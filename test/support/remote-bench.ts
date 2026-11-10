@@ -20,12 +20,13 @@
 //      wrapper and the scratch engine store's trust first (`prepare`, before the daemon starts), then (`serve`) starts
 //      the stub's session over the scratch machine.sock and, once told the owner's member, lists it through the
 //      harness's fake sminos on the scratch RL10 socket (e2e:remote's pattern), streaming the stub's samples back;
-//   3. enroll: the code file streamed by its descriptor into `<transport> '<mawsd> enroll --profile … --label … --name
-//      <name> --json'` (mawsd reads stdin without a TTY; no `--wait`, so it returns once the machine has posted its key),
-//      the code file removed whatever the outcome; the machine's key id shown as soon as `keys` reads it (its flat
-//      answer's `keyId`), for the owner to compare with their terminal's before they type y; exit 4 then waited out by
-//      asking `endpoint sync` (the org state read now, the listing promoted) until org-listed, within the code's TTL of
-//      the key shown;
+//   3. enroll: the code file waited for, bounded, while the owner makes the code in their app's Enroll sheet (Settings ›
+//      Org › Machines, Enroll a machine…), which it allows only once the app's pairing has ended; then streamed by its
+//      descriptor into `<transport> '<mawsd> enroll --profile … --label … --name <name> --json'` (mawsd reads stdin
+//      without a TTY; no `--wait`, so it returns once the machine has posted its key), the code file removed whatever the
+//      outcome; the machine's key id shown as soon as `keys` reads it (its flat answer's `keyId`), for the owner to compare
+//      with the sheet's key id before they approve it there with Touch ID; exit 4 then waited out by asking `endpoint
+//      sync` (the org state read now, the listing promoted) until org-listed, within ENROLL_WAIT_S of the key shown;
 //   4. teardown, on every path: the agent ended (its stdin's end stops its session and ends its stubs; killed when it
 //      outlives that, its exit waited for), then the watch; on the VM the daemon stopped by its pid once that pid is
 //      shown to be the daemon's (registered before its launch: no pid recorded is unverified), on the mini mini-ops'
@@ -146,7 +147,20 @@ const SOCKET_PATH_MAX_BYTES = 103; // src/engine-host/supervisor-files.ts's, so 
  */
 const LONGEST_SOCKET = 'mawsd/endpoint/rl10.sock';
 const TEMPORARY_SUFFIX_BYTES = 9;
-export const ENROLL_WAIT_S = 900; // the code's TTL
+/**
+ * How long the listing is waited for once the machine's key is shown: the owner's compare, Approve… and Touch ID. Well
+ * inside the code's life (the app's sheet makes it for 3600 s, src/main/org/enroll.ts's ENROLL_TTL_S).
+ */
+export const ENROLL_WAIT_S = 900;
+/**
+ * The waits for the code files the owner writes on this Mac, from the codes' lives. A pairing code lives 10 minutes
+ * (src/main/org/timing.ts's PAIR_TTL_MS) and its device must answer inside them, so the bench waits no longer than one
+ * code lives. An enrollment code lives an hour (ENROLL_TTL_S) and the enroll's own span after it lands is REMOTE_CALL_MS,
+ * KEY_WITHIN_MS and ENROLL_WAIT_S (18 minutes), so a code made at the wait's start and landing at its end still has that
+ * span left with room to spare; and the owner's app makes it only once the pairing has ended (src/main/org/org-session.ts:
+ * one attempt at a time), which is why one run that pairs the app and enrolls the machine waits here at all.
+ */
+export const CODE_WAIT = { pairingMs: 10 * 60_000, enrollMs: 30 * 60_000, everyMs: 2_000, sayEveryMs: 60_000 } as const;
 /** How long the enroll's return may come before the machine's key reads back. */
 const KEY_WITHIN_MS = 60_000;
 const STATUS_EVERY_MS = 5_000;
@@ -779,9 +793,10 @@ export class BenchRun {
 
   /**
    * The machine enrolled and listed under its name: skipped when the scratch profile already is (a rerun); else the code
-   * file streamed into `mawsd enroll`, which returns once the machine has posted its key (no `--wait`), the code file
-   * removed whatever happened; then the machine's key shown as soon as `mawsd keys` reads it, for the owner to compare with
-   * the one their terminal shows before they type y; then the listing waited for, within the code's TTL of the key shown.
+   * file waited for (`awaitCodeFile`, CODE_WAIT.enrollMs) and streamed into `mawsd enroll`, which returns once the machine
+   * has posted its key (no `--wait`), the code file removed whatever happened; then the machine's key shown as soon as
+   * `mawsd keys` reads it, for the owner to compare with the key id the Enroll sheet shows before they approve it there
+   * (Touch ID); then the listing waited for, ENROLL_WAIT_S from the key shown.
    */
   async enroll(): Promise<void> {
     const m = this.#m;
@@ -792,13 +807,19 @@ export class BenchRun {
       this.#deps.say(`[bench] ${m.name}: already enrolled and listed in ${before.org ?? 'the org'} (the profile is kept between runs); the unused code file is removed`);
       return;
     }
-    // before the code is taken, the whole span: the enroll, the key's posting and the owner's y (a refused enroll leaves
-    // its file for the next try)
-    this.#quiet(REMOTE_CALL_MS + KEY_WITHIN_MS + ENROLL_WAIT_S * 1000);
+    // the whole span, the enroll, the key's posting and the owner's approval, before the owner is asked for the code and
+    // again before it is taken (a refused enroll leaves its file for the next try)
+    const span = REMOTE_CALL_MS + KEY_WITHIN_MS + ENROLL_WAIT_S * 1000;
+    this.#quiet(span);
+    const act = `the owner, in their MAWS: Settings › Org › Machines, Enroll a machine…, the name ${m.name}, Make a code, Copy, and the code into that file (0600); the app makes it only once the pairing has ended, and the sheet stays open until the machine is enrolled`;
+    if (!(await awaitCodeFile(m.codeFile, { who: m.name, code: 'the enrollment code', act }, CODE_WAIT.enrollMs, { say: (line) => this.#deps.say(line), sleep: (ms) => this.#sleep(ms), now: () => this.#now() }))) {
+      throw new Error(`${m.name}: no enrollment code came to ${m.codeFile} within ${CODE_WAIT.enrollMs / 60_000} minutes`);
+    }
+    this.#quiet(span);
     let code: number | null;
     let answer: { enrollment?: string; name?: string; org?: string } = {};
     try {
-      this.#deps.say(`[bench] ${m.name}: enrolling with the code from its file (the machine's key is shown below as soon as it is posted; the owner compares it with their terminal's and types y)`);
+      this.#deps.say(`[bench] ${m.name}: enrolling with the code from its file (the machine's key id is shown below as soon as it is posted; the owner compares it with the Enroll sheet's key id, then Approve… and Touch ID)`);
       const result = await this.#remote(`${guardedLine(m, [m.profile, `${m.profile}/mawsd`], '')}${mawsd(m)} enroll ${scoped(m)} --name ${quote(m.name)} --json`, { stdinFile: m.codeFile });
       code = result.code;
       try {
@@ -813,7 +834,7 @@ export class BenchRun {
     }
     this.#deps.say(`[bench] ${m.name}: enroll exited ${code}${answer.enrollment === undefined ? '' : `: ${answer.enrollment}, ${answer.name ?? '?'} in ${answer.org ?? '?'}`}`);
     if (code !== 0 && code !== 4) throw new Error(`${m.name}: enroll failed (exit ${code}); its own output is not shown, read it with \`mawsd endpoint status\` there`);
-    // the key first, as soon as the machine has posted it: nothing waits on the owner's y before they can compare it
+    // the key first, as soon as the machine has posted it: nothing waits on the owner's approval before they can compare it
     const keyBy = this.#now() + KEY_WITHIN_MS;
     for (;;) {
       const id = await this.#keyId();
@@ -821,11 +842,11 @@ export class BenchRun {
         this.#deps.say(`[bench] ${m.name}: the machine's key id, to compare: ${id}`);
         break;
       }
-      if (this.#now() > keyBy) throw new Error(`${m.name}: the machine posted no key to compare within ${KEY_WITHIN_MS / 1000} s, so no y is asked for`);
+      if (this.#now() > keyBy) throw new Error(`${m.name}: the machine posted no key to compare within ${KEY_WITHIN_MS / 1000} s, so no approval is asked for`);
       await this.#sleep(STATUS_EVERY_MS);
     }
     if (code === 0) return;
-    const deadline = this.#now() + ENROLL_WAIT_S * 1000; // the code's TTL, from the key shown
+    const deadline = this.#now() + ENROLL_WAIT_S * 1000; // from the key shown
     for (;;) {
       // after every wait the decision is asked again, by a read of the org state now: listed, under this name
       const now = await this.#enrollment('sync');
@@ -833,7 +854,7 @@ export class BenchRun {
         this.#deps.say(`[bench] ${m.name}: listed in ${now.org ?? 'the org'}`);
         return;
       }
-      if (this.#now() > deadline) throw new Error(`${m.name}: not listed in the org within the code's ${ENROLL_WAIT_S} s of its key shown (state ${now?.enrollment ?? 'unread'})`);
+      if (this.#now() > deadline) throw new Error(`${m.name}: not listed in the org within ${ENROLL_WAIT_S} s of its key shown (state ${now?.enrollment ?? 'unread'})`);
       await this.#sleep(STATUS_EVERY_MS);
     }
   }
@@ -849,14 +870,14 @@ export class BenchRun {
   }
 
   /**
-   * The mini's 1-minute load for the bench's precheck (M10): `sysctl -n vm.loadavg` through its transport, read-only,
-   * with its deadline and quiet window; the reason when it is unread. Null on the VM, whose load the precheck doesn't read.
+   * The machine's 1-minute load for the bench's precheck (M10): the mini's `sysctl -n vm.loadavg`, the VM's
+   * `/proc/loadavg`, through its transport, read-only, with its deadline and quiet window; the reason when it is unread.
    */
-  async load1(): Promise<number | string | null> {
-    if (this.#m.transport.kind !== 'ssh') return null;
-    const read = await this.#remote('sysctl -n vm.loadavg');
+  async load1(): Promise<number | string> {
+    const [command, program] = this.#m.transport.kind === 'devcloud' ? ['cat /proc/loadavg', 'cat /proc/loadavg'] : ['sysctl -n vm.loadavg', 'sysctl'];
+    const read = await this.#remote(command);
     const load = read.code === 0 ? loadOf(read.stdout) : null;
-    return load ?? `its load could not be read (sysctl exit ${read.code})`;
+    return load ?? `its load could not be read (${program} exit ${read.code})`;
   }
 
   /**
@@ -1018,15 +1039,15 @@ export class BenchRun {
 
 const mib = (bytes: number) => (bytes / 1024 / 1024).toFixed(1);
 
-/** The 1-minute load from macOS's `sysctl -n vm.loadavg` (`{ 1.23 1.45 1.67 }`); null when unreadable. */
+/** The 1-minute load from macOS's `sysctl -n vm.loadavg` (`{ 1.23 1.45 1.67 }`) or Linux's `/proc/loadavg` (`1.23 1.45 1.67 2/345 6789`); null when unreadable. */
 export function loadOf(answer: string): number | null {
-  const load = /^\{\s*(\d+(?:\.\d+)?)\s/.exec(answer.trim())?.[1];
+  const load = /^(?:\{\s*)?(\d+(?:\.\d+)?)\s/.exec(answer.trim())?.[1];
   return load === undefined ? null : Number(load);
 }
 
 /**
  * The live bench's precheck (M10, before its local case): why it refuses to start, or null. Rule B's ceiling on a
- * 1-minute load (IDLE_RUN.maxLoad, 5) applies to this Mac, the runner, and to the mini it measures; the mini's load
+ * 1-minute load (IDLE_RUN.maxLoad, 5) applies to this Mac, the runner, and to the machine it measures; the machine's load
  * unread (`load` a reason) refuses too. A refusal is a recorded outcome of the run, not a failure.
  */
 export function loadPrecheck(loads: { mac: number; machine: { name: string; load: number | string } | null }): string | null {
@@ -1037,6 +1058,44 @@ export function loadPrecheck(loads: { mac: number; machine: { name: string; load
   if (mac >= IDLE_RUN.maxLoad) over.push(`this Mac’s load1 is ${mac.toFixed(2)}`);
   if (machine !== null && typeof remote === 'number' && remote >= IDLE_RUN.maxLoad) over.push(`${machine.name}’s${over.length > 0 ? '' : ' load1'} is ${remote.toFixed(2)}`);
   return over.length === 0 ? null : `${over.join(' and ')}, at or over Rule B’s ${IDLE_RUN.maxLoad}`;
+}
+
+/** A file's size, null when it is not there. */
+const sizeOnDisk = (path: string): number | null => {
+  try {
+    return statSync(path).size;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Waits, bounded by `withinMs`, for a code file the owner writes on this Mac: true once it is there, not empty, and the
+ * same size at two reads a poll apart (a file still being written is not taken); false when the time runs out first.
+ * While it waits it says what it waits for, what the operator does meanwhile and how long is left, at once and then each
+ * minute; it never reads the file.
+ */
+export async function awaitCodeFile(path: string, what: { who: string; code: string; act: string }, withinMs: number, deps: { say(line: string): void; sleep(ms: number): Promise<void>; now(): number; size?(path: string): number | null }): Promise<boolean> {
+  const size = deps.size ?? sizeOnDisk;
+  const deadline = deps.now() + withinMs;
+  let toldAt: number | null = null;
+  for (let last = size(path); ; ) {
+    const left = deadline - deps.now();
+    if (left <= 0) return false;
+    if (last !== null && last > 0) {
+      await deps.sleep(CODE_WAIT.everyMs);
+      const again = size(path);
+      if (again === last) return true;
+      last = again;
+      continue;
+    }
+    if (toldAt === null || deps.now() - toldAt >= CODE_WAIT.sayEveryMs) {
+      deps.say(`[bench] ${what.who}: waiting for ${what.code} at ${path}, ${Math.ceil(left / 60_000)} min left: ${what.act}`);
+      toldAt = deps.now();
+    }
+    await deps.sleep(CODE_WAIT.everyMs);
+    last = size(path);
+  }
 }
 
 /** `keyId` from `mawsd keys --json`'s flat answer (`keysAnswer`); null when it is absent or the answer unreadable. */

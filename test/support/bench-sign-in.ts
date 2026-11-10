@@ -5,8 +5,9 @@
 //   - registered, its session signed out or its hub access lapsed: `org.signIn` (the owner's browser step), then the
 //     connection waited for; still connecting or signing in, only waited for; removed or denied, refused, since no
 //     sign-in restores it;
-//   - unregistered: registered from the pairing code read from its file, the owner comparing the fingerprint and
-//     approving at their terminal.
+//   - unregistered: registered from the pairing code read from its file (waited for, bounded, while the owner makes it in
+//     their MAWS: Settings › Org › People, Pair a device…, Make a code, Copy), then the owner's browser step, then the
+//     owner comparing the fingerprint below with the Pair sheet's and approving there (Approve…, then Touch ID).
 // The pairing file is removed on every path, read only in the last (a registered profile never takes a code). The code
 // crosses only into org.register's input; nothing here says it, and an error that could carry it is replaced by one that
 // cannot.
@@ -18,8 +19,11 @@ export interface SignInDeps {
   status(): Promise<OrgStatus>;
   register(code: string): Promise<Attempt>;
   signIn(): Promise<Attempt>;
-  /** The pairing file's code, the file removed whatever happens; null when the config names none or it is gone. */
-  takePairing(): string | null;
+  /**
+   * The pairing file's code once it is there (waited for, bounded), the file removed whatever happens; null when the
+   * config names none; throws, with its reason, when none came in time.
+   */
+  takePairing(): Promise<string | null>;
   /** The pairing file removed unread, when there is one. */
   removePairing(): void;
   say(line: string): void;
@@ -49,15 +53,15 @@ export async function benchSignIn(deps: SignInDeps, withinMs: number): Promise<s
     }
   } else if (now.state === 'none') {
     let attempt: Attempt;
-    const code = deps.takePairing();
-    if (code === null) throw new Error(`the bench app is not registered (${now.state}) and the config names no pairing file that exists`);
+    const code = await deps.takePairing();
+    if (code === null) throw new Error(`the bench app is not registered (${now.state}) and the config names no pairing file`);
     try {
       attempt = await deps.register(code);
     } catch {
       throw new Error('org.register did not answer (its error is not shown, since it could carry the code)');
     }
     if (!attempt.ok) throw new Error(`org.register refused the pairing code: ${attempt.reason?.code ?? 'no reason'}`);
-    deps.say('[bench] app: the pairing file is removed; the owner signs in in the browser, then compares the fingerprint below with `admin pair`’s and approves');
+    deps.say('[bench] app: the pairing file is removed; the owner signs in in the browser, then compares the fingerprint below with the one the Pair sheet shows and, if they match, presses Approve… there and Touch ID');
   } else if (now.state === 'development') {
     deps.removePairing();
     throw new Error('the bench app runs a development org, not the hub’s');
