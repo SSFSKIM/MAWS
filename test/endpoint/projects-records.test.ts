@@ -3,7 +3,7 @@
 // floor the hub's copy gives, never from an index that is not loaded, and the statements a rebuilt index takes back; the
 // locations sminos is told, their `gen` raised by an anchor alone; the other machines' records held by their marks,
 // dropped once their machine is retired, and `complete` as §D defines it; and the seam the machine's services ask.
-import { generateSigningKey, keyId, NO_CERTIFICATES, signRecord, SIGNING_DOMAINS, verifyProjectsRecord, type OrgState, type ProjectsRecord, type Signed, type SigningKey } from 'org-protocol';
+import { generateSigningKey, keyId, NO_CERTIFICATES, signRecord, SIGNING_DOMAINS, verifyProjectsRecord, type Certificates, type OrgState, type ProjectsRecord, type Signed, type SigningKey } from 'org-protocol';
 import { machineProjectId } from 'desk-hub/protocol';
 import { describe, expect, it, vi } from 'vitest';
 import type { DeclaredRow, KeptStatement, ProjectsSource } from '../../src/shared/machine/registry';
@@ -369,7 +369,7 @@ describe('the other machines’ held records', () => {
 });
 
 describe('the registry seam', () => {
-  async function registry(w: Awaited<ReturnType<typeof world>>, options: { sminos?: SminosView | null; enrolled?: boolean; kept?: (gen: number, ms: number) => Promise<boolean> } = {}) {
+  async function registry(w: Awaited<ReturnType<typeof world>>, options: { sminos?: SminosView | null; enrolled?: boolean; kept?: (gen: number, ms: number) => Promise<boolean>; certificates?: Certificates } = {}) {
     let state = { projects: w.kept, projectsHeld: w.held };
     const fakeState = {
       get projects() {
@@ -387,7 +387,7 @@ describe('the registry seam', () => {
       ref: () => w.ref,
       enrollment: () => (options.enrolled === false ? null : { org: ORG, name: 'mini' }),
       key: w.ctx.key,
-      head: w.ctx.head,
+      head: options.certificates === undefined ? w.ctx.head : () => ({ state: w.ctx.head()!.state, certificates: options.certificates! }),
       now: Date.now,
       hub: { send: () => true, capabilities: () => ['projects'] },
       sminos: () => sminos,
@@ -418,6 +418,20 @@ describe('the registry seam', () => {
     r.sminosLinked();
     expect(r.statements()).toEqual({ possible: false, reason: 'sminos-too-old' });
     expect(turns).toBe(2);
+  });
+
+  // the project registry's M12 (review 1's finding 2): `maws` aims at a VM that exists only by its certificate by its name
+  it('reads the directory’s machines for `maws`, a certificate-only VM among them, and none unenrolled', async () => {
+    const w = await world();
+    const delegationKey = await generateSigningKey();
+    const dKey = await generateSigningKey();
+    const dId = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+    const dRef = mintRef(dId);
+    await w.amend((s) => void s.delegations.push({ id: dId, pub: delegationKey.pub, prefix: 'dl-', expires: new Date(Date.now() + 3_600_000).toISOString(), maxUses: 10, offlineRevokeS: 0, owners: [w.admin] }));
+    const cert = await signRecord(SIGNING_DOMAINS.machineCert, { org: ORG, machine: dRef, name: 'dl-one', pub: dKey.pub, delegation: dId, use: 1, issued: new Date().toISOString() }, delegationKey.privateKey, delegationKey.pub);
+    const { r } = await registry(w, { certificates: { certs: [cert], retirements: [] } });
+    expect(r.read()).toMatchObject({ enrolled: true, machine: { ref: w.ref, name: 'mini' }, machines: [{ ref: dRef, name: 'dl-one' }, { ref: w.ref, name: 'mini' }, { ref: w.other, name: 'vm' }] });
+    expect((await registry(w, { enrolled: false })).r.read().machines).toEqual([]);
   });
 
   it('answers a project of the verified records with its hub and highest name counter, none for an unknown id or a machine’s own', async () => {

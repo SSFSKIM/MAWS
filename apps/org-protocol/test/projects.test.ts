@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { canonicalize } from '../src/canonical.ts';
 import { importSigningKey } from '../src/keys.ts';
-import { assembleProjects, directoryMachineNames, machineProjectNames } from '../src/projects.ts';
+import { assembleProjects, directoryMachineNames, directoryMachines, machineProjectNames } from '../src/projects.ts';
 import { NO_CERTIFICATES, signRecord, verifyProjectsRecord } from '../src/records.ts';
 import { isProjectsRecord, PROJECTS_RECORD_BOUNDS } from '../src/shapes.ts';
 import { SIGNING_DOMAINS, type Certificates, type OrgState, type ProjectLocation, type ProjectsRecord, type Signed, type SignedOrgState } from '../src/types.ts';
@@ -109,6 +109,18 @@ describe("the machine names: the directory's and the registry's", () => {
       expect(names(V2, VM1_CERTS, new Date('2026-12-01T00:00:00.000Z'))).toEqual(['builder', 'mini']);
       expect(names(revoked, VM1_CERTS, NOW)).toEqual(['builder', 'mini']);
     }
+  });
+
+  // the project registry's M12 (review 1's finding 2): `maws` aims at a machine by its name, and acts on it by its ref
+  it('are the machines with their refs, a VM that exists only by its certificate among them, its gone delegation not', () => {
+    const certified = VM1_CERTS.certs[0]!.body as { machine: string; name: string };
+    const enrolled = V2.machines.map((m) => ({ ref: m.ref, name: m.name })).sort((a, b) => a.name.localeCompare(b.name)); // by name
+    expect(directoryMachines(V2, NO_CERTIFICATES, NOW)).toEqual(enrolled);
+    expect(directoryMachines(V2, VM1_CERTS, NOW)).toEqual([...enrolled, { ref: certified.machine, name: 'vm-1' }]);
+    expect(certified.machine).toBe(REF_VM1);
+    expect(directoryMachines(V2, VM1_CERTS, NOW).map((m) => m.name)).toEqual(directoryMachineNames(V2, VM1_CERTS, NOW));
+    expect(directoryMachines(fixture<SignedOrgState>('v2 without the delegation').state, VM1_CERTS, NOW)).toEqual(enrolled);
+    expect(directoryMachines(V2, VM1_CERTS, new Date('2026-12-01T00:00:00.000Z'))).toEqual(enrolled);
   });
 
   it("take a renamed machine's old name into the registry's set alone, and no name of a ref the head no longer enrolls", () => {

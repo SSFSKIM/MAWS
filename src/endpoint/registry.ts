@@ -18,7 +18,7 @@
 // - The kept files' writes throw on failure (M9's review 1, F3): what follows a write (a record sent, a mark kept, the
 //   locations told) never runs on one that failed.
 import { machineProjectId } from 'desk-hub/protocol';
-import { assembleProjects, machineProjectNames, type Certificates, type KnownProject, type OrgState, type ProjectsPageFrame, type ProjectsRecord, type ProjectsRecordFrame, type RegistryProject, type SigningKey } from 'org-protocol';
+import { assembleProjects, directoryMachines, machineProjectNames, type Certificates, type KnownProject, type OrgState, type ProjectsPageFrame, type ProjectsRecord, type ProjectsRecordFrame, type RegistryProject, type SigningKey } from 'org-protocol';
 import type { MachineRef } from '@shared/machine/ref';
 import type { DeclaredRow, ProjectsSource, RegistryRead, RegistrySeam, StatementsState } from '@shared/machine/registry';
 import type { HubUpFrame } from './hub-link';
@@ -144,8 +144,9 @@ export class Registry implements RegistrySeam, RegistryRead {
     const head = this.#ctx.head();
     const machine = { ref: this.#ctx.ref(), name: enrollment?.name ?? '' };
     if (enrollment === null) return { enrolled: false, machine, machines: [], projects: [] };
-    // the verified state's refs, branded where they enter this machine's types
-    return { enrolled: true, machine, machines: (head?.state.machines ?? []).map((m) => ({ ref: m.ref as MachineRef, name: m.name })), projects: this.projects() };
+    // the directory's machines (a VM that exists only by its certificate is one), branded where they enter this machine's types
+    const machines = head === null ? [] : directoryMachines(head.state, head.certificates, new Date(this.#ctx.now())).map((m) => ({ ref: m.ref as MachineRef, name: m.name }));
+    return { enrolled: true, machine, machines, projects: this.projects() };
   }
 
   // ---- The endpoint's -------------------------------------------------------------------------------------------------

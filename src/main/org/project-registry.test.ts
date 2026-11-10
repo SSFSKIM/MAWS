@@ -122,13 +122,14 @@ async function start(w: World, options: { files?: OrgFiles; local?: ProjectRecor
   };
 }
 
-// The project registry's M12 (Interfaces §K): main's act handler names another machine by its name in the held head, and
-// tells a signed-out app from one that is signed in
+// The project registry's M12 (Interfaces §K): main's act handler names another machine by its name in the held head and
+// the certificates (review 1's finding 2: a VM that exists only by its certificate), and tells a signed-out app from one
+// that is signed in
 describe('the machines the registry names', () => {
-  it('are the held head’s, by name and ref; none signed out', async () => {
+  it('are the directory’s, by name and ref, a certificate-only VM among them; none signed out', async () => {
     const w = await World.make();
     const h = await start(w);
-    expect(h.registry.machines()).toEqual([{ ref: w.m1.ref, name: 'mac-one' }, { ref: w.m2.ref, name: 'mac-two' }]);
+    expect(h.registry.machines()).toEqual([{ ref: w.m1.ref, name: 'mac-one' }, { ref: w.m2.ref, name: 'mac-two' }, { ref: w.d.ref, name: 'vm-one' }]);
     w.session.set(null);
     expect(h.registry.machines()).toBeNull();
   });

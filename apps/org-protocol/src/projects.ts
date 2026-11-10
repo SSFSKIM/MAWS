@@ -42,6 +42,22 @@ export function directoryMachineNames(state: OrgState, certificates: Certificate
 }
 
 /**
+ * The machines `directoryMachineNames` names, each with its ref: the enrolled machines, and those of certificates under a
+ * live, unrevoked delegation (the certificate's `machine`), so a devcloud VM that exists only by its certificate can be
+ * aimed at by its name and acted on by its ref. One entry per ref; sorted by name, then ref.
+ */
+export function directoryMachines(state: OrgState, certificates: Certificates, now: Date): Array<{ ref: MachineRef; name: string }> {
+  const machines = new Map<string, { ref: MachineRef; name: string }>();
+  for (const m of state.machines) machines.set(m.ref, { ref: m.ref, name: m.name });
+  const live = new Set(state.delegations.filter((d) => Date.parse(d.expires) > now.getTime()).map((d) => d.id));
+  const revoked = new Set(state.revoked.flatMap((r) => ('delegation' in r.holder ? [r.holder.delegation] : [])));
+  for (const c of certificates.certs) {
+    if (isSigned(c, isMachineCert) && live.has(c.body.delegation) && !revoked.has(c.body.delegation)) machines.set(c.body.machine, { ref: c.body.machine, name: c.body.name });
+  }
+  return [...machines.values()].sort((a, b) => byText(a.name, b.name) || byText(a.ref, b.ref));
+}
+
+/**
  * The names whose machine projects (`machineProjectId(org, name)` maps one to its id) are no project of the registry:
  * the directory's (`directoryMachineNames`) and every former name the head binds to a ref it still enrolls, so a session
  * recorded under a renamed machine's old machine-project id stays that machine's own and registers nothing. Sorted. The

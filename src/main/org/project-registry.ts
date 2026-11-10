@@ -21,7 +21,7 @@
 // - Signed out, `projects()` answers the empty value and no key is assigned.
 //
 // Electron-free: main injects the feed, the links, its own rows, the act's send and the emission.
-import { assembleProjects, machineOwners, machineProjectNames, ownerMembers, type ProjectsRecord, type RegistryProject } from '../../../apps/org-protocol/src/index.ts';
+import { assembleProjects, directoryMachines, machineOwners, machineProjectNames, ownerMembers, type ProjectsRecord, type RegistryProject } from '../../../apps/org-protocol/src/index.ts';
 import type { OrgProjectLocation, OrgProjects } from '@shared/ipc/schema/org';
 import type { ProjectRecord } from '@shared/ipc/schema/session';
 import { PROJECT_ACTS_CAPABILITY } from '@shared/ipc/schema/session';
@@ -70,7 +70,7 @@ export interface ProjectRegistryDeps {
 export interface ProjectRegistry {
   /** The last computed value (the empty one signed out, and until the first). */
   projects(): OrgProjects;
-  /** The project registry's M12: the held head's machines, by ref and name; null while signed out. */
+  /** The project registry's M12: the directory's machines (the held head's and certificate-only VMs'), by ref and name; null while signed out. */
   machines(): Array<{ ref: MachineRef; name: string }> | null;
   /** The row key of a project id on this device; null for an id the table has not given one. */
   keyOf(project: string): OrgKey | null;
@@ -374,8 +374,11 @@ export function createProjectRegistry(deps: ProjectRegistryDeps): ProjectRegistr
   return {
     projects: () => latest,
     machines() {
-      const head = deps.session.current()?.view.head() ?? null;
-      return head === null ? null : head.state.machines.map((m) => ({ ref: m.ref as MachineRef, name: m.name }));
+      const view = deps.session.current()?.view ?? null;
+      const head = view?.head() ?? null;
+      if (view === null || head === null) return null;
+      // the directory's machines: a VM that exists only by its certificate is one, aimed at by its name
+      return directoryMachines(head.state, view.certificates(), new Date(now())).map((m) => ({ ref: m.ref as MachineRef, name: m.name }));
     },
     keyOf: (project) => table.keyOf(project),
     onKeys(listener) {
