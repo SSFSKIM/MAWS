@@ -11,7 +11,7 @@ import { endorseDevice, signOrgState, signTransition, stateHash } from '../src/o
 import { encodePairingCode, pairingFingerprint, pairingMac, pairingMacInput, type PairingCode, type PairingFields } from '../src/pairing.ts';
 import { encodeProvisioningCodeV2, PROVISIONING_CODE_V2_PREFIX, type ProvisioningCodeV2 } from '../src/provisioning.ts';
 import { signRecord } from '../src/records.ts';
-import { SIGNING_DOMAINS, type Signer, type Device, type RevokedKey, type EndpointRecord, type Grant, type Listing, type MachineCert, type OrgState, type RootTransition, type Signed, type SignedOrgState } from '../src/types.ts';
+import { SIGNING_DOMAINS, type Signer, type Device, type RevokedKey, type EndpointRecord, type Grant, type Listing, type MachineCert, type OrgState, type ProjectLocation, type ProjectsRecord, type RootTransition, type Signed, type SignedOrgState } from '../src/types.ts';
 import type { Verdict } from '../src/verdict.ts';
 import { buildHistoryScenario, type HistoryVectors } from './scenario-history.ts';
 import { buildRemoteScenario, RP_ID, type ActionEncoding, type ChannelVectors } from './scenario-remote.ts';
@@ -54,6 +54,7 @@ export type Case = {
     | 'verifyCertRetirement'
     | 'verifyListing'
     | 'verifyEndpointRecord'
+    | 'verifyProjectsRecord'
     | 'verifyEvent'
     | 'signerFor'
     | 'contestedRefs'
@@ -1108,6 +1109,96 @@ export async function buildScenario(k: Keys): Promise<VectorSet> {
     await eventCase("a live certificate's event, its ref enrolled since", vmSay, no('unknown-signer'), { state: host, certs });
   }
 
+  // Projects records (the project registry, Interfaces §A): the endpoint record's rule, under its own domain, with the
+  // record's shape and bounds. Each bound is met by one vector the shape takes and exceeded by one in another, where the
+  // vectors stay small; the count and byte bounds are met in projects.test.ts.
+  {
+    const PROJECT_ALPHA = '0f3c2b1a-4d5e-5f60-8a7b-9c0d1e2f3a4b';
+    const PROJECT_SCRAPE = '6a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d';
+    const alpha: ProjectLocation = {
+      pid: '0c6f7e1a-2b3d-4e5f-8a9b-0c1d2e3f4a5b',
+      id: PROJECT_ALPHA,
+      key: 'remote:github.com/example/alpha',
+      name: 'alpha',
+      path: '/Users/a/src/alpha',
+      source: 'remote',
+      remote: 'github.com/example/alpha',
+    };
+    const scrape: ProjectLocation = { pid: '7d8e9f0a-1b2c-4d3e-8f4a-5b6c7d8e9f0a', id: PROJECT_SCRAPE, key: 'folder:mref-mini-0000001:/srv/scrape', name: 'scrape', nameRev: 2, path: '/srv/scrape', source: 'folder', stated: 'minted' };
+    const projects: ProjectsRecord = { org: ORG, machine: REF_MINI, revision: 1_762_732_800_000, issued: at(3), locations: [alpha, scrape], known: [{ id: 'b2c3d4e5-f6a7-5b8c-9d0e-1f2a3b4c5d6e', name: 'beta' }] };
+    const projectsCase = (name: string, record: unknown, expect: Verdict, withCerts: Arg = bundle(), state = 'v2') => recordCase(name, 'verifyProjectsRecord', record, expect, [withCerts, NOW], state);
+    const byMini = (body: unknown) => signRecord(SIGNING_DOMAINS.projects, body, k.mini.privateKey, k.mini.pub);
+    /** The record with its first location edited, signed by mini. */
+    const located = (edit: Partial<ProjectLocation> | Record<string, unknown>) => byMini({ ...projects, locations: [{ ...alpha, ...edit }, scrape] });
+    const signedProjects = await byMini(projects);
+    await projectsCase('a projects record signed by its listed machine', signedProjects, ok());
+    await projectsCase('a projects record with no location and no known project', await byMini({ ...projects, locations: [], known: [] }), ok());
+    await projectsCase('a projects record signed by a certified VM', await signRecord(SIGNING_DOMAINS.projects, { ...projects, machine: REF_VM1 }, k.vm1.privateKey, k.vm1.pub), ok(), certs);
+    await projectsCase('a projects record signed as an endpoint record', { body: projects, sig: (await signRecord(SIGNING_DOMAINS.endpoint, projects, k.mini.privateKey, k.mini.pub)).sig }, no('bad-signature'));
+    await projectsCase('a projects record whose locations changed after signing', { body: { ...projects, locations: [{ ...alpha, id: PROJECT_SCRAPE }, scrape] }, sig: signedProjects.sig }, no('bad-signature'));
+    await projectsCase('a projects record signed by another key', await signRecord(SIGNING_DOMAINS.projects, projects, k.stranger.privateKey, k.stranger.pub), no('unknown-signer'));
+    await projectsCase('a projects record of another org', await byMini({ ...projects, org: 'org-other' }), no('malformed'));
+    await projectsCase('a projects record of an unlisted machine', await byMini({ ...projects, machine: REF_GHOST }), no('not-listed'));
+    // A retired machine's record verifies no more: its locations leave every reader with no cleanup.
+    await projectsCase("a projects record of a VM whose certificate the state retired", await signRecord(SIGNING_DOMAINS.projects, { ...projects, machine: REF_VM1 }, k.vm1.privateKey, k.vm1.pub), no('not-listed'), certs, 'v3 vm-1 retired by an admin');
+    await projectsCase("a VM's projects record after its delegation is removed", await signRecord(SIGNING_DOMAINS.projects, { ...projects, machine: REF_VM1 }, k.vm1.privateKey, k.vm1.pub), no('not-listed'), certs, 'v2 without the delegation');
+    await projectsCase("a projects record signed by a machine's retired key", signedProjects, no('unknown-signer'), bundle(), 'v3 mini retired');
+    await projectsCase('a projects record of a contested ref', await signRecord(SIGNING_DOMAINS.projects, { ...projects, machine: REF_VM1 }, k.vm1Rival.privateKey, k.vm1Rival.pub), no('contested'), contested);
+    await projectsCase('a projects record whose certificates are not a list', signedProjects, no('malformed'), 'none');
+    await projectsCase('a projects record with a lone surrogate', { body: { ...projects, known: [{ ...projects.known[0], name: LONE }] }, sig: signedProjects.sig }, no('malformed'));
+
+    // The shape and its bounds, each record signed by its own machine.
+    const many = <T>(n: number, item: (i: number) => T): T[] => Array.from({ length: n }, (_, i) => item(i));
+    const plain = (i: number): ProjectLocation => ({ pid: `p${i}`, id: `f${i}`, key: `folder:${i}`, name: `f${i}`, path: `/f/${i}`, source: 'folder', stated: 'minted' });
+    await projectsCase('a projects record with 1,001 locations', await byMini({ ...projects, locations: many(1_001, plain), known: [] }), no('malformed'));
+    await projectsCase('a projects record with 1,001 known projects', await byMini({ ...projects, known: many(1_001, (i) => ({ id: `k${i}`, name: `k${i}` })) }), no('malformed'));
+    {
+      // 262,145 bytes of canonical form under 1,000 locations: locations of the longest paths until the bound is
+      // passed, the last one's path then shortened to land one byte over.
+      const long = (i: number, length: number): ProjectLocation => ({ ...plain(i), path: `/${String(i).padStart(4, '0')}/${'d'.repeat(length - 6)}` });
+      const body: ProjectsRecord = { ...projects, locations: [], known: [] };
+      const size = () => new TextEncoder().encode(canonicalize(body)).length;
+      while (size() <= 262_145) body.locations.push(long(body.locations.length, 4_096));
+      const last = body.locations.length - 1;
+      body.locations[last] = long(last, 4_096 - (size() - 262_145));
+      if (size() !== 262_145) throw new Error(`the oversized projects record is ${size()} bytes`);
+      await projectsCase('a projects record of 262,145 canonical bytes', await byMini(body), no('malformed'));
+    }
+    await projectsCase('a projects record of revision 0', await byMini({ ...projects, revision: 0 }), no('malformed'));
+    await projectsCase('a projects record whose revision is not a safe integer', await byMini({ ...projects, revision: 2 ** 53 }), no('malformed'));
+    await projectsCase('a projects record with an unknown field', await byMini({ ...projects, hub: 'https://desk.example' }), no('malformed'));
+    await projectsCase('a location with an unknown field', await located({ branch: 'main' }), no('malformed'));
+    await projectsCase('two locations of one pid', await located({ pid: scrape.pid }), no('malformed'));
+    await projectsCase('two locations of one path', await located({ path: scrape.path }), no('malformed'));
+    await projectsCase('two known projects of one id', await byMini({ ...projects, known: [...projects.known, { id: projects.known[0].id, name: 'beta again' }] }), no('malformed'));
+    await projectsCase("a known project of a location's id", await byMini({ ...projects, known: [{ id: PROJECT_ALPHA, name: 'alpha' }] }), no('malformed'));
+    await projectsCase('a location of a relative path', await located({ path: 'src/alpha' }), no('malformed'));
+    await projectsCase('a location of a decomposed path', await located({ path: '/Users/a/src/cafe\u0301' }), no('malformed'));
+    await projectsCase('a location of a composed path', await located({ path: '/Users/a/src/caf\u00e9' }), ok());
+    await projectsCase('a location path of 4,096 bytes', await located({ path: `/${'p'.repeat(4_095)}` }), ok());
+    await projectsCase('a location path of 4,097 bytes', await located({ path: `/${'p'.repeat(4_096)}` }), no('malformed'));
+    await projectsCase('a location path of 2,049 characters and 4,097 bytes', await located({ path: `/${'\u00e9'.repeat(2_048)}` }), no('malformed'));
+    await projectsCase('a pid of 64 characters', await located({ pid: 'p'.repeat(64) }), ok());
+    await projectsCase('a pid of 65 characters', await located({ pid: 'p'.repeat(65) }), no('malformed'));
+    await projectsCase('a pid with a slash', await located({ pid: 'mref-mini-0000001/1' }), no('malformed'));
+    await projectsCase('a project id of 65 characters', await located({ id: 'i'.repeat(65) }), no('malformed'));
+    await projectsCase('a known project id of 65 characters', await byMini({ ...projects, known: [{ id: 'i'.repeat(65), name: 'beta' }] }), no('malformed'));
+    await projectsCase('a key of 600 bytes', await located({ key: 'k'.repeat(600) }), ok());
+    await projectsCase('a key of 601 bytes', await located({ key: 'k'.repeat(601) }), no('malformed'));
+    await projectsCase('a name of 128 characters outside the BMP', await located({ name: '\u{1F4C1}'.repeat(128) }), ok());
+    await projectsCase('a name of 129 characters', await located({ name: 'n'.repeat(129) }), no('malformed'));
+    await projectsCase('an empty name', await located({ name: '' }), no('malformed'));
+    await projectsCase('a known project of a name of 129 characters', await byMini({ ...projects, known: [{ id: 'b2c3d4e5-f6a7-5b8c-9d0e-1f2a3b4c5d6e', name: 'n'.repeat(129) }] }), no('malformed'));
+    await projectsCase('a remote of 512 bytes', await located({ remote: 'r'.repeat(512) }), ok());
+    await projectsCase('a remote of 513 bytes', await located({ remote: 'r'.repeat(513) }), no('malformed'));
+    await projectsCase('a nameRev of 0', await located({ nameRev: 0 }), no('malformed'));
+    await projectsCase("a location of another source", await located({ source: 'git' }), no('malformed'));
+    await projectsCase("a location stated otherwise than minted or linked", await located({ stated: 'derived' }), no('malformed'));
+    await projectsCase('a location saying hub: true', await located({ hub: true }), no('malformed'));
+    await projectsCase('a location of another state', await located({ state: 'offline' }), no('malformed'));
+    await projectsCase('a location missing on its machine', await located({ state: 'missing' }), ok());
+  }
+
   // Who may sign as a writer.
   const signerCase = (name: string, state: string, writer: string, keys: B64[], withCerts: Arg = bundle(), notAfter: string | null = null) =>
     cases.push({ name, call: 'signerFor', args: [stateOf(state), writer, withCerts, NOW], expect: { signers: keys.map((pub) => ({ pub, notAfter })) } });
@@ -1147,6 +1238,7 @@ export async function buildScenario(k: Keys): Promise<VectorSet> {
           [SIGNING_DOMAINS.machineCert, 'cert vm-1'],
           [SIGNING_DOMAINS.listing, 'a listing signed by its listed machine'],
           [SIGNING_DOMAINS.endpoint, 'an endpoint record signed by its listed machine'],
+          [SIGNING_DOMAINS.projects, 'a projects record signed by its listed machine'],
           [SIGNING_DOMAINS.transition, 't5'],
         ] as const
       ).map(async ([domain, name]) => {

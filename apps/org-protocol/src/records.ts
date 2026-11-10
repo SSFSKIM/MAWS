@@ -1,5 +1,5 @@
 // The records signed beside the org state (RL5, RL6): grants, delegation-signed machine certificates with their
-// delegations' retirements, machine-signed listings and endpoint records. Every `machine` field carries the machine's
+// delegations' retirements, machine-signed listings, endpoint records and projects records. Every `machine` field carries the machine's
 // ref (RL §2.3), never its name.
 //
 // A certificate is authentic when its delegation is in the state, its use is within `maxUses`, its name sits under the
@@ -19,7 +19,7 @@
 // enrolls later. The hub serving only certificates `verifyMachineCert` accepted on arrival (M4) is defence in depth.
 import { keyId, signBody, signingInput, verifyInput, type B64 } from './keys.ts';
 import { machineNameKey, type MemberId } from './names.ts';
-import { canonicalizable, isCertRetirement, isCertificates, isEndpointRecord, isGrant, isListing, isMachineCert, isSigned } from './shapes.ts';
+import { canonicalizable, isCertRetirement, isCertificates, isEndpointRecord, isGrant, isListing, isMachineCert, isProjectsRecord, isSigned } from './shapes.ts';
 import {
   SIGNING_DOMAINS,
   type CertRetirement,
@@ -30,6 +30,7 @@ import {
   type MachineCert,
   type OrgState,
   type Owners,
+  type ProjectsRecord,
   type Signed,
 } from './types.ts';
 import { accept, refuse, type Verdict, type VerdictCode } from './verdict.ts';
@@ -356,4 +357,14 @@ export async function verifyListing(state: OrgState, l: Signed<Listing>, certs: 
 export async function verifyEndpointRecord(state: OrgState, r: Signed<EndpointRecord>, certs: Certificates, now: Date): Promise<Verdict> {
   if (!isSigned(r, isEndpointRecord) || r.body.org !== state.org || !isCertificates(certs)) return refuse('malformed');
   return machineSigned(SIGNING_DOMAINS.endpoint, state, r, certs, now);
+}
+
+/**
+ * A machine's projects record (the project registry, Interfaces §A): its shape and bounds (`isProjectsRecord`), signed
+ * by its machine's key. A retired machine's record no longer verifies, so its locations leave every reader with no
+ * cleanup. The revision rule (each machine's highest) is the hub's and each reader's, beside this.
+ */
+export async function verifyProjectsRecord(state: OrgState, r: Signed<ProjectsRecord>, certs: Certificates, now: Date): Promise<Verdict> {
+  if (!isSigned(r, isProjectsRecord) || r.body.org !== state.org || !isCertificates(certs)) return refuse('malformed');
+  return machineSigned(SIGNING_DOMAINS.projects, state, r, certs, now);
 }

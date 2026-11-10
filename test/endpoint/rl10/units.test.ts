@@ -195,6 +195,21 @@ describe("the directory's retired machines", () => {
     });
   });
 
+  it("lists a renamed machine under its name alone: a former name is no row and no machine project", async () => {
+    const { a1, A, certificates, head: before } = await delegated();
+    const ref = mintRef();
+    const head = await successor(before, [a1], (s) => {
+      s.machines.push({ name: 'studio', ref, pub: base64urlEncode(new Uint8Array(32).fill(7)), owners: [A] });
+      s.machineNames.push({ name: 'mini', ref }, { name: 'studio', ref });
+    });
+    const d = await orgDirectory(head.state, certificates, now(), () => null);
+    expect(entries(d, 'studio')).toEqual({
+      project: expect.objectContaining({ kind: 'machine', machine: 'studio', retired: false }),
+      machine: { name: 'studio', online: false, seen: null },
+    });
+    expect(entries(d, 'mini')).toEqual({ project: undefined, machine: undefined });
+  });
+
   it('does not retire a machine before its retirement takes effect, and does once it has', async () => {
     const { head, certificates, certify, retire } = await delegated();
     const at = Date.now() + 3_600_000;
