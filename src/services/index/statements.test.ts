@@ -17,6 +17,8 @@ import { runGit } from '../../../test/support/git-fixture';
 import { summary, tempDir } from '../../../test/support/index-fixture';
 import { openDb } from './db';
 import { Index } from './index';
+import { deriveProject } from './org-project';
+import type { DeriveRule } from './statements';
 import { ADDED_COLUMNS, ADDED_TABLES, MIGRATIONS, REPAIRS } from './migrations';
 
 const MACHINE = 'StatementsTestMachine0' as MachineRef;
@@ -948,6 +950,33 @@ describe('the stored statements', () => {
       expect(seam.fitted).toHaveLength(asked);
       seam.fit = true;
       expect(index.statements.update(pid, { name: 'A much longer name' })).toMatchObject({ name: 'A much longer name', nameRev: 1 });
+    });
+
+    it('scalpel-5#2: a derivation read before a relocation never lands on the relocated row', async () => {
+      const made = standIn();
+      seam = made.seam;
+      index = new Index(join(dir.path, 'index.sqlite'), { registry: made.registry });
+      const gated = new Set<string>();
+      let release = () => {};
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      const rule: DeriveRule = async (subject, enrollment, options) => {
+        if (gated.has(subject.directory)) await gate;
+        return deriveProject(subject, enrollment, options);
+      };
+      await index.refreshOrgProjects({ machine: MACHINE, enrollment: () => ENROLLED, home, folderCheckMs: 60 * 60_000, rule });
+      const before = folder('before');
+      const after = folder('after');
+      const id = (await add(before)).project.org!.smnsId!;
+      const pid = row(before)!.id;
+      gated.add(before);
+      const stale = index.statements.deriveRow({ id: pid, directory: before, name: 'before' }); // a refresh's, reading the old folder
+      await index.statements.relocate(pid, after);
+      expect(row(after)?.org?.smnsId).toBe(id);
+      release();
+      await stale;
+      await settle();
+      expect(row(after)?.org?.smnsId).toBe(id);
+      expect(published(after)).toMatchObject({ org: { smnsId: id }, stated: 'minted', statedAt: after });
     });
   });
 });

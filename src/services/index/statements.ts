@@ -52,6 +52,9 @@ export interface StatementsQueue {
 /** What a declaration's answer gains while statements are possible (§G's `addFolder`). */
 export type Decided = { by?: OrgDerivation['by']; at?: string | null; restated?: boolean };
 
+/** How many times a row's rule is read again when the row or a statement moved while it was read (`deriveAsNow`). */
+const STALE_READS = 3;
+
 function refuse(code: ProjectRefusal, words: string): never {
   throw new HostCommandError(ipcError('invalid_input', `${code}: ${words}`));
 }
@@ -117,16 +120,34 @@ export class Statements {
    * the rule answers for it as for any folder.
    */
   async deriveRow(row: OrgRow, gitTimeoutMs: number = ORG_GIT_TIMEOUT_MS): Promise<RowDerivation> {
+    return this.deriveAsNow(row, gitTimeoutMs, 1);
+  }
+
+  /**
+   * `deriveRow`, its answer written only while it is still the row's (panel 1, scalpel-5#2): a rule read while the row
+   * moved to another folder, or while any stored statement changed (`statements_gen`), is read again for the row as it is
+   * now, and after STALE_READS such reads the row goes to the refresh queue instead, its answer written by neither.
+   */
+  private async deriveAsNow(row: OrgRow, gitTimeoutMs: number, read: number): Promise<RowDerivation> {
     const context = this.context;
     if (context === null) return null;
     const enrollment = context.enrollment();
     if (enrollment !== null && this.projects.missingDeclared(row.id) && this.projects.keepMissing(row.id, context.machine)) return 'missing';
+    const gen = this.projects.statementsGen();
     const derived = await (context.derive ?? deriveProject)(
       { directory: row.directory, machine: context.machine, projectId: row.id, name: row.name, ...(row.files === undefined ? {} : { files: row.files }) },
       enrollment,
       { statements: this.lookup, gitTimeoutMs, ...(row.remoteReads === undefined ? {} : { remoteReads: row.remoteReads }) },
     );
     if (derived === null) return null;
+    const now = this.projects.placeOf(row.id);
+    if (now === null) return derived; // gone meanwhile: nothing to write
+    if (now.directory !== row.directory || this.projects.statementsGen() !== gen) {
+      const current = { ...row, ...now };
+      if (read < STALE_READS) return this.deriveAsNow(current, gitTimeoutMs, read + 1);
+      this.queue.rederive([current]);
+      return null;
+    }
     this.projects.setOrg(row.id, derived.org, enrollment === null ? null : { remote: derived.remote, hub: derived.hub, by: derived.by, at: derived.at });
     // §F.5: the folder holding a deciding `.smns` a session runs in or beneath is declared (an enrolled machine's alone)
     // (asked to fit as it will be published: the row the rule gives that folder; review 2, finding 5)

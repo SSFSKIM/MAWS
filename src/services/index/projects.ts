@@ -708,6 +708,12 @@ export class ProjectStore {
     return { id, directory: row.directory, name: row.name, declared: declared(row), nameRev: row.name_rev, state: row.location_state, minted: row.stated_minted, linked: row.stated_linked, anchor: row.anchor === null ? null : (JSON.parse(row.anchor) as Anchor), smnsId: row.org_smns_id };
   }
 
+  /** A row's folder and name now; null once it is gone (a relocate's merge deletes one). */
+  placeOf(id: ProjectId): { directory: string; name: string } | null {
+    const row = this.db.get<ProjectRow>('SELECT * FROM projects WHERE id = ?', id);
+    return row === null ? null : { directory: row.directory, name: row.name };
+  }
+
   /** The statement row at a canonical path, declared or not; null when there is no row there. */
   statementRowAt(path: string): StatementRow | null {
     const row = this.db.get<{ id: string }>('SELECT id FROM projects WHERE directory = ?', path);
