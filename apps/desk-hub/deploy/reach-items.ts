@@ -24,7 +24,7 @@ import type { LogEvent } from '../src/protocol/log';
 import type { OrgView } from './endpoint-acceptance';
 import type { MemberChange, RunHub, StepResult, Tag, VmMachine } from './endpoint-machine';
 import type { Remote, RunDevice } from './endpoint-remote';
-import type { ItemReport } from './endpoint-verdicts';
+import { snapshotRows, type ItemReport, type PlaneMessage } from './endpoint-verdicts';
 import type { Person } from './hub';
 import { seatSession } from './endpoint-items';
 import type { Cleanup } from './proof';
@@ -464,9 +464,21 @@ export async function item2(scene: ReachScene, report: ReachReport): Promise<voi
   await report.check('2', 'as a peer message with its owner label, nobody’s words', async () => {
     const row = await scene.S.machine.vm.row(scene.S.session, tok);
     if (row === null) throw new Error('no row holds it');
-    if (!row.includes(scene.U.alias) || !row.includes(scene.b.email)) throw new Error(`the row names neither U's alias and B's email: ${masked(scene, row.slice(0, 200))}`);
+    if (!row.includes(scene.U.alias) || !row.includes(`, owned by ${scene.b.email}`)) throw new Error(`the row names neither U's alias and “, owned by <B’s email>”: ${masked(scene, row.slice(0, 200))}`);
     if (!/\[sminos/.test(row)) throw new Error(`the row is not a chat frame: ${row.slice(0, 200)}`);
     return `the row is a chat frame from ${scene.U.alias}, owned by B (its label B's email)`;
+  });
+  await report.check('2', 'S’s stored line for U’s message carries `verified`, its owners naming B', async () => {
+    const lines = await until(async () => {
+      const found = (await scene.S.machine.vm.events(tok)).filter((e) => e.kind === 'say' && e.writer?.includes(`/${scene.U.session}`) === true);
+      return found.length ? found : null;
+    }, `U's message in A1's log`, 60_000);
+    for (const line of lines) {
+      const owners = line.verified?.owners ?? [];
+      if (line.verified?.signer?.kind !== 'machine' || !owners.some((o) => o.id === scene.b.member)) throw new Error(`${line.writer}:${String(line.seq)} stored with verified ${masked(scene, JSON.stringify(line.verified ?? null)).slice(0, 300)}`);
+    }
+    const stored = lines.map((line) => `${line.writer}:${String(line.seq)} signed by the machine ${String(line.verified?.signer?.name)}, owners ${(line.verified?.owners ?? []).map((o) => (o.id === scene.b.member ? 'B' : String(o.id))).join(', ')}`);
+    return `stored verified: ${stored.join('; ')}`;
   });
   await report.check('2', 'S spawns L1 while listed', async () => {
     scene.seats.L1 = await spawnSeat(scene, scene.S, `o18-l1-${scene.tag}`);
@@ -623,7 +635,7 @@ export async function item3b(scene: ReachScene, report: ReachReport): Promise<vo
       return e.length ? e : null;
     }, `${tok} in B1's log`, 60_000);
     const expected = `@${tagWordOf(scene.U)} hello ${tok}`;
-    if (events.length !== 1 || events[0].text !== expected) throw new Error(`B1 holds ${JSON.stringify(events)}`);
+    if (events.length !== 1 || events[0].text !== expected) throw new Error(`B1 holds ${masked(scene, JSON.stringify(events))}`);
     if (events[0].text.includes(scene.S.alias) || (scene.S.short !== undefined && events[0].text.includes(scene.S.short))) throw new Error('its text names S');
     return `B1 holds one event, “${expected}”, under ${events[0].writer}; S and U each got it once`;
   });
@@ -1054,6 +1066,43 @@ export async function itemVisibility(scene: ReachScene, report: ReachReport): Pr
     ]);
     if (steer !== 'grade' || decide !== 'grade') throw new Error(`sminos.steer ${steer}; sminos.decide ${decide}`);
     return 'sminos.steer (converse) and sminos.decide (approve) refused grade by A1’s endpoint, before anything reached S';
+  });
+  await report.check(VISIBILITY, 'the member’s own session U, in full over b1’s channel', async () => ownSessionInFull(scene));
+}
+
+/**
+ * B's own session U read in full over b1's channel to B1, as B's MAWS reads it. b1 first sends U a marker of the run's
+ * (`sminos.send`, B's converse on its own session), and waits for it in U's transcript; then a `full` subscription must
+ * be answered `subbed` with a snapshot of rows, `sminos.rows` on that subscription (the page before the snapshot's oldest
+ * row) must be answered ok with a rows array in the stream, and the marker must come through one or the other.
+ */
+async function ownSessionInFull(scene: ReachScene): Promise<string> {
+  const U = scene.U;
+  if (U.launch === undefined) throw new Error('U has no launch the scene recorded');
+  const tok = token(scene, 'own');
+  return withChannel(scene, 'b', scene.machines.b1, async (remote) => {
+    const sent = await laneAAck(remote, scene.machines.b1.ref, { session: U.session, launch: U.launch! }, 'sminos.send', { text: `hello ${tok}` });
+    if (sent !== 'accepted') throw new Error(`b1's sminos.send to U was answered ${sent}`);
+    await arrives(U, tok);
+    const sub = `o18-own-${scene.tag}`;
+    const from = remote.inbox.length;
+    await remote.channel.send({ t: 'sub', sub, session: { lane: 'A', id: U.session }, view: 'full', cursor: null, credit: 4 << 20 });
+    const answer = await remote.waitFor((m) => m.sub === sub && (m.t === 'ended' || m.t === 'subbed'), 'the answer to the subscription', from);
+    if (answer.t !== 'subbed') throw new Error(`the full subscription to U ended ${String(answer.reason)}`);
+    await remote.waitFor((m) => m.sub === sub && m.t === 'snap' && m.last === true, 'the subscription’s snapshot', from, 30_000);
+    const pages = remote.inbox.slice(from).filter((m) => m.sub === sub && m.t === 'snap');
+    const snapshot = JSON.parse(pages.slice(0, pages.findIndex((m) => m.last === true) + 1).map((m) => String(m.body)).join('')) as PlaneMessage;
+    const rows = snapshotRows(snapshot);
+    if (rows.length === 0) throw new Error(`U's snapshot (${String(answer.mode)}) carries no rows`);
+    const asked = remote.inbox.length;
+    const read = await remote.call('sminos.rows', { session: U.session, sub, before: rows.at(-1), limit: 5 });
+    if (!read.ok) throw new Error(`sminos.rows on U was refused ${read.code}`);
+    const page = await remote.waitFor((m) => m.sub === sub && m.t === 'ev' && (m.body as PlaneMessage | undefined)?.kind === 'rows', 'the rows answer in the stream', asked, 30_000);
+    const earlier = ((page.body as PlaneMessage).body as { rows?: unknown } | undefined)?.rows;
+    if (!Array.isArray(earlier)) throw new Error(`sminos.rows on U answered no rows array: ${JSON.stringify((page.body as PlaneMessage).body ?? null).slice(0, 120)}`);
+    const where = names(snapshot.body, tok) ? 'the snapshot' : names(earlier, tok) ? 'the rows page' : null;
+    if (where === null) throw new Error(`b1's marker ${tok}, in U's transcript, is in neither U's snapshot (${rows.length} row(s)) nor the rows page (${earlier.length})`);
+    return `subbed ${String(answer.mode)}, its snapshot ${rows.length} row(s); sminos.rows ok, ${earlier.length} earlier row(s) in the stream; b1's marker came through ${where}`;
   });
 }
 

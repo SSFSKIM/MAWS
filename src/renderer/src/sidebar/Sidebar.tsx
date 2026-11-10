@@ -154,8 +154,8 @@ function SidebarBody() {
   const search = useRef<HTMLDivElement>(null);
 
   const rankedEntries = useMemo((): RankedEntry[] => projectList({ records, digests, projects, rows, local, machineName: (m) => machineName(machines, m, local), alsoListed: projectFilter ?? undefined, listed: listedSessions, people, seen }).map((entry) => {
-    const sorted = projectSessions({ sessions: entry.sessions, digests, rows, sort: sidebar.sort, matches: () => true, spawned, seen, now });
-    return { ...entry, sessions: sorted, items: projectItems({ sorted, listed: entry.listed, digests, rows, sort: sidebar.sort, spawned, seen, now }) };
+    const sorted = projectSessions({ sessions: entry.sessions, digests, rows, sort: sidebar.sort, matches: () => true, spawned, seen, listings: listedSessions, now });
+    return { ...entry, sessions: sorted, items: projectItems({ sorted, listed: entry.listed, digests, rows, sort: sidebar.sort, spawned, seen, listings: listedSessions, now }) };
   }), [records, digests, projects, rows, local, machines, projectFilter, sidebar.sort, listedSessions, people, spawned, seen, now]);
   // Hold ranks, not data: titles, glyphs and counts remain live. Pointer presence, keyboard focus (including
   // portalled cards/menus), or an open context menu keeps the same targets in place until the person leaves.

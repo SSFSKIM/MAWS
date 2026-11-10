@@ -3,21 +3,30 @@
 // (e2e/remote-latency.spec.ts) from this Mac against a scratch machine on the mini (`mini-bench`) or the acceptance VM
 // (`vm-bench`), on the owner's go and never on a gate. Two machines, two clocks: delta-to-frame is read across them and
 // judged over the clock offset's whole interval (test/support/remote-latency.ts's live clock), from 100 exchanges at
-// each carrier's start and 50 at its end; round trip and open to first row are this Mac's clock alone.
+// each carrier's start and 50 at its end, the carrier void when those exchanges can't share one offset within 5 ms (O7
+// Decision Log, 2026-11-10); round trip and open to first row are this Mac's clock alone.
 //
-//   0. the precheck (M10): this Mac's load1 and, on the mini, its own (`sysctl -n vm.loadavg` through the run), each under
-//      Rule B's 5, or the run refuses to start: the refusal and both loads written to the run's JSON and annotated, the
-//      test skipped with its reason, a recorded outcome rather than a failure (attempt 2 measured on a runner at 97.7);
+// The owner's acts are their MAWS's sheets on their own Mac, each approval signed with Touch ID (production has no admin
+// device): Settings › Org › People, Pair a device… for the bench app, and Settings › Org › Machines, Enroll a machine…
+// for the machine, each sheet's code copied into its file on this Mac (0600) while the sheet stays open; the app runs one
+// of them at a time, and the bench waits, bounded, for each file (CODE_WAIT), saying what it waits for.
+//
+//   0. the precheck (M10): this Mac's load1 and the machine's (the mini's `sysctl -n vm.loadavg`, the VM's
+//      `/proc/loadavg`, through the run), each under Rule B's 5, or the run refuses to start: the refusal and both loads
+//      written to the run's JSON and annotated, the test skipped with its reason, a recorded outcome rather than a failure
+//      (attempt 2 measured on a runner at 97.7);
 //   1. local: this Mac's own case, the latency stub as a scratch profile's engine (the same run's local numbers);
 //   2. the bench app: a scratch profile (the config's, kept between runs) launched with the mock keychain (MAWS_E2E),
-//      signed in from a pairing code read from its file and the file removed, the owner comparing the fingerprint and
-//      approving at their terminal; already registered, the code is not needed and its file is removed unread, and a
-//      profile whose session or hub access lapsed signs in again in the browser (org.signIn, test/support/bench-sign-in.ts);
+//      signed in from a pairing code read from its file and the file removed, then the owner's Access login in this
+//      Mac's browser, then the owner comparing the fingerprint the bench prints with the Pair sheet's and approving there;
+//      already registered, the code is not needed and its file is removed unread, and a profile whose session or hub
+//      access lapsed signs in again in the browser (org.signIn, test/support/bench-sign-in.ts);
 //   3. the machine (test/support/remote-bench.ts): the bench agent prepared, the scratch mawsd staged (on the VM, the
 //      pack prepare-vm built there before the sitting, started; on the mini, this checkout's head bundle copied into the
 //      profile, then started by mini-ops under the MAWS binary and waited for), enrolled with the code file on the
-//      enroll's stdin alone and the file removed, the stub's session served and listed for the app's member by the
-//      harness's fake sminos on the scratch RL10 socket;
+//      enroll's stdin alone and the file removed, the owner comparing the key id the bench prints with the Enroll sheet's
+//      and approving there, the stub's session served and listed for the app's member by the harness's fake sminos on the
+//      scratch RL10 socket;
 //   4. per carrier, a fresh launch of the app over its profile: direct (the tailnet), then relay
 //      (MAWS_E2E_REMOTE_CARRIER=relay refuses the direct dial, so the link comes up through the hub): the clock's start
 //      exchanges, open to first row, 3 turns of 300 deltas sent from the pane (each frame and each write on the wall
@@ -40,7 +49,9 @@
 // profile, label, port, head, commit, node, quietUtc?, runtime?, stageHead?), and MAWS_REMOTE_BENCH_MACHINE, the name of
 // the machine this run benches. Two more modes of the same file: MAWS_REMOTE_BENCH_PREPARE=1, prepare-vm before the
 // sitting (this checkout's source at the commit installed and packed on the VM, once per commit), and
-// MAWS_REMOTE_BENCH_REMOVE=1, the machine's scratch profile removed once the bench is done.
+// MAWS_REMOTE_BENCH_REMOVE=1, the machine's scratch profile removed once the bench is done; with
+// MAWS_REMOTE_BENCH_REMOVE_APP=1 beside it, the bench app's scratch profile on this Mac too (it holds the device's keys),
+// once no process names it.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, loadavg, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -52,9 +63,10 @@ import type { MachineRef } from '../src/shared/machine/ref';
 import { FIXTURE_ENGINE_VERSION } from '../test/support/engine-pin';
 import { BENCH, summarize } from '../test/support/local-latency';
 import { benchSignIn } from '../test/support/bench-sign-in';
-import { appProfileProblems, BenchRun, buildHeadBundle, buildSourceArchive, loadPrecheck, processRunner, type BenchMachine } from '../test/support/remote-bench';
+import { appProfileProblems, awaitCodeFile, BenchRun, buildHeadBundle, buildSourceArchive, CODE_WAIT, loadPrecheck, processRunner, type BenchMachine } from '../test/support/remote-bench';
 import { carrierSwitch, CARRIERS, invalidReasons, LIVE_BENCH, liveClock, liveJudgement, loadVerdict, measureResume, REMOTE_BENCH, remoteLine, rttStats, signedStats, type CaseRun, type Carrier, type Exchange, type LinkTransition, type LiveJudgement, type LiveMeasures } from '../test/support/remote-latency';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { processesNaming } from './support/processes';
 import { markerOf } from '../test/support/latency-engine';
 import { cleanupAll, lastTurn, linkOf, localCase, main, measureTurns, openToFirstRow, pings, prompt, raw, roundTrips, TURN_MS, type Written } from './support/remote-latency-page';
 import { showProjectList, sidebarOf } from './support/sidebar';
@@ -63,6 +75,7 @@ test.skip(process.env.MAWS_REMOTE_LATENCY_LIVE !== '1', 'the live remote bench r
 test.describe.configure({ timeout: 150 * 60_000 });
 
 const REMOVE = process.env.MAWS_REMOTE_BENCH_REMOVE === '1';
+const REMOVE_APP = process.env.MAWS_REMOTE_BENCH_REMOVE_APP === '1';
 const PREPARE = process.env.MAWS_REMOTE_BENCH_PREPARE === '1';
 const SIGN_IN_MS = 15 * 60_000; // the owner's browser step and approval
 const say = (line: string) => console.log(line);
@@ -93,7 +106,7 @@ async function bundleAgent(dir: string): Promise<string> {
 }
 
 // The app's sign-in over its page (test/support/bench-sign-in.ts): a registered profile signs in again; only an
-// unregistered one reads the pairing file, every path removing it.
+// unregistered one waits for the pairing file and reads it, every path removing it.
 function signIn(page: Page, pairingFile: string | undefined): Promise<string> {
   const removePairing = () => {
     if (pairingFile !== undefined) rmSync(pairingFile, { force: true });
@@ -102,8 +115,12 @@ function signIn(page: Page, pairingFile: string | undefined): Promise<string> {
     status: () => raw<OrgStatus>(page, 'org.status', undefined),
     register: (code) => page.evaluate((c) => window.maws.invoke('org.register', { code: c }), code).then((r) => (r.ok ? (r.value as { ok: boolean; reason?: { code?: string } }) : { ok: false, reason: { code: r.error.code } })),
     signIn: () => page.evaluate(() => window.maws.invoke('org.signIn', undefined)).then((r) => (r.ok ? (r.value as { ok: boolean; reason?: { code?: string } }) : { ok: false, reason: { code: r.error.code } })),
-    takePairing: () => {
-      if (pairingFile === undefined || !existsSync(pairingFile)) return null;
+    takePairing: async () => {
+      if (pairingFile === undefined) return null;
+      const act = 'the owner, in their MAWS: Settings › Org › People, Pair a device… on their own row, A Mac with MAWS, Make a code, Copy, and the code into that file (0600); the sheet stays open, since closing it cancels the pairing';
+      if (!(await awaitCodeFile(pairingFile, { who: 'app', code: 'the pairing code', act }, CODE_WAIT.pairingMs, { say, sleep: (ms) => page.waitForTimeout(ms), now: Date.now }))) {
+        throw new Error(`no pairing code came to ${pairingFile} within ${CODE_WAIT.pairingMs / 60_000} minutes`);
+      }
       try {
         return readFileSync(pairingFile, 'utf8').trim();
       } finally {
@@ -270,7 +287,7 @@ test('remote latency, live: delta to frame across two clocks, round trip and ope
   const macLoad = loadavg()[0];
   const machineLoad = await bench.load1();
   const precheckLoads = { mac: macLoad, machine: machineLoad };
-  const refused = loadPrecheck({ mac: macLoad, machine: machineLoad === null ? null : { name: machine.name, load: machineLoad } });
+  const refused = loadPrecheck({ mac: macLoad, machine: { name: machine.name, load: machineLoad } });
   if (refused !== null) {
     const info = test.info();
     mkdirSync(info.project.outputDir, { recursive: true });
@@ -281,7 +298,7 @@ test('remote latency, live: delta to frame across two clocks, round trip and ope
     test.skip(true, `the precheck refused the run: ${refused}`);
     return;
   }
-  say(`[bench] ${machine.name}: the precheck passed (this Mac’s load1 ${macLoad.toFixed(2)}${typeof machineLoad === 'number' ? `, ${machine.name}’s ${machineLoad.toFixed(2)}` : ''})`);
+  say(`[bench] ${machine.name}: the precheck passed (this Mac’s load1 ${macLoad.toFixed(2)}, ${machine.name}’s ${typeof machineLoad === 'number' ? machineLoad.toFixed(2) : machineLoad})`);
   const loads = [loadavg()[0]];
   const sampler = setInterval(() => loads.push(loadavg()[0]), 30_000);
   let terminalLoad: number | undefined;
@@ -360,7 +377,7 @@ test('remote latency, live: delta to frame across two clocks, round trip and ope
       if (m == null || j === undefined) return [];
       const f = (value: number) => value.toFixed(1);
       const delta = j.delta === null ? 'not judged (the clock voids it)' : `[${f(j.delta.p50IntervalMs[0])}, ${f(j.delta.p50IntervalMs[1])}] ms, ${j.delta.verdict}`;
-      return [`[remote-latency-live] ${c}: delta-to-frame p50 ${delta} (bound ${f(j.bounds.deltaToFrameP50Ms)} ms, n=${m.rawDelta.n}) · round trip p50 ${f(m.roundTrip.p50)} ms · open to first row ${f(m.openToFirstRowMs)} ms · resume ${m.resumeMs === null ? 'not measured' : `${f(m.resumeMs)} ms (bound ${f(j.bounds.resumeMs)} ms)`} · rtt p50 ${f(m.rtt.p50)} ms (n=${m.rtt.n}) · clock spread ${m.clock === null ? '?' : f(m.clock.spreadMs)} ms`];
+      return [`[remote-latency-live] ${c}: delta-to-frame p50 ${delta} (bound ${f(j.bounds.deltaToFrameP50Ms)} ms, n=${m.rawDelta.n}) · round trip p50 ${f(m.roundTrip.p50)} ms · open to first row ${f(m.openToFirstRowMs)} ms · resume ${m.resumeMs === null ? 'not measured' : `${f(m.resumeMs)} ms (bound ${f(j.bounds.resumeMs)} ms)`} · rtt p50 ${f(m.rtt.p50)} ms (n=${m.rtt.n}) · clock gap ${m.clock === null ? '?' : f(m.clock.gapMs)} ms (spread ${m.clock === null ? '?' : f(m.clock.spreadMs)} ms)`];
     }),
   ];
   const info = test.info();
@@ -380,7 +397,7 @@ test('remote latency, live: delta to frame across two clocks, round trip and ope
     console.log(line);
     info.annotations.push({ type: 'remote-latency-live', description: line });
   }
-  say(`[bench] ${machine.name}: done; the scratch profile is kept until the bench is done (MAWS_REMOTE_BENCH_REMOVE=1), the app's device and the machine revoked by the owner (${member === undefined ? 'no member read' : 'admin machine drop <name> --revoke'})`);
+  say(`[bench] ${machine.name}: done; the scratch profiles are kept until the bench is done (MAWS_REMOTE_BENCH_REMOVE=1, with MAWS_REMOTE_BENCH_REMOVE_APP=1 for the app's), and the owner, in their MAWS with Touch ID, drops the machine (Settings › Org › Machines, Drop… on ${machine.name}, "Its key may be compromised" ticked) and removes the bench app's device (Settings › Org › People, Remove device… on its line)${member === undefined ? '; no member was read' : ''}`);
   expect(all, 'the run is valid').toEqual([]);
   expect(misses, 'every carrier within acceptance 3’s bounds of the same run’s local numbers, or inconclusive').toEqual([]);
 });
@@ -400,7 +417,19 @@ test('remote latency, live: prepare-vm, the VM’s head installed and packed at 
 
 test('remote latency, live: the bench machine’s scratch profile removed once the bench is done, refused while a bench process lives', async () => {
   test.skip(!REMOVE, 'runs under MAWS_REMOTE_BENCH_REMOVE=1, once the bench is done');
-  const { machine } = benchMachine();
+  const { config, machine } = benchMachine();
   const bench = new BenchRun(machine, { runner: processRunner(), engineVersion: FIXTURE_ENGINE_VERSION, say });
   expect(await bench.removeProfile(), 'no bench process is left on the machine').toBe(true);
+  if (!REMOVE_APP) return;
+  // the bench app's profile on this Mac (its device's keys, its Access token, its logs): a scratch profile only, and
+  // only while nothing runs over it
+  const app = config.app.profile;
+  expect(appProfileProblems(app, config.app.scratchRoot, homedir()), 'the bench app’s profile is a scratch profile').toEqual([]);
+  if (!existsSync(app)) {
+    say(`[bench] app: no scratch profile at ${app}; nothing to remove`);
+    return;
+  }
+  expect(processesNaming(app).map((p) => `${p.pid} ${p.command}`), 'no process runs over the bench app’s profile').toEqual([]);
+  rmSync(app, { recursive: true, force: true });
+  say(`[bench] app: the scratch profile ${app} is removed; the owner removes its device in their MAWS if they have not (Settings › Org › People, Remove device…)`);
 });

@@ -153,8 +153,16 @@ export function remoteLine(name: 'local' | Carrier, m: Measures & { rtt?: Stats 
 // machine's time between the stamps) over two plus the resolution: a route's asymmetry hides anywhere inside it, so the
 // whole interval is what the judgement carries, never the estimate alone. Of an exchange set, the narrowest interval (the
 // fastest exchange) is kept, as NTP keeps its lowest-delay sample. The run takes one set at its start and one at its end;
-// their intervals' union is the run's, and the distance between their estimates its spread, which voids the run past 5 ms
-// (the clocks moved apart, or a route changed, during it).
+// the hull of their narrowest intervals is the run's, which holds the offset at both ends and so anywhere it moved
+// between them.
+//
+// The void (O7 Decision Log, 2026-11-10) asks whether one offset fits every exchange: each interval must hold θ, so a
+// steady θ lies at or above every lower edge and at or below every upper edge, and the greatest lower edge over both sets
+// can pass the least upper edge only by as much as θ moved. Past 5 ms the carrier is void (the clocks moved, or a stamp
+// is wrong). A wide interval moves neither edge, so a slow exchange neither voids nor hides anything; what the rule can
+// see is a move wider than the fastest exchanges' round trips, and a move it can't see, if it runs one way, stays inside
+// the hull. The spread of the estimates (their range) is recorded and voids nothing: on a path with jitter it measures
+// the path.
 //
 // A delta read across the two clocks (this Mac's frame less the machine's write, each the wall clock's whole millisecond,
 // Date.now, the clock both ends stamp pongs with) is the true delta less θ, so the true p50 lies in [raw p50 + low − 1,
@@ -162,7 +170,7 @@ export function remoteLine(name: 'local' | Carrier, m: Measures & { rtt?: Stats 
 // missed when its best edge misses, and is otherwise inconclusive, as it is whenever the clock's interval is wider than
 // the bound's own allowance.
 
-export const LIVE_BENCH = { clockExchanges: 50, spreadVoidMs: 5, stampResolutionMs: 1 } as const;
+export const LIVE_BENCH = { clockExchanges: 50, gapVoidMs: 5, stampResolutionMs: 1 } as const;
 export type Verdict = 'pass' | 'miss' | 'inconclusive';
 
 export interface ClockEstimate {
@@ -172,32 +180,39 @@ export interface ClockEstimate {
   samples: number;
   /** every such exchange's own estimate, ((received − at) + (sent − arrived)) / 2 */
   estimates: number[];
-  /** their range, max − min */
+  /** their range, max − min (recorded; it voids nothing) */
   spreadMs: number;
+  /** the greatest lower edge and the least upper edge of every exchange's interval: lower past upper when no one offset fits them */
+  edgesMs: [number, number];
 }
 
 /**
- * The narrowest offset interval of the exchanges that carry the machine's stamps (the offset and its uncertainty), and
- * every exchange's own estimate with their range; null with none.
+ * The narrowest offset interval of the exchanges that carry the machine's stamps (the offset and its uncertainty), every
+ * exchange's own estimate with their range, and the edges all their intervals share; null with none.
  */
 export function clockEstimate(exchanges: readonly Exchange[]): ClockEstimate | null {
   const q = LIVE_BENCH.stampResolutionMs;
   let best: [number, number] | null = null;
   const estimates: number[] = [];
+  const edges: [number, number] = [-Infinity, Infinity];
   for (const e of exchanges) {
     if (e.received === null || e.sent === null) continue;
     estimates.push((e.received - e.at + (e.sent - e.arrived)) / 2);
     const interval: [number, number] = [e.sent - e.arrived - q, e.received - e.at + q];
     if (best === null || interval[1] - interval[0] < best[1] - best[0]) best = interval;
+    edges[0] = Math.max(edges[0], interval[0]);
+    edges[1] = Math.min(edges[1], interval[1]);
   }
-  return best === null ? null : { offsetMs: (best[0] + best[1]) / 2, intervalMs: best, samples: estimates.length, estimates, spreadMs: Math.max(...estimates) - Math.min(...estimates) };
+  return best === null ? null : { offsetMs: (best[0] + best[1]) / 2, intervalMs: best, samples: estimates.length, estimates, spreadMs: Math.max(...estimates) - Math.min(...estimates), edgesMs: edges };
 }
 
 export interface LiveClock {
   offsetMs: number;
   intervalMs: [number, number];
-  /** the range of every exchange's estimate across the start's and the end's sets */
+  /** the range of every exchange's estimate across the start's and the end's sets (recorded; it voids nothing) */
   spreadMs: number;
+  /** the greatest lower edge of every exchange's interval in both sets less the least upper edge: at most 0 when one offset fits them all */
+  gapMs: number;
   samples: { start: number; end: number };
   start: Omit<ClockEstimate, 'estimates'>;
   end: Omit<ClockEstimate, 'estimates'>;
@@ -205,31 +220,34 @@ export interface LiveClock {
 
 /**
  * The run's clock from its start's and its end's exchanges; null when either carried none of the machine's stamps. The
- * offset and its interval are the narrowest exchanges' (the union of the two sets'); the spread is every exchange's
- * estimate's range, within each set and across both, so one exchange off by more than 5 ms voids the run even when the
- * narrowest agree.
+ * offset and its interval are the narrowest exchanges' (the hull of the two sets'); the gap is how far the exchanges'
+ * intervals, over both sets, miss one shared offset; the spread is every exchange's estimate's range, recorded.
  */
 export function liveClock(start: readonly Exchange[], end: readonly Exchange[]): LiveClock | null {
   const [s, e] = [clockEstimate(start), clockEstimate(end)];
   if (s === null || e === null) return null;
   const all = [...s.estimates, ...e.estimates];
-  const kept = (c: ClockEstimate) => ({ offsetMs: c.offsetMs, intervalMs: c.intervalMs, samples: c.samples, spreadMs: c.spreadMs });
+  const kept = (c: ClockEstimate) => ({ offsetMs: c.offsetMs, intervalMs: c.intervalMs, samples: c.samples, spreadMs: c.spreadMs, edgesMs: c.edgesMs });
   return {
     offsetMs: (s.offsetMs + e.offsetMs) / 2,
     intervalMs: [Math.min(s.intervalMs[0], e.intervalMs[0]), Math.max(s.intervalMs[1], e.intervalMs[1])],
     spreadMs: Math.max(...all) - Math.min(...all),
+    gapMs: Math.max(s.edgesMs[0], e.edgesMs[0]) - Math.min(s.edgesMs[1], e.edgesMs[1]),
     samples: { start: s.samples, end: e.samples },
     start: kept(s),
     end: kept(e),
   };
 }
 
-/** Why a carrier's live clock voids its run, or null: too few exchanges at either end, or a spread past 5 ms. */
+/**
+ * Why a carrier's live clock voids its run, or null: too few exchanges at either end, or exchanges whose intervals miss
+ * one shared offset by more than 5 ms (the clocks moved during the case).
+ */
 export function clockVoid(clock: LiveClock | null): string | null {
   if (clock === null) return 'no exchange carried the machine’s clock (its endpoint lists no rl2.pong-clock)';
   const few = (['start', 'end'] as const).filter((at) => clock.samples[at] < LIVE_BENCH.clockExchanges);
   if (few.length > 0) return few.map((at) => `${clock.samples[at]} clock exchanges at the run’s ${at}, under ${LIVE_BENCH.clockExchanges}`).join('; ');
-  if (clock.spreadMs > LIVE_BENCH.spreadVoidMs) return `the clock’s spread ${ms(clock.spreadMs)} ms is over ${LIVE_BENCH.spreadVoidMs} ms`;
+  if (clock.gapMs > LIVE_BENCH.gapVoidMs) return `the exchanges can’t share one clock offset: their intervals miss each other by ${ms(clock.gapMs)} ms, over ${LIVE_BENCH.gapVoidMs} ms`;
   return null;
 }
 

@@ -54,8 +54,9 @@ export interface RemoteScene {
   member: string;
   sminos: {
     /** A lane B session of B's listed through sminos: the project's presence (`cwd` its checkout), then its `member` frame
-     * once B's engine host reports the session under `engine`. */
-    list(session: { engine: string; app: string; owners: string[]; project: string; title?: string; cwd?: string }): Promise<void>;
+     * once B's engine host reports the session under `engine`; listed again, restated (`state` its word, `idle` unless
+     * given), as sminos's observer restates a session at each change of its state. */
+    list(session: { engine: string; app: string; owners: string[]; project: string; title?: string; cwd?: string; state?: string }): Promise<void>;
     gone(engine: string): Promise<void>;
     /** 2026-11-06: a terminal session of B's listed through sminos (the project's presence, `cwd` its checkout, then its
      * lane A `member` frame), its session plane served by sminos (fake-sminos.ts). */
@@ -276,7 +277,7 @@ export async function startRemoteScene(opts: { scratch: string; aUserData: strin
               message: `B's engine host runs ${session.app} as ${session.engine}\n${said()}`,
             })
             .toBe(true);
-          sminos.member(session.project, { engine: session.engine, alias: session.app, title: session.title ?? session.app, cwd, owners: session.owners });
+          sminos.member(session.project, { engine: session.engine, alias: session.app, title: session.title ?? session.app, cwd, owners: session.owners, ...(session.state === undefined ? {} : { state: session.state }) });
         },
         async gone(engine) {
           sminos.gone(engine);

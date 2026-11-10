@@ -611,7 +611,8 @@ export class VmMachine implements EndpointMachine {
 }
 
 /** An event of a scene's log files as `events` prints it. */
-export type LoggedLine = { writer?: string; seq?: number; ts?: string; kind?: string; session?: string; text?: string; withheld?: boolean; audience?: string[]; file: string };
+/** `verified`: what sminos stored an arriving event with, its signer and the owners the endpoint attested. */
+export type LoggedLine = { writer?: string; seq?: number; ts?: string; kind?: string; session?: string; text?: string; withheld?: boolean; audience?: string[]; verified?: { signer?: { kind?: string; ref?: string; name?: string }; owners?: Array<{ id?: string; email?: string | null }> }; file: string };
 
 /** Every status: a verb whose refusal is what an item checks. */
 const ANY = Array.from({ length: 256 }, (_, i) => i);

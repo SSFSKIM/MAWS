@@ -180,6 +180,21 @@ describe('a session tab’s label without its record', () => {
   });
 });
 
+// P5 O7 M10 (a busy remote session's state): the tab of another machine's lane B session, its record held with no
+// digest, carries its listing's state as the sidebar row does
+describe('a remote lane B session tab’s glyph', () => {
+  it('is its listing’s state while its record has no digest', () => {
+    const onB = addressOf(OTHER_MACHINE, 'b1' as AppSessionId);
+    const listed = (state: string) => new Map([[onB, { ...remoteRow(OTHER_MACHINE, 'b1', { state }), appId: onB }]]);
+    useSessions.setState({ records: new Map([[onB, record(onB)]]), listed: listed('busy') });
+    const { result } = renderHook(() => useTabLabel({ id: `session:${onB}`, kind: 'session', appSessionId: onB, pinned: false, title: 'b1' }));
+    expect(result.current.glyph?.label).toBe('Working');
+    act(() => useSessions.setState({ listed: listed('idle') }));
+    expect(result.current.glyph?.label).toBe('Idle');
+    act(() => useSessions.setState({ records: new Map(), listed: new Map() }));
+  });
+});
+
 // P5 O9 (the owner's Q1): a session a terminal or a `--bg` job holds and MAWS drives through its bridge reads like any
 // MAWS session, with a small marker in its pane's tab naming where it runs, the hover card's line as its title; only
 // while the session's controls port is lane A.

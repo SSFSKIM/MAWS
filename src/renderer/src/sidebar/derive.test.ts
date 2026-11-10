@@ -260,6 +260,19 @@ describe('listed rows in the project list', () => {
     expect(entries[0].rollup).toEqual({ waiting: 1, working: 3 });
   });
 
+  // P5 O7 M10 (a busy remote session's state): a record at a listed address with no digest counts by its listing, as
+  // its listed row did; a digest, where there is one, says instead
+  it('counts a record at a listed address by its listing’s state while it has no digest', () => {
+    const states = ['waiting', 'busy', 'busy', 'idle'];
+    const recorded = states.map((_, i) => sessionOn(OTHER_MACHINE, `b${i}`, { projectId: null }));
+    const entries = list(listedMap(...states.map((state, i) => listedOn(`b${i}`, { orgKey: ORG, state }))), {
+      records: recs(local, ...recorded),
+      digests: new Map([[there('b2') as AppSessionId, digest(there('b2'), { phase: 'idle' })]]),
+    });
+    expect(shape(entries)).toEqual([[ORG, [addr('s1'), ...states.map((_, i) => there(`b${i}`))], []]]);
+    expect(entries[0].rollup).toEqual({ waiting: 1, working: 1 });
+  });
+
   it('a search finds a listed row by its title', () => {
     const entries = list(listedMap(listedOn('b1', { orgKey: ORG, title: 'Remote refactor' }), listedOn('b2', { title: 'Studio chores' })));
     expect(filterProjectList(entries, 'chores', byId).map((e) => e.key)).toEqual([machineKey(OTHER_MACHINE)]);
@@ -542,6 +555,24 @@ describe('a remote session’s activity', () => {
 
   it('its row’s age reads the same activity', () => {
     expect(sessionAge(remote(), undefined, Date.parse(hour(10)) + 8 * 60_000, Date.parse(hour(10)))).toBe(REL.amount(8, 'minute'));
+  });
+
+  // P5 O7 M10 (a busy remote session's state): with no digest, its listing's `busy` ranks it among the working (by its
+  // activity, as a listed row by its issue), above idle sessions active since, and its age reads "now"
+  it('a remote session its listing says is busy ranks among the working under priority and its age reads "now"', () => {
+    const busy: ListedSession = { ...listing, state: 'busy', issued: '2026-11-05T00:30:00.000Z' }; // its turn started long since
+    const listings = new Map([[REMOTE, busy]]);
+    const seen = seenActivity(listings, new Map());
+    const locals = older();
+    const working = record('working-local', { updatedAt: hour(0) });
+    const digests = new Map([...digestsOf(locals), [working.appId, digest(working.appId, { phase: 'working', turnStartedAt: hour(2) })]]);
+    const sessions = [...locals, remote(), working];
+    const sorted = projectSessions({ now: NOW, sessions, digests, rows: [], sort: 'priority', matches: everyone, seen, listings });
+    expect(sorted.slice(0, 3).map((r) => r.appId)).toEqual([working.appId, REMOTE, 'idle0']);
+    expect(projectItems({ now: NOW, sorted, listed: [], digests, rows: [], sort: 'priority', seen, listings }).slice(0, 2).map(sidebarSessionId)).toEqual([working.appId, REMOTE]);
+    expect(projectSessions({ now: NOW, sessions, digests, rows: [], sort: 'recency', matches: everyone, seen, listings }).at(-1)?.appId).toBe(REMOTE); // recency: its activity alone
+    expect(sessionAge(remote(), undefined, NOW, seen.get(REMOTE), busy)).toBe(formatAge(0));
+    expect(sessionAge(remote(), undefined, NOW, seen.get(REMOTE), { ...busy, state: 'idle' })).not.toBe(formatAge(0));
   });
 });
 

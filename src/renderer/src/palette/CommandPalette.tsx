@@ -256,13 +256,14 @@ function SessionItem({ record, project, snippet, onOpen }: { snippet?: string | 
   const now = useNow();
   const digest = useSessions((s) => s.digests.get(record.appId) ?? null);
   const seenAt = useSessions((s) => selectSeenAt(s, record.appId)); // P5 O7 M10
+  const listing = useSessions((s) => s.listed.get(record.appId)); // P5 O7 M10: a remote lane B record's state (`listedStateOf`)
   const pending = useAttention((s) => selectPendingOf(s, record.appId));
   return (
     <Command.Item value={`session:${record.appId}`} onSelect={() => onOpen(record.appId, false)} className={`${ITEM} ${snippet ? "h-auto min-h-(--row-h) py-1.5" : ""}`}>
-      <GlyphMark glyph={glyphFor(record, digest, pending)} className="w-4 shrink-0" />
+      <GlyphMark glyph={glyphFor(record, digest, pending, listing)} className="w-4 shrink-0" />
       <span className="min-w-0 flex-1"><span className="block truncate">{displayTitle(record)}</span>{snippet && <span className="line-clamp-2 block text-ui-sm text-fg-muted">{conversationSnippet(snippet)}</span>}</span>
       {project && <span className="ml-auto max-w-[30%] shrink-0 truncate text-ui-sm text-fg-muted">{project.name}</span>}
-      <span className="shrink-0 text-ui-sm text-fg-faint">{sessionAge(record, digest ?? undefined, now, seenAt)}</span>
+      <span className="shrink-0 text-ui-sm text-fg-faint">{sessionAge(record, digest, now, seenAt, listing)}</span>
     </Command.Item>
   );
 }
