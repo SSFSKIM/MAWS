@@ -9,6 +9,9 @@
 // - a main-loop request of the holder's acceptance run (P5 O16 M4; its first message `o16-holder go <tag> <s>`) gets
 //   the holder run's script (`holderStep`, below): a background `sleep <s>`, a Bash call that raises a permission, the turn's
 //   text, then the text answering the shell's completion;
+// - a main-loop request whose last user text says `o15-digest <tag>` (P5 O15 M4's row 9b, endpoint-items.ts item 9) gets
+//   a Bash `curl` to a closed port, which no rule allows, so a permission is raised; that tool's result, allowed or
+//   denied, ends the turn (`digestStep`, below);
 // - any other main-loop request is answered with a short text turn naming the request;
 // - a side request (a title, a classifier) with a short text; count_tokens a fixed count; the relay's health check
 //   (GET /api/hello) 200, so a MAWS gateway launch pointed here by MAWS_RELAY_URL (lane B's engine) starts; any other
@@ -87,11 +90,26 @@ function resultOf(messages, toolUseId) {
   return '';
 }
 
+// P5 O15 M4's row 9b: a permission pending on a lane B session that is already running (item 9's digest check).
+const DIGEST = /o15-digest ([a-z0-9]{1,16})/;
+
+/** The digest check's next model step for a main-loop request, or null: decided by the last user message alone. */
+export function digestStep(body) {
+  const last = [...(Array.isArray(body?.messages) ? body.messages : [])].reverse().find((m) => m?.role === 'user');
+  const results = Array.isArray(last?.content) ? last.content.filter((b) => b?.type === 'tool_result') : [];
+  const answered = results.map((b) => /^toolu_o15_digest_([a-z0-9]{1,16})$/.exec(String(b.tool_use_id))).find(Boolean);
+  if (answered) return { text: `o15-digest done ${answered[1]}` };
+  const asked = DIGEST.exec(textOf(last?.content));
+  if (!asked) return null;
+  const tag = asked[1];
+  return { tool: { id: `toolu_o15_digest_${tag}`, name: 'Bash', input: { command: `curl -sS --max-time 2 http://127.0.0.1:9/o15-digest-${tag}`, description: `o15 digest permission ${tag}` } } };
+}
+
 const isMainLoop = (body) => Array.isArray(body.tools) && body.tools.some((t) => t?.name === 'Bash');
 
 /** The turn a main-loop request gets: decided by its last user message alone. */
 export function answer(body) {
-  const step = holderStep(body);
+  const step = holderStep(body) ?? digestStep(body);
   if (step) return step.tool ? toolTurn(step.tool.id, step.tool.name, step.tool.input) : textTurn(step.text);
   const last = [...(body.messages ?? [])].reverse().find((m) => m.role === 'user');
   const text = textOf(last?.content);

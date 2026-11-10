@@ -48,7 +48,7 @@
 #                                lines whose `ts` is not after it are not counted); then `total <n>`
 #   owed                         `sminos daemon owed`
 #   events <token>               each event of the project's log files holding the token (its writer, seq, ts, kind,
-#                                session, text, withheld, audience, file)
+#                                session, text, withheld, audience, verified, file)
 #   row <session> <token>        the text of the first row the session was given holding the token (its frame, label)
 #   archive-ls [token…]          the run's archive (/srv/o18-archive.git) as root: `file <path>` for each file on main,
 #                                `tomb <path> <seq>` for each tombstone in them, `token <t> <n>` for each token's count
@@ -632,7 +632,8 @@ for d, _, files in os.walk(root):
 print("total", total)
 '
 # Each event of the project's log files holding the token: `event <json>`, its writer, seq, ts, kind, session, text
-# (at most 300 characters), withheld and audience, the run's own markers and ids alone.
+# (at most 300 characters), withheld, audience and verified (the signer and owners sminos stored an arriving event
+# with), the run's own markers and ids alone.
 EVENTS_PY='
 import glob, json, os, sys
 for path in sorted(glob.glob(os.path.join(sys.argv[1], "*.jsonl"))):
@@ -644,7 +645,7 @@ for path in sorted(glob.glob(os.path.join(sys.argv[1], "*.jsonl"))):
         except ValueError:
             continue
         if isinstance(e, dict):
-            keep = {k: e[k] for k in ("writer", "seq", "ts", "kind", "session", "withheld", "audience") if k in e}
+            keep = {k: e[k] for k in ("writer", "seq", "ts", "kind", "session", "withheld", "audience", "verified") if k in e}
             if isinstance(e.get("text"), str):
                 keep["text"] = e["text"][:300]
             keep["file"] = os.path.basename(path)
