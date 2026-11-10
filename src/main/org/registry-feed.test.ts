@@ -6,7 +6,7 @@
 import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocketServer } from 'ws';
-import type { Listing, Signed } from '../../../apps/org-protocol/src/index.ts';
+import type { Listing, ProjectsRecord, Signed } from '../../../apps/org-protocol/src/index.ts';
 import { BUILD_HEADER } from './hub-client';
 import { CLOSE_REMOVED, createRegistryFeed, MAX_PART_SETS, MAX_PART_TEXT, REGISTRY_APP_PATH, type RegistryFeed, type WebSocketLike } from './registry-feed';
 import { heldOrgSession, type SignedIn } from './session';
@@ -274,6 +274,31 @@ describe('frames', () => {
     expect(h.seen).toMatchObject({ state: [], listings: [], listing: [] });
     h.last().send({ t: 'state', version: 8 });
     expect(h.seen.state).toEqual([8]);
+  });
+
+  it('types the projects records: `projects-all` pages and each `projects` frame, ill-typed ones ignored (the project registry, §C)', async () => {
+    const h = await opened();
+    const pages: Array<{ records: Signed<ProjectsRecord>[]; last: boolean }> = [];
+    const live: Signed<ProjectsRecord>[] = [];
+    h.feed.onProjectsPages((page) => pages.push(page));
+    h.feed.onProjects((one) => live.push(one));
+    const projects = (id: string) => ({ body: { machine: id }, sig: 'sig' }) as unknown as Signed<ProjectsRecord>;
+    h.last().send({ t: 'projects-all', records: [projects('m1')], last: false });
+    h.last().send({ t: 'projects-all', records: [] });
+    h.last().send({ t: 'projects-all', records: [], last: true });
+    h.last().send({ t: 'projects', record: projects('m2') });
+    for (const frame of [
+      { t: 'projects-all', records: 'none', last: true },
+      { t: 'projects', record: [projects('x')] },
+      { t: 'projects', record: 'x' },
+    ]) h.last().send(frame);
+    expect(pages).toEqual([
+      { records: [projects('m1')], last: false },
+      { records: [], last: false },
+      { records: [], last: true },
+    ]);
+    expect(live).toEqual([projects('m2')]);
+    expect(h.seen.listings).toEqual([]);
   });
 
   it('reads a listings page with no `last` as not the last', async () => {

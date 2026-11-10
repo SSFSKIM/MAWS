@@ -10,7 +10,7 @@
 // the member; the session reads `denied`), and an upgrade refused by Access rather than the Worker (no `X-Desk-Build`: the
 // credential has ended). A Worker's own 403 on the upgrade (`not-a-member`) is the first of those.
 import WebSocket from 'ws';
-import type { Listing, Signed } from '../../../apps/org-protocol/src/index.ts';
+import type { Listing, ProjectsRecord, Signed } from '../../../apps/org-protocol/src/index.ts';
 import { BUILD_HEADER } from './hub-client';
 import type { OrgSession } from './session';
 import { orgTiming, type OrgTiming } from './timing';
@@ -32,6 +32,10 @@ export interface RegistryFeedHooks {
 export interface RegistryFeed extends RegistryFeedHooks {
   onListings(listener: (page: { records: Signed<Listing>[]; last: boolean }) => void): () => void;
   onListing(listener: (record: Signed<Listing>) => void): () => void;
+  /** The project registry (§C): the hub's projects records as `projects-all` pages, after the listings pages. */
+  onProjectsPages(listener: (page: { records: Signed<ProjectsRecord>[]; last: boolean }) => void): () => void;
+  /** The project registry (§C): a record the hub stored, as each `projects` frame brings it. */
+  onProjects(listener: (record: Signed<ProjectsRecord>) => void): () => void;
   connected(): boolean;
   probe(): void;
   close(): void;
@@ -140,6 +144,8 @@ export function createRegistryFeed(deps: {
     credentials: new Set<() => void>(),
     listings: new Set<(page: { records: Signed<Listing>[]; last: boolean }) => void>(),
     listing: new Set<(record: Signed<Listing>) => void>(),
+    projectsPages: new Set<(page: { records: Signed<ProjectsRecord>[]; last: boolean }) => void>(),
+    projects: new Set<(record: Signed<ProjectsRecord>) => void>(),
   };
   const subscribe =
     <T>(set: Set<T>) =>
@@ -273,6 +279,8 @@ export function createRegistryFeed(deps: {
       if (frame.t === 'state' && typeof frame.version === 'number' && Number.isInteger(frame.version)) tell(listeners.state, frame.version);
       else if (frame.t === 'listings' && Array.isArray(frame.records)) tell(listeners.listings, { records: frame.records as Signed<Listing>[], last: frame.last === true });
       else if (frame.t === 'listing' && isObject(frame.record)) tell(listeners.listing, frame.record as unknown as Signed<Listing>);
+      else if (frame.t === 'projects-all' && Array.isArray(frame.records)) tell(listeners.projectsPages, { records: frame.records as Signed<ProjectsRecord>[], last: frame.last === true });
+      else if (frame.t === 'projects' && isObject(frame.record)) tell(listeners.projects, frame.record as unknown as Signed<ProjectsRecord>);
     });
     current.on('close', (code) =>
       end(() => {
@@ -320,6 +328,8 @@ export function createRegistryFeed(deps: {
     onCredentialsEnded: subscribe(listeners.credentials),
     onListings: subscribe(listeners.listings),
     onListing: subscribe(listeners.listing),
+    onProjectsPages: subscribe(listeners.projectsPages),
+    onProjects: subscribe(listeners.projects),
     connected: () => open,
     probe() {
       if (closed || socket !== null || parked) return;

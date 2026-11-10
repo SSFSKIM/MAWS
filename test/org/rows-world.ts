@@ -12,6 +12,7 @@ import {
   type Listing,
   type MachineCert,
   type OrgView,
+  type ProjectsRecord,
   type Signed,
   type SignedOrgState,
   type SigningKey,
@@ -124,6 +125,8 @@ export function fakeFeed() {
     state: new Set<(version: number) => void>(),
     listings: new Set<(page: { records: Signed<Listing>[]; last: boolean }) => void>(),
     listing: new Set<(record: Signed<Listing>) => void>(),
+    projectsPages: new Set<(page: { records: Signed<ProjectsRecord>[]; last: boolean }) => void>(),
+    projects: new Set<(record: Signed<ProjectsRecord>) => void>(),
   };
   const on =
     <T>(set: Set<T>) =>
@@ -139,6 +142,8 @@ export function fakeFeed() {
     onCredentialsEnded: () => () => {},
     onListings: on(sets.listings),
     onListing: on(sets.listing),
+    onProjectsPages: on(sets.projectsPages),
+    onProjects: on(sets.projects),
     connected: () => true,
     probe: () => {},
     close: () => {},
@@ -150,6 +155,9 @@ export function fakeFeed() {
     state: (version: number) => sets.state.forEach((l) => l(version)),
     page: (records: Signed<Listing>[], last: boolean) => sets.listings.forEach((l) => l({ records, last })),
     push: (record: Signed<Listing>) => sets.listing.forEach((l) => l(record)),
+    /** The project registry: a `projects-all` page, and a live `projects` frame. */
+    projectsPage: (records: Signed<ProjectsRecord>[], last: boolean) => sets.projectsPages.forEach((l) => l({ records, last })),
+    projectsRecord: (record: Signed<ProjectsRecord>) => sets.projects.forEach((l) => l(record)),
   };
 }
 
