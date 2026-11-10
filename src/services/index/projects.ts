@@ -778,7 +778,23 @@ export class ProjectStore {
     const row = this.db.get<ProjectRow>('SELECT * FROM projects WHERE id = ?', id);
     if (!row) return;
     if (declared(row) && ownStatement(row) !== null) this.observeRow(row);
+    else this.observeDecider(row);
     if (this.undeclaredSmns(row.directory)) this.db.defer(`org:${id}`, () => this.deriveOrg?.({ id, directory: row.directory, name: row.name }));
+  }
+
+  // M8's review 1 (finding 3, the inherited case): a row whose project a statement above it decided has that folder's
+  // anchor checked as its own would be (one stat); a statement that no longer counts (its folder replaced or missing, its
+  // row removed) drops the answer it gave at once, and the row is derived again, before anything is filed under it.
+  private observeDecider(row: ProjectRow): void {
+    if ((row.org_by !== 'link' && row.org_by !== 'minted') || row.org_at === null || row.org_at === row.directory) return;
+    const decider = this.db.get<ProjectRow>('SELECT * FROM projects WHERE directory = ?', row.org_at);
+    if (decider !== null && declared(decider) && ownStatement(decider) !== null && this.observeRow(decider) === null) return;
+    if (this.db.readOnly) return;
+    this.db.transaction(() => {
+      this.db.update('projects', 'id', row.id, { org_smns_id: null, org_by: null, org_at: null });
+      this.changed();
+      this.db.defer(`org:${row.id}`, () => this.deriveOrg?.({ id: row.id as ProjectId, directory: row.directory, name: row.name }));
+    });
   }
 
   // The nearest `.smns` walking up from `directory` sits in a folder with no row, or one discovery made and nobody removed.

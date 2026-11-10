@@ -590,6 +590,36 @@ describe('the stored statements', () => {
       expect(row(other)?.org?.smnsId).not.toBe(otherId);
     });
 
+    it('F3b: a session filed into a row under a replaced folder’s statement is not filed under the old project', async () => {
+      await open();
+      const parent = folder('swapped-parent');
+      const child = folder('swapped-parent', 'child');
+      const found = folder('swapped-parent', 'found');
+      const id = (await add(parent)).project.org!.smnsId!;
+      await add(child);
+      index.sessions.upsertFromSummary(summary({ directory: found }));
+      await vi.waitFor(() => expect(row(found)?.org?.smnsId).toBe(id));
+      expect(row(child)).toMatchObject({ stated: 'minted', org: { smnsId: id } });
+      renameSync(parent, `${parent}-old`);
+      mkdirSync(child, { recursive: true });
+      mkdirSync(found);
+      // a declared row and a discovered one, each deciding by the statement above it
+      for (const directory of [child, found]) {
+        const record = index.sessions.upsertFromSummary(summary({ directory })).record;
+        expect(index.projects.record(record.projectId!).org?.smnsId).not.toBe(id);
+        expect(index.projects.record(record.projectId!)).not.toHaveProperty('stated');
+      }
+      // and a statement above that no longer counts because its row was removed
+      const kept = folder('kept-parent');
+      const under = folder('kept-parent', 'under');
+      const keptId = (await add(kept)).project.org!.smnsId!;
+      index.sessions.upsertFromSummary(summary({ directory: under }));
+      await vi.waitFor(() => expect(row(under)?.org?.smnsId).toBe(keptId));
+      index.projects.hide(row(kept)!.id);
+      const record = index.sessions.upsertFromSummary(summary({ directory: under })).record;
+      expect(index.projects.record(record.projectId!).org?.smnsId).not.toBe(keptId);
+    });
+
     it('F4: a link that cannot be anchored to a folder is refused', async () => {
       await open({ possible: false });
       seam.projects.set('target-id', { hub: true, nameRev: 0 });
