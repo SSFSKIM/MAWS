@@ -235,8 +235,30 @@ export const ProjectRecordSchema = z.strictObject({
   hidden: z.boolean().optional(),
   discovered: z.boolean().optional(), // UX1: discovered, not explicitly added to the sidebar
   org: ProjectOrgSchema.optional(), // P5 O6 M5
+  // The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §F; additive), each with the
+  // projects record's meaning (§A) and absent where it does not apply: `stated`, the row's own stored statement decides its
+  // project (`org.smnsId`); `state`, its folder is not there or is another folder; `nameRev`, the counter of its last
+  // rename; `remote`, its repository's observed remote key, whatever decided; `hub`, false when a `.smns` that names no hub
+  // of this org decides its project.
+  stated: z.enum(['minted', 'linked']).optional(),
+  state: z.enum(['missing', 'replaced']).optional(),
+  nameRev: z.number().int().positive().optional(),
+  remote: z.string().optional(),
+  hub: z.literal(false).optional(),
 });
 export type ProjectRecord = z.infer<typeof ProjectRecordSchema>;
+// How design §8's rule decided a directory's project (Interfaces §F.3): a link, a minted id, a `.smns`, the repository's
+// remote, or none of them (the machine's own project).
+export const PROJECT_DECIDED_BY = ['link', 'minted', 'smns', 'remote', 'machine'] as const;
+export type ProjectDecidedBy = (typeof PROJECT_DECIDED_BY)[number];
+// A project act's refusals (Interfaces §G): `invalid_input`, its message starting `<code>: ` (`statements-unavailable: <reason>: `).
+export const PROJECT_REFUSALS = [
+  'not-a-directory', 'not-declared', 'statements-unavailable', 'unknown-project', 'not-a-hub-project', 'too-many-locations',
+  'has-statement', 'into-and-own', 'changed', 'unresolved',
+] as const;
+export type ProjectRefusal = (typeof PROJECT_REFUSALS)[number];
+/** The RL2 capability an endpoint lists when it serves the project acts of Interfaces §G (src/endpoint/capabilities.ts, from M9). */
+export const PROJECT_ACTS_CAPABILITY = 'rl2.project-acts';
 
 // Every field optional, at least one present. `title` sets the MAWS-side override of the Title rule (`null` clears it);
 // `generated` is never set by MAWS. "Mark all read" is `unread: false` plus `lastSeen`.
@@ -342,7 +364,29 @@ const c4Commands = {
     owner: 'machine',
   },
   // hides; rediscovery does not resurrect it
-  'session.projects.remove': { input: z.strictObject({ id: ProjectIdSchema }), output: z.void(), owner: 'machine' },
+  // The project registry (Interfaces §G): `expect`, the path and project the row must still have, else `changed`
+  'session.projects.remove': {
+    input: z.strictObject({ id: ProjectIdSchema, expect: z.strictObject({ path: z.string(), project: z.string().nullable() }).optional() }),
+    output: z.void(),
+    owner: 'machine',
+  },
+  // The project registry (Interfaces §G): design §8's rule for a directory, changing nothing; a declared row's link set or
+  // cleared; a declared row pointed at its folder's new path (its own path: "Use this folder")
+  'session.projects.resolve': {
+    input: z.strictObject({ directory: z.string() }),
+    output: z.strictObject({ project: z.string().nullable(), by: z.enum(PROJECT_DECIDED_BY), at: z.string().nullable(), label: ProjectOrgSchema }),
+    owner: 'machine',
+  },
+  'session.projects.link': {
+    input: z.strictObject({ id: ProjectIdSchema, into: z.string().min(1).nullable() }),
+    output: z.strictObject({ project: ProjectRecordSchema, restated: z.boolean() }),
+    owner: 'machine',
+  },
+  'session.projects.relocate': {
+    input: z.strictObject({ id: ProjectIdSchema, directory: z.string() }),
+    output: z.strictObject({ project: ProjectRecordSchema, merged: z.boolean(), restated: z.boolean() }),
+    owner: 'machine',
+  },
   'session.drafts.get': { input: appSession, output: DraftSchema.nullable(), owner: 'machine' },
   'session.drafts.set': { input: z.strictObject({ appSessionId: AppSessionIdSchema, draft: DraftSchema.nullable(), replaces: z.string().nullable().optional() /* P5 O8 M6a: STALE_DRAFT_WORDS */ }), output: z.void(), owner: 'machine' },
   // Main allocates the ids and the `kind: 'replay'` record, then dispatches session.replay.launch; a failed launch
@@ -597,8 +641,10 @@ const c10Events = {
 const newChatCommands = {
   'session.projects.addFolder': {
     // `opened` (P5 O7 M9's review): the endpoint's, under `machine.op` only, never a client's: the asking member's opens
-    input: z.strictObject({ directory: z.string(), opened: SetupOpenedSchema.optional() }),
-    output: z.strictObject({ project: ProjectRecordSchema, location: LocationSchema }),
+    // The project registry (Interfaces §G): `into` declares and links in one act, `own` makes a project of its own inside
+    // another's folder; the answer's `by` and `at`, design §8's rule after the add, and `restated`, sminos's acknowledgement
+    input: z.strictObject({ directory: z.string(), opened: SetupOpenedSchema.optional(), into: z.string().min(1).optional(), own: z.literal(true).optional() }),
+    output: z.strictObject({ project: ProjectRecordSchema, location: LocationSchema, by: z.enum(PROJECT_DECIDED_BY).optional(), at: z.string().nullable().optional(), restated: z.boolean().optional() }),
     owner: 'machine',
   },
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;

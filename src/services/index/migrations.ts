@@ -302,6 +302,19 @@ export const ADDED_COLUMNS: readonly AddedColumn[] = [
   // an older build reads and writes as before; null for a session never verified on the machine route
   { table: 'sessions', column: 'gateway_route', definition: 'TEXT' },
   { table: 'sessions', column: 'gateway_observed', definition: 'TEXT' },
+  // The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §F.1; its Plan of Work's
+  // decision 14): a row's stored statement, a minted id (a random UUID, lower case) and a link's target beside it; the
+  // anchor of the folder it was made on (JSON `{dev, ino, birth}`); the counter of its last rename; and its folder's state
+  // (`missing`, `replaced`). With them, what the rule last observed beside the label (`org_*`): the repository's remote
+  // key and, as 0, a `.smns` deciding the project that names no hub of the org; null otherwise. A build from before reads
+  // none of them, so it files these rows by their files alone.
+  { table: 'projects', column: 'stated_minted', definition: 'TEXT' },
+  { table: 'projects', column: 'stated_linked', definition: 'TEXT' },
+  { table: 'projects', column: 'anchor', definition: 'TEXT' },
+  { table: 'projects', column: 'name_rev', definition: 'INTEGER' },
+  { table: 'projects', column: 'location_state', definition: "TEXT CHECK (location_state IN ('missing','replaced'))" },
+  { table: 'projects', column: 'org_remote', definition: 'TEXT' },
+  { table: 'projects', column: 'org_hub', definition: 'INTEGER' },
 ];
 
 // A table added without moving `user_version` (P5 O8 M7b; the spec's Decision Log, the architect's rulings on M7b Task
@@ -353,6 +366,21 @@ CREATE TABLE IF NOT EXISTS reader_state (app_session_id TEXT NOT NULL REFERENCES
 CREATE TABLE IF NOT EXISTS member_drafts (app_session_id TEXT NOT NULL REFERENCES sessions(app_id) ON DELETE CASCADE, member TEXT NOT NULL,
   doc TEXT NOT NULL, attachments TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL,
   PRIMARY KEY (app_session_id, member));
+`,
+  },
+  // The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §F.1): the index's own facts.
+  // `index_id`, a random UUID written when the table is first made, which tells the endpoint a rebuilt index from an
+  // upgraded one (§H's restore); `statements_gen`, raised in every transaction that changes a stored statement or a
+  // declared row's path, which ties a checked removal's rule to its hide (§G); `minting`, '1' once the rows that existed
+  // when stored statements became possible were minted (§F.4's moment (c)), cleared when they stop being possible.
+  {
+    table: 'index_meta',
+    sql: `
+CREATE TABLE IF NOT EXISTS index_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+INSERT OR IGNORE INTO index_meta (key, value) VALUES ('index_id', lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4'
+  || substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', 1 + abs(random()) % 4, 1) || substr(lower(hex(randomblob(2))), 2) || '-'
+  || lower(hex(randomblob(6))));
+INSERT OR IGNORE INTO index_meta (key, value) VALUES ('statements_gen', '0');
 `,
   },
 ];

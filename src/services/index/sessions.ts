@@ -326,6 +326,7 @@ export class SessionStore {
         this.changed(appId, 'discovered');
         this.bindingChanged(appId);
         if (projectId !== null) this.projects.sessionPresenceChanged();
+        if (projectId !== null) this.projects.sessionJoined(projectId); // the project registry: a `.smns` folder it runs in is declared
         this.refoldFamilyOf(this.row(appId)); // E3
         return { record: this.requireRecord(appId), created: true, advanced: false };
       }
@@ -349,6 +350,7 @@ export class SessionStore {
       if ((projectId !== null && existing.transcript_path === null) || existing.project_id !== projectId) this.projects.sessionPresenceChanged();
       const family = familyKey(existing); // E3: the family it was in, before the write
       if (this.write(existing, facts)) this.changed(appId, 'facts');
+      if (projectId !== null && existing.project_id !== projectId) this.projects.sessionJoined(projectId); // the project registry
       this.refoldFamilyOf(existing, family); // E3
       return { record: this.requireRecord(appId), created: false, advanced };
     });
@@ -426,6 +428,7 @@ export class SessionStore {
       if (membership.projectId !== null) {
         this.projects.usedByMaws(membership.projectId);
         this.projects.sessionPresenceChanged();
+        this.projects.sessionJoined(membership.projectId); // the project registry: a `.smns` folder it runs in is declared
       }
       this.changed(appId, 'live');
       return { ok: true, record: this.requireRecord(appId) };
@@ -601,6 +604,11 @@ export class SessionStore {
       }
       return moved;
     });
+  }
+
+  // The project registry (Interfaces §G's `relocate`): a merged row's sessions are filed under the located row.
+  moveProject(from: ProjectId, to: ProjectId): void {
+    for (const row of this.db.all<SessionRow>('SELECT * FROM sessions WHERE project_id = ?', from)) if (this.write(row, { project_id: to })) this.changed(row.app_id as AppSessionId, 'facts');
   }
 
   // Sessions without a project whose directory is `directory` or lies in one of its worktrees join a new project.

@@ -12,12 +12,19 @@
 // unenrolled `local-<name>` would merge unrelated repositories that share a basename. The key is the persisted
 // identity and enrollment never changes it: sminos's ids hash the org, so they are carried beside it, as `smnsId`, for
 // joins (O8). No Electron: O3 moves the index, and this with it, into `mawsd`.
+//
+// The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §F.2 and §F.3; its design §8)
+// keeps the label (`key`, `name`, `source`) as above and gives `smnsId` by design §8's rule, `deriveProject`: walking up
+// from the directory the nearer of a stored statement (a link, then a minted id) and a `.smns` decides, a statement above
+// a checkout whose remote derives an id not counting there; else the remote; else the machine's own project (`smnsId`
+// null). A linked worktree is in its owning checkout's project. With no statement in force (signed out, not enrolled,
+// none made) it is the rule above, which `deriveOrg` keeps answering.
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
-import type { ProjectOrg } from '@shared/ipc/schema/session';
+import type { ProjectDecidedBy, ProjectOrg } from '@shared/ipc/schema/session';
 import type { GitFiles } from '@shared/machine/git-reads';
 import type { Enrollment } from '@shared/machine/identity'; // P5 O3-D M2 (D16): the enrollment moved to shared
 import type { OrgKey } from '@shared/machine/org-key';
@@ -121,23 +128,30 @@ function git(args: string[], timeoutMs: number, isolated = false): Promise<GitAn
 // sminos's `common_git_dir`, read off the filesystem as `_common_git_dir_fs` does: from the nearest existing ancestor,
 // the nearest `.git` upward; a directory is it, a file (a linked worktree's) points at its gitdir, whose `commondir`
 // leads to the main checkout's. '' outside git. A layout that is neither asks git, as sminos does; null when git gave
-// no answer.
-async function commonGitDir(directory: string, timeoutMs: number, io: OrgIo): Promise<string | null> {
+// no answer. With it, for design §8's rule, the folder holding that `.git` (the checkout's work tree; '' outside git)
+// and whether it is a linked worktree's (its gitdir names a `commondir`).
+type GitLayout = { common: string; holder: string; linked: boolean };
+async function gitLayout(directory: string, timeoutMs: number, io: OrgIo): Promise<GitLayout | null> {
   let d = resolve(directory);
   while ((await io.kind(d)) !== 'directory') {
-    if (dirname(d) === d) return '';
+    if (dirname(d) === d) return { common: '', holder: '', linked: false };
     d = dirname(d);
   }
   for (let at = d; ; at = dirname(at)) {
     const dot = join(at, '.git');
     const kind = await io.kind(dot);
-    if (kind === 'directory') return dot;
-    if (kind === 'file') return (await linkedCommonDir(at, dot, io)) ?? (io.asksGit ? await askedCommonDir(d, timeoutMs) : null);
-    if (dirname(at) === at) return '';
+    if (kind === 'directory') return { common: dot, holder: at, linked: false };
+    if (kind === 'file') {
+      const pointed = await linkedCommonDir(at, dot, io);
+      if (pointed !== null) return { common: pointed.common, holder: at, linked: pointed.linked };
+      const asked = io.asksGit ? await askedCommonDir(d, timeoutMs) : null;
+      return asked === null ? null : { common: asked, holder: asked === '' ? '' : at, linked: false };
+    }
+    if (dirname(at) === at) return { common: '', holder: '', linked: false };
   }
 }
 
-async function linkedCommonDir(at: string, dot: string, io: OrgIo): Promise<string | null> {
+async function linkedCommonDir(at: string, dot: string, io: OrgIo): Promise<{ common: string; linked: boolean } | null> {
   let line: string;
   try {
     const text = await io.read(dot);
@@ -151,7 +165,9 @@ async function linkedCommonDir(at: string, dot: string, io: OrgIo): Promise<stri
   if (gitdir === null) return null;
   try {
     const common = await io.read(join(gitdir, 'commondir'));
-    return common === null ? resolve(gitdir) : io.pointer(gitdir, common.trim());
+    if (common === null) return { common: resolve(gitdir), linked: false };
+    const pointed = await io.pointer(gitdir, common.trim());
+    return pointed === null ? null : { common: pointed, linked: true };
   } catch {
     return null;
   }
@@ -173,6 +189,9 @@ interface OrgIo {
   kind(path: string): Promise<'file' | 'directory' | null>;
   read(path: string): Promise<string | null>;
   canonical(path: string): Promise<string>;
+  // the real path `path` leads to, links followed, as the filesystem spells it (no normalization), so it reads on any
+  // filesystem; `path` itself where it leads nowhere
+  real(path: string): Promise<string>;
   // the path a pointer's content names from `base`: sminos's lexical join (Python's os.path.join: an absolute part
   // wins); under the setup, the walk's resolution (a `..` after a link climbing from its target), null when it names
   // nowhere, so what is read from then on is what was checked
@@ -202,6 +221,13 @@ const LOCAL_IO: OrgIo = {
   async canonical(path) {
     return canonical(path);
   },
+  async real(path) {
+    try {
+      return realpathSync.native(path);
+    } catch {
+      return resolve(path);
+    }
+  },
   async pointer(base, target) {
     return resolve(base, target);
   },
@@ -229,6 +255,9 @@ function checkedIo(files: GitFiles): OrgIo {
     },
     async canonical(path) {
       return (await files.real(path))?.normalize('NFC') ?? path;
+    },
+    async real(path) {
+      return (await files.real(path)) ?? resolve(path);
     },
     pointer: (base, target) => files.real(isAbsolute(target) ? target : `${base}${sep}${target}`),
     config: (common) => files.real(join(common, 'config')),
@@ -263,7 +292,9 @@ async function configRemotes(common: string, timeoutMs: number, io: OrgIo): Prom
 
 // sminos's `read_smns`: the file's `project` (a valid name) and `name` (else the project), or null for one that is
 // unreadable or names no valid project, which sminos passes over with a warning.
-async function readSmns(path: string, io: OrgIo): Promise<{ project: string; name: string } | null> {
+// `hub` is the org the file's `hub` names ('' for a `hub` naming none), null when it has no `hub` (a git-mirrored project).
+type SmnsFile = { project: string; name: string; hub: string | null };
+async function readSmns(path: string, io: OrgIo): Promise<SmnsFile | null> {
   if ((await io.kind(path)) !== 'file') return null;
   let parsed: unknown;
   try {
@@ -278,7 +309,8 @@ async function readSmns(path: string, io: OrgIo): Promise<{ project: string; nam
     console.warn(`[index] ignoring ${path}: it names no valid project id`);
     return null;
   }
-  return { project, name: pyText(file.name) || project };
+  const hub = !('hub' in file) ? null : typeof file.hub === 'object' && file.hub !== null && typeof (file.hub as Record<string, unknown>).org === 'string' ? ((file.hub as Record<string, unknown>).org as string) : '';
+  return { project, name: pyText(file.name) || project, hub };
 }
 
 // sminos's `str(value or "")` over a JSON value: a falsy one ("", 0, false, null, [], {}) is "", a truthy one its Python
@@ -301,7 +333,7 @@ function pyRepr(value: unknown): string {
 
 // sminos's `smns_at`: the first `.smns` walking up from the directory; else, for a linked worktree at a head that
 // predates the file, its owning repository's, so an old branch never splits the repository into two projects.
-async function smnsAt(directory: string, owningRepo: string, io: OrgIo): Promise<{ project: string; name: string } | null> {
+async function smnsAt(directory: string, owningRepo: string, io: OrgIo): Promise<SmnsFile | null> {
   for (let d = resolve(directory); ; d = dirname(d)) {
     const found = await readSmns(join(d, '.smns'), io);
     if (found) return found;
@@ -329,25 +361,114 @@ export interface OrgSubject {
 }
 
 // The directory's org project; null when git gave no answer within `gitTimeoutMs` (a timeout), which decides nothing:
-// the row keeps what it had, and is asked again, so a slow git never moves a project's key.
-export async function deriveOrg(
+// the row keeps what it had, and is asked again, so a slow git never moves a project's key. No stored statement is read.
+export async function deriveOrg(subject: OrgSubject, enrollment: Enrollment | null, gitTimeoutMs: number = ORG_GIT_TIMEOUT_MS): Promise<ProjectOrg | null> {
+  return (await deriveProject(subject, enrollment, { gitTimeoutMs }))?.org ?? null;
+}
+
+/** A folder's stored statement in force (Interfaces §F.2), looked up by its canonical path (the real path, NFC). */
+export type StatementLookup = (path: string) => { minted: string | null; linked: string | null } | null;
+export const NO_STATEMENTS: StatementLookup = () => null;
+
+/** How design §8's rule decided (Interfaces §F.3). */
+export interface OrgDerivation {
+  org: ProjectOrg; // the label as above; `smnsId` the rule's project, null for the machine's own
+  by: ProjectDecidedBy;
+  at: string | null; // the deciding folder, canonical; null for the machine's own project
+  smnsFolder: string | null; // where `by` is `smns`, the folder holding the deciding file (the main checkout's for a worktree)
+  remote: string | null; // the repository's remote key, whatever decided
+  hub: boolean; // false when a `.smns` decides that names no hub of the enrollment's org
+}
+
+type Decision = { by: ProjectDecidedBy; at: string | null; id: string | null; smns?: SmnsFile };
+
+const nfc = (path: string) => path.normalize('NFC');
+// `folder` is `path` or lies above it
+const holds = (folder: string, path: string) => folder === path || path.startsWith(folder.endsWith(sep) ? folder : folder + sep);
+
+/**
+ * Design §8's rule for a directory, with the label (Interfaces §F.3); null when git gave no answer in time. Stored
+ * statements count only on an enrolled machine (constraint 7): with none, `statements` is not asked.
+ */
+export async function deriveProject(
   { directory, machine, projectId, name, files }: OrgSubject,
   enrollment: Enrollment | null,
-  gitTimeoutMs: number = ORG_GIT_TIMEOUT_MS,
-): Promise<ProjectOrg | null> {
+  { statements = NO_STATEMENTS, gitTimeoutMs = ORG_GIT_TIMEOUT_MS }: { statements?: StatementLookup; gitTimeoutMs?: number } = {},
+): Promise<OrgDerivation | null> {
   const io = files === undefined ? LOCAL_IO : checkedIo(files);
-  const common = await commonGitDir(directory, gitTimeoutMs, io);
-  if (common === null) return null;
-  const owningRepo = common === '' ? '' : dirname(common);
-  const smns = await smnsAt(directory, owningRepo, io);
-  if (smns) return { key: `smns:${smns.project}` as OrgKey, name: smns.name, source: 'smns', smnsId: smns.project };
-  if (owningRepo === '') return { key: `folder:${machine}:${projectId}` as OrgKey, name, source: 'folder', smnsId: null };
-  const remotes = await configRemotes(common, gitTimeoutMs, io);
+  const lookup = enrollment === null ? NO_STATEMENTS : statements;
+  const start = await io.real(directory);
+  const layout = await gitLayout(start, gitTimeoutMs, io);
+  if (layout === null) return null;
+  const owningRepo = layout.common === '' ? '' : dirname(layout.common);
+  const remotes = owningRepo === '' ? new Map<string, string>() : await configRemotes(layout.common, gitTimeoutMs, io);
   if (remotes === null) return null;
   const remote = remotes.has('origin') ? 'origin' : remotes.size === 1 ? [...remotes.keys()][0] : undefined;
   const url = remote === undefined ? '' : remotes.get(remote)!;
   const key = remoteKey(url);
-  if (key !== '') return { key: `remote:${key}` as OrgKey, name: remoteName(url), source: 'remote', smnsId: enrollment ? repoProjectId(enrollment.org, key) : null };
-  const repo = await io.canonical(owningRepo);
-  return { key: `repo:${machine}:${createHash('sha256').update(repo).digest('hex').slice(0, 16)}` as OrgKey, name: basename(repo), source: 'repository', smnsId: null };
+
+  // the label, as before the registry
+  const smns = await smnsAt(start, owningRepo, io);
+  let label: ProjectOrg;
+  if (smns) label = { key: `smns:${smns.project}` as OrgKey, name: smns.name, source: 'smns', smnsId: null };
+  else if (owningRepo === '') label = { key: `folder:${machine}:${projectId}` as OrgKey, name, source: 'folder', smnsId: null };
+  else if (key !== '') label = { key: `remote:${key}` as OrgKey, name: remoteName(url), source: 'remote', smnsId: null };
+  else {
+    const repo = await io.canonical(owningRepo);
+    label = { key: `repo:${machine}:${createHash('sha256').update(repo).digest('hex').slice(0, 16)}` as OrgKey, name: basename(repo), source: 'repository', smnsId: null };
+  }
+
+  // the rule. The checkout's root R: the main checkout for a linked worktree, else the folder holding `.git`.
+  const root = layout.common === '' ? '' : layout.linked ? await io.real(owningRepo) : await io.real(layout.holder);
+  const remoteId = key === '' ? null : enrollment ? repoProjectId(enrollment.org, key) : null;
+  const ruleAt = async (from: string): Promise<Decision> => {
+    for (let folder = from; ; folder = dirname(folder)) {
+      // a statement above R does not count when R derives a remote: a project folder does not take the clones beneath it
+      const stated = root !== '' && key !== '' && !holds(root, folder) ? null : lookup(nfc(folder));
+      if (stated?.linked) return { by: 'link', at: folder, id: stated.linked };
+      if (stated?.minted) return { by: 'minted', at: folder, id: stated.minted };
+      const file = await readSmns(join(folder, '.smns'), io);
+      if (file) return { by: 'smns', at: folder, id: file.project, smns: file };
+      if (dirname(folder) === folder) break;
+    }
+    if (root !== '' && key !== '') return { by: 'remote', at: root, id: remoteId };
+    return { by: 'machine', at: null, id: null };
+  };
+  let decided: Decision;
+  let smnsFolder: string | null = null;
+  if (root !== '' && layout.linked) {
+    // a linked worktree is in its owning checkout's project: R's own statement decides for it before any `.smns` in it;
+    // else a `.smns` on its own path, up to the first folder R lies in; else the rule at R
+    const worktree = await io.real(layout.holder);
+    const atRoot = await ruleAt(root);
+    decided = atRoot;
+    if (!((atRoot.by === 'link' || atRoot.by === 'minted') && atRoot.at === root)) {
+      for (let folder = start; !holds(folder, root); folder = dirname(folder)) {
+        const file = await readSmns(join(folder, '.smns'), io);
+        if (file) {
+          decided = { by: 'smns', at: folder, id: file.project, smns: file };
+          smnsFolder = holds(worktree, folder) ? root + folder.slice(worktree.length) : folder;
+          break;
+        }
+        if (dirname(folder) === folder) break;
+      }
+    }
+    if (decided === atRoot && decided.by === 'smns') smnsFolder = decided.at;
+  } else {
+    decided = await ruleAt(start);
+    if (decided.by === 'smns') smnsFolder = decided.at;
+  }
+  return {
+    org: { ...label, smnsId: decided.id },
+    by: decided.by,
+    at: decided.at === null ? null : nfc(decided.at),
+    smnsFolder: smnsFolder === null ? null : nfc(smnsFolder),
+    remote: key === '' ? null : key,
+    hub: decided.smns === undefined || (enrollment !== null && decided.smns.hub === enrollment.org),
+  };
+}
+
+/** The project the `.smns` in the folder itself names, or null (Interfaces §G: a link to it needs no record). */
+export async function folderSmnsId(folder: string): Promise<string | null> {
+  return (await readSmns(join(folder, '.smns'), LOCAL_IO))?.project ?? null;
 }

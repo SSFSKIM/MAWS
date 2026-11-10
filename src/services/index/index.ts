@@ -11,6 +11,10 @@ import { ADDED_COLUMNS, ADDED_TABLES, MIGRATIONS, REPAIRS } from './migrations';
 import { ProjectStore, type OrgRow } from './projects';
 import { machineEnrollment, type Enrollment } from '@shared/machine/identity'; // P5 O3-D M2 (D16)
 import { deriveOrg, ORG_GIT_TIMEOUT_MS } from './org-project'; // P5 O6 M5
+import { NO_REGISTRY, type ProjectsSource, type RegistrySeam } from '@shared/machine/registry'; // the project registry
+import { Statements, type DeriveRule } from './statements';
+import { startFolderChecks } from './folder-checks';
+import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { GIT_TIMEOUT_MS } from '../git/runner';
 import type { MachineRef } from '@shared/machine/ref';
 import { ReplayFixtureStore } from './replay-fixtures';
@@ -32,6 +36,9 @@ const ORG_RETRY_GIT_TIMEOUT_MS = GIT_TIMEOUT_MS;
 
 export interface IndexOptions {
   refused?: string | null; // P5 O3-A
+  // the project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §H): what the machine's
+  // services ask of the endpoint; `NO_REGISTRY` (no stored statement possible) until mawsd wires its endpoint's
+  registry?: RegistrySeam;
 }
 
 export class Index {
@@ -45,7 +52,12 @@ export class Index {
   readonly ownerChannel: OwnerChannelStore; // P2-C (2026-10-09): the to-human lane's sessions and marks (migration 8)
   readonly library: LibraryStore; // P3-L: the library's rows, links, Spaces and search, derived from the engine host (migration 10)
   readonly channel: ChannelJournal; // P5 O8 M7b: the project channel's to-human entries per org project (ADDED_TABLES)
+  readonly statements: Statements; // the project registry: stored statements and the project acts (Interfaces §F, §G)
   private readonly db: Db;
+  // the refresh's queue and slots, once it started: a statement change's rows beneath are derived through them
+  private requeue: ((row: OrgRow) => void) | null = null;
+  private inSlot: (<T>(work: () => Promise<T>) => Promise<T>) | null = null;
+  private stopChecks: (() => void) | null = null;
   private stamped = 0;
   private closed = false;
 
@@ -56,7 +68,7 @@ export class Index {
     // One revision per committed change, stamped as each change is announced after its commit (never inside a
     // transaction that may still roll back), so revisions are distinct and in commit order.
     const stamp = () => ++this.stamped;
-    this.projects = new ProjectStore(this.db, stamp, (projectId, directory) => this.sessions.attachOrphans(projectId, directory));
+    this.projects = new ProjectStore(this.db, stamp, (projectId, directory) => this.sessions.attachOrphans(projectId, directory), (from, to) => this.sessions.moveProject(from, to));
     this.sessionSearch = new SessionSearchStore(this.db);
     this.sessions = new SessionStore(this.db, this.projects, stamp);
     this.projects.preserveUsedProjects();
@@ -67,6 +79,24 @@ export class Index {
     this.ownerChannel = new OwnerChannelStore(this.db); // P2-C (2026-10-09)
     this.channel = new ChannelJournal(this.db); // P5 O8 M7b
     this.library = new LibraryStore(this.db, { sessionTitle: (appSessionId) => this.sessions.get(appSessionId)?.title.text ?? '' }); // P3-L
+    this.statements = new Statements(this.projects, options.registry ?? NO_REGISTRY, {
+      rederive: (rows) => {
+        for (const row of rows) this.requeue?.(row);
+      },
+      slot: (work) => (this.inSlot === null ? work() : this.inSlot(work)),
+    });
+  }
+
+  /** What the endpoint reads of the index (Interfaces §H's `ProjectsSource`). */
+  projectsSource(): ProjectsSource {
+    return this.statements.source();
+  }
+
+  /** A start in a session's folder failed: its declared row's folder is checked now (Interfaces §F.6). */
+  startFailed(appSessionId: AppSessionId): void {
+    if (this.db.readOnly || this.closed) return;
+    const projectId = this.sessions.get(appSessionId)?.projectId;
+    if (projectId) void this.statements.checkFolders([projectId as ProjectId]).catch(() => {});
   }
 
   // A newer app's database, opened read-only and not used: every store call fails with `index unavailable: <reason>`.
@@ -100,12 +130,21 @@ export class Index {
   // row and told as a project change; from then on a project made is derived once it is committed. A `.smns` added or a
   // remote changed mid-run shows at the next start. A derivation that got no answer leaves the row as it was, and is
   // asked again after each of ORG_RETRY_MS.
-  async refreshOrgProjects({ machine, enrollment = machineEnrollment, derive = deriveOrg }: {
+  //
+  // The project registry (Interfaces §F): each derivation is design §8's rule, its stored statements read through the
+  // index (`rule`, a test's stand-in; `derive`, one for the label alone, which skips everything the rule's answer feeds).
+  // The start's derivations done, the declared folders are checked (and every ten minutes after), and minting's moment
+  // (c) is taken when statements are possible.
+  async refreshOrgProjects({ machine, enrollment = machineEnrollment, derive, rule, home, folderCheckMs }: {
     machine: MachineRef;
     enrollment?: () => Enrollment | null;
     derive?: typeof deriveOrg;
+    rule?: DeriveRule;
+    home?: string;
+    folderCheckMs?: number;
   }): Promise<void> {
     if (this.db.readOnly) return;
+    this.statements.bind({ machine, enrollment, ...(rule === undefined ? {} : { derive: rule }), ...(home === undefined ? {} : { home }) });
     // Every derivation, the start's queue, a new project's and a retry's alike, takes one of ORG_CONCURRENCY slots.
     let active = 0;
     const waiting: (() => void)[] = [];
@@ -122,10 +161,16 @@ export class Index {
     };
     const one = async (row: OrgRow, attempt = 0): Promise<void> => {
       try {
-        const org = await inSlot(async () => (this.closed ? null : derive({ directory: row.directory, machine, projectId: row.id, name: row.name, ...(row.files === undefined ? {} : { files: row.files }) }, enrollment(), attempt === 0 ? ORG_GIT_TIMEOUT_MS : ORG_RETRY_GIT_TIMEOUT_MS)));
+        const timeout = attempt === 0 ? ORG_GIT_TIMEOUT_MS : ORG_RETRY_GIT_TIMEOUT_MS;
+        const answered = await inSlot(async () => {
+          if (this.closed) return false;
+          if (derive === undefined) return (await this.statements.deriveRow(row, timeout)) !== null;
+          const org = await derive({ directory: row.directory, machine, projectId: row.id, name: row.name, ...(row.files === undefined ? {} : { files: row.files }) }, enrollment(), timeout);
+          if (org !== null && !this.closed) this.projects.setOrg(row.id, org);
+          return org !== null;
+        });
         if (this.closed) return;
-        if (org !== null) this.projects.setOrg(row.id, org);
-        else if (attempt < ORG_RETRY_MS.length) {
+        if (!answered && attempt < ORG_RETRY_MS.length) {
           const delay = ORG_RETRY_MS[attempt]!;
           console.warn(`[index] git gave no answer for the org project of ${row.directory}; asking again in ${delay} ms`);
           setTimeout(() => void one(row, attempt + 1), delay).unref();
@@ -135,12 +180,20 @@ export class Index {
       }
     };
     this.projects.onCreated((row) => void one(row));
+    this.requeue = (row) => void one(row);
+    this.inSlot = inSlot;
     const queue = this.projects.orgRows();
     await Promise.all(queue.map((row) => one(row))); // a closed index asks git nothing more (`inSlot`'s work)
+    if (this.closed) return;
+    this.stopChecks?.();
+    this.stopChecks = startFolderChecks(this.statements, folderCheckMs);
+    await this.statements.statementsChanged();
   }
 
   close(): void {
     this.closed = true;
+    this.stopChecks?.();
+    this.statements.unbind();
     this.projects.onCreated(null);
     this.db.close();
   }
