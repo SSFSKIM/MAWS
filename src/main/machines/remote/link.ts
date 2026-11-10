@@ -1070,8 +1070,8 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     settled();
     if (phase === 'draining') return;
     if (phase === 'lanes') {
-      startLanes();
-      return armFloor();
+      armFloor(); // first, so a floor that row 4 brings at once (`spend`) counts from here
+      return startLanes();
     }
     startAttempt();
   }
@@ -1096,8 +1096,8 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
       l.targets = [];
     }
     if (current !== null) return;
+    armFloor(); // first, so a floor that row 4 brings at once counts from here
     startLanes(answering);
-    armFloor();
   }
 
   /** Each lane not running and not spent starts: waiting on its targets, or attempting on an answer it brings (row 12). */
@@ -1152,6 +1152,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
   function resume(l: Lane): void {
     if (!l.running || l.spent || l.attempt !== null || l.wait !== null) return;
     if (phase === 'today' || (phase !== 'lanes' && hadAnswer[l.name])) return; // past the floor only an unanswered lane waits (row 8)
+    if (l.count >= timing.LANE_ATTEMPTS) return spend(l, `${timing.LANE_ATTEMPTS} attempts`); // row 4: at its count, it waits on nothing
     if (l.targets.length === 0) {
       if (l.name === 'relay' || directReads === 0) spend(l, 'no target');
       return;

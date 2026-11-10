@@ -1653,6 +1653,23 @@ describe('the window: the lanes', () => {
     await after(9_000);
     expect(h.relayTries()).toHaveLength(tries);
   });
+
+  it('a lane at its count after a success is spent at the loss, waiting on nothing: both spent, the floor at once and today’s attempt', async () => {
+    const h = await woken({ timing: { LANE_ATTEMPTS: 1 }, directTarget: () => null });
+    expect(linesOf(h, 'lane direct: spent (no target)')).toHaveLength(1);
+    h.window.answer(HUB);
+    await settle();
+    expect(h.link.carrier()).toBe('relay');
+    await after(3_000);
+    const lostAt = Date.now();
+    h.last().end('closed'); // no second answer from the hub follows
+    await settle();
+    expect(linesOf(h, 'lane relay: spent (1 attempts)')).toHaveLength(1);
+    expect(h.window.waiting(HUB)).toBe(0);
+    expect(linesOf(h, 'floor after')).toEqual([`${h.o.ref}: floor after 0 ms: today's attempts from here (both lanes spent)`]);
+    expect(h.attempts.at(-1)!.at).toBe(lostAt);
+    expect(h.handshakeTimeouts.at(-1)).toBeUndefined(); // today's
+  });
 });
 
 describe('the window: the two arrival orders', () => {
