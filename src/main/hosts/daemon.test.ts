@@ -235,6 +235,23 @@ describe('a packaged start that does not end in a welcome', () => {
     expect(await launchMain(true, { awaitDaemon: silent() })).toEqual(failure('not-started', /^no mawsd welcomed/));
   });
 
+  // Fix wave 5 (the architect's panel, scalpel-1#2): a lock is held by its process only when the pid is alive and, where
+  // the lock recorded its start, the pid's start is that one; a pid reused by another process after an unclean exit or a
+  // reboot holds nothing (isSameProcess, src/engine-host/supervisor-files.ts)
+  it('(iii) no welcome, the files unchanged, and a stale mawsd.lock whose pid another process now holds: install-refused', async () => {
+    await installUnit();
+    const { lock } = files();
+    writeLock(lock, process.pid, 'Mon Jan  1 00:00:00 2001'); // alive, but not the process the lock recorded
+    expect(await launchMain(true, { awaitDaemon: silent() })).toEqual(failure('install-refused', UNAVAILABLE_WHY.loadedNotRun));
+  });
+
+  it('(iv) a live pid in a lock that recorded no start is still its holder, as every lock reader takes it', async () => {
+    await installUnit();
+    const { lock } = files();
+    writeLock(lock, process.pid, '');
+    expect(await launchMain(true, { awaitDaemon: silent() })).toEqual(failure('not-started', /^no mawsd welcomed/));
+  });
+
   it('reads whether mawsd wrote with no clock: size and inode of both files, a missing file a value of its own', () => {
     const p = paths();
     const missing = daemonWrites(p);

@@ -31,7 +31,7 @@ import type { DaemonStatus } from '@shared/ipc/schema/daemon';
 import { installDaemon, isDefaultProfile, unitFor, type InstallDeps } from '../../mawsd/install';
 import { HELLO_TIMEOUT_MS, reachMachine } from '../../mawsd/machine-client';
 import { DEFAULT_LABEL, readIfPresent, UnitError, type Unit, type UnitProgram } from '../../mawsd/units/unit';
-import { isAlive, readLock } from '../../engine-host/supervisor-files';
+import { isAlive, isSameProcess, procStartOf, readLock } from '../../engine-host/supervisor-files';
 import { testLaunchRefusal } from './mode';
 
 // ---- the launch's outcome ----------------------------------------------------------------------------------------------
@@ -164,10 +164,11 @@ export function daemonWrites(paths: DaemonPaths): string {
 }
 
 // A live process holds mawsd.lock, read as main reads every lock: a `mawsd` already running and silent (iv), not a job
-// macOS never ran (iii)
+// macOS never ran (iii). Fix wave 5: the process the lock names, not merely its pid (isSameProcess): a pid reused by
+// another process after an unclean exit or a reboot holds nothing, and a lock with no recorded start is taken at its pid.
 function lockHeldByLiveProcess(paths: DaemonPaths): boolean {
   const lock = readLock(paths.dir, undefined, DAEMON_FILES.lock);
-  return lock !== null && isAlive(lock.pid);
+  return lock !== null && isSameProcess(lock, { isAlive, procStartOf });
 }
 
 // §C: MAWS_E2E_UNIT_FAULT=<absolute path>, honoured only under MAWS_E2E=1 in an unpackaged app on a profile that is not

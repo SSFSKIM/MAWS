@@ -376,6 +376,10 @@ describe('the spine and the checkouts composed under plain Node', () => {
     compose(await openSpineData(profile, { build: BUILD }), host, bus, { engineEnv: Promise.resolve({ HOME: join(dir.path, 'home'), CLAUDE_CONFIG_DIR: shellConfig }) });
     await host.ready();
     expect(await bus.invoke('settings.userEngineDefaults', undefined)).toMatchObject({ ok: true, value: { defaultMode: 'plan' } });
+    // fix wave 5 (the architect's panel): the composed SessionService reads them too, so a new intent's mode is the
+    // capture's defaultMode (W3), not the process's
+    const made = await bus.invoke('session.create', { projectId: null, location: { kind: 'directory', path: checkout } });
+    expect(made).toMatchObject({ ok: true, value: { intent: { permissionMode: 'plan' } } });
     const unstarted = '11111111-1111-4111-8111-111111111111' as AppSessionId; // no record yet: every project's rows
     expect(await bus.invoke('session.history.list', { appSessionId: unstarted, limit: 10 })).toMatchObject({ ok: true, value: { entries: [{ display: 'from login shell', source: 'terminal' }] } });
     const trusting = JSON.stringify({ projects: { [checkout]: { hasTrustDialogAccepted: true } } });

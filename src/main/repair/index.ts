@@ -59,6 +59,7 @@ export function repairLaunch(first: Unavailable, attempt: () => LaunchOutcome | 
         ipcMain.removeHandler(REPAIR_CHANNELS.state);
         ipcMain.removeListener(REPAIR_CHANNELS.act, onAct);
         win.off('closed', quitOnClose);
+        app.off('activate', onActivate); // now, not at 'closed': Electron closes the window later
         win.close();
         resolve(launch);
       },
@@ -70,13 +71,20 @@ export function repairLaunch(first: Unavailable, attempt: () => LaunchOutcome | 
     };
     ipcMain.on(REPAIR_CHANNELS.act, onAct);
     win.on('focus', () => controller.focused());
-    onSecondLaunch(() => {
+    const bringBackAndRetry = () => {
       if (win.isDestroyed()) return;
       if (win.isMinimized()) win.restore();
       win.show();
       win.focus();
       controller.secondLaunch();
-    });
+    };
+    onSecondLaunch(bringBackAndRetry);
+    // fix wave 5 (the architect's panel): on macOS reopening MAWS from the Dock or Finder while it runs starts no second
+    // process but fires the app's `activate`, which startMain's own listener does not hear yet; while the window is up it
+    // does what a second launch does. It goes when the window resolves or closes, leaving startMain's listener the only one.
+    const onActivate = () => bringBackAndRetry();
+    app.on('activate', onActivate);
+    win.on('closed', () => app.off('activate', onActivate));
     win.once('ready-to-show', () => showAppWindow(win, env));
     // fix wave 1: a page that fails to load is said in main's log, never a rejection nothing handles
     const loaded = devServerUrl ? win.loadURL(new URL('repair.html', devServerUrl).href) : win.loadFile(join(__dirname, '../renderer/repair.html'));
