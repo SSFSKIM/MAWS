@@ -26,7 +26,7 @@ import { registerMainHandler } from '../ipc/router';
 import { daemonHostSpecs, daemonStart, launchFailed, resolveLaunch, unitRunsThisApp, watchDaemon, type LaunchOutcome, type LaunchShape } from './daemon';
 import { watchEngineHandover } from './engine-handover'; // P5 O16 M3c fix wave 2
 import { hostEventToWindows } from './window-events'; // P5 O17 M9b
-import { retiredHostModeNotice, testLaunchRefusal } from './mode'; // P5 O2 landing; P5 O15 M2: the retired variable
+import { DEFAULT_PROFILE_REFUSAL, isTestLaunch, retiredHostModeNotice, testLaunchRefusal } from './mode'; // P5 O2 landing; P5 O15 M2: the retired variable
 import { startHostStatus, type HostStatusService } from './status';
 import { createHostSupervisor, type HostSupervisor } from './supervisor';
 
@@ -87,10 +87,17 @@ export function prepareLaunch(): LaunchOutcome | Promise<LaunchOutcome> {
 }
 
 // P5 O2 landing: a test or harness launch on the default profile (testLaunchRefusal) ends here, before the profile's
-// machine identity, settings or hosts are touched; prepareLaunch holds the same line.
+// machine identity, settings or hosts are touched; prepareLaunch holds the same line. Fix wave 2: an ordinary launch
+// reads nothing here (the account's home, which `homedir()` can fail to give, is read on prepareLaunch's guarded way),
+// and a test or harness launch whose profile cannot be placed fails closed, refused as on the default profile.
 export function refuseTestLaunchOnDefaultProfile(): void {
-  const deps = unitDeps();
-  const refusal = testLaunchRefusal(process.env, isDefaultProfile(app.getPath('userData'), deps.platform, deps.env, deps.home));
+  if (!isTestLaunch(process.env)) return;
+  let refusal: string | null;
+  try {
+    refusal = testLaunchRefusal(process.env, isDefaultProfile(app.getPath('userData'), process.platform, process.env, homedir()));
+  } catch (error) {
+    refusal = `${DEFAULT_PROFILE_REFUSAL} (whether this launch's profile is the default one could not be read: ${error instanceof Error ? error.message : String(error)})`;
+  }
   if (refusal !== null) refuse(1, refusal);
 }
 

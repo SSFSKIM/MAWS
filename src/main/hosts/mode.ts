@@ -20,5 +20,10 @@ export function retiredHostModeNotice(env: NodeJS.ProcessEnv): string | null {
 export const DEFAULT_PROFILE_REFUSAL = '[hosts] a test or harness launch (MAWS_E2E=1 or MAWS_HARNESS=1) refuses the default profile, whose daemon and LaunchAgent are the owner\'s: set MAWS_USER_DATA to a scratch profile';
 
 export function testLaunchRefusal(env: NodeJS.ProcessEnv, defaultProfile: boolean): string | null {
-  return defaultProfile && (env.MAWS_E2E === '1' || env.MAWS_HARNESS === '1') ? DEFAULT_PROFILE_REFUSAL : null;
+  return defaultProfile && isTestLaunch(env) ? DEFAULT_PROFILE_REFUSAL : null;
+}
+
+// A test or harness launch: the only one the refusal concerns, so the only one whose preflight reads the profile
+export function isTestLaunch(env: NodeJS.ProcessEnv): boolean {
+  return env.MAWS_E2E === '1' || env.MAWS_HARNESS === '1';
 }
