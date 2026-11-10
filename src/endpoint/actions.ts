@@ -311,7 +311,8 @@ export class Actions {
         // P5 O7 M9: a setup act runs on the directory the setup policy checked, guarded by the asking member's opens; the
         // sealed action keeps what was signed. The project registry: its other args go as signed (`addFolder`'s `into` and
         // `own`, `relocate`'s row), and the acts that read in the directory take the opens (M9's review 1, F1).
-        const input = decision.setup === undefined ? action.args : { ...action.args, directory: decision.setup.directory, ...(OPENED_ACTS.has(action.action) ? { opened: decision.setup.opened } : {}) };
+        const setupInput = decision.setup === undefined ? action.args : { ...action.args, directory: decision.setup.directory, ...(OPENED_ACTS.has(action.action) ? { opened: decision.setup.opened } : {}) };
+        const input = decision.opened === undefined ? setupInput : { ...setupInput, opened: decision.opened }; // a link's (Fix 1c)
         const op = { opId: action.opId, opCreated: action.opCreated, claim: { ...who, fingerprint, ...target }, name: action.action, input, ...kept };
         const answer = row.executor === 'machine' ? await dispatch('machine', 'machine.op', op) : await dispatch('pty-host', 'pty.op', op);
         // A pty host older than `pty.op` (adopted by a newer mawsd) knows no ledger: nothing ran, ask again later.

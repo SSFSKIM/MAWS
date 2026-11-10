@@ -16,6 +16,7 @@ import { OFFERS } from '../../src/endpoint/offers';
 import { stepUpRequired } from '../../src/endpoint/step-up';
 import { Index } from '../../src/services/index/index';
 import { registerIndexHandlers } from '../../src/services/index/register';
+import { registerFolders } from '../../src/services/machine/folders';
 import type { SetupGuard } from '../../src/services/machine/setup';
 import { act, done, makeOrg, openRemote, ORG, sminos, startEndpoint, stopAll, until, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
 
@@ -49,6 +50,7 @@ async function setup(): Promise<{ f: Fixture; home: string; index: Index; a: Rem
   indexes.push(index);
   const guard: SetupGuard = { where: { home, platform: 'darwin' } };
   registerIndexHandlers(index, f.spine.bus as never, guard);
+  registerFolders(f.spine.bus.register as never, guard);
   await sminos(f, [], ['audience', 'record', 'locations']);
   await index.refreshOrgProjects({ machine: f.services.machine.ref, enrollment: () => ({ org: ORG, machine: 'mini' }), home });
   return { f, home, index, a: await openRemote(f, org.a1, org.A), b: await openRemote(f, org.b1, org.B) };
@@ -153,5 +155,25 @@ describe('the project acts over the network', () => {
     for (let k = 0; k < 100; k++) await new Promise((resolve) => setImmediate(resolve));
     expect(JSON.stringify(moved)).not.toMatch(/private-id|private label/);
     expect(JSON.stringify(index.projects.list({ includeHidden: true }))).not.toMatch(/private-id|private label/);
+  });
+
+  // M9's review 1, Fix 1c: a remote link's own-`.smns` read is the setup guard's too, so its refusal is no oracle
+  it('read a remote link’s own `.smns` through the setup’s checked reader: one linked into an unopened protected folder names nothing', async () => {
+    const { f, home, a } = await setup();
+    await until(() => f.endpoint.registry.statements().possible, 'statements possible');
+    mkdirSync(join(home, 'Desktop'), { recursive: true });
+    writeFileSync(join(home, 'Desktop/private-smns'), JSON.stringify({ project: 'private-id', hub: { org: ORG } }));
+    const add = async (folder: string) => ((await admitted(a, await stepped(f, a, 'session.projects.addFolder', { directory: join(home, folder) }))).result as { project: { id: string } }).project.id;
+    const leaked = await add('work/scrape');
+    symlinkSync(join(home, 'Desktop/private-smns'), join(home, 'work/scrape/.smns'));
+    const probe = await admitted(a, await stepped(f, a, 'session.projects.link', { id: leaked, into: 'private-id' }));
+    expect(JSON.stringify(probe)).toContain('unknown-project'); // as for an id it guessed wrong
+    // once the member opened that folder, the read is theirs: the endpoint carries their opens to the machine
+    expect(await call(a, 'machine.folders.list', { path: '~/Desktop', open: true })).toMatchObject({ ok: true });
+    expect(await admitted(a, await stepped(f, a, 'session.projects.link', { id: leaked, into: 'private-id' }))).toMatchObject({ state: 'done', result: { project: { id: leaked, org: { smnsId: 'private-id' } } } });
+    // the folder's own file, in no protected folder: its id links over the network as here
+    const own = await add('work/other');
+    writeFileSync(join(home, 'work/other/.smns'), JSON.stringify({ project: 'own-id', hub: { org: ORG } }));
+    expect(await admitted(a, await stepped(f, a, 'session.projects.link', { id: own, into: 'own-id' }))).toMatchObject({ state: 'done', result: { project: { id: own } } });
   });
 });

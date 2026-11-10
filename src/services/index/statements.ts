@@ -51,6 +51,9 @@ export interface StatementsQueue {
 /** What a declaration's answer gains while statements are possible (§G's `addFolder`). */
 export type Decided = { by?: OrgDerivation['by']; at?: string | null; restated?: boolean };
 
+/** A read of a folder's own `.smns` (`folderSmns`), as a link's target asks it. */
+export type SmnsRead = (folder: string) => Promise<Awaited<ReturnType<typeof folderSmns>>>;
+
 function refuse(code: ProjectRefusal, words: string): never {
   throw new HostCommandError(ipcError('invalid_input', `${code}: ${words}`));
 }
@@ -166,11 +169,12 @@ export class Statements {
   }
 
   // A link's target (§G): a hub project a verified record names, or the id the folder's own `.smns` names, which waives the
-  // record and not the hub (M8's review 1, finding 5): that file must name this org's hub.
-  private async target(into: string, folder: string, files?: GitFiles): Promise<void> {
+  // record and not the hub (M8's review 1, finding 5): that file must name this org's hub. `readSmns`: another machine's
+  // owner's read of that file, through the setup's guard (M9's review 1, Fix 1c).
+  private async target(into: string, folder: string, files?: GitFiles, readSmns: SmnsRead = (at) => folderSmns(at, files)): Promise<void> {
     const known = this.registry.project(into);
     if (known === null) {
-      const own = await folderSmns(folder, files).catch(() => null); // a file the setup did not open names nothing
+      const own = await readSmns(folder).catch(() => null); // a file the setup did not open names nothing
       if (own?.project !== into) refuse('unknown-project', `${into} is in no verified projects record`);
       const org = this.enrollment()?.org;
       if (org === undefined || own.hub !== org) refuse('not-a-hub-project', `${into}'s .smns names no hub of this org`);
@@ -298,8 +302,11 @@ export class Statements {
     return { project: derived.org.smnsId, by: derived.by, at: derived.at, label: derived.org };
   }
 
-  /** `session.projects.link`: a declared row's link set or, with null, cleared. It never mints. */
-  async link(id: ProjectId, into: string | null): Promise<{ project: ProjectRecord; restated: boolean }> {
+  /**
+   * `session.projects.link`: a declared row's link set or, with null, cleared. It never mints. `readSmns`: another
+   * machine's owner's read of the folder's own `.smns`, guarded (M9's review 1, Fix 1c).
+   */
+  async link(id: ProjectId, into: string | null, { readSmns }: { readSmns?: SmnsRead } = {}): Promise<{ project: ProjectRecord; restated: boolean }> {
     const row = this.projects.statementRow(id);
     if (!row.declared) refuse('not-declared', `${row.directory} is not a declared folder`);
     const anchor = readAnchor(row.directory);
@@ -307,7 +314,7 @@ export class Statements {
       this.unavailable();
       // finding 4: a link is about the folder at the path, so there must be one to anchor it to
       if (anchor === null) refuse('not-a-directory', `${row.directory}: there is no folder there to link`);
-      await this.target(into, row.directory);
+      await this.target(into, row.directory, undefined, readSmns);
     }
     const changed = this.projects.setLink(id, into, anchor);
     if (!changed) return { project: this.projects.record(id), restated: true };

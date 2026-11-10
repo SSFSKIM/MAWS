@@ -7,6 +7,7 @@ import type { Reader } from '@shared/ipc/client';
 import type { ReaderPatch, SessionPatch } from '@shared/ipc/schema/session';
 import type { ServicesBus } from '@shared/spine/bus';
 import { setupGuarded, thisGuard, type SetupGuard } from '../machine/setup';
+import { folderSmns } from './org-project';
 import { locate } from './projects';
 import type { Index } from './index';
 import { draftForLink, restoreWithheld } from '@shared/sessions/draft-fit'; // P5 O8 M6a
@@ -52,7 +53,13 @@ export function registerIndexHandlers(index: Index, { register }: Pick<ServicesB
     if (context.remote !== true && context.op === undefined) return index.statements.resolve(directory);
     return await setupGuarded(directory, opened ?? [], setup, (checked, files) => index.statements.resolve(checked, { files, locateIn: setupLocate }));
   });
-  register('session.projects.link', ({ id, into }) => index.statements.link(id as ProjectId, into));
+  // Fix 1c: another machine's owner's link reads the folder's own `.smns` (a target no record names) through the guard, by
+  // that member's opens: a file it may not read names nothing, as one it guessed wrong
+  register('session.projects.link', ({ id, into, opened }, context) => {
+    if (context.op === undefined) return index.statements.link(id as ProjectId, into);
+    const readSmns = (folder: string) => setupGuarded(folder, opened ?? [], setup, (_checked, files) => folderSmns(folder, files));
+    return index.statements.link(id as ProjectId, into, { readSmns });
+  });
   register('session.projects.relocate', async ({ id, directory, opened }, context) => {
     if (context.op === undefined) return index.statements.relocate(id as ProjectId, directory);
     return await setupGuarded(directory, opened ?? [], setup, (checked, files) => index.statements.relocate(id as ProjectId, checked, { files }));

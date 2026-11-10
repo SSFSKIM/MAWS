@@ -379,7 +379,8 @@ const c4Commands = {
     owner: 'machine',
   },
   'session.projects.link': {
-    input: z.strictObject({ id: ProjectIdSchema, into: z.string().min(1).nullable() }),
+    // `opened` (M9's review 1, Fix 1c): the endpoint's for another machine's owner, the opens its own-`.smns` read is guarded by
+    input: z.strictObject({ id: ProjectIdSchema, into: z.string().min(1).nullable(), opened: SetupOpenedSchema.optional() }),
     output: z.strictObject({ project: ProjectRecordSchema, restated: z.boolean() }),
     owner: 'machine',
   },
