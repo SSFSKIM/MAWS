@@ -745,6 +745,14 @@ export class ProjectStore {
   }
 
   /**
+   * `setLink` only while the row is still at `path` (§G's `link` with `expect`; panel 1, A2), checked in the transaction
+   * that sets it: `changed` when the row has moved since, nothing set.
+   */
+  setLinkAt(id: ProjectId, into: string | null, anchor: Anchor | null, path: string): boolean | 'changed' {
+    return this.db.transaction(() => (this.row(id).directory === path ? this.setLink(id, into, anchor) : 'changed'));
+  }
+
+  /**
    * Points a row at a folder's new path (§G's `relocate`), its anchor that folder's and its state cleared. A row at that
    * path with a statement of its own refuses it (`has-statement`); one without is merged: its sessions and artifacts move
    * to the located row and it is deleted, the one place a row is. Answers whether it merged.

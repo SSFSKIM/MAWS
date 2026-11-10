@@ -52,7 +52,7 @@ async function removeProject(projectId: ProjectId): Promise<void> {
   // machine): each location of its project on a machine you own, hidden there now while that machine is up, else held
   // by main and sent when it is next up; a checkout the registry does not name, as before.
   const registered = index.orgs.get(key)?.registry;
-  const acting = registered?.locations.filter((l) => l.acts) ?? [];
+  const acting = registered?.locations.filter((l) => l.acts).map((location) => ({ ...location, project: registered.id })) ?? [];
   const named = new Set(acting.map(locationAddress));
   const linked = (machine: MachineRef) => machine === ipc.localMachine || useMachines.getState().machines.get(machine)?.state === 'up';
   const count = sessionsOfRow(sessions, ipc.localMachine, key).filter((r) => !r.archived).length;
@@ -72,7 +72,8 @@ async function removeProject(projectId: ProjectId): Promise<void> {
   }
   for (const location of acting) {
     const machine = useMachines.getState().machines.get(location.machine)?.name ?? location.machine;
-    const answer = await removeLocation({ address: locationAddress(location), machine: location.machine, pid: location.pid, up: linked(location.machine) }, machine);
+    // the location's path and project, which another machine expects (panel 1, A2)
+    const answer = await removeLocation({ address: locationAddress(location), machine: location.machine, pid: location.pid, path: location.path, project: location.project, local: location.machine === ipc.localMachine, up: linked(location.machine) }, machine);
     if (!answer.ok) fail(answer.words);
   }
 }

@@ -6,7 +6,7 @@ import type { MachineRef } from '@shared/machine/ref';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { addInput, machineChoices, pickedMachine } from './AddProjectSheet';
-import { actWords, addFolder, cancelRemoval, removeLocation, servesProjectActs } from './registry-acts';
+import { actWords, addFolder, cancelRemoval, linkLocation, removeLocation, servesProjectActs } from './registry-acts';
 
 // The project registry's acts from the page (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §G, §I, §J.3).
 const MINI = 'MiniMachineRef00000000' as MachineRef;
@@ -36,12 +36,30 @@ describe('a project act’s refusal in words', () => {
 });
 
 describe('the acts’ commands', () => {
-  it('removes a location on its machine while it is up, and asks main to hold the removal while it is off', async () => {
+  // panel 1, A2 (scalpel-1#1): an act on another machine's location carries the location as the page showed it (§G's
+  // `expect`, the pair a held removal sends), so that machine refuses it `changed` when the row has moved since
+  it('removes a location on its machine while it is up, expecting it as shown, and asks main to hold the removal while it is off', async () => {
     const fake = fakeClient({ 'session.projects.remove': {}, 'org.removals.hold': { id: 'r1' } });
-    expect(await removeLocation({ address: ADDRESS, machine: OTHER_MACHINE, pid: 'p-1', up: true }, 'studio', fake.client)).toEqual({ ok: true });
-    expect(fake.invoked('session.projects.remove')).toEqual([{ id: ADDRESS }]);
-    expect(await removeLocation({ address: ADDRESS, machine: OTHER_MACHINE, pid: 'p-1', up: false }, 'studio', fake.client)).toEqual({ ok: true });
+    const location = { address: ADDRESS, machine: OTHER_MACHINE, pid: 'p-1', path: '/srv/scrape', project: 'project-1', local: false };
+    expect(await removeLocation({ ...location, up: true }, 'studio', fake.client)).toEqual({ ok: true });
+    expect(fake.invoked('session.projects.remove')).toEqual([{ id: ADDRESS, expect: { path: '/srv/scrape', project: 'project-1' } }]);
+    expect(await removeLocation({ ...location, up: false }, 'studio', fake.client)).toEqual({ ok: true });
     expect(fake.invoked('org.removals.hold')).toEqual([{ machine: OTHER_MACHINE, pid: 'p-1' }]);
+  });
+
+  it('links or unlinks another machine’s location expecting its path, and this Mac’s with no precondition', async () => {
+    const fake = fakeClient({ 'session.projects.link': { project: {}, restated: true }, 'session.projects.remove': {} });
+    expect(await linkLocation({ address: ADDRESS, path: '/srv/scrape', local: false }, 'project-1', 'studio', fake.client)).toEqual({ ok: true });
+    expect(await linkLocation({ address: ADDRESS, path: '/srv/scrape', local: false }, null, 'studio', fake.client)).toEqual({ ok: true });
+    const own = addressOf(TEST_MACHINE, 'p-2' as ProjectId);
+    expect(await linkLocation({ address: own, path: '/Users/me/scrape', local: true }, 'project-1', 'This Mac', fake.client)).toEqual({ ok: true });
+    expect(fake.invoked('session.projects.link')).toEqual([
+      { id: ADDRESS, into: 'project-1', expect: { path: '/srv/scrape' } },
+      { id: ADDRESS, into: null, expect: { path: '/srv/scrape' } },
+      { id: own, into: 'project-1' },
+    ]);
+    expect(await removeLocation({ address: own, machine: TEST_MACHINE, pid: 'p-2', path: '/Users/me/scrape', project: 'project-1', local: true, up: true }, 'This Mac', fake.client)).toEqual({ ok: true });
+    expect(fake.invoked('session.projects.remove')).toEqual([{ id: own }]);
   });
 
   it('adds a folder on the machine chosen, and says a refusal in the registry’s words', async () => {

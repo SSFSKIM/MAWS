@@ -58,8 +58,9 @@ export function registerIndexHandlers(index: Index, { register }: Pick<ServicesB
   // Fix 1c and the re-review's Fix 2: another machine's owner's link reads its row's folder (the target's own `.smns`, and
   // the derivation it answers) through that member's opens alone: a file it may not read names nothing, as one it guessed
   // wrong, and is no answer
-  register('session.projects.link', ({ id, into, opened }, context) =>
-    index.statements.link(id as ProjectId, into, context.op === undefined ? {} : { files: rowFiles(opened ?? [], setup) }),
+  // panel 1, A2: `expect`, the path the asker confirmed, which the row must still have
+  register('session.projects.link', ({ id, into, expect, opened }, context) =>
+    index.statements.link(id as ProjectId, into, { ...(expect === undefined ? {} : { expect }), ...(context.op === undefined ? {} : { files: rowFiles(opened ?? [], setup) }) }),
   );
   register('session.projects.relocate', async ({ id, directory, opened }, context) => {
     if (context.op === undefined) return index.statements.relocate(id as ProjectId, directory);

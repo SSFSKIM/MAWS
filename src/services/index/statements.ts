@@ -430,13 +430,17 @@ export class Statements {
   }
 
   /**
-   * `session.projects.link`: a declared row's link set or, with null, cleared. It never mints. `files`: another machine's
+   * `session.projects.link`: a declared row's link set or, with null, cleared. It never mints. With `expect`, only while
+   * the row is at that path (else `changed`, nothing changed; panel 1, A2). `files`: another machine's
    * owner's reader, which its target's `.smns` and the derivation it answers read through (M9's review 1, Fix 1c; its
    * re-review, Fix 2).
    */
-  async link(id: ProjectId, into: string | null, { files }: { files?: GitFiles } = {}): Promise<{ project: ProjectRecord; restated: boolean }> {
+  async link(id: ProjectId, into: string | null, { files, expect }: { files?: GitFiles; expect?: { path: string } } = {}): Promise<{ project: ProjectRecord; restated: boolean }> {
     const row = this.projects.statementRow(id);
     if (!row.declared) refuse('not-declared', `${row.directory} is not a declared folder`);
+    // panel 1, A2: the location as its asker confirmed it; a row moved since is refused before anything is read in it, and
+    // again in the transaction that sets the link
+    if (expect !== undefined && row.directory !== expect.path) refuse('changed', `the location is at ${row.directory} now`);
     const anchor = readAnchor(row.directory);
     if (into !== null) {
       this.unavailable();
@@ -446,7 +450,9 @@ export class Statements {
     }
     if (files !== undefined && row.linked !== into) await this.linkReadable(row, into, files);
     const changed = await this.rederiving(async () => {
-      if (!this.projects.setLink(id, into, anchor)) return false;
+      const set = expect === undefined ? this.projects.setLink(id, into, anchor) : this.projects.setLinkAt(id, into, anchor, expect.path);
+      if (set === 'changed') refuse('changed', `the location is at ${this.projects.statementRow(id).directory} now`);
+      if (!set) return false;
       if (files === undefined) await this.deriveId(id);
       else await this.deriveThrough(id, files);
       return true;

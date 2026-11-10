@@ -381,8 +381,8 @@ const c4Commands = {
   },
   'session.projects.link': {
     // `opened` (M9's review 1, Fix 1c; re-review, Fix 2): the endpoint's for another machine's owner, the opens its reads of
-    // the row's folder go by
-    input: z.strictObject({ id: ProjectIdSchema, into: z.string().min(1).nullable(), opened: SetupOpenedSchema.optional() }),
+    // the row's folder go by. `expect` (panel 1, A2): the path the row must still have, else `changed`, as remove's
+    input: z.strictObject({ id: ProjectIdSchema, into: z.string().min(1).nullable(), expect: z.strictObject({ path: z.string() }).optional(), opened: SetupOpenedSchema.optional() }),
     output: z.strictObject({ project: ProjectRecordSchema, restated: z.boolean() }),
     owner: 'machine',
   },

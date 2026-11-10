@@ -181,7 +181,7 @@ describe('a request shown in the page', () => {
     await s.decide('pa-2', true);
     await s.ask({ verb: 'link', machine: 'mini', path: '/srv/elsewhere', into: SCRAPE }, 'pa-3');
     await s.decide('pa-3', true);
-    expect(s.sent).toEqual([['session.projects.remove', { id: 'p-scrape', expect: { path: '/srv/scrape', project: SCRAPE } }], ['session.projects.link', { id: 'p-scrape', into: null }]]);
+    expect(s.sent).toEqual([['session.projects.remove', { id: 'p-scrape', expect: { path: '/srv/scrape', project: SCRAPE } }], ['session.projects.link', { id: 'p-scrape', into: null, expect: { path: '/srv/scrape' } }]]);
     expect(s.answers).toEqual([
       answered('pa-1', { ok: true, text: 'removed /srv/scrape' }),
       answered('pa-2', { ok: true, text: `unlinked /srv/scrape; its project is scrape (${SCRAPE})` }),
@@ -206,6 +206,25 @@ describe('a request shown in the page', () => {
     await s.decide('pa-1', true);
     expect(s.sent).toEqual([['session.projects.remove', { id: 'p-scrape', expect: { path: '/srv/scrape', project: SCRAPE } }]]);
     expect(hidden, 'nothing hidden at the new path').toEqual([]);
+    expect(s.answers).toEqual([answered('pa-1', { ok: false, code: 'changed', text: 'changed: the location is at /srv/scrape-moved now' })]);
+  });
+
+  // panel 1, A2 (scalpel-1#1's link half): a link, as a removal, carries the path the person confirmed
+  it('sends the confirmed path as the link’s precondition, and answers the machine’s `changed`', async () => {
+    openWindow();
+    const s = scene();
+    const rows = new Map([['p-scrape', '/srv/scrape-moved']]); // the row was relocated on mini after main's view was read
+    const linked: string[] = [];
+    s.replies.set('session.projects.link', (input) => {
+      const { id, expect: wanted } = input as { id: string; expect?: { path: string } };
+      if (wanted !== undefined && rows.get(id) !== wanted.path) return { ok: false, error: { code: 'internal', message: `changed: the location is at ${rows.get(id)} now` } } as CommandResult<CommandName>;
+      linked.push(id);
+      return { ok: true, value: { project: record('/srv/scrape-moved', SCRAPE), restated: true } } as CommandResult<CommandName>;
+    });
+    await s.ask({ verb: 'link', machine: 'mini', path: '/srv/scrape', into: null });
+    await s.decide('pa-1', true);
+    expect(s.sent).toEqual([['session.projects.link', { id: 'p-scrape', into: null, expect: { path: '/srv/scrape' } }]]);
+    expect(linked, 'nothing linked at the new path').toEqual([]);
     expect(s.answers).toEqual([answered('pa-1', { ok: false, code: 'changed', text: 'changed: the location is at /srv/scrape-moved now' })]);
   });
 

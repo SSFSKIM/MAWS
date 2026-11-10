@@ -9,8 +9,8 @@
 // A request the app cannot show is refused at once and never waits unseen: signed out (`signed-out`), or with no window
 // open (`no-window`), as is every held one when the last window closes (panel scalpel-4#1); one the person dismisses is
 // `declined`. A remove or a link names the row by the registry's location at that path on that machine (its `pid`); a
-// remove carries that path and project as `expect`, so the machine refuses it `changed` when the row has moved since
-// (panel scalpel-1#1). A request whose terminal has gone is withdrawn by the daemon
+// remove carries that path and project as `expect`, and a link that path, so the machine refuses either `changed` when the
+// row has moved since (panel scalpel-1#1; A2). A request whose terminal has gone is withdrawn by the daemon
 // (`projects.act.withdrawn`) and taken off the page unacted; one already confirmed goes on, since its act may be under
 // way. The daemon's connection ending drops every ask, which covers a daemon restart (Decision Log 22). The machine a
 // request names is read on demand (`registry.machines`, which verifies the certificates it reads; branch review 1, P1);
@@ -165,7 +165,8 @@ export function startProjectActs<L>(deps: ProjectActsDeps<L>): { stop(): void } 
       return removed.ok ? { ok: true, text: removeWords(path) } : refused(removed)!;
     }
     const into = request.into ?? null;
-    const linked = await deps.send(link, 'session.projects.link', { id: pid, into });
+    // panel 1, A2: a link, as a removal, carries the confirmed path, so a row relocated since is refused `changed` there
+    const linked = await deps.send(link, 'session.projects.link', { id: pid, into, expect: { path } });
     if (!linked.ok) return refused(linked)!;
     return { ok: true, text: linkWords(linked.value as { project: ProjectRecord; restated: boolean }, { into, nameOf, machine: machineName }) };
   }

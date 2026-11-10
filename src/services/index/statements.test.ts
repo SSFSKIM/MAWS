@@ -1003,5 +1003,22 @@ describe('the stored statements', () => {
       expect(row(after)?.org?.smnsId).toBe(id);
       expect(published(after)).toMatchObject({ org: { smnsId: id }, stated: 'minted', statedAt: after });
     });
+    it('A2 (scalpel-1#1, link): a link that expects its row at a path the row has left is refused `changed`, nothing changed', async () => {
+      await open();
+      seam.projects.set('target-id', { hub: true, nameRev: 0 });
+      const before = folder('linked-before');
+      const after = folder('linked-after');
+      const minted = (await add(before)).project.org!.smnsId!;
+      const pid = row(before)!.id;
+      await index.statements.relocate(pid, after);
+      const gen = index.projects.statementsGen();
+      await expect(index.statements.link(pid, 'target-id', { expect: { path: before } })).rejects.toEqual(refusal('changed'));
+      await expect(index.statements.link(pid, null, { expect: { path: before } })).rejects.toEqual(refusal('changed'));
+      expect(columns(after)).toMatchObject({ stated_minted: minted, stated_linked: null });
+      expect(row(after)?.org?.smnsId).toBe(minted);
+      expect(index.projects.statementsGen()).toBe(gen);
+      // at the path it expects, the link is made
+      expect((await index.statements.link(pid, 'target-id', { expect: { path: after } })).project.org?.smnsId).toBe('target-id');
+    });
   });
 });

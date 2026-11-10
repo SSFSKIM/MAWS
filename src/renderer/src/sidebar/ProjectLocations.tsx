@@ -27,7 +27,7 @@ export function ProjectLocations({ project, view }: { project: RegistryProject; 
       <h4 className="m-0 mb-1 text-ui-sm font-medium text-fg-muted">{REGISTRY.locations}</h4>
       <ul aria-label={REGISTRY.locations} className="m-0 flex max-h-56 list-none flex-col gap-1.5 overflow-y-auto p-0 [scrollbar-width:thin]">
         {lines.map((line) => (
-          <Location key={line.address} line={line} />
+          <Location key={line.address} line={line} project={project.id} />
         ))}
         {held.map((removal) => (
           <Pending key={removal.id} removal={removal} view={view} />
@@ -37,15 +37,17 @@ export function ProjectLocations({ project, view }: { project: RegistryProject; 
   );
 }
 
-function Location({ line }: { line: LocationLine }) {
+function Location({ line, project }: { line: LocationLine; project: string }) {
   const [busy, setBusy] = useState(false);
   const { location, address, machine, state, suggestion } = line;
+  // the location as this card shows it, which an act on another machine expects (panel 1, A2)
+  const shown = { address, path: location.path, local: line.local };
   const run = (act: () => Promise<ActAnswer>) => async () => {
     setBusy(true);
     said(await act());
     setBusy(false);
   };
-  const remove = run(() => removeLocation({ address, machine: location.machine, pid: location.pid, up: line.up }, machine));
+  const remove = run(() => removeLocation({ ...shown, machine: location.machine, pid: location.pid, project, up: line.up }, machine));
   const acts = location.acts && line.up;
   return (
     <li data-location={address} data-location-state={state?.kind} className="flex min-w-0 flex-col gap-0.5">
@@ -83,7 +85,7 @@ function Location({ line }: { line: LocationLine }) {
       {suggestion !== null && (
         <span data-location-suggestion className="flex min-w-0 flex-wrap items-baseline gap-x-2">
           <span className="min-w-0 text-fg-muted">{suggestion.words}</span>
-          <button type="button" className={QUIET} disabled={busy} onClick={() => void run(() => linkLocation(address, suggestion.into, machine))()}>
+          <button type="button" className={QUIET} disabled={busy} onClick={() => void run(() => linkLocation(shown, suggestion.into, machine))()}>
             {suggestion.button}
           </button>
         </span>

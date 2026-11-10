@@ -47,9 +47,12 @@ export async function addFolder(machine: MachineRef, name: string, input: { dire
   return result.ok ? { ok: true } : { ok: false, words: actWords(result.error, name) };
 }
 
-/** Sets a location's link (`into`), or with null clears it. */
-export async function linkLocation(address: ProjectId, into: string | null, machine: string, client: MawsBridge = ipc): Promise<ActAnswer> {
-  const result = await client.invoke('session.projects.link', { id: address, into });
+/**
+ * Sets a location's link (`into`), or with null clears it. On another machine it expects the location at the path the page
+ * shows (§G's `expect`; panel 1, A2), so a row relocated there since is refused `changed`, nothing linked.
+ */
+export async function linkLocation(target: { address: ProjectId; path: string; local: boolean }, into: string | null, machine: string, client: MawsBridge = ipc): Promise<ActAnswer> {
+  const result = await client.invoke('session.projects.link', { id: target.address, into, ...(target.local ? {} : { expect: { path: target.path } }) });
   return result.ok ? { ok: true } : { ok: false, words: actWords(result.error, machine) };
 }
 
@@ -61,10 +64,16 @@ export async function relocateLocation(address: ProjectId, directory: string, ma
 
 /**
  * Removes a location: hidden on its machine now while that machine is up, else held by main for when it is next up
- * (§I: bound to the location as it is now, listed meanwhile, cancellable).
+ * (§I: bound to the location as it is now, listed meanwhile, cancellable). On another machine that is up it expects the
+ * location's path and project as the page shows them, the pair a held removal sends (§G; panel 1, A2).
  */
-export async function removeLocation(target: { address: ProjectId; machine: MachineRef; pid: string; up: boolean }, machine: string, client: MawsBridge = ipc): Promise<ActAnswer> {
-  const result = target.up ? await client.invoke('session.projects.remove', { id: target.address }) : await client.invoke('org.removals.hold', { machine: target.machine, pid: target.pid });
+export async function removeLocation(
+  target: { address: ProjectId; machine: MachineRef; pid: string; path: string; project: string; local: boolean; up: boolean },
+  machine: string,
+  client: MawsBridge = ipc,
+): Promise<ActAnswer> {
+  const expect = target.local ? {} : { expect: { path: target.path, project: target.project } };
+  const result = target.up ? await client.invoke('session.projects.remove', { id: target.address, ...expect }) : await client.invoke('org.removals.hold', { machine: target.machine, pid: target.pid });
   return result.ok ? { ok: true } : { ok: false, words: actWords(result.error, machine) };
 }
 

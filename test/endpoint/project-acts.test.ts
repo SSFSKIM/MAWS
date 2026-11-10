@@ -142,6 +142,23 @@ describe('the project acts over the network', () => {
     expect(JSON.stringify(outcome)).toContain('unknown-project');
   });
 
+  // the registry branch's panel 1, A2 (scalpel-1#1's link half): a link carries the path its asker confirmed, which the
+  // machine checks against the row before it changes anything
+  it('carry a link’s `expect` to the machine, which refuses `changed` a row no longer at that path, nothing changed', async () => {
+    const { f, home, a, index } = await setup();
+    await until(() => f.endpoint.registry.statements().possible, 'statements possible');
+    const folder = join(home, 'work/scrape');
+    const pid = ((await admitted(a, await stepped(f, a, 'session.projects.addFolder', { directory: folder }))).result as { project: { id: string } }).project.id;
+    writeFileSync(join(folder, '.smns'), JSON.stringify({ project: 'public-id', name: 'Public', hub: { org: ORG } }));
+    expect(await admitted(a, await stepped(f, a, 'session.projects.link', { id: pid, into: 'public-id', expect: { path: folder } }))).toMatchObject({ state: 'done', result: { project: { org: { smnsId: 'public-id' } } } });
+    expect(claimed(f, 'session.projects.link').at(-1)?.input).toEqual({ id: pid, into: 'public-id', expect: { path: folder }, opened: [] });
+    const moved = join(home, 'work/moved');
+    expect(await admitted(a, await stepped(f, a, 'session.projects.relocate', { id: pid, directory: moved }))).toMatchObject({ state: 'done' });
+    const stale = await admitted(a, await stepped(f, a, 'session.projects.link', { id: pid, into: null, expect: { path: folder } }));
+    expect(JSON.stringify(stale)).toContain('changed');
+    expect(index.projects.list().find((p) => p.id === pid)).toMatchObject({ directory: moved, org: { smnsId: 'public-id' } });
+  });
+
   // M9's review 1, F1: the setup's checked reader, which a remote addFolder derives through, guards resolve and relocate
   it('read a folder’s `.smns` for resolve and relocate through the setup’s checked reader, never one linked into a folder macOS protects that was not opened', async () => {
     const { f, home, a, index } = await setup();
