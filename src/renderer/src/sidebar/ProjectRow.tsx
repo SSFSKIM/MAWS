@@ -79,7 +79,7 @@ export function ProjectRow({ entry, open, sessions, more, matchCount, onToggle, 
       {open ? <FolderOpenIcon className={`size-[13px] ${project ? 'text-fg-muted' : 'text-fg-faint'}`} /> : <FolderIcon className={`size-[13px] ${project ? 'text-fg-muted' : 'text-fg-faint'}`} />}
       <span className={`min-w-0 flex-1 truncate text-ui ${offline ? 'text-fg-faint' : project ? 'text-fg' : 'text-fg-muted'}`}>{name}</span>
       {machinesLine !== null && (
-        <span data-row-machines className="max-w-[45%] shrink-0 truncate text-ui-sm text-fg-faint group-hover/line:hidden group-focus-visible/project:hidden">
+        <span data-row-machines title={machinesLine} className="max-w-[45%] shrink-0 truncate text-ui-sm text-fg-faint group-hover/line:hidden group-focus-visible/project:hidden">
           {machinesLine}
         </span>
       )}

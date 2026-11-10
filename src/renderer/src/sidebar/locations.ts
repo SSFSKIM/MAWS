@@ -1,8 +1,8 @@
 // A registry project's locations as the sidebar says them (docs/doperpowers/plans/2026-11-10-project-registry.md,
 // Interfaces §J.3; design §6, §10): pure, so the words are testable without React.
 //
-// - A location's state, the first that holds: its machine off (`offline`, since the machine was last seen: main's `seen`,
-//   else when its link went down), its folder not there (`missing`), another folder at its path (`replaced`).
+// - A location's state, the first that holds: its machine off (`offline` on the row's line, and in the card since the
+//   machine was last seen: main's `seen`, else when its link went down), its folder not there (`missing`), another folder at its path (`replaced`).
 // - A suggestion (§J.3, design §2: nothing links unasked) is a line with one button, which sends `link` with the project
 //   it names; none for a replaced location, nor where the member may not act on the machine. "Follow the file": a
 //   location with a stored statement whose label is a `.smns` naming another id than its project. "Link": a minted
@@ -92,10 +92,16 @@ export function locationLines(project: RegistryProject, registry: OrgProjects, v
   return [...lines.filter((l) => l.local), ...lines.filter((l) => !l.local)];
 }
 
-/** The machines a row's folders are on, as its line says them; null where they are this Mac's alone (a row names no machine then, T4). */
+/**
+ * The machines a row's folders are on, as its line says them, a machine that is off followed by `offline` (§J.3: the
+ * card says since when); null where they are this Mac's alone (a row names no machine then, T4).
+ */
 export function machinesWords(machines: readonly MachineRef[], view: Pick<LocationView, 'machine'>): string | null {
   if (machines.every((m) => view.machine(m).local)) return null;
-  return REGISTRY.machines(machines.map((m) => view.machine(m).name));
+  return REGISTRY.machines(machines.map((ref) => {
+    const machine = view.machine(ref);
+    return machine.up ? machine.name : `${machine.name} ${REGISTRY.offline}`;
+  }));
 }
 
 /** A held removal's line (§J.3). */

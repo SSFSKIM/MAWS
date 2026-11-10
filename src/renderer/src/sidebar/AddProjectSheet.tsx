@@ -123,6 +123,7 @@ export function AddProjectSheet({ into }: { into: string | null }) {
         <label className="flex flex-col gap-1">
           <span className="text-ui-sm text-fg-muted">{REGISTRY.project}</span>
           <select
+            aria-label={REGISTRY.project}
             className={FIELD}
             value={target ?? ''}
             disabled={!chosen.serves || busy !== null}

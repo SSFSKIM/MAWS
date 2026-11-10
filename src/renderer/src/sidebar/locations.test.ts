@@ -37,8 +37,9 @@ describe('a location’s state in words', () => {
     expect(locationState(location(OTHER_MACHINE, 'p'), view())).toBeNull();
   });
 
-  it('names a row’s machines joined by a middle dot, and none where they are this Mac’s alone', () => {
-    expect(machinesWords([TEST_MACHINE, OTHER_MACHINE, MINI], view())).toBe('This Mac · studio · mini');
+  it('names a row’s machines joined by a middle dot, one that is off said offline, and none where they are this Mac’s alone', () => {
+    expect(machinesWords([TEST_MACHINE, OTHER_MACHINE, MINI], view())).toBe('This Mac · studio · mini offline');
+    expect(machinesWords([OTHER_MACHINE, MINI], view([TEST_MACHINE, OTHER_MACHINE, MINI]))).toBe('studio · mini');
     expect(machinesWords([TEST_MACHINE], view())).toBeNull();
   });
 
