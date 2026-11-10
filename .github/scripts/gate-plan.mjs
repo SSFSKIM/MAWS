@@ -108,6 +108,7 @@ import { appendFileSync, readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 import { affected } from './gate-affected.mjs';
+import { docsOnlyChange } from './gate-docs.mjs';
 import { backlogOf, utcTimestampOf } from './gate-backlog.mjs';
 
 const words = (text = '') => text.split(/[\s,]+/).filter(Boolean);
@@ -163,7 +164,7 @@ export const peerCheckOf = (env, scripts) => peerOf(env, scripts).peerCheck;
 // Pure planning boundary: all workflow inputs (including its env lists and repository variables), and package scripts.
 // The caller supplies now (epoch milliseconds) for snapshot freshness; absent time makes the advisory fail open.
 // Output values are the exact strings GitHub receives; property order preserves GITHUB_OUTPUT byte for byte.
-export function planOf(env, scripts, now) {
+export function planOf(env, scripts, now, { docsOnly = false } = {}) {
   const cap = env.HOSTED_MAC_CAP || '5';
   if (!/^[0-9]+$/.test(cap) || !Number.isSafeInteger(Number(cap)) || Number(cap) <= 0) refuse('HOSTED_MAC_CAP must be a positive whole number');
   const hostedCap = Number(cap);
@@ -444,6 +445,8 @@ export function planOf(env, scripts, now) {
   const selection = selectionAsked && affected(env.HEAD_MESSAGE ?? '');
 
   const has = (gate) => String(gates.has(gate));
+  // This fact comes from the workflow checkout, not a caller-controlled trailer or input. Other gates stay selected.
+  if (docsOnly && gates.delete('static')) gates.add('docs');
   const runners = CLASS1A_RUNNERS[class1a];
   const pool = (class1a === 'pool' && (['static', 'unit', 'probes'].some((gate) => gates.has(gate)) || e2e.some((entry) => offMac.has(entry.group)))) || e2eBuild.length > 0 || e2eHosted.length > 0;
   // The unit job's matrix: its shards, each with the `--shard` value and the suffix of its JUnit artifact's name
@@ -532,6 +535,11 @@ export function planOf(env, scripts, now) {
       stdout += `${line}\n`;
     }
   }
+  if (gates.has('docs')) {
+    outputs.docs = 'true';
+    summary += '\nDocs-only git diff: docs replaces static; every other selected gate is unchanged.\n';
+    stdout += 'docs-only git diff: docs replaces static\n';
+  }
   return { outputs, summary, stdout, peerCheck, overflowShadowCount: shadowSent.ec2 };
 }
 
@@ -539,7 +547,8 @@ export function planOf(env, scripts, now) {
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const { scripts } = JSON.parse(readFileSync('package.json', 'utf8'));
-    const { outputs, summary, stdout, overflowShadowCount } = planOf(process.env, scripts, Date.now());
+    const docsOnly = process.env.GITHUB_ACTIONS === 'true' && Boolean(process.env.GITHUB_REF) && docsOnlyChange(process.cwd(), process.env.GITHUB_SHA);
+    const { outputs, summary, stdout, overflowShadowCount } = planOf(process.env, scripts, Date.now(), { docsOnly });
     appendFileSync(process.env.GITHUB_OUTPUT, Object.entries(outputs).map(([key, value]) => `${key}=${value}\n`).join(''));
     appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
     process.stdout.write(`::notice title=EC2 overflow shadow::old_rule_count=${overflowShadowCount}\n`);

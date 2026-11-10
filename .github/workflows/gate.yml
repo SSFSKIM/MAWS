@@ -370,6 +370,7 @@ jobs:
     timeout-minutes: ${{ vars.GATE_RUNNER == 'macos' && 40 || 30 }}
     outputs:
       static: ${{ steps.plan.outputs.static }}
+      docs: ${{ steps.plan.outputs.docs }}
       static_checks: ${{ steps.static-checks.outputs.matrix }}
       unit: ${{ steps.plan.outputs.unit }}
       unit_darwin: ${{ steps.plan.outputs.unit_darwin }}
@@ -398,6 +399,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          # The docs-only decision reads the actual diff, including a nonce parent and master merge-base.
+          fetch-depth: 0
           sparse-checkout: |
             package.json
             .github
@@ -459,6 +462,22 @@ jobs:
           PEER_GROUP: ${{ matrix.group }}
           PEER_WAIT_MINUTES: ${{ matrix.wait }}
         run: .github/scripts/gate-run.sh '^held by run ' node .github/scripts/gate-peer-wait.mjs
+
+  # A docs-only change still earns a real green run on this head/tree; no dependency install is needed.
+  docs:
+    needs: plan
+    if: needs.plan.outputs.docs == 'true'
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            .github/scripts
+            docs/tech-debt-tracker.md
+            docs/doperpowers/plans/2026-10-27-p5-org.md
+          sparse-checkout-cone-mode: false
+      - run: node .github/scripts/gate-docs.mjs
 
   # On the pool, gate-bg already overlaps checks; on the Mac it protects the shared memory budget.
   static-local:
