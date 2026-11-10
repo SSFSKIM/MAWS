@@ -29,6 +29,7 @@ P5 moved everything that belongs to a machine out of the app: sessions, terminal
 - [ ] M1 — No suite launches the app's embedded shape
 - [ ] M2 — One launch outcome: `mawsd`, or the repair window
 - [ ] M2b — Resume after a wake by design, main's log on disk, and what the readiness read found
+  - (2026-11-10) on `p5-o15-wake`, each task reviewed clean: Task 1 (bcbe7dea5), Task 2 (04953e7a0, c04cc2622), Task 3 (8c764631a), Task 4 (2632d4da4), Task 6 (9dc99e17c), Task 9 (5a02a8e9c). Task 5 and Task 7 to come; Task 8 waits on the owner's ruling.
 - [ ] M3 — The final build on the three machines
 - [ ] M4 — The closing run
 - [ ] M5 — The record and the verdict
