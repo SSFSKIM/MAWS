@@ -572,6 +572,9 @@ test('a wake after a silent cut: every subscription answered within 1 s of the r
         requests: { hub: scene!.aHub.requests(), direct: direct.requests() },
       });
       const final = await within(() => readWake(inputOf()), (wake) => wake.failures.length === 0, READ_WITHIN_MS);
+      // the evidence the verdict takes is fixed here: a line that came after a bounded wait above gave up is still
+      // inside a pair of reads
+      readLoad('final');
       if (final.last === null) {
         unavailable[carrier] = final.error ?? 'no answer';
         failures.push(`${carrier}: main.log, B's logs or the pipes could not be read: ${unavailable[carrier]}`, ...panes);
@@ -592,8 +595,8 @@ test('a wake after a silent cut: every subscription answered within 1 s of the r
   }
 
   // The void rule as built (Decision Log 33 (c)): each carrier's 1-minute load read at the inject, after the last subbed,
-  // at the hub's restore where it comes later (the direct launch) and after the feed's last page is in, so no timed
-  // window lies outside a pair of reads; a read of 5 or more voids the run, as the artifacts case voids a window. The
+  // at the hub's restore where it comes later (the direct launch), after the feed's last page is in and after the final
+  // reading, so no timed window and no line the verdict takes lies outside a pair of reads; a read of 5 or more voids the run, as the artifacts case voids a window. The
   // load at the case's start and end and Rule B's 30 s samples are printed as context and void nothing here.
   const verdict = wakeVerdict(CARRIERS.flatMap((c) => (records[c] === undefined ? [] : [records[c]!])), windowLoads, failures);
   const ruleB = ruleBContext(loads, terminalLoad ?? null);

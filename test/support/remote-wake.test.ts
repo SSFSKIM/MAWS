@@ -275,22 +275,26 @@ describe('a run', () => {
 // condition is about the lane that was adopted, so the other lane's failed attempts and its spent line are kept apart
 describe('the conditions', () => {
   const conditionsOf = (input: WakeInput, ...extra: LogLine[]) => {
-    const { conditions, otherLane, beforeInject } = readWake({ ...input, main: input.main.concat(extra) }).record;
-    return { conditions, otherLane, beforeInject };
+    const { conditions, otherLane, windowContext, beforeInject } = readWake({ ...input, main: input.main.concat(extra) }).record;
+    return { conditions, otherLane, windowContext, beforeInject };
   };
 
   it('count from the inject: today’s attempts against the refused pipes during the stall are kept apart, as before the inject', () => {
     expect(conditionsOf(passing('direct'), m(35, "attempt failed (today's): no relay (connect ECONNREFUSED 127.0.0.1:60705 (ECONNREFUSED)); next in 984 ms"))).toEqual({
       conditions: [],
       otherLane: [],
+      windowContext: [],
       beforeInject: ["-47000 ms attempt failed (today's): no relay (connect ECONNREFUSED 127.0.0.1:60705 (ECONNREFUSED)); next in 984 ms"],
     });
   });
 
-  it('take today’s attempt failed after the inject as a condition, between the inject and the restore too', () => {
-    expect(conditionsOf(passing('relay'), m(81, "attempt failed (today's): no relay (connect ECONNREFUSED 127.0.0.1:60705 (ECONNREFUSED)); next in 984 ms")).conditions).toEqual([
-      "-1000 ms attempt failed (today's): no relay (connect ECONNREFUSED 127.0.0.1:60705 (ECONNREFUSED)); next in 984 ms",
-    ]);
+  it('keep today’s attempt failed after the inject as context, no condition: it names no lane of §F’s', () => {
+    expect(conditionsOf(passing('relay'), m(81, "attempt failed (today's): no relay (connect ECONNREFUSED 127.0.0.1:60705 (ECONNREFUSED)); next in 984 ms"))).toEqual({
+      conditions: [],
+      otherLane: [],
+      windowContext: ["-1000 ms attempt failed (today's): no relay (connect ECONNREFUSED 127.0.0.1:60705 (ECONNREFUSED)); next in 984 ms"],
+      beforeInject: [],
+    });
   });
 
   it('on the relay’s launch, keep the direct lane’s failed attempt on the held pipe and its spent line as the other lane’s, not conditions (the early run’s line)', () => {
@@ -298,15 +302,17 @@ describe('the conditions', () => {
     expect(conditionsOf(input, m(83.052, 'attempt failed (direct): ws://127.0.0.1:60706 did not open within 1000 ms; next in 99 ms'), m(90, 'lane direct: spent (6 attempts)'))).toEqual({
       conditions: [],
       otherLane: ['+1052 ms attempt failed (direct): ws://127.0.0.1:60706 did not open within 1000 ms; next in 99 ms', '+8000 ms lane direct: spent (6 attempts)'],
+      windowContext: [],
       beforeInject: [],
     });
-    expect(conditionsOf(input, m(82.15, 'attempt failed (relay): no handshake within 2000 ms; next in 100 ms')).conditions).toEqual(['+150 ms attempt failed (relay): no handshake within 2000 ms; next in 100 ms']);
+    expect(conditionsOf(input, m(82.15, 'attempt failed (relay): no handshake within 2000 ms; next in 100 ms'), m(83, 'lane relay: spent (6 attempts)')).conditions).toEqual(['+150 ms attempt failed (relay): no handshake within 2000 ms; next in 100 ms', '+1000 ms lane relay: spent (6 attempts)']);
   });
 
   it('on the direct launch, keep the relay lane’s as the other lane’s', () => {
     expect(conditionsOf(passing('direct'), m(82.1, 'attempt failed (relay): no relay (connect ECONNREFUSED 127.0.0.1:60705 (ECONNREFUSED)); next in 100 ms'), m(82.12, 'lane relay: spent (no target)'))).toEqual({
       conditions: [],
       otherLane: ['+100 ms attempt failed (relay): no relay (connect ECONNREFUSED 127.0.0.1:60705 (ECONNREFUSED)); next in 100 ms', '+120 ms lane relay: spent (no target)'],
+      windowContext: [],
       beforeInject: [],
     });
   });
@@ -317,11 +323,32 @@ describe('the conditions', () => {
     expect(conditionsOf({ ...input, main }, m(82.1, 'attempt failed (direct): no handshake within 2000 ms; next in 100 ms'))).toMatchObject({ conditions: [], otherLane: ['+100 ms attempt failed (direct): no handshake within 2000 ms; next in 100 ms'] });
   });
 
-  it('keep a catch-up, the floor and the acts ahead of the subscriptions whatever their lane', () => {
-    const lines = [m(82.1, 'attempt (direct): catch-up, dial 2'), m(82.11, 'attempt (relay): catch-up, dial 2'), m(82.12, "floor after 10000 ms: today's attempts from here (10 s without a channel)"), m(82.13, 'wrote 14 act message(s), 9000 bytes, ahead of the subscriptions')];
+  it('keep a catch-up whatever its lane, and the acts ahead of the subscriptions over 4 KiB', () => {
+    const lines = [m(82.1, 'attempt (direct): catch-up, dial 2'), m(82.11, 'attempt (relay): catch-up, dial 2'), m(82.13, 'wrote 14 act message(s), 9000 bytes, ahead of the subscriptions')];
     expect(conditionsOf(passing('direct'), ...lines)).toEqual({
-      conditions: ['+100 ms attempt (direct): catch-up, dial 2', '+110 ms attempt (relay): catch-up, dial 2', "+120 ms floor after 10000 ms: today's attempts from here (10 s without a channel)", '+130 ms wrote 14 act message(s), 9000 bytes, ahead of the subscriptions'],
+      conditions: ['+100 ms attempt (direct): catch-up, dial 2', '+110 ms attempt (relay): catch-up, dial 2', '+130 ms wrote 14 act message(s), 9000 bytes, ahead of the subscriptions'],
       otherLane: [],
+      windowContext: [],
+      beforeInject: [],
+    });
+  });
+
+  it('keep the floor as context, no condition: §F lets a path return after it with the claim intact', () => {
+    expect(conditionsOf(passing('direct'), m(82.12, "floor after 10000 ms: today's attempts from here (10 s without a channel)"))).toEqual({
+      conditions: [],
+      otherLane: [],
+      windowContext: ["+120 ms floor after 10000 ms: today's attempts from here (10 s without a channel)"],
+      beforeInject: [],
+    });
+  });
+
+  it('take the acts ahead of the subscriptions as a condition only past 4 KiB: 4096 bytes is context, 4097 a condition', () => {
+    const at4096 = m(82.13, 'wrote 3 act message(s), 4096 bytes, ahead of the subscriptions');
+    const at4097 = m(82.14, 'wrote 3 act message(s), 4097 bytes, ahead of the subscriptions');
+    expect(conditionsOf(passing('direct'), at4096, at4097)).toEqual({
+      conditions: ['+140 ms wrote 3 act message(s), 4097 bytes, ahead of the subscriptions'],
+      otherLane: [],
+      windowContext: ['+130 ms wrote 3 act message(s), 4096 bytes, ahead of the subscriptions'],
       beforeInject: [],
     });
   });
@@ -395,6 +422,12 @@ describe('the verdict', () => {
     expect(verdict).toMatchObject({ void: true, outside: false, pass: null, boundMisses: ['direct: the link up 1200 ms after the restore, over 1000 ms'] });
     expect(verdict.voidReasons).toEqual(["relay: the 1-minute load read 5 or more after the last subbed and after the feed's last page (4.99 at the inject, 5.00 after the last subbed, 5.31 after the feed's last page)"]);
     expect(wakeVerdict([direct, relay], { ...loads, direct: [{ at: "hub's restore", load: 7.2 }] }, []).voidReasons).toEqual(["direct: the 1-minute load read 5 or more at the hub's restore (7.20 at the hub's restore)"]);
+  });
+
+  it('voids the run on the read after the final reading, where the evidence the verdict takes is fixed', () => {
+    const verdict = wakeVerdict([direct, relay], { ...loads, relay: [...loads.relay, { at: 'final', load: 5.4 }] }, []);
+    expect(verdict).toMatchObject({ void: true, pass: null });
+    expect(verdict.voidReasons).toEqual(["relay: the 1-minute load read 5 or more after the final reading (3.10 at the inject, 3.10 after the last subbed, 3.10 after the feed's last page, 5.40 after the final reading)"]);
   });
 
   it('fails a miss with no condition as a miss', () => {

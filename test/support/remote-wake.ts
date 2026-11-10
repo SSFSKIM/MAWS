@@ -7,8 +7,8 @@
 // - `wakeMisses` are the bounds, which the measured group alone holds: every `subbed` and the link's `up` at most
 //   1,000 ms after the restore, the feed's `connected` and last listings page at most 2,000 ms after the hub's.
 // - `conditions` keeps the lines from the inject on that show which of §F's six conditions a wake missed (a catch-up, a
-//   failed attempt or a spent lane of the lane adopted, the floor, acts ahead of the subscriptions), so a miss outside
-//   them is read as neither pass nor fail (Decision Log 33 (d)).
+//   failed attempt or a spent lane of the lane adopted, more than 4 KiB ahead of the subscriptions), so a miss outside
+//   them is read as neither pass nor fail (Decision Log 33 (d)); the floor and today's attempts are context.
 // - `wakeVerdict` voids the run on the 1-minute load read at the instants that bracket each carrier's timed windows
 //   (Decision Log 33 (c)), labels a miss outside §F's conditions, and otherwise gives the verdict.
 import { IDLE_RUN } from './daemon-idle';
@@ -160,12 +160,17 @@ export interface WakeRecord {
   /** The hub's requests for the feed's socket since the stall. */
   feedOpens: number;
   /**
-   * §F's conditions, from the inject on, `ms` from the restore: a catch-up, a failed attempt (today's, or of the lane
-   * adopted), the lane adopted spent, the floor, acts ahead of the subscriptions.
+   * §F's conditions, from the inject on, `ms` from the restore: a catch-up (condition 1), a failed attempt of the lane
+   * adopted (4), that lane spent (4 and 5), more than 4 KiB written ahead of the subscriptions (6).
    */
   conditions: string[];
   /** The other lane's failed attempts and spent line from the inject on: §F's fourth condition is the adopted lane's. */
   otherLane: string[];
+  /**
+   * The rest of those lines from the inject on, context and no condition: the floor (§F lets a path return after it
+   * with the claim intact), today's failed attempts, which are no lane's, and acts ahead of the subscriptions within 4 KiB.
+   */
+  windowContext: string[];
   /** The same lines from the stall to the inject (today's attempts against the refused pipes): context, no condition. */
   beforeInject: string[];
   /** Each pipe's connections since the stall, `ms` from the restore; a null first line is a probe. */
@@ -173,6 +178,8 @@ export interface WakeRecord {
 }
 
 const CONDITION_KINDS: readonly CaseLine['kind'][] = ['catch-up', 'attempt-failed', 'lane-spent', 'floor', 'acts-ahead'];
+/** §F's sixth condition: at most 4 KiB written on the new channel ahead of the `sub`s. */
+const ACTS_AHEAD_BYTES = 4_096;
 const behind = (a: { seq: number; idx: number | null }, b: { seq: number; idx: number | null }) => a.seq < b.seq || (a.seq === b.seq && (a.idx ?? -1) < (b.idx ?? -1));
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
@@ -303,17 +310,21 @@ export function readWake(input: WakeInput): { record: WakeRecord; failures: stri
 
   const answeredMs = subscriptions.flatMap((s) => (s.after === null ? [] : [s.after.ms]));
   // §F's lines, from the inject, where its window opens; the lane adopted is the one the link came up over after the
-  // restore (the case's carrier when it came up over none). A lane's own failed attempt or spent line is the other
-  // lane's when it names the other carrier; today's attempt, a catch-up, the floor and the acts name no lane of theirs
+  // restore (the case's carrier when it came up over none). A catch-up is a condition whatever its lane; a lane's failed
+  // attempt or spent line is one for the lane adopted and the other lane's otherwise; acts ahead are one past 4 KiB.
+  // The floor, today's failed attempts and acts within 4 KiB are context
   const adopted = up?.line.carrier ?? carrier;
-  const laneOf = (line: CaseLine) => (line.kind === 'attempt-failed' ? line.which : line.kind === 'lane-spent' ? line.lane : null);
-  const otherLane = (r: Read) => {
-    const lane = laneOf(r.line);
-    return (lane === 'direct' || lane === 'relay') && lane !== adopted;
+  const classOf = ({ line }: Read): 'condition' | 'otherLane' | 'windowContext' => {
+    if (line.kind === 'catch-up') return 'condition';
+    if (line.kind === 'acts-ahead') return line.bytes > ACTS_AHEAD_BYTES ? 'condition' : 'windowContext';
+    const lane = line.kind === 'attempt-failed' ? line.which : line.kind === 'lane-spent' ? line.lane : null;
+    if (lane === 'direct' || lane === 'relay') return lane === adopted ? 'condition' : 'otherLane';
+    return 'windowContext'; // the floor, today's attempt
   };
   const timed = (r: Read) => `${ms(r.at) >= 0 ? '+' : ''}${ms(r.at)} ms ${linkText(ref, r.text)}`;
   const conditionLines = link.filter((r) => CONDITION_KINDS.includes(r.line.kind));
   const windowed = conditionLines.filter(since(injectedAt));
+  const ofClass = (name: ReturnType<typeof classOf>) => windowed.filter((r) => classOf(r) === name).map(timed);
   const record: WakeRecord = {
     carrier,
     waitMs: restoredAt - injectedAt,
@@ -330,8 +341,9 @@ export function readWake(input: WakeInput): { record: WakeRecord; failures: stri
     feed: { connectedMs: connected === undefined ? null : ms(connected.at, hubRestoredAt), lastPageMs: lastPage === undefined ? null : ms(lastPage.at, hubRestoredAt), records: lastPage?.line.records ?? null, pages: lastPage?.line.pages ?? null },
     upgrades,
     feedOpens,
-    conditions: windowed.filter((r) => !otherLane(r)).map(timed),
-    otherLane: windowed.filter(otherLane).map(timed),
+    conditions: ofClass('condition'),
+    otherLane: ofClass('otherLane'),
+    windowContext: ofClass('windowContext'),
     beforeInject: conditionLines.filter((r) => r.at >= stalledAt && r.at < injectedAt).map(timed),
     requests: { hub: hub.map((r) => ({ ms: ms(r.at), firstLine: r.firstLine })), direct: direct.map((r) => ({ ms: ms(r.at), firstLine: r.firstLine })) },
   };
@@ -361,15 +373,16 @@ export const VOID_LOAD = 5;
 
 /**
  * Where a carrier's 1-minute load is read, so that no timed window lies outside a pair of reads: at the inject, after the
- * last `subbed` (the link's window), at the hub's restore where it comes later (the direct launch's), and after the
- * feed's last page is in (the feed's window).
+ * last `subbed` (the link's window), at the hub's restore where it comes later (the direct launch's), after the feed's
+ * last page is in (the feed's window), and after the final reading, where the evidence the verdict takes is fixed (a
+ * line that came after a bounded wait gave up is still inside a pair of reads).
  */
-export type LoadInstant = 'inject' | 'last subbed' | "hub's restore" | 'last page';
+export type LoadInstant = 'inject' | 'last subbed' | "hub's restore" | 'last page' | 'final';
 export interface LoadRead {
   at: LoadInstant;
   load: number;
 }
-const INSTANT: Record<LoadInstant, string> = { inject: 'at the inject', 'last subbed': 'after the last subbed', "hub's restore": "at the hub's restore", 'last page': "after the feed's last page" };
+const INSTANT: Record<LoadInstant, string> = { inject: 'at the inject', 'last subbed': 'after the last subbed', "hub's restore": "at the hub's restore", 'last page': "after the feed's last page", final: 'after the final reading' };
 
 export interface WakeVerdict {
   /** A window's read at VOID_LOAD or more: no verdict on the bounds either way. */
