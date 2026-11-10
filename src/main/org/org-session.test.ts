@@ -2624,6 +2624,12 @@ describe('M4b: org.enroll.*', () => {
     gate.armed = true;
     await postKey(started.code, 'box');
     await until(() => gate.release !== null, 'the held key read');
+    // signingRoot's root-add adoption exposes its in-memory head before saving the anchor. Baseline only once that
+    // registration.json write has landed and no atomic-write temp remains, so close itself must change nothing too.
+    await until(
+      async () => (await readJson<RegistrationFile>(REGISTRATION_FILE)).anchor.version === headVersion(session) && (await readdir(orgDir())).every((name) => !name.startsWith('.')),
+      'the root-add anchor saved and org/ at rest',
+    );
     const before = await orgSnapshot();
     let closed = false;
     const closing = session.close().then(() => (closed = true));
