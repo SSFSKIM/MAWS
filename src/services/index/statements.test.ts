@@ -952,6 +952,31 @@ describe('the stored statements', () => {
       expect(index.statements.update(pid, { name: 'A much longer name' })).toMatchObject({ name: 'A much longer name', nameRev: 1 });
     });
 
+    it('scalpel-5#1: no snapshot pairs a changed statement with the project derived before it', async () => {
+      await open();
+      seam.projects.set('target-id', { hub: true, nameRev: 0 });
+      const plain = folder('linking');
+      const minted = (await add(plain)).project.org!.smnsId!;
+      const source = index.projectsSource();
+      const seen: Array<NonNullable<ReturnType<typeof source.snapshot>>> = [];
+      const off = source.onChange(() => {
+        const snapshot = source.snapshot();
+        if (snapshot !== null) seen.push(snapshot);
+      });
+      const pid = row(plain)!.id;
+      await index.statements.link(pid, 'target-id');
+      await index.statements.link(pid, null);
+      await settle();
+      off();
+      const pairs = seen.map((snapshot) => {
+        const kept = snapshot.statements.find((s) => s.path === plain)!;
+        return [kept.linked ?? kept.minted, snapshot.rows.find((r) => r.path === plain)?.org.smnsId ?? null];
+      });
+      expect(pairs.length).toBeGreaterThan(0);
+      for (const [stated, derived] of pairs) expect(derived).toBe(stated);
+      expect(pairs.at(-1)).toEqual([minted, minted]);
+    });
+
     it('scalpel-5#2: a derivation read before a relocation never lands on the relocated row', async () => {
       const made = standIn();
       seam = made.seam;

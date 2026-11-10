@@ -77,6 +77,9 @@ export class Statements {
   private derivedUnder: string | null = null;
   private evaluating = false;
   private offStatements: (() => void) | null = null;
+  /** Statement changes whose row is not derived again yet (`rederiving`): while any is, the endpoint reads no snapshot. */
+  private deriving = 0;
+  private readonly rederived = new Set<() => void>();
 
   constructor(
     private readonly projects: ProjectStore,
@@ -237,6 +240,39 @@ export class Statements {
     if (!read) refuse('unresolved', `${row.directory}: ${into === null ? 'unlinked' : 'linked'}, its project is read from a file this device has not opened: open its folder from this device, or do it on the machine`);
   }
 
+  /**
+   * A statement change and its row's derivation after it (panel 1, scalpel-5#1): until the derivation is done the row's
+   * kept project is the one from before the change, so the endpoint's snapshot, which pairs each row with its statement,
+   * is withheld; when the last such change is derived, the source's listeners are told, so what was withheld is read.
+   */
+  private async rederiving<T>(work: () => Promise<T>): Promise<T> {
+    this.deriving += 1;
+    try {
+      return await work();
+    } finally {
+      this.deriving -= 1;
+      if (this.deriving === 0) for (const listener of [...this.rederived]) listener();
+    }
+  }
+
+  /** Resolves once no statement change awaits its derivation: an act's restatement is asked with every change derived. */
+  private allDerived(): Promise<void> {
+    if (this.deriving === 0) return Promise.resolve();
+    return new Promise((resolve) => {
+      const done = () => {
+        this.rederived.delete(done);
+        resolve();
+      };
+      this.rederived.add(done);
+    });
+  }
+
+  /** The endpoint's restatement of an act's change, once every statement change is derived. */
+  private async restate(): Promise<{ restated: boolean }> {
+    await this.allDerived();
+    return this.registry.published();
+  }
+
   private beneath(directory: string): void {
     this.queue.rederive(this.projects.rowsBeneath(directory));
   }
@@ -327,7 +363,7 @@ export class Statements {
     const decided = await this.oneAtATime(() => this.admit(directory, declare, options));
     if (!('derived' in decided)) return decided.answer as T & Decided;
     const { answer, derived } = decided;
-    const { restated } = await this.registry.published();
+    const { restated } = await this.restate();
     return { ...answer, project: this.projects.record(answer.project.id), ...(derived === null ? {} : { by: derived.by, at: derived.at }), restated } as T & Decided;
   }
 
@@ -350,24 +386,26 @@ export class Statements {
       const shape = await this.prospective(folder, files, { ...(into === undefined ? {} : { into }), ...(own === true ? { own } : {}) }, reads);
       if (!this.registry.fits([...before.filter((row) => row.path !== folder), shape])) refuse('too-many-locations', 'the declared folders would not fit one projects record');
     }
-    const answer = declare(reads);
-    // a statement kept on a removed row counts again, for the folder and the rows beneath it
-    if (!wasDeclared) this.beneath(answer.project.directory);
-    if (!this.registry.statements().possible || this.context === null) return { answer };
-    const id = answer.project.id;
-    let derived = await this.deriveId(id, files, reads);
-    let changed = false;
-    const row = this.projects.statementRow(id);
-    // review 1, finding 11: the broadest folders are minted only by an add of that very folder, never one that folds to it
-    const explicit = folder === row.directory;
-    if (own === true && row.linked !== null) changed = this.projects.setLink(id, null, readAnchor(row.directory)); // finding 10
-    if (derived !== null && row.minted === null && (own === true || derived.by === 'machine') && this.mintable(row.directory, explicit)) changed = this.mintRow(id) || changed;
-    if (into !== undefined) changed = this.projects.setLink(id, into, readAnchor(row.directory)) || changed;
-    if (changed) {
-      derived = await this.deriveId(id, files, reads);
-      this.beneath(row.directory);
-    }
-    return { answer, derived };
+    return this.rederiving(async () => {
+      const answer = declare(reads);
+      // a statement kept on a removed row counts again, for the folder and the rows beneath it
+      if (!wasDeclared) this.beneath(answer.project.directory);
+      if (!this.registry.statements().possible || this.context === null) return { answer };
+      const id = answer.project.id;
+      let derived = await this.deriveId(id, files, reads);
+      let changed = false;
+      const row = this.projects.statementRow(id);
+      // review 1, finding 11: the broadest folders are minted only by an add of that very folder, never one that folds to it
+      const explicit = folder === row.directory;
+      if (own === true && row.linked !== null) changed = this.projects.setLink(id, null, readAnchor(row.directory)); // finding 10
+      if (derived !== null && row.minted === null && (own === true || derived.by === 'machine') && this.mintable(row.directory, explicit)) changed = this.mintRow(id) || changed;
+      if (into !== undefined) changed = this.projects.setLink(id, into, readAnchor(row.directory)) || changed;
+      if (changed) {
+        derived = await this.deriveId(id, files, reads);
+        this.beneath(row.directory);
+      }
+      return { answer, derived };
+    });
   }
 
   /** `addFolder`'s act: the folder by the membership rule, then `declare`. */
@@ -407,12 +445,15 @@ export class Statements {
       await this.target(into, row.directory, files);
     }
     if (files !== undefined && row.linked !== into) await this.linkReadable(row, into, files);
-    const changed = this.projects.setLink(id, into, anchor);
+    const changed = await this.rederiving(async () => {
+      if (!this.projects.setLink(id, into, anchor)) return false;
+      if (files === undefined) await this.deriveId(id);
+      else await this.deriveThrough(id, files);
+      return true;
+    });
     if (!changed) return { project: this.projects.record(id), restated: true };
-    if (files === undefined) await this.deriveId(id);
-    else await this.deriveThrough(id, files);
     this.beneath(row.directory);
-    const { restated } = await this.registry.published();
+    const { restated } = await this.restate();
     return { project: this.projects.record(id), restated };
   }
 
@@ -426,12 +467,15 @@ export class Statements {
     const folder = canonicalFolder(directory);
     const anchor = folder === null ? null : readAnchor(folder);
     if (folder === null || anchor === null) refuse('not-a-directory', directory);
-    const moved = this.projects.relocate(id, folder, anchor);
+    const moved = await this.rederiving(async () => {
+      const relocated = this.projects.relocate(id, folder, anchor);
+      if (!('refused' in relocated)) await this.deriveId(id, files);
+      return relocated;
+    });
     if ('refused' in moved) refuse('has-statement', `${folder} is a folder with a stored statement of its own`);
-    await this.deriveId(id, files);
     this.beneath(row.directory);
     if (folder !== row.directory) this.beneath(folder);
-    const { restated } = await this.registry.published();
+    const { restated } = await this.restate();
     return { project: this.projects.record(id), merged: moved.merged, restated };
   }
 
@@ -457,24 +501,26 @@ export class Statements {
    */
   async remove(id: ProjectId, expect?: { path: string; project: string | null }, { files }: { files?: GitFiles } = {}): Promise<void> {
     const { directory } = this.projects.statementRow(id);
-    if (expect === undefined) {
-      this.projects.hide(id);
-    } else {
-      for (let attempt = 0; ; attempt += 1) {
-        if (attempt === 3) refuse('unresolved', 'the rule kept changing: try again');
-        const gen = this.projects.statementsGen();
-        const row = this.projects.statementRow(id);
-        if (row.directory !== expect.path) refuse('changed', `the location is at ${row.directory} now`);
-        const project = await this.projectNow(row, files);
-        if (project === undefined) refuse('unresolved', 'the rule has no answer now: try again');
-        if (project !== expect.project) refuse('changed', `the location is in ${project ?? "this machine's own project"} now`);
-        if (this.projects.hideAt(id, gen)) break;
+    await this.rederiving(async () => {
+      if (expect === undefined) {
+        this.projects.hide(id);
+      } else {
+        for (let attempt = 0; ; attempt += 1) {
+          if (attempt === 3) refuse('unresolved', 'the rule kept changing: try again');
+          const gen = this.projects.statementsGen();
+          const row = this.projects.statementRow(id);
+          if (row.directory !== expect.path) refuse('changed', `the location is at ${row.directory} now`);
+          const project = await this.projectNow(row, files);
+          if (project === undefined) refuse('unresolved', 'the rule has no answer now: try again');
+          if (project !== expect.project) refuse('changed', `the location is in ${project ?? "this machine's own project"} now`);
+          if (this.projects.hideAt(id, gen)) break;
+        }
       }
-    }
-    // its statement no longer counts: the folder and the rows beneath it derived again
-    await this.deriveId(id, files);
+      // its statement no longer counts: the folder and the rows beneath it derived again
+      await this.deriveId(id, files);
+    });
     this.beneath(directory);
-    if (this.registry.statements().possible) await this.registry.published();
+    if (this.registry.statements().possible) await this.restate();
   }
 
   /**
@@ -502,9 +548,17 @@ export class Statements {
     const row = this.projects.statementRow(id);
     if (!row.declared || row.minted !== null || !this.mintable(row.directory, false)) return;
     const derived = await this.deriveId(id);
-    if (derived?.by !== 'machine' || !this.mintRow(id)) return;
-    await this.deriveId(id);
-    this.beneath(row.directory);
+    if (derived?.by !== 'machine') return;
+    if (await this.mintDerived(id)) this.beneath(row.directory);
+  }
+
+  /** A row minted and derived again under its new statement (`rederiving`); false when it could not be minted. */
+  private mintDerived(id: ProjectId): Promise<boolean> {
+    return this.rederiving(async () => {
+      if (!this.mintRow(id)) return false;
+      await this.deriveId(id);
+      return true;
+    });
   }
 
   /**
@@ -538,11 +592,13 @@ export class Statements {
           }),
         ),
       );
-      for (const id of candidates) if (!this.mintRow(id) && this.projects.statementRow(id).minted === null) unfound.push(id);
-      for (const id of candidates) {
-        await this.deriveId(id);
-        this.beneath(this.projects.statementRow(id).directory);
-      }
+      await this.rederiving(async () => {
+        for (const id of candidates) if (!this.mintRow(id) && this.projects.statementRow(id).minted === null) unfound.push(id);
+        for (const id of candidates) {
+          await this.deriveId(id);
+          this.beneath(this.projects.statementRow(id).directory);
+        }
+      });
       this.projects.setMeta('minting_pending', JSON.stringify(unfound));
       this.projects.setMeta('minting', '1');
     } finally {
@@ -600,10 +656,7 @@ export class Statements {
         continue;
       }
       if (!this.registry.statements().possible || !row.declared || row.minted !== null || !this.mintable(row.directory, false)) continue;
-      if ((await this.deriveId(id))?.by === 'machine' && this.mintRow(id)) {
-        await this.deriveId(id);
-        this.beneath(row.directory);
-      }
+      if ((await this.deriveId(id))?.by === 'machine' && (await this.mintDerived(id))) this.beneath(row.directory);
     }
     this.projects.setMeta('minting_pending', JSON.stringify(left));
   }
@@ -617,18 +670,29 @@ export class Statements {
     }
   }
 
-  /** What the endpoint reads of the index (§H): null while the index is not available or a declared row is underived. */
+  /**
+   * What the endpoint reads of the index (§H): null while the index is not available, a declared row is underived, or a
+   * statement change awaits its row's derivation (panel 1, scalpel-5#1).
+   */
   source(): ProjectsSource {
     return {
       snapshot: () => {
-        if (this.projects.unavailable || !this.projects.declaredDerived()) return null;
+        if (this.projects.unavailable || this.deriving > 0 || !this.projects.declaredDerived()) return null;
         return { indexId: this.projects.indexId(), rows: this.projects.declaredRows(), statements: this.projects.keptStatements() };
       },
       restore: (statements) => {
         this.projects.restore(statements);
         this.queue.rederive(this.projects.orgRows());
       },
-      onChange: (listener) => this.projects.onChange(() => listener()),
+      onChange: (listener) => {
+        const off = this.projects.onChange(() => listener());
+        const told = () => listener();
+        this.rederived.add(told);
+        return () => {
+          off();
+          this.rederived.delete(told);
+        };
+      },
     };
   }
 }
