@@ -11,9 +11,12 @@
 //       connects to the same pid through the same `mawsd`, the failure's Needs-you item (derived only from the
 //       undelivered tail) and the request's show once each, `engine.budget` answers from the kept supervisor, rows keep
 //       arriving, and the finished transcript equals a control run's without the quit;
+//   (c) G3: kill -9 of the engine host mid-turn with a replay session nothing can adopt: the crash toast says it was
+//       interrupted, Diagnostics shows the new pid and its crash line, the session is not live;
 //   (d) G3: Settings' Stop all: the old supervisor exits, a fresh one starts under the same `mawsd` and launches;
 //   (e) G3: the idle release (`idle`), then the engine host parked and `mawsd` gone once idle, after a keep-quit and
-//       after a kill -9 of the app;
+//       after a kill -9 of the app; and an app relaunched after an idle release reads the session as released while
+//       idle (its status, its last event, the sidebar's mark);
 //   (f) an update (another build id), the seams passed to a fresh `mawsd`: the banner, Restart now, a new pid; P5 O16
 //       M3c: that is an older engine host's (one without `host.holder`); a capable one hands its live session over at
 //       once to a successor that adopts it, with no banner, and a handover deferred by a tool call in flight ends with
@@ -35,12 +38,12 @@
 //       fake observer on the engine host's gate.sock, the release's `arm` arrives, the scene answers `armed` and the
 //       session is released; a `turn` after the arm is answered `proceed` and the session stays live another period;
 //       an observer gone silent holds its session past two periods.
-// The evidence (`relaunch.txt`, `idle.txt`, the screenshots in both themes) is written from what the cases observe,
-// under MAWS_E10_SHOTS=1 only (E11 W-E: a gate run leaves the committed evidence alone; the both-themes token scans run
-// either way). Run by `pnpm e2e:supervisor-daemon` (MAWS_SUPERVISOR_E2E=1), part of `pnpm verify`.
+// The evidence (`relaunch.txt`, `crash.txt`, `idle.txt`, the screenshots in both themes) is written from what the cases
+// observe, under MAWS_E10_SHOTS=1 only (E11 W-E: a gate run leaves the committed evidence alone; the both-themes token
+// scans run either way). Run by `pnpm e2e:supervisor-daemon` (MAWS_SUPERVISOR_E2E=1), part of `pnpm verify`.
 // P5 O15 M1 (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md): the embedded shape's runs are gone with that
-// shape; the cases it alone ran ((c), a replay launch's crash with nothing to adopt it, and the embedded halves of (a),
-// (e) and (h)) went with them, and every case here runs on the daemon shape.
+// shape; the cases it alone had (the embedded halves of (a) and (h)) went with them, and every case here runs on the
+// daemon shape, (c) and (e)'s relaunch reading among them (ported: shared behaviour).
 // P5 O16 M2b (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M2; D28, D31): cases (a), (b), (e) and (m) run their
 // sessions on the stub engine (e2e/support/stub-engine.ts), a real process playing the same fixtures under a real session
 // host, rather than the in-process replay, which spawns nothing; (a) adds a live session whose engine, session host and
@@ -144,6 +147,18 @@ async function shots(maws: MawsLaunch, name: string, target: () => Locator | nul
     if (element) await element.screenshot({ path });
     else await page.screenshot({ path });
   }
+}
+
+async function openDiagnostics(maws: MawsLaunch): Promise<Locator> {
+  const strip = maws.page.getByRole('region', { name: 'Diagnostics' });
+  await expect
+    .poll(async () => {
+      if (await strip.isVisible()) return true;
+      await maws.app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('diagnostics.open')?.click());
+      return strip.isVisible();
+    }, { timeout: 10_000, message: 'Help › Diagnostics opens the Diagnostics tab' })
+    .toBe(true);
+  return strip;
 }
 
 const banner = (page: Page, text: string) => page.locator('[data-banner-host]').getByRole('status').filter({ hasText: text });
@@ -434,6 +449,70 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
   });
 });
 
+// P5 O15 M1 (the architect's ruling: shared behaviour, ported): a replay launch, which no session host holds, so
+// nothing survives the kill and the successor `mawsd` starts has nothing to adopt; (c′) is the adopted form. `mawsd`
+// started the engine host, so main reads no signal.
+test('(c) G3: kill -9 of the engine host mid-turn with a session nothing can adopt: the crash toast says it was interrupted, Diagnostics shows the new pid, the session is not live', async () => {
+  await withScratch('crash', async (s) => {
+    const run = await s.launch();
+    const before = await s.ready(run.page);
+    const old = before.supervisor!.pid;
+    const daemonPid = before.daemon!.pid;
+    const id = await s.record(run.page);
+    const row = await showSession(run.page, id);
+    await startTurn(run.page, s, id);
+    await untilRequested(run.page, id);
+    await expect(submitOf(run.page)).toHaveAttribute('data-submit-state', 'stop');
+
+    process.kill(old, 'SIGKILL');
+    const killedAt = new Date().toISOString();
+    const toast = run.page.getByText(/^The session supervisor stopped unexpectedly/);
+    await expect(toast).toHaveText('The session supervisor stopped unexpectedly; 1 session was interrupted. Their transcripts are on disk; open one to resume.', { timeout: 60_000 });
+    await toast.hover(); // a hovered toast stays
+    const restarted = await s.ready(run.page, (st) => st.supervisor!.pid !== old);
+    const fresh = restarted.supervisor!.pid;
+    expect(restarted.lastExit).toMatchObject({ code: null, signal: null, interrupted: 1 });
+    expect(s.lock()?.pid).toBe(fresh);
+    expect(restarted.daemon!.pid, 'mawsd serves on').toBe(daemonPid);
+
+    // the renderer drops the dead host's statuses: the composer no longer offers Stop, the glyph is not live; P2-A: Send
+    // offers to start the session again
+    await expect(submitOf(run.page)).toHaveAttribute('data-submit-state', 'send');
+    await expect(submitOf(run.page)).toHaveAttribute('aria-description', 'Starts this session');
+    await expect(glyphOf(row)).not.toHaveAttribute('aria-label', /Working|Needs approval/);
+    const composer = `"${await submitOf(run.page).textContent()}" (${await submitOf(run.page).getAttribute('title')})`;
+    // the transcript closes the dead turn once the successor's table does not list the session: stopped, not Working
+    await expect(run.page.getByText('Session process exited (crash)')).toBeVisible();
+    await expect(run.page.getByRole('button', { name: /Stopped after .*\(engine process exited\)/ })).toBeVisible(); // the human turn's divider, in the engine's words (E11)
+    await expect(run.page.getByText(/^Working/)).toHaveCount(0);
+    await expect(toast).toBeVisible();
+    await shots(run.maws, 'notice-crashed', () => null);
+    const sessions = value(await invoke(run.page, 'engine.sessions', undefined));
+    expect(sessions.filter((st) => st.appSessionId === id && st.process !== 'exited'), 'the new engine host holds no live row of it').toEqual([]);
+
+    const strip = await openDiagnostics(run.maws);
+    const supervisorRow = strip.getByRole('status', { name: 'supervisor' });
+    await expect(supervisorRow).toContainText(`pid ${fresh}`);
+    await expect(supervisorRow).toContainText(new RegExp(`last unexpected exit ${CLOCK} · 1 interrupted`));
+    await expect(strip.getByRole('status', { name: 'mawsd' }), 'Diagnostics’ daemon row keeps mawsd’s pid').toContainText(`mawsd · private · pid ${daemonPid} · `);
+    const rowText = (await supervisorRow.textContent())!;
+    await shots(run.maws, 'diagnostics-supervisor', () => strip);
+    expect(run.maws.consoleErrors()).toEqual([]);
+    evidence('crash.txt', [
+      'E10 G3: kill -9 of the engine host mid-turn, on the daemon shape (e2e/supervisor.spec.ts case (c))',
+      `engine host pid ${old} killed with SIGKILL at ${killedAt}, the session mid-turn at its permission request; mawsd pid ${daemonPid}`,
+      `toast: ${await toast.textContent().catch(() => '(gone)')}`,
+      `host.status after the restart: state ${restarted.state}, pid ${fresh}, lastExit ${JSON.stringify(restarted.lastExit)}`,
+      `Diagnostics: ${rowText}`,
+      `the composer reads ${composer}; engine.sessions lists no live row of the session`,
+      `the lock names pid ${s.lock()?.pid}`,
+      '',
+      'host.log (the killed engine host, then its successor):',
+      ...s.log().split('\n').filter(Boolean).map((l) => `  ${l}`),
+    ]);
+  });
+});
+
 // ---- P5 O16 M3c: the handover's scenes --------------------------------------------------------------------------------
 
 // The session's own checks after an adoption, then its turn played out: live with the same engine pid and adopted, its
@@ -579,6 +658,46 @@ test('(e) G3: an idle kept session is released as idle, then the engine host is 
     lines.push(`  ${at()} the engine host parked and mawsd exited by itself`);
   });
   evidence('idle.txt', lines);
+});
+
+// P5 O15 M1 (the architect's ruling: shared behaviour, ported): the relaunched app reads a session released as idle
+// while it was closed. A second session held mid-turn at its request keeps the engine host (and so its table, where the
+// release is recorded) from `mawsd`'s park, whose exit when idle waits for every session to be idle; the idle release
+// leaves an open turn alone.
+test('(e) G3: an app relaunched after an idle release reads the session as released while idle: its status, its last event and the sidebar’s mark', async () => {
+  const IDLE_MS = 10_000;
+  const env = { MAWS_E2E_SUPERVISOR_IDLE_MS: String(IDLE_MS), MAWS_E2E_REPLAY_ROW_MS: '1500' };
+  const released = (s: Scratch, id: string) => s.journal(id).find((r) => r.direction === 'meta' && r.frame.event === 'exit');
+  const ended = (s: Scratch, id: string) => s.journal(id).some((r) => r.direction === 'in' && r.frame.type === 'command_lifecycle' && r.frame.state === 'completed');
+  await withScratch('idle-relaunch', async (s) => {
+    const fixture = turnsJournal(s.root, 'idle', 1);
+    s.useStub({ rowMs: 1500 });
+    const first = await s.launch(env);
+    const status = await s.ready(first.page);
+    const pid = status.supervisor!.pid;
+    const daemon = status.daemon!.pid;
+    const held = `e10-idle-held-${Date.now()}` as AppSessionId;
+    await startTurn(first.page, s, held); // the permission round trip: its turn stays open, held at its request
+    const id = await s.record(first.page);
+    await startTurn(first.page, s, id, fixture, 'turn 1');
+    await s.quit(first);
+    expect(first.quitLines(), 'nothing is asked: both sessions outlive the app').toEqual([expect.stringMatching(/not asked: they outlive the app$/)]);
+    await expect.poll(() => ended(s, id), { timeout: 30_000, message: 'the turn ends while the app is closed' }).toBe(true);
+    await expect.poll(() => released(s, id)?.frame.reason, { timeout: IDLE_MS + 15_000, message: 'the idle row is released' }).toBe('idle');
+    expect(released(s, held), 'the held session, mid-turn, is not released').toBeUndefined();
+    expect([isAlive(pid), isAlive(daemon)], 'the engine host and mawsd serve the held session').toEqual([true, true]);
+
+    // relaunched: the same engine host; the session reads released, as idle
+    const second = await s.launch(env);
+    const again = await s.ready(second.page);
+    expect([again.supervisor!.pid, again.daemon!.pid], 'the same engine host, through the same mawsd').toEqual([pid, daemon]);
+    expect(await statusOf(second.page, id)).toMatchObject({ process: 'exited', exit: { reason: 'idle' } });
+    const exits = (await eventsOf(second.page, id)).filter((e) => e.kind === 'process.exited');
+    expect(exits.map((e) => (e as Extract<SessionEvent, { kind: 'process.exited' }>).reason), 'session.events ends the launch with process.exited, reason idle').toEqual(['idle']);
+    const row = await rowOf(second.page, id);
+    await expect(row.locator('[data-released-mark]')).toHaveAttribute('title', /while idle/);
+    expect(second.maws.consoleErrors()).toEqual([]);
+  });
 });
 
 // A kept session mid-turn at its request, and the app quit with keep; returns the supervisor's pid. The e2e seams are

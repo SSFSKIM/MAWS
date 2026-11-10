@@ -9,8 +9,8 @@
 // P5 O15 M1 (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md): both apps run on the daemon shape there, the
 // crossing every swap makes: the attaching app meets the keeper's private `mawsd`, of the other build, and its build
 // check has it restart onto the attacher's (src/main/hosts/daemon.ts, watchDaemon), the kept engine host running on
-// under the new `mawsd`. A peer this build's `mawsd` and app do not cross with on that shape (one before O4, whose app
-// lists no `machine.connectors`: D11) runs on its embedded shape's detached supervisor, as the scenes below pin it.
+// under the new `mawsd`. A peer this build's `mawsd` refuses (one before O4, whose app lists no `machine.connectors`:
+// D11) skips both, saying so; the scenes below that pin the peer to its embedded shape cover it.
 // In each, the attaching app's hello crosses the minor (host.log names the app's wire, the app's main the supervisor's),
 // the app is served as another build (`matches: 'build'`, the update banner, exit-when-idle armed), the kept session's
 // tail reaches its main (the background failure journaled while no app ran raises the Needs-you item only main's live
@@ -245,10 +245,8 @@ const DROPPED = /dropped \S+ from .*, a field this build does not know|dropped e
 type Shape = 'detached' | 'daemon';
 interface Shapes { keeper: Shape; attacher: Shape }
 const DAEMON_SHAPE_MINOR = 5; // P5 O2's wire minor: a build at or past it knows the daemon shape, and leaves it on purpose
-// P5 O15 M1: the shape a build's app runs in (update) and (downgrade): this build's the daemon's; the peer's the daemon's
-// too when its app crosses with this build's `mawsd` there (it lists `machine.connectors`, D11), else its embedded one
-const shapeFor = (build: Build): Shape => (build.root === undefined || appObeysConnectors(build) ? 'daemon' : 'detached');
-const shapesOf = (keeper: Build, attacher: Build): Shapes => ({ keeper: shapeFor(keeper), attacher: shapeFor(attacher) });
+// P5 O15 M1: (update) and (downgrade) run both builds on the daemon shape
+const ON_MAWSD: Shapes = { keeper: 'daemon', attacher: 'daemon' };
 const onShape = (shape: Shape) => (st: HostStatus) => shape === 'detached' || st.daemon !== null; // the daemon shape's main also knows its mawsd
 // P5 O15 M1: and the attacher's on its own `mawsd`, not the keeper's it met first and had restart (`keeperDaemon`)
 const onOwnShape = (shape: Shape, keeperDaemon: number | null) => (st: HostStatus) => onShape(shape)(st) && (shape === 'detached' || st.daemon!.pid !== keeperDaemon);
@@ -916,14 +914,23 @@ async function unreadableRows(page: Page, artifactId: string): Promise<string[] 
 
 test.beforeEach(() => test.setTimeout(240_000));
 
+// P5 O15 M1: a peer whose app lists no `machine.connectors` (before O4) is refused by this build's `mawsd` on each of
+// its sockets (D11), so it cannot run on the daemon shape beside this build: (pre-O4 app, daemon) holds that refusal,
+// and (update, daemon) and (downgrade, daemon) cross with it on its embedded shape
+const crossesOnMawsd = (peer: Build) => [appObeysConnectors(peer), `the peer (wire ${wireOf(peer)}) lists no ${CONNECTORS_CLIENT_CAPABILITY}: this build's mawsd refuses its app (D11), so it cannot cross on the daemon shape; (pre-O4 app, daemon) holds the refusal`] as const;
+
 test('(update) the older build’s app keeps a session; the newer build’s app attaches across the minor, is served, launches, meets what the older lacks, and moves to its own supervisor', async () => {
-  const { older, newer } = builds();
-  await withScratch('xb-update', async (s) => record(await crossing(s, older, newer, { newer, older }, shapesOf(older, newer))));
+  const { older, newer, peer } = builds();
+  const [crosses, why] = crossesOnMawsd(peer);
+  test.skip(!crosses, why);
+  await withScratch('xb-update', async (s) => record(await crossing(s, older, newer, { newer, older }, ON_MAWSD)));
 });
 
 test('(downgrade) the newer build’s app keeps a session; the older build’s app attaches across the minor, is served, launches, and moves to its own supervisor', async () => {
-  const { older, newer } = builds();
-  await withScratch('xb-downgrade', async (s) => record(await crossing(s, newer, older, null, shapesOf(newer, older))));
+  const { older, newer, peer } = builds();
+  const [crosses, why] = crossesOnMawsd(peer);
+  test.skip(!crosses, why);
+  await withScratch('xb-downgrade', async (s) => record(await crossing(s, newer, older, null, ON_MAWSD)));
 });
 
 // P5 O4 M4 (acceptance 3's old-host rule at app level, acceptance 10): besides which engine host lists host.connectors
