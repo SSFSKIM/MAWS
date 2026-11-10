@@ -41,7 +41,7 @@ refusals() { # <the jobs, "conclusion<TAB>name" lines> <the failed jobs' logs>
       sub(/ \((EC2|mini) overflow\)$/, "", job)
       if (job ~ /^e2e-build \([^)]+\)$/) { build = 1; return }
       if (job ~ /^(unit|packaged) [0-9]+\/[0-9]+$/) sub(/ [0-9]+\/[0-9]+$/, "", job)
-      if (job == "static-local" || job ~ /^static \/ /) job = "static"
+      if (job == "docs" || job == "static-local" || job ~ /^static \/ /) job = "static"
       if (!(job in named)) { named[job] = 1; gates = gates "," job }
     }
     BEGIN { n = split(ENVIRON["refused"], names, "\n"); for (i = 1; i <= n; i++) isrefused[names[i]] = 1 }
