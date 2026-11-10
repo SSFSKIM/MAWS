@@ -206,26 +206,70 @@ const capabilityLine = (caps) =>
 
 // --- the run -------------------------------------------------------------------------------------------------------
 
+// A request the link itself failed (no answer, the socket gone), as against an error mawsd answered.
+const linkFailed = (error) => /did not answer|closed the connection|ECONN|EPIPE|no answer to the hello/.test(error instanceof Error ? error.message : String(error));
+
 /**
- * The session's end, once however many ask (the run's end, a signal): `session.stop`, bounded; a refusal, a timeout or
- * an answer that the process did not exit is a FAIL naming the session, to stop by hand.
+ * Ends session `app` however the run ends (its end, a signal, a start that failed or never answered), bounded, and says
+ * whether it is ended. `start` is the `session.start` request's promise (null when none was sent): a pending one is
+ * awaited first, at most `startMs`. Then `session.stop`, and the session is watched for `settleMs` and stopped again
+ * whenever it shows a live process, since the daemon's setup runs past start's answer (src/services/sessions/service.ts)
+ * and may launch after a first stop. An error mawsd answers to a stop or a status read (an unknown session, nothing
+ * running) counts as not running; a request the link failed counts as unread, and the session as not shown ended.
  */
-function ender(link, app, verdicts) {
-  let ending = null;
-  return () =>
-    (ending ??= (async () => {
-      const stopped = await link.request('session.stop', { appSessionId: app, reason: 'stop' }, 60_000).catch((error) => ({ failed: error instanceof Error ? error.message : String(error) }));
-      const ok = stopped.failed === undefined && stopped.exited === true;
-      say(`${now()} session ${app} ended: ${stopped.failed ?? `exited ${String(stopped.exited)}`}`);
-      verdicts.push([ok, ok ? `the session ${app} ended` : `the session ${app} was not ended (${stopped.failed ?? `exited ${String(stopped.exited)}`}): stop it by hand`]);
-    })());
+export async function endSession(link, app, start, { startMs = 30_000, settleMs = 30_000, everyMs = 2000, stopMs = 60_000 } = {}) {
+  if (start !== null) await Promise.race([Promise.resolve(start).catch(() => {}), sleep(startMs)]);
+  const said = [];
+  let unread = false;
+  const stop = async () => {
+    try {
+      const r = await link.request('session.stop', { appSessionId: app, reason: 'stop' }, stopMs);
+      said.push(`stop: exited ${String(r?.exited)}`);
+    } catch (error) {
+      if (linkFailed(error)) unread = true;
+      said.push(`stop: ${linkFailed(error) ? 'unanswered' : 'not running'} (${error instanceof Error ? error.message : String(error)})`);
+    }
+  };
+  /** `live`, `ended`, or `unread` (the link failed). */
+  const state = async () => {
+    try {
+      const s = await link.request('session.status', { appSessionId: app }, 10_000);
+      return s?.process === undefined || s.process === 'exited' ? 'ended' : 'live';
+    } catch (error) {
+      return linkFailed(error) ? 'unread' : 'ended';
+    }
+  };
+  await stop();
+  let last = await state();
+  const deadline = Date.now() + settleMs;
+  while (last !== 'unread' && Date.now() < deadline) {
+    if (last === 'live') await stop();
+    await sleep(everyMs);
+    last = await state();
+  }
+  if (last === 'live') {
+    await stop();
+    last = await state();
+  }
+  const ok = !unread && last === 'ended';
+  return { ok, detail: `${said.join('; ')}; last read ${last}` };
 }
 
 async function run(link, profile, directory, title, verdicts, onSession) {
   if (!existsSync(directory)) throw new Error(`no directory ${tilde(directory)}: run in a directory already trusted on this machine (--list-trusted)`);
   const { appSessionId: app } = await link.request('session.create', { projectId: null, location: { kind: 'directory', path: directory } });
   say(`${now()} session ${app} created`);
-  let stop = null;
+  // The session's end, from here on, once however many ask (the run's end, a signal): a start sent is awaited first,
+  // and a run that never saw the session ready watches it longer, for a launch its setup makes late.
+  let starting = null;
+  let launched = false;
+  let ending = null;
+  const stop = () =>
+    (ending ??= endSession(link, app, starting, { settleMs: launched ? 4000 : 30_000 }).then(({ ok, detail }) => {
+      say(`${now()} session ${app} end: ${detail}`);
+      verdicts.push([ok, ok ? `the session ${app} ended` : `the session ${app} is not shown ended (${detail}): stop it by hand`]);
+    }));
+  onSession(stop);
   try {
     const before = await link.request('session.capabilities', { appSessionId: app });
     say(`${now()} capabilities before the start: ${JSON.stringify(before)}`);
@@ -237,11 +281,10 @@ async function run(link, profile, directory, title, verdicts, onSession) {
     say(`${now()} start`);
     // the model through the machine's managed settings, so the engine's own route: `direct`
     // No trust decision is sent: the run trusts nothing, so the directory must be trusted already.
-    const outcome = await link.request('session.start', { appSessionId: app, message: { content: PROMPT, display: title }, options: { gateway: 'direct' } }, 120_000);
+    starting = link.request('session.start', { appSessionId: app, message: { content: PROMPT, display: title }, options: { gateway: 'direct' } }, 120_000);
+    const outcome = await starting;
     if (outcome?.status === 'needs_trust') throw new Error(`not trusted: run in a directory already trusted on this machine (its trust key ${tilde(outcome.trust?.trustKey)} in ${tilde(outcome.trust?.configPath)}; --list-trusted)`);
     if (outcome?.status !== 'starting') throw new Error(`session.start answered ${String(outcome?.status)}`);
-    stop = ender(link, app, verdicts);
-    onSession(stop);
     const renamed = await until(() => link.request('session.rename', { appSessionId: app, title }), (r) => r?.record !== undefined, `the session named "${title}"`, 60_000, 2000);
     say(`${now()} named "${title}" (${renamed.via})`);
 
@@ -265,6 +308,7 @@ async function run(link, profile, directory, title, verdicts, onSession) {
       }
       const status = await link.request('session.status', { appSessionId: app }).catch(() => null);
       model = status?.model ?? model;
+      if (status?.process === 'ready') launched = true;
       if (status?.turn === null && status?.process === 'ready' && turns.length > 0) break;
       if (Date.now() > deadline) throw new Error(`the turn did not end within ${TURN_MS / 1000} s`);
       await sleep(2000);
@@ -283,13 +327,27 @@ async function run(link, profile, directory, title, verdicts, onSession) {
     verdicts.push([shot !== null && !shot.isError && shot.status === 'captured' && shot.image?.mimeType === 'image/png' && shot.image.png, `artifact_screenshot: ${shot === null ? 'never called' : `${shot.isError ? 'an error result, ' : ''}${String(shot.status)}, ${shot.image === null ? 'no image' : `${shot.image.mimeType}, ${shot.image.bytes} bytes, ${shot.image.png ? `a PNG ${shot.image.width}x${shot.image.height}` : 'not a PNG with a size'}`}`}`]);
     verdicts.push([file !== null && !file.isError && file.status === 'exported' && file.underStore && file.pdf, `artifact_export: ${file === null ? 'never called' : `${file.isError ? 'an error result, ' : ''}${String(file.status)}, ${String(file.format)}, ${file.bytes} bytes, ${file.pdf ? 'a PDF' : 'not a whole PDF'} ${file.underStore ? 'under' : 'outside'} the profile's artifact store`}`]);
   } finally {
-    await stop?.();
+    await stop();
   }
 }
 
-/** The project paths the engine's global config records as trusted: path strings alone, nothing else of the file. */
+/**
+ * The global config file the engine reads, as src/shared/engine/config-dir.ts's `configFilePath` selects it (a script on
+ * the machine cannot import the TS; test/deploy/o15-tools.test.ts holds the two to one answer): the legacy
+ * `<CLAUDE_CONFIG_DIR or ~/.claude>/.config.json` when it exists, else `<CLAUDE_CONFIG_DIR or ~>/.claude<suffix>.json`,
+ * the suffix `-custom-oauth` under CLAUDE_CODE_CUSTOM_OAUTH_URL.
+ */
+export function configFilePath(env, exists = existsSync) {
+  const home = env.HOME || homedir();
+  const legacy = join(env.CLAUDE_CONFIG_DIR || join(home, '.claude'), '.config.json');
+  if (exists(legacy)) return legacy;
+  return join(env.CLAUDE_CONFIG_DIR || home, `.claude${env.CLAUDE_CODE_CUSTOM_OAUTH_URL ? '-custom-oauth' : ''}.json`);
+}
+
+/** The project paths the engine's global config records as trusted: path strings alone, nothing else of the file. Read
+ * under this shell's environment: mawsd's engine reads it under the unit's, which a needs_trust answer names. */
 function listTrusted() {
-  const config = join(process.env.CLAUDE_CONFIG_DIR || homedir(), '.claude.json');
+  const config = configFilePath(process.env);
   let projects;
   try {
     projects = JSON.parse(readFileSync(config, 'utf8'))?.projects;
@@ -316,11 +374,12 @@ async function main(argv) {
   const report = () => {
     for (const [ok, line] of verdicts) say(`${ok ? 'PASS' : 'FAIL'} ${line}`);
   };
-  // An INT or TERM: the same bounded end of the session (session.stop's 60 s), then a non-zero exit.
+  // An INT or TERM: the same bounded end of the session (a pending start's 30 s, a stop's 60 s, the watch's 30 s), then
+  // a non-zero exit; before session.create answered there is no session to end.
   let stop = null;
   const interrupted = async (signal) => {
     say(`${now()} ${signal}: ending the session`);
-    const bound = sleep(75_000).then(() => verdicts.push([false, 'the session’s end did not settle within 75 s: stop it by hand']));
+    const bound = sleep(150_000).then(() => verdicts.push([false, 'the session’s end did not settle within 150 s: stop it by hand']));
     await Promise.race([stop?.() ?? Promise.resolve(), bound]);
     verdicts.push([false, `interrupted by ${signal}`]);
     link.close();

@@ -856,7 +856,7 @@ runs and two scripts beside them:
   message carries `verified`, its owners naming B" reads A1's stored line through `vm/scene.sh events`, which keeps
   `verified` (the signer and owners sminos stored an arriving event with).
 - Row 10, `node vm/o15-tools.mjs <directory> [--title <name>]` in a directory already trusted there (`--list-trusted`
-  prints the trusted paths; the run trusts nothing), run on a production machine as its user against the
+  prints the trusted paths of the config file the engine reads, and names it; the run trusts nothing), run on a production machine as its user against the
   unit's `mawsd` over machine.sock with no app on the session: one lane B session on the real model, named "O15 row 10
   dry run" by default and ended however the run ends, makes and screenshots an html artifact and exports a document as
   a PDF, with `session.capabilities` read before the start and after the turn; it answers only the `maws` artifact
