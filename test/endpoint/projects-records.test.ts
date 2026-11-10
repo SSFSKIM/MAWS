@@ -670,8 +670,10 @@ describe('panel 1', () => {
     const rival = await signRecord(SIGNING_DOMAINS.machineCert, { org: ORG, machine: mintRef(dId), name: 'dl-one', pub: (await generateSigningKey()).pub, delegation: dId, use: 2, issued: new Date().toISOString() }, delegationKey.privateKey, delegationKey.pub);
     let certificates: Certificates = { certs: [cert], retirements: [] };
     const h = new HeldProjects({ ref: () => w.ref, ownKeyId: () => w.kid, head: () => ({ state: w.head.state, certificates }), now: Date.now, store: w.heldStore, own: () => {}, changed: () => {}, snapshotEnded: () => {}, log: (line) => void w.lines.push(line) });
-    const vmRecord = (revision: number, path: string) =>
-      signRecord(SIGNING_DOMAINS.projects, { org: ORG, machine: dRef, revision, issued: new Date().toISOString(), locations: [{ pid: 'dl-pid', id: 'id-dl', key: `folder:${dRef}:dl-pid`, name: 'dl', path, source: 'folder', stated: 'minted' }], known: [] }, dKey.privateKey, dKey.pub);
+    const vmRecord = (revision: number, path: string): Promise<Signed<ProjectsRecord>> => {
+      const body: ProjectsRecord = { org: ORG, machine: dRef, revision, issued: new Date().toISOString(), locations: [{ pid: 'dl-pid', id: 'id-dl', key: `folder:${dRef}:dl-pid`, name: 'dl', path, source: 'folder', stated: 'minted' }], known: [] };
+      return signRecord(SIGNING_DOMAINS.projects, body, dKey.privateKey, dKey.pub);
+    };
     const newer = await vmRecord(5, '/srv/now');
     await h.frame({ t: 'projects', record: newer });
     expect(h.records()).toEqual([newer.body]);
