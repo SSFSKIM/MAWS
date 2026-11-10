@@ -104,6 +104,10 @@ test('static subjobs relaunch as static once, whether a Mac refusal or a hosted 
   }
 });
 
+test('a failed docs replacement relaunches through static, not an unsupported docs request', () => {
+  assert.match(refusals(['failure\tdocs', 'failure\te2e:library'], [refusal('e2e:library')]), / --gates static,e2e:library --label /);
+});
+
 test('a refused job is matched by its whole name, a space in it included', () => {
   const jobs = shardedRun.map((job) => job.replace(/^\w+\tunit 1\/4$/, 'failure\tunit 1/4'));
   assert.match(
