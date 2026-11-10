@@ -146,6 +146,21 @@ describe('the project registry: rows by project id', () => {
     expect(rowOfListed(index, listing)).toBe(`id:${OTHER_ID}`);
   });
 
+  // panel sweep#2: §I, a project the member sees only through a session of it is listed; §J.1, a row is listed when
+  // `OrgProjects.projects` holds it. A record of this Mac that is no checkout (discovered) already giving its key a row
+  // makes no difference; checkouts all hidden do, hiding being the owner's word on the project.
+  it('lists a project seen only through its sessions when a discovered record here already names its key, not when its checkouts here are hidden', () => {
+    const discovered = project(at('reports'), 0, { discovered: true, org: withId('remote:example.org/reports', OTHER_ID) });
+    const registry = registryOf([registered(OTHER_ID, 'Shared reports', [])], { [OTHER_ID]: 'remote:example.org/reports' });
+    const index = orgIndex([discovered], TEST_MACHINE, registry);
+    expect(index.orgs.get('remote:example.org/reports' as OrgKey)).toMatchObject({ name: 'Shared reports', smnsId: OTHER_ID, checkouts: [] });
+    expect(index.listed.has('remote:example.org/reports' as OrgKey)).toBe(true);
+    const listing = { ...remoteRow(OTHER_MACHINE, 's', { orgKey: 'remote:example.org/reports' as OrgKey, project: OTHER_ID }), appId: studio('s' as AppSessionId) };
+    expect(rowOfListed(index, listing)).toBe('remote:example.org/reports');
+    const hidden = project(at('reports'), 0, { hidden: true, org: withId('remote:example.org/reports', OTHER_ID) });
+    expect(orgIndex([hidden], TEST_MACHINE, registry).listed.has('remote:example.org/reports' as OrgKey)).toBe(false);
+  });
+
   it('makes no row of a machine’s own project: main leaves it out of the registry, so its location makes no record and its sessions sit under the machine’s row', () => {
     const registry = registryOf([registered(ID, 'app', [location(OTHER_MACHINE, 'app')])], { [ID]: 'remote:example.org/app' });
     const records = registryRecords(registry, TEST_MACHINE);

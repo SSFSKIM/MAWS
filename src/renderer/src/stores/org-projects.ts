@@ -100,12 +100,14 @@ export function orgIndex(all: Iterable<ProjectRecord>, local: MachineRef, regist
     });
     if (list.some((p) => isCheckout(p) && !p.hidden)) listed.add(key);
   }
-  // a registry project with no location the member may see (its sessions only, design §11): a row with no checkout
+  // a registry project with no location the member may see (its sessions only, design §11): a row with no checkout. One
+  // whose key a record here already gives a row is listed too (panel sweep#2: a discovered record lists nothing), unless
+  // its checkouts here are all hidden, hiding being the owner's word on the project.
   for (const project of registry.projects) {
     if (project.locations.length > 0) continue;
     const key = keys[project.id] ?? idKey(project.id);
-    if (orgs.has(key)) continue;
-    orgs.set(key, { id: key, name: project.name, kind: 'project', smnsId: project.id, checkouts: [], registry: project });
+    if (!orgs.has(key)) orgs.set(key, { id: key, name: project.name, kind: 'project', smnsId: project.id, checkouts: [], registry: project });
+    else if ((projects.get(key) ?? []).some(isCheckout)) continue;
     listed.add(key);
   }
   return { orgs, projects, listed, keyOf, registry };
