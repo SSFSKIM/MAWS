@@ -173,3 +173,17 @@ test('a mark a killed call left under the same pid does not count as this call\'
   assert.equal(result.results[0].status, 0);
   assert.deepEqual(result.sleeps, [605]);
 });
+
+test('a limit that ends in any other answer, a 304 included, ends the exhaustion: the next limit starts the bound again', () => {
+  // A bound of 2000 s against resets 30 min out: a second limit that inherited the first's start would pass it at once.
+  const notModified = { stdout: 'HTTP/2.0 304 Not Modified\n', stderr: 'gh: HTTP 304', status: 1 };
+  const result = paced(
+    { answers: [{ stderr: exhausted, status: 1 }, notModified, { stderr: exhausted, status: 1 }, { stdout: 'ok\n' }], budget: [[0, 1800], [4999, 3600], [0, 1800], [4999, 3600]] },
+    [['api', '-i', 'one'], ['api', '-i', 'two']],
+    { limitWait: 2000 },
+  );
+  assert.deepEqual(result.results.map(({ status, stdout }) => [status, stdout]), [[1, 'HTTP/2.0 304 Not Modified'], [0, 'ok']]);
+  assert.doesNotMatch(result.results[1].stderr, /would outlast/);
+  assert.deepEqual(result.sleeps, [1805, 1805]);
+  assert.equal(result.mark, '');
+});

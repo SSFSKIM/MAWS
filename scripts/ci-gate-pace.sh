@@ -14,13 +14,13 @@
 # redirect of its stderr does not reach); after it the budget is read again, and a reset that moved while the window
 # refilled and drained is waited for too. The wait is bounded: a wait that would end past LIMIT_WAIT s of continuous
 # exhaustion (one hour's window, plus a reset that moved once, as ci-kit's bound) is not begun, the limited answer
-# going back to the caller, which ends as it would on any failed read; later limited answers go back at once until a
-# read succeeds.
+# going back to the caller, which ends as it would on any failed read; later limited answers go back at once until an
+# answer that is not the limit.
 #
 # The exhaustion outlives the subshell a call runs in (most reads are command substitutions), so it is kept in
-# PACE_MARK: the second it began, or `over` past the bound; a read that succeeds removes it. ci-gate.sh's finish removes
-# it too, after asking pace_limited whether the budget is why it found no run. One a killed call left under a reused
-# pid is removed as the helper loads.
+# PACE_MARK: the second it began, or `over` past the bound; any answer that is not the limit removes it. ci-gate.sh's
+# finish removes it too, after asking pace_limited whether the budget is why it found no run. One a killed call left
+# under a reused pid is removed as the helper loads.
 # shellcheck disable=SC2034 # the bounds are read by the tests too
 
 LIMIT_WAIT=$((90 * 60))
@@ -36,11 +36,12 @@ paced_gh() {
   while :; do
     gh "$@" >"$out" 2>"$err"
     status=$?
-    if ((status == 0)); then
+    # Any answer but the limit, a failure or a 304 too (gh exits 1 on one), says the exhaustion is over.
+    if ((status == 0)) || ! rate_limited "$err"; then
       rm -f "$PACE_MARK"
       break
     fi
-    if ! rate_limited "$err" || ! pace_wait; then break; fi
+    pace_wait || break
   done
   cat "$out"
   cat "$err" >&2
