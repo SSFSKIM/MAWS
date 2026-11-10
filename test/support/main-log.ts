@@ -57,7 +57,7 @@ export type CaseLine =
   | { kind: 'feed-connected'; host: string }
   | { kind: 'feed-last-page'; records: number; pages: number }
   | { kind: 'endpoint-subbed'; channel: string; id: string; what: string; mode: Mode; position: string; asked: string; ms: number }
-  | { kind: 'journal'; app: string; after: number | null; rows: number; ms: number };
+  | { kind: 'journal'; app: string; after: number | null; rows: number; ms: number; checkpoint: number | null };
 
 const LINK = String.raw`^\[machines\] (\S+): `;
 const MODE = '(replay|snapshot|missing)';
@@ -90,8 +90,8 @@ const READERS: { pattern: RegExp; read(m: RegExpExecArray): CaseLine }[] = [
     read: (m) => ({ kind: 'endpoint-subbed', channel: m[1]!, id: m[2]!, what: m[3]!, mode: m[4] as Mode, position: m[5]!, asked: m[6]!, ms: Number(m[7]) }),
   },
   {
-    pattern: /^(?:warn: )?(?:\[engine-host\] )?session\.events (\S+) after (\d+|start): from the journal, (\d+) rows read in (\d+) ms(?:, from the checkpoint at seq \d+)?$/,
-    read: (m) => ({ kind: 'journal', app: m[1]!, after: m[2] === 'start' ? null : Number(m[2]), rows: Number(m[3]), ms: Number(m[4]) }),
+    pattern: /^(?:warn: )?(?:\[engine-host\] )?session\.events (\S+) after (\d+|start): from the journal, (\d+) rows read in (\d+) ms(?:, from the checkpoint at seq (\d+))?$/,
+    read: (m) => ({ kind: 'journal', app: m[1]!, after: m[2] === 'start' ? null : Number(m[2]), rows: Number(m[3]), ms: Number(m[4]), checkpoint: m[5] === undefined ? null : Number(m[5]) }),
   },
 ];
 

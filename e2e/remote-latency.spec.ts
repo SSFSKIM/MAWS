@@ -46,6 +46,7 @@ import { linkPending, loadVoid, markersNotOnce, placeOfEvent, readWake, sixMissi
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { cleanupAll, lastTurn, linkOf, localCase, main, measureTurns, now, openToFirstRow, pings, probe, prompt, raw, roundTrips, statsOf, trust, TURN_MS, writtenOf, type CaseResult } from './support/remote-latency-page';
 import { startRemoteScene, type RemoteScene } from './support/remote-scene';
+import { mainTabById } from './support/shell';
 import { showProjectList, sidebarOf } from './support/sidebar';
 
 // `pnpm e2e:remote-latency-check` (MAWS_REMOTE_LATENCY_CHECK=1) runs the same scene as a functional check, anywhere an e2e
@@ -307,8 +308,12 @@ const paneOf = (page: Page, index: number) => main(page).locator(`[data-pane="${
 const paneText = (page: Page, index: number, timeout?: number) => paneOf(page, index).evaluate((el) => el.textContent ?? '', undefined, timeout === undefined ? {} : { timeout });
 const turnMarkers = (turn: number) => Array.from({ length: BENCH.markersPerTurn }, (_, k) => markerOf(turn, k + 1).trim());
 
-// B's first session in A's left pane and its second in the right: a click, a ⌘-click for a tab of its own, then the
-// split, which moves the focused pane's active tab to a pane of its own (e2e/requests.spec.ts's way).
+// B's first session in A's left pane and its second in the right, as a person puts two of another machine's sessions side
+// by side. Before its tab opens, a session of B's is a listed row (sidebar/ListedRow.tsx), whose click calls lane B's
+// opener (lane-b/remote-connect.ts): `openSession` with no options, so a ⌘-click on it replaces the focused pane's
+// session like a plain one. So the first is opened and its tab pinned (shell.spec.ts's way: the tab's menu, Pin tab), the
+// second clicked opens after the pinned tab (`replaceActive` leaves a pinned tab alone), and the split moves the active
+// tab, the second, to a pane of its own (requests.spec.ts's way: the menu's pane.split).
 async function openSideBySide(launch: MawsLaunch, ref: MachineRef, sessions: readonly BSession[]): Promise<void> {
   const { page } = launch;
   await showProjectList(page);
@@ -318,14 +323,21 @@ async function openSideBySide(launch: MawsLaunch, ref: MachineRef, sessions: rea
     await expect(machineRow).toHaveAttribute('aria-expanded', 'true', { timeout: 1_000 });
   }).toPass({ timeout: 30_000 });
   const rowOf = (s: BSession) => sidebarOf(page).locator(`[role="treeitem"][data-tree-id="s:${s.address}"]`);
+  const tabOf = (s: BSession) => mainTabById(page, `session:${s.address}`);
   const composerIn = (pane: number, s: BSession) => paneOf(page, pane).locator(`[data-composer="${s.address}"]`);
+  // the strips' tabs, for a failure: whether a tab was replaced, or never opened
+  const strips = async () => (await page.locator('[role="tablist"]').evaluateAll((lists) => lists.map((l) => `${l.getAttribute('aria-label')}: ${Array.from(l.querySelectorAll('[role="tab"]'), (t) => t.getAttribute('data-tab-id')).join(', ') || 'none'}`))).join('; ');
   const left = sessions[0]!;
   const right = sessions[1]!;
   for (const s of sessions) await expect(rowOf(s), `B's session ${s.app} is a row of A's sidebar`).toBeVisible({ timeout: 30_000 });
   await rowOf(left).click();
   await expect(composerIn(0, left), `B's session ${left.app} open in A's pane`).toBeVisible({ timeout: 30_000 });
-  await rowOf(right).click({ modifiers: ['Meta'] });
-  await expect(composerIn(0, right), `B's session ${right.app} open in a tab of its own`).toBeVisible({ timeout: 30_000 });
+  await tabOf(left).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Pin tab' }).click();
+  await expect(tabOf(left).getByRole('img', { name: 'Pinned' }), `B's session ${left.app}'s tab pinned`).toBeVisible({ timeout: 30_000 });
+  await rowOf(right).click();
+  await expect(composerIn(0, right), `B's session ${right.app} open in A's pane`).toBeVisible({ timeout: 30_000 });
+  await expect(tabOf(left), `B's session ${left.app}'s pinned tab stays beside ${right.app}'s (the strips: ${await strips()})`).toBeVisible();
   await launch.app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('pane.split')?.click());
   await expect(composerIn(1, right), `B's session ${right.app} in A's right pane after the split`).toBeVisible({ timeout: 30_000 });
   await expect(composerIn(0, left), `B's session ${left.app} still in A's left pane`).toBeVisible({ timeout: 30_000 });
@@ -537,15 +549,22 @@ test('a wake after a silent cut: every subscription answered within 1 s of the r
 
   const voids = loadVoid(loads, terminalLoad ?? null);
   const misses = CARRIERS.flatMap((c) => (records[c] === undefined ? [] : wakeMisses(records[c]!)));
-  // a line for each carrier whose launch reached its reads: its summary, or that its evidence was unavailable
-  const lines = CARRIERS.flatMap((c) => (records[c] !== undefined ? [wakeSummary(records[c]!)] : unavailable[c] !== undefined ? [unavailableSummary(c, unavailable[c]!)] : []));
+  // the machine's 1-minute load at the case's start and end (the measured group voids a run on either), then a line for
+  // each carrier whose launch reached its reads: its summary, or that its evidence was unavailable
+  const startLoad = loads[0]!;
+  const endLoad = terminalLoad ?? null;
+  const loadText = (value: number | null) => (value === null ? 'not read' : value.toFixed(2));
+  const lines = [
+    `[remote-wake] the machine's 1-minute load: ${loadText(startLoad)} at the case's start, ${loadText(endLoad)} at its end`,
+    ...CARRIERS.flatMap((c) => (records[c] !== undefined ? [wakeSummary(records[c]!)] : unavailable[c] !== undefined ? [unavailableSummary(c, unavailable[c]!)] : [])),
+  ];
   const load = loadVerdict(loads, terminalLoad ?? null);
   const info = test.info();
   mkdirSync(info.project.outputDir, { recursive: true });
   writeFileSync(join(info.project.outputDir, 'remote-wake.json'), `${JSON.stringify({
     lines, mode: CHECK ? 'check' : 'perf', valid: voids.length === 0, sha: process.env.GITHUB_SHA ?? null, runId: process.env.GITHUB_RUN_ID ?? null,
     bounds: { linkWithinMs: WAKE_CASE.linkWithinMs, feedWithinMs: WAKE_CASE.feedWithinMs }, invalidReasons: voids, failures, boundMisses: misses,
-    load: { samples: loads, terminal: terminalLoad ?? null, peak: load.peak, pair: load.pair },
+    load: { start: startLoad, end: endLoad, samples: loads, peak: load.peak, pair: load.pair },
     direct: records.direct ?? null, relay: records.relay ?? null, unavailable,
   }, null, 2)}\n`);
   for (const line of lines) {

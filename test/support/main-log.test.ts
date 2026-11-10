@@ -73,8 +73,9 @@ describe('the lines the case reads', () => {
     ['[org-feed] listings: last page, 3 records in 1 pages', { kind: 'feed-last-page', records: 3, pages: 1 }],
     ['[endpoint] endpoint: channel k7 sub AbC_9-x session B:app-1: subbed replay at L1:6800:2, asked from L1:310:-, after 41 ms', { kind: 'endpoint-subbed', channel: 'k7', id: 'AbC_9-x', what: 'session B:app-1', mode: 'replay', position: 'L1:6800:2', asked: 'L1:310:-', ms: 41 }],
     ['endpoint: channel k7 sub q2 feed attention: subbed snapshot at e:1:-, asked from none, after 0 ms', { kind: 'endpoint-subbed', channel: 'k7', id: 'q2', what: 'feed attention', mode: 'snapshot', position: 'e:1:-', asked: 'none', ms: 0 }],
-    ['warn: [engine-host] session.events app-1 after 310: from the journal, 6810 rows read in 23 ms', { kind: 'journal', app: 'app-1', after: 310, rows: 6_810, ms: 23 }],
-    ['session.events app-1 after start: from the journal, 12 rows read in 1 ms, from the checkpoint at seq 9', { kind: 'journal', app: 'app-1', after: null, rows: 12, ms: 1 }],
+    ['warn: [engine-host] session.events app-1 after 310: from the journal, 6810 rows read in 23 ms', { kind: 'journal', app: 'app-1', after: 310, rows: 6_810, ms: 23, checkpoint: null }],
+    ['session.events app-1 after start: from the journal, 12 rows read in 1 ms', { kind: 'journal', app: 'app-1', after: null, rows: 12, ms: 1, checkpoint: null }],
+    ['session.events app-1 after 12345: from the journal, 2400 rows read in 9 ms, from the checkpoint at seq 10000', { kind: 'journal', app: 'app-1', after: 12_345, rows: 2_400, ms: 9, checkpoint: 10_000 }],
   ];
   it.each(cases)('%s', (text, line) => {
     expect(caseLineOf(text)).toEqual(line);

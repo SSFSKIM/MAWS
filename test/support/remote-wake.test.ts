@@ -3,7 +3,8 @@
 import { describe, expect, it } from 'vitest';
 import type { PipeRequest } from './loopback-pipe';
 import type { LogLine } from './main-log';
-import { linkPending, loadVoid, markersNotOnce, placeOfEvent, readWake, sixMissing, sixSubscriptions, subscriptionsIn, unavailableSummary, wakeMisses, wakeSummary, type WakeInput } from './remote-wake';
+import { CHECKPOINT_ROWS as STREAM_CHECKPOINT_ROWS } from '../../src/engine-host/session-stream';
+import { CHECKPOINT_ROWS, linkPending, loadVoid, markersNotOnce, placeOfEvent, readWake, sixMissing, sixSubscriptions, subscriptionsIn, unavailableSummary, wakeMisses, wakeSummary, type WakeInput } from './remote-wake';
 
 const REF = 'Bref0123456789abcdef';
 const APPS = ['app-1', 'app-2'];
@@ -115,7 +116,7 @@ describe('a run', () => {
     expect(record.lost).toEqual(['the direct channel was lost (timeout); reconnecting']);
     expect(record.waitMs).toBe(2_000);
     const s1 = record.subscriptions.find((s) => s.id === 's1')!;
-    expect(s1).toMatchObject({ what: 'session B:app-1', stream: 'app-1', held: 'L1:310:4', after: { mode: 'replay', asked: 'L1:310:4', ms: 250 }, endpoint: { mode: 'replay', asked: 'L1:310:4', ms: 21 }, journal: { after: 309, rows: 6_900, ms: 20 }, first: { delivery: 'event', position: 'L1:311:0', ms: 400 } });
+    expect(s1).toMatchObject({ what: 'session B:app-1', stream: 'app-1', held: 'L1:310:4', after: { mode: 'replay', asked: 'L1:310:4', ms: 250 }, endpoint: { mode: 'replay', asked: 'L1:310:4', ms: 21 }, journal: { after: 309, rows: 6_900, ms: 20, checkpoint: null, bound: 16_591 }, first: { delivery: 'event', position: 'L1:311:0', ms: 400 } });
     expect(record.subscriptions.find((s) => s.id === 'at')).toMatchObject({ stream: null, held: null, journal: null, after: { mode: 'snapshot', asked: 'none' } });
     expect(wakeMisses(record)).toEqual([]);
     expect(wakeSummary(record)).toBe("[remote-wake] direct: up 200 ms and last subbed 300 ms after the restore; feed connected 400 ms and last listings page 600 ms after the hub's restore; 1 upgrade, 1 feed open");
@@ -200,6 +201,22 @@ describe('a run', () => {
     const input = passing('direct');
     expect(failuresOf({ ...input, endpoint: without(input.endpoint, 'channel k2 sub c2 ') })).toEqual(["direct: B's mawsd.log has no sub c2 line (feed checkout B:app-2) after the restore"]);
     expect(failuresOf({ ...input, host: without(input.host, 'app-2 after 311') })).toEqual(["direct: B's host.log has no session.events app-2 … from the journal line after the restore: the stream's cursor is not shown evicted"]);
+  });
+
+  it('holds the rows each resume read took to one interval before its cursor plus the page (§L), naming the rows and the bound', () => {
+    expect(CHECKPOINT_ROWS, 'the engine host’s interval').toBe(STREAM_CHECKPOINT_ROWS);
+    // app-1's cursor past the first boundary: a read from the checkpoint at 10,000 holds the bound, one from the first row
+    // (today's scan) does not
+    const resumedAt = (input: WakeInput, host: string): WakeInput => {
+      const moved = (lines: readonly LogLine[]) => lines.map((l) => ({ ...l, text: l.text.replaceAll('L1:310:4', 'L1:12000:4').replaceAll('L1:311:0', 'L1:12001:0') }));
+      return { ...input, held: { ...input.held, 'app-1': 'L1:12000:4' }, main: moved(input.main), endpoint: moved(input.endpoint), host: input.host.map((l) => (l.text.includes('app-1 after 309') ? { ...l, text: host } : l)) };
+    };
+    const fromCheckpoint = resumedAt(passing('direct'), 'warn: [engine-host] session.events app-1 after 11999: from the journal, 2100 rows read in 9 ms, from the checkpoint at seq 10000');
+    const { record, failures } = readWake(fromCheckpoint);
+    expect(failures).toEqual([]);
+    expect(record.subscriptions.find((s) => s.id === 's1')!.journal).toEqual({ after: 11_999, rows: 2_100, ms: 9, checkpoint: 10_000, bound: 10_101 });
+    const scanned = resumedAt(passing('direct'), 'warn: [engine-host] session.events app-1 after 11999: from the journal, 12100 rows read in 80 ms');
+    expect(failuresOf(scanned)).toEqual(["direct: B's read of session.events app-1 after 11999 took 12100 rows, over its bound of 10101: 10000 rows (CHECKPOINT_ROWS) before the cursor plus the page's 101, read from the first row"]);
   });
 
   it('names a repeated event', () => {

@@ -21,6 +21,13 @@ export const WAKE_CASE = {
   feedWithinMs: 2_000, // §G's target, held on loopback
 } as const;
 
+/**
+ * §L's interval: a resume read takes at most this many rows before its cursor, plus the page's (`CHECKPOINT_ROWS`,
+ * src/engine-host/session-stream.ts, whose value remote-wake.test.ts pins: the e2e project does not take in the stream's
+ * module graph).
+ */
+export const CHECKPOINT_ROWS = 10_000;
+
 /** The feed's socket (`REGISTRY_APP_PATH`, src/main/org/registry-feed.ts) and a machine's relay socket (src/main/machines/remote/link.ts). */
 export const REGISTRY_SOCKET = '/api/registry/socket?app=1';
 export const relaySocketPath = (ref: string) => `/api/machines/${encodeURIComponent(ref)}/socket`;
@@ -112,8 +119,11 @@ export interface SubscriptionRecord {
   after: { mode: Mode; position: string; asked: string; ms: number } | null;
   /** B's answer to it; `ms` is §F's `J`, from the `sub`'s receipt to the answer. */
   endpoint: { mode: Mode; asked: string; ms: number } | null;
-  /** A stream's journal read on B (`rows` read in `ms`), the proof its cursor was evicted. */
-  journal: { after: number | null; rows: number; ms: number } | null;
+  /**
+   * A stream's journal read on B (`rows` read in `ms`), the proof its cursor was evicted; `checkpoint`, the seq of the
+   * checkpoint it read from (null: from the first row); `bound`, its most rows, CHECKPOINT_ROWS plus the page's (§L).
+   */
+  journal: { after: number | null; rows: number; ms: number; checkpoint: number | null; bound: number | null } | null;
   /** The first delivery after that `subbed`: when its content resumed; `ms` from the restore. */
   first: { delivery: 'event' | 'snapshot'; position: string; ms: number } | null;
 }
@@ -193,6 +203,11 @@ export function readWake(input: WakeInput): { record: WakeRecord; failures: stri
     const read = heldAt === null ? reads[0] : reads.find((r) => r.line.after === heldAt.seq - 1);
     // a stream's content resumes with an event after its replay; a feed's with its snapshot, recorded only
     const first = answer === undefined ? undefined : firsts.find((r) => r.line.id === id && r.at >= answer.at && (stream === null || r.line.delivery === 'event'));
+    // §L's bound on the read's rows: those before the cursor (from the checkpoint's next row, or the first) at most
+    // CHECKPOINT_ROWS, so at most that plus the page's, the rows it read past the cursor
+    const upToCursor = read === undefined || read.line.after === null ? null : read.line.after - (read.line.checkpoint ?? 0);
+    const page = upToCursor === null ? null : read!.line.rows - upToCursor;
+    const bound = page === null ? null : CHECKPOINT_ROWS + page;
     subscriptions.push({
       id,
       what,
@@ -201,7 +216,7 @@ export function readWake(input: WakeInput): { record: WakeRecord; failures: stri
       held,
       after: answer === undefined ? null : { mode: answer.line.mode, position: answer.line.position, asked: answer.line.asked, ms: ms(answer.at) },
       endpoint: answered === undefined ? null : { mode: answered.line.mode, asked: answered.line.asked, ms: answered.line.ms },
-      journal: read === undefined ? null : { after: read.line.after, rows: read.line.rows, ms: read.line.ms },
+      journal: read === undefined ? null : { after: read.line.after, rows: read.line.rows, ms: read.line.ms, checkpoint: read.line.checkpoint, bound },
       first: first === undefined ? null : { delivery: first.line.delivery, position: first.line.position, ms: ms(first.at) },
     });
     if (answer === undefined) {
@@ -216,6 +231,10 @@ export function readWake(input: WakeInput): { record: WakeRecord; failures: stri
       else if (answer.line.asked !== held) fail(`${name} asked from ${answer.line.asked}, not from ${held}, the cursor it held`);
       if (reads.length === 0) fail(`B's host.log has no session.events ${stream} … from the journal line after the restore: the stream's cursor is not shown evicted`);
       else if (read === undefined && heldAt !== null) fail(`B's host.log read session.events ${stream} from the journal after ${reads.map((r) => r.line.after ?? 'start').join(', ')}, not after ${heldAt.seq - 1}, the row before the cursor it held`);
+      if (read !== undefined && bound !== null && read.line.rows > bound) {
+        const from = read.line.checkpoint === null ? 'read from the first row' : `read from the checkpoint at seq ${read.line.checkpoint}`;
+        fail(`B's read of session.events ${stream} after ${read.line.after} took ${read.line.rows} rows, over its bound of ${bound}: ${CHECKPOINT_ROWS} rows (CHECKPOINT_ROWS) before the cursor plus the page's ${page}, ${from}`);
+      }
       const firstAt = first === undefined ? null : positionOf(first.line.position);
       if (first === undefined) fail(`${name} has no first event after subbed line after its subbed`);
       else if (heldAt !== null && firstAt !== null && !behind(heldAt, firstAt)) fail(`${name}'s first event after subbed is at ${first.line.position}, not after ${held}, the cursor it held`);
