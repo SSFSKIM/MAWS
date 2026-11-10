@@ -49,11 +49,12 @@ const CHIP =
 
 function ThreadChip({ child, record, selected, onSelect }: { child: AppSessionId; record: SessionRecord | null; selected: boolean; onSelect(): void }) {
   const digest = useSessions((s) => s.digests.get(child) ?? null);
+  const listing = useSessions((s) => s.listed.get(child)); // P5 O7 M10: a remote lane B record's state (`listedStateOf`)
   const pending = useAttention((s) => selectPendingOf(s, child));
   const label = SIDE_COPY.label(record?.lineage?.anchor?.label ?? null, record?.lineage?.openedBy ?? null);
   return (
     <button type="button" aria-current={selected ? 'true' : undefined} data-side-chip={child} onClick={onSelect} className={CHIP}>
-      {record !== null && <GlyphMark glyph={glyphFor(record, digest, pending)} className="w-[12px] shrink-0" />}
+      {record !== null && <GlyphMark glyph={glyphFor(record, digest, pending, listing)} className="w-[12px] shrink-0" />}
       <span className="truncate font-mono">{label}</span>
     </button>
   );

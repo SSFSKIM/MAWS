@@ -6,10 +6,12 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, ProjectId, RequestId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
-import { item, status, humanTurn } from '../../../../test/support/builders';
+import { item, record, remoteRow, status, humanTurn } from '../../../../test/support/builders';
+import { addressOf } from '@shared/machine/address';
+import { machineKey } from '@shared/machine/org-key';
 import { ev } from '../../../../test/support/events';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { useAttention } from '../stores/attention';
 import { useMachines } from '../stores/machines';
 import { useSessions } from '../stores/sessions';
@@ -164,6 +166,24 @@ describe('a session row’s hover card', () => {
     expect(within(card).getByTestId('hover-activity').textContent).toBe('Running curl -sI https://example.com | head -1');
     expect(within(card).getByTestId('hover-answer').textContent).toMatch(/^The request succeeded/);
     expect(within(card).queryByRole('button', { name: 'Approve' })).toBeNull(); // nothing waits
+  });
+
+  // P5 O7 M10 (a busy remote session's state): another machine's lane B record, which has no digest, by its listing
+  it('another machine’s lane B record with no digest: its listing’s state, and "now" while that says busy', async () => {
+    withMain();
+    const b1 = addressOf(OTHER_MACHINE, 'b1' as AppSessionId);
+    useMachines.getState().applyRoster([
+      { ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-10-28T10:00:00Z', generation: 0 },
+      { ref: OTHER_MACHINE, name: 'Studio', local: false, state: 'up', since: '2026-10-28T10:00:00Z', generation: 0 },
+    ]);
+    const listing = (state: string) => new Map([[b1, { ...remoteRow(OTHER_MACHINE, 'b1', { state }), appId: b1 }]]);
+    useSessions.setState({ records: new Map([...useSessions.getState().records, [b1, record(b1, { title: { text: 'Studio build', source: 'user' } })]]), listed: listing('busy') });
+    useLayout.getState().setSidebar({ expandedProjects: [machineKey(OTHER_MACHINE)] });
+    render(<Sidebar />);
+    const card = await open('Studio build');
+    expect(within(card).getByTestId('hover-meta').textContent).toBe(`Working · ${REL.now}`);
+    act(() => useSessions.setState({ listed: listing('failed') }));
+    expect(within(card).getByTestId('hover-meta').textContent).toMatch(/^Failed · /);
   });
 
   it('a foreign-live session names its holder', async () => {

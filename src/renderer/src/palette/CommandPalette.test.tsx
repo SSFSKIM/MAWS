@@ -15,7 +15,7 @@ import { addressOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../test/support/fake-client';
-import { remoteRow } from '../../../../test/support/builders';
+import { record, remoteRow } from '../../../../test/support/builders';
 import { useMachines } from '../stores/machines';
 import { registerRemoteOpener } from '../sessions/remote-openers';
 import { Sidebar } from '../sidebar/Sidebar';
@@ -87,6 +87,19 @@ describe('command palette', () => {
     expect(sessions[0].textContent).toContain('codex_somersault');
     expect(within(sessions[0]).getByRole('img', { name: 'Plan review' })).toBeTruthy();
     expect(options('Actions')).toEqual([]);
+  });
+
+  // P5 O7 M10 (a busy remote session's state): another machine's lane B record, which has no digest, by its listing
+  it('draws another machine’s lane B record by its listing’s state, its age "now" while busy', async () => {
+    const b1 = addressOf(OTHER_MACHINE, 'b1' as AppSessionId);
+    useSessions.setState({
+      records: new Map([...useSessions.getState().records, [b1, record(b1, { title: { text: 'Studio build', source: 'user' } })]]),
+      listed: new Map([[b1, { ...remoteRow(OTHER_MACHINE, 'b1', { state: 'busy' }), appId: b1 }]]),
+    });
+    await openAndType('studio build');
+    const option = within(dialog()).getAllByRole('option').find((o) => o.textContent?.includes('Studio build'))!;
+    expect(within(option).getByRole('img', { name: 'Working' })).toBeTruthy();
+    expect(option.textContent).toMatch(/now$/);
   });
 
   it('“dark” lists exactly one action, Appearance: Dark', async () => {

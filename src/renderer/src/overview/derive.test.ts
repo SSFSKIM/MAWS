@@ -2,7 +2,8 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionDigest } from '@shared/ipc/schema';
-import { digest, item, project, record } from '../../../../test/support/builders';
+import { digest, item, project, record, remoteRow } from '../../../../test/support/builders';
+import type { ListedSession } from '../stores/sessions';
 import { TEST_FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { loadScenario } from '../../../../test/support/scenario';
 import { addressOf } from '@shared/machine/address';
@@ -163,6 +164,21 @@ describe('sidebar sort', () => {
     expect(order([['read', 1], ['n', 100, { unread: true }], ['stale-working', 30, { unread: true, working: 0.1 }], ['unread', 3, { unread: true }], ['stale-idle', 40, { unread: true }]], needs))
       .toEqual(['n', 'unread', 'stale-working', 'read', 'stale-idle']);
   });
+
+  // P5 O7 M10 (a busy remote session's state): another machine's lane B record has no digest; its listing's `busy`
+  // ranks it among the working, by its last activity (what this window saw of it), and a Needs-you row and fresh unread
+  // still come first
+  it('a remote lane B record with no digest ranks among the working while its listing says busy', () => {
+    const remote = (id: string, state: string): ListedSession => ({ ...remoteRow(OTHER_MACHINE, id, { state }), appId: id as AppSessionId });
+    const listings = new Map([['b-busy', remote('b-busy', 'busy')], ['b-idle', remote('b-idle', 'idle')], ['b-a', { ...remote('b-a', 'busy'), lane: 'A' as const }]].map(([id, l]) => [id as AppSessionId, l as ListedSession]));
+    const seen = new Map([['b-busy' as AppSessionId, Date.parse(hoursBefore(0.5))], ['b-idle' as AppSessionId, Date.parse(hoursBefore(0.1))]]);
+    const sessions = [...recs.values(), record('b-busy'), record('b-idle'), record('b-a', { updatedAt: hoursBefore(0.2) })];
+    expect(sortSessions(sessions, 'priority', { digests: ds, rows: waiting, seen, listings, now: NOW }).map((r) => r.appId)).toEqual([
+      'needs', 'unread', 'b-busy', 'working', 'b-idle', 'b-a', 'idle-new', 'idle-old',
+    ]);
+    expect(priorityRank(record('b-busy'), undefined, undefined, NOW, seen.get('b-busy' as AppSessionId), listings.get('b-busy' as AppSessionId))).toEqual([2, -Date.parse(hoursBefore(0.5))]);
+    expect(priorityRank(record('b-busy'), digest('b-busy', { phase: 'idle' }), undefined, NOW, undefined, listings.get('b-busy' as AppSessionId))[0]).toBe(3); // a digest says
+  });
 });
 
 describe('overview card lines', () => {
@@ -187,6 +203,14 @@ describe('overview card lines', () => {
     expect(cardActivity(record('w'), digest('w', { phase: 'working' }), [])).toBe('Working');
     expect(cardActivity(record('f'), digest('f', { phase: 'failed' }), [])).toBe('Failed');
     expect(cardActivity(record('n'), null, [])).toBe('Idle');
+  });
+
+  // P5 O7 M10: another machine's lane B record, with no digest, says its listing's word as its glyph does
+  it('a remote lane B record with no digest reads its listing’s state, its open items first', () => {
+    const lane = (state: string): ListedSession => ({ ...remoteRow(OTHER_MACHINE, 'b', { state }), appId: 'b' as AppSessionId });
+    expect(['busy', 'waiting', 'failed', 'stopped', 'idle'].map((state) => cardActivity(record('b'), null, [], lane(state)))).toEqual(['Working', 'Needs you', 'Failed', 'Done', 'Idle']);
+    expect(cardActivity(record('b'), null, [item('b', 'permission', '2026-10-28T10:00:00Z')], lane('busy'))).toBe('Waiting for approval');
+    expect(cardActivity(record('b'), null, [item('b', 'question', '2026-10-28T10:00:00Z')], lane('busy'))).toBe('Question');
   });
 
   // P5 O9 M6 (Q1): a terminal session MAWS drives through its bridge reads as any session; one with no live bridge, its holder

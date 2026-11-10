@@ -592,6 +592,11 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     // While B's engine holds before the whole message, A's pane draws the streamed prefix, and only that.
     await expect(main(page).getByText(SECOND_PARTIAL).first(), `the streamed text in A's pane before the whole reply\n${mainSaid(page)}`).toBeVisible({ timeout: 60_000 });
     await expect(main(page).getByText(SECOND_REPLY)).toHaveCount(0);
+    // P5 O7 M10 (a busy remote session's state): mid-turn, its tab open here, A holds its record with no digest, and the
+    // row reads B's listing. sminos's observer restates the session busy at its turn's start; the scene plays that.
+    const listing = { engine: B_SESSION, app, owners: [scene.member], project: PROJECT, title: TITLE, cwd: checkout };
+    await scene.sminos.list({ ...listing, state: 'busy' });
+    await expect(row.getByRole('img', { name: 'Working', exact: true }), `B's row reads Working mid-turn, from its listing\n${mainSaid(page)}`).toBeVisible({ timeout: 30_000 });
     await b.request('session.getContextUsage', { appSessionId: app, detail: 'summary' }); // lets B's engine go on
     await expect(main(page).getByText(SECOND_REPLY).first(), 'the whole reply in A’s pane').toBeVisible({ timeout: 60_000 });
     const onA = await batchedEvents(page, b.ref, app);
@@ -601,6 +606,8 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     const said = () => `A's batches for ${address}: ${onA.map((e) => e.kind).join(', ')}\nthe sessions A's batches named: ${batchIds.join(', ')}\nB's events: ${onB.map((e) => e.kind).join(', ')}`;
     expect(deltas.map((e) => e.textDelta), `the reply streamed to A as its deltas\n${said()}`).toEqual(SECOND_DELTAS);
     await expect.poll(turnOverOnB, { timeout: 30_000 }).toBe(true);
+    await scene.sminos.list({ ...listing, state: 'idle' }); // the turn over, restated idle
+    await expect(row.getByRole('img', { name: 'Idle', exact: true }), `B's row reads Idle once its listing does\n${mainSaid(page)}`).toBeVisible({ timeout: 30_000 });
 
     // A permission B's engine asks for, answered in A's pane: the replay goes on only on the `allow` it holds at.
     await composerOf(page).click();

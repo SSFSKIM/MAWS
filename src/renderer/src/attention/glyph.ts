@@ -7,6 +7,8 @@ import { ATTENTION_HEADINGS } from '@shared/attention/headings';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionRecord } from '@shared/graph/session';
 import type { SessionDigest } from '@shared/ipc/schema';
+import { listedStateOf } from '../sessions/listed-state'; // P5 O7 M10
+import type { ListedSession } from '../stores/sessions';
 import { isActionable, isOpen } from './derive';
 
 export type Glyph = { char: string; tone: 'accent' | 'warning' | 'info' | 'danger' | 'faint'; label: string; pulse: boolean };
@@ -20,8 +22,10 @@ const TROUBLE: Partial<Record<AttentionItem['kind'], string>> = {
 };
 
 // The owner's ruling (2026-10-30; it withdraws E11 F2b's "Ended with an error"): an error seen or dismissed leaves no
-// glyph of its own; the transcript shows what happened, and the session reads as what it is now.
-export function glyphFor(record: SessionRecord, digest: SessionDigest | null, pending: AttentionItem[]): Glyph {
+// glyph of its own; the transcript shows what happened, and the session reads as what it is now. P5 O7 M10: another
+// machine's lane B record, which has no digest, reads its listing's word as its listed row did (`listedStateOf`), its
+// open items first and an unread idle one "Idle, unread"; `listed` is the listing the sessions store holds at its address.
+export function glyphFor(record: SessionRecord, digest: SessionDigest | null, pending: AttentionItem[], listed?: ListedSession): Glyph {
   const { holder } = record;
   const open = pending.filter((i) => isOpen(i) && isActionable(i));
   const unbridged = open.length === 0 && (digest === null || digest.phase === 'foreign'); // P5 O9 M6
@@ -32,6 +36,8 @@ export function glyphFor(record: SessionRecord, digest: SessionDigest | null, pe
 
   const waiting = waitingGlyph(open);
   if (waiting !== null) return waiting;
+  const word = listedStateOf(digest, listed); // P5 O7 M10
+  if (word !== null) return wordGlyph(word) ?? idleGlyph(record);
 
   switch (digest?.phase) {
     case 'working':
@@ -41,8 +47,10 @@ export function glyphFor(record: SessionRecord, digest: SessionDigest | null, pe
       return glyph('✕', 'danger', 'Failed');
   }
   if (digest?.phase === 'exited') return glyph('✓', 'faint', 'Done');
-  return record.unread ? glyph('●', 'faint', 'Idle, unread') : glyph('○', 'faint', 'Idle');
+  return idleGlyph(record);
 }
+
+const idleGlyph = (record: SessionRecord): Glyph => (record.unread ? glyph('●', 'faint', 'Idle, unread') : glyph('○', 'faint', 'Idle'));
 
 // What the open actionable items ask for, the first matching row of the table; null with none.
 function waitingGlyph(open: AttentionItem[]): Glyph | null {
@@ -63,8 +71,11 @@ function waitingGlyph(open: AttentionItem[]): Glyph | null {
 // read these live glyphs. P5 O7 M6: its machine's attention feed, when it holds open items for it, says what it waits for
 // (the record's rows above), whatever the listing's word.
 export function listedGlyph(state: string, pending: AttentionItem[] = []): Glyph {
-  const waiting = waitingGlyph(pending.filter((i) => isOpen(i) && isActionable(i)));
-  if (waiting !== null) return waiting;
+  return waitingGlyph(pending.filter((i) => isOpen(i) && isActionable(i))) ?? wordGlyph(state) ?? glyph('○', 'faint', 'Idle');
+}
+
+// A listing's word as the glyph table draws it; null for idle and any word it doesn't know (the caller's idle glyph).
+export function wordGlyph(state: string): Glyph | null {
   switch (state) {
     case 'busy':
       return glyph('●', 'accent', 'Working', true);
@@ -77,6 +88,6 @@ export function listedGlyph(state: string, pending: AttentionItem[] = []): Glyph
     case 'retired':
       return glyph('✓', 'faint', 'Done');
     default:
-      return glyph('○', 'faint', 'Idle');
+      return null;
   }
 }
