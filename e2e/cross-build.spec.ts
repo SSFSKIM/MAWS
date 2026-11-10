@@ -994,6 +994,105 @@ test('(downgrade, daemon) this build’s app keeps a session under its mawsd; th
   });
 });
 
+// P5 O15 M2 (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, acceptance 3, Interfaces §C "Acceptance 3's
+// data"; Decision Log 14): nothing lost. The peer, a real build that still has the embedded shape (its main composes the
+// spine and holds spine.lock), makes on one profile a session (a turn played to its end), an artifact, a draft and a
+// layout of more than one tab (the library's tab and the artifact's, opened as a person opens them), and quits; this
+// build, which has no embedded shape, opens that profile on `mawsd`. After the library's first sync, and again after a
+// relaunch of this build: the session is listed, the artifact is in the library and its page loads, the draft is back,
+// the layout holds the same tabs, and `mawsd.log` says the spine loaded with no line of the index's rebuild (the database
+// moved aside as unusable, src/services/index/db.ts) or of its refusal as newer than the build knows. A peer with no
+// embedded shape skips, saying so.
+const runsEmbedded = (build: Build) => {
+  const mode = join(build.root ?? REPO_ROOT, 'src/main/hosts/mode.ts');
+  return existsSync(mode) && readFileSync(mode, 'utf8').includes('export function hostModeFromEnv');
+};
+const INDEX_REBUILT = /\[index\] \S+ is not a usable database \(.*\); moved aside as /; // db.ts: the index moved aside and made anew
+const INDEX_REFUSED = /\[index\] \S+: user_version \d+ is newer than this app knows/; // db.ts: the index left unopened
+const DATA_ARTIFACT = 'Acceptance 3 page';
+const DATA_MARK = 'ACCEPTANCE_3_PAGE';
+const DATA_DRAFT = 'the draft the embedded shape kept';
+// Every tab id in a `main.tabs` value, whatever its version: the ids of each `tabs` list's entries, sorted
+function tabIdsOf(value: unknown): string[] {
+  const ids: string[] = [];
+  const walk = (node: unknown, key: string | null) => {
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        if (key === 'tabs' && item !== null && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'string') ids.push((item as { id: string }).id);
+        walk(item, null);
+      }
+    } else if (node !== null && typeof node === 'object') for (const [k, v] of Object.entries(node)) if (k !== 'closedTabs') walk(v, k);
+  };
+  walk(value, null);
+  return ids.sort();
+}
+const mainTabsOf = async (page: Page) => value(await invoke(page, 'layout.get', { key: 'main.tabs' })).value;
+
+test('(embedded profile, mawsd) a profile the peer made on its embedded shape opens on this build’s mawsd with its session, artifact, draft and layout, after the library’s first sync and after a relaunch, and no index rebuild', async () => {
+  test.setTimeout(300_000);
+  const { here, peer } = builds();
+  test.skip(!runsEmbedded(peer), `the peer (wire ${wireOf(peer)}) has no embedded shape (its src/main/hosts/mode.ts has no hostModeFromEnv): acceptance 3's data needs a build that still composes the spine in its app; M5 files this scene's retirement`);
+  await withScratch('xb-embedded-data', async (s) => {
+    const said: string[] = [`${peer.label} (wire ${wireOf(peer)}) on its embedded shape makes the data; ${here.label} (wire ${wireOf(here)}) opens the profile on mawsd`];
+    // the peer, embedded: its main holds spine.lock and composes the spine
+    const old = await s.launch({ MAWS_HOST_MODE: 'detached', MAWS_E2E_QUIT_ANSWER: 'quit' }, peer.root);
+    const theirs = await s.ready(old.page, (st) => st.transport !== 'daemon');
+    expect(theirs.daemon, `${peer.label} runs no mawsd on its embedded shape`).toBeNull();
+    expect(spineLockOf(s.userData)?.pid, `${peer.label}'s main holds spine.lock`).toBe(old.child.pid);
+    // a session: the seeded record, with a turn played to its end
+    const id = await s.record(old.page);
+    await launchOn(peer, old.page, id, turnsJournal(s.root, 'acceptance-3', 1), s);
+    await turnEnded(old.page, id);
+    // an artifact, in the peer's engine host's store
+    const created = (await old.page.evaluate(
+      ([html, title]) => window.maws.invoke('artifacts.create' as never, { kind: 'html', title, content: { bytes: new TextEncoder().encode(html), name: 'index.html' } } as never),
+      [`<!doctype html><html><head><title>x</title></head><body><p>${DATA_MARK}</p></body></html>`, DATA_ARTIFACT] as const,
+    )) as CommandResult<'artifacts.create'>;
+    const artifactId = value(created).artifact.id;
+    // a draft, as the composer keeps one (src/renderer/src/composer/editor/controller.ts), for a session with no tab open
+    const doc = { type: 'doc', attrs: { attachments: [] }, content: [{ type: 'paragraph', content: [{ type: 'text', text: DATA_DRAFT }] }] };
+    value(await invoke(old.page, 'session.drafts.set', { appSessionId: id, draft: { doc, attachments: [], updatedAt: new Date().toISOString() } }));
+    // a layout of more than one tab: the library's, then the artifact's from its row, as a person opens them
+    await old.page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click({ timeout: 15_000 });
+    await old.page.locator('[data-library]').getByRole('article', { name: DATA_ARTIFACT, exact: true }).click({ timeout: 20_000 });
+    await expect(old.page.locator(`[data-region="main"] [data-artifact-tab="${artifactId}"]`), `${peer.label} opened the artifact's tab`).toBeVisible({ timeout: 20_000 });
+    let tabs: string[] = [];
+    await expect
+      .poll(async () => (tabs = tabIdsOf(await mainTabsOf(old.page))), { timeout: 20_000, message: `${peer.label} saved its layout: the library's tab and the artifact's among more than one` })
+      .toEqual(expect.arrayContaining(['artifacts', expect.stringContaining(artifactId)]));
+    expect(tabs.length, 'more than one tab').toBeGreaterThan(1);
+    expect(old.maws.consoleErrors()).toEqual([]);
+    await s.quit(old);
+    await endProfileProcesses(s.userData); // the embedded shape's detached supervisor: this build's mawsd starts afresh
+    said.push(`  made: session ${id} (a turn to its end), artifact ${artifactId}, a draft, the tabs ${tabs.join(', ')}`);
+
+    // this build on mawsd, twice: after the library's first sync, and after a relaunch
+    for (const pass of ['after the library’s first sync', 'after a relaunch']) {
+      const run = await s.launch();
+      const ours = await s.ready(run.page, (st) => st.daemon !== null, 60_000);
+      await expect.poll(() => spineLockOf(s.userData)?.pid ?? null, { timeout: 30_000, message: `${pass}: ${here.label}'s mawsd holds spine.lock` }).toBe(ours.daemon!.pid);
+      await expect
+        .poll(async () => value(await invoke(run.page, 'library.list', {})).rows.some((row) => row.id === artifactId), { timeout: 60_000, message: `${pass}: the artifact in the library` })
+        .toBe(true);
+      expect(value(await invoke(run.page, 'session.list', {})).sessions.map((row) => row.appId), `${pass}: the session listed`).toContain(id);
+      const page = await run.maws.app.evaluate(async ({ session }, target) => {
+        const response = await session.defaultSession.fetch(target);
+        return { status: response.status, text: await response.text() };
+      }, `maws-artifact://${artifactId}/live/index.html`);
+      expect(page.status, `${pass}: the artifact's page loads`).toBe(200);
+      expect(page.text).toContain(DATA_MARK);
+      expect(JSON.stringify(value(await invoke(run.page, 'session.drafts.get', { appSessionId: id }))), `${pass}: the draft`).toContain(DATA_DRAFT);
+      await expect.poll(async () => tabIdsOf(await mainTabsOf(run.page)), { timeout: 20_000, message: `${pass}: the layout's tabs` }).toEqual(expect.arrayContaining(tabs));
+      await expect.poll(() => s.daemonLog(), { timeout: 30_000, message: `${pass}: mawsd's spine loaded` }).toMatch(/\[spine\] loaded in \d+ ms/);
+      expect(s.daemonLog(), `${pass}: no index rebuild in mawsd.log`).not.toMatch(INDEX_REBUILT);
+      expect(s.daemonLog(), `${pass}: the index opened, not refused`).not.toMatch(INDEX_REFUSED);
+      said.push(`  ${pass}: on ${here.label}'s mawsd pid ${ours.daemon!.pid}, all four present, no rebuild`);
+      await s.quit(run);
+    }
+    record(said);
+  });
+});
+
 // The upgrade's restart of `mawsd` (2026-10-31: after an upgrade New chat stayed disabled until the app was reopened). The
 // older peer's app on the daemon shape leaves its private `mawsd` running; this build's app attaches to it, finds another
 // build and asks it to restart (src/main/hosts/daemon.ts, the build check), and its own `mawsd` serves on. The page's
