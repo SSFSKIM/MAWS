@@ -9,6 +9,12 @@
 // (spikes/u4-render-service/vm/lane-b.mjs), whose link, journal read and checks it keeps.
 //
 //   node o15-tools.mjs <directory> [--title <name>]   (the session's name: "O15 row 10 dry run" unless given)
+//   node o15-tools.mjs --list-trusted                 the project paths the engine's config (.claude.json) records as
+//                                                     trusted, and nothing else of that file: where to run
+//
+// The run trusts nothing itself: <directory> must already be trusted on this machine (session.start's `needs_trust` is a
+// FAIL naming the trust key and the config file). The session's id is printed, so a session the run could not end can
+// be stopped by hand; an INT or TERM ends it the same bounded way before the script exits.
 //
 // The hello lists no capability (never `machine.spine`), and the script sends no `exit now`. What it prints is times, the
 // model's id, the turns' counts, the capability record and PASS / FAIL lines; nothing of the model's text, the prompt or
@@ -16,7 +22,7 @@
 // ${XDG_CONFIG_HOME:-~/.config}/MAWS. Every request and every wait is bounded.
 import { Buffer } from 'node:buffer';
 import console from 'node:console';
-import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -44,6 +50,7 @@ const PROMPT = [
 ].join('\n');
 
 const now = () => new Date().toISOString();
+const tilde = (path) => (typeof path === 'string' && path.startsWith(homedir()) ? `~${path.slice(homedir().length)}` : String(path));
 const say = (line) => console.log(line);
 
 /** A link to machine.sock: `request(name, input)` answers the response's value, or throws its error. */
@@ -158,14 +165,36 @@ function checked(profile, calls) {
     }
   };
   const image = screenshot?.content?.find((b) => b.type === 'image') ?? null;
+  const picture = image === null ? null : pngOf(image);
   const shot = textOf(screenshot);
   const file = textOf(exported);
   const path = typeof file?.path === 'string' ? file.path : null;
   const store = join(profile, 'artifacts');
   return {
-    screenshot: screenshot === null ? null : { isError: screenshot.isError === true, status: shot?.status ?? null, image: image === null ? null : { mimeType: image.mimeType, bytes: Buffer.from(image.data, 'base64').length } },
-    export: exported === null ? null : { isError: exported.isError === true, status: file?.status ?? null, format: file?.format ?? null, underStore: path !== null && path.startsWith(`${store}/`) && /\/exports\//.test(path), pdf: path !== null && existsSync(path) && readFileSync(path).subarray(0, 5).toString('latin1') === '%PDF-' },
+    screenshot: screenshot === null ? null : { isError: screenshot.isError === true, status: shot?.status ?? null, image: image === null ? null : { mimeType: image.mimeType, ...picture } },
+    export: exported === null ? null : { isError: exported.isError === true, status: file?.status ?? null, format: file?.format ?? null, underStore: path !== null && path.startsWith(`${store}/`) && /\/exports\//.test(path), ...pdfOf(path) },
   };
+}
+
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const MIN_PNG_BYTES = 100;
+const MIN_PDF_BYTES = 500;
+
+/** The picture decoded: its size, and whether it is a PNG (the signature, then an IHDR naming a width and a height). */
+function pngOf(image) {
+  const bytes = typeof image.data === 'string' ? Buffer.from(image.data, 'base64') : Buffer.alloc(0);
+  const ihdr = bytes.length >= 24 && bytes.subarray(0, 8).equals(PNG_SIGNATURE) && bytes.subarray(12, 16).toString('latin1') === 'IHDR';
+  const width = ihdr ? bytes.readUInt32BE(16) : 0;
+  const height = ihdr ? bytes.readUInt32BE(20) : 0;
+  return { bytes: bytes.length, width, height, png: ihdr && width > 0 && height > 0 && bytes.length >= MIN_PNG_BYTES };
+}
+
+/** The exported file read: its size, and whether it is a PDF (the header, an end-of-file marker, a size past a stub's). */
+function pdfOf(path) {
+  if (path === null || !existsSync(path)) return { bytes: 0, pdf: false };
+  const bytes = readFileSync(path);
+  const tail = bytes.subarray(Math.max(0, bytes.length - 1024)).toString('latin1');
+  return { bytes: bytes.length, pdf: bytes.subarray(0, 5).toString('latin1') === '%PDF-' && tail.includes('%%EOF') && bytes.length >= MIN_PDF_BYTES };
 }
 
 /** The two tools' entries of a capability record, as printed: `available`, or the reason it is not. */
@@ -177,13 +206,26 @@ const capabilityLine = (caps) =>
 
 // --- the run -------------------------------------------------------------------------------------------------------
 
-async function run(link, profile, directory, title, verdicts) {
-  mkdirSync(directory, { recursive: true });
+/**
+ * The session's end, once however many ask (the run's end, a signal): `session.stop`, bounded; a refusal, a timeout or
+ * an answer that the process did not exit is a FAIL naming the session, to stop by hand.
+ */
+function ender(link, app, verdicts) {
+  let ending = null;
+  return () =>
+    (ending ??= (async () => {
+      const stopped = await link.request('session.stop', { appSessionId: app, reason: 'stop' }, 60_000).catch((error) => ({ failed: error instanceof Error ? error.message : String(error) }));
+      const ok = stopped.failed === undefined && stopped.exited === true;
+      say(`${now()} session ${app} ended: ${stopped.failed ?? `exited ${String(stopped.exited)}`}`);
+      verdicts.push([ok, ok ? `the session ${app} ended` : `the session ${app} was not ended (${stopped.failed ?? `exited ${String(stopped.exited)}`}): stop it by hand`]);
+    })());
+}
+
+async function run(link, profile, directory, title, verdicts, onSession) {
+  if (!existsSync(directory)) throw new Error(`no directory ${tilde(directory)}: run in a directory already trusted on this machine (--list-trusted)`);
   const { appSessionId: app } = await link.request('session.create', { projectId: null, location: { kind: 'directory', path: directory } });
-  const stop = async () => {
-    const stopped = await link.request('session.stop', { appSessionId: app, reason: 'stop' }, 60_000).catch((error) => ({ failed: error.message }));
-    say(`${now()} session ended: ${stopped.failed ?? `exited ${String(stopped.exited)}`}`);
-  };
+  say(`${now()} session ${app} created`);
+  let stop = null;
   try {
     const before = await link.request('session.capabilities', { appSessionId: app });
     say(`${now()} capabilities before the start: ${JSON.stringify(before)}`);
@@ -194,8 +236,12 @@ async function run(link, profile, directory, title, verdicts) {
     const started = Date.now();
     say(`${now()} start`);
     // the model through the machine's managed settings, so the engine's own route: `direct`
-    const outcome = await link.request('session.start', { appSessionId: app, message: { content: PROMPT, display: title }, options: { gateway: 'direct', trust: 'accepted' } }, 120_000);
+    // No trust decision is sent: the run trusts nothing, so the directory must be trusted already.
+    const outcome = await link.request('session.start', { appSessionId: app, message: { content: PROMPT, display: title }, options: { gateway: 'direct' } }, 120_000);
+    if (outcome?.status === 'needs_trust') throw new Error(`not trusted: run in a directory already trusted on this machine (its trust key ${tilde(outcome.trust?.trustKey)} in ${tilde(outcome.trust?.configPath)}; --list-trusted)`);
     if (outcome?.status !== 'starting') throw new Error(`session.start answered ${String(outcome?.status)}`);
+    stop = ender(link, app, verdicts);
+    onSession(stop);
     const renamed = await until(() => link.request('session.rename', { appSessionId: app, title }), (r) => r?.record !== undefined, `the session named "${title}"`, 60_000, 2000);
     say(`${now()} named "${title}" (${renamed.via})`);
 
@@ -234,14 +280,32 @@ async function run(link, profile, directory, title, verdicts) {
     const result = checked(profile, mawsCalls(journalOf(profile, app)));
     const shot = result.screenshot;
     const file = result.export;
-    verdicts.push([shot?.status === 'captured' && shot.image?.mimeType === 'image/png', `artifact_screenshot: ${shot === null ? 'never called' : `${String(shot.status)}, ${shot.image === null ? 'no image' : `${shot.image.mimeType}, ${shot.image.bytes} bytes`}`}`]);
-    verdicts.push([file?.status === 'exported' && file.underStore && file.pdf, `artifact_export: ${file === null ? 'never called' : `${String(file.status)}, ${String(file.format)}, ${file.pdf ? 'a PDF' : 'not a PDF'} ${file.underStore ? 'under' : 'outside'} the profile's artifact store`}`]);
+    verdicts.push([shot !== null && !shot.isError && shot.status === 'captured' && shot.image?.mimeType === 'image/png' && shot.image.png, `artifact_screenshot: ${shot === null ? 'never called' : `${shot.isError ? 'an error result, ' : ''}${String(shot.status)}, ${shot.image === null ? 'no image' : `${shot.image.mimeType}, ${shot.image.bytes} bytes, ${shot.image.png ? `a PNG ${shot.image.width}x${shot.image.height}` : 'not a PNG with a size'}`}`}`]);
+    verdicts.push([file !== null && !file.isError && file.status === 'exported' && file.underStore && file.pdf, `artifact_export: ${file === null ? 'never called' : `${file.isError ? 'an error result, ' : ''}${String(file.status)}, ${String(file.format)}, ${file.bytes} bytes, ${file.pdf ? 'a PDF' : 'not a whole PDF'} ${file.underStore ? 'under' : 'outside'} the profile's artifact store`}`]);
   } finally {
-    await stop();
+    await stop?.();
   }
 }
 
+/** The project paths the engine's global config records as trusted: path strings alone, nothing else of the file. */
+function listTrusted() {
+  const config = join(process.env.CLAUDE_CONFIG_DIR || homedir(), '.claude.json');
+  let projects;
+  try {
+    projects = JSON.parse(readFileSync(config, 'utf8'))?.projects;
+  } catch {
+    say(`FAIL unread: ${tilde(config)}`);
+    process.exitCode = 1;
+    return;
+  }
+  say(`trusted project paths in ${tilde(config)}:`);
+  const trusted = Object.entries(projects && typeof projects === 'object' ? projects : {}).filter(([, v]) => v?.hasTrustDialogAccepted === true);
+  for (const [path] of trusted) say(path);
+  if (trusted.length === 0) say('(none)');
+}
+
 async function main(argv) {
+  if (argv[0] === '--list-trusted') return listTrusted();
   const [directory] = argv;
   const at = argv.indexOf('--title');
   const title = at > 0 ? argv[at + 1] : TITLE;
@@ -249,15 +313,30 @@ async function main(argv) {
   const profile = process.env.MAWS_USER_DATA || join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'MAWS');
   const link = await reach(join(profile, 'mawsd'));
   const verdicts = [];
+  const report = () => {
+    for (const [ok, line] of verdicts) say(`${ok ? 'PASS' : 'FAIL'} ${line}`);
+  };
+  // An INT or TERM: the same bounded end of the session (session.stop's 60 s), then a non-zero exit.
+  let stop = null;
+  const interrupted = async (signal) => {
+    say(`${now()} ${signal}: ending the session`);
+    const bound = sleep(75_000).then(() => verdicts.push([false, 'the session’s end did not settle within 75 s: stop it by hand']));
+    await Promise.race([stop?.() ?? Promise.resolve(), bound]);
+    verdicts.push([false, `interrupted by ${signal}`]);
+    link.close();
+    report();
+    process.exit(1);
+  };
+  for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => void interrupted(signal));
   try {
     await link.request('daemon.status', undefined); // wakes the parked engine host
-    await run(link, profile, resolve(directory), title, verdicts);
+    await run(link, profile, resolve(directory), title, verdicts, (end) => (stop = end));
   } catch (error) {
     verdicts.push([false, error instanceof Error ? error.message : String(error)]);
   } finally {
     link.close();
   }
-  for (const [ok, line] of verdicts) say(`${ok ? 'PASS' : 'FAIL'} ${line}`);
+  report();
   if (verdicts.some(([ok]) => !ok)) process.exitCode = 1;
 }
 

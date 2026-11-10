@@ -12,8 +12,9 @@
 # tailnet addresses and on no other (src/endpoint/direct-listener.ts); no loopback listener but the connectors' sign-in
 # listener while a sign-in runs. Outside the profile it reads the X server's sockets under /tmp/.X11-unix and each
 # running Xvfb's -auth file (its owner and mode, never its contents).
-# A `FLAG` line names each departure, a `NOTE` what the reader judges; the last line is `PASS` with no flag, else
-# `FAIL <n> flag(s)` (exit 1). Paths under the profile are printed relative to it; a listener's address only as its
+# A `FLAG` line names each departure, a `NOTE` what the reader judges, a `FAIL unread: <what>` a read that failed (a
+# command's error, a subtree `find` could not enter): the run then proves nothing and ends `FAIL`, never `PASS`. The last
+# line is `PASS` with no flag and nothing unread, else `FAIL …` (exit 1). Paths under the profile are printed relative to it; a listener's address only as its
 # class (tailnet, loopback, wildcard, other); the user as `self`; $HOME as `~`. Nothing else of the machine is printed.
 set -uo pipefail
 
@@ -24,13 +25,35 @@ UNIT=mawsd.service
 DIRECT_PORT=47830
 ME=$(id -un)
 flags=0
+unread=0
 
 flag() {
   echo "FLAG $*"
   flags=$((flags + 1))
 }
+# A read that failed: the inventory is incomplete, so the run cannot pass. The command's own words are not printed
+# (they name paths outside the profile).
+failed() {
+  echo "FAIL unread: $*"
+  unread=$((unread + 1))
+}
 owner() { if [[ $1 == "$ME" ]]; then echo self; else echo "$1"; fi; }
 home() { echo "${1/#$HOME/\~}"; }
+ERR=$(mktemp) || {
+  echo "FAIL unread: no temporary file for the commands' errors"
+  exit 1
+}
+trap 'rm -f "$ERR"' EXIT
+# `run <what> <command…>`: the command's output into $OUT; a non-zero status (find's for a subtree it could not enter
+# included) is `FAIL unread: <what>`, with how many error lines it wrote.
+run() {
+  local what=$1 rc=0
+  shift
+  OUT=$("$@" 2>"$ERR") || rc=$?
+  ((rc == 0)) && return 0
+  failed "$what (exit $rc, $(wc -l <"$ERR" | tr -d ' ') error line(s))"
+  return 1
+}
 
 # ---- under the profile --------------------------------------------------------------------------------------------
 
@@ -40,48 +63,68 @@ if [[ ! -d $PROFILE ]]; then
 fi
 [[ -L $PROFILE ]] && flag "the profile $(home "$PROFILE") is itself a symlink"
 echo "== under the profile, $(home "$PROFILE") (type mode owner path; d directory, s socket, l symlink)"
-while IFS=$'\t' read -r type mode user rel; do
-  [[ -n $rel ]] || rel=.
-  echo "$type $mode $(owner "$user") $rel"
-  case $type in
-    l) flag "$rel is a symlink" ;;
-    s)
-      [[ $user == "$ME" ]] || flag "$rel is owned by $(owner "$user"), not the user"
-      [[ $mode == 600 ]] || flag "$rel is mode 0$mode, not 0600"
-      parent=$(stat -c %a "$(dirname "$PROFILE/$rel")" 2>/dev/null)
-      [[ $parent == 700 ]] || flag "$rel is in a directory of mode 0${parent:-?}, not 0700"
-      case $rel in
-        mawsd/* | supervisor/* | endpoint/rl10.sock) ;;
-        *) echo "NOTE $rel is a socket outside mawsd/, supervisor/ and endpoint/rl10.sock" ;;
-      esac
-      ;;
-  esac
-done < <(find -H "$PROFILE" \( -type s -o -type d -o -type l \) -printf '%y\t%m\t%u\t%P\n' 2>/dev/null | sort -t $'\t' -k4,4)
+if run "the profile's sockets, directories and symlinks (find)" find -H "$PROFILE" \( -type s -o -type d -o -type l \) -printf '%y\t%m\t%u\t%P\n'; then
+  while IFS=$'\t' read -r type mode user rel; do
+    [[ -n $type ]] || continue
+    [[ -n $rel ]] || rel=.
+    echo "$type $mode $(owner "$user") $rel"
+    case $type in
+      l) flag "$rel is a symlink" ;;
+      s)
+        [[ $user == "$ME" ]] || flag "$rel is owned by $(owner "$user"), not the user"
+        [[ $mode == 600 ]] || flag "$rel is mode 0$mode, not 0600"
+        if parent=$(stat -c %a "$(dirname "$PROFILE/$rel")" 2>/dev/null); then
+          [[ $parent == 700 ]] || flag "$rel is in a directory of mode 0$parent, not 0700"
+        else
+          failed "the mode of $rel's directory (stat)"
+        fi
+        case $rel in
+          mawsd/* | supervisor/* | endpoint/rl10.sock) ;;
+          *) echo "NOTE $rel is a socket outside mawsd/, supervisor/ and endpoint/rl10.sock" ;;
+        esac
+        ;;
+    esac
+  done < <(sort -t $'\t' -k4,4 <<<"$OUT")
+fi
 
 # The long-path fallbacks put a socket under the temporary directory instead (src/endpoint/rl10/server.ts's
-# `mawsd-rl10-<uid>-<hash>`): listed when there is one.
-while IFS=$'\t' read -r mode user rel; do
-  echo "NOTE outside the profile: s $mode $(owner "$user") \$TMPDIR/$rel (a long-path fallback)"
-  [[ $user == "$ME" && $mode == 600 ]] || flag "\$TMPDIR/$rel is $(owner "$user")'s, mode 0$mode"
-done < <(find "${TMPDIR:-/tmp}" -maxdepth 2 -path "*/mawsd-*" -type s -printf '%m\t%u\t%P\n' 2>/dev/null | sort)
+# `mawsd-rl10-<uid>-<hash>`): the user's `mawsd-*` directories there, and their sockets, listed when there are any.
+TMP=${TMPDIR:-/tmp}
+if run "the temporary directory's mawsd-* directories (find)" find "$TMP" -mindepth 1 -maxdepth 1 -name 'mawsd-*' -type d -user "$ME" -printf '%P\n'; then
+  fallbacks=$OUT
+  while read -r dir; do
+    [[ -n $dir ]] || continue
+    run "\$TMPDIR/$dir's sockets (find)" find "$TMP/$dir" -maxdepth 1 -type s -printf '%m\t%u\t%P\n' || continue
+    while IFS=$'\t' read -r mode user name; do
+      [[ -n $mode ]] || continue
+      echo "NOTE outside the profile: s $mode $(owner "$user") \$TMPDIR/$dir/$name (a long-path fallback)"
+      [[ $user == "$ME" && $mode == 600 ]] || flag "\$TMPDIR/$dir/$name is $(owner "$user")'s, mode 0$mode"
+    done <<<"$OUT"
+  done <<<"$fallbacks"
+fi
 
 # ---- the listeners of mawsd and its hosts ------------------------------------------------------------------------
 
 echo "== listening TCP sockets of mawsd and its hosts (port class process)"
-main=$(systemctl --user show "$UNIT" -p MainPID --value 2>/dev/null)
-group=$(systemctl --user show "$UNIT" -p ControlGroup --value 2>/dev/null)
 declare -A ours=()
+main='' group=''
+run "$UNIT's main process (systemctl --user show)" systemctl --user show "$UNIT" -p MainPID --value && main=$OUT
+run "$UNIT's control group (systemctl --user show)" systemctl --user show "$UNIT" -p ControlGroup --value && group=$OUT
 if [[ ! $main =~ ^[1-9][0-9]*$ ]]; then
-  flag "$UNIT has no main process: its listeners are unread"
+  [[ -z $main ]] || failed "$UNIT has no main process (MainPID $main): its listeners"
 else
   ours[$main]=1
   # the unit's control group, every level of it
-  if [[ -n $group && -d /sys/fs/cgroup$group ]]; then
-    while read -r pid; do ours[$pid]=1; done < <(find "/sys/fs/cgroup$group" -name cgroup.procs -exec cat {} + 2>/dev/null)
+  if [[ -z $group || ! -d /sys/fs/cgroup$group ]]; then
+    failed "$UNIT's control group (not under /sys/fs/cgroup)"
+  elif run "$UNIT's control group's processes (find cgroup.procs)" find "/sys/fs/cgroup$group" -name cgroup.procs -exec cat {} +; then
+    while read -r pid; do [[ -n $pid ]] && ours[$pid]=1; done <<<"$OUT"
   fi
   # the main process's descendants, wherever they run
   declare -A children=()
-  while read -r pid ppid; do children[$ppid]+=" $pid"; done < <(ps -e -o pid=,ppid=)
+  if run "the process table (ps)" ps -e -o pid=,ppid=; then
+    while read -r pid ppid; do [[ -n $pid ]] && children[$ppid]+=" $pid"; done <<<"$OUT"
+  fi
   queue=("$main")
   while ((${#queue[@]})); do
     pid=${queue[0]}
@@ -110,25 +153,23 @@ class() {
   esac
 }
 
-# Whether a process is one of mawsd's own (mawsd and its hosts run a binary of a release): a session's own process, a
-# tool the agent started, is not.
-is_host() {
-  local exe
-  exe=$(readlink "/proc/$1/exe" 2>/dev/null)
-  [[ $exe == "$RELEASES"/* ]]
-}
-
 direct=0
-if ((${#ours[@]})); then
+if ((${#ours[@]})) && run "the listening TCP sockets (ss -ltnpH)" ss -ltnpH; then
   while read -r _ _ _ local _ users; do
     [[ -n ${local:-} ]] || continue
     mine=''
-    while read -r pid; do [[ -n ${ours[$pid]:-} ]] && mine=$pid; done < <(grep -o 'pid=[0-9]*' <<<"$users" | cut -d= -f2)
+    while read -r pid; do [[ -n $pid && -n ${ours[$pid]:-} ]] && mine=$pid; done < <(grep -o 'pid=[0-9]*' <<<"$users" | cut -d= -f2)
     [[ -n $mine ]] || continue
     port=${local##*:}
     kind=$(class "$local")
     name=$(grep -o '(("[^"]*"' <<<"$users" | head -1 | cut -d'"' -f2)
-    if ! is_host "$mine"; then
+    # Whether it is one of mawsd's own (mawsd and its hosts run a binary of a release): a session's own process, a tool
+    # the agent started, is not.
+    if ! exe=$(readlink "/proc/$mine/exe" 2>/dev/null); then
+      failed "the binary of the process listening on $port (${name:-?})"
+      continue
+    fi
+    if [[ $exe != "$RELEASES"/* ]]; then
       echo "NOTE a listener on $port ($kind) of ${name:-?}, a process under the unit that runs no release binary (a session's own tool?)"
       continue
     fi
@@ -140,41 +181,60 @@ if ((${#ours[@]})); then
     else
       flag "a listener on $port on a $kind address (${name:-?}), outside the expected set"
     fi
-  done < <(ss -ltnpH 2>/dev/null)
+  done <<<"$OUT"
   ((direct)) || echo "NOTE no direct listener on $DIRECT_PORT (is the endpoint enrolled and its listener on?)"
 fi
 
 # ---- outside the profile: the X server -------------------------------------------------------------------------
 
 echo "== outside the profile: the X server's sockets (type mode owner path)"
-if [[ -d /tmp/.X11-unix ]]; then
-  while IFS=$'\t' read -r type mode user rel; do
-    echo "$type $mode $(owner "$user") /tmp/.X11-unix${rel:+/$rel}"
-  done < <(find /tmp/.X11-unix -maxdepth 1 \( -type d -o -type s \) -printf '%y\t%m\t%u\t%P\n' 2>/dev/null | sort -t $'\t' -k4,4)
-else
+if [[ ! -e /tmp/.X11-unix ]]; then
   echo "(no /tmp/.X11-unix)"
+elif run "/tmp/.X11-unix (find)" find /tmp/.X11-unix -maxdepth 1 \( -type d -o -type s \) -printf '%y\t%m\t%u\t%P\n'; then
+  while IFS=$'\t' read -r type mode user rel; do
+    [[ -n $type ]] || continue
+    echo "$type $mode $(owner "$user") /tmp/.X11-unix${rel:+/$rel}"
+  done < <(sort -t $'\t' -k4,4 <<<"$OUT")
 fi
 echo "== outside the profile: each running Xvfb's -auth file (display owner auth)"
-xvfbs=$(pgrep -x Xvfb 2>/dev/null)
-[[ -n $xvfbs ]] || echo "(no Xvfb running)"
+xvfbs=''
+if xvfbs=$(pgrep -x Xvfb 2>"$ERR"); then
+  :
+elif (($? == 1)); then
+  echo "(no Xvfb running)" # pgrep's 1: nothing matched
+else
+  failed "the running Xvfb processes (pgrep)"
+fi
 for pid in $xvfbs; do
-  mapfile -d '' -t argv </proc/"$pid"/cmdline 2>/dev/null || continue
+  if ! mapfile -d '' -t argv <"/proc/$pid/cmdline" 2>/dev/null || ((${#argv[@]} == 0)); then
+    failed "Xvfb $pid's command line"
+    continue
+  fi
   display='' auth=''
   for ((i = 1; i < ${#argv[@]}; i++)); do
     [[ -z $display && ${argv[i]} == :* ]] && display=${argv[i]}
     [[ ${argv[i]} == -auth ]] && auth=${argv[i + 1]:-}
   done
-  user=$(ps -o user= -p "$pid" 2>/dev/null)
+  if ! user=$(ps -o user= -p "$pid" 2>/dev/null); then
+    failed "Xvfb ${display:-?}'s owner (ps)"
+    continue
+  fi
   if [[ -z $auth ]]; then
-    echo "Xvfb ${display:-?} $(owner "${user:-?}") no -auth argument"
+    echo "Xvfb ${display:-?} $(owner "$user") no -auth argument"
     echo "NOTE Xvfb ${display:-?} has no -auth file: the server checks no cookie"
-  elif [[ -e $auth ]]; then
-    echo "Xvfb ${display:-?} $(owner "${user:-?}") -auth $(home "$auth"), mode 0$(stat -c %a "$auth"), owner $(owner "$(stat -c %U "$auth")")"
+  elif [[ ! -e $auth ]]; then
+    echo "Xvfb ${display:-?} $(owner "$user") -auth $(home "$auth"), which does not exist"
+  elif read -r amode auser < <(stat -c '%a %U' "$auth" 2>/dev/null) && [[ -n ${auser:-} ]]; then
+    echo "Xvfb ${display:-?} $(owner "$user") -auth $(home "$auth"), mode 0$amode, owner $(owner "$auser")"
   else
-    echo "Xvfb ${display:-?} $(owner "${user:-?}") -auth $(home "$auth"), which does not exist"
+    failed "Xvfb ${display:-?}'s -auth file's mode and owner (stat)"
   fi
 done
 
+if ((unread)); then
+  echo "FAIL $unread read(s) failed and $flags flag(s): the inventory is incomplete"
+  exit 1
+fi
 if ((flags)); then
   echo "FAIL $flags flag(s)"
   exit 1
