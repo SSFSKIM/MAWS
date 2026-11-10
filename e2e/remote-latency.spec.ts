@@ -22,6 +22,15 @@
 // and by Rule B on the load sampled every 30 s (test/support/remote-latency.ts), and each carrier is held to acceptance
 // 3's bounds against the local numbers. A measured group (gate.yml's MEASURED_E2E): `pnpm e2e:remote-latency` sets
 // MAWS_REMOTE_LATENCY_PERF=1; it spends nothing (no network beyond 127.0.0.1) and touches no keychain.
+//
+// The second test is P5 O15 M2b's wake case (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, §I; O15's
+// acceptance 6), on a scene of its own: B runs two sessions on the stub, A opens both side by side, and per carrier both
+// of A's ways go silent (the pipes stalled: their connections dead, a new connect refused), each session writes 21 turns
+// A can't see, so its cursor falls out of B's ring, a wake of an hour is injected through main's seam, and after 1 to 3
+// s A's way back is restored, on the relay's launch with the direct pipe answering TCP and hanging above it. Main's own
+// log (`<profile>/logs/main.log`), B's `mawsd.log` and `host.log` and the pipes' records say what came back and when;
+// test-results/remote-wake.json holds it, one line per carrier is printed, and the measured group holds every
+// subscription to 1 s from the restore and the feed to 2 s from the hub's (test/support/remote-wake.ts).
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { loadavg, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -29,8 +38,11 @@ import { expect, test, type Page } from '@playwright/test';
 import { addressOf } from '../src/shared/machine/address';
 import type { MachineRef } from '../src/shared/machine/ref';
 import { BENCH, summarize, type ClockCheck } from '../test/support/local-latency';
-import { markerOf, writeLatencyEngine } from '../test/support/latency-engine';
+import { FIXTURE_ENGINE_VERSION } from '../test/support/engine-pin';
+import { LATENCY_STUB, markerOf, writeLatencyEngine } from '../test/support/latency-engine';
+import { parseLogText, readLogLines } from '../test/support/main-log';
 import { boundsOf, budgetMisses, CARRIERS, invalidReasons, loadVerdict, remoteLine, rttStats, type Bounds, type Carrier, type Exchange, type RemoteMeasures } from '../test/support/remote-latency';
+import { linkPending, loadVoid, markersNotOnce, readWake, sixMissing, sixSubscriptions, subscriptionsIn, WAKE_CASE, wakeMisses, wakeSummary, type WakeRecord } from '../test/support/remote-wake';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { cleanupAll, lastTurn, linkOf, localCase, main, measureTurns, now, openToFirstRow, pings, probe, prompt, raw, roundTrips, statsOf, trust, TURN_MS, writtenOf, type CaseResult } from './support/remote-latency-page';
 import { startRemoteScene, type RemoteScene } from './support/remote-scene';
@@ -229,4 +241,249 @@ test('remote latency: delta to frame, round trip, open, resume and the link’s 
   }
   expect(reasons, 'the run is valid').toEqual([]);
   expect(misses, 'every carrier within acceptance 3’s bounds of the same run’s local numbers').toEqual([]);
+});
+
+// ---- The wake case (P5 O15 M2b §I) ----
+
+const MAIN_LOG = (userData: string) => join(userData, 'logs', 'main.log');
+
+// The latency stub as B's engine for the wake case's two sessions, one samples file per engine session
+// (`<dir>/<its --session-id or --resume>.jsonl`), so each session numbers its own turns (the stub numbers on from its
+// samples file's last) and its markers are its own.
+function writeSessionLatencyEngine(path: string, dir: string): string {
+  const quote = (text: string) => `'${text.replaceAll("'", `'\\''`)}'`;
+  const script = [
+    '#!/bin/sh',
+    'sid=none',
+    'prev=',
+    'for arg in "$@"; do',
+    '  case "$prev" in --session-id|--resume) sid=$arg ;; esac',
+    '  prev=$arg',
+    'done',
+    `MAWS_LATENCY_STUB_VERSION=${quote(FIXTURE_ENGINE_VERSION)} exec ${quote(process.execPath)} ${quote(LATENCY_STUB)} ${quote(dir)}/"$sid.jsonl" "$@"`,
+    '',
+  ];
+  writeFileSync(path, script.join('\n'), { mode: 0o755 });
+  return path;
+}
+
+type BSession = { app: string; engine: string; address: string; samples: string };
+type Daemon = RemoteScene['b'];
+type BStatus = { process: string; turn: unknown; engineSessionId: string | null };
+const bStatusOf = (b: Daemon, app: string) => b.request<BStatus>('session.status', { appSessionId: app }).catch(() => null);
+const bTurnOver = async (b: Daemon, app: string) => {
+  const s = await bStatusOf(b, app);
+  return s?.process === 'ready' && s.turn === null;
+};
+
+// One of B's sessions, its first turn over and its 300 deltas written, then listed through sminos.
+async function startBSession(scene: RemoteScene, projectId: string, checkout: string, samplesDir: string, title: string): Promise<BSession> {
+  const { b } = scene;
+  const app = (await b.request<{ appSessionId: string }>('session.create', { projectId, location: null })).appSessionId;
+  await b.request('session.intent.patch', { appSessionId: app, patch: { gateway: 'direct' } });
+  const started = await b.request<{ status: string }>('session.start', { appSessionId: app, message: { content: prompt(1), display: prompt(1) }, options: {} });
+  expect(started.status, `B's session ${title} starts without the trust question`).not.toBe('needs_trust');
+  const engineOf = async () => (await bStatusOf(b, app))?.engineSessionId ?? null;
+  await expect.poll(engineOf, { timeout: TURN_MS, message: `B's session ${title} names its engine session` }).not.toBeNull();
+  const engine = (await engineOf())!;
+  const samples = join(samplesDir, `${engine}.jsonl`);
+  await expect.poll(() => writtenOf(samples).length, { timeout: TURN_MS, message: `B's session ${title}: its first turn's deltas in ${samples}\n${b.log().slice(-3000)}` }).toBe(BENCH.markersPerTurn);
+  await expect.poll(() => bTurnOver(b, app), { timeout: TURN_MS, message: `B's session ${title}: its first turn over` }).toBe(true);
+  await scene.sminos.list({ engine, app, owners: [scene.member], project: PROJECT, title, cwd: checkout });
+  return { app, engine, address: addressOf(b.ref, app), samples };
+}
+
+// `count` turns of one of B's sessions, one after another, each written whole and over before the next.
+async function writeTurns(b: Daemon, s: BSession, count: number): Promise<void> {
+  for (let i = 0; i < count; i += 1) {
+    const turn = lastTurn(writtenOf(s.samples)) + 1;
+    await b.request('session.send', { appSessionId: s.app, content: prompt(turn) });
+    await expect.poll(() => writtenOf(s.samples).filter((w) => w.turn === turn).length, { timeout: TURN_MS, intervals: [100], message: `B's session ${s.app}: turn ${turn}'s deltas written` }).toBe(BENCH.markersPerTurn);
+    await expect.poll(() => bTurnOver(b, s.app), { timeout: TURN_MS, intervals: [100], message: `B's session ${s.app}: turn ${turn} over` }).toBe(true);
+  }
+}
+
+const paneOf = (page: Page, index: number) => main(page).locator(`[data-pane="${index}"]`);
+const paneText = (page: Page, index: number) => paneOf(page, index).evaluate((el) => el.textContent ?? '');
+const turnMarkers = (turn: number) => Array.from({ length: BENCH.markersPerTurn }, (_, k) => markerOf(turn, k + 1).trim());
+
+// B's first session in A's left pane and its second in the right: a click, a ⌘-click for a tab of its own, then the
+// split, which moves the focused pane's active tab to a pane of its own (e2e/requests.spec.ts's way).
+async function openSideBySide(launch: MawsLaunch, ref: MachineRef, sessions: readonly BSession[]): Promise<void> {
+  const { page } = launch;
+  await showProjectList(page);
+  const machineRow = sidebarOf(page).locator(`[data-kind="project"][data-tree-id="p:machine:${ref}"]`);
+  await expect(async () => {
+    if ((await machineRow.getAttribute('aria-expanded')) !== 'true') await machineRow.locator('[data-project-line]').click();
+    await expect(machineRow).toHaveAttribute('aria-expanded', 'true', { timeout: 1_000 });
+  }).toPass({ timeout: 30_000 });
+  const rowOf = (s: BSession) => sidebarOf(page).locator(`[role="treeitem"][data-tree-id="s:${s.address}"]`);
+  const composerIn = (pane: number, s: BSession) => paneOf(page, pane).locator(`[data-composer="${s.address}"]`);
+  const left = sessions[0]!;
+  const right = sessions[1]!;
+  for (const s of sessions) await expect(rowOf(s), `B's session ${s.app} is a row of A's sidebar`).toBeVisible({ timeout: 30_000 });
+  await rowOf(left).click();
+  await expect(composerIn(0, left), `B's session ${left.app} open in A's pane`).toBeVisible({ timeout: 30_000 });
+  await rowOf(right).click({ modifiers: ['Meta'] });
+  await expect(composerIn(0, right), `B's session ${right.app} open in a tab of its own`).toBeVisible({ timeout: 30_000 });
+  await launch.app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('pane.split')?.click());
+  await expect(composerIn(1, right), `B's session ${right.app} in A's right pane after the split`).toBeVisible({ timeout: 30_000 });
+  await expect(composerIn(0, left), `B's session ${left.app} still in A's left pane`).toBeVisible({ timeout: 30_000 });
+}
+
+/** True once `done` holds, false if it has not within `timeoutMs`: a bounded wait whose miss the record names. */
+async function within(done: () => boolean | Promise<boolean>, timeoutMs: number): Promise<boolean> {
+  const end = Date.now() + timeoutMs;
+  for (;;) {
+    if (await done()) return true;
+    if (Date.now() >= end) return false;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
+const READ_WITHIN_MS = 30_000; // each wait for what the logs and the panes should show after the restore
+
+test('a wake after a silent cut: every subscription answered within 1 s of the restore, one upgrade, nothing lost or repeated, per carrier', async () => {
+  const loads = [loadavg()[0]];
+  const sampler = setInterval(() => loads.push(loadavg()[0]), 30_000);
+  let terminalLoad: number | undefined;
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-rw-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-rwa-'));
+  const checkout = join(root, 'b-checkout');
+  mkdirSync(checkout);
+  const samplesDir = join(root, 'b-samples');
+  mkdirSync(samplesDir);
+  const bBin = writeSessionLatencyEngine(join(root, 'b-engine'), samplesDir);
+  let scene: RemoteScene | null = null;
+  let a: MawsLaunch | null = null;
+  type CarrierRecord = WakeRecord & { linkBeforeWake: string; turns: { app: string; lastSeen: number; lastWritten: number }[] };
+  const records: Partial<Record<Carrier, CarrierRecord>> = {};
+  const failures: string[] = [];
+  try {
+    scene = await startRemoteScene({ scratch: join(root, 'scene'), aUserData, directPipe: true, b: { env: { MAWS_E2E_ENGINE_BIN: bBin }, prepare: trust(checkout) } });
+    const { b } = scene;
+    const direct = scene.aDirect!;
+    await b.request('machineSettings.set', { patch: { gateway: { defaultRoute: 'direct' } } });
+    const project = await b.request<{ id: string }>('session.projects.add', { directory: checkout });
+    const sessions: BSession[] = [];
+    for (const title of ['B’s first wake session', 'B’s second wake session']) sessions.push(await startBSession(scene, project.id, checkout, samplesDir, title));
+    const expected = sixSubscriptions(sessions.map((s) => s.app));
+    const mainLog = () => readLogLines(MAIN_LOG(aUserData));
+    const hostLog = join(b.userData, 'supervisor', 'host.log');
+
+    for (const carrier of CARRIERS) {
+      // both launches map B's address to the direct pipe: open for the direct launch, on hold for the relay's, so its
+      // own direct race times out and the link comes up over the relay
+      scene.aHub.restore();
+      if (carrier === 'direct') direct.restore();
+      else direct.hold();
+      rmSync(join(aUserData, 'layout.json'), { force: true });
+      a = await launchMaws({ userData: aUserData, env: { MAWS_DEV_ORG: scene.devOrgDir(true), MAWS_MACHINE_NAME: 'A' } });
+      const { page, launchedAt } = a;
+
+      // 1. Up over the carrier, both sessions open side by side and their histories shown to their last turns, and the
+      //    six subscriptions answered since the launch
+      await expect.poll(async () => {
+        const m = await linkOf(page, b.ref);
+        return m === undefined ? null : `${m.state}/${m.carrier ?? ''}`;
+      }, { timeout: 60_000, message: `A's link to B comes up over ${carrier}` }).toBe(`up/${carrier}`);
+      await expect.poll(async () => {
+        const rows = (await raw<{ rows: { machine: string; session: string }[] }>(page, 'org.rows', undefined)).rows;
+        return sessions.filter((s) => !rows.some((r) => r.machine === b.ref && r.session === s.app)).map((s) => s.app);
+      }, { timeout: 60_000, message: "B's sessions are rows of A's (received: those that are not)" }).toEqual([]);
+      await openSideBySide(a, b.ref, sessions);
+      const seen = sessions.map((s) => lastTurn(writtenOf(s.samples)));
+      for (const [i, s] of sessions.entries()) {
+        const last = markerOf(seen[i]!, BENCH.markersPerTurn).trim();
+        await expect.poll(async () => (await paneText(page, i)).includes(last), { timeout: 60_000, message: `A's pane ${i} shows B's session ${s.app} to its last turn (${last})` }).toBe(true);
+      }
+      await expect.poll(() => sixMissing(expected, subscriptionsIn(mainLog(), b.ref, launchedAt)), { timeout: READ_WITHIN_MS, message: `main.log's subbed lines since the launch give the link's six subscriptions (received: what they lack)` }).toEqual([]);
+      const ids = [...subscriptionsIn(mainLog(), b.ref, launchedAt).values()].map((held) => held.id);
+
+      // 2. Both ways silent; each session writes its turns unseen, past the ring's first trim
+      const stalledAt = Date.now();
+      scene.aHub.stall();
+      direct.stall();
+      await Promise.all(sessions.map((s) => writeTurns(b, s, WAKE_CASE.turns)));
+      const before = await linkOf(page, b.ref);
+
+      // 3. The hour asleep, through main's seam
+      const injectedAt = Date.now();
+      await a.app.evaluate((_electron, sleptMs) => {
+        const seam = (globalThis as { __maws_wake?: { inject(ms: number): void } }).__maws_wake;
+        if (seam === undefined) throw new Error('no wake seam in main (MAWS_E2E=1, unpackaged)');
+        seam.inject(sleptMs);
+      }, WAKE_CASE.sleptMs);
+
+      // 4. After a drawn wait, the way back, at an instant the app is not told
+      const { min, max } = WAKE_CASE.restoreAfterMs;
+      await new Promise((resolve) => setTimeout(resolve, Math.max(0, injectedAt + min + Math.round(Math.random() * (max - min)) - Date.now())));
+      const restoredAt = Date.now();
+      if (carrier === 'direct') direct.restore();
+      else {
+        scene.aHub.restore();
+        direct.hold();
+      }
+
+      // 5. and 6. What main's log, B's logs, the pipes and the panes show; the hub restored, on the direct launch, once
+      //    the link's lines are in, still inside the window
+      await within(() => linkPending(mainLog(), b.ref, carrier, ids, restoredAt).length === 0, READ_WITHIN_MS);
+      let hubRestoredAt = restoredAt;
+      if (carrier === 'direct') {
+        hubRestoredAt = Date.now();
+        scene.aHub.restore();
+      }
+      const inputOf = () => ({
+        carrier, ref: b.ref, expected, main: mainLog(), endpoint: parseLogText(b.log()), host: readLogLines(hostLog), launchedAt, stalledAt, injectedAt, restoredAt, hubRestoredAt,
+        requests: { hub: scene!.aHub.requests(), direct: direct.requests() },
+      });
+      await within(() => readWake(inputOf()).failures.length === 0, READ_WITHIN_MS);
+      const panes: string[] = [];
+      for (const [i, s] of sessions.entries()) {
+        const turn = lastTurn(writtenOf(s.samples));
+        const markers = turnMarkers(turn);
+        await within(async () => {
+          const text = await paneText(page, i);
+          return markers.every((marker) => text.includes(marker));
+        }, READ_WITHIN_MS);
+        const off = markersNotOnce(await paneText(page, i), markers);
+        if (off.length > 0) panes.push(`${carrier}: A's pane ${i} shows ${off.length} of the ${markers.length} markers of B's session ${s.app}'s turn ${turn} other than once: ${off.slice(0, 5).map((m) => `${m.marker} ×${m.count}`).join(', ')}${off.length > 5 ? ', …' : ''}`);
+      }
+      const { record, failures: read } = readWake(inputOf());
+      records[carrier] = { ...record, linkBeforeWake: before === undefined ? 'gone' : `${before.state}/${before.carrier ?? 'none'}`, turns: sessions.map((s, i) => ({ app: s.app, lastSeen: seen[i]!, lastWritten: lastTurn(writtenOf(s.samples)) })) };
+      failures.push(...read, ...panes);
+      await a.cleanup();
+      a = null;
+    }
+  } finally {
+    clearInterval(sampler);
+    terminalLoad = loadavg()[0];
+    await cleanupAll([() => a?.cleanup(), () => scene?.stop(), () => rmSync(aUserData, { recursive: true, force: true }), () => rmSync(root, { recursive: true, force: true })]);
+  }
+
+  const voids = loadVoid(loads, terminalLoad ?? null);
+  const misses = CARRIERS.flatMap((c) => (records[c] === undefined ? [] : wakeMisses(records[c]!)));
+  const lines = CARRIERS.flatMap((c) => (records[c] === undefined ? [] : [wakeSummary(records[c]!)]));
+  const load = loadVerdict(loads, terminalLoad ?? null);
+  const info = test.info();
+  mkdirSync(info.project.outputDir, { recursive: true });
+  writeFileSync(join(info.project.outputDir, 'remote-wake.json'), `${JSON.stringify({
+    lines, mode: CHECK ? 'check' : 'perf', valid: voids.length === 0, sha: process.env.GITHUB_SHA ?? null, runId: process.env.GITHUB_RUN_ID ?? null,
+    bounds: { linkWithinMs: WAKE_CASE.linkWithinMs, feedWithinMs: WAKE_CASE.feedWithinMs }, invalidReasons: voids, failures, boundMisses: misses,
+    load: { samples: loads, terminal: terminalLoad ?? null, peak: load.peak, pair: load.pair },
+    direct: records.direct ?? null, relay: records.relay ?? null,
+  }, null, 2)}\n`);
+  for (const line of lines) {
+    console.log(line);
+    info.annotations.push({ type: 'remote-wake', description: line });
+  }
+  if (CHECK) {
+    // the functional check: every line and count there; the times recorded, never held
+    expect(failures, 'every line and count the wake case reads, per carrier').toEqual([]);
+    for (const line of [...voids, ...misses]) console.log(`[remote-wake] (check, not held) ${line}`);
+    return;
+  }
+  expect(voids, 'the run is valid').toEqual([]);
+  expect(failures, 'every line and count the wake case reads, per carrier').toEqual([]);
+  expect(misses, 'every subscription within 1 s of the restore and the feed within 2 s of the hub’s, per carrier').toEqual([]);
 });
