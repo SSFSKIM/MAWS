@@ -83,6 +83,24 @@ describe('the reach (§E)', () => {
     subject.close();
   });
 
+  it('keeps each probe’s 3 s and the thirty in flight through a backward correction of the wall clock', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
+    const { calls, live, reach: subject } = reach();
+    subject.openWindow('wake');
+    const answer = subject.reachable(MACHINE);
+    vi.advanceTimersByTime(PROBE_CONNECT_MS - PROBE_STAGGER_MS); // thirty hanging, the k-th started at k × 100 ms
+    expect(live()).toHaveLength(30);
+    vi.setSystemTime(Date.now() - 30_000); // the wall clock set back; elapsed time goes on
+    for (let elapsed = PROBE_CONNECT_MS; elapsed <= 8_000; elapsed += PROBE_STAGGER_MS) {
+      vi.advanceTimersByTime(PROBE_STAGGER_MS);
+      expect(live().length).toBeLessThanOrEqual(30);
+      calls.forEach((call, k) => expect(call.signal.aborted).toBe(k * PROBE_STAGGER_MS + PROBE_CONNECT_MS <= elapsed)); // each destroyed at its own 3 s
+    }
+    expect(calls).toHaveLength(81); // one every 100 ms, from 0 through 8 s
+    expect(await settled(answer)).toBe('pending');
+    subject.close();
+  });
+
   it('answers every waiter of a key at its first connect, destroys the key’s other probes and probes it no more', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
     const { calls, live, lines, reach: subject } = reach();

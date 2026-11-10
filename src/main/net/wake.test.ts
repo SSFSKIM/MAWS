@@ -177,10 +177,12 @@ describe('the wake seam (§I)', () => {
   };
 
   it('is installed only under MAWS_E2E=1 in an unpackaged build, and removed again', () => {
-    installWakeSeam({}, false, wake())();
+    const outsideE2e = installWakeSeam({}, false, wake());
     expect(globalThis.__maws_wake).toBeUndefined();
-    installWakeSeam({ MAWS_E2E: '1' }, true, wake())();
+    outsideE2e();
+    const packaged = installWakeSeam({ MAWS_E2E: '1' }, true, wake());
     expect(globalThis.__maws_wake).toBeUndefined();
+    packaged();
     const source = wake();
     const remove = installWakeSeam({ MAWS_E2E: '1' }, false, source);
     globalThis.__maws_wake!.inject(3_600_000);

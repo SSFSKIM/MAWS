@@ -62,7 +62,7 @@ function keyOf(target: string): { key: string; host: string; port: number } {
 }
 
 type Waiter = { answer(reachable: boolean): void };
-type Probe = { controller: AbortController; startedAt: number };
+type Probe = { controller: AbortController; deadline: ReturnType<typeof setTimeout> };
 /** One key's round of waiting: from its first waiter to the answer, or to its last waiter leaving. */
 type Round = {
   key: string;
@@ -72,11 +72,13 @@ type Round = {
   probes: Set<Probe>;
   started: number; // probes started in the round
   startedAt: number;
+  owed: boolean; // a tick found thirty in flight: the next probe starts as soon as one of them ends
   lastError: unknown;
   ticker: ReturnType<typeof setInterval>;
 };
 
 const NO_PROBE_ENDED = 'no probe ended';
+const MAX_IN_FLIGHT = PROBE_CONNECT_MS / PROBE_STAGGER_MS; // thirty
 
 export function createReach(deps: { connect?: Connect; now?(): number; log(line: string): void }): Reach {
   const connect = deps.connect ?? tcpConnect;
@@ -87,7 +89,15 @@ export function createReach(deps: { connect?: Connect; now?(): number; log(line:
 
   const destroy = (round: Round, probe: Probe) => {
     round.probes.delete(probe);
+    clearTimeout(probe.deadline);
     probe.controller.abort();
+  };
+
+  /** A probe of a round still waiting has ended without connecting: a tick the cap held back starts now. */
+  const freed = (round: Round) => {
+    if (!round.owed) return;
+    round.owed = false;
+    startProbe(round);
   };
 
   /** Ends a round: its probes destroyed, its ticker stopped, every waiter still in it answered. */
@@ -99,8 +109,16 @@ export function createReach(deps: { connect?: Connect; now?(): number; log(line:
     round.waiters.clear();
   };
 
-  const startProbe = (round: Round) => {
-    const probe: Probe = { controller: new AbortController(), startedAt: now() };
+  // Each probe's PROBE_CONNECT_MS is its own timer, so a correction of the wall clock neither shortens nor lengthens it.
+  function startProbe(round: Round): void {
+    const probe: Probe = {
+      controller: new AbortController(),
+      deadline: setTimeout(() => {
+        destroy(round, probe);
+        round.lastError = new Error(`no connect within ${PROBE_CONNECT_MS} ms`);
+        freed(round);
+      }, PROBE_CONNECT_MS),
+    };
     round.probes.add(probe);
     round.started += 1;
     connect(round.host, round.port, probe.controller.signal).then(
@@ -112,20 +130,20 @@ export function createReach(deps: { connect?: Connect; now?(): number; log(line:
       (error: unknown) => {
         if (!round.probes.has(probe)) return;
         round.probes.delete(probe);
+        clearTimeout(probe.deadline);
         round.lastError = error;
+        freed(round);
       },
     );
-  };
+  }
 
-  /** A stagger's tick: every probe that has had its PROBE_CONNECT_MS is destroyed first, so at most thirty are ever in flight. */
+  /**
+   * A stagger's tick starts a probe unless thirty are in flight. A tick due in the same millisecond as the oldest
+   * probe's deadline may run first, whatever order the timers fire in; it is then owed, and starts at that deadline.
+   */
   const tick = (round: Round) => {
-    const at = now();
-    for (const probe of [...round.probes]) {
-      if (at - probe.startedAt < PROBE_CONNECT_MS) continue;
-      destroy(round, probe);
-      round.lastError = new Error(`no connect within ${PROBE_CONNECT_MS} ms`);
-    }
-    startProbe(round);
+    if (round.probes.size >= MAX_IN_FLIGHT) round.owed = true;
+    else startProbe(round);
   };
 
   const closeWindow = (log: boolean) => {
@@ -160,7 +178,7 @@ export function createReach(deps: { connect?: Connect; now?(): number; log(line:
       return new Promise<boolean>((resolve) => {
         let round = rounds.get(where.key);
         if (round === undefined) {
-          const fresh: Round = { ...where, waiters: new Set(), probes: new Set(), started: 0, startedAt: now(), lastError: null, ticker: setInterval(() => tick(fresh), PROBE_STAGGER_MS) };
+          const fresh: Round = { ...where, waiters: new Set(), probes: new Set(), started: 0, startedAt: now(), owed: false, lastError: null, ticker: setInterval(() => tick(fresh), PROBE_STAGGER_MS) };
           rounds.set(where.key, fresh);
           round = fresh;
           startProbe(fresh);
