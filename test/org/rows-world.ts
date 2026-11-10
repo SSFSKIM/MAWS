@@ -12,6 +12,7 @@ import {
   type Listing,
   type MachineCert,
   type OrgView,
+  type ProjectLocation,
   type ProjectsRecord,
   type Signed,
   type SignedOrgState,
@@ -111,6 +112,12 @@ export class World {
   list(machine: Machine, session: string, revision: number, fields: Partial<Listing['fields']> = {}, org = ORG): Promise<Signed<Listing>> {
     const body: Listing = { org, machine: machine.ref, session, revision, issued: iso(this.clock), fields: { owners: [this.A], project: null, lane: 'A', state: 'busy', title: `${session} r${revision}`, ...fields } };
     return signRecord(SIGNING_DOMAINS.listing, body, machine.key.privateKey, machine.key.pub);
+  }
+
+  /** The project registry: `machine`'s projects record at `revision`, signed with its key. */
+  projects(machine: Machine, revision: number, locations: ProjectLocation[] = [], known: ProjectsRecord['known'] = [], org = ORG): Promise<Signed<ProjectsRecord>> {
+    const body: ProjectsRecord = { org, machine: machine.ref, revision, issued: iso(this.clock), locations, known };
+    return signRecord(SIGNING_DOMAINS.projects, body, machine.key.privateKey, machine.key.pub);
   }
 
   gone(machine: Machine, session: string, revision: number): Promise<Signed<Listing>> {
@@ -222,3 +229,15 @@ export function fakeLinks(initial: LinkState = 'up') {
     },
   };
 }
+
+/** The project registry: a declared location as a record states it, a minted plain folder unless `over` says otherwise. */
+export const location = (pid: string, id: string, path: string, over: Partial<ProjectLocation> = {}): ProjectLocation => ({
+  pid,
+  id,
+  key: `folder:x:${pid}`,
+  name: path.split('/').pop()!,
+  path,
+  source: 'folder',
+  stated: 'minted',
+  ...over,
+});
