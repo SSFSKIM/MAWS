@@ -18,7 +18,7 @@
 // sminos matches a stored signer by any of the three (`signer_revoked`), so a device id or member id still in the head is
 // never named: one member's revoked device must not revoke their other device's words.
 import { machineProjectId } from 'desk-hub/protocol';
-import { isMachineCert, isSigned, keyId, machineNameKey, machineProjectNames, standingCertNames, type Certificates, type OrgState } from 'org-protocol';
+import { isMachineCert, isSigned, keyId, directoryMachineNames, machineNameKey, standingCertNames, type Certificates, type OrgState } from 'org-protocol';
 
 export type OrgDirectory = {
   t: 'org';
@@ -30,7 +30,7 @@ export type RevocationSet = { version: number; devices: string[]; members: strin
 
 /** DX2's `org` frame from the head; `seen` gives each machine name's newest relayed event time. */
 export async function orgDirectory(head: OrgState, certificates: Certificates, now: Date, seen: (name: string) => string | null): Promise<OrgDirectory> {
-  const names = machineProjectNames(head, certificates, now);
+  const names = directoryMachineNames(head, certificates, now);
   const refs = new Set(head.machines.map((m) => m.ref));
   const enrolled = new Set([...head.machines, ...head.machineNames.filter((p) => refs.has(p.ref))].map((m) => machineNameKey(m.name)));
   const standing = await standingCertNames(head, certificates, now);

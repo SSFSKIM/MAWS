@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { canonicalize } from '../src/canonical.ts';
 import { importSigningKey } from '../src/keys.ts';
-import { assembleProjects, machineProjectNames } from '../src/projects.ts';
+import { assembleProjects, directoryMachineNames, machineProjectNames } from '../src/projects.ts';
 import { NO_CERTIFICATES, signRecord, verifyProjectsRecord } from '../src/records.ts';
 import { isProjectsRecord, PROJECTS_RECORD_BOUNDS } from '../src/shapes.ts';
 import { SIGNING_DOMAINS, type Certificates, type OrgState, type ProjectLocation, type ProjectsRecord, type Signed, type SignedOrgState } from '../src/types.ts';
@@ -93,18 +93,31 @@ describe("the projects record's bounds, met exactly", () => {
   });
 });
 
-describe('machineProjectNames', () => {
-  it("names the enrolled machines and a VM that exists only by its certificate, as the endpoint's directory did", () => {
-    expect(machineProjectNames(V2, NO_CERTIFICATES, NOW)).toEqual(['builder', 'mini']);
-    expect(machineProjectNames(V2, VM1_CERTS, NOW)).toEqual(['builder', 'mini', 'vm-1']);
+describe("the machine names: the directory's and the registry's", () => {
+  it('name the enrolled machines and a VM that exists only by its certificate', () => {
+    for (const names of [directoryMachineNames, machineProjectNames]) {
+      expect(names(V2, NO_CERTIFICATES, NOW)).toEqual(['builder', 'mini']);
+      expect(names(V2, VM1_CERTS, NOW)).toEqual(['builder', 'mini', 'vm-1']);
+    }
   });
 
-  it('leaves out a certificate whose delegation is gone, expired or revoked', () => {
-    expect(machineProjectNames(fixture<SignedOrgState>('v2 without the delegation').state, VM1_CERTS, NOW)).toEqual(['builder', 'mini']);
-    expect(machineProjectNames(V2, VM1_CERTS, new Date('2026-12-01T00:00:00.000Z'))).toEqual(['builder', 'mini']);
+  it('leave out a certificate whose delegation is gone, expired or revoked', () => {
     const revoked = structuredClone(V2);
     revoked.revoked.push({ keyId: 'AAAAAAAAAAAAAAAAAAAAAA', holder: { delegation: V2.delegations[0].id, prefix: V2.delegations[0].prefix } });
-    expect(machineProjectNames(revoked, VM1_CERTS, NOW)).toEqual(['builder', 'mini']);
+    for (const names of [directoryMachineNames, machineProjectNames]) {
+      expect(names(fixture<SignedOrgState>('v2 without the delegation').state, VM1_CERTS, NOW)).toEqual(['builder', 'mini']);
+      expect(names(V2, VM1_CERTS, new Date('2026-12-01T00:00:00.000Z'))).toEqual(['builder', 'mini']);
+      expect(names(revoked, VM1_CERTS, NOW)).toEqual(['builder', 'mini']);
+    }
+  });
+
+  it("take a renamed machine's old name into the registry's set alone, and no name of a ref the head no longer enrolls", () => {
+    const renamed = fixture<SignedOrgState>('v3 renamed').state;
+    expect(directoryMachineNames(renamed, NO_CERTIFICATES, NOW)).toEqual(['builder', 'studio']);
+    expect(machineProjectNames(renamed, NO_CERTIFICATES, NOW)).toEqual(['builder', 'mini', 'studio']);
+    const dropped = structuredClone(renamed);
+    dropped.machines = dropped.machines.filter((m) => m.name !== 'studio');
+    expect(machineProjectNames(dropped, NO_CERTIFICATES, NOW)).toEqual(['builder']);
   });
 });
 
@@ -160,6 +173,9 @@ describe('assembleProjects', () => {
       machines,
     );
     expect(projects.map((p) => p.id)).toEqual(['work-id']);
+    // A session recorded under a renamed machine's old machine-project id registers nothing.
+    const renamed = new Set(machineProjectNames(fixture<SignedOrgState>('v3 renamed').state, NO_CERTIFICATES, NOW).map(machineId));
+    expect(assembleProjects([record(REF_MINI, [], [{ id: machineId('mini'), name: 'mini' }])], renamed)).toEqual([]);
     expect(assembleProjects([record(REF_VM1, [at('v1', '/root', machineId('vm-1'))])], new Set(machineProjectNames(V2, NO_CERTIFICATES, NOW).map(machineId)))).toHaveLength(1);
   });
 

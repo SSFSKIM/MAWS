@@ -25,12 +25,12 @@ export type RegistryProject = {
 };
 
 /**
- * The names the head's machines go by, each a machine project's (`machineProjectId(org, name)` maps one to its id):
- * enrolled machines' names, and those of certificates under a live, unrevoked delegation, so a devcloud VM that exists
- * only by its certificate is one of them. Sorted. The endpoint's directory lists a machine project for each, and the
- * set `assembleProjects` leaves out is built from them.
+ * The names the endpoint's RL10 directory lists, each with its machine project and its `machines` entry: enrolled
+ * machines' names, and those of certificates under a live, unrevoked delegation, so a devcloud VM that exists only by
+ * its certificate is one of them. Sorted. A former name is not one: the directory would list it as a machine that is
+ * enrolled and never online.
  */
-export function machineProjectNames(state: OrgState, certificates: Certificates, now: Date): string[] {
+export function directoryMachineNames(state: OrgState, certificates: Certificates, now: Date): string[] {
   const names = new Map<string, string>();
   for (const m of state.machines) names.set(machineNameKey(m.name), m.name);
   const live = new Set(state.delegations.filter((d) => Date.parse(d.expires) > now.getTime()).map((d) => d.id));
@@ -38,6 +38,19 @@ export function machineProjectNames(state: OrgState, certificates: Certificates,
   for (const c of certificates.certs) {
     if (isSigned(c, isMachineCert) && live.has(c.body.delegation) && !revoked.has(c.body.delegation)) names.set(machineNameKey(c.body.name), c.body.name);
   }
+  return [...names.values()].sort();
+}
+
+/**
+ * The names whose machine projects (`machineProjectId(org, name)` maps one to its id) are no project of the registry:
+ * the directory's (`directoryMachineNames`) and every former name the head binds to a ref it still enrolls, so a session
+ * recorded under a renamed machine's old machine-project id stays that machine's own and registers nothing. Sorted. The
+ * set `assembleProjects`' callers pass is built from them.
+ */
+export function machineProjectNames(state: OrgState, certificates: Certificates, now: Date): string[] {
+  const names = new Map(directoryMachineNames(state, certificates, now).map((name) => [machineNameKey(name), name]));
+  const enrolled = new Set(state.machines.map((m) => m.ref));
+  for (const p of state.machineNames) if (enrolled.has(p.ref) && !names.has(machineNameKey(p.name))) names.set(machineNameKey(p.name), p.name);
   return [...names.values()].sort();
 }
 
