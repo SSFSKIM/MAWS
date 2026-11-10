@@ -18,6 +18,9 @@
 //                                a durable and a session-only job) with `e7-cron-resume`'s launch appended (the session
 //                                resumed by its id, one CronList turn), so the Scheduled rows read one transcript across a
 //                                resume.
+//   events/agents-peer-owners    P5 O15 M2b (§J): agents-peer with a sminos frame line (`E7_PEER_OWNERS`) opening the body
+//                                of each inbound envelope, the idle one's naming its sender's owners and the mid-turn
+//                                one's none; the peer.message companions are as the parser gives them (the frame cut).
 // Appended events continue the journal's clock at 300 ms steps and its seq, one seq per recorded row, with ids
 // `<fixture>:journal:<seq>:<n>`: the `journal` launch segment is the one the replayed ids carry and `feed` sets on the
 // fed status, so the task-graph store's launch check keeps them. A recorded stop is re-keyed to the task it stops: its
@@ -29,11 +32,11 @@ import type { EventId } from '@shared/graph/ids';
 import type { SessionId } from '@shared/graph/ids';
 import { createBackfillContext, recordToEvents } from '../../src/engine-host/fs/backfill'; // E7
 import { journalToEvents } from '../../src/renderer/src/transcript/dev/journal';
-import { AGENTS_RELAY_TAIL } from './agents-fixtures-tail';
+import { AGENTS_RELAY_TAIL, E7_PEER_OWNERS } from './agents-fixtures-tail';
 import { loadJournal, loadTranscript, TEST_FIXTURE_DIR, type FixturePass } from './fixtures';
 import { firstChildOf } from './panel-child-fixture';
 
-export { AGENTS_CRON_TAIL, AGENTS_RELAY_TAIL, AGENTS_STOP_SHELL_TAIL, AGENTS_STOP_WORKFLOW_TAIL, E7_NESTED_AGENTS, E7_PEER_A } from './agents-fixtures-tail';
+export { AGENTS_CRON_TAIL, AGENTS_RELAY_TAIL, AGENTS_STOP_SHELL_TAIL, AGENTS_STOP_WORKFLOW_TAIL, E7_NESTED_AGENTS, E7_PEER_A, E7_PEER_OWNERS } from './agents-fixtures-tail';
 
 const EVENTS_DIR = join(TEST_FIXTURE_DIR, 'transcript/events');
 export const AGENTS_FIXTURE_FILES = {
@@ -42,6 +45,7 @@ export const AGENTS_FIXTURE_FILES = {
   stopShell: join(EVENTS_DIR, 'agents-stop-shell.events.jsonl'),
   peer: join(EVENTS_DIR, 'agents-peer.events.jsonl'), // E7
   cron: join(EVENTS_DIR, 'agents-cron.events.jsonl'), // E7
+  peerOwners: join(EVENTS_DIR, 'agents-peer-owners.events.jsonl'), // P5 O15 M2b
 } as const;
 
 const STEP_MS = 300;
@@ -157,6 +161,20 @@ export function deriveAgentsPeerFixture(): SessionEvent[] {
   const sessionId = records.find((record) => typeof record.sessionId === 'string')!.sessionId as SessionId;
   const ctx = createBackfillContext({ sessionId, agent: null });
   return records.flatMap((record) => recordToEvents(record, ctx));
+}
+
+// P5 O15 M2b (§J): agents-peer with sminos's frame line opening each inbound envelope's body, the labelled one first;
+// the envelope's companion peer.message is unchanged, since the parser cuts the frame from the body it gives.
+export function deriveAgentsPeerOwnersFixture(): SessionEvent[] {
+  const frames: string[] = [E7_PEER_OWNERS.labelled, E7_PEER_OWNERS.unlabelled];
+  const events = deriveAgentsPeerFixture().map((event) => {
+    if (event.kind !== 'user.message' || event.origin !== 'peer' || typeof event.content !== 'string') return event;
+    const frame = frames.shift();
+    if (frame === undefined) throw new Error('agents-peer-owners: more inbound envelopes than frames');
+    return { ...event, content: event.content.replace(/<cross-session-message [^>]*>\n/, (opening) => `${opening}${frame}\n`) };
+  });
+  if (frames.length > 0) throw new Error('agents-peer-owners: fewer inbound envelopes than frames');
+  return events;
 }
 
 // e7-cron's launch, then e7-cron-resume's rows appended (its ids re-keyed into this fixture, its clock continued).

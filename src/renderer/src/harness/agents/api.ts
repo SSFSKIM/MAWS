@@ -115,7 +115,8 @@ export interface ScheduledView {
 // M7: the column transcript's messages between sessions and its `ListAgents` listings, as shown (rows inside a folded
 // turn are not shown, so a row's presence before and after `expandAll` tells its persistence).
 export type PeerRowView =
-  | { kind: 'message'; direction: 'inbound' | 'outbound'; who: string; address: string | null; preview: string; result: string | null; resultText: string | null; reply: boolean; line: string | null }
+  // P5 O15 M2b: owners, the label after the sender of the owners its sminos frame names (null: none drawn)
+  | { kind: 'message'; direction: 'inbound' | 'outbound'; who: string; owners: string | null; address: string | null; preview: string; result: string | null; resultText: string | null; reply: boolean; line: string | null }
   | { kind: 'listing'; self: string; sections: { heading: string; rows: { name: string; ref: string | null; extras: string }[] }[]; notes: string[] };
 // E7 end
 

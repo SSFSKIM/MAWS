@@ -6,6 +6,7 @@ import { matchesSendMessage, relayText /* E7 */ } from '../../src/renderer/src/t
 import { phasesOf } from '../../src/renderer/src/tools/agents/model/workflow-progress';
 import { journalToEvents } from '../../src/renderer/src/transcript/dev/journal'; // E7
 import { loadJournal } from './fixtures'; // E7
+import { parsePeerMessage, peerEventsOf, sminosFrameOwners } from '@shared/engine/peer-envelope'; // P5 O15 M2b
 import {
   AGENTS_CRON_TAIL, // E7
   AGENTS_FIXTURE_FILES,
@@ -22,8 +23,10 @@ import {
   // E7 start
   deriveAgentsCronFixture,
   deriveAgentsPeerFixture,
+  deriveAgentsPeerOwnersFixture, // P5 O15 M2b
   E7_NESTED_AGENTS,
   E7_PEER_A,
+  E7_PEER_OWNERS, // P5 O15 M2b
   measureAgentsCron,
   measureE7NestedAgents,
   measureE7PeerA,
@@ -144,7 +147,7 @@ describe('agents fixtures are reproducible', () => {
 // E7 start (M7): the derived disk-path peer fixture and the cron fixture across a resume, and the boundaries the E7
 // cases release to in the recorded journals.
 describe('E7 agents fixtures are reproducible', () => {
-  const e7 = { peer: deriveAgentsPeerFixture(), cron: deriveAgentsCronFixture() };
+  const e7 = { peer: deriveAgentsPeerFixture(), cron: deriveAgentsCronFixture(), peerOwners: deriveAgentsPeerOwnersFixture() /* P5 O15 M2b */ };
   const live = (name: string) => journalToEvents(loadJournal('pass3', name));
   const BASE = new Set(['id', 'sessionId', 'at', 'seq', 'agentId', 'parentToolUseId']); // as backfill.test.ts's parity case
   const peerPayloads = (events: SessionEvent[]) =>
@@ -165,6 +168,18 @@ describe('E7 agents fixtures are reproducible', () => {
     expect(sends).toEqual([E7_PEER_A.name, E7_PEER_A.address, 'nobody-e7']);
     expect(events.some((event) => event.kind === 'tool.use' && event.toolName === 'ListAgents')).toBe(true);
     expect(events.every((event) => event.seq === null)).toBe(true); // history: the harness releases it at load
+  });
+
+  // P5 O15 M2b (§J): what the harness's owners case draws from.
+  it('agents-peer-owners: agents-peer but for the sminos frame opening each inbound envelope, the first naming owners, the second none', () => {
+    const events = e7.peerOwners;
+    const inbound = events.filter((event): event is Extract<SessionEvent, { kind: 'user.message' }> => event.kind === 'user.message' && event.origin === 'peer');
+    expect(events.map((event) => (inbound.includes(event as never) ? null : event))).toEqual(e7.peer.map((event) => (event.kind === 'user.message' && event.origin === 'peer' ? null : event)));
+    const frames = inbound.map((event) => parsePeerMessage(event.content as string));
+    expect(frames.map((parsed) => parsed?.kind === 'cross-session' && parsed.frame)).toEqual([E7_PEER_OWNERS.labelled, E7_PEER_OWNERS.unlabelled]);
+    expect(frames.map((parsed) => (parsed?.kind === 'cross-session' && parsed.frame !== null ? (sminosFrameOwners(parsed.frame)?.owners ?? null) : undefined))).toEqual([[...E7_PEER_OWNERS.owners], null]);
+    // the companions the parser gives these envelopes are the fixture's own peer.message payloads
+    expect(inbound.map((event) => peerEventsOf(event.content as string, event.messageUuid))).toEqual(peerPayloads(events).map((payload) => expect.objectContaining({ text: payload.text })));
   });
 
   it('pass3/e7-peer-a: the boundaries, and the recorded reply steer is the peer relayText of the owner’s text', () => {
