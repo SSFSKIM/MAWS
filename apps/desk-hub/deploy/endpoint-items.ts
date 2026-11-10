@@ -327,6 +327,7 @@ async function alteredDigest(scene: Scene, source: LaneBScene): Promise<string> 
   const tag = `${scene.tag}d`;
   let settled = false;
   let card: Card | null = null;
+  let restore: string | null = null;
   /** The card answered with `reply` under `digest`: `refused <reason>`, `delivered`, or what else was said. */
   const answer = async (digest: NonNullable<Card['requestDigest']>, reply: Record<string, unknown>) => {
     const action = remote.device.action({ machine: scene.ref, action: 'session.answer', session: app, context: { lane: 'B', ...card!.context! }, requestDigest: digest, args: { appSessionId: app, requestId: card!.requestDigest!.request, answer: reply } });
@@ -347,13 +348,39 @@ async function alteredDigest(scene: Scene, source: LaneBScene): Promise<string> 
       const said = await remote.waitFor((m) => m.sub === sub && (m.t === 'subbed' || m.t === 'ended'), `the answer to ${sub}`, from, 30_000);
       return said.t === 'subbed';
     }, `a cards subscription to ${app}`, 120_000, 3000);
-    const status = await remote.call('session.status', { appSessionId: app });
-    if (!status.ok) throw new Error(`session.status was answered ${status.code}`);
-    const { launchId, engineSessionId } = status.output as { launchId: string; engineSessionId: string };
+    type Status = { launchId: string; engineSessionId: string; permissionMode?: { effective?: string }; pendingRequests?: number; turn?: unknown };
+    const statusNow = async () => {
+      const status = await remote.call('session.status', { appSessionId: app });
+      if (!status.ok) throw new Error(`session.status was answered ${status.code}`);
+      return status.output as Status;
+    };
+    const context = (s: Status) => ({ lane: 'B' as const, launchId: s.launchId, engineSessionId: s.engineSessionId });
+    // The session runs in MAWS's seeded mode, `auto`, whose classifier decides an unlisted Bash call without asking: the
+    // check asks for `default` (a call no rule allows is asked), and puts the mode back after.
+    const before = await statusNow();
+    const mode = before.permissionMode?.effective ?? null;
+    if (mode !== 'default') {
+      const set = remote.device.action({ machine: scene.ref, action: 'session.setPermissionMode', session: app, context: context(before), args: { appSessionId: app, mode: 'default' } });
+      const from = remote.inbox.length;
+      const said = await remote.act(set);
+      if (said !== 'accepted') throw new Error(`session.setPermissionMode default was answered ${said}`);
+      const outcome = await remote.done(set.opId, from);
+      const effective = ((outcome.result as { ok?: boolean; value?: { effective?: string } } | undefined)?.value ?? (outcome.result as { effective?: string } | undefined))?.effective;
+      if (outcome.state !== 'done') throw new Error(`session.setPermissionMode default: ${JSON.stringify(outcome).slice(0, 200)}`);
+      restore = mode;
+      scene.log(`  the lane B session's permission mode ${String(mode)} set to default (${String(effective)})`);
+    }
+    const status = await statusNow();
+    const { launchId, engineSessionId } = status;
     const sent = await remote.act(remote.device.action({ machine: scene.ref, action: 'session.send', session: app, context: { lane: 'B', launchId, engineSessionId }, args: { appSessionId: app, content: `o15-digest ${tag}` } }));
     if (sent !== 'accepted') throw new Error(`the send that raises the permission was answered ${sent}`);
     const mine = (cards: Card[] | null) => cards?.find((c) => c.requestDigest?.tool === 'Bash' && JSON.stringify(c.request ?? null).includes(`o15-digest-${tag}`)) ?? null;
-    card = await until(() => mine(latestCards(remote, sub)), `the permission of \`o15-digest ${tag}\` pending`, 120_000, 500);
+    card = await until(() => mine(latestCards(remote, sub)), `the permission of \`o15-digest ${tag}\` pending`, 120_000, 500).catch(async (error: unknown) => {
+      // What there was instead: the cards' tools and the session's turn, mode and pending count, never their content.
+      const cards = latestCards(remote, sub);
+      const now = await statusNow().catch(() => null);
+      throw new Error(`${error instanceof Error ? error.message : String(error)} (cards: ${cards === null ? 'no snapshot' : `${cards.length} [${cards.map((c) => c.requestDigest?.tool ?? '?').join(', ')}]`}; the session ${now === null ? 'unread' : `mode ${String(now.permissionMode?.effective)}, ${String(now.pendingRequests)} pending, turn ${now.turn === null ? 'none' : 'open'}`})`);
+    });
     if (card.context === undefined || card.requestDigest === undefined) throw new Error(`the card carries no context or digest: ${JSON.stringify(card).slice(0, 300)}`);
     const real = card.requestDigest;
     const flipped = `${real.input_sha256[0] === '0' ? '1' : '0'}${real.input_sha256.slice(1)}`;
@@ -370,6 +397,18 @@ async function alteredDigest(scene: Scene, source: LaneBScene): Promise<string> 
   } finally {
     // A request the check left pending is denied under its own digest, so the session is left with nothing pending.
     if (!settled && card?.requestDigest !== undefined && card.context !== undefined) await answer(card.requestDigest, { kind: 'permission', decision: 'deny' }).catch(() => {});
+    // The session's mode as it was (best effort: item 2 asks nothing a mode decides)
+    if (restore !== null) {
+      const mode = restore;
+      await (async () => {
+        const s = await remote.call('session.status', { appSessionId: app });
+        if (!s.ok) return;
+        const { launchId, engineSessionId } = s.output as { launchId: string; engineSessionId: string };
+        const back = remote.device.action({ machine: scene.ref, action: 'session.setPermissionMode', session: app, context: { lane: 'B', launchId, engineSessionId }, args: { appSessionId: app, mode } });
+        const from = remote.inbox.length;
+        if ((await remote.act(back)) === 'accepted') await remote.done(back.opId, from);
+      })().catch(() => {});
+    }
     remote.close();
   }
 }
