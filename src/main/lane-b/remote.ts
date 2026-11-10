@@ -239,10 +239,11 @@ export const MACHINE_ACTS: ReadonlySet<CommandName> = new Set<CommandName>([
   'artifacts.grantConnectorTool', 'artifacts.revokeConnectorTool',
   'connectors.signInServer', // P5 O7 M8: the session's MCP widget's Sign in, the entry read on the machine
   'session.projects.addFolder', // P5 O7 M9: the remote setup's registration (`machine-admin`, the machine's owners')
+  'session.projects.link', 'session.projects.relocate', 'session.projects.update', 'session.projects.remove', // the project registry (M9, §I's acts): the machine's owners' (`machine-admin`)
   'session.drafts.set', // P5 O8 M6a: the caller's own draft, kept per member on the machine (`converse`)
 ]);
 /** Acts the endpoint always asks a step-up of, signed before the first copy goes (no round trip to be asked). */
-const STEPPED_UP: ReadonlySet<CommandName> = new Set<CommandName>(['session.projects.addFolder']);
+const STEPPED_UP: ReadonlySet<CommandName> = new Set<CommandName>(['session.projects.addFolder', 'session.projects.link', 'session.projects.relocate']);
 // P5 O7 M5c ("O4's surfaces: the grade"): the six lease reads, sent as calls by name (./remote-connectors.ts)
 export { MACHINE_CALLS } from './remote-connectors';
 /** Reads the pane makes that no row offers, answered here from one that is. */
