@@ -86,7 +86,7 @@ async function viaLaneB(f: Fixture, r: Remote, name: CommandName, input: unknown
 const NO_PROJECTS: OrgProjects = { projects: [], keys: {}, moved: {}, removals: [], seen: {} };
 
 /** Main on this Mac, signed in with one window open: its host supervisor on the daemon and the project acts' handler. */
-async function mainOn(scene: MawsdScene, target: { f: Fixture; a: Remote }) {
+async function mainOn(scene: MawsdScene, target: { f: Fixture; a: Remote }, options: { withdrawals?: false } = {}) {
   const hosts = scene.appHosts({}, { machine: true });
   void hosts.start();
   await until(() => hosts.snapshot('engine-host').state === 'ready' && hosts.snapshot('machine').state === 'ready' && hosts.streaming('engine-host'), 10_000, 'main’s two links to the daemon');
@@ -98,7 +98,9 @@ async function mainOn(scene: MawsdScene, target: { f: Fixture; a: Remote }) {
   const answers: Array<Promise<unknown>> = []; // main's answers to the daemon, settled before the scene ends
   const acts = startProjectActs({
     hosts: {
-      onEvent: hosts.onEvent.bind(hosts),
+      // `withdrawals: false` leaves the daemon's withdrawals unheard, so only the connection's loss can drop an ask
+      onEvent: ((name: Parameters<typeof hosts.onEvent>[0], listener: never) => (options.withdrawals === false && name === 'projects.act.withdrawn' ? () => {} : hosts.onEvent(name, listener))) as never,
+      onState: hosts.onState.bind(hosts),
       dispatch: ((owner: 'machine', name: CommandName, input: unknown) => {
         const sent = hosts.dispatch(owner, name, input as never);
         answers.push(sent);
@@ -155,6 +157,20 @@ describe('maws aimed at another machine, with the app', () => {
     const { code, out, err } = await terminal;
     expect([code, out, err]).toEqual([2, '', `${notRunningHere({ verb: 'add', machine: 'mini', path: folder })}\n`]);
     expect(target.index.projects.list({ includeHidden: true }).some((p) => p.directory === folder && p.hidden !== true)).toBe(false);
+  });
+
+  // Decision Log 22, review 1's finding 3: the daemon's connection ending drops what main holds, through the real link
+  it('drops the ask from the page when the daemon’s connection ends', { timeout: 30_000 }, async () => {
+    const target = await mini();
+    const scene = new MawsdScene('maws-pa-');
+    scenes.push(scene);
+    const daemon = await scene.start();
+    const main = await mainOn(scene, target, { withdrawals: false });
+    const terminal = maws(scene, ['project', 'add', `mini:${join(target.home, 'work/scrape')}`]);
+    await until(() => main.waiting().length === 1, 5_000, 'the request on the page');
+    await daemon.stop('test: the daemon goes');
+    await until(() => main.hosts.snapshot('machine').state !== 'ready' && main.waiting().length === 0, 5_000, 'the ask dropped at the link’s loss');
+    expect((await terminal).code).not.toBe(0);
   });
 });
 
