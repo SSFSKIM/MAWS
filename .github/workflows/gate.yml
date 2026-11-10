@@ -370,6 +370,8 @@ jobs:
     timeout-minutes: ${{ vars.GATE_RUNNER == 'macos' && 40 || 30 }}
     outputs:
       static: ${{ steps.plan.outputs.static }}
+      docs: ${{ steps.plan.outputs.docs }}
+      static_checks: ${{ steps.static-checks.outputs.matrix }}
       unit: ${{ steps.plan.outputs.unit }}
       unit_darwin: ${{ steps.plan.outputs.unit_darwin }}
       probes: ${{ steps.plan.outputs.probes }}
@@ -397,6 +399,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          # The docs-only decision reads the actual diff, including a nonce parent and master merge-base.
+          fetch-depth: 0
           sparse-checkout: |
             package.json
             .github
@@ -429,7 +433,9 @@ jobs:
           HEAD_MESSAGE: ${{ github.event.head_commit.message }}
           GATE_RUNNER: ${{ vars.GATE_RUNNER }}
           GATE_E2E_RUNNER: ${{ vars.GATE_E2E_RUNNER }}
-        run: node .github/scripts/gate-plan.mjs
+        run: node .github/scripts/gate-plan.mjs --git-docs
+      - id: static-checks
+        run: echo "matrix=$(node .github/scripts/gate-static.mjs)" >>"$GITHUB_OUTPUT"
 
   # An omitted duplicate still owes the holder's verdict. Use a standard hosted runner: ubuntu-slim has a hard
   # 15-minute cap, while the mini's queue alone has reached 71 minutes. No Mac or pool instance is occupied here.
@@ -457,9 +463,26 @@ jobs:
           PEER_WAIT_MINUTES: ${{ matrix.wait }}
         run: .github/scripts/gate-run.sh '^held by run ' node .github/scripts/gate-peer-wait.mjs
 
-  static:
+  # A docs-only change still earns a real green run on this head/tree; no dependency install is needed.
+  docs:
     needs: plan
-    if: needs.plan.outputs.static == 'true'
+    if: needs.plan.outputs.docs == 'true'
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            .github/scripts
+            docs/tech-debt-tracker.md
+            docs/doperpowers/plans/2026-10-27-p5-org.md
+          sparse-checkout-cone-mode: false
+      - run: node .github/scripts/gate-docs.mjs
+
+  # On the pool, gate-bg already overlaps checks; on the Mac it protects the shared memory budget.
+  static-local:
+    needs: plan
+    if: needs.plan.outputs.static == 'true' && fromJSON(needs.plan.outputs.static_runner) != 'ubuntu-24.04'
     runs-on: ${{ fromJSON(needs.plan.outputs.static_runner) }}
     # 30, and on the Mac the exclusive instance's wait bound on top (gate-plan.mjs), as for unit and probes.
     timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeouts).static }}
@@ -522,6 +545,53 @@ jobs:
       - name: the session host's Go tests
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: .github/scripts/gate-bg.sh wait session-host-go
+
+  # Standard hosted runners have 4 cores / 16 GB: the old 24-GiB threshold serialized all checks.
+  # Separate machines avoid that combined peak without weakening the pool/Mac memory guard.
+  static-checks:
+    name: static / ${{ matrix.name }}
+    needs: plan
+    if: needs.plan.outputs.static == 'true' && fromJSON(needs.plan.outputs.static_runner) == 'ubuntu-24.04'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.static_checks) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+        with:
+          fonts: 'false'
+      - if: matrix.go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: native/session-host/go.version
+          cache: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          COMMAND: ${{ matrix.command }}
+          PATTERN: ${{ matrix.pattern }}
+        run: PATH="$PWD/node_modules/.bin:$PATH" .github/scripts/gate-run.sh "$PATTERN" bash -c "$COMMAND"
+
+  # Keep static as the public gate name for --gates static and landing consumers. A skipped/failed part
+  # cannot turn it green; !cancelled() lets this result run after a failed dependency, not just successes.
+  static:
+    needs: [plan, static-checks, static-local]
+    if: ${{ !cancelled() && needs.plan.outputs.static == 'true' }}
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    steps:
+      - env:
+          HOSTED: ${{ fromJSON(needs.plan.outputs.static_runner) == 'ubuntu-24.04' }}
+          HOSTED_RESULT: ${{ needs.static-checks.result }}
+          LOCAL_RESULT: ${{ needs.static-local.result }}
+        run: |
+          if [[ $HOSTED == true ]]; then
+            test "$HOSTED_RESULT" = success
+          else
+            test "$LOCAL_RESULT" = success
+          fi
 
   # On the pool the whole suite runs in shards, `unit <k>/<n>`, each its own box (gate-plan.mjs's UNIT_SHARDS); a
   # selected run that tests the related suites, and a run off the pool, is the one job `unit`.

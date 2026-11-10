@@ -27,7 +27,7 @@ What a person can do afterwards that they cannot do now:
 
 Status words: *specified* (ready to build), *building*, *landed* (on master, or merged in doperpowers), *live* (running on the three machines).
 
-- [ ] M1 — The projects record and the shared vectors (desk track; a MAWS PR) — specified
+- [x] M1 — The projects record and the shared vectors (desk track; a MAWS PR) — landed (2026-11-10, master 82f706120, the merge of `registry-m1` at 7f641867b; class 1a run 42792480991 green on the merge's tree; reviewed at reviewer-high by the desk track; Decision Log 8)
 - [ ] M2 — The hub keeps and hands out projects records (desk track; a MAWS PR; staging deploy) — specified
 - [ ] M3 — sminos: the rule and canonical paths, against the vectors (desk track; doperpowers) — specified
 - [ ] M4 — sminos: declared locations are known checkouts and rooted projects (desk track; doperpowers) — specified
