@@ -178,6 +178,29 @@ describe('a delegation’s expiry', () => {
     w.clock += 120_000; // past the forged certificate's delegation, inside the real one's
     expect(h.held()).toEqual([`${w.d.ref} r1`]);
   });
+
+  // Review 4: the deadline is read at the instant the record verified at. With the clock crossing the delegation's
+  // `expires` between the record's verification and the certificate's, the record still gets its deadline (no fallback
+  // to none): past it, the record is hidden with no timer having run.
+  it('reads the deadline at the instant the record verified at, across the expiry instant', async () => {
+    const w = await World.make();
+    const expires = Date.parse(w.delegation.expires);
+    const h = await start(w);
+    const record = await w.projects(w.d, 1, [location('v1', ID, '/srv/vm')]);
+    let reads = 0;
+    let crossing = true;
+    let clock = w.clock;
+    Object.defineProperty(w, 'clock', {
+      get: () => (crossing ? (reads++ === 0 ? expires - 1 : expires + 1) : clock),
+      set: (value: number) => void (clock = value),
+    });
+    await h.page([record]); // the record verified just before `expires`, the clock read once more just after it
+    crossing = false;
+    w.clock = expires - 1;
+    expect(h.held()).toEqual([`${w.d.ref} r1`]);
+    w.clock = expires + 1;
+    expect(h.held()).toEqual([]);
+  });
 });
 
 describe('the file', () => {

@@ -145,21 +145,21 @@ export function createProjectsRecords(deps: ProjectsRecordsDeps): ProjectsRecord
   };
 
   /**
-   * When the authority a verified record of `machine` speaks under ends: the `expires` of the delegation of a certificate
-   * for its ref that verifies (`verifyMachineCert`, the check the record's own verification makes of it); none for a
-   * machine the head enrolls, or one no verified certificate binds. A certificate the set merely holds counts for nothing:
-   * only an authentic one names its delegation (its ref is that delegation's), so it is the one the record verified under.
+   * When the authority a record of `machine` verified under at `at` ends: none for a machine the head enrolls; else the
+   * `expires` of the delegation of a certificate for its ref that verifies at the same instant (`verifyMachineCert`, the
+   * check the record's own verification makes of it). A certificate the set merely holds counts for nothing: only an
+   * authentic one names its delegation (its ref is that delegation's), so it is the one the record verified under. With
+   * none found it fails closed: `at`, the record hidden until a verification decides.
    */
-  async function authorityEnd(current: SignedIn, machine: string): Promise<number> {
+  async function authorityEnd(current: SignedIn, machine: string, at: Date): Promise<number> {
     const state = current.view.head().state;
     if (state.machines.some((m) => m.ref === machine)) return Infinity;
-    const at = new Date(now());
     for (const cert of current.view.certificates().certs) {
       if (cert.body.machine !== machine || !(await verifyMachineCert(state, cert, at)).ok) continue;
       const delegation = state.delegations.find((d) => d.id === cert.body.delegation);
       if (delegation !== undefined) return Date.parse(delegation.expires);
     }
-    return Infinity;
+    return at.getTime();
   }
   /** The soonest delegation `expires` ahead of now under the signed-in head (Infinity: none). */
   function soonestExpiry(current: SignedIn): number {
@@ -172,8 +172,9 @@ export function createProjectsRecords(deps: ProjectsRecordsDeps): ProjectsRecord
     authorityEnds.delete(machine);
   }
 
-  async function verifies(current: SignedIn, record: Signed<ProjectsRecord>): Promise<boolean> {
-    return (await verifyProjectsRecord(current.view.head().state, record, current.view.certificates(), new Date(now()))).ok;
+  /** Whether `record` verifies at `at` (one instant: its deadline is read at the same one, `authorityEnd`). */
+  async function verifies(current: SignedIn, record: Signed<ProjectsRecord>, at: Date): Promise<boolean> {
+    return (await verifyProjectsRecord(current.view.head().state, record, current.view.certificates(), at)).ok;
   }
 
   /** One record against its machine's mark, then the head. */
@@ -190,11 +191,12 @@ export function createProjectsRecords(deps: ProjectsRecordsDeps): ProjectsRecord
       }
     }
     if (keyEnded(current.view.head().state, record.sig.kid)) return;
-    if (!(await verifies(current, record))) {
+    const at = new Date(now());
+    if (!(await verifies(current, record, at))) {
       if ((waiting.get(machine)?.body.revision ?? 0) < revision) waiting.set(machine, record);
       return;
     }
-    const ends = await authorityEnd(current, machine);
+    const ends = await authorityEnd(current, machine, at);
     marks.set(machine, { revision, hash, kid: record.sig.kid });
     held.set(machine, record);
     authorityEnds.set(machine, ends);
@@ -214,8 +216,9 @@ export function createProjectsRecords(deps: ProjectsRecordsDeps): ProjectsRecord
     for (const [machine, record] of [...waiting]) if (keyEnded(state, record.sig.kid)) waiting.delete(machine);
     for (const [machine, record] of [...held]) {
       if (held.get(machine) !== record) continue;
-      if (await verifies(current, record)) {
-        const ends = await authorityEnd(current, machine);
+      const at = new Date(now());
+      if (await verifies(current, record, at)) {
+        const ends = await authorityEnd(current, machine, at);
         if (held.get(machine) === record) authorityEnds.set(machine, ends);
         continue;
       }
