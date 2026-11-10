@@ -127,15 +127,25 @@ describe('a held removal', () => {
     expect(h.told).toHaveLength(1);
   });
 
-  it('stays through a machine that does not answer, and is dropped, the person told, on another refusal', async () => {
+  it('reads a refusal by its words whatever code carries it; stays through a machine that does not answer, and is dropped, the person told, on another failure', async () => {
     const w = await World.make();
-    const h = await start(w, { answers: [{ ok: false, error: ipcError('host_unavailable', 'not reachable') }, { ok: false, error: ipcError('internal', 'refused owners-only by machine mini', { refusal: 'owners-only' }) }] });
+    const h = await start(w, {
+      answers: [
+        { ok: false, error: ipcError('internal', 'unresolved: as another machine forwards it') },
+        { ok: false, error: ipcError('host_unavailable', 'not reachable') },
+        { ok: false, error: ipcError('timeout', 'mini took the request but its answer was lost') },
+        { ok: false, error: ipcError('internal', 'refused owners-only by machine mini', { refusal: 'owners-only' }) },
+      ],
+    });
     await h.removals.hold({ machine: w.m1.ref as MachineRef, pid: 'p1' });
-    await h.linkUp(w.m1.ref);
-    expect(h.removals.list()).toHaveLength(1);
+    for (let i = 0; i < 3; i++) {
+      await h.linkUp(w.m1.ref);
+      expect(h.removals.list()).toHaveLength(1);
+    }
     await h.linkUp(w.m1.ref);
     expect(h.removals.list()).toEqual([]);
     expect(h.told).toEqual([`${PATH} on mini was not removed: refused owners-only by machine mini.`]);
+    expect(h.sent).toHaveLength(4);
   });
 
   it('outlives a relaunch, and is the asking member’s alone', async () => {

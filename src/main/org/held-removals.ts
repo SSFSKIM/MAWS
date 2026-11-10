@@ -7,8 +7,8 @@
 // - When the machine's link is next up (and it serves the project acts, `rl2.project-acts`), the removal goes as
 //   `session.projects.remove` with `expect` naming that path and project, and the machine decides (§G): done drops it;
 //   `changed` drops it and tells the person the location changed and was not removed; `unresolved`, or no answer from
-//   the machine (unreachable, timed out, or main's own failure), keeps it, sent again at the next link-up or after
-//   `retryMs`. Any other refusal drops it, the person told why.
+//   the machine (unreachable, or its answer lost), keeps it, sent again at the next link-up or after `retryMs`. Any
+//   other failure drops it, the person told why: a removal that cannot succeed is not retried for ever.
 // - A removal is the asking member's act: it is listed and sent only while that member of that org is signed in here.
 //
 // Electron-free: the registry (project-registry.ts) injects the registry's read, the links' state and the act's send.
@@ -65,15 +65,18 @@ const TEXT_FIELDS = ['id', 'project', 'machine', 'pid', 'path', 'askedAt', 'org'
 const isEntry = (value: unknown): value is Entry => isObject(value) && TEXT_FIELDS.every((field) => typeof value[field] === 'string');
 const isFile = (value: unknown): value is HeldRemovalsFile => isObject(value) && value.version === 1 && Array.isArray(value.removals);
 
-/** What the machine's answer means for the removal: gone (done, or not to be sent again) or kept. */
+/**
+ * What the machine's answer means for the removal: gone (done, or not to be sent again) or kept. A project act's refusal
+ * is told by its message's `<code>: ` (§G), whatever IPC code carries it: `invalid_input` from this Mac's own index,
+ * `internal` from another machine's, as its endpoint forwards a failure.
+ */
 function judged(answer: RemovalAnswer): { drop: false } | { drop: true; why: string | null } {
   if (answer.ok) return { drop: true, why: null };
-  const { code, message, issues } = answer.error;
-  if (code === 'invalid_input' && message.startsWith('changed:')) return { drop: true, why: 'it changed after you asked' };
-  if (code === 'invalid_input' && message.startsWith('unresolved:')) return { drop: false };
-  // nothing decided: the machine unreachable, its answer lost, or main's own failure before it went
-  const refusal = isObject(issues) && typeof issues.refusal === 'string';
-  if (code === 'host_unavailable' || code === 'timeout' || (code === 'internal' && !refusal)) return { drop: false };
+  const { code, message } = answer.error;
+  if (message.startsWith('unresolved:')) return { drop: false };
+  if (message.startsWith('changed:')) return { drop: true, why: 'it changed after you asked' };
+  // nothing decided: the machine unreachable, or its answer lost
+  if (code === 'host_unavailable' || code === 'timeout') return { drop: false };
   return { drop: true, why: message.replace(/\.$/, '') };
 }
 
