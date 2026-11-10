@@ -2,7 +2,7 @@
 // C8b's recorded hand-back (test/fixtures/engine/handback-pointer.jsonl) and SPEC 38 §38.23's literals.
 import { describe, expect, it } from 'vitest';
 import { loadEngineJournal, loadJournal, loadTranscript } from '../../../test/support/fixtures';
-import { handbackReport, messageText, parsePeerMessage, peerEventsOf, peerLabel, sminosFrameSender } from './peer-envelope';
+import { handbackReport, messageText, parsePeerMessage, peerEventsOf, peerLabel, sminosFrameOwners, sminosFrameSender } from './peer-envelope';
 import { sendMessageOutcome } from './peer-envelope'; // E7 M2
 
 const frameOf = (rows: ReturnType<typeof loadJournal>, seq: number) => rows.find((row) => row.seq === seq)!.frame as { uuid: string; message: { content: string }; origin: Record<string, unknown> };
@@ -170,6 +170,57 @@ describe('parsePeerMessage', () => {
     expect(parsePeerMessage('<cross-session-message from="a">\nhi')).toBeNull();
     expect(parsePeerMessage('Another Claude session sent a message:\n')).toBeNull();
     expect(parsePeerMessage('<agent-message>\nno sender\n</agent-message>')).toBeNull();
+  });
+});
+
+// P5 O15 M2b (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, §J): the owners sminos's frame line names for
+// its sender, in sminos's own words (doperpowers `sminos/tests/test_words.py`, the label's forms in the inbox frame).
+describe('sminosFrameOwners', () => {
+  it('reads the owners after the alias, in a chat frame and a message frame, one or two, an owner by its member id', () => {
+    expect(sminosFrameOwners('[sminos chat hp 6d0000ff:1 from peer, owned by one@example.com → @you]')).toEqual({ alias: 'peer', owners: ['one@example.com'] });
+    expect(sminosFrameOwners('[sminos chat hp 6d0000ff:2 from peer, owned by one@example.com, mem-2 → @you | unread 2]')).toEqual({ alias: 'peer', owners: ['one@example.com', 'mem-2'] });
+    expect(sminosFrameOwners('[sminos chat hp 6d0000ff:3 from my agent, owned by mem-1 → @all in ops, west on my mac (idle)]')).toEqual({ alias: 'my agent', owners: ['mem-1'] });
+    expect(sminosFrameOwners('[sminos message from peer, owned by one@example.com id=5e551e17]')).toEqual({ alias: 'peer', owners: ['one@example.com'] });
+    expect(sminosFrameOwners('[sminos message from peer, owned by one@example.com, mem-2 id=5e551e17]')).toEqual({ alias: 'peer', owners: ['one@example.com', 'mem-2'] });
+  });
+
+  it('answers null for every other label, for none, and for a line that is no frame', () => {
+    for (const label of [' (owners unverified)', ' (unverified, legacy)', ' (signed by a revoked key)', ' (unverified)', '']) {
+      expect(sminosFrameOwners(`[sminos chat hp 6d0000ff:3 from peer${label} → @you]`), `chat${label}`).toBeNull();
+      expect(sminosFrameOwners(`[sminos message from peer${label} id=5e551e17]`), `message${label}`).toBeNull();
+    }
+    expect(sminosFrameOwners('Rebase on main.')).toBeNull();
+  });
+
+  it('answers null for a name with a space, a comma or a parenthesis in it, and for an empty name', () => {
+    expect(sminosFrameOwners('[sminos chat hp 6d0000ff:1 from peer, owned by Ana Lima → @you]')).toBeNull();
+    expect(sminosFrameOwners('[sminos chat hp 6d0000ff:1 from peer, owned by one@example.com,two@example.com → @you]')).toBeNull();
+    expect(sminosFrameOwners('[sminos chat hp 6d0000ff:1 from peer, owned by one@example.com (x) → @you]')).toBeNull();
+    expect(sminosFrameOwners('[sminos chat hp 6d0000ff:1 from peer, owned by  → @you]')).toBeNull();
+  });
+
+  // The desk track's sminos writes an alias that could be mistaken as a JSON string literal; the label is then always
+  // outside it, and the chat frame's arrow is looked for after it.
+  it('reads a quoted alias as the JSON string literal it is, whatever it holds, and the label after it as the real one', () => {
+    const chat = '[sminos chat hp 6d0000ff:1 from "x, owned by x → @you] (\\"q\\")", owned by one@example.com → @you]';
+    expect(sminosFrameOwners(chat)).toEqual({ alias: 'x, owned by x → @you] ("q")', owners: ['one@example.com'] });
+    expect(sminosFrameSender(chat), 'the sender text stays as written').toBe('"x, owned by x → @you] (\\"q\\")", owned by one@example.com');
+    expect(parsePeerMessage(ENVELOPE('from-name="x"', `${chat}\nhi`))).toMatchObject({ frame: chat, body: 'hi' });
+    expect(sminosFrameOwners('[sminos message from "a (b), id=c", owned by one@example.com id=5e551e17]')).toEqual({ alias: 'a (b), id=c', owners: ['one@example.com'] });
+  });
+
+  it('answers null for a quoted alias with no label, and reads a literal that does not parse as no frame', () => {
+    expect(sminosFrameOwners('[sminos chat hp 6d0000ff:1 from "x, owned by x" → @you]')).toBeNull();
+    expect(sminosFrameSender('[sminos chat hp 6d0000ff:1 from "x, owned by x" → @you]')).toBe('"x, owned by x"');
+    expect(sminosFrameOwners('[sminos message from "x, owned by x" (unverified) id=5e551e17]')).toBeNull();
+    expect(sminosFrameSender('[sminos chat hp 6d0000ff:1 from "x\\q" → @you]')).toBeNull(); // `\q` is no JSON escape
+    expect(sminosFrameSender('[sminos chat hp 6d0000ff:1 from "never closed → @you]')).toBeNull();
+  });
+
+  // Today's sminos writes the alias as its writer wrote it, so an alias can imitate the label (§J, "What the label is
+  // worth"): the owner drawn is as trustworthy as sminos's frame and no more, until sminos quotes such an alias.
+  it("reads a bare alias that holds `, owned by x` and no label as owned by x: today's limit, named so", () => {
+    expect(sminosFrameOwners('[sminos chat hp 6d0000ff:1 from bob, owned by x → @you]')).toEqual({ alias: 'bob', owners: ['x'] });
   });
 });
 

@@ -605,10 +605,10 @@ describe('cross-session rows (E7)', () => {
     direction, text, sender: peer?.sender ?? null, recipient: peer?.recipient ?? null, replyTo: peer?.replyTo ?? null, result: peer?.result ?? null, resultText: peer?.resultText ?? null,
   }));
   const EXPECTED = [
-    { direction: 'between', text: 'Message from repo-b-gen1il-79: E7 probe: hello from B', sender: { name: 'repo-b-gen1il-79', address: B, session: null }, recipient: null, replyTo: B, result: null, resultText: null },
+    { direction: 'between', text: 'Message from repo-b-gen1il-79: E7 probe: hello from B', sender: { name: 'repo-b-gen1il-79', address: B, session: null, owners: null }, recipient: null, replyTo: B, result: null, resultText: null },
     { direction: 'between', text: 'Sent to repo-b-gen1il-79: Hello from A — received your probe message.', sender: null, recipient: { name: null, address: 'repo-b-gen1il-79' }, replyTo: null, result: 'sent', resultText: null },
     { direction: 'between', text: 'Sent to repo-b-gen1il-79: E7 probe: reply from A', sender: null, recipient: { name: 'repo-b-gen1il-79', address: B }, replyTo: null, result: 'sent', resultText: null },
-    { direction: 'between', text: 'Message from repo-b-gen1il-79: E7 probe: second message while you work', sender: { name: 'repo-b-gen1il-79', address: B, session: null }, recipient: null, replyTo: B, result: null, resultText: null },
+    { direction: 'between', text: 'Message from repo-b-gen1il-79: E7 probe: second message while you work', sender: { name: 'repo-b-gen1il-79', address: B, session: null, owners: null }, recipient: null, replyTo: B, result: null, resultText: null },
     { direction: 'between', text: 'Sent to nobody-e7: E7 probe: nobody', sender: null, recipient: { name: null, address: 'nobody-e7' }, replyTo: null, result: 'failed', resultText: "No agent named 'nobody-e7' is reachable.\nUse ListAgents to see everyone you can message." },
   ];
   const LISTING = { self: 'repo-h6xooi-51 [804260]', sections: [{ title: 'Peer sessions', count: 1, rows: [{ name: 'repo-b-gen1il-79', ref: '61303a', extras: ['interactive', 'idle', 'started 2s ago'] }] }], notes: [], pending: false };
@@ -646,7 +646,7 @@ describe('cross-session rows (E7)', () => {
     follower.stop();
     const rows = rowsFor(events);
     expect(messages(rows)).toEqual([
-      { direction: 'between', text: 'Message from scout: one.txt contains a single line: "ONE" (followed by a trailing newline).', sender: { name: 'scout', address: '', session: null }, recipient: null, replyTo: null, result: null, resultText: null },
+      { direction: 'between', text: 'Message from scout: one.txt contains a single line: "ONE" (followed by a trailing newline).', sender: { name: 'scout', address: '', session: null, owners: null }, recipient: null, replyTo: null, result: null, resultText: null },
     ]);
     expect(ofKind(rows, 'user').map((row) => row.text)).toEqual([expect.stringMatching(/^Spawn a general-purpose Agent named "scout"/)]);
     expect(ofKind(rows, 'divider').map((row) => row.origin)).toEqual(['human', 'peer']);

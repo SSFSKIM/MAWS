@@ -6,7 +6,7 @@ import { stripAnsi } from '@shared/wire/ansi';
 import type { QueueEntry } from '@shared/engine/session-state-store';
 import { ENGINE_COMPAT_NOTICE_KEY } from '@shared/engine/compat-notice'; // W13
 import type { SessionEvent } from '@shared/graph/events';
-import type { AgentId, AppSessionId, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
+import type { AgentId, AppSessionId, MessageUuid, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { parseAskSteer, withQuestionIds, type AskCancelReason } from '@shared/maws/ask'; // E1
 import { AskInputSchema, AskResultSchema, SendFileInputSchema, SendFileResultSchema, type AskAnswer, type AskInput, type DeliveredFile, type SendFileInput } from '@shared/maws/tools'; // E1
 import { ArtifactDeliverySchema } from '@shared/maws/tools'; // E2; P3-A
@@ -29,7 +29,7 @@ import { TOOL_CATEGORIES, type Cell, type ChangedFile, type Row, type RowId, typ
 import { previewHidesBody } from './rows'; // E7
 import { needsSeparator, separatorLabel } from './time';
 import { confirmsSettingChange, isInterruptionMarker, isLocalCommand, localCommandOutput, slashCommandLine, userTextOf, type UserText } from './user-text';
-import { handbackReport, messageText, parsePeerMessage, peerLabel, sendMessageOutcome } from '@shared/engine/peer-envelope'; // E7
+import { handbackReport, messageText, parsePeerMessage, peerLabel, sendMessageOutcome, sminosFrameOwners } from '@shared/engine/peer-envelope'; // E7; P5 O15 M2b: sminosFrameOwners
 import { INTERRUPT_CUT, parseInterruptCut } from '@shared/lane-a/interrupt-cut'; // P5 O9
 import { parseListing } from './agent-listing'; // E7
 import { peerMessageCopy } from './copy'; // E7
@@ -374,6 +374,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const deliveries = new Map<ToolUseId, DeliveryRecord>(); // E1
   const sideThreads = new Map<AppSessionId, RowOf<'side_thread'>>(); // E3
   const results = new Map<ToolUseId, Event<'tool.result'>>(); // E7: a SendMessage's or ListAgents' result, for its row
+  const peerOwners = new Map<MessageUuid, string[]>(); // P5 O15 M2b: the owners a peer envelope's sminos frame named, for its peer.message's row
   const artifacts = new Map<ToolUseId, ArtifactRecord>(); // E2
   const browserActions = new Map<ToolUseId, BrowserActionRecord>(); // E4c
   // P4-R7: a message tool's calls, apart from the turn's tool records: an accepted one is a message, not work the turn
@@ -495,7 +496,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         } else if (originOf(event.origin) === 'engine') {
           // The engine's own trigger (C4's disk `<task-notification>` record, origin 'task-notification'): an engine turn
           // has no user row; its divider reads Continued and the subagent row says what finished.
-        } else if (originOf(event.origin) === 'peer' && parsePeerMessage(messageText(event.content)) !== null) {
+        } else if (originOf(event.origin) === 'peer' && keepsPeerOwners(event, peerOwners)) {
           // E7: a message from another session or an in-process agent: its companion event (peer.message,
           // subagent.message) draws it; a peer text the parser refuses keeps its bubble below, so nothing is lost
         } else if (answersHeldAsk(event)) {
@@ -770,7 +771,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       // E3 end
       // E7 start: a message from another session, at its arrival position (its user.message draws no bubble)
       case 'peer.message':
-        items.push({ kind: 'row', row: inboundRow(event, turn.id) });
+        items.push({ kind: 'row', row: inboundRow(event, turn.id, event.messageUuid === null ? null : (peerOwners.get(event.messageUuid) ?? null)) });
         break;
       // E7 end
       // E2 start: the host's account of an artifact call, routed here by its tool use (reduce.ts)
@@ -1291,12 +1292,22 @@ function isPersistentMessage(row: Row): boolean {
   return row.kind === 'agent_message' && ((row.peer?.sender ?? null) !== null || row.report !== undefined);
 }
 
-function inboundRow(event: Event<'peer.message'>, turnId: TurnId): RowOf<'agent_message'> {
+// Whether a peer user.message is an envelope its companion event draws (E7); P5 O15 M2b: when it is one whose sminos
+// frame names the sender's owners, they are kept by its messageUuid for the companion's row (§J).
+function keepsPeerOwners(event: Event<'user.message'>, peerOwners: Map<MessageUuid, string[]>): boolean {
+  const envelope = parsePeerMessage(messageText(event.content));
+  if (envelope === null) return false;
+  const owners = envelope.kind !== 'agent' && envelope.frame !== null ? sminosFrameOwners(envelope.frame)?.owners : undefined;
+  if (owners !== undefined && event.messageUuid !== null) peerOwners.set(event.messageUuid, owners);
+  return true;
+}
+
+function inboundRow(event: Event<'peer.message'>, turnId: TurnId, owners: string[] | null): RowOf<'agent_message'> {
   const preview = previewOf(event.text);
   return {
     id: rowId.agentMessage(event.id), turnId, at: event.at, kind: 'agent_message', direction: 'between', from: null, to: null, text: peerMessageCopy.inbound(peerLabel(event.from, event.fromName), preview),
     peer: {
-      sender: { name: event.fromName, address: event.from, session: event.fromSession }, recipient: null, body: event.text, preview, replyTo: event.replyable ? event.from : null,
+      sender: { name: event.fromName, address: event.from, session: event.fromSession, owners }, recipient: null, body: event.text, preview, replyTo: event.replyable ? event.from : null,
       toolUseId: null, messageUuid: event.messageUuid, result: null, resultText: null, summary: null,
     },
   };

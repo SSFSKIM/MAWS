@@ -887,6 +887,31 @@ describe('cross-session rows (E7)', () => {
     expect(messages(list).map((row) => row.text)).toEqual(['Message from repo-b: hello from B']);
   });
 
+  // P5 O15 M2b (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, §J): the owners sminos's frame names for the
+  // sender, read from the user.message that carried the envelope and paired with its peer.message by messageUuid.
+  it('puts the owners a labelled sminos frame names on the row of the peer.message with the same messageUuid, and null on any other', () => {
+    const framed = (frame: string) => `Another Claude session sent a message:\n<cross-session-message from="${B}" from-name="peer">\n${frame}\nhello from B\n</cross-session-message>\n\nThis came from another Claude session.`;
+    const sent = { from: B, fromSession: null, fromName: 'peer', fromMode: null, fromPlugin: null, hopChain: [], text: 'hello from B', midTurn: false, lineage: 'peer' as const, replyable: true };
+    const b = builder();
+    b.emit('turn.started', { userMessageUuid: null, origin: 'peer' });
+    b.emit('user.message', { messageUuid: uuid('p1'), content: framed('[sminos chat hp 6d0000ff:1 from peer, owned by one@example.com, mem-2 → @you]'), isReplay: true, isSynthetic: true, origin: 'peer', bash: null });
+    b.emit('peer.message', { ...sent, messageUuid: uuid('p1') });
+    b.emit('user.message', { messageUuid: uuid('p2'), content: framed('[sminos chat hp 6d0000ff:2 from peer (owners unverified) → @you]'), isReplay: true, isSynthetic: true, origin: 'peer', bash: null });
+    b.emit('peer.message', { ...sent, messageUuid: uuid('p2') });
+    b.emit('user.message', { messageUuid: uuid('p3'), content: ENVELOPE, isReplay: true, isSynthetic: true, origin: 'peer', bash: null });
+    b.emit('peer.message', { ...sent, messageUuid: uuid('p3') });
+    b.emit('peer.message', { ...sent, messageUuid: uuid('p4') }); // no user.message carried it here
+    b.emit('peer.message', { ...sent, messageUuid: null });
+    b.end([], { origin: 'peer' });
+    expect(messages(rows(b.events)).map((row) => [row.peer?.messageUuid, row.peer?.sender?.owners])).toEqual([
+      ['p1', ['one@example.com', 'mem-2']],
+      ['p2', null], // a frame with another label
+      ['p3', null], // no sminos frame
+      ['p4', null],
+      [null, null],
+    ]);
+  });
+
   it('draws a SendMessage to another session between, naming a sender this transcript heard from, pending until its result, failed on `success: false` or an error', () => {
     const b = builder();
     peerTurn(b, 'hello from B');

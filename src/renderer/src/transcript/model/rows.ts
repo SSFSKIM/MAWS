@@ -164,7 +164,9 @@ export type AskRowData = Omit<Extract<Row, { kind: 'ask' }>, keyof RowBase | 'ki
 // null when the engine says SendMessage cannot reach it. `result` is an outbound send's: pending until its tool result,
 // failed with `resultText` when the engine could not send it; `summary` the call's own summary.
 export interface PeerMessage {
-  sender: { name: string | null; address: string; session: string | null } | null;
+  // P5 O15 M2b: owners, the names the sender's sminos frame wrote as its owners (an email or a member id), as written;
+  // null: the frame attested none, or there was no frame
+  sender: { name: string | null; address: string; session: string | null; owners: string[] | null } | null;
   recipient: { name: string | null; address: string } | null;
   body: string;
   preview: string; // the body's first line, cut to 120 columns

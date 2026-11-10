@@ -171,6 +171,7 @@
       "sender": {
         "address": "uds:/tmp/cc-socks/10562.sock",
         "name": "repo-b-gen1il-79",
+        "owners": null,
         "session": null
       },
       "summary": null,
@@ -480,6 +481,7 @@
       "sender": {
         "address": "uds:/tmp/cc-socks/10562.sock",
         "name": "repo-b-gen1il-79",
+        "owners": null,
         "session": null
       },
       "summary": null,
