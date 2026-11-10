@@ -399,18 +399,25 @@ test('maws-artifact: reaches the app and the capture partition only, and an arti
 //                host over the profile, so nothing of it is in memory), the worst of three cold trials; bound < 150 ms.
 //   ackP95Ms     a keystroke (one edit of the open 1 MB document) → the ack that says it is durable, p95 over 500
 //                keystrokes at S2's human pace (60 to 180 ms apart), the store's `synchronous = FULL` and `fullfsync = ON`
-//                (migrations.ts); bound < 10 ms.
+//                (migrations.ts); bound < 13 ms. The first bound, 10 ms, was set on 2026-10-12 from S2's 7.7 ms for the
+//                in-app (utility) shape; 13 ms is the owner's ruling of 2026-11-10 for the shape MAWS runs, about 20% over
+//                the valid reading of 10.6 ms on `mawsd` (run 42837591610, 1-minute loads 3.02 to 2.41)
+//                (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, Decision Log 15). A window whose 1-minute
+//                load is 5 or more at its start or its end is void: its line says `void: true` and the case fails
+//                asking for a rerun, which is no verdict on the bound either way (the architect's rule, as daemon-idle's).
 //   ackedLost    acknowledged keystrokes missing after a host SIGKILL mid-typing, summed over three kills; bound 0.
-const PERF_BOUNDS = { firstSyncMs: 150, ackP95Ms: 10, ackedLost: 0 } as const;
+const PERF_BOUNDS = { firstSyncMs: 150, ackP95Ms: 13, ackedLost: 0 } as const;
+const ACK_VOID_LOAD = 5; // the 1-minute load at which an ack window is void, at its start or its end
 // P5 O15 M1 (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md): the bounds were utility mode's, whose host
 // ended with its app; on the daemon shape the engine host is `mawsd`'s and outlives the app, so each cold trial and each
 // kill run ends the profile's `mawsd` and hosts with the app (the launch's cleanup, which keeps a given profile) before
-// the next launch, and a SIGKILLed engine host is restarted by `mawsd`. The bounds are unchanged.
+// the next launch, and a SIGKILLed engine host is restarted by `mawsd`. First sync and acknowledged loss keep their bounds;
+// the ack bound is the owner's re-derivation above.
 const PERF_ENV = { MAWS_HOST_MODE: 'daemon' };
 const load = () => loadavg().map((value) => Math.round(value * 100) / 100);
 function recordBound(bound: keyof typeof PERF_BOUNDS, value: number, detail: Record<string, unknown>): void {
   const limit = PERF_BOUNDS[bound];
-  const pass = bound === 'ackedLost' ? value <= limit : value < limit;
+  const pass = detail.void === true ? null : bound === 'ackedLost' ? value <= limit : value < limit; // null: void, no verdict
   const dir = test.info().project.outputDir;
   mkdirSync(dir, { recursive: true });
   appendFileSync(join(dir, 'artifacts-perf.jsonl'), `${JSON.stringify({ bound, value, limit, pass, mode: 'daemon', at: new Date().toISOString(), ...detail })}\n`);
@@ -470,10 +477,12 @@ test('S2’s numbers in the product: first sync of a 1 MB document, keystroke to
   const windowStart = new Date().toISOString();
   const latencies = await typing.timeAcks(typer, 500, [60, 180]);
   const windowEnd = new Date().toISOString();
+  const ackLoads = [loadBefore, load()];
+  const ackVoid = ackLoads.some(([oneMinute]) => oneMinute! >= ACK_VOID_LOAD);
   const ackP95Ms = round(percentile(latencies, 95));
   // P5 O15 (Decision Log 13): the record also carries the window's times and every latency in order, written after the
   // timing ends, so a reading over the bound can be told apart as launch residue or a cost each edit pays
-  recordBound('ackP95Ms', ackP95Ms, { edits: latencies.length, p50: round(percentile(latencies, 50)), max: round(Math.max(...latencies)), load: [loadBefore, load()], window: { start: windowStart, end: windowEnd }, samples: latencies.map(round) });
+  recordBound('ackP95Ms', ackP95Ms, { edits: latencies.length, p50: round(percentile(latencies, 50)), max: round(Math.max(...latencies)), load: ackLoads, ...(ackVoid ? { void: true } : {}), window: { start: windowStart, end: windowEnd }, samples: latencies.map(round) });
 
   // Three host SIGKILLs mid-typing, each in a fresh app and `mawsd` (a host supervisor stops restarting a host that dies
   // three times within 60 s): every acknowledged keystroke is in the document the restarted host serves.
@@ -509,6 +518,7 @@ test('S2’s numbers in the product: first sync of a 1 MB document, keystroke to
   recordBound('ackedLost', ackedLost, { runs: kills });
 
   expect(firstSyncMs, `first sync of a 1 MB document, cold (trials ${JSON.stringify(trials)})`).toBeLessThan(PERF_BOUNDS.firstSyncMs);
+  expect(ackVoid, `the keystroke-to-ack window is void by load, not a bound miss: its 1-minute load read ${ackLoads[0]![0]} at the start and ${ackLoads[1]![0]} at the end (${ACK_VOID_LOAD} or more at either end voids it); rerun the group in a quiet window (p95 ${ackP95Ms} ms, no verdict)`).toBe(false);
   expect(ackP95Ms, 'keystroke to durable ack, p95').toBeLessThan(PERF_BOUNDS.ackP95Ms);
   expect(ackedLost, 'acknowledged keystrokes lost to three host SIGKILLs').toBe(PERF_BOUNDS.ackedLost);
 });
