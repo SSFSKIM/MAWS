@@ -70,6 +70,8 @@ export interface ProjectRegistryDeps {
 export interface ProjectRegistry {
   /** The last computed value (the empty one signed out, and until the first). */
   projects(): OrgProjects;
+  /** The project registry's M12: the held head's machines, by ref and name; null while signed out. */
+  machines(): Array<{ ref: MachineRef; name: string }> | null;
   /** The row key of a project id on this device; null for an id the table has not given one. */
   keyOf(project: string): OrgKey | null;
   onKeys(listener: () => void): () => void;
@@ -371,6 +373,10 @@ export function createProjectRegistry(deps: ProjectRegistryDeps): ProjectRegistr
 
   return {
     projects: () => latest,
+    machines() {
+      const head = deps.session.current()?.view.head() ?? null;
+      return head === null ? null : head.state.machines.map((m) => ({ ref: m.ref as MachineRef, name: m.name }));
+    },
     keyOf: (project) => table.keyOf(project),
     onKeys(listener) {
       keyListeners.add(listener);

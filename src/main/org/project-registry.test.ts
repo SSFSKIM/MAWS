@@ -122,6 +122,18 @@ async function start(w: World, options: { files?: OrgFiles; local?: ProjectRecor
   };
 }
 
+// The project registry's M12 (Interfaces §K): main's act handler names another machine by its name in the held head, and
+// tells a signed-out app from one that is signed in
+describe('the machines the registry names', () => {
+  it('are the held head’s, by name and ref; none signed out', async () => {
+    const w = await World.make();
+    const h = await start(w);
+    expect(h.registry.machines()).toEqual([{ ref: w.m1.ref, name: 'mac-one' }, { ref: w.m2.ref, name: 'mac-two' }]);
+    w.session.set(null);
+    expect(h.registry.machines()).toBeNull();
+  });
+});
+
 describe('the member’s view', () => {
   it('lists the locations on machines they own, with actions; those on a machine they hold a grant on, without; and a project seen only through a session, with none', async () => {
     const w = await World.make(); // A owns m1, B owns m2; A is signed in
