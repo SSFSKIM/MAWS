@@ -80,9 +80,10 @@ import * as remote from './schema/remote'; // P5 O7 M2
 import * as browserEngine from './schema/browser-engine'; // P5 O17
 import * as channel from './schema/channel'; // P5 O8 M7b
 import * as endpoint from './schema/endpoint'; // P5 O8 M6b
+import * as projects from './schema/projects'; // the project registry's M12
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
-const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */, designSystems /* P3-D */, presentations /* P3-C M6 */, connectors /* P3-H H3b */, delivery /* P4-B5 */, customization /* UX2-K */, catalog /* P4-AGG M2 */, daemon /* P5 O2 M5 */, machine /* P5 O6 M1 */, machines /* P5 O6 M3 */, org /* P5 O8 M1 */, laneA /* P5 O9 M2 */, machineSettings, clientPort /* P5 O3-D */, render /* P5 O5 M3 */, remote /* P5 O7 M2 */, browserEngine /* P5 O17 */, channel /* P5 O8 M7b */, endpoint /* P5 O8 M6b */ } satisfies Record<
+const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */, designSystems /* P3-D */, presentations /* P3-C M6 */, connectors /* P3-H H3b */, delivery /* P4-B5 */, customization /* UX2-K */, catalog /* P4-AGG M2 */, daemon /* P5 O2 M5 */, machine /* P5 O6 M1 */, machines /* P5 O6 M3 */, org /* P5 O8 M1 */, laneA /* P5 O9 M2 */, machineSettings, clientPort /* P5 O3-D */, render /* P5 O5 M3 */, remote /* P5 O7 M2 */, browserEngine /* P5 O17 */, channel /* P5 O8 M7b */, endpoint /* P5 O8 M6b */, projects /* the project registry's M12 */ } satisfies Record<
   Namespace,
   { commands: object; events: object }
 >;
@@ -676,7 +677,7 @@ describe('ipc schema validates both directions', () => {
       // added since; E2's `deliverables` was too, until P3-L's cutover removed it).
       const before = ['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings'];
       for (const name of Object.keys(owners)) expect(before, name).toContain(name.split('.')[0]);
-      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */, 'designSystems' /* P3-D */, 'presentations' /* P3-C M6 */, 'connectors' /* P3-H H3b */, 'delivery' /* P4-B5 */, 'customization' /* UX2-K */, 'catalog' /* P4-AGG M2 */, 'daemon' /* P5 O2 M5 */, 'machine' /* P5 O6 M1 */, 'machines' /* P5 O6 M3 */, 'org' /* P5 O8 M1 */, 'laneA' /* P5 O9 M2 */, 'machineSettings', 'clientPort' /* P5 O3-D */, 'render' /* P5 O5 M3 */, 'remote' /* P5 O7 M2 */, 'browserEngine' /* P5 O17 */, 'channel' /* P5 O8 M7b */, 'endpoint' /* P5 O8 M6b */]);
+      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */, 'designSystems' /* P3-D */, 'presentations' /* P3-C M6 */, 'connectors' /* P3-H H3b */, 'delivery' /* P4-B5 */, 'customization' /* UX2-K */, 'catalog' /* P4-AGG M2 */, 'daemon' /* P5 O2 M5 */, 'machine' /* P5 O6 M1 */, 'machines' /* P5 O6 M3 */, 'org' /* P5 O8 M1 */, 'laneA' /* P5 O9 M2 */, 'machineSettings', 'clientPort' /* P5 O3-D */, 'render' /* P5 O5 M3 */, 'remote' /* P5 O7 M2 */, 'browserEngine' /* P5 O17 */, 'channel' /* P5 O8 M7b */, 'endpoint' /* P5 O8 M6b */, 'projects' /* the project registry's M12 */]);
       for (const [name, owner] of Object.entries(owners)) expect(commands[name as keyof typeof owners].owner, name).toBe(owner);
       for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
     });
@@ -2372,6 +2373,45 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandOutput('endpoint.local.grants', { ok: false, code: 'unavailable' }).ok).toBe(true);
       expect(validateCommandOutput('endpoint.local.grants', { ok: true, output: { members: [{ member: 'm-b', grant: { ...grant, body: { ...grant.body, rights: ['root'] } }, highWater: 2 }] } }).ok, 'no such right').toBe(false);
       expect(validateCommandOutput('endpoint.local.grants', { ok: true, output: { members: [{ member: 'm-b', grant: null }] } }).ok, 'a mark is always answered').toBe(false);
+    });
+  });
+  describe('the project registry M12 projects.*', () => {
+    const location = { pid: 'p1', id: '0f6c7b1e-0000-4000-8000-000000000001', key: 'folder:mRef:/srv/scrape', name: 'scrape', path: '/srv/scrape', source: 'folder', stated: 'minted', machine: 'mRef0123456789abcdefAB' };
+    const project = { id: location.id, name: 'scrape', hub: true, renamable: true, locations: [location], known: [] };
+    it('adds the daemon commands for `maws`, machine-owned and main-only, and the act request, main-only and among the machine host events', () => {
+      expect(Object.fromEntries(Object.entries(projects.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({ 'projects.registry': 'machine', 'projects.forward': 'machine', 'projects.act.answer': 'machine' });
+      expect(Object.keys(projects.events)).toEqual(['projects.act.request']);
+      expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['projects.registry', 'projects.forward', 'projects.act.answer']));
+      expect(MAIN_ONLY_EVENTS).toContain('projects.act.request');
+      expect(MACHINE_EVENTS).toContain('projects.act.request');
+    });
+    it('reads the registry as the endpoint assembles it', () => {
+      const registry = { enrolled: true, machine: { ref: 'mRef0123456789abcdefAB', name: 'mini' }, machines: [{ ref: 'mRef0123456789abcdefAB', name: 'mini' }], projects: [project] };
+      expect(validateCommandOutput('projects.registry', registry).ok).toBe(true);
+      expect(validateCommandOutput('projects.registry', { enrolled: false, machine: { ref: 'mRef0123456789abcdefAB', name: '' }, machines: [], projects: [] }).ok).toBe(true);
+      expect(validateCommandOutput('projects.registry', { ...registry, projects: [{ ...project, locations: [{ ...location, state: 'gone' }] }] }).ok, 'no such state').toBe(false);
+      expect(validateCommandInput('projects.registry', undefined).ok).toBe(true);
+    });
+    it('forwards a verb aimed at another machine and takes its answer', () => {
+      expect(validateCommandInput('projects.forward', { verb: 'add', machine: 'mini', path: '/srv/scrape', into: 'abc', name: 'Scrape' }).ok).toBe(true);
+      expect(validateCommandInput('projects.forward', { verb: 'link', machine: 'mini', path: '/srv/scrape', into: null }).ok).toBe(true);
+      expect(validateCommandInput('projects.forward', { verb: 'add', machine: 'mini', path: '/srv/scrape', own: true }).ok).toBe(true);
+      expect(validateCommandInput('projects.forward', { verb: 'rename', machine: 'mini', path: '/srv/scrape' }).ok, 'no such verb').toBe(false);
+      expect(validateCommandInput('projects.forward', { verb: 'add', machine: 'mini', path: 'srv/scrape' }).ok, 'an absolute path').toBe(false);
+      expect(validateCommandOutput('projects.forward', { ok: true, text: 'added scrape as a new project (abc)' }).ok).toBe(true);
+      expect(validateCommandOutput('projects.forward', { ok: false, code: 'no-app', text: 'MAWS is not running on this machine' }).ok).toBe(true);
+      expect(validateCommandInput('projects.act.answer', { id: 'pa-1', result: { ok: false, code: 'declined', text: 'declined in MAWS' } }).ok).toBe(true);
+      expect(validateEventPayload('projects.act.request', { id: 'pa-1', verb: 'add', machine: 'mini', path: '/srv/scrape' }).ok).toBe(true);
+      expect(validateEventPayload('projects.act.request', { id: 'pa-1', verb: 'link', machine: 'mini', path: '/srv/scrape', into: null }).ok).toBe(true);
+    });
+    it('adds the page half of the confirmation sheet, main-owned', () => {
+      const ask = { id: 'pa-1', verb: 'add', machine: 'mRef0123456789abcdefAB', machineName: 'mini', path: '/srv/scrape', into: 'abc', intoName: 'scrape', askedAt: '2026-11-10T12:00:00.000Z' };
+      expect(commands['org.projectActs'].owner).toBe('main');
+      expect(commands['org.projectActs.decide'].owner).toBe('main');
+      expect(validateCommandOutput('org.projectActs', { asks: [ask] }).ok).toBe(true);
+      expect(validateEventPayload('org.projectActs.changed', { asks: [] }).ok).toBe(true);
+      expect(validateCommandInput('org.projectActs.decide', { id: 'pa-1', confirm: false }).ok).toBe(true);
+      expect(validateCommandInput('org.projectActs.decide', { id: 'pa-1' }).ok, 'a decision').toBe(false);
     });
   });
 });

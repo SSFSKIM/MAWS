@@ -36,6 +36,7 @@ import { grades as remote } from './grades/remote'; // P5 O7 M2
 import { grades as browserEngine } from './grades/browser-engine'; // P5 O17
 import { grades as channel } from './grades/channel'; // P5 O8 M7b
 import { grades as endpoint } from './grades/endpoint'; // P5 O8 M6b
+import { grades as projects } from './grades/projects'; // the project registry's M12
 import { grades as library } from './grades/library';
 import { grades as marketplaces } from './grades/marketplaces';
 import { grades as maws } from './grades/maws';
@@ -84,6 +85,7 @@ export const NAMESPACE_GRADES = {
   browserEngine, // P5 O17
   channel, // P5 O8 M7b
   endpoint, // P5 O8 M6b
+  projects, // the project registry's M12
 } as const satisfies { readonly [N in Namespace]: NamespaceGrades<CommandsOf<N>> };
 
 const isSpec = (declared: NamespaceGrades<string>): declared is GradeSpec =>

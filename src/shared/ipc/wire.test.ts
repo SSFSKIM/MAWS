@@ -7,7 +7,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import * as z from 'zod';
 import { describe, expect, it } from 'vitest';
-import { ATTACHMENT_CAPABILITY, BROWSER_ENGINE_CAPABILITY, ClientHelloV2Schema, CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, ENGINE_ROUTE_MACHINE_CAPABILITY, FOLLOW_OWNERS_CAPABILITY, HOLDER_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY, HOST_RENDER_CAPABILITY, MACHINE_ARTIFACTS_CAPABILITY, MACHINE_DELIVERY_CAPABILITY, MACHINE_RENDER_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, PTY_FRAMES_CAPABILITY, RENDER_CLIENT_CAPABILITY, ServerWelcomeV2Schema, SOCKET_PROTOCOL } from '../host/socket-protocol';
+import { ATTACHMENT_CAPABILITY, BROWSER_ENGINE_CAPABILITY, ClientHelloV2Schema, CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, ENGINE_ROUTE_MACHINE_CAPABILITY, FOLLOW_OWNERS_CAPABILITY, HOLDER_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY, HOST_RENDER_CAPABILITY, MACHINE_ARTIFACTS_CAPABILITY, MACHINE_DELIVERY_CAPABILITY, MACHINE_PROJECT_ACTS_CAPABILITY, MACHINE_RENDER_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, PTY_FRAMES_CAPABILITY, RENDER_CLIENT_CAPABILITY, ServerWelcomeV2Schema, SOCKET_PROTOCOL } from '../host/socket-protocol';
 import { HostRequestSchema, HostRequestV2Schema } from './host-protocol';
 import { REGISTRY, type WireRegistry } from './registry';
 import { classifyWireChange, WIRE_CAPABILITIES, WIRE_MAJOR, WIRE_MINOR, wireManifestOf, type WireManifest } from './wire';
@@ -216,6 +216,7 @@ describe('the machine host on the wire (P5 O3-D M1)', () => {
     expect([MACHINE_RENDER_CAPABILITY, HOST_RENDER_CAPABILITY]).toEqual(['machine.render', 'host.render']); // P5 O5 M4
     expect(MACHINE_DELIVERY_CAPABILITY).toBe('machine.delivery'); // P5 O7 M5c
     expect(ENGINE_ROUTE_MACHINE_CAPABILITY).toBe('engine.route-machine'); // P5 O7 M9: in the union; the engine host lists it with the machine launch
+    expect(MACHINE_PROJECT_ACTS_CAPABILITY).toBe('machine.project-acts'); // the project registry's M12: the app's hello lists it, and mawsd asks only such an app
     expect(manifest.capabilities).toEqual(expect.arrayContaining(['host.attachment', 'host.render', 'machine.artifacts', 'machine.render', 'machine.spine', 'render.client', 'socket.ptyFrames']));
     expect([...WIRE_CAPABILITIES].sort()).toEqual(manifest.capabilities);
     // D4: the engine host lists host.attachment from M3, when it serves the command, and mawsd's hello to it from M3
@@ -242,7 +243,7 @@ describe('the connectors’ capabilities on the wire (P5 O4 M2)', () => {
 
   it('names both, and lists them in the manifest’s union', () => {
     expect([CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY]).toEqual(['host.connectors', 'machine.connectors']);
-    expect(manifest.capabilities).toEqual(['browser.engine' /* P5 O17 M4 */, 'engine.route-machine' /* P5 O7 M9 */, 'host.attachment', 'host.browserWork' /* P5 O17 M3 */, 'host.connectors', 'host.followOwners' /* P5 O7 M8 */, 'host.holder' /* P5 O16 M3b */, 'host.render', 'machine.artifacts', 'machine.connectors', 'machine.delivery' /* P5 O7 M5c */, 'machine.render', 'machine.spine', 'render.client', 'socket.ptyFrames']);
+    expect(manifest.capabilities).toEqual(['browser.engine' /* P5 O17 M4 */, 'engine.route-machine' /* P5 O7 M9 */, 'host.attachment', 'host.browserWork' /* P5 O17 M3 */, 'host.connectors', 'host.followOwners' /* P5 O7 M8 */, 'host.holder' /* P5 O16 M3b */, 'host.render', 'machine.artifacts', 'machine.connectors', 'machine.delivery' /* P5 O7 M5c */, 'machine.project-acts' /* the project registry's M12 */, 'machine.render', 'machine.spine', 'render.client', 'socket.ptyFrames']);
   });
 
   // P5 O16 M3b: the engine host's welcome and both its clients' hellos list host.holder too (the handover, and the
@@ -251,7 +252,7 @@ describe('the connectors’ capabilities on the wire (P5 O4 M2)', () => {
     expect(PEER_CAPABILITIES).toEqual({
       engineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, HOST_RENDER_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY, FOLLOW_OWNERS_CAPABILITY, ENGINE_ROUTE_MACHINE_CAPABILITY], // P5 O17 M7; P5 O7 M8: host.followOwners; P5 O7 M9: engine.route-machine
       ptyHost: [PTY_FRAMES_CAPABILITY],
-      app: [PTY_FRAMES_CAPABILITY, MACHINE_SPINE_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOLDER_CAPABILITY, BROWSER_ENGINE_CAPABILITY], // P5 O17 M9b: a tab engine of its agent tabs
+      app: [PTY_FRAMES_CAPABILITY, MACHINE_SPINE_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOLDER_CAPABILITY, BROWSER_ENGINE_CAPABILITY, MACHINE_PROJECT_ACTS_CAPABILITY], // P5 O17 M9b: a tab engine of its agent tabs; the project registry's M12: it answers projects.act.request
       daemonToEngineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY], // P5 O17 M7 fix 2: it tells browser work
       daemonToPtyHost: [PTY_FRAMES_CAPABILITY],
       daemon: [PTY_FRAMES_CAPABILITY, MACHINE_ARTIFACTS_CAPABILITY, MACHINE_RENDER_CAPABILITY, MACHINE_DELIVERY_CAPABILITY],

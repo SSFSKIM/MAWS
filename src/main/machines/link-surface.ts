@@ -31,7 +31,7 @@ const CLIENT_RULES = {
   // P5 O16 M3c: `daemon.engineHandover` is a profile's `mawsd` telling its own app why engine-host.sock holds that app's
   // hello (main's start budget and host.status's reason read it); a linked machine's app reaches that engine host
   // through the services front, whose hellos it never holds, as host.supervisorStatus is the app's own
-  names: ['attention.navigate', 'attention.notified', 'engine.budget', 'host.status', 'host.supervisorStatus', 'clientPort.request', 'daemon.engineHandover', 'host.browserIdle'],
+  names: ['attention.navigate', 'attention.notified', 'engine.budget', 'host.status', 'host.supervisorStatus', 'clientPort.request', 'daemon.engineHandover', 'host.browserIdle', 'projects.act.request' /* the project registry's M12: mawsd's request to its own app, never a link's */],
 };
 
 const placedBy = (rules: { namespaces: string[]; names: string[] }) => (name: string) => rules.names.includes(name) || rules.namespaces.includes(name.slice(0, name.indexOf('.')));

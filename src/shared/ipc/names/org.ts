@@ -46,6 +46,8 @@ export const commands = [
   'org.projects',
   'org.removals.hold',
   'org.removals.cancel',
+  'org.projectActs', // the project registry's M12 (§K): a terminal's request aimed at another machine
+  'org.projectActs.decide',
 ] as const;
 
-export const events = ['org.changed', 'org.rows.changed', 'org.channel.changed', 'org.policies.changed', 'org.grants.changed', 'org.projects.changed'] as const;
+export const events = ['org.changed', 'org.rows.changed', 'org.channel.changed', 'org.policies.changed', 'org.grants.changed', 'org.projects.changed', 'org.projectActs.changed' /* M12 */] as const;

@@ -639,6 +639,28 @@ export const OrgProjectsSchema = z.strictObject({
 export type OrgProjects = z.infer<typeof OrgProjectsSchema>;
 
 /**
+ * The project registry's M12 (Interfaces §K, the page's half; Decision Log 20): a terminal's `maws project …` aimed at
+ * another machine, which `mawsd` asked this app (`projects.act.request`) and main holds until the person decides in the
+ * page's sheet. `machine` is the ref the request's machine name names in the held org state; `into` a project id (null:
+ * unlink), `intoName` its name in the registry when it has one; `askedAt` when main took it.
+ */
+export const ProjectActAskSchema = z.strictObject({
+  id: z.string().min(1),
+  verb: z.enum(['add', 'remove', 'link']),
+  machine: MachineRefSchema,
+  machineName: z.string(),
+  path: z.string(),
+  into: z.string().nullable().optional(),
+  intoName: z.string().optional(),
+  own: z.literal(true).optional(),
+  name: z.string().optional(),
+  askedAt: z.string(),
+});
+export type ProjectActAsk = z.infer<typeof ProjectActAskSchema>;
+export const ProjectActAsksSchema = z.strictObject({ asks: z.array(ProjectActAskSchema) });
+export type ProjectActAsks = z.infer<typeof ProjectActAsksSchema>;
+
+/**
  * M7a (Interfaces §N, with the pre-flight's ruling in the Decision Log, "M7a is built as three tasks"): a project's
  * channel, the app's one reader of the log plane. Main reads the hub's Project socket and verifies every event against
  * the held head (src/main/org/channel/); the renderer folds what it is sent into the stream (`channel/project.ts`), so
@@ -912,6 +934,8 @@ export const commands = {
   'org.projects': { input: z.void(), output: OrgProjectsSchema, owner: 'main' }, // the project registry (§I)
   'org.removals.hold': { input: z.strictObject({ machine: MachineRefSchema, pid: z.string().min(1) }), output: z.void(), owner: 'main' }, // §I: a location on a machine that is off
   'org.removals.cancel': { input: z.strictObject({ id: z.string().min(1) }), output: z.void(), owner: 'main' }, // §I
+  'org.projectActs': { input: z.void(), output: ProjectActAsksSchema, owner: 'main' }, // M12 (§K): the requests waiting for the person
+  'org.projectActs.decide': { input: z.strictObject({ id: z.string().min(1), confirm: z.boolean() }), output: z.void(), owner: 'main' }, // M12: the sheet's Confirm or dismissal
 } as const satisfies Record<`org.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -921,4 +945,5 @@ export const events = {
   'org.policies.changed': OrgPolicySchema, // M6b: a machine's policies, at each whole read (at a sheet's save, and when asked)
   'org.grants.changed': z.strictObject({ ref: z.string() }), // M4b: a machine's grants moved (a delivery's outcome, a ledger read): read org.grants.view again
   'org.projects.changed': OrgProjectsSchema, // the project registry (§I): coalesced, the whole value
+  'org.projectActs.changed': ProjectActAsksSchema, // M12 (§K): the whole list, at each request taken or decided
 } as const satisfies Record<`org.${string}`, z.ZodType>;
