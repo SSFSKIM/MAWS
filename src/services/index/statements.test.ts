@@ -30,6 +30,7 @@ function standIn(possible = true) {
     state: (possible ? { possible: true } : { possible: false, reason: 'sminos-too-old' }) as StatementsState,
     projects: new Map<string, { hub: boolean; nameRev: number }>(),
     fit: true,
+    limit: Infinity,
     fitted: [] as DeclaredRow[][],
     restates: 0,
     turn(state: StatementsState) {
@@ -46,7 +47,7 @@ function standIn(possible = true) {
     project: (id) => seam.projects.get(id) ?? null,
     fits: (rows) => {
       seam.fitted.push([...rows]);
-      return seam.fit;
+      return seam.fit && rows.length <= seam.limit;
     },
     published: async () => {
       seam.restates += 1;
@@ -748,6 +749,102 @@ describe('the stored statements', () => {
       const locations = rows.map((r) => ({ pid: r.pid, id: r.org.smnsId ?? 'machine-id', key: r.org.key, name: r.name, path: r.path, source: r.org.source, ...(r.stated ? { stated: r.stated } : {}), ...(r.nameRev ? { nameRev: r.nameRev } : {}) }));
       const [assembled] = assembleProjects([{ org: ENROLLED.org, machine: MACHINE, revision: 1, issued: new Date().toISOString(), locations, known: [] }], new Set(['machine-id'])).filter((p) => p.id === id);
       expect(assembled).toMatchObject({ name: 'Chosen name', renamable: true });
+    });
+  });
+
+  // M8's review 2 (.doperpowers/sde/2026-11-10-project-registry/task-8-review-2.md): each finding, reproduced
+  describe('review 2', () => {
+    const settle = async () => {
+      for (let k = 0; k < 100; k++) await new Promise((resolve) => setImmediate(resolve));
+    };
+    const refresh = (enrollment: Enrollment | null = ENROLLED) => index.refreshOrgProjects({ machine: MACHINE, enrollment: () => enrollment, home, folderCheckMs: 60 * 60_000 });
+    // a row's size as a projects record carries it
+    const bytes = (r: DeclaredRow) => Buffer.byteLength(JSON.stringify({ pid: r.pid, id: r.org.smnsId ?? 'machine-id', key: r.org.key, name: r.name, path: r.path, source: r.org.source, ...(r.stated ? { stated: r.stated } : {}), ...(r.remote ? { remote: r.remote } : {}), ...(r.hub === false ? { hub: false } : {}) }));
+    const checked = (path: string) => seam.fitted.flat().filter((r) => r.path === path).at(-1);
+
+    it('R1: a restored statement on a missing folder gives the row its identity, so the snapshot is published', async () => {
+      await open();
+      const missing = folder('missing-restored');
+      const anchor = readAnchor(missing);
+      renameSync(missing, `${missing}-away`);
+      const restored = '44444444-4444-4444-8444-444444444444';
+      index.projectsSource().restore([{ path: missing, minted: restored, linked: null, anchor, name: 'missing-restored', nameRev: null, hidden: false }]);
+      await vi.waitFor(() => expect(index.projectsSource().snapshot()).not.toBeNull());
+      expect(index.projectsSource().snapshot()!.rows.find((r) => r.path === missing)).toMatchObject({ org: { smnsId: restored }, stated: 'minted', statedAt: missing, state: 'missing' });
+      await add(folder('available'));
+      await settle();
+      expect(index.projectsSource().snapshot()!.rows.map((r) => r.path)).toEqual(expect.arrayContaining([missing, join(tree.path, 'available')]));
+    });
+
+    it('R2: a session in a folder that cannot be read is filed, the .smns walk reading nothing there', async () => {
+      await open();
+      const locked = folder('locked');
+      chmodSync(locked, 0);
+      try {
+        expect(() => index.sessions.upsertFromSummary(summary({ directory: locked }))).not.toThrow();
+      } finally {
+        chmodSync(locked, 0o755);
+      }
+    });
+
+    it('R3: a replaced folder whose original returns is derived again, and its project is the minted one', async () => {
+      await open();
+      const back = folder('back');
+      const under = folder('back', 'under');
+      const id = (await add(back)).project.org!.smnsId!;
+      index.sessions.upsertFromSummary(summary({ directory: under }));
+      await vi.waitFor(() => expect(row(under)?.org?.smnsId).toBe(id));
+      renameSync(back, `${back}-original`);
+      mkdirSync(back);
+      await index.statements.checkFolders();
+      await settle();
+      expect(row(back)?.org?.smnsId).toBeNull();
+      expect(await index.statements.resolve(back)).toMatchObject({ by: 'machine' });
+      rmSync(back, { recursive: true });
+      renameSync(`${back}-original`, back);
+      await index.statements.checkFolders();
+      expect(row(back)).not.toHaveProperty('state');
+      await vi.waitFor(() => expect(row(back)?.org?.smnsId).toBe(id));
+      await vi.waitFor(() => expect(row(under)?.org?.smnsId).toBe(id));
+      expect(await index.statements.resolve(back)).toMatchObject({ project: id, by: 'minted' });
+    });
+
+    it('R4: two declarations at once are admitted one at a time, an underived declared row counted', async () => {
+      await open();
+      await add(folder('first'));
+      seam.limit = index.projects.declaredRows().length + 1;
+      const answers = await Promise.allSettled([add(folder('concurrent-one')), add(folder('concurrent-two'))]);
+      expect(answers.map((a) => a.status).sort()).toEqual(['fulfilled', 'rejected']);
+      await settle();
+      expect(index.projects.list({ includeHidden: true }).filter((p) => p.directory.includes('concurrent-')).filter((p) => !p.hidden && index.projects.declaredIds().includes(p.id))).toHaveLength(1);
+    });
+
+    it('R5: the bound is asked with each row as it is published: minted, linked, or as its deciding .smns says', async () => {
+      await open();
+      seam.projects.set('hub-target', { hub: true, nameRev: 0 });
+      const mint = folder('to-mint');
+      await add(mint);
+      expect(bytes(checked(mint)!)).toBe(bytes(index.projects.declaredRows().find((r) => r.path === mint)!));
+      const link = folder('to-link');
+      await add(link, { into: 'hub-target' });
+      expect(bytes(checked(link)!)).toBe(bytes(index.projects.declaredRows().find((r) => r.path === link)!));
+      const fileRoot = folder('by-file');
+      const fileChild = folder('by-file', 'sub');
+      writeFileSync(join(fileRoot, '.smns'), JSON.stringify({ project: 'file-id', name: 'x'.repeat(128), hub: { org: ENROLLED.org } }));
+      index.sessions.upsertFromSummary(summary({ directory: fileChild }));
+      await vi.waitFor(() => expect(index.projects.declaredRows().find((r) => r.path === fileRoot)).toBeDefined());
+      expect(bytes(checked(fileRoot)!)).toBe(bytes(index.projects.declaredRows().find((r) => r.path === fileRoot)!));
+    });
+
+    it('R6: on an unenrolled machine a missing folder keeps no statement-made identity', async () => {
+      await open();
+      const away = folder('unenroll');
+      const id = (await add(away)).project.id;
+      renameSync(away, `${away}-away`);
+      await refresh(null);
+      const record = index.projects.record(id);
+      expect(record.org?.smnsId ?? null).toBeNull();
+      expect(record).not.toHaveProperty('stated');
     });
   });
 });
