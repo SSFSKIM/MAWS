@@ -895,6 +895,12 @@ export class ProjectStore {
     return declaredRowOf(decided === null ? row : { ...row, org_smns_id: decided.smnsId, org_by: decided.by, org_at: decided.at, org_hub: null });
   }
 
+  /** The declared row as it would be published once renamed (§G's `update`; panel 1, scalpel-2#2); null when none is derived. */
+  declaredRowRenamed(id: ProjectId, name: string, nameRev: number): DeclaredRow | null {
+    const row = this.row(id);
+    return declared(row) ? declaredRowOf({ ...row, name, name_rev: nameRev }) : null;
+  }
+
   /**
    * A missing declared folder's identity while the machine is enrolled (M8's review 2, finding 1): with a stored statement
    * of its own, the statement's (its link, else its minted id), decided at itself, the label kept or else rebuilt from the

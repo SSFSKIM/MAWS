@@ -930,5 +930,24 @@ describe('the stored statements', () => {
       await index.statements.remove(row(swapped)!.id, { path: swapped, project: id });
       expect(row(swapped)).toMatchObject({ hidden: true });
     });
+
+    it('scalpel-2#2: a rename that would take the record past its bound is refused as admission refuses it, and nothing is written', async () => {
+      await open();
+      const plain = folder('renamed');
+      await add(plain);
+      const pid = row(plain)!.id;
+      seam.fit = false; // the record is at its bound
+      expect(() => index.statements.update(pid, { name: 'A much longer name' })).toThrow(refusal('too-many-locations'));
+      expect(row(plain)).toMatchObject({ name: 'renamed' });
+      expect(row(plain)).not.toHaveProperty('nameRev');
+      // asked with the row as it would be published: its new name and counter
+      expect(seam.fitted.at(-1)?.find((r) => r.pid === pid)).toMatchObject({ name: 'A much longer name', nameRev: 1 });
+      // an order alone grows nothing, and is not asked
+      const asked = seam.fitted.length;
+      expect(index.statements.update(pid, { order: 4 })).toMatchObject({ order: 4 });
+      expect(seam.fitted).toHaveLength(asked);
+      seam.fit = true;
+      expect(index.statements.update(pid, { name: 'A much longer name' })).toMatchObject({ name: 'A much longer name', nameRev: 1 });
+    });
   });
 });

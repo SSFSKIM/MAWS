@@ -414,11 +414,17 @@ export class Statements {
     return { project: this.projects.record(id), merged: moved.merged, restated };
   }
 
-  /** `session.projects.update`: a rename sets the name counter one above the highest the records and this machine hold. */
+  /**
+   * `session.projects.update`: a rename sets the name counter one above the highest the records and this machine hold. A
+   * rename is admitted as a declaration is, with the row as it will be published (panel 1, scalpel-2#2): one that would
+   * take the record past §A's bounds is refused before anything is written.
+   */
   update(id: ProjectId, patch: { name?: string; order?: number }): ProjectRecord {
     if (patch.name === undefined || this.enrollment() === null) return this.projects.update(id, patch);
     const { smnsId, nameRev } = this.projects.statementRow(id);
     const highest = smnsId === null ? (nameRev ?? 0) : Math.max(this.registry.project(smnsId)?.nameRev ?? 0, this.projects.highestNameRev(smnsId));
+    const renamed = this.projects.declaredRowRenamed(id, patch.name, highest + 1);
+    if (renamed !== null && !this.registry.fits([...this.projects.admissionRows().filter((row) => row.pid !== id), renamed])) refuse('too-many-locations', 'the renamed folder would not fit one projects record');
     return this.projects.update(id, patch, highest + 1);
   }
 
