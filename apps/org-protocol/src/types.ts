@@ -19,6 +19,8 @@ export const SIGNING_DOMAINS = {
   action: 'smns-action-v1',
   /** A machine's re-attestation of its phase-1 history (history.ts, O14 M4). */
   historyAttest: 'smns-history-attest-v1',
+  /** A machine's projects record: its declared locations (projects.ts; the project registry, Interfaces §A). */
+  projects: 'smns-projects-v1',
 } as const;
 
 export type DeviceClass = 'native-mac' | 'web-cards';
@@ -81,6 +83,10 @@ export type OrgState = {
   /** Append-only. */
   revoked: RevokedKey[];
   delegations: Delegation[];
+  /**
+   * Reserved: no state writes it. The org's projects are the machines' projects records (`ProjectsRecord`, assembled by
+   * `assembleProjects`), not entries of the head (the project registry's design, §5).
+   */
   projects: ProjectEntry[];
   /**
    * The DX1 org key's retirement (O14 M5a): set by the state that retires it (`version` is that state's own) and kept
@@ -130,6 +136,47 @@ export const LISTING_GONE = 'gone';
 export const isListingGone = (listing: Listing): boolean => listing.fields.state === LISTING_GONE;
 /** RL §4.1's direct carriers. */
 export type EndpointRecord = { org: string; machine: string; addresses: string[]; issued: string };
+
+/** A machine's ref (RL §2.3; `isMachineRef`): its identity, never its name. */
+export type MachineRef = string;
+/**
+ * A declared location: a folder on the record's machine that belongs to project `id` (the project registry's design §4;
+ * Interfaces §A of docs/doperpowers/plans/2026-11-10-project-registry.md). `key` is the folder's label on its machine
+ * and joins nothing; `remote` is its repository's observed remote key, whatever decided `id`, and joins nothing by
+ * itself. `id` is the machine's own project id when design §8's rule gives that, and such a location makes no project
+ * (`assembleProjects`).
+ */
+export type ProjectLocation = {
+  /** The machine's own id of the row; a command to the machine names the row by it. */
+  pid: string;
+  /** The project the rule gives this folder. */
+  id: string;
+  key: string;
+  /**
+   * The location's own name: the deciding `.smns`'s when a file decides; else the name a rename chose when `nameRev` is
+   * set; else the remote's name when the repository has a remote; else the folder's base name.
+   */
+  name: string;
+  /** Set at a rename on this machine: one above the highest `nameRev` the records hold for the project. */
+  nameRev?: number;
+  /** Absolute, the real path, NFC. */
+  path: string;
+  /** The label's kind: what the folder's files derive. */
+  source: 'smns' | 'remote' | 'repository' | 'folder';
+  /** Present when a stored statement decides `id`. */
+  stated?: 'minted' | 'linked';
+  /** `id` is decided by a `.smns` that names no hub of this org: its log is not on the hub. */
+  hub?: false;
+  remote?: string;
+  state?: 'missing' | 'replaced';
+};
+/** A project with live sessions on the machine and no declared location there. */
+export type KnownProject = { id: string; name: string };
+/**
+ * One machine's signed statement of its locations, under `smns-projects-v1`. `revision` orders a machine's records (the
+ * hub keeps the highest, and a reader takes none below the highest it holds); `issued` is for display.
+ */
+export type ProjectsRecord = { org: string; machine: MachineRef; revision: number; issued: string; locations: ProjectLocation[]; known: KnownProject[] };
 
 /**
  * A key allowed to sign as a writer: `notAfter` null for a current key; else the latest timestamp its events may carry
