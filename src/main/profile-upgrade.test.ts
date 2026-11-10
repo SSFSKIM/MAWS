@@ -18,6 +18,10 @@ import { machineRows, O2_CHOSEN_SETTINGS as CHOSEN, O2_LIBRARY_ARTIFACT, O2_PART
 import { BrowserData } from './browser/data';
 import { composeSettings } from './client/settings-store';
 import { createMachineSettingsMirror } from './client/machine-settings-mirror';
+
+// P5 O15 M2: what Settings shows of the O2 profile, whose `supervisor.shape: embedded` main reads and stores as `daemon`
+// (the field is retired); every other value as chosen
+const SHOWN = { ...CHOSEN, supervisor: { ...CHOSEN.supervisor, shape: 'daemon' as const } };
 import { openSpineData } from '../services/spine-root';
 import { Index } from '../services/index/index';
 import { takeSpineLock } from '../services/settings/spine-lock';
@@ -54,7 +58,7 @@ describe('a profile O2 left starts under O3-A’s build with no visible change',
     browser.reattach(index.sessions.appIds());
     try {
       // Settings shows every value as before
-      expect(settings.settings).toEqual(CHOSEN);
+      expect(settings.settings).toEqual(SHOWN);
       // the files: each exactly its owner's fields, the client file at 21, the machine file at 1
       expect(JSON.parse(readFileSync(paths.client, 'utf8'))).toEqual(splitSettings(CHOSEN).client);
       expect(JSON.parse(readFileSync(paths.machine, 'utf8'))).toEqual(splitSettings(CHOSEN).machine);
@@ -138,10 +142,10 @@ describe('a profile O2 left starts under O3-A’s build with no visible change',
       answer = { settings: data.machineSettings.state(), version: 0 };
       streaming = true;
       for (const listener of onStreaming) listener();
-      await vi.waitFor(() => expect(settings.settings).toEqual({ ...CHOSEN, theme: 'light' }));
+      await vi.waitFor(() => expect(settings.settings).toEqual({ ...SHOWN, theme: 'light' }));
       // the change made in the window is in the converted client file; main wrote nothing else
-      expect(await changing).toEqual({ ...CHOSEN, theme: 'light' });
-      expect(JSON.parse(readFileSync(paths.client, 'utf8'))).toEqual({ ...splitSettings(CHOSEN).client, theme: 'light' });
+      expect(await changing).toEqual({ ...SHOWN, theme: 'light' });
+      expect(JSON.parse(readFileSync(paths.client, 'utf8'))).toEqual({ ...splitSettings(SHOWN).client, theme: 'light' });
       expect(JSON.parse(readFileSync(paths.machine, 'utf8'))).toEqual(splitSettings(CHOSEN).machine);
     } finally {
       mirror.stop();
