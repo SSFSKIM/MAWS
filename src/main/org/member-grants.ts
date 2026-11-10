@@ -2,10 +2,12 @@
 // registry.md, M10's decision "What a member sees"; design §11: the app lists a project for a member who owns or holds a
 // grant on a machine with a location of it). Ownership is the head's; a grant is a record kept by the machine's own
 // ledger, so it is read from there: `endpoint.grants`, which answers a member who owns nothing their own entry. A grant
-// counts while its rights are not empty (an empty one is a withdrawal).
+// counts while its rights are not empty (an empty one is a withdrawal), and ends when the held head revokes the key that
+// signed it, as the machine's ledger ends it (`dropRevokedGrants`): so the signer's key id is kept with it, and the
+// head's revocations are applied here too, at load and at each change of the session, the machine offline or not.
 //
-// - Read when the machine's link comes up and at each new head (the registry asks, `read`), one call per machine at a
-//   time. A failed or malformed answer changes nothing: the last answer stands.
+// - Read when the machine's link comes up, at each of its `caps` and at each new head (the registry asks, `read`), one
+//   call per machine at a time. A failed or malformed answer changes nothing: the last answer stands.
 // - Kept in `<userData>/org/member-grants.json` for the member it was read for, so a relaunch with the machine off still
 //   lists its projects; another member's sign-in reads none of it.
 //
@@ -16,7 +18,8 @@ import type { OrgFiles } from './files';
 import type { OrgSession } from './session';
 
 export const MEMBER_GRANTS_FILE = 'member-grants.json';
-export type MemberGrantsFile = { version: 1; org: string; member: string; granted: string[] };
+/** `granted`: per machine ref, the key id that signed the member's grant there. */
+export type MemberGrantsFile = { version: 1; org: string; member: string; granted: Record<string, string> };
 
 export interface MemberGrants {
   granted(ref: string): boolean;
@@ -30,7 +33,7 @@ export interface MemberGrants {
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const isFile = (value: unknown): value is MemberGrantsFile =>
-  isObject(value) && value.version === 1 && typeof value.org === 'string' && typeof value.member === 'string' && Array.isArray(value.granted) && value.granted.every((r) => typeof r === 'string');
+  isObject(value) && value.version === 1 && typeof value.org === 'string' && typeof value.member === 'string' && isObject(value.granted) && Object.values(value.granted).every((kid) => typeof kid === 'string');
 
 export function createMemberGrants(deps: {
   session: OrgSession;
@@ -42,7 +45,8 @@ export function createMemberGrants(deps: {
   const log = (line: string) => deps.log(`[org-grants] ${line}`);
   /** Whose grants `granted` holds: the org and member they were read for. */
   let reader: { org: string; member: string } | null = null;
-  let granted = new Set<string>();
+  /** Per machine ref, the key id that signed the member's grant there. */
+  let granted = new Map<string, string>();
   const reading = new Set<string>();
   const listeners = new Set<() => void>();
   let closed = false;
@@ -58,7 +62,7 @@ export function createMemberGrants(deps: {
   function changed(): void {
     for (const listener of [...listeners]) listener();
     if (reader === null) return;
-    const file: MemberGrantsFile = { version: 1, ...reader, granted: [...granted].sort() };
+    const file: MemberGrantsFile = { version: 1, ...reader, granted: Object.fromEntries([...granted].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) };
     writing = writing.then(async () => {
       try {
         const check = await deps.files.check();
@@ -73,9 +77,23 @@ export function createMemberGrants(deps: {
   /** The signed-in member's grants are the ones held, or none: another member's are never read for them. */
   function follow(): void {
     const who = current();
-    if (who === null || same(who, reader)) return;
-    reader = who;
-    granted = new Set();
+    if (who === null) return;
+    if (!same(who, reader)) {
+      reader = who;
+      granted = new Map();
+      changed();
+    }
+    dropRevoked();
+  }
+
+  /** Ends each held grant whose signer's key the held head revokes, as the machine's ledger does. */
+  function dropRevoked(): void {
+    const state = deps.session.current()?.view.head().state;
+    if (state === undefined || granted.size === 0) return;
+    const revoked = new Set(state.revoked.map((r) => r.keyId));
+    const ended = [...granted].filter(([, kid]) => revoked.has(kid));
+    if (ended.length === 0) return;
+    for (const [ref] of ended) granted.delete(ref);
     changed();
   }
 
@@ -84,7 +102,7 @@ export function createMemberGrants(deps: {
     const who = current();
     if (isFile(raw) && (who === null || same(who, raw))) {
       reader = { org: raw.org, member: raw.member };
-      granted = new Set(raw.granted);
+      granted = new Map(Object.entries(raw.granted));
     }
     follow();
   })();
@@ -99,9 +117,12 @@ export function createMemberGrants(deps: {
     if (!result.ok) return void log(`${ref.slice(0, 64)}'s grants did not read: ${result.error.code}`);
     const parsed = GrantsAnswerSchema.safeParse(result.output);
     if (!parsed.success) return void log(`${ref.slice(0, 64)}'s grants answer is not a grants read`);
-    const holds = parsed.data.members.some((m) => m.member === who.member && m.grant !== null && m.grant.body.rights.length > 0);
-    if (holds === granted.has(ref)) return;
-    if (holds) granted.add(ref);
+    const grant = parsed.data.members.find((m) => m.member === who.member && m.grant !== null && m.grant.body.rights.length > 0)?.grant ?? null;
+    const signer = grant?.sig.kid ?? null;
+    // a grant whose signer the held head revokes is no grant, though a machine behind on heads still answers it
+    const kid = signer !== null && deps.session.current()?.view.head().state.revoked.some((r) => r.keyId === signer) !== true ? signer : null;
+    if (kid === (granted.get(ref) ?? null)) return;
+    if (kid !== null) granted.set(ref, kid);
     else granted.delete(ref);
     changed();
   }

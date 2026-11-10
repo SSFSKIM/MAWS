@@ -11,9 +11,9 @@ afterEach(async () => {
   for (const g of running.splice(0)) await g.close();
 });
 
-const entry = (member: string, rights: string[] | null) => ({
+const entry = (member: string, rights: string[] | null, kid = 'kid') => ({
   member,
-  grant: rights === null ? null : { body: { org: 'o', machine: 'm', machineKey: 'k', member, rights, version: 1, issued: '2026-11-10T00:00:00.000Z' }, sig: { kid: 'kid', value: 'sig' } },
+  grant: rights === null ? null : { body: { org: 'o', machine: 'm', machineKey: 'k', member, rights, version: 1, issued: '2026-11-10T00:00:00.000Z' }, sig: { kid, value: 'sig' } },
   highWater: rights === null ? 0 : 1,
 });
 
@@ -60,11 +60,42 @@ describe('the member’s grants', () => {
     expect(h.grants.granted(w.m2.ref)).toBe(true);
     await h.grants.close();
     running.splice(0);
-    expect(JSON.parse(h.files.store.get(MEMBER_GRANTS_FILE)!)).toMatchObject({ version: 1, member: w.A, granted: [w.m2.ref] });
+    expect(JSON.parse(h.files.store.get(MEMBER_GRANTS_FILE)!)).toMatchObject({ version: 1, member: w.A, granted: { [w.m2.ref]: 'kid' } });
     h = await start(w, h.files);
     expect(h.grants.granted(w.m2.ref)).toBe(true);
     w.session.set(w.signedIn(w.B));
     await h.grants.settled();
     expect(h.grants.granted(w.m2.ref)).toBe(false);
+  });
+
+  // Review 1, finding 4: a grant ends when its signer's key is revoked (the endpoint's `dropRevokedGrants`); with the
+  // machine offline no read says so, so the signing key is kept and the held head's revocations are applied here.
+  it('end when the head revokes the key that signed them, the machine offline, and stay ended across a relaunch', async () => {
+    const w = await World.make();
+    let h = await start(w);
+    h.answers.push({ ok: true, output: { members: [entry(w.A, ['spawn'], 'signer-kid')] } }, { ok: true, output: { members: [entry(w.A, ['spawn'], 'kid')] } });
+    await h.read(w.m2.ref);
+    await h.read(w.m1.ref);
+    await h.grants.close();
+    running.splice(0);
+    await w.adopt((s) => {
+      s.revoked.push({ keyId: 'signer-kid', holder: { member: w.A, device: 'app', class: 'native-mac', key: 'step-up' } });
+    });
+    h = await start(w, h.files);
+    expect([h.grants.granted(w.m2.ref), h.grants.granted(w.m1.ref)]).toEqual([false, true]);
+    await h.grants.close();
+    running.splice(0);
+    expect(JSON.parse(h.files.store.get(MEMBER_GRANTS_FILE)!).granted).toEqual({ [w.m1.ref]: 'kid' });
+    // revoked while running: the head that says so ends it at once
+    h = await start(w, h.files);
+    await w.adopt((s) => {
+      s.revoked.push({ keyId: 'kid', holder: { member: w.A, device: 'app', class: 'native-mac', key: 'channel' } });
+    });
+    await h.grants.settled();
+    expect(h.grants.granted(w.m1.ref)).toBe(false);
+    // a machine behind on heads still answers it: no grant here
+    h.answers.push({ ok: true, output: { members: [entry(w.A, ['spawn'], 'kid')] } });
+    await h.read(w.m1.ref);
+    expect(h.grants.granted(w.m1.ref)).toBe(false);
   });
 });

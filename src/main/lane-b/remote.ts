@@ -247,7 +247,9 @@ export const MACHINE_ACTS: ReadonlySet<CommandName> = new Set<CommandName>([
  * The project registry (Interfaces §G, "Older peers"): what goes only to a machine whose RL2 handshake lists
  * `rl2.project-acts`. An older endpoint could pass by a field it does not know (`addFolder`'s `into`, `own`) and do a
  * plain add unsaid, so each is refused here before it goes, `not-offered`, as an older peer's missing offer reads.
- * `resolve` is the adapter's to send for that reason, as a call by name.
+ * `resolve` is the adapter's to send for that reason, as a call by name. The check at the command's start is not the
+ * last: each act carries the capability as `requires` (judged at each transmission, so one waiting on Touch ID or resent
+ * on the next channel follows that channel's peer), and `resolve` goes `oneChannel`, on the channel it was checked on.
  */
 const PROJECT_CALLS: ReadonlySet<CommandName> = new Set<CommandName>(['session.projects.resolve']);
 const needsProjectActs = (name: CommandName, fields: Fields): boolean =>
@@ -504,7 +506,15 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
    * up to `answerMs` past it (its command's budget on the machine).
    */
   async function machineAct(link: RemoteLink, name: CommandName, fields: Fields, deadline: number, options: MachineActOptions = {}): Promise<CommandResult<CommandName>> {
-    const handle = link.act({ action: name, args: fields, executor: 'machine', sendBy: deadline, ...(options.oneChannel === true ? { oneChannel: true as const } : {}), ...(STEPPED_UP.has(name) ? { stepUp: 'required' as const } : {}) });
+    const handle = link.act({
+      action: name,
+      args: fields,
+      executor: 'machine',
+      sendBy: deadline,
+      ...(options.oneChannel === true ? { oneChannel: true as const } : {}),
+      ...(STEPPED_UP.has(name) ? { stepUp: 'required' as const } : {}),
+      ...(needsProjectActs(name, fields) ? { requires: PROJECT_ACTS_CAPABILITY } : {}), // judged at each transmission
+    });
     options.onHandle?.(handle);
     const result = await settle(link, name, handle, deadline + (options.answerMs ?? 0), String(fields.appSessionId ?? fields.artifactId ?? ''));
     if (name === 'session.acquire' && result.ok && record(result.value)?.status === 'ready') machines.get(link.machine)?.lanes.get(String(fields.appSessionId))?.session.kick();
@@ -696,7 +706,8 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       const peers = link.peerCapabilities();
       if (peers === null) return failure('host_unavailable', `${name}: machine ${link.name} is not reachable`);
       if (!peers.includes(PROJECT_ACTS_CAPABILITY)) return refusalError(name, link.name, { code: 'not-offered' });
-      if (PROJECT_CALLS.has(name)) return callOverLink(link, name, fields);
+      // only on the channel checked: one that ends fails it `offline`, never carried to the next channel's peer unchecked
+      if (PROJECT_CALLS.has(name)) return callOverLink(link, name, fields, { oneChannel: true });
     }
     if (artifacts.handles(name)) return artifacts.dispatch(link, name, fields, ctx.client); // P5 O7 M5a; M5b: the window a document opens in
     if (PTY_NAMES.has(name)) return ptys.dispatch(link, name, fields);

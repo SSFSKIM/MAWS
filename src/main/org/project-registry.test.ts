@@ -4,7 +4,7 @@
 // actions) or hold a grant on (without), and a project they see only through a session with no locations. Each project's
 // row key comes from the key table, one of this device's rows lending its label; a held removal's location is left out
 // and listed; signed out the value is empty. Over a fake feed, session, links and rows, with real signed records.
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { machineProjectId, repoProjectId } from '@shared/machine/project-ids';
 import type { OrgProjects } from '@shared/ipc/schema/org';
 import type { ProjectRecord } from '@shared/ipc/schema/session';
@@ -12,13 +12,16 @@ import type { MachineRef } from '@shared/machine/ref';
 import type { LinkState } from '../machines/manager';
 import type { CallResult } from '../machines/remote/link';
 import { iso } from '../../../test/endpoint/org-fixtures';
-import { fakeFeed, location, memoryFiles, ORG, World } from '../../../test/org/rows-world';
+import { fakeFeed, HOUR, location, memoryFiles, ORG, World } from '../../../test/org/rows-world';
+import type { OrgFiles } from './files';
 import type { RemovalAnswer, RemovalInput } from './held-removals';
+import { PROJECT_KEYS_FILE } from './project-keys';
 import { createProjectRegistry, type ProjectRegistry, type RegistryLink } from './project-registry';
 
 const running: ProjectRegistry[] = [];
 afterEach(async () => {
   for (const r of running.splice(0)) await r.close();
+  vi.useRealTimers();
 });
 
 const P = '0a0a0a0a-0000-4000-8000-000000000001';
@@ -31,19 +34,36 @@ const own = (id: string, key: string, smnsId: string | null, over: Partial<Proje
 
 function fakeLink(initial: LinkState = 'down', capabilities: string[] = ['rl2.project-acts']) {
   const listeners = new Set<(state: LinkState) => void>();
+  const capsListeners = new Set<() => void>();
+  const channelListeners = new Set<(event: 'current' | 'lost') => void>();
   let state = initial;
+  /** As the real link's grace: `up` may read while no channel is current (no peers). */
+  let channel = true;
   const calls: string[] = [];
   const answers: CallResult[] = [];
   const link: RegistryLink = {
     state: () => state,
     onState: (listener) => (listeners.add(listener), () => void listeners.delete(listener)),
-    peerCapabilities: () => (state === 'up' ? capabilities : null),
+    onCaps: (listener) => (capsListeners.add(listener as () => void), () => void capsListeners.delete(listener as () => void)),
+    onChannel: (listener) => (channelListeners.add(listener), () => void channelListeners.delete(listener)),
+    peerCapabilities: () => (state === 'up' && channel ? capabilities : null),
     call: async (name) => (calls.push(name), answers.shift() ?? { ok: false, error: { code: 'offline' } }),
   };
-  return { link, calls, answers, set: (next: LinkState) => ((state = next), listeners.forEach((l) => l(next))) };
+  return {
+    link,
+    calls,
+    answers,
+    set: (next: LinkState) => ((state = next), listeners.forEach((l) => l(next))),
+    /** The channel lost within the grace: still `up`, no peers, nothing said on `onState`. */
+    lose: () => ((channel = false), channelListeners.forEach((l) => l('lost'))),
+    /** The next channel current, its `caps` after it, as the real link says them. */
+    relink: () => ((channel = true), channelListeners.forEach((l) => l('current')), capsListeners.forEach((l) => l())),
+    /** A `caps` with no channel change: the endpoint's grant delivered or withdrawn (`refreshCaps`). */
+    caps: () => capsListeners.forEach((l) => l()),
+  };
 }
 
-async function start(w: World, options: { files?: ReturnType<typeof memoryFiles>; local?: ProjectRecord[]; sessions?: string[]; links?: Record<string, ReturnType<typeof fakeLink>> } = {}) {
+async function start(w: World, options: { files?: OrgFiles; local?: ProjectRecord[]; sessions?: string[]; links?: Record<string, ReturnType<typeof fakeLink>>; loaded?: false } = {}) {
   const feed = fakeFeed();
   const files = options.files ?? memoryFiles();
   let local = options.local ?? [];
@@ -72,7 +92,7 @@ async function start(w: World, options: { files?: ReturnType<typeof memoryFiles>
     log: () => {},
   });
   running.push(registry);
-  await registry.loaded;
+  if (options.loaded !== false) await registry.loaded;
   return {
     registry,
     feed,
@@ -134,6 +154,19 @@ describe('the member’s view', () => {
     ]);
   });
 
+  // Review 1, finding 1: a delegated machine's authority, and its owners' actions, end at the delegation's `expires`.
+  it('drops a delegated machine’s locations, and their actions, at its delegation’s expiry, with no new head', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const w = await World.make();
+    const h = await start(w);
+    await h.page(await w.projects(w.d, 1, [location('v1', P, '/srv/vm')]), await w.projects(w.m1, 1, [location('a1', P, '/srv/p')]));
+    expect(h.value().projects.map((p) => [p.id, p.locations.map((l) => [l.pid, l.acts])])).toEqual([[P, expect.arrayContaining([['v1', true], ['a1', true]])]]);
+    w.clock = Date.parse(w.delegation.expires) + 1;
+    await vi.advanceTimersByTimeAsync(HOUR + 1_000);
+    await h.registry.settled();
+    expect(h.value().projects.map((p) => [p.id, p.locations.map((l) => [l.pid, l.acts])])).toEqual([[P, [['a1', true]]]]);
+  });
+
   it('is empty signed out', async () => {
     const w = await World.make();
     const h = await start(w);
@@ -155,6 +188,30 @@ describe('the row keys', () => {
     expect(h.registry.keyOf(P)).toBe('folder:mac:l1');
     expect(h.registry.keyOf(R)).toBeNull();
     expect(told).toBeGreaterThan(0);
+  });
+
+  // Review 1, finding 2: the first computation waits for the persisted table (and the first own rows), so an entry the
+  // table already holds is never first given from an empty one and then replaced.
+  it('are never computed before the persisted table is read: an entry it holds is the first one given', async () => {
+    const w = await World.make();
+    const store = new Map<string, string>();
+    const first = await start(w, { files: memoryFiles(store) });
+    await first.page(await w.projects(w.m1, 1, [location('a1', P, '/srv/p')]));
+    expect(first.value().keys).toEqual({ [P]: `id:${P}` });
+    await first.registry.close();
+    let release!: () => void;
+    const held = new Promise<void>((done) => (release = done));
+    const base = memoryFiles(store);
+    const files: OrgFiles = { ...base, read: async (name) => (name === PROJECT_KEYS_FILE && (await held), base.read(name)) };
+    const h = await start(w, { files, local: [own('l1', 'folder:mac:l1', P)], loaded: false });
+    let told = 0;
+    h.registry.onKeys(() => told++);
+    await new Promise((done) => setTimeout(done, 30)); // the held records loaded, a computation's coalescing past
+    release();
+    await h.registry.loaded;
+    expect(h.emitted.map((v) => v.keys[P])).toEqual([`id:${P}`]);
+    expect(h.registry.keyOf(P)).toBe(`id:${P}`);
+    expect(told).toBe(1);
   });
 
   it('on a Mac signed in and not enrolled, give a `remote:` row the id its key derives', async () => {
@@ -198,6 +255,47 @@ describe('a held removal', () => {
     expect(h.removed).toEqual([]);
     expect(h.value().removals).toHaveLength(1);
     expect(h.value().projects).toEqual([]);
+  });
+});
+
+// Review 1, findings 3 and 6: the link's other two signals. A grant delivered or withdrawn reaches main as a `caps` with no
+// state change (the endpoint's `refreshCaps`); a channel current again inside the link's grace says nothing on `onState`.
+describe('the link’s channel and caps', () => {
+  const grant = (w: World) => ({ member: w.A, grant: { body: { org: ORG, machine: w.m2.ref, machineKey: 'k', member: w.A, rights: ['spawn'], version: 1, issued: iso(w.clock) }, sig: { kid: 'k', value: 'v' } }, highWater: 1 });
+
+  it('reads the member’s grant again at each `caps`: one delivered shows the machine’s locations, one withdrawn hides them', async () => {
+    const w = await World.make();
+    const m2 = fakeLink('down');
+    const h = await start(w, { links: { [w.m2.ref]: m2 } });
+    await h.page(await w.projects(w.m2, 1, [location('b1', Q, '/srv/q')]));
+    m2.answers.push({ ok: true, output: { members: [] } });
+    m2.set('up');
+    await h.registry.settled();
+    expect(h.value().projects).toEqual([]);
+    m2.answers.push({ ok: true, output: { members: [grant(w)] } });
+    m2.caps();
+    await h.registry.settled();
+    expect(h.value().projects.map((p) => [p.id, p.locations.map((l) => l.pid)])).toEqual([[Q, ['b1']]]);
+    m2.answers.push({ ok: true, output: { members: [] } });
+    m2.caps();
+    await h.registry.settled();
+    expect(h.value().projects).toEqual([]);
+    expect(m2.calls).toEqual(['endpoint.grants', 'endpoint.grants', 'endpoint.grants']);
+  });
+
+  it('sends a removal held during the link’s grace when the next channel is current', async () => {
+    const w = await World.make();
+    const m1 = fakeLink('up');
+    const h = await start(w, { links: { [w.m1.ref]: m1 } });
+    await h.page(await w.projects(w.m1, 1, [location('a1', P, '/srv/p'), location('a2', P, '/srv/p2')]));
+    m1.lose();
+    await h.registry.hold({ machine: w.m1.ref as MachineRef, pid: 'a1' });
+    await h.registry.settled();
+    expect(h.removed).toEqual([]);
+    m1.relink();
+    await h.registry.settled();
+    expect(h.removed).toEqual([{ machine: w.m1.ref, input: { id: 'a1', expect: { path: '/srv/p', project: P } } }]);
+    expect(h.value().removals).toEqual([]);
   });
 });
 

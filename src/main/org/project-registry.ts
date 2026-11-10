@@ -13,8 +13,11 @@
 // - The key table is filled at each computation from every record's locations and this Mac's own rows that are not
 //   hidden. An own row's project is its `org.smnsId`; on a Mac signed in and not enrolled, a `remote:` row's is computed
 //   from its key, as `joinIds` did (M10: the join is by id, and a key written in a record joins nothing).
+// - The first computation waits for the persisted key table and the first own rows, so no entry is given from an empty
+//   table and then replaced.
 // - Each roster machine's link is watched: its transitions are `seen`; its coming up sends its held removals and reads
-//   the member's grant from its ledger, read again for every link up at each new head.
+//   the member's grant from its ledger, read again for every link up at each new head and at each of the link's `caps`
+//   (a grant delivered or withdrawn); a channel current again inside the link's grace sends the held removals too.
 // - Signed out, `projects()` answers the empty value and no key is assigned.
 //
 // Electron-free: main injects the feed, the links, its own rows, the act's send and the emission.
@@ -36,8 +39,8 @@ import type { RegistryFeed } from './registry-feed';
 import type { OrgSession, SignedIn } from './session';
 import { orgTiming, type OrgTiming } from './timing';
 
-/** What the registry reads of an RL2 link: its state, its peer's capabilities and its calls. */
-export type RegistryLink = Pick<RemoteLink, 'call' | 'peerCapabilities'> & { state(): LinkState; onState(listener: (state: LinkState) => void): () => void };
+/** What the registry reads of an RL2 link: its state, its channels, its `caps`, its peer's capabilities and its calls. */
+export type RegistryLink = Pick<RemoteLink, 'call' | 'peerCapabilities' | 'onCaps' | 'onChannel'> & { state(): LinkState; onState(listener: (state: LinkState) => void): () => void };
 
 export interface ProjectRegistryDeps {
   session: OrgSession;
@@ -127,6 +130,7 @@ export function createProjectRegistry(deps: ProjectRegistryDeps): ProjectRegistr
 
   let table = new KeyTable(null);
   const keyListeners = new Set<() => void>();
+  let keysTold = JSON.stringify({});
   let local: readonly ProjectRecord[] = [];
   let localRead = 0;
   let latest = empty();
@@ -136,8 +140,11 @@ export function createProjectRegistry(deps: ProjectRegistryDeps): ProjectRegistr
   let timer: ReturnType<typeof setTimeout> | null = null;
   let writeTimer: ReturnType<typeof setTimeout> | null = null;
   let writing: Promise<void> = Promise.resolve();
-  /** The owners' member ids of each machine under the head and certificates last read, by machine ref. */
-  let owners: { head: unknown; certificates: unknown; by: Map<string, readonly string[]> } = { head: null, certificates: null, by: new Map() };
+  /**
+   * The owners' member ids of each machine under the head and certificates last read, by machine ref, until the soonest
+   * delegation's `expires` then ahead (a delegated machine's owners end with it, with no new head).
+   */
+  let owners: { head: unknown; certificates: unknown; until: number; by: Map<string, readonly string[]> } = { head: null, certificates: null, until: 0, by: new Map() };
 
   const keysRead = (async () => {
     const raw = await deps.files.read(PROJECT_KEYS_FILE).catch(() => null);
@@ -145,6 +152,11 @@ export function createProjectRegistry(deps: ProjectRegistryDeps): ProjectRegistr
     if (isKeysFile(raw)) table = new KeyTable(raw);
     else log(`${PROJECT_KEYS_FILE} is not a key table, treated as absent`);
   })();
+  /**
+   * What the first computation waits for: the persisted key table and the first own rows. Computed from an empty table,
+   * an entry the file holds would be given otherwise first, then replaced (§I: an entry never changes).
+   */
+  const inputsRead = Promise.all([keysRead, readLocal()]);
 
   function writeKeys(): void {
     if (closed || writeTimer !== null) return;
@@ -171,8 +183,11 @@ export function createProjectRegistry(deps: ProjectRegistryDeps): ProjectRegistr
   async function ownersOf(current: SignedIn, refs: Iterable<string>): Promise<Map<string, readonly string[]>> {
     const head = current.view.head();
     const certificates = current.view.certificates();
-    if (owners.head !== head || owners.certificates !== certificates) owners = { head, certificates, by: new Map() };
     const at = new Date(now());
+    if (owners.head !== head || owners.certificates !== certificates || at.getTime() >= owners.until) {
+      const ahead = head.state.delegations.map((d) => Date.parse(d.expires)).filter((expires) => expires > at.getTime());
+      owners = { head, certificates, until: ahead.length === 0 ? Infinity : Math.min(...ahead), by: new Map() };
+    }
     for (const ref of refs) {
       if (owners.by.has(ref)) continue;
       const of = await machineOwners(head.state, ref, certificates, at);
@@ -182,6 +197,7 @@ export function createProjectRegistry(deps: ProjectRegistryDeps): ProjectRegistr
   }
 
   async function compute(): Promise<void> {
+    await inputsRead;
     const current = deps.session.current();
     if (current === null) {
       assembled = [];
@@ -199,9 +215,13 @@ export function createProjectRegistry(deps: ProjectRegistryDeps): ProjectRegistr
     const mine: OwnRow[] = local.flatMap((row) =>
       row.hidden === true || row.org === undefined ? [] : [{ machine: deps.local, pid: row.id, id: ownProject(org, row), key: row.org.key, declared: row.discovered !== true, linked: row.stated === 'linked' }],
     );
-    const before = JSON.stringify(table.keys());
     if (table.update(carriers, mine)) writeKeys();
-    if (JSON.stringify(table.keys()) !== before) for (const listener of [...keyListeners]) listener();
+    const keysText = JSON.stringify(table.keys());
+    if (keysText !== keysTold) {
+      // the table as `keyOf` answers it, told once it moves from what was last told (the file's entries at the first)
+      keysTold = keysText;
+      for (const listener of [...keyListeners]) listener();
+    }
 
     const by = await ownersOf(current, new Set(assembled.flatMap((p) => p.locations.map((l) => l.machine))));
     const seenSessions = new Set([...deps.sessions()].filter((id): id is string => id !== null));
@@ -288,7 +308,18 @@ export function createProjectRegistry(deps: ProjectRegistryDeps): ProjectRegistr
           grants.read(ref);
         }
       };
-      watch.off = link.onState(onState);
+      const offs = [
+        link.onState(onState),
+        // a channel current again inside the link's grace (`up` all along, no peers meanwhile): what waited for one goes
+        link.onChannel((event) => {
+          if (event === 'current' && watch.up) removals.linkUp(ref);
+        }),
+        // a grant delivered or withdrawn reaches main as a `caps` (the endpoint's `refreshCaps`): read it again
+        link.onCaps(() => {
+          if (watch.up) grants.read(ref);
+        }),
+      ];
+      watch.off = () => offs.forEach((off) => off());
       onState(link.state());
     }
   }
@@ -315,7 +346,7 @@ export function createProjectRegistry(deps: ProjectRegistryDeps): ProjectRegistr
     deps.onLocalProjects(() => void readLocal()),
   ];
 
-  const loaded = Promise.all([records.loaded, removals.loaded, grants.loaded, keysRead, readLocal()]).then(async () => {
+  const loaded = Promise.all([records.loaded, removals.loaded, grants.loaded, inputsRead]).then(async () => {
     watchRoster();
     sessionChanged();
     await settled();

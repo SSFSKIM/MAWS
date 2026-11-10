@@ -4,7 +4,7 @@
 // a record that fails at arrival waits for a head it verifies under; a record leaves only when it stops verifying, and a
 // retired key's mark goes with it; the file is verified again at load; another org's is discarded; `seen` is the later
 // of a link's last up and the newest record's issue. A fake feed and session over real signed states and records.
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { generateSigningKey, keyId, type ProjectsRecord, type Signed } from '../../../apps/org-protocol/src/index.ts';
 import { iso } from '../../../test/endpoint/org-fixtures';
 import { fakeFeed, HOUR, location, memoryFiles, random, World, type Machine } from '../../../test/org/rows-world';
@@ -13,6 +13,7 @@ import { createProjectsRecords, PROJECTS_FILE, type ProjectsFile, type ProjectsR
 const running: ProjectsRecords[] = [];
 afterEach(async () => {
   for (const r of running.splice(0)) await r.close();
+  vi.useRealTimers();
 });
 
 async function start(w: World, files = memoryFiles()) {
@@ -114,9 +115,26 @@ describe('the marks', () => {
     });
     await h.records.settled();
     expect(h.held()).toEqual(['m2 r3']);
-    expect(h.file()?.marks[w.m1.ref]).toBeUndefined();
     await h.push(r1);
     expect(h.held()).toEqual(['m2 r3']);
+    await h.records.close(); // the file as written at the end, not raced against its coalesced write
+    expect(h.file()?.marks[w.m1.ref]).toBeUndefined();
+  });
+});
+
+// Review 1, finding 1: a delegation's `expires` ends its machines' authority with no new head and no new certificate set,
+// so the held records are verified again then too.
+describe('a delegation’s expiry', () => {
+  it('drops the records of the machines it certified when it is reached, with no new head', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const w = await World.make();
+    const h = await start(w);
+    await h.page([await w.projects(w.d, 2, [location('v1', ID, '/srv/vm')]), await w.projects(w.m1, 1)]);
+    expect([...h.held()].sort()).toEqual([`${w.d.ref} r2`, 'm1 r1'].sort());
+    w.clock = Date.parse(w.delegation.expires) + 1;
+    await vi.advanceTimersByTimeAsync(HOUR + 1_000);
+    await h.records.settled();
+    expect(h.held()).toEqual(['m1 r1']);
   });
 });
 
@@ -151,6 +169,27 @@ describe('the file', () => {
     h = await start(w, h.files);
     expect(h.held()).toEqual([]);
     expect(h.logs.some((line) => line.includes('another org'))).toBe(true);
+  });
+
+  // Review 1, finding 5: a mark in the file whose key the head has since ended is not imported, so the machine's next key
+  // starts its own revisions.
+  it('takes no mark of a key the head has ended since it was written: the replacement key’s first record lands', async () => {
+    const w = await World.make();
+    let h = await start(w);
+    await h.page([await w.projects(w.m1, 5)]);
+    await h.records.close();
+    const pub = w.m1.key.pub;
+    const next: Machine = { ref: w.m1.ref, key: await generateSigningKey() };
+    await w.adopt(async (s) => {
+      s.revoked.push({ keyId: await keyId(pub), holder: { machine: w.m1.ref } });
+      s.machines = s.machines.map((m) => (m.ref === w.m1.ref ? { ...m, pub: next.key.pub } : m));
+    });
+    h = await relaunch(w, h);
+    expect(h.held()).toEqual([]);
+    await h.push(await w.projects(next, 1));
+    expect(h.held()).toEqual(['m1 r1']);
+    await h.records.close();
+    expect(h.file()?.marks[w.m1.ref]?.revision).toBe(1);
   });
 
   it('reads nothing signed out, and holds what it has for the next sign-in', async () => {

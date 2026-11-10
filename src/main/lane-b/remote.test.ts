@@ -1271,6 +1271,25 @@ describe('the project acts (the project registry)', () => {
     expect(l.base).toEqual([]);
   });
 
+  // Review 1, finding 7: the check at the command's start is not the last word. An act waiting on Touch ID or resent after
+  // a reconnection carries the capability as `requires`, which the act table judges at each transmission; `resolve` goes
+  // only on the channel it was checked against, and fails `offline` at that channel's end rather than going to the next.
+  it('carry the capability to every send: the acts as `requires`, `resolve` bound to the channel it was checked on', async () => {
+    const l = lab();
+    l.link.relink(['rl2.executor.machine', 'rl2.project-acts']);
+    l.link.onAct = settleWith({ state: 'done', result: null });
+    for (const [name, input] of guarded.slice(0, 5)) await l.cmd(name, input);
+    await l.cmd('session.projects.addFolder', { directory: '/srv/a' });
+    expect(l.link.acts.map((a) => a.request.requires)).toEqual([...guarded.slice(0, 5).map(() => 'rl2.project-acts'), undefined]);
+    l.link.answers.set('session.projects.resolve', () => new Promise(() => {}));
+    const resolving = l.cmd('session.projects.resolve', { directory: '/srv/a' });
+    await vi.waitFor(() => expect(l.link.calls.filter((c) => c.name === 'session.projects.resolve')).toHaveLength(1));
+    l.link.lose();
+    expect(await resolving).toMatchObject({ ok: false });
+    l.link.relink(['rl2.executor.machine']);
+    expect(l.link.calls.filter((c) => c.name === 'session.projects.resolve')).toHaveLength(1);
+  });
+
   it('are refused `not-offered`, unsent, to a peer that does not; a plain add, a remove with no expectation and a rename still go', async () => {
     const l = lab();
     l.link.onAct = settleWith({ state: 'done', result: null });

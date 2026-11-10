@@ -9,8 +9,9 @@
 //   is a conflict, passed by and logged; one above it is verified and replaces the machine's record.
 // - Unlike listings, the hub's snapshot removes nothing: a machine it lacks keeps its last verified record (unknown is
 //   not empty, constraint 4). A record leaves only when it stops verifying, judged again at each new head or
-//   certificate set; its mark goes only when the head retires or revokes the key that signed it, so an older revision
-//   can never return.
+//   certificate set and at the soonest delegation's `expires` ahead (a delegated machine's authority ends then, with
+//   neither); its mark goes only when the head retires or revokes the key that signed it, so an older revision can
+//   never return, and a mark of such a key is not taken from the file either.
 // - A record that does not verify when it arrives (its machine enrolled by a head this app has not adopted yet) waits,
 //   the newest per machine, and is tried again at each change of the session.
 // - The file is one org's. Read at the start, its records count once they verify again under the signed-in head;
@@ -65,6 +66,8 @@ const isMark = (value: unknown): value is ProjectsMark =>
 const isFile = (value: unknown): value is ProjectsFile => isObject(value) && value.version === 1 && typeof value.org === 'string' && Array.isArray(value.records) && isObject(value.marks);
 /** Whether the head is signed evidence that the key can never speak again: the one reason a mark drops. */
 const keyEnded = (state: OrgState, kid: string): boolean => state.retired.some((r) => r.keyId === kid) || state.revoked.some((r) => r.keyId === kid);
+/** The longest a timer waits (setTimeout's bound); a later expiry is looked at again then. */
+const LONGEST_WAIT_MS = 2 ** 31 - 1;
 /** A log's view of a hub-supplied ref: bounded, quoted. */
 const shown = (ref: string) => JSON.stringify(ref.length > 64 ? `${ref.slice(0, 64)}…` : ref);
 
@@ -89,6 +92,8 @@ export function createProjectsRecords(deps: ProjectsRecordsDeps): ProjectsRecord
   let dirty = false;
   let writeTimer: ReturnType<typeof setTimeout> | null = null;
   let writing: Promise<void> = Promise.resolve();
+  /** The next check of the held records, at the soonest delegation's `expires` still ahead. */
+  let expiry: ReturnType<typeof setTimeout> | null = null;
 
   let queue: Promise<void> = (async () => {
     const raw = await deps.files.read(PROJECTS_FILE);
@@ -178,9 +183,34 @@ export function createProjectsRecords(deps: ProjectsRecordsDeps): ProjectsRecord
     }
   }
 
+  /** While a record is held, the held records verified again at the soonest delegation's `expires` still ahead. */
+  function armExpiry(): void {
+    if (expiry !== null) clearTimeout(expiry);
+    expiry = null;
+    const current = signedIn();
+    if (closed || current === null || held.size === 0) return;
+    const at = now();
+    const ahead = current.view.head().state.delegations.map((d) => Date.parse(d.expires)).filter((expires) => expires > at);
+    if (ahead.length === 0) return;
+    expiry = setTimeout(
+      () => {
+        expiry = null;
+        void enqueue('a delegation’s expiry', async () => {
+          const signed = signedIn();
+          if (signed !== null) await judgeAgain(signed);
+          armExpiry();
+        });
+      },
+      Math.min(Math.min(...ahead) - at + 1, LONGEST_WAIT_MS),
+    );
+    (expiry as { unref?: () => void }).unref?.();
+  }
+
   async function applyFile(current: SignedIn, kept: ProjectsFile): Promise<void> {
     if (kept.org !== current.identity.org) return void log(`${PROJECTS_FILE} holds another org's records, discarded`);
-    for (const [machine, mark] of Object.entries(kept.marks)) if (isMark(mark) && !marks.has(machine)) marks.set(machine, mark);
+    const state = current.view.head().state;
+    // a mark of a key the head has ended since the file was written is not taken: that key's revisions are over
+    for (const [machine, mark] of Object.entries(kept.marks)) if (isMark(mark) && !marks.has(machine) && !keyEnded(state, mark.kid)) marks.set(machine, mark);
     if (isObject(kept.seen)) for (const [ref, at] of Object.entries(kept.seen)) if (typeof at === 'string' && !linkUp.has(ref)) linkUp.set(ref, at);
     for (const record of kept.records) {
       if (!isSigned(record, isProjectsRecord)) continue;
@@ -217,6 +247,7 @@ export function createProjectsRecords(deps: ProjectsRecordsDeps): ProjectsRecord
       file = null;
       await applyFile(current, kept);
     }
+    armExpiry();
     for (const listener of [...listeners]) listener(); // signed in again: what is held reads again
   }
 
@@ -224,6 +255,7 @@ export function createProjectsRecords(deps: ProjectsRecordsDeps): ProjectsRecord
     const current = signedIn();
     if (current === null) return;
     for (const record of records) await judge(current, record);
+    armExpiry();
   }
 
   function write(): Promise<void> {
@@ -276,7 +308,8 @@ export function createProjectsRecords(deps: ProjectsRecordsDeps): ProjectsRecord
       await queue;
       closed = true;
       if (writeTimer !== null) clearTimeout(writeTimer);
-      writeTimer = null;
+      if (expiry !== null) clearTimeout(expiry);
+      writeTimer = expiry = null;
       await write();
     },
   };
