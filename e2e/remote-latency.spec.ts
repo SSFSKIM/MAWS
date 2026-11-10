@@ -42,7 +42,7 @@ import { FIXTURE_ENGINE_VERSION } from '../test/support/engine-pin';
 import { LATENCY_STUB, markerOf, writeLatencyEngine } from '../test/support/latency-engine';
 import { parseLogText, readLogLines } from '../test/support/main-log';
 import { boundsOf, budgetMisses, CARRIERS, invalidReasons, loadVerdict, remoteLine, rttStats, type Bounds, type Carrier, type Exchange, type RemoteMeasures } from '../test/support/remote-latency';
-import { linkPending, loadVoid, markersNotOnce, readWake, sixMissing, sixSubscriptions, subscriptionsIn, WAKE_CASE, wakeMisses, wakeSummary, type WakeRecord } from '../test/support/remote-wake';
+import { linkPending, loadVoid, markersNotOnce, placeOfEvent, readWake, sixMissing, sixSubscriptions, subscriptionsIn, WAKE_CASE, wakeMisses, wakeSummary, type WakeRecord } from '../test/support/remote-wake';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { cleanupAll, lastTurn, linkOf, localCase, main, measureTurns, now, openToFirstRow, pings, probe, prompt, raw, roundTrips, statsOf, trust, TURN_MS, writtenOf, type CaseResult } from './support/remote-latency-page';
 import { startRemoteScene, type RemoteScene } from './support/remote-scene';
@@ -304,7 +304,7 @@ async function writeTurns(b: Daemon, s: BSession, count: number): Promise<void> 
 }
 
 const paneOf = (page: Page, index: number) => main(page).locator(`[data-pane="${index}"]`);
-const paneText = (page: Page, index: number) => paneOf(page, index).evaluate((el) => el.textContent ?? '');
+const paneText = (page: Page, index: number, timeout?: number) => paneOf(page, index).evaluate((el) => el.textContent ?? '', undefined, timeout === undefined ? {} : { timeout });
 const turnMarkers = (turn: number) => Array.from({ length: BENCH.markersPerTurn }, (_, k) => markerOf(turn, k + 1).trim());
 
 // B's first session in A's left pane and its second in the right: a click, a ⌘-click for a tab of its own, then the
@@ -331,13 +331,70 @@ async function openSideBySide(launch: MawsLaunch, ref: MachineRef, sessions: rea
   await expect(composerIn(0, left), `B's session ${left.app} still in A's left pane`).toBeVisible({ timeout: 30_000 });
 }
 
-/** True once `done` holds, false if it has not within `timeoutMs`: a bounded wait whose miss the record names. */
-async function within(done: () => boolean | Promise<boolean>, timeoutMs: number): Promise<boolean> {
+// The last event of B's session, read on B once its turn is over: with nothing writing, it is the last event the launch's
+// stream can deliver, so a stream delivered to its end holds its place as its cursor. Read from the status's last row
+// back a little (a row may yield no event), paged to the end.
+const HEAD_ROWS = 50;
+async function bHead(b: Daemon, s: BSession): Promise<{ id: string; place: string }> {
+  const status = await b.request<{ launchId: string; lastEventSeq: number }>('session.status', { appSessionId: s.app });
+  let afterSeq = Math.max(0, status.lastEventSeq - HEAD_ROWS);
+  let last: string | null = null;
+  for (let pages = 0; pages < 20; pages += 1) {
+    const read = await b.request<{ events: { id: string }[]; lastSeq: number; complete: boolean }>('session.events', { appSessionId: s.app, afterSeq, limit: null });
+    last = read.events.map((e) => e.id).filter((id) => placeOfEvent(s.app, id) !== null).at(-1) ?? last;
+    if (read.complete || read.lastSeq <= afterSeq) break;
+    afterSeq = read.lastSeq;
+  }
+  const place = last === null ? null : placeOfEvent(s.app, last);
+  if (last === null || place === null || !place.startsWith(`${status.launchId}:`)) throw new Error(`B's session ${s.app}: no last event of launch ${status.launchId} after row ${Math.max(0, status.lastEventSeq - HEAD_ROWS)} (last read: ${last ?? 'none'})`);
+  return { id: last, place };
+}
+
+// A's renderer's last event of a launch of each of B's sessions (an id `<app>:<launch>:<seq>:<i>`, the only events a
+// stream's cursor moves on), by its bare app id, kept from now on.
+async function keepLastEvents(page: Page, machine: MachineRef): Promise<void> {
+  await page.evaluate((on) => {
+    const last: Record<string, string> = {};
+    (window as unknown as { __lastEvent: Record<string, string> }).__lastEvent = last;
+    window.maws.on('session.eventBatch', (batch, from) => {
+      const { appSessionId, events } = batch as { appSessionId?: string; events?: { id?: unknown }[] };
+      if (from !== on || typeof appSessionId !== 'string') return;
+      for (const { id } of events ?? []) if (typeof id === 'string' && id.startsWith(`${appSessionId}:`) && /:\d+:\d+$/.test(id)) last[appSessionId] = id;
+    });
+  }, machine);
+}
+const lastEventOf = (page: Page, app: string) => page.evaluate((id) => (window as unknown as { __lastEvent?: Record<string, string> }).__lastEvent?.[id] ?? null, app);
+
+type Bounded<T> = { done: boolean; last: T | null; error: string | null };
+/**
+ * Reads until `done` holds or `timeoutMs` has passed. Each read is itself cut at the time left (and given it, as `leftMs`,
+ * for a read that takes a timeout of its own), and one that fails or is cut counts as not done, so whatever is missing
+ * is a recorded miss, never the test's whole timeout. `last` is the last read that answered.
+ */
+async function within<T>(read: (leftMs: number) => T | Promise<T>, done: (value: T) => boolean, timeoutMs: number): Promise<Bounded<T>> {
   const end = Date.now() + timeoutMs;
+  let last: T | null = null;
+  let error: string | null = null;
   for (;;) {
-    if (await done()) return true;
-    if (Date.now() >= end) return false;
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    const left = end - Date.now();
+    if (left <= 0) return { done: false, last, error };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const value = await new Promise<T>((answer, fail) => {
+        timer = setTimeout(() => fail(new Error(`no answer within ${left} ms`)), left);
+        Promise.resolve()
+          .then(() => read(left))
+          .then(answer, fail);
+      });
+      last = value;
+      error = null;
+      if (done(value)) return { done: true, last, error };
+    } catch (failure) {
+      error = failure instanceof Error ? failure.message : String(failure);
+    } finally {
+      clearTimeout(timer);
+    }
+    await new Promise((resolve) => setTimeout(resolve, Math.min(100, Math.max(0, end - Date.now()))));
   }
 }
 
@@ -380,6 +437,7 @@ test('a wake after a silent cut: every subscription answered within 1 s of the r
       rmSync(join(aUserData, 'layout.json'), { force: true });
       a = await launchMaws({ userData: aUserData, env: { MAWS_DEV_ORG: scene.devOrgDir(true), MAWS_MACHINE_NAME: 'A' } });
       const { page, launchedAt } = a;
+      await keepLastEvents(page, b.ref); // before any tab of B's: no stream of B's runs yet
 
       // 1. Up over the carrier, both sessions open side by side and their histories shown to their last turns, and the
       //    six subscriptions answered since the launch
@@ -399,6 +457,15 @@ test('a wake after a silent cut: every subscription answered within 1 s of the r
       }
       await expect.poll(() => sixMissing(expected, subscriptionsIn(mainLog(), b.ref, launchedAt)), { timeout: READ_WITHIN_MS, message: `main.log's subbed lines since the launch give the link's six subscriptions (received: what they lack)` }).toEqual([]);
       const ids = [...subscriptionsIn(mainLog(), b.ref, launchedAt).values()].map((held) => held.id);
+      // The cursor each stream holds at the stall, established from B's side: both sessions are idle, so B's last event
+      // is the last the stream can deliver, and A's renderer showing that very event received is A's sink holding it
+      // (the link's cursor is the last event it delivered to the sink, src/main/machines/remote/subs.ts)
+      const held: Record<string, string> = {};
+      for (const s of sessions) {
+        const head = await bHead(b, s);
+        await expect.poll(async () => placeOfEvent(s.app, (await lastEventOf(page, s.app)) ?? ''), { timeout: READ_WITHIN_MS, message: `A's renderer received B's session ${s.app}'s last event, ${head.id}, before the stall` }).toBe(head.place);
+        held[s.app] = head.place;
+      }
 
       // 2. Both ways silent; each session writes its turns unseen, past the ring's first trim
       const stalledAt = Date.now();
@@ -427,29 +494,34 @@ test('a wake after a silent cut: every subscription answered within 1 s of the r
 
       // 5. and 6. What main's log, B's logs, the pipes and the panes show; the hub restored, on the direct launch, once
       //    the link's lines are in, still inside the window
-      await within(() => linkPending(mainLog(), b.ref, carrier, ids, restoredAt).length === 0, READ_WITHIN_MS);
+      await within(() => linkPending(mainLog(), b.ref, carrier, ids, restoredAt), (pending) => pending.length === 0, READ_WITHIN_MS);
       let hubRestoredAt = restoredAt;
       if (carrier === 'direct') {
         hubRestoredAt = Date.now();
         scene.aHub.restore();
       }
-      const inputOf = () => ({
-        carrier, ref: b.ref, expected, main: mainLog(), endpoint: parseLogText(b.log()), host: readLogLines(hostLog), launchedAt, stalledAt, injectedAt, restoredAt, hubRestoredAt,
-        requests: { hub: scene!.aHub.requests(), direct: direct.requests() },
-      });
-      await within(() => readWake(inputOf()).failures.length === 0, READ_WITHIN_MS);
       const panes: string[] = [];
       for (const [i, s] of sessions.entries()) {
         const turn = lastTurn(writtenOf(s.samples));
         const markers = turnMarkers(turn);
-        await within(async () => {
-          const text = await paneText(page, i);
-          return markers.every((marker) => text.includes(marker));
-        }, READ_WITHIN_MS);
-        const off = markersNotOnce(await paneText(page, i), markers);
-        if (off.length > 0) panes.push(`${carrier}: A's pane ${i} shows ${off.length} of the ${markers.length} markers of B's session ${s.app}'s turn ${turn} other than once: ${off.slice(0, 5).map((m) => `${m.marker} ×${m.count}`).join(', ')}${off.length > 5 ? ', …' : ''}`);
+        const pane = await within((left) => paneText(page, i, left), (text) => markers.every((marker) => text.includes(marker)), READ_WITHIN_MS);
+        const off = pane.last === null ? null : markersNotOnce(pane.last, markers);
+        if (off === null) panes.push(`${carrier}: A's pane ${i} (B's session ${s.app}) could not be read within ${READ_WITHIN_MS} ms: ${pane.error ?? 'no answer'}`);
+        else if (off.length > 0) panes.push(`${carrier}: A's pane ${i} shows ${off.length} of the ${markers.length} markers of B's session ${s.app}'s turn ${turn} other than once: ${off.slice(0, 5).map((m) => `${m.marker} ×${m.count}`).join(', ')}${off.length > 5 ? ', …' : ''}`);
       }
-      const { record, failures: read } = readWake(inputOf());
+      // the last read is the launch's record: its counts run to here
+      const inputOf = () => ({
+        carrier, ref: b.ref, expected, held, main: mainLog(), endpoint: parseLogText(b.log()), host: readLogLines(hostLog), launchedAt, stalledAt, injectedAt, restoredAt, hubRestoredAt,
+        requests: { hub: scene!.aHub.requests(), direct: direct.requests() },
+      });
+      const final = await within(() => readWake(inputOf()), (wake) => wake.failures.length === 0, READ_WITHIN_MS);
+      if (final.last === null) {
+        failures.push(`${carrier}: main.log, B's logs or the pipes could not be read: ${final.error ?? 'no answer'}`, ...panes);
+        await a.cleanup();
+        a = null;
+        continue;
+      }
+      const { record, failures: read } = final.last;
       records[carrier] = { ...record, linkBeforeWake: before === undefined ? 'gone' : `${before.state}/${before.carrier ?? 'none'}`, turns: sessions.map((s, i) => ({ app: s.app, lastSeen: seen[i]!, lastWritten: lastTurn(writtenOf(s.samples)) })) };
       failures.push(...read, ...panes);
       await a.cleanup();

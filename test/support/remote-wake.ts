@@ -83,6 +83,11 @@ export interface WakeInput {
   carrier: Carrier;
   ref: string;
   expected: readonly Expected[];
+  /**
+   * Each stream's cursor at the stall, by its bare app id: B's last event of the launch, which A's renderer was shown to
+   * have received, established before the stall from B's side (the spec's `heldCursor`). A resume asks from exactly it.
+   */
+  held: Readonly<Record<string, string>>;
   /** A's main.log, B's mawsd.log and B's host.log, whole. */
   main: readonly LogLine[];
   endpoint: readonly LogLine[];
@@ -101,6 +106,8 @@ export interface SubscriptionRecord {
   what: string;
   stream: string | null;
   before: { mode: Mode; position: string };
+  /** A stream's cursor at the stall (`WakeInput.held`); null for a feed, which resubscribes with none. */
+  held: string | null;
   /** The first `subbed` after the restore; `ms` from the restore. */
   after: { mode: Mode; position: string; asked: string; ms: number } | null;
   /** B's answer to it; `ms` is §F's `J`, from the `sub`'s receipt to the answer. */
@@ -171,20 +178,26 @@ export function readWake(input: WakeInput): { record: WakeRecord; failures: stri
   const firsts = kindOf(link, 'first');
   const subscriptions: SubscriptionRecord[] = [];
   for (const expected of input.expected) {
-    const held = before.get(expected.what);
-    if (held === undefined) continue; // named above
-    const { id, what } = held;
+    const stood = before.get(expected.what);
+    if (stood === undefined) continue; // named above
+    const { id, what } = stood;
     const name = `subscription ${id} (${what})`;
+    const { stream } = expected;
+    const held = stream === null ? null : (input.held[stream] ?? null);
+    const heldAt = held === null ? null : positionOf(held);
     if (subbed.some((r) => r.line.id === id && r.at >= stalledAt && r.at < restoredAt)) fail(`${name} was answered during the stall`);
     const answer = subbed.find((r) => r.line.id === id && r.at >= restoredAt);
     const answered = endpoint.find((r) => r.line.id === id && r.at >= restoredAt);
-    const read = expected.stream === null ? undefined : journal.find((r) => r.line.app === expected.stream && r.at >= restoredAt);
-    const first = firsts.find((r) => r.line.id === id && r.at >= restoredAt);
+    // B's read for the resume starts at the row before the cursor (`afterSeq: seq - 1`, src/shared/host/stream-catchup.ts)
+    const reads = stream === null ? [] : journal.filter((r) => r.line.app === stream && r.at >= restoredAt);
+    const read = heldAt === null ? reads[0] : reads.find((r) => r.line.after === heldAt.seq - 1);
+    const first = answer === undefined ? undefined : firsts.find((r) => r.line.id === id && r.at >= answer.at);
     subscriptions.push({
       id,
       what,
-      stream: expected.stream,
-      before: { mode: held.mode, position: held.position },
+      stream,
+      before: { mode: stood.mode, position: stood.position },
+      held,
       after: answer === undefined ? null : { mode: answer.line.mode, position: answer.line.position, asked: answer.line.asked, ms: ms(answer.at) },
       endpoint: answered === undefined ? null : { mode: answered.line.mode, asked: answered.line.asked, ms: answered.line.ms },
       journal: read === undefined ? null : { after: read.line.after, rows: read.line.rows, ms: read.line.ms },
@@ -194,15 +207,17 @@ export function readWake(input: WakeInput): { record: WakeRecord; failures: stri
       fail(`${name} has no subbed line after the restore`);
       continue;
     }
-    if (expected.stream !== null) {
-      // a stream resumes from the cursor it held: a replay, asked from a position of the launch it stood in, at or past it
+    if (stream !== null) {
+      // a stream resumes from the cursor it held: a replay asked from exactly it, read on B from that cursor's row, and
+      // its content going on after it
       if (answer.line.mode !== 'replay') fail(`${name} answered ${answer.line.mode}, not replay`);
-      const asked = positionOf(answer.line.asked);
-      const stood = positionOf(held.position);
-      if (asked === null) fail(`${name} asked from ${answer.line.asked}, not from the cursor it held`);
-      else if (stood !== null && asked.epoch !== stood.epoch) fail(`${name} asked from ${answer.line.asked}, a cursor of another launch than ${held.position}`);
-      else if (stood !== null && behind(asked, stood)) fail(`${name} asked from ${answer.line.asked}, before ${held.position}, where it stood`);
-      if (read === undefined) fail(`B's host.log has no session.events ${expected.stream} … from the journal line after the restore: the stream's cursor is not shown evicted`);
+      if (held === null) fail(`${name} has no cursor established before the stall`);
+      else if (answer.line.asked !== held) fail(`${name} asked from ${answer.line.asked}, not from ${held}, the cursor it held`);
+      if (reads.length === 0) fail(`B's host.log has no session.events ${stream} … from the journal line after the restore: the stream's cursor is not shown evicted`);
+      else if (read === undefined && heldAt !== null) fail(`B's host.log read session.events ${stream} from the journal after ${reads.map((r) => r.line.after ?? 'start').join(', ')}, not after ${heldAt.seq - 1}, the row before the cursor it held`);
+      const firstAt = first === undefined ? null : positionOf(first.line.position);
+      if (first === undefined) fail(`${name} has no first event after subbed line after its subbed`);
+      else if (heldAt !== null && firstAt !== null && !behind(heldAt, firstAt)) fail(`${name}'s first event after subbed is at ${first.line.position}, not after ${held}, the cursor it held`);
     }
     if (answered === undefined) fail(`B's mawsd.log has no sub ${id} line (${what}) after the restore`);
     else {
@@ -282,6 +297,17 @@ export function wakeMisses(record: WakeRecord): string[] {
 export function wakeSummary(record: WakeRecord): string {
   const f = (value: number | null) => (value === null ? 'none' : `${value} ms`);
   return `[remote-wake] ${record.carrier}: up ${f(record.upMs)} and last subbed ${f(record.lastSubbedMs)} after the restore; feed connected ${f(record.feed.connectedMs)} and last listings page ${f(record.feed.lastPageMs)} after the hub's restore; ${plural(record.upgrades, 'upgrade')}, ${plural(record.feedOpens, 'feed open')}`;
+}
+
+/**
+ * An event's place as the lines write a cursor, `<launch>:<seq>:<idx>`, from its id `<appSessionId>:<launchId>:<seq>:<i>`
+ * (`eventPosition` in src/shared/host/stream-catchup.ts, which places every event a lane B stream sends by it); null for
+ * an id of another session or of no launch.
+ */
+export function placeOfEvent(app: string, id: string): string | null {
+  if (!id.startsWith(`${app}:`)) return null;
+  const match = /^(.+):(\d+):(\d+)$/.exec(id.slice(app.length + 1));
+  return match === null ? null : `${match[1]!}:${Number(match[2])}:${Number(match[3])}`;
 }
 
 /** Each marker `text` shows other than exactly once, with its count. */

@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import type { PipeRequest } from './loopback-pipe';
 import type { LogLine } from './main-log';
-import { linkPending, loadVoid, markersNotOnce, readWake, sixMissing, sixSubscriptions, subscriptionsIn, wakeMisses, wakeSummary, type WakeInput } from './remote-wake';
+import { linkPending, loadVoid, markersNotOnce, placeOfEvent, readWake, sixMissing, sixSubscriptions, subscriptionsIn, wakeMisses, wakeSummary, type WakeInput } from './remote-wake';
 
 const REF = 'Bref0123456789abcdef';
 const APPS = ['app-1', 'app-2'];
@@ -29,23 +29,24 @@ function passing(carrier: 'direct' | 'relay'): WakeInput {
     m(80.01, 'wake after 3600000 ms: dropped no channel, 1 attempt(s) in flight'),
     line(80.01, '[org-feed] wake after 3600000 ms: no socket'),
     m(82.2, `up over the ${carrier} carrier`),
-    m(82.25, 'subscription s1 session B:app-1: subbed replay at L1:6900:-, asked from L1:310:-'),
-    m(82.3, 'subscription s2 session B:app-2: subbed replay at L2:6950:-, asked from L2:312:-'),
+    m(82.25, 'subscription s1 session B:app-1: subbed replay at L1:310:4, asked from L1:310:4'),
+    m(82.3, 'subscription s2 session B:app-2: subbed replay at L2:312:2, asked from L2:312:2'),
     ...FEEDS.map((what) => m(82.21, `subscription ${IDS[what]} ${what}: subbed snapshot at e:2:-, asked from none`)),
     m(82.4, 'subscription s1 session B:app-1: first event after subbed, at L1:311:0'),
+    m(82.45, 'subscription s2 session B:app-2: first event after subbed, at L2:313:0'),
     line(hub + 0.4, '[org-feed] connected to 127.0.0.1:5000'),
     line(hub + 0.6, '[org-feed] listings: last page, 2 records in 1 pages'),
   ];
   const endpoint: LogLine[] = [
     line(5, '[endpoint] endpoint: channel k1 sub s1 session B:app-1: subbed snapshot at L1:310:-, asked from none, after 2 ms'),
-    line(82.24, '[endpoint] endpoint: channel k2 sub s1 session B:app-1: subbed replay at L1:6900:-, asked from L1:310:-, after 21 ms'),
-    line(82.29, '[endpoint] endpoint: channel k2 sub s2 session B:app-2: subbed replay at L2:6950:-, asked from L2:312:-, after 33 ms'),
+    line(82.24, '[endpoint] endpoint: channel k2 sub s1 session B:app-1: subbed replay at L1:310:4, asked from L1:310:4, after 21 ms'),
+    line(82.29, '[endpoint] endpoint: channel k2 sub s2 session B:app-2: subbed replay at L2:312:2, asked from L2:312:2, after 33 ms'),
     ...FEEDS.map((what) => line(82.2, `[endpoint] endpoint: channel k2 sub ${IDS[what]} ${what}: subbed snapshot at e:2:-, asked from none, after 0 ms`)),
   ];
   const host: LogLine[] = [
     line(3, 'warn: [engine-host] session.events app-1 after start: from the journal, 310 rows read in 1 ms'),
-    line(82.23, 'warn: [engine-host] session.events app-1 after 310: from the journal, 6900 rows read in 20 ms'),
-    line(82.27, 'warn: [engine-host] session.events app-2 after 312: from the journal, 6950 rows read in 30 ms'),
+    line(82.23, 'warn: [engine-host] session.events app-1 after 309: from the journal, 6900 rows read in 20 ms'),
+    line(82.27, 'warn: [engine-host] session.events app-2 after 311: from the journal, 6950 rows read in 30 ms'),
   ];
   const probe = (s: number): PipeRequest => ({ at: at(s), firstLine: null });
   const request = (s: number, target: string): PipeRequest => ({ at: at(s), firstLine: `GET ${target} HTTP/1.1` });
@@ -54,7 +55,8 @@ function passing(carrier: 'direct' | 'relay'): WakeInput {
     carrier === 'direct'
       ? { direct: [request(1, '/'), probe(82.05), request(82.1, '/')], hub: [request(1, '/api/registry/socket?app=1'), request(1, relaySocket), probe(84.05), request(84.1, '/api/registry/socket?app=1'), request(84.1, `/api/machines/${REF}/endpoint`)] }
       : { direct: [request(1, '/'), probe(82.05), request(82.1, '/'), request(84.3, '/')], hub: [request(1, relaySocket), probe(82.05), request(82.1, relaySocket), request(82.1, '/api/registry/socket?app=1')] };
-  return { carrier, ref: REF, expected: sixSubscriptions(APPS), main, endpoint, host, launchedAt: at(0), stalledAt: at(10), injectedAt: at(80), restoredAt: at(restored), hubRestoredAt: at(hub), requests };
+  const held = { 'app-1': 'L1:310:4', 'app-2': 'L2:312:2' };
+  return { carrier, ref: REF, expected: sixSubscriptions(APPS), held, main, endpoint, host, launchedAt: at(0), stalledAt: at(10), injectedAt: at(80), restoredAt: at(restored), hubRestoredAt: at(hub), requests };
 }
 const without = (lines: LogLine[], part: string) => lines.filter((l) => !l.text.includes(part));
 const failuresOf = (input: WakeInput) => readWake(input).failures;
@@ -113,8 +115,8 @@ describe('a run', () => {
     expect(record.lost).toEqual(['the direct channel was lost (timeout); reconnecting']);
     expect(record.waitMs).toBe(2_000);
     const s1 = record.subscriptions.find((s) => s.id === 's1')!;
-    expect(s1).toMatchObject({ what: 'session B:app-1', stream: 'app-1', after: { mode: 'replay', asked: 'L1:310:-', ms: 250 }, endpoint: { mode: 'replay', asked: 'L1:310:-', ms: 21 }, journal: { after: 310, rows: 6_900, ms: 20 }, first: { delivery: 'event', ms: 400 } });
-    expect(record.subscriptions.find((s) => s.id === 'at')).toMatchObject({ stream: null, journal: null, after: { mode: 'snapshot', asked: 'none' } });
+    expect(s1).toMatchObject({ what: 'session B:app-1', stream: 'app-1', held: 'L1:310:4', after: { mode: 'replay', asked: 'L1:310:4', ms: 250 }, endpoint: { mode: 'replay', asked: 'L1:310:4', ms: 21 }, journal: { after: 309, rows: 6_900, ms: 20 }, first: { delivery: 'event', position: 'L1:311:0', ms: 400 } });
+    expect(record.subscriptions.find((s) => s.id === 'at')).toMatchObject({ stream: null, held: null, journal: null, after: { mode: 'snapshot', asked: 'none' } });
     expect(wakeMisses(record)).toEqual([]);
     expect(wakeSummary(record)).toBe("[remote-wake] direct: up 200 ms and last subbed 300 ms after the restore; feed connected 400 ms and last listings page 600 ms after the hub's restore; 1 upgrade, 1 feed open");
   });
@@ -149,20 +151,49 @@ describe('a run', () => {
 
   it('names a stream that is not a replay from the cursor it held', () => {
     const input = passing('direct');
-    const swap = (from: string, to: string) => ({ ...input, main: input.main.map((l) => (l.text.includes(from) ? { ...l, text: l.text.replace(from, to) } : l)) });
-    expect(failuresOf(swap('subbed replay at L1:6900:-, asked from L1:310:-', 'subbed snapshot at L1:6900:-, asked from L1:310:-'))).toEqual([
+    const swap = (from: string, to: string, logs: ('main' | 'endpoint' | 'host')[] = ['main']) => {
+      const out = { ...input };
+      for (const log of logs) out[log] = input[log].map((l) => (l.text.includes(from) ? { ...l, text: l.text.replace(from, to) } : l));
+      return out;
+    };
+    expect(failuresOf(swap('subbed replay at L1:310:4, asked from L1:310:4', 'subbed snapshot at L1:310:4, asked from L1:310:4'))).toEqual([
       'direct: subscription s1 (session B:app-1) answered snapshot, not replay',
       'direct: B answered subscription s1 replay where A read snapshot',
     ]);
-    expect(failuresOf(swap('asked from L1:310:-', 'asked from none'))).toEqual(['direct: subscription s1 (session B:app-1) asked from none, not from the cursor it held', 'direct: B was asked for subscription s1 from L1:310:-, where A asked from none']);
-    expect(failuresOf(swap('asked from L1:310:-', 'asked from L9:310:-'))[0]).toBe('direct: subscription s1 (session B:app-1) asked from L9:310:-, a cursor of another launch than L1:310:-');
-    expect(failuresOf(swap('asked from L1:310:-', 'asked from L1:200:-'))[0]).toBe('direct: subscription s1 (session B:app-1) asked from L1:200:-, before L1:310:-, where it stood');
+    expect(failuresOf(swap('asked from L1:310:4', 'asked from none'))).toEqual(['direct: subscription s1 (session B:app-1) asked from none, not from L1:310:4, the cursor it held', 'direct: B was asked for subscription s1 from L1:310:4, where A asked from none']);
+    expect(failuresOf(swap('asked from L1:310:4', 'asked from L9:310:4'))[0]).toBe('direct: subscription s1 (session B:app-1) asked from L9:310:4, not from L1:310:4, the cursor it held');
+  });
+
+  it('names a resume that jumped forward in the same launch, though B agrees and replays it from its journal', () => {
+    const input = passing('direct');
+    const jump = (l: LogLine) => ({ ...l, text: l.text.replace('L1:310:4, asked from L1:310:4', 'L1:400:0, asked from L1:400:0').replace('app-1 after 309:', 'app-1 after 399:') });
+    expect(failuresOf({ ...input, main: input.main.map(jump), endpoint: input.endpoint.map(jump), host: input.host.map(jump) })).toEqual([
+      'direct: subscription s1 (session B:app-1) asked from L1:400:0, not from L1:310:4, the cursor it held',
+      "direct: B's host.log read session.events app-1 from the journal after 399, not after 309, the row before the cursor it held",
+    ]);
+  });
+
+  it('names a stream with no cursor established before the stall', () => {
+    const input = passing('direct');
+    expect(failuresOf({ ...input, held: { 'app-2': 'L2:312:2' } })).toEqual(['direct: subscription s1 (session B:app-1) has no cursor established before the stall']);
+  });
+
+  it('names a stream whose content did not resume after its subbed, or resumed at or before its cursor', () => {
+    const input = passing('direct');
+    for (const [id, app] of [['s1', 'app-1'], ['s2', 'app-2']] as const) {
+      const what = `session B:${app}`;
+      expect(failuresOf({ ...input, main: without(input.main, `subscription ${id} ${what}: first event after subbed`) })).toEqual([`direct: subscription ${id} (${what}) has no first event after subbed line after its subbed`]);
+    }
+    const early = input.main.map((l) => (l.text.includes('subscription s2 session B:app-2: first event after subbed') ? { ...l, at: at(82.29) } : l));
+    expect(failuresOf({ ...input, main: early })).toEqual(['direct: subscription s2 (session B:app-2) has no first event after subbed line after its subbed']);
+    const repeated = input.main.map((l) => (l.text.includes('subscription s1 session B:app-1: first event') ? { ...l, text: l.text.replace('at L1:311:0', 'at L1:310:4') } : l));
+    expect(failuresOf({ ...input, main: repeated })).toEqual(["direct: subscription s1 (session B:app-1)'s first event after subbed is at L1:310:4, not after L1:310:4, the cursor it held"]);
   });
 
   it('names what B’s logs lack: the endpoint’s answer and the journal read', () => {
     const input = passing('direct');
     expect(failuresOf({ ...input, endpoint: without(input.endpoint, 'channel k2 sub c2 ') })).toEqual(["direct: B's mawsd.log has no sub c2 line (feed checkout B:app-2) after the restore"]);
-    expect(failuresOf({ ...input, host: without(input.host, 'app-2 after 312') })).toEqual(["direct: B's host.log has no session.events app-2 … from the journal line after the restore: the stream's cursor is not shown evicted"]);
+    expect(failuresOf({ ...input, host: without(input.host, 'app-2 after 311') })).toEqual(["direct: B's host.log has no session.events app-2 … from the journal line after the restore: the stream's cursor is not shown evicted"]);
   });
 
   it('names a repeated event', () => {
@@ -217,6 +248,16 @@ describe('the bounds', () => {
       'direct: subscription s2 (session B:app-2) answered 1001 ms after the restore, over 1000 ms',
       "direct: the feed's last listings page 2500 ms after the hub's restore, over 2000 ms",
     ]);
+  });
+});
+
+describe('an event’s place', () => {
+  it('is its launch, row and index, from its id, as a cursor is written', () => {
+    expect(placeOfEvent('app-1', 'app-1:L-1:310:4')).toBe('L-1:310:4');
+    expect(placeOfEvent('app-1', 'app-1:a:b:310:0')).toBe('a:b:310:0');
+    expect(placeOfEvent('app-1', 'app-2:L-1:310:4')).toBeNull();
+    expect(placeOfEvent('app-1', 'app-1:side-thread:opened')).toBeNull();
+    expect(placeOfEvent('app-1', 'app-1:L-1:x:4')).toBeNull();
   });
 });
 
