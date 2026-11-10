@@ -27,6 +27,7 @@ P5 moved everything that belongs to a machine out of the app: sessions, terminal
 ## Progress
 
 - [ ] M1 — No suite launches the app's embedded shape
+  - 2026-11-10: task review clean (one finding, fixed: Decision Log 7 (c)); class 1a green on 27740743a (run 42804585935). `--gates all` on M1's tree 549387e48: run 42808148412 green but for delivery.spec.ts:79, delivery.spec.ts:180 and browser-comment.spec.ts:545, each passing in 42829266756 (the first run's mini overflow lane at load 47; the rerun at load 2 to 7, :180 in 2.7 s). The measured groups and cross-build follow.
 - [ ] M2 — One launch outcome: `mawsd`, or the repair window
 - [ ] M2b — Resume after a wake by design, main's log on disk, and what the readiness read found
 - [ ] M3 — The final build on the three machines
