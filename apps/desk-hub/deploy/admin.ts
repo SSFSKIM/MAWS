@@ -327,7 +327,15 @@ async function signedIn(ctx: Context, person: Person): Promise<{ org: string; me
   return { org: me.org.id, member: me.member };
 }
 
-/** Asks `question` at the terminal (`--yes` answers it at the local hub); true for y or yes. */
+/** How many bytes of a line that is not an answer `confirm` names in hex. */
+const NOT_AN_ANSWER_HEX = 32;
+
+/**
+ * Asks `question` at the terminal (`--yes` answers it at the local hub); true for y or yes. A line that is neither y,
+ * yes, n, no nor empty (whitespace aside), such as a bracketed paste or a key sequence left in the terminal, is a
+ * refusal too, and its bytes are named in hex first, so the owner tells it apart from a typed n; the caller's refusal
+ * follows it.
+ */
 async function confirm(ctx: Context, question: string): Promise<boolean> {
   if (ctx.yes) {
     ctx.io.out(`${question} yes (--yes)`);
@@ -335,7 +343,32 @@ async function confirm(ctx: Context, question: string): Promise<boolean> {
   }
   const terminal = ctx.terminal();
   terminal.write(`${question} `);
-  return /^\s*y(es)?\s*$/i.test(await terminal.readLine());
+  const line = await terminal.readLine();
+  const answer = line.trim();
+  if (/^y(es)?$/i.test(answer)) return true;
+  if (answer !== '' && !/^no?$/i.test(answer)) {
+    const bytes = Buffer.from(line, 'utf8');
+    const hex = bytes.subarray(0, NOT_AN_ANSWER_HEX).toString('hex');
+    ctx.io.err(`read ${bytes.length} byte${bytes.length === 1 ? '' : 's'} that are not an answer: ${hex}${bytes.length > NOT_AN_ANSWER_HEX ? '…' : ''}`);
+  }
+  return false;
+}
+
+/**
+ * The head a hub's 409 `not-head` or `rollback` names ("version M", or "a later version" when its message names none):
+ * the head moved before the post landed, and the hub stored nothing. Null for any other answer.
+ */
+function headMovedTo(status: number, text: string): string | null {
+  if (status !== 409) return null;
+  let body: { error?: unknown; message?: unknown } | null;
+  try {
+    body = JSON.parse(text) as typeof body;
+  } catch {
+    return null;
+  }
+  if (body?.error !== 'not-head' && body?.error !== 'rollback') return null;
+  const named = typeof body.message === 'string' ? /the head is version (\d+)/.exec(body.message) : null;
+  return named ? `version ${named[1]}` : 'a later version';
 }
 
 /** Posts a signed state: `ok`, `not-head` (the head moved), or throws with the hub's refusal. */
@@ -357,6 +390,11 @@ async function post(person: Person, signed: SignedOrgState): Promise<'ok' | 'not
  * parent → the same bytes sent again; the hub holds another successor of that parent → `fork`, and nothing changes. A
  * hub that stored a proposal but answered an error is therefore never handed a second, different successor of the
  * same parent.
+ *
+ * `amend` signs on the head as it is when it signs, read again then: a verb that waited on a person since its first read
+ * (`pair`'s device, a confirmation) makes its change on the head other writers moved meanwhile, and says so. A post the
+ * hub refuses because the head moved still (its 409 `not-head` or `rollback`) stored nothing, so it is dropped from the
+ * slot and the verb refuses: no later verb meets it as a fork.
  *
  * An `unsent` proposal (`delegation create`'s) is never settled here (the spec's Decision Log, M2 round 3): its
  * delegation takes effect only once the owner has checked the stored code, so only `delegation publish` sends it
@@ -433,6 +471,17 @@ async function anchored(ctx: Context, needsSigner: boolean, { unsent = 'refuse' 
     } catch (error) {
       return refuse(`version ${n} got no answer (${error instanceof Error ? error.message : String(error)}): it stays pending in ${anchorFile(ctx.keysPath)}, and the next run settles it`);
     }
+    // The head moved before it landed: the hub took nothing, so nothing stays pending for a later verb to call a fork.
+    const moved = headMovedTo(response.status, text);
+    if (moved !== null) {
+      save({ ...anchor, pending: undefined, unsent: undefined });
+      const added = signed.state.delegations.filter((d) => !head.state.delegations.some((x) => x.id === d.id)).map((d) => d.id);
+      refuse(
+        `the hub's head moved to ${moved} before version ${n} landed: nothing landed, and nothing stays pending; ${
+          added.length > 0 ? `delegation ${added.join(', ')} never took effect: run provisioning revoke ${added.join(', ')}, delete its stored code, and create it again` : 'run the verb again'
+        }`,
+      );
+    }
     if (response.status !== 201) refuse(`the hub answered ${response.status} to version ${n} (${printable(text.slice(0, 300))}): it stays pending in ${anchorFile(ctx.keysPath)}, and the next run settles it`);
     save(settled(anchor, n));
   }
@@ -449,6 +498,16 @@ async function anchored(ctx: Context, needsSigner: boolean, { unsent = 'refuse' 
   const propose = (edit: (state: OrgState) => Promise<void> | void) => signPending(edit, true);
 
   async function signPending(edit: (state: OrgState) => Promise<void> | void, unsent: boolean): Promise<SignedOrgState> {
+    // A verb may have waited on a person since it read the head (pair's device, a confirmation), while other writers
+    // signed: the change is made again on the head as it is now, and `successorProblems` judges it against that head.
+    const now = (await verifiedHead(person, anchor)).head;
+    if (canonicalize(now) !== canonicalize(head)) {
+      ctx.io.out(`the head moved from version ${head.state.version} to ${now.state.version} while waiting: signing on ${now.state.version}`);
+      const problem = await signerProblem(now.state, me.member.id, keys);
+      if (problem) refuse(`${problem}: this device cannot sign its successors; nothing was signed`);
+      head = now;
+      if (head.state.version > anchor.version) save({ ...anchor, version: head.state.version });
+    }
     const next = await successor(head.state, () => {});
     await edit(next);
     // What the package would refuse once signed, refused before: the slot never holds a successor no verifier takes.
@@ -986,7 +1045,9 @@ async function delegationCreate(ctx: Context): Promise<number> {
     offlineRevokeS: NEVER_OFFLINE,
     owners: [from.me.member.id],
   };
-  const { root } = from.head.state;
+  const signed = await from.propose((s) => void s.delegations.push(delegation));
+  // The pins of the head it was signed on, which `propose` read again after the confirmation.
+  const { root } = signed.state;
   const code = `${encodeProvisioningCodeV2({
     hub: ctx.hub,
     org: from.anchor.org,
@@ -996,7 +1057,6 @@ async function delegationCreate(ctx: Context): Promise<number> {
     delegation: { id: delegation.id, prefix: delegation.prefix, privateJwk: { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y, d: jwk.d } },
     ...(legacy ? { legacy } : {}),
   })}\n`;
-  const signed = await from.propose((s) => void s.delegations.push(delegation));
   const n = signed.state.version;
   ctx.io.out(`version ${n} lists delegation ${delegation.id} (prefix ${prefix}, expires ${delegation.expires}), signed and pending in ${anchorFile(ctx.keysPath)}: nothing was posted`);
   try {

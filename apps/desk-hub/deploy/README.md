@@ -562,9 +562,15 @@ No two successors of one parent: every successor this device signs (`refresh`, `
 Any answer but 201, or none, leaves it there, and the next subcommand settles it before anything else: the hub's chain
 holding it adopts it (`pending version n is the hub's: adopted`); the hub's head still its parent sends the same bytes
 again (`pending version n is not at the hub: sent again`); the hub holding another state at its version refuses
-`fork: …: nothing was signed`, the anchor unchanged. A `not-head` refusal is not signed again: the next run finds the
-hub's other successor and refuses `fork`, which is the owner's to take to whoever runs the hub (or to the other admin
-device that signed it). Each subcommand but `init` holds `<keys>.org.json.lock` from its first read to its last write;
+`fork: …: nothing was signed`, the anchor unchanged, which is the owner's to take to whoever runs the hub (or to the
+other admin device that signed it). A verb reads the head again just before it signs: one that waited on a person
+meanwhile (`pair`'s device, a confirmation) while other writers moved it says `the head moved from version N to M
+while waiting: signing on M` and makes its change on that head, judged against it before signing. A post the hub
+refuses `409 not-head` or `rollback` (the head moved still, before it landed) stored nothing: it is dropped from
+`pending` and the verb refuses `the hub's head moved to version M before version n landed: nothing landed, and nothing
+stays pending; run the verb again`, so no later verb names it a fork. A confirmation answered with a line that is not
+`y`, `yes`, `n`, `no` or empty (a bracketed paste, a key sequence left in the terminal) is refused as an `n` is, after
+`read <n> bytes that are not an answer: <hex>`. Each subcommand but `init` holds `<keys>.org.json.lock` from its first read to its last write;
 a second one is refused, naming the holder's pid, host and start time (and saying when that pid is gone from this host).
 A run ended by Ctrl-C, its terminal closed or a SIGTERM, in `pair`'s wait or at a prompt, removes its own lock as it
 exits; a lock left by a run that died otherwise (a SIGKILL, a crash) is removed by hand once nothing runs (`run-lock.ts`,
