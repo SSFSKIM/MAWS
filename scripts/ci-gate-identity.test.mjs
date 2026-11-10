@@ -21,8 +21,7 @@ case "$*" in
   'variable list '*HOSTED_MAC_ROUTE*) echo "\${TEST_ROUTE:-mirror}" ;;
   'variable list '*) ;;
   *' run list '*) [[ \${TEST_RESULT:-failure} == no-run ]] || echo "$TEST_RUN" ;;
-  *' run watch '*) ;;
-  *' run view '*'--json status '*) echo completed ;;
+  'api -i '*'actions/runs/'*' --jq .status') printf 'HTTP/2.0 200 OK\\r\\nEtag: W/"completed"\\r\\n\\r\\ncompleted\\n' ;;
   *' run view '*'--log-failed'*) printf 'e2e:document\\twait\\t2026-10-28 hosted: failure https://github.com/SSFSKIM/maws-app/actions/runs/999\\n' ;;
   *' run download '*)
     kind=report; [[ $* != *maws-app* ]] || kind=hosted

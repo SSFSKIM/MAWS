@@ -12,9 +12,12 @@
 # .github/workflows/gate.yml on it, prints each job's conclusion, downloads the failed e2e jobs' reports to
 # /tmp/maws-review/gates/ci-<short>-<run-id>-<invocation>/reports/ (including hosted reports from SSFSKIM/maws-app),
 # keeps the whole transcript beside it in transcript.log, deletes the
-# ref (unless --keep) and exits with the run's status (0 green, 1 anything else). On ci-kit's pool, a failed GCE job
-# annotated "The operation was canceled." without a timeout, or a failed EC2 job annotated "The self-hosted runner
-# lost communication with the server.", is rerun alone, once per job per run. The EC2 annotation can mean a spot
+# ref (unless --keep) and exits with the run's status (0 green, 1 anything else). A call that ends without the run's
+# verdict while the run exists (unreadable, interrupted) keeps the ref for a rerun and prints how to delete it. A read
+# the exhausted API budget refuses is waited out until the budget's reset, up to 90 minutes (scripts/ci-gate-pace.sh).
+# On ci-kit's pool, a failed GCE job annotated "The operation was canceled." without a timeout, or a failed EC2 job
+# annotated "The self-hosted runner lost communication with the server.", is rerun alone, once per job per run. The
+# EC2 annotation can mean a spot
 # interruption or a box the tree starved, not a proven preemption. The script reports the run's final attempt: the line
 # before the run's status, `ci-gate: run <id> <conclusion>`, is `ci-gate: run <id> attempt <n>`, and a line before those
 # names each interrupted job and how its rerun ended, one interrupted again staying red (Decision Log 70).
@@ -135,6 +138,9 @@ print_paths() {
 }
 trap print_paths EXIT
 
+# paced_gh: a read the exhausted API budget refuses, waited out rather than failed (bounded at 90 minutes).
+# shellcheck source=scripts/ci-gate-pace.sh
+source "$(dirname "$0")/ci-gate-pace.sh" || exit 2
 # refusals: the refused against the finished, and the relaunch line, when the mini refused jobs (Decision Log 58(c), 66).
 # shellcheck source=scripts/ci-gate-refusals.sh
 source "$(dirname "$0")/ci-gate-refusals.sh" || exit 2
@@ -347,6 +353,9 @@ mkdir -p "$invocation/reports" || exit 2
 log=$invocation/transcript.log
 reports=$invocation/reports
 exec > >(tee "$log") 2>&1
+# The pacer's waits reach the transcript also from a read whose stderr goes elsewhere (ci-gate-pace.sh).
+exec 3>&2
+PACE_NOTES_FD=3
 [[ -z $alert_check ]] || printf '%s\n' "$alert_check"
 [[ -z $peer_said ]] || printf '%s\n' "$peer_said"
 [[ -z $affected_note ]] || printf '%s\n' "$affected_note"
@@ -379,16 +388,23 @@ fi
 pushed=$(git -C "$git_dir" commit-tree "$sha^{tree}" -p "$sha" -m "ci-gate: $short${affected:+ affected}" -m "$trailers") || exit 1
 
 run_id=''
+verdict=''
+# The ref goes once the run has a verdict, green or red, and when no run came of the push. A call that ends without one
+# while its run exists (unreadable, the budget spent past its bound, interrupted), or when the spent budget hid the run,
+# keeps it, so a rerun of the run, or a read of its head, still finds the branch; it says how to delete it.
 finish() {
   local status=$1
   if [[ $keep == false ]]; then
+    if [[ -z $verdict ]] && { [[ -n $run_id ]] || pace_limited; }; then
+      echo "ci-gate: kept $ref, as this call ends without the run's verdict; delete it with: git -C $(printf %q "$git_dir") push origin --delete refs/heads/$ref" >&2
     # Only while the ref is still this invocation's commit: a later invocation's push to it is not ours to delete.
-    if git -C "$git_dir" push --quiet --force-with-lease="refs/heads/$ref:$pushed" origin ":refs/heads/$ref" 2>/dev/null; then
+    elif git -C "$git_dir" push --quiet --force-with-lease="refs/heads/$ref:$pushed" origin ":refs/heads/$ref" 2>/dev/null; then
       echo "ci-gate: removed $ref"
     else
       echo "ci-gate: left $ref (moved by a later push)"
     fi
   fi
+  rm -f "$PACE_MARK"
   exit "$status"
 }
 # shellcheck disable=SC2329 # invoked by the trap below
@@ -415,16 +431,24 @@ done
 
 # The run usually appears a few seconds after the push, but GitHub has created it more than a minute late (2026-11-04,
 # twice in a row on one head), and the late run still ran after ci-gate had given up. So: every 2 s for a minute, then
-# every 10 s up to 5 min. Only a run that never comes costs the longer wait, and then the workflow did not trigger.
+# every 10 s up to 5 min. Only a run that never comes costs the longer wait, and then the workflow did not trigger. A wait
+# for the spent budget counts no poll.
 for poll in $(seq 1 54); do
-  run_id=$(gh -R "$REPO" run list --workflow gate.yml --event push --branch "$ref" --json databaseId,headSha --jq ".[] | select(.headSha == \"$pushed\") | .databaseId" | head -1)
+  run_id=$(paced_gh -R "$REPO" run list --workflow gate.yml --event push --branch "$ref" --json databaseId,headSha --jq ".[] | select(.headSha == \"$pushed\") | .databaseId" | head -1)
   [[ -n $run_id ]] && break
   if [[ $poll -lt 30 ]]; then sleep 2; else
     [[ $poll -eq 30 ]] && echo "ci-gate: no run of $pushed yet after a minute; waiting up to 5 min" >&2
     sleep 10
   fi
 done
-[[ -n $run_id ]] || { echo "ci-gate: no run of $pushed on $ref after 5 min (a run GitHub creates later still runs: gh -R $REPO run list --commit $pushed)" >&2; finish 1; }
+if [[ -z $run_id ]]; then
+  if pace_limited; then
+    echo "ci-gate: no run of $pushed on $ref could be read through the exhausted API rate limit (find it later: gh -R $REPO run list --commit $pushed)" >&2
+  else
+    echo "ci-gate: no run of $pushed on $ref after 5 min (a run GitHub creates later still runs: gh -R $REPO run list --commit $pushed)" >&2
+  fi
+  finish 1
+fi
 # tee keeps the same open file while the invocation directory gains its run id.
 run_dir=$out/ci-$short-$run_id-$invocation_token
 mv "$invocation" "$run_dir" || finish 1
@@ -433,15 +457,26 @@ log=$invocation/transcript.log
 reports=$invocation/reports
 echo "ci-gate: https://github.com/$REPO/actions/runs/$run_id"
 
-# A failed watch (an API error mid-poll) is not the end of the run: only the status `completed` is.
-# A run that can no longer be read (credentials revoked, run deleted) would be retried forever, so consecutive read failures are bounded.
+# Waits for the run's status `completed`, reading the run alone (settle_run reads its jobs once it completes), each
+# read conditional on the last one's ETag: an unchanged run answers 304, which GitHub does not count against the budget
+# every session on the account shares, where `gh run watch` read the run and its jobs, and the annotations of each job
+# not completed, every 30 s. A minute apart for the first five polls, which sees a short run end soon, then two.
+# A failed read (an API error mid-poll) is not the end of the run, nor a limit waited out (paced_gh). A run that can no
+# longer be read (credentials revoked, run deleted) would be retried forever, so consecutive read failures are bounded,
+# 15 s apart.
 await_run() {
-  local unreadable=0 view_err=$invocation/view.err run_status
+  local etag='' polls=0 unreadable=0 view_err=$invocation/view.err answer head
   while :; do
-    gh -R "$REPO" run watch "$run_id" --compact --interval 30 >/dev/null 2>&1
-    if run_status=$(gh -R "$REPO" run view "$run_id" --json status --jq .status 2>"$view_err"); then
+    # gh exits 1 on a 304, having printed its headers (-i) and no body.
+    answer=$(paced_gh api -i ${etag:+-H "If-None-Match: $etag"} "repos/$REPO/actions/runs/$run_id" --jq .status 2>"$view_err")
+    answer=${answer//$'\r'/}
+    head=${answer%%$'\n'*}
+    if [[ $head == HTTP/*' 304'* ]]; then
       unreadable=0
-      [[ $run_status == completed ]] && break
+    elif [[ $head == HTTP/*' 200'* ]]; then
+      unreadable=0
+      etag=$(printf '%s\n' "$answer" | awk -F': ' 'tolower($1) == "etag" { print $2; exit }')
+      [[ ${answer##*$'\n'} == completed ]] && break
     else
       unreadable=$((unreadable + 1))
       if ((unreadable >= 20)); then
@@ -450,8 +485,11 @@ await_run() {
         rm -f "$view_err"
         finish 1
       fi
+      sleep 15
+      continue
     fi
-    sleep 15
+    polls=$((polls + 1))
+    if ((polls <= 5)); then sleep 60; else sleep 120; fi
   done
   rm -f "$view_err"
 }
@@ -460,8 +498,8 @@ settle_run
 printf '%s\n' "$jobs"
 
 if [[ $conclusion != success ]]; then
-  if gh -R "$REPO" run download "$run_id" -D "$reports" 2>/dev/null; then echo "ci-gate: failed jobs' reports in $reports/"; fi
-  failed_log=$(gh -R "$REPO" run view "$run_id" --log-failed | perl -pe 's/(\e|\^\[)\[[0-9;]*[A-Za-z]//g')
+  if paced_gh -R "$REPO" run download "$run_id" -D "$reports" 2>/dev/null; then echo "ci-gate: failed jobs' reports in $reports/"; fi
+  failed_log=$(paced_gh -R "$REPO" run view "$run_id" --log-failed | perl -pe 's/(\e|\^\[)\[[0-9;]*[A-Za-z]//g')
   hosted_reports "$failed_log" "$reports"
   # The failed steps' last lines, each under its job's name, colours and timestamps stripped.
   printf '%s\n' "$failed_log" | perl -pe 's/^([^\t]*)\t[^\t]*\t\S+ /$1  /' | tail -80
@@ -473,5 +511,6 @@ if [[ $jobs == *e2e:* ]]; then node "$(dirname "$0")/ci-gate-flaky.mjs" "$REPO" 
 # The attempt on a line of its own, so the status line stays what every waiter matches (^ci-gate: run [0-9]+ [a-z_]+$).
 echo "ci-gate: run $run_id attempt $run_attempt"
 echo "ci-gate: run $run_id $conclusion"
+verdict=$conclusion
 [[ $conclusion == success ]] && finish 0
 finish 1
