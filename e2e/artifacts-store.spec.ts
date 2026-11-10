@@ -1,4 +1,4 @@
-// The artifact store's acceptance in utility mode (docs/doperpowers/plans/2026-10-12-p3-a-store.md, M4 Proves; `pnpm
+// The artifact store's acceptance (docs/doperpowers/plans/2026-10-12-p3-a-store.md, M4 Proves; `pnpm
 // e2e:artifacts`): a document the host's test writer made syncs to replicas in two windows over the product's port
 // route (main's channel, the sandboxed preload, the renderer's ArtifactHost), an edit in one reaches the other and the
 // writer's reaches both; a repeated op id is a no-op; versions list their actors; restore lands whole in both windows;
@@ -392,26 +392,28 @@ test('maws-artifact: reaches the app and the capture partition only, and an arti
 });
 
 // M9 (the execution document's M9 Decisions; parent §5 P3-A): S2's numbers in the product, measured in real Electron over
-// the product's port route in utility mode, on S2's 1 MB seed. Each bound writes one JSON line to
+// the product's port route on the daemon shape, on S2's 1 MB seed. Each bound writes one JSON line to
 // `test-results/artifacts-perf.jsonl` with the load average beside each run, and only then is checked: a missed bound is
 // a finding, never a number to record and pass.
-//   firstSyncMs  open → the replica synced, the host loading the document from SQLite (a fresh app over the profile, so
-//                nothing of it is in memory), the worst of three cold trials; bound < 150 ms.
+//   firstSyncMs  open → the replica synced, the host loading the document from SQLite (a fresh app, `mawsd` and engine
+//                host over the profile, so nothing of it is in memory), the worst of three cold trials; bound < 150 ms.
 //   ackP95Ms     a keystroke (one edit of the open 1 MB document) → the ack that says it is durable, p95 over 500
 //                keystrokes at S2's human pace (60 to 180 ms apart), the store's `synchronous = FULL` and `fullfsync = ON`
 //                (migrations.ts); bound < 10 ms.
 //   ackedLost    acknowledged keystrokes missing after a host SIGKILL mid-typing, summed over three kills; bound 0.
 const PERF_BOUNDS = { firstSyncMs: 150, ackP95Ms: 10, ackedLost: 0 } as const;
-// P5 O3-B: the bounds are utility mode's, whose host ends with its app (so each relaunch's first sync is cold) and is
-// restarted by main after a SIGKILL; on the daemon shape the host outlives the app and is `mawsd`'s
-const PERF_ENV = { MAWS_HOST_MODE: 'utility' };
+// P5 O15 M1 (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md): the bounds were utility mode's, whose host
+// ended with its app; on the daemon shape the engine host is `mawsd`'s and outlives the app, so each cold trial and each
+// kill run ends the profile's `mawsd` and hosts with the app (the launch's cleanup, which keeps a given profile) before
+// the next launch, and a SIGKILLed engine host is restarted by `mawsd`. The bounds are unchanged.
+const PERF_ENV = { MAWS_HOST_MODE: 'daemon' };
 const load = () => loadavg().map((value) => Math.round(value * 100) / 100);
 function recordBound(bound: keyof typeof PERF_BOUNDS, value: number, detail: Record<string, unknown>): void {
   const limit = PERF_BOUNDS[bound];
   const pass = bound === 'ackedLost' ? value <= limit : value < limit;
   const dir = test.info().project.outputDir;
   mkdirSync(dir, { recursive: true });
-  appendFileSync(join(dir, 'artifacts-perf.jsonl'), `${JSON.stringify({ bound, value, limit, pass, mode: 'utility', at: new Date().toISOString(), ...detail })}\n`);
+  appendFileSync(join(dir, 'artifacts-perf.jsonl'), `${JSON.stringify({ bound, value, limit, pass, mode: 'daemon', at: new Date().toISOString(), ...detail })}\n`);
 }
 const round = (ms: number) => Math.round(ms * 100) / 100;
 const percentile = (values: number[], p: number) => [...values].sort((x, y) => x - y)[Math.ceil((p / 100) * values.length) - 1];
@@ -439,10 +441,11 @@ test('S2’s numbers in the product: first sync of a 1 MB document, keystroke to
   const quiet = await quietWait();
   console.log(`[artifacts perf] the first trial's admission: ${quiet.summary}`);
 
-  // First sync, cold: a fresh app over the profile each trial, the window's first open of the document.
+  // First sync, cold: a fresh app, `mawsd` and engine host over the profile each trial, the window's first open of the
+  // document.
   const trials: { ms: number; load: number[] }[] = [];
   for (let trial = 0; trial < 3; trial++) {
-    await launch.app.close();
+    await launch.cleanup();
     launch = await launchMaws({ userData: profile, env: PERF_ENV });
     await seamReady(launch.page);
     await hostReady(launch.page);
@@ -468,11 +471,11 @@ test('S2’s numbers in the product: first sync of a 1 MB document, keystroke to
   const ackP95Ms = round(percentile(latencies, 95));
   recordBound('ackP95Ms', ackP95Ms, { edits: latencies.length, p50: round(percentile(latencies, 50)), max: round(Math.max(...latencies)), load: [loadBefore, load()] });
 
-  // Three host SIGKILLs mid-typing, each in a fresh app (main stops restarting a host that dies three times within 60 s):
-  // every acknowledged keystroke is in the document the restarted host serves.
+  // Three host SIGKILLs mid-typing, each in a fresh app and `mawsd` (a host supervisor stops restarting a host that dies
+  // three times within 60 s): every acknowledged keystroke is in the document the restarted host serves.
   const kills: { typed: number; acked: number; lost: number; load: number[] }[] = [];
   for (let run = 1; run <= 3; run++) {
-    await launch.app.close();
+    await launch.cleanup();
     launch = await launchMaws({ userData: profile, env: PERF_ENV });
     const { page } = launch;
     await seamReady(page);
@@ -487,7 +490,10 @@ test('S2’s numbers in the product: first sync of a 1 MB document, keystroke to
     // What the typer was told is durable, and nothing more: it is closed at once, so it re-sends nothing after the restart.
     const { typed, acked } = await seam.stopTyping(killed);
     await seam.close(killed);
-    await expect.poll(async () => (await ok<{ state: string; pid: number | null }>(page, 'engine.hostState')).pid, { timeout: 20_000, message: 'the host restarts' }).not.toBe(pid);
+    await expect.poll(async () => {
+      const status = await ok<HostStatus>(page, 'host.status');
+      return status.state === 'ready' && status.supervisor !== null && status.supervisor.pid !== pid;
+    }, { timeout: 20_000, message: 'mawsd restarts the host' }).toBe(true);
     await hostReady(page);
     const fresh = await seam.open(artifact.id);
     const text = (await seam.json(fresh)).text;

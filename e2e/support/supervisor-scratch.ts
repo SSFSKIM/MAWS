@@ -4,10 +4,12 @@
 // true})`), and every supervisor it starts is killed and its files removed in the case's cleanup, whatever happened.
 // A launch may run another checkout's built app on the same profile (`root`, launch.ts), so a case can keep a session on
 // one build's supervisor and attach another build's app to it.
-// P5 O2 M7 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md): under `MAWS_HOST_MODE=daemon` (`e2e:supervisor-daemon`)
-// every launch runs on the daemon shape: main reaches the engine host through a private `mawsd` on the profile, whose
-// lock and sockets are under `<profile>/mawsd/`; the engine host keeps the supervisor's files. `ready` then waits for
-// main to know the daemon too, and every `mawsd` the case saw is killed with the supervisors.
+// P5 O2 M7 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md): a launch runs on the daemon shape: main reaches the
+// engine host through a private `mawsd` on the profile, whose lock and sockets are under `<profile>/mawsd/`; the engine
+// host keeps the supervisor's files. `ready` waits for main to know the daemon too, and every `mawsd` the case saw is
+// killed with the supervisors. P5 O15 M1 (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md): the daemon shape
+// is the default whatever the runner's env says, the embedded shape no suite's to launch; a launch's `env` may still
+// name another mode, as e2e/cross-build.spec.ts does for a peer build that predates the daemon shape.
 // P5 O16 M2b (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md; D28, D31): a case that calls `useStub` runs its
 // sessions on the stub engine, a real process each under a real session host, instead of the in-process replay:
 // every launch of the app names the stub (MAWS_E2E_ENGINE_BIN), and `launchSession` (and so `startTurn`) launches live
@@ -64,13 +66,11 @@ export function tailFixture(dir: string): string {
 
 export interface Lock { pid: number; procStart: string; socketPath: string; buildId: string }
 
-// The shape the suite runs on: the daemon's under `e2e:supervisor-daemon`, else the embedded shape's detached supervisor.
-export const HOST_MODE = process.env.MAWS_HOST_MODE === 'daemon' ? 'daemon' : 'detached';
-export const DAEMON = HOST_MODE === 'daemon';
-// The quit guard's line for a quit that leaves one session running mid-turn (`parts`, the report's words): a keep the
-// embedded shape asks and the case answers; on the daemon shape nothing is asked, the sessions outliving the app (P5
-// O3-D, Q1)
-export const keptQuitLine = (parts = '1 mid-turn') => (DAEMON ? `quit-guard: ${parts}, not asked: they outlive the app` : `quit-guard: ${parts}, auto-answered keep, 1 session kept`);
+// The shape a launch runs on unless its `env` says otherwise (P5 O15 M1).
+export const HOST_MODE = 'daemon';
+// The quit guard's line for a quit that leaves one session running mid-turn (`parts`, the report's words): nothing is
+// asked, the sessions outliving the app (P5 O3-D, Q1)
+export const keptQuitLine = (parts = '1 mid-turn') => `quit-guard: ${parts}, not asked: they outlive the app`;
 export interface JournalRow { seq: number; direction: string; at: string; frame: Record<string, unknown> }
 export const isRequestRow = (r: JournalRow) => r.direction === 'in' && (r.frame.request as { subtype?: string } | undefined)?.subtype === 'can_use_tool';
 export const isTaskFailureRow = (r: JournalRow) => r.direction === 'in' && r.frame.type === 'system' && r.frame.subtype === 'task_notification';
@@ -252,15 +252,16 @@ export class Scratch {
     return run;
   }
 
-  // The connected supervisor as main reports it, once main is ready with one (on the daemon shape, and knows the daemon).
+  // The connected supervisor as main reports it, once main is ready with one (and, on the daemon shape, knows the daemon:
+  // an app on another mode is a peer build's, e2e/cross-build.spec.ts).
   async ready(page: Page, match: (s: HostStatus) => boolean = () => true, timeout = 30_000): Promise<HostStatus> {
     let status: HostStatus | null = null;
     await expect
       .poll(async () => {
         const answer = await invoke(page, 'host.status', undefined);
         status = answer.ok ? answer.value : null;
-        return status !== null && status.state === 'ready' && status.supervisor !== null && (!DAEMON || status.daemon !== null) && match(status);
-      }, { timeout, message: DAEMON ? 'main is connected to a supervisor through mawsd' : 'main is connected to a supervisor' })
+        return status !== null && status.state === 'ready' && status.supervisor !== null && (status.transport !== 'daemon' || status.daemon !== null) && match(status);
+      }, { timeout, message: 'main is connected to a supervisor' })
       .toBe(true);
     const s = status as unknown as HostStatus;
     this.supervisors.add(s.supervisor!.pid);

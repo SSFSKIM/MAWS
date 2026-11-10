@@ -107,6 +107,7 @@ describe('the spine and the checkouts composed under plain Node', () => {
     }
     for (const bridge of bridges) await bridge.close();
     vi.restoreAllMocks();
+    vi.unstubAllEnvs(); // P5 O15 M1: the engine environment's case stubs the process's
     rmSync(sminos, { recursive: true, force: true });
     dir.dispose();
   });
@@ -333,6 +334,55 @@ describe('the spine and the checkouts composed under plain Node', () => {
     expect(await bus.invoke('files.readResolved', { path: outside })).toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
     expect(await bus.main('files.readResolved', { path: outside })).toMatchObject({ ok: true, value: { content: 'a,b\n' } });
     expect(await bus.main('files.readResolved', { path: join(dir.path, 'gone.csv') })).toMatchObject({ ok: false, error: { message: `not found: ${join(dir.path, 'gone.csv')}` } });
+  });
+
+  // P5 O15 M1 (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md): what src/main/sessions/main-wiring.test.ts
+  // held of main's own session service, where the spine composes it now. An unstarted session's accepted additional
+  // directory is a checkout's directory before its first send, and leaves with the intent's patch.
+  it('admits an unstarted session’s additional directories to git.lsFiles before its first send, and revokes them when its intent changes', async () => {
+    const directory = realpathSync(mkdtempSync(join(dir.path, 'additional-')));
+    writeFileSync(join(directory, 'mention-me.txt'), 'hello');
+    const host = new FakeSpineHost();
+    const bus = fakeBus();
+    compose(await openSpineData(profile, { build: BUILD }), host, bus);
+    await host.ready();
+    const created = await bus.invoke('session.create', { projectId: null, location: { kind: 'directory', path: join(dir.path, 'home') } });
+    if (!created.ok) throw new Error(created.error.message);
+    const { appSessionId } = created.value;
+    expect(await bus.invoke('git.lsFiles', { directory, query: '', limit: 50 }), 'no session names it yet').toMatchObject({ ok: false });
+    expect(await bus.invoke('session.intent.patch', { appSessionId, patch: { additionalDirectories: [directory] } })).toMatchObject({ ok: true });
+    await vi.waitFor(async () => expect(await bus.invoke('git.lsFiles', { directory, query: '', limit: 50 })).toMatchObject({ ok: true, value: { paths: ['mention-me.txt'] } }));
+    expect(await bus.invoke('session.intent.patch', { appSessionId, patch: { additionalDirectories: [] } })).toMatchObject({ ok: true });
+    await vi.waitFor(async () => expect(await bus.invoke('git.lsFiles', { directory, query: '', limit: 50 })).toMatchObject({ ok: false, error: { message: expect.stringContaining('is not a directory of any session or project') } }));
+  });
+
+  // P5 O15 M1: Settings' engine defaults, the prompt history and scm's trust read the environment the engine runs in (the
+  // login shell's capture, `engineEnv`), never the process's own config home
+  it('reads the user’s engine defaults, the prompt history and scm’s trust from the engine’s captured environment, not the process’s', async () => {
+    vi.stubEnv('MAWS_GH', ''); // gh is looked up on the capture's PATH, which has none: no gh runs here
+    const shellConfig = join(dir.path, 'shell-config');
+    const processConfig = join(dir.path, 'process-config');
+    for (const config of [shellConfig, processConfig]) mkdirSync(config);
+    vi.stubEnv('CLAUDE_CONFIG_DIR', processConfig);
+    writeFileSync(join(shellConfig, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'plan' } }));
+    writeFileSync(join(shellConfig, 'history.jsonl'), `${JSON.stringify({ display: 'from login shell', timestamp: 1 })}\n`);
+    writeFileSync(join(processConfig, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'auto' } }));
+    const checkout = realpathSync(mkdtempSync(join(dir.path, 'checkout-')));
+    const seeded = new Index(join(profile, 'index.sqlite'));
+    const appSessionId = seeded.sessions.upsertFromSummary(summary({ directory: checkout })).record.appId;
+    seeded.close();
+    const host = new FakeSpineHost();
+    const bus = fakeBus();
+    compose(await openSpineData(profile, { build: BUILD }), host, bus, { engineEnv: Promise.resolve({ HOME: join(dir.path, 'home'), CLAUDE_CONFIG_DIR: shellConfig }) });
+    await host.ready();
+    expect(await bus.invoke('settings.userEngineDefaults', undefined)).toMatchObject({ ok: true, value: { defaultMode: 'plan' } });
+    const unstarted = '11111111-1111-4111-8111-111111111111' as AppSessionId; // no record yet: every project's rows
+    expect(await bus.invoke('session.history.list', { appSessionId: unstarted, limit: 10 })).toMatchObject({ ok: true, value: { entries: [{ display: 'from login shell', source: 'terminal' }] } });
+    const trusting = JSON.stringify({ projects: { [checkout]: { hasTrustDialogAccepted: true } } });
+    writeFileSync(join(processConfig, '.claude.json'), trusting); // the process's own config home: not the engine's
+    expect(await bus.invoke('scm.status', { appSessionId })).toMatchObject({ ok: true, value: { directory: checkout, repository: false, trusted: false, gh: { state: 'missing' } } });
+    writeFileSync(join(shellConfig, '.claude.json'), trusting);
+    expect(await bus.invoke('scm.status', { appSessionId })).toMatchObject({ ok: true, value: { trusted: true, trustKey: checkout } });
   });
 
   // P5 O3-E M2 (acceptance 4): the checkouts' acts run under the services' ledger: a replayed op id answers its stored

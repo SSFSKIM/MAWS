@@ -299,24 +299,24 @@ test('a MEASURED_E2E group is marked measured in its matrix entry, and gate.yml 
 // E2E_MINUTES: a group's own minutes replace its class's, the wait of its runner's start still added on top; a group not
 // on the list keeps its class's. A malformed entry refuses the plan whatever the run, as the other lists' checks do.
 test("an E2E_MINUTES group takes its own minutes before the wait is added, every other group its class's; a malformed entry refuses the plan", () => {
-  const lists = { MEASURED_E2E: 'daemon-idle-aba daemon-idle-enrolled', E2E_MINUTES: 'daemon-idle-aba=90 library=50' };
-  const { outputs } = plan({ ...lists, HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:daemon-idle-aba,e2e:daemon-idle-enrolled,e2e:library,e2e:side\nRunner: macos' });
-  assert.deepEqual(placement(outputs), { 'daemon-idle-aba': [homeMac, 100], 'daemon-idle-enrolled': [homeMac, 70], library: [mac, 60], side: [mac, 40] });
+  const lists = { MEASURED_E2E: 'daemon-idle-render daemon-idle-enrolled', E2E_MINUTES: 'daemon-idle-render=90 library=50' };
+  const { outputs } = plan({ ...lists, HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:daemon-idle-render,e2e:daemon-idle-enrolled,e2e:library,e2e:side\nRunner: macos' });
+  assert.deepEqual(placement(outputs), { 'daemon-idle-render': [homeMac, 100], 'daemon-idle-enrolled': [homeMac, 70], library: [mac, 60], side: [mac, 40] });
   assert.deepEqual(placement(plan({ ...lists, LINUX_E2E: 'library', HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:library\nRunner: linux' }).outputs), { library: ['ubuntu-24.04', 50] }); // off the Mac, no wait on top
   // The cap itself is accepted, the wait still added on top: 300 + the home Mac's 10.
-  assert.deepEqual(placement(plan({ MEASURED_E2E: 'daemon-idle-aba', E2E_MINUTES: 'daemon-idle-aba=300', HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:daemon-idle-aba\nRunner: macos' }).outputs), { 'daemon-idle-aba': [homeMac, 310] });
+  assert.deepEqual(placement(plan({ MEASURED_E2E: 'daemon-idle-render', E2E_MINUTES: 'daemon-idle-render=300', HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:daemon-idle-render\nRunner: macos' }).outputs), { 'daemon-idle-render': [homeMac, 310] });
   for (const [listed, said] of [
-    ['daemon-idle-aba', 'E2E_MINUTES: daemon-idle-aba is not <group>=<minutes>, a positive whole number of minutes'],
-    ['daemon-idle-aba=0', 'E2E_MINUTES: daemon-idle-aba=0 is not <group>=<minutes>, a positive whole number of minutes'],
-    ['daemon-idle-aba=1.5', 'E2E_MINUTES: daemon-idle-aba=1.5 is not <group>=<minutes>, a positive whole number of minutes'],
-    ['daemon-idle-aba=-90', 'E2E_MINUTES: daemon-idle-aba=-90 is not <group>=<minutes>, a positive whole number of minutes'],
-    ['daemon-idle-aba=90m', 'E2E_MINUTES: daemon-idle-aba=90m is not <group>=<minutes>, a positive whole number of minutes'],
+    ['daemon-idle-render', 'E2E_MINUTES: daemon-idle-render is not <group>=<minutes>, a positive whole number of minutes'],
+    ['daemon-idle-render=0', 'E2E_MINUTES: daemon-idle-render=0 is not <group>=<minutes>, a positive whole number of minutes'],
+    ['daemon-idle-render=1.5', 'E2E_MINUTES: daemon-idle-render=1.5 is not <group>=<minutes>, a positive whole number of minutes'],
+    ['daemon-idle-render=-90', 'E2E_MINUTES: daemon-idle-render=-90 is not <group>=<minutes>, a positive whole number of minutes'],
+    ['daemon-idle-render=90m', 'E2E_MINUTES: daemon-idle-render=90m is not <group>=<minutes>, a positive whole number of minutes'],
     ['=90', 'E2E_MINUTES: =90 is not <group>=<minutes>, a positive whole number of minutes'],
-    [`daemon-idle-aba=${'9'.repeat(309)}`, `E2E_MINUTES: daemon-idle-aba=${'9'.repeat(309)} is not <group>=<minutes>, a positive whole number of minutes, at most 300`], // Infinity, which JSON writes as null
-    ['daemon-idle-aba=301', 'E2E_MINUTES: daemon-idle-aba=301 is not <group>=<minutes>, a positive whole number of minutes, at most 300'],
+    [`daemon-idle-render=${'9'.repeat(309)}`, `E2E_MINUTES: daemon-idle-render=${'9'.repeat(309)} is not <group>=<minutes>, a positive whole number of minutes, at most 300`], // Infinity, which JSON writes as null
+    ['daemon-idle-render=301', 'E2E_MINUTES: daemon-idle-render=301 is not <group>=<minutes>, a positive whole number of minutes, at most 300'],
     ['no-such-group=90', 'E2E_MINUTES names no-such-group, which has no e2e:no-such-group script'],
   ]) {
-    for (const message of ['ci-gate: test\n\nGates: e2e:daemon-idle-aba\nRunner: macos', 'ci-gate: test\n\nGates: static\nClass1a: pool']) {
+    for (const message of ['ci-gate: test\n\nGates: e2e:daemon-idle-render\nRunner: macos', 'ci-gate: test\n\nGates: static\nClass1a: pool']) {
       const { status, stderr } = refusal({ ...lists, E2E_MINUTES: listed, HEAD_MESSAGE: message });
       assert.equal(status, 1, listed);
       assert.equal(stderr, `gate-plan: ${said}\n`, listed);
@@ -347,9 +347,9 @@ test("gate.yml's proven-VM groups run on Solo Mac, or the named VM lane alone; e
   // The mini's own placement, as with no group on HOSTED_MAC_E2E; the list's waiters are pinned by their own test below.
   const own = { ...Object.fromEntries(names.map((name) => [name, workflowList(workflow, name)])), HOSTED_MAC_E2E: '' };
   assert.equal(own.MAC_SHARED_E2E, '');
-  assert.equal(own.MAC_VM_E2E, 'document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations deliverables supervisor browser browser-comment browser-import agents c12 available design-systems browser-chrome composer layout delivery connectors-oauth artifacts browser-cua connectors connectors-direct');
+  assert.equal(own.MAC_VM_E2E, 'document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations deliverables browser browser-comment browser-import agents c12 available design-systems browser-chrome composer layout delivery connectors-oauth artifacts browser-cua connectors connectors-direct');
   const proven = ['document-app', 'widgets', 'to-human', 'transcript', 'panel', 'c7', 'code', 'scm', 'library', 'document', 'settings', 'tools', 'dashboard', 'side', 'presentations',
-    'deliverables', 'supervisor', 'browser', 'browser-comment', 'browser-import', 'agents', 'c12', 'available', 'design-systems', 'browser-chrome', 'composer', 'layout', 'delivery', 'connectors-oauth', 'artifacts', 'browser-cua', 'connectors', 'connectors-direct'];
+    'deliverables', 'browser', 'browser-comment', 'browser-import', 'agents', 'c12', 'available', 'design-systems', 'browser-chrome', 'composer', 'layout', 'delivery', 'connectors-oauth', 'artifacts', 'browser-cua', 'connectors', 'connectors-direct'];
   // The repository's variables as they stand, and the default set: class 1a on the pool, unit:darwin and every class-1
   // group on the Mac but desk-web.
   const { outputs, summary } = plan({ ...own, GATE_RUNNER: 'pool', GATE_E2E_RUNNER: 'macos', HEAD_MESSAGE: 'ci-gate: test' });
@@ -363,7 +363,7 @@ test("gate.yml's proven-VM groups run on Solo Mac, or the named VM lane alone; e
   assert.equal(outputs.unit_darwin_runner, JSON.stringify(mac));
   assert.deepEqual(JSON.parse(outputs.timeouts), { static: 30, unit: 30, probes: 30, unit_darwin: 40 });
   assert.doesNotMatch(summary, /Shared Mac|MAC_SHARED_E2E|MAC_VM_E2E|Lane/);
-  assert.match(summary, /\. Solo Mac \(the exclusive instance or the guest, whichever is free\): e2e:artifacts, e2e:library, e2e:side, e2e:tools, e2e:to-human, e2e:deliverables, e2e:panel, e2e:supervisor, e2e:browser, e2e:browser-comment, e2e:browser-import, e2e:settings, e2e:transcript, e2e:code, e2e:agents, e2e:widgets, e2e:c7, e2e:scm, e2e:c12, e2e:available, e2e:document, e2e:document-app, e2e:presentations, e2e:design-systems, e2e:browser-cua, e2e:browser-chrome, e2e:dashboard, e2e:connectors, e2e:connectors-direct, e2e:connectors-oauth, e2e:delivery\. Out\/ built on the pool \(e2e-build\) for the guest-eligible jobs: harness, plain\.\n$/);
+  assert.match(summary, /\. Solo Mac \(the exclusive instance or the guest, whichever is free\): e2e:artifacts, e2e:library, e2e:side, e2e:tools, e2e:to-human, e2e:deliverables, e2e:panel, e2e:browser, e2e:browser-comment, e2e:browser-import, e2e:settings, e2e:transcript, e2e:code, e2e:agents, e2e:widgets, e2e:c7, e2e:scm, e2e:c12, e2e:available, e2e:document, e2e:document-app, e2e:presentations, e2e:design-systems, e2e:browser-cua, e2e:browser-chrome, e2e:dashboard, e2e:connectors, e2e:connectors-direct, e2e:connectors-oauth, e2e:delivery\. Out\/ built on the pool \(e2e-build\) for the guest-eligible jobs: harness, plain\.\n$/);
   for (const [lane, guest] of [['vm', vmMac], ['vm-trial', vmTrialMac]]) {
     const laned = plan({ ...own, GATE_RUNNER: 'pool', GATE_E2E_RUNNER: 'macos', HEAD_MESSAGE: `ci-gate: test\n\nLane: ${lane}` });
     const expected = Object.fromEntries(groups.map(([group, where]) => [group, proven.includes(group) ? [guest, 65] : where]));
@@ -372,7 +372,7 @@ test("gate.yml's proven-VM groups run on Solo Mac, or the named VM lane alone; e
     assert.deepEqual(JSON.parse(laned.outputs.timeouts), JSON.parse(outputs.timeouts), lane);
     for (const job of ['static', 'unit', 'probes']) assert.equal(laned.outputs[`${job}_runner`], outputs[`${job}_runner`], `${lane} ${job}`);
     assert.doesNotMatch(laned.summary, /Shared Mac|Solo Mac/);
-    assert.match(laned.summary, new RegExp(`\\. Lane: ${lane}, on \\[${guest[0]}\\] alone: e2e:artifacts, e2e:library, e2e:side, e2e:tools, e2e:to-human, e2e:deliverables, e2e:panel, e2e:supervisor, e2e:browser, e2e:browser-comment, e2e:browser-import, e2e:settings, e2e:transcript, e2e:code, e2e:agents, e2e:widgets, e2e:c7, e2e:scm, e2e:c12, e2e:available, e2e:document, e2e:document-app, e2e:presentations, e2e:design-systems, e2e:browser-cua, e2e:browser-chrome, e2e:dashboard, e2e:connectors, e2e:connectors-direct, e2e:connectors-oauth, e2e:delivery\\. Out/ built on the pool \\(e2e-build\\) for the guest-eligible jobs: harness, plain\\.\\n$`), lane);
+    assert.match(laned.summary, new RegExp(`\\. Lane: ${lane}, on \\[${guest[0]}\\] alone: e2e:artifacts, e2e:library, e2e:side, e2e:tools, e2e:to-human, e2e:deliverables, e2e:panel, e2e:browser, e2e:browser-comment, e2e:browser-import, e2e:settings, e2e:transcript, e2e:code, e2e:agents, e2e:widgets, e2e:c7, e2e:scm, e2e:c12, e2e:available, e2e:document, e2e:document-app, e2e:presentations, e2e:design-systems, e2e:browser-cua, e2e:browser-chrome, e2e:dashboard, e2e:connectors, e2e:connectors-direct, e2e:connectors-oauth, e2e:delivery\\. Out/ built on the pool \\(e2e-build\\) for the guest-eligible jobs: harness, plain\\.\\n$`), lane);
   }
   // composer and layout, outside the class-1 set, take the guest's labels when a run names them.
   const named = { ...own, GATE_RUNNER: 'pool', GATE_E2E_RUNNER: 'macos' };
@@ -380,10 +380,9 @@ test("gate.yml's proven-VM groups run on Solo Mac, or the named VM lane alone; e
   assert.deepEqual(placement(plan({ ...named, HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:composer,e2e:layout\nLane: vm' }).outputs), { composer: [vmMac, 65], layout: [vmMac, 65] });
   // The measured groups, which only a run naming them takes; class 1a on the Mac carries the wait too.
   const measured = plan({ ...own, HEAD_MESSAGE: `ci-gate: test\n\nGates: ${own.MEASURED_E2E.split(/\s+/).filter((group) => !own.LIVE_E2E.includes(group)).map((group) => `e2e:${group}`).join(',')}\nRunner: macos\nClass1a: macos` }).outputs;
-  // daemon-idle-aba's three windows take its own 90 minutes (E2E_MINUTES), as daemon-idle-render's three (P5 O17 M7), the
-  // home Mac's wait on top.
-  assert.equal(own.E2E_MINUTES, 'daemon-idle-aba=90 daemon-idle-render=90 p1-live=45');
-  for (const [group, where] of Object.entries(placement(measured))) assert.deepEqual(where, [homeMac, group === 'daemon-idle-aba' || group === 'daemon-idle-render' ? 100 : UNBUILT_MEASURED.has(group) ? 55 : 70], group);
+  // daemon-idle-render's three windows take its own 90 minutes (E2E_MINUTES, P5 O17 M7), the home Mac's wait on top.
+  assert.equal(own.E2E_MINUTES, 'daemon-idle-render=90 p1-live=45');
+  for (const [group, where] of Object.entries(placement(measured))) assert.deepEqual(where, [homeMac, group === 'daemon-idle-render' ? 100 : UNBUILT_MEASURED.has(group) ? 55 : 70], group);
   assert.deepEqual(JSON.parse(measured.timeouts), { static: 40, unit: 40, probes: 40, unit_darwin: 40 });
   // A live run of every live group: all on the home Mac; p1-live, every sitting in one invocation, its own 45 minutes.
   const live = plan({ ...own, HEAD_MESSAGE: `ci-gate: test\n\nGates: ${own.LIVE_E2E.split(/\s+/).map((group) => `e2e:${group}`).join(',')}\nRunner: macos\nLive: yes` }).outputs;
@@ -613,12 +612,12 @@ test("gate.yml's proven-VM groups split into e2e_vm with just their build varian
   const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'POPPLER_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E', 'HOSTED_MAC_E2E', 'MAC_SECRET_E2E', 'MAC_HOME_E2E', 'LAUNCHD_E2E', 'E2E_MINUTES'];
   // The mini's own placement, as with no group on HOSTED_MAC_E2E; the list's waiters are pinned by their own test below.
   const own = { ...Object.fromEntries(names.map((name) => [name, workflowList(workflow, name)])), HOSTED_MAC_E2E: '' };
-  assert.equal(own.MAC_VM_E2E, 'document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations deliverables supervisor browser browser-comment browser-import agents c12 available design-systems browser-chrome composer layout delivery connectors-oauth artifacts browser-cua connectors connectors-direct');
+  assert.equal(own.MAC_VM_E2E, 'document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations deliverables browser browser-comment browser-import agents c12 available design-systems browser-chrome composer layout delivery connectors-oauth artifacts browser-cua connectors connectors-direct');
   const variants = {
     'document-app': 'plain', widgets: 'harness', 'to-human': 'harness', transcript: 'harness', panel: 'harness',
     c7: 'harness', code: 'harness', scm: 'plain', library: 'plain', document: 'harness',
     settings: 'harness', tools: 'harness', dashboard: 'plain', side: 'harness', presentations: 'plain',
-    deliverables: 'harness', supervisor: 'plain', browser: 'harness', 'browser-comment': 'harness', 'browser-import': 'harness',
+    deliverables: 'harness', browser: 'harness', 'browser-comment': 'harness', 'browser-import': 'harness',
     agents: 'harness', c12: 'plain', available: 'harness', 'design-systems': 'plain', 'browser-chrome': 'harness',
     composer: 'harness', layout: 'plain', delivery: 'plain', 'connectors-oauth': 'plain', artifacts: 'plain',
     'browser-cua': 'harness', connectors: 'plain', 'connectors-direct': 'plain',
@@ -629,7 +628,7 @@ test("gate.yml's proven-VM groups split into e2e_vm with just their build varian
   const linuxGroups = own.LINUX_E2E.split(/\s+/);
   const linuxGates = `Gates: static,unit,probes,${linuxGroups.map((group) => `e2e:${group}`).join(',')}\nRunner: linux`;
   const defaultHost = own.CLASS1_E2E.split(/\s+/).filter((group) => !(group in variants) && (group === 'default' ? 'e2e' : `e2e:${group}`) in scripts).map((group) => [group, undefined, own.POOL_E2E.split(/\s+/).includes(group) ? box : own.MAC_HOME_E2E.split(/\s+/).includes(group) ? homeMac : group === 'daemon-unit' ? ec2Mac : mac]);
-  const defaultGuests = ['artifacts', 'library', 'side', 'tools', 'to-human', 'deliverables', 'panel', 'supervisor', 'browser', 'browser-comment', 'browser-import', 'settings', 'transcript', 'code',
+  const defaultGuests = ['artifacts', 'library', 'side', 'tools', 'to-human', 'deliverables', 'panel', 'browser', 'browser-comment', 'browser-import', 'settings', 'transcript', 'code',
     'agents', 'widgets', 'c7', 'scm', 'c12', 'available', 'document', 'document-app', 'presentations', 'design-systems', 'browser-cua', 'browser-chrome', 'dashboard', 'connectors', 'connectors-direct', 'connectors-oauth', 'delivery'];
   const runs = [
     ['the default macOS set', 'ci-gate: test', defaultHost, defaultGuests, ['harness', 'plain'], 'true'],
@@ -1003,7 +1002,6 @@ const LIVENESS_BOUNDS = {
   },
   'e2e/c12-quit.spec.ts': {
     "expect(exitAt - started, 'no stop-all: the quit is the report and the exit').toBeLessThan(PROBE_BOUND_MS + 8_000);": 'the daemon shape\'s quit (P5 O3-D): the same probe and quit path as the embedded bound below, with nothing to stop',
-    'expect(exitAt - ended).toBeLessThan(10_000);': 'the quit\'s own 2 s re-read after the last busy thing ends, then the hosts\' stop',
     'expect(reportMs).toBeLessThan(PROBE_BOUND_MS);': 'the quit probe\'s own 2 s bound (C12 acceptance 8), a timer of the product\'s',
     'expect(exitAt - started).toBeLessThan(PROBE_BOUND_MS + 8_000); // the report, then the existing quit path (the hosts stop)': 'that probe and the existing quit path, with 8 s of margin',
   },
@@ -1041,9 +1039,6 @@ const LIVENESS_BOUNDS = {
   'e2e/dashboard-live-data.spec.ts': {
     "expect(Date.parse(scheduled.at) - Date.parse(last.at), 'the scheduled call within the schedule (and a margin)').toBeLessThanOrEqual(35_000);": 'the product\'s own 30 s schedule; and no gate job runs it (MAWS_DASHBOARD_LIVE_DATA, outside every list)',
     "expect(elapsed, 'answered within the operation’s deadline').toBeLessThan(CONNECTOR_OPERATION_DEADLINE_MS);": 'a cold spine\'s refresh against the product\'s own 180 s operation deadline (P5 O4 acceptance 3), a timer of the product\'s, which the call\'s own 200 s timeout outlasts; and no gate job runs it (MAWS_DASHBOARD_LIVE_DATA)',
-  },
-  'e2e/p1-live-keep-quit.spec.ts': {
-    "expect(relaunchMs, 'relaunched within 10 s').toBeLessThan(RELAUNCH_WITHIN_MS);": 'the test\'s own steps from the first app\'s exit to its relaunch (an A-15 read and the launch\'s setup, no wait), against 10 s inside the 45 s sleep the relaunch must land in (keep-quit-live, on the home Mac)',
   },
 };
 const TIME_WORD = /Date\.now\(\)|Date\.parse\(|performance\.now\(\)|\b\w*(?:Ms|MS|_MS)\b|\bms\b|\btimings?\b|\btimes\b|\belapsed\w*|\blatency\b|\bduration\b|\b[a-z]\w*At\b/;
@@ -1735,6 +1730,7 @@ test('the deferred peer matrix is wired to a hosted verdict job with action-read
 });
 
 // Captured from peer-check-once f85cc954b before direct routing: exact outputs, stdout and summary on all five lanes.
+// P5 O15 M1: re-captured with f85cc954b's planner over this package.json, the lists less the two groups O15 deleted.
 test('mirror keeps the pre-direct planner byte-identical with the captured admission lists', async () => {
   const { createHash } = await import('node:crypto');
   const { planOf } = await import('./gate-plan.mjs');
@@ -1931,7 +1927,7 @@ test('packaged workflow gives each shard its own bare command and report, and ru
     assert.equal(Function('matrix', 'format', `return (${name})`)(matrix, (template, value) => template.replace('{0}', value)), expectedName);
     assert.equal(artifact.replace(/\$\{\{ matrix\.slug \}\}/, matrix.slug), expectedArtifact);
     assert.equal(execFileSync('bash', ['-c', `pnpm() { printf '%s' "pnpm $*"; }; ${command}`], { env: { ...process.env, SHARD: matrix.shard }, encoding: 'utf8' }), expectedCommand);
-    for (const script of ['supervisor:packaged', 'supervisor-daemon:packaged', 'voice:packaged']) {
+    for (const script of ['supervisor-daemon:packaged', 'voice:packaged']) {
       const step = job.split(/\n {6}- /).find((chunk) => chunk.includes(`pnpm e2e:${script}`));
       const condition = /^if: \$\{\{ (.*?) \}\}/.exec(step)[1];
       const enabled = (built, cancelled) => Function('matrix', 'steps', 'cancelled', `return (${condition})`)(matrix, { build: { outcome: built } }, () => cancelled);

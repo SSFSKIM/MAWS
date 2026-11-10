@@ -6,6 +6,11 @@
 // peer the group runs nothing. Of the two builds the older is the one of the lower WIRE_MINOR (on a tie, the peer).
 //   (update)    the older app starts a kept session and quits with keep; the newer app attaches to its supervisor;
 //   (downgrade) the newer app keeps the session; the older one attaches.
+// P5 O15 M1 (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md): both apps run on the daemon shape there, the
+// crossing every swap makes: the attaching app meets the keeper's private `mawsd`, of the other build, and its build
+// check has it restart onto the attacher's (src/main/hosts/daemon.ts, watchDaemon), the kept engine host running on
+// under the new `mawsd`. A peer this build's `mawsd` and app do not cross with on that shape (one before O4, whose app
+// lists no `machine.connectors`: D11) runs on its embedded shape's detached supervisor, as the scenes below pin it.
 // In each, the attaching app's hello crosses the minor (host.log names the app's wire, the app's main the supervisor's),
 // the app is served as another build (`matches: 'build'`, the update banner, exit-when-idle armed), the kept session's
 // tail reaches its main (the background failure journaled while no app ran raises the Needs-you item only main's live
@@ -240,8 +245,13 @@ const DROPPED = /dropped \S+ from .*, a field this build does not know|dropped e
 type Shape = 'detached' | 'daemon';
 interface Shapes { keeper: Shape; attacher: Shape }
 const DAEMON_SHAPE_MINOR = 5; // P5 O2's wire minor: a build at or past it knows the daemon shape, and leaves it on purpose
-const EMBEDDED: Shapes = { keeper: 'detached', attacher: 'detached' };
+// P5 O15 M1: the shape a build's app runs in (update) and (downgrade): this build's the daemon's; the peer's the daemon's
+// too when its app crosses with this build's `mawsd` there (it lists `machine.connectors`, D11), else its embedded one
+const shapeFor = (build: Build): Shape => (build.root === undefined || appObeysConnectors(build) ? 'daemon' : 'detached');
+const shapesOf = (keeper: Build, attacher: Build): Shapes => ({ keeper: shapeFor(keeper), attacher: shapeFor(attacher) });
 const onShape = (shape: Shape) => (st: HostStatus) => shape === 'detached' || st.daemon !== null; // the daemon shape's main also knows its mawsd
+// P5 O15 M1: and the attacher's on its own `mawsd`, not the keeper's it met first and had restart (`keeperDaemon`)
+const onOwnShape = (shape: Shape, keeperDaemon: number | null) => (st: HostStatus) => onShape(shape)(st) && (shape === 'detached' || st.daemon!.pid !== keeperDaemon);
 // P5 O3-D M6: whether a build's engine host serves `host.attachment` (its manifest's capabilities, the union its peers
 // list), so a post-D `mawsd` keeps one permanent connection to it rather than O2's per attachment
 const hostsAttachment = (build: Build) => build.manifest.capabilities.includes('host.attachment');
@@ -281,6 +291,9 @@ function welcomedWith(daemonLog: string, hostPid: number): string[] | null {
   const listed = line === undefined ? null : /capabilities \[([^\]]*)\]/.exec(line);
   return listed ? listed[1]!.split(', ').filter(Boolean) : null;
 }
+// P5 O15 M1: what an app's build check logs as it asks a private `mawsd` of another build to restart (src/main/hosts/daemon.ts,
+// watchDaemon; the same words at the merge-base peer)
+const restartAsked = (daemonPid: number) => new RegExp(`\\[hosts\\] mawsd pid ${daemonPid} runs build \\S+, this app's is \\S+; asking it to restart`);
 const recyclesTo = (daemonLog: string, hostPid: number) => daemonLog.split('\n').filter((l) => l.includes(`recycling the connection to pid ${hostPid}`)).length;
 
 // P5 O4 M4: what a scene adds to a crossing, each answering the lines it records: `keeperReady`, once the keeper's app
@@ -295,7 +308,7 @@ interface CrossingSteps {
   attacherMoved?(run: Run): Promise<string[]>;
 }
 
-async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer: Build; older: Build } | null, shapes: Shapes = EMBEDDED, steps: CrossingSteps = {}): Promise<string[]> {
+async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer: Build; older: Build } | null, shapes: Shapes, steps: CrossingSteps = {}): Promise<string[]> {
   if (holds(keeper) && holds(attacher)) return handedOverCrossing(s, keeper, attacher, shapes, steps); // P5 O16 M3c
   const shapeOf = (shape: Shape) => (shape === 'daemon' ? ' on the daemon shape' : '');
   const said: string[] = [`${keeper.label} (wire ${wireOf(keeper)})${shapeOf(shapes.keeper)} keeps a session; ${attacher.label} (wire ${wireOf(attacher)})${shapeOf(shapes.attacher)} attaches`];
@@ -330,7 +343,7 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   const attach = () => s.launch({ MAWS_HOST_MODE: shapes.attacher, MAWS_E2E_SUPERVISOR_IDLE_MS: String(idleMs), ...(legacyRoute !== null && { MAWS_E2E_REPLAY_FIXTURES: legacyRoute }), ...steps.env }, attacher.root);
   let second = await attach();
   const attacherRuns: Run[] = [second]; // P5 O3-D M6: the attacher's launches (acceptance 9 quits and reattaches it)
-  const served = await s.ready(second.page, (st) => st.supervisor!.exitWhenIdle && onShape(shapes.attacher)(st));
+  const served = await s.ready(second.page, (st) => st.supervisor!.exitWhenIdle && onOwnShape(shapes.attacher, keeperDaemon)(st));
   expect(served, `${attacher.label} served by ${keeper.label}'s supervisor`).toMatchObject({ matches: 'build', supervisor: { pid: kept.pid, buildId: kept.buildId, liveSessions: 1, exitWhenIdle: true } });
   const build = served.appBuildId;
   expect(build, 'two builds').not.toBe(kept.buildId);
@@ -345,13 +358,18 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   if (attacherDaemon !== null) expect(s.daemonLog(), "mawsd's log: the upstream's welcome, at the supervisor's minor").toContain(welcome);
   said.push(`  hello: ${hello}…`, `  welcome: ${welcome}…`);
   if (keeperDaemon !== null) {
-    // How the keeper's `mawsd` goes depends on the attacher's build. One that knows the daemon shape (P5 O2, wire minor 5)
-    // leaves it on purpose: launched embedded on a profile with a `mawsd`, it ends that `mawsd` before its own hosts start
-    // (src/main/hosts/daemon.ts, prepareShape and leaveDaemonShape), and the kept engine host runs on. One from before
-    // O2 takes the engine host from the `mawsd`, which stops reaching it and exits 0 (residue 38).
+    // How the keeper's `mawsd` goes depends on the attacher's build and shape. On the daemon shape (P5 O15 M1) its build
+    // check asks that `mawsd`, of another build, to restart, and its own serves the kept engine host. One that knows the
+    // daemon shape (P5 O2, wire minor 5) launched embedded leaves it on purpose: on a profile with a `mawsd`, it ends that
+    // `mawsd` before its own hosts start (src/main/hosts/daemon.ts, prepareShape and leaveDaemonShape), and the kept
+    // engine host runs on. One from before O2 takes the engine host from the `mawsd`, which stops reaching it and exits 0
+    // (residue 38).
     const leaves = attacher.manifest.minor >= DAEMON_SHAPE_MINOR;
     await expect.poll(() => isAlive(keeperDaemon), { timeout: 15_000, message: 'the keeper’s mawsd exits once the engine host is taken' }).toBe(false);
-    if (leaves) {
+    if (shapes.attacher === 'daemon') {
+      expect(second.output(), `${attacher.label}'s main asks the keeper's mawsd, of another build, to restart`).toMatch(restartAsked(keeperDaemon));
+      said.push(`  mawsd pid ${keeperDaemon} exited: ${attacher.label}'s app had it restart onto its own build, pid ${attacherDaemon}`);
+    } else if (leaves) {
       expect(second.output(), `${attacher.label}'s main ends the profile's mawsd as it leaves the daemon shape`).toContain(`[hosts] ending mawsd, pid ${keeperDaemon}, as the profile leaves the daemon shape`);
       expect(s.daemonLog(), 'mawsd says why it left').toContain('exiting (signal)');
       said.push(`  mawsd pid ${keeperDaemon} exited: ${attacher.label}'s app ended it, leaving the daemon shape`);
@@ -508,7 +526,7 @@ async function handedOverCrossing(s: Scratch, keeper: Build, attacher: Build, sh
   const attach = () => s.launch({ MAWS_HOST_MODE: shapes.attacher, MAWS_E2E_SUPERVISOR_IDLE_MS: String(shapes.attacher === 'daemon' ? REATTACH_IDLE_MS : IDLE_MS), ...steps.env }, attacher.root);
   let second = await attach();
   const attacherRuns: Run[] = [second];
-  const served = await s.ready(second.page, (st) => st.supervisor!.pid !== kept.pid && onShape(shapes.attacher)(st), 90_000);
+  const served = await s.ready(second.page, (st) => st.supervisor!.pid !== kept.pid && onOwnShape(shapes.attacher, keeperDaemon)(st), 90_000);
   const build = served.appBuildId;
   expect(build, 'two builds').not.toBe(kept.buildId);
   expect(served, `${attacher.label} on a supervisor of its own build at once`).toMatchObject({ matches: 'same', supervisor: { buildId: build, exitWhenIdle: false } });
@@ -520,7 +538,8 @@ async function handedOverCrossing(s: Scratch, keeper: Build, attacher: Build, sh
   await expect(banner(second.page, 'MAWS was updated.'), 'no banner: the kept host hands over, never waits for idle (P5 O16 M3c fix wave 2: served at most until its first quiet status)').toHaveCount(0);
   if (keeperDaemon !== null) {
     await expect.poll(() => isAlive(keeperDaemon), { timeout: 15_000, message: 'the keeper’s mawsd exits once the engine host is taken' }).toBe(false);
-    expect(second.output(), `${attacher.label}'s main ends the profile's mawsd as it leaves the daemon shape`).toContain(`[hosts] ending mawsd, pid ${keeperDaemon}, as the profile leaves the daemon shape`);
+    if (shapes.attacher === 'daemon') expect(second.output(), `${attacher.label}'s main asks the keeper's mawsd, of another build, to restart`).toMatch(restartAsked(keeperDaemon)); // P5 O15 M1
+    else expect(second.output(), `${attacher.label}'s main ends the profile's mawsd as it leaves the daemon shape`).toContain(`[hosts] ending mawsd, pid ${keeperDaemon}, as the profile leaves the daemon shape`);
   }
   await expect.poll(() => adoptedOf(second.page, id), { timeout: 60_000, message: 'the kept session adopted' }).toBe(true);
   expect((await statusOf(second.page, id)).pid, 'the same engine process').toBe(engine);
@@ -899,12 +918,12 @@ test.beforeEach(() => test.setTimeout(240_000));
 
 test('(update) the older build’s app keeps a session; the newer build’s app attaches across the minor, is served, launches, meets what the older lacks, and moves to its own supervisor', async () => {
   const { older, newer } = builds();
-  await withScratch('xb-update', async (s) => record(await crossing(s, older, newer, { newer, older })));
+  await withScratch('xb-update', async (s) => record(await crossing(s, older, newer, { newer, older }, shapesOf(older, newer))));
 });
 
 test('(downgrade) the newer build’s app keeps a session; the older build’s app attaches across the minor, is served, launches, and moves to its own supervisor', async () => {
   const { older, newer } = builds();
-  await withScratch('xb-downgrade', async (s) => record(await crossing(s, newer, older, null)));
+  await withScratch('xb-downgrade', async (s) => record(await crossing(s, newer, older, null, shapesOf(newer, older))));
 });
 
 // P5 O4 M4 (acceptance 3's old-host rule at app level, acceptance 10): besides which engine host lists host.connectors

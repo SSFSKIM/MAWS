@@ -1,63 +1,37 @@
-// WR 76/78: the built app starts a real detached host over scratch files, with no engine/session. As in the
-// supervisor group's askWithNoApp, the test then replaces main with an authenticated socket client. One attachment
-// spans locate and send because source handles belong to that attachment. No production seam or allowlist changes.
+// WR 76/78: an HTTP connector's delivery completes with the app gone, no engine and no session. P5 O15 M1
+// (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md): on the daemon shape the profile's private `mawsd` is the
+// engine host's permanent client and delivery is the daemon's (O4), so the app quits and a second client of the
+// profile's machine.sock (as O4's no-app cases observe the machine) asks the engine host's route D through `mawsd`, which
+// forwards an engine host name raw: one machine.sock connection spans locate and send, because source handles belong to
+// the client that located them. The delivery service's own `delivery.deliver` is not the stand-in: its Notion host
+// allowlist admits no loopback fixture. No production seam or allowlist changes.
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { createConnection } from 'node:net';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type TestInfo } from '@playwright/test';
+import { daemonPaths } from '@shared/daemon/files';
 import type { CommandInput, CommandName, CommandOutput } from '@shared/ipc/schema';
-import { HostResponseSchema, type HostResponse } from '@shared/ipc/host-protocol';
-import { WIRE_MINOR } from '@shared/ipc/wire';
 import { validateCommandOutput } from '@shared/ipc/validate';
-import { SOCKET_PROTOCOL, splitLines } from '@shared/host/socket-protocol';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
+import { reachMachine } from '../../src/mawsd/machine-client';
 import { probeLayout, readLog, startHttpFixture } from './connector-direct-probe';
 import { shellQuoted } from './connector-direct-checks';
 import { invoke, value } from './connector-scene';
 import { launchMaws, type MawsLaunch } from './launch';
-import { killScratchProcesses } from './processes';
-import { tmpSocketDirOf } from './supervisor-socket';
+import { isAlive, killScratchProcesses } from './processes';
 
 const NOTION_TOOL = 'notion-create-pages';
-type Lock = { pid: number; socketPath: string; buildId: string };
 
-async function connectHost(userData: string, lock: Lock) {
-  const socket = createConnection(lock.socketPath);
-  const responses = new Map<string, HostResponse>();
-  const ended = new Set<string>();
-  let welcome: { liveSessions: number; rows: number } | null = null;
-  let fault: string | null = null;
-  const lines = splitLines((text) => {
-    const message = JSON.parse(text) as { t: string; name?: string; payload?: { operationId?: string }; liveSessions: number; rows: number; reason?: string };
-    if (message.t === 'welcome') welcome = message;
-    else if (message.t === 'refuse') fault = `supervisor refused the scratch client: ${message.reason}`;
-    else if (message.t === 'res') {
-      const response = HostResponseSchema.parse(message);
-      responses.set(response.id, response);
-    } else if (message.t === 'evt' && message.name === 'connectors.directOperation' && message.payload?.operationId) ended.add(message.payload.operationId);
-  }, () => { fault = 'supervisor line exceeded the protocol bound'; });
-  socket.on('data', (chunk: Buffer) => lines.push(chunk));
-  socket.on('error', (error) => { fault = error.message; });
-  socket.on('close', () => { fault ??= 'supervisor socket closed'; });
-  try {
-    await once(socket, 'connect');
-    const token = readFileSync(join(userData, 'supervisor', 'host.token'), 'utf8').trim();
-    socket.write(`${JSON.stringify({ t: 'hello', protocol: SOCKET_PROTOCOL, token, minor: WIRE_MINOR, build: lock.buildId, capabilities: [], appPid: process.pid })}\n`);
-    await expect.poll(() => { if (fault) throw new Error(fault); return welcome; }, { timeout: 10_000, message: 'the cold built host welcomes the scratch client' }).toMatchObject({ liveSessions: 0, rows: 0 });
-    socket.write(`${JSON.stringify({ t: 'ready' })}\n`);
-  } catch (error) {
-    socket.destroy();
-    throw error;
-  }
+// A client of the profile's machine.sock, with no app running: its requests, each validated as the app's would be, and
+// a direct operation's outcome taken once it has ended (`connectors.directTake` answers null while it runs)
+async function connectMachine(userData: string) {
+  const reached = await reachMachine(daemonPaths(userData), { build: 'e2e-cold-delivery' });
+  if (!reached.ok) throw new Error(`machine.sock: ${reached.state}: ${reached.why}`);
+  const { link } = reached;
   const request = async <N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandOutput<N>> => {
-    const id = randomUUID();
-    socket.write(`${JSON.stringify({ t: 'req', id, name, input })}\n`);
-    await expect.poll(() => { if (fault) throw new Error(fault); return responses.has(id); }, { timeout: 15_000, message: `${name} answers through the built host` }).toBe(true);
-    const answer = responses.get(id)!;
-    responses.delete(id);
-    if (!answer.ok) throw new Error(`${name} failed: ${answer.error.code}`);
+    const answer = await link.request(name, input, 15_000);
+    if (!answer.ok) throw new Error(`${name} failed: ${answer.error.code} ${answer.error.message}`);
     const checked = validateCommandOutput(name, answer.value);
     if (!checked.ok) throw new Error(`${name} returned an invalid output`);
     return checked.value as CommandOutput<N>;
@@ -65,33 +39,29 @@ async function connectHost(userData: string, lock: Lock) {
   return {
     request,
     async take(operationId: string) {
-      await expect.poll(() => { if (fault) throw new Error(fault); return ended.has(operationId); }, { timeout: 30_000, message: 'the real direct operation completes' }).toBe(true);
-      const { outcome } = await request('connectors.directTake', { operationId });
-      expect(outcome).not.toBeNull();
+      let outcome: CommandOutput<'connectors.directTake'>['outcome'] = null;
+      await expect.poll(async () => (outcome = (await request('connectors.directTake', { operationId })).outcome) !== null, { timeout: 30_000, message: 'the real direct operation completes' }).toBe(true);
       return outcome!;
     },
-    close: () => socket.destroy(),
+    close: () => link.close(),
   };
 }
 
 export async function coldHttpDelivery(info: TestInfo): Promise<void> {
   const layout = probeLayout();
   const userData = join(layout.scratch, 'app');
-  const lockFile = join(userData, 'supervisor', 'host.lock');
   const fixtures: Awaited<ReturnType<typeof startHttpFixture>>[] = [];
   let maws: MawsLaunch | null = null;
   let child: ReturnType<MawsLaunch['app']['process']> | null = null;
-  let client: Awaited<ReturnType<typeof connectHost>> | null = null;
-  let lock: Lock | null = null;
+  let client: Awaited<ReturnType<typeof connectMachine>> | null = null;
+  const pids: number[] = []; // `mawsd` and the engine host, which outlive the app
   mkdirSync(userData);
   try {
     const user = await startHttpFixture(layout, 'cold-user', { tools: [NOTION_TOOL] }); fixtures.push(user);
     const app = await startHttpFixture(layout, 'cold-app', { tools: [NOTION_TOOL] }); fixtures.push(app);
-    // P5 O3-B: the embedded shape's detached supervisor is what the scene takes over: its client is main alone, so the
-    // stand-in below attaches to the supervisor's own socket once main is gone (on the daemon shape `mawsd` is its client)
     maws = await launchMaws({
       userData,
-      env: { HOME: layout.home, SHELL: '/bin/zsh', MAWS_HARNESS: '0', MAWS_HOST_MODE: 'detached' },
+      env: { HOME: layout.home, SHELL: '/bin/zsh', MAWS_HARNESS: '0', MAWS_HOST_MODE: 'daemon' },
       prepare: ({ shellHome, claudeConfigDir }) => {
         // Inherited config home deliberately has no server: only the scratch login shell names the real user entry.
         writeFileSync(join(claudeConfigDir, '.claude.json'), JSON.stringify({ mcpServers: {} }));
@@ -105,15 +75,17 @@ export async function coldHttpDelivery(info: TestInfo): Promise<void> {
     const exited = once(child, 'exit');
     await expect.poll(async () => {
       const status = value(await invoke(maws!.page, 'host.status', undefined));
-      return status.state === 'ready' && status.supervisor?.pid ? status.supervisor.pid : 0;
-    }, { timeout: 30_000, message: 'the built app registers its real detached engine host' }).not.toBe(0);
-    lock = JSON.parse(readFileSync(lockFile, 'utf8')) as Lock;
+      if (status.state !== 'ready' || !status.supervisor?.pid || status.transport !== 'daemon' || status.daemon === null) return false;
+      pids.push(status.supervisor.pid, status.daemon.pid);
+      return true;
+    }, { timeout: 30_000, message: 'the built app reaches its real engine host through the profile\'s mawsd' }).toBe(true);
     expect(value(await invoke(maws.page, 'engine.sessions', undefined))).toEqual([]);
     const { artifact } = value(await invoke(maws.page, 'artifacts.create', { kind: 'document', title: 'Cold delivery fixture' }));
-    // Main's real client goes, clearing every observation and source handle; the fresh attachment below is cold.
-    child.kill('SIGKILL');
+    // The app quits; `mawsd` and its engine host outlive it, and the client below is a fresh one, with no source handle.
+    await maws.app.close();
     await exited;
-    client = await connectHost(userData, lock);
+    expect(pids.filter((pid) => !isAlive(pid)), 'mawsd and its engine host outlive the app').toEqual([]);
+    client = await connectMachine(userData);
     expect(await client.request('engine.sessions', undefined)).toEqual([]);
     const locating = randomUUID();
     await client.request('connectors.directLocate', { operationId: locating, tool: NOTION_TOOL, urlHosts: ['127.0.0.1'] });
@@ -143,14 +115,11 @@ export async function coldHttpDelivery(info: TestInfo): Promise<void> {
     for (const fixture of fixtures) fixture.close();
     if (child && child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
     try {
-      await maws?.cleanup().catch((error: unknown) => console.error(error));
-      if (!lock) {
-        try { lock = JSON.parse(readFileSync(lockFile, 'utf8')) as Lock; } catch { /* startup may have failed or the host already exited */ }
-      }
-      await killScratchProcesses(layout.scratch, lock ? [lock.pid] : []);
+      await maws?.cleanup().catch((error: unknown) => console.error(error)); // ends the profile's `mawsd` and hosts too
+      await killScratchProcesses(layout.scratch, pids);
     } finally {
-      const socketDir = lock && tmpSocketDirOf(userData, lock.socketPath);
-      if (socketDir) rmSync(socketDir, { recursive: true, force: true });
+      const { socketDir } = daemonPaths(userData); // `mawsd`'s sockets' $TMPDIR fallback, when they took it
+      if (!socketDir.startsWith(layout.scratch)) rmSync(socketDir, { recursive: true, force: true });
       layout.close();
     }
   }
