@@ -50,6 +50,12 @@ const PROMPT = [
 ].join('\n');
 
 const now = () => new Date().toISOString();
+/** A wait that can be called off, so a race it lost leaves no timer behind to hold the process open. */
+function wait(ms) {
+  let timer;
+  const done = new Promise((resolve) => (timer = setTimeout(resolve, ms)));
+  return { done, cancel: () => clearTimeout(timer) };
+}
 const tilde = (path) => (typeof path === 'string' && path.startsWith(homedir()) ? `~${path.slice(homedir().length)}` : String(path));
 const say = (line) => console.log(line);
 
@@ -226,7 +232,12 @@ const capabilityLine = (caps) =>
  */
 export async function endSession(link, app, start, { startMs = 30_000, settleMs = 30_000, everyMs = 2000, stopMs = 60_000, seenLive = false } = {}) {
   const PENDING = Symbol('pending');
-  const answered = start === null ? null : await Promise.race([Promise.resolve(start).then((v) => ({ v }), () => ({ failed: true })), sleep(startMs).then(() => PENDING)]);
+  let answered = null;
+  if (start !== null) {
+    const expiry = wait(startMs);
+    answered = await Promise.race([Promise.resolve(start).then((v) => ({ v }), () => ({ failed: true })), expiry.done.then(() => PENDING)]);
+    expiry.cancel();
+  }
   const said = [];
   let unread = false;
   let live = seenLive;
@@ -394,10 +405,13 @@ async function main(argv) {
   // An INT or TERM: the same bounded end of the session (a pending start's 30 s, a stop's 60 s, the watch's 30 s), then
   // a non-zero exit; before session.create answered there is no session to end.
   let stop = null;
+  let finished = null; // the run's own exit code, once its verdicts are printed
   const interrupted = async (signal) => {
+    if (finished !== null) process.exit(finished); // the run is over: its verdicts stand, printed once
     say(`${now()} ${signal}: ending the session`);
-    const bound = sleep(150_000).then(() => verdicts.push([false, 'the session’s end did not settle within 150 s: stop it by hand']));
-    await Promise.race([stop?.() ?? Promise.resolve(), bound]);
+    const bound = wait(150_000);
+    await Promise.race([stop?.() ?? Promise.resolve(), bound.done.then(() => verdicts.push([false, 'the session’s end did not settle within 150 s: stop it by hand']))]);
+    bound.cancel();
     verdicts.push([false, `interrupted by ${signal}`]);
     link.close();
     report();
@@ -413,7 +427,10 @@ async function main(argv) {
     link.close();
   }
   report();
-  if (verdicts.some(([ok]) => !ok)) process.exitCode = 1;
+  finished = verdicts.length > 0 && verdicts.every(([ok]) => ok) ? 0 : 1;
+  // Exit with the verdict once stdout has taken every line, whatever handle a host or a timer still holds.
+  await new Promise((done) => process.stdout.write('', done));
+  process.exit(finished);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {

@@ -77,6 +77,17 @@ describe('the row 10 script’s end of its session', () => {
     expect(ended).toMatchObject({ ok: false, why: 'end unconfirmed: the start answered starting and no launch was seen' });
   });
 
+  it('settles and leaves no timer behind once the start answered before its wait ran out', async () => {
+    const { endSession } = await load();
+    const m = machine({ startMs: 0, launchMs: 0 });
+    const timers = () => process.getActiveResourcesInfo().filter((r) => r === 'Timeout').length;
+    const start = m.link.request('session.start', {});
+    await sleep(10); // the fake's own launch timer has fired
+    const before = timers();
+    expect(await endSession(m.link, 'app-1', start, { startMs: 600_000, settleMs: 50, everyMs: 10, seenLive: true })).toMatchObject({ ok: true });
+    expect(timers()).toBe(before); // the start's 600 s wait, which lost its race, was called off
+  });
+
   it('never reads host_unavailable as ended', async () => {
     const { endSession } = await load();
     const m = machine({ startMs: 0, launchMs: 0, down: true });
