@@ -403,7 +403,7 @@ function recordingReport(): ReachReport & { checks: Array<{ item: string; check:
  * S on A1 and the run's machines, faked: S's policy as sminos keeps it (`access`, `shares`, `policyRev`), moved by the
  * session's own shell (narrowing) and by A's record acts, read back by A's `record.policy`; A1's listings to b1.
  */
-function fakeScene(o: { operator?: (change: Record<string, unknown>) => { rc: number; lines: string[] }; capabilities?: string[]; bAck?: (a: Act) => string; ignored?: (args: Record<string, unknown>) => boolean; ownEnded?: string } = {}) {
+function fakeScene(o: { operator?: (change: Record<string, unknown>) => { rc: number; lines: string[] }; capabilities?: string[]; bAck?: (a: Act) => string; ignored?: (args: Record<string, unknown>) => boolean; ownEnded?: string; ownSnapshot?: 'metadata' | 'unmarked'; ownRows?: 'malformed' | 'marked' } = {}) {
   const policy = { access: 'listed', shares: [] as Array<{ member: string; grade: string }>, policyRev: 3 };
   const shell: unknown[] = [];
   const operator: unknown[] = [];
@@ -442,15 +442,23 @@ function fakeScene(o: { operator?: (change: Record<string, unknown>) => { rc: nu
     outcome: (act) => ({ state: 'done', result: o.ignored?.(act.args) ? { changed: false, policyRev: policy.policyRev } : apply(Object.fromEntries(Object.entries(act.args).filter(([k]) => k !== 'session' && k !== 'appSessionId'))) }),
     answer: (name, input) => (name === 'record.policy' && input.session === SID ? { ok: true, output: { supported: true, policies: [{ session: SID, ...structuredClone(policy) }] } } : { ok: false, code: 'not-offered' }),
   });
-  const b1 = { scene: 'b1', vm, name: 'o18-b1-t', ref: 'ref-b1', owner: B };
+  // U's transcript on B1 holds what b1 sent it (its marker), as `count` reads it.
+  const b1 = { scene: 'b1', vm: { ...vm, laneA: { count: async () => 1 } }, name: 'o18-b1-t', ref: 'ref-b1', owner: B };
   const U = { label: 'U', session: UID, alias: 'u', launch: 'L-u', machine: b1 };
-  // B1's endpoint answers b1's full subscription to U with a snapshot of two rows, and a rows read on it in the stream.
+  let marker = '';
+  const markedRow = () => ({ uuid: 'r2', message: { content: marker } });
+  // B1's endpoint answers b1's full subscription to U with a snapshot of two rows (the newest b1's marker, unless
+  // `ownSnapshot` says otherwise), and a rows read on it in the stream (`ownRows`: one without a rows array, or the marker's).
   const b = fakeChannel({
-    ack: o.bAck,
+    ack: (a) => {
+      if (a.action === 'sminos.send' && a.session === UID) marker = String(a.args.text);
+      return o.bAck?.(a) ?? 'accepted';
+    },
     answer: (name, input, inbox) => {
       if (name === 'endpoint.listings') return { ok: true, output: { listings: policy.access === 'private' && !policy.shares.some((s) => s.member === B) ? [] : [listing()] } };
-      if (name === 'sminos.rows' && input.session === UID && input.before === 'r1') {
-        inbox.push({ t: 'ev', sub: input.sub, epoch: 'e', seq: 3, body: { kind: 'rows', body: { rows: [{ uuid: 'r0' }], more: false } } });
+      if (name === 'sminos.rows' && input.session === UID && (input.before === 'r1' || o.ownSnapshot === 'metadata')) {
+        const body = o.ownRows === 'malformed' ? {} : { rows: [o.ownRows === 'marked' ? markedRow() : { uuid: 'r0' }], more: false };
+        inbox.push({ t: 'ev', sub: input.sub, epoch: 'e', seq: 3, body: { kind: 'rows', body } });
         return { ok: true, output: { asked: true } };
       }
       return { ok: false, code: 'not-offered' };
@@ -459,7 +467,8 @@ function fakeScene(o: { operator?: (change: Record<string, unknown>) => { rc: nu
       if (m.t !== 'sub') return;
       if (o.ownEnded !== undefined || (m.session as { id: string }).id !== UID) return void inbox.push({ t: 'ended', sub: m.sub, reason: o.ownEnded ?? 'grade' });
       inbox.push({ t: 'subbed', sub: m.sub, mode: 'snapshot', epoch: 'e', seq: 2 });
-      const body = JSON.stringify({ kind: 'snapshot', body: { rows: [{ uuid: 'r2' }, { uuid: 'r1' }], more: true } });
+      const rows = o.ownSnapshot === 'metadata' ? undefined : [o.ownSnapshot === 'unmarked' ? { uuid: 'r2' } : markedRow(), { uuid: 'r1' }];
+      const body = JSON.stringify({ kind: 'snapshot', body: { ...(rows === undefined ? {} : { rows }), more: true } });
       inbox.push({ t: 'snap', sub: m.sub, epoch: 'e', seq: 2, page: 0, body: body.slice(0, 20) }, { t: 'snap', sub: m.sub, epoch: 'e', seq: 2, page: 1, last: true, body: body.slice(20) });
     },
   });
@@ -623,11 +632,12 @@ describe('the reach scenes on a build whose endpoint says `record` (P5 O8 M6b)',
       ['pass', 'at listed, shared with no one: b1’s converse and approve acts on S refused `grade`'],
       ['pass', 'the member’s own session U, in full over b1’s channel'],
     ]);
-    expect(report.checks.at(-1)!.detail).toBe('subbed snapshot, its snapshot 2 row(s); sminos.rows ok, 1 earlier row(s) in the stream');
+    expect(report.checks.at(-1)!.detail).toBe('subbed snapshot, its snapshot 2 row(s); sminos.rows ok, 1 earlier row(s) in the stream; b1’s marker came through the snapshot'.replace('’', "'"));
     expect(f.a.acts.map((a) => a.args.access)).toEqual(['private', 'listed', 'org-view', 'org-converse', 'listed']);
     expect(f.b.acts.map(({ action, session, context }) => ({ action, session, context }))).toEqual([
       { action: 'sminos.steer', session: SID, context: { lane: 'A', session: SID, launch: 'L-s' } },
       { action: 'sminos.decide', session: SID, context: { lane: 'A', session: SID, launch: 'L-s' } },
+      { action: 'sminos.send', session: UID, context: { lane: 'A', session: UID, launch: 'L-u' } },
     ]);
     expect(f.b.acts.every((a) => a.stepUp === undefined)).toBe(true);
   });
@@ -645,6 +655,20 @@ describe('the reach scenes on a build whose endpoint says `record` (P5 O8 M6b)',
     await itemVisibility(f.scene, report);
     expect(report.checks.at(-1)).toMatchObject({ status: 'fail', check: 'the member’s own session U, in full over b1’s channel', detail: 'the full subscription to U ended grade' });
     expect(f.opened.at(-1)).toBe(`b:ref-b1`);
+  });
+
+  it('the visibility item fails b1’s own read of U that carries no rows: a metadata-only snapshot, a rows page with no rows array', async () => {
+    const graded = (a: Act) => (a.action === 'sminos.steer' || a.action === 'sminos.decide' ? 'grade' : 'accepted');
+    const own = async (o: Parameters<typeof fakeScene>[0]) => {
+      const f = fakeScene({ bAck: graded, ...o });
+      const report = recordingReport();
+      await itemVisibility(f.scene, report);
+      return report.checks.at(-1)!;
+    };
+    expect(await own({ ownSnapshot: 'metadata', ownRows: 'malformed' })).toMatchObject({ status: 'fail', detail: 'U’s snapshot (snapshot) carries no rows'.replace('’', "'") });
+    expect(await own({ ownSnapshot: 'unmarked', ownRows: 'malformed' })).toMatchObject({ status: 'fail', detail: expect.stringMatching(/^sminos\.rows on U answered no rows array: \{\}$/) });
+    expect(await own({ ownSnapshot: 'unmarked' })).toMatchObject({ status: 'fail', detail: expect.stringMatching(/is in neither U's snapshot \(2 row\(s\)\) nor the rows page \(1\)$/) });
+    expect(await own({ ownSnapshot: 'unmarked', ownRows: 'marked' })).toMatchObject({ status: 'pass', detail: expect.stringMatching(/came through the rows page$/) });
   });
 
   it('the visibility item fails a level A’s act answered done but never set, as A’s record.policy reads it back', async () => {

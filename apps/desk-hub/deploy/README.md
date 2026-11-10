@@ -849,18 +849,20 @@ runs and two scripts beside them:
   runs": on the scene's one lane B session (started by whichever of items 9 and 2 asks first), the stub model's
   `o15-digest <tag>` raises a Bash permission, an allow under the card's digest with its `input_sha256` altered must be
   refused `digest-mismatch` with the request still pending, and a denial under the card's own digest then settles it.
-- Row 12b, `reach`'s `m6b-visibility`, "the member’s own session U, in full over b1’s channel": b1's `full`
-  subscription to U on B1 is answered `subbed` with its snapshot's rows, and `sminos.rows` on it is answered ok.
+- Row 12b, `reach`'s `m6b-visibility`, "the member’s own session U, in full over b1’s channel": b1 sends U a marker
+  (`sminos.send`); then b1's `full` subscription to U on B1 is answered `subbed` with its snapshot's rows, `sminos.rows`
+  on it is answered ok with a rows array, and the marker comes through the snapshot or that page.
 - Row 11c, `reach`'s item 2: the frame's owner label is matched as `, owned by <B's email>`, and "S’s stored line for U’s
   message carries `verified`, its owners naming B" reads A1's stored line through `vm/scene.sh events`, which keeps
   `verified` (the signer and owners sminos stored an arriving event with).
-- Row 10, `node vm/o15-tools.mjs <directory> [--title <name>]`, run on a production machine as its user against the
+- Row 10, `node vm/o15-tools.mjs <directory> [--title <name>]` in a directory already trusted there (`--list-trusted`
+  prints the trusted paths; the run trusts nothing), run on a production machine as its user against the
   unit's `mawsd` over machine.sock with no app on the session: one lane B session on the real model, named "O15 row 10
   dry run" by default and ended however the run ends, makes and screenshots an html artifact and exports a document as
   a PDF, with `session.capabilities` read before the start and after the turn; it answers only the `maws` artifact
   tools' asks, says no `machine.spine` and no `exit now`, and prints times, the model's id, the turns' counts, the
   capability record and PASS / FAIL lines, nothing of the transcript.
-- Row 15, `bash vm/o15-sockets.sh`, run on a machine as its user: every socket, directory and symlink under the profile
+- Row 15, `bash vm/o15-sockets.sh`, run on a machine as its user (a read that fails is `FAIL unread`, never PASS): every socket, directory and symlink under the profile
   with its type, mode and owner, and the listening TCP sockets of `mawsd` and its hosts by pid from the unit; it flags a
   socket not the user's, not 0600 or not in a 0700 directory, any symlink, and any listener but TCP 47830 on the
   tailnet's addresses, and reads, outside the profile, the X server's sockets and each Xvfb's `-auth` file (owner and

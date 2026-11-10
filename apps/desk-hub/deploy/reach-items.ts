@@ -1071,13 +1071,19 @@ export async function itemVisibility(scene: ReachScene, report: ReachReport): Pr
 }
 
 /**
- * B's own session U read in full over b1's channel to B1, as B's MAWS reads it: a `full` subscription answered `subbed`
- * with its snapshot's rows, then `sminos.rows` on that subscription (an earlier page, before the snapshot's oldest row)
- * answered ok, its rows in the stream.
+ * B's own session U read in full over b1's channel to B1, as B's MAWS reads it. b1 first sends U a marker of the run's
+ * (`sminos.send`, B's converse on its own session), and waits for it in U's transcript; then a `full` subscription must
+ * be answered `subbed` with a snapshot of rows, `sminos.rows` on that subscription (the page before the snapshot's oldest
+ * row) must be answered ok with a rows array in the stream, and the marker must come through one or the other.
  */
 async function ownSessionInFull(scene: ReachScene): Promise<string> {
   const U = scene.U;
+  if (U.launch === undefined) throw new Error('U has no launch the scene recorded');
+  const tok = token(scene, 'own');
   return withChannel(scene, 'b', scene.machines.b1, async (remote) => {
+    const sent = await laneAAck(remote, scene.machines.b1.ref, { session: U.session, launch: U.launch! }, 'sminos.send', { text: `hello ${tok}` });
+    if (sent !== 'accepted') throw new Error(`b1's sminos.send to U was answered ${sent}`);
+    await arrives(U, tok);
     const sub = `o18-own-${scene.tag}`;
     const from = remote.inbox.length;
     await remote.channel.send({ t: 'sub', sub, session: { lane: 'A', id: U.session }, view: 'full', cursor: null, credit: 4 << 20 });
@@ -1092,8 +1098,11 @@ async function ownSessionInFull(scene: ReachScene): Promise<string> {
     const read = await remote.call('sminos.rows', { session: U.session, sub, before: rows.at(-1), limit: 5 });
     if (!read.ok) throw new Error(`sminos.rows on U was refused ${read.code}`);
     const page = await remote.waitFor((m) => m.sub === sub && m.t === 'ev' && (m.body as PlaneMessage | undefined)?.kind === 'rows', 'the rows answer in the stream', asked, 30_000);
-    const more = ((page.body as PlaneMessage).body as { rows?: unknown } | undefined)?.rows;
-    return `subbed ${String(answer.mode)}, its snapshot ${rows.length} row(s); sminos.rows ok, ${Array.isArray(more) ? more.length : 0} earlier row(s) in the stream`;
+    const earlier = ((page.body as PlaneMessage).body as { rows?: unknown } | undefined)?.rows;
+    if (!Array.isArray(earlier)) throw new Error(`sminos.rows on U answered no rows array: ${JSON.stringify((page.body as PlaneMessage).body ?? null).slice(0, 120)}`);
+    const where = names(snapshot.body, tok) ? 'the snapshot' : names(earlier, tok) ? 'the rows page' : null;
+    if (where === null) throw new Error(`b1's marker ${tok}, in U's transcript, is in neither U's snapshot (${rows.length} row(s)) nor the rows page (${earlier.length})`);
+    return `subbed ${String(answer.mode)}, its snapshot ${rows.length} row(s); sminos.rows ok, ${earlier.length} earlier row(s) in the stream; b1's marker came through ${where}`;
   });
 }
 
