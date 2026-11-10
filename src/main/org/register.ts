@@ -213,6 +213,6 @@ export function registerProjectsHandlers(deps: {
   registry: Pick<ProjectRegistry, 'projects' | 'hold' | 'cancel'>;
 }): void {
   deps.register('org.projects', () => deps.registry.projects());
-  deps.register('org.removals.hold', (input) => deps.registry.hold(input));
+  deps.register('org.removals.hold', (input) => deps.registry.hold({ machine: input.machine as MachineRef, pid: input.pid })); // the schema's ref, validated at the boundary
   deps.register('org.removals.cancel', (input) => deps.registry.cancel(input));
 }

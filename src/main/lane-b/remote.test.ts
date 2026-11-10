@@ -1281,7 +1281,7 @@ describe('the project acts (the project registry)', () => {
     for (const [name, input] of guarded.slice(0, 5)) await l.cmd(name, input);
     await l.cmd('session.projects.addFolder', { directory: '/srv/a' });
     expect(l.link.acts.map((a) => a.request.requires)).toEqual([...guarded.slice(0, 5).map(() => 'rl2.project-acts'), undefined]);
-    l.link.answers.set('session.projects.resolve', () => new Promise(() => {}));
+    l.link.answers.set('session.projects.resolve', () => new Promise<never>(() => {}));
     const resolving = l.cmd('session.projects.resolve', { directory: '/srv/a' });
     await vi.waitFor(() => expect(l.link.calls.filter((c) => c.name === 'session.projects.resolve')).toHaveLength(1));
     l.link.lose();

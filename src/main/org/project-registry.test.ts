@@ -44,7 +44,11 @@ function fakeLink(initial: LinkState = 'down', capabilities: string[] = ['rl2.pr
   const link: RegistryLink = {
     state: () => state,
     onState: (listener) => (listeners.add(listener), () => void listeners.delete(listener)),
-    onCaps: (listener) => (capsListeners.add(listener as () => void), () => void capsListeners.delete(listener as () => void)),
+    onCaps: (listener) => {
+      const told = () => listener(null as never); // the registry reads no field of the caps, only that they came
+      capsListeners.add(told);
+      return () => void capsListeners.delete(told);
+    },
     onChannel: (listener) => (channelListeners.add(listener), () => void channelListeners.delete(listener)),
     peerCapabilities: () => (state === 'up' && channel ? capabilities : null),
     call: async (name) => (calls.push(name), answers.shift() ?? { ok: false, error: { code: 'offline' } }),

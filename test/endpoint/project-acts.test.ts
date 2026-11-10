@@ -347,12 +347,27 @@ describe('the project acts over the network', () => {
     it('a linked worktree’s row whose owning checkout’s `.smns` the asker cannot read: a link is refused `unresolved`, nothing changed', async () => {
       const { f, a, home, index } = await setup();
       await until(() => f.endpoint.registry.statements().possible, 'statements possible');
+      // every derivation the machine makes of a row (the new row's own, a refresh's, a retry's) goes through `deriveRow`:
+      // counted, so the file changes only once none is in flight and the last one answered (none waits to be retried)
+      const derive = index.statements.deriveRow.bind(index.statements);
+      let inFlight = 0;
+      let answered = true;
+      vi.spyOn(index.statements, 'deriveRow').mockImplementation(async (...args) => {
+        inFlight += 1;
+        try {
+          const out = await derive(...args);
+          answered = out !== null;
+          return out;
+        } finally {
+          inFlight -= 1;
+        }
+      });
       const { main, wt, pid, refresh } = await worktree(index, f, home);
       writeFileSync(join(main, '.smns'), JSON.stringify({ project: 'root-project', name: 'Root', hub: { org: ORG } }));
       await refresh();
-      // the machine's own derivations of the new row done before the file changes (they read as the machine, unguarded)
-      await until(() => index.projects.record(pid).org?.smnsId === 'root-project', 'the row derived');
-      for (let k = 0; k < 100; k++) await new Promise((resolve) => setImmediate(resolve));
+      // the machine's own derivations of the new row done before the file changes (they read as the machine, unguarded):
+      // the row's creation started one before the file was written, which a slow runner finishes after the refresh's
+      await until(() => index.projects.record(pid).org?.smnsId === 'root-project' && inFlight === 0 && answered, 'the row derived, no derivation in flight');
       mkdirSync(join(home, 'Desktop'), { recursive: true });
       writeFileSync(join(home, 'Desktop/private-smns'), JSON.stringify({ project: 'private-id', name: 'private label', hub: { org: ORG } }));
       rmSync(join(main, '.smns'));

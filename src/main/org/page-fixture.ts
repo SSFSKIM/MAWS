@@ -8,7 +8,7 @@
 // `interceptCommand`, so the real renderer draws what main would send; every act is answered without effect, so the
 // production session behind it stays untouched. Its status no longer reaches the renderer either: the fixture stops the
 // session's `org.changed` forwarding (`unpublish`), since even a profile never signed in publishes once its load ends
-// (org-session.ts's `changed(true)`), which would replace the seeded status. `org.rows`, M6b's `org.policy.get` (reads, without effect) and M7a's `org.channel.*` stay main's. Only a harness
+// (org-session.ts's `changed(true)`), which would replace the seeded status. `org.rows`, M6b's `org.policy.get`, the project registry's `org.projects` (reads, without effect) and M7a's `org.channel.*` stay main's; the registry's held removals are acts, answered without effect. Only a harness
 // build's main contains this module at all (index.ts's guard on `__MAWS_HARNESS_BUILD__`); a production launch never installs it.
 import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
@@ -45,7 +45,7 @@ export interface OrgPageFixtureInstall {
   unpublish(): void;
 }
 
-type FixtureCommand = Exclude<keyof typeof commands, 'org.rows' | 'org.policy.get' | `org.channel.${string}`>;
+type FixtureCommand = Exclude<keyof typeof commands, 'org.rows' | 'org.policy.get' | 'org.projects' | `org.channel.${string}`>;
 
 /** Null unless the fixture is asked for; throws, naming the file, when the schemas refuse it. Returns the uninstall. */
 export function installOrgPageFixture(deps: OrgPageFixtureInstall): (() => void) | null {
@@ -117,6 +117,8 @@ export function installOrgPageFixture(deps: OrgPageFixtureInstall): (() => void)
     'org.grants.regrant': () => grant,
     'org.policy.set': () => save,
     'org.owners.add': () => save,
+    'org.removals.hold': () => {}, // the project registry: nothing held, nothing sent
+    'org.removals.cancel': () => {},
   };
   const offs = (Object.keys(answers) as FixtureCommand[]).map((name) => deps.intercept(name, answers[name] as MainHandler<typeof name>));
   return () => offs.forEach((off) => off());
