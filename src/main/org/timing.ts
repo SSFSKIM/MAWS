@@ -73,6 +73,15 @@ export interface OrgTiming {
    * started this long ago, so the page's own re-reads don't ask the hub at each `org.changed`.
    */
   KEYS_FRESH_MS: number;
+  /**
+   * P5 O15 M2b §G (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md): the Registry feed and each Project
+   * socket send a protocol ping this often from their `open`, the period of mawsd's own heartbeat to the hub, so a dead
+   * socket is found within 20 s; a ping with no pong within HUB_PONG_MS drops it (the pongs took 8 to 64 ms on staging).
+   */
+  HUB_PING_MS: number;
+  HUB_PONG_MS: number;
+  /** An open made while the reach's window is open is given this long to be answered (wsSocket's 10 s otherwise). */
+  HUB_WINDOW_OPEN_MS: number;
 }
 
 export const ORG_TIMING: Readonly<OrgTiming> = Object.freeze({
@@ -108,6 +117,9 @@ export const ORG_TIMING: Readonly<OrgTiming> = Object.freeze({
   CHANNEL_MACHINE_ENTRIES: 500,
   CHANNEL_MACHINE_BYTES: 4 * 1024 * 1024,
   KEYS_FRESH_MS: 30_000,
+  HUB_PING_MS: 15_000,
+  HUB_PONG_MS: 5_000,
+  HUB_WINDOW_OPEN_MS: 2_000,
 });
 
 export const orgTiming = (overrides: Partial<OrgTiming> = {}): OrgTiming => ({ ...ORG_TIMING, ...overrides });

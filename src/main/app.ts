@@ -41,7 +41,7 @@ import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2
 import type { RemoteLink } from './machines/remote/link'; // P5 O8 M3: the deliveries' links
 import type { LocalAnswer } from './org/channel/machines'; // P5 O8 M7b
 import type { HostEntry } from '@shared/ipc/schema/channel'; // P5 O8 M7b
-import { powerMonitor } from 'electron'; // P5 O8 M1: the Registry feed reconnects at wake and unlock
+import { powerMonitor } from 'electron'; // P5 O15 M2b: the wake source's one listener to suspend, resume and unlock
 import { openExternalUrl } from './open-external'; // P5 O8 M1: the Access login's browser trip
 import { createOrgSession } from './org/org-session'; // P5 O8 M1
 import { openProvisioningSecret, PROVISIONING_SECRET_FILE } from './org/provisioning-secret-store'; // P5 O8 M4c
@@ -345,6 +345,12 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     gcloud: () => resolveGcloud({ loginPath: async () => (await engineEnv).PATH ?? null, home: app.getPath('home') }),
     log: (line) => console.log(`[org] ${line}`),
   });
+  // P5 O15 M2b (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md §D to §G): the wake source and the reach, made
+  // once for the profile and handed to the org session's project channels, the Registry feed and the machines' links;
+  // §I's seam tells a wake that did not happen, under MAWS_E2E=1 in a build that is not packaged
+  const wake = createWakeSource({ power: powerMonitor, log: (line) => console.log(line) });
+  const reach = createReach({ log: (line) => console.log(line) });
+  const removeWakeSeam = installWakeSeam(process.env, app.isPackaged, wake);
   // One handle on <userData>/org/ for the session and M2's rows cache; excluded from Time Machine at its creation
   const orgDir = orgFiles({ userData: app.getPath('userData'), excludeFromBackup: (path) => excludeFromBackup(path), log: (line) => console.log(`[org] ${line}`) });
   const orgSession =
@@ -360,6 +366,8 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
           // `<userData>/org/` stays out of Time Machine, as the device keys do: a restored token or chain is no one's
           excludeFromBackup: (path) => excludeFromBackup(path),
           local, // M4b: this Mac's own machine, which a drop refuses
+          wake, // P5 O15 M2b §G: each project channel's socket drops at a wake and waits on the hub's path in the window
+          reach,
           delegations: { secrets: provisioningCustody, destination: provisioningSecret }, // M4c: the create transaction's custody
           // M3: the app as the org's signer. Org states are signed with the device's step-up key behind Touch ID (the
           // key stays in step-up.ts); the weekly successor asks at a window's focus, and notifies once a day while no
@@ -407,13 +415,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
         })
       : null;
   const session = devOrg ?? orgSession!;
-  // P5 O15 M2b (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md §D to §F): the wake source and the reach, made
-  // once for the profile and handed to the machines' links (and, by Task 5, to the feed and the org session); §I's seam
-  // tells a wake that did not happen, under MAWS_E2E=1 in a build that is not packaged
-  const wake = createWakeSource({ power: powerMonitor, log: (line) => console.log(line) });
-  const reach = createReach({ log: (line) => console.log(line) });
-  const removeWakeSeam = installWakeSeam(process.env, app.isPackaged, wake);
-  const orgFeed = createRegistryFeed({ session, log: (line) => console.log(line) });
+  const orgFeed = createRegistryFeed({ session, wake, reach, log: (line) => console.log(line) }); // P5 O15 M2b §G: its wake, unlock and window
   orgSession?.attach(orgFeed);
   // P5 O8 M7a: the project channels (org/channel/), composed in the production session; org.channel.changed forwarded
   // for the app's life
@@ -437,8 +439,6 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     // (org/share-fixture.ts), and holds the production rows' org.rows.changed, which signed out would clear the seed
     installShareFixture({ env: process.env, packaged: app.isPackaged, intercept: interceptCommand, unpublish: unpublishOrgStatus, holdRows: () => void (rowsHeld = true) });
   }
-  powerMonitor.on('resume', () => orgFeed.probe());
-  powerMonitor.on('unlock-screen', () => orgFeed.probe());
   // P5 O6 M3: every other machine through the connection manager (one link per machine; MAWS_LOCAL_MACHINES names another
   // profile's serve directory in a build that is not packaged), and machines.list and machines.changed
   const relayOnly = relayOnlyDial(process.env, app.isPackaged);

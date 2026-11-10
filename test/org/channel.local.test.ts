@@ -134,7 +134,8 @@ function forgingSocket(url: string, headers: Record<string, string>): ReturnType
       else socket.on(event as 'open', listener as () => void);
     },
     send: (text: string) => socket.send(text),
-    close: () => socket.close(),
+    ping: () => socket.ping(),
+    terminate: () => socket.terminate(),
   } as ReturnType<typeof wsSocket>;
 }
 
