@@ -496,15 +496,16 @@ async function anchored(ctx: Context, needsSigner: boolean, { unsent = 'refuse' 
       } catch (error) {
         return refuse(`the hub answered ${response.status} to version ${n}, and its chain could not be read again (${error instanceof Error ? error.message : String(error)}): it stays pending in ${anchorFile(ctx.keysPath)}, and the next run settles it`);
       }
+      const at = now.head.state.version;
+      if (at > anchor.version) save({ ...anchor, version: at });
       const held = now.chain[n - 1];
       if (held !== undefined && canonicalize(held) === canonicalize(signed)) {
-        save(settled(anchor, now.head.state.version));
+        save(settled(anchor, at));
         ctx.io.out(`pending version ${n} is the hub's: adopted`);
         return;
       }
-      const at = now.head.state.version;
       if (at >= n) {
-        save({ ...anchor, pending: undefined, unsent: undefined, version: Math.max(anchor.version, at) });
+        save({ ...anchor, pending: undefined, unsent: undefined });
         const added = signed.state.delegations.filter((d) => !head.state.delegations.some((x) => x.id === d.id)).map((d) => d.id);
         refuse(
           `the hub's head moved to version ${at} before version ${n} landed: nothing landed, and nothing stays pending; ${
@@ -532,12 +533,14 @@ async function anchored(ctx: Context, needsSigner: boolean, { unsent = 'refuse' 
     // A verb may have waited on a person since it read the head (pair's device, a confirmation), while other writers
     // signed: the change is made again on the head as it is now, and `successorProblems` judges it against that head.
     const now = (await verifiedHead(person, anchor)).head;
+    // Kept before anything is judged on it: a refusal that follows (this device revoked meanwhile) never leaves the
+    // anchor at a version a hub serving the older chain could still pass.
+    if (now.state.version > anchor.version) save({ ...anchor, version: now.state.version });
     if (canonicalize(now) !== canonicalize(head)) {
       ctx.io.out(`the head moved from version ${head.state.version} to ${now.state.version} while waiting: signing on ${now.state.version}`);
+      head = now;
       const problem = await signerProblem(now.state, me.member.id, keys);
       if (problem) refuse(`${problem}: this device cannot sign its successors; nothing was signed`);
-      head = now;
-      if (head.state.version > anchor.version) save({ ...anchor, version: head.state.version });
     }
     const next = await successor(head.state, () => {});
     await edit(next);
@@ -557,6 +560,7 @@ async function anchored(ctx: Context, needsSigner: boolean, { unsent = 'refuse' 
     const before = head.state;
     await send(proposal);
     head = (await verifiedHead(person, anchor)).head;
+    if (head.state.version > anchor.version) save({ ...anchor, version: head.state.version });
     inEffect(proposal, before);
     return proposal;
   }
@@ -579,7 +583,10 @@ async function openAnchor(ctx: Context) {
   if (me.org !== anchor.org) refuse(`the deployment serves the org ${me.org}, not the anchor's ${anchor.org}`);
   const verified = await verifiedHead(person, anchor);
   ctx.io.out(ageLine(verified.head));
-  return { anchor, keys, person, me, verified };
+  // The newest version seen is kept before anything is decided on it (a pending proposal settled, a fork refused).
+  const seen = verified.head.state.version > anchor.version ? { ...anchor, version: verified.head.state.version } : anchor;
+  if (seen !== anchor) writeAnchor(ctx.keysPath, seen);
+  return { anchor: seen, keys, person, me, verified };
 }
 
 /** `run` under the anchor's lock: a lock another run holds is the command's refusal, naming its holder. */

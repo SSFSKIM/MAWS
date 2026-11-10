@@ -555,7 +555,9 @@ signs in through the stand-in instead, and only there may `--yes` answer its con
 Where it writes: the deployment's own org, under the anchor `<keys>.org.json` (`{hub, org, genesis, version, roots,
 recoveryPub, pending?}`, 0600, each write synced and renamed into place), which `genesis` or `adopt` writes; every
 other subcommand reads the chain from its genesis, verifies it against the anchor's pins, refuses another genesis or a
-head older than the anchor's version, and moves the version forward. Never a throwaway org.
+head older than the anchor's version, and moves the version forward: every read that verifies a newer head writes its
+version to the anchor before anything is decided on it, a refusal included (this device revoked while a verb waited),
+so a hub that later serves the older chain is refused. Never a throwaway org.
 
 No two successors of one parent: every successor this device signs (`refresh`, `pair`, `remove-device`, one path,
 `amend` in `admin.ts`) is written to the anchor's `pending` before its POST, and leaves it only once the hub took it.

@@ -932,19 +932,20 @@ describe('no two successors of one parent', () => {
     expect(anchor().pending).toBeUndefined();
   });
 
-  it("refuses `fork` when the hub's head is another successor of the pending proposal's parent, and changes nothing", async () => {
+  it("refuses `fork` when the hub's head is another successor of the pending proposal's parent, and changes nothing but the version seen", async () => {
     const admin = await readAdminKeys(keys);
     const parent = await head();
     const proposal = await signOrgState(await successor(parent.state, () => {}), [admin.stepUp]);
     const other = await signOrgState(await successor(parent.state, (s) => void s.projects.push({ id: 'p-other', name: 'other' })), [admin.stepUp]);
     expect((await hub.fetchAs(ADMIN, '/api/org/state', { body: other })).status).toBe(201);
     writeFileSync(anchorFile(keys), JSON.stringify({ ...anchor(), pending: proposal }), { mode: 0o600 });
-    const held = readFileSync(anchorFile(keys), 'utf8');
+    // The pending proposal stays as it was; the anchor records the head it saw (version 5), as every read does.
+    const held = JSON.stringify({ ...anchor(), version: 5 });
     for (const args of [['refresh'], ['devices'], ['remove-device', 'nothing', '--yes']]) {
       const f = fake();
       expect(await runAdmin([...args, ...via()], f.io), args[0]).toBe(1);
       expect(f.err.join('\n'), args[0]).toMatch(/fork: the hub holds version 5 .* where this device signed .*: nothing was signed/);
-      expect(readFileSync(anchorFile(keys), 'utf8')).toBe(held);
+      expect(JSON.stringify(anchor())).toBe(held);
       expect(canonicalize(await head())).toBe(canonicalize(other));
     }
   });
@@ -1002,6 +1003,108 @@ describe('no two successors of one parent', () => {
     expect((await head()).state.version).toBe(n);
     expect(anchor()).toMatchObject({ version: n });
     expect(anchor().pending).toBeUndefined();
+  });
+});
+
+describe('this device revoked while its verb waits', () => {
+  // A co-root revokes this admin device during a confirmation: the verb refuses, and the anchor keeps the version that
+  // showed it, so a hub serving the older chain afterward (`replay`, through the proxy) is refused, never signed on.
+  let hub: LocalHub;
+  let proxy: Server;
+  let proxyUrl: string;
+  /** Serve the chain only up to this version, its head that version's state, as a hub replaying an older chain. */
+  let replay: number | null = null;
+  const keys = join(scratch, 'revoked-keys', 'keys.json');
+  const via = (...extra: string[]) => ['--hub', proxyUrl, '--user', ADMIN, '--keys', keys, ...extra];
+  const head = async () => ((await hub.fetchAs(ADMIN, '/api/org/state').then((r) => r.json())) as { head: SignedOrgState }).head;
+  const anchor = () => JSON.parse(readFileSync(anchorFile(keys), 'utf8')) as { version: number; pending?: SignedOrgState };
+
+  beforeAll(async () => {
+    hub = await startLocalHub();
+    proxy = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk: Buffer) => chunks.push(chunk));
+      req.on('end', async () => {
+        const body = Buffer.concat(chunks);
+        const headers: Record<string, string> = {};
+        for (const name of ['x-desk-standin-user', 'content-type']) if (typeof req.headers[name] === 'string') headers[name] = req.headers[name] as string;
+        const upstream = await fetch(`${hub.url}${req.url}`, { method: req.method, headers, body: body.length ? body : undefined });
+        let answer = Buffer.from(await upstream.arrayBuffer());
+        if (replay !== null && req.method === 'GET' && req.url?.startsWith('/api/org/state')) {
+          const page = JSON.parse(answer.toString()) as { chain?: SignedOrgState[]; head: SignedOrgState; more?: boolean };
+          const all = ((await hub.fetchAs(ADMIN, '/api/org/state?since=0').then((r) => r.json())) as { chain: SignedOrgState[] }).chain;
+          const chain = (page.chain ?? []).filter((c) => c.state.version <= replay!);
+          answer = Buffer.from(JSON.stringify({ ...page, chain, head: all[replay - 1], more: false }));
+        }
+        res.writeHead(upstream.status, { 'content-type': upstream.headers.get('content-type') ?? 'application/json' });
+        res.end(answer);
+      });
+    });
+    await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
+    proxyUrl = `http://127.0.0.1:${(proxy.address() as { port: number }).port}`;
+    expect(await runAdmin(['init', '--keys', keys], fake().io)).toBe(0);
+    expect(await runAdmin(['genesis', '--recovery', join(dir('volume'), 'recovery.json'), ...via('--yes')], fake().io)).toBe(0);
+  });
+  afterAll(async () => {
+    await new Promise((resolve) => proxy?.close(resolve));
+    await hub?.close();
+  });
+
+  it('refuses to sign, records the version that revoked it, and then refuses a hub replaying the chain before it', async () => {
+    const admin = await readAdminKeys(keys);
+    // A co-root under the same member: a native-mac device endorsed by this admin device, its step-up key a root (v2).
+    const channel = await generateSigningKey();
+    const stepUp = await generateSigningKey();
+    const parent = (await head()).state;
+    const owner = parent.members[0];
+    const bare: Omit<Device, 'endorsement'> = { id: await keyId(channel.pub), class: 'native-mac', keyStorage: 'software', channelPub: channel.pub, stepUpPub: stepUp.pub };
+    const endorsement = await endorseDevice(ORG, owner.id, bare, admin.stepUp.privateKey, admin.stepUp.pub);
+    const coRootKid = await keyId(stepUp.pub);
+    const withCoRoot = await successor(parent, (s) => {
+      s.members[0].devices.push({ ...bare, endorsement });
+      s.root.keys.push(coRootKid);
+    });
+    expect((await hub.fetchAs(ADMIN, '/api/org/state', { body: await signOrgState(withCoRoot, [admin.stepUp]) })).status).toBe(201);
+
+    // keys retire waits at its confirmation, having read version 2.
+    let answer: (line: string) => void = () => {};
+    const f = fake([], { openTerminal: () => ({ write: (text) => void f.term.push(text), readLine: () => new Promise<string>((resolve) => (answer = resolve)) }) });
+    const running = runAdmin(['keys', 'retire', ...via()], f.io);
+    const deadline = Date.now() + 15_000;
+    while (!f.term.join('').endsWith('[y/N] ') && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+    expect(anchor().version).toBe(2);
+
+    // Meanwhile the co-root revokes this admin device (v3): its keys revoked, its step-up key out of the root set.
+    const was = (await head()).state;
+    const mine = was.members[0].devices.find((d) => d.id === admin.id)!;
+    const revoked = [
+      { keyId: await keyId(mine.channelPub), holder: { member: owner.id, device: mine.id, class: mine.class, key: 'channel' as const } },
+      { keyId: await keyId(mine.stepUpPub!), holder: { member: owner.id, device: mine.id, class: mine.class, key: 'step-up' as const } },
+    ];
+    const adminKid = await keyId(admin.stepUp.pub);
+    const revoking = await successor(was, (s) => {
+      s.members[0].devices = s.members[0].devices.filter((d) => d.id !== admin.id);
+      s.revoked.push(...revoked);
+      s.root.keys = s.root.keys.filter((k) => k !== adminKid);
+    });
+    const took = await hub.fetchAs(ADMIN, '/api/org/state', { body: await signOrgState(revoking, [stepUp]) });
+    expect(took.status, await took.clone().text()).toBe(201);
+
+    answer('y');
+    expect(await running).toBe(1);
+    expect(f.err.join('\n')).toMatch(new RegExp(`the head \\(version 3\\) does not list device ${admin.id} with these keys under .*: this device cannot sign its successors; nothing was signed`));
+    expect(anchor().version).toBe(3);
+    expect(anchor().pending).toBeUndefined();
+    expect((await head()).state.version).toBe(3);
+
+    // A hub replaying the chain up to version 2, where this device is still a root, is refused before anything.
+    replay = 2;
+    const replayed = fake(['y']);
+    expect(await runAdmin(['keys', 'retire', ...via()], replayed.io)).toBe(1);
+    expect(replayed.err.join('\n')).toMatch(/the hub's head is version 2, older than the version 3 this device has seen: refusing/);
+    expect(replayed.term).toEqual([]);
+    replay = null;
+    expect((await head()).state.version).toBe(3);
   });
 });
 
