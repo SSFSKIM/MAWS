@@ -115,7 +115,7 @@ describe('the rule vectors', () => {
 
   it("hold §B's format", () => {
     expect(shaped(raw, ['about', 'version', 'org', 'machine', 'cases', 'anchors'])).toBe(true);
-    expect(PROJECT_RULE.version).toBe(1);
+    expect(PROJECT_RULE.version).toBe(2);
     expect(isText(PROJECT_RULE.org) && isText(PROJECT_RULE.machine)).toBe(true);
     const names = PROJECT_RULE.cases.map((c) => c.name);
     expect(new Set(names).size).toBe(names.length);
@@ -147,6 +147,7 @@ describe('the rule vectors', () => {
       "a linked worktree outside its repository under another project's folder: its repository's project",
       "a linked main checkout with a worktree carrying the committed .smns: both the link's project",
       "a worktree outside its repository whose main checkout has a .smns above it: that file's project",
+      "a worktree's own walk stops at the first folder it shares with its main checkout: a nearer statement at R beats a .smns above",
       "a removed folder with a declared subfolder: the machine's project",
       'a folder linked and then unlinked: its minted project',
       'a replaced folder: its statement does not count',
