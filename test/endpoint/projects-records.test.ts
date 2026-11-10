@@ -5,7 +5,7 @@
 // dropped once their machine is retired, and `complete` as §D defines it; and the seam the machine's services ask.
 import { generateSigningKey, keyId, NO_CERTIFICATES, signRecord, SIGNING_DOMAINS, verifyProjectsRecord, type OrgState, type ProjectsRecord, type Signed, type SigningKey } from 'org-protocol';
 import { machineProjectId } from 'desk-hub/protocol';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { DeclaredRow, KeptStatement, ProjectsSource } from '../../src/shared/machine/registry';
 import type { HubUpFrame } from '../../src/endpoint/hub-link';
 import { HeldProjects, type HeldMachines } from '../../src/endpoint/projects-held';
@@ -93,6 +93,7 @@ async function world() {
     signRecord(SIGNING_DOMAINS.projects, { org: ORG, machine: other, revision, issued: new Date(clock).toISOString(), locations, known: [] }, key.privateKey, key.pub);
   const vmLocation = (id: string, path = '/srv/scrape'): ProjectsRecord['locations'][number] => ({ pid: 'vm-pid', id, key: `folder:${other}:vm-pid`, name: 'scrape', path, source: 'folder', stated: 'minted' });
   return {
+    admin,
     ref,
     other,
     machineKey,
@@ -454,5 +455,168 @@ describe('the registry seam', () => {
     expect(acked.asked).toEqual([[acked.r.own.locations()!.gen, RESTATE_WAIT_MS]]);
     const silent = await registry(w, { sminos: view(['locations']), kept: async () => false });
     expect(await silent.r.published()).toEqual({ restated: false });
+  });
+});
+
+// M9's review 1 (.doperpowers/sde/2026-11-10-project-registry/task-9-review-1.md): each finding, reproduced
+describe('review 1', () => {
+  const heldWith = (w: Awaited<ReturnType<typeof world>>, certificates = NO_CERTIFICATES) =>
+    new HeldProjects({ ref: () => w.ref, ownKeyId: () => w.kid, head: () => ({ state: w.head.state, certificates }), now: () => Date.now(), store: w.heldStore, own: () => {}, changed: () => {}, snapshotEnded: () => {}, log: (line) => void w.lines.push(line) });
+  const view = (capabilities: string[], fields: Partial<SminosView> = {}): SminosView => ({ capabilities, restating: false, sessionProjects: () => [], logProjects: () => [], ...fields });
+  /** A registry over the world's kept files, as the endpoint builds it. */
+  function registryOf(w: Awaited<ReturnType<typeof world>>, options: { sminos?: SminosView | null; kept?: (gen: number) => Promise<boolean>; refuseWrite?: (next: ProjectsKeptFile, now: ProjectsKeptFile) => boolean } = {}) {
+    const sent: HubUpFrame[] = [];
+    const asked: number[] = [];
+    let sminos = options.sminos ?? null;
+    const fakeState = {
+      get projects() {
+        return w.kept;
+      },
+      get projectsHeld() {
+        return w.held;
+      },
+      setProjects: (file: ProjectsKeptFile) => {
+        if (options.refuseWrite?.(file, w.kept) === true) throw new Error('ENOSPC: no space left on device');
+        w.kept = structuredClone(file);
+      },
+      setProjectsHeld: (machines: HeldMachines) => w.heldStore.write(machines),
+    };
+    const r = new Registry({
+      ref: () => w.ref,
+      enrollment: () => ({ org: ORG, name: 'mini' }),
+      key: w.ctx.key,
+      head: w.ctx.head,
+      now: Date.now,
+      hub: { send: (frame) => (sent.push(frame), true), capabilities: () => ['projects'] },
+      sminos: () => sminos,
+      source: w.source,
+      state: () => fakeState as never,
+      restate: () => {},
+      locationsKept: (gen) => (asked.push(gen), options.kept?.(gen) ?? Promise.resolve(false)),
+      log: (line) => void w.lines.push(line),
+    });
+    return { r, sent, asked, setSminos: (next: SminosView | null) => void (sminos = next) };
+  }
+  const records = (sent: HubUpFrame[]) => sent.filter((f): f is { t: 'projects'; record: Signed<ProjectsRecord> } => f.t === 'projects').map((f) => f.record);
+
+  it('F2: a restart with the index unloaded tells sminos the locations it was last told, never one rebuilt from a record the signing hold kept behind', async () => {
+    const w = await world();
+    const own = new OwnProjects(w.ctx);
+    w.source.set([row('/Users/me/scrape')], [statement('/Users/me/scrape')]);
+    await own.publish();
+    await own.welcome(); // the hub keeps records: new signatures wait for its snapshot
+    const linked = row('/Users/me/scrape', { org: { key: 'folder:r:/Users/me/scrape' as DeclaredRow['org']['key'], name: 'scrape', source: 'folder', smnsId: 'id-b' }, stated: 'linked' });
+    w.source.set([linked], [statement('/Users/me/scrape', { linked: 'id-b' })]);
+    await own.publish();
+    expect(own.locations()!.at).toEqual([{ path: '/Users/me/scrape', project: 'id-b', stated: 'linked', anchor: ANCHOR }]);
+    expect(w.kept.record!.body.locations[0].id).toBe('id-scrape'); // the record still A's: held
+    w.source.value = null; // a restart with the index not loaded
+    const later = new OwnProjects(w.ctx);
+    expect(later.locations()).toEqual(own.locations());
+  });
+
+  it('F3: a record whose write failed is neither sent nor kept, and the next one is signed above it', async () => {
+    const w = await world();
+    let refusing = true;
+    const { r, sent } = registryOf(w, { refuseWrite: (next, now) => refusing && next.record !== null && JSON.stringify(next.record) !== JSON.stringify(now.record) });
+    w.source.set([row('/Users/me/scrape')]);
+    await r.own.publish();
+    expect(records(sent)).toEqual([]);
+    expect(r.own.record()).toBeNull();
+    expect(w.lines.some((l) => l.includes('ENOSPC'))).toBe(true);
+    refusing = false;
+    w.source.set([row('/Users/me/scrape'), row('/Users/me/other')]);
+    await r.own.publish();
+    expect(records(sent)).toHaveLength(1);
+    expect(records(sent)[0]).toEqual(r.own.record());
+  });
+
+  it('F4: held records read from the file count only once verified again, and a record whose authority lapsed with time is dropped then, with no new head', async () => {
+    const w = await world();
+    const r5 = await w.otherRecord(5);
+    const gone = mintRef();
+    const goneKey = await generateSigningKey();
+    const orphan = await signRecord(SIGNING_DOMAINS.projects, { org: ORG, machine: gone, revision: 3, issued: new Date().toISOString(), locations: [], known: [] }, goneKey.privateKey, goneKey.pub);
+    w.heldStore.write({ [w.other]: { revision: 5, hash: 'h5', keyId: r5.sig.kid, record: r5 }, [gone]: { revision: 3, hash: 'h3', keyId: orphan.sig.kid, record: orphan } });
+    const h = heldWith(w); // a start: the file as the last run left it
+    expect(h.records()).toEqual([]);
+    await h.adopted();
+    expect(h.records()).toEqual([r5.body]);
+    expect(Object.keys(w.held)).toEqual([w.other]);
+
+    // a delegated machine: its authority is its delegation's, which expires
+    const delegationKey = await generateSigningKey();
+    const dKey = await generateSigningKey();
+    const dId = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+    const dRef = mintRef(dId); // a delegated machine's ref is its delegation's
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      await w.amend((s) => void s.delegations.push({ id: dId, pub: delegationKey.pub, prefix: 'dl-', expires: new Date(Date.now() + 60_000).toISOString(), maxUses: 10, offlineRevokeS: 0, owners: [w.admin] }));
+      const cert = await signRecord(SIGNING_DOMAINS.machineCert, { org: ORG, machine: dRef, name: 'dl-one', pub: dKey.pub, delegation: dId, use: 1, issued: new Date().toISOString() }, delegationKey.privateKey, delegationKey.pub);
+      const delegated = heldWith(w, { certs: [cert], retirements: [] });
+      await delegated.adopted();
+      const record = await signRecord(SIGNING_DOMAINS.projects, { org: ORG, machine: dRef, revision: 2, issued: new Date().toISOString(), locations: [], known: [] }, dKey.privateKey, dKey.pub);
+      await delegated.frame({ t: 'projects', record });
+      expect(delegated.records().map((b) => b.machine)).toContain(dRef);
+      await vi.advanceTimersByTimeAsync(61_000);
+      await delegated.settled();
+      expect(delegated.records().map((b) => b.machine)).not.toContain(dRef);
+      delegated.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('F5: a machine counts as seen in the snapshot only by a record that verified, or the very one held', async () => {
+    const w = await world();
+    const h = heldWith(w);
+    await h.frame({ t: 'projects', record: await w.otherRecord(5) });
+    h.welcomed(true);
+    await h.frame({ t: 'projects-all', records: [await w.otherRecord(6, [], w.machineKey)], last: true }); // signed by another machine's key
+    expect(h.complete()).toBe(false);
+    h.welcomed(true);
+    await h.frame({ t: 'projects-all', records: [await w.otherRecord(5, [w.vmLocation('id-other')])], last: true }); // a conflict at the mark
+    expect(h.complete()).toBe(false);
+    h.welcomed(true);
+    await h.frame({ t: 'projects-all', records: [w.held[w.other].record], last: true });
+    expect(h.complete()).toBe(true);
+  });
+
+  it('F6: a page queued from a connection that ended does not complete the next connection’s snapshot', async () => {
+    const w = await world();
+    const h = heldWith(w);
+    const r5 = await w.otherRecord(5);
+    await h.frame({ t: 'projects', record: r5 });
+    h.welcomed(true);
+    const queued = h.frame({ t: 'projects-all', records: [r5], last: true });
+    h.ended(); // the connection drops before its page was taken, and another is welcomed
+    h.welcomed(true);
+    await queued;
+    expect(h.complete()).toBe(false);
+  });
+
+  it('F7: a statement change made while the index is not loaded is answered unrestated, whatever sminos acknowledged before', async () => {
+    const w = await world();
+    const acknowledged = new Set<number>();
+    const { r, asked } = registryOf(w, { sminos: view(['locations']), kept: async (gen) => (acknowledged.add(gen), true) });
+    w.source.set([row('/Users/me/scrape')], [statement('/Users/me/scrape')]);
+    expect(await r.published()).toEqual({ restated: true });
+    expect(asked).toHaveLength(1);
+    w.source.value = null; // the spine released: this change's locations are never built
+    expect(await r.published()).toEqual({ restated: false });
+    expect(asked).toHaveLength(1);
+  });
+
+  it('F8: after a restart with sminos away, the record keeps the known projects the kept record carried', async () => {
+    const w = await world();
+    const first = registryOf(w, { sminos: view(['locations'], { sessionProjects: () => ['id-held'], logProjects: () => [{ project: 'id-held', name: 'Held', follow: false }] }) });
+    w.source.set([row('/Users/me/scrape')]);
+    await first.r.own.publish();
+    expect(w.kept.record!.body.known).toEqual([{ id: 'id-held', name: 'Held' }]);
+    const later = registryOf(w); // a restart: no sminos connected yet
+    w.source.set([row('/Users/me/scrape'), row('/Users/me/other')]);
+    await later.r.own.publish();
+    expect(w.kept.record!.body.locations).toHaveLength(2);
+    expect(w.kept.record!.body.known).toEqual([{ id: 'id-held', name: 'Held' }]);
   });
 });

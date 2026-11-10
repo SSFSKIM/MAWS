@@ -189,8 +189,9 @@ const RetirementSchema = z.strictObject({
  * The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §H): the machine's own projects
  * record and what it was made from (projects.ts). `indexId` the index the statements were last read from (null before
  * the first read); `sminosLocations` whether the last sminos on RL10 advertised `locations`; `record` the last one signed;
- * `statements` every row's stored statement whole, which a rebuilt index takes back; `locationsGen` the org frame's
- * `locations.gen` last given.
+ * `statements` every row's stored statement whole, which a rebuilt index takes back; `locations` the org frame's
+ * `locations` as sminos was last told them, whole with their `gen` (M9's review 1, F2: one value, never rebuilt from a
+ * record and statements that a signing hold may have left apart).
  */
 const AnchorSchema = z.strictObject({ dev: z.string().min(1), ino: z.string().min(1), birth: z.string().min(1) });
 const KeptStatementSchema = z.strictObject({
@@ -208,7 +209,21 @@ const ProjectsKeptSchema = z.strictObject({
   sminosLocations: z.boolean(),
   record: custom<Signed<ProjectsRecord>>((v) => isSigned(v, isProjectsRecord)).nullable(),
   statements: z.array(KeptStatementSchema),
-  locationsGen: z.number().int().nonnegative(),
+  locations: z
+    .strictObject({
+      gen: z.number().int().positive(),
+      at: z.array(
+        z.strictObject({
+          path: z.string().min(1),
+          project: z.string().min(1),
+          hub: z.literal(false).optional(),
+          stated: z.enum(['minted', 'linked']).optional(),
+          anchor: AnchorSchema.optional(),
+          state: z.enum(['missing', 'replaced']).optional(),
+        }),
+      ),
+    })
+    .nullable(),
 });
 /**
  * The other machines' projects records the endpoint verified and keeps (projects-held.ts), by machine ref: each one's
@@ -239,7 +254,7 @@ export type RetirementFile = z.infer<typeof RetirementSchema>;
 export type ProjectsKeptFile = z.infer<typeof ProjectsKeptSchema>;
 export type ProjectsHeldFile = z.infer<typeof ProjectsHeldSchema>;
 /** The kept file before anything was kept. */
-export const NO_PROJECTS_KEPT: ProjectsKeptFile = { version: 1, indexId: null, sminosLocations: false, record: null, statements: [], locationsGen: 0 };
+export const NO_PROJECTS_KEPT: ProjectsKeptFile = { version: 1, indexId: null, sminosLocations: false, record: null, statements: [], locations: null };
 export type Authority = Omit<z.infer<typeof AuthoritySchema>, 'version'>;
 export type ChainEntry = z.infer<typeof ChainEntrySchema>;
 

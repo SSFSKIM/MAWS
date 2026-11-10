@@ -11,7 +11,7 @@ import { repoProjectId } from '@shared/machine/project-ids';
 import type { MachineRef } from '@shared/machine/ref';
 import { assembleProjects } from 'org-protocol';
 import { NO_REGISTRY, type DeclaredRow, type RegistrySeam, type StatementsState } from '@shared/machine/registry';
-import { setupAddFolder } from '../machine/setup';
+import { setupGuarded } from '../machine/setup';
 import { readAnchor } from './anchor';
 import { runGit } from '../../../test/support/git-fixture';
 import { summary, tempDir } from '../../../test/support/index-fixture';
@@ -551,7 +551,7 @@ describe('the stored statements', () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const error = vi.spyOn(console, 'error').mockImplementation(() => {});
       try {
-        const answer = await setupAddFolder(opened, [], { where: { home: guardHome, platform: 'darwin' } }, (checked, files) => index.statements.addFolder(checked, { files }));
+        const answer = await setupGuarded(opened, [], { where: { home: guardHome, platform: 'darwin' } }, (checked, files) => index.statements.addFolder(checked, { files }));
         await settle();
         expect(JSON.stringify(answer)).not.toMatch(/private-id|private label/);
         expect(JSON.stringify(index.projects.list({ includeHidden: true }))).not.toMatch(/private-id|private label/);

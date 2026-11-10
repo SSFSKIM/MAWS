@@ -759,7 +759,7 @@ export class Endpoint implements EndpointModule {
     if (state.enrolled) this.#keepSynced();
     this.#ensureLink();
     this.registry.statementsMoved();
-    this.registry.own.kick();
+    this.registry.adopted(); // the held records read from the file count once verified again (M9's review 1, F4)
   }
 
   async stop(): Promise<void> {
@@ -782,6 +782,7 @@ export class Endpoint implements EndpointModule {
     this.rl10.members.stop();
     await this.rl10.unserve();
     await this.hub.stop();
+    this.registry.stop();
   }
 
   /** The direct listener, when this daemon binds one (a suite reads its addresses again through it). */

@@ -373,7 +373,8 @@ const c4Commands = {
   // The project registry (Interfaces §G): design §8's rule for a directory, changing nothing; a declared row's link set or
   // cleared; a declared row pointed at its folder's new path (its own path: "Use this folder")
   'session.projects.resolve': {
-    input: z.strictObject({ directory: z.string() }),
+    // `opened` (M9's review 1, F1), as addFolder's: the endpoint's for another machine's owner, the asking member's opens
+    input: z.strictObject({ directory: z.string(), opened: SetupOpenedSchema.optional() }),
     output: z.strictObject({ project: z.string().nullable(), by: z.enum(PROJECT_DECIDED_BY), at: z.string().nullable(), label: ProjectOrgSchema }),
     owner: 'machine',
   },
@@ -383,7 +384,7 @@ const c4Commands = {
     owner: 'machine',
   },
   'session.projects.relocate': {
-    input: z.strictObject({ id: ProjectIdSchema, directory: z.string() }),
+    input: z.strictObject({ id: ProjectIdSchema, directory: z.string(), opened: SetupOpenedSchema.optional() }),
     output: z.strictObject({ project: ProjectRecordSchema, merged: z.boolean(), restated: z.boolean() }),
     owner: 'machine',
   },

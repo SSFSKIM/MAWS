@@ -17,10 +17,13 @@
 // - Restoring. When the snapshot comes from another index than the kept file's and the file holds statements, the index
 //   takes them back (`restore`) before anything is signed from it, and the file takes the new index's id.
 // - The locations sminos is told (§D): every declared location in canonical path form with the project the rule gives,
-//   `stated` and `anchor` where a stored statement of the row's own folder decides, and its `hub: false` and state. Read
-//   from the snapshot, else from the kept record and statements, so a daemon whose index is not loaded still tells sminos
-//   what it last knew; with neither nothing is told (a frame without `locations` erases none). Its `gen` is the later of
-//   one past the last and the clock's milliseconds, raised whenever their content changes, an anchor alone included.
+//   `stated` and `anchor` where a stored statement of the row's own folder decides, and its `hub: false` and state. Built
+//   from the snapshot and kept whole with their `gen` (M9's review 1, F2), so a daemon whose index is not loaded tells
+//   sminos exactly what it last told, never a value rebuilt from a record the signing hold kept behind its statements;
+//   with none kept nothing is told (a frame without `locations` erases none). Their `gen` is the later of one past the
+//   last and the clock's milliseconds, raised whenever their content changes, an anchor alone included.
+// - Every write comes first (M9's review 1, F3): a write that fails throws, and nothing after it runs: the record is not
+//   sent, the locations are not told.
 import { basename } from 'node:path';
 import { machineProjectId } from 'desk-hub/protocol';
 import {
@@ -115,8 +118,6 @@ export class OwnProjects {
   #kicked = false;
   /** The revision of this machine's own record as the hub last showed it (0 before it has). */
   #floor = 0;
-  #locations: Locations | null = null;
-  #locationsText: string | null = null;
   /** A welcome's snapshot is awaited: new signatures wait for its floor (its release timer while it is). */
   #awaiting: ReturnType<typeof setTimeout> | null = null;
   /** The hub holds a record of this machine at or above the kept one that is not it: the next is signed whatever it says. */
@@ -136,9 +137,14 @@ export class OwnProjects {
     });
   }
 
-  /** Builds, and signs where it changed, now, after anything queued. */
-  publish(): Promise<void> {
-    return this.#serial(() => this.#publish());
+  /**
+   * Builds, and signs where it changed, now, after anything queued: the locations built from this snapshot, which carry
+   * every change the index holds now; null when none were (the index not loaded, or rebuilt; M9's review 1, F7).
+   */
+  async publish(): Promise<Locations | null> {
+    let built: Locations | null = null;
+    await this.#serial(async () => void (built = await this.#publish()));
+    return built;
   }
 
   /**
@@ -196,13 +202,9 @@ export class OwnProjects {
     return this.#ctx.store.read().record;
   }
 
-  /** What sminos is told of this machine's locations; null while nothing is known of them. */
+  /** What sminos is told of this machine's locations, as last told; null while nothing is known of them. */
   locations(): Locations | null {
-    if (this.#locations === null) {
-      const kept = this.#ctx.store.read();
-      if (kept.record !== null) this.#setLocations(kept.record.body.locations, kept.statements, false);
-    }
-    return this.#locations;
+    return this.#ctx.store.read().locations;
   }
 
   /** Whether a record of these rows, with the known projects of now, keeps within §A's bounds. */
@@ -218,12 +220,12 @@ export class OwnProjects {
     return this.#queue.then(() => {});
   }
 
-  async #publish(): Promise<void> {
+  async #publish(): Promise<Locations | null> {
     const source = this.#ctx.source;
-    if (source === null) return;
+    if (source === null) return null;
     // The snapshot and a restore in one synchronous step: the index read is the index restored into.
     const snapshot = source.snapshot();
-    if (snapshot === null) return;
+    if (snapshot === null) return null;
     const file = this.#ctx.store.read();
     if (file.indexId !== snapshot.indexId) {
       const restoring = file.statements.length > 0;
@@ -231,15 +233,16 @@ export class OwnProjects {
       this.#ctx.store.write({ ...file, indexId: snapshot.indexId });
       if (restoring) {
         this.#ctx.log(`endpoint: the index was rebuilt; its ${file.statements.length} stored statement(s) given back from the kept file`);
-        return; // the restored rows are derived again, and their change publishes
+        return null; // the restored rows are derived again, and their change publishes
       }
     }
     if (canonicalize(snapshot.statements) !== canonicalize(this.#ctx.store.read().statements)) this.#ctx.store.write({ ...this.#ctx.store.read(), statements: snapshot.statements });
     const enrollment = this.#ctx.enrollment();
-    if (enrollment === null) return;
+    if (enrollment === null) return null;
     const body = this.#body(snapshot.rows, enrollment);
-    this.#setLocations(body.locations, snapshot.statements, true);
+    const locations = this.#setLocations(body.locations, snapshot.statements);
     await this.#sign(body);
+    return locations;
   }
 
   async #sign(body: Pick<ProjectsRecord, 'locations' | 'known'>): Promise<void> {
@@ -274,18 +277,16 @@ export class OwnProjects {
     return { locations, known: [...known.values()].sort((a, b) => (a.id < b.id ? -1 : 1)).slice(0, PROJECTS_RECORD_BOUNDS.known) };
   }
 
-  /** What sminos is told, its `gen` raised when its content changed; `tell`: the endpoint states it again. */
-  #setLocations(locations: readonly ProjectLocation[], statements: readonly KeptStatement[], tell: boolean): void {
+  /** What sminos is told, kept, its `gen` raised when its content changed, and stated again then. */
+  #setLocations(locations: readonly ProjectLocation[], statements: readonly KeptStatement[]): Locations {
     const byPath = new Map(statements.map((s) => [s.path, s]));
     const at = locations.map((l) => locationEntry(l, byPath.get(l.path))).sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-    const text = canonicalize(at);
-    if (text === this.#locationsText) return;
     const file = this.#ctx.store.read();
-    const gen = Math.max(file.locationsGen + 1, this.#ctx.now());
-    this.#ctx.store.write({ ...file, locationsGen: gen });
-    this.#locations = { gen, at };
-    this.#locationsText = text;
-    if (tell) this.#ctx.moved();
+    if (file.locations !== null && canonicalize(file.locations.at) === canonicalize(at)) return file.locations;
+    const told = { gen: Math.max((file.locations?.gen ?? 0) + 1, this.#ctx.now()), at };
+    this.#ctx.store.write({ ...file, locations: told });
+    this.#ctx.moved();
+    return told;
   }
 
   /** Signed by the key in force for this machine, in the head's org. */

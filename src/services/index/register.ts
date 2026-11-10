@@ -6,7 +6,7 @@ import { readerStateOf, type SessionRecord } from '@shared/graph/session';
 import type { Reader } from '@shared/ipc/client';
 import type { ReaderPatch, SessionPatch } from '@shared/ipc/schema/session';
 import type { ServicesBus } from '@shared/spine/bus';
-import { setupAddFolder, thisGuard, type SetupGuard } from '../machine/setup';
+import { setupGuarded, thisGuard, type SetupGuard } from '../machine/setup';
 import { locate } from './projects';
 import type { Index } from './index';
 import { draftForLink, restoreWithheld } from '@shared/sessions/draft-fit'; // P5 O8 M6a
@@ -42,13 +42,21 @@ export function registerIndexHandlers(index: Index, { register }: Pick<ServicesB
   register('session.projects.addFolder', async ({ directory, opened, into, own }, context) => {
     const acts = { ...(into === undefined ? {} : { into }), ...(own === undefined ? {} : { own }) };
     if (context.op === undefined) return index.statements.addFolder(directory, acts);
-    return await setupAddFolder(directory, opened ?? [], setup, (checked, files) => index.statements.addFolder(checked, { ...acts, files, locateIn: setupLocate }));
+    return await setupGuarded(directory, opened ?? [], setup, (checked, files) => index.statements.addFolder(checked, { ...acts, files, locateIn: setupLocate }));
   });
   register('session.projects.update', ({ id, patch }) => index.statements.update(id as ProjectId, patch));
   register('session.projects.remove', ({ id, expect }) => index.statements.remove(id as ProjectId, expect));
-  register('session.projects.resolve', ({ directory }) => index.statements.resolve(directory));
+  // M9's review 1, F1: another machine's owner's resolve and relocate read the folder as its addFolder does, through the
+  // checked reader (`remote`: the endpoint's call; `op`: its claimed act)
+  register('session.projects.resolve', async ({ directory, opened }, context) => {
+    if (context.remote !== true && context.op === undefined) return index.statements.resolve(directory);
+    return await setupGuarded(directory, opened ?? [], setup, (checked, files) => index.statements.resolve(checked, { files, locateIn: setupLocate }));
+  });
   register('session.projects.link', ({ id, into }) => index.statements.link(id as ProjectId, into));
-  register('session.projects.relocate', ({ id, directory }) => index.statements.relocate(id as ProjectId, directory));
+  register('session.projects.relocate', async ({ id, directory, opened }, context) => {
+    if (context.op === undefined) return index.statements.relocate(id as ProjectId, directory);
+    return await setupGuarded(directory, opened ?? [], setup, (checked, files) => index.statements.relocate(id as ProjectId, checked, { files }));
+  });
   // P5 O8 M6a (M6a's branch review, F3): a request the endpoint dispatched (it names the reader) is answered the draft as it
   // fits one answer over the channel, naming the attachments it leaves out (@shared/sessions/draft-fit.ts). M6a's
   // re-review, K1: and a cleared draft as one with no document, so the device saving there next names the clear's stamp.

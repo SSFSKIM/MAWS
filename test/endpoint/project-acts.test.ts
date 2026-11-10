@@ -5,7 +5,7 @@
 // directory, held to the setup policy before anything reads in it; a remote `addFolder` keeps its checked path and its
 // `into`. An `into` the verified records do not name is the machine's own refusal, `unknown-project`. The endpoint's
 // `h2` lists `rl2.project-acts`.
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -121,7 +121,7 @@ describe('the project acts over the network', () => {
     const pid = ((await admitted(a, await stepped(f, a, 'session.projects.addFolder', { directory: join(home, 'work/scrape') }))).result as { project: { id: string } }).project.id;
     const moved = join(home, 'work/moved');
     expect(await admitted(a, await stepped(f, a, 'session.projects.relocate', { id: pid, directory: `${home}/work/../work/moved` }))).toMatchObject({ state: 'done', result: { project: { id: pid, directory: moved }, merged: false } });
-    expect(claimed(f, 'session.projects.relocate').map((c) => c.input)).toEqual([{ id: pid, directory: moved }]);
+    expect(claimed(f, 'session.projects.relocate').map((c) => c.input)).toEqual([{ id: pid, directory: moved, opened: [] }]);
     const outside = tempDir('project-acts-outside-');
     expect(await act(a, await stepped(f, a, 'session.projects.relocate', { id: pid, directory: outside }))).toBe('outside-home');
     expect(claimed(f, 'session.projects.relocate')).toHaveLength(1);
@@ -136,5 +136,22 @@ describe('the project acts over the network', () => {
     const outcome = await admitted(a, await stepped(f, a, 'session.projects.addFolder', { directory: `${home}/work/../work/other`, into: 'id-nobody-has' }));
     expect(claimed(f, 'session.projects.addFolder').at(-1)?.input).toMatchObject({ directory: folder, into: 'id-nobody-has', opened: [] });
     expect(JSON.stringify(outcome)).toContain('unknown-project');
+  });
+
+  // M9's review 1, F1: the setup's checked reader, which a remote addFolder derives through, guards resolve and relocate
+  it('read a folder’s `.smns` for resolve and relocate through the setup’s checked reader, never one linked into a folder macOS protects that was not opened', async () => {
+    const { f, home, a, index } = await setup();
+    mkdirSync(join(home, 'Desktop'), { recursive: true });
+    writeFileSync(join(home, 'Desktop/private-smns'), JSON.stringify({ project: 'private-id', name: 'private label' }));
+    const linked = join(home, 'work/linked');
+    mkdirSync(linked, { recursive: true });
+    symlinkSync(join(home, 'Desktop/private-smns'), join(linked, '.smns'));
+    const resolved = await call(a, 'session.projects.resolve', { directory: linked });
+    expect(JSON.stringify(resolved)).not.toMatch(/private-id|private label/);
+    const pid = ((await admitted(a, await stepped(f, a, 'session.projects.addFolder', { directory: join(home, 'work/scrape') }))).result as { project: { id: string } }).project.id;
+    const moved = await admitted(a, await stepped(f, a, 'session.projects.relocate', { id: pid, directory: linked }));
+    for (let k = 0; k < 100; k++) await new Promise((resolve) => setImmediate(resolve));
+    expect(JSON.stringify(moved)).not.toMatch(/private-id|private label/);
+    expect(JSON.stringify(index.projects.list({ includeHidden: true }))).not.toMatch(/private-id|private label/);
   });
 });

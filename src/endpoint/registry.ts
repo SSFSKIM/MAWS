@@ -8,11 +8,15 @@
 //   answer, the turn to possible being minting's moment (c).
 // - `known` (design §4, the desk track's reading): a project sminos holds (its log-plane hello does not `follow` it)
 //   with sessions on this machine. While no sminos is connected, or its restatement after a welcome has not closed, the
-//   last answer stands: a sminos restarting is not every project's sessions ending.
+//   last answer stands: a sminos restarting is not every project's sessions ending. After a restart, before any answer,
+//   the kept record's `known` is the last answer (M9's review 1, F8).
 // - The directory sminos reads (§8): every project the verified records name, this machine's own included, as a hub
 //   project, but a project any location of which says `hub: false`; and the machines' own projects as today.
 // - A statement change answers after sminos acknowledged the locations that carry it (`published`), within
-//   RESTATE_WAIT_MS; with no sminos connected that reads them, at once, unrestated.
+//   RESTATE_WAIT_MS; with no sminos connected that reads them, or no locations built from the index now (it is not
+//   loaded), at once, unrestated (M9's review 1, F7).
+// - The kept files' writes throw on failure (M9's review 1, F3): what follows a write (a record sent, a mark kept, the
+//   locations told) never runs on one that failed.
 import { machineProjectId } from 'desk-hub/protocol';
 import { assembleProjects, machineProjectNames, type Certificates, type KnownProject, type OrgState, type ProjectsPageFrame, type ProjectsRecord, type ProjectsRecordFrame, type RegistryProject, type SigningKey } from 'org-protocol';
 import type { MachineRef } from '@shared/machine/ref';
@@ -66,13 +70,14 @@ export class Registry implements RegistrySeam, RegistryRead {
   readonly #ctx: RegistryContext;
   readonly #listeners = new Set<() => void>();
   #told: string | null = null;
-  #known: KnownProject[] = [];
+  /** The last `known` answer; null until sminos gave one in this run (the kept record's then). */
+  #known: KnownProject[] | null = null;
 
   constructor(ctx: RegistryContext) {
     this.#ctx = ctx;
     const keptFile = {
       read: () => ctx.state()?.projects ?? NO_PROJECTS_KEPT,
-      write: (file: typeof NO_PROJECTS_KEPT) => this.#write(() => ctx.state()?.setProjects(file)),
+      write: (file: typeof NO_PROJECTS_KEPT) => ctx.state()?.setProjects(file),
     };
     this.own = new OwnProjects({
       ref: ctx.ref,
@@ -93,7 +98,7 @@ export class Registry implements RegistrySeam, RegistryRead {
       ownKeyId: () => ctx.key()?.keyId ?? null,
       head: ctx.head,
       now: ctx.now,
-      store: { read: () => ctx.state()?.projectsHeld ?? {}, write: (machines) => this.#write(() => ctx.state()?.setProjectsHeld(machines)) },
+      store: { read: () => ctx.state()?.projectsHeld ?? {}, write: (machines) => ctx.state()?.setProjectsHeld(machines) },
       own: (record) => void this.own.ownSeen(record),
       changed: () => ctx.restate(),
       snapshotEnded: () => this.own.snapshotEnded(),
@@ -127,8 +132,7 @@ export class Registry implements RegistrySeam, RegistryRead {
 
   async published(): Promise<{ restated: boolean }> {
     if (this.#ctx.sminos()?.capabilities.includes(LOCATIONS_CAPABILITY) !== true) return { restated: false };
-    await this.own.publish();
-    const locations = this.own.locations();
+    const locations = await this.own.publish();
     if (locations === null) return { restated: false };
     return { restated: await this.#ctx.locationsKept(locations.gen, RESTATE_WAIT_MS) };
   }
@@ -203,10 +207,18 @@ export class Registry implements RegistrySeam, RegistryRead {
     void this.held.frame(frame);
   }
 
-  /** A new head or certificate set: held records verified again, the own record built again (machine names may move). */
+  /**
+   * The endpoint started, or a new head or certificate set: held records verified again (those read from the file count
+   * from then), the own record built again (machine names may move).
+   */
   adopted(): void {
     void this.held.adopted();
     this.own.kick();
+  }
+
+  /** The endpoint stopped: the held records' clock let go. */
+  stop(): void {
+    this.held.stop();
   }
 
   /** The projects with sessions here may have moved (a member, a restatement's close, a log-plane hello). */
@@ -217,7 +229,7 @@ export class Registry implements RegistrySeam, RegistryRead {
   /** The candidates for `known`: the last answer while sminos is away or restating. */
   #knownNow(): KnownProject[] {
     const sminos = this.#ctx.sminos();
-    if (sminos === null || sminos.restating) return this.#known;
+    if (sminos === null || sminos.restating) return this.#known ?? this.#ctx.state()?.projects.record?.body.known ?? [];
     const held = new Set(sminos.sessionProjects());
     this.#known = sminos.logProjects().flatMap((p) => (p.follow || !held.has(p.project) ? [] : [{ id: p.project, name: p.name }]));
     return this.#known;

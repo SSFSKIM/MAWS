@@ -391,10 +391,13 @@ export class Calls {
     return this.#forward(dispatch, 'machine', { ...m, name: 'machine.setupTrust', input: { directory: decision.setup.directory, opened: decision.setup.opened } });
   }
 
-  /** The project registry: the rule's answer for a directory, on the directory the setup policy resolved and checked. */
+  /**
+   * The project registry: the rule's answer for a directory, on the directory the setup policy resolved and checked, read
+   * there through the asking member's opens (M9's review 1, F1).
+   */
   #resolve(dispatch: EndpointServices['dispatch'], m: CallMessage, decision: Granted): Promise<Result> {
     if (decision.setup === undefined) return Promise.resolve({ ok: false, code: 'unavailable' });
-    return this.#forward(dispatch, 'machine', { ...m, input: { directory: decision.setup.directory } });
+    return this.#forward(dispatch, 'machine', { ...m, input: { directory: decision.setup.directory, opened: decision.setup.opened } });
   }
 
   /** A read its executor answers raw: the engine host's, or the machine's services', a failure with its message (M8). */

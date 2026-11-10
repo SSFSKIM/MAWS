@@ -282,15 +282,18 @@ export class Statements {
     return this.declare(directory, (reads) => addFolder(this.projects, directory, options.locateIn, options.files, reads), options);
   }
 
-  /** `session.projects.resolve`: the rule for a directory, changing nothing. */
-  async resolve(directory: string): Promise<{ project: string | null; by: OrgDerivation['by']; at: string | null; label: OrgDerivation['org'] }> {
+  /**
+   * `session.projects.resolve`: the rule for a directory, changing nothing. `files` and `locateIn`: another machine's
+   * owner's, read through the setup's checked reader with no git run (M9's review 1, F1).
+   */
+  async resolve(directory: string, { files, locateIn = locate }: { files?: GitFiles; locateIn?: typeof locate } = {}): Promise<{ project: string | null; by: OrgDerivation['by']; at: string | null; label: OrgDerivation['org'] }> {
     const folder = canonicalFolder(directory);
     if (folder === null) refuse('not-a-directory', directory);
     const context = this.context;
     if (context === null) refuse('unresolved', 'the rule cannot be computed yet');
-    const located = locate(folder);
+    const located = locateIn(folder);
     const row = located.projectDirectory === null ? null : this.projects.projectAt(located);
-    const derived = await (context.derive ?? deriveProject)({ directory: folder, machine: context.machine, projectId: row ?? 'new', name: basename(folder) }, context.enrollment(), { statements: this.lookup });
+    const derived = await (context.derive ?? deriveProject)({ directory: folder, machine: context.machine, projectId: row ?? 'new', name: basename(folder), ...(files === undefined ? {} : { files }) }, context.enrollment(), { statements: this.lookup });
     if (derived === null) refuse('unresolved', 'git gave no answer in time: try again');
     return { project: derived.org.smnsId, by: derived.by, at: derived.at, label: derived.org };
   }
@@ -314,8 +317,11 @@ export class Statements {
     return { project: this.projects.record(id), restated };
   }
 
-  /** `session.projects.relocate`: a declared row pointed at its folder's path now, merging an unstated row there. */
-  async relocate(id: ProjectId, directory: string): Promise<{ project: ProjectRecord; merged: boolean; restated: boolean }> {
+  /**
+   * `session.projects.relocate`: a declared row pointed at its folder's path now, merging an unstated row there. `files`:
+   * another machine's owner's, the setup's checked reader its derivation reads through (M9's review 1, F1).
+   */
+  async relocate(id: ProjectId, directory: string, { files }: { files?: GitFiles } = {}): Promise<{ project: ProjectRecord; merged: boolean; restated: boolean }> {
     const row = this.projects.statementRow(id);
     if (!row.declared) refuse('not-declared', `${row.directory} is not a declared folder`);
     const folder = canonicalFolder(directory);
@@ -323,7 +329,7 @@ export class Statements {
     if (folder === null || anchor === null) refuse('not-a-directory', directory);
     const moved = this.projects.relocate(id, folder, anchor);
     if ('refused' in moved) refuse('has-statement', `${folder} is a folder with a stored statement of its own`);
-    await this.deriveId(id);
+    await this.deriveId(id, files);
     this.beneath(row.directory);
     if (folder !== row.directory) this.beneath(folder);
     const { restated } = await this.registry.published();
