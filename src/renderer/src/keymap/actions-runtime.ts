@@ -50,8 +50,10 @@ export const registerSessionCreator = (fn: SessionCreator): (() => void) => {
 export const isSessionCreatorRegistered = (): boolean => creators.has('create');
 export const useSessionCreatorRegistered = (): boolean => creators.useEnabled('create');
 
-// C12: answers the new session's id (null when none was made), so the Worktrees… dialog can set its location.
-export async function createSession(projectId: ProjectId | null, opts: { pane?: 0 | 1 | 'focused'; location?: Location } = {}): Promise<AppSessionId | null> {
+// C12: answers the new session's id (null when none was made), so the Worktrees… dialog can set its location. The project
+// registry: `registry`, the registry project a New chat with no project here is opened in (sidebar/registry-new-chat.ts),
+// the unstarted session's before its tab opens, so the tab is filed in that project's set (panel sweep#3).
+export async function createSession(projectId: ProjectId | null, opts: { pane?: 0 | 1 | 'focused'; location?: Location; registry?: string } = {}): Promise<AppSessionId | null> {
   const creator = creators.get('create') as SessionCreator | undefined;
   if (!creator) return null; // C12
   let appSessionId: AppSessionId | null;
@@ -62,7 +64,7 @@ export async function createSession(projectId: ProjectId | null, opts: { pane?: 
     return null; // C12
   }
   if (appSessionId === null) return null; // C12
-  useSessions.getState().addUnstarted(appSessionId, { projectId, createdAt: new Date().toISOString() });
+  useSessions.getState().addUnstarted(appSessionId, { projectId, createdAt: new Date().toISOString(), ...(opts.registry !== undefined && { registry: opts.registry }) });
   // W9 (H3): the new tab's composer takes the keyboard as it mounts, so typing goes on without a click (Claude Desktop's
   // and T3's new thread); marked as the tab opens, before anything could render its composer
   markFocusOnMount(appSessionId);

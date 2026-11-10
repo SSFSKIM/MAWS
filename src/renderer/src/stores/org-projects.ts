@@ -27,7 +27,7 @@ import { isAddress, machineOf } from '@shared/machine/address';
 import { idKey, machineKey, type OrgKey } from '@shared/machine/org-key';
 import type { MachineRef } from '@shared/machine/ref';
 import { EMPTY_REGISTRY, isRegistryRecord, type OrgProjects, type RegistryProject } from './registry';
-import type { ListedSession } from './sessions';
+import type { ListedSession, UnstartedSession } from './sessions';
 
 // A row's key: an org project's, a machine's own project's, or the address of a project not derived yet.
 export type RowKey = OrgKey | ProjectId;
@@ -179,9 +179,11 @@ export function selectOrgIndex(state: ProjectsHolder, local: MachineRef): OrgInd
 
 // The set a session's tabs belong in, by its record's project, else its unstarted intent's (`intentProject`: the
 // project a New chat was made in, null for none, which keeps it in the no-project set); undefined for a session not
-// known now. What `connectShell` hands the layout as its `projectOf`.
+// known now. What `connectShell` hands the layout as its `projectOf`. The project registry (panel sweep#3): a New chat
+// with no project here opened in a registry project (its unstarted entry's `registry`) is in that project's row's set
+// while the project is a row.
 export function sessionSetKey(
-  state: ProjectsHolder & { records: ReadonlyMap<AppSessionId, SessionRecord>; listed?: ReadonlyMap<AppSessionId, ListedSession> },
+  state: ProjectsHolder & { records: ReadonlyMap<AppSessionId, SessionRecord>; listed?: ReadonlyMap<AppSessionId, ListedSession>; unstarted?: ReadonlyMap<AppSessionId, Pick<UnstartedSession, 'registry'>> },
   local: MachineRef,
   appSessionId: AppSessionId,
   intentProject: () => ProjectId | null | undefined,
@@ -197,9 +199,17 @@ export function sessionSetKey(
   // P5 O7 M2: a listed lane B session's tab goes where its row is from the click, before main has read its record
   if (listing?.lane === 'B') return setKeyOfListed(index, listing);
   const intent = intentProject();
-  if (intent === undefined || intent === null) return intent;
+  if (intent === null) return registryRowOf(index, state.unstarted?.get(appSessionId)?.registry);
+  if (intent === undefined) return intent;
   const project = state.projects.get(intent);
   return project === undefined ? intent : setKeyOfProject(index, project);
+}
+
+// The row of a registry project (its id), while it is listed; null for none.
+function registryRowOf(index: OrgIndex, id: string | undefined): RowKey | null {
+  if (id === undefined) return null;
+  for (const org of index.orgs.values()) if (org.smnsId === id && index.listed.has(org.id)) return org.id;
+  return null;
 }
 
 // The listed checkouts of a row on the machines that are up, the ones an action on the row reaches ("Remove from

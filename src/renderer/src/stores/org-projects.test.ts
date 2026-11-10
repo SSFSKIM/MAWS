@@ -161,6 +161,18 @@ describe('the project registry: rows by project id', () => {
     expect(orgIndex([hidden], TEST_MACHINE, registry).listed.has('remote:example.org/reports' as OrgKey)).toBe(false);
   });
 
+  // panel sweep#3: a New chat opened in a project with no folder here (sidebar/registry-new-chat.ts) has no project here,
+  // so its intent's is null; its tab belongs in its registry project's set, not the no-project set
+  it('files an unstarted New chat of a registry project in that project’s set while the project is a row', () => {
+    const registry = registryOf([registered(ID, 'app', [location(OTHER_MACHINE, 'app')])], { [ID]: 'remote:example.org/app' });
+    const tab = at('new' as AppSessionId);
+    const s = { projects: registryRecords(registry, TEST_MACHINE), registry, records: new Map(), unstarted: new Map([[tab, { projectId: null, createdAt: 't', registry: ID }]]) };
+    expect(sessionSetKey(s, TEST_MACHINE, tab, () => null)).toBe('remote:example.org/app');
+    expect(sessionSetKey(s, TEST_MACHINE, tab, () => undefined), 'a session not known now').toBeUndefined();
+    const gone = { ...s, unstarted: new Map([[tab, { projectId: null, createdAt: 't', registry: OTHER_ID }]]) }; // no row of it now
+    expect(sessionSetKey(gone, TEST_MACHINE, tab, () => null)).toBeNull();
+  });
+
   it('makes no row of a machine’s own project: main leaves it out of the registry, so its location makes no record and its sessions sit under the machine’s row', () => {
     const registry = registryOf([registered(ID, 'app', [location(OTHER_MACHINE, 'app')])], { [ID]: 'remote:example.org/app' });
     const records = registryRecords(registry, TEST_MACHINE);
