@@ -56,6 +56,9 @@ function refuse(code: ProjectRefusal, words: string): never {
   throw new HostCommandError(ipcError('invalid_input', `${code}: ${words}`));
 }
 
+/** An enrollment as the rows' derivations read it: its org and machine name; null while not enrolled. */
+const enrollmentKey = (enrollment: Enrollment | null): string | null => (enrollment === null ? null : JSON.stringify([enrollment.org, enrollment.machine]));
+
 const canonicalFolder = (directory: string): string | null => {
   try {
     const real = realpathSync.native(directory);
@@ -67,6 +70,8 @@ const canonicalFolder = (directory: string): string | null => {
 
 export class Statements {
   private context: StatementsContext | null = null;
+  /** The enrollment the rows were last derived under (`enrollmentKey`): a start's, then each move's. */
+  private derivedUnder: string | null = null;
   private evaluating = false;
   private offStatements: (() => void) | null = null;
 
@@ -82,6 +87,7 @@ export class Statements {
   /** Starts the statements' life on this machine: the first MAWS use's minting and the seam's turns. */
   bind(context: StatementsContext): void {
     this.context = context;
+    this.derivedUnder = enrollmentKey(context.enrollment()); // the start derives every row under it next
     this.projects.onFits((rows) => this.registry.fits(rows));
     this.projects.onUsed((id) => void this.used(id).catch((error) => console.error('[index] minting a first-used project failed:', error instanceof Error ? error.message : error)));
     this.offStatements?.();
@@ -477,14 +483,17 @@ export class Statements {
    */
   async statementsChanged(): Promise<void> {
     const state = this.registry.statements();
+    // begun at the turn, as the state is read: the rows derived again if the enrollment moved, before any is minted
+    const moved = this.enrollmentMoved();
     if (!state.possible) {
       if (this.projects.meta('minting') !== '0') this.projects.setMeta('minting', '0');
       if (this.pending().length > 0) this.projects.setMeta('minting_pending', '[]'); // the next (c) considers every row
-      return;
+      return moved;
     }
-    if (this.context === null || this.evaluating || this.projects.meta('minting') === '1') return;
+    if (this.context === null || this.evaluating || this.projects.meta('minting') === '1') return moved;
     this.evaluating = true;
     try {
+      await moved;
       const candidates: ProjectId[] = [];
       // a folder not found now is minted once it is, and it alone (`checkFolders`; M8's review 1, finding 7)
       const unfound: ProjectId[] = [];
@@ -508,6 +517,31 @@ export class Statements {
     } finally {
       this.evaluating = false;
     }
+  }
+
+  /**
+   * The enrollment moved since the rows were derived (an enrollment, a re-enrollment or its end, with no restart): every
+   * row derived again under it, before minting considers any. What the rule gives reads the enrollment throughout: a
+   * stored statement counts on an enrolled machine alone, and a remote's and the machine's own project's ids are its
+   * org's. So a minted or linked row takes its statement again on enrolling, and loses its statement-made identity on
+   * unenrolling; whether a row is minted is no part of whether it is derived again (branch review 1, P2). A row the rule
+   * gives no answer for now goes to the refresh queue, which asks again.
+   */
+  private async enrollmentMoved(): Promise<void> {
+    const context = this.context;
+    if (context === null) return;
+    const now = enrollmentKey(context.enrollment());
+    if (now === this.derivedUnder) return;
+    this.derivedUnder = now;
+    const unanswered: OrgRow[] = [];
+    await Promise.all(
+      this.projects.orgRows().map((row) =>
+        this.queue.slot(async () => {
+          if ((await this.deriveRow(row).catch(() => null)) === null) unanswered.push(row);
+        }),
+      ),
+    );
+    this.queue.rederive(unanswered);
   }
 
   /**

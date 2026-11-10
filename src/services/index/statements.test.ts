@@ -847,4 +847,61 @@ describe('the stored statements', () => {
       expect(record).not.toHaveProperty('stated');
     });
   });
+
+  // branch review 1, P2: the rows are derived again when the enrollment moves, whatever minting would take; a row's
+  // identity from a stored statement holds on an enrolled machine alone
+  describe('branch review 1', () => {
+    let enrollment: Enrollment | null = ENROLLED;
+    const start = () => index.refreshOrgProjects({ machine: MACHINE, enrollment: () => enrollment, home, folderCheckMs: 60 * 60_000 });
+    /** The row at `path` as the endpoint reads it (§H's snapshot). */
+    const published = (path: string) => index.projectsSource().snapshot()?.rows.find((r) => r.path === path);
+    /** A minted folder and a discovered row beneath it, both in the minted project. */
+    const mintedTree = async () => {
+      const plain = folder('plain');
+      await add(plain);
+      const id = minted(plain)!;
+      const sub = index.projects.ensureForDirectory(folder('plain', 'sub'), 'discovered').directory;
+      await vi.waitFor(() => expect(row(sub)?.org?.smnsId).toBe(id));
+      return { plain, sub, id };
+    };
+    const inForce = async ({ plain, sub, id }: Awaited<ReturnType<typeof mintedTree>>) => {
+      await vi.waitFor(() => expect([row(plain)?.org?.smnsId, row(sub)?.org?.smnsId]).toEqual([id, id]));
+      expect(row(plain)).toMatchObject({ stated: 'minted' });
+      expect(published(plain)).toMatchObject({ stated: 'minted', statedAt: plain, org: { smnsId: id } });
+    };
+    const notInForce = async ({ plain, sub }: Awaited<ReturnType<typeof mintedTree>>) => {
+      await vi.waitFor(() => expect([row(plain)?.org?.smnsId ?? null, row(sub)?.org?.smnsId ?? null]).toEqual([null, null]));
+      expect(row(plain)).not.toHaveProperty('stated');
+      expect(published(plain)?.org.smnsId ?? null).toBeNull();
+      expect(published(plain)).not.toHaveProperty('stated');
+    };
+
+    it('P2: a minted row an unenrolled start derived takes its statement once the machine enrolls, with no restart', async () => {
+      enrollment = ENROLLED;
+      await open();
+      const tree = await mintedTree();
+      enrollment = null; // a start while not enrolled: the statement counts for nothing
+      seam.state = { possible: false, reason: 'not-enrolled' };
+      await start();
+      await notInForce(tree);
+      enrollment = ENROLLED;
+      seam.turn({ possible: true });
+      await inForce(tree);
+      expect(minted(tree.plain)).toBe(tree.id);
+    });
+
+    it('P2: an enrolled machine unenrolled, and enrolled again, with no restart: the statement out of force, then in again', async () => {
+      enrollment = ENROLLED;
+      await open();
+      await start();
+      const tree = await mintedTree();
+      enrollment = null;
+      seam.turn({ possible: false, reason: 'not-enrolled' });
+      await notInForce(tree);
+      expect(minted(tree.plain), 'the statement itself is kept').toBe(tree.id);
+      enrollment = ENROLLED;
+      seam.turn({ possible: true });
+      await inForce(tree);
+    });
+  });
 });
