@@ -1,5 +1,6 @@
 // Hosted Linux gives each static check its own runner. Keep typecheck's project list in package.json;
 // as in gate-bg.sh, split only simple && chains. The pool and Mac still use gate-bg's memory-aware pacing.
+import process from 'node:process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,5 +19,5 @@ export function staticChecks(scripts) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  console.log(JSON.stringify(staticChecks(JSON.parse(readFileSync('package.json', 'utf8')).scripts)));
+  process.stdout.write(`${JSON.stringify(staticChecks(JSON.parse(readFileSync('package.json', 'utf8')).scripts))}\n`);
 }

@@ -542,6 +542,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
+        with:
+          fonts: 'false'
       - if: matrix.go
         uses: actions/setup-go@v7
         with:

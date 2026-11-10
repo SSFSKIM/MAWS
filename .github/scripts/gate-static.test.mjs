@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
+import process from 'node:process';
+import { URL } from 'node:url';
 import { staticChecks } from './gate-static.mjs';
 
 const workflow = readFileSync(new URL('../workflows/gate.yml', import.meta.url), 'utf8');
@@ -26,7 +28,7 @@ test('the two test shards cover the same file globs without fail-fast', () => {
 });
 
 test('static succeeds only when its selected lane succeeds, never a skipped or failed lane', () => {
-  const body = /\n  static:\n([\s\S]*?)(?=\n  \S)/.exec(workflow)?.[1];
+  const body = /\n {2}static:\n([\s\S]*?)(?=\n {2}\S)/.exec(workflow)?.[1];
   assert.ok(body, 'the static compatibility result exists');
   assert.match(body, /needs: \[plan, static-checks, static-local\]/);
   assert.match(body, /if:.*!cancelled\(\).*needs.plan.outputs.static == 'true'/);
@@ -37,4 +39,14 @@ test('static succeeds only when its selected lane succeeds, never a skipped or f
       assert.equal(spawnSync('bash', ['-c', shell], { env }).status, result === 'success' ? 0 : 1, `${hosted}: ${result}`);
     }
   }
+});
+
+// The runtime fonts held a hosted setup for minutes; static never opens a renderer. Other jobs retain them.
+test('only a Linux job opting out of fonts omits the runtime font packages', () => {
+  const setup = readFileSync(new URL('../actions/setup/action.yml', import.meta.url), 'utf8');
+  const expression = /^ {8}skip: \$\{\{ (.*) \}\}$/m.exec(setup)[1];
+  const skip = (os, fonts) => Function('runner', 'inputs', `return (${expression});`)({ os, environment: 'self-hosted' }, { fonts });
+  assert.equal(skip('Linux', 'false'), 'apt:fonts-noto-cjk apt:fonts-inter apt:fonts-jetbrains-mono');
+  assert.equal(skip('Linux', 'true'), '');
+  assert.equal(skip('macOS', 'false'), '');
 });
