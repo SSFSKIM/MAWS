@@ -14,6 +14,7 @@ import { project } from '../../../../test/support/builders';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { useMachines } from '../stores/machines';
+import { EMPTY_REGISTRY, type OrgProjectLocation } from '../stores/registry';
 import { useSessions } from '../stores/sessions';
 import { SPAWN_HOME_CAPABILITY } from '@shared/ipc/schema/session';
 import { checkTrust, knownCheckouts, listFolders, readMachines, readPlaces, registerFolder, setupErrorWords, SETUP_WORDS, suggestionsFor } from './remote-setup';
@@ -32,7 +33,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() });
-  useSessions.setState({ projects: new Map() });
+  useSessions.setState({ projects: new Map(), registry: EMPTY_REGISTRY });
 });
 
 describe('the machines the menu offers', () => {
@@ -74,6 +75,25 @@ describe('the machines the menu offers', () => {
       { kind: 'closed', machine: OTHER_MACHINE, name: 'mini', words: SETUP_WORDS.noSpawn('mini') },
       { kind: 'ready', target: { machine: THIRD, name: 'vm', checkout: null, key: null } },
     ]);
+  });
+
+  // The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §J; design §6): a project the
+  // registry holds takes its location on each machine from its record, with no read over the link; a location missing
+  // there is no place to start in.
+  it('takes a registry project’s location on each machine from its record, reading nothing of them', async () => {
+    const ID = '11111111-2222-4333-8444-555555555555';
+    const location = (ref: MachineRef, pid: string, path: string, over: Partial<OrgProjectLocation> = {}): OrgProjectLocation => ({ machine: ref, pid, path, key: KEY, name: 'app', source: 'remote', acts: true, ...over });
+    useSessions.setState({
+      projects: new Map([[addressOf(TEST_MACHINE, 'here' as ProjectId), projectOn(TEST_MACHINE, 'here', '/Users/owner/app', { org: { ...org, smnsId: ID } })]]),
+      registry: { ...EMPTY_REGISTRY, projects: [{ id: ID, name: 'app', hub: true, renamable: true, locations: [location(TEST_MACHINE, 'here', '/Users/owner/app'), location(OTHER_MACHINE, 'p-2', '/Users/mini/app', { state: 'missing' }), location(THIRD, 'p-3', '/home/vm/app')] }] },
+    });
+    const fake = fakeClient({});
+    expect(await readMachines(KEY, fake.client)).toEqual([
+      { kind: 'ready', target: { machine: OTHER_MACHINE, name: 'mini', checkout: null, key: null } },
+      { kind: 'ready', target: { machine: THIRD, name: 'vm', checkout: '/home/vm/app', key: KEY } },
+    ]);
+    expect(fake.invoked('session.projects.list')).toEqual([]);
+    expect(knownCheckouts(KEY).sort()).toEqual(['/Users/mini/app', '/Users/owner/app', '/home/vm/app']);
   });
 });
 

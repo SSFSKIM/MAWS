@@ -9,7 +9,8 @@ import { useMemo, useRef } from 'react';
 import { create } from 'zustand';
 import type { ProjectId } from '@shared/graph/ids';
 import { WIDGET_DIALOG_BOX } from '../composer/WidgetDialog';
-import { orgKeyOf } from '../stores/org-projects';
+import { selectOrgIndex } from '../stores/org-projects';
+import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
 import { RESUME_COPY } from './copy';
 import { ResumeChooser } from './ResumeChooser';
@@ -32,8 +33,10 @@ function returnFocus(opener: HTMLElement): void {
 export function ResumeChooserHost() {
   const open = useResumeChooser((s) => s.open);
   // P5 O6 M5: the row the project is listed under, which scopes the chooser to every checkout it groups
-  const project = useSessions((s) => (open === null ? undefined : s.projects.get(open.projectId)));
-  const row = project === undefined ? undefined : orgKeyOf(project);
+  const row = useSessions((s) => {
+    const project = open === null ? undefined : s.projects.get(open.projectId);
+    return project === undefined ? undefined : selectOrgIndex(s, ipc.localMachine).keyOf(project); // the project registry: its row's key
+  });
   const context = useMemo(() => (open === null ? null : { projectId: open.projectId, row, exclude: null }), [open, row]);
   const opened = useRef(false); // the close opened a session
   if (open === null || context === null) return null;

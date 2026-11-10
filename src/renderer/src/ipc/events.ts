@@ -14,11 +14,14 @@
 // them all and what main says again for it is heard.
 // P5 O7 M6 (the same document, M6 "The feed"): `remote.attention`, another machine's attention feed, into the attention
 // store's partition of that machine; the feed's per-session changes arrive as that machine's `attention.changed`.
-import type { AppSessionId } from '@shared/graph/ids';
+// The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §J): main's `org.projects` and
+// `org.projects.changed`, each the whole value, into the sessions store (`applyRegistry`), and a layout key that is no
+// row's any more moves whole to its successor (§J.2, `successorOf`), once this Mac's own projects are in.
+import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { EventPayload, MawsBridge, SessionDigest } from '@shared/ipc/schema';
 import type { MachineState } from '@shared/ipc/schema/machines';
-import type { OrgRows } from '@shared/ipc/schema/org';
-import { machineOf } from '@shared/machine/address';
+import type { OrgProjects, OrgRows } from '@shared/ipc/schema/org';
+import { isAddress, machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import { currentTabRetention, unstartedProjectOf } from '../keymap/actions-runtime';
 import { useAttention } from '../stores/attention';
@@ -27,10 +30,10 @@ import { useLayout } from '../stores/layout';
 import { useMachines } from '../stores/machines';
 import { useSessions } from '../stores/sessions';
 import { applyRemoteSession, holdsRemoteStatus, keepsRemoteStatus } from '../lane-b/remote-session'; // P5 O7 M2
-import { selectOrgIndex, sessionSetKey, setKeyOfProject } from '../stores/org-projects'; // P5 O6 M5
+import { machineOfRow, selectOrgIndex, sessionSetKey, setKeyOfProject, successorOf, type RowKey } from '../stores/org-projects'; // P5 O6 M5; the project registry: successorOf
 import { displayTitle } from '../sessions/title'; // P5 O6 M2: a session tab's last-known title
 import type { RekeyOf } from '../stores/layout-model';
-import type { TabSetKey } from '@shared/ipc/schema/layout';
+import { NO_PROJECT, type TabSetKey } from '@shared/ipc/schema/layout';
 import { ipc } from './client';
 import { checkoutKey } from './machine';
 import { askUntilAnswered } from './until-answered';
@@ -100,6 +103,7 @@ export function connectShell(
   const on: MawsBridge['on'] = (name, listener) => client.on(name, (payload, from) => connected && listener(payload, from));
   const rosterFreshness = createFreshness(); // advanced by every `machines.changed`, which a `machines.list` answer must not undo
   const rowsFreshness = createFreshness(); // P5 O8 M2: advanced by every `org.rows.changed`, which an `org.rows` answer must not undo
+  const registryFreshness = createFreshness(); // the project registry: advanced by every `org.projects.changed`, as the rows'
   const links = new Map<MachineRef, Link>();
   const linkOf = (machine: MachineRef): Link => {
     let link = links.get(machine);
@@ -206,6 +210,10 @@ export function connectShell(
     on('org.rows.changed', (rows) => {
       rowsFreshness.advance();
       takeRows(rows);
+    }),
+    on('org.projects.changed', (registry) => {
+      registryFreshness.advance();
+      takeRegistry(registry);
     }),
     // P5 O7 M2: main's word on a lane B session it streams from another machine; a stream main says idle or ended is one
     // whose status main forgot, so its status here goes too (kept through a link going down, below)
@@ -337,6 +345,15 @@ export function connectShell(
     return applied && heard;
   });
 
+  // The project registry: the whole value, replaced (signed out, none); its records join the projects map.
+  const takeRegistry = (registry: OrgProjects) => sessions().applyRegistry(registry, local);
+  const registryLive = registryFreshness.stamp();
+  void client.invoke('org.projects', undefined).then((result) => {
+    if (!connected) return;
+    if (!result.ok) console.warn('[shell] org.projects unavailable; no project registry', result.error);
+    else if (registryLive()) takeRegistry(result.value);
+  });
+
   const rowsLive = rowsFreshness.stamp();
   void client.invoke('org.rows', undefined).then((result) => {
     if (!connected) return;
@@ -371,12 +388,20 @@ export function connectShell(
   // its loaded machine no longer lists is gone; anything else waits for that machine's next projects. A project not
   // derived yet whose sessions file under its address meanwhile (a listed checkout's, `setKeyOfProject`) answers that
   // address: its set is already where it belongs, and its tabs refile as any set's do.
-  const rekeyOf: RekeyOf = (address) => {
+  // The project registry (§J.2): any other key that is no row's now (a label whose project took a key of the table, an
+  // `id:` key whose project's locations were linked into another) moves to its successor; until this Mac's own projects
+  // are in, nothing moves, since every key reads as no row's then.
+  const rekeyOf: RekeyOf = (key) => {
+    if (!isAddress(key)) {
+      if (key === NO_PROJECT || machineOfRow(key) !== null || !stores.machines.getState().loaded.has(local)) return 'wait';
+      return successorOf(selectOrgIndex(sessions(), local), key as RowKey, local);
+    }
+    const address = key as ProjectId;
     if (!stores.machines.getState().loaded.has(machineOf(address))) return 'wait';
     const project = sessions().projects.get(address);
     if (project === undefined) return 'gone';
-    const key = setKeyOfProject(selectOrgIndex(sessions(), local), project);
-    return project.org === undefined && key !== address ? 'wait' : key;
+    const into = setKeyOfProject(selectOrgIndex(sessions(), local), project);
+    return project.org === undefined && into !== address ? 'wait' : into;
   };
   // P5 O6 M2 (M6's scene): a held session's title, which its tabs keep for when it is not held
   const titleOf = (id: AppSessionId): string | undefined => {

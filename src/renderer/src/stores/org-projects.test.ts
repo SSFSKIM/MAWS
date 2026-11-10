@@ -5,7 +5,8 @@ import { addressOf } from '@shared/machine/address';
 import { machineKey, type OrgKey } from '@shared/machine/org-key';
 import { project, record, remoteRow } from '../../../../test/support/builders';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
-import { localProjectOfSet, machineOrder, orgIndex, primaryCheckout, reachableCheckouts, rowOfListed, sessionSetKey } from './org-projects';
+import { labelOf, localProjectOfSet, machineOrder, orgIndex, primaryCheckout, reachableCheckouts, registryOnly, rowOfListed, rowOfSession, sessionSetKey, successorOf } from './org-projects';
+import { EMPTY_REGISTRY, registryRecords, type OrgProjectLocation, type OrgProjects, type RegistryProject } from './registry';
 import type { ListedSession } from './sessions';
 
 // P5 O6 M5 ("Assembly"): every machine's projects grouped by their org key.
@@ -95,5 +96,91 @@ describe('org projects', () => {
     expect(rowOfListed(index, listed(`folder:${OTHER_MACHINE}:tmp`))).toBe(machineKey(OTHER_MACHINE)); // a key with no checkout
     expect(rowOfListed(index, listed(`folder:${OTHER_MACHINE}:tmp`), new Set([`folder:${OTHER_MACHINE}:tmp` as OrgKey]))).toBe(`folder:${OTHER_MACHINE}:tmp`);
     expect(rowOfListed(orgIndex([{ ...here, hidden: true }], TEST_MACHINE), listed('repo:maws'))).toBeNull();
+  });
+});
+
+// The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §J.1 and §J.2): one row per
+// project id, by main's key table; a record with no id by its label, as before.
+describe('the project registry: rows by project id', () => {
+  const ID = '11111111-2222-4333-8444-555555555555';
+  const OTHER_ID = '66666666-7777-4888-9999-aaaaaaaaaaaa';
+  const withId = (key: string, smnsId: string | null, source: 'smns' | 'remote' | 'folder' = 'remote'): ProjectRecord['org'] => ({ key: key as OrgKey, name: key, source, smnsId });
+  const location = (machine: typeof TEST_MACHINE, pid: string, over: Partial<OrgProjectLocation> = {}): OrgProjectLocation => ({
+    machine, pid, path: `/work/${pid}`, key: 'remote:example.org/app' as OrgKey, name: pid, source: 'remote', acts: true, ...over,
+  });
+  const registered = (id: string, name: string, locations: OrgProjectLocation[]): RegistryProject => ({ id, name, hub: true, renamable: true, locations });
+  const registryOf = (projects: RegistryProject[], keys: Record<string, string>, moved: Record<string, string> = {}): OrgProjects => ({
+    ...EMPTY_REGISTRY, projects, keys: keys as OrgProjects['keys'], moved: moved as OrgProjects['moved'],
+  });
+
+  it('files two labels of one id under one row, the key table’s', () => {
+    const pinned = project(at('pinned'), 0, { org: withId(`smns:${ID}`, ID, 'smns') });
+    const clone = project(studio('clone'), 0, { org: withId('remote:example.org/app', ID) });
+    const index = orgIndex([pinned, clone], TEST_MACHINE, registryOf([], { [ID]: `smns:${ID}` }));
+    expect([...index.listed]).toEqual([`smns:${ID}`]);
+    expect(index.projects.get(`smns:${ID}` as OrgKey)?.map((p) => p.id)).toEqual([pinned.id, clone.id]);
+    expect(index.orgs.get(`smns:${ID}` as OrgKey)?.smnsId).toBe(ID);
+  });
+
+  it('keeps one label of two ids as two rows, and a record with no id under its label', () => {
+    const minted = project(at('minted'), 0, { org: withId('remote:example.org/app', ID) });
+    const linked = project(at('linked'), 1, { org: withId('remote:example.org/app', OTHER_ID) });
+    const plain = project(at('plain'), 2, { org: withId(`folder:${TEST_MACHINE}:plain`, null, 'folder') });
+    const index = orgIndex([minted, linked, plain], TEST_MACHINE, registryOf([], { [ID]: 'remote:example.org/app', [OTHER_ID]: `id:${OTHER_ID}` }));
+    expect([...index.listed].sort()).toEqual([`folder:${TEST_MACHINE}:plain`, `id:${OTHER_ID}`, 'remote:example.org/app'].sort());
+    expect(index.keyOf(linked)).toBe(`id:${OTHER_ID}`);
+    expect(index.keyOf(plain)).toBe(`folder:${TEST_MACHINE}:plain`);
+    // signed out (no table), every record by its label, as before
+    expect([...orgIndex([minted, linked, plain], TEST_MACHINE).listed].sort()).toEqual([`folder:${TEST_MACHINE}:plain`, 'remote:example.org/app']);
+  });
+
+  it('names a registry project’s row as main assembled it, and lists one seen only through its sessions with no checkout', () => {
+    const here = project(at('app'), 0, { name: 'app-local', org: withId('remote:example.org/app', ID) });
+    const registry = registryOf([registered(ID, 'Northwind app', [location(TEST_MACHINE, 'app')]), registered(OTHER_ID, 'Shared reports', [])], { [ID]: 'remote:example.org/app', [OTHER_ID]: `id:${OTHER_ID}` });
+    const index = orgIndex([here], TEST_MACHINE, registry);
+    expect(index.orgs.get('remote:example.org/app' as OrgKey)?.name).toBe('Northwind app');
+    expect(index.orgs.get(`id:${OTHER_ID}` as OrgKey)).toMatchObject({ name: 'Shared reports', smnsId: OTHER_ID, checkouts: [] });
+    expect(index.listed.has(`id:${OTHER_ID}` as OrgKey)).toBe(true);
+    // a listing of that project files under its row, by the key main gave its listing
+    const listing = { ...remoteRow(OTHER_MACHINE, 's', { orgKey: `id:${OTHER_ID}` as OrgKey, project: OTHER_ID }), appId: studio('s' as AppSessionId) };
+    expect(rowOfListed(index, listing)).toBe(`id:${OTHER_ID}`);
+  });
+
+  it('makes no row of a machine’s own project: main leaves it out of the registry, so its location makes no record and its sessions sit under the machine’s row', () => {
+    const registry = registryOf([registered(ID, 'app', [location(OTHER_MACHINE, 'app')])], { [ID]: 'remote:example.org/app' });
+    const records = registryRecords(registry, TEST_MACHINE);
+    expect([...records.keys()]).toEqual([studio('app')]);
+    const index = orgIndex(records.values(), TEST_MACHINE, registry);
+    const own = { ...remoteRow(OTHER_MACHINE, 'h', { orgKey: null, project: 'machine-project-id' }), appId: studio('h' as AppSessionId) };
+    expect(rowOfListed(index, own)).toBe(machineKey(OTHER_MACHINE));
+    expect([...index.listed]).toEqual(['remote:example.org/app']);
+    // a session of a record whose project is no registry project and carries no id stays under its label's row or its machine's
+    expect(rowOfSession(index, new Map(), record(studio('x')))).toBe(machineKey(OTHER_MACHINE));
+  });
+
+  it('tells a row the registry alone holds from one a machine of this app answered', () => {
+    const registry = registryOf([registered(ID, 'app', [location(OTHER_MACHINE, 'app')])], { [ID]: 'remote:example.org/app' });
+    const remote = orgIndex(registryRecords(registry, TEST_MACHINE).values(), TEST_MACHINE, registry);
+    expect(registryOnly(remote, 'remote:example.org/app' as OrgKey)).toBe(true);
+    const here = project(at('app'), 0, { org: withId('remote:example.org/app', ID) });
+    const both = orgIndex([here, ...registryRecords(registry, TEST_MACHINE).values()], TEST_MACHINE, registry);
+    expect(registryOnly(both, 'remote:example.org/app' as OrgKey)).toBe(false);
+    expect(registryOnly(orgIndex([here], TEST_MACHINE), 'remote:example.org/app' as OrgKey)).toBe(false); // signed out: no registry row
+  });
+
+  // §J.2: a key that is no row's any more moves to its successor
+  it('finds a key’s successor: itself while a row, main’s moved, else the first record with that label, this Mac’s first', () => {
+    const LABEL = 'remote:example.org/app' as OrgKey;
+    const linkedHere = project(at('app'), 0, { org: withId(LABEL, OTHER_ID) }); // this Mac's clone, linked into OTHER_ID
+    const there = project(studio('app'), 0, { org: withId(LABEL, '99999999-0000-4000-8000-000000000000') });
+    const registry = registryOf([], { [OTHER_ID]: `id:${OTHER_ID}`, '99999999-0000-4000-8000-000000000000': 'id:99999999-0000-4000-8000-000000000000' }, { [`id:${ID}`]: `id:${OTHER_ID}` });
+    const index = orgIndex([there, linkedHere], TEST_MACHINE, registry);
+    expect(successorOf(index, `id:${OTHER_ID}` as OrgKey, TEST_MACHINE)).toBe(`id:${OTHER_ID}`); // a row's own
+    expect(successorOf(index, `id:${ID}` as OrgKey, TEST_MACHINE)).toBe(`id:${OTHER_ID}`); // linked into another: main names it
+    expect(successorOf(index, LABEL, TEST_MACHINE)).toBe(`id:${OTHER_ID}`); // the label's records: this Mac's first
+    expect(labelOf(linkedHere)).toBe(LABEL);
+    expect(successorOf(index, 'smns:nobody' as OrgKey, TEST_MACHINE)).toBe('smns:nobody'); // none: it stays
+    const hidden = orgIndex([{ ...linkedHere, hidden: true }], TEST_MACHINE, registry);
+    expect(successorOf(hidden, LABEL, TEST_MACHINE)).toBe(LABEL); // a hidden project's set stays
   });
 });

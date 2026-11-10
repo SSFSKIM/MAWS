@@ -16,6 +16,10 @@
 // alone) draws other people's sessions among them; while it is off, "+N others", faint, counts those it leaves out. The
 // toggle is offered only where it can act, with others to show or while it is on (`data-people` tells the menu), so a
 // row with neither (every row of a person with no org) is as it was before M5.
+// The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §J.3): a row whose folders are
+// on another machine names its machines after its name (` · `, this Mac's first; a row on this Mac alone, and every row
+// signed out, still names none, T4), faint, giving way to the hover actions as the counts do; a row of a project you see only through its
+// sessions has no actions and no card, and its menu is `registry:<id>`'s.
 import { useState } from 'react';
 import type { ProjectId } from '@shared/graph/ids';
 import { machineOf } from '@shared/machine/address';
@@ -30,6 +34,8 @@ import { isListedRow, type ProjectEntry, type ProjectKey, type SidebarTreeRow } 
 import { ListedRow } from './ListedRow'; // P5 O8 M2
 import { focusVisible } from './HoverCard';
 import { ProjectHoverCard } from './ProjectHoverCard';
+import { machinesWords } from './locations'; // the project registry
+import { useLocationView } from './location-view'; // the project registry
 import { runProjectAction, useProjectActionEnabled } from './project-actions';
 import { openResumeChooser } from '../resume/host'; // P2-D
 import { SessionRow } from './SessionRow';
@@ -52,6 +58,8 @@ export function ProjectRow({ entry, open, sessions, more, matchCount, onToggle, 
     const machines = entry.machine !== null ? [entry.machine] : entry.org.checkouts.map((c) => c.machine);
     return machines.length > 0 && machines.every((m) => selectOffline(s, m));
   });
+  const view = useLocationView();
+  const machinesLine = entry.registry !== null ? machinesWords(entry.machines, view) : null; // signed out, a row names no machine, as before
   const tree = useTree();
   const nodeId = projectNodeId(key);
   // The rows stay as they were through the close, so the body folds over what it showed.
@@ -70,6 +78,11 @@ export function ProjectRow({ entry, open, sessions, more, matchCount, onToggle, 
     >
       {open ? <FolderOpenIcon className={`size-[13px] ${project ? 'text-fg-muted' : 'text-fg-faint'}`} /> : <FolderIcon className={`size-[13px] ${project ? 'text-fg-muted' : 'text-fg-faint'}`} />}
       <span className={`min-w-0 flex-1 truncate text-ui ${offline ? 'text-fg-faint' : project ? 'text-fg' : 'text-fg-muted'}`}>{name}</span>
+      {machinesLine !== null && (
+        <span data-row-machines className="max-w-[45%] shrink-0 truncate text-ui-sm text-fg-faint group-hover/line:hidden group-focus-visible/project:hidden">
+          {machinesLine}
+        </span>
+      )}
       {matchCount !== undefined && <span aria-label={`${matchCount} matching sessions`} className="text-ui-sm text-fg-muted tabular-nums">{matchCount}</span>}
       {entry.others > 0 && (
         <span aria-label={othersText(entry.others).slice(1)} className="shrink-0 text-ui-sm text-fg-faint tabular-nums group-hover/line:hidden group-focus-visible/project:hidden">
@@ -105,7 +118,7 @@ export function ProjectRow({ entry, open, sessions, more, matchCount, onToggle, 
       data-tree-id={nodeId}
       data-kind="project"
       data-offline={offline || undefined}
-      data-menu={project ? `project:${project.id}` : `machine:${entry.machine}`}
+      data-menu={project ? `project:${project.id}` : entry.machine !== null ? `machine:${entry.machine}` : entry.registry !== null ? `registry:${entry.registry.id}` : undefined}
       data-people={people !== null || undefined}
       onFocus={(event) => {
         if (event.target !== event.currentTarget) return;

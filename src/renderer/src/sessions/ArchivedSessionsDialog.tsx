@@ -13,7 +13,7 @@ import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../ipc/client';
 import { useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { selectOffline, useMachines } from '../stores/machines';
-import { machineName, machineOfRow, orgKeyOf, rowName, rowOfSession, rowProjects, selectOrgIndex, type RowKey } from '../stores/org-projects';
+import { machineName, machineOfRow, rowName, rowOfSession, rowProjects, selectOrgIndex, type RowKey } from '../stores/org-projects';
 import { useSessions } from '../stores/sessions';
 import { isManagedWorktree } from './ArchiveDialog';
 import { cleanupTargetOf } from './CleanupDialog';
@@ -28,7 +28,7 @@ export function ArchivedSessionsDialog({ projectId, machine: named }: { projectI
   const projects = useSessions((s) => s.projects);
   const machines = useMachines((s) => s.machines);
   const project = projectId === null ? undefined : projects.get(projectId);
-  const row: RowKey = projectId === null ? machineKey(named ?? local) : project ? orgKeyOf(project) : machineKey(machineOf(projectId));
+  const row: RowKey = projectId === null ? machineKey(named ?? local) : project ? index.keyOf(project) : machineKey(machineOf(projectId));
   // the machines the row's sessions are on: a machine's row its own, an org project's those of its projects that are up
   const own = machineOfRow(row);
   const readOn = own !== null ? own : [...new Set(rowProjects(index, row, (m) => !selectOffline({ machines }, m)).map((p) => machineOf(p.id)))].sort().join(' ');

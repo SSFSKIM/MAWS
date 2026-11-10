@@ -18,6 +18,10 @@
 // there when the machine holds one; otherwise the machine's places are the project chip's (`readPlaces`): its own
 // projects, "New project" there (this sheet, naming no org project: any folder, git or not, registered as a project of
 // its own), and "Don't work in a project" (its home, a machine owner's alone, where its endpoint lists `rl2.spawn-home`).
+// The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §J; design §6, "+ Session"
+// offers the project's locations, "the record saves the round trip"): a project the registry holds takes its location on
+// the machine from its record, with no read over the link; a location missing or replaced there is no place to start in.
+// A project the registry does not hold is read live, as before.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { IpcError } from '@shared/ipc/errors';
 import type { MawsBridge, ProjectRecord } from '@shared/ipc/schema';
@@ -28,6 +32,8 @@ import type { TrustState } from '@shared/sessions/trust';
 import { ipc } from '../ipc/client';
 import { useMachines } from '../stores/machines';
 import { useSessions } from '../stores/sessions';
+import type { RegistryProject } from '../stores/registry';
+import { machineOf } from '@shared/machine/address';
 import { SPAWN_WORDS, type SpawnTarget } from './remote-spawn';
 
 /**
@@ -138,11 +144,16 @@ const rl2Machines = () => [...useMachines.getState().machines.values()].filter((
  * known and hold no `spawn`, greyed with why. Unknown rights grey nothing: the machine decides at the Send.
  */
 export async function readMachines(key: string | null, client: MawsBridge = ipc): Promise<MachineChoice[]> {
+  const registered = registryProjectOf(key);
   return Promise.all(
     rl2Machines().map(async (machine): Promise<MachineChoice> => {
       if (machine.rights !== undefined && !machine.rights.includes('spawn')) return { kind: 'closed', machine: machine.ref, name: machine.name, words: SETUP_WORDS.noSpawn(machine.name) };
       const none: MachineChoice = { kind: 'ready', target: { machine: machine.ref, name: machine.name, checkout: null, key: null } };
       if (key === null) return none;
+      if (registered !== undefined) {
+        const location = registered.locations.find((l) => l.machine === machine.ref && l.state === undefined);
+        return location === undefined ? none : { kind: 'ready', target: { machine: machine.ref, name: machine.name, checkout: location.path, key } };
+      }
       const projects = await client.invoke('session.projects.list', undefined, { machine: machine.ref }).catch(() => null);
       const checkout = projects?.ok === true ? projects.value.projects.find((p) => p.org?.key === key && p.discovered !== true) : undefined;
       return checkout === undefined ? none : { kind: 'ready', target: { machine: machine.ref, name: machine.name, checkout: checkout.directory, key } };
@@ -153,7 +164,16 @@ export async function readMachines(key: string | null, client: MawsBridge = ipc)
 /** The paths the checkouts of the org project `key` have on every machine the sessions store holds (this Mac's included), which a new project's folder there is suggested by. */
 export function knownCheckouts(key: string | null): string[] {
   if (key === null) return [];
-  return [...new Set([...useSessions.getState().projects.values()].filter((p) => p.org?.key === key && p.discovered !== true).map((p) => p.directory))];
+  const labelled = [...useSessions.getState().projects.values()].filter((p) => p.org?.key === key && p.discovered !== true).map((p) => p.directory);
+  return [...new Set([...labelled, ...(registryProjectOf(key)?.locations.map((l) => l.path) ?? [])])];
+}
+
+/** The registry's project of this Mac's project labelled `key` (the tab's local project), by the id its record carries. */
+function registryProjectOf(key: string | null): RegistryProject | undefined {
+  if (key === null) return undefined;
+  const { projects, registry } = useSessions.getState();
+  const id = [...projects.values()].find((p) => p.org?.key === key && p.org.smnsId !== null && machineOf(p.id) === ipc.localMachine)?.org?.smnsId;
+  return id == null ? undefined : registry.projects.find((p) => p.id === id);
 }
 
 /** What the project chip's menu offers on another machine (`readPlaces`): `newProject` and `noProject` null when offered, else why not. */

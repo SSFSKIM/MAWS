@@ -2,7 +2,7 @@ import { Popover } from 'radix-ui';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ProjectRecord } from '@shared/ipc/schema';
 import { IconButton } from '../app/IconButton';
-import { orgKeyOf, type OrgIndex, type RowKey } from '../stores/org-projects';
+import type { OrgIndex, RowKey } from '../stores/org-projects';
 import { projectLabels } from './project-labels';
 
 // P5 O6 M5: the filter chooses org projects, each once whatever machines hold it; choosing one no checkout lists (a
@@ -20,7 +20,10 @@ export function ProjectFilter({ projects, index, current, selected, onChange }: 
   // one entry per org project, named as its row is, the first of its projects standing for it
   const options = useMemo(() => {
     const seen = new Map<RowKey, ProjectRecord>();
-    for (const p of projects) if (!seen.has(orgKeyOf(p))) seen.set(orgKeyOf(p), { ...p, name: index.orgs.get(orgKeyOf(p))?.name ?? p.name });
+    for (const p of projects) {
+      const key = index.keyOf(p);
+      if (!seen.has(key)) seen.set(key, { ...p, name: index.orgs.get(key)?.name ?? p.name });
+    }
     const labels = projectLabels([...seen.values()]);
     return [...seen].map(([key, p]) => ({ key, label: labels.get(p.id)!, title: p.directory }));
   }, [projects, index]);

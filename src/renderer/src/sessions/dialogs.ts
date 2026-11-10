@@ -58,6 +58,11 @@ export type OpenDialog =
   | { kind: 'remoteSetup'; request: SetupRequest } // P5 O7 M9: a project set up on another machine, or its trust card
   | { kind: 'share'; address: AppSessionId } // P5 O8 M6b: a session's reach (share/ShareSheet.tsx)
   | { kind: 'addOwner'; address: AppSessionId } // P5 O8 M5b: an owner added to a session (share/AddOwnerSheet.tsx)
+  // the project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §J): Add project (`into`: "Add
+  // location…" of that project), a missing location's Locate… (`address`, the location's), and Rename… at one location
+  | { kind: 'addProject'; into: string | null }
+  | { kind: 'locateProject'; address: ProjectId; path: string }
+  | { kind: 'renameProject'; address: ProjectId; name: string }
   | ({ kind: 'confirm'; answer(yes: boolean): void } & ConfirmRequest);
 
 export const useDialogs = create<{ open: OpenDialog | null }>()(() => ({ open: null }));

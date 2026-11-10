@@ -12,7 +12,9 @@ import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { displayTitle, listedTitle } from '../sessions/title'; // E3; P5 O7 M6: listedTitle
 import { projectLabels } from './project-labels';
 import type { MachineRef } from '@shared/machine/ref';
-import { machineOfRow, machineOrder, machineProject, orgIndex, orgKeyOf, primaryCheckout, rowOfListed, rowOfListedRecord, rowOfSession, type OrgProject, type RowKey } from '../stores/org-projects'; // P5 O6 M5; P5 O7 M2: rowOfListedRecord
+import { isCheckout, machineOfRow, machineOrder, machineProject, orgIndex, primaryCheckout, registryOnly, rowOfListed, rowOfListedRecord, rowOfSession, type OrgProject, type RowKey } from '../stores/org-projects'; // P5 O6 M5; P5 O7 M2: rowOfListedRecord
+import type { OrgProjects, RegistryProject } from '../stores/registry'; // the project registry
+import { machineOf } from '@shared/machine/address';
 import type { ListedSession } from '../stores/sessions'; // P5 O8 M2
 import { SIDE_COPY } from '../side/copy'; // E3
 import { isWorking, listedStateOf } from '../sessions/listed-state'; // P5 O7 M10
@@ -57,6 +59,7 @@ export interface ProjectListInput {
   listed?: ReadonlyMap<AppSessionId, ListedSession>; // P5 O8 M2: other machines' listed sessions (the sessions store's)
   people?: ReadonlySet<ProjectKey>; // P5 O8 M5: the rows whose People toggle is on (`stores/people.ts`)
   seen?: SeenActivity; // P5 O7 M10: a remote record's activity beyond the record (`seenActivity`), for its row's order
+  registry?: OrgProjects; // the project registry (Interfaces §J): its row keys, names and locations (the sessions store's)
 }
 
 export interface ProjectEntry {
@@ -70,6 +73,10 @@ export interface ProjectEntry {
   rollup: { waiting: number; working: number }; // P5 O8 M5: yours only
   lastActivity: number | null; // W11 (I6): the latest movement of any of its drawn sessions, archived ones included; null without one
   others: number; // P5 O8 M5: other people's sessions filed under it and not drawn (its People toggle is off)
+  // the project registry (§J): the registry's project the row is, and the machines its folders are on, this Mac's first
+  // (its locations as the registry says them, and the checkouts of machines that answer their own projects)
+  registry: RegistryProject | null;
+  machines: MachineRef[];
 }
 
 // P5 O6 M5: every listed org project, then each machine's own project that holds a session (T3: named after the machine,
@@ -88,8 +95,8 @@ export interface ProjectEntry {
 // drawn only under a row whose People toggle is on (`people`), else counted in its `others`, so a record a lane opened of
 // someone else's session leaves the list with the toggle. Drawn, they count as activity but never in the rollups, which
 // say what needs you; a machine's row with others' sessions alone is kept, so its "+N others" and toggle stay reachable.
-export function projectList({ records, digests, projects, rows, local, machineName, alsoListed, listed: remoteSessions = new Map(), people = new Set(), seen }: ProjectListInput): ProjectEntry[] {
-  const index = orgIndex(projects.values(), local);
+export function projectList({ records, digests, projects, rows, local, machineName, alsoListed, listed: remoteSessions = new Map(), people = new Set(), seen, registry }: ProjectListInput): ProjectEntry[] {
+  const index = orgIndex(projects.values(), local, registry);
   const waiting = new Set(rows.map((row) => row.appSessionId));
   const grouped = new Map<ProjectKey, { live: SessionRecord[]; listed: ListedSession[]; activity: number; theirs: Set<AppSessionId>; others: number }>();
   const groupOf = (key: ProjectKey) => {
@@ -133,7 +140,14 @@ export function projectList({ records, digests, projects, rows, local, machineNa
     const primary = primaryCheckout(index, key, local);
     return primary ? [[key, primary] as const] : [];
   }));
-  const labels = projectLabels([...primaries.values()].map((p) => ({ ...p, name: index.orgs.get(orgKeyOf(p))!.name })));
+  const labels = projectLabels([...primaries.values()].map((p) => ({ ...p, name: index.orgs.get(index.keyOf(p))!.name })));
+  // the project registry: the machines a row's folders are on, this Mac's first
+  const byMachine = machineOrder(local, machineName);
+  const machinesOf = (key: ProjectKey): MachineRef[] => {
+    const org = index.orgs.get(key);
+    const held = [...(org?.registry?.locations.map((l) => l.machine) ?? []), ...(index.projects.get(key) ?? []).filter((p) => isCheckout(p) && !p.hidden).map((p) => machineOf(p.id))];
+    return [...new Set(held)].sort(byMachine);
+  };
   // a row's latest drawn movement; null with none (others' rows the toggle hides leave a group with no activity)
   const entryActivity = (key: ProjectKey): number | null => {
     const activity = grouped.get(key)?.activity;
@@ -152,6 +166,8 @@ export function projectList({ records, digests, projects, rows, local, machineNa
       project,
       machine,
       name,
+      registry: org.registry ?? null,
+      machines: machine === null ? machinesOf(org.id) : [machine],
       sessions,
       listed: remote,
       rollup: {
@@ -162,10 +178,21 @@ export function projectList({ records, digests, projects, rows, local, machineNa
       others: group?.others ?? 0,
     };
   };
-  const listed = [...primaries]
+  // this app's machines' rows by recency, as before; then (the project registry, provisionally: Plan of Work, M11) the rows
+  // whose folders only the registry names, none on a machine that answers its own projects, by name
+  const here = [...primaries]
+    .filter(([key]) => !registryOnly(index, key))
     .map(([key, project]) => ({ entry: entryOf(index.orgs.get(key)!, project, null, labels.get(project.id)!), activity: entryActivity(key) ?? Date.parse(project.createdAt) }))
     .sort((a, b) => b.activity - a.activity || a.entry.project!.order - b.entry.project!.order || a.entry.name.localeCompare(b.entry.name))
     .map(({ entry }) => entry);
+  const elsewhere = listedKeys
+    .filter((key) => registryOnly(index, key))
+    .map((key) => {
+      const primary = primaries.get(key) ?? null;
+      return entryOf(index.orgs.get(key)!, primary, null, primary === null ? index.orgs.get(key)!.name : labels.get(primary.id)!);
+    })
+    .sort((a, b) => a.name.localeCompare(b.name) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  const listed = [...here, ...elsewhere];
   const machines = [...new Set([...grouped.keys()].map(machineOfRow).filter((m) => m !== null))].sort(machineOrder(local, machineName));
   const own = machines.map((machine) => entryOf(machineProject(machine, machineName(machine)), null, machine, machineName(machine))).filter((entry) => entry.sessions.length > 0 || entry.listed.length > 0 || entry.others > 0);
   return [...listed, ...own];

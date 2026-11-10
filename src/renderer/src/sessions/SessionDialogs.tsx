@@ -14,6 +14,8 @@ import { ForkSheet } from './ForkSheet';
 import { deleteOutcomeWords, deleteSession } from './record-ops';
 import { RemoteSetupSheet } from './RemoteSetupSheet'; // P5 O7 M9
 import { AddOwnerSheet } from './share/AddOwnerSheet'; // P5 O8 M5b
+import { AddProjectSheet } from '../sidebar/AddProjectSheet'; // the project registry
+import { LocateSheet, RenameProjectSheet } from '../sidebar/LocationSheets'; // the project registry
 import { ShareSheet } from './share/ShareSheet'; // P5 O8 M6b
 import { RenameDialog } from './RenameDialog';
 import { Sheet, SheetForm } from './Sheet';
@@ -52,6 +54,12 @@ export function SessionDialogs() {
       return <ShareSheet key={open.address} address={open.address} />;
     case 'addOwner': // P5 O8 M5b: an owner added, beside Share
       return <AddOwnerSheet key={open.address} address={open.address} />;
+    case 'addProject': // the project registry: Add project, and a project's Add location…
+      return <AddProjectSheet key={open.into ?? ''} into={open.into} />;
+    case 'locateProject': // the project registry: a missing location's Locate…
+      return <LocateSheet key={open.address} address={open.address} path={open.path} />;
+    case 'renameProject': // the project registry: Rename… at one location's machine
+      return <RenameProjectSheet key={open.address} address={open.address} name={open.name} />;
     case 'confirm':
       return (
         <Sheet title={open.title}>

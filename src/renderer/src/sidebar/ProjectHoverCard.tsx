@@ -3,7 +3,9 @@
 // counts and its paths (readable/chatgpt-26.928.40906/renderer/app/app-initial-27bc4044d9e8.js:525811-526198, the
 // summary line at :527226-527250, the path rows home-abbreviated at :525682-525721); MAWS's says the name, the full
 // path home-abbreviated, how many sessions it holds with how many wait and work, when it last moved, and its worktrees
-// with their branches, read from git when the card opens (`git.worktree.list`), never while it is closed.
+// with their branches, read from git when the card opens (`git.worktree.list`), never while it is closed. The project
+// registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §J.3): a registry project's card lists its
+// locations in place of the one path, each with its machine, state and actions (`ProjectLocations.tsx`).
 import { useEffect, useState, type ReactNode } from 'react';
 import type { ProjectRecord } from '@shared/ipc/schema';
 import type { WorktreeInfo } from '@shared/sessions/worktree';
@@ -14,6 +16,8 @@ import { ipc } from '../ipc/client';
 import { branchLabel } from '../sessions/branch-label';
 import type { ProjectEntry } from './derive';
 import { SidebarHoverCard } from './HoverCard';
+import { ProjectLocations } from './ProjectLocations'; // the project registry
+import { useLocationView } from './location-view'; // the project registry
 import { machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 
@@ -36,23 +40,27 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
 
 function Body({ entry }: { entry: ProjectEntry & { project: ProjectRecord } }) {
-  const { project, sessions, listed, rollup, lastActivity } = entry;
+  const { project, sessions, listed, rollup, lastActivity, registry } = entry;
   const now = useNow();
+  const view = useLocationView();
   const elapsed = lastActivity === null ? null : Math.max(0, now - lastActivity);
   const counts = [plural(sessions.length + listed.length, 'session', 'sessions') /* P5 O8 M2: listed rows too */, `${rollup.waiting} waiting`, `${rollup.working} working`].join(' · ');
 
   return (
     <div className="flex flex-col gap-2 text-ui-sm text-fg">
       <h3 className="m-0 truncate text-ui leading-[18px] font-semibold">{entry.name}</h3>
-      <p data-testid="project-path" title={project.directory} className="m-0 font-mono break-all text-fg-muted">
-        {formatCwd(project.directory)}
-      </p>
+      {registry === null && (
+        <p data-testid="project-path" title={project.directory} className="m-0 font-mono break-all text-fg-muted">
+          {formatCwd(project.directory)}
+        </p>
+      )}
       <p data-testid="project-counts" className="m-0 text-fg-muted tabular-nums">
         {counts}
       </p>
       <p data-testid="project-activity" className="m-0 text-fg-muted tabular-nums">
         {elapsed === null ? 'No activity yet' : elapsed < 60_000 ? 'Active now' : `Last active ${formatAgo(elapsed, { narrow: true })}`}
       </p>
+      {registry !== null && <ProjectLocations project={registry} view={view} />}
       <Worktrees machine={machineOf(project.id)} directory={project.directory} />
     </div>
   );

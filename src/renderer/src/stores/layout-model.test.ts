@@ -779,3 +779,71 @@ describe('rekeying project sets to org keys', () => {
     expect(rekeyExpanded(list, rekeyOf, M)).toEqual([SHARED, PL, OWN]);
   });
 });
+
+// The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §J.2; design §2): a tab set,
+// panel context or expanded row under a key that is no row's any more moves whole to its successor, the answer
+// `stores/org-projects.ts`'s `successorOf` gives through `RekeyOf`: a label key whose project took a key of the table, and
+// an `id:` key whose project's locations were linked into another. Its file and artifact tabs move with its sessions.
+describe('the project registry: a set whose key is no row’s moves whole', () => {
+  const LABEL = 'remote:example.org/team/app' as OrgKey; // this Mac's label, before its project took the table's key
+  const GONE = 'id:11111111-2222-4333-8444-555555555555' as OrgKey; // a project whose locations were linked into ROW's
+  const ROW = 'id:66666666-7777-4888-9999-aaaaaaaaaaaa' as OrgKey;
+  const STAYS = 'smns:a-hidden-project' as OrgKey; // no successor: it stays
+  const session = (id: string): TabRef => ({ id: `session:${id}`, kind: 'session', appSessionId: id as AppSessionId, pinned: false });
+  const file = (path: string): TabRef => ({ id: `file:${M}:${path}`, kind: 'file', path, line: null, appSessionId: null, machine: M, pinned: false });
+  const artifact = (artifactId: string): TabRef => ({ id: `artifact:${M}:${artifactId}`, kind: 'artifact', artifactId, machine: M, pinned: false });
+  const set = (tabs: TabRef[]): TabSet => ({ panes: [{ tabs, activeTabId: tabs.at(-1)?.id ?? '' }], focusedPane: 0, splitRatio: 0.5 });
+  const s1 = session(`${M}/s1`);
+  const s2 = session(`${M}/s2`);
+  const notes = file('/app/notes.md');
+  const plan = artifact('00000000-0000-4000-8000-0000000000a1');
+  const report = artifact('00000000-0000-4000-8000-0000000000a2');
+  const rekeyOf: RekeyOf = (key) => (key === LABEL || key === GONE ? ROW : key);
+  const setOf: SetOfTab = () => null; // no session tab is filed elsewhere: only the sets move
+  const main = (): LayoutMain => ({
+    version: 3,
+    current: LABEL,
+    sets: { [LABEL]: set([s1, notes, plan]), [GONE]: set([s2, report]), [STAYS]: set([file('/hidden/readme.md')]), [NO_PROJECT]: set([file('/loose.md')]) },
+    closedTabs: [],
+  });
+
+  it('moves a label key’s set and an id: key’s set onto their row, file and artifact tabs with them, the current set’s panes standing', () => {
+    const { main: moved, bases } = rekeySets(main(), rekeyOf, setOf);
+    expect(moved.current).toBe(ROW);
+    expect(moved.sets[ROW]?.panes[0].tabs).toEqual([s1, notes, plan, s2, report]);
+    expect(moved.sets[LABEL]).toBeUndefined();
+    expect(moved.sets[GONE]).toBeUndefined();
+    expect(moved.sets[STAYS]).toEqual(main().sets[STAYS]); // no successor: it stays, as a hidden project's set does
+    expect(moved.sets[NO_PROJECT]).toEqual(main().sets[NO_PROJECT]);
+    expect(bases.get(ROW)).toBe(LABEL);
+    expect(LayoutMainSchema.safeParse(moved).success).toBe(true);
+    expect(rekeySets(moved, rekeyOf, setOf).main).toBe(moved); // nothing left to move: the same value
+  });
+
+  it('asks nothing of a machine’s row or the no-project set', () => {
+    const asked: string[] = [];
+    const own = `machine:${M}` as OrgKey;
+    const watching: RekeyOf = (key) => {
+      asked.push(key);
+      return key;
+    };
+    rekeySets({ ...main(), sets: { ...main().sets, [own]: set([file('/own.md')]) } }, watching, setOf);
+    expect(asked.sort()).toEqual([GONE, LABEL, STAYS].sort());
+    expect(rekeyExpanded([own, 'other' as ProjectKey], watching, M)).toEqual([own]);
+    expect(asked).not.toContain(own);
+  });
+
+  it('moves the panel’s contexts and the expanded rows by the same answer, the base set’s context kept', () => {
+    const { bases } = rekeySets(main(), rekeyOf, setOf);
+    const contexts = { [LABEL]: `${M}/s1`, [GONE]: `${M}/s2`, [STAYS]: `${M}/x`, [NO_PROJECT]: `${M}/y` } as unknown as Record<string, AppSessionId>;
+    expect(rekeyContexts(contexts, rekeyOf, bases)).toEqual({ [ROW]: `${M}/s1`, [STAYS]: `${M}/x`, [NO_PROJECT]: `${M}/y` });
+    expect(rekeyExpanded([GONE, LABEL, STAYS, ROW], rekeyOf, M)).toEqual([ROW, STAYS]);
+  });
+
+  it('leaves every set where it is while the answer waits (this Mac’s own projects not in yet)', () => {
+    const waiting: RekeyOf = () => 'wait';
+    const before = main();
+    expect(rekeySets(before, waiting, setOf).main).toBe(before);
+    expect(rekeyExpanded([LABEL, GONE], waiting, M)).toEqual([LABEL, GONE]);
+  });
+});
