@@ -126,6 +126,9 @@ CREATE TABLE IF NOT EXISTS summaries (
 CREATE TABLE IF NOT EXISTS announcements (
   project TEXT PRIMARY KEY, version INTEGER NOT NULL, members TEXT NOT NULL, attempts INTEGER NOT NULL, due INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS relays (ref TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS projects_owed (
+  ref TEXT NOT NULL, machine TEXT NOT NULL, revision INTEGER NOT NULL, attempts INTEGER NOT NULL, due INTEGER NOT NULL,
+  PRIMARY KEY (ref, machine));
 CREATE TABLE IF NOT EXISTS machine_states (
   project TEXT NOT NULL, name_key TEXT NOT NULL, client TEXT NOT NULL, online INTEGER NOT NULL,
   PRIMARY KEY (project, name_key, client));
@@ -1078,8 +1081,8 @@ export class Registry extends DurableObject<Env> {
     return ok({ project: this.project(id)! });
   }
 
-  /** Expired enrollments, orphaned tokens, revocations and state announcements projects have not taken, swept when
-   * their time comes. */
+  /** Expired enrollments, orphaned tokens, revocations, state announcements projects have not taken and projects
+   * records ref objects have not taken, swept when their time comes. */
   async alarm(): Promise<void> {
     await this.sweep();
   }
@@ -1122,6 +1125,7 @@ export class Registry extends DurableObject<Env> {
     for (const enrollment of live) if (lapsed(enrollment, now) && !this.busy.has(enrollment.id)) this.expire(enrollment);
     await this.sweepOffline(now);
     this.sweepAnnouncements(now);
+    this.sweepProjects(now);
     await this.sweepRevocations();
     await this.sweepOrphans();
     await this.scheduleAlarm();
@@ -1236,6 +1240,8 @@ export class Registry extends DurableObject<Env> {
     if (this.sql.exec('SELECT 1 FROM orphans UNION ALL SELECT 1 FROM revocations LIMIT 1').toArray().length > 0) next.push(now + RETRY_MS);
     const announcement = this.sql.exec<{ due: number | null }>('SELECT MIN(due) AS due FROM announcements').one().due;
     if (announcement !== null) next.push(announcement);
+    const owed = this.sql.exec<{ due: number | null }>('SELECT MIN(due) AS due FROM projects_owed').one().due;
+    if (owed !== null) next.push(owed);
     if (next.length === 0) return;
     const at = Math.max(Math.min(...next), now + 250);
     const current = await this.ctx.storage.getAlarm();
@@ -1611,37 +1617,78 @@ export class Registry extends DurableObject<Env> {
     return this.records.projectPage(after, LISTINGS_PAGE_BYTES);
   }
 
-  /** A machine-signed projects record (RL1's `projects`, through the machine's ref object). One stored goes to every
+  /**
+   * A machine-signed projects record (RL1's `projects`, through the machine's ref object). One stored goes to every
    * app's Registry socket and to every machine's ref object, for its endpoint, the machine's own included; one held
-   * already goes nowhere. */
+   * already goes nowhere. Each ref is owed the machine's record (`projects_owed`) in the step that stores it, and the
+   * alarm is set before any is sent, so a push lost with this object's reset is sent by the alarm (`pushProjects`).
+   */
   async storeProjects(record: unknown): Promise<Result<{ stored: boolean }>> {
-    const kept = await this.records.storeProjects(record);
+    const kept = await this.records.storeProjects(record, (body) => this.oweProjects(body.machine, body.revision));
     if (!kept.ok || !kept.value.stored) return kept;
-    const frame = { t: 'projects', record: record as Signed<ProjectsRecord> } as const;
-    this.toApps(frame);
+    const { machine } = (record as Signed<ProjectsRecord>).body;
+    this.toApps({ t: 'projects', record: record as Signed<ProjectsRecord> });
+    await this.scheduleAlarm();
     const org = this.ensureOrg().id;
-    for (const { ref } of this.sql.exec<{ ref: string }>('SELECT ref FROM relays').toArray()) void this.relayProjects(org, ref, frame.record, 1);
+    for (const { ref } of this.sql.exec<{ ref: string }>('SELECT ref FROM projects_owed WHERE machine = ?', machine).toArray()) void this.pushProjects(org, ref, machine);
     return kept;
   }
 
+  /** Owes every relay's object `machine`'s record at `revision`; one owed an older revision is owed this one instead,
+   * since a push sends the record held, the newest. Due a retry's first wait on, as an announcement is: the push sent
+   * now answers well before, and one lost with this object's reset is sent then. */
+  private oweProjects(machine: string, revision: number): void {
+    this.sql.exec(
+      'INSERT INTO projects_owed (ref, machine, revision, attempts, due) SELECT ref, ?, ?, 0, ? FROM relays WHERE true ON CONFLICT (ref, machine) DO UPDATE SET revision = excluded.revision, attempts = 0, due = excluded.due WHERE excluded.revision > projects_owed.revision',
+      machine,
+      revision,
+      Date.now() + this.retryBaseMs(),
+    );
+  }
+
   /**
-   * A stored projects record to a machine's ref object (`Machine.relayProjects`), which writes it to its endpoint when
-   * that connection was welcomed with `projects`. A call that failed goes again (retry.ts), in memory: a reset ref object
-   * drops its endpoint's socket, whose next welcome brings the whole snapshot, but a lost connection between the two
-   * objects heals nothing. A ref object on the code before projects records lacks the method, and its endpoint was
-   * welcomed without `projects`: it is passed by.
+   * The projects record held for `machine` to the ref object of `ref` (`Machine.relayProjects`), which writes it to its
+   * endpoint when that connection was welcomed with `projects`, and passes it by otherwise (a connection welcomed later
+   * is sent the snapshot). Answered, the push is no longer owed, unless a newer record was stored meanwhile, which is
+   * owed and sent on its own. One that failed stays owed and is sent again by the alarm, its wait growing as retry.ts's
+   * does, up to a minute, for as long as it takes, a reset of this object included: in memory, a lost push left that
+   * endpoint without the record until its next welcome. A ref object on the code before projects records lacks the
+   * method, and its endpoint was welcomed without `projects`: it is taken as answered.
    */
-  private async relayProjects(org: string, ref: string, record: Signed<ProjectsRecord>, attempt: number): Promise<void> {
+  protected async pushProjects(org: string, ref: string, machine: string): Promise<void> {
+    const record = this.records.projectsRecord(machine);
+    if (record === null) {
+      this.sql.exec('DELETE FROM projects_owed WHERE ref = ? AND machine = ?', ref, machine);
+      return;
+    }
+    const { revision } = record.body;
+    let failure: { error: unknown } | null = null;
     try {
       await this.env.MACHINE.get(this.env.MACHINE.idFromName(relayObjectName(org, ref))).relayProjects(record);
     } catch (error) {
-      if (lacksMethod(error, 'relayProjects')) return;
-      const wait = attempt < RETRY_ATTEMPTS ? retryDelay(attempt, this.retryBaseMs(), error) : null;
-      console.log(JSON.stringify({ desk: 'registry', event: 'projects-relay-failed', ref, machine: record.body.machine, revision: record.body.revision, attempt, error: described(error), retry_ms: wait === null ? null : Math.round(wait) }));
-      if (wait === null) return;
-      await new Promise((resolve) => setTimeout(resolve, wait));
-      return this.relayProjects(org, ref, record, attempt + 1);
+      if (!lacksMethod(error, 'relayProjects')) failure = { error };
     }
+    if (failure === null) {
+      this.sql.exec('DELETE FROM projects_owed WHERE ref = ? AND machine = ? AND revision <= ?', ref, machine, revision);
+      return;
+    }
+    const row = this.sql.exec<{ attempts: number }>('SELECT attempts FROM projects_owed WHERE ref = ? AND machine = ? AND revision <= ?', ref, machine, revision).toArray()[0];
+    if (!row) return;
+    const attempt = row.attempts + 1;
+    const wait = retryDelay(Math.min(attempt, RETRY_ATTEMPTS), this.retryBaseMs(), failure.error);
+    this.sql.exec('UPDATE projects_owed SET attempts = ?, due = ? WHERE ref = ? AND machine = ? AND revision <= ?', attempt, Date.now() + wait, ref, machine, revision);
+    console.log(JSON.stringify({ desk: 'registry', event: 'projects-relay-failed', ref, machine, revision, attempt, error: described(failure.error), retry_ms: Math.round(wait) }));
+    await this.scheduleAlarm();
+  }
+
+  /** Sends again every owed projects record whose time has come, not waiting for the answers; one in flight waits a
+   * minute before it is sent again, unless its answer says otherwise first. */
+  private sweepProjects(now: number): void {
+    const due = this.sql.exec<{ ref: string; machine: string }>('SELECT ref, machine FROM projects_owed WHERE due <= ?', now).toArray();
+    if (due.length === 0) return;
+    const org = this.ensureOrg().id;
+    this.sql.exec('UPDATE projects_owed SET due = ? WHERE due <= ?', now + RETRY_CAP_MS, now);
+    for (const { ref, machine } of due) void this.pushProjects(org, ref, machine);
   }
 
   /** The listings kept, a project's alone when named, with their machines' endpoint records. */
