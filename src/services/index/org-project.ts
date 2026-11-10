@@ -151,6 +151,17 @@ async function gitLayout(directory: string, timeoutMs: number, io: OrgIo): Promi
   }
 }
 
+/**
+ * Whether a folder is in a linked worktree as design §8's rule reads it (its checkout's `.git` a file whose gitdir names
+ * a `commondir`), through `files`; null when the layout gives no answer. A statement at a linked worktree's own folder
+ * does not decide its project: the owning checkout does (M9's re-review, Fix 2c).
+ */
+export async function inLinkedWorktree(directory: string, files: GitFiles): Promise<boolean | null> {
+  const io = checkedIo(files);
+  const layout = await gitLayout(await io.real(directory), ORG_GIT_TIMEOUT_MS, io);
+  return layout === null ? null : layout.linked;
+}
+
 async function linkedCommonDir(at: string, dot: string, io: OrgIo): Promise<{ common: string; linked: boolean } | null> {
   let line: string;
   try {

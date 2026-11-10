@@ -313,6 +313,64 @@ describe('the project acts over the network', () => {
         restore();
       }
     });
+
+    // the re-review of Fix 2b (Fix 2c): in a linked worktree the owning checkout decides (design §8), never a statement on
+    // the worktree folder; the rule is asked, and a read of it the asker cannot make refuses the act before anything changes
+    /** A main checkout under the home with a linked worktree beside it, made from git's files; the worktree declared. */
+    async function worktree(index: Index, f: Fixture, home: string) {
+      const main = join(home, 'work/main');
+      const wt = join(home, 'work/side');
+      const admin = join(main, '.git/worktrees/side');
+      for (const dir of [join(main, '.git/objects'), join(main, '.git/refs'), admin, wt]) mkdirSync(dir, { recursive: true });
+      writeFileSync(join(main, '.git/config'), '[core]\nrepositoryformatversion = 0\nbare = false\n');
+      writeFileSync(join(main, '.git/HEAD'), 'ref: refs/heads/main\n');
+      writeFileSync(join(admin, 'HEAD'), 'ref: refs/heads/side\n');
+      writeFileSync(join(admin, 'commondir'), '../..\n');
+      writeFileSync(join(admin, 'gitdir'), `${join(wt, '.git')}\n`);
+      writeFileSync(join(wt, '.git'), `gitdir: ${admin}\n`);
+      const pid = index.projects.add(wt).id;
+      return { main, wt, pid, refresh: () => index.refreshOrgProjects({ machine: f.services.machine.ref, enrollment: () => ({ org: ORG, machine: 'mini' }), home }) };
+    }
+
+    it('a linked worktree’s row: the link answers and a checked remove expects the owning checkout’s project', async () => {
+      const { f, a, home, index } = await setup();
+      await until(() => f.endpoint.registry.statements().possible, 'statements possible');
+      const { main, wt, pid, refresh } = await worktree(index, f, home);
+      writeFileSync(join(main, '.smns'), JSON.stringify({ project: 'root-project', name: 'Root', hub: { org: ORG } }));
+      await refresh();
+      expect((await index.statements.resolve(wt)).project).toBe('root-project');
+      vi.spyOn(f.endpoint.registry, 'project').mockImplementation((id) => (id === 'linked-project' ? { hub: true, nameRev: 0 } : null));
+      expect(await admitted(a, await stepped(f, a, 'session.projects.link', { id: pid, into: 'linked-project' }))).toMatchObject({ state: 'done', result: { project: { org: { smnsId: 'root-project' } } } });
+      expect(await admitted(a, action(f, a, 'session.projects.remove', { id: pid, expect: { path: wt, project: 'root-project' } }))).toMatchObject({ state: 'done' });
+    });
+
+    it('a linked worktree’s row whose owning checkout’s `.smns` the asker cannot read: a link is refused `unresolved`, nothing changed', async () => {
+      const { f, a, home, index } = await setup();
+      await until(() => f.endpoint.registry.statements().possible, 'statements possible');
+      const { main, wt, pid, refresh } = await worktree(index, f, home);
+      writeFileSync(join(main, '.smns'), JSON.stringify({ project: 'root-project', name: 'Root', hub: { org: ORG } }));
+      await refresh();
+      // the machine's own derivations of the new row done before the file changes (they read as the machine, unguarded)
+      await until(() => index.projects.record(pid).org?.smnsId === 'root-project', 'the row derived');
+      for (let k = 0; k < 100; k++) await new Promise((resolve) => setImmediate(resolve));
+      mkdirSync(join(home, 'Desktop'), { recursive: true });
+      writeFileSync(join(home, 'Desktop/private-smns'), JSON.stringify({ project: 'private-id', name: 'private label', hub: { org: ORG } }));
+      rmSync(join(main, '.smns'));
+      symlinkSync(join(home, 'Desktop/private-smns'), join(main, '.smns'));
+      vi.spyOn(f.endpoint.registry, 'project').mockImplementation((id) => (id === 'linked-project' ? { hub: true, nameRev: 0 } : null));
+      const restore = quiet();
+      try {
+        const answer = await admitted(a, await stepped(f, a, 'session.projects.link', { id: pid, into: 'linked-project' }));
+        expect([answer.state, answer.error?.message?.split(':')[0]]).toEqual(['failed', 'unresolved']);
+        expect(JSON.stringify(answer)).not.toMatch(/private-id|private label/);
+        expect(index.projects.statementRow(pid as never).linked).toBeNull();
+        expect(index.projects.record(pid as never).org?.smnsId).toBe('root-project');
+        const removed = await admitted(a, action(f, a, 'session.projects.remove', { id: pid, expect: { path: wt, project: 'root-project' } }));
+        expect([removed.state, removed.error?.message?.split(':')[0]]).toEqual(['failed', 'unresolved']);
+      } finally {
+        restore();
+      }
+    });
   });
 });
 
