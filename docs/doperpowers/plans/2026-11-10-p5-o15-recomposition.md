@@ -845,4 +845,14 @@ No new package. The repair page uses the renderer's existing build (React, Tailw
 
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+**M1 and M2, 2026-11-10 (the executor).** Both are built on `p5-o15` and reviewed: each at its task review, with fixes re-reviewed, and the whole branch at `doperpowers:reviewer-high`, which found no material defect (Decision Log 1). M2b and M3 to M5 are outside this branch.
+
+*What holds on the branch's head.* Main composes none of the machine's services. The main profile's launch has two outcomes, `mawsd` or the repair window, and nothing on the way to the window throws past it. A profile saved on the embedded shape opens on `mawsd` with its settings kept, at client settings version 21. Acceptance 3's data has a cross-build scene of its own. No suite launches the embedded shape. No wire member was narrowed and no stored version moved. The suites' evidence is in the report (`2026-11-10-p5-o15-report.md`, "Validation").
+
+*What it cost against the plan.* The plan put the risk in the deletion. It was in the proof, and in the measuring:
+- M2's code passed its review with two findings, both on the repair path, which is the only thing the owner sees when a launch fails. The executor's walk of that path found two more uncaught calls, and the next review round found a fifth.
+- The acceptance-3 scene needed a canary before it proved a reconciliation rather than a cached read, and a missing `turn 1` before it ran at all. Both came from a scene written without a Mac run of its own. A new e2e scene's first Mac run is part of its writing, not of the final gate.
+- The ack bound took most of the day. M1's port of `e2e:artifacts-perf` to `mawsd` measured the daemon shape's real cost per acknowledged edit (about 0.7 ms at p50 and 1.1 ms at p95) on a bound that the utility shape had already drifted to within half a millisecond of. It also showed that the case loaded its own windows: three of eight runs that day were void by the load of the case's own launches. The owner re-derived the bound at 13 ms. The case now admits every measured window and voids a trial or a window measured in load.
+- The lesson for the next port of a measured group is to read the bound's margin on the old shape the same day before porting, and to admit every window, not only the first.
+
+*Process.* Mac time was cleared window by window with the architect. One red result reached the architect two hours late, because three gates were chained in one background command; each gate now runs in its own command. One fix was applied before the architect had lifted a no-change instruction; it was the confirmed fix, and the rule now is to ask first.
