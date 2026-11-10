@@ -653,10 +653,12 @@ export class Rl10 {
       stateVersion: head.state.version,
     });
     this.#welcomed = true;
+    // The restatement is open before the link's listeners hear of the connection: the registry's publication they queue
+    // reads `known` from the sessions held, which only a closed restatement answers for (panel 1, scalpel-3#1).
+    this.members.welcome();
     this.#link(true);
     await this.#restate(true);
     if (!this.legacy.held && !this.legacy.retired) this.send({ t: 'legacy-key?' });
-    this.members.welcome();
     // The remote sessions' audiences; the local ones follow their member frames in the restatement.
     for (const [session, remote] of this.cache.policies()) this.#tellAudience(session, { owners: remote.owners, members: remote.audience, policyRev: remote.policyRev });
   }

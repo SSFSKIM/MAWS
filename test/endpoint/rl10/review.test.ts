@@ -473,3 +473,29 @@ describe("the directory's restatements (MAWS #474's review)", () => {
     expect(told).toEqual([['host'], ['host', 'vm-one'], ['host']]);
   });
 });
+
+// The registry branch's xhigh panel 1 (.doperpowers/sde/2026-11-10-project-registry/registry-panel-1.md), scalpel-3#1:
+// the link's listeners queue the registry's publication, whose `known` reads the sessions held only once the restatement
+// after a welcome closed, so the restatement is open before they are told a connection is up
+describe('panel 1', () => {
+  it('scalpel-3#1: a welcome’s restatement is open when the link listeners hear the connection up, at each reconnect', async () => {
+    const { head } = await org();
+    const { rl10, sminos, connect } = await served({ head: () => ({ state: head.state, certificates: NO_CERTS }) });
+    const heard: Array<boolean | undefined> = [];
+    rl10.onLink((connected) => {
+      if (connected) heard.push(rl10.sminosView()?.restating);
+    });
+    // the first connection's restatement closes
+    sminos.send({ t: 'restated' });
+    rl10.send({ t: 'mark' });
+    await sminos.next((f) => f.t === 'mark', 'the mark');
+    await expect.poll(() => rl10.sminosView()?.restating).toBe(false);
+    await connect(); // a reconnect: sminos's connection replaced
+    expect(heard).toEqual([true]);
+    const again = await connect();
+    again.send({ t: 'restated' });
+    await expect.poll(() => rl10.sminosView()?.restating).toBe(false);
+    await connect();
+    expect(heard).toEqual([true, true, true]);
+  });
+});
