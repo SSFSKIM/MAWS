@@ -136,6 +136,27 @@ describe('a delegation’s expiry', () => {
     await h.records.settled();
     expect(h.held()).toEqual(['m1 r1']);
   });
+
+  // Review 2, finding 1: an expiry reached signed out is not lost: the next sign-in, under the same head and certificates,
+  // exposes none of the records it ended, not even before they are verified again.
+  it('reached while signed out, ends the records at the next sign-in under the same head', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const w = await World.make();
+    const h = await start(w);
+    await h.page([await w.projects(w.d, 2, [location('v1', ID, '/srv/vm')]), await w.projects(w.m1, 1)]);
+    expect(h.held()).toHaveLength(2);
+    w.session.set(null);
+    await h.records.settled();
+    w.clock = Date.parse(w.delegation.expires) + 1;
+    await vi.advanceTimersByTimeAsync(HOUR + 1_000);
+    await h.records.settled();
+    w.session.set(w.signedIn());
+    expect(h.held()).toEqual(['m1 r1']);
+    await h.records.settled();
+    expect(h.held()).toEqual(['m1 r1']);
+    await h.records.close(); // verified again and dropped, not only hidden
+    expect(h.file()?.records.map((r) => r.body.machine)).toEqual([w.m1.ref]);
+  });
 });
 
 describe('the file', () => {

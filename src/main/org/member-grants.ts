@@ -7,7 +7,8 @@
 // head's revocations are applied here too, at load and at each change of the session, the machine offline or not.
 //
 // - Read when the machine's link comes up, at each of its `caps` and at each new head (the registry asks, `read`), one
-//   call per machine at a time. A failed or malformed answer changes nothing: the last answer stands.
+//   call per machine at a time; one asked during it is read again once it is answered. A failed or malformed answer
+//   changes nothing: the last answer stands.
 // - Kept in `<userData>/org/member-grants.json` for the member it was read for, so a relaunch with the machine off still
 //   lists its projects; another member's sign-in reads none of it.
 //
@@ -48,6 +49,8 @@ export function createMemberGrants(deps: {
   /** Per machine ref, the key id that signed the member's grant there. */
   let granted = new Map<string, string>();
   const reading = new Set<string>();
+  /** The machines whose read was asked again while theirs was in flight. */
+  const again = new Set<string>();
   const listeners = new Set<() => void>();
   let closed = false;
   let writing: Promise<void> = Promise.resolve();
@@ -130,9 +133,19 @@ export function createMemberGrants(deps: {
   return {
     granted: (ref) => same(current(), reader) && granted.has(ref),
     read(ref) {
-      if (closed || reading.has(ref)) return;
+      if (closed) return;
+      // one read per machine at a time; one asked meanwhile (a grant delivered during it) runs once it is answered,
+      // however many were asked, so the newest answer stands
+      if (reading.has(ref)) return void again.add(ref);
       reading.add(ref);
-      const run = loaded.then(() => readOne(ref)).finally(() => reading.delete(ref));
+      const run = loaded
+        .then(async () => {
+          do {
+            again.delete(ref);
+            await readOne(ref);
+          } while (again.has(ref) && !closed);
+        })
+        .finally(() => reading.delete(ref));
       pending = [...pending, run];
     },
     onChanged(listener) {

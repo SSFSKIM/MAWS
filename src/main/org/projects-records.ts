@@ -10,7 +10,8 @@
 // - Unlike listings, the hub's snapshot removes nothing: a machine it lacks keeps its last verified record (unknown is
 //   not empty, constraint 4). A record leaves only when it stops verifying, judged again at each new head or
 //   certificate set and at the soonest delegation's `expires` ahead (a delegated machine's authority ends then, with
-//   neither); its mark goes only when the head retires or revokes the key that signed it, so an older revision can
+//   neither, and an expiry reached signed out is judged at the next sign-in, the record hidden from that moment on
+//   whatever the queue's progress); its mark goes only when the head retires or revokes the key that signed it, so an older revision can
 //   never return, and a mark of such a key is not taken from the file either.
 // - A record that does not verify when it arrives (its machine enrolled by a head this app has not adopted yet) waits,
 //   the newest per machine, and is tried again at each change of the session.
@@ -86,7 +87,13 @@ export function createProjectsRecords(deps: ProjectsRecordsDeps): ProjectsRecord
   /** When this device's link to each machine was last up. */
   const linkUp = new Map<string, string>();
   let file: ProjectsFile | null = null;
-  let judgedAgainst: { head: SignedOrgState; certificates: Certificates } | null = null;
+  /** What the held records were last verified against, and the soonest delegation `expires` then ahead (ms). */
+  let judgedAgainst: { head: SignedOrgState; certificates: Certificates; until: number } | null = null;
+  /**
+   * Per held record's machine, when the authority it verified under ends: its certifying delegation's `expires` (a
+   * machine the head enrolls has no end). A record past it is not exposed, before it is verified again and dropped.
+   */
+  const authorityEnds = new Map<string, number>();
   const listeners = new Set<() => void>();
   let closed = false;
   let dirty = false;
@@ -137,6 +144,28 @@ export function createProjectsRecords(deps: ProjectsRecordsDeps): ProjectsRecord
     return current !== null && current.identity.org === dataOrg ? current : null;
   };
 
+  function authorityEnd(current: SignedIn, machine: string): number {
+    const state = current.view.head().state;
+    if (state.machines.some((m) => m.ref === machine)) return Infinity;
+    const cert = current.view.certificates().certs.find((c) => c.body.machine === machine);
+    const delegation = cert === undefined ? undefined : state.delegations.find((d) => d.id === cert.body.delegation);
+    return delegation === undefined ? Infinity : Date.parse(delegation.expires);
+  }
+  /** The soonest delegation `expires` ahead of now under the signed-in head (Infinity: none). */
+  function soonestExpiry(current: SignedIn): number {
+    const at = now();
+    const ahead = current.view.head().state.delegations.map((d) => Date.parse(d.expires)).filter((expires) => expires > at);
+    return ahead.length === 0 ? Infinity : Math.min(...ahead);
+  }
+  function hold(current: SignedIn, machine: string, record: Signed<ProjectsRecord>): void {
+    held.set(machine, record);
+    authorityEnds.set(machine, authorityEnd(current, machine));
+  }
+  function release(machine: string): void {
+    held.delete(machine);
+    authorityEnds.delete(machine);
+  }
+
   async function verifies(current: SignedIn, record: Signed<ProjectsRecord>): Promise<boolean> {
     return (await verifyProjectsRecord(current.view.head().state, record, current.view.certificates(), new Date(now()))).ok;
   }
@@ -160,7 +189,7 @@ export function createProjectsRecords(deps: ProjectsRecordsDeps): ProjectsRecord
       return;
     }
     marks.set(machine, { revision, hash, kid: record.sig.kid });
-    held.set(machine, record);
+    hold(current, machine, record);
     if ((waiting.get(machine)?.body.revision ?? 0) <= revision) waiting.delete(machine);
     changed();
   }
@@ -171,13 +200,17 @@ export function createProjectsRecords(deps: ProjectsRecordsDeps): ProjectsRecord
     for (const [machine, mark] of [...marks]) {
       if (!keyEnded(state, mark.kid)) continue;
       marks.delete(machine);
-      held.delete(machine);
+      release(machine);
       changed();
     }
     for (const [machine, record] of [...waiting]) if (keyEnded(state, record.sig.kid)) waiting.delete(machine);
     for (const [machine, record] of [...held]) {
-      if (held.get(machine) !== record || (await verifies(current, record))) continue;
-      held.delete(machine);
+      if (held.get(machine) !== record) continue;
+      if (await verifies(current, record)) {
+        if (held.get(machine) === record) authorityEnds.set(machine, authorityEnd(current, machine));
+        continue;
+      }
+      release(machine);
       log(`the projects record of machine ${shown(machine)} no longer verifies; dropped`);
       changed();
     }
@@ -197,7 +230,9 @@ export function createProjectsRecords(deps: ProjectsRecordsDeps): ProjectsRecord
         expiry = null;
         void enqueue('a delegation’s expiry', async () => {
           const signed = signedIn();
-          if (signed !== null) await judgeAgain(signed);
+          if (signed === null) return; // judged at the next sign-in: `judgedAgainst.until` has passed
+          if (judgedAgainst !== null) judgedAgainst = { ...judgedAgainst, until: soonestExpiry(signed) };
+          await judgeAgain(signed);
           armExpiry();
         });
       },
@@ -229,6 +264,7 @@ export function createProjectsRecords(deps: ProjectsRecordsDeps): ProjectsRecord
         log('the signed-in org changed: the projects records held for the last one are dropped');
         marks.clear();
         held.clear();
+        authorityEnds.clear();
         waiting.clear();
         linkUp.clear();
         changed();
@@ -237,8 +273,10 @@ export function createProjectsRecords(deps: ProjectsRecordsDeps): ProjectsRecord
       judgedAgainst = null;
     }
     const at = { head: current.view.head(), certificates: current.view.certificates() };
-    if (judgedAgainst === null || judgedAgainst.head !== at.head || judgedAgainst.certificates !== at.certificates) {
-      judgedAgainst = at;
+    // judged again at a new head or certificate set, and once a delegation's `expires` passed since (one reached signed
+    // out had no judgement: its timer found no session)
+    if (judgedAgainst === null || judgedAgainst.head !== at.head || judgedAgainst.certificates !== at.certificates || now() >= judgedAgainst.until) {
+      judgedAgainst = { ...at, until: soonestExpiry(current) };
       await judgeAgain(current);
       for (const record of [...waiting.values()]) await judge(current, record);
     }
@@ -282,7 +320,14 @@ export function createProjectsRecords(deps: ProjectsRecordsDeps): ProjectsRecord
   const loaded = enqueue('the file', sessionChanged);
 
   return {
-    records: () => (signedIn() === null ? [] : [...held.values()].map((r) => r.body).sort((a, b) => (a.machine < b.machine ? -1 : a.machine > b.machine ? 1 : 0))),
+    records() {
+      if (signedIn() === null) return [];
+      const at = now();
+      return [...held]
+        .filter(([machine]) => (authorityEnds.get(machine) ?? Infinity) > at) // past its authority: hidden until dropped
+        .map(([, r]) => r.body)
+        .sort((a, b) => (a.machine < b.machine ? -1 : a.machine > b.machine ? 1 : 0));
+    },
     seen() {
       if (signedIn() === null) return {};
       const out: Record<string, string> = Object.fromEntries(linkUp);
