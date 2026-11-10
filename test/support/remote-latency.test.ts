@@ -106,14 +106,60 @@ describe('the live bench’s clock (P5 O7 M7)', () => {
     }
   });
 
-  it('takes the union of the start’s and the end’s intervals, their estimates’ distance as the spread, and voids past 5 ms or under 50 exchanges', () => {
-    const fifty = (offset: number) => Array.from({ length: 50 }, (_, i) => exchange(i * 10, 1, 1, offset));
+  it('takes the union of the start’s and the end’s narrowest intervals, records the estimates’ spread, and voids under 50 exchanges', () => {
     const clock = liveClock(fifty(1000), fifty(1004))!;
-    expect(clock).toMatchObject({ offsetMs: 1002, intervalMs: [998, 1006], spreadMs: 4, samples: { start: 50, end: 50 } });
+    expect(clock).toMatchObject({ offsetMs: 1002, intervalMs: [998, 1006], spreadMs: 4, gapMs: 0, samples: { start: 50, end: 50 } });
     expect(clockVoid(clock)).toBeNull();
-    expect(clockVoid(liveClock(fifty(1000), fifty(1006)))).toBe('the clock’s spread 6 ms is over 5 ms');
     expect(clockVoid(liveClock(fifty(1000).slice(0, 49), fifty(1000)))).toBe('49 clock exchanges at the run’s start, under 50');
     expect(clockVoid(liveClock([], fifty(1000)))).toMatch(/no exchange carried the machine’s clock/);
+  });
+
+  // The void asks whether one offset fits every exchange's interval: the greatest lower edge over both sets against the
+  // least upper edge; past 5 ms apart, the clocks moved during the case.
+  const fifty = (offset: number, at = 0) => Array.from({ length: 50 }, (_, i) => exchange(at + i * 10, 1, 1, offset));
+
+  it('does not void a constant offset on a path whose round trips vary by 100 ms, and judges over the narrowest intervals', () => {
+    // one fast exchange per set, the rest out 2, 27 or 52 ms and back 2 or 50: round trips from 2 to 102 ms, and estimates
+    // tens of milliseconds apart
+    const jittery = (at: number, fastest: [number, number]) => [exchange(at, ...fastest), ...Array.from({ length: 49 }, (_, i) => exchange(at + 10 + i * 10, 2 + (i % 3) * 25, 2 + (i % 2) * 48))];
+    const [start, end] = [jittery(0, [1, 1]), jittery(5000, [2, 1])];
+    const trips = [...start, ...end].map((e) => e.arrived - e.at);
+    expect(Math.max(...trips) - Math.min(...trips)).toBe(100);
+    const clock = liveClock(start, end)!;
+    expect(clock.spreadMs).toBeGreaterThan(20); // recorded, and no longer a reason
+    expect(clock.gapMs).toBeLessThanOrEqual(0);
+    expect(clockVoid(clock)).toBeNull();
+    expect(clock.intervalMs).toEqual([998, 1003]); // the start's [998, 1002] and the end's [998, 1003]
+  });
+
+  it('voids a clock that steps 20 ms between the start and the end, saying by how much the intervals miss', () => {
+    const clock = liveClock(fifty(1000), fifty(1020, 5000))!; // [998, 1002] at the start, [1018, 1022] at the end
+    expect(clock.gapMs).toBe(16);
+    expect(clockVoid(clock)).toBe('the exchanges can’t share one clock offset: their intervals miss each other by 16 ms, over 5 ms');
+  });
+
+  it('voids a step inside one set, though its narrowest interval meets the other set’s', () => {
+    const stepped = [...fifty(1000).slice(0, 25), ...fifty(1020, 250).slice(0, 25)];
+    const clock = liveClock(stepped, fifty(1020, 5000))!;
+    expect(clock.start.edgesMs).toEqual([1018, 1002]); // the start's own exchanges already can't share one offset
+    expect(clockVoid(clock)).toMatch(/miss each other by 16 ms, over 5 ms$/);
+  });
+
+  it('does not void a drift of 3 ms, and the judged interval covers both ends', () => {
+    const clock = liveClock(fifty(1000), fifty(1003, 5000))!;
+    expect(clockVoid(clock)).toBeNull();
+    expect(clock.intervalMs[0]).toBeLessThanOrEqual(1000);
+    expect(clock.intervalMs[1]).toBeGreaterThanOrEqual(1003);
+  });
+
+  it('lets no wide exchange hide a step, and voids nothing for one exchange held on its way', () => {
+    const wide = (at: number) => exchange(at, 400, 300); // a round trip of 700 ms: its interval holds any offset near
+    expect(clockVoid(liveClock([...fifty(1000), wide(600)], [...fifty(1020, 5000), wide(5600)]))).toMatch(/miss each other by 16 ms/);
+    const held = exchange(600, 1, 17); // a pong held 16 ms on its way back: its estimate reads 8 ms low, its interval still holds 1000
+    const clock = liveClock([...fifty(1000), held], fifty(1000, 5000))!;
+    expect(clock.spreadMs).toBe(8);
+    expect(clock.intervalMs).toEqual([998, 1002]);
+    expect(clockVoid(clock)).toBeNull();
   });
 
   it('judges a cross-clock delta at its interval’s worst edge: pass, miss beyond its best edge, else inconclusive, and inconclusive when wider than the allowance', () => {
@@ -142,21 +188,11 @@ describe('the live bench’s clock (P5 O7 M7)', () => {
     // a clock interval wider than the allowance (10 ms and the round trip) is never decided, even where it would pass
     const slow = liveClock(fifty(1000, 30, 30), fifty(1000, 30, 30))!; // [969, 1031]
     expect(liveJudgement('relay', LOCAL, { ...base, rtt: stats(20), clock: slow, rawDelta: stats(-970) })).toMatchObject({ delta: { verdict: 'inconclusive', wide: true }, misses: [], inconclusive: ['relay: delta-to-frame p50 in [-2, 62] ms across the clocks, its clock’s interval 62 ms wider than its allowance 30 ms (10 ms and the round trip)'] });
-    const spread = liveJudgement('direct', LOCAL, { ...base, clock: liveClock(fifty(1000), fifty(1007)), rawDelta: stats(-970) });
-    expect(spread).toMatchObject({ void: 'direct: the clock’s spread 7 ms is over 5 ms', delta: null, inconclusive: [], verdicts: { deltaToFrame: 'void' } });
+    const stepped = liveJudgement('direct', LOCAL, { ...base, clock: liveClock(fifty(1000), fifty(1020)), rawDelta: stats(-970) });
+    expect(stepped).toMatchObject({ void: 'direct: the exchanges can’t share one clock offset: their intervals miss each other by 16 ms, over 5 ms', delta: null, inconclusive: [], verdicts: { deltaToFrame: 'void' } });
     // a resume measured live is held to the local engine start plus the rtt
     expect(liveJudgement('direct', LOCAL, { ...base, rawDelta: stats(-970), resumeMs: 430 })).toMatchObject({ verdicts: { resume: 'miss' }, misses: ['direct: resume 430 ms over its bound 422 ms'] });
     expect(liveJudgement('direct', LOCAL, { ...base, rawDelta: stats(-970), resumeMs: 300 }).verdicts.resume).toBe('pass');
-  });
-
-  it('voids the run on one exchange whose estimate lies more than 5 ms from the rest, though the narrowest agree', () => {
-    const steady = Array.from({ length: 50 }, (_, i) => exchange(i * 10, 1, 1));
-    const outlier = exchange(600, 1, 17); // a pong held 16 ms on its way back: its estimate reads 8 ms low
-    const clock = liveClock([...steady, outlier], steady)!;
-    expect(clock.intervalMs).toEqual([998, 1002]); // the offset and its uncertainty are still the narrowest exchanges'
-    expect(clock.spreadMs).toBe(8);
-    expect(clockVoid(clock)).toBe('the clock’s spread 8 ms is over 5 ms');
-    expect(clockVoid(liveClock(steady, steady))).toBeNull();
   });
 
   it('carries a live case’s signed delays through stats, validity and judgement: negative before the clock is applied, valid after', () => {

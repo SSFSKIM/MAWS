@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { keysAnswer, statusAnswer } from '../../src/endpoint/presence';
 import type { MachineRef } from '../../src/shared/machine/ref';
-import { appProfileProblems, archiveProblems, BenchRun, buildHeadBundle, buildSourceArchive, copyLine, deadlined, ENROLL_WAIT_S, envLine, guardedLine, keyIdOf, loadOf, loadPrecheck, makeScratchDirs, reapLine, SCRATCH_DIRS, scratchDaemonLine, SERVE_MAX_MS, INHERITED_OVERRIDES, machineProblems, meetsQuiet, processRunner, productionProblem, profileEnv, QUIET_MARGIN_MS, quote, startLine, stopLine, stubFixtures, transportArgv, untilQuiet, type BenchMachine, type CommandRunner, type HeadBundle, type RunResult, type Started } from './remote-bench';
+import { appProfileProblems, archiveProblems, awaitCodeFile, BenchRun, buildHeadBundle, buildSourceArchive, copyLine, deadlined, CODE_WAIT, ENROLL_WAIT_S, envLine, guardedLine, keyIdOf, loadOf, loadPrecheck, makeScratchDirs, reapLine, SCRATCH_DIRS, scratchDaemonLine, SERVE_MAX_MS, INHERITED_OVERRIDES, machineProblems, meetsQuiet, processRunner, productionProblem, profileEnv, QUIET_MARGIN_MS, quote, startLine, stopLine, stubFixtures, transportArgv, untilQuiet, type BenchMachine, type CommandRunner, type HeadBundle, type RunResult, type Started } from './remote-bench';
 
 const CODE = 'smns-enroll-v1.SECRET-0123456789abcdefghij';
 const COMMIT = 'a'.repeat(40);
@@ -166,7 +166,7 @@ function leaks(calls: Call[], started: { argv: readonly string[]; written: strin
 }
 
 /** A run's deps over a fake clock: `sleep` advances it, `after` records each deadline set. */
-function benchDeps(fake: ReturnType<typeof fakeRunner>, startAt: number) {
+function benchDeps(fake: ReturnType<typeof fakeRunner>, startAt: number, onSleep?: (said: readonly string[]) => void) {
   const said: string[] = [];
   const deadlines: { ms: number; fire: () => void; cancelled: boolean }[] = [];
   let clock = startAt;
@@ -174,7 +174,10 @@ function benchDeps(fake: ReturnType<typeof fakeRunner>, startAt: number) {
     runner: fake.runner,
     engineVersion: ENGINE_VERSION,
     say: (line: string) => void said.push(line),
-    sleep: async (ms: number) => void (clock += ms),
+    sleep: async (ms: number) => {
+      clock += ms;
+      onSleep?.(said);
+    },
     now: () => clock,
     after: (ms: number, fire: () => void) => {
       const deadline = { ms, fire, cancelled: false };
@@ -196,9 +199,9 @@ function scratchEnd(calls: Call[], m: BenchMachine): string[] {
 }
 const SCRATCH_END = ['stop', 'daemon', 'stop-hosts', 'reap', 'check'];
 
-async function fullRun(machine: BenchMachine, script: Script, startAt = 0, bundle: HeadBundle | null = BUNDLE, options: { endless?: boolean } = {}) {
+async function fullRun(machine: BenchMachine, script: Script, startAt = 0, bundle: HeadBundle | null = BUNDLE, options: { endless?: boolean; onSleep?: (said: readonly string[]) => void } = {}) {
   const fake = fakeRunner(script, options);
-  const { deps, said, deadlines } = benchDeps(fake, startAt);
+  const { deps, said, deadlines } = benchDeps(fake, startAt, options.onSleep);
   const run = new BenchRun(machine, deps);
   let failure: unknown = null;
   let teardownFailure: unknown = null;
@@ -352,10 +355,57 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
   it('waits out exit 4 to the code’s TTL and fails, the file removed and every resource ended', async () => {
     const file = codeFile();
     const { failure, calls, said } = await fullRun(VM(file), machineScript({}));
-    expect(String(failure)).toMatch(/not listed in the org within the code's 900 s of its key shown/);
+    expect(String(failure)).toMatch(/not listed in the org within 900 s of its key shown/);
     expect(existsSync(file)).toBe(false);
     expect(scratchEnd(calls, VM(file))).toEqual(SCRATCH_END);
     expect(said.at(-1)).toMatch(/torn down/);
+  });
+
+  it('waits, bounded, for the code file the owner writes once the pairing has ended, saying what the owner does and how long is left', async () => {
+    const file = codeFile();
+    rmSync(file);
+    let polls = 0;
+    // the owner makes the code a while after the bench asks for it; it lands empty first, then whole
+    const owner = (said: readonly string[]) => {
+      if (!said.some((line) => line.includes('waiting for the enrollment code'))) return;
+      polls += 1;
+      if (polls === 40) writeFileSync(file, '', { mode: 0o600 });
+      if (polls === 41) writeFileSync(file, `${CODE}\n`, { mode: 0o600 });
+    };
+    const { failure, calls, said, started, watches } = await fullRun(VM(file), machineScript({ listedAfter: 1 }), 0, BUNDLE, { onSleep: owner });
+    expect(failure).toBeNull();
+    const waits = said.filter((line) => line.includes('waiting for the enrollment code'));
+    expect(waits[0]).toBe(`[bench] vm-bench: waiting for the enrollment code at ${file}, 30 min left: the owner, in their MAWS: Settings › Org › Machines, Enroll a machine…, the name vm-bench, Make a code, Copy, and the code into that file (0600); the app makes it only once the pairing has ended, and the sheet stays open until the machine is enrolled`);
+    expect(waits[1]).toMatch(/, 29 min left: /); // once a minute
+    expect(waits).toHaveLength(2);
+    const enrolls = calls.filter((c) => / enroll /.test(c.argv.at(-1)!));
+    expect(enrolls).toHaveLength(1);
+    expect(enrolls[0]!.stdin).toBe(`${CODE}\n`); // taken whole, not while it was empty
+    expect(leaks(calls, [...started, ...watches], said)).toEqual([]);
+    expect(existsSync(file)).toBe(false);
+  });
+
+  it('a code file that never comes fails the enroll with its reason, nothing enrolled and every resource ended', async () => {
+    const file = codeFile();
+    rmSync(file);
+    const { failure, calls, said } = await fullRun(VM(file), machineScript({}));
+    expect(String(failure)).toContain(`vm-bench: no enrollment code came to ${file} within 30 minutes`);
+    expect(calls.some((c) => / enroll /.test(c.argv.at(-1)!))).toBe(false);
+    expect(said.filter((line) => line.includes('waiting for the enrollment code'))).toHaveLength(30);
+    expect(scratchEnd(calls, VM(file))).toEqual(SCRATCH_END);
+  });
+
+  it('takes a code file at once when it is already there, and gives up on one that never stops growing at the bound', async () => {
+    let clock = 0;
+    const said: string[] = [];
+    const deps = (size: (path: string) => number | null) => ({ say: (line: string) => void said.push(line), sleep: async (ms: number) => void (clock += ms), now: () => clock, size });
+    expect(await awaitCodeFile('/x/pairing', { who: 'app', code: 'the pairing code', act: 'make it' }, CODE_WAIT.pairingMs, deps(() => 52))).toBe(true);
+    expect(clock).toBe(CODE_WAIT.everyMs); // one poll to see it whole
+    expect(said).toEqual([]);
+    clock = 0;
+    let growing = 0;
+    expect(await awaitCodeFile('/x/pairing', { who: 'app', code: 'the pairing code', act: 'make it' }, CODE_WAIT.pairingMs, deps(() => (growing += 1)))).toBe(false);
+    expect(clock).toBe(CODE_WAIT.pairingMs);
   });
 
   it('a failed enroll: its output never said, the file removed, the daemon stopped', async () => {
@@ -929,7 +979,7 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
       }
       if (/^watch (status|sync) /.test(command)) {
         order.push(command.split(' ')[1]!);
-        const listed = keyShownAt !== null && clock >= keyShownAt + (ENROLL_WAIT_S - 10) * 1000; // the owner types y late
+        const listed = keyShownAt !== null && clock >= keyShownAt + (ENROLL_WAIT_S - 10) * 1000; // the owner approves late
         return { code: listed || command.startsWith('watch status') ? 0 : 4, stdout: statusOut(listed ? 'org-listed' : order.includes('enroll') ? 'hub-confirmed' : 'none', 'vm-bench'), stderr: '' };
       }
       return undefined;
@@ -1156,12 +1206,13 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
     await expect(run.enroll()).rejects.toThrow(/the status watch has ended/);
   });
 
-  it('the precheck: this Mac’s load1 and the mini’s (`sysctl -n vm.loadavg`, read through the run) under Rule B’s 5, else a refusal with its reason; an unread load refuses', async () => {
+  it('the precheck: this Mac’s load1 and the machine’s (the mini’s `sysctl -n vm.loadavg`, the VM’s `/proc/loadavg`, read through the run) under Rule B’s 5, else a refusal with its reason; an unread load refuses', async () => {
     expect(loadOf('{ 4.99 3.20 2.10 }\n')).toBe(4.99);
+    expect(loadOf('5.20 3.10 2.00 2/345 6789\n')).toBe(5.2);
     expect(loadOf('{ 12,5 3 2 }')).toBeNull();
     expect(loadOf('')).toBeNull();
     expect(loadPrecheck({ mac: 4.99, machine: { name: 'mini-bench', load: 4.2 } })).toBeNull();
-    expect(loadPrecheck({ mac: 3.1, machine: null })).toBeNull(); // the VM's is not read
+    expect(loadPrecheck({ mac: 3.1, machine: null })).toBeNull();
     expect(loadPrecheck({ mac: 5, machine: { name: 'mini-bench', load: 1 } })).toBe('this Mac’s load1 is 5.00, at or over Rule B’s 5');
     expect(loadPrecheck({ mac: 20.4, machine: { name: 'mini-bench', load: 7.25 } })).toBe('this Mac’s load1 is 20.40 and mini-bench’s is 7.25, at or over Rule B’s 5');
     expect(loadPrecheck({ mac: 1, machine: { name: 'mini-bench', load: 'its load could not be read (sysctl exit 255)' } })).toBe('mini-bench: its load could not be read (sysctl exit 255)');
@@ -1173,9 +1224,14 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
     const lost = fakeRunner((command) => (command === 'sysctl -n vm.loadavg' ? { code: 255, stdout: '', stderr: '' } : undefined));
     expect(await new BenchRun(MINI('/tmp/code'), benchDeps(lost, at('2026-11-03T12:00:00Z')).deps).load1()).toBe('its load could not be read (sysctl exit 255)');
     await expect(new BenchRun(MINI('/tmp/code'), benchDeps(fakeRunner(() => undefined), at('2026-11-03T06:50:00Z')).deps).load1()).rejects.toThrow(/refused: nothing reaches it from 06:45/);
-    const vm = fakeRunner(() => undefined);
-    expect(await new BenchRun(VM('/tmp/code'), benchDeps(vm, 0).deps).load1()).toBeNull();
-    expect(vm.calls).toEqual([]);
+    // the VM's: its /proc/loadavg through devcloud vm ssh, refused at Rule B's 5 as the mini's is
+    const vm = fakeRunner((command) => (command === 'cat /proc/loadavg' ? ok('6.40 2.00 1.00 3/512 4242\n') : undefined));
+    const vmLoad = await new BenchRun(VM('/tmp/code'), benchDeps(vm, 0).deps).load1();
+    expect(vmLoad).toBe(6.4);
+    expect(vm.calls.map((c) => c.argv.slice(0, 5))).toEqual([['devcloud', 'vm', 'ssh', 'o7-accept', '--']]);
+    expect(loadPrecheck({ mac: 1, machine: { name: 'vm-bench', load: vmLoad } })).toBe('vm-bench’s load1 is 6.40, at or over Rule B’s 5');
+    const vmLost = fakeRunner((command) => (command === 'cat /proc/loadavg' ? { code: 255, stdout: '', stderr: '' } : undefined));
+    expect(await new BenchRun(VM('/tmp/code'), benchDeps(vmLost, 0).deps).load1()).toBe('its load could not be read (cat /proc/loadavg exit 255)');
   });
 });
 
