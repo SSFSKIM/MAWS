@@ -9,7 +9,7 @@
 // endpoint `open [id][the app's payload]`, and answers the app `open [id][the tag, u32]`. A refused open is answered
 // the same, then `close [id][reason]` at once. `close`'s payload is a u16 reason (`CHANNEL_CLOSE`).
 import { isMachineRef } from './names.ts';
-import type { EndpointRecord, Listing, Signed } from './types.ts';
+import type { EndpointRecord, Listing, ProjectsRecord, Signed } from './types.ts';
 
 /** RL1's version, carried in the endpoint's `hello`; a hub refuses a major it does not speak. */
 export const RL1_PROTOCOL = { major: 1, minor: 0 } as const;
@@ -105,10 +105,14 @@ export type Rl1Welcome = { t: 'welcome'; generation: number; heartbeat_ms: numbe
  * What either end of RL1 can do beyond the major it speaks (OX1), in the optional `capabilities` of the endpoint's hello
  * and the hub's welcome. `audience` (P5 O18 D9): on the welcome, the hub filters audience streams per reader and refuses
  * at upload what is out of reach, so the endpoint may upload a private session's events; on the hello, the endpoint
- * passes no audience stream down to an sminos that does not advertise it, so the hub may serve it streams.
+ * passes no audience stream down to an sminos that does not advertise it, so the hub may serve it streams. `projects`
+ * (the project registry, Interfaces §C), on the welcome alone: the hub keeps the machine's `projects` record and hands
+ * this connection every machine's (`projects-all` pages after the welcome, then `projects` as each is stored); a
+ * connection welcomed without it is sent no record.
  */
-export const RL1_CAPABILITIES = { audience: 'audience' } as const;
-/** The capabilities this hub's welcome advertises. */
+export const RL1_CAPABILITIES = { audience: 'audience', projects: 'projects' } as const;
+/** The capabilities this hub's welcome advertises whatever its Registry object runs. `projects` is added per connection,
+ * once the Registry has answered that it keeps projects records. */
 export const HUB_CAPABILITIES: readonly string[] = [RL1_CAPABILITIES.audience];
 
 /** A `capabilities` list as either end sends it: at most 32 names of at most 64 characters. */
@@ -122,14 +126,23 @@ export type Rl1HeartbeatAck = { t: 'hb-ack'; generation: number };
 export type ListingFrame = { t: 'listing'; record: Signed<Listing> };
 /** The machine's endpoint record (RL §4.1's direct carriers). */
 export type EndpointRecordFrame = { t: 'endpoint'; record: Signed<EndpointRecord> };
+/**
+ * A machine's projects record (Interfaces §C). Up, the endpoint's own, for the hub to keep at its highest revision; down,
+ * on an endpoint's socket and on an app's Registry socket alike, each record as the hub stores it, every machine's to
+ * every member and every machine, a machine's own included.
+ */
+export type ProjectsRecordFrame = { t: 'projects'; record: Signed<ProjectsRecord> };
+/** Every projects record the hub holds, in pages within `LISTINGS_PAGE_BYTES` (a larger record alone), `last` marking
+ * the final one (an empty page when it holds none): after an endpoint's welcome, and to an app after the listings. */
+export type ProjectsPageFrame = { t: 'projects-all'; records: Signed<ProjectsRecord>[]; last: boolean };
 export type NotifyKind = 'waiting' | 'wrote' | 'settled';
 /** A session's state: `waiting` and `wrote` push to its listed owners' devices; `pending` is its count for badges. */
 export type NotifyFrame = { t: 'notify'; session: string; project: string; kind: NotifyKind; pending: number };
 /** The org state advanced to `version`: the endpoint reads `GET /machine/org/state?since=<held>`. */
 export type StateNotice = { t: 'state'; version: number };
 /** The hub refused a text frame (`frame` its `t`), and keeps the socket: `422 not-on-rl1` for a DX4/DX6 session-plane
- * frame, a record's refusal as the Registry answered it (`session` and `revision` name a listing, `issued` an endpoint
- * record). */
+ * frame, a record's refusal as the Registry answered it (`session` and `revision` name a listing, `revision` a projects
+ * record, `issued` an endpoint record). */
 export type Rl1Refusal = { t: 'refusal'; frame: string; status: number; error: string; message?: string; session?: string; revision?: number; issued?: string };
 
 /** What the hub tells each app socket of a machine: whether its endpoint is connected, and each session's pending

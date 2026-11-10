@@ -68,6 +68,9 @@ import {
   UPGRADE_HELD_PATH,
   UPGRADE_RELEASE_PATH,
   RELAY_FAULT_PATH,
+  RELAY_PROJECTS_PATH,
+  PROJECT_PAGE_FAULT_PATH,
+  RELAY_SNAPSHOT_PATH,
   CLAIM_PATH,
   WRAPPED_KEY_SEED_PATH,
   PROJECT_RPCS_PATH,
@@ -413,9 +416,20 @@ export async function startLocalHub(options: { script?: string } = {}) {
     },
     /** How long the first retry of the Registry's failed pushes of the directory waits, or of a project's failed summary
      * reports (the deployed second; each retry after waits twice the one before). */
-    async retryBase(of: 'registry' | { project: string }, ms: number) {
+    async retryBase(of: 'registry' | { project: string } | { relay: string }, ms: number) {
       if (of === 'registry') await seam('REGISTRY', ORG, RETRY_BASE_PATH, { ms });
+      else if ('relay' in of) await seam('MACHINE', `ref:${of.relay}`, RETRY_BASE_PATH, { ms });
       else await seam('PROJECT', of.project, RETRY_BASE_PATH, { ms });
+    },
+    /** Makes the Registry's next `times` reads of a projects page throw (none armed without `times`), each held until
+     * released when `hold` is set; `release` lets the held one throw. Answers the throws still armed, the reads taken
+     * since it was armed, and whether one is held. */
+    async projectPageFault(times?: number, options: { hold?: boolean; release?: boolean } = {}): Promise<{ remaining: number; calls: number; held: boolean }> {
+      return JSON.parse(await seam('REGISTRY', ORG, PROJECT_PAGE_FAULT_PATH, { times, ...options })) as { remaining: number; calls: number; held: boolean };
+    },
+    /** How a machine's ref object's projects snapshot stands: null when none is being read. */
+    async relaySnapshot(ref: string): Promise<{ conn: number; held: number; waiting: boolean } | null> {
+      return JSON.parse(await seam('MACHINE', `ref:${ref}`, RELAY_SNAPSHOT_PATH)) as { conn: number; held: number; waiting: boolean } | null;
     },
     /** Whether a retry of the project's failed summary report waits for its time (the suites' Worker only). */
     async reportRetryWaits(project: string): Promise<boolean> {
@@ -530,9 +544,19 @@ export async function startLocalHub(options: { script?: string } = {}) {
     async claimAs(machine: string, ref: string, client: string): Promise<unknown> {
       return JSON.parse(await seam('MACHINE', machine, CLAIM_PATH, { org: ORG, name: machine, ref, client }));
     },
-    /** Makes a machine's ref object throw from its next `times` calls of `method` (`relayRevoke`, `relayState`). */
-    async relayFault(ref: string, method: 'relayRevoke' | 'relayState', times: number) {
+    /** Makes a machine's ref object throw from its next `times` calls of `method` (`relayRevoke`, `relayState`,
+     * `relayProjects`). */
+    async relayFault(ref: string, method: 'relayRevoke' | 'relayState' | 'relayProjects', times: number) {
       await seam('MACHINE', `ref:${ref}`, RELAY_FAULT_PATH, { method, times });
+    },
+    /** Makes a machine's ref object refuse `relayProjects` as one of the build before projects records (`'projects'`),
+     * or take it as deployed (null). */
+    async relayLacks(ref: string, method: 'projects' | null) {
+      await seam('MACHINE', `ref:${ref}`, RELAY_PROJECTS_PATH, { method });
+    },
+    /** How many `relayProjects` calls a machine's ref object took. */
+    async relayProjectsCalls(ref: string): Promise<number> {
+      return (JSON.parse(await seam('MACHINE', `ref:${ref}`, RELAY_PROJECTS_PATH)) as { calls: number }).calls;
     },
     /** A member's app-socket upgrade straight to a machine's ref object, as the Worker forwards one it resolved: how an
      * upgrade admitted just before a removal reaches the object late. Answers the status; an accepted socket is closed. */
