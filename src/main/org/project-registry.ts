@@ -136,8 +136,8 @@ export function createProjectRegistry(deps: ProjectRegistryDeps): ProjectRegistr
   let timer: ReturnType<typeof setTimeout> | null = null;
   let writeTimer: ReturnType<typeof setTimeout> | null = null;
   let writing: Promise<void> = Promise.resolve();
-  /** The owners of each machine under the head last read, by machine ref. */
-  let owners: { head: unknown; by: Map<string, readonly string[]> } = { head: null, by: new Map() };
+  /** The owners' member ids of each machine under the head and certificates last read, by machine ref. */
+  let owners: { head: unknown; certificates: unknown; by: Map<string, readonly string[]> } = { head: null, certificates: null, by: new Map() };
 
   const keysRead = (async () => {
     const raw = await deps.files.read(PROJECT_KEYS_FILE).catch(() => null);
@@ -170,11 +170,12 @@ export function createProjectRegistry(deps: ProjectRegistryDeps): ProjectRegistr
 
   async function ownersOf(current: SignedIn, refs: Iterable<string>): Promise<Map<string, readonly string[]>> {
     const head = current.view.head();
-    if (owners.head !== head) owners = { head, by: new Map() };
+    const certificates = current.view.certificates();
+    if (owners.head !== head || owners.certificates !== certificates) owners = { head, certificates, by: new Map() };
     const at = new Date(now());
     for (const ref of refs) {
       if (owners.by.has(ref)) continue;
-      const of = await machineOwners(head.state, ref, current.view.certificates(), at);
+      const of = await machineOwners(head.state, ref, certificates, at);
       owners.by.set(ref, of === null ? [] : ownerMembers(head.state, of));
     }
     return owners.by;
