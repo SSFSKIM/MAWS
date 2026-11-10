@@ -11,6 +11,8 @@
 //   them is read as neither pass nor fail (Decision Log 33 (d)); the floor and today's attempts are context.
 // - `wakeVerdict` voids the run on the 1-minute load read at the instants that bracket each carrier's timed windows
 //   (Decision Log 33 (c)), labels a miss outside §F's conditions, and otherwise gives the verdict.
+// - `bLines` and `streams` are context, never conditions (Decision Log 37): B's own lines from the stall on (its idle
+//   collections, the endpoint's `sub` answers, the journal reads), and each stream's `J` beside its journal read.
 import { IDLE_RUN } from './daemon-idle';
 import { requestTarget, type PipeRequest } from './loopback-pipe';
 import { caseLineOf, positionOf, type CaseLine, type LogLine, type Mode } from './main-log';
@@ -32,6 +34,26 @@ export const WAKE_CASE = {
 export const CHECKPOINT_ROWS = 10_000;
 /** The events a resume's page asks for (`PAGE_EVENTS`, src/shared/host/stream-catchup.ts, pinned likewise by the test). */
 export const RESUME_PAGE_EVENTS = 500;
+
+/**
+ * B's endpoint's silence before a ping, drawn anew each period (`PING_MS`, src/endpoint/channels.ts), and how long it keeps
+ * a closed channel's interest (`RESUME_MS`, src/endpoint/interest.ts): pinned here as CHECKPOINT_ROWS is, and held to the
+ * source by remote-wake.test.ts (the e2e project does not take in the endpoint's module graph).
+ */
+export const PING_MS: readonly [number, number] = [5_000, 7_000];
+export const RESUME_MS = 120_000;
+/**
+ * The latest B's endpoint closes the stalled channel after the stall: it writes no line at that close, so the time is
+ * counted. A channel is closed at its third silent ping period in a row, and the period running at the stall may have
+ * heard A just before it, so the close comes at most four periods of PING_MS's longest after the stall.
+ */
+export const CHANNEL_CLOSED_WITHIN_MS = 4 * PING_MS[1];
+export const PAST_RESUME_MARGIN_MS = 10_000;
+/**
+ * The inject's earliest time after the stall (Decision Log 37): B's channel closed, its resume window over and a margin,
+ * so B meets the wake past its resume window, the state an hour asleep leaves it in.
+ */
+export const INJECT_AFTER_STALL_MS = CHANNEL_CLOSED_WITHIN_MS + RESUME_MS + PAST_RESUME_MARGIN_MS;
 
 /** The feed's socket (`REGISTRY_APP_PATH`, src/main/org/registry-feed.ts) and a machine's relay socket (src/main/machines/remote/link.ts). */
 export const REGISTRY_SOCKET = '/api/registry/socket?app=1';
@@ -140,11 +162,36 @@ export interface SubscriptionRecord {
   first: { delivery: 'event' | 'snapshot'; position: string; ms: number } | null;
 }
 
+/** A stream's `J` (B's `sub` answer's ms), its own journal read's ms, and `J` less that read; null where a line is missing. */
+export interface StreamTiming {
+  app: string;
+  id: string;
+  jMs: number | null;
+  journalMs: number | null;
+  remainderMs: number | null;
+}
+
+/**
+ * One of B's own lines, `ms` from the restore: an idle collection (mawsd's, or the engine host's `[supervisor]` one), an
+ * endpoint's `sub` answer, or a `session.events … from the journal` read. Context, never a condition.
+ */
+export interface BLine {
+  ms: number;
+  log: 'mawsd' | 'host';
+  kind: 'idle-collected' | 'sub' | 'journal';
+  text: string;
+}
+const B_LINES: readonly { kind: BLine['kind']; pattern: RegExp }[] = [
+  { kind: 'idle-collected', pattern: /^(?:\[supervisor\] )?idle: collected in \d+ ms/ },
+  { kind: 'sub', pattern: /^(?:\[endpoint\] )?endpoint: channel \S+ sub \S+ / },
+  { kind: 'journal', pattern: /^(?:warn: )?(?:\[engine-host\] )?session\.events \S+ after \S+: from the journal/ },
+];
+
 export interface WakeRecord {
   carrier: Carrier;
   /** From the inject to the restore: the drawn wait. */
   waitMs: number;
-  /** From the stall to the restore: B's writing, the settle and the wait. */
+  /** From the stall to the restore: B's writing, the wait past B's resume window, the settle and the drawn wait. */
   stallMs: number;
   wake: string | null;
   linkWake: string | null;
@@ -154,6 +201,8 @@ export interface WakeRecord {
   upMs: number | null;
   lastSubbedMs: number | null;
   subscriptions: SubscriptionRecord[];
+  /** Each stream's `J` beside its journal read (Decision Log 37): context, no condition. */
+  streams: StreamTiming[];
   feed: { connectedMs: number | null; lastPageMs: number | null; records: number | null; pages: number | null };
   /** The carrier's upgrades since the stall: the direct pipe's requests, or the hub's for the machine's relay socket. */
   upgrades: number;
@@ -175,6 +224,8 @@ export interface WakeRecord {
   beforeInject: string[];
   /** Each pipe's connections since the stall, `ms` from the restore; a null first line is a probe. */
   requests: { hub: { ms: number; firstLine: string | null }[]; direct: { ms: number; firstLine: string | null }[] };
+  /** B's own lines from the stall to the final read, both logs in time order (Decision Log 37): context, no condition. */
+  bLines: BLine[];
 }
 
 const CONDITION_KINDS: readonly CaseLine['kind'][] = ['catch-up', 'attempt-failed', 'lane-spent', 'floor', 'acts-ahead'];
@@ -217,6 +268,7 @@ export function readWake(input: WakeInput): { record: WakeRecord; failures: stri
   const subbed = kindOf(link, 'subbed');
   const firsts = kindOf(link, 'first');
   const subscriptions: SubscriptionRecord[] = [];
+  const streams: StreamTiming[] = [];
   for (const expected of input.expected) {
     const stood = before.get(expected.what);
     if (stood === undefined) continue; // named above
@@ -251,6 +303,11 @@ export function readWake(input: WakeInput): { record: WakeRecord; failures: stri
       journal: read === undefined ? null : { after: read.line.after, rows: read.line.rows, ms: read.line.ms, checkpoint: read.line.checkpoint, bound },
       first: first === undefined ? null : { delivery: first.line.delivery, position: first.line.position, ms: ms(first.at) },
     });
+    if (stream !== null) {
+      const jMs = answered?.line.ms ?? null;
+      const journalMs = read?.line.ms ?? null;
+      streams.push({ app: stream, id, jMs, journalMs, remainderMs: jMs === null || journalMs === null ? null : jMs - journalMs });
+    }
     if (answer === undefined) {
       fail(`${name} has no subbed line after the restore`);
       continue;
@@ -325,6 +382,13 @@ export function readWake(input: WakeInput): { record: WakeRecord; failures: stri
   const conditionLines = link.filter((r) => CONDITION_KINDS.includes(r.line.kind));
   const windowed = conditionLines.filter(since(injectedAt));
   const ofClass = (name: ReturnType<typeof classOf>) => windowed.filter((r) => classOf(r) === name).map(timed);
+  const bLines = [...input.endpoint.map((l) => ({ l, log: 'mawsd' as const })), ...input.host.map((l) => ({ l, log: 'host' as const }))]
+    .filter(({ l }) => l.at >= stalledAt)
+    .sort((x, y) => x.l.at - y.l.at)
+    .flatMap(({ l, log }): BLine[] => {
+      const kind = B_LINES.find(({ pattern }) => pattern.test(l.text))?.kind;
+      return kind === undefined ? [] : [{ ms: ms(l.at), log, kind, text: l.text }];
+    });
   const record: WakeRecord = {
     carrier,
     waitMs: restoredAt - injectedAt,
@@ -338,6 +402,7 @@ export function readWake(input: WakeInput): { record: WakeRecord; failures: stri
     upMs: up === undefined ? null : ms(up.at),
     lastSubbedMs: answeredMs.length === 0 ? null : Math.max(...answeredMs),
     subscriptions,
+    streams,
     feed: { connectedMs: connected === undefined ? null : ms(connected.at, hubRestoredAt), lastPageMs: lastPage === undefined ? null : ms(lastPage.at, hubRestoredAt), records: lastPage?.line.records ?? null, pages: lastPage?.line.pages ?? null },
     upgrades,
     feedOpens,
@@ -346,6 +411,7 @@ export function readWake(input: WakeInput): { record: WakeRecord; failures: stri
     windowContext: ofClass('windowContext'),
     beforeInject: conditionLines.filter((r) => r.at >= stalledAt && r.at < injectedAt).map(timed),
     requests: { hub: hub.map((r) => ({ ms: ms(r.at), firstLine: r.firstLine })), direct: direct.map((r) => ({ ms: ms(r.at), firstLine: r.firstLine })) },
+    bLines,
   };
   return { record, failures };
 }
@@ -361,6 +427,12 @@ export function wakeMisses(record: WakeRecord): string[] {
   if (over(record.feed.connectedMs, WAKE_CASE.feedWithinMs)) misses.push(`${record.carrier}: the feed connected ${record.feed.connectedMs} ms after the hub's restore, over ${WAKE_CASE.feedWithinMs} ms`);
   if (over(record.feed.lastPageMs, WAKE_CASE.feedWithinMs)) misses.push(`${record.carrier}: the feed's last listings page ${record.feed.lastPageMs} ms after the hub's restore, over ${WAKE_CASE.feedWithinMs} ms`);
   return misses;
+}
+
+/** The plain miss's `expect` message: the bounds, and each stream's `J` beside the miss, as context and no label. */
+export function boundMissMessage(records: readonly WakeRecord[]): string {
+  const js = records.map((r) => `${r.carrier} ${r.streams.map((s) => `${s.app} ${s.jMs === null ? 'none' : `${s.jMs} ms`}`).join(', ')}`);
+  return `every subscription within ${WAKE_CASE.linkWithinMs / 1_000} s of the restore and the feed within ${WAKE_CASE.feedWithinMs / 1_000} s of the hub’s, per carrier; each stream's J: ${js.join('; ')}`;
 }
 
 /** Whether main's log has the feed's `[org-feed] listings: last page` line at or after `from` (the hub's restore). */
@@ -429,6 +501,17 @@ export function wakeVerdict(records: readonly WakeRecord[], loads: Partial<Recor
 export function wakeSummary(record: WakeRecord): string {
   const f = (value: number | null) => (value === null ? 'none' : `${value} ms`);
   return `[remote-wake] ${record.carrier}: up ${f(record.upMs)} and last subbed ${f(record.lastSubbedMs)} after the restore; feed connected ${f(record.feed.connectedMs)} and last listings page ${f(record.feed.lastPageMs)} after the hub's restore; ${plural(record.upgrades, 'upgrade')}, ${plural(record.feedOpens, 'feed open')}`;
+}
+
+/**
+ * The job log's line for one carrier's timing (Decision Log 37): the stall, the wait past B's resume window, the settle,
+ * B's idle collections between the stall and the restore on each of its logs, and each stream's J/journal/remainder.
+ */
+export function wakeTimingSummary(record: WakeRecord, waits: { resumeWaitMs: number; settleMs: number }): string {
+  const idle = (log: BLine['log']) => record.bLines.filter((l) => l.log === log && l.kind === 'idle-collected' && l.ms < 0).length;
+  const f = (value: number | null) => (value === null ? 'none' : String(value));
+  const streams = record.streams.map((s) => `${s.app} ${f(s.jMs)}/${f(s.journalMs)}/${f(s.remainderMs)}${s.remainderMs === null ? '' : ' ms'}`).join(', ');
+  return `[remote-wake] ${record.carrier}: stalled ${record.stallMs} ms: waited ${waits.resumeWaitMs} ms until ${INJECT_AFTER_STALL_MS} ms after the stall, settled in ${waits.settleMs} ms, restored ${record.waitMs} ms after the inject; idle collections before the restore: ${idle('mawsd')} on mawsd, ${idle('host')} on the engine host; each stream's J/journal/remainder: ${streams}`;
 }
 
 /**

@@ -1,11 +1,13 @@
 // The wake case's reading (test/support/remote-wake.ts) over made-up logs and pipe records in the forms the writers give
 // them: a run that passes reads as one, and each way §I's step 5 or 6 can fail is named.
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { PipeRequest } from './loopback-pipe';
 import type { LogLine } from './main-log';
 import { CHECKPOINT_ROWS as STREAM_CHECKPOINT_ROWS } from '../../src/engine-host/session-stream';
 import { PAGE_EVENTS } from '../../src/shared/host/stream-catchup';
-import { CHECKPOINT_ROWS, RESUME_PAGE_EVENTS, lastPageIn, linkPending, markersNotOnce, placeOfEvent, readWake, ruleBContext, sixMissing, sixSubscriptions, subscriptionsIn, unavailableSummary, VOID_LOAD, wakeMisses, wakeSummary, wakeVerdict, type LoadRead, type WakeInput, type WakeRecord } from './remote-wake';
+import { boundMissMessage, CHANNEL_CLOSED_WITHIN_MS, CHECKPOINT_ROWS, INJECT_AFTER_STALL_MS, PAST_RESUME_MARGIN_MS, PING_MS, RESUME_MS, RESUME_PAGE_EVENTS, lastPageIn, linkPending, markersNotOnce, placeOfEvent, readWake, ruleBContext, sixMissing, sixSubscriptions, subscriptionsIn, unavailableSummary, VOID_LOAD, wakeMisses, wakeSummary, wakeTimingSummary, wakeVerdict, type LoadRead, type WakeInput, type WakeRecord } from './remote-wake';
 
 const REF = 'Bref0123456789abcdef';
 const APPS = ['app-1', 'app-2'];
@@ -379,6 +381,87 @@ describe('the bounds', () => {
   });
 });
 
+// Decision Log 37: the inject waits until B is past its resume window, the state an hour asleep leaves B in
+describe('the wait past B’s resume window', () => {
+  // The endpoint module is reached only through its entries (eslint's no-restricted-imports), which export neither
+  // constant, so each is read from its declaration in the source
+  const declared = (file: string, pattern: RegExp): number[] => {
+    const match = pattern.exec(readFileSync(resolve(__dirname, '../../src/endpoint', file), 'utf8'));
+    expect(match, `src/endpoint/${file} declares ${pattern.source}`).not.toBeNull();
+    return match!.slice(1).map((n) => Number(n.replaceAll('_', '')));
+  };
+
+  it('is B’s latest close of the silent channel, its resume window and a margin, from the endpoint’s own constants', () => {
+    const [pingMin, pingMax] = declared('channels.ts', /^export const PING_MS: readonly \[number, number\] = \[([\d_]+), ([\d_]+)\];$/m);
+    const [resumeMs] = declared('interest.ts', /^export const RESUME_MS = ([\d_]+);$/m);
+    expect(PING_MS, 'B’s endpoint’s ping period').toEqual([pingMin, pingMax]);
+    expect(RESUME_MS, 'B’s resume window').toBe(resumeMs);
+    // the period running at the stall may have heard A just before it; three silent ones after it close the channel
+    expect(CHANNEL_CLOSED_WITHIN_MS).toBe(4 * pingMax);
+    expect(PAST_RESUME_MARGIN_MS).toBe(10_000);
+    expect(INJECT_AFTER_STALL_MS).toBe(4 * pingMax + resumeMs + 10_000);
+    expect(INJECT_AFTER_STALL_MS).toBe(158_000);
+  });
+});
+
+describe('B’s own lines', () => {
+  // the stall at 10 s, the restore at 82 s
+  const withB = (input: WakeInput): WakeInput => ({
+    ...input,
+    endpoint: [
+      line(8, 'idle: collected in 30 ms, heap 40.0 to 30.0 MiB (used 31.0 to 29.0)'),
+      ...input.endpoint,
+      line(40, 'idle: collected in 25 ms, heap 43.9 to 28.0 MiB (used 32.6 to 27.2)'),
+      line(41, '[spine] something else'),
+      line(42, '[endpoint] endpoint: a stream on channel k1 could not be opened: gone'),
+    ],
+    host: [...input.host, line(45, '[supervisor] idle: collected in 12 ms, heap 20.0 to 18.0 MiB (used 15.0 to 14.0)'), line(46, '[supervisor] quiet'), line(70, 'warn: [engine-host] session.events app-1 after 309: from the journal, 6900 rows read in 19 ms')],
+  });
+
+  it('are kept from the stall on, both logs in time order, with their times from the restore: the idle collections, the endpoint’s sub lines and the journal reads', () => {
+    const { record } = readWake(withB(passing('direct')));
+    const feeds = FEEDS.map((what) => ({ ms: 200, log: 'mawsd', kind: 'sub', text: `[endpoint] endpoint: channel k2 sub ${IDS[what]} ${what}: subbed snapshot at e:2:-, asked from none, after 0 ms` }));
+    expect(record.bLines).toEqual([
+      { ms: -42_000, log: 'mawsd', kind: 'idle-collected', text: 'idle: collected in 25 ms, heap 43.9 to 28.0 MiB (used 32.6 to 27.2)' },
+      { ms: -37_000, log: 'host', kind: 'idle-collected', text: '[supervisor] idle: collected in 12 ms, heap 20.0 to 18.0 MiB (used 15.0 to 14.0)' },
+      { ms: -12_000, log: 'host', kind: 'journal', text: 'warn: [engine-host] session.events app-1 after 309: from the journal, 6900 rows read in 19 ms' },
+      ...feeds,
+      { ms: 230, log: 'host', kind: 'journal', text: 'warn: [engine-host] session.events app-1 after 309: from the journal, 6900 rows read in 20 ms' },
+      { ms: 240, log: 'mawsd', kind: 'sub', text: '[endpoint] endpoint: channel k2 sub s1 session B:app-1: subbed replay at L1:310:4, asked from L1:310:4, after 21 ms' },
+      { ms: 270, log: 'host', kind: 'journal', text: 'warn: [engine-host] session.events app-2 after 311: from the journal, 6950 rows read in 30 ms' },
+      { ms: 290, log: 'mawsd', kind: 'sub', text: '[endpoint] endpoint: channel k2 sub s2 session B:app-2: subbed replay at L2:312:2, asked from L2:312:2, after 33 ms' },
+    ]);
+  });
+
+  it('are context, never a failure', () => {
+    expect(failuresOf(withB(passing('relay')))).toEqual([]);
+  });
+
+  it('give each stream its J, its own journal read’s ms and the remainder, J less that read', () => {
+    expect(readWake(passing('direct')).record.streams).toEqual([
+      { app: 'app-1', id: 's1', jMs: 21, journalMs: 20, remainderMs: 1 },
+      { app: 'app-2', id: 's2', jMs: 33, journalMs: 30, remainderMs: 3 },
+    ]);
+    const input = passing('direct');
+    const { record } = readWake({ ...input, host: without(input.host, 'app-2 after 311'), endpoint: without(input.endpoint, 'sub s1 session') });
+    expect(record.streams).toEqual([
+      { app: 'app-1', id: 's1', jMs: null, journalMs: 20, remainderMs: null },
+      { app: 'app-2', id: 's2', jMs: 33, journalMs: null, remainderMs: null },
+    ]);
+  });
+
+  it('are summed up in one line per carrier: the stall, the wait, the settle, the idle collections before the restore and each stream’s J/journal/remainder', () => {
+    const { record } = readWake(withB(passing('direct')));
+    expect(wakeTimingSummary(record, { resumeWaitMs: 93_000, settleMs: 60_002 })).toBe(
+      "[remote-wake] direct: stalled 72000 ms: waited 93000 ms until 158000 ms after the stall, settled in 60002 ms, restored 2000 ms after the inject; idle collections before the restore: 1 on mawsd, 1 on the engine host; each stream's J/journal/remainder: app-1 21/20/1 ms, app-2 33/30/3 ms",
+    );
+    const bare = readWake({ ...passing('relay'), host: [] }).record;
+    expect(wakeTimingSummary(bare, { resumeWaitMs: 0, settleMs: 30_001 })).toBe(
+      "[remote-wake] relay: stalled 72000 ms: waited 0 ms until 158000 ms after the stall, settled in 30001 ms, restored 2000 ms after the inject; idle collections before the restore: 0 on mawsd, 0 on the engine host; each stream's J/journal/remainder: app-1 21/none/none, app-2 33/none/none",
+    );
+  });
+});
+
 describe('an event’s place', () => {
   it('is its launch, row and index, from its id, as a cursor is written', () => {
     expect(placeOfEvent('app-1', 'app-1:L-1:310:4')).toBe('L-1:310:4');
@@ -432,6 +515,14 @@ describe('the verdict', () => {
 
   it('fails a miss with no condition as a miss', () => {
     expect(wakeVerdict([late(direct), relay], loads, [])).toEqual({ void: false, outside: false, pass: false, voidReasons: [], boundMisses: ['direct: the link up 1200 ms after the restore, over 1000 ms'], outsideMisses: [], outsideConditions: [] });
+  });
+
+  it('fails a plain miss with each stream’s J beside it, and no label for a large one', () => {
+    const slow: WakeRecord = { ...late(direct), streams: direct.streams.map((s) => (s.app === 'app-2' ? { ...s, jMs: 1_360 } : s)) };
+    expect(boundMissMessage([slow, { ...relay, streams: relay.streams.map((s) => ({ ...s, jMs: null })) }])).toBe(
+      "every subscription within 1 s of the restore and the feed within 2 s of the hub’s, per carrier; each stream's J: direct app-1 21 ms, app-2 1360 ms; relay app-1 none, app-2 none",
+    );
+    expect(wakeVerdict([slow, relay], loads, [])).toMatchObject({ pass: false, outside: false, boundMisses: ['direct: the link up 1200 ms after the restore, over 1000 ms'] });
   });
 
   it('labels a miss on a carrier whose conditions are not empty as outside §F’s conditions: neither a breach nor a pass', () => {
