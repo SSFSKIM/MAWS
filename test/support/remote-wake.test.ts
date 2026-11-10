@@ -58,7 +58,7 @@ function passing(carrier: 'direct' | 'relay'): WakeInput {
   const held = { 'app-1': 'L1:310:4', 'app-2': 'L2:312:2' };
   return { carrier, ref: REF, expected: sixSubscriptions(APPS), held, main, endpoint, host, launchedAt: at(0), stalledAt: at(10), injectedAt: at(80), restoredAt: at(restored), hubRestoredAt: at(hub), requests };
 }
-const without = (lines: LogLine[], part: string) => lines.filter((l) => !l.text.includes(part));
+const without = (lines: readonly LogLine[], part: string) => lines.filter((l) => !l.text.includes(part));
 const failuresOf = (input: WakeInput) => readWake(input).failures;
 
 describe('the six', () => {
