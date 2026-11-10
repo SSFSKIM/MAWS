@@ -65,6 +65,7 @@ export type Command =
   | { verb: 'access'; level: Level; target: 'S' | 'L' }
   | { verb: 'share'; grade: ShareGrade | null; target: 'S' | 'L' }
   | { verb: 'policy'; target: 'S' | 'L' }
+  | { verb: 'owner'; target: 'S' | 'L' }
   | { verb: 'adraft'; text: string }
   | { verb: 'aread' }
   | { verb: 'terminal-share' };
@@ -79,6 +80,7 @@ export function commandOf(line: string): Command | null {
   if (verb === 'access' && rest.length === 2 && LEVELS.includes(rest[0] as Level) && target(rest[1])) return { verb, level: rest[0] as Level, target: target(rest[1])! };
   if (verb === 'share' && rest.length === 2 && (GRADES.includes(rest[0] as ShareGrade) || rest[0] === 'none') && target(rest[1])) return { verb, grade: rest[0] === 'none' ? null : (rest[0] as ShareGrade), target: target(rest[1])! };
   if (verb === 'policy' && rest.length === 1 && target(rest[0])) return { verb, target: target(rest[0])! };
+  if (verb === 'owner' && rest.length === 1 && target(rest[0])) return { verb, target: target(rest[0])! };
   return null;
 }
 
@@ -103,6 +105,21 @@ export function controlReader(path: string): () => string[] {
  * and writes each to the token scan list.) */
 export function maskEmails(emails: readonly string[], line: string): string {
   return [...emails].filter(Boolean).sort((x, y) => y.length - x.length).reduce((out, email) => out.replaceAll(email, '<a member’s email>'), line);
+}
+
+/**
+ * The owners `session`'s listing at the hub names, read until they include `member` or 30 s pass: the endpoint lists the
+ * change after its act's `done`, so the first read may still hold the earlier revision. Null when nothing lists it.
+ */
+export async function listedOwners(person: Pick<Person, 'json'>, session: string, member: string, waitMs = 30_000, sleep = (ms: number) => new Promise<void>((done) => setTimeout(done, ms))): Promise<{ owners: string[]; revision: number } | null> {
+  const end = Date.now() + waitMs;
+  for (;;) {
+    const { listings } = await person.json<{ listings: Array<{ body: { session: string; revision: number; fields: { owners: string[] } } }> }>('/api/listings');
+    const found = listings.find((l) => l.body.session === session)?.body;
+    const seen = found === undefined ? null : { owners: found.fields.owners, revision: found.revision };
+    if ((seen !== null && seen.owners.includes(member)) || Date.now() >= end) return seen;
+    await sleep(2000);
+  }
 }
 
 export async function main(argv: string[]): Promise<number> {
@@ -180,7 +197,7 @@ export async function main(argv: string[]): Promise<number> {
         for (const t of Object.values(targets)) await withA((remote) => recordAct(remote, ref, t, { member: b, grade: null }));
       });
       const run = { hub: { host: new URL(person.hub).host, org: config.org.id }, scenes: [...REACH_SCENES] as string[] };
-      print(`keep-a1: READY. Commands, one a line in ${given.control}: access <${LEVELS.join('|')}> <S|L> · share <${GRADES.join('|')}|none> <S|L> · policy <S|L> · adraft <text> · aread · terminal-share · down`);
+      print(`keep-a1: READY. Commands, one a line in ${given.control}: access <${LEVELS.join('|')}> <S|L> · share <${GRADES.join('|')}|none> <S|L> · policy <S|L> · owner <S|L> · adraft <text> · aread · terminal-share · down`);
 
       const control = controlReader(given.control);
       let before = '';
@@ -205,6 +222,12 @@ export async function main(argv: string[]): Promise<number> {
             } else if (c.verb === 'share') {
               const r = await withA((remote) => recordAct(remote, ref, targets[c.target], { member: b, grade: c.grade }));
               print(`share ${c.target} with B ${c.grade ?? 'none'}: changed ${r.changed}, policyRev ${r.policyRev}`);
+            } else if (c.verb === 'owner') {
+              // B made an owner by A's record.owners act (O8 M5b, M8's step 7 rehearsed), then the session's owners as the
+              // hub's listing carries them once the endpoint has republished it.
+              const r = await withA((remote) => recordAct(remote, ref, targets[c.target], { add: true, member: b }));
+              print(`owner ${c.target} B: changed ${r.changed}, policyRev ${r.policyRev}`);
+              print(`owners ${c.target}: ${JSON.stringify(await listedOwners(person, c.target === 'S' ? s.session : l.app, b))}`);
             } else if (c.verb === 'policy') {
               print(`policy ${c.target}: ${JSON.stringify(await withA((remote) => recordPolicy(remote, c.target === 'S' ? s.session : l.app)))}`);
             } else if (c.verb === 'adraft') {

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { PRODUCTION_HOST, STAGING_HOST } from '../../deploy/config.ts';
-import { commandOf, controlReader, keepA1Mode, maskEmails } from '../../deploy/keep-a1.ts';
+import { commandOf, controlReader, keepA1Mode, listedOwners, maskEmails } from '../../deploy/keep-a1.ts';
 import { masked } from '../../deploy/reach-items.ts';
 import { LEFTOVER, sweepMode, sweepName } from '../../deploy/sweep-leftovers.ts';
 
@@ -48,15 +48,38 @@ describe('keep-a1’s control lines', () => {
     expect(commandOf('share converse L')).toEqual({ verb: 'share', grade: 'converse', target: 'L' });
     expect(commandOf('share none S')).toEqual({ verb: 'share', grade: null, target: 'S' });
     expect(commandOf('policy L')).toEqual({ verb: 'policy', target: 'L' });
+    expect(commandOf('owner S')).toEqual({ verb: 'owner', target: 'S' });
     expect(commandOf('adraft A’s  draft, kept')).toEqual({ verb: 'adraft', text: 'A’s draft, kept' });
     expect(commandOf('aread')).toEqual({ verb: 'aread' });
     expect(commandOf('terminal-share')).toEqual({ verb: 'terminal-share' });
   });
 
   it('reads nothing else as one: an unknown verb, level, grade or session, or a word too many or too few', () => {
-    for (const line of ['', 'up', 'down now', 'access public S', 'access listed T', 'access listed', 'share edit S', 'share view', 'share view S L', 'policy', 'policy B', 'adraft', 'aread L', 'terminal-share S']) {
+    for (const line of ['', 'up', 'down now', 'access public S', 'access listed T', 'access listed', 'share edit S', 'share view', 'share view S L', 'policy', 'policy B', 'adraft', 'aread L', 'terminal-share S', 'owner', 'owner B', 'owner S L']) {
       expect(commandOf(line), line).toBeNull();
     }
+  });
+});
+
+describe('keep-a1’s owner read', () => {
+  const B = 'b'.repeat(32);
+  const A = 'a'.repeat(32);
+  const listing = (session: string, owners: string[], revision: number) => ({ body: { session, revision, fields: { owners } } });
+
+  it('reads the session’s listing until its owners name B, and stops there', async () => {
+    const answers = [[listing('S1', [A], 3)], [listing('X', [A], 1), listing('S1', [A, B], 4)], [listing('S1', [A], 9)]];
+    let reads = 0;
+    const person = { json: async () => ({ listings: answers[reads++] }) };
+    const slept: number[] = [];
+    expect(await listedOwners(person as never, 'S1', B, 60_000, async (ms) => void slept.push(ms))).toEqual({ owners: [A, B], revision: 4 });
+    expect(reads).toBe(2);
+    expect(slept).toEqual([2000]);
+  });
+
+  it('gives what it last read once the wait is over, or null for a session nothing lists', async () => {
+    const person = (listings: unknown[]) => ({ json: async () => ({ listings }) });
+    expect(await listedOwners(person([listing('S1', [A], 3)]) as never, 'S1', B, 0)).toEqual({ owners: [A], revision: 3 });
+    expect(await listedOwners(person([listing('S2', [A, B], 3)]) as never, 'S1', B, 0)).toBeNull();
   });
 });
 
