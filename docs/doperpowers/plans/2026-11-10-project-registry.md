@@ -34,7 +34,7 @@ Status words: *specified* (ready to build), *building*, *landed* (on master, or 
 - [ ] M5 — sminos: the org frame's `locations`, kept and acknowledged; the capability advertised (desk track; doperpowers) — specified
 - [ ] M6 — sminos: leaving a project (desk track; doperpowers) — specified
 - [ ] M7 — sminos: `project init` and `project show` beside a stored statement (desk track; doperpowers) — specified
-- [ ] M8 — The wire and the index: stored statements, the rule, states (architect) — specified; lands after O15 fixes P5's verified build
+- [ ] M8 — The wire and the index: stored statements, the rule, states (architect) — built and reviewed clean on `registry-app` (2026-11-10 11:56Z; d563695ff..bc1c2f7ce, three review rounds at reviewer-high, Decision Logs 13 and 14; class 1a green, run 42809400448); lands with the branch after O15 fixes P5's verified build
 - [ ] M9 — The endpoint: the record signed and published, locations to sminos, the directory from the records, the offers (architect) — specified; after M8
 - [ ] M10 — Main: the registry read, verified and kept; row keys; held removals (architect) — specified; after M9
 - [ ] M11 — The page: one project per id, its locations, Add project, states (architect) — specified; after M10
