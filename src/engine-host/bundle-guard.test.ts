@@ -279,6 +279,24 @@ describe.skipIf(services === null)('the built services entry and its chunks', ()
 });
 // P5 O3-C end
 
+// P5 O15 M2 (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, M2 "The absence checks", acceptance 1): the app
+// composes none of the machine's services. Main's entry and its root, with every chunk they require, hold none of the
+// services' composition (spine-root, the services entry, checkouts-root): neither the entry's file nor a definition of
+// the three roots' functions, which a re-export would carry with it. The markers are definitions, and the services
+// entry's own graph holds each, so a renamed function fails here rather than passing vacuously.
+describe.skipIf(services === null || !existsSync(join(OUT, 'app.js')))('main’s graph and the services’ composition (P5 O15 M2)', () => {
+  const COMPOSITION = { startSpine: /\bfunction startSpine\(/, openSpineData: /\bfunction openSpineData\(/, startCheckouts: /\bfunction startCheckouts\(/ };
+
+  it('holds none of it: not the services entry, nor spine-root’s or checkouts-root’s roots', () => {
+    const app = new Map([...graphOf(join(OUT, 'index.js'))!, ...graphOf(join(OUT, 'app.js'))!]);
+    expect([...app.keys()]).not.toContain(SERVICES);
+    for (const [what, marker] of Object.entries(COMPOSITION)) {
+      expect([...app].filter(([, text]) => marker.test(text)).map(([file]) => file), what).toEqual([]);
+      expect([...services!].some(([, text]) => marker.test(text)), `${what} in the services entry’s graph`).toBe(true);
+    }
+  });
+});
+
 describe.skipIf(chunk === null || pty === null)('the built hosts as guarded entries', () => {
   it('load nothing deferred, the engine host only builtins, zod and the MCP SDK, the pty host node-pty besides', () => {
     expect(guardedEntryProblems({ entry: hostFile(ENGINE_MARKER)!, root: resolve(OUT, '..'), externals: (name) => allowed(name), deferred: false })).toEqual([]);

@@ -52,7 +52,7 @@ describe('startArtifacts', () => {
       env: {},
       openWindow: vi.fn() as never,
       root: '/tmp/artifacts',
-      artifactsSocket: null,
+      artifactsSocket: '/tmp/artifacts.sock',
     });
     streaming.forEach((listener) => listener());
     streaming.forEach((listener) => listener());
@@ -66,7 +66,7 @@ describe('startArtifacts', () => {
     const registerMachine = vi.fn();
     const onEvent = vi.fn(() => () => {});
     const hosts = { dispatch: vi.fn(), postDocPort: vi.fn(), closeDocPorts: vi.fn(), onState: () => () => {}, onStreaming: () => () => {}, onEvent };
-    const started = startArtifacts({ hosts: hosts as unknown as ArtifactsDeps['hosts'], register: register as never, registerMachine: registerMachine as never, emit: vi.fn() as never, env: {}, openWindow: vi.fn() as never, root: '/tmp/artifacts', artifactsSocket: null });
+    const started = startArtifacts({ hosts: hosts as unknown as ArtifactsDeps['hosts'], register: register as never, registerMachine: registerMachine as never, emit: vi.fn() as never, env: {}, openWindow: vi.fn() as never, root: '/tmp/artifacts', artifactsSocket: '/tmp/artifacts.sock' });
     expect(sessions.default.protocol.handle).toHaveBeenCalledWith('maws-artifact', expect.any(Function));
     expect(sessions.capture.protocol.handle).toHaveBeenCalledWith('maws-artifact', expect.any(Function));
     expect(sessions.partitions).toContain('maws-capture');
@@ -115,7 +115,7 @@ describe('the scheme on the daemon shape (P5 O5 M2)', () => {
     let listed: string[] | null = ['socket.ptyFrames', 'machine.artifacts'];
     const dispatch = vi.fn(async () => ({ ok: true, value: { revision: 1, kind: 'html', name: 'index.html', size: 0, sha256: 'x', path: file } }));
     const hosts = { dispatch, postDocPort: vi.fn(), closeDocPorts: vi.fn(), onState: () => () => {}, onStreaming: () => () => {}, onEvent: vi.fn(() => () => {}), peer: (owner: string) => (owner === 'machine' && listed ? { major: 3, minor: 13, build: 'b', capabilities: listed } : null) };
-    const start = (artifactsSocket: string | null) => {
+    const start = (artifactsSocket: string) => {
       sessions.default.protocol.handle.mockClear();
       const started = startArtifacts({ hosts: hosts as unknown as ArtifactsDeps['hosts'], register: vi.fn() as never, registerMachine: vi.fn() as never, emit: vi.fn() as never, env: {}, openWindow: vi.fn() as never, root: '/tmp/artifacts', artifactsSocket });
       const handler = sessions.default.protocol.handle.mock.calls.at(-1)![1] as (request: Request) => Promise<Response>;
@@ -132,11 +132,6 @@ describe('the scheme on the daemon shape (P5 O5 M2)', () => {
     expect(await daemonShape.load()).toContain('from main');
     expect(dispatch).toHaveBeenCalledWith('engine-host', 'artifacts.content', { artifactId: PAGE, path: 'index.html' });
     daemonShape.started.stop();
-    listed = ['machine.artifacts'];
-    const embedded = start(null); // the embedded shape never proxies
-    expect(await embedded.load()).toContain('from main');
-    expect(asked).toHaveLength(1);
-    embedded.started.stop();
   });
 
   it('asks the presenter’s embeds first on both paths, and relays the endpoint’s status and headers as received', async () => {

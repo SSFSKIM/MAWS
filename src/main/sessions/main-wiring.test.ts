@@ -1,22 +1,20 @@
-// Exercise the actual startup callbacks with disk-backed intents/layout/history, without Electron or engine hosts.
-import { EventEmitter } from 'node:events';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+// Exercise main's actual startup callbacks on the daemon shape, without Electron or hosts. P5 O15 M1
+// (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md): main composes no session service of its own any more, so
+// what this file held of that service's wiring is the spine's to hold, where it is composed (src/services/spine-root.test.ts:
+// the additional directories, the engine's captured environment for defaults, history and scm's trust) and the chat
+// panels' (src/main/sessions/panel-lifetime.test.ts); what main itself hands on stays here.
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppSessionId } from '@shared/graph/ids';
-import type { SessionServiceDeps } from '../../services/sessions/context';
-import { intentFor } from '../../../test/support/session-host';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import type { Settings } from '@shared/ipc/schema';
 
 const state = vi.hoisted(() => ({
-  root: '', shellConfig: '', ready: null as null | (() => unknown),
-  deps: null as SessionServiceDeps | null,
+  root: '', ready: null as null | (() => unknown),
   handlers: new Map<string, (input?: unknown) => unknown>(),
   settings: null as unknown as Settings, // E4a: what the settings service answers now
   browserSettings: null as null | (() => unknown), // E4a: the accessor main hands the browser
-  model: null as unknown as { record: () => null; allRecords: () => []; on: (name: string, listener: (...args: unknown[]) => void) => () => void; emit: (name: string, ...args: unknown[]) => boolean },
 }));
 vi.mock('electron', () => ({
   app: { whenReady: () => ({ then: (fn: () => unknown) => { state.ready = fn; } }), on: vi.fn(), requestSingleInstanceLock: () => true, hasSingleInstanceLock: () => true, getPath: (name: string) => join(state.root, name), getAppPath: () => state.root, getVersion: () => '0.0.0-test' /* P4-AGG M2: the catalog's user agent */, isPackaged: false, commandLine: { appendSwitch: vi.fn(), getSwitchValue: vi.fn(() => '') /* P3-F1: Electron's answer for a switch not given */ }, setPath: vi.fn() },
@@ -27,126 +25,46 @@ vi.mock('electron', () => ({
 }));
 vi.mock('../ipc/router', () => ({ installRouter: vi.fn(), registerMainHandler: (name: string, fn: (input?: unknown) => unknown) => state.handlers.set(name, fn), registerMachineHandler: (name: string, fn: (input?: unknown) => unknown) => state.handlers.set(name, fn) /* P5 O6 M1 */, interceptCommand: vi.fn(), dispatchLocal: vi.fn() /* P5 O6 M3 */, beforeCommand: () => () => {} /* P5 O4 M2 */, CommandFailure: class extends Error {} }));
 vi.mock('../machines', () => ({ startMachines: vi.fn(() => ({ dispatch: vi.fn(), serve: vi.fn(), stop: vi.fn(), onRemote: vi.fn(() => () => {}) /* P5 O8 M2: the rows read the roster */ })) })); // P5 O6 M3: no links, no stand-in
-vi.mock('@shared/host/shell-env', () => ({ captureShellEnvironment: async () => ({ HOME: join(state.root, 'home'), CLAUDE_CONFIG_DIR: state.shellConfig }) }));
-vi.mock('../hosts', () => ({ createHosts: () => ({ daemon: null /* P5 O3-D M5b: the embedded shape */, hosts: { start: vi.fn(), stop: vi.fn(), onState: vi.fn(() => () => {}) /* E3: the dataset holds follow the host's state */, onEvent: vi.fn(() => () => {}) /* P4-AGG M2: the catalog hears plugins.changed */, onStreaming: vi.fn(() => () => {}), streaming: vi.fn(() => false) /* P5 O4 M2: the spine's connector service follows the engine host's stream */ } }), prepareLaunch: () => ({ mode: 'utility', daemon: null, unavailable: null }), refuseTestLaunchOnDefaultProfile: () => {} /* P5 O2 landing: a scratch-profile test launch */ /* P5 O2 M7: the launch's shape, settled at once */ }));
+vi.mock('@shared/host/shell-env', () => ({ captureShellEnvironment: async () => ({ HOME: join(state.root, 'home') }) }));
+const daemonWatch = { status: () => null, refresh: () => {}, onStatus: () => () => {} };
+vi.mock('../hosts', () => ({ createHosts: () => ({ daemon: daemonWatch, hosts: { start: vi.fn(), stop: vi.fn(), dispatch: vi.fn(), onState: vi.fn(() => () => {}) /* E3: the dataset holds follow the host's state */, onEvent: vi.fn(() => () => {}) /* P4-AGG M2: the catalog hears plugins.changed */, onStreaming: vi.fn(() => () => {}), streaming: vi.fn(() => false) /* P5 O4 M2: the app's connectors follow the machine host */, snapshot: () => ({ state: 'down', pid: null }), servedFd: () => null /* P5 O5 M5: the cua relay reads the machine link */ } }), prepareLaunch: () => ({ ok: true, launch: { daemon: 'private' } }), refuseTestLaunchOnDefaultProfile: () => {} /* P5 O2 landing: a scratch-profile test launch */ /* P5 O2 M7: the launch's shape, settled at once */ }));
+// P5 O3-D M5b: the spine's mirror and the machine half's, which main reads on the daemon shape
+vi.mock('./daemon-spine', () => ({
+  startDaemonSpine: () => ({ view: { on: () => () => {}, unavailable: () => 'the machine daemon is connecting', known: () => false, record: () => null, records: () => [], projects: () => [], projectRows: () => [], intents: () => [] }, forwarded: () => {}, watches: { owns: () => false, dispatch: async () => ({ ok: true, value: undefined }) }, stop: vi.fn() }),
+}));
+vi.mock('../client/machine-settings-mirror', () => ({ createMachineSettingsMirror: () => ({ state: () => ({}), update: vi.fn(), onChange: () => () => {}, stop: vi.fn() }) }));
 vi.mock('../client/settings', () => ({ startSettings: () => ({ state: () => ({ settings: state.settings, resolvedTheme: 'light' }), onChange: vi.fn(() => vi.fn()) }) }));
 vi.mock('../window', () => ({ installContentSecurityPolicy: vi.fn(), appUrl: '', createWindow: vi.fn() }));
-vi.mock('../../services/index/index', () => ({ Index: class { unavailable = 'test'; sessions = { get: () => null, list: () => [] }; projects = { list: () => [] }; refreshOrgProjects = async () => {}; } }));
-vi.mock('../../services/index/source', () => ({ IndexSessionSource: class { onScanned = () => () => {}; discoveryCurrent = () => false; } }));
-vi.mock('../../services/index/attention-service', () => ({ startIndexAttention: () => ({ stop: vi.fn() }) }));
-vi.mock('../../services/index/register', () => ({ registerIndexHandlers: vi.fn() }));
-vi.mock('../../services/index/replay', () => ({ registerReplayHandlers: () => ({ dispose: vi.fn() }) }));
-vi.mock('../../services/git/service', () => ({ GitService: class {} }));
-vi.mock('../../services/git/register', () => ({ registerGitHandlers: vi.fn() }));
-vi.mock('../../services/git/worktrees-register', () => ({ registerWorktreeHandlers: vi.fn() }));
-vi.mock('../pty-links', () => ({ registerPtyOpenLink: vi.fn() }));
 vi.mock('../open-external', () => ({ registerOpenExternal: vi.fn() }));
 vi.mock('../attention', () => ({ startAttention: vi.fn() }));
 vi.mock('../menu', () => ({ startMenu: vi.fn(), registerMenuHandlers: vi.fn() }));
 vi.mock('../window-state', () => ({ restoreWindowState: vi.fn(), trackWindowState: vi.fn() }));
-vi.mock('../lifecycle/quit-guard', () => ({ installQuitGuard: () => ({}), askToQuit: vi.fn(), listProcesses: vi.fn(), trackUnsavedFiles: () => ({}) /* E5 */ }));
-vi.mock('../../services/sessions', () => ({ startSessions: () => ({ model: state.model, stop: vi.fn() }) }));
-vi.mock('../../services/sessions/yield', () => ({ startYield: () => vi.fn() }));
-vi.mock('../../services/side/side-threads', () => ({ startSideThreads: () => vi.fn(), sideThreadEvents: () => [] })); // E3
-vi.mock('../../services/sessions/service', () => ({ SessionService: class { constructor(deps: SessionServiceDeps) { state.deps = deps; } async start() { await state.deps!.intents.load(); } } }));
-vi.mock('../../services/sessions/service-register', () => ({ registerSessionServiceHandlers: vi.fn(), engineHostSettled: vi.fn() }));
-vi.mock('../../services/files/register', () => ({ registerFilesHandlers: () => ({ dispose: vi.fn() }) }));
+vi.mock('../lifecycle/quit-guard', () => ({ installQuitGuard: () => ({}), askToQuit: vi.fn(), trackUnsavedFiles: () => ({}) /* E5 */ }));
 vi.mock('../usage/claude-usage-reader', () => ({ claudeUsageDir: () => '', ClaudeUsageReader: class { start() {} } }));
 vi.mock('../usage/claude-usage-control', () => ({ baseUrlFrom: () => null, ClaudeUsageControl: class {} }));
 vi.mock('../gateway/claude-usage-app', () => ({ createClaudeUsageApp: () => ({}), execRunner: vi.fn() }));
-vi.mock('../../services/settings/engine-configure', async (original) => ({ ...(await original<object>()), startEngineConfigure: () => ({ stop: vi.fn() }) })); // the budgets (command-budgets.ts) read its CONFIGURE_WAIT_MS
-vi.mock('../../services/settings/host-configure', () => ({ startHostConfigure: () => vi.fn() })); // E10
 vi.mock('./interest', () => ({ startInterest: () => () => {}, appInterest: () => ({ set: () => new Set(), onChange: () => () => {}, stop: () => {} }) })); // P5 O2 M2: its sibling; P5 O3-C: the app's interest
 vi.mock('../widgets/fixture-backend', () => ({ installWidgetBackend: vi.fn() }));
-vi.mock('../browser', () => ({ startBrowser: (deps: { settings(): unknown }) => { state.browserSettings = deps.settings; return { stop: vi.fn(), partitions: {} /* E4b */ }; } })); // E4a
+vi.mock('../browser', () => ({ startBrowser: (deps: { settings(): unknown }) => { state.browserSettings = deps.settings; return { stop: vi.fn(), partitions: {} /* E4b */, cua: { relay: vi.fn() } /* P5 O5 M5: the daemon's relay pass */ }; } })); // E4a
 vi.mock('../artifacts', () => ({ registerStoreSchemes: vi.fn() /* M7 */, installStorePolicies: vi.fn() /* P3-L M6b: E2's startDeliverables' policies */, startArtifacts: () => ({ stop: vi.fn(), exporters: { register: () => () => {} } /* P3-B: the document exporters register here */ }) })); // P3-A: the artifact store's main side
-vi.mock('../../services/artifacts/defaults', () => ({ startArtifactDefaults: vi.fn(() => () => {}) })); // P5 O3-C (D23): the spine's relay, beside the artifacts
 vi.mock('../presentations/present', () => ({ registerPresenter: vi.fn(() => ({ end: vi.fn() })) })); // P3-C M6: the presenter's windows
 vi.mock('../browser/import', () => ({ ImportedProfiles: { open: () => ({ list: () => [] }) }, sweepBrowserImports: vi.fn(), startBrowserImport: () => ({ stop: vi.fn() }) })); // E4b
 
-const ID = '11111111-1111-4111-8111-111111111111' as AppSessionId;
-const invoke = async (name: string, input?: unknown) => state.handlers.get(name)!(input);
-
-describe('main setup-intent and shell-environment wiring', () => {
+describe('main startup wiring', () => {
   beforeEach(async () => {
     vi.resetModules();
     state.handlers.clear();
     state.settings = SETTINGS_DEFAULTS_V21; // E4a
     state.root = mkdtempSync(join(tmpdir(), 'maws-main-wiring-'));
-    state.shellConfig = join(state.root, 'shell-config');
-    for (const name of ['userData', 'home', 'shell-config', 'dock-config', 'additional']) mkdirSync(join(state.root, name));
-    vi.stubEnv('CLAUDE_CONFIG_DIR', join(state.root, 'dock-config'));
+    for (const name of ['userData', 'home']) mkdirSync(join(state.root, name));
     vi.stubEnv('MAWS_HARNESS', '');
     // E11 §2.7: electron.vite.config.ts defines main's build stamp for its bundle; vitest does not
     vi.stubGlobal('__MAWS_VERSION__', '0.0.0');
     vi.stubGlobal('__MAWS_BUILD__', { commit: 'test0000', builtAt: '2026-10-08T00:00:00.000Z' });
-    const events = new EventEmitter();
-    state.model = {
-      record: () => null, allRecords: () => [],
-      on: (name, listener) => { events.on(name, listener); return () => { events.off(name, listener); }; },
-      emit: (name, ...args) => events.emit(name, ...args),
-    };
     await import('../app');
     await state.ready!();
-    await state.deps!.intents.load();
   });
   afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); rmSync(state.root, { recursive: true, force: true }); });
-
-  it('lists accepted additional directories before first send and revokes them when the intent changes', async () => {
-    const directory = join(state.root, 'additional');
-    writeFileSync(join(directory, 'mention-me.txt'), 'hello');
-    const intent = intentFor(ID, { additionalDirectories: [directory] });
-    await state.deps!.intents.put(intent);
-    const { emit } = await import('../ipc/events');
-    emit('session.intent.changed', { appSessionId: ID, intent });
-    await expect(invoke('git.lsFiles', { directory, query: '', limit: 50 })).resolves.toMatchObject({ paths: ['mention-me.txt'] });
-    const patched = { ...intent, additionalDirectories: [] };
-    await state.deps!.intents.put(patched);
-    emit('session.intent.changed', { appSessionId: ID, intent: patched });
-    await expect(invoke('git.lsFiles', { directory, query: '', limit: 50 })).rejects.toThrow('not a directory');
-  });
-
-  it('persists an unstarted chat panel, retains it on provisional record removal, and drops it when the intent goes', async () => {
-    const intent = intentFor(ID);
-    await state.deps!.intents.put(intent);
-    const panel = { tabs: [{ id: 'notes', kind: 'notes' }] };
-    await invoke('layout.set', { key: `panel.${ID}`, value: panel });
-    expect(JSON.parse(readFileSync(join(state.root, 'userData', 'layout.json'), 'utf8'))[`panel.${ID}`]).toEqual(panel);
-    state.model.emit('record', ID, null);
-    await new Promise((resolve) => setTimeout(resolve, 130));
-    await expect(invoke('layout.get', { key: `panel.${ID}` })).resolves.toEqual({ value: panel });
-    await state.deps!.intents.remove(ID);
-    const { emit } = await import('../ipc/events');
-    emit('session.intent.changed', { appSessionId: ID, intent: null });
-    await new Promise((resolve) => setTimeout(resolve, 130));
-    await expect(invoke('layout.get', { key: `panel.${ID}` })).resolves.toEqual({ value: null });
-    await expect(invoke('layout.set', { key: `panel.${ID}`, value: panel })).rejects.toThrow('no such session');
-  });
-
-  it('reads setup defaults, Settings defaults and prompt history from the same captured environment as the engine', async () => {
-    writeFileSync(join(state.shellConfig, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'plan' } }));
-    writeFileSync(join(state.shellConfig, 'history.jsonl'), JSON.stringify({ display: 'from login shell', timestamp: 1 }) + '\n');
-    writeFileSync(join(state.root, 'dock-config', 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'auto' } }));
-    await expect(state.deps!.userDefaults!()).resolves.toMatchObject({ defaultMode: 'plan' });
-    await expect(invoke('settings.userEngineDefaults')).resolves.toMatchObject({ defaultMode: 'plan' });
-    await expect(invoke('session.history.list', { appSessionId: ID, limit: 10 })).resolves.toMatchObject({ entries: [{ display: 'from login shell', source: 'terminal' }] });
-    expect((await state.deps!.env).CLAUDE_CONFIG_DIR).toBe(state.shellConfig);
-  });
-
-  // E6 start: scm.* resolves the session's checkout from the read model and reads trust with the captured environment
-  it('registers every scm.* command and reads their trust from the same captured environment as the engine', async () => {
-    vi.stubEnv('MAWS_GH', ''); // gh is looked up on the capture's PATH, which has none: no gh runs here
-    const names = ['status', 'stage', 'unstage', 'discard', 'commit', 'push.plan', 'push', 'pr.plan', 'pr.create', 'remote.cancel', 'remote.last', 'pr.state'];
-    for (const name of names) expect(state.handlers.has(`scm.${name}`), name).toBe(true);
-    const checkout = realpathSync(join(state.root, 'additional'));
-    (state.model as { record: (id: AppSessionId) => unknown }).record = (id) => (id === ID ? { directory: checkout, worktree: null } : null);
-    const trusting = JSON.stringify({ projects: { [checkout]: { hasTrustDialogAccepted: true } } });
-    writeFileSync(join(state.root, 'dock-config', '.claude.json'), trusting); // the process's own config home: not the engine's
-    await expect(invoke('scm.status', { appSessionId: ID })).resolves.toMatchObject({ directory: checkout, repository: false, trusted: false, gh: { state: 'missing' } });
-    writeFileSync(join(state.shellConfig, '.claude.json'), trusting);
-    await expect(invoke('scm.status', { appSessionId: ID })).resolves.toMatchObject({ trusted: true, trustKey: checkout });
-  });
-  // E6 end
 
   // E4a: the browser reads settings 11's browser section from the service at each use, so a change reaches the next tab
   // opened and the next new-window link without a restart

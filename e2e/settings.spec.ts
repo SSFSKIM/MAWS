@@ -14,7 +14,7 @@ import { expect, test, type ElectronApplication, type Page } from '@playwright/t
 import { TESTED_ENGINE_VERSION } from '../src/engine-host/engine-compat';
 import { launchMaws, REPO_ROOT } from './support/launch';
 import { invoke, value } from './support/c7-replay'; // P5 O3-D M5b: the shape flip's raw reads
-import { isAlive } from './support/processes';
+import { SETTINGS_DEFAULTS_V21, splitSettings } from '@shared/settings/defaults'; // P5 O15 M2: a client file saved on the embedded shape
 
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now.
 const HARNESS_BUILT = !process.env.MAWS_E2E_EXECUTABLE && existsSync(join(REPO_ROOT, 'out/renderer/harness.html'));
@@ -561,13 +561,12 @@ test('Customize and Projects are reachable without a chat, at desktop and narrow
   } finally { rmSync(userData, { recursive: true, force: true }); }
 });
 
-// P5 O3-D M5b (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, acceptance 2): the profile flips between the shapes
-// by the client file's `supervisor.shape`, read at the next launch, and the spine's one writer follows it: on the daemon
-// shape `mawsd` holds spine.lock; on the embedded shape main does, the launch having ended the profile's `mawsd`; and back.
-// Each launch's app is closed rather than cleaned up, so the profile's processes live on into the next launch as an
-// owner's would; the cleanups run at the end.
-test('settings: the shape flips by the client file, and spine.lock names the spine’s one writer on each shape', async () => {
-  test.setTimeout(180_000);
+// P5 O15 M2 (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, acceptance 3, Interfaces §C case 5): a profile
+// saved on the embedded shape, its client `settings.json` holding `supervisor.shape: embedded` beside three settings off
+// their defaults, opens on `mawsd`, whose pid holds spine.lock; the three read as written; the first settings write
+// stores `shape` as `daemon`, the version still 21. (It replaces O3-D's shape flip: no setting selects a shape now.)
+test('a profile saved on the embedded shape opens on mawsd with everything present', async () => {
+  test.setTimeout(120_000);
   const userData = realpathSync(mkdtempSync(join(tmpdir(), 'maws-e2e-shape-')));
   const lockPid = () => {
     try {
@@ -576,41 +575,23 @@ test('settings: the shape flips by the client file, and spine.lock names the spi
       return null;
     }
   };
-  const status = async (page: Page) => value(await invoke(page, 'host.status', undefined));
-  const launches: Awaited<ReturnType<typeof launchMaws>>[] = [];
+  const saved = splitSettings({ ...SETTINGS_DEFAULTS_V21, theme: 'dark', usage: { nearLimitPercent: 75 }, voice: { locale: 'ko-KR' }, supervisor: { ...SETTINGS_DEFAULTS_V21.supervisor, shape: 'embedded' } }).client;
+  writeFileSync(join(userData, 'settings.json'), JSON.stringify(saved));
+  let maws: Awaited<ReturnType<typeof launchMaws>> | null = null;
   try {
-    // the daemon shape (the default): mawsd holds the lock
-    const first = await launchMaws({ userData });
-    launches.push(first);
-    const before = await status(first.page);
-    expect(before.transport).toBe('daemon');
-    const daemon = before.daemon!.pid;
-    await expect.poll(lockPid, { timeout: 30_000, message: 'mawsd holds spine.lock' }).toBe(daemon);
-    value(await invoke(first.page, 'settings.set', { supervisor: { shape: 'embedded' } }));
-    expect(readSettings(userData)).toMatchObject({ supervisor: { shape: 'embedded' } });
-    await first.app.close();
-    expect(isAlive(daemon), 'mawsd outlives the app that quit').toBe(true);
-
-    // embedded: the launch ends mawsd, and main composes the spine and holds the lock
-    const second = await launchMaws({ userData });
-    launches.push(second);
-    expect((await status(second.page)).transport).not.toBe('daemon');
-    await expect.poll(() => isAlive(daemon), { timeout: 15_000, message: 'the embedded launch ended the profile’s mawsd' }).toBe(false);
-    await expect.poll(lockPid, { timeout: 30_000, message: 'main holds spine.lock' }).toBe(second.app.process().pid);
-    value(await invoke(second.page, 'settings.set', { supervisor: { shape: 'daemon' } }));
-    await second.app.close();
-    await expect.poll(lockPid, { timeout: 10_000, message: 'main released spine.lock at its exit' }).toBeNull();
-
-    // daemon again: the next launch runs the spine in a mawsd of its own
-    const third = await launchMaws({ userData });
-    launches.push(third);
-    const after = await status(third.page);
-    expect(after.transport).toBe('daemon');
-    expect(after.daemon!.pid).not.toBe(daemon);
-    await expect.poll(lockPid, { timeout: 30_000, message: 'the new mawsd holds spine.lock' }).toBe(after.daemon!.pid);
-    expect(after.spineRefused).toBeNull();
+    maws = await launchMaws({ userData });
+    const status = value(await invoke(maws.page, 'host.status', undefined));
+    expect(status.transport).toBe('daemon');
+    await expect.poll(lockPid, { timeout: 30_000, message: 'mawsd holds spine.lock' }).toBe(status.daemon!.pid);
+    expect(lockPid(), 'main holds no spine.lock').not.toBe(maws.app.process().pid);
+    const shown = value(await invoke(maws.page, 'settings.get', undefined)).settings;
+    expect(shown).toMatchObject({ theme: 'dark', usage: { nearLimitPercent: 75 }, voice: { locale: 'ko-KR' }, supervisor: { shape: 'daemon' } });
+    expect(readSettings(userData), 'a read writes nothing').toEqual(saved);
+    value(await invoke(maws.page, 'settings.set', { usage: { nearLimitPercent: 80 } }));
+    expect(readSettings(userData)).toEqual({ ...saved, usage: { nearLimitPercent: 80 }, supervisor: { ...saved.supervisor, shape: 'daemon' } });
+    expect(readSettings(userData).version).toBe(21);
   } finally {
-    for (const launch of launches.reverse()) await launch.cleanup().catch((error: unknown) => console.error(error));
+    await maws?.cleanup().catch((error: unknown) => console.error(error));
     rmSync(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });

@@ -117,7 +117,6 @@ export const SUPERVISOR = {
   exitsAfter: (idleExitMs: number) => `exits ${idleSpan(idleExitMs)} after the last session ends`,
   exitsNever: 'never exits on its own',
   exitsWithLast: 'exits when its last session ends', // exit-when-idle armed (an update, or the incompatible wait)
-  inApp: (pid: number, live: number) => `Runs inside MAWS · pid ${pid} · ${sessions(live)} · stops when MAWS quits`, // MAWS_HOST_MODE=utility
   starting: 'Starting',
   restarting: 'Restarting',
   notRunning: 'Not running',
@@ -133,10 +132,6 @@ export const SUPERVISOR = {
   idleNote: (minutes: number) => `With MAWS closed, the supervisor exits ${minutes} min after its last session ends, and a kept session idle that long is stopped (Send resumes it). Empty means never.`,
   idleNeverNote: 'Never · the supervisor keeps running after its last session ends, even with MAWS closed.',
   idleInvalid: `Enter whole minutes from 1 to ${MAX_IDLE_MINUTES}, or leave the field empty for never`,
-  quitDefault: 'When quitting with work in flight',
-  quitKeep: 'Keep sessions running',
-  quitStop: 'Stop them',
-  quitNote: "The quit question's default answer. It asks only while a session is mid-turn or has work in flight; otherwise quitting stops every session.",
   stopAll: 'Stop all',
   stopAllAction: 'Stop all sessions and the supervisor…',
   stopAllNote: 'Every session stops; Send resumes it from its transcript. A fresh supervisor starts in its place.',
@@ -145,16 +140,10 @@ export const SUPERVISOR = {
   cancel: 'Cancel',
   stopping: 'Stopping…',
   stopFailed: (why: string) => `The supervisor was not stopped · ${why}`,
-  // P5 O2 M7: the shape's switch, applied at the next launch, and the machine daemon's line
-  shape: 'Run sessions under the machine daemon',
-  shapeNote: 'Applies at the next launch. Sessions and terminals then run under mawsd, which keeps them running when MAWS quits.',
-  shapeLeaving: 'MAWS stops using the machine daemon when it opens again; this launch keeps running under it.',
-  shapeJoining: 'MAWS runs its sessions under the machine daemon when it opens again.',
+  // P5 O2 M7: the machine daemon's line
   daemon: 'Machine daemon',
   daemonLine: (kind: 'unit' | 'private', pid: number, machine: string) => `${kind === 'unit' ? 'At login' : 'This profile only'} · pid ${pid} · machine ${machine}`,
   daemonConnecting: 'Connecting',
-  daemonUnavailable: (why: string) => `Not in use this launch · ${why}`,
-  daemonEmbedded: 'Not in use · MAWS runs its sessions itself',
 };
 // E10 end
 

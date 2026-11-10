@@ -33,7 +33,7 @@ export function describeSupervisor(status: HostStatus | null): string {
     if (status.handover) parts.push(ENGINE_HOST_UPDATE.waiting(status.handover.inFlight, status.handover.tool));
     else parts.push(status.state === 'restarting' ? ROW.restarting : ROW.starting);
   } else {
-    const idle = status.transport === 'utility' ? ROW.idleWithApp : s.exitWhenIdle ? ROW.idleWithLast : s.idleExitMs === null ? ROW.idleNever : ROW.idleAfter(s.idleExitMs);
+    const idle = s.exitWhenIdle ? ROW.idleWithLast : s.idleExitMs === null ? ROW.idleNever : ROW.idleAfter(s.idleExitMs);
     parts.push(ROW.pid(s.pid));
     if (status.matches) parts.push(ROW.matches[status.matches]);
     if (status.handover) parts.push(ENGINE_HOST_UPDATE.waiting(status.handover.inFlight, status.handover.tool)); // the old build serves meanwhile
@@ -68,7 +68,7 @@ export function SupervisorRow() {
           {ROW.restartNow}
         </button>
       )}
-      {status !== null && status.transport !== 'utility' && ( // P5 O2 M7: the engine host keeps its log on the daemon shape too
+      {status !== null && ( // P5 O2 M7: the engine host behind mawsd keeps its own log
         <button type="button" className={BUTTON} onClick={() => void openLog()}>
           {ROW.openLog}
         </button>

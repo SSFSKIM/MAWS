@@ -1,12 +1,11 @@
-// Wires the host supervisor into main: the two utility-process entries (bundled by electron-vite's `?modulePath`,
-// which evaluates to the emitted file's path in dev and inside the packaged asar alike), the `engine.hostState` and
-// `pty.hostState` snapshot commands, and the events of the same names on every transition.
-// E10: the engine host runs in the mode MAWS_HOST_MODE picks (mode.ts): detached (the supervisor) or a utility process
-// (under the harnesses); the pty host is a utility process.
-// P5 O2 M7 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M7): the launch's shape is settled before the hosts are
-// created (`prepareLaunch`: the setting, the default profile's unit installed, repaired or uninstalled; daemon.ts). On
-// the daemon shape main reaches the engine host, the pty host and `mawsd`'s own `daemon` namespace through `mawsd`'s
-// three relay sockets, starting `mawsd` the profile's way, and watches the daemon's status and build (daemon.ts).
+// Wires the host supervisor into main: the `engine.hostState` and `pty.hostState` snapshot commands, and the events of
+// the same names on every transition. P5 O2 M7 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M7); P5 O15 M2
+// (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, Interfaces §A): the launch's outcome is settled before the
+// hosts are created (`prepareLaunch`: the main profile's unit installed or repaired and started, or a private daemon);
+// main reaches the engine host, the pty host and `mawsd`'s own `daemon` namespace through `mawsd`'s three relay sockets,
+// starting `mawsd` the profile's way, and watches the daemon's status and build (daemon.ts). The host bundles' paths
+// (electron-vite's `?modulePath`, the emitted file's path in dev and inside the packaged asar alike) name the builds the
+// daemon would start, for the build check and the hello's identity.
 import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
@@ -16,23 +15,22 @@ import engineHostPath from '../../engine-host/index?modulePath';
 import ptyHostPath from '../../pty-host/index?modulePath';
 import { daemonPaths } from '@shared/daemon/files';
 import { appIdentity } from '@shared/host/identity';
-import { ENGINE_HOST_BUDGETS_MS, type HostSpec } from '@shared/host/host-supervisor';
+import type { HostSpec } from '@shared/host/host-supervisor';
 import type { DaemonStatus } from '@shared/ipc/schema/daemon';
 import type { MainBuild } from '@shared/ipc/schema/host'; // E11 §2.7
-import type { SupervisorShape } from '@shared/ipc/schema/settings';
 import { buildIdOf, SUPERVISOR_FILES } from '../../engine-host/supervisor-files';
 import { isDefaultProfile, unitFor, type InstallDeps } from '../../mawsd/install';
 import { DEFAULT_LABEL, type UnitProgram } from '../../mawsd/units/unit';
 import { emit } from '../ipc/events';
 import { registerMainHandler } from '../ipc/router';
-import { daemonHostSpecs, daemonStart, resolveLaunch, unitRunsThisApp, watchDaemon, type LaunchShape } from './daemon';
+import { daemonHostSpecs, daemonStart, launchFailed, resolveLaunch, unitRunsThisApp, watchDaemon, type LaunchOutcome, type LaunchShape } from './daemon';
 import { watchEngineHandover } from './engine-handover'; // P5 O16 M3c fix wave 2
 import { hostEventToWindows } from './window-events'; // P5 O17 M9b
-import { testLaunchRefusal } from './mode'; // P5 O2 landing
+import { DEFAULT_PROFILE_REFUSAL, isTestLaunch, retiredHostModeNotice, testLaunchRefusal } from './mode'; // P5 O2 landing; P5 O15 M2: the retired variable
 import { startHostStatus, type HostStatusService } from './status';
 import { createHostSupervisor, type HostSupervisor } from './supervisor';
 
-export type { LaunchShape } from './daemon';
+export type { LaunchOutcome, LaunchShape, Unavailable } from './daemon';
 
 // `mawsd`'s entry, beside main's own (electron-vite's second main input): out/main/mawsd.js, inside app.asar when packaged
 const mawsdPath = (): string => join(__dirname, 'mawsd.js');
@@ -48,12 +46,21 @@ const program = (): UnitProgram => {
   return { runtime: process.execPath, entry };
 };
 
+// The account's name; $USER where the system has no passwd entry to give it (userInfo throws then)
+function userName(): string {
+  try {
+    return userInfo().username;
+  } catch {
+    return process.env.USER ?? '';
+  }
+}
+
 const unitDeps = (): InstallDeps => ({
   platform: process.platform,
   home: homedir(),
   env: process.env,
   uid: process.getuid?.() ?? -1,
-  user: userInfo().username,
+  user: userName(), // fix wave 1: read on the launch's way, so it never throws
   run: (command, args) => {
     const result = spawnSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000 });
     return { status: result.status, stdout: result.stdout ?? '', stderr: result.stderr ?? (result.error ? String(result.error) : '') };
@@ -61,17 +68,36 @@ const unitDeps = (): InstallDeps => ({
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 });
 
-// The launch's shape from the setting `supervisor.shape`, read once, with the unit work it needs done before any host
-// exists; synchronous when there is none (every profile but the default one).
-export function prepareLaunch(shape: SupervisorShape): LaunchShape | Promise<LaunchShape> {
-  return resolveLaunch({ env: process.env, shape, packaged: app.isPackaged, profileDir: app.getPath('userData'), program: program() }, { ...unitDeps(), log: (line) => console.log(line), exit: refuse });
+// The launch's outcome (daemon.ts's table), with the unit work it needs done before any host exists; synchronous when
+// there is none (every profile but the main one). Asked again by the repair window's each attempt. P5 O15 M2: a
+// MAWS_HOST_MODE the environment still names is said once, at the first ask.
+let hostModeTold = false;
+// Fix wave 1: never a throw or a rejection either; what goes wrong before resolveLaunch (the launch's facts) is
+// `install-refused` with its words, as resolveLaunch's own errors are, so the repair window opens.
+export function prepareLaunch(): LaunchOutcome | Promise<LaunchOutcome> {
+  const log = (line: string) => console.log(line);
+  try {
+    const retired = hostModeTold ? null : retiredHostModeNotice(process.env);
+    hostModeTold = true;
+    if (retired !== null) log(retired);
+    return resolveLaunch({ env: process.env, packaged: app.isPackaged, profileDir: app.getPath('userData'), program: program() }, { ...unitDeps(), log, exit: refuse });
+  } catch (error) {
+    return launchFailed(error, { log });
+  }
 }
 
 // P5 O2 landing: a test or harness launch on the default profile (testLaunchRefusal) ends here, before the profile's
-// machine identity, settings or hosts are touched; prepareLaunch holds the same line.
+// machine identity, settings or hosts are touched; prepareLaunch holds the same line. Fix wave 2: an ordinary launch
+// reads nothing here (the account's home, which `homedir()` can fail to give, is read on prepareLaunch's guarded way),
+// and a test or harness launch whose profile cannot be placed fails closed, refused as on the default profile.
 export function refuseTestLaunchOnDefaultProfile(): void {
-  const deps = unitDeps();
-  const refusal = testLaunchRefusal(process.env, isDefaultProfile(app.getPath('userData'), deps.platform, deps.env, deps.home));
+  if (!isTestLaunch(process.env)) return;
+  let refusal: string | null;
+  try {
+    refusal = testLaunchRefusal(process.env, isDefaultProfile(app.getPath('userData'), process.platform, process.env, homedir()));
+  } catch (error) {
+    refusal = `${DEFAULT_PROFILE_REFUSAL} (whether this launch's profile is the default one could not be read: ${error instanceof Error ? error.message : String(error)})`;
+  }
   if (refusal !== null) refuse(1, refusal);
 }
 
@@ -80,45 +106,31 @@ function refuse(code: number, line: string): never {
   process.exit(code);
 }
 
-// P5 O3-D M5b: on the daemon shape, the daemon's last `daemon.status` and each new one, for main's mirror of the spine
+// P5 O3-D M5b: the daemon's last `daemon.status` and each new one, for main's mirror of the spine
 export interface DaemonStatusWatch {
   status(): DaemonStatus | null;
   refresh(): void; // read it again (src/main/hosts/daemon.ts)
   onStatus(listener: () => void): () => void;
 }
 
-// P5 O3-A: `spineRefused`, why this run does not run the spine, for host.status (the embedded shape's; on the daemon
-// shape the daemon's status says it)
-// The panel's sweep#3: `machineBudgetsMs`, the spine's commands that run past a request's default deadline (the services
-// entry's COMMAND_BUDGETS_MS), which the daemon shape's `machine` host applies.
-export function createHosts(
-  mainBuild: MainBuild,
-  launch: LaunchShape,
-  { spineRefused = null, machineBudgetsMs }: { spineRefused?: string | null; machineBudgetsMs?: HostSpec['requestBudgetsMs'] } = {},
-): { hosts: HostSupervisor; daemon: DaemonStatusWatch | null } {
-  const { mode } = launch;
-  const daemon = mode === 'daemon';
+// The panel's sweep#3: `machineBudgetsMs`, the spine's commands that run past a request's default deadline (the services'
+// COMMAND_BUDGETS_MS), which the `machine` host applies.
+export function createHosts(mainBuild: MainBuild, launch: LaunchShape, { machineBudgetsMs }: { machineBudgetsMs?: HostSpec['requestBudgetsMs'] } = {}): { hosts: HostSupervisor; daemon: DaemonStatusWatch } {
   const userData = app.getPath('userData');
-  console.log(`[hosts] the engine host runs ${daemon ? `under the machine daemon (${launch.daemon === 'unit' ? 'its LaunchAgent' : 'a private mawsd'})` : mode === 'detached' ? 'detached (the supervisor)' : 'as a utility process'}`);
-  // E10 Task 2.4: one identity for the hello and for host.status, so the e2e seams (MAWS_E2E_BUILD_ID, MAWS_E2E_WIRE)
-  // read the same in both; a utility host is never compared, so they apply only when detached. P5 O2 M7: on the daemon
-  // shape the seams are mawsd's (daemon.ts), and host.status compares with the daemon's engine-host build instead.
-  const identity = appIdentity(engineHostPath, process.env, mode === 'detached' ? 'detached' : 'utility');
+  console.log(`[hosts] the engine host runs under the machine daemon (${launch.daemon === 'unit' ? 'its LaunchAgent' : 'a private mawsd'})`);
+  // E10 Task 2.4: one identity for the hello and for host.status. P5 O2 M7: the e2e seams are mawsd's (daemon.ts), and
+  // host.status compares with the daemon's engine-host build instead.
+  const identity = appIdentity(engineHostPath, process.env, 'utility');
   const paths = daemonPaths(userData);
   const modules = { engineHost: engineHostPath, ptyHost: ptyHostPath, mawsd: mawsdPath() };
   const unit = () => unitFor(DEFAULT_LABEL, unitDeps());
-  const engineHandover = daemon ? watchEngineHandover() : null; // P5 O16 M3c fix wave 2: mawsd's report, on machine.sock
+  const engineHandover = watchEngineHandover(); // P5 O16 M3c fix wave 2: mawsd's report, on machine.sock
   const supervisor = createHostSupervisor({
-    hosts: daemon
-      ? daemonHostSpecs(paths, daemonStart(launch.daemon ?? 'private', { paths, modules, execPath: process.execPath, env: process.env, packaged: app.isPackaged, unitStart: () => unit().start() }), modules, process.env, machineBudgetsMs, () => engineHandover?.drainingAt() ?? null)
-      : {
-          'engine-host': { modulePath: engineHostPath, serviceName: 'maws-engine-host', transport: mode, requestBudgetsMs: ENGINE_HOST_BUDGETS_MS }, // the spine runs here
-          'pty-host': { modulePath: ptyHostPath, serviceName: 'maws-pty-host' },
-        },
+    hosts: daemonHostSpecs(paths, daemonStart(launch.daemon, { paths, modules, execPath: process.execPath, env: process.env, packaged: app.isPackaged, unitStart: () => unit().start() }), modules, process.env, machineBudgetsMs, () => engineHandover.drainingAt()),
     emit: hostEventToWindows(emit), // P5 O17 M9b: but what is main's alone
     detached: { identity },
   });
-  engineHandover?.bind(supervisor); // for the launch's life
+  engineHandover.bind(supervisor); // for the launch's life
   // E10: the engine host is told ready after main's resync (X13), which the session read side registers
   // (sessions/index.ts `hostEventSource`); with none registered (launch mode scenario) it is told at once.
   registerMainHandler('engine.hostState', () => supervisor.snapshot('engine-host'));
@@ -128,42 +140,36 @@ export function createHosts(
   // P5 O2 M7: the daemon's status for host.status and Diagnostics, and its build checked once for the launch
   let status: HostStatusService | null = null;
   const statusListeners = new Set<() => void>();
-  const watch = daemon
-    ? watchDaemon({
-        hosts: supervisor,
-        buildId: buildIdOf(mawsdPath()),
-        unitRunsThisApp: () => unitRunsThisApp({ profileDir: userData, program: program() }, unitDeps()),
-        onChange: () => {
-          status?.refresh();
-          for (const listener of [...statusListeners]) listener();
-        },
-        log: (line) => console.log(line),
-      })
-    : null;
+  const watch = watchDaemon({
+    hosts: supervisor,
+    buildId: buildIdOf(mawsdPath()),
+    unitRunsThisApp: () => unitRunsThisApp({ profileDir: userData, program: program() }, unitDeps()),
+    onChange: () => {
+      status?.refresh();
+      for (const listener of [...statusListeners]) listener();
+    },
+    log: (line) => console.log(line),
+  });
   // E10: host.status (the supervisor's status with main's facts), host.restart and host.openLog
   status = startHostStatus({
     hosts: supervisor,
     appBuildId: identity.buildId,
     appWire: identity.wire,
     mainBuild, // E11 §2.7
-    logPath: () => (mode !== 'utility' ? join(userData, 'supervisor', SUPERVISOR_FILES.log) : null),
+    logPath: () => join(userData, 'supervisor', SUPERVISOR_FILES.log),
     emit: (next) => void emit('host.status', next),
     register: registerMainHandler,
     openPath: (path) => shell.openPath(path),
-    ...(watch ? { daemon: () => watch.status() } : {}),
-    daemonUnavailable: launch.unavailable,
-    spineRefused, // P5 O3-A
-    ...(engineHandover && { engineHandover }), // P5 O16 M3c fix wave 2
+    daemon: () => watch.status(),
+    engineHandover, // P5 O16 M3c fix wave 2
   });
-  const daemonWatch = watch
-    ? {
-        status: () => watch.status(),
-        refresh: () => watch.refresh(),
-        onStatus: (listener: () => void) => {
-          statusListeners.add(listener);
-          return () => void statusListeners.delete(listener);
-        },
-      }
-    : null;
+  const daemonWatch = {
+    status: () => watch.status(),
+    refresh: () => watch.refresh(),
+    onStatus: (listener: () => void) => {
+      statusListeners.add(listener);
+      return () => void statusListeners.delete(listener);
+    },
+  };
   return { hosts: supervisor, daemon: daemonWatch };
 }

@@ -87,3 +87,39 @@ describe('a client change while mawsd has not split settings.json yet', () => {
     expect(await waiting.update({ sessions: { archiveInactiveDays: 30 } })).toMatchObject({ theme: 'dark', sessions: { archiveInactiveDays: 30 } });
   });
 });
+
+// P5 O15 M2 (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, "Settings"): `supervisor.shape` is retired. It
+// stays in the schema, so every saved file parses, and reads and is stored as `daemon` whatever the file or a caller
+// says; every other setting, `keepRunningDefault` among them, is kept as stored, and the version stays 21.
+describe('the retired supervisor.shape', () => {
+  const SAVED = { ...SETTINGS_DEFAULTS_V21, theme: 'dark' as const, usage: { nearLimitPercent: 75 }, supervisor: { ...SETTINGS_DEFAULTS_V21.supervisor, keepRunningDefault: false, shape: 'embedded' as const } };
+  const onDisk = (file: string) => JSON.parse(readFileSync(file, 'utf8'));
+  const open = (paths: ReturnType<typeof settingsPaths>) => composeSettings({ clientFile: paths.client, machine: startMachineSettings(paths.machine, { refused: null }) });
+
+  it('reads `daemon` from a client file saved on the embedded shape, every other setting as written', () => {
+    const paths = settingsPaths(dir);
+    writeFileSync(paths.client, JSON.stringify(splitSettings(SAVED).client));
+    expect(open(paths).settings).toEqual({ ...SAVED, supervisor: { ...SAVED.supervisor, shape: 'daemon' } });
+    expect(onDisk(paths.client).supervisor.shape, 'a read writes nothing').toBe('embedded');
+  });
+
+  it('reads `daemon` from a unified file the split has not converted', () => {
+    const paths = settingsPaths(dir);
+    writeFileSync(paths.client, JSON.stringify({ ...SAVED, version: 20 }));
+    expect(open(paths).settings).toMatchObject({ theme: 'dark', supervisor: { keepRunningDefault: false, shape: 'daemon' } });
+  });
+
+  it('stores `daemon` at the first write, at version 21, the other settings kept', async () => {
+    const paths = settingsPaths(dir);
+    writeFileSync(paths.client, JSON.stringify(splitSettings(SAVED).client));
+    await open(paths).update({ voice: { locale: 'ko-KR' } });
+    expect(onDisk(paths.client)).toEqual({ ...splitSettings(SAVED).client, voice: { locale: 'ko-KR' }, supervisor: { keepRunningDefault: false, shape: 'daemon' } });
+  });
+
+  it('stores `daemon` when a caller sets `embedded`', async () => {
+    const paths = settingsPaths(dir);
+    const settings = open(paths);
+    expect((await settings.update({ supervisor: { shape: 'embedded' } })).supervisor.shape).toBe('daemon');
+    expect(onDisk(paths.client)).toMatchObject({ version: 21, supervisor: { shape: 'daemon' } });
+  });
+});

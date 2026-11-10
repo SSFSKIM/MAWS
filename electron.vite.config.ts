@@ -55,10 +55,10 @@ export default defineConfig(({ command }) => {
 
   // C6: the development harness (src/renderer/harness.html) is a second renderer entry, built by the dev server or
   // under MAWS_HARNESS=1 only, so a production build never contains it; its fixtures are read from the repo root.
-  const harnessInput =
-    command === 'serve' || process.env.MAWS_HARNESS === '1'
-      ? { index: resolve(__dirname, 'src/renderer/index.html'), harness: resolve(__dirname, 'src/renderer/harness.html') }
-      : null;
+  // P5 O15 M2: the repair window's page (src/renderer/repair.html, src/main/repair/) is an entry of every build: it is
+  // what a launch shows when `mawsd` cannot start.
+  const pages = { index: resolve(__dirname, 'src/renderer/index.html'), repair: resolve(__dirname, 'src/renderer/repair.html') };
+  const harnessInput = command === 'serve' || process.env.MAWS_HARNESS === '1' ? { ...pages, harness: resolve(__dirname, 'src/renderer/harness.html') } : null;
   // end C6
 
   return {
@@ -104,12 +104,13 @@ export default defineConfig(({ command }) => {
       // (X2's zod-free name lists, `@shared/ipc/names`) is bundled into out/preload/index.js; only `electron` stays
       // external.
       // E4a start: a second entry, the browser view's preload (out/preload/browser.js); the two share no module, so
-      // neither requires a chunk beside it (src/preload/bundle.test.ts).
+      // neither requires a chunk beside it (src/preload/bundle.test.ts). P5 O15 M2: a third, the repair window's
+      // (out/preload/repair.js), sharing none either.
       build: {
         externalizeDeps: false,
         rollupOptions: {
           ...rollupOptions,
-          input: { index: resolve(__dirname, 'src/preload/index.ts'), browser: resolve(__dirname, 'src/preload/browser.ts') },
+          input: { index: resolve(__dirname, 'src/preload/index.ts'), browser: resolve(__dirname, 'src/preload/browser.ts'), repair: resolve(__dirname, 'src/preload/repair.ts') },
           output: { plugins: [latin1Bundles()] }, // as main's: each renderer process holds its preload's source too
         },
       },
@@ -124,7 +125,7 @@ export default defineConfig(({ command }) => {
         : {
             resolve: { alias },
             html: devNonce ? { cspNonce: devNonce } : undefined,
-            build: { rollupOptions: harnessInput ? { ...rollupOptions, input: harnessInput } : rollupOptions }, // C6: harness input
+            build: { rollupOptions: { ...rollupOptions, input: harnessInput ?? pages } }, // C6: harness input; P5 O15 M2: the repair page
             server: { fs: { allow: [__dirname] } }, // C6: harness fixtures under spikes/ and test/
             plugins: [react({ babel: { plugins: ['babel-plugin-react-compiler'] } }), tailwindcss()],
           },

@@ -9,6 +9,7 @@ import { applySettingsPatch, SETTINGS_DEFAULTS_V21 } from '@shared/settings/defa
 import { useSettings } from '../stores/settings';
 import { ARTIFACT_KINDS } from '@shared/artifacts/entity'; // P3-D
 import { TEST_MACHINE } from '../../../../test/support/machine';
+import { daemonStatus } from './host-status'; // P5 O15 M2
 
 export const BINARY: BinaryInfo = { path: '/Users/owner/.local/share/claude/versions/2.1.287', testedVersion: '2.1.283', version: '2.1.287', ok: true, error: null }; // W13: the installed one
 
@@ -59,11 +60,11 @@ export function settingsBridge(initial: Settings = SETTINGS_DEFAULTS_V21): Setti
     }),
     'voice.openPrivacySettings': () => undefined,
     // E9 end
-    // E10 start: Settings › Engine › Background supervisor connects the hosts store (the engine host in the app, as under
-    // the harness); a test replaces these to show a detached supervisor
+    // E10 start: Settings › Engine › Background supervisor connects the hosts store (P5 O15 M2: main on `mawsd`, the
+    // supervisor not yet reported); a test replaces these to show a running one
     'engine.hostState': () => ({ state: 'ready', pid: 1111, restarts: 0, revision: 1 }),
     'pty.hostState': () => ({ state: 'ready', pid: 2222, restarts: 0, revision: 1 }),
-    'host.status': () => ({ transport: 'utility', state: 'ready', supervisor: null, appBuildId: 'b', appWire: 'w', mainBuild: { version: '0.0.0', commit: 'ac8724a6', builtAt: '2026-10-08T09:05:53.000Z' }, matches: null, reason: null, waitingLiveSessions: null, lastExit: null, daemon: null, daemonUnavailable: null }),
+    'host.status': () => ({ transport: 'daemon', state: 'ready', supervisor: null, appBuildId: 'b', appWire: 'w', mainBuild: { version: '0.0.0', commit: 'ac8724a6', builtAt: '2026-10-08T09:05:53.000Z' }, matches: null, reason: null, waitingLiveSessions: null, lastExit: null, daemon: daemonStatus(), daemonUnavailable: null }),
     'host.restart': () => undefined,
     // E10 end
     // E4a start: Settings › Browser's profile select (E4b writes the profiles; none by default)

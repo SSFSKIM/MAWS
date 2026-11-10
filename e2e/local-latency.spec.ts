@@ -1,5 +1,5 @@
 // The local-latency bench (P5 O1, M1; docs/doperpowers/plans/2026-10-27-p5-o1-seams.md; P5 §10 and OX7): one lane B
-// session on the local path, in detached mode (the owner's daily shape), measured end to end through the built app.
+// session on the local path, on the daemon shape, measured end to end through the built app.
 // Its engine is test/support/latency-engine-stub.mjs, a real child process the engine host launches through
 // MAWS_E2E_ENGINE_BIN, so every hop P5 adds (mawsd, then O16's session host) lands on the measured path.
 //
@@ -20,12 +20,14 @@
 // Once test/support/local-latency.ts records the baseline (three runs at M1's commit), each metric is held to it plus
 // OX7's 2 ms at p50 and 5 ms at p95.
 //
-// A measured group (gate.yml's MEASURED_E2E): `pnpm e2e:local-latency` sets MAWS_LOCAL_LATENCY_PERF=1, and the gate runs
-// it only when named, on the mini's exclusive instance behind the measured-job guard. It spends nothing and touches no
-// keychain: the stub makes no network call, and MAWS_E2E brings the mock keychain.
-// P5 O2 M7 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md): `pnpm e2e:local-latency-daemon` runs the same bench on
-// the daemon shape (MAWS_HOST_MODE=daemon), main reaching the engine host through the scratch profile's private `mawsd`,
-// whose relay is the hop OX7's budget holds against the same baseline; a measured group too.
+// A measured group (gate.yml's MEASURED_E2E): `pnpm e2e:local-latency-daemon` sets MAWS_LOCAL_LATENCY_PERF=1, and the gate
+// runs it only when named, on the mini's exclusive instance behind the measured-job guard. It spends nothing and touches
+// no keychain: the stub makes no network call, and MAWS_E2E brings the mock keychain.
+// P5 O2 M7 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md): main reaches the engine host through the scratch
+// profile's private `mawsd`, whose relay is the hop OX7's budget holds against the baseline the embedded shape's
+// detached mode recorded (test/support/local-latency.ts). P5 O15 M1
+// (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md): that shape's run (`e2e:local-latency`) is gone with it, so
+// the bench runs on the daemon shape alone.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -42,7 +44,7 @@ import { killScratchProcesses } from './support/processes';
 import { sidebarRow } from './support/sidebar';
 import { tmpSocketDirOf } from './support/supervisor-socket';
 
-test.skip(process.env.MAWS_LOCAL_LATENCY_PERF !== '1', 'the local-latency bench runs under pnpm e2e:local-latency (MAWS_LOCAL_LATENCY_PERF=1)');
+test.skip(process.env.MAWS_LOCAL_LATENCY_PERF !== '1', 'the local-latency bench runs under pnpm e2e:local-latency-daemon (MAWS_LOCAL_LATENCY_PERF=1)');
 test.describe.configure({ timeout: 5 * 60_000 });
 
 const now = () => performance.timeOrigin + performance.now();
@@ -152,7 +154,7 @@ test('local latency: delta to frame and command round trip of a lane B session o
     maws = await launchMaws({
       userData,
       syntheticEngineBin: bin, // writeLatencyEngine's test-owned stub: keep measured process evidence, never real-engine logs
-      env: { MAWS_HARNESS: '0', MAWS_E2E_QUIET: '1', MAWS_HOST_MODE: process.env.MAWS_HOST_MODE === 'daemon' ? 'daemon' : 'detached', MAWS_E2E_ENGINE_BIN: bin },
+      env: { MAWS_HARNESS: '0', MAWS_E2E_QUIET: '1', MAWS_HOST_MODE: 'daemon', MAWS_E2E_ENGINE_BIN: bin },
       // the bench's directory trusted and the user's default mode `default`, so the launch runs no trust bootstrap and
       // no auto-mode fallback: the stub's prelude is Session's minimal one
       prepare: ({ claudeConfigDir }) => {
@@ -224,9 +226,8 @@ test('local latency: delta to frame and command round trip of a lane B session o
   if (leftover !== null) throw leftover; // the body passed: a process of the scratch outliving it is the case's failure
 });
 
-// The app closed, then every process of the scratch killed (the detached supervisor, and on the daemon shape `mawsd`,
-// by their locks' pids too), then their socket directories and the scratch removed. A survivor is answered, after the
-// files are removed all the same.
+// The app closed, then every process of the scratch killed (the engine host and `mawsd`, by their locks' pids too), then
+// their socket directories and the scratch removed. A survivor is answered, after the files are removed all the same.
 async function removeScratch(root: string, userData: string, maws: MawsLaunch | null): Promise<unknown> {
   const lockAt = (path: string) => {
     try {

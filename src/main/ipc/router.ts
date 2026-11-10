@@ -7,7 +7,8 @@
 // P5 O1 M5: a router is built over a registry (`createRouter`), and the module's exports are one router bound to
 // production's `REGISTRY`. A `machine`-owned command goes through the router's `MachineBinding`: `embedded` runs the
 // handler registered with `registerMachine` here, `host` forwards it with the asker's `ClientRef` to the `machine` host
-// (src/main/hosts/supervisor.ts), which runs the same handler code in its own runtime. O1 binds production embedded.
+// (src/main/hosts/supervisor.ts), which runs the same handler code in its own runtime. P5 O15 M2: production binds `host`
+// alone (src/main/app.ts), whose `machine` host is `mawsd`; `embedded`, the default, is the suites' in-process binding.
 //
 // P5 O6 M2 (OX2; docs/doperpowers/plans/2026-10-27-p5-o6-machine-dimension.md, "The router and `emit`"): every invoke names
 // the machine it goes to (the IPC message's last argument; none is the local machine), validated as a `MachineRef`, and a
@@ -104,7 +105,7 @@ export interface RouterOptions {
   appUrl: string;
   local: MachineRef; // P5 O6 M2: this main's own machine (src/main/machine/local.ts), which a command naming none goes to
   dispatchToHost?: HostDispatch;
-  machine?: MachineBinding; // P5 O1 M5: `embedded` unless said otherwise
+  machine?: MachineBinding; // P5 O1 M5: `embedded` unless said otherwise (the suites'); production binds `host` (P5 O15 M2)
   remote?: RemoteDispatch; // P5 O6 M3: the connection manager; none answers every other machine `host_unavailable`
 }
 

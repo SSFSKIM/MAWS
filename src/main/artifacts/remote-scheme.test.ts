@@ -116,7 +116,7 @@ function scene(options: { openTimeoutMs?: number; idleMs?: number; peers?: strin
   stops.push(() => scheme.stop());
   sessions.default.protocol.handle.mockClear();
   const hosts = { dispatch, postDocPort: vi.fn(), closeDocPorts: vi.fn(), onState: () => () => {}, onStreaming: () => () => {}, onEvent: vi.fn(() => () => {}), peer: () => null };
-  const started = startArtifacts({ hosts: hosts as unknown as ArtifactsDeps['hosts'], register: vi.fn() as never, registerMachine: vi.fn() as never, emit: vi.fn() as never, env: {}, openWindow: vi.fn() as never, root, artifactsSocket: null, remote: scheme.respond });
+  const started = startArtifacts({ hosts: hosts as unknown as ArtifactsDeps['hosts'], register: vi.fn() as never, registerMachine: vi.fn() as never, emit: vi.fn() as never, env: {}, openWindow: vi.fn() as never, root, artifactsSocket: '/tmp/artifacts.sock', remote: scheme.respond });
   stops.push(() => started.stop());
   const handler = sessions.default.protocol.handle.mock.calls.at(-1)![1] as (request: Request) => Promise<Response>;
   /** The stream the `n`th open named (its id), once it went out. */

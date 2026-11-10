@@ -114,6 +114,9 @@ export interface ShellLaunchOptions extends MawsLaunchOptions {
   defaultRoute?: Route;
   // P5 O7 M9 (m9-5): the runner's ANTHROPIC_* variables the launch keeps, by name (launchEnvironment drops the rest)
   runnerEnv?: readonly string[];
+  // P5 O15 M2: the window the launch returns, the app's (`window.maws`, the default) or the repair window's
+  // (`window.repair`, docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md §B), whose launch has no host to wait for
+  firstWindow?: 'app' | 'repair';
 }
 // C5 end
 
@@ -263,13 +266,13 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
     if (keychainScene) keychainWatch = watchKeychainPrompt(() => child?.pid !== undefined && killTree(child.pid)); // the app, its hosts, their engines and their `security` children
     launchedHook?.(app); // E4b
     app.on('close', () => (closed = true));
-    const page = await appWindow(app); // P5 O3-B: the app's own window, not whichever page came first
+    const page = await appWindow(app, opts.firstWindow === 'repair' ? 'repair' : 'maws'); // P5 O3-B: the app's own window, not whichever page came first; P5 O15 M2: or the repair window
     applications.set(page, app);
     const consoleErrors = await collectConsoleErrors(page);
     await sizeForGroup(app, page); // P3-F1
     await placeForInstance(app); // ci-kit's mac-lane concurrency spec, M2
     await reportForeground(app);
-    if (opts.hostReady !== false) await untilDaemonHostReady(page, launchedAt); // P5 O3-B
+    if (opts.hostReady !== false && opts.firstWindow !== 'repair') await untilDaemonHostReady(page, launchedAt); // P5 O3-B
     return { app, page, consoleErrors, userData, shellHome: shellHome.dir, sminosHome: env.SMINOS_HOME ?? sminosHome, packaged: executable !== null, launchedAt, ...(engine && discover && { realEngine: { ...engine, scratch: discover } }), cleanup };
   } catch (error) {
     await cleanup().catch((cleanupError) => console.error('[e2e] cleanup after a failed launch also failed', cleanupError));
@@ -325,18 +328,19 @@ async function placeForInstance(app: ElectronApplication): Promise<void> {
 // the first page target, which may be another page than the app's (a tab or an extension page a relaunch restores) or the
 // app's own before its document has loaded; either way `window.maws` was missing where the scene read it. The app's
 // window is the one whose preload exposes `window.maws`, so the launch waits, at most 30 s, for a window that does, and
-// says so when the first was not it at once (its URL then, and the one taken).
+// says so when the first was not it at once (its URL then, and the one taken). P5 O15 M2: exported, and for the repair
+// window's `window.repair` too, so a spec finds the app's window once the repair window has given way to it.
 const APP_WINDOW_MS = 30_000;
-async function appWindow(app: ElectronApplication): Promise<Page> {
+export async function appWindow(app: ElectronApplication, bridge: 'maws' | 'repair' = 'maws'): Promise<Page> {
   const first = await app.firstWindow();
-  const bridged = (page: Page) => page.evaluate(() => typeof window.maws !== 'undefined').catch(() => false);
+  const bridged = (page: Page) => page.evaluate((name) => typeof (window as unknown as Record<string, unknown>)[name] !== 'undefined', bridge).catch(() => false);
   if (await bridged(first)) return first;
   const firstUrl = first.url();
   const started = Date.now();
   for (;;) {
     for (const page of app.windows()) {
       if (!(await bridged(page))) continue;
-      console.log(`[e2e] the first window (${firstUrl}) had no window.maws; took ${page === first ? 'it' : 'another window'} at ${page.url()} after ${Date.now() - started} ms`);
+      console.log(`[e2e] the first window (${firstUrl}) had no window.${bridge}; took ${page === first ? 'it' : 'another window'} at ${page.url()} after ${Date.now() - started} ms`);
       return page;
     }
     if (Date.now() - started >= APP_WINDOW_MS) return first; // the spec's own reads then say what is missing
