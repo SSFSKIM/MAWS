@@ -2037,7 +2037,7 @@ Live: at M8's sitting, step 7 (moved there on 2026-11-09; the architect).
       - [desk] Runs `zsh apps/desk-hub/deploy/staging-run.sh real-member remove --email-file <that file>`. If B paired, it also runs `staging-run.sh access-sync`.
       - [owner] Quits the staging profile.
       - [desk] Ends the profile's `mawsd` with `pgrep -fl maws-m8-staging`, then `kill -TERM <pid>`, and checks that no process and no lock file is left. Then it deletes `~/.local/share/maws-m8-staging`, the email file, and the VM.
-      - [owner] In the production Org page, nothing has changed. In the staging hub, the owner's staging profile's device is still listed; the desk track removes it with `staging-run.sh admin remove-device`, confirmed by the owner at the terminal.
+      - [owner] Removes the staging profile's device from staging, since its keys went with the directory. In a Terminal or iTerm window, not with `!` in Claude Code, run `zsh apps/desk-hub/deploy/staging-run.sh admin remove-device -- <its id>` (the `--` because a device id may start with `-`), the id the profile showed at step 3, and confirm. You see that the staging head no longer lists it. Nothing on production has changed.
 1. **The root add, unless done.**
    - [owner] In a Terminal or iTerm window, not with `!` in Claude Code, run `zsh apps/desk-hub/deploy/production-run.sh admin show`.
    - If it already lists two root lines, one of them naming the device in your MAWS's Settings › Org › You, go to step 3.
