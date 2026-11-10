@@ -27,7 +27,7 @@ import { useSessions, type ListedSession } from '../stores/sessions';
 import { usePeople } from '../stores/people'; // P5 O8 M5
 import { connectRemoteReadMarks, resetRemoteReadMarks } from '../lane-b/read-marks'; // P5 O7 M2
 import { fileTabsByProject, fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
-import type { ProjectKey } from './derive';
+import { formatAge, type ProjectKey } from './derive';
 import { registerProjectAction } from './project-actions';
 import { useResumeChooser } from '../resume/host'; // P2-D
 import { clearPreviewCache } from '../resume/preview'; // P2-D
@@ -1473,6 +1473,25 @@ describe('listed rows from another machine', () => {
     await userEvent.click(screen.getByRole('treeitem', { name: 'Show more' }));
     const glyph = (state: string) => within(row(`state ${state}`)).getByRole('img').getAttribute('aria-label');
     expect(states.map(glyph)).toEqual(['Working', 'Needs you', 'Failed', 'Done', 'Done', 'Done', 'Idle']);
+  });
+
+  // P5 O7 M10 (a busy remote session's state): a tab open here holds the record at a listed address, and no digest says
+  // another machine's lane B session's state, so its listing goes on saying it, as it did for the listed row: the glyph,
+  // the rollups and the working tier, an unread idle one "Idle, unread"
+  it('draws a record at a listed address by its listing’s state, counts it in the rollups and ranks a busy one among the working', async () => {
+    const states = ['busy', 'waiting', 'failed', 'done', 'stopped', 'retired', 'idle'];
+    const listed = states.map((state, i) => listedOn(`b${i}`, { state, title: `listing ${state}`, issued: `2026-10-28T10:0${9 - i}:00Z` }));
+    const records = states.map((state, i) => record(studio(`b${i}`), { projectId: null, title: { text: `state ${state}`, source: 'user' }, updatedAt: '2026-10-28T08:00:00Z', unread: state === 'idle' }));
+    fill(listed, [{ ...here, updatedAt: '2026-10-28T11:00:00Z' }, ...records]);
+    render(<Sidebar />);
+    expect(within(row('MAWS')).getByLabelText('1 waiting').textContent).toBe('◐1');
+    expect(within(row('MAWS')).getByLabelText('1 working').textContent).toBe('●1');
+    act(() => useLayout.getState().setSidebar({ expandedProjects: [ORG] as ProjectKey[] }));
+    expect(drawn(row('MAWS')).map(([name]) => name)).toEqual(['state busy', 'Sidebar pass', 'state waiting', 'state failed', 'state done']); // busy among the working, the rest by recency
+    await userEvent.click(screen.getByRole('treeitem', { name: 'Show more' }));
+    const glyph = (state: string) => within(row(`state ${state}`)).getAllByRole('img').find((mark) => mark.getAttribute('aria-label') !== 'Unread')!.getAttribute('aria-label');
+    expect(states.map(glyph)).toEqual(['Working', 'Needs you', 'Failed', 'Done', 'Done', 'Done', 'Idle, unread']);
+    expect(row('state busy').querySelector('[data-session-age]')?.textContent).toBe(formatAge(0)); // a working session is "now"
   });
 
   // P5 O7 M6 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M6): another machine's item with no tab open has
