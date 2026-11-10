@@ -29,7 +29,7 @@ P5 moved everything that belongs to a machine out of the app: sessions, terminal
 - [ ] M1 — No suite launches the app's embedded shape
 - [ ] M2 — One launch outcome: `mawsd`, or the repair window
 - [ ] M2b — Resume after a wake by design, main's log on disk, and what the readiness read found
-  - (2026-11-10) on `p5-o15-wake`, each task reviewed clean: Task 1 (bcbe7dea5), Task 2 (04953e7a0, c04cc2622), Task 3 (8c764631a), Task 4 (2632d4da4), Task 6 (9dc99e17c), Task 9 (5a02a8e9c). Task 5 (3809f88f5) and Task 7 (03bef4926) followed, and the whole-branch review at `reviewer-high` found nothing material on 93e440962. Task 8 is ruled in (Decision Log 22) and is being built.
+  - (2026-11-10) on `p5-o15-wake`, each task reviewed clean: Task 1 (bcbe7dea5), Task 2 (04953e7a0, c04cc2622), Task 3 (8c764631a), Task 4 (2632d4da4), Task 6 (9dc99e17c), Task 9 (5a02a8e9c). Task 5 (3809f88f5) and Task 7 (03bef4926) followed, and the whole-branch review at `reviewer-high` found nothing material on 93e440962. Task 8 (ruled in by Decision Log 22) followed (c7a969f4e, 48a2b98d4, 3be1bfb8e), and a whole-branch re-review at `reviewer-high` scoped to it and to what it touches in Tasks 1–7 found nothing material on ca7c3c7be. On 4b8f99326 (master 0e1718bbd merged): class 1a green (run 42864716776); the wake shakedown green (42869001165); `--gates all` green as a pair (42870615035, whose one red, `e2e:connectors-oauth`, was two launches timing out at load 7.3, and its rerun alone 42890991103), `packaged 1/2` and `2/2` inside it. The measured `e2e:remote-latency` is pending.
 - [ ] M3 — The final build on the three machines
 - [ ] M4 — The closing run
 - [ ] M5 — The record and the verdict
@@ -819,6 +819,12 @@ No new package. The repair page uses the renderer's existing build (React, Tailw
   Evidence: `openSupervisorLog` in `src/engine-host/supervisor-log.ts` (`mkdirSync` before the `try`; `size` read once); the adversarial review of d2353ab77.
 - Observation: the hub's own work on a WebSocket upgrade is about 220 to 240 ms, some 190 ms of it the Access check and the Registry round trip that every request pays. It is the largest single share of the relay carrier's second after a wake.
   Evidence: the desk track's staging measurement of 2026-11-10 (Decision Log 6, (j)): medians of 252 ms for the feed and 255 ms for the Relay's app side from TLS done to the 101, over a network round trip of 15 to 35 ms.
+- Observation: on master, a click on a session row with ⌘ or the middle button opens it in place like a plain click, and a remote session's connect replaces the active tab, so "open side by side" in the wake case's scene left one tab.
+  Evidence: `ListedRow.tsx` (the click handler reads no modifier) and `remote-connect.ts` (the tab replaced); the shakedown 42856948906 on 9aada1e8d failing at `openSideBySide`; the case now pins the first tab (998da50f2).
+- Observation: on master, a live session stream and a replay of its journal already disagree for an engine frame whose numbers JSON cannot carry: a literal `1e400` is `Infinity` live and `null` in the journal, a `-0` is `-0` live and `0` in the journal.
+  Evidence: Task 8's review's repro (Decision Log 25); the detector `numbersReadBack` in `src/engine-host/journal.ts` keeps checkpoints out of such a launch, the disagreement itself is outside M2b.
+- Observation: `--gates all` runs the packaged jobs (`packaged 1/2`, `2/2`), so a separate `--gates packaged` on the same tree repeats them.
+  Evidence: run 42870615035 on 4b8f99326.
 
 ## Decision Log
 
