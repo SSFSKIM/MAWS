@@ -227,7 +227,7 @@ describe('maws project aimed at another machine', () => {
     expect(await maws(['project', 'add', 'vm:/srv/new'], d.reach)).toEqual({ code: 1, out: '', err: 'unknown-machine: vm is no machine of this org\n' });
     // branch fix 2: a name claimed by more than one machine is refused as such, and nothing is forwarded
     const contested = daemon({ 'projects.registry': ok(registry({ contested: ['vm-2'] })) });
-    expect(await maws(['project', 'add', 'vm-2:/srv/new'], contested.reach)).toEqual({ code: 1, out: '', err: 'contested: vm-2 is claimed by more than one machine of this org; an admin settles it\n' });
+    expect(await maws(['project', 'add', 'vm-2:/srv/new'], contested.reach)).toEqual({ code: 1, out: '', err: 'contested: vm-2 is in dispute in this org (two claims to its name or its identity); an admin settles it\n' });
     expect(contested.calls.map(([name]) => name)).toEqual(['projects.registry']);
     mkdirSync(join(work, 'mini:'), { recursive: true });
     mkdirSync(join(work, 'mini:', 'srv'));

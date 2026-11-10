@@ -110,7 +110,7 @@ describe('a request the app cannot show', () => {
     // branch fix 2: a name claimed by more than one machine is no target, and is not called unknown
     const contested = scene();
     await contested.ask({ verb: 'add', machine: 'vm-2', path: '/srv/new' });
-    expect(contested.answers).toEqual([answered('pa-1', { ok: false, code: 'contested', text: 'contested: vm-2 is claimed by more than one machine of this org; an admin settles it' })]);
+    expect(contested.answers).toEqual([answered('pa-1', { ok: false, code: 'contested', text: 'contested: vm-2 is in dispute in this org (two claims to its name or its identity); an admin settles it' })]);
     for (const s of [out, none, unknown, contested]) expect(s.emitted).toEqual([]);
   });
 });

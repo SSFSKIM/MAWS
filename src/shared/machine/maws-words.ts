@@ -62,7 +62,7 @@ export const hasParentSegment = (path: string): boolean => path.split('/').inclu
 
 /** A request aimed at another machine whose path has a `..` segment (`not-canonical`, exit 1). */
 /** A name live certificates claim under more than one ref (org-protocol's `directoryMachines`): no machine's to aim at. */
-export const contestedMachine = (name: string) => `contested: ${name} is claimed by more than one machine of this org; an admin settles it`;
+export const contestedMachine = (name: string) => `contested: ${name} is in dispute in this org (two claims to its name or its identity); an admin settles it`;
 
 export const notCanonical = (path: string) => `not-canonical: ${path} has a ".." segment, which only that machine can resolve; give the folder's path without ".."`;
 
