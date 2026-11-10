@@ -92,7 +92,7 @@ const EVIDENCE = [
   String.raw`${ENGINE_HOST}ring evicted ${S} launch ${S}: events through seq ${N} are the journal's now`,
   String.raw`${ENGINE_HOST}session\.events ${S} after (?:${N}|start): from the journal, ${N} rows read in ${N} ms(?:, from the checkpoint at seq ${N})?`,
   String.raw`${ENGINE_HOST}checkpoint ${S} launch ${S} at seq ${N}: ${N} bytes; ${N} held, ${N} bytes`,
-  // Decision Log 25: a session's line, under its app session id (src/engine-host/launcher.ts)
+  // Decision Log 30: a session's line, under its app session id (src/engine-host/launcher.ts)
   String.raw`${ENGINE_HOST}${S}: live checkpoints off for launch ${S} at seq ${N}: an engine line holds a number the journal writes otherwise`,
 ].map((source) => new RegExp(`^${source}$`));
 

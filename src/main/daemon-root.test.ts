@@ -1,11 +1,12 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 
-// P5 O3-D M5b (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, acceptance 3; Interfaces §F, §G): the daemon shape's
-// root. Loads the real `src/main/index.ts` as src/main/lifecycle.test.ts does (the same fakes), with the launch settled
-// on the daemon shape: main opens none of the spine's data (no spine.lock, no split), composes no spine, binds `machine`
-// as `host`, reads the spine through its mirror and the machine half through its settings mirror, and stops the mirror
-// at will-quit.
+// P5 O3-D M5b (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, acceptance 3; Interfaces §F, §G): main's root.
+// Loads the real `src/main/index.ts` as src/main/lifecycle.test.ts does (the same fakes), with the launch settled on
+// `mawsd`: main binds `machine` as `host`, reads the spine through its mirror and the machine half through its settings
+// mirror, and stops the mirror at will-quit. P5 O15 M2: that main composes none of the machine's services (no spine, no
+// spine.lock, no checkouts) is no longer a branch to test here but the import graph's, held by lint rule B
+// (test/services/boundary.test.ts) and the bundle check on main's graph (src/engine-host/bundle-guard.test.ts).
 const fake = vi.hoisted(() => {
   const listeners = new Map<string, ((...args: unknown[]) => void)[]>();
   const windows: object[] = [];
@@ -46,7 +47,7 @@ vi.mock('electron', () => {
   };
 });
 const daemonWatch = { status: () => null, refresh: () => {}, onStatus: () => () => {} };
-vi.mock('./hosts', () => ({ createHosts: () => ({ hosts: fake.hosts, daemon: daemonWatch }), prepareLaunch: () => ({ mode: 'daemon', daemon: 'private', unavailable: null }), refuseTestLaunchOnDefaultProfile: () => {} }));
+vi.mock('./hosts', () => ({ createHosts: () => ({ hosts: fake.hosts, daemon: daemonWatch }), prepareLaunch: () => ({ ok: true, launch: { daemon: 'private' } }), refuseTestLaunchOnDefaultProfile: () => {} }));
 const mirrors = vi.hoisted(() => ({
   spine: [] as unknown[], settings: [] as unknown[], stop: vi.fn(), // stop is called in its own case
   // P5 O3-E M2: what the router's forwards reach (plain records: the suite clears mocks between cases)
@@ -70,19 +71,10 @@ const router = vi.hoisted(() => ({ installs: [] as unknown[], before: [] as stri
 vi.mock('./ipc/router', () => ({ installRouter: (options: unknown) => void router.installs.push(options), registerMainHandler: vi.fn() /* C3 */, registerMachineHandler: vi.fn() /* P5 O6 M1 */, interceptCommand: vi.fn(), dispatchLocal: vi.fn() /* P5 O6 M3 */, invokeOwn: vi.fn() /* P5 O3-E */, beforeCommand: (names: string[]) => (router.before.push(names), () => {}) /* P5 O4 M2 */, CommandFailure: Error /* C11 */ }));
 vi.mock('./machines', () => ({ startMachines: vi.fn(() => ({ dispatch: vi.fn(), serve: vi.fn(), stop: vi.fn(), onRemote: vi.fn(() => () => {}) /* P5 O8 M2: the rows read the roster */ })) })); // P5 O6 M3: no links, no stand-in
 vi.mock('./client/settings', () => ({ startSettings: () => ({ state: () => ({ settings: SETTINGS_DEFAULTS_V21, resolvedTheme: 'light' }), onChange: vi.fn(() => vi.fn()) }) })); // P5 O3-A: the client half
-// P5 O3-C (M4): the services entry's roots, stubbed as main sees them: the machine's identity (no machine.json under the
-// fixed getPath; main binds its ref), the spine's data (spine.lock held, the split done, the machine half), the spine
-// with an empty view (P5 O3-E: the checkouts are the spine root's own parts); each root's start and stop recorded
-const roots = vi.hoisted(() => ({ release: vi.fn(), opened: 0, spineStarted: 0, stopSpine: vi.fn() }));
-vi.mock('../services/entry', () => ({
-  COMMAND_BUDGETS_MS: {}, // main's `machine` budgets (sweep#3): none here, every name at the host's 10 s
-  startMachineIdentity: vi.fn(() => ({ ref: 'TestMachineRef00000000' })),
-  openSpineData: async (profile: string) => ((roots.opened += 1), { lock: { refused: null, holder: null, release: roots.release }, refused: null, machineSettings: {}, paths: { client: `${profile}/settings.json`, machine: `${profile}/machine-settings.json` } }),
-  startSpine: () => {
-    roots.spineStarted += 1;
-    return { view: { on: () => () => {}, unavailable: () => null, record: () => null, records: () => [], projects: () => [], projectRows: () => [], intents: () => [] }, stop: roots.stopSpine };
-  },
-}));
+// P5 O15 M2: of the library main takes only the command budgets (none here, every name at the host's 10 s); the
+// machine's identity is read with no machine.json under the fixed getPath (main binds its ref)
+vi.mock('../services/command-budgets', () => ({ COMMAND_BUDGETS_MS: {} }));
+vi.mock('./machine/identity', () => ({ readMachineIdentity: vi.fn(() => ({ ref: 'TestMachineRef00000000', name: 'test' })) }));
 vi.mock('./window', () => ({ appUrl: 'file:///index.html', createWindow: fake.createWindow, installContentSecurityPolicy: vi.fn() }));
 vi.mock('./ipc/events', () => ({ emit: vi.fn(), onEmitted: vi.fn(() => () => {}) })); // onEmitted: the services bus's taps (P5 O3-C)
 vi.mock('./log-file', () => ({ captureMainLog: () => ({ install: () => false }) })); // P5 O15 M2b §H: no wrapped console, no main.log (log-file.test.ts holds the module)
@@ -93,7 +85,7 @@ vi.mock('./open-external', () => ({ registerOpenExternal: vi.fn() }));
 vi.mock('./menu', () => ({ startMenu: vi.fn(), registerMenuHandlers: vi.fn() }));
 vi.mock('./window-state', () => ({ restoreWindowState: vi.fn(() => null), trackWindowState: vi.fn() }));
 vi.mock('./attention', () => ({ startAttention: vi.fn() }));
-vi.mock('./lifecycle/quit-guard', () => ({ installQuitGuard: vi.fn(), askToQuit: vi.fn(), listProcesses: vi.fn(), trackUnsavedFiles: vi.fn(() => ({})) /* E5 */ }));
+vi.mock('./lifecycle/quit-guard', () => ({ installQuitGuard: vi.fn(), askToQuit: vi.fn(), trackUnsavedFiles: vi.fn(() => ({})) /* E5 */ }));
 // C5 end
 // the login-shell capture main shares with the roots, without a real shell
 vi.mock('@shared/host/shell-env', () => ({ captureShellEnvironment: () => Promise.resolve({}) }));
@@ -116,13 +108,7 @@ beforeAll(async () => {
   await new Promise((resolve) => setImmediate(resolve)); // let `whenReady().then(...)` run, and the start it waits for
 });
 
-describe('the daemon shape’s root in main', () => {
-  // P5 O3-E M2: nor the checkouts, which the spine's root composes in mawsd
-  it('opens none of the spine’s data and composes no spine: mawsd holds spine.lock and the machine’s files', () => {
-    expect(roots.opened).toBe(0);
-    expect(roots.spineStarted).toBe(0);
-  });
-
+describe('main’s root on mawsd', () => {
   it('binds `machine` as `host` and reads the spine and the machine half through their mirrors', () => {
     expect(router.installs).toEqual([expect.objectContaining({ machine: { kind: 'host', daemonRenders: expect.any(Function) /* P5 O5 M4: router.test drives it */, daemonDelivers: expect.any(Function) /* P5 O7 M5c: likewise */ } })]);
     expect(mirrors.spine).toEqual([expect.objectContaining({ hosts: fake.hosts, daemon: daemonWatch })]);
@@ -150,10 +136,8 @@ describe('the daemon shape’s root in main', () => {
     expect(fake.hosts.dispatch).toHaveBeenCalledWith('machine', 'files.watch', { appSessionId: 's', path: '/r' }, page);
   });
 
-  it('stops the mirror at will-quit and releases no lock it never took', () => {
+  it('stops the mirror at will-quit', () => {
     fake.emit('will-quit');
     expect(mirrors.stop).toHaveBeenCalledOnce();
-    expect(roots.stopSpine).not.toHaveBeenCalled();
-    expect(roots.release).not.toHaveBeenCalled();
   });
 });

@@ -854,7 +854,7 @@ test.describe('E7: the orchestration views', () => {
       expect((await h.agents('calls')).steer, 'the refused start asks nothing more').toHaveLength(1);
     });
 
-    // P5 O15 M2b (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, §J; Decision Log 15 (b)): the built renderer
+    // P5 O15 M2b (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, §J; Decision Log 20 (b)): the built renderer
     // draws the owners a sminos frame names after the sender; signed out, as the harness is, the names as written.
     await test.step('a sminos frame that names its sender’s owners draws them after the sender; one that names none draws nothing', async () => {
       await h.load('A', 'events/agents-peer-owners');

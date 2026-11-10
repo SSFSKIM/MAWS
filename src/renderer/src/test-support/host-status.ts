@@ -1,5 +1,6 @@
-// E10: main's `host.status` and the supervisor's own status for renderer tests, a detached supervisor of this build
-// holding three sessions unless a test says otherwise.
+// E10: main's `host.status` and the supervisor's own status for renderer tests: unless a test says otherwise, the engine
+// host of this build (its own mode detached) holding three sessions, reached through a private `mawsd` of this build,
+// the one transport main reports (P5 O15 M2).
 import type { DaemonStatus } from '@shared/ipc/schema/daemon';
 import type { HostStatus, SupervisorStatus } from '@shared/ipc/schema/host';
 
@@ -24,30 +25,6 @@ export const supervisorStatus = (over: Partial<SupervisorStatus> = {}): Supervis
   ...over,
 });
 
-export const hostStatus = (over: Partial<HostStatus> = {}): HostStatus => ({
-  transport: 'detached',
-  state: 'ready',
-  supervisor: supervisorStatus(),
-  appBuildId: 'b',
-  appWire: 'w',
-  mainBuild: { version: '0.0.0', commit: 'ac8724a6', builtAt: MAIN_BUILT },
-  matches: 'same',
-  reason: null,
-  waitingLiveSessions: null,
-  lastExit: null,
-  daemon: null, // P5 O2 M7: the embedded shape
-  daemonUnavailable: null,
-  ...over,
-});
-
-// An older build's supervisor, served while it still runs `live` sessions (exit-when-idle armed).
-export const updatedStatus = (live = 2): HostStatus =>
-  hostStatus({ matches: 'build', supervisor: supervisorStatus({ buildId: 'old', liveSessions: live, exitWhenIdle: true }) });
-
-// An incompatible supervisor main waits on (`crashed` with reason `incompatible`), running `live` sessions.
-export const waitingStatus = (live = 2): HostStatus =>
-  hostStatus({ state: 'crashed', supervisor: null, matches: 'wire', reason: 'incompatible', waitingLiveSessions: live });
-
 // P5 O2 M7: a private `mawsd` of this build, its hosts ready, as main's daemon.status reads it
 export const daemonStatus = (over: Partial<DaemonStatus> = {}): DaemonStatus => ({
   pid: 4100,
@@ -66,5 +43,26 @@ export const daemonStatus = (over: Partial<DaemonStatus> = {}): DaemonStatus => 
   ...over,
 });
 
-// P5 O2 M7: the engine host reached through that daemon
-export const daemonShapeStatus = (over: Partial<HostStatus> = {}): HostStatus => hostStatus({ transport: 'daemon', daemon: daemonStatus(), ...over });
+export const hostStatus = (over: Partial<HostStatus> = {}): HostStatus => ({
+  transport: 'daemon',
+  state: 'ready',
+  supervisor: supervisorStatus(),
+  appBuildId: 'b',
+  appWire: 'w',
+  mainBuild: { version: '0.0.0', commit: 'ac8724a6', builtAt: MAIN_BUILT },
+  matches: 'same',
+  reason: null,
+  waitingLiveSessions: null,
+  lastExit: null,
+  daemon: daemonStatus(), // P5 O2 M7
+  daemonUnavailable: null,
+  ...over,
+});
+
+// An older build's supervisor, served while it still runs `live` sessions (exit-when-idle armed).
+export const updatedStatus = (live = 2): HostStatus =>
+  hostStatus({ matches: 'build', supervisor: supervisorStatus({ buildId: 'old', liveSessions: live, exitWhenIdle: true }) });
+
+// An incompatible supervisor main waits on (`crashed` with reason `incompatible`), running `live` sessions.
+export const waitingStatus = (live = 2): HostStatus =>
+  hostStatus({ state: 'crashed', supervisor: null, matches: 'wire', reason: 'incompatible', waitingLiveSessions: live });

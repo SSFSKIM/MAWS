@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
 import { createRedactor, redactJournal } from '../../test/live/support/live';
 import { JOURNAL_MAX_BYTES, JOURNAL_PRUNE_EVERY_MS, JournalReader, JournalWriter, numbersReadBack, pruneJournals, scheduleJournalPruning } from './journal';
-import { FIXTURE_DIR } from '../../test/support/fixtures'; // P5 O15 M2b (Decision Log 25)
+import { FIXTURE_DIR } from '../../test/support/fixtures'; // P5 O15 M2b (Decision Log 30)
 
 let root: string;
 beforeEach(() => {
@@ -142,7 +142,7 @@ describe('transport frames and journals', () => {
     });
   });
 
-  // P5 O15 M2b (Decision Log 25): whether an engine line's numbers read back from the journal as they were read
+  // P5 O15 M2b (Decision Log 30): whether an engine line's numbers read back from the journal as they were read
   describe('numbersReadBack', () => {
     const line = (event: string) => `{"type":"stream_event","session_id":"S","parent_tool_use_id":null,"uuid":"u2","event":${event}}`;
     // what the journal does to a value: JSON.parse of the line, written back with JSON.stringify and read again

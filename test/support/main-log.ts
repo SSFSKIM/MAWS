@@ -1,7 +1,7 @@
 // The gate case's reading of the logs (P5 O15 M2b §I, docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md): a
 // line of `main.log`, `mawsd.log` or `host.log` is `<ISO-8601 UTC with ms> <text>` (§H), and the case reads the lines
 // §H lists by their text, in the forms their writers give them. The endpoint's lines reach `mawsd.log` under mawsd's
-// `[endpoint] ` prefix and the engine host's stream lines reach `host.log` as `warn: [engine-host] …` (Decision Log 19),
+// `[endpoint] ` prefix and the engine host's stream lines reach `host.log` as `warn: [engine-host] …` (Decision Log 24),
 // so both prefixes are optional here. This is the instrument M4's 7e reads with on the day, and the case reads the app's
 // own file through it, so the gate proves the lines as well as the behaviour.
 import { existsSync, readFileSync } from 'node:fs';

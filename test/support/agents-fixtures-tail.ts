@@ -81,7 +81,7 @@ export const AGENTS_CRON_TAIL = {
 } as const;
 // E7 end
 
-// P5 O15 M2b (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, §J; Decision Log 15 (b)): events/agents-peer-owners,
+// P5 O15 M2b (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, §J; Decision Log 20 (b)): events/agents-peer-owners,
 // events/agents-peer with a sminos frame line opening each inbound envelope's body, in sminos's words
 // (doperpowers `sminos/tests/test_words.py`): the idle message's names its sender's owners, an email and a member id;
 // the mid-turn one's names none. The harness is signed out, so the label is the names as written.

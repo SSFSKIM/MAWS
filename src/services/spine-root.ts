@@ -1,6 +1,7 @@
 // The spine's root (P5 O3-C, docs/doperpowers/plans/2026-10-28-p5-o3-c-spine-library.md, Interfaces §D; O3 §5, §6): the
-// one function that composes what O3-D moves into `mawsd`, from injected dependencies alone. Main's embedded root
-// (src/main/index.ts) calls it today; at O3-D `mawsd` calls the same function. It composes settings' machine half (as
+// one function that composes the machine's services, from injected dependencies alone. `mawsd` calls it
+// (src/mawsd/spine-seam.ts); main's embedded root, which called it until P5 O15 M2
+// (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md), is gone, and the app imports nothing of it. It composes settings' machine half (as
 // `openSpineData` opened it), the index with its session source, replay and the read model, attention's core, the owner
 // channel and mods, the session service with intents, worktrees, prompt history, side threads, yield, observed facts
 // and the sweep, the engine host's configure relays, the design-system defaults relay, the library's derived index and

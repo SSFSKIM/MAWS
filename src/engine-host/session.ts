@@ -39,7 +39,7 @@ import { REAP_TERM_MS, type ReapView } from './holder/reap'; // O16 M5
 import { expectedArgv, type Binding, type StdioServers } from './holder/descendants'; // O16 M5, D52; D69
 import { RELAY_URL, spawnMeta, type LaunchPlan } from './launch';
 import { HostMap } from './holder/checkpoint'; // P5 O16 M2
-import { numbersReadBack, type JournalPosition } from './journal'; // P5 O15 M2b (§L; Decision Log 25)
+import { numbersReadBack, type JournalPosition } from './journal'; // P5 O15 M2b (§L; Decision Log 30)
 import { launchRows, OutstandingSet, type Outstanding } from './holder/restore'; // P5 O16 M3
 import { UnsettledFold } from './prompt-history'; // P5 O16 M3
 import { resolveStorePaths, slugOf } from './fs/paths'; // P5 O16 M3: the reseed's transcript
@@ -252,7 +252,7 @@ export class EngineSession {
   private readonly log: (message: string) => void;
   private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set(), catalog: new Set() /* C7 */, models: new Set() /* C10 */, delivery: new Set() /* P5 O16 M3c fix wave 2 */, checkpoint: new Set() /* P5 O15 M2b */, paneShow: new Set() /* E1 */, artifactCapture: new Set() /* E2 */, artifactExport: new Set() /* P3-A M7 */ };
   private readonly pendingWarnings: NormalizerWarning[] = [];
-  private liveCheckpoints = true; // P5 O15 M2b (Decision Log 25): false from the first engine line whose numbers the journal writes otherwise
+  private liveCheckpoints = true; // P5 O15 M2b (Decision Log 30): false from the first engine line whose numbers the journal writes otherwise
   private readonly stderrTail: string[] = [];
   private readonly storeWrites = new Set<Promise<void>>();
   private readonly launchedAt = new Date().toISOString();
@@ -1034,7 +1034,7 @@ export class EngineSession {
 
   // P5 O15 M2b (§L): the stream's checkpoint at a boundary row, in the turn that normalised it: the live normaliser's
   // state copied whole, and the writer's position, just past that row. The session's own fold of an adopted journal takes
-  // none: the adopted stream's first scan does. Decision Log 25: none either once an engine line held a number the journal
+  // none: the adopted stream's first scan does. Decision Log 30: none either once an engine line held a number the journal
   // writes otherwise (`liveCheckpoints`), since the live state may then hold what no scan of the journal does.
   private checkpoint(through: number): void {
     const at = !this.liveCheckpoints || this.listeners.checkpoint.size === 0 ? null : this.journal.position;
@@ -1764,7 +1764,7 @@ export class EngineSession {
         this.transportProblem(item.error, item.hseq);
         return;
       }
-      // P5 O15 M2b (Decision Log 25): a line whose numbers the journal writes otherwise ends the launch's live checkpoints
+      // P5 O15 M2b (Decision Log 30): a line whose numbers the journal writes otherwise ends the launch's live checkpoints
       // before its row is normalised, so none holds what the journal does not
       const offLine = this.liveCheckpoints && !numbersReadBack(item.raw);
       if (offLine) this.liveCheckpoints = false;

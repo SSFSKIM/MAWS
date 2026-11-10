@@ -1,14 +1,13 @@
 // The idle cost of what stays behind when the app has quit (P5 O2, M1; docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md,
-// acceptance 7; P5 acceptance 14): the physical footprint and CPU time of today's detached supervisor holding one kept
-// idle session, which is the laptop's costly steady state (with no live session the supervisor exits after its idle
-// time and costs nothing). The numbers, the readers, the validity rule, the baseline and the bound are
+// acceptance 7; P5 acceptance 14): the physical footprint and CPU time of what the daemon shape leaves behind holding
+// one kept idle session, which is the laptop's costly steady state (with no live session the engine host is parked
+// after its idle time and costs nothing). The numbers, the readers, the validity rule, the baseline and the bound are
 // test/support/daemon-idle.ts.
 //
-// The scene: the built app in detached mode over C3's replay transport, on a scratch profile whose machine-settings.json sets
+// The scene: the built app on the daemon shape over C3's replay transport, on a scratch profile whose machine-settings.json sets
 // `supervisor.idleExitMinutes: null`, so neither the idle release nor the supervisor's idle exit fires. One replayed
 // session plays the permission round trip, paced, and holds at its request; the request is answered and, while the
-// rest of the turn plays, the app quits with the keep answer (an unbusy quit is never asked and stops the supervisor,
-// so the quit is made mid-turn). The turn ends with no app connected and the session holds at its next prompt. Then a
+// rest of the turn plays, the app quits. The turn ends with no app connected and the session holds at its next prompt. Then a
 // 120 s settle, and a 600 s window: every 30 s each measured process's physical footprint (proc_pid_rusage, P5 Decision
 // Log 48) and `ps -o rss=` (each summed per sample; the RSS is a diagnostic) and the 1-minute load, and `ps -o time=` at
 // the window's start and end. At the first sample top's MEM column reads the footprint a second, independent way. Each
@@ -18,14 +17,17 @@
 // O17 footprint fix adds more, recorded only: from the footprint reader's same call, the machine's memory pressure level
 // and each process's cumulative CPU ticks, idle and interrupt wakeups and pageins at every sample, and vm_stat's
 // swapouts and pageouts from the window's first sample to its last, which the JSON keeps and one line per window
-// prints (`window activity`). The measured processes are those of the profile whose argv0 is `maws-supervisor`; the
-// replay has no `claude` child, and a real one is the session's cost, not the daemon's.
+// prints (`window activity`). The measured processes are those of the profile whose argv0 is `mawsd`,
+// `maws-supervisor` or `maws-pty-host`; the replay has no `claude` child, and a real one is the session's cost, not the
+// daemon's.
 //
-// The scene runs on the shape `MAWS_HOST_MODE` names, as e2e/supervisor.spec.ts does. `detached` is M1's, which recorded
-// the baseline; `daemon` is M9's (acceptance 7): main reaches the engine host through a private `mawsd` on the profile,
-// and what stays behind is `mawsd` and the engine host (and the pty host if it runs), measured together against
-// DAEMON_IDLE_BOUND. The settings' `idleExitMinutes: null` reaches `mawsd` as `host.configure`'s, so neither its park
-// clock nor its own idle exit arms. P5 O3-D (D7, Q1): on the daemon shape this case's `mawsd` is the harness's unit,
+// The shape is M9's (acceptance 7): main reaches the engine host through a `mawsd` on the profile, and what stays
+// behind is `mawsd` and the engine host (and the pty host if it runs), measured together against DAEMON_IDLE_BOUND. The
+// settings' `idleExitMinutes: null` reaches `mawsd` as `host.configure`'s, so neither its park clock nor its own idle
+// exit arms. P5 O15 M1 (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md): the embedded shape's detached
+// supervisor, on which M1 recorded the baseline, is gone, and with it the runs that measured it (the baseline's own and
+// A-B-A's); the bound stays as recorded (test/support/daemon-idle.ts names the commit that last could re-derive it).
+// P5 O3-D (D7, Q1): this case's `mawsd` is the harness's unit,
 // started before the app as the owner's LaunchAgent runs it, holding the spine, which it releases 60 s after the app
 // has gone (MAWS_SPINE_QUIET_MS), inside the settle; and the quit mid-turn is not asked, the session outliving the app.
 //
@@ -35,8 +37,7 @@
 // both held 4.7 or more, each interval's own load rebuilt from the 1-minute series (its 30 s pair). It prints one line
 // naming each process's footprint, the app's Electron version against the runtime floor's and the load, the highest
 // 1-minute load with the 30 s pair beside it, adds it as an annotation, and writes the samples to
-// test-results/daemon-idle.json. On the daemon shape the line states the bound's verdict and a valid run outside the
-// bound fails; the detached shape records only.
+// test-results/daemon-idle.json. The line states the bound's verdict and a valid run outside the bound fails.
 //
 // The second case is the runtime floor, the footprint of the bare runtime `mawsd` runs on, a diagnostic outside the
 // bound (P5 Decision Logs 54 and 57); it writes test-results/daemon-idle-floor.json. The third (P5 O2 M5, Decision Log
@@ -46,9 +47,8 @@
 // case's scene measured unenrolled, then with its mawsd enrolled in an org on desk-hub's local runner; it writes
 // test-results/daemon-idle-enrolled.json.
 //
-// The fifth is A-B-A, for the bound's re-derivation: the first case's scene three times back to back, each on a fresh
-// launch with its own shape, today's detached supervisor (A), the daemon shape (B) and the supervisor again (A'),
-// recording each window and the deltas without a bound; it writes test-results/daemon-idle-aba.json.
+// The fifth, A-B-A (the first case's scene on the embedded shape, the daemon shape and the embedded again, for the
+// bound's re-derivation), went with the embedded shape (P5 O15 M1).
 //
 // The sixth (P5 O3-C M5, docs/doperpowers/plans/2026-10-28-p5-o3-c-spine-library.md, D18 and D19) is the spine alone,
 // what O3-D moves into mawsd, composed by the built services entry over a profile the size of the owner's, idle while
@@ -63,7 +63,7 @@
 // artifact fetch through artifacts.sock, then the render host's quiet period (MAWS_RENDER_QUIET_MS 30 s) and its exit in
 // mawsd.log, then the same settle, window, readers, validity rule and bound, with no render host process at the
 // window's start: what the deferred chunks keep resident after use. It writes test-results/daemon-idle-render.json and
-// runs as `pnpm e2e:daemon-idle-render`, which the plain group's and the baseline's --grep-invert leave out.
+// runs as `pnpm e2e:daemon-idle-render`, which the plain group's --grep-invert leaves out.
 //
 // P5 O17 M8 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, M8; OX7): the first case on the daemon shape also reads
 // mawsd's resources (a SIGUSR2 report under MAWS_E2E=1) at the unit's cold start and at the window: no session listener
@@ -79,15 +79,13 @@
 // argv0 names `maws-session-host` (the session's holder), with the same readers and validity rule, against
 // SESSION_HOST_BOUND_KIB (5 MiB) on its own, outside DAEMON_IDLE_BOUND's two processes; a valid run over it fails. It
 // writes test-results/daemon-idle-session-host.json and runs as `pnpm e2e:daemon-idle-session-host`, which the plain
-// group's and the baseline's --grep-invert leave out. The stub runs no model and spends nothing.
+// group's --grep-invert leaves out. The stub runs no model and spends nothing.
 //
-// Eight measured groups (gate.yml's MEASURED_E2E), one case each, chosen by title: `pnpm e2e:daemon-idle` (the
-// scene, on the daemon shape since M9), `pnpm e2e:daemon-idle-baseline` (the same case under MAWS_HOST_MODE=detached,
-// today's supervisor alone, recording only: the baseline is re-measured from it on the tree under test when a landing
-// misses), `pnpm e2e:daemon-idle-floor` (the floor, which needs no build), `pnpm e2e:daemon-idle-mawsd` (mawsd
-// alone), `pnpm e2e:daemon-idle-enrolled` (the enrolled endpoint, recording only), `pnpm e2e:daemon-idle-aba` (A-B-A,
-// recording only, its shapes its own whatever MAWS_HOST_MODE says), `pnpm e2e:daemon-idle-spine` (the spine alone,
-// recording only) and `pnpm e2e:daemon-idle-mawsd-spine` (mawsd with the spine, recording only). Each sets MAWS_DAEMON_IDLE_PERF=1,
+// Measured groups (gate.yml's MEASURED_E2E), each choosing its cases by title: `pnpm e2e:daemon-idle` (the scene),
+// `pnpm e2e:daemon-idle-floor` (the floor, which needs no build), `pnpm e2e:daemon-idle-mawsd` (mawsd alone),
+// `pnpm e2e:daemon-idle-enrolled` (the enrolled endpoint, recording only), `pnpm e2e:daemon-idle-spine` (the spine
+// alone, recording only), `pnpm e2e:daemon-idle-mawsd-spine` (mawsd with the spine, recording only),
+// `pnpm e2e:daemon-idle-render` and `pnpm e2e:daemon-idle-session-host` (above). Each sets MAWS_DAEMON_IDLE_PERF=1,
 // and the gate runs it only when named, on the mini's exclusive instance behind the measured-job guard. None spends
 // anything or touches a keychain: a replay runs no engine, mawsd alone wakes no host, the spine alone has no host to
 // wake, mawsd with the spine wakes an engine host that replays (MAWS_ENGINE_REPLAY=1) and runs no session, and the enrolled endpoint's hub is a local one on loopback, its machine key a file of the scratch profile.
@@ -103,7 +101,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import { daemonPaths } from '@shared/daemon/files';
 import { machineSettingsDefaults } from '@shared/settings/defaults';
-import { abaDeltas, abaLine, activityDelta, activityLine, mawsdSpineLine, boundMisses, busyShare, cpuSeconds, cpuTimes, DAEMON_IDLE_BOUND, ENROLLED_INCREMENT_BUDGET_KIB, enrolledLine, floorLine, IDLE_RUN, idleLine, invalidReasons, loadPair, mawsdLine, measured, median, readerMismatches, readFootprints, readProcessTable, readTopMem, readVmPaging, SESSION_HOST_BOUND_KIB, SESSION_HOST_RUN, sessionHostLine, sessionHostMisses, sessionHosts, SPINE_RELEASED_RUN, spineLine, topOutside, type CpuTimes, type MeasuredProcess, type ProcessActivity, type ProcessRow, type ReaderMachine, type ShapeReading, type SpineWindow, type TopMem, type TopProcess, type VmPaging } from '../test/support/daemon-idle';
+import { activityDelta, activityLine, mawsdSpineLine, boundMisses, busyShare, cpuSeconds, cpuTimes, DAEMON_IDLE_BOUND, ENROLLED_INCREMENT_BUDGET_KIB, enrolledLine, floorLine, IDLE_RUN, idleLine, invalidReasons, loadPair, mawsdLine, measured, median, readerMismatches, readFootprints, readProcessTable, readTopMem, readVmPaging, SESSION_HOST_BOUND_KIB, SESSION_HOST_RUN, sessionHostLine, sessionHostMisses, sessionHosts, SPINE_RELEASED_RUN, spineLine, topOutside, type CpuTimes, type MeasuredProcess, type ProcessActivity, type ProcessRow, type ReaderMachine, type ShapeReading, type SpineWindow, type TopMem, type TopProcess, type VmPaging } from '../test/support/daemon-idle';
 import { writeSpineFixture } from '../test/support/spine-fixture';
 import { reachMachine } from '../src/mawsd/machine-client';
 import { invoke, launchReady, value } from './support/c7-replay';
@@ -123,7 +121,7 @@ import { answered, BEFORE_M7, ENGINE_HOST_BROWSER_WORK, startHeadlessScene, star
 import { browserWindowProblems, o17IdleProblems, type E2eResources } from '../test/support/daemon-idle';
 // P5 O17 M8 end
 
-test.skip(process.env.MAWS_DAEMON_IDLE_PERF !== '1', 'the idle-cost measurement runs under pnpm e2e:daemon-idle, e2e:daemon-idle-baseline, e2e:daemon-idle-floor, e2e:daemon-idle-mawsd, e2e:daemon-idle-enrolled, e2e:daemon-idle-aba, e2e:daemon-idle-spine, e2e:daemon-idle-mawsd-spine, e2e:daemon-idle-render and e2e:daemon-idle-session-host (MAWS_DAEMON_IDLE_PERF=1)');
+test.skip(process.env.MAWS_DAEMON_IDLE_PERF !== '1', 'the idle-cost measurement runs under pnpm e2e:daemon-idle, e2e:daemon-idle-floor, e2e:daemon-idle-mawsd, e2e:daemon-idle-enrolled, e2e:daemon-idle-spine, e2e:daemon-idle-mawsd-spine, e2e:daemon-idle-render and e2e:daemon-idle-session-host (MAWS_DAEMON_IDLE_PERF=1)');
 test.describe.configure({ timeout: 20 * 60_000 }); // about 13 minutes: the scene, the settle and the window
 
 // C3's permission round trip: a prompt, ~44 rows, a Bash `can_use_tool` (seq 49) the replay holds at until it is
@@ -133,17 +131,10 @@ const ROW_MS = '500'; // about 22 s from the answer to the result: the quit land
 const FLOOR_ARGV0 = 'maws-runtime-floor';
 const MAWSD_ARGV0 = 'mawsd'; // P5 O2 M5
 const SPINE_ARGV0 = 'maws-spine'; // P5 O3-C M5
-// P5 O2 M9: the scene's shape, one switch as in e2e/supervisor.spec.ts; `daemon` measures what the daemon shape leaves.
-// The A-B-A case names each launch's shape itself; every other case runs the one this switch names.
-type Shape = 'daemon' | 'detached';
-const SHAPE: Shape = process.env.MAWS_HOST_MODE === 'daemon' ? 'daemon' : 'detached';
-const DAEMON = SHAPE === 'daemon';
-const measuredOn = (shape: Shape) => (shape === 'daemon' ? [MAWSD_ARGV0, 'maws-supervisor', 'maws-pty-host'] : ['maws-supervisor']);
-// A settle and window of IDLE_RUN's form; IDLE_RUN's own unless a local trial shortens the A-B-A case's.
+// P5 O2 M9: what the daemon shape leaves behind, measured together
+const MEASURED = [MAWSD_ARGV0, 'maws-supervisor', 'maws-pty-host'];
+// A settle and window of IDLE_RUN's form
 type IdleRun = Record<keyof typeof IDLE_RUN, number>;
-// A local trial of the A-B-A case end to end (MAWS_DAEMON_IDLE_TRIAL=1, which no package script sets): each of its three
-// legs settles 10 s and reads a 60 s window, so the run takes minutes; what it reads is no measurement.
-const ABA_RUN: IdleRun = process.env.MAWS_DAEMON_IDLE_TRIAL === '1' ? { ...IDLE_RUN, settleS: 10, windowS: 60, samples: 3 } : IDLE_RUN;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 interface JournalRow { seq: number; direction: string; frame: Record<string, unknown> }
@@ -186,7 +177,7 @@ const lockOf = (userData: string): { pid: number; socketPath: string } | null =>
 interface Held { maws: MawsLaunch | null; supervisor: number | null; daemon: number | null; endUnit?: () => void; evidence?: ReturnType<typeof processEvidence>; cold?: { report: E2eResources; listeners: number } /* P5 O17 M8 */ }
 
 // The scene's launch environment beyond launchMaws's own
-const sceneEnv = (shape: Shape) => ({ MAWS_HARNESS: '0', MAWS_HOST_MODE: shape, MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_ROW_MS: ROW_MS, MAWS_E2E_QUIT_ANSWER: 'keep' });
+const SCENE_ENV = { MAWS_HARNESS: '0', MAWS_HOST_MODE: 'daemon', MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_ROW_MS: ROW_MS };
 
 // P5 O3-D D7 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md): the daemon as the harness's unit, as the owner's
 // LaunchAgent runs it: `mawsd run --unit` started on the scratch profile before the app, with the environment the app
@@ -198,7 +189,7 @@ async function startUnitDaemon(userData: string, held: Held, extraEnv: Record<st
   const script = join(REPO_ROOT, 'out', 'main', 'mawsd.js');
   expect(existsSync(script), 'the build has out/main/mawsd.js (scripts/e2e-build.sh plain)').toBe(true);
   const binary = electronBinary();
-  const base: Record<string, string> = { ...launchEnvironment(process.env, userData), MAWS_E2E_ENGINE_BIN: writeReplayEngine(userData), ...writeScratchShellHome(join(userData, 'shell-home')).env, ...sceneEnv('daemon') };
+  const base: Record<string, string> = { ...launchEnvironment(process.env, userData), MAWS_E2E_ENGINE_BIN: writeReplayEngine(userData), ...writeScratchShellHome(join(userData, 'shell-home')).env, ...SCENE_ENV };
   const env = { ...supervisorEnv(base, { userData, packaged: false }), MAWS_SPINE_QUIET_MS: '60000', ...extraEnv }; // P5 O5 M4: extraEnv, the render case's
   const logFile = join(userData, 'mawsd', 'mawsd.log');
   const serving = () => (existsSync(logFile) ? readFileSync(logFile, 'utf8').split('\n').filter((line) => line.includes(' serving; ')).length : 0);
@@ -228,16 +219,14 @@ const sessionListeners = (userData: string) => {
   return existsSync(dir) ? readdirSync(dir).filter((name) => name.endsWith('.sock')).length : 0;
 };
 
-// The scene up to its idle: the app launched on `shape`, the seeded session's turn played to its request, the answer
-// given, the app quit mid-turn, and the turn ended with no app connected, the session held at its next prompt. The
-// embedded shape asks the quit and the scene answers keep; the daemon shape's sessions outlive the app, so nothing is
-// asked (P5 O3-D, Q1). On the daemon shape `daemonKind` says whose daemon the app reaches: its private one, or the
+// The scene up to its idle: the app launched, the seeded session's turn played to its request, the answer given, the
+// app quit mid-turn, and the turn ended with no app connected, the session held at its next prompt. The sessions outlive
+// the app, so nothing is asked (P5 O3-D, Q1). `daemonKind` says whose daemon the app reaches: its private one, or the
 // harness's unit (D7), started here before the launch. P5 O16 M6: with `stub`, the session's engine is the stub engine
 // under a real session host instead of the in-process replay. Answers the session's id, the Electron version every
 // measured process runs as Node, and the pid of the session's host (null on the replay, which has none).
 interface SceneOptions { daemonKind?: 'private' | 'unit'; unitEnv?: Record<string, string>; stub?: StubEngine }
-async function keptIdleScene(root: string, userData: string, held: Held, shape: Shape, { daemonKind = 'private', unitEnv = {}, stub }: SceneOptions = {}): Promise<{ id: AppSessionId; electron: string; holder: number | null }> {
-  const daemon = shape === 'daemon';
+async function keptIdleScene(root: string, userData: string, held: Held, { daemonKind = 'private', unitEnv = {}, stub }: SceneOptions = {}): Promise<{ id: AppSessionId; electron: string; holder: number | null }> {
   const engine: Record<string, string> = stub === undefined ? {} : { MAWS_E2E_ENGINE_BIN: stub.bin };
   const repo = join(root, 'repo');
   mkdirSync(repo, { recursive: true });
@@ -253,9 +242,9 @@ async function keptIdleScene(root: string, userData: string, held: Held, shape: 
 
   // P5 O3-D M6 (fix round 1): mawsd's own log published beside the launch's host log (as the mawsd-spine case does), so
   // a run can be read for mawsd's attach and spine lines; taken before the harness's unit starts, so its log is this scene's
-  if (daemon) held.evidence = processEvidence(test.info().outputDir, userData, () => true, process.env, { daemon: join(userData, 'mawsd'), host: false });
-  if (daemon && daemonKind === 'unit') await startUnitDaemon(userData, held, { ...unitEnv, ...engine });
-  const maws = (held.maws = await launchMaws({ userData, keepConfigHome: true, ...(stub && { syntheticEngineBin: stub.bin }), env: { ...sceneEnv(shape), ...engine } }));
+  held.evidence = processEvidence(test.info().outputDir, userData, () => true, process.env, { daemon: join(userData, 'mawsd'), host: false });
+  if (daemonKind === 'unit') await startUnitDaemon(userData, held, { ...unitEnv, ...engine });
+  const maws = (held.maws = await launchMaws({ userData, keepConfigHome: true, ...(stub && { syntheticEngineBin: stub.bin }), env: { ...SCENE_ENV, ...engine } }));
   const { page, app } = maws;
   const child = app.process();
   let output = '';
@@ -266,16 +255,16 @@ async function keptIdleScene(root: string, userData: string, held: Held, shape: 
   await expect.poll(async () => {
     const status = await invoke(page, 'host.status', undefined);
     if (!status.ok || status.value.state !== 'ready' || status.value.supervisor?.mode !== 'detached') return null;
-    if (daemon && (status.value.transport !== 'daemon' || status.value.daemon?.kind !== daemonKind)) return null;
+    if (status.value.transport !== 'daemon' || status.value.daemon?.kind !== daemonKind) return null;
     held.daemon = status.value.daemon?.pid ?? null;
     return status.value.supervisor.pid;
-  }, { timeout: 30_000, message: daemon ? `main is connected to the engine host through a ${daemonKind} mawsd` : 'main is connected to a detached supervisor' }).not.toBeNull();
+  }, { timeout: 30_000, message: `main is connected to the engine host through a ${daemonKind} mawsd` }).not.toBeNull();
   const supervisor = (held.supervisor = lockOf(userData)!.pid);
   const electron = await app.evaluate(() => process.versions.electron); // the binary every measured process runs as Node
   let id = '' as AppSessionId;
   await expect.poll(async () => (id = (value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === engineId)?.appId ?? '') as AppSessionId), { timeout: 20_000, message: 'the seeded session has a record' }).not.toBe('');
 
-  // The session holds at its request; the answer is given, and the app quits mid-turn (keeping the session).
+  // The session holds at its request; the answer is given, and the app quits mid-turn (the session outliving it).
   if (stub === undefined) await launchReady(page, id, PERMISSION, { cwd: repo });
   else await stubLaunchReady(page, stub, id, PERMISSION, { cwd: repo });
   const holder = value(await invoke(page, 'session.status', { appSessionId: id })).holder?.pid ?? null;
@@ -288,21 +277,20 @@ async function keptIdleScene(root: string, userData: string, held: Held, shape: 
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error(`MAWS did not quit; it said ${JSON.stringify(output.split('\n').filter((l) => l.startsWith('quit-guard:')))}`)), 20_000)));
   await Promise.race([exited, late]).finally(() => clearTimeout(timer));
-  if (daemon) expect(output.split('\n'), 'the quit mid-turn is not asked: the session outlives the app').toContain('quit-guard: 1 mid-turn, not asked: they outlive the app');
-  else expect(output.split('\n'), 'the quit was asked mid-turn and answered keep').toContain('quit-guard: 1 mid-turn, auto-answered keep, 1 session kept');
+  expect(output.split('\n'), 'the quit mid-turn is not asked: the session outlives the app').toContain('quit-guard: 1 mid-turn, not asked: they outlive the app');
   expect(isAlive(supervisor), 'the supervisor outlives the app').toBe(true);
-  if (daemon) expect(isAlive(held.daemon!), 'mawsd outlives the app').toBe(true);
+  expect(isAlive(held.daemon!), 'mawsd outlives the app').toBe(true);
   await expect.poll(() => turnEnded(journal(userData, id)), { timeout: 60_000, message: 'the turn ends with no app connected' }).toBe(true);
   expect(launchEnded(journal(userData, id)), 'the kept session holds at its next prompt').toBe(false);
   return { id, electron, holder };
 }
 
-// The scene's processes after the settle: the profile's supervisor, and on the daemon shape its mawsd beside it.
-async function settledProcesses(root: string, held: Held, shape: Shape, run: IdleRun = IDLE_RUN): Promise<MeasuredProcess[]> {
+// The scene's processes after the settle: the profile's supervisor, and its mawsd beside it.
+async function settledProcesses(root: string, held: Held, run: IdleRun = IDLE_RUN): Promise<MeasuredProcess[]> {
   await sleep(run.settleS * 1_000);
-  const procs: MeasuredProcess[] = measured(processesNaming(root), root, measuredOn(shape));
+  const procs: MeasuredProcess[] = measured(processesNaming(root), root, MEASURED);
   expect(procs.map((p) => p.pid), "the profile's supervisor is what is measured").toContain(held.supervisor);
-  if (shape === 'daemon') expect(procs.map((p) => p.pid), "the profile's mawsd is measured beside it").toContain(held.daemon);
+  expect(procs.map((p) => p.pid), "the profile's mawsd is measured beside it").toContain(held.daemon);
   return procs;
 }
 
@@ -312,28 +300,26 @@ test('daemon idle: the physical footprint and CPU of what stays behind holding o
   const held: Held = { maws: null, supervisor: null, daemon: null };
   let leftover: unknown;
   try {
-    const { id, electron } = await keptIdleScene(root, userData, held, SHAPE, { daemonKind: DAEMON ? 'unit' : 'private' }); // D7
-    const procs = await settledProcesses(root, held, SHAPE);
+    const { id, electron } = await keptIdleScene(root, userData, held, { daemonKind: 'unit' }); // D7
+    const procs = await settledProcesses(root, held);
     // P5 O17 M8 (OX7): from the cold start, no session listener, neither the broker's nor the feed's chunk; at the
     // window, at most the kept session's listener (P5 Decision Log 187), still no chunk, and no timer the cold start lacked
-    if (DAEMON) {
-      const cold = held.cold!;
-      const idle = await mawsdResources(userData, held.daemon!);
-      console.log(`[daemon-idle] mawsd's resources: cold start ${JSON.stringify(cold.report.resources)}, the window ${JSON.stringify(idle.resources)}`);
-      expect([
-        ...o17IdleProblems('cold start', cold.report, { listeners: cold.listeners, allowedListeners: 0 }),
-        ...o17IdleProblems('the window', idle, { listeners: sessionListeners(userData), allowedListeners: 1, cold: cold.report }),
-      ], 'nothing of O17 at the cold start or the idle').toEqual([]);
-    }
+    const cold = held.cold!;
+    const idle = await mawsdResources(userData, held.daemon!);
+    console.log(`[daemon-idle] mawsd's resources: cold start ${JSON.stringify(cold.report.resources)}, the window ${JSON.stringify(idle.resources)}`);
+    expect([
+      ...o17IdleProblems('cold start', cold.report, { listeners: cold.listeners, allowedListeners: 0 }),
+      ...o17IdleProblems('the window', idle, { listeners: sessionListeners(userData), allowedListeners: 1, cold: cold.report }),
+    ], 'nothing of O17 at the cold start or the idle').toEqual([]);
     const measurement = await measureWindow(procs);
     const sessionEnded = launchEnded(journal(userData, id));
 
     const reasons = invalidReasons({ loads: measurement.samples.map((s) => s.load), measured: measurement.names, lost: measurement.lost, sessionEnded, mismatches: measurement.mismatches });
     const { footprintKiB, rssKiB, cpuS, load } = measurement;
-    const bound = DAEMON ? DAEMON_IDLE_BOUND : null;
+    const bound = DAEMON_IDLE_BOUND;
     const line = footprintKiB === null || rssKiB === null || cpuS === null ? null : idleLine({ footprintKiB, rssKiB, samples: measurement.whole, cpuS, processes: measurement.perProcess, bound, electron, load, loadPair: measurement.loadPair });
-    const misses = bound === null || footprintKiB === null || cpuS === null ? [] : boundMisses({ footprintKiB, cpuS }, bound);
-    report('daemon-idle.json', line, reasons, { shape: SHAPE, electron, bound, misses, ...measurement.record, sessionEnded });
+    const misses = footprintKiB === null || cpuS === null ? [] : boundMisses({ footprintKiB, cpuS }, bound);
+    report('daemon-idle.json', line, reasons, { shape: 'daemon', electron, bound, misses, ...measurement.record, sessionEnded });
     expect(misses, `the daemon shape's processes together are within DAEMON_IDLE_BOUND (${line})`).toEqual([]);
   } finally {
     held.endUnit?.();
@@ -357,13 +343,12 @@ const fetchThroughEndpoint = (socketPath: string, url: string) =>
   });
 
 test('daemon idle render: the footprint and CPU the daemon shape keeps after a render through the seam and an artifact fetch, once the render host has ended', async () => {
-  test.skip(!DAEMON, 'the render seam is the daemon shape’s (MAWS_HOST_MODE=daemon)');
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-di-render-')));
   const userData = join(root, 'ud');
   const held: Held = { maws: null, supervisor: null, daemon: null };
   let leftover: unknown;
   try {
-    const { id, electron } = await keptIdleScene(root, userData, held, SHAPE, { daemonKind: 'unit', unitEnv: { MAWS_RENDER_QUIET_MS: String(RENDER_QUIET_MS) } });
+    const { id, electron } = await keptIdleScene(root, userData, held, { daemonKind: 'unit', unitEnv: { MAWS_RENDER_QUIET_MS: String(RENDER_QUIET_MS) } });
     const paths = daemonPaths(userData);
     const reached = await reachMachine(paths, { build: 'e2e-daemon-idle-render' });
     if (!reached.ok) throw new Error(`machine.sock: ${reached.state}: ${reached.why}`);
@@ -381,7 +366,7 @@ test('daemon idle render: the footprint and CPU the daemon shape keeps after a r
     expect(await fetchThroughEndpoint(paths.artifactsSocket, `maws-artifact://${artifactId}/live/index.html`), 'the artifact fetch through artifacts.sock').toBe(200);
     const mawsdLog = () => readFileSync(join(userData, 'mawsd', 'mawsd.log'), 'utf8');
     await expect.poll(mawsdLog, { timeout: RENDER_QUIET_MS + 60_000, message: 'the render host ends after its quiet period' }).toMatch(/\[render\] the render host exited/);
-    const procs = await settledProcesses(root, held, SHAPE);
+    const procs = await settledProcesses(root, held);
     expect(processesNaming(root).filter((p) => p.command.includes('--render-host') || p.command.includes(join('mawsd', 'render-host'))).map((p) => p.command), 'no render host process at the window’s start').toEqual([]);
     const measurement = await measureWindow(procs);
     const sessionEnded = launchEnded(journal(userData, id));
@@ -389,7 +374,7 @@ test('daemon idle render: the footprint and CPU the daemon shape keeps after a r
     const { footprintKiB, rssKiB, cpuS, load } = measurement;
     const line = footprintKiB === null || rssKiB === null || cpuS === null ? null : idleLine({ footprintKiB, rssKiB, samples: measurement.whole, cpuS, processes: measurement.perProcess, bound: DAEMON_IDLE_BOUND, electron, load, loadPair: measurement.loadPair });
     const misses = footprintKiB === null || cpuS === null ? [] : boundMisses({ footprintKiB, cpuS }, DAEMON_IDLE_BOUND);
-    report('daemon-idle-render.json', line, reasons, { shape: SHAPE, electron, bound: DAEMON_IDLE_BOUND, misses, ...measurement.record, sessionEnded });
+    report('daemon-idle-render.json', line, reasons, { shape: 'daemon', electron, bound: DAEMON_IDLE_BOUND, misses, ...measurement.record, sessionEnded });
     expect(misses, `warm to idle, the daemon shape's processes together are within DAEMON_IDLE_BOUND (${line})`).toEqual([]);
   } finally {
     held.endUnit?.();
@@ -427,7 +412,7 @@ async function browserWindow(scene: HeadlessScene, moment: string, startsAtFirst
 // child watched for at every sample; its report written as `file`, the bound asserted
 async function measuredHeadless(scene: HeadlessScene, ids: readonly AppSessionId[], file: string, startsAtFirstExit: number, extra: Record<string, unknown>): Promise<void> {
   await sleep(IDLE_RUN.settleS * 1_000);
-  const procs = measured(processesNaming(scene.root), scene.root, measuredOn('daemon'));
+  const procs = measured(processesNaming(scene.root), scene.root, MEASURED);
   expect(procs.map((p) => p.pid), "the profile's mawsd is measured").toContain(scene.daemon.pid);
   const atStart = await browserWindow(scene, 'the window’s start', startsAtFirstExit);
   expect(atStart.problems, 'the browser idle as the window starts').toEqual([]);
@@ -448,7 +433,6 @@ async function measuredHeadless(scene: HeadlessScene, ids: readonly AppSessionId
 
 test('daemon idle render: the agent’s browser warm to idle, a real cua connector connected across two quiet periods and two 5 s retry intervals, the render host gone', async () => {
   test.skip(!ENGINE_HOST_BROWSER_WORK, BEFORE_M7);
-  test.skip(!DAEMON, 'the agent’s headless browser is the daemon shape’s (MAWS_HOST_MODE=daemon)');
   const pages = await startPages();
   const scene = await startHeadlessScene({ keepSessions: true, engine: { retryMs: CUA_RETRY_MS, lifeMs: 60 * 60_000 }, env: { MAWS_RENDER_QUIET_MS: String(BROWSER_QUIET_MS) } });
   try {
@@ -478,7 +462,6 @@ test('daemon idle render: the agent’s browser warm to idle, a real cua connect
 
 test('daemon idle render: four kept sessions with live stub engines and connected cua connectors and no app', async () => {
   test.skip(!ENGINE_HOST_BROWSER_WORK, BEFORE_M7);
-  test.skip(!DAEMON, 'the agent’s headless browser is the daemon shape’s (MAWS_HOST_MODE=daemon)');
   const scene = await startHeadlessScene({ repos: 4, keepSessions: true, engine: { retryMs: CUA_RETRY_MS, lifeMs: 60 * 60_000 } });
   try {
     const ids: AppSessionId[] = [];
@@ -503,14 +486,13 @@ test('daemon idle render: four kept sessions with live stub engines and connecte
 // which must be the session's holder, against SESSION_HOST_BOUND_KIB. Its validity is the same rule's: the load, the host
 // living through the window, the session held at its next prompt, and the readers agreeing.
 test('daemon idle session host: the physical footprint and CPU of one session host holding an idle stub-engine session after the app has quit', async () => {
-  test.skip(!DAEMON, 'the session host is measured on the daemon shape (MAWS_HOST_MODE=daemon)');
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-di-sh-')));
   const userData = join(root, 'ud');
   const held: Held = { maws: null, supervisor: null, daemon: null };
   let leftover: unknown;
   try {
     const stub = writeStubEngine(root, { rowMs: Number(ROW_MS) }); // under the scratch root, so its cleanup finds the stub
-    const { id, electron, holder } = await keptIdleScene(root, userData, held, SHAPE, { stub });
+    const { id, electron, holder } = await keptIdleScene(root, userData, held, { stub });
     expect(holder, 'the session runs under a session host').not.toBeNull();
     await sleep(SESSION_HOST_RUN.settleS * 1_000);
     const procs = sessionHosts(processesNaming(root), root);
@@ -611,7 +593,6 @@ test('daemon idle mawsd alone: the physical footprint and CPU of mawsd idle with
 // this scene's own baseline, raised by the local hub running beside it (M10's readings: mawsd 34.0 and 41.7 MiB there,
 // 31.2 to 31.8 in the first case's scene), and is never compared with DAEMON_IDLE_BOUND, which the first case reads.
 test('daemon idle enrolled endpoint: the footprint and CPU an enrolled, listed endpoint adds to the daemon shape holding one kept idle session', async () => {
-  test.skip(!DAEMON, 'the enrolled endpoint is measured on the daemon shape (pnpm e2e:daemon-idle-enrolled)');
   test.setTimeout(40 * 60_000);
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-die-')));
   const userData = join(root, 'ud');
@@ -636,15 +617,15 @@ test('daemon idle enrolled endpoint: the footprint and CPU an enrolled, listed e
   let leftover: unknown;
   try {
     org = await startLocalOrg(root, { heartbeatMs: 15_000 });
-    const { id, electron } = await keptIdleScene(root, userData, held, SHAPE);
-    const procs = await settledProcesses(root, held, SHAPE);
+    const { id, electron } = await keptIdleScene(root, userData, held);
+    const procs = await settledProcesses(root, held);
     const unenrolled = await measureWindow(procs);
     const unenrolledEnded = launchEnded(journal(userData, id));
 
     const enrolling = await org.enroll('idle-scene', (code) => cli(['enroll', '--name', 'idle-scene', '--wait', '60', '--json'], `${code}\n`));
     expect(JSON.parse(enrolling.stdout), 'the scene’s mawsd is enrolled and listed').toMatchObject({ enrollment: 'org-listed', name: 'idle-scene' });
     await expect.poll(hubConnected, { timeout: 60_000, message: 'the enrolled endpoint’s hub link is up' }).toBe(true);
-    const enrolled = await measureWindow(await settledProcesses(root, held, SHAPE));
+    const enrolled = await measureWindow(await settledProcesses(root, held));
     const sessionEnded = launchEnded(journal(userData, id));
     const linkUp = await hubConnected(); // after the window's last reading, so the command's own cost is outside it
 
@@ -663,50 +644,6 @@ test('daemon idle enrolled endpoint: the footprint and CPU an enrolled, listed e
   }
   if (leftover !== null) throw leftover;
 });
-
-// The bound's re-derivation (after P5 O10 M10): A-B-A, the first case's scene three times back to back in one job, each
-// leg a fresh launch on a scratch profile of its own with the shape the leg names in that launch's MAWS_HOST_MODE:
-// today's detached supervisor (A), the daemon shape (B) and the supervisor again (A'). A leg's processes are ended and
-// its scratch removed before the next launches, so no window reads beside another leg's. Each window is the first
-// case's settle and window under the same readers and validity rule, applied to each. Its line names the deltas (B
-// against the mean of A and A', A against A'), each window's per-process medians and CPU, and the validity, and asserts
-// no bound; it writes test-results/daemon-idle-aba.json. `pnpm e2e:daemon-idle-aba` runs this case alone (about 40
-// minutes: three scenes, settles and windows).
-test("daemon idle A-B-A: today's detached supervisor, the daemon shape and the supervisor again, each holding one kept idle session on a fresh launch, back to back", async () => {
-  test.setTimeout(60 * 60_000);
-  const a = { name: 'A', ...(await keptIdleLeg('detached', ABA_RUN)) };
-  const b = { name: 'B', ...(await keptIdleLeg('daemon', ABA_RUN)) };
-  const a2 = { name: "A'", ...(await keptIdleLeg('detached', ABA_RUN)) };
-  const legs = [a, b, a2];
-  const reasons = legs.flatMap((leg) => windowReasons(leg.measurement, leg.sessionEnded).map((reason) => `${leg.name}: ${reason}`));
-  const [ra, rb, ra2] = [shapeReading(a.measurement), shapeReading(b.measurement), shapeReading(a2.measurement)];
-  const line = ra === null || rb === null || ra2 === null ? null : abaLine({ a: ra, b: rb, a2: ra2, reasons, windowS: ABA_RUN.windowS });
-  const deltas = ra === null || rb === null || ra2 === null ? null : abaDeltas(ra, rb, ra2);
-  report('daemon-idle-aba.json', line, reasons, {
-    shape: 'A-B-A', deltas,
-    windows: legs.map((leg) => ({ window: leg.name, shape: leg.shape, electron: leg.electron, sessionEnded: leg.sessionEnded, ...leg.measurement.record })),
-  });
-});
-
-// One leg of the A-B-A case: the first case's scene on a fresh launch on `shape`, on a scratch of its own, then its
-// settle and window, and the scratch removed. A process of the scratch outliving the removal fails the run here, before
-// the next leg's window could read beside it.
-async function keptIdleLeg(shape: Shape, run: IdleRun): Promise<{ shape: Shape; electron: string; measurement: IdleWindow; sessionEnded: boolean }> {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-dia-')));
-  const userData = join(root, 'ud');
-  const held: Held = { maws: null, supervisor: null, daemon: null };
-  let leg: { shape: Shape; electron: string; measurement: IdleWindow; sessionEnded: boolean };
-  let leftover: unknown;
-  try {
-    const { id, electron } = await keptIdleScene(root, userData, held, shape);
-    const measurement = await measureWindow(await settledProcesses(root, held, shape, run), run);
-    leg = { shape, electron, measurement, sessionEnded: launchEnded(journal(userData, id)) };
-  } finally {
-    leftover = await removeScratch(root, userData, held.maws, [held.supervisor, held.daemon], held.evidence);
-  }
-  if (leftover !== null) throw leftover;
-  return leg;
-}
 
 // P5 O3-C M5 (D18, D19; O3 §11's diagnostic reading): the spine alone, O3-D's starting point. The profile-sized fixture
 // (test/support/spine-fixture.ts: 5,000 sessions over 50 project folders, attention, library rows, drafts and the
@@ -787,7 +724,7 @@ test('daemon idle spine alone: the physical footprint and CPU of the spine compo
 // the case asserts the index unchanged by it (no removal, addition or re-index) and the host parked again before the
 // LOADED window's settle ends, and annotates both; the RELEASED and RE-EXECUTED windows run with the host parked
 // (asserted). M2's LOADED readings followed no wake, so they and these are not one-to-one comparable. Each window is SPINE_RELEASED_RUN's (120 s settle, 300 s, 11 samples, the load rule), over the
-// processes measuredOn('daemon') finds once the window's daemon is stable. The line (mawsdSpineLine) names the three
+// processes of MEASURED's names found once the window's daemon is stable. The line (mawsdSpineLine) names the three
 // medians for mawsd and the engine host, the peak load and its pair, each window's validity and D5's verdict; it
 // asserts no bound and writes test-results/daemon-idle-mawsd-spine.json. `pnpm e2e:daemon-idle-mawsd-spine` runs this
 // case alone (it needs the plain build; about 24 minutes).
@@ -866,7 +803,7 @@ test('daemon idle mawsd with the spine: loaded, released, re-executed', async ()
   const hostParked = (procs: MeasuredProcess[], window: string) => expect(procs.filter((p) => p.argv0 === 'maws-supervisor').map((p) => p.pid), `the ${window} window runs with the engine host parked (D36)`).toEqual([]);
   const settled = async () => {
     await sleep(SPINE_RELEASED_RUN.settleS * 1_000);
-    const procs = measured(processesNaming(root), root, measuredOn('daemon'));
+    const procs = measured(processesNaming(root), root, MEASURED);
     const live = daemons.filter((d) => d.exitCode === null && d.signalCode === null).map((d) => d.pid);
     expect(procs.filter((p) => p.argv0 === MAWSD_ARGV0).map((p) => p.pid), 'the live mawsd is what is measured').toEqual(live);
     return procs;

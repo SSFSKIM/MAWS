@@ -89,15 +89,16 @@ env:
   # its LaunchAgent end to end, which loads scratch-labelled agents into the runner's account and refuses outside CI; the
   # e2e job's last step sweeps every `dev.maws.mawsd.e2e-*` after it, as the overlay's does on a hosted Mac.
   # P5 O3-B (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md, O3-B): every group runs on the daemon shape, a private
-  # mawsd on its scratch profile, unless its script or spec pins MAWS_HOST_MODE for what it tests. The embedded shape keeps
-  # two sentinels until O15 deletes its root: supervisor (its detached supervisor) and c7-utility, c7's specs with both
-  # hosts Electron utility processes. render-host (P5 O5 M3) is the render host started alone against a fake mawsd.
+  # mawsd on its scratch profile. P5 O15 M1 (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md): no group
+  # launches the embedded shape any more, its two sentinel groups deleted; e2e:cross-build alone still runs a peer build
+  # on it, since the peer's own code decides its shape. render-host (P5 O5 M3) is the render host started alone against
+  # a fake mawsd.
   # remote (P5 O7 M2): remote lane B over RL2, the app on one profile and a second profile's enrolled mawsd on a local org;
   # it proves behaviour and carries no wall-clock bound (e2e:remote-latency, measured, holds those). It joins
   # HOSTED_MAC_E2E only by the rule below (three green `Lane: hosted` runs on one tree), CI-opt's call.
   CLASS1_E2E: >-
-    default artifacts render-host library side tools to-human deliverables panel supervisor browser browser-comment browser-import
-    settings transcript terminal code agents widgets c7 c7-utility scm c12 available document document-app presentations
+    default artifacts render-host library side tools to-human deliverables panel browser browser-comment browser-import
+    settings transcript terminal code agents widgets c7 scm c12 available document document-app presentations
     design-systems browser-cua browser-chrome desk-web design dashboard connectors connectors-direct connectors-oauth delivery
     discover supervisor-daemon daemon-unit machines lane-a remote
   # The groups §3.1's table found green on a Linux runner, the only ones a Linux lane takes (never by default). desk-web
@@ -125,15 +126,15 @@ env:
   # its script and spends nothing; LIVE_GUARD_E2E adds it to every live run, so every gate that runs the live specs holds
   # the heaviest known cases under the guard's bound.
   # The core app-level live runs, by hand on the owner's MacBook until no engine ran there (P5 Decision Log 29), keep their
-  # specs' own flags: available-live MAWS_P2A_LIVE, plugins-library-live and plugins-live MAWS_E8_LIVE, p1-live and
-  # keep-quit-live MAWS_P1_LIVE, tools-live MAWS_E1_LIVE, agents-live MAWS_C8B_LIVE. Each script names its cap, and, where
+  # specs' own flags: available-live MAWS_P2A_LIVE, plugins-library-live and plugins-live MAWS_E8_LIVE, p1-live
+  # MAWS_P1_LIVE, tools-live MAWS_E1_LIVE, agents-live MAWS_C8B_LIVE. Each script names its cap, and, where
   # its spec reads test/support/engine-pin, the installer's ~/.local/bin/claude as MAWS_E2E_ENGINE_BIN, so every group runs
   # the engine a fresh install of MAWS finds (the one the others resolve themselves), never the fixtures' retained pin.
   # Their own logs go under test-results/, which --evidence uploads. agents-live builds out/ with the renderer's
-  # development surface (e2e/support/dev-surface.vite.config.mjs), keep-quit-live the unsigned packaged app (build:app).
+  # development surface (e2e/support/dev-surface.vite.config.mjs).
   # ask-interrupt-live is E11 S1, an interrupt during a blocking maws ask: a vitest file of the `live` project, skipped
   # by its gate unless MAWS_LIVE is 1, its spend held to its own US$0.15 over three attempts, its log under test-results/.
-  LIVE_E2E: library-live document-live document-provisional-live presentations-live presentations-provisional-live design-systems-live design-live dashboard-live available-live plugins-library-live plugins-live p1-live keep-quit-live tools-live agents-live ask-interrupt-live tool-time-heavy-live
+  LIVE_E2E: library-live document-live document-provisional-live presentations-live presentations-provisional-live design-systems-live design-live dashboard-live available-live plugins-library-live plugins-live p1-live tools-live agents-live ask-interrupt-live tool-time-heavy-live
   LIVE_GUARD_E2E: tool-time-heavy-live
   # The timing-measured groups, whose bounds were calibrated on the mini at @2x with no viewer and no foreign load, so a
   # result read under another posture is void (Decision Log 75's posture go). On a Mac each job's first step is ci-kit's
@@ -151,10 +152,9 @@ env:
   # replace read 510 and its cold open 1,299 against 1,000 (p4-r6-func, 2026-10-21; 634 relaunched quiet).
   # presentations-drag (P4-B2 M0) is the deck drag's fast group: no-agent control trials alternating with agent trials
   # that republish through the host, the class-1 drag case under MAWS_PRESENTATIONS_PERF=1.
-  # local-latency (P5 O1, OX7) is the local path's latency bench: a stub-engine session's delta to frame and command round
-  # trip in detached mode, held to the baseline test/support/local-latency.ts records from three runs on the mini.
-  # local-latency-daemon (P5 O2 M7) is the same bench on the daemon shape, `mawsd`'s relay on the measured path, held to
-  # the same baseline and budget.
+  # local-latency-daemon (P5 O2 M7; P5 O1, OX7) is the local path's latency bench: a stub-engine session's delta to frame
+  # and command round trip on the daemon shape, `mawsd`'s relay on the measured path, held to the baseline
+  # test/support/local-latency.ts records from three runs on the mini in detached mode, and OX7's budget over it.
   # remote-latency (P5 O7 M7, acceptance 3) is the remote bench: the local bench's measures taken through the remote pane
   # over e2e:remote's scene with the stub engine on profile B, on the direct carrier and on the relay, plus open to first
   # row, resume after a forced drop and the link's own round trip, each carrier held to acceptance 3's bounds against
@@ -162,9 +162,8 @@ env:
   # functional check for any lane (no switch, so not on this list).
   # daemon-idle (P5 O2, acceptance 14) is the idle cost of what stays behind with the app quit: on the daemon shape since
   # O2's M9, mawsd and the engine host's physical footprint and CPU holding one kept idle session over 600 s, held to the
-  # bound test/support/daemon-idle.ts derives from the detached supervisor's recorded baseline.
-  # daemon-idle-baseline (P5 O2's landing) is the same scene on today's detached supervisor, no mawsd: it records only,
-  # asserting no bound, and is what the baseline is re-measured from on the tree under test when a landing misses.
+  # bound test/support/daemon-idle.ts derives from the detached supervisor's recorded baseline (P5 O15 M1: re-derived
+  # only from a checkout that still has that supervisor, which the file names).
   # daemon-idle-floor (P5 Decision Logs 54 and 57), the same spec's other case, is the bare Electron runtime's footprint
   # as Node, the share of mawsd's footprint that is the runtime's: a diagnostic, outside the bound.
   # daemon-idle-mawsd (P5 O2 M5, Decision Log 57's early check), the spec's third case, is mawsd alone, idle with no hosts
@@ -172,10 +171,6 @@ env:
   # daemon-idle-enrolled (P5 O10 M10, Decision Log 114), the spec's fourth case, is the increment an enrolled endpoint
   # adds to the daemon shape: the same scene's window unenrolled, then with its mawsd enrolled and listed in an org on
   # desk-hub's local runner (wrangler dev on loopback), recorded without a bound; about 27 minutes, two windows.
-  # daemon-idle-aba (the idle bound's re-derivation, after P5 O10 M10), the spec's fifth case, is A-B-A: the same scene on
-  # today's detached supervisor, on the daemon shape and on the supervisor again, each a fresh launch back to back in
-  # one job, so the daemon shape is read against the mean of two baselines on the same machine state, recorded without
-  # a bound; about 40 minutes, three windows.
   # daemon-idle-spine (P5 O3-C M5), the spec's sixth case, is the spine alone, what O3-D moves into mawsd: the built
   # services entry composing it over a profile-sized fixture with no host and no client, read idle while loaded and after
   # its data is released, recorded without a bound; about 20 minutes, two windows, within a measured build's 60.
@@ -185,17 +180,15 @@ env:
   # A group with a timing bound turns its timed cases on with a switch, MAWS_<name>_PERF or MAWS_<name>_SCALE set to 1 in
   # its package script, each such spec skipping without it or asserting its bounds only under it (presentations-drag's
   # one class-1 trial in e2e:presentations logs its p95), and is on this list: ci-kit's VM contract above rests on it.
-  MEASURED_E2E: artifacts-perf daemon-idle daemon-idle-baseline daemon-idle-floor daemon-idle-mawsd daemon-idle-enrolled daemon-idle-aba daemon-idle-spine daemon-idle-mawsd-spine daemon-idle-render daemon-idle-session-host dashboard-scale design-scale document-scale document-scale-repeat local-latency local-latency-daemon presentations-drag presentations-scale remote-latency tool-time-heavy-live
+  MEASURED_E2E: artifacts-perf daemon-idle daemon-idle-floor daemon-idle-mawsd daemon-idle-enrolled daemon-idle-spine daemon-idle-mawsd-spine daemon-idle-render daemon-idle-session-host dashboard-scale design-scale document-scale document-scale-repeat local-latency-daemon presentations-drag presentations-scale remote-latency tool-time-heavy-live
   # A group whose own run needs more than its class's minutes (30; a measured group's 45, or 60 when its script builds
   # out/): name=minutes, before the Mac wait is added (gate-plan.mjs); the plan refuses an entry that is not a positive
-  # whole number of minutes for a group with a package script. daemon-idle-aba's three settles and windows take 36 of
-  # them and its scenes about 3 more, which its two settle guards' 15-minute bounds and its build would outgrow in 60.
-  # p1-live runs every sitting in one invocation (S3, S6's twenty resumes, A-47, S2's three cases): about 5 minutes at
+  # whole number of minutes for a group with a package script. p1-live runs every sitting in one invocation (S3, S6's twenty resumes, A-47, S2's three cases): about 5 minutes at
   # E11's pace, but its waits run to minutes each (a turn's 5, a terminal's 3), which a slow engine stretches past 30.
   # daemon-idle-render (P5 O17 M7) runs three cases once M7's engine host lists host.browserWork: the render seam's, the
   # browser warm to idle and the four kept sessions, each a scene, a 120 s settle and a 600 s window (about 13 minutes,
   # the spec's 20-minute case bound), so about 40 with its scenes, which its build and two settle guards outgrow in 60.
-  E2E_MINUTES: daemon-idle-aba=90 daemon-idle-render=90 p1-live=45
+  E2E_MINUTES: daemon-idle-render=90 p1-live=45
   # The Mac jobs that may run beside another: e2e groups, and `unit:darwin`, that ask for ci-kit's shared instances
   # ([ci-kit-mac-shared], their only label), which run two jobs at a time on the mini's one desktop (ci-kit's mac-lane
   # concurrency spec, SSFSKIM/ci-kit docs/doperpowers/specs/2026-10-21-mac-lane-concurrency-design.md). Every other Mac
@@ -224,7 +217,7 @@ env:
   # Earlier, wave 2b was 2/3, one run hanging for 180 s at presentations.spec.ts:965; wave 2c was otherwise 3/3 green
   # at c38cfea0c except one presentations-history.spec.ts:137 red, the product race fixed by #141. The :965 hang was
   # 1 in 12 guest runs, never on the host; it stays known debt for the architect to record, not a timeout change here.
-  # Wave 3 (V4, CI-opt): deliverables, supervisor, browser, browser-comment, browser-import, agents, c12, available,
+  # Wave 3 (V4, CI-opt): deliverables, browser, browser-comment, browser-import, agents, c12, available,
   # design-systems, browser-chrome, composer and layout were 3/3 green on maws-vm-golden-20261024a in guest runs
   # 40140642786, 40146601191 and 40157558847. composer and layout are not class-1 groups (default's bare set collects
   # their specs), so they take the guest only when a run names them. In the guest, agents' stop-settle bound, browser's
@@ -238,7 +231,7 @@ env:
   # terminal stays held; design stays host-only.
   MAC_VM_E2E: >-
     document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations
-    deliverables supervisor browser browser-comment browser-import agents c12 available design-systems browser-chrome
+    deliverables browser browser-comment browser-import agents c12 available design-systems browser-chrome
     composer layout delivery connectors-oauth artifacts browser-cua connectors connectors-direct
   # The e2e groups that run on GitHub's hosted Macs on a macOS lane (ci-kit's hosted-Mac spec, Admission): a waiter on the
   # pool, the e2e-hosted job, runs each through SSFSKIM/maws-app, on macos-26 at 1920x1080@1x. A name joins on 3 of 3
@@ -259,7 +252,7 @@ env:
   # the host (settings 12 passed, its Nerd Font case run on both desktops; connectors 5; connectors-direct 15; delivery 3).
   # Waves 2 and 3 (CI-opt, M3), at master c9803aa1a, each run's count lines those of the shared `Lane: no-hosted` baseline
   # 40302689449 on the same tree, every job on the host: to-human (2 passed), widgets (29) and side (12) were 3/3 green under
-  # `Lane: hosted` in runs 40290693239, 40290750401 and 40294506903; supervisor (10), c12 (4), browser-import (6) and
+  # `Lane: hosted` in runs 40290693239, 40290750401 and 40294506903; c12 (4), browser-import (6) and
   # document (19) in runs 40293256908, 40293322930 and 40295843922. c7 stays off: red in 40290693239 and 40290750401 at
   # composer.spec.ts:772 (the user row's actions at opacity 0 after focus, against 1) and at :871 (a 1512x982 content
   # size clamped to 971 by the Dock, before #159).
@@ -307,13 +300,10 @@ env:
   # remote (P5 O7 M2, CI-opt): 3/3 green under `Lane: hosted` at master 3adf9c979 (tree aaf2effe6) in runs
   # 41231090341 (#410's merge gate), 41233011088 and 41233011061 (1 passed each), against the `Lane: no-hosted`
   # baseline 41233011649 on the same tree (1 passed, on ci-kit-mac-ec2).
-  # c7-utility (P5 O3-B), the embedded shape's utility sentinel: admitted by the rule above on the tree that lists it, its
-  # three `Lane: hosted` runs (the O3-B after-sets) and its `Lane: no-hosted` baseline recorded in the O3-B ledger
-  # (docs/doperpowers/ledgers/2026-10-28-p5-o3-b.md, Gate runs).
   HOSTED_MAC_E2E: >-
     document-app browser-chrome available artifacts settings connectors connectors-direct delivery to-human widgets side
-    supervisor c12 browser-import document code scm agents library deliverables presentations dashboard design
-    design-systems tools panel browser-cua terminal c7 c7-utility browser transcript supervisor-daemon daemon-unit machines lane-a
+    c12 browser-import document code scm agents library deliverables presentations dashboard design
+    design-systems tools panel browser-cua terminal c7 browser transcript supervisor-daemon daemon-unit machines lane-a
     remote
   # Non-e2e jobs admitted to the direct hosted route. Lane: hosted/no-hosted never changes these.
   # packaged (CI-opt): PR #297 records the admission evidence: 3/3 direct hosted greens on one tree, with the
@@ -711,7 +701,7 @@ jobs:
 
   # The unsigned packaged app (Decision Log 35): HOSTED_MAC_JOBS admits two jobs on direct macos-26, each building dist/
   # and checking its fuses before half the bare suite, and there the default set holds it. Shard 1 alone runs the small
-  # checks (supervisor, daemon shape, voice and, on a hosted Mac, the packaged unit), in their existing order. Every job
+  # checks (the daemon shape's supervisor, voice and, on a hosted Mac, the packaged unit), in their existing order. Every job
   # sweeps launchd, even after a failed check. Mirror, an unlisted job or a reserved final ref keeps one unsharded build and
   # all checks on the mini, only by `Gates: packaged`.
   packaged:
@@ -755,10 +745,6 @@ jobs:
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/packaged
           SHARD: ${{ matrix.shard }}
         run: .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)' pnpm e2e:packaged ${SHARD:+--shard="$SHARD"}
-      - if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.checks }}
-        env:
-          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/supervisor-packaged
-        run: .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)' pnpm e2e:supervisor:packaged
       # P5 O2 M7: the daemon shape's packaged check, a private mawsd of a scratch profile (no LaunchAgent: the spec fails if
       # the job creates, removes or rewrites anything of the account's canonical dev.maws.mawsd it could cause, its plist,
       # the default profile's sockets and lock, or that profile's mawsd/ tree; a live canonical mawsd's own logs and

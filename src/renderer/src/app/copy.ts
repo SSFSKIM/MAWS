@@ -28,7 +28,6 @@ export const SUPERVISOR_ROW = {
   idleAfter: (ms: number) => `idle exit ${idleSpan(ms)}`,
   idleNever: 'idle exit never',
   idleWithLast: 'exits when its last session ends', // exit-when-idle armed (an update, or the incompatible wait)
-  idleWithApp: 'ends with MAWS', // a utility host
   orphans: (killed: number) => `orphans killed ${killed}`,
   socket: (path: string) => `socket ${path}`,
   noExit: 'no unexpected exit',
@@ -41,7 +40,7 @@ export const SUPERVISOR_ROW = {
   restartNow: 'Restart now',
 };
 
-// P5 O2 M7: Diagnostics' machine daemon row (the daemon shape's `mawsd`, from main's host.status)
+// P5 O2 M7: Diagnostics' machine daemon row (`mawsd`, from main's host.status)
 export const DAEMON_ROW = {
   label: 'mawsd',
   unknown: 'mawsd · unknown',
@@ -51,8 +50,6 @@ export const DAEMON_ROW = {
   build: (commit: string, buildId: string) => `build ${commit} (${buildId})`,
   machine: (ref: string) => `machine ${ref}`,
   host: (name: string, state: string, pid: number | null) => `${name} ${state}${pid === null ? '' : ` pid ${pid}`}`,
-  unavailable: (why: string) => `not in use this launch · ${why}`,
-  embedded: 'not in use · MAWS runs its hosts itself',
 };
 
 // P5 O3-A: the spine's refusal, beside the daemon row

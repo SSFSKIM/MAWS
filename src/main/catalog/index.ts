@@ -3,7 +3,7 @@
 // catalog is the person's: no engine tool, prompt or session context carries it.
 // P5 O4 M3 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §C; D16, D25): the catalog splits by the
 // fact's owner. The engine's reads and the watch of the engine's plugin state are the machine's (src/services/catalog/,
-// composed with the spine: `mawsd` on the daemon shape, main's embedded root on the other); this half, the person's,
+// composed with the spine in `mawsd`; P5 O15 M2: main's embedded root is gone); this half, the person's,
 // keeps the network sources, their cache under `<userData>/catalog/`, the icons and the join, and asks the machine
 // `catalog.engine {cwd}` for a cwd's view.
 // - `catalog.changed` fires once per refresh that changed anything and once per engine-read invalidation (each

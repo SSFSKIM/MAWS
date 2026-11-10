@@ -12,7 +12,7 @@ import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
 import { replayedSession } from './conformance/session-harness';
 import type { EngineSession } from './session'; // P5 O15 M2b (§L)
-import { parseStdoutLine, type EngineTransport } from './transport'; // P5 O15 M2b (Decision Log 25)
+import { parseStdoutLine, type EngineTransport } from './transport'; // P5 O15 M2b (Decision Log 30)
 import { JOURNAL_MAX_BYTES, JournalReader, JournalWriter } from './journal';
 import { Normalizer } from './normalizer';
 import { BATCH_BYTES, CHECKPOINT_BYTES, CHECKPOINT_SPARSE_EVERY, CHECKPOINTS_DENSE, CHECKPOINTS_MAX, SessionStream, type Checkpoint } from './session-stream';
@@ -50,7 +50,7 @@ function recorder() {
 // A live run of pass1/reads (its one turn; the replay ends at the first read) journaled to disk by the production
 // writer, and the events it produced. P5 O15 M2b (§L): `live` gives the session a checkpoint interval and takes what
 // it hands its stream; `maxBytes` the writer's rotation size; `beforeSend` acts on the ready session before the turn;
-// `wrap` stands between the replay and the session (Decision Log 25: an engine line rewritten); `log` the session's.
+// `wrap` stands between the replay and the session (Decision Log 30: an engine line rewritten); `log` the session's.
 async function recordedInit(live: { checkpointRows: number; maxBytes: number; checkpoint: (c: Checkpoint) => void; beforeSend?: (session: EngineSession) => void; wrap?: (t: EngineTransport) => EngineTransport; log?: (message: string) => void } | null = null): Promise<{ events: SessionEvent[]; launchId: string; sessionId: string; appSessionId: AppSessionId; status: EngineSessionStatus; journalPath: string }> {
   const writer = new JournalWriter(dir, 'LAUNCHS1', { maxBytes: live?.maxBytes ?? JOURNAL_MAX_BYTES });
   const run = await replayedSession('pass1', 'reads', (row, { session, ready, fixture, transport }) => {
@@ -893,7 +893,7 @@ describe('checkpoints: a journal read starts near its cursor and answers as the 
     expect((await fed.snapshot(null, null)).events).toEqual(events);
   });
 
-  // Decision Log 24 (a): the host builds a control request as `{ subtype, ...payload }` (rpc.ts), so a payload member
+  // Decision Log 29 (a): the host builds a control request as `{ subtype, ...payload }` (rpc.ts), so a payload member
   // that is undefined is in the live normaliser's `outbound` entry until the answer, and not in the journal's JSON: the
   // live checkpoint's bytes then differ from a scan's at that row, and a read on from it must still answer as today.
   it('a live checkpoint that holds an undefined member the journal drops keeps it, and reads on from it as a full scan does', async () => {
@@ -940,7 +940,7 @@ describe('checkpoints: a journal read starts near its cursor and answers as the 
     }
   });
 
-  // Decision Log 25: the journal writes a parsed frame back with JSON.stringify, which writes a negative zero as `0` and
+  // Decision Log 30: the journal writes a parsed frame back with JSON.stringify, which writes a negative zero as `0` and
   // an index past a double's range (`1e400`, read as Infinity) as `null`. A live normaliser that read such a line holds
   // what no scan of the journal holds, so from that line on its launch takes no live checkpoint (one host.log line
   // says so), and reads begin at the checkpoints taken before it or at scans' own, which agree with the journal.

@@ -1,4 +1,4 @@
-// P5 O15 M2b (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, Decision Log 25): what `numbersReadBack` costs
+// P5 O15 M2b (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, Decision Log 30): what `numbersReadBack` costs
 // the live path, once per engine line. The lines are every `in` frame of the probe's recordings as the engine writes it
 // (JSON.stringify of the frame), timed as a whole set over several rounds beside JSON.parse of the same lines, which the
 // transport already pays for each; the largest line is timed alone. Timing only, so it runs on request:

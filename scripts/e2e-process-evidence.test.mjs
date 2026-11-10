@@ -334,10 +334,8 @@ test('only the chosen test-owned synthetic engine enables evidence, not an unkno
   const syntheticEngineBin = '/scratch/replay-engine';
   assert.equal(captureAllowed({ file, env: { MAWS_E2E: '1', MAWS_E2E_ENGINE_BIN: syntheticEngineBin }, syntheticEngineBin }), true);
   assert.equal(captureAllowed({ file, env: { MAWS_E2E: '1', MAWS_E2E_ENGINE_BIN: '/some/other-engine' }, syntheticEngineBin }), false);
-  for (const group of ['local-latency', 'local-latency-daemon']) {
-    const bin = '/scratch/latency-engine'; // writeLatencyEngine's wrapper, not a forwarding wrapper around a real engine
-    assert.equal(captureAllowed({ file: 'local-latency.spec.ts', env: { MAWS_E2E: '1', MAWS_E2E_ENGINE_BIN: bin, MAWS_E2E_GROUP: group, MAWS_LOCAL_LATENCY_PERF: '1' }, syntheticEngineBin: bin }), true);
-  }
+  const bin = '/scratch/latency-engine'; // writeLatencyEngine's wrapper, not a forwarding wrapper around a real engine
+  assert.equal(captureAllowed({ file: 'local-latency.spec.ts', env: { MAWS_E2E: '1', MAWS_E2E_ENGINE_BIN: bin, MAWS_E2E_GROUP: 'local-latency-daemon', MAWS_LOCAL_LATENCY_PERF: '1' }, syntheticEngineBin: bin }), true);
 });
 
 test('configured engines take precedence over the replay environment, with bounded fail-closed settings reads', (t) => {

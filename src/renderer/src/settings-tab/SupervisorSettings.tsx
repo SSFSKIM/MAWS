@@ -1,13 +1,14 @@
 // Settings › Engine › Background supervisor (E10 execution document, §Design 11; Interfaces "Settings version 10" and
 // "Renderer and copy"): a group inside the Engine section, so X14's `settings` enum is untouched. The status line reads
 // main's `host.status` (the hosts store, connected while the group is shown); while an incompatible supervisor is
-// waited for, or none is running, it offers Restart now (Decision Log, Task 2.3a's re-review). The idle time and the
-// quit default write settings version 10's `supervisor` section; main pushes the idle time to the supervisor
-// (`host.configure`) and the quit guard reads the default. Stop all asks inline, naming the live count, then calls
-// `host.restart {stopSessions: true}`: main stops every session through the supervisor and starts a fresh one.
-// P5 O2 M7 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M7 "The shape setting"): the switch writes version 20's
-// `supervisor.shape`, which applies at the next launch (the running launch keeps its daemon and its links), and the
-// machine daemon's line reads host.status: the daemon's kind, pid and machine ref, or why this launch runs without it.
+// waited for, or none is running, it offers Restart now (Decision Log, Task 2.3a's re-review). The idle time writes
+// settings version 10's `supervisor` section; main pushes it to the supervisor (`host.configure`). Stop all asks
+// inline, naming the live count, then calls `host.restart {stopSessions: true}`: main stops every session through the
+// supervisor and starts a fresh one. P5 O2 M7 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M7 "Status"): the
+// machine daemon's line reads host.status: the daemon's kind, pid and machine ref.
+// P5 O15 M2 (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, M2 "Settings", "`host.status`"): every launch
+// that reaches the app runs on `mawsd`, so the group has no shape switch and no quit default (both settings are retired
+// and read by nothing), and it reads host.status as the daemon's: no branch for another transport or an unavailable daemon.
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import type { Settings } from '@shared/ipc/schema';
 import type { HostStatus } from '@shared/ipc/schema/host';
@@ -20,7 +21,7 @@ import { useHosts } from '../stores/hosts';
 import { toast, useNotices } from '../stores/notices';
 import { SUPERVISOR } from './copy';
 import { ENGINE_HOST_UPDATE } from '../app/copy'; // P5 O16 M3c fix wave 2
-import { INPUT, Segment, Setting, Switch, TEXT_ACTION, useCommittedDraft, writeSettings } from './parts';
+import { INPUT, Setting, TEXT_ACTION, useCommittedDraft, writeSettings } from './parts';
 
 // Whole minutes from 1 to MAX_IDLE_MINUTES as typed, or null when the text is not one.
 function idleMinutesOf(text: string): number | null {
@@ -30,10 +31,10 @@ function idleMinutesOf(text: string): number | null {
 }
 
 // What the status line says, whether the way back (Restart now) is offered, and its note: what the background process
-// is for, said only while the engine host is one (detached).
+// is for, once main has answered.
 function describe(status: HostStatus | null): { text: string; restart: boolean; note?: string } {
-  const note = status?.transport === 'detached' || status?.transport === 'daemon' ? SUPERVISOR.statusNote : undefined; // P5 O2 M7: daemon too
   if (status === null) return { text: SUPERVISOR.reading, restart: false };
+  const note = SUPERVISOR.statusNote;
   if (status.state === 'crashed') {
     if (status.reason === 'incompatible') return { text: SUPERVISOR.waiting(status.waitingLiveSessions ?? 0), restart: true, note: SUPERVISOR.waitingNote };
     return { text: status.reason === 'held_lock' ? SUPERVISOR.heldLock : SUPERVISOR.notRunning, restart: true, note };
@@ -43,7 +44,6 @@ function describe(status: HostStatus | null): { text: string; restart: boolean; 
   if (status.state === 'restarting') return { text: SUPERVISOR.restarting, restart: false, note };
   const s = status.supervisor;
   if (status.state === 'starting' || s === null) return { text: SUPERVISOR.starting, restart: false, note };
-  if (status.transport === 'utility') return { text: SUPERVISOR.inApp(s.pid, s.liveSessions), restart: false, note };
   const exit = s.exitWhenIdle ? SUPERVISOR.exitsWithLast : s.idleExitMs === null ? SUPERVISOR.exitsNever : SUPERVISOR.exitsAfter(s.idleExitMs);
   return { text: SUPERVISOR.running(clockTime(s.startedAt), s.pid, s.liveSessions, exit), restart: false, note };
 }
@@ -82,20 +82,8 @@ export function SupervisorSettings({ settings }: { settings: Settings }) {
         {SUPERVISOR.title}
       </h4>
       <StatusRow status={status} keepFocus={keepFocus} returnFocus={returnFocus} />
-      <Shape settings={settings} status={status} />
       <DaemonLine status={status} />
       <IdleExit settings={settings} />
-      <Setting label={SUPERVISOR.quitDefault} note={SUPERVISOR.quitNote}>
-        <Segment
-          label={SUPERVISOR.quitDefault}
-          value={settings.supervisor.keepRunningDefault ? 'keep' : 'stop'}
-          options={[
-            { value: 'keep', label: SUPERVISOR.quitKeep },
-            { value: 'stop', label: SUPERVISOR.quitStop },
-          ]}
-          onChange={(next) => writeSettings({ supervisor: { keepRunningDefault: next === 'keep' } })}
-        />
-      </Setting>
       <StopAll status={status} keepFocus={keepFocus} />
     </div>
   );
@@ -139,22 +127,8 @@ function StatusRow({ status, keepFocus, returnFocus }: { status: HostStatus | nu
   );
 }
 
-// P5 O2 M7: the switch, whose note says when a change waits for the next launch: the running launch's shape (main's
-// transport) differs from the setting, and is not a launch that could not honour it (its own line says why)
-function Shape({ settings, status }: { settings: Settings; status: HostStatus | null }) {
-  const asked = settings.supervisor.shape;
-  const running = status === null || status.transport === 'utility' || status.daemonUnavailable !== null ? null : status.transport === 'daemon' ? 'daemon' : 'embedded';
-  const note = running === null || running === asked ? SUPERVISOR.shapeNote : asked === 'embedded' ? SUPERVISOR.shapeLeaving : SUPERVISOR.shapeJoining;
-  return (
-    <Setting label={SUPERVISOR.shape} note={note}>
-      <Switch checked={asked === 'daemon'} label={SUPERVISOR.shape} onChange={(next) => void writeSettings({ supervisor: { shape: next ? 'daemon' : 'embedded' } })} />
-    </Setting>
-  );
-}
-
 function daemonText(status: HostStatus | null): string {
   if (status === null) return SUPERVISOR.reading;
-  if (status.transport !== 'daemon') return status.daemonUnavailable === null ? SUPERVISOR.daemonEmbedded : SUPERVISOR.daemonUnavailable(status.daemonUnavailable);
   const d = status.daemon;
   return d === null ? SUPERVISOR.daemonConnecting : SUPERVISOR.daemonLine(d.kind, d.pid, d.machine);
 }

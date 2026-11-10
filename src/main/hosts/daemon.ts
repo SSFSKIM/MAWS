@@ -1,177 +1,200 @@
-// The app on the daemon shape (P5 O2 M7; docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M7): which shape this launch
-// runs, what has to happen to the default profile's unit before the hosts start, how main reaches `mawsd`, and the check
-// of the daemon's build. No Electron here: index.ts brings the app's facts.
+// The app's one arrangement (P5 O2 M7, docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M7; P5 O15 M2,
+// docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, Interfaces §A): the launch's outcome, which is `mawsd` or a
+// reason it cannot start, how main reaches `mawsd`, and the check of the daemon's build. No Electron here: index.ts
+// brings the app's facts.
 //
-// The shape, read once per launch (mode.ts gives the mode; Settings' switch changes nothing in a running launch):
-// - another profile than the default one (a dev run, an e2e run) gets a private `mawsd`, which the app starts;
-// - the default profile (its real path is the platform default): a packaged app installs or repairs the LaunchAgent so it
-//   runs this bundle, before the hosts start; an unpackaged run uses an installed and loaded unit and never writes one,
-//   and otherwise runs embedded for the launch, saying why (the log, Diagnostics). A unit the system refuses (MAWS turned
-//   off in Login Items) also runs embedded, with the reason, and so does a loaded unit that does not start `mawsd`: the
-//   unit is asked to start and `mawsd` must welcome a hello on its machine.sock within UNIT_READY_MS (a rejected
-//   kickstart, a job whose program is gone, or a `mawsd` whose start fails after its lock never gets there). `mawsd`'s
-//   canonical label refuses an unpackaged program before it writes anything (M6), so an unpackaged run never asks;
-// - the embedded shape on the default profile of a packaged app uninstalls a LaunchAgent it finds before the hosts
-//   start (which ends `mawsd`, whose hosts keep running);
-// - an embedded launch of any profile that finds the daemon shape's processes named in its `mawsd/` directory leaves
-//   the shape before its hosts start: it ends that profile's `mawsd` (its hosts keep running), then the socket-mode pty
-//   host, whose terminals end as an embedded app's do at its quit, and connects to the engine host directly, with its
-//   sessions. A launch that runs embedded only because the daemon was unavailable leaves them as they are.
+// The outcome, read at each attempt (the repair window's retry runs the table again from the top):
+// - a profile that is not the main one (a dev run, an e2e run) gets a private `mawsd`, which the app's transports start;
+//   nothing is started here (MAWS_E2E_UNIT_FAULT, an unpackaged e2e launch's, stands a failure in for it: §C);
+// - the main profile (its real path is the platform default): a packaged app installs or repairs the LaunchAgent so it
+//   runs this bundle, asks it to start, and waits for `mawsd`'s welcome on its machine.sock within UNIT_READY_MS; an
+//   unpackaged run uses an installed and loaded unit the same way and never writes one. Anything else is a failure,
+//   classified so the repair window can say why (`UnavailableKind`). The main profile's machine runs under its unit or
+//   not at all: no launch composes the machine's services in main.
 //
-// Main's hosts on the daemon shape are three detached transports over `mawsd`'s file set, one per relay socket
-// (engine-host.sock, pty-host.sock, machine.sock). Each starts `mawsd` the profile's way (the lock arbitrates their race:
-// a loser exits 3 and the transport connects), serves whatever build of the major answers (`serve`), is `relayed`, and
-// waits for its welcome as long as the start budget, since `mawsd` holds a hello while it wakes a host (relay.ts).
-// `daemon.*` is main-only: main reaches it through its `machine` host, never the router.
+// Main's hosts are three detached transports over `mawsd`'s file set, one per relay socket (engine-host.sock,
+// pty-host.sock, machine.sock). Each starts `mawsd` the profile's way (the lock arbitrates their race: a loser exits 3
+// and the transport connects), serves whatever build of the major answers (`serve`), is `relayed`, and waits for its
+// welcome as long as the start budget, since `mawsd` holds a hello while it wakes a host (relay.ts). `daemon.*` is
+// main-only: main reaches it through its `machine` host, never the router.
 //
 // The build check: at the `machine` host's first `ready` of a launch, main reads `daemon.status`; a daemon of another
 // build than this app's out/main/mawsd.js that runs this app's files (a private daemon, or a unit whose program is this
 // bundle) is asked `daemon.restart` once for the launch. Its hosts, and so the sessions, keep running.
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
-import { setTimeout as sleep } from 'node:timers/promises';
+import { readFileSync, statSync } from 'node:fs';
+import { isAbsolute, join } from 'node:path';
 import { DAEMON_FILES, daemonHostFiles, daemonPaths, type DaemonPaths, type DaemonSocket } from '@shared/daemon/files';
 import { START_TIMEOUT_MS, supervisorEnv, type DetachedTransportOptions, type StartStrategy } from '@shared/host/detached-transport';
 import type { HostOwner, HostSpec, HostSupervisor } from '@shared/host/host-supervisor';
 import { appIdentity } from '@shared/host/identity';
 import type { DaemonStatus } from '@shared/ipc/schema/daemon';
-import type { SupervisorShape } from '@shared/ipc/schema/settings';
-import { installDaemon, isDefaultProfile, uninstallDaemon, unitFor, type InstallDeps } from '../../mawsd/install';
+import { installDaemon, isDefaultProfile, unitFor, type InstallDeps } from '../../mawsd/install';
 import { HELLO_TIMEOUT_MS, reachMachine } from '../../mawsd/machine-client';
-import { DEFAULT_LABEL, readIfPresent, UnitError, type Unit, type UnitProgram, type UnitState } from '../../mawsd/units/unit';
+import { DEFAULT_LABEL, readIfPresent, UnitError, type Unit, type UnitProgram } from '../../mawsd/units/unit';
 import { isAlive, isSameProcess, procStartOf, readLock } from '../../engine-host/supervisor-files';
-import { PTY_HOST_FILES } from '../../pty-host/files';
-import { hostModeFromEnv, testLaunchRefusal, type HostMode } from './mode';
+import { testLaunchRefusal } from './mode';
 
-// ---- the shape ---------------------------------------------------------------------------------------------------------
+// ---- the launch's outcome ----------------------------------------------------------------------------------------------
 
-export interface ShapeFacts {
-  mode: HostMode; // hostModeFromEnv's
-  shape: SupervisorShape; // the setting
-  packaged: boolean;
-  defaultProfile: boolean; // the profile's real path is the platform default
-  unit: UnitState; // the default profile's unit (read only for the default profile; else nothing installed)
+export type LaunchShape = { daemon: 'unit' | 'private' };
+export type UnavailableKind = 'no-unit' | 'not-loaded' | 'install-refused' | 'not-started';
+export interface Unavailable {
+  kind: UnavailableKind;
+  why: string; // the system's or mawsd's own words, one line
 }
+export type LaunchOutcome = { ok: true; launch: LaunchShape } | { ok: false; unavailable: Unavailable };
 
-export type ShapePlan =
-  | { mode: 'daemon'; daemon: 'private' }
-  | { mode: 'daemon'; daemon: 'unit'; install: boolean } // install: written or repaired to run this bundle, then loaded
-  | { mode: 'utility' | 'detached'; uninstall: boolean; unavailable: string | null };
+export const UNAVAILABLE_KINDS: readonly UnavailableKind[] = ['no-unit', 'not-loaded', 'install-refused', 'not-started'];
 
-export const UNAVAILABLE = {
-  noUnit: 'no LaunchAgent is installed for the default profile, and a development build never installs one',
-  notLoaded: 'the LaunchAgent is installed but not loaded (MAWS may be turned off in Login Items)',
-  refused: (why: string) => `the LaunchAgent could not be installed: ${why}`,
-  notStarted: (why: string) => `the LaunchAgent did not start mawsd: ${why}`,
+export const UNAVAILABLE_WHY = {
+  noUnit: 'no LaunchAgent is installed for the main profile, and a development build never installs one',
+  notLoaded: 'the LaunchAgent is installed but not loaded',
+  loadedNotRun: 'macOS loaded mawsd but did not run it', // §A (iii)
+  e2eFault: 'e2e fault', // §C
 } as const;
-
-export function planShape({ mode, shape, packaged, defaultProfile, unit }: ShapeFacts): ShapePlan {
-  if (mode !== 'daemon') return { mode, uninstall: shape === 'embedded' && packaged && defaultProfile && (unit.installed || unit.loaded), unavailable: null };
-  if (!defaultProfile) return { mode, daemon: 'private' };
-  if (packaged) return { mode, daemon: 'unit', install: true };
-  if (unit.installed && unit.loaded) return { mode, daemon: 'unit', install: false };
-  return { mode: 'detached', uninstall: false, unavailable: unit.installed ? UNAVAILABLE.notLoaded : UNAVAILABLE.noUnit };
-}
-
-// What a launch runs, once its unit work is done.
-export interface LaunchShape {
-  mode: HostMode;
-  daemon: 'unit' | 'private' | null; // how `mawsd` is started; null off the daemon shape
-  unavailable: string | null; // why the daemon shape the setting asks for does not run this launch
-}
-
-export interface PrepareDeps {
-  install(): Promise<unknown>; // the default profile's unit, written or repaired to run this bundle, and loaded
-  startUnit(): Promise<unknown>; // the unit asked to start, and its `mawsd` up; rejects saying why not
-  uninstall(): Promise<unknown>;
-  daemonLeft(): boolean; // the profile's `mawsd/` directory has a lock of `mawsd` or of a socket-mode pty host
-  leaveDaemon(): Promise<void>; // the profile's `mawsd`, then its socket-mode pty host, ended where they run
-  log(line: string): void;
-}
-
-// The unit work the plan names, before any host exists; synchronous when there is none (every profile but the default
-// one, with no daemon-shape locks), so a scratch profile's launch starts as it always has.
-export function prepareShape(plan: ShapePlan, deps: PrepareDeps): LaunchShape | Promise<LaunchShape> {
-  if (plan.mode === 'daemon') {
-    if (plan.daemon === 'private') return settled({ mode: 'daemon', daemon: 'private', unavailable: null }, deps);
-    const embedded = (why: string) => settled({ mode: 'detached', daemon: null, unavailable: why }, deps);
-    const start = () =>
-      deps.startUnit().then(
-        () => settled({ mode: 'daemon', daemon: 'unit', unavailable: null }, deps),
-        (error: unknown) => embedded(UNAVAILABLE.notStarted(messageOf(error))),
-      );
-    if (!plan.install) return start();
-    return deps.install().then(start, (error: unknown) => embedded(UNAVAILABLE.refused(messageOf(error))));
-  }
-  const embedded: LaunchShape = { mode: plan.mode, daemon: null, unavailable: plan.unavailable };
-  // the daemon shape left by choice (the setting, the environment), not a launch the daemon was unavailable to
-  if (!plan.uninstall && !(plan.unavailable === null && deps.daemonLeft())) return settled(embedded, deps);
-  let uninstalled: Promise<unknown> = Promise.resolve();
-  if (plan.uninstall) {
-    deps.log('[hosts] the embedded shape: uninstalling the LaunchAgent before the hosts start');
-    uninstalled = deps.uninstall().catch((error: unknown) => deps.log(`[hosts] the LaunchAgent could not be uninstalled: ${messageOf(error)}`));
-  }
-  return uninstalled.then(() => deps.leaveDaemon()).then(() => settled(embedded, deps));
-}
-
-function settled(launch: LaunchShape, deps: PrepareDeps): LaunchShape {
-  if (launch.unavailable !== null) deps.log(`[hosts] the daemon shape does not run this launch: ${launch.unavailable}; running embedded`);
-  else if (launch.daemon !== null) deps.log(`[hosts] the daemon shape: ${launch.daemon === 'unit' ? "the default profile's LaunchAgent" : 'a private mawsd'}`);
-  return launch;
-}
-
-const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
-
-// ---- the launch: the facts read, the plan made, the unit work done -------------------------------------------------------
 
 export interface LaunchInput {
   env: NodeJS.ProcessEnv;
-  shape: SupervisorShape; // the setting, read once before the hosts start
   packaged: boolean;
   profileDir: string; // Electron's userData
   program: UnitProgram; // this app as a unit would run it: its binary as Node and its out/main/mawsd.js
 }
 
 export interface LaunchDeps extends InstallDeps {
-  leaveDaemon?(paths: DaemonPaths): Promise<void>; // leaveDaemonShape unless a test brings its own
   awaitDaemon?(paths: DaemonPaths): Promise<void>; // awaitDaemonWelcome unless a test brings its own
   log(line: string): void;
   exit(code: number, line: string): never; // the process ends, saying why on its last line (testLaunchRefusal)
 }
 
 // The default profile's unit, or none where there is no unit manager (the app runs on a Mac; a test may run on Linux).
-function defaultUnit(deps: InstallDeps): Unit | null {
+function defaultUnit(deps: InstallDeps): Unit | { none: string } {
   try {
     return unitFor(DEFAULT_LABEL, deps);
   } catch (error) {
-    if (error instanceof UnitError) return null;
+    if (error instanceof UnitError) return { none: error.message };
     throw error;
   }
 }
 
-// The mode table (mode.ts, then planShape) over the launch's facts, and the plan's unit work, before any host exists. A
-// test or harness launch on the default profile exits first, before the unit is read (testLaunchRefusal).
-export function resolveLaunch(input: LaunchInput, deps: LaunchDeps): LaunchShape | Promise<LaunchShape> {
-  const defaultProfile = isDefaultProfile(input.profileDir, deps.platform, deps.env, deps.home);
-  const refusal = testLaunchRefusal(input.env, defaultProfile);
+// §A's table over the launch's facts, before any host exists, and never a throw or a rejection: a refused install or
+// start is a failure with launchctl's words, and any other error on the main profile's way (fix wave 1: a unit whose
+// state cannot be read, a plist path that is a directory or unreadable) is `install-refused` with the error's own words,
+// so the repair window, all the owner sees of a launch that fails, always opens. A test or harness launch on the main
+// profile exits first, before the unit is read (testLaunchRefusal). Synchronous where nothing is started (every profile
+// but the main one), so a scratch profile's launch starts as it always has.
+export function resolveLaunch(input: LaunchInput, deps: LaunchDeps): LaunchOutcome | Promise<LaunchOutcome> {
+  const mainProfile = isDefaultProfile(input.profileDir, deps.platform, deps.env, deps.home);
+  const refusal = testLaunchRefusal(input.env, mainProfile);
   if (refusal !== null) deps.exit(1, refusal);
-  const mode = hostModeFromEnv(input.env, input.shape);
-  const unit = defaultProfile ? defaultUnit(deps) : null;
-  const plan = planShape({ mode, shape: input.shape, packaged: input.packaged, defaultProfile, unit: unit?.state() ?? { installed: false, loaded: false } });
-  const target = { profileDir: input.profileDir, label: DEFAULT_LABEL };
-  const paths = daemonPaths(input.profileDir);
-  return prepareShape(plan, {
-    install: () => installDaemon({ ...target, program: input.program }, deps),
-    startUnit: async () => {
-      unit!.start(); // throws launchctl's answer when the system will not start the job
-      await (deps.awaitDaemon ?? ((p) => awaitDaemonWelcome(p, { reach: reachMachine, now: Date.now, sleep: deps.sleep })))(paths);
-    },
-    uninstall: () => uninstallDaemon(target, deps),
-    daemonLeft: () => existsSync(join(paths.dir, DAEMON_FILES.lock)) || existsSync(join(paths.ptyHost, PTY_HOST_FILES.lock)),
-    leaveDaemon: () => (deps.leaveDaemon ?? leaveDaemonShape)(paths),
-    log: deps.log,
-  });
+  if (!mainProfile) return told(e2eFault(input) ?? { ok: true, launch: { daemon: 'private' } }, deps);
+  try {
+    const launch = resolveMainLaunch(input, deps);
+    return launch instanceof Promise ? launch.catch((error: unknown) => launchFailed(error, deps)) : launch;
+  } catch (error) {
+    return launchFailed(error, deps);
+  }
 }
+
+// An error nothing on the launch's way classified: `install-refused`, its own words on one line, told as every outcome is
+export function launchFailed(error: unknown, deps: Pick<LaunchDeps, 'log'>): LaunchOutcome {
+  return told(failed('install-refused', messageOf(error)), deps);
+}
+
+function resolveMainLaunch(input: LaunchInput, deps: LaunchDeps): LaunchOutcome | Promise<LaunchOutcome> {
+  const unit = defaultUnit(deps);
+  if ('none' in unit) return told(failed('no-unit', unit.none), deps);
+  const paths = daemonPaths(input.profileDir);
+  const awaitDaemon = deps.awaitDaemon ?? ((p: DaemonPaths) => awaitDaemonWelcome(p, { reach: reachMachine, now: Date.now, sleep: deps.sleep }));
+  if (input.packaged) return startPackaged(unit, input, paths, awaitDaemon, deps).then((outcome) => told(outcome, deps));
+  const state = unit.state();
+  if (!state.installed) return told(failed('no-unit', UNAVAILABLE_WHY.noUnit), deps);
+  if (!state.loaded) return told(failed('not-loaded', UNAVAILABLE_WHY.notLoaded), deps);
+  // an unpackaged run never writes the unit; a start it is refused, or one that never welcomes, is `not-started`
+  return (async (): Promise<LaunchOutcome> => {
+    try {
+      unit.start();
+      await awaitDaemon(paths);
+      return { ok: true, launch: { daemon: 'unit' } };
+    } catch (error) {
+      return failed('not-started', messageOf(error));
+    }
+  })().then((outcome) => told(outcome, deps));
+}
+
+// A packaged app's start (§A, "A start that does not end in a welcome"): the unit installed or repaired, then started,
+// then welcomed. (i) a refused install and (ii) a refused start are `install-refused` with launchctl's words; a start
+// that reported success and was not welcomed is (iii) `install-refused` when `mawsd` wrote nothing since the attempt
+// began and no live process holds its lock (macOS never ran it), else (iv) `not-started` with the wait's last answer.
+async function startPackaged(unit: Unit, input: LaunchInput, paths: DaemonPaths, awaitDaemon: (paths: DaemonPaths) => Promise<void>, deps: LaunchDeps): Promise<LaunchOutcome> {
+  const before = daemonWrites(paths); // at the attempt's start, so a `mawsd` the repair's bootstrap ran counts as written
+  try {
+    await installDaemon({ profileDir: input.profileDir, label: DEFAULT_LABEL, program: input.program }, deps);
+  } catch (error) {
+    return failed('install-refused', messageOf(error)); // (i)
+  }
+  try {
+    unit.start(); // throws launchctl's answer when the system will not start the job
+  } catch (error) {
+    return failed('install-refused', messageOf(error)); // (ii)
+  }
+  try {
+    await awaitDaemon(paths);
+    return { ok: true, launch: { daemon: 'unit' } };
+  } catch (error) {
+    const wrote = daemonWrites(paths) !== before;
+    if (!wrote && !lockHeldByLiveProcess(paths)) return failed('install-refused', UNAVAILABLE_WHY.loadedNotRun); // (iii)
+    return failed('not-started', messageOf(error)); // (iv)
+  }
+}
+
+// Whether `mawsd` wrote, read with no clock: the size and the inode of mawsd.log and of mawsd.out (the unit's standard
+// output and error), a missing file a value of its own. A `mawsd` that starts writes its `starting` line to mawsd.log
+// before it takes its lock, and what it prints before that goes to mawsd.out; a rotation is a new inode.
+export function daemonWrites(paths: DaemonPaths): string {
+  return [DAEMON_FILES.log, DAEMON_FILES.out]
+    .map((name) => {
+      try {
+        const stat = statSync(join(paths.dir, name));
+        return `${stat.size}:${stat.ino}`;
+      } catch {
+        return 'missing';
+      }
+    })
+    .join(' ');
+}
+
+// A live process holds mawsd.lock, read as main reads every lock: a `mawsd` already running and silent (iv), not a job
+// macOS never ran (iii). Fix wave 5: the process the lock names, not merely its pid (isSameProcess): a pid reused by
+// another process after an unclean exit or a reboot holds nothing, and a lock with no recorded start is taken at its pid.
+function lockHeldByLiveProcess(paths: DaemonPaths): boolean {
+  const lock = readLock(paths.dir, undefined, DAEMON_FILES.lock);
+  return lock !== null && isSameProcess(lock, { isAlive, procStartOf });
+}
+
+// §C: MAWS_E2E_UNIT_FAULT=<absolute path>, honoured only under MAWS_E2E=1 in an unpackaged app on a profile that is not
+// the main one: while the file holds one of the four kinds, the launch fails with it; otherwise the row's own outcome
+function e2eFault({ env, packaged }: LaunchInput): LaunchOutcome | null {
+  const file = env.MAWS_E2E_UNIT_FAULT;
+  if (packaged || env.MAWS_E2E !== '1' || !file || !isAbsolute(file)) return null;
+  let kind: string;
+  try {
+    kind = readFileSync(file, 'utf8').trim();
+  } catch {
+    return null; // absent: the row's own outcome
+  }
+  return UNAVAILABLE_KINDS.includes(kind as UnavailableKind) ? failed(kind as UnavailableKind, UNAVAILABLE_WHY.e2eFault) : null;
+}
+
+const failed = (kind: UnavailableKind, why: string): LaunchOutcome => ({ ok: false, unavailable: { kind, why: oneLine(why) } });
+const oneLine = (text: string) => text.replace(/\s*\n\s*/g, ' ').trim();
+
+function told(outcome: LaunchOutcome, deps: Pick<LaunchDeps, 'log'>): LaunchOutcome {
+  if (outcome.ok) deps.log(`[hosts] the machine daemon: ${outcome.launch.daemon === 'unit' ? "the main profile's LaunchAgent" : 'a private mawsd'}`);
+  else deps.log(`[hosts] mawsd cannot start (${outcome.unavailable.kind}): ${outcome.unavailable.why}`);
+  return outcome;
+}
+
+const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 // ---- the unit's daemon, up ----------------------------------------------------------------------------------------------
 
@@ -207,58 +230,10 @@ export async function awaitDaemonWelcome(paths: DaemonPaths, deps: AwaitDaemonDe
 // Whether the default profile's unit runs this bundle: its file is the one this app would write.
 export function unitRunsThisApp(input: Pick<LaunchInput, 'profileDir' | 'program'>, deps: InstallDeps): boolean {
   const unit = defaultUnit(deps);
-  return unit !== null && readIfPresent(unit.file) === unit.render({ label: DEFAULT_LABEL, profileDir: input.profileDir, program: input.program });
+  return !('none' in unit) && readIfPresent(unit.file) === unit.render({ label: DEFAULT_LABEL, profileDir: input.profileDir, program: input.program });
 }
 
-// ---- the daemon shape's processes, ended when the profile leaves it -----------------------------------------------------
-
-export const PTY_HOST_END_MS = 5_000; // its kill ladders end every pty; past this the app starts without waiting longer
-export const DAEMON_END_MS = 5_000; // its endpoint's stop is bounded at 2.5 s (M5); past this the app starts anyway
-
-// The profile's `mawsd` first, so it wakes no pty host again (its hosts keep running, the engine host's sessions with
-// them), then its socket-mode pty host, whose terminals end with it.
-export async function leaveDaemonShape(paths: DaemonPaths, deps: EndPtyHostDeps = DEFAULT_END_DEPS): Promise<void> {
-  await endLockHolder(paths.dir, DAEMON_FILES.lock, 'mawsd', DAEMON_END_MS, deps);
-  await endSocketPtyHost(paths.ptyHost, deps);
-}
-
-export interface EndPtyHostDeps {
-  readLock: typeof readLock;
-  isAlive(pid: number): boolean;
-  procStartOf(pid: number): string | null;
-  kill(pid: number, signal: NodeJS.Signals): void;
-  sleep(ms: number): Promise<unknown>;
-  log(line: string): void;
-}
-
-const END_POLL_MS = 100;
-
-const DEFAULT_END_DEPS: EndPtyHostDeps = { readLock, isAlive, procStartOf, kill: (pid, signal) => process.kill(pid, signal), sleep, log: console.log };
-
-// The socket-mode pty host: its exit order ends every pty through the kill ladder.
-export function endSocketPtyHost(dir: string, deps: EndPtyHostDeps = DEFAULT_END_DEPS): Promise<void> {
-  return endLockHolder(dir, PTY_HOST_FILES.lock, 'the socket-mode pty host', PTY_HOST_END_MS, deps);
-}
-
-// SIGTERM to the process a lock names, when that is still the process it records (a pid is believed only with its start
-// time), then a wait of at most `boundMs` for it to go.
-async function endLockHolder(dir: string, lockName: string, what: string, boundMs: number, deps: EndPtyHostDeps): Promise<void> {
-  const lock = deps.readLock(dir, undefined, lockName);
-  if (!lock || !isSameProcess(lock, deps)) return;
-  deps.log(`[hosts] ending ${what}, pid ${lock.pid}, as the profile leaves the daemon shape`);
-  try {
-    deps.kill(lock.pid, 'SIGTERM');
-  } catch (error) {
-    return deps.log(`[hosts] ${what} could not be signalled: ${messageOf(error)}`);
-  }
-  for (let waited = 0; waited < boundMs; waited += END_POLL_MS) {
-    if (!isSameProcess(lock, deps)) return;
-    await deps.sleep(END_POLL_MS);
-  }
-  deps.log(`[hosts] ${what}, pid ${lock.pid}, is still running ${boundMs / 1000} s after its SIGTERM; starting anyway`);
-}
-
-// ---- main's hosts on the daemon shape ----------------------------------------------------------------------------------
+// ---- main's hosts ----------------------------------------------------------------------------------
 
 export interface DaemonModules {
   engineHost: string; // the bundles `?modulePath` gives main

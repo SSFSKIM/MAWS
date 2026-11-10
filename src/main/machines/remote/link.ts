@@ -1027,7 +1027,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
   /** `wake` and `probe('network')`: the window opened, and the link started over (§F, "Opening the window"). */
   function open(reason: 'wake' | 'network', sleptMs: number | null): void {
     if (state === 'closed' || state === 'refused') return void log(`probe ${reason}: ${state}`);
-    if (held) return void log(`probe ${reason}: held`); // the bench's hold: passed over (P5 O15 M2b Decision Log 15)
+    if (held) return void log(`probe ${reason}: held`); // the bench's hold: passed over (P5 O15 M2b Decision Log 20)
     const drop = sleptMs !== null && sleptMs >= WAKE_DROP_MS;
     reach.openWindow(reason);
     const windowed = reach.windowOpen();
@@ -1664,7 +1664,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
       held = false;
       failures = 0;
       lossAt = now();
-      log(`bench release: today's attempt (${reach.windowOpen() ? 'the window open' : 'no window'})`); // P5 O15 M2b Decision Log 18 (d)
+      log(`bench release: today's attempt (${reach.windowOpen() ? 'the window open' : 'no window'})`); // P5 O15 M2b Decision Log 23 (d)
       startAttempt(); // the link left the lanes at its hold: today's attempt, a window open or not
     },
     close() {

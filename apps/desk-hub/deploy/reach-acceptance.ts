@@ -275,16 +275,17 @@ export async function buildReachScene(o: ReachRunOptions & { tag: string }, made
   for (const m of Object.values(machines)) await endpointServing(m.vm, view);
   const pa = await probe(`o18-pa-${tag}`, a.member, undefined);
   const pb = await probe(`o18-pb-${tag}`, b.member, ['audience']);
-  // The relays to A1 and A2, which A's and b1's channels ride, each closed after every undoing that acts through them.
+  // The relays to A1, A2 and B1, which A's and B's channels ride (B1's for 12b: the member's own session U over b1), each
+  // closed after every undoing that acts through them.
   const relays = new Map<string, RelayDialer>();
-  for (const m of [machines.a1, machines.a2]) {
+  for (const m of [machines.a1, machines.a2, machines.b1]) {
     const relay = new RelayDialer(person.hub, m.ref, () => person.headers);
     relays.set(m.ref, relay);
     cleanup.add(`close the relay to ${m.scene.toUpperCase()}`, async () => relay.close());
   }
   const channel = (who: 'a' | 'b', m: Pick<ReachMachine, 'ref'>) => {
     const relay = relays.get(m.ref);
-    if (relay === undefined) throw new Error(`no relay to ${m.ref}: the run's channels go to A1 and A2`);
+    if (relay === undefined) throw new Error(`no relay to ${m.ref}: the run's channels go to A1, A2 and B1`);
     return openRemote(testDevice(view.chain[0].state.org, who === 'a' ? a.device : b.device, { chain: view.chain, certificates: view.certificates }, { build: 'o18-m6-acceptance' }), m.ref, () => relay.dial());
   };
 

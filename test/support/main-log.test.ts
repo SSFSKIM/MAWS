@@ -1,7 +1,7 @@
 // The gate case's reading of the logs (test/support/main-log.ts): a line's time and text, a log's two generations, and
 // each line the case reads in the form its writer gives it (src/main/machines/remote/link.ts and subs.ts, the wake source,
 // the org feed, src/endpoint/subscriptions.ts through mawsd's `[endpoint]` prefix, the engine host's stream through its
-// routed console's `warn: [engine-host]`; Decision Log 19).
+// routed console's `warn: [engine-host]`; Decision Log 24).
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

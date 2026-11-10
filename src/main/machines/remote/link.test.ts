@@ -2278,7 +2278,7 @@ describe('the window: what goes ahead of the subscriptions', () => {
   });
 });
 
-// P5 O15 M2b Decision Log 15 (c): what the live bench (e2e/remote-latency-live.spec.ts) holds the link to
+// P5 O15 M2b Decision Log 20 (c): what the live bench (e2e/remote-latency-live.spec.ts) holds the link to
 describe('the window and the live bench', () => {
   it('passes a held link over at a wake and at `probe(network)`, and its release is today’s attempt', async () => {
     const h = await harness({ window: true });

@@ -1,10 +1,10 @@
 // The client half of the settings (P5 O3-A; docs/doperpowers/plans/2026-10-28-p5-o3-spine.md §3, contract O3X3): the
 // fields the app draws or acts on (the theme, the keymap, the notifications, the appearance, voice, the browser, the
-// usage banner's threshold, the supervisor's shape and the quit question's default, the comments view and the export
-// author), in `<profile>/settings.json` from version 21, written by main alone. The file's rules; the service that
-// composes it with the machine half is ./settings.ts.
+// usage banner's threshold, the comments view and the export author, and the supervisor's two retired fields), in
+// `<profile>/settings.json` from version 21, written by main alone. The file's rules; the service that composes it with
+// the machine half is ./settings.ts.
 import { readFileSync } from 'node:fs';
-import { ClientSettingsSchema, type ClientSettings, type Settings, type SettingsPatch, type SettingsState, type SupervisorShape, type ThemeSetting } from '@shared/ipc/schema/settings';
+import { ClientSettingsSchema, type ClientSettings, type Settings, type SettingsPatch, type SettingsState, type ThemeSetting } from '@shared/ipc/schema/settings';
 import { applyClientPatch, clientSettingsDefaults, isUnifiedSettings, mergeSettings, migrateClientSettings, migrateSettings, splitSettings, splitSettingsPatch } from '@shared/settings/defaults';
 import type { MachineSettingsService } from '@shared/spine/machine-settings';
 import { openSettingsFile, type SettingsFileRules } from '@shared/settings/file-store';
@@ -15,11 +15,19 @@ import { openSettingsFile, type SettingsFileRules } from '@shared/settings/file-
 export const clientSettingsRules: SettingsFileRules<ClientSettings> = {
   read: (raw) =>
     isUnifiedSettings(raw)
-      ? { value: splitSettings(migrateSettings(raw)).client, readOnly: 'it is a unified settings file the split has not converted (the split runs only under spine.lock)' }
-      : { value: migrateClientSettings(raw) },
+      ? { value: retireShape(splitSettings(migrateSettings(raw)).client), readOnly: 'it is a unified settings file the split has not converted (the split runs only under spine.lock)' }
+      : { value: retireShape(migrateClientSettings(raw)) },
   defaults: clientSettingsDefaults,
   validate: (value) => ClientSettingsSchema.parse(value),
 };
+
+// P5 O15 M2 (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, "Settings"): `supervisor.shape` selects nothing
+// any more, every launch runs on `mawsd`. The field stays in the schema at its type, so every saved file parses, and is
+// read and stored as `daemon` whatever the file or a caller says: here, at the store's read and at its set, and nowhere
+// else. `keepRunningDefault`, retired too, is kept as stored and read by nothing.
+function retireShape(settings: ClientSettings): ClientSettings {
+  return settings.supervisor.shape === 'daemon' ? settings : { ...settings, supervisor: { ...settings.supervisor, shape: 'daemon' } };
+}
 
 // The renderer's one `Settings` over the two halves: the client file, read and written here, and the machine half's
 // service. A patch is cut by owner, field by field, so a machine field changes only `machine-settings.json` and a client
@@ -53,7 +61,7 @@ export function composeSettings({ clientFile, machine, split }: { clientFile: st
           await within(split!(), SPLIT_WAIT_MS, `the machine daemon has not converted settings.json to this version's format within ${SPLIT_WAIT_MS / 1000} s`);
           awaitingSplit = false; // converted, or the split could not write it: the store's own read says which
         }
-        store.update((current) => applyClientPatch(current, routed.client!));
+        store.update((current) => retireShape(applyClientPatch(current, routed.client!)));
       }
       return mergeSettings(store.value, machine.state());
     },
@@ -72,18 +80,6 @@ function within(promise: Promise<void>, ms: number, why: string): Promise<void> 
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<never>((_resolve, reject) => (timer = setTimeout(() => reject(new Error(why)), ms)));
   return Promise.race([promise, late]).finally(() => clearTimeout(timer));
-}
-
-// P5 O2 M7's read of the launch's shape, before any daemon and before `spine.lock` (§2): the client file's own field,
-// read without the lock and writing nothing (no migration persisted, no warning: the store that opens the file once the
-// lock is settled says what is wrong with it). A file this build cannot read gives the default shape, as its store's
-// defaults would.
-export function readLaunchShape(file: string): SupervisorShape {
-  try {
-    return clientSettingsRules.read(JSON.parse(readFileSync(file, 'utf8'))).value.supervisor.shape;
-  } catch {
-    return clientSettingsDefaults().supervisor.shape;
-  }
 }
 
 export type ResolvedTheme = SettingsState['resolvedTheme'];

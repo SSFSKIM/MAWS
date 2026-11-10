@@ -1817,7 +1817,7 @@ function mainChain(d: Device): { fetch(request: Request): Promise<Response>; loc
     peer: () => null,
   };
   const noop = (() => {}) as never;
-  const started = startArtifacts({ hosts: hosts as unknown as ArtifactsDeps['hosts'], register: noop, registerMachine: noop, emit: noop, env: {}, openWindow: noop, root, artifactsSocket: null, remote: d.adapter.artifacts.scheme });
+  const started = startArtifacts({ hosts: hosts as unknown as ArtifactsDeps['hosts'], register: noop, registerMachine: noop, emit: noop, env: {}, openWindow: noop, root, artifactsSocket: '/tmp/artifacts.sock', remote: d.adapter.artifacts.scheme });
   cleanups.push(() => started.stop());
   const handler = schemes.handlers.at(-1)!;
   return { fetch: (request) => handler(request), local };

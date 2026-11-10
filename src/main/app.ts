@@ -2,8 +2,9 @@
 // from src/main/index.ts, which is now the entry: it runs the bootstrap every mode shares (the stdio guard, the SIGUSR1
 // refusal, MAWS_USER_DATA, Chromium's switches, the store's scheme) and then loads this module. Everything below the
 // imports is today's index.ts below that bootstrap, unchanged in behaviour.
-// P5 O3-C (docs/doperpowers/plans/2026-10-28-p5-o3-c-spine-library.md): the library's one door, its two roots
-import { COMMAND_BUDGETS_MS, openSpineData, startMachineIdentity, startSpine, type SpineData } from '../services/entry';
+// P5 O15 M2 (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md): the app composes none of the machine's services,
+// which run in `mawsd` alone; of the library it takes only the command budgets its `machine` host applies (lint rule B)
+import { COMMAND_BUDGETS_MS } from '../services/command-budgets';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandInput, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import { REGISTRY } from '@shared/ipc/registry'; // P5 O3-D M1: the bus's register reads each name's owner
@@ -13,13 +14,14 @@ import { hostname } from 'node:os'; // P5 O6 M1: the machine's name
 import { app, BrowserWindow, dialog, MessageChannelMain, screen, systemPreferences } from 'electron';
 import type { ClientRef } from '@shared/ipc/client';
 import { mainClient, pageOf } from './ipc/clients'; // P5 O3-E: mainClient, main's own asker
-import { createHosts, prepareLaunch, refuseTestLaunchOnDefaultProfile, type LaunchShape } from './hosts'; // P5 O2 M7: prepareLaunch; the landing: the refusal
+import { createHosts, prepareLaunch, refuseTestLaunchOnDefaultProfile, type LaunchOutcome, type LaunchShape } from './hosts'; // P5 O2 M7: prepareLaunch; the landing: the refusal
+import { repairLaunch } from './repair'; // P5 O15 M2: the launch `mawsd` cannot start
+import { readMachineIdentity } from './machine/identity'; // P5 O15 M2: the profile's MachineRef, with no services' module
 import { beforeCommand, dispatchLocal, installRouter, invokeOwn } from './ipc/router'; // P5 O6 M3: dispatchLocal, the local link's and the stand-in's; P5 O3-E: invokeOwn, main's own calls; P5 O4: beforeCommand
 import { startSettings, type SettingsService } from './client/settings'; // P5 O3-A: the client half, composed with the machine's
-import { readLaunchShape } from './client/settings-store'; // P5 O3-A
-import { createMachineSettingsMirror } from './client/machine-settings-mirror'; // P5 O3-D M5b: the daemon shape's machine half
-import { startDaemonSpine, type DaemonSpine } from './sessions/daemon-spine'; // P5 O3-D M5b: the daemon shape's spine
-import { CUA_SOCKET_DIR, cuaSocketPath } from '@shared/browser/cua-socket'; // P5 O3-D M5b; P5 O5 M5: cuaSocketPath
+import { createMachineSettingsMirror } from './client/machine-settings-mirror'; // P5 O3-D M5b: mawsd's machine half
+import { startDaemonSpine, type DaemonSpine } from './sessions/daemon-spine'; // P5 O3-D M5b: mawsd's spine, through main's mirror
+import { CUA_SOCKET_DIR } from '@shared/browser/cua-socket'; // P5 O3-D M5b
 import { daemonPaths } from '@shared/daemon/files'; // P5 O5 M2: artifacts.sock
 import { launchMode, scenarioPath } from '@shared/sessions/select-source'; // P5 O3-D M5b (D11)
 import { settingsPaths } from '@shared/settings/paths';
@@ -69,7 +71,7 @@ import { notificationActions } from './attention/actions';
 import { startAttention } from './attention';
 import { LayoutFileStore } from './layout/store';
 import { registerChatPanels } from './sessions/panel-lifetime';
-import { askToQuit, installQuitGuard, listProcesses } from './lifecycle/quit-guard';
+import { askToQuit, installQuitGuard } from './lifecycle/quit-guard';
 import { registerMenuHandlers, startMenu } from './menu';
 import { openForMachine, registerOpenExternal } from './open-external'; // P5 O7 M5c: openForMachine
 import { electronClientPort } from './client/electron-port'; // P5 O1 M3
@@ -110,9 +112,6 @@ import { trackUnsavedFiles } from './lifecycle/quit-guard';
 // E2 start
 import { appWindows } from './windows';
 // E2 end
-// E10 start
-import { engineQuitDeps } from './lifecycle/engine-quit';
-// E10 end
 // E11 start
 import { shutdownSteps } from './lifecycle/shutdown';
 import { startReaper } from './lifecycle/reaper'; // the quit reaper
@@ -209,8 +208,11 @@ const diskBuildIsNewer = (): string | null =>
     running: MAIN_BUILD,
     formatTime: builtAtLabel,
   }))();
+// P5 O15 M2: while the repair window is up, a second launch brings it forward and tries the launch once more
+let repairSecondLaunch: (() => void) | null = null;
 function answerSecondLaunch(launched: MainBuild | null): void {
   console.log(`[main] a second launch (${launched === null ? 'an unknown build' : describeMainBuild(launched)}) was handed to this instance`); // P5 O15 M2b §H
+  if (repairSecondLaunch !== null) return repairSecondLaunch();
   const win = bringForward();
   if (win === null) return; // quitting (or not yet started): nothing to bring forward or offer
   const onDisk = diskBuildIsNewer(); // asked either way, so the build on disk this answer covers is not said again
@@ -226,7 +228,7 @@ void startWithProfileLock(app, () => {
   let local: MachineRef;
   let localName: string; // P5 O6 M3: a display attribute, for machines.list
   try {
-    ({ ref: local, name: localName } = startMachineIdentity({ userData: app.getPath('userData'), env: process.env, hostname: hostname(), register: registerMachineHandler }));
+    ({ ref: local, name: localName } = readMachineIdentity({ userData: app.getPath('userData'), env: process.env, hostname: hostname() }));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[machine] ${message}`);
@@ -235,34 +237,26 @@ void startWithProfileLock(app, () => {
     return;
   }
   bindLocalMachine(local); // P5 O6 M2: the router's, `emit`'s and every app window's local machine
-  // P5 O2 M7: the launch's shape (`supervisor.shape`, read once) settled before the hosts are created: the default
-  // profile's LaunchAgent installed, repaired or uninstalled first. P5 O3-A (the O3 document §2): the shape is the client
-  // file's own field, read without the spine lock and writing nothing; the lock is taken once the shape is settled.
-  const profile = app.getPath('userData');
-  const paths = settingsPaths(profile);
+  // P5 O15 M2 (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, Interfaces §A, §B): the launch's one outcome,
+  // settled before the hosts are created: `mawsd` (the main profile's LaunchAgent installed or repaired and started, or a
+  // private daemon), or the repair window, which says why and resolves once an attempt succeeds; the same process then
+  // goes on into the app. Main opens none of the machine's files and takes no spine.lock: `mawsd` does.
   const machine = { local, localName };
-  return Promise.resolve(prepareLaunch(readLaunchShape(paths.client))).then(
-    // P5 O3-A, O3-C: the spine's data (spine.lock, then the split and the machine half) once the shape has settled. P5 O3-D
-    // M5b: on the daemon shape the spine is `mawsd`'s, which takes spine.lock and alone writes the machine's files; main
-    // opens none of them
-    async (settled) => startMain(settled.mode === 'daemon' ? null : await openSpineData(profile, { build: `${MAIN_BUILD.version}+${MAIN_BUILD.commit}` }), settled, machine),
-    (error: unknown) => {
-      console.error('[hosts] the launch could not settle its shape; quitting', error);
+  // fix wave 1: a throw from the outcome's synchronous part is a rejection the chain handles (prepareLaunch throws none)
+  return new Promise<LaunchOutcome>((resolve) => resolve(prepareLaunch()))
+    .then((outcome) => (outcome.ok ? outcome.launch : repairLaunch(outcome.unavailable, prepareLaunch, { packaged: app.isPackaged, profileDir: app.getPath('userData'), env: process.env, onSecondLaunch: (listener) => (repairSecondLaunch = listener) })))
+    .then((launch) => {
+      repairSecondLaunch = null;
+      startMain(launch, machine);
+    })
+    .catch((error: unknown) => {
+      console.error('[main] MAWS could not start; quitting', error);
       app.exit(1);
-    },
-  ).catch((error: unknown) => {
-    console.error('[main] MAWS could not start; quitting', error);
-    app.exit(1);
-  });
+    });
 }, { build: MAIN_BUILD, onSecondInstance: answerSecondLaunch }); // E11 §2.7
 
-// P5 O3-A (the O3 document §2, §3; contracts O3X2, O3X3): `openSpineData` took `spine.lock` before either settings file
-// is migrated or written and before the index opens (startSpine), then, holding it, split a unified settings file, once,
-// and started the machine half; the client half composes with it here. Refused, nothing is migrated, the machine half is
-// read and never written, and the client file is written only once it is a client file. The lock is held for the
-// process's life.
-// P5 O3-D M5b (D11): a scenario launch on the daemon shape plays its scenario in mawsd, which inherits this environment;
-// the scenario's path is resolved here, against main's root, before mawsd is started with it.
+// P5 O3-D M5b (D11): a scenario launch plays its scenario in mawsd, which inherits this environment; the scenario's path
+// is resolved here, against main's root, before mawsd is started with it.
 function absoluteScenarioPath(): void {
   if (launchMode(process.env, app.isPackaged) !== 'scenario') return;
   try {
@@ -272,23 +266,19 @@ function absoluteScenarioPath(): void {
   }
 }
 
-// P5 O3-D M5b (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §F, §G, §E; D11, D19, D20, D25): two
-// roots by shape. The embedded one (`data`, this run's spine.lock and machine half) composes the spine here, as above. On
-// the daemon shape (`data` null) the spine runs in `mawsd`: main binds `machine` as `host`, reads the spine through its
-// mirror (src/main/sessions/spine-mirror.ts), the machine half through its settings mirror, answers the client port's
-// requests and holds neither spine.lock nor any of the machine's files.
-function startMain(data: SpineData | null, launch: LaunchShape, { local, localName }: { local: MachineRef; localName: string }): void {
+// P5 O3-D M5b (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §F, §G, §E; D11, D19, D20, D25); P5 O15
+// M2: the spine runs in `mawsd`: main binds `machine` as `host`, reads the spine through its mirror
+// (src/main/sessions/spine-mirror.ts), the machine half through its settings mirror, answers the client port's requests
+// and holds neither spine.lock nor any of the machine's files.
+function startMain(launch: LaunchShape, { local, localName }: { local: MachineRef; localName: string }): void {
   const profile = app.getPath('userData');
   // D11: a scenario's path made absolute before mawsd is started with this environment, so its own root is never consulted
-  if (data === null) absoluteScenarioPath();
-  // P5 O3-A (the O3 document §2): whether this run holds `spine.lock`. Refused, none of the spine's services that write
-  // the machine's files or launch a session starts (startSpine says which), the index is opened unavailable, and the
-  // client half runs.
-  const { hosts, daemon } = createHosts(MAIN_BUILD, launch, { spineRefused: data?.refused ?? null, machineBudgetsMs: COMMAND_BUDGETS_MS }); // E11 §2.7: main's build for host.status; P5 O2 M7: the launch's shape; P5 O3-A: why the spine does not run
-  // P5 O3-D M5b (§G, D20): the daemon shape's machine half mirrors mawsd's, from machine-settings.json read and never written;
-  // a client change waits for mawsd's settings split at the first launch on a profile before it (composeSettings)
-  const mirror = data === null ? createMachineSettingsMirror({ file: settingsPaths(profile).machine, hosts, log: (line) => console.log(line) }) : null;
-  const settings: SettingsService = startSettings({ clientFile: settingsPaths(profile).client, machine: data?.machineSettings ?? mirror!, ...(mirror && { split: mirror.answered }) });
+  absoluteScenarioPath();
+  const { hosts, daemon } = createHosts(MAIN_BUILD, launch, { machineBudgetsMs: COMMAND_BUDGETS_MS }); // E11 §2.7: main's build for host.status; P5 O2 M7: the launch's daemon
+  // P5 O3-D M5b (§G, D20): the machine half mirrors mawsd's, from machine-settings.json read and never written; a client
+  // change waits for mawsd's settings split at the first launch on a profile before it (composeSettings)
+  const mirror = createMachineSettingsMirror({ file: settingsPaths(profile).machine, hosts, log: (line) => console.log(line) });
+  const settings: SettingsService = startSettings({ clientFile: settingsPaths(profile).client, machine: mirror, split: mirror.answered });
   installContentSecurityPolicy();
   // C9 block begin: the harness's fake session directories; a terminal's links open through pty.openLink
   if (process.env.MAWS_HARNESS === '1') prepareHarness();
@@ -523,7 +513,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     if (!result.ok) throw new CommandFailure(result.error);
     return result.value;
   });
-  // P5 O3-D M5b: on the daemon shape a `machine` name goes to mawsd's services front (the `machine` host); the spine's
+  // P5 O3-D M5b: a `machine` name goes to mawsd's services front (the `machine` host); the spine's
   // mirror, once it runs, is told each forward, to replay the pages' visibility claims at each streaming of mawsd
   // P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §E): a page's git.watch and git.unwatch
   // go through the spine's watch replay, which sends them under units of its own and gives them back at each streaming
@@ -534,8 +524,8 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     if (owner === 'machine') forwardedToMachine?.(name, input, client);
     return hosts.dispatch(owner, name, input, client);
   };
-  // P5 O5 M4: on the daemon shape artifacts.export goes to mawsd's render seam while its welcome lists machine.render, and
-  // is answered by this root's own registration (startArtifacts) on an older daemon; before any welcome it is forwarded
+  // P5 O5 M4: artifacts.export goes to mawsd's render seam while its welcome lists machine.render, and is answered by
+  // this root's own registration (startArtifacts) on an older daemon; before any welcome it is forwarded
   const daemonRenders = () => {
     const peer = hosts.peer('machine');
     return peer === null || peer.capabilities.includes(MACHINE_RENDER_CAPABILITY);
@@ -545,21 +535,18 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     const peer = hosts.peer('machine');
     return peer === null || peer.capabilities.includes(MACHINE_DELIVERY_CAPABILITY);
   };
-  installRouter({ appUrl, local, dispatchToHost, remote: routeLaneB(routeLaneA(machines.dispatch, (ref) => machines.remote(ref), remoteLaneA), (ref) => machines.remote(ref), remoteLaneB), machine: data === null ? { kind: 'host', daemonRenders, daemonDelivers } : { kind: 'embedded' } });
-  // P5 O3-C (Interfaces §A): the services bus, how the library (the spine and the checkouts) registers its commands,
-  // installs its intercepts, emits its events and taps them, bound here to the router and `emit`, so every tap main's
-  // own code holds (the menu's, the stand-in's) still hears the library's events. O3-D's mawsd binds its services front.
-  // P5 O3-D M1: the spine's commands are `machine`-owned, so a `machine` name goes to the router's embedded machine
-  // binding (its output checked as a host runtime checks it) and a `main` one to its main handlers (P5 O3-E: the
-  // checkouts' are `machine`-owned too, composed by the spine's root).
+  installRouter({ appUrl, local, dispatchToHost, remote: routeLaneB(routeLaneA(machines.dispatch, (ref) => machines.remote(ref), remoteLaneA), (ref) => machines.remote(ref), remoteLaneB), machine: { kind: 'host', daemonRenders, daemonDelivers } });
+  // P5 O3-C (Interfaces §A): the services bus, bound here to the router and `emit`, so every tap main's own code holds
+  // (the menu's) hears mawsd's events, and main's own calls take main's own route. P5 O15 M2: no library registers its
+  // commands here any more; `register` is the older-daemon answers' (a `machine` name answered here only while the
+  // daemon's welcome lacks what serves it, the router's `answeredHere`) and main's own.
   const bus: ServicesBus = {
     register: (name, handler) => (REGISTRY.commands[name].owner === 'machine' ? registerMachineHandler(name, handler) : registerMainHandler(name, handler)),
     intercept: interceptCommand,
     emit,
     onEmitted,
-    // P5 O3-D M2 (Interfaces §H): the router's local route, which answers a `machine` name through the embedded binding;
-    // P5 O3-E M2 (Interfaces §D): main's own route past the main-only refusal (`machine.op`'s claimed acts are graded
-    // acts, never main-only), which on the daemon shape forwards to mawsd
+    // P5 O3-D M2 (Interfaces §H); P5 O3-E M2 (Interfaces §D): main's own route past the main-only refusal (`machine.op`'s
+    // claimed acts are graded acts, never main-only), which forwards a `machine` name to mawsd
     invoke: (name, input, context) => invokeOwn(name, input, { ...context, target: local }) as never,
   };
   remoteLink = (ref) => machines.remote(ref);
@@ -620,57 +607,28 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     roster = refs;
     for (const listener of [...rosterListeners]) listener();
   });
-  // The engine's environment (the login-shell capture): the spine's launches and transcripts, the checkouts' scm, and
-  // Send to's gws (P5 O4: the spine's delivery) read it.
+  // The engine's environment (the login-shell capture): main's gcloud lookup reads its PATH (mawsd captures its own for
+  // the spine's launches, the checkouts' scm and Send to's gws).
   const home = app.getPath('home');
   const engineEnv = captureShellEnvironment();
-  // P5 O3-C (docs/doperpowers/plans/2026-10-28-p5-o3-c-spine-library.md, Interfaces §D): the spine, composed by its root
-  // from what main binds (O3-D's mawsd calls the same root): the index with its session source, replay and the read
-  // model, attention's core, the owner channel, the session service and its siblings, the configure and defaults relays
-  // and the library's derived index. From here main holds of it only its view, the one way the code that stays in the
-  // app reads the spine (the notifier, the quit guard, the chat panels, the interest report, the browser, until O4 the connectors,
-  // the export authors, the org rows, Settings' reveal, and until O3-E the checkouts), and its stop. Its reverse reads
-  // are ports: the sweep keeps this app's interest set (bound below, once the layout and the view exist; D11), and a
-  // launch is told the browser's cua socket (E13; the browser starts below, and a launch asked before it carries none).
-  let boundInterest: ReturnType<typeof appInterest> | null = null;
+  // P5 O3-C (docs/doperpowers/plans/2026-10-28-p5-o3-c-spine-library.md, Interfaces §D); P5 O3-D M5b: the spine is
+  // `mawsd`'s; main holds of it only its view through main's mirror, the one way the code that stays in the app reads the
+  // spine (the notifier, the quit guard, the chat panels, the interest report, the browser, the export authors, the org
+  // rows, Settings' reveal), the client port's answers and its stop. A launch is told mawsd's cua socket once the browser
+  // starts below (E13).
   let cuaSockets: Browser['cua'] | null = null;
-  const spine = data === null
-    ? // P5 O3-D M5b: the daemon shape's, mawsd's spine through main's mirror and the client port's answers
-      startDaemonSpine({ hosts, daemon: daemon!, port: clientPort, browserSocket: () => (cuaSockets ? join(profile, ...CUA_SOCKET_DIR) : null), emit: (name, payload) => void emit(name, payload), budgetsMs: COMMAND_BUDGETS_MS })
-    : startSpine({
-        profile: app.getPath('userData'),
-        machine: local,
-        data,
-        hosts,
-        bus,
-        clientPort,
-        interest: () => {
-          if (boundInterest === null) throw new Error('the interest set was read before main bound it');
-          return boundInterest.set();
-        },
-        browserSocket: (appSessionId) => cuaSockets?.socketPathFor(appSessionId) ?? null,
-        trash: (path) => shell.trashItem(path),
-        engineEnv,
-        env: process.env,
-        packaged: app.isPackaged,
-        appPath: app.getAppPath(), // the replay fixtures' checkout
-        devRoot: process.cwd(), // a relative scenario path is the repository's: `pnpm dev`, `pnpm dev:stub` and the smoke's launch alike
-        home,
-      });
+  const spine = startDaemonSpine({ hosts, daemon, port: clientPort, browserSocket: () => (cuaSockets ? join(profile, ...CUA_SOCKET_DIR) : null), emit: (name, payload) => void emit(name, payload), budgetsMs: COMMAND_BUDGETS_MS });
   shutdown.add('spine', spine.stop);
-  if ('forwarded' in spine) {
-    forwardedToMachine = spine.forwarded; // the daemon shape's mirror and watch replay (the router's forwards above)
-    watchReplay = spine.watches;
-  }
+  forwardedToMachine = spine.forwarded; // the mirror and the watch replay (the router's forwards above)
+  watchReplay = spine.watches;
   const view = spine.view;
   // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §B, §F; D8, D28, D32): the connectors are
-  // the spine's (mawsd's on the daemon shape, startSpine's above on the embedded one). The app reports each page's window
-  // to them through the router's seam before a lease command, adopts the grants Electron's safeStorage sealed once per
-  // launch (at the machine host's first streaming on the daemon shape, now on the embedded one), and at each later
-  // streaming of the machine host tells its windows `connectors.reset`, on which they rebuild their leases.
+  // the spine's, in mawsd. The app reports each page's window to them through the router's seam before a lease command,
+  // adopts the grants Electron's safeStorage sealed once per launch (at the machine host's first streaming), and at each
+  // later streaming of the machine host tells its windows `connectors.reset`, on which they rebuild their leases.
   const appConnectors = startAppConnectors({
     local, // P5 O7 M5c: the machine host's reset names this Mac's machine
-    machine: data === null ? { streaming: () => hosts.streaming('machine'), onStreaming: (listener) => hosts.onStreaming('machine', listener) } : null,
+    machine: { streaming: () => hosts.streaming('machine'), onStreaming: (listener) => hosts.onStreaming('machine', listener) },
     windowShown: windowShownOf,
     invoke: bus.invoke,
     before: beforeCommand,
@@ -735,7 +693,6 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   // P5 O2 M2; P5 O3-C (D11): the sessions this app holds open (its tabs and the sessions on screen), one memoized set the
   // interest report sends and the inactive sweep keeps
   const interest = appInterest(layout, view, local); // P5 O6: the local machine's
-  boundInterest = interest;
 
   // The application menu from the action table, rebuilt on settings and on the page's registered handlers.
   registerMenuHandlers(startMenu({ settings: () => settings.state().settings, emit }));
@@ -841,7 +798,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     // E4c start: the browser tools answer the engine host's requests (E4c Design §4; Decision Log 36)
     hosts,
     // E4c end
-    machineHost: launch.mode === 'daemon', // P5 O17 M9b: the app a tab engine to mawsd only where its machine host runs
+    machineHost: true, // P5 O17 M9b: the app a tab engine to mawsd, whose machine host every launch runs (P5 O15 M2)
     // P5 O7 M3: a remote session's tabs are this Mac's, said from its machine; a forwarded port's tab opens its forward
     // again at its first load past a relaunch (src/main/browser/machines.ts, forwarded.ts)
     remote: {
@@ -856,33 +813,21 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   });
   shutdown.add('browser', browser.stop);
   cuaSockets = browser.cua; // E13
-  // P5 O5 M5 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §H): on the daemon shape a launch is told
+  // P5 O5 M5 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §H): a launch is told
   // mawsd's socket, which checks the engine's peer and relays the connection here from its own process; every session's
   // socket admits that relay by the daemon the machine link is connected to: its socket's peer, pid and start read
   // through the addon at each change of the link (none while it is down), never a pid remembered from a welcome; the pass
   // holds once mawsd answers a request sent on that same link after the read (machine.identity, the front's own, cold)
-  if (launch.mode === 'daemon') {
-    let told = 0; // each change of the link: a confirmation counts only for the link it was sent on
-    const tellRelay = () => {
-      const link = ++told;
-      const fd = hosts.snapshot('machine').state === 'ready' ? hosts.servedFd('machine') : null;
-      if (fd === null) return browser.cua.relay(null);
-      const current = () => link === told && hosts.snapshot('machine').state === 'ready' && hosts.servedFd('machine') === fd;
-      browser.cua.relay({ fd, confirm: async () => (await hosts.dispatch('machine', 'machine.identity', undefined)).ok && current() });
-    };
-    tellRelay();
-    shutdown.add('cua relay', hosts.onState('machine', tellRelay));
-  }
-  // P5 O5 M5 (Interfaces §I): on the embedded shape this app is the session's machine, its renderer and its tab engine,
-  // so a session's capabilities hold but for a socket path too long for its browser (mawsd answers them on the daemon's)
-  if (data !== null) {
-    const appCuaDir = join(app.getPath('userData'), ...CUA_SOCKET_DIR);
-    registerMachineHandler('session.capabilities', ({ appSessionId }) => ({
-      artifact_screenshot: { available: true },
-      artifact_export: { available: true },
-      browser: cuaSocketPath(appCuaDir, appSessionId) === null ? { available: false, reason: `the browser socket of this session is longer than a Unix socket allows on ${localName}` } : { available: true },
-    }));
-  }
+  let told = 0; // each change of the link: a confirmation counts only for the link it was sent on
+  const tellRelay = () => {
+    const link = ++told;
+    const fd = hosts.snapshot('machine').state === 'ready' ? hosts.servedFd('machine') : null;
+    if (fd === null) return browser.cua.relay(null);
+    const current = () => link === told && hosts.snapshot('machine').state === 'ready' && hosts.servedFd('machine') === fd;
+    browser.cua.relay({ fd, confirm: async () => (await hosts.dispatch('machine', 'machine.identity', undefined)).ok && current() });
+  };
+  tellRelay();
+  shutdown.add('cua relay', hosts.onState('machine', tellRelay));
   // E4a end
   // E4b start: the Chrome import over E4a's handle (E4b Decision Log 31, 32, 34): browser.import.*, the per-boot loading
   // of an imported profile's extensions, the active profile's partition prepared now; at will-quit a running import is
@@ -933,42 +878,40 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     env: process.env,
     openWindow,
     root: join(app.getPath('userData'), 'artifacts'), // P3-A M7: the store's directory (the host's own rule)
-    artifactsSocket: launch.mode === 'daemon' ? daemonPaths(profile).artifactsSocket : null, // P5 O5 M2: the scheme proxy's endpoint, while the daemon's welcome lists it
+    artifactsSocket: daemonPaths(profile).artifactsSocket, // P5 O5 M2: the scheme proxy's endpoint, while the daemon's welcome lists it
     authors: exportAuthors, // P5 O5 M3
     remote: remoteLaneB.artifacts.scheme, // P5 O7 M5b: another machine's artifact pages, over its link
   });
   shutdown.add('artifacts', artifacts.stop);
   // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, D7): an artifact page's connectors, the owner's
-  // grants, rows and sign-ins, the engine's MCP sign-in and the owner's Send to are the machine's, composed with the spine
-  // (mawsd's on the daemon shape, startSpine's above on the embedded one). P5 O7 M5c
+  // grants, rows and sign-ins, the engine's MCP sign-in and the owner's Send to are the machine's, composed with mawsd's
+  // spine. P5 O7 M5c
   // (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "O4's surfaces: leases, the window, delivery on the
-  // machine"): `delivery.send` is the machine's too, its export and its delivery both, on either shape; main's own send
+  // machine"): `delivery.send` is the machine's too, its export and its delivery both; main's own send
   // (./delivery/send.ts: the export here, the file handed to the machine's `delivery.deliver`, a cancel in its export phase
   // answered here) is kept as the shim for a daemon whose welcome lists no `machine.delivery`, which the router answers
-  // here alone (`daemonDelivers`). The embedded shape's spine serves `delivery.send` itself.
-  if (data === null) {
-    shutdown.add(
-      'delivery send',
-      registerDeliverySend({
-        register: (name, handler) => registerMachineHandler(name, handler),
-        before: beforeCommand,
-        // P5 O5 M4: the library's Export as the machine command, its dialect on the wire: mawsd's render seam, or this
-        // root's handler on an older daemon; the e2e's hold around it (./delivery/e2e-hold.ts)
-        exportArtifact: exportHeldFor(async (input: CommandInput<'artifacts.export'>, options?: { dialect?: 'notion' }) => {
-          const exported = await invokeOwn('artifacts.export', { ...input, ...(options?.dialect && { dialect: options.dialect }) }, { client: mainClient, target: local });
-          if (!exported.ok) throw new Error(exported.error.message);
-          return exported.value as CommandOutput<'artifacts.export'>;
-        }, process.env),
-        call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
-        invoke: bus.invoke,
-      }),
-    );
-  }
+  // here alone (`daemonDelivers`).
+  shutdown.add(
+    'delivery send',
+    registerDeliverySend({
+      register: (name, handler) => registerMachineHandler(name, handler),
+      before: beforeCommand,
+      // P5 O5 M4: the library's Export as the machine command, its dialect on the wire: mawsd's render seam, or this
+      // root's handler on an older daemon; the e2e's hold around it (./delivery/e2e-hold.ts)
+      exportArtifact: exportHeldFor(async (input: CommandInput<'artifacts.export'>, options?: { dialect?: 'notion' }) => {
+        const exported = await invokeOwn('artifacts.export', { ...input, ...(options?.dialect && { dialect: options.dialect }) }, { client: mainClient, target: local });
+        if (!exported.ok) throw new Error(exported.error.message);
+        return exported.value as CommandOutput<'artifacts.export'>;
+      }, process.env),
+      call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
+      invoke: bus.invoke,
+    }),
+  );
   // P4-AGG M2: Discover's catalog (the person's, never an agent's): the seed marketplaces, Anthropic's directory and the
   // official install counts through the `catalog` egress rule, cached under userData, joined with the engine's reads per
   // cwd. P5 O4 M3 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, D16): those reads and the watch of the engine's
-  // plugin state are the machine's, composed with the spine (mawsd's on the daemon shape, startSpine's above on the
-  // embedded one), asked through main's own route and heard through the bus's tap, which hears mawsd's events too
+  // plugin state are the machine's, composed with mawsd's spine, asked through main's own route and heard through the
+  // bus's tap, which hears mawsd's events
   const catalog = startCatalog({
     register: registerMainHandler,
     emit: (name, payload) => emit(name, payload),
@@ -1037,7 +980,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     remote: remoteLaneB.attention,
     remoteTitle: (machine, app) => remoteRows.rows().rows.find((row) => row.machine === machine && row.session === app)?.title ?? null,
   }); // P5 O3-C (readers R1, R2)
-  // C12: the busy report asks C9's pty host (read only: pty.list and pty.foreground) and publishes Quit when idle's wait
+  // C12: the busy report asks C9's pty host (read only: pty.list and pty.foreground)
   const quitGuard = installQuitGuard(view, { // P5 O3-C (reader R3)
     // C12 start
     pty: {
@@ -1053,12 +996,13 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
       },
       hostGone: () => hosts.snapshot('pty-host').state !== 'ready',
     },
-    publish: (waiting) => void emit('layout.quitWait', { waiting }),
     log: process.env.MAWS_E2E === '1' ? (line) => console.error(line) : undefined,
     // C12 end
-    ask: (report, asked /* E5 */, keep /* E10 */) =>
+    // P5 O3-D (Q1); P5 O15 M2: the sessions and the terminals are mawsd's and outlive the app, so a quit asks only about
+    // the unsaved files (E5) and stops nothing of the machine's
+    ask: (files, asked /* E5 */) =>
       askToQuit(
-        report,
+        files,
         {
           env: process.env,
           show: (options) => {
@@ -1067,17 +1011,9 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
           },
         },
         asked,
-        keep,
       ),
-    // C3's engine host stops its sessions within the grace; a host that cannot answer (not started, or a build without
-    // C3's command) has nothing to stop. E10: through the quit's stop-all (`host.stopAll` to a detached supervisor, which
-    // then exits; `engine.shutdown` to a utility host), and keep offered in detached mode with the setting's default.
-    ...engineQuitDeps(hosts, () => settings.state().settings, () => launch.mode === 'daemon'), // P5 O2 M7, P5 O3-D (Q1): terminals and sessions outlive the app on the daemon shape
-    // debt wave 6: past the bound, the ladder's SIGKILL rung for the engines still the engine host's children
-    engines: { hostPid: () => hosts.snapshot('engine-host').pid, ps: listProcesses, kill: (pid) => process.kill(pid, 'SIGKILL') },
     // E5 start: the unsaved files the windows pushed, and Save all's round trip
     unsavedFiles: () => unsavedFiles.paths(),
-    onUnsavedFiles: (listener) => unsavedFiles.onChange(listener), // E11
     saveAll: () => unsavedFiles.saveAll((requestId) => void emit('layout.saveAll', { requestId })),
     // E5 end
   });
@@ -1138,7 +1074,4 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     wake.close();
     reach.close();
   });
-  // P5 O3-A: spine.lock is released at the process's exit alone (openSpineData), never at a will-quit step: the steps'
-  // promises settle after the last step is called, and a writer still finishing (an intent's rename) must not run
-  // beside a candidate that took the lock meanwhile.
 }

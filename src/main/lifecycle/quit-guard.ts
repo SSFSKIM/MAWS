@@ -1,83 +1,42 @@
-// Quitting with turns in flight asks first (D-16; C5 execution document, "Quit guard"; residue *Quit coordination*).
-// Mid-turn is counted from C3's engine statuses in the read model (`midTurnCount`), never from the folded digest.
-// C12 start: the widened question (C12 execution document, Interfaces "The quit question"; charter §3 P0 quit line as
-// aligned by D8). The report counts sessions mid-turn, launching or otherwise working (host work in flight, or the
-// engine running or waiting, with no turn), sessions running background tasks or workflows that are not counted so,
-// and terminals whose shell has a foreground command (C9's `pty.foreground`, asked in parallel, an unanswered probe
-// counted busy as C9's close check does). `before-quit` must prevent synchronously and the report is
-// asynchronous, so the guard always holds the quit while it computes the report: all zero, it quits; otherwise it asks
-// Quit, Quit when idle or Cancel. Quit quits; Quit when idle holds the quit, publishes the waiting report for the page's
-// banner, re-reads it on every status change (E11: and every unsaved-files push) and every 2 s, and quits at zero.
-// Every quit first stops the engine host's sessions (`engine.shutdown`, each through its ladder) and waits for that
-// answer, bounded by SHUTDOWN_BOUND_MS, before the final app.quit(): will-quit then kills the hosts, and an engine still running there would outlive the app. (E10:
-// in detached mode every quit but a keep stops them through `stopAllForQuit`, which sends `host.stopAll` and the
-// supervisor exits after it; will-quit only closes the supervisor's socket, killing nothing.)
-// Foreign-live sessions and the owner's terminals outside MAWS are never waited on (the statuses and the pty table are
-// MAWS's own). Quitting is one flight: once it starts, outside quits stay held and any report, question or wait still
-// out is inert until the one final app.quit() (review fix). The end-to-end smoke answers without a dialog. The
-// `Restart` wording waits for P1's updater.
+// Quitting asks first about what the app alone holds (D-16; C5 execution document, "Quit guard"; residue *Quit
+// coordination*). P5 O15 M2 (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, "Quitting"): the sessions and
+// the terminals belong to `mawsd`, which outlives the app, so a quit never stops them and never asks about them; the
+// embedded shape's keep-or-stop question, its stop-all and SIGKILL rung, and the when-idle wait went with that shape.
+// C12 start: the busy report (C12 execution document, Interfaces "The quit question"; charter §3 P0 quit line as aligned
+// by D8). It counts sessions mid-turn, launching or otherwise working (host work in flight, or the engine running or
+// waiting, with no turn; counted from C3's engine statuses in the read model, `midTurnCount`, never from the folded
+// digest), sessions running background tasks or workflows that are not counted so, and terminals whose shell has a
+// foreground command (C9's `pty.foreground`, asked in parallel, an unanswered probe counted busy as C9's close check
+// does). `before-quit` must prevent synchronously and the report is asynchronous, so the guard always holds the quit
+// while it computes the report. The report is logged whole; a quit with sessions busy and no file unsaved logs what it
+// did not ask, for the e2e. Foreign-live sessions and the owner's terminals outside MAWS are never counted (the statuses
+// and the pty table are MAWS's own). Quitting is one flight: once it starts, outside quits are not asked about again and
+// any report or question still out is inert (review fix). The end-to-end smoke answers without a dialog. The `Restart`
+// wording waits for P1's updater.
 // C12 end
 // E5 start: unsaved editor files (E5 execution document, Interfaces "The quit guard and unsaved files (M5)"; the owner's
-// ruling of 2026-10-06). Each window pushes its dirty file tabs (`layout.unsavedFiles`); the report carries their union
-// and counts it, so a wait also waits for a file dirtied during it. With files unsaved the question offers Save all,
-// Quit anyway and Cancel: Save all asks every window to save (`layout.saveAll`), waits for each window holding files to
-// answer, bounded, then reads the report again, quitting when nothing is left and asking again otherwise; the question
-// asked again names each file a window could not save with its reason. A tab in the merge view is never saved by Save
-// all (the renderer answers it as the conflict it is). Under MAWS_E2E a question asked again about unsaved files is
-// answered Cancel, so a save that keeps failing cannot loop a test.
+// ruling of 2026-10-06). Each window pushes its dirty file tabs (`layout.unsavedFiles`); the report carries their union.
+// With files unsaved the question offers Save all, Quit anyway and Cancel: Save all asks every window to save
+// (`layout.saveAll`), waits for each window holding files to answer, bounded, then reads the report again, quitting when
+// no file is left unsaved and asking again otherwise; the question asked again names each file a window could not save
+// with its reason. A tab in the merge view is never saved by Save all (the renderer answers it as the conflict it is).
+// Under MAWS_E2E a question asked again is answered Cancel, so a save that keeps failing cannot loop a test. With no file
+// unsaved the app quits without asking.
 // E5 end
-// E10 start: keeping the sessions running (E10 execution document, §Design 5; ruled by A-29). In detached mode the engine
-// host is the supervisor, which outlives the app, so a non-zero report is asked with "Quit and keep sessions running"
-// first (the default button when the setting says so, else Quit; Cancel stays the cancel button). Keep skips the engine
-// shutdown and the SIGKILL rung and quits: will-quit then closes the supervisor's socket without an exit, and it serves
-// its sessions on. Every other quit stops the sessions as before (shutdownEngine). With files unsaved E5's question
-// comes first, unchanged; after Save all the ordinary question, keep included, follows. An unbusy quit is never asked.
-// E10 end
-// P5 O3-D start (Q1, D12; docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md): on the daemon shape the sessions, like
-// the terminals, belong to `mawsd`, which outlives the app and frees them at its idle release (`sessionsOutlive`). The
-// report decides and asks on its unsaved files alone: Quit asks only about them (Save all, Quit anyway, Cancel), offers
-// no keep and no when-idle, and every quit leaves the sessions running (no stop-all, no SIGKILL rung). The report is
-// still logged whole, and a quit that would have asked logs what it did not ask. The embedded shape keeps the question.
-// P5 O3-D end
-import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto'; // E5
 import { basename } from 'node:path'; // E5
 import { app, type MessageBoxOptions } from 'electron';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { ClientId, ClientRef } from '@shared/ipc/client';
 import type { SpineView } from '@shared/spine/view';
-import { QUIT_KEEP } from './copy'; // E10
-import { SESSION_HOST_BINARY } from '../../engine-host/holder/files'; // O16 panel 1
 
 // C12 start
-export type QuitAnswer = 'quit' | 'when_idle' | 'cancel' | 'save_all' /* E5 */ | 'keep' /* E10 */;
+export type QuitAnswer = 'quit' | 'cancel' | 'save_all' /* E5 */;
 // terminalsUnknown: a live pty host did not list its terminals in time, so they count as one busy terminal, said so
 // E5: unsavedFiles, the absolute paths of every window's dirty file tabs, sorted
 export interface BusyReport { midTurn: number; backgroundWork: number; busyTerminals: number; terminalsUnknown: boolean; unsavedFiles: string[] }
 
 export const PROBE_TIMEOUT_MS = 2_000; // per terminal, and for the list
-export const WAIT_POLL_MS = 2_000;
-// How long a quit waits for engine.shutdown (E10: or, detached, host.stopAll; the same ladder). The host's ladder (session-ladder.ts) writes end_session and waits 3 s for
-// the exit, then closes stdin and sends SIGTERM (2.1.283's own handler exits 143: pass3/sigterm-disposition.mjs), then
-// SIGKILL at 6 s. 5 s covers the end_session rung and 2 s of the SIGTERM rung, so only an engine that ignores both
-// would lose its SIGKILL rung, since will-quit kills the engine host (debt wave 6; E10: in detached mode will-quit only
-// closes the socket, and the supervisor exits after its stop-all): past the bound main sends that rung itself
-// (`killEngines`, the engines being the supervisor's children there) before the final app.quit().
-export const SHUTDOWN_BOUND_MS = 5_000;
-export const KILL_PS_TIMEOUT_MS = 1_000; // the process listing that confirms each pid before its SIGKILL
-
-// The engine host's processes as main reaches them at the bound: its pid (the supervisor's), the process listing
-// (`ps -axo pid=,ppid=,comm=`; O16 panel 1: the command names a session host) and the signal.
-export interface EngineKill {
-  hostPid(): number | null;
-  ps(): Promise<string>;
-  kill(pid: number): void; // SIGKILL
-}
-
-export const listProcesses = (): Promise<string> =>
-  new Promise((resolve, reject) => execFile('/bin/ps', ['-axo', 'pid=,ppid=,comm='], { maxBuffer: 16 * 1024 * 1024 }, (error, stdout) => (error ? reject(error) : resolve(stdout))));
-
-class BoundExpired extends Error {}
 
 export interface QuitPty {
   list(): Promise<readonly { ptyId: string; alive: boolean }[]>;
@@ -87,13 +46,10 @@ export interface QuitPty {
 
 const LIVE = new Set<EngineSessionStatus['process']>(['starting', 'initializing', 'ready']);
 const LAUNCHING = new Set<EngineSessionStatus['process']>(['starting', 'initializing']);
-// E5: an unsaved file holds a quit too; P5 O2 M7: a busy terminal does not while terminals outlive the app (the daemon shape)
-const NOTHING_BUSY: BusyReport = { midTurn: 0, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false, unsavedFiles: [] }; // P5 O3-D
-const total = (r: BusyReport, terminalsOutlive = false) => r.midTurn + r.backgroundWork + (terminalsOutlive ? 0 : r.busyTerminals) + r.unsavedFiles.length;
 
 function within<T>(promise: Promise<T>, ms: number): Promise<T> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new BoundExpired(`no answer within ${ms} ms`)), ms);
+    const timer = setTimeout(() => reject(new Error(`no answer within ${ms} ms`)), ms);
     promise.then(
       (value) => (clearTimeout(timer), resolve(value)),
       (error: unknown) => (clearTimeout(timer), reject(error)),
@@ -106,8 +62,8 @@ export async function busyReport(
   pty: QuitPty,
   unsavedFiles: () => readonly string[] = () => [], // E5: the windows' last pushes
 ): Promise<BusyReport> {
-  // The sessions are read after the terminals (review fix): a status can only arrive between awaits, so the counts a
-  // zero decision rests on are never older than the terminal read. E5: nor are the unsaved files, read with them.
+  // The sessions are read after the terminals (review fix): a status can only arrive between awaits, so the counts the
+  // report gives are never older than the terminal read. E5: nor are the unsaved files, read with them.
   const sessions = () => {
     // with no open turn, a live session still works when the host has work in flight (`busy`: a `!` command, a message
     // not yet started) or the engine reports itself running or waiting (whole-branch review); it counts with the turns
@@ -136,44 +92,8 @@ export async function busyReport(
   return { ...sessions(), busyTerminals, terminalsUnknown: false };
 }
 
-// Debt wave 6: the ladder's SIGKILL rung for every engine the statuses name as not yet exited, sent only to a pid the
-// listing still shows as the engine host's child, so a pid the OS reused after an exit main has not heard of yet is
-// never signalled. A listing that fails or is late kills nothing; the quit goes on either way.
-//
-// O16 panel 1 (scalpel-4#4): a hosted engine is its session host's child, not the engine host's. Its parent must be the
-// session host its own status names (`holder.pid`), and the listing must show that pid as a session host by its
-// executable's basename, so a reused pid is never signalled. The session host's own parent is not checked: an adopted
-// session's host was launched by a predecessor engine host and, detached, was reparented to launchd (ppid 1) at its exit.
-export async function killEngines(statuses: readonly EngineSessionStatus[], deps: EngineKill): Promise<number[]> {
-  const host = deps.hostPid();
-  const known = statuses.flatMap((s) => (s.process !== 'exited' && s.pid !== null ? [{ pid: s.pid, holder: s.holder?.pid ?? null }] : []));
-  if (host === null || known.length === 0) return [];
-  const listed = new Map<number, { ppid: number; command: string }>();
-  for (const line of (await within(deps.ps(), KILL_PS_TIMEOUT_MS)).split('\n')) {
-    const [pid, ppid, ...command] = line.trim().split(/\s+/);
-    if (Number.isInteger(Number(pid)) && Number.isInteger(Number(ppid))) listed.set(Number(pid), { ppid: Number(ppid), command: command.join(' ') });
-  }
-  const isSessionHost = (pid: number) => basename(listed.get(pid)?.command ?? '') === SESSION_HOST_BINARY;
-  const killed: number[] = [];
-  for (const { pid, holder } of known) {
-    const parent = listed.get(pid)?.ppid;
-    if (parent !== host && !(holder !== null && parent === holder && isSessionHost(holder))) continue;
-    try {
-      deps.kill(pid);
-      killed.push(pid);
-    } catch {
-      // exited between the listing and the signal
-    }
-  }
-  return killed;
-}
-
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
-
-// E10: keep is offered (detached mode), as the default button or not; `kept()` counts the sessions a keep leaves
-// running, read when the answer is logged. P5 O2 M7: `terminalsOutlive`, on the daemon shape: the terminals keep running
-// whatever the answer, so the question names none among what is busy and its detail says they keep running.
-export interface KeepOffer { isDefault: boolean; kept(): number; terminalsOutlive?: boolean }
+const unsavedCount = (paths: readonly string[]) => plural(paths.length, 'unsaved file', 'unsaved files');
 
 // E5: the unsaved question's detail names the files by basename, at most five. A file the last Save all could not save
 // gets a line of its own with the reason its window gave (`app.ts: Changed on disk since you opened it`); the others
@@ -188,61 +108,27 @@ function unsavedDetail(paths: readonly string[], reasons: ReadonlyMap<string, st
   return [...named, ...(listing ? [listing] : [])].join('\n');
 }
 
+// E5: the question names the unsaved files and its buttons are theirs: Save all, or go on without saving. P5 O15 M2: it
+// is the only question a quit asks, so it names nothing else.
 export function quitQuestion(
-  report: BusyReport,
+  unsavedFiles: readonly string[],
   verb: 'Quit' | 'Restart',
   reasons: ReadonlyMap<string, string> = new Map(), // E5
-  keep: KeepOffer | null = null, // E10
 ): MessageBoxOptions {
-  const outlive = keep?.terminalsOutlive === true; // P5 O2 M7
-  const parts = [
-    report.midTurn > 0 ? `${plural(report.midTurn, 'session', 'sessions')} mid-turn` : null,
-    report.backgroundWork > 0 ? `${plural(report.backgroundWork, 'session', 'sessions')} running background work` : null,
-    outlive ? null : report.terminalsUnknown ? 'the terminals did not answer' : report.busyTerminals > 0 ? `${plural(report.busyTerminals, 'terminal', 'terminals')} running a command` : null,
-  ].filter((p): p is string => p !== null);
-  const stops = `${verb === 'Quit' ? 'Quitting' : 'Restarting'} stops them. Transcripts stay on disk and can be resumed.`;
-  // E5 start: unsaved files are named first and the buttons are theirs: Save all, or go on without saving. "When idle"
-  // is not offered while files are unsaved (save first; the ordinary question follows).
-  const unsaved = report.unsavedFiles;
-  if (unsaved.length > 0) {
-    return {
-      type: 'warning',
-      buttons: ['Save all', `${verb} anyway`, 'Cancel'],
-      defaultId: 2,
-      cancelId: 2,
-      message: [plural(unsaved.length, 'unsaved file', 'unsaved files'), ...parts].join(' · '),
-      detail: [unsavedDetail(unsaved, reasons), ...(parts.length > 0 ? [stops] : [])].join('\n'),
-    };
-  }
-  // E5 end
-  // E10: keep first; terminals cannot be kept, which the detail says when one is busy. P4: the detail names what keep
-  // and the verb each do, since keep may be the default button under it. P5 O2 M7: on the daemon shape a busy terminal
-  // keeps running whichever button is pressed, which the detail says instead.
-  if (keep) {
-    const terminals = report.busyTerminals === 0 ? [] : !outlive ? [QUIT_KEEP.terminalsClose] : [QUIT_KEEP.terminalsKeep(report.terminalsUnknown ? null : report.busyTerminals)];
-    return {
-      type: 'warning',
-      buttons: [QUIT_KEEP.button, verb, `${verb} when idle`, 'Cancel'],
-      defaultId: keep.isDefault ? 0 : 1,
-      cancelId: 3,
-      message: parts.join(' · '),
-      detail: [QUIT_KEEP.detail(verb), ...terminals].join('\n'),
-    };
-  }
   return {
     type: 'warning',
-    buttons: [verb, `${verb} when idle`, 'Cancel'],
+    buttons: ['Save all', `${verb} anyway`, 'Cancel'],
     defaultId: 2,
     cancelId: 2,
-    message: parts.join(' · '),
-    detail: stops,
+    message: unsavedCount(unsavedFiles),
+    detail: unsavedDetail(unsavedFiles, reasons),
   };
 }
 
 // The e2e's words for a report: C5's `4 mid-turn` stays as it was when only turns are busy.
 function logParts(r: BusyReport): string {
   const parts = [
-    r.unsavedFiles.length > 0 ? plural(r.unsavedFiles.length, 'unsaved file', 'unsaved files') : null, // E5
+    r.unsavedFiles.length > 0 ? unsavedCount(r.unsavedFiles) : null, // E5
     r.midTurn > 0 ? `${r.midTurn} mid-turn` : null,
     r.backgroundWork > 0 ? `${r.backgroundWork} background work` : null,
     r.terminalsUnknown ? 'terminals unknown' : r.busyTerminals > 0 ? plural(r.busyTerminals, 'busy terminal', 'busy terminals') : null,
@@ -251,193 +137,88 @@ function logParts(r: BusyReport): string {
 }
 // C12 end
 
-// E5: which question of its flight this is (0 the first; each Save all that leaves work asks once more) and the reasons
-// the last Save all's windows gave by path for the files they could not save
+// E5: which question of its flight this is (0 the first; each Save all that leaves a file unsaved asks once more) and the
+// reasons the last Save all's windows gave by path for the files they could not save
 export interface QuitRound { round: number; reasons: ReadonlyMap<string, string> }
 const FIRST_ROUND: QuitRound = { round: 0, reasons: new Map() };
 
 // The question as the app asks it: the native dialog, or under `MAWS_E2E=1` the answer `MAWS_E2E_QUIT_ANSWER` gives
-// (quit by default; C12: `cancel` and `when_idle` too; E5: `save_all`; E10: `keep`; each only when the question offers
-// it), logged to stderr for the smoke to read. E5: under MAWS_E2E a later question of the flight that still names
-// unsaved files is answered `cancel`, so a Save all that keeps failing ends the flight instead of looping; a later
-// ordinary question (Save all saved everything, sessions still busy) cannot loop, none of its answers asking again, and
-// is answered as at first. E10: a keep, scripted or chosen, is logged with the sessions it keeps.
+// (quit by default; C12: `cancel` too; E5: `save_all`), logged to stderr for the smoke to read. E5: under MAWS_E2E a
+// later question of the flight is answered `cancel`, so a Save all that keeps failing ends the flight instead of looping.
 export async function askToQuit(
-  report: BusyReport, // C12: the report, not C5's mid-turn count
+  unsavedFiles: readonly string[], // P5 O15 M2: what the question is about, the files alone
   deps: { env: Record<string, string | undefined>; show(options: MessageBoxOptions): Promise<{ response: number }> },
   asked: QuitRound = FIRST_ROUND, // E5
-  keep: KeepOffer | null = null, // E10
 ): Promise<QuitAnswer> {
-  // E5: the question's buttons as answers, in order; with unsaved files Save all, Quit anyway (a quit) and Cancel
-  const unsaved = report.unsavedFiles.length > 0;
-  const offered: readonly QuitAnswer[] = unsaved ? ['save_all', 'quit', 'cancel'] : keep ? ['keep', 'quit', 'when_idle', 'cancel'] /* E10 */ : ['quit', 'when_idle', 'cancel'];
-  const kept = (answer: QuitAnswer) => (answer === 'keep' && keep ? `, ${plural(keep.kept(), 'session', 'sessions')} kept` : ''); // E10
+  const offered: readonly QuitAnswer[] = ['save_all', 'quit', 'cancel']; // the buttons as answers, in order
   if (deps.env.MAWS_E2E === '1') {
-    const repeated = asked.round > 0 && unsaved;
-    const answer: QuitAnswer = repeated ? 'cancel' : (offered.find((a) => a === deps.env.MAWS_E2E_QUIT_ANSWER) ?? 'quit');
-    console.error(`quit-guard: ${logParts(report)}, auto-answered ${answer}${kept(answer)}`);
+    const answer: QuitAnswer = asked.round > 0 ? 'cancel' : (offered.find((a) => a === deps.env.MAWS_E2E_QUIT_ANSWER) ?? 'quit');
+    console.error(`quit-guard: ${unsavedCount(unsavedFiles)}, auto-answered ${answer}`);
     return answer;
   }
-  const { response } = await deps.show(quitQuestion(report, 'Quit', asked.reasons, keep));
-  const answer = offered[response] ?? 'cancel'; // C12: three buttons (E10: four with keep)
-  if (answer === 'keep') console.error(`quit-guard: ${logParts(report)}, answered keep${kept(answer)}`); // E10
-  return answer;
+  const { response } = await deps.show(quitQuestion(unsavedFiles, 'Quit', asked.reasons));
+  return offered[response] ?? 'cancel';
 }
 
 // C12 start
 export interface QuitGuardDeps {
   pty: QuitPty;
-  ask(report: BusyReport, asked: QuitRound /* E5 */, keep: KeepOffer | null /* E10 */): Promise<QuitAnswer>;
-  shutdownEngine(): Promise<void>;
-  engines: EngineKill; // debt wave 6: the SIGKILL rung past the bound
-  publish(waiting: BusyReport | null): void; // the page's "MAWS will quit when … finish" banner
-  log?(line: string): void; // the report's latency, for the e2e
-  pollMs?: number;
+  ask(unsavedFiles: readonly string[], asked: QuitRound /* E5 */): Promise<QuitAnswer>;
+  log?(line: string): void; // the report's latency and what a quit did not ask, for the e2e
   // E5 start
   unsavedFiles(): readonly string[]; // every window's dirty file tabs, as last pushed
-  onUnsavedFiles(listener: () => void): () => void; // E11: a wait re-reads at each push, as at each status change
   // asks every window to save its dirty tabs; settles once each has answered, or at the bound, with the reasons the
   // answers gave by path for the files not saved
   saveAll(): Promise<ReadonlyMap<string, string>>;
   // E5 end
-  // E10 start
-  keepOffered(): boolean; // the engine host runs detached: its sessions can outlive the app
-  keepDefault(): boolean; // the setting `supervisor.keepRunningDefault`: keep is the default button
-  // E10 end
-  terminalsOutlive?(): boolean; // P5 O2 M7: the pty host runs under the machine daemon (the daemon shape); false unless said
-  sessionsOutlive?(): boolean; // P5 O3-D (Q1): the sessions run under the machine daemon (the daemon shape); false unless said
 }
 
+// The banner's surface (`layout.quitWait`, `layout.quitWaitAnswer`). P5 O15 M2: no quit waits any more, so there is
+// never a waiting report and nothing to cancel; Quit now still quits.
 export interface QuitGuard {
-  waiting(): BusyReport | null;
+  waiting(): null;
   quitNow(): void; // the banner's Quit now
   cancelWait(): void; // the banner's Cancel
 }
 
-export function installQuitGuard(model: Pick<SpineView, 'midTurnCount' | 'engineStatuses' | 'on'>, deps: QuitGuardDeps): QuitGuard {
-  let disarmed = false; // set only right before the one final app.quit()
-  let quitting: Promise<void> | null = null; // the one quit in flight: outside quits stay held, outstanding work is inert
+export function installQuitGuard(model: Pick<SpineView, 'midTurnCount' | 'engineStatuses'>, deps: QuitGuardDeps): QuitGuard {
+  let quitting = false; // set only right before the one final app.quit(); outstanding reports and questions are inert
   let asking = false; // a report or a question is under way
-  let wait: { report: BusyReport; stop: () => void } | null = null; // each wait is its own object: a cancelled one's reads are inert
   const report = () => busyReport(model, deps.pty, deps.unsavedFiles);
-  const outlive = () => deps.terminalsOutlive?.() === true; // P5 O2 M7
-  const sessionsOutlive = () => deps.sessionsOutlive?.() === true; // P5 O3-D (Q1)
-  // P5 O3-D (Q1): what the quit asks about; on the daemon shape the unsaved files alone
-  const askable = (r: BusyReport): BusyReport => (sessionsOutlive() ? { ...NOTHING_BUSY, unsavedFiles: r.unsavedFiles } : r);
 
-  const finalQuit = () => {
-    disarmed = true;
+  // Every quit, busy or not, leaves the sessions and the terminals running under `mawsd` (P5 O3-D, Q1; P5 O15 M2).
+  const quit = () => {
+    if (quitting) return;
+    quitting = true;
     app.quit();
-  };
-  const stopWaiting = () => {
-    if (!wait) return;
-    wait.stop();
-    wait = null;
-    deps.publish(null);
-  };
-  // Every quit, busy or not: the engines end through their ladders, bounded, then the one final app.quit(). E10: a keep
-  // leaves them running (no shutdown, no SIGKILL rung) and quits. P5 O3-D (Q1): so does every quit on the daemon shape.
-  const quit = (keep = false): Promise<void> => {
-    if (quitting) return quitting;
-    stopWaiting();
-    quitting = (async () => {
-      if (keep || sessionsOutlive()) return finalQuit(); // the answer's log line names the sessions kept (askToQuit)
-      try {
-        await within(deps.shutdownEngine(), SHUTDOWN_BOUND_MS);
-      } catch (error) {
-        console.error('[quit-guard] stopping the engine failed or ran past its bound; quitting anyway', error);
-        if (error instanceof BoundExpired) {
-          await killEngines(model.engineStatuses(), deps.engines).then(
-            (killed) => killed.length > 0 && console.error(`[quit-guard] sent SIGKILL to engines still running at the bound: ${killed.join(', ')}`),
-            (failure: unknown) => console.error('[quit-guard] could not list the engines at the bound; quitting without SIGKILL', failure),
-          );
-        }
-      }
-      finalQuit();
-    })();
-    return quitting;
-  };
-  // P5 O3-B: what a wait publishes and answers is what it waits for: on the daemon shape a busy terminal outlives the app,
-  // so the banner counts none (the question names none either)
-  const waited = (r: BusyReport): BusyReport => (outlive() ? { ...r, busyTerminals: 0, terminalsUnknown: false } : r);
-  const startWaiting = (asked: BusyReport) => {
-    const first = waited(asked);
-    if (wait) {
-      wait.report = first;
-      deps.publish(first);
-      return;
-    }
-    let reading = false;
-    let again = false; // a status changed while a read was out: that read decides nothing, the next one does
-    // A status change invalidates a read already out; the 2 s poll only starts one when none is (re-review fix: a tick
-    // that invalidated would discard every read slower than the poll, and a wait would never end).
-    const changed = () => {
-      if (wait !== mine) return;
-      if (reading) return void (again = true);
-      recheck();
-    };
-    const tick = () => {
-      if (wait === mine && !reading) recheck();
-    };
-    const recheck = () => {
-      reading = true;
-      void report()
-        .then((next) => {
-          if (wait !== mine || again) return;
-          if (total(next, outlive()) === 0) {
-            void quit();
-          } else {
-            mine.report = waited(next);
-            deps.publish(mine.report);
-          }
-        })
-        .finally(() => {
-          reading = false;
-          if (again && wait === mine) {
-            again = false;
-            recheck();
-          }
-        });
-    };
-    const off = model.on('engine', changed);
-    const offFiles = deps.onUnsavedFiles(changed); // E11
-    const timer = setInterval(tick, deps.pollMs ?? WAIT_POLL_MS);
-    const mine = { report: first, stop: () => (off(), offFiles(), clearInterval(timer)) };
-    wait = mine;
-    deps.publish(first);
   };
 
   app.on('before-quit', (event) => {
-    if (disarmed) return;
+    if (quitting) return;
     event.preventDefault();
-    if (asking || quitting) return;
+    if (asking) return;
     asking = true;
     const started = Date.now();
     void report()
       .then(async (first) => {
         if (quitting) return;
         deps.log?.(`quit-report: ${Date.now() - started} ms · ${logParts(first)}`);
-        // E5: Save all saves, then the report is read again and decides: nothing left quits, anything left asks again
+        // P5 O3-D (Q1): a quit that would have asked about its sessions says what it left running, for the e2e
+        if (first.unsavedFiles.length === 0 && first.midTurn + first.backgroundWork > 0) deps.log?.(`quit-guard: ${logParts(first)}, not asked: they outlive the app`);
+        // E5: Save all saves, then the report is read again and decides: no file left quits, any file left asks again
         // (each round waits for the owner's answer, so the loop needs no bound), naming the files Save all could not save
         // with their reasons; outside quits stay held throughout
         let reasons: ReadonlyMap<string, string> = new Map();
-        // P5 O3-D (Q1): a quit the daemon shape does not ask about says what it left running, for the e2e
-        if (total(askable(first), outlive()) === 0 && total(first, outlive()) > 0) deps.log?.(`quit-guard: ${logParts(first)}, not asked: they outlive the app`);
-        for (let r = askable(first), round = 0; ; r = askable(await report()), round += 1) {
+        for (let files = first.unsavedFiles, round = 0; ; files = (await report()).unsavedFiles, round += 1) {
           if (quitting) return;
-          if (total(r, outlive()) === 0) return quit();
-          // E10: keep is offered in detached mode, its default read at each question; it keeps every live session
-          const keep = deps.keepOffered() ? { isDefault: deps.keepDefault(), kept: () => model.engineStatuses().filter((s) => s.process !== 'exited').length, ...(outlive() ? { terminalsOutlive: true } : {}) } : null;
-          const answer = await deps.ask(r, { round, reasons }, keep).catch((error: unknown) => {
+          if (files.length === 0) return quit();
+          const answer = await deps.ask(files, { round, reasons }).catch((error: unknown) => {
             console.error('[quit-guard] the quit question failed; treating it as Cancel', error);
             return 'cancel' as const;
           });
           if (quitting) return; // the banner's Quit now answered first
           if (answer === 'quit') return quit();
-          if (answer === 'keep') return quit(true); // E10
-          if (answer === 'when_idle') return startWaiting(r);
-          // Cancel keeps the app, and leaves a wait already under way as it was (the banner has its own Cancel)
-          if (answer !== 'save_all') return;
+          if (answer !== 'save_all') return; // Cancel keeps the app
           // E5: a Save all that fails ends the flight as Cancel does, as a failed question does
           const saved = await deps.saveAll().catch((error: unknown) => {
             console.error('[quit-guard] Save all failed; treating it as Cancel', error);
@@ -453,9 +234,9 @@ export function installQuitGuard(model: Pick<SpineView, 'midTurnCount' | 'engine
   });
 
   return {
-    waiting: () => wait?.report ?? null,
-    quitNow: () => void quit(),
-    cancelWait: stopWaiting,
+    waiting: () => null,
+    quitNow: quit,
+    cancelWait: () => {},
   };
 }
 // C12 end
@@ -475,7 +256,6 @@ export interface UnsavedFiles {
   update(client: ClientRef, paths: readonly string[]): void; // `layout.unsavedFiles`
   done(client: ClientRef, requestId: string, failed: readonly { path: string; message: string }[]): void; // `layout.saveAllDone`
   paths(): string[]; // every window's, once each, sorted
-  onChange(listener: () => void): () => void; // E11: after each push and each window forgotten
   saveAll(send: (requestId: string) => void): Promise<ReadonlyMap<string, string>>; // `send` emits `layout.saveAll` to every window
 }
 
@@ -483,23 +263,18 @@ export function trackUnsavedFiles(): UnsavedFiles {
   const sets = new Map<ClientId, readonly string[]>();
   const followed = new Set<ClientId>();
   const waits = new Map<string, { windows: Set<ClientId>; failed: Map<string, string>; finish(): void }>();
-  const listeners = new Set<() => void>(); // E11
-  const changed = () => {
-    for (const listener of [...listeners]) listener();
-  };
   const answered = (requestId: string, clientId: ClientId) => {
     const wait = waits.get(requestId);
     if (wait?.windows.delete(clientId) && wait.windows.size === 0) wait.finish();
   };
   const forget = (clientId: ClientId) => {
-    if (sets.delete(clientId)) changed(); // E11
+    sets.delete(clientId);
     for (const requestId of [...waits.keys()]) answered(requestId, clientId); // it will not answer now
   };
   return {
     update(client, paths) {
       const { id } = client;
       sets.set(id, [...paths]);
-      changed(); // E11
       if (followed.has(id)) return;
       followed.add(id);
       client.onGone(() => {
@@ -515,10 +290,6 @@ export function trackUnsavedFiles(): UnsavedFiles {
       answered(requestId, client.id);
     },
     paths: () => [...new Set([...sets.values()].flat())].sort(),
-    onChange(listener) {
-      listeners.add(listener);
-      return () => void listeners.delete(listener);
-    },
     saveAll(send) {
       const windows = new Set([...sets].flatMap(([id, paths]) => (paths.length > 0 ? [id] : [])));
       if (windows.size === 0) return Promise.resolve(new Map());

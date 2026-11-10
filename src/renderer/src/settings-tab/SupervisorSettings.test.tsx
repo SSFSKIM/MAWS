@@ -1,15 +1,17 @@
 // E10 Task 3.2 (E10 execution document, §Design 11; Interfaces "Settings version 10"): Settings › Engine › Background
-// supervisor. The status line reads main's `host.status`; the idle time and the quit default write settings version
-// 10's `supervisor` section; Stop all asks inline, naming the live count, then calls `host.restart {stopSessions: true}`.
+// supervisor. The status line reads main's `host.status`; the idle time writes settings version 10's `supervisor`
+// section; Stop all asks inline, naming the live count, then calls `host.restart {stopSessions: true}`. P5 O15 M2: every
+// status is the daemon's (main reports no other transport), and the group has no shape switch and no quit default.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PreloadBridge, Settings } from '@shared/ipc/schema';
-import type { HostStatus, SupervisorStatus } from '@shared/ipc/schema/host';
+import type { HostStatus } from '@shared/ipc/schema/host';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { useHosts } from '../stores/hosts';
 import { useNotices } from '../stores/notices';
 import { useSettings } from '../stores/settings';
+import { daemonStatus, hostStatus as status, SUPERVISOR_STARTED, supervisorStatus as supervisor } from '../test-support/host-status';
 import { settingsBridge, type SettingsBridge } from '../test-support/settings-bridge';
 import { EngineSection } from './EngineSection';
 import { SupervisorSettings } from './SupervisorSettings';
@@ -17,40 +19,7 @@ import { formatClock } from '@shared/app/date-format';
 
 vi.mock('./engine-update', () => ({ openEngineUpdate: vi.fn() }));
 
-const STARTED = new Date(2026, 9, 6, 14, 2).toISOString();
-const CLOCK = formatClock(Date.parse(STARTED)); // L129: the display locale's clock
-const supervisor = (over: Partial<SupervisorStatus> = {}): SupervisorStatus => ({
-  mode: 'detached',
-  pid: 48213,
-  startedAt: STARTED,
-  buildId: 'b',
-  protocol: 1,
-  wire: 'w',
-  liveSessions: 3,
-  rows: 4,
-  idleExitMs: 600_000,
-  idleExitAt: null,
-  exitWhenIdle: false,
-  socketPath: '/u/supervisor/host.sock',
-  logPath: '/u/supervisor/host.log',
-  orphansKilled: 0,
-  ...over,
-});
-const status = (over: Partial<HostStatus> = {}): HostStatus => ({
-  transport: 'detached',
-  state: 'ready',
-  supervisor: supervisor(),
-  appBuildId: 'b',
-  appWire: 'w',
-  mainBuild: { version: '0.0.0', commit: 'ac8724a6', builtAt: '2026-10-08T09:05:53.000Z' },
-  matches: 'same',
-  reason: null,
-  waitingLiveSessions: null,
-  lastExit: null,
-  daemon: null, // P5 O2 M7
-  daemonUnavailable: null,
-  ...over,
-});
+const CLOCK = formatClock(Date.parse(SUPERVISOR_STARTED)); // L129: the display locale's clock
 
 let b: SettingsBridge;
 let unsubscribe = () => {};
@@ -100,15 +69,13 @@ describe('the status line, from host.status', () => {
     await statusLine(`Running since ${CLOCK} · pid 48213 · 3 sessions · exits 2 s after the last session ends`);
   });
 
-  it('reads Starting, Restarting and Not running, and inside the app in utility mode', async () => {
+  it('reads Starting, Restarting and Not running', async () => {
     await renderGroup(status({ state: 'starting', supervisor: null, matches: null }));
     await statusLine('Starting');
     event(status({ state: 'restarting', supervisor: null, matches: null }));
     await statusLine('Restarting');
     event(status({ state: 'crashed', supervisor: null, matches: null }));
     await statusLine('Not running');
-    event(status({ transport: 'utility', supervisor: supervisor({ mode: 'utility', socketPath: null, logPath: null }) }));
-    await statusLine('Runs inside MAWS · pid 48213 · 3 sessions · stops when MAWS quits');
   });
 
   // P5 O16 M3c fix wave 2 (D63): an update that waits for MAWS tool calls, in the update copy, served or deferred
@@ -182,11 +149,11 @@ describe('the status line, from host.status', () => {
     expect(document.activeElement).toBe(field);
   });
 
-  it('says what the background process is for only while the engine host is one (detached)', async () => {
+  it('says what the background process is for once main answers, while starting too', async () => {
     await renderGroup();
     expect(within(row('Status')).getByText('Sessions run in this background process, so they can keep running after MAWS quits.')).toBeTruthy();
-    event(status({ transport: 'utility', supervisor: supervisor({ mode: 'utility', socketPath: null, logPath: null }) }));
-    expect(within(row('Status')).queryByText('Sessions run in this background process, so they can keep running after MAWS quits.')).toBeNull();
+    event(status({ state: 'starting', supervisor: null, matches: null }));
+    expect(within(row('Status')).getByText('Sessions run in this background process, so they can keep running after MAWS quits.')).toBeTruthy();
   });
 });
 
@@ -222,68 +189,20 @@ describe('the idle time', () => {
   });
 });
 
-describe('the quit default', () => {
-  it('shows Keep sessions running by default and writes keepRunningDefault', async () => {
-    await renderGroup();
-    const group = screen.getByRole('radiogroup', { name: 'When quitting with work in flight' });
-    expect((within(group).getByRole('radio', { name: 'Keep sessions running' }) as HTMLInputElement).checked).toBe(true);
-    fireEvent.click(within(group).getByRole('radio', { name: 'Stop them' }));
-    await vi.waitFor(() => expect(b.sets).toEqual([{ supervisor: { keepRunningDefault: false } }]));
-    expect((within(group).getByRole('radio', { name: 'Stop them' }) as HTMLInputElement).checked).toBe(true);
-  });
-});
-
-// P5 O2 M7 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M7 "The shape setting"): the switch writes the setting
-// alone (it applies at the next launch, so the running launch keeps its daemon), and the daemon line reads main's
-// host.status: the daemon's kind, pid and machine ref, or why the launch runs without it.
+// P5 O2 M7 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M7 "Status"): the daemon line reads main's host.status:
+// the daemon's kind, pid and machine ref.
 describe('the machine daemon', () => {
-  const machineDaemon = () => screen.getByRole('switch', { name: 'Run sessions under the machine daemon' });
   const daemonLine = () => row('Machine daemon').querySelector('[data-daemon-line]')!;
-  const daemon = {
-    pid: 4100, startedAt: STARTED, kind: 'unit' as const,
-    build: { version: '0.0.0', commit: 'ac8724a6', builtAt: STARTED, buildId: 'a1b2c3d4e5f60718', engineHostBuildId: 'b' },
-    machine: 'mRef0123456789abcdefAB' as never, profile: '/u', platform: 'darwin', role: 'laptop' as const,
-    hosts: { 'engine-host': { state: 'ready', pid: 48213, build: 'b', liveSessions: 3 }, 'pty-host': { state: 'ready', pid: 48300, build: 'p', liveSessions: 1 } },
-    clients: { engineHost: true, ptyHost: true, machine: 1 }, idleExitAt: null, logPath: '/u/mawsd/mawsd.log', endpoint: { present: false, detail: null },
-  };
-  const onDaemon = (over: Partial<HostStatus> = {}) => status({ transport: 'daemon', daemon, ...over });
 
-  it('is on by default, and switching it off writes the shape alone, for the next launch; the running launch keeps its daemon', async () => {
-    await renderGroup(onDaemon());
-    expect(machineDaemon().getAttribute('aria-checked')).toBe('true');
-    expect(within(row('Run sessions under the machine daemon')).getByText(/Applies at the next launch/)).toBeTruthy();
+  it('reads the daemon at login, a private one and one not yet answering; the group’s one status stays the supervisor’s', async () => {
+    await renderGroup(status({ daemon: daemonStatus({ kind: 'unit' }) }));
     expect(daemonLine().textContent).toBe('At login · pid 4100 · machine mRef0123456789abcdefAB');
     // the group's one status stays the supervisor's (its live line, which the e2e suites and the owner's reader read)
     expect(within(screen.getByRole('group', { name: 'Background supervisor' })).getAllByRole('status')).toHaveLength(1);
-    fireEvent.click(machineDaemon());
-    await vi.waitFor(() => expect(b.sets).toEqual([{ supervisor: { shape: 'embedded' } }]));
-    expect(machineDaemon().getAttribute('aria-checked')).toBe('false');
-    expect(within(row('Run sessions under the machine daemon')).getByText('MAWS stops using the machine daemon when it opens again; this launch keeps running under it.')).toBeTruthy();
-    expect(daemonLine().textContent, 'the running launch keeps its daemon').toBe('At login · pid 4100 · machine mRef0123456789abcdefAB');
-  });
-
-  it('switched back on while embedded, says it takes effect when MAWS opens again', async () => {
-    await renderGroup(status(), { ...SETTINGS_DEFAULTS_V21, supervisor: { ...SETTINGS_DEFAULTS_V21.supervisor, shape: 'embedded' } });
-    expect(machineDaemon().getAttribute('aria-checked')).toBe('false');
-    expect(daemonLine().textContent).toBe('Not in use · MAWS runs its sessions itself');
-    fireEvent.click(machineDaemon());
-    await vi.waitFor(() => expect(b.sets).toEqual([{ supervisor: { shape: 'daemon' } }]));
-    expect(within(row('Run sessions under the machine daemon')).getByText('MAWS runs its sessions under the machine daemon when it opens again.')).toBeTruthy();
-  });
-
-  it('reads a private daemon, one not yet answering, and a launch that runs embedded though the setting asks for the daemon', async () => {
-    await renderGroup(onDaemon({ daemon: { ...daemon, kind: 'private' } }));
+    event(status());
     expect(daemonLine().textContent).toBe('This profile only · pid 4100 · machine mRef0123456789abcdefAB');
-    event(onDaemon({ daemon: null }));
+    event(status({ daemon: null }));
     expect(daemonLine().textContent).toBe('Connecting');
-    event(status({ daemonUnavailable: 'no LaunchAgent is installed for the default profile, and a development build never installs one' }));
-    expect(daemonLine().textContent).toBe('Not in use this launch · no LaunchAgent is installed for the default profile, and a development build never installs one');
-    expect(within(row('Run sessions under the machine daemon')).queryByText(/when it opens again/), 'not a pending switch').toBeNull();
-  });
-
-  it('says what the background process is for on the daemon shape too', async () => {
-    await renderGroup(onDaemon());
-    expect(within(row('Status')).getByText('Sessions run in this background process, so they can keep running after MAWS quits.')).toBeTruthy();
   });
 });
 
@@ -389,10 +308,10 @@ describe('inside Settings › Engine', () => {
   it('is a Background supervisor group of the Engine section, after the engine rows', async () => {
     await renderGroup(status(), SETTINGS_DEFAULTS_V21, true);
     const group = screen.getByRole('group', { name: 'Background supervisor' });
-    expect(within(group).getByRole('group', { name: 'Status' })).toBeTruthy();
-    expect(within(group).getByRole('group', { name: 'Exit when idle' })).toBeTruthy();
-    expect(within(group).getByRole('group', { name: 'When quitting with work in flight' })).toBeTruthy();
-    expect(within(group).getByRole('group', { name: 'Stop all' })).toBeTruthy();
+    // P5 O15 M2: its rows, in order; no shape switch and no quit default
+    expect(within(group).getAllByRole('group').map((g) => g.firstElementChild?.textContent)).toEqual(['Status', 'Machine daemon', 'Exit when idle', 'Stop all']); // each row's label
+    expect(within(group).queryByRole('switch')).toBeNull();
+    expect(within(group).queryByRole('radiogroup')).toBeNull();
     await statusLine(`Running since ${CLOCK} · pid 48213 · 3 sessions · exits 10 min after the last session ends`);
   });
 });

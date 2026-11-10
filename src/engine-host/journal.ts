@@ -162,7 +162,7 @@ const DIGIT_9 = 0x39;
 const LOWER_E = 0x65;
 const UPPER_E = 0x45;
 
-// P5 O15 M2b (§L; Decision Log 25): whether every value of an engine line's JSON reads back from the journal as the
+// P5 O15 M2b (§L; Decision Log 30): whether every value of an engine line's JSON reads back from the journal as the
 // engine host read it. The journal writes the parsed frame with JSON.stringify, which writes each finite number as the
 // shortest text that parses back to the same double, and every string, key and structure so that it parses back the
 // same; the two values it changes are a negative zero (written `0`) and an overflow to ±Infinity (written `null`). So a

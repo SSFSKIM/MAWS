@@ -1,6 +1,6 @@
 // The app's report of the window that shows each page, for the connectors' window veto (P3-H H4, P3 Decision Log 80 and
 // 89; P5 O4 M2, docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §F, D8, D24, D28). The connectors run
-// with the spine (`mawsd`'s on the daemon shape, main's embedded root's on the embedded one), where no Electron window
+// with the spine in `mawsd` (P5 O15 M2: never in the app), where no Electron window
 // can be read, so the app reads it and reports it as `connectors.windowShown {shown}` under the page's own client; the
 // broker holds the latest report, and a page never reported is hidden (fail closed).
 //
