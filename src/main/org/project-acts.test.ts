@@ -34,7 +34,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-type Machines = Array<{ ref: MachineRef; name: string }> | null;
+type Machines = { machines: Array<{ ref: MachineRef; name: string }>; contested: string[] } | null;
 /** A macrotask's turn: the registry's read of the machines (a promise) settled, and what follows it. */
 const turn = () => new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -58,7 +58,7 @@ function scene(options: { signedIn?: boolean; links?: MachineRef[]; machines?: (
       }) as never,
       dispatch: (async (_owner: string, name: string, input: unknown) => (answers.push([name, input]), { ok: true, value: undefined })) as never,
     },
-    registry: { projects: () => PROJECTS, machines: options.machines ?? (async () => (options.signedIn === false ? null : [{ ref: BOOK, name: 'macbook' }, { ref: MINI, name: 'mini' }])) },
+    registry: { projects: () => PROJECTS, machines: options.machines ?? (async () => (options.signedIn === false ? null : { machines: [{ ref: BOOK, name: 'macbook' }, { ref: MINI, name: 'mini' }], contested: ['vm-2'] })) },
     roster: () => links,
     link: (ref) => (links.includes(ref) ? { machine: ref } : null),
     send: async (_link, name, input) => (sent.push([name, input]), replies.get(name)?.(input) ?? { ok: false, error: { code: 'internal', message: `no reply for ${name}` } }),
@@ -107,7 +107,11 @@ describe('a request the app cannot show', () => {
     const unknown = scene();
     await unknown.ask({ verb: 'add', machine: 'vm', path: '/srv/new' });
     expect(unknown.answers).toEqual([answered('pa-1', { ok: false, code: 'unknown-machine', text: 'unknown-machine: vm is no machine of this org' })]);
-    for (const s of [out, none, unknown]) expect(s.emitted).toEqual([]);
+    // branch fix 2: a name claimed by more than one machine is no target, and is not called unknown
+    const contested = scene();
+    await contested.ask({ verb: 'add', machine: 'vm-2', path: '/srv/new' });
+    expect(contested.answers).toEqual([answered('pa-1', { ok: false, code: 'contested', text: 'contested: vm-2 is claimed by more than one machine of this org; an admin settles it' })]);
+    for (const s of [out, none, unknown, contested]) expect(s.emitted).toEqual([]);
   });
 });
 
@@ -261,12 +265,12 @@ describe('a request withdrawn', () => {
     expect(s.watching.size, 'watched while it is read').toBe(1);
     s.withdraw('pa-1');
     expect(s.watching.size).toBe(0);
-    release([{ ref: MINI, name: 'mini' }]);
+    release({ machines: [{ ref: MINI, name: 'mini' }], contested: [] });
     await turn();
     expect([s.emitted, s.answers, s.watching.size]).toEqual([[], [], 0]);
     void s.ask({ verb: 'add', machine: 'mini', path: '/srv/other' }, 'pa-2');
     s.linkState('restarting'); // the daemon's connection ends while it is read
-    release([{ ref: MINI, name: 'mini' }]);
+    release({ machines: [{ ref: MINI, name: 'mini' }], contested: [] });
     await turn();
     expect([s.emitted, s.answers, s.watching.size]).toEqual([[{ asks: [] }], [], 0]);
     const failing = scene({ machines: () => Promise.reject(new Error('the head could not be read')) });

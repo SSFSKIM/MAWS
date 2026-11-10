@@ -2386,9 +2386,11 @@ describe('ipc schema validates both directions', () => {
       expect(MACHINE_EVENTS).toEqual(expect.arrayContaining(['projects.act.request', 'projects.act.withdrawn']));
     });
     it('reads the registry as the endpoint assembles it', () => {
-      const registry = { enrolled: true, machine: { ref: 'mRef0123456789abcdefAB', name: 'mini' }, machines: [{ ref: 'mRef0123456789abcdefAB', name: 'mini' }], projects: [project] };
+      const registry = { enrolled: true, machine: { ref: 'mRef0123456789abcdefAB', name: 'mini' }, machines: [{ ref: 'mRef0123456789abcdefAB', name: 'mini' }], contested: ['vm-2'], projects: [project] };
       expect(validateCommandOutput('projects.registry', registry).ok).toBe(true);
-      expect(validateCommandOutput('projects.registry', { enrolled: false, machine: { ref: 'mRef0123456789abcdefAB', name: '' }, machines: [], projects: [] }).ok).toBe(true);
+      expect(validateCommandOutput('projects.registry', { enrolled: false, machine: { ref: 'mRef0123456789abcdefAB', name: '' }, machines: [], contested: [], projects: [] }).ok).toBe(true);
+      const unsaid = Object.fromEntries(Object.entries(registry).filter(([key]) => key !== 'contested'));
+      expect(validateCommandOutput('projects.registry', unsaid).ok, 'the contested names are always said').toBe(false);
       expect(validateCommandOutput('projects.registry', { ...registry, projects: [{ ...project, locations: [{ ...location, state: 'gone' }] }] }).ok, 'no such state').toBe(false);
       expect(validateCommandInput('projects.registry', undefined).ok).toBe(true);
     });

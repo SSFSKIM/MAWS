@@ -21,7 +21,7 @@ import type { CommandName, CommandResult, EventPayload } from '@shared/ipc/schem
 import type { ProjectActAsk, ProjectActAsks } from '@shared/ipc/schema/org';
 import type { ProjectForwardResult } from '@shared/ipc/schema/projects';
 import type { ProjectRecord } from '@shared/ipc/schema/session';
-import { actRefusal, addWords, canonicalPath, hasParentSegment, linkWords, NO_WINDOW, notCanonical, NOT_CONFIRMED, notSignedIn, removeWords } from '@shared/machine/maws-words';
+import { actRefusal, addWords, canonicalPath, contestedMachine, hasParentSegment, linkWords, NO_WINDOW, notCanonical, NOT_CONFIRMED, notSignedIn, removeWords } from '@shared/machine/maws-words';
 import type { MachineRef } from '@shared/machine/ref';
 import type { MainHandler } from '../ipc/router';
 import { appWindows } from '../windows';
@@ -95,7 +95,8 @@ export function startProjectActs<L>(deps: ProjectActsDeps<L>): { stop(): void } 
     if (machines === null) return answer(request.id, { ok: false, code: 'signed-out', text: notSignedIn(request) });
     const windows = appWindows();
     if (windows.length === 0) return answer(request.id, { ok: false, code: 'no-window', text: NO_WINDOW });
-    const machine = machines.find((m) => m.name === request.machine);
+    if (machines.contested.includes(request.machine)) return answer(request.id, { ok: false, code: 'contested', text: contestedMachine(request.machine) }); // branch fix 2: not unknown
+    const machine = machines.machines.find((m) => m.name === request.machine);
     if (machine === undefined) return answer(request.id, { ok: false, code: 'unknown-machine', text: `unknown-machine: ${request.machine} is no machine of this org` });
     if (hasParentSegment(request.path)) return answer(request.id, { ok: false, code: 'not-canonical', text: notCanonical(request.path) }); // that machine's to resolve
     const intoName = typeof request.into === 'string' ? nameOf(request.into) : null;

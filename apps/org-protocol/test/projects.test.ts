@@ -4,9 +4,9 @@
 // certificate-only VM is among, and `assembleProjects`' grouping, exclusions and names.
 import { describe, expect, it } from 'vitest';
 import { canonicalize } from '../src/canonical.ts';
-import { importSigningKey } from '../src/keys.ts';
+import { importSigningKey, keyId } from '../src/keys.ts';
 import { assembleProjects, directoryMachineNames, directoryMachines, machineProjectNames } from '../src/projects.ts';
-import { NO_CERTIFICATES, signRecord, verifyMachineCert, verifyProjectsRecord } from '../src/records.ts';
+import { NO_CERTIFICATES, signRecord, standingCertMachines, verifyMachineCert, verifyProjectsRecord } from '../src/records.ts';
 import { isProjectsRecord, PROJECTS_RECORD_BOUNDS } from '../src/shapes.ts';
 import { SIGNING_DOMAINS, type Certificates, type OrgState, type ProjectLocation, type ProjectsRecord, type Signed, type SignedOrgState } from '../src/types.ts';
 import { ORG, REF_MINI, REF_VM1, REF_VM_BUILD, VECTOR_KEYS, VECTORS } from '../vectors/index.ts';
@@ -20,6 +20,18 @@ async function reissued(old: Certificates['certs'][number]): Promise<Certificate
   const delegation = await importSigningKey(VECTOR_KEYS.delegation.jwk);
   const body = { ...old.body, machine: `${REF_VM1}-next`, pub: VECTOR_KEYS.vm1Next.pub, issued: '2026-10-27T12:00:00.000Z' };
   return signRecord(SIGNING_DOMAINS.machineCert, body, delegation.privateKey, delegation.pub);
+}
+
+/** V2 with an admin's retirement of `cert`'s key (the state's `retired`), an hour before it was reissued. */
+async function retiredByState(cert: Certificates['certs'][number]): Promise<OrgState> {
+  const state = structuredClone(V2);
+  state.retired.push({ keyId: await keyId(cert.body.pub), pub: cert.body.pub, notAfter: '2026-10-27T11:00:00.000Z', holder: { machine: cert.body.machine } });
+  return state;
+}
+/** A retirement record of `cert`'s key, signed by its own delegation's key. */
+async function retiredByRecord(cert: Certificates['certs'][number]): Promise<Certificates['retirements'][number]> {
+  const delegation = await importSigningKey(VECTOR_KEYS.delegation.jwk);
+  return signRecord(SIGNING_DOMAINS.certRetire, { org: ORG, keyId: await keyId(cert.body.pub), notAfter: '2026-10-27T11:00:00.000Z' }, delegation.privateKey, delegation.pub);
 }
 
 /** A vector argument with its `{$state}` and `{$fixture}` references resolved, as the replay does. */
@@ -121,27 +133,42 @@ describe("the machine names: the directory's and the registry's", () => {
   it('are the machines with their refs, a VM that exists only by its certificate among them, its gone delegation not', async () => {
     const certified = VM1_CERTS.certs[0]!.body as { machine: string; name: string };
     const enrolled = V2.machines.map((m) => ({ ref: m.ref, name: m.name })).sort((a, b) => a.name.localeCompare(b.name)); // by name
-    expect(await directoryMachines(V2, NO_CERTIFICATES, NOW)).toEqual(enrolled);
-    expect(await directoryMachines(V2, VM1_CERTS, NOW)).toEqual([...enrolled, { ref: certified.machine, name: 'vm-1' }]);
+    const none = { machines: enrolled, contested: [] };
+    expect(await directoryMachines(V2, NO_CERTIFICATES, NOW)).toEqual(none);
+    expect(await directoryMachines(V2, VM1_CERTS, NOW)).toEqual({ machines: [...enrolled, { ref: certified.machine, name: 'vm-1' }], contested: [] });
     expect(certified.machine).toBe(REF_VM1);
-    expect((await directoryMachines(V2, VM1_CERTS, NOW)).map((m) => m.name)).toEqual(directoryMachineNames(V2, VM1_CERTS, NOW));
-    expect(await directoryMachines(fixture<SignedOrgState>('v2 without the delegation').state, VM1_CERTS, NOW)).toEqual(enrolled);
-    expect(await directoryMachines(V2, VM1_CERTS, new Date('2026-12-01T00:00:00.000Z'))).toEqual(enrolled);
+    expect((await directoryMachines(V2, VM1_CERTS, NOW)).machines.map((m) => m.name)).toEqual(directoryMachineNames(V2, VM1_CERTS, NOW));
+    expect(await directoryMachines(fixture<SignedOrgState>('v2 without the delegation').state, VM1_CERTS, NOW)).toEqual(none);
+    expect(await directoryMachines(V2, VM1_CERTS, new Date('2026-12-01T00:00:00.000Z'))).toEqual(none);
   });
 
-  // M12's re-review, finding 1: a VM retired and its name reissued is one machine, the replacement
-  it('are one per name: a retired certificate none, the latest issued of one name the one, an enrolled machine before any', async () => {
+  // M12's re-review, finding 1, as the certificates' standing judges it (branch fix 2): a VM retired and its name
+  // reissued is one machine, the replacement; two live certificates of one name under two refs are contested
+  it('are one per name: a retired certificate none, two live of one name contested, an enrolled machine before any', async () => {
     const old = VM1_CERTS.certs[0]!;
     const replacement = await reissued(old);
-    const retired = structuredClone(V2);
-    retired.retired.push({ keyId: 'AAAAAAAAAAAAAAAAAAAAAA', pub: old.body.pub, notAfter: '2026-10-27T11:00:00.000Z', holder: { machine: REF_VM1 } });
-    const vms = async (state: OrgState, certs: Certificates['certs']) => (await directoryMachines(state, { certs, retirements: [] }, NOW)).filter((m) => m.name === 'vm-1');
-    expect(await vms(retired, [old, replacement])).toEqual([{ ref: `${REF_VM1}-next`, name: 'vm-1' }]); // the retired ref, sorted first by ref, is no target
-    expect(await vms(retired, [old]), 'a retired certificate alone').toEqual([]);
-    expect(await vms(V2, [replacement, old]), 'two live certificates of one name: the latest issued').toEqual([{ ref: `${REF_VM1}-next`, name: 'vm-1' }]);
+    const retired = await retiredByState(old);
+    const vm1 = async (state: OrgState, certs: Certificates['certs']) => {
+      const read = await directoryMachines(state, { certs, retirements: [] }, NOW);
+      return { machines: read.machines.filter((m) => m.name === 'vm-1'), contested: read.contested };
+    };
+    expect(await vm1(retired, [old, replacement])).toEqual({ machines: [{ ref: `${REF_VM1}-next`, name: 'vm-1' }], contested: [] });
+    expect(await vm1(retired, [old]), 'a retired certificate alone').toEqual({ machines: [], contested: [] });
+    expect(await vm1(V2, [replacement, old]), 'two live certificates of one name under two refs').toEqual({ machines: [], contested: ['vm-1'] });
     const enrolledToo = structuredClone(V2);
     enrolledToo.machines.push({ ...enrolledToo.machines[0]!, name: 'VM-1', ref: 'mref-enrolled-vm1' });
-    expect((await directoryMachines(enrolledToo, VM1_CERTS, NOW)).filter((m) => m.name.toLowerCase() === 'vm-1'), 'an enrolled machine before a certificate').toEqual([{ ref: 'mref-enrolled-vm1', name: 'VM-1' }]);
+    const read = await directoryMachines(enrolledToo, VM1_CERTS, NOW);
+    expect([read.machines.filter((m) => m.name.toLowerCase() === 'vm-1'), read.contested], 'an enrolled machine before a certificate').toEqual([[{ ref: 'mref-enrolled-vm1', name: 'VM-1' }], []]);
+  });
+
+  // branch fix 2: a retirement record its own delegation's key signed retires the certificate, as the state's entry does
+  it('take no target from a certificate a delegation-signed retirement record retired', async () => {
+    const old = VM1_CERTS.certs[0]!;
+    const retirement = await retiredByRecord(old);
+    const read = await directoryMachines(V2, { certs: [old], retirements: [retirement] }, NOW);
+    expect([read.machines.map((m) => m.name), read.contested]).toEqual([['builder', 'mini'], []]);
+    const replaced = await directoryMachines(V2, { certs: [old, await reissued(old)], retirements: [retirement] }, NOW);
+    expect([replaced.machines.find((m) => m.name === 'vm-1'), replaced.contested], 'its replacement the one').toEqual([{ ref: `${REF_VM1}-next`, name: 'vm-1' }, []]);
   });
 
   // branch review 1, P1: the hub's set is only shape-checked, so a certificate names a target only once it verifies
@@ -152,31 +179,42 @@ describe("the machine names: the directory's and the registry's", () => {
     for (const forged of [toMini, later]) {
       expect((await verifyMachineCert(V2, forged, NOW)).ok).toBe(false);
       const certs: Certificates = { certs: [genuine, forged], retirements: [] };
-      expect((await directoryMachines(V2, certs, NOW)).find((m) => m.name === 'vm-1')).toEqual({ ref: REF_VM1, name: 'vm-1' });
-      expect((await directoryMachines(V2, { certs: [forged], retirements: [] }, NOW)).map((m) => m.name), 'a forged certificate alone').not.toContain('vm-1');
+      expect(await directoryMachines(V2, certs, NOW), 'the forgery contests nothing').toMatchObject({ machines: expect.arrayContaining([{ ref: REF_VM1, name: 'vm-1' }]), contested: [] });
+      expect((await directoryMachines(V2, { certs: [forged], retirements: [] }, NOW)).machines.map((m) => m.name), 'a forged certificate alone').not.toContain('vm-1');
     }
   });
 
-  it('name what `directoryMachineNames` names, save a retired certificate’s name it lists', async () => {
+  it('name some of what `directoryMachineNames` names, every standing, uncontested certificate’s name in both', async () => {
     const old = VM1_CERTS.certs[0]!;
     const replacement = await reissued(old);
+    // a revoked delegation: dropped from the state, its key in `revoked` under its id and prefix (org-state.ts)
     const revoked = structuredClone(V2);
-    revoked.revoked.push({ keyId: 'AAAAAAAAAAAAAAAAAAAAAA', holder: { delegation: V2.delegations[0].id, prefix: V2.delegations[0].prefix } });
+    revoked.delegations = [];
+    revoked.revoked.push({ keyId: await keyId(V2.delegations[0].pub), holder: { delegation: V2.delegations[0].id, prefix: V2.delegations[0].prefix } });
     const inputs: Array<[OrgState, Certificates, Date]> = [
       [V2, NO_CERTIFICATES, NOW],
       [V2, VM1_CERTS, NOW],
       [V2, { certs: [old, replacement], retirements: [] }, NOW],
+      [V2, { certs: [old, replacement], retirements: [await retiredByRecord(old)] }, NOW],
+      [await retiredByState(old), { certs: [old, replacement], retirements: [] }, NOW],
+      [await retiredByState(old), VM1_CERTS, NOW],
       [fixture<SignedOrgState>('v2 without the delegation').state, VM1_CERTS, NOW],
       [V2, VM1_CERTS, new Date('2026-12-01T00:00:00.000Z')],
       [revoked, VM1_CERTS, NOW],
       [fixture<SignedOrgState>('v3 renamed').state, NO_CERTIFICATES, NOW],
     ];
-    for (const [state, certs, now] of inputs) expect((await directoryMachines(state, certs, now)).map((m) => m.name)).toEqual(directoryMachineNames(state, certs, now));
-    // the one difference: the directory's names still list a certificate the head retired, which is no target
-    const retired = structuredClone(V2);
-    retired.retired.push({ keyId: 'AAAAAAAAAAAAAAAAAAAAAA', pub: old.body.pub, notAfter: '2026-10-27T11:00:00.000Z', holder: { machine: REF_VM1 } });
-    expect(directoryMachineNames(retired, VM1_CERTS, NOW)).toContain('vm-1');
-    expect((await directoryMachines(retired, VM1_CERTS, NOW)).map((m) => m.name)).not.toContain('vm-1');
+    for (const [state, certs, now] of inputs) {
+      const listed = directoryMachineNames(state, certs, now);
+      const named = (await directoryMachines(state, certs, now)).machines.map((m) => m.name);
+      expect(listed, 'a subset').toEqual(expect.arrayContaining(named));
+      for (const c of await standingCertMachines(state, certs, now)) {
+        if (c.contested) continue;
+        expect([named, listed], c.name).toEqual([expect.arrayContaining([c.name]), expect.arrayContaining([c.name])]);
+      }
+    }
+    // the directory's names still list a certificate the head retired, which is no target
+    expect(directoryMachineNames(await retiredByState(old), VM1_CERTS, NOW)).toContain('vm-1');
+    expect((await directoryMachines(await retiredByState(old), VM1_CERTS, NOW)).machines.map((m) => m.name)).not.toContain('vm-1');
   });
 
   it("take a renamed machine's old name into the registry's set alone, and no name of a ref the head no longer enrolls", () => {

@@ -107,7 +107,7 @@ async function mainOn(scene: MawsdScene, target: { f: Fixture; a: Remote }, opti
         return sent;
       }) as never,
     },
-    registry: { projects: () => NO_PROJECTS, machines: async () => [{ ref: target.f.ref as MachineRef, name: 'mini' }] },
+    registry: { projects: () => NO_PROJECTS, machines: async () => ({ machines: [{ ref: target.f.ref as MachineRef, name: 'mini' }], contested: [] }) },
     roster: () => [target.f.ref as MachineRef],
     link: (ref) => (ref === target.f.ref ? target.a : null),
     send: (r, name, input) => viaLaneB(target.f, r, name, input),

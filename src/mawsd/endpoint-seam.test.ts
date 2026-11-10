@@ -326,7 +326,7 @@ describe('the seam’s local door', () => {
 // The project registry's M12 (Interfaces §H's RegistryRead, §K's `projects.registry`): what `maws` reads of the org's
 // projects is the loaded module's own read; unloaded, there is none, and the daemon answers for an unenrolled machine.
 describe('the seam’s registry read', () => {
-  const READ = { enrolled: true, machine: { ref: 'r'.repeat(22) as never, name: 'mini' }, machines: [], projects: [] };
+  const READ = { enrolled: true, machine: { ref: 'r'.repeat(22) as never, name: 'mini' }, machines: [], contested: [], projects: [] };
   class ReadModule extends Module {
     readonly registryRead = { read: async () => READ };
   }

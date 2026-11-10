@@ -5,6 +5,7 @@
 // row key comes from the key table, one of this device's rows lending its label; a held removal's location is left out
 // and listed; signed out the value is empty. Over a fake feed, session, links and rows, with real signed records.
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { generateSigningKey } from '../../../apps/org-protocol/src/index.ts';
 import { machineProjectId, repoProjectId } from '@shared/machine/project-ids';
 import type { OrgProjects } from '@shared/ipc/schema/org';
 import type { ProjectRecord } from '@shared/ipc/schema/session';
@@ -129,7 +130,7 @@ describe('the machines the registry names', () => {
   it('are the directory’s, by name and ref, a certificate-only VM among them; none signed out', async () => {
     const w = await World.make();
     const h = await start(w);
-    expect(await h.registry.machines()).toEqual([{ ref: w.m1.ref, name: 'mac-one' }, { ref: w.m2.ref, name: 'mac-two' }, { ref: w.d.ref, name: 'vm-one' }]);
+    expect(await h.registry.machines()).toEqual({ machines: [{ ref: w.m1.ref, name: 'mac-one' }, { ref: w.m2.ref, name: 'mac-two' }, { ref: w.d.ref, name: 'vm-one' }], contested: [] });
     w.session.set(null);
     expect(await h.registry.machines()).toBeNull();
   });
@@ -140,9 +141,19 @@ describe('the machines the registry names', () => {
     const forged = { ...w.d.cert, body: { ...w.d.cert.body, machine: w.m1.ref, issued: iso(w.clock + 60_000) } };
     w.certs = { certs: [w.d.cert, forged], retirements: [] };
     const h = await start(w);
-    expect((await h.registry.machines())?.find((m) => m.name === 'vm-one')).toEqual({ ref: w.d.ref, name: 'vm-one' });
+    expect(await h.registry.machines()).toMatchObject({ machines: expect.arrayContaining([{ ref: w.d.ref, name: 'vm-one' }]), contested: [] });
     w.certs = { certs: [forged], retirements: [] };
-    expect((await h.registry.machines())?.map((m) => m.name)).toEqual(['mac-one', 'mac-two']);
+    expect(await h.registry.machines()).toEqual({ machines: [{ ref: w.m1.ref, name: 'mac-one' }, { ref: w.m2.ref, name: 'mac-two' }], contested: [] });
+  });
+
+  // branch fix 2: a name two live certificates claim under two refs names no target, and is told as contested
+  it('take no ref for a name claimed under two refs: it is contested', async () => {
+    const w = await World.make();
+    const rivalKey = await generateSigningKey();
+    const rival = await w.certify(`${w.delegation.id}_${'r'.repeat(22)}`, rivalKey);
+    w.certs = { certs: [w.d.cert, rival], retirements: [] };
+    const h = await start(w);
+    expect(await h.registry.machines()).toEqual({ machines: [{ ref: w.m1.ref, name: 'mac-one' }, { ref: w.m2.ref, name: 'mac-two' }], contested: ['vm-one'] });
   });
 });
 

@@ -321,6 +321,22 @@ export async function standingCertNames(state: OrgState, set: Certificates, now:
 }
 
 /**
+ * The machines live certificates stand for at `now`, one per certificate's ref and name as it spells it: authentic, its
+ * key neither revoked nor retired (by the state's entry or its own delegation's record), its delegation unexpired; and
+ * whether it is contested (see the header). A contested certificate speaks for no one; `maws` aims at the others.
+ */
+export async function standingCertMachines(state: OrgState, set: Certificates, now: Date): Promise<Array<{ ref: string; name: string; contested: boolean }>> {
+  if (!isCertificates(set)) return [];
+  const machines = new Map<string, { ref: string; name: string; contested: boolean }>();
+  for (const v of await certViews(state, set, now)) {
+    if (!v.live) continue;
+    const id = JSON.stringify([v.body.machine, v.body.name]);
+    machines.set(id, { ref: v.body.machine, name: v.body.name, contested: v.contested || machines.get(id)?.contested === true });
+  }
+  return [...machines.values()];
+}
+
+/**
  * The keys allowed to sign as a machine writer `<name>/…` (RL8): those of the ref `machineNames` gives the name — its
  * entry's current key unless the ref is contested, and its retired keys — and those of every certificate bearing the
  * name, live and uncontested, or retired or expired, each bound to its own ref by its own certificate.

@@ -61,6 +61,9 @@ export function canonicalPath(path: string): string {
 export const hasParentSegment = (path: string): boolean => path.split('/').includes('..');
 
 /** A request aimed at another machine whose path has a `..` segment (`not-canonical`, exit 1). */
+/** A name live certificates claim under more than one ref (org-protocol's `directoryMachines`): no machine's to aim at. */
+export const contestedMachine = (name: string) => `contested: ${name} is claimed by more than one machine of this org; an admin settles it`;
+
 export const notCanonical = (path: string) => `not-canonical: ${path} has a ".." segment, which only that machine can resolve; give the folder's path without ".."`;
 
 /** A request aimed at another machine, as a terminal names it (`projects.forward`'s input). */

@@ -18,7 +18,7 @@ import type { HostResponse } from '@shared/ipc/host-protocol';
 import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
 import type { ProjectForwardResult, ProjectsRegistry } from '@shared/ipc/schema/projects';
 import type { ProjectRecord } from '@shared/ipc/schema/session';
-import { actRefusal, addWords, canonicalPath, exitOf, hasParentSegment, linkWords, notCanonical, removeWords } from '@shared/machine/maws-words';
+import { actRefusal, addWords, canonicalPath, contestedMachine, exitOf, hasParentSegment, linkWords, notCanonical, removeWords } from '@shared/machine/maws-words';
 import { EXIT, type CliDeps } from './cli';
 import { reachMachine, type MachineLink, type Reached } from './machine-client';
 
@@ -146,6 +146,7 @@ async function run(link: MachineLink, parsed: Parsed, deps: MawsDeps): Promise<n
     const into = parsed.into === undefined ? undefined : resolveInto(parsed.into, registry);
     if ('machine' in target) {
       if (parsed.verb === 'show') throw new Usage('show takes a folder on this machine');
+      if (registry.enrolled && registry.contested.includes(target.machine)) throw new Refused(contestedMachine(target.machine)); // branch fix 2: not unknown
       if (registry.enrolled && !registry.machines.some((m) => m.name === (target as { machine: string }).machine)) throw new Refused(`unknown-machine: ${target.machine} is no machine of this org`);
       if (hasParentSegment(target.path)) throw new Refused(notCanonical(target.path)); // that machine's to resolve, past a link
       return await forward(link, { verb: parsed.verb, machine: target.machine, path: target.path, ...(parsed.verb === 'link' ? { into: into ?? null } : into !== undefined && { into }), ...(parsed.own && { own: true as const }), ...(parsed.name !== undefined && { name: parsed.name }) }, deps);

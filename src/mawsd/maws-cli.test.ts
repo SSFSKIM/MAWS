@@ -30,6 +30,7 @@ const registry = (over: Record<string, unknown> = {}) => ({
   enrolled: true,
   machine: { ref: BOOK, name: 'macbook' },
   machines: [{ ref: BOOK, name: 'macbook' }, { ref: MINI, name: 'mini' }],
+  contested: [],
   projects: [
     { id: SCRAPE, name: 'scrape', hub: true, renamable: true, locations: [location(MINI, '/srv/scrape', { stated: 'minted' }), location(BOOK, '/Users/me/scrape', { state: 'missing' })], known: [] },
     { id: TOOLS_A, name: 'tools', hub: true, renamable: true, locations: [location(MINI, '/srv/tools')], known: [] },
@@ -104,7 +105,7 @@ describe('maws project add, on this machine', () => {
   });
 
   it('on a machine that is not enrolled, declares the folder as this machine’s alone', async () => {
-    const d = daemon({ 'projects.registry': ok(registry({ enrolled: false, machines: [], projects: [] })), 'session.projects.addFolder': ok({ project: record(work, null), location: { kind: 'directory', path: work } }) });
+    const d = daemon({ 'projects.registry': ok(registry({ enrolled: false, machines: [], contested: [], projects: [] })), 'session.projects.addFolder': ok({ project: record(work, null), location: { kind: 'directory', path: work } }) });
     expect(await maws(['project', 'add'], d.reach)).toEqual({ code: 0, out: `added ${work}; this machine is not enrolled, so it is a project of this machine only\n`, err: '' });
   });
 
@@ -119,7 +120,7 @@ describe('maws project list and show', () => {
     const d = daemon({ 'projects.registry': ok(registry()) });
     expect((await maws(['project', 'list'], d.reach)).out).toBe([`scrape  ${SCRAPE}  mini:/srv/scrape  macbook:/Users/me/scrape missing`, `tools  ${TOOLS_A}  mini:/srv/tools`, `tools  ${TOOLS_B}  macbook:/Users/me/tools`, ''].join('\n'));
     expect(JSON.parse((await maws(['project', 'list', '--json'], d.reach)).out)).toEqual(registry());
-    const none = daemon({ 'projects.registry': ok(registry({ enrolled: false, machines: [], projects: [] })) });
+    const none = daemon({ 'projects.registry': ok(registry({ enrolled: false, machines: [], contested: [], projects: [] })) });
     expect(await maws(['project', 'list'], none.reach)).toEqual({ code: 0, out: 'this machine is not enrolled, so it holds no project of an org\n', err: '' });
   });
 
@@ -224,6 +225,10 @@ describe('maws project aimed at another machine', () => {
     await maws(['project', 'add', `macbook:${work}`], d.reach);
     expect(d.calls.at(-1)).toEqual(['session.projects.addFolder', { directory: work }]);
     expect(await maws(['project', 'add', 'vm:/srv/new'], d.reach)).toEqual({ code: 1, out: '', err: 'unknown-machine: vm is no machine of this org\n' });
+    // branch fix 2: a name claimed by more than one machine is refused as such, and nothing is forwarded
+    const contested = daemon({ 'projects.registry': ok(registry({ contested: ['vm-2'] })) });
+    expect(await maws(['project', 'add', 'vm-2:/srv/new'], contested.reach)).toEqual({ code: 1, out: '', err: 'contested: vm-2 is claimed by more than one machine of this org; an admin settles it\n' });
+    expect(contested.calls.map(([name]) => name)).toEqual(['projects.registry']);
     mkdirSync(join(work, 'mini:'), { recursive: true });
     mkdirSync(join(work, 'mini:', 'srv'));
     await maws(['project', 'add', 'mini:/srv'], d.reach);

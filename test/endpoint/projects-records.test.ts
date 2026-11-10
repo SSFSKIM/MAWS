@@ -430,8 +430,12 @@ describe('the registry seam', () => {
     await w.amend((s) => void s.delegations.push({ id: dId, pub: delegationKey.pub, prefix: 'dl-', expires: new Date(Date.now() + 3_600_000).toISOString(), maxUses: 10, offlineRevokeS: 0, owners: [w.admin] }));
     const cert = await signRecord(SIGNING_DOMAINS.machineCert, { org: ORG, machine: dRef, name: 'dl-one', pub: dKey.pub, delegation: dId, use: 1, issued: new Date().toISOString() }, delegationKey.privateKey, delegationKey.pub);
     const { r } = await registry(w, { certificates: { certs: [cert], retirements: [] } });
-    expect(await r.read()).toMatchObject({ enrolled: true, machine: { ref: w.ref, name: 'mini' }, machines: [{ ref: dRef, name: 'dl-one' }, { ref: w.ref, name: 'mini' }, { ref: w.other, name: 'vm' }] });
-    expect((await (await registry(w, { enrolled: false })).r.read()).machines).toEqual([]);
+    expect(await r.read()).toMatchObject({ enrolled: true, machine: { ref: w.ref, name: 'mini' }, machines: [{ ref: dRef, name: 'dl-one' }, { ref: w.ref, name: 'mini' }, { ref: w.other, name: 'vm' }], contested: [] });
+    expect(await (await registry(w, { enrolled: false })).r.read()).toMatchObject({ machines: [], contested: [] });
+    // branch fix 2: a name claimed under two refs names no machine, and is read as contested
+    const rival = await signRecord(SIGNING_DOMAINS.machineCert, { org: ORG, machine: mintRef(dId), name: 'dl-one', pub: (await generateSigningKey()).pub, delegation: dId, use: 2, issued: new Date().toISOString() }, delegationKey.privateKey, delegationKey.pub);
+    const contested = await registry(w, { certificates: { certs: [cert, rival], retirements: [] } });
+    expect(await contested.r.read()).toMatchObject({ machines: [{ ref: w.ref, name: 'mini' }, { ref: w.other, name: 'vm' }], contested: ['dl-one'] });
   });
 
   // branch review 1, P1: the hub's certificates are only shape-checked; one that does not verify retargets no name

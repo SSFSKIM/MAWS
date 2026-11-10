@@ -1,7 +1,8 @@
 // X2 `projects.*` (the project registry, docs/doperpowers/plans/2026-11-10-project-registry.md, M12 and Interfaces §K):
 // what `mawsd` serves the `maws` command line on machine.sock, the front's own and no service's:
 //   - `projects.registry`: the org's projects as this machine's endpoint holds them (§H's `RegistryRead`): the held records
-//     and the machine's own, assembled as the endpoint assembles its directory, with the machines' names from the head.
+//     and the machine's own, assembled as the endpoint assembles its directory, with the machines' names from the head
+//     and the certificates, and the names the certificates contest.
 //     On a machine that is not enrolled, `enrolled: false` and no projects.
 //   - `projects.forward`: a verb aimed at another machine, which only a member's device can sign. The daemon posts
 //     `projects.act.request` to the attached app whose hello lists `machine.project-acts` and answers with the app's
@@ -39,7 +40,8 @@ export const RegistryProjectSchema = z.strictObject({
   known: z.array(MachineRefSchema),
 });
 const MachineNamedSchema = z.strictObject({ ref: MachineRefSchema, name: z.string() });
-export const ProjectsRegistrySchema = z.strictObject({ enrolled: z.boolean(), machine: MachineNamedSchema, machines: z.array(MachineNamedSchema), projects: z.array(RegistryProjectSchema) });
+/** `contested`: the names live certificates claim under more than one ref, which name no machine (`maws` refuses them as such). */
+export const ProjectsRegistrySchema = z.strictObject({ enrolled: z.boolean(), machine: MachineNamedSchema, machines: z.array(MachineNamedSchema), contested: z.array(z.string()), projects: z.array(RegistryProjectSchema) });
 export type ProjectsRegistry = z.infer<typeof ProjectsRegistrySchema>;
 
 export const PROJECT_VERBS = ['add', 'remove', 'link'] as const;

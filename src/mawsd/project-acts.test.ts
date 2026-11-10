@@ -12,7 +12,7 @@ import { createServicesFront, type FrontOptions } from './front';
 
 const APP_PID = 4242;
 const REF = 'TestMachineRef00000000' as MachineRef;
-const REGISTRY_READ = { enrolled: true, machine: { ref: REF, name: 'macbook' }, machines: [{ ref: REF, name: 'macbook' }], projects: [] };
+const REGISTRY_READ = { enrolled: true, machine: { ref: REF, name: 'macbook' }, machines: [{ ref: REF, name: 'macbook' }], contested: [], projects: [] };
 
 function connection() {
   const posted: Record<string, unknown>[] = [];

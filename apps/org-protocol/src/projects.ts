@@ -7,7 +7,7 @@
 // records list it among the projects with live sessions and no location there. A machine's own project is no project of
 // the registry: a location or known entry carrying one sits under its machine's row, so it is left out here.
 import { machineNameKey } from './names.ts';
-import { verifyMachineCert } from './records.ts';
+import { standingCertMachines } from './records.ts';
 import { isMachineCert, isSigned } from './shapes.ts';
 import type { Certificates, MachineRef, OrgState, ProjectLocation, ProjectsRecord } from './types.ts';
 
@@ -44,31 +44,23 @@ export function directoryMachineNames(state: OrgState, certificates: Certificate
 }
 
 /**
- * The machines a person aims at by name (`maws project add vm-1:/srv`), each with its ref: the enrolled machines, and
- * those of certificates under a live, unrevoked delegation whose key the head has not retired (`retired`), so a devcloud
- * VM that exists only by its certificate is one and a retired VM is none. A certificate names a target only once
- * `verifyMachineCert` accepts it at `now`: the hub's set is only shape-checked, and a copy of a genuine certificate with
- * its ref or `issued` altered would otherwise aim a VM's name at another machine. One per name as `directoryMachineNames`
- * keys it (`machineNameKey`): an enrolled machine before any certificate, and among live certificates of one name the
- * latest issued, so a VM retired and reissued under its name is its replacement. Its names are `directoryMachineNames`',
- * save a name only a certificate the head retired, or one that does not verify, bears, which that list keeps. Sorted by
- * name.
+ * The machines a person aims at by name (`maws project add vm-1:/srv`), each with its ref, and the names no one may be
+ * aimed at by. The machines: the enrolled ones, then those a live, uncontested certificate stands for
+ * (`standingCertMachines`: authentic, its key neither revoked nor retired, its delegation unexpired), so a devcloud VM
+ * that exists only by its certificate is one and a retired VM is none. One per name as `directoryMachineNames` keys it
+ * (`machineNameKey`), an enrolled machine before any certificate. `contested`: the names of live certificates that are
+ * contested (two refs claiming one name, a ref claimed with two keys, or one a state entry holds), which name no target
+ * however many claim them; an enrolled machine's name is never one. Its machines' names are some of
+ * `directoryMachineNames`', which also keeps a name only a retired or contested certificate bears. Each sorted by name.
  */
-export async function directoryMachines(state: OrgState, certificates: Certificates, now: Date): Promise<Array<{ ref: MachineRef; name: string }>> {
-  const machines = new Map<string, { ref: MachineRef; name: string; issued: string | null }>();
-  for (const m of state.machines) machines.set(machineNameKey(m.name), { ref: m.ref, name: m.name, issued: null });
-  const live = new Set(state.delegations.filter((d) => Date.parse(d.expires) > now.getTime()).map((d) => d.id));
-  const revoked = new Set(state.revoked.flatMap((r) => ('delegation' in r.holder ? [r.holder.delegation] : [])));
-  const retired = new Set(state.retired.map((r) => r.pub));
-  for (const c of certificates.certs) {
-    if (!isSigned(c, isMachineCert) || !live.has(c.body.delegation) || revoked.has(c.body.delegation) || retired.has(c.body.pub)) continue;
-    const key = machineNameKey(c.body.name);
-    const held = machines.get(key);
-    if (held !== undefined && (held.issued === null || held.issued >= c.body.issued)) continue; // enrolled, or issued no earlier
-    if (!(await verifyMachineCert(state, c, now)).ok) continue;
-    machines.set(key, { ref: c.body.machine, name: c.body.name, issued: c.body.issued });
-  }
-  return [...machines.values()].map(({ ref, name }) => ({ ref, name })).sort((a, b) => byText(a.name, b.name));
+export async function directoryMachines(state: OrgState, certificates: Certificates, now: Date): Promise<{ machines: Array<{ ref: MachineRef; name: string }>; contested: string[] }> {
+  const machines = new Map<string, { ref: MachineRef; name: string }>();
+  for (const m of state.machines) machines.set(machineNameKey(m.name), { ref: m.ref, name: m.name });
+  const enrolled = new Set(machines.keys());
+  const standing = (await standingCertMachines(state, certificates, now)).filter((c) => !enrolled.has(machineNameKey(c.name)));
+  for (const c of standing) if (!c.contested) machines.set(machineNameKey(c.name), { ref: c.ref, name: c.name });
+  const contested = [...new Set(standing.filter((c) => c.contested).map((c) => c.name))];
+  return { machines: [...machines.values()].sort((a, b) => byText(a.name, b.name)), contested: contested.sort(byText) };
 }
 
 /**

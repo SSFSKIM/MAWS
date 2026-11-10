@@ -72,9 +72,10 @@ export interface ProjectRegistry {
   projects(): OrgProjects;
   /**
    * The project registry's M12: the directory's machines (the held head's and certificate-only VMs', a certificate only
-   * once it verifies now), by ref and name; null while signed out. Read on demand: nothing is held between asks.
+   * while it stands now, uncontested), by ref and name, and the names live certificates contest (org-protocol's
+   * `directoryMachines`); null while signed out. Read on demand: nothing is held between asks.
    */
-  machines(): Promise<Array<{ ref: MachineRef; name: string }> | null>;
+  machines(): Promise<{ machines: Array<{ ref: MachineRef; name: string }>; contested: string[] } | null>;
   /** The row key of a project id on this device; null for an id the table has not given one. */
   keyOf(project: string): OrgKey | null;
   onKeys(listener: () => void): () => void;
@@ -381,7 +382,8 @@ export function createProjectRegistry(deps: ProjectRegistryDeps): ProjectRegistr
       const head = view?.head() ?? null;
       if (view === null || head === null) return null;
       // the directory's machines: a VM that exists only by its certificate is one, aimed at by its name
-      return (await directoryMachines(head.state, view.certificates(), new Date(now()))).map((m) => ({ ref: m.ref as MachineRef, name: m.name }));
+      const read = await directoryMachines(head.state, view.certificates(), new Date(now()));
+      return { machines: read.machines.map((m) => ({ ref: m.ref as MachineRef, name: m.name })), contested: read.contested };
     },
     keyOf: (project) => table.keyOf(project),
     onKeys(listener) {
