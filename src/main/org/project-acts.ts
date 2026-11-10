@@ -8,7 +8,8 @@
 //
 // A request the app cannot show is refused at once and never waits unseen: signed out (`signed-out`), or with no window
 // open (`no-window`); one the person dismisses is `declined`. A remove or a link names the row by the registry's location
-// at that path on that machine (its `pid`). A request whose terminal has gone is withdrawn by the daemon
+// at that path on that machine (its `pid`); a remove carries that path and project as `expect`, so the machine refuses it
+// `changed` when the row has moved since (panel scalpel-1#1). A request whose terminal has gone is withdrawn by the daemon
 // (`projects.act.withdrawn`) and taken off the page unacted; one already confirmed goes on, since its act may be under
 // way. The daemon's connection ending drops every ask, which covers a daemon restart (Decision Log 22). The machine a
 // request names is read on demand (`registry.machines`, which verifies the certificates it reads; branch review 1, P1);
@@ -134,10 +135,13 @@ export function startProjectActs<L>(deps: ProjectActsDeps<L>): { stop(): void } 
       }
       return { ok: true, text: addWords({ ...value, project }, { enrolled: true, nameOf, machine: machineName }) };
     }
-    const pid = deps.registry.projects().projects.flatMap((p) => p.locations).find((l) => l.machine === machine && l.path === path)?.pid;
-    if (pid === undefined) return { ok: false, code: 'not-declared', text: `not-declared: ${path} is not a project folder on ${machineName}` };
+    const at = deps.registry.projects().projects.flatMap((p) => p.locations.map((l) => ({ project: p.id, ...l }))).find((l) => l.machine === machine && l.path === path);
+    if (at === undefined) return { ok: false, code: 'not-declared', text: `not-declared: ${path} is not a project folder on ${machineName}` };
+    const { pid } = at;
     if (verb === 'remove') {
-      const removed = await deps.send(link, 'session.projects.remove', { id: pid });
+      // panel scalpel-1#1: the location as the person confirmed it, which the machine checks before it hides the row
+      // (§G's `expect`, as a held removal sends it): a row relocated since this Mac's view was read is refused `changed`
+      const removed = await deps.send(link, 'session.projects.remove', { id: pid, expect: { path, project: at.project } });
       return removed.ok ? { ok: true, text: removeWords(path) } : refused(removed)!;
     }
     const into = request.into ?? null;

@@ -167,12 +167,32 @@ describe('a request shown in the page', () => {
     await s.decide('pa-2', true);
     await s.ask({ verb: 'link', machine: 'mini', path: '/srv/elsewhere', into: SCRAPE }, 'pa-3');
     await s.decide('pa-3', true);
-    expect(s.sent).toEqual([['session.projects.remove', { id: 'p-scrape' }], ['session.projects.link', { id: 'p-scrape', into: null }]]);
+    expect(s.sent).toEqual([['session.projects.remove', { id: 'p-scrape', expect: { path: '/srv/scrape', project: SCRAPE } }], ['session.projects.link', { id: 'p-scrape', into: null }]]);
     expect(s.answers).toEqual([
       answered('pa-1', { ok: true, text: 'removed /srv/scrape' }),
       answered('pa-2', { ok: true, text: `unlinked /srv/scrape; its project is scrape (${SCRAPE})` }),
       answered('pa-3', { ok: false, code: 'not-declared', text: 'not-declared: /srv/elsewhere is not a project folder on mini' }),
     ]);
+  });
+
+  // panel scalpel-1#1: main's registry may still show the location at the confirmed path after the machine relocated its
+  // row; the removal carries that path and project as its precondition, so the machine refuses it there, nothing hidden
+  it('sends the confirmed path and project as the removal’s precondition, and answers the machine’s `changed`', async () => {
+    openWindow();
+    const s = scene();
+    const rows = new Map([['p-scrape', '/srv/scrape-moved']]); // the row was relocated on mini after main's view was read
+    const hidden: string[] = [];
+    s.replies.set('session.projects.remove', (input) => {
+      const { id, expect: wanted } = input as { id: string; expect?: { path: string; project: string | null } };
+      if (wanted !== undefined && rows.get(id) !== wanted.path) return { ok: false, error: { code: 'internal', message: `changed: the location is at ${rows.get(id)} now` } } as CommandResult<CommandName>;
+      hidden.push(id);
+      return { ok: true, value: undefined } as CommandResult<CommandName>;
+    });
+    await s.ask({ verb: 'remove', machine: 'mini', path: '/srv/scrape' });
+    await s.decide('pa-1', true);
+    expect(s.sent).toEqual([['session.projects.remove', { id: 'p-scrape', expect: { path: '/srv/scrape', project: SCRAPE } }]]);
+    expect(hidden, 'nothing hidden at the new path').toEqual([]);
+    expect(s.answers).toEqual([answered('pa-1', { ok: false, code: 'changed', text: 'changed: the location is at /srv/scrape-moved now' })]);
   });
 
   // review 1's minor finding: a path spelled otherwise names the same location
@@ -184,7 +204,7 @@ describe('a request shown in the page', () => {
     await s.decide('pa-1', true);
     await s.ask({ verb: 'remove', machine: 'mini', path: '/srv//./scrape' }, 'pa-2');
     await s.decide('pa-2', true);
-    expect(s.sent).toEqual([['session.projects.remove', { id: 'p-scrape' }], ['session.projects.remove', { id: 'p-scrape' }]]);
+    expect(s.sent).toEqual([['session.projects.remove', { id: 'p-scrape', expect: { path: '/srv/scrape', project: SCRAPE } }], ['session.projects.remove', { id: 'p-scrape', expect: { path: '/srv/scrape', project: SCRAPE } }]]);
     expect(s.answers).toEqual([answered('pa-1', { ok: true, text: 'removed /srv/scrape' }), answered('pa-2', { ok: true, text: 'removed /srv/scrape' })]);
   });
 
@@ -234,7 +254,7 @@ describe('a request withdrawn', () => {
     const deciding = s.decide('pa-1', true);
     s.withdraw('pa-1');
     await deciding;
-    expect(s.sent).toEqual([['session.projects.remove', { id: 'p-scrape' }]]);
+    expect(s.sent).toEqual([['session.projects.remove', { id: 'p-scrape', expect: { path: '/srv/scrape', project: SCRAPE } }]]);
     expect(s.answers).toEqual([answered('pa-1', { ok: true, text: 'removed /srv/scrape' })]);
   });
 
