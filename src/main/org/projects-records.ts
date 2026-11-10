@@ -22,7 +22,7 @@
 //
 // Electron-free: vitest's node project runs it.
 import { createHash } from 'node:crypto';
-import { canonicalize, isProjectsRecord, isSigned, verifyProjectsRecord, type Certificates, type OrgState, type ProjectsRecord, type Signed, type SignedOrgState } from '../../../apps/org-protocol/src/index.ts';
+import { canonicalize, isProjectsRecord, isSigned, verifyMachineCert, verifyProjectsRecord, type Certificates, type OrgState, type ProjectsRecord, type Signed, type SignedOrgState } from '../../../apps/org-protocol/src/index.ts';
 import type { OrgFiles } from './files';
 import type { RegistryFeed } from './registry-feed';
 import type { OrgSession, SignedIn } from './session';
@@ -144,22 +144,28 @@ export function createProjectsRecords(deps: ProjectsRecordsDeps): ProjectsRecord
     return current !== null && current.identity.org === dataOrg ? current : null;
   };
 
-  function authorityEnd(current: SignedIn, machine: string): number {
+  /**
+   * When the authority a verified record of `machine` speaks under ends: the `expires` of the delegation of a certificate
+   * for its ref that verifies (`verifyMachineCert`, the check the record's own verification makes of it); none for a
+   * machine the head enrolls, or one no verified certificate binds. A certificate the set merely holds counts for nothing:
+   * only an authentic one names its delegation (its ref is that delegation's), so it is the one the record verified under.
+   */
+  async function authorityEnd(current: SignedIn, machine: string): Promise<number> {
     const state = current.view.head().state;
     if (state.machines.some((m) => m.ref === machine)) return Infinity;
-    const cert = current.view.certificates().certs.find((c) => c.body.machine === machine);
-    const delegation = cert === undefined ? undefined : state.delegations.find((d) => d.id === cert.body.delegation);
-    return delegation === undefined ? Infinity : Date.parse(delegation.expires);
+    const at = new Date(now());
+    for (const cert of current.view.certificates().certs) {
+      if (cert.body.machine !== machine || !(await verifyMachineCert(state, cert, at)).ok) continue;
+      const delegation = state.delegations.find((d) => d.id === cert.body.delegation);
+      if (delegation !== undefined) return Date.parse(delegation.expires);
+    }
+    return Infinity;
   }
   /** The soonest delegation `expires` ahead of now under the signed-in head (Infinity: none). */
   function soonestExpiry(current: SignedIn): number {
     const at = now();
     const ahead = current.view.head().state.delegations.map((d) => Date.parse(d.expires)).filter((expires) => expires > at);
     return ahead.length === 0 ? Infinity : Math.min(...ahead);
-  }
-  function hold(current: SignedIn, machine: string, record: Signed<ProjectsRecord>): void {
-    held.set(machine, record);
-    authorityEnds.set(machine, authorityEnd(current, machine));
   }
   function release(machine: string): void {
     held.delete(machine);
@@ -188,8 +194,10 @@ export function createProjectsRecords(deps: ProjectsRecordsDeps): ProjectsRecord
       if ((waiting.get(machine)?.body.revision ?? 0) < revision) waiting.set(machine, record);
       return;
     }
+    const ends = await authorityEnd(current, machine);
     marks.set(machine, { revision, hash, kid: record.sig.kid });
-    hold(current, machine, record);
+    held.set(machine, record);
+    authorityEnds.set(machine, ends);
     if ((waiting.get(machine)?.body.revision ?? 0) <= revision) waiting.delete(machine);
     changed();
   }
@@ -207,7 +215,8 @@ export function createProjectsRecords(deps: ProjectsRecordsDeps): ProjectsRecord
     for (const [machine, record] of [...held]) {
       if (held.get(machine) !== record) continue;
       if (await verifies(current, record)) {
-        if (held.get(machine) === record) authorityEnds.set(machine, authorityEnd(current, machine));
+        const ends = await authorityEnd(current, machine);
+        if (held.get(machine) === record) authorityEnds.set(machine, ends);
         continue;
       }
       release(machine);

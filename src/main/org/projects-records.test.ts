@@ -5,7 +5,7 @@
 // retired key's mark goes with it; the file is verified again at load; another org's is discarded; `seen` is the later
 // of a link's last up and the newest record's issue. A fake feed and session over real signed states and records.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { generateSigningKey, keyId, type ProjectsRecord, type Signed } from '../../../apps/org-protocol/src/index.ts';
+import { generateSigningKey, keyId, signRecord, SIGNING_DOMAINS, type MachineCert, type ProjectsRecord, type Signed } from '../../../apps/org-protocol/src/index.ts';
 import { iso } from '../../../test/endpoint/org-fixtures';
 import { fakeFeed, HOUR, location, memoryFiles, random, World, type Machine } from '../../../test/org/rows-world';
 import { createProjectsRecords, PROJECTS_FILE, type ProjectsFile, type ProjectsRecords } from './projects-records';
@@ -156,6 +156,27 @@ describe('a delegation’s expiry', () => {
     expect(h.held()).toEqual(['m1 r1']);
     await h.records.close(); // verified again and dropped, not only hidden
     expect(h.file()?.records.map((r) => r.body.machine)).toEqual([w.m1.ref]);
+  });
+
+  // Review 3: the deadline is the authority's that verified the record, never a certificate the verification passed by.
+  // A shape-valid certificate for the machine's ref placed first in the set, naming an earlier-expiring delegation, is
+  // not authentic (its ref is not that delegation's, nor its signature): the record it does not speak for stays.
+  it('takes the deadline only from the certificate that verified the record, not an unauthentic one placed first', async () => {
+    const w = await World.make();
+    const early = { id: random(32).toLowerCase().replace(/[^0-9a-f]/g, 'a'), key: await generateSigningKey() };
+    await w.adopt((s) => {
+      s.delegations.push({ id: early.id, pub: early.key.pub, prefix: 'vm-', expires: iso(w.clock + 60_000), maxUses: 10, offlineRevokeS: 0, owners: [w.A] });
+    });
+    const forger = await generateSigningKey();
+    const body: MachineCert = { org: w.head().state.org, machine: w.d.ref, name: 'vm-one', pub: w.d.key.pub, delegation: early.id, use: 1, issued: iso(w.clock) };
+    const forged = await signRecord(SIGNING_DOMAINS.machineCert, body, forger.privateKey, forger.pub);
+    w.certs = { certs: [forged, w.d.cert], retirements: [] };
+    w.session.changed();
+    const h = await start(w);
+    await h.page([await w.projects(w.d, 1, [location('v1', ID, '/srv/vm')])]);
+    expect(h.held()).toEqual([`${w.d.ref} r1`]);
+    w.clock += 120_000; // past the forged certificate's delegation, inside the real one's
+    expect(h.held()).toEqual([`${w.d.ref} r1`]);
   });
 });
 
