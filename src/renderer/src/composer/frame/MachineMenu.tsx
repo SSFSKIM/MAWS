@@ -13,7 +13,7 @@
 // choose (ProjectRow.tsx), there: its projects, a new project ("New project", RemoteSetupSheet.tsx) or its home.
 import { Popover } from 'radix-ui';
 import { useEffect, useState } from 'react';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { useRemoteSpawn, useSpawnTarget, type SpawnTarget } from '../../sessions/remote-spawn';
 import { readMachines, type MachineChoice } from '../../sessions/remote-setup';
 import { useMachines } from '../../stores/machines';
@@ -52,7 +52,7 @@ function ClosedItem({ label, line }: { label: string; line: string }) {
   );
 }
 
-export function MachineMenu({ appSessionId, projectKey, disabled }: { appSessionId: AppSessionId; projectKey: string | null; disabled: string | null }) {
+export function MachineMenu({ appSessionId, projectId, projectKey, disabled }: { appSessionId: AppSessionId; projectId: ProjectId | null; projectKey: string | null; disabled: string | null }) {
   const reaches = useReachesRl2();
   const chosen = useSpawnTarget(appSessionId, projectKey);
   const [open, setOpen] = useState(false);
@@ -60,11 +60,11 @@ export function MachineMenu({ appSessionId, projectKey, disabled }: { appSession
   useEffect(() => {
     if (!open) return;
     let live = true;
-    void readMachines(projectKey).then((found) => live && setChoices(found));
+    void readMachines(projectId).then((found) => live && setChoices(found)); // the project registry: by the tab's project, not its label
     return () => {
       live = false;
     };
-  }, [open, projectKey]);
+  }, [open, projectId]);
   if (!reaches) return null;
   const choose = (target: SpawnTarget | null) => {
     // the machine already chosen, chosen again, keeps its place there and what its setup answered (an accepted trust card)

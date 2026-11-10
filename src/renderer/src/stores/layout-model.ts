@@ -546,7 +546,7 @@ export type RekeyOf = (key: TabSetKey) => TabSetKey | 'gone' | 'wait';
 
 const isProjectAddress = (key: string): key is ProjectId => key !== NO_PROJECT && isAddress(key);
 // The keys `RekeyOf` is asked of: a project's address, an org project's key; never a machine's row or the no-project set.
-const isRekeyable = (key: string): boolean => key !== NO_PROJECT && !key.startsWith('machine:');
+const isRekeyable = (key: string): key is TabSetKey => key !== NO_PROJECT && !key.startsWith('machine:');
 
 // Whole sets move, not tabs one by one (W12's `refile` moves session tabs only, which would strand a set's file and
 // artifact tabs under a key nothing shows). Sets landing on one key merge: the base is the one that was current, else

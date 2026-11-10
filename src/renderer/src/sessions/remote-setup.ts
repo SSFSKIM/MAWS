@@ -22,7 +22,7 @@
 // offers the project's locations, "the record saves the round trip"): a project the registry holds takes its location on
 // the machine from its record, with no read over the link; a location missing or replaced there is no place to start in.
 // A project the registry does not hold is read live, as before.
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { IpcError } from '@shared/ipc/errors';
 import type { MawsBridge, ProjectRecord } from '@shared/ipc/schema';
 import type { FolderEntry } from '@shared/ipc/schema/machine';
@@ -33,7 +33,6 @@ import { ipc } from '../ipc/client';
 import { useMachines } from '../stores/machines';
 import { useSessions } from '../stores/sessions';
 import type { RegistryProject } from '../stores/registry';
-import { machineOf } from '@shared/machine/address';
 import { SPAWN_WORDS, type SpawnTarget } from './remote-spawn';
 
 /**
@@ -139,12 +138,16 @@ export function suggestionsFor(known: readonly string[], home: string | null): s
 const rl2Machines = () => [...useMachines.getState().machines.values()].filter((m) => !m.local && m.state === 'up' && (m.carrier === 'direct' || m.carrier === 'relay'));
 
 /**
- * The machines the menu offers, in the roster's order: each to start on, with the checkout of the org project `key` (the
- * tab's local project's) there when its projects hold one, else no place yet; or, where the member's rights there are
- * known and hold no `spawn`, greyed with why. Unknown rights grey nothing: the machine decides at the Send.
+ * The machines the menu offers, in the roster's order: each to start on, with the checkout there of the tab's local
+ * project's org project (its record's `org.key`) when that machine's projects hold one, else no place yet; or, where the
+ * member's rights there are known and hold no `spawn`, greyed with why. Unknown rights grey nothing: the machine decides
+ * at the Send. The project registry: a project the registry holds (by the id the tab's project's own record carries,
+ * never by its label, which two projects may share) takes each machine's location from the registry.
  */
-export async function readMachines(key: string | null, client: MawsBridge = ipc): Promise<MachineChoice[]> {
-  const registered = registryProjectOf(key);
+export async function readMachines(project: ProjectId | null, client: MawsBridge = ipc): Promise<MachineChoice[]> {
+  const record = project === null ? undefined : useSessions.getState().projects.get(project);
+  const key = record?.org?.key ?? null;
+  const registered = registryProjectOf(record);
   return Promise.all(
     rl2Machines().map(async (machine): Promise<MachineChoice> => {
       if (machine.rights !== undefined && !machine.rights.includes('spawn')) return { kind: 'closed', machine: machine.ref, name: machine.name, words: SETUP_WORDS.noSpawn(machine.name) };
@@ -161,19 +164,22 @@ export async function readMachines(key: string | null, client: MawsBridge = ipc)
   );
 }
 
-/** The paths the checkouts of the org project `key` have on every machine the sessions store holds (this Mac's included), which a new project's folder there is suggested by. */
-export function knownCheckouts(key: string | null): string[] {
-  if (key === null) return [];
+/**
+ * The paths the checkouts of the tab's local project's org project have on every machine the sessions store holds (this
+ * Mac's included), and the registry's locations of its project, which a new project's folder there is suggested by.
+ */
+export function knownCheckouts(project: ProjectId | null): string[] {
+  const record = project === null ? undefined : useSessions.getState().projects.get(project);
+  const key = record?.org?.key;
+  if (key === undefined) return [];
   const labelled = [...useSessions.getState().projects.values()].filter((p) => p.org?.key === key && p.discovered !== true).map((p) => p.directory);
-  return [...new Set([...labelled, ...(registryProjectOf(key)?.locations.map((l) => l.path) ?? [])])];
+  return [...new Set([...labelled, ...(registryProjectOf(record)?.locations.map((l) => l.path) ?? [])])];
 }
 
-/** The registry's project of this Mac's project labelled `key` (the tab's local project), by the id its record carries. */
-function registryProjectOf(key: string | null): RegistryProject | undefined {
-  if (key === null) return undefined;
-  const { projects, registry } = useSessions.getState();
-  const id = [...projects.values()].find((p) => p.org?.key === key && p.org.smnsId !== null && machineOf(p.id) === ipc.localMachine)?.org?.smnsId;
-  return id == null ? undefined : registry.projects.find((p) => p.id === id);
+/** The registry's project of a project record, by the id the record carries. */
+function registryProjectOf(record: ProjectRecord | undefined): RegistryProject | undefined {
+  const id = record?.org?.smnsId;
+  return id == null ? undefined : useSessions.getState().registry.projects.find((p) => p.id === id);
 }
 
 /** What the project chip's menu offers on another machine (`readPlaces`): `newProject` and `noProject` null when offered, else why not. */

@@ -18,6 +18,7 @@ import { resetRemoteSpawn, spawnTargetOf, useRemoteSpawn } from '../../sessions/
 import { SETUP_WORDS } from '../../sessions/remote-setup';
 import type { MachineRef } from '@shared/machine/ref';
 import { useMachines } from '../../stores/machines';
+import { useSessions } from '../../stores/sessions';
 import { MACHINE_WORDS, MachineLine, MachineMenu } from './MachineMenu';
 
 const TAB = addressOf(TEST_MACHINE, 'new-1' as AppSessionId);
@@ -25,13 +26,17 @@ const THIRD = 'ThirdMachineRef0000000' as MachineRef;
 const KEY = 'repo:github.com/acme/app' as OrgKey;
 const up = (ref: MachineRef, name: string, over: Partial<MachineState> = {}): MachineState => ({ ref, name, local: false, state: 'up', since: '2026-10-31T10:00:00Z', generation: 1, carrier: 'relay', ...over });
 const theirs = (over: Partial<ProjectRecord> = {}): ProjectRecord => ({ ...project('app', 0), id: addressOf(OTHER_MACHINE, 'app' as ProjectId), directory: '/srv/app', org: { key: KEY, name: 'app', source: 'remote', smnsId: null }, ...over });
-const view = (key: string | null = KEY) =>
-  render(
+// the tab's local project, whose record's label is the org project the menu looks for on the other machines
+const HERE = addressOf(TEST_MACHINE, 'here' as ProjectId);
+const view = (key: string | null = KEY) => {
+  if (key !== null) useSessions.setState({ projects: new Map([[HERE, { ...project('here', 0), id: HERE, org: { key: key as OrgKey, name: 'app', source: 'remote', smnsId: null } }]]) });
+  return render(
     <>
-      <MachineMenu appSessionId={TAB} projectKey={key} disabled={null} />
+      <MachineMenu appSessionId={TAB} projectId={key === null ? null : HERE} projectKey={key} disabled={null} />
       <MachineLine appSessionId={TAB} projectKey={key} />
     </>,
   );
+};
 
 beforeEach(() => {
   resetRemoteSpawn();
@@ -41,6 +46,7 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() });
+  useSessions.setState({ projects: new Map() });
 });
 
 describe('the machine menu', () => {
@@ -112,7 +118,7 @@ describe('the machine menu', () => {
   });
 
   it('is closed while the row is, and absent with no RL2 machine up', () => {
-    const { unmount } = render(<MachineMenu appSessionId={TAB} projectKey={null} disabled="Starting…" />);
+    const { unmount } = render(<MachineMenu appSessionId={TAB} projectId={null} projectKey={null} disabled="Starting…" />);
     const chip = screen.getByRole<HTMLButtonElement>('button', { name: 'Machine This Mac' });
     expect(chip.disabled).toBe(true);
     expect(chip.title).toBe('Starting…');

@@ -102,6 +102,7 @@
     "src/renderer/src/channel/project.ts",
     "src/renderer/src/channel/state.ts",
     "src/renderer/src/stores/org-projects.ts",
+    "src/renderer/src/stores/registry.ts", // the project registry's M11: org-projects.ts and sessions.ts import it
     "src/renderer/src/stores/sessions.ts",
     "src/renderer/src/attention/derive.ts",
     "src/renderer/src/attention/glyph.ts",

@@ -17,6 +17,7 @@ import { closeDialog } from '../sessions/dialogs';
 import { Sheet, SheetForm } from '../sessions/Sheet';
 import { CHOICE, FIELD, PRIMARY } from '../sessions/ui';
 import { useMachines } from '../stores/machines';
+import { machineName } from '../stores/org-projects';
 import { useSessions } from '../stores/sessions';
 import { FolderField } from './FolderField';
 import { defaultLinkOf, insideOf, intoChoices, type Resolved } from './locations';
@@ -42,6 +43,15 @@ export function machineChoices(machines: ReadonlyMap<MachineRef, MachineState>, 
   return [here, ...others];
 }
 
+/**
+ * The machine the sheet acts on: the one the person chose, while it is offered. One no longer offered (its link went
+ * down, its rights changed) is kept, closed with why, until the person chooses another, so a folder is never added on
+ * another machine than the one chosen (review 1, finding 3).
+ */
+export function pickedMachine(choices: readonly MachineChoice[], ref: MachineRef, name: string): MachineChoice {
+  return choices.find((c) => c.ref === ref) ?? { ref, name, local: false, serves: false, closed: REGISTRY.machineGone(name) };
+}
+
 /** The act's input (§G): `into` a chosen project, else `own` for a separate project inside another's folder; nothing more to a machine that predates them. */
 export function addInput(directory: string, choice: { serves: boolean; project: string | null; own: boolean }): { directory: string; into?: string; own?: true } {
   if (!choice.serves) return { directory };
@@ -62,7 +72,8 @@ export function AddProjectSheet({ into }: { into: string | null }) {
   const [read, setRead] = useState<{ key: string; resolved: Resolved | null } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const chosen = choices.find((c) => c.ref === machine) ?? choices[0];
+  const chosen = pickedMachine(choices, machine, machineName(machines, machine, local));
+  const gone = !choices.some((c) => c.ref === machine);
   const directory = path.trim();
   const key = `${chosen.ref}\u0000${directory}`;
 
@@ -94,7 +105,7 @@ export function AddProjectSheet({ into }: { into: string | null }) {
   return (
     <Sheet title={intoName === null ? REGISTRY.addTitle : REGISTRY.addLocationTitle(intoName)} width="w-[min(520px,92vw)]" data-add-project="">
       <SheetForm canSubmit={directory.startsWith('/') && busy === null && chosen.closed === null} onSubmit={() => void submit()} submitLabel={REGISTRY.add} submitClass={PRIMARY}>
-        {choices.length > 1 && (
+        {(choices.length > 1 || gone) && ( // a machine gone still leaves the others to choose
           <fieldset className="m-0 flex flex-col gap-1 border-0 p-0">
             <legend className="mb-1 p-0 text-ui-sm text-fg-muted">{REGISTRY.machine}</legend>
             {choices.map((c) => (
@@ -140,7 +151,12 @@ export function AddProjectSheet({ into }: { into: string | null }) {
             ))}
           </select>
         </label>
-        {!chosen.serves && (
+        {gone && (
+          <p role="alert" data-registry-notice="gone" className="m-0 text-ui-sm text-danger">
+            {chosen.closed}
+          </p>
+        )}
+        {!chosen.serves && !gone && (
           <p data-registry-notice="maws" className="m-0 text-ui-sm text-fg-muted">
             {REGISTRY.mawsTooOld(chosen.name)}
           </p>

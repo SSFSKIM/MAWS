@@ -242,7 +242,7 @@ export function createProjectRegistry(deps: ProjectRegistryDeps): ProjectRegistr
           source: l.source,
           ...(l.stated === undefined ? {} : { stated: l.stated }),
           ...(l.state === undefined ? {} : { state: l.state }),
-          ...(l.remote === undefined ? {} : { remote: l.remote }),
+          ...(l.remote === undefined ? {} : { remote: l.remote, remoteProject: repoProjectId(org, l.remote) }), // M11: the page's Link (it has no uuid5)
           acts: owns,
         });
       }

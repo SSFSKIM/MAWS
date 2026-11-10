@@ -158,6 +158,18 @@ describe('the member’s view', () => {
     ]);
   });
 
+  // The project registry's M11 (review 1, finding 5): the page has no `uuid5`, so each location with an observed remote
+  // carries the project that remote derives in the org (design §8), for the page's Link suggestion.
+  it('gives a location with a remote the project its remote derives, and none to one without', async () => {
+    const w = await World.make();
+    const h = await start(w);
+    await h.page(await w.projects(w.m1, 1, [location('a1', P, '/srv/fork', { remote: 'github.com/a/b', source: 'smns', key: `smns:${P}` }), location('a2', P, '/srv/plain')]));
+    expect(h.value().projects[0]!.locations.map((l) => [l.pid, l.remoteProject])).toEqual([
+      ['a1', repoProjectId(ORG, 'github.com/a/b')],
+      ['a2', undefined],
+    ]);
+  });
+
   // Review 1, finding 1: a delegated machine's authority, and its owners' actions, end at the delegation's `expires`.
   it('drops a delegated machine’s locations, and their actions, at its delegation’s expiry, with no new head', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });

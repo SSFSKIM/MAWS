@@ -5,7 +5,7 @@ import { addressOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
-import { addInput, machineChoices } from './AddProjectSheet';
+import { addInput, machineChoices, pickedMachine } from './AddProjectSheet';
 import { actWords, addFolder, cancelRemoval, removeLocation, servesProjectActs } from './registry-acts';
 
 // The project registry's acts from the page (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §G, §I, §J.3).
@@ -71,6 +71,12 @@ describe('Add project’s machines and input', () => {
       { ref: MINI, name: 'mini', local: false, serves: false, closed: null },
       { ref: OTHER_MACHINE, name: 'studio', local: false, serves: true, closed: 'Only studio’s owners can change its projects' },
     ]);
+  });
+
+  it('keeps the machine chosen once it is no longer offered, closed with why, never another in its place', () => {
+    const choices = machineChoices(new Map([[TEST_MACHINE, machine(TEST_MACHINE, 'macbook', { local: true })]]), TEST_MACHINE);
+    expect(pickedMachine(choices, MINI, 'mini')).toEqual({ ref: MINI, name: 'mini', local: false, serves: false, closed: 'mini isn’t reachable now; choose another machine' });
+    expect(pickedMachine(choices, TEST_MACHINE, 'macbook')).toBe(choices[0]);
   });
 
   it('sends the chosen project, else a separate project where asked, and nothing more to a machine that predates them', () => {

@@ -21,7 +21,7 @@
 import { Command } from 'cmdk';
 import { Popover } from 'radix-ui';
 import { useEffect, useMemo, useState } from 'react';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
 import { HOME_CHECKOUT } from '@shared/ipc/schema/session';
@@ -74,7 +74,7 @@ function ActionItem({ value, label, why, disabled, onSelect }: { value: string; 
 
 // 2026-11-06: another machine's places, read as the menu opens (sessions/remote-setup.ts' `readPlaces`); a choice is the
 // tab's target there (sessions/remote-spawn.ts), "New project" its folder sheet.
-function RemoteMenu({ appSessionId, target, projectKey, disabled, onDone }: { appSessionId: AppSessionId; target: SpawnTarget; projectKey: string | null; disabled: boolean; onDone(): void }) {
+function RemoteMenu({ appSessionId, target, projectId, projectKey, disabled, onDone }: { appSessionId: AppSessionId; target: SpawnTarget; projectId: ProjectId | null; projectKey: string | null; disabled: boolean; onDone(): void }) {
   const [query, setQuery] = useState('');
   const [places, setPlaces] = useState<Places | null>(null); // null while read
   const { machine, name } = target;
@@ -98,7 +98,7 @@ function RemoteMenu({ appSessionId, target, projectKey, disabled, onDone }: { ap
     if (first == null) return;
     onDone();
     const home = places?.home ?? null;
-    openDialog({ kind: 'remoteSetup', request: { kind: 'folder', tab: appSessionId, machine, name, key: projectKey, home, first, suggestions: suggestionsFor(knownCheckouts(projectKey), home) } });
+    openDialog({ kind: 'remoteSetup', request: { kind: 'folder', tab: appSessionId, machine, name, key: projectKey, home, first, suggestions: suggestionsFor(knownCheckouts(projectId), home) } });
   };
   return (
     <Command label={`Projects on ${name}`} shouldFilter={false} loop>
@@ -269,7 +269,7 @@ export function ProjectRow({ binding, directories = [], appSessionId }: { bindin
             <Popover.Portal>
               <Popover.Content aria-label="Choose a project" side="top" align="start" sideOffset={6} collisionPadding={8} className={`${POPOVER} w-72 p-0`}>
                 {remote !== null && appSessionId !== undefined ? (
-                  <RemoteMenu appSessionId={appSessionId} target={remote} projectKey={projectKey} disabled={disabled} onDone={() => setOpen(false)} />
+                  <RemoteMenu appSessionId={appSessionId} target={remote} projectId={binding.projectId} projectKey={projectKey} disabled={disabled} onDone={() => setOpen(false)} />
                 ) : (
                   <ProjectMenu binding={binding} disabled={disabled} onWrite={(write) => void run(write)} />
                 )}
@@ -277,7 +277,7 @@ export function ProjectRow({ binding, directories = [], appSessionId }: { bindin
               </Popover.Content>
             </Popover.Portal>
           </Popover.Root>
-          {appSessionId !== undefined && <MachineMenu appSessionId={appSessionId} projectKey={projectKey} disabled={binding.disabled} />}
+          {appSessionId !== undefined && <MachineMenu appSessionId={appSessionId} projectId={binding.projectId} projectKey={projectKey} disabled={binding.disabled} />}
           {binding.branch !== null && there === null && (
             <span aria-label={`Branch ${binding.branch}`} title={binding.branch} className="max-w-40 truncate font-mono text-ui-sm text-fg-muted">
               ⎇ {binding.branch}

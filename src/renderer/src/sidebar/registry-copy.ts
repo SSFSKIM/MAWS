@@ -39,6 +39,7 @@ export const REGISTRY = {
   adding: (machine: string) => `Adding it on ${machine}…`,
   addingRemote: (machine: string) => `Adding it on ${machine}; confirm with Touch ID…`,
   notOwner: (machine: string) => `Only ${machine}’s owners can change its projects`,
+  machineGone: (machine: string) => `${machine} isn’t reachable now; choose another machine`,
   locateTitle: (folder: string, machine: string) => `Locate ${folder} on ${machine}`,
   locateHint: (path: string) => `It was at ${path}. Choose where the folder is now.`,
   locating: (machine: string) => `Pointing it at the folder on ${machine}…`,

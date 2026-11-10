@@ -141,6 +141,7 @@ describe("the project registry's e2e fixture in main", () => {
     });
     expect(standIn(STUDIO, 'session.projects.addFolder', { directory: '/srv/next', into: SCRAPE })).toMatchObject({ ok: true, value: { project: { directory: '/srv/next' }, location: { kind: 'directory', path: '/srv/next' } } });
     expect(standIn(STUDIO, 'git.worktree.list', { directory: '/srv/next' })).toBeUndefined();
+    expect(standIn(STUDIO, 'machines.list', undefined)).toBeUndefined(); // a command with no input, left to the link
     expect(standIn(LOCAL, 'session.projects.addFolder', { directory: '/srv/next' })).toBeUndefined(); // this Mac is not stood in for
     expect(logged()).toEqual([
       { name: 'session.projects.resolve', machine: STUDIO, input: { directory: '/srv/next' } },

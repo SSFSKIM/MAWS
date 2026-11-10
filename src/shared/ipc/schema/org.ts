@@ -606,7 +606,8 @@ export type OrgRows = z.infer<typeof OrgRowsSchema>;
  * The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §I; design §6, §11): the org's
  * projects as main holds them for the signed-in member, assembled from the machines' verified projects records
  * (src/main/org/project-registry.ts). A location is one machine's declared folder of the project, named by the machine's
- * own row id (`pid`); `key` is the folder's label on its machine and joins nothing. `acts`: the member owns the machine,
+ * own row id (`pid`); `key` is the folder's label on its machine and joins nothing. `remoteProject` (M11, additive): the
+ * project the observed `remote` derives in the org, which the page cannot compute. `acts`: the member owns the machine,
  * so the location's actions are theirs. A project the member sees only through a session of it has no locations.
  */
 export const OrgProjectLocationSchema = z.strictObject({
@@ -619,6 +620,7 @@ export const OrgProjectLocationSchema = z.strictObject({
   stated: z.enum(['minted', 'linked']).optional(),
   state: z.enum(['missing', 'replaced']).optional(),
   remote: z.string().optional(),
+  remoteProject: z.string().optional(), // M11, additive: the project `remote` derives in the org (design §8's uuid5), with `remote` alone
   acts: z.boolean(),
 });
 export type OrgProjectLocation = z.infer<typeof OrgProjectLocationSchema>;

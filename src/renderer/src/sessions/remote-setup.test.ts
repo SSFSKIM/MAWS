@@ -25,6 +25,11 @@ const KEY = 'repo:github.com/acme/app' as OrgKey;
 const org = { key: KEY, name: 'app', source: 'remote' as const, smnsId: null };
 const machine = (ref: MachineRef, name: string, over: Partial<MachineState> = {}): MachineState => ({ ref, name, local: false, state: 'up', since: '2026-10-31T10:00:00Z', generation: 1, carrier: 'relay', ...over });
 const projectOn = (ref: MachineRef, id: string, directory: string, over: Partial<ProjectRecord> = {}): ProjectRecord => ({ ...project(id, 0), id: addressOf(ref, id as ProjectId), directory, org, ...over });
+// the tab's local project: its record's label is the org project the menu looks for on the other machines
+const HERE = addressOf(TEST_MACHINE, 'here' as ProjectId);
+const hereWith = (over: Partial<ProjectRecord> = {}) => useSessions.setState({ projects: new Map([[HERE, projectOn(TEST_MACHINE, 'here', '/Users/owner/Developer/GitHub/app', over)]]) });
+const ID = '11111111-2222-4333-8444-555555555555';
+const location = (ref: MachineRef, pid: string, path: string, over: Partial<OrgProjectLocation> = {}): OrgProjectLocation => ({ machine: ref, pid, path, key: KEY, name: 'app', source: 'remote', acts: true, ...over });
 const HOME_PAGE = { entries: [{ name: 'Developer', path: '/Users/mini/Developer', protected: false }, { name: 'Documents', path: '/Users/mini/Documents', protected: true }], cursor: null };
 const trustOf = (over: Partial<TrustState> = {}): TrustState => ({ directory: '/Users/mini/Developer/GitHub/app', trustKey: '/Users/mini/Developer/GitHub/app', keyKind: 'repo', configPath: '/Users/mini/.claude.json', trusted: false, source: null, isHome: false, found: [], ...over });
 
@@ -52,12 +57,13 @@ describe('the machines the menu offers', () => {
     const fake = fakeClient({
       'session.projects.list': (_input: unknown, on: MachineRef) => (on === THIRD ? { projects: [projectOn(THIRD, 'app', '/home/vm/src/app')], revision: 1 } : { projects: [], revision: 1 }),
     });
-    expect(await readMachines(KEY, fake.client)).toEqual([
+    hereWith();
+    expect(await readMachines(HERE, fake.client)).toEqual([
       { kind: 'ready', target: { machine: OTHER_MACHINE, name: 'mini', checkout: null, key: null } },
       { kind: 'ready', target: { machine: THIRD, name: 'vm', checkout: '/home/vm/src/app', key: KEY } },
     ]);
     const failing = fakeClient({});
-    const read = readMachines(KEY, failing.client);
+    const read = readMachines(HERE, failing.client);
     await vi.waitFor(() => expect(failing.pending('session.projects.list')).toBe(2));
     await failing.fail('session.projects.list', 'unreachable', 'host_unavailable');
     await failing.reply('session.projects.list', { projects: [projectOn(THIRD, 'app', '/srv/app', { discovered: true })], revision: 1 }); // a discovered project is no checkout
@@ -81,19 +87,42 @@ describe('the machines the menu offers', () => {
   // registry holds takes its location on each machine from its record, with no read over the link; a location missing
   // there is no place to start in.
   it('takes a registry project’s location on each machine from its record, reading nothing of them', async () => {
-    const ID = '11111111-2222-4333-8444-555555555555';
-    const location = (ref: MachineRef, pid: string, path: string, over: Partial<OrgProjectLocation> = {}): OrgProjectLocation => ({ machine: ref, pid, path, key: KEY, name: 'app', source: 'remote', acts: true, ...over });
     useSessions.setState({
-      projects: new Map([[addressOf(TEST_MACHINE, 'here' as ProjectId), projectOn(TEST_MACHINE, 'here', '/Users/owner/app', { org: { ...org, smnsId: ID } })]]),
+      projects: new Map([[HERE, projectOn(TEST_MACHINE, 'here', '/Users/owner/app', { org: { ...org, smnsId: ID } })]]),
       registry: { ...EMPTY_REGISTRY, projects: [{ id: ID, name: 'app', hub: true, renamable: true, locations: [location(TEST_MACHINE, 'here', '/Users/owner/app'), location(OTHER_MACHINE, 'p-2', '/Users/mini/app', { state: 'missing' }), location(THIRD, 'p-3', '/home/vm/app')] }] },
     });
     const fake = fakeClient({});
-    expect(await readMachines(KEY, fake.client)).toEqual([
+    expect(await readMachines(HERE, fake.client)).toEqual([
       { kind: 'ready', target: { machine: OTHER_MACHINE, name: 'mini', checkout: null, key: null } },
       { kind: 'ready', target: { machine: THIRD, name: 'vm', checkout: '/home/vm/app', key: KEY } },
     ]);
     expect(fake.invoked('session.projects.list')).toEqual([]);
-    expect(knownCheckouts(KEY).sort()).toEqual(['/Users/mini/app', '/Users/owner/app', '/home/vm/app']);
+    expect(knownCheckouts(HERE).sort()).toEqual(['/Users/mini/app', '/Users/owner/app', '/home/vm/app']);
+  });
+
+  // review 1, finding 2: two of this Mac's projects with one label and two ids: each tab's own project decides
+  it('reads the registry project of the tab’s own project, not the first that shares its label', async () => {
+    const OTHER_ID = '66666666-7777-4888-9999-aaaaaaaaaaaa';
+    const SECOND = addressOf(TEST_MACHINE, 'second' as ProjectId);
+    useSessions.setState({
+      projects: new Map([
+        [HERE, projectOn(TEST_MACHINE, 'here', '/Users/owner/app', { org: { ...org, smnsId: ID } })],
+        [SECOND, projectOn(TEST_MACHINE, 'second', '/Users/owner/app-fork', { org: { ...org, smnsId: OTHER_ID } })],
+      ]),
+      registry: {
+        ...EMPTY_REGISTRY,
+        projects: [
+          { id: ID, name: 'app', hub: true, renamable: true, locations: [location(OTHER_MACHINE, 'p-app', '/Users/mini/app')] },
+          { id: OTHER_ID, name: 'app-fork', hub: true, renamable: true, locations: [location(THIRD, 'p-fork', '/home/vm/app-fork')] },
+        ],
+      },
+    });
+    expect(await readMachines(SECOND, fakeClient({}).client)).toEqual([
+      { kind: 'ready', target: { machine: OTHER_MACHINE, name: 'mini', checkout: null, key: null } },
+      { kind: 'ready', target: { machine: THIRD, name: 'vm', checkout: '/home/vm/app-fork', key: KEY } },
+    ]);
+    expect(knownCheckouts(SECOND)).toContain('/home/vm/app-fork');
+    expect(knownCheckouts(SECOND)).not.toContain('/Users/mini/app');
   });
 });
 
@@ -125,7 +154,7 @@ describe('a machine’s places (the project chip on it)', () => {
         [addressOf(THIRD, 'other' as ProjectId), projectOn(THIRD, 'other', '/home/vm/other', { org: undefined })],
       ]),
     });
-    expect(knownCheckouts(KEY).sort()).toEqual(['/Users/owner/Developer/GitHub/app', '/home/vm/src/app']);
+    expect(knownCheckouts(addressOf(TEST_MACHINE, 'here' as ProjectId)).sort()).toEqual(['/Users/owner/Developer/GitHub/app', '/home/vm/src/app']);
     expect(knownCheckouts(null)).toEqual([]);
   });
 

@@ -35,6 +35,8 @@ import { ListedRow } from './ListedRow'; // P5 O8 M2
 import { focusVisible } from './HoverCard';
 import { ProjectHoverCard } from './ProjectHoverCard';
 import { machinesWords } from './locations'; // the project registry
+import { newChatElsewhere, registrySpawnTarget } from './registry-new-chat'; // the project registry
+import type { RegistryProject } from '../stores/registry'; // the project registry
 import { useLocationView } from './location-view'; // the project registry
 import { runProjectAction, useProjectActionEnabled } from './project-actions';
 import { openResumeChooser } from '../resume/host'; // P2-D
@@ -103,7 +105,16 @@ export function ProjectRow({ entry, open, sessions, more, matchCount, onToggle, 
           )}
         </span>
       )}
-      {project ? <ProjectActions projectId={project.id} rowKey={key} name={name} people={people} /> : <span aria-hidden className="size-[22px] shrink-0" />}
+      {project ? (
+        <ProjectActions projectId={project.id} rowKey={key} name={name} people={people} registry={entry.registry} />
+      ) : entry.registry !== null && people !== null ? (
+        // the project registry: a project seen only through sessions (no folder to act through) keeps its People toggle
+        <span className={HOVER_ACTIONS}>
+          <PeopleAction rowKey={key} name={name} people={people} />
+        </span>
+      ) : (
+        <span aria-hidden className="size-[22px] shrink-0" />
+      )}
     </div>
   );
 
@@ -152,6 +163,28 @@ export function ProjectRow({ entry, open, sessions, more, matchCount, onToggle, 
 const ACTION =
   'inline-flex size-[22px] shrink-0 items-center justify-center rounded-sm text-fg-muted hover:bg-bg-active hover:text-fg disabled:text-fg-faint disabled:hover:bg-transparent';
 
+const HOVER_ACTIONS = 'hidden shrink-0 items-center group-hover/line:flex group-focus-visible/project:flex';
+
+// The row's People toggle (P5 O8 M5): pressed while the row draws other people's sessions.
+function PeopleAction({ rowKey, name, people }: { rowKey: ProjectKey; name: string; people: boolean }) {
+  return (
+    <button
+      type="button"
+      tabIndex={-1}
+      aria-label={`${peopleActionLabel(people)} in ${name}`}
+      aria-pressed={people}
+      title={peopleActionLabel(people)}
+      onClick={(event) => {
+        event.stopPropagation();
+        usePeople.getState().toggle(rowKey);
+      }}
+      className={`${ACTION} aria-pressed:bg-bg-active aria-pressed:text-fg`}
+    >
+      <PeopleIcon className="size-[13px]" />
+    </button>
+  );
+}
+
 // "+N others" (P5 O8 M5): how many of other people's sessions the row's People toggle leaves out.
 const othersText = (count: number) => `+${count} ${count === 1 ? 'other' : 'others'}`;
 const peopleActionLabel = (on: boolean) => (on ? 'Hide people’s sessions' : 'Show people’s sessions');
@@ -162,25 +195,16 @@ const peopleActionLabel = (on: boolean) => (on ? 'Hide people’s sessions' : 'S
 // it keep their places), the search icon opens the Resume… picker on the project (I7, "Resume a session…"), the minus
 // removes the project from the sidebar after a confirm (I5; the menu's "Remove from sidebar…"), and "+" opens an
 // unstarted session tab in the project ("New chat in X", the New chat landing's open copy item).
-function ProjectActions({ projectId, rowKey, name, people }: { projectId: ProjectId; rowKey: ProjectKey; name: string; people: boolean | null }) {
-  const canCreate = useSessionCreatorRegistered() && machineOf(projectId) === ipc.localMachine;
+function ProjectActions({ projectId, rowKey, name, people, registry }: { projectId: ProjectId; rowKey: ProjectKey; name: string; people: boolean | null; registry: RegistryProject | null }) {
+  // the project registry: a project with no folder on this Mac starts on one of its locations elsewhere (registry-new-chat.ts)
+  const machines = useMachines((s) => s.machines);
+  const here = machineOf(projectId) === ipc.localMachine;
+  const elsewhere = here || registry === null ? null : registrySpawnTarget(registry, machines);
+  const canCreate = useSessionCreatorRegistered() && (here || elsewhere !== null);
   const canRemove = useProjectActionEnabled('removeProject');
   return (
-    <span className="hidden shrink-0 items-center group-hover/line:flex group-focus-visible/project:flex">
-      {people !== null && <button
-        type="button"
-        tabIndex={-1}
-        aria-label={`${peopleActionLabel(people)} in ${name}`}
-        aria-pressed={people}
-        title={peopleActionLabel(people)}
-        onClick={(event) => {
-          event.stopPropagation();
-          usePeople.getState().toggle(rowKey);
-        }}
-        className={`${ACTION} aria-pressed:bg-bg-active aria-pressed:text-fg`}
-      >
-        <PeopleIcon className="size-[13px]" />
-      </button>}
+    <span className={HOVER_ACTIONS}>
+      {people !== null && <PeopleAction rowKey={rowKey} name={name} people={people} />}
       <button
         type="button"
         tabIndex={-1}
@@ -216,7 +240,7 @@ function ProjectActions({ projectId, rowKey, name, people }: { projectId: Projec
         disabled={!canCreate}
         onClick={(event) => {
           event.stopPropagation();
-          void createSession(projectId);
+          void (elsewhere !== null ? newChatElsewhere(elsewhere) : createSession(projectId));
         }}
         className={ACTION}
       >

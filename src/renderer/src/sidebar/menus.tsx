@@ -20,7 +20,7 @@ import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../ipc/client';
 import { createSession, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { openDialog } from '../sessions/dialogs';
-import { machineKey } from '@shared/machine/org-key';
+import { idKey, machineKey } from '@shared/machine/org-key';
 import { selectOrgIndex, sessionsOfRow, type RowKey } from '../stores/org-projects';
 import { useLayout } from '../stores/layout'; // P5 O8 M7a
 import { CHANNEL } from '../channel/copy'; // P5 O8 M7a
@@ -30,6 +30,7 @@ import { useSessions } from '../stores/sessions';
 import { useMachines } from '../stores/machines'; // the project registry
 import { locationAddress, type OrgProjectLocation } from '../stores/registry'; // the project registry
 import { REGISTRY } from './registry-copy'; // the project registry
+import { newChatElsewhere, registrySpawnTarget } from './registry-new-chat'; // the project registry
 import { PROJECT_ACTION_IDS, PROJECT_ACTIONS, runProjectAction, useProjectActionEnabled, type ProjectActionId } from './project-actions';
 import { openResumeChooser } from '../resume/host'; // P2-D
 import { KEEP_RUNNING } from './copy'; // P5 O2 M2
@@ -44,7 +45,7 @@ export type MenuTarget =
   | { kind: 'machine'; machine: MachineRef; people: boolean }
   | { kind: 'session'; appSessionId: AppSessionId }
   | { kind: 'project'; projectId: ProjectId; people: boolean }
-  | { kind: 'registry'; id: string }; // the project registry: a row with no location to act on
+  | { kind: 'registry'; id: string; people: boolean }; // the project registry: a row with no location to act on
 
 // The target a `data-menu` attribute names: `session:<appSessionId>`, `project:<projectId>` (an org project's row, by the
 // checkout its actions act on) or `machine:<ref>` (a machine's own row, P5 O6 M5).
@@ -55,7 +56,7 @@ export function menuTargetOf(element: Element | null): MenuTarget | null {
   if (value?.startsWith('machine:')) return { kind: 'machine', machine: value.slice('machine:'.length) as MachineRef, people };
   if (value?.startsWith('session:')) return { kind: 'session', appSessionId: value.slice('session:'.length) as AppSessionId };
   if (value?.startsWith('project:')) return { kind: 'project', projectId: value.slice('project:'.length) as ProjectId, people };
-  if (value?.startsWith('registry:')) return { kind: 'registry', id: value.slice('registry:'.length) };
+  if (value?.startsWith('registry:')) return { kind: 'registry', id: value.slice('registry:'.length), people };
   return null;
 }
 
@@ -85,7 +86,7 @@ export function SidebarMenuContent({ target }: { target: MenuTarget | null }) {
         )}
         {target?.kind === 'session' && <SessionItems appSessionId={target.appSessionId} />}
         {target?.kind === 'project' && <ProjectItems projectId={target.projectId} people={target.people} />}
-        {target?.kind === 'registry' && <RegistryItems id={target.id} />}
+        {target?.kind === 'registry' && <RegistryItems id={target.id} people={target.people} />}
       </ContextMenu.Content>
     </ContextMenu.Portal>
   );
@@ -163,7 +164,8 @@ const projectRowOf = (projectId: ProjectId): HTMLElement | null =>
   [...document.querySelectorAll<HTMLElement>('[role="treeitem"][data-menu]')].find((el) => el.dataset.menu === `project:${projectId}`) ?? null;
 
 function ProjectItems({ projectId, people }: { projectId: ProjectId; people: boolean }) {
-  const canCreate = useSessionCreatorRegistered() && machineOf(projectId) === ipc.localMachine; // a New chat on another machine is O7's picker
+  const creator = useSessionCreatorRegistered();
+  const here = machineOf(projectId) === ipc.localMachine;
   const records = useSessions((s) => s.records);
   const projects = useSessions((s) => s.projects);
   const registry = useSessions((s) => s.registry);
@@ -178,9 +180,13 @@ function ProjectItems({ projectId, people }: { projectId: ProjectId; people: boo
   const registered = org?.registry;
   const machines = useMachines((s) => s.machines);
   const renameAt = registered === undefined || !registered.renamable ? null : renameTarget(registered.locations, machines);
+  // a New chat on another machine is O7's picker; the project registry: a project with no folder here starts on one of its
+  // locations elsewhere, the machine already chosen (registry-new-chat.ts)
+  const elsewhere = here || registered === undefined ? null : registrySpawnTarget(registered, machines);
+  const canCreate = creator && (here || elsewhere !== null);
   return (
     <>
-      <Item enabled={canCreate} onSelect={() => void createSession(projectId)}>
+      <Item enabled={canCreate} onSelect={() => void (elsewhere !== null ? newChatElsewhere(elsewhere) : createSession(projectId))}>
         New chat
       </Item>
       {/* W11 (I7): the project's Resume… picker, as the row's search icon opens it */}
@@ -214,14 +220,21 @@ function ProjectItems({ projectId, people }: { projectId: ProjectId; people: boo
   );
 }
 
-// The project registry: a row of a project you see only through its sessions (no location to act on), its Channel alone.
-function RegistryItems({ id }: { id: string }) {
+// The project registry: a row of a project you see only through its sessions (no location to act on): its People toggle
+// where it has others' sessions (as any project row's), and its Channel.
+function RegistryItems({ id, people }: { id: string; people: boolean }) {
   const hub = useSessions((s) => s.registry.projects.find((p) => p.id === id)?.hub ?? false);
-  return hub ? (
-    <Item enabled onSelect={() => useLayout.getState().openTab({ kind: 'channel', project: id })}>
-      {CHANNEL.menuItem}
-    </Item>
-  ) : null;
+  const rowKey = useSessions((s) => s.registry.keys[id] ?? idKey(id)); // its row's key, as orgIndex gives it
+  return (
+    <>
+      {people && <PeopleItem rowKey={rowKey} />}
+      {hub && (
+        <Item enabled onSelect={() => useLayout.getState().openTab({ kind: 'channel', project: id })}>
+          {CHANNEL.menuItem}
+        </Item>
+      )}
+    </>
+  );
 }
 
 // The location a rename is sent to (§J.3): this Mac's when the project has one, else the first in order whose machine is

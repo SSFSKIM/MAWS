@@ -738,6 +738,16 @@ describe('the project registry’s rows', () => {
     expect(entries[1].project).toBeNull(); // seen only through a session: no folder to act through
   });
 
+  // review 1, finding 4: a project seen only through others' sessions keeps the People capability with no checkout
+  it('counts others’ sessions of a project with no location under its row, and draws them once its People toggle is on', () => {
+    const theirs: ListedSession = { ...remoteRow(OTHER_MACHINE, 'b9', { orgKey: `id:${SEEN_ID}` as OrgKey, project: SEEN_ID, mine: false, owners: ['ana'] }), appId: there('b9') as AppSessionId };
+    const listed = new Map([[theirs.appId, theirs]]);
+    const row = (people: ReadonlySet<RowKey>) => projectList(input({ records: new Map(), digests: new Map(), projects: all, rows: [], registry, listed, people })).find((e) => e.key === `id:${SEEN_ID}`)!;
+    expect([row(new Set()).others, row(new Set()).listed.map((l) => l.appId)]).toEqual([1, []]);
+    expect([row(new Set([`id:${SEEN_ID}` as RowKey])).others, row(new Set([`id:${SEEN_ID}` as RowKey])).listed.map((l) => l.appId)]).toEqual([0, [there('b9')]]);
+    expect(row(new Set()).project).toBeNull(); // still no folder to act through
+  });
+
   it('signed out, rows are as before: by label, naming no registry and no machine beyond their checkouts', () => {
     const entries = projectList(input({ records: new Map(), digests: new Map(), projects: mapOf([app]), rows: [] }));
     expect(entries.map((e) => [e.key, e.name, e.machines, e.registry])).toEqual([['remote:example.org/app', 'app', [TEST_MACHINE], null]]);

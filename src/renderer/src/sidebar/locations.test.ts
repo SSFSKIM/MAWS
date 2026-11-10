@@ -58,7 +58,8 @@ describe('a location’s state in words', () => {
 
 describe('a suggestion against a stored statement', () => {
   const remote = 'example.org/scrape';
-  const repository = registered(OTHER_ID, 'scrape-repo', [location(OTHER_MACHINE, 'clone', { source: 'remote', key: `remote:${remote}` as OrgKey, remote })]);
+  // the project the remote derives (`remoteProject`, main's uuid5), its clone decided by the remote itself
+  const repository = registered(OTHER_ID, 'scrape-repo', [location(OTHER_MACHINE, 'clone', { source: 'remote', key: `remote:${remote}` as OrgKey, remote, remoteProject: OTHER_ID })]);
 
   it('offers to follow a .smns that names another project, with that project’s name', () => {
     const follows = location(OTHER_MACHINE, 'app', { stated: 'linked', source: 'smns', key: `smns:${OTHER_ID}` as OrgKey, path: '/srv/app' });
@@ -70,15 +71,18 @@ describe('a suggestion against a stored statement', () => {
   });
 
   it('offers to link a minted clone to the project its remote decides, and nothing for a replaced location or where the member may not act', () => {
-    const minted = location(TEST_MACHINE, 'fork', { stated: 'minted', source: 'remote', key: `remote:${remote}` as OrgKey, remote, path: '/Users/me/fork' });
+    const minted = location(TEST_MACHINE, 'fork', { stated: 'minted', source: 'remote', key: `remote:${remote}` as OrgKey, remote, remoteProject: OTHER_ID, path: '/Users/me/fork' });
     const project = registered(ID, 'fork', [minted]);
     const registry = registryOf(project, repository);
     expect(suggestionOf(minted, project, registry, 'This Mac')).toEqual({ words: 'fork on This Mac is a clone of scrape-repo\'s repository.', button: 'Link', into: OTHER_ID });
     expect(suggestionOf({ ...minted, state: 'replaced' }, project, registry, 'This Mac')).toBeNull();
     expect(suggestionOf({ ...minted, acts: false }, project, registry, 'This Mac')).toBeNull();
-    // a project whose locations of that remote are all stated decides nothing by the remote
-    const stated = registered(OTHER_ID, 'scrape-repo', [location(OTHER_MACHINE, 'clone', { source: 'remote', remote, stated: 'minted' })]);
-    expect(suggestionOf(minted, project, registryOf(project, stated), 'This Mac')).toBeNull();
+    // review 1, finding 5: the remote's project is found by its id, though every clone of it pins a `.smns`
+    const pinned = registered(OTHER_ID, 'scrape-repo', [location(OTHER_MACHINE, 'clone', { source: 'smns', key: `smns:${OTHER_ID}` as OrgKey, remote, remoteProject: OTHER_ID, stated: 'linked' })]);
+    expect(suggestionOf(minted, project, registryOf(project, pinned), 'This Mac')).toMatchObject({ button: 'Link', into: OTHER_ID });
+    // the remote's project not in the registry, or the location's own: nothing to link
+    expect(suggestionOf(minted, project, registryOf(project), 'This Mac')).toBeNull();
+    expect(suggestionOf({ ...minted, remoteProject: ID }, project, registryOf(project, repository), 'This Mac')).toBeNull();
   });
 });
 

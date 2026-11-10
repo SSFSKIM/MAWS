@@ -97,15 +97,16 @@ export function installRegistryFixture(deps: RegistryFixtureInstall): (() => voi
     }),
     deps.standIn((machine, name, input) => {
       if (!others.has(machine)) return undefined;
-      const directory = (input as { directory: string }).directory;
+      const directory = () => (input as { directory: string }).directory; // the two handled commands' input; another's may be none
       if (name === 'session.projects.resolve') {
         write({ name, machine, input });
-        return answered({ project: null, by: 'machine', at: null, label: { key: `folder:${machine}:${directory}` as OrgKey, name: basename(directory), source: 'folder', smnsId: null } });
+        return answered({ project: null, by: 'machine', at: null, label: { key: `folder:${machine}:${directory()}` as OrgKey, name: basename(directory()), source: 'folder', smnsId: null } });
       }
       if (name === 'session.projects.addFolder') {
         write({ name, machine, input });
-        const project = { id: `added-${basename(directory)}` as ProjectId, name: basename(directory), directory, order: 0, createdAt: new Date().toISOString() };
-        return answered({ project, location: { kind: 'directory', path: directory }, by: 'minted', at: directory, restated: true });
+        const path = directory();
+        const project = { id: `added-${basename(path)}` as ProjectId, name: basename(path), directory: path, order: 0, createdAt: new Date().toISOString() };
+        return answered({ project, location: { kind: 'directory', path }, by: 'minted', at: path, restated: true });
       }
       return undefined;
     }),

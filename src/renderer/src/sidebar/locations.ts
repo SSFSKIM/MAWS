@@ -6,9 +6,8 @@
 // - A suggestion (§J.3, design §2: nothing links unasked) is a line with one button, which sends `link` with the project
 //   it names; none for a replaced location, nor where the member may not act on the machine. "Follow the file": a
 //   location with a stored statement whose label is a `.smns` naming another id than its project. "Link": a minted
-//   location whose observed remote is another registry project's: one with a location that the remote itself decides
-//   (`source: 'remote'`, no statement), which is the remote's id by design §8's rule (the page has no `uuid5`: no
-//   node:crypto here).
+//   location whose observed remote derives another project of the registry (design §8's `uuid5`, which main computes
+//   for the page as the location's `remoteProject`: the page has no node:crypto), whatever its clones' own files say.
 import type { ProjectId } from '@shared/graph/ids';
 import type { ProjectDecidedBy, ProjectOrg } from '@shared/ipc/schema/session';
 import type { MachineRef } from '@shared/machine/ref';
@@ -68,8 +67,8 @@ export function suggestionOf(location: OrgProjectLocation, project: RegistryProj
     const named = location.key.slice(SMNS.length);
     if (named !== '' && named !== project.id) return { words: REGISTRY.followsFile(folder, machine, nameOf(named)), button: REGISTRY.follow, into: named };
   }
-  if (location.stated === 'minted' && location.remote !== undefined) {
-    const repository = registry.projects.find((p) => p.id !== project.id && p.locations.some((l) => l.remote === location.remote && l.source === 'remote' && l.stated === undefined));
+  if (location.stated === 'minted' && location.remoteProject !== undefined && location.remoteProject !== project.id) {
+    const repository = registry.projects.find((p) => p.id === location.remoteProject);
     if (repository !== undefined) return { words: REGISTRY.clone(folder, machine, repository.name), button: REGISTRY.link, into: repository.id };
   }
   return null;
