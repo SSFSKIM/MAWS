@@ -5,6 +5,7 @@
 // the code goes in with `org.register` and `org.reanchor` and is never echoed back. The one exception is M4a's
 // `org.pair.start`, whose answer carries the code this Mac made for another device, once, to show; no status does.
 import * as z from 'zod';
+import { ProjectIdSchema } from '../../graph/ids';
 import { OrgKeySchema } from '../../machine/org-key';
 import { MachineRefSchema } from '../../machine/ref';
 import type { CommandSpec } from './common';
@@ -635,10 +636,10 @@ export const OrgProjectsSchema = z.strictObject({
   moved: z.record(z.string(), OrgKeySchema), // a key no project has any more → the key its tabs belong under now
   removals: z.array(HeldRemovalSchema), // the signed-in member's, waiting for their machine
   seen: z.record(z.string(), z.string()), // machine ref → when it was last seen (ISO), for "offline since"
-  // panel scalpel-2#1, additive: this Mac's row (its address) → the project id main computed for it where the row carries
-  // none (a `remote:` label on a Mac signed in and not enrolled, as `joinIds` did), which the page groups it by, having no
-  // uuid5 to compute it; absent when no row needs one
-  ownIds: z.record(z.string(), z.string()).optional(),
+  // panel scalpel-2#1, additive: this Mac's row → the project id main computed for it where the row carries none (a
+  // `remote:` label on a Mac signed in and not enrolled, as `joinIds` did), which the page groups it by, having no uuid5
+  // to compute it; absent when no row needs one. The key is a ProjectId, so the page reads it as the row's address.
+  ownIds: z.record(ProjectIdSchema, z.string()).optional(),
 });
 export type OrgProjects = z.infer<typeof OrgProjectsSchema>;
 

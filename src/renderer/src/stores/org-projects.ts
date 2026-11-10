@@ -53,10 +53,10 @@ export const labelOf = (project: ProjectRecord): RowKey => project.org?.key ?? p
  * A record's project id: its own (`org.smnsId`), else the one main computed for this Mac's row that carries none
  * (`OrgProjects.ownIds`: a `remote:` label, signed in and not enrolled; panel scalpel-2#1); null for none.
  */
-export const projectIdOf = (project: ProjectRecord, ownIds?: Readonly<Record<string, string>>): string | null =>
+export const projectIdOf = (project: ProjectRecord, ownIds?: Readonly<Record<ProjectId, string>>): string | null =>
   project.org?.smnsId ?? (ownIds !== undefined && Object.hasOwn(ownIds, project.id) ? ownIds[project.id] : null);
 // A record's row key (§J.1): the key table's entry for its project, else its label.
-export const orgKeyOf = (project: ProjectRecord, keys: RowKeys, ownIds?: Readonly<Record<string, string>>): RowKey => {
+export const orgKeyOf = (project: ProjectRecord, keys: RowKeys, ownIds?: Readonly<Record<ProjectId, string>>): RowKey => {
   const id = projectIdOf(project, ownIds);
   return (id !== null && Object.hasOwn(keys, id) ? keys[id] : undefined) ?? labelOf(project);
 };

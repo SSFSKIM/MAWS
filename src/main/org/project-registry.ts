@@ -23,6 +23,7 @@
 //
 // Electron-free: main injects the feed, the links, its own rows, the act's send and the emission.
 import { assembleProjects, directoryMachines, machineOwners, machineProjectNames, ownerMembers, type ProjectsRecord, type RegistryProject } from '../../../apps/org-protocol/src/index.ts';
+import type { ProjectId } from '@shared/graph/ids';
 import type { OrgProjectLocation, OrgProjects } from '@shared/ipc/schema/org';
 import type { ProjectRecord } from '@shared/ipc/schema/session';
 import { PROJECT_ACTS_CAPABILITY } from '@shared/ipc/schema/session';
@@ -258,7 +259,7 @@ export function createProjectRegistry(deps: ProjectRegistryDeps): ProjectRegistr
     }
     // panel scalpel-2#1: the ids computed for this Mac's rows that carry none (hidden ones too, as a row's own id groups it
     // hidden or not), the page's to group them by
-    const ownIds: Record<string, string> = {};
+    const ownIds: Record<ProjectId, string> = {};
     for (const row of local) {
       const id = row.org?.smnsId === null ? ownProject(org, row) : null;
       if (id !== null) ownIds[row.id] = id;
