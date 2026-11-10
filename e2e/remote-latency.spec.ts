@@ -42,7 +42,7 @@ import { FIXTURE_ENGINE_VERSION } from '../test/support/engine-pin';
 import { LATENCY_STUB, markerOf, writeLatencyEngine } from '../test/support/latency-engine';
 import { parseLogText, positionOf, readLogLines } from '../test/support/main-log';
 import { boundsOf, budgetMisses, CARRIERS, invalidReasons, loadVerdict, remoteLine, rttStats, type Bounds, type Carrier, type Exchange, type RemoteMeasures } from '../test/support/remote-latency';
-import { linkPending, loadVoid, RESUME_PAGE_EVENTS, markersNotOnce, placeOfEvent, readWake, sixMissing, sixSubscriptions, subscriptionsIn, unavailableSummary, WAKE_CASE, wakeMisses, wakeSummary, type WakeRecord } from '../test/support/remote-wake';
+import { linkPending, ruleBContext, RESUME_PAGE_EVENTS, markersNotOnce, placeOfEvent, readWake, sixMissing, sixSubscriptions, subscriptionsIn, unavailableSummary, WAKE_CASE, wakeMisses, wakeSummary, type WakeRecord } from '../test/support/remote-wake';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { cleanupAll, lastTurn, linkOf, localCase, main, measureTurns, now, openToFirstRow, pings, probe, prompt, raw, roundTrips, statsOf, trust, TURN_MS, writtenOf, type CaseResult } from './support/remote-latency-page';
 import { startRemoteScene, type RemoteScene } from './support/remote-scene';
@@ -569,7 +569,7 @@ test('a wake after a silent cut: every subscription answered within 1 s of the r
     await cleanupAll([() => a?.cleanup(), () => scene?.stop(), () => rmSync(aUserData, { recursive: true, force: true }), () => rmSync(root, { recursive: true, force: true })]);
   }
 
-  const voids = loadVoid(loads, terminalLoad ?? null);
+  const voids = ruleBContext(loads, terminalLoad ?? null);
   const misses = CARRIERS.flatMap((c) => (records[c] === undefined ? [] : wakeMisses(records[c]!)));
   // the machine's 1-minute load at the case's start and end (the measured group voids a run on either), then a line for
   // each carrier whose launch reached its reads: its summary, or that its evidence was unavailable

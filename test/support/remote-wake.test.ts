@@ -5,7 +5,7 @@ import type { PipeRequest } from './loopback-pipe';
 import type { LogLine } from './main-log';
 import { CHECKPOINT_ROWS as STREAM_CHECKPOINT_ROWS } from '../../src/engine-host/session-stream';
 import { PAGE_EVENTS } from '../../src/shared/host/stream-catchup';
-import { CHECKPOINT_ROWS, RESUME_PAGE_EVENTS, linkPending, loadVoid, markersNotOnce, placeOfEvent, readWake, sixMissing, sixSubscriptions, subscriptionsIn, unavailableSummary, wakeMisses, wakeSummary, type WakeInput } from './remote-wake';
+import { CHECKPOINT_ROWS, RESUME_PAGE_EVENTS, lastPageIn, linkPending, markersNotOnce, placeOfEvent, readWake, ruleBContext, sixMissing, sixSubscriptions, subscriptionsIn, unavailableSummary, VOID_LOAD, wakeMisses, wakeSummary, wakeVerdict, type LoadRead, type WakeInput, type WakeRecord } from './remote-wake';
 
 const REF = 'Bref0123456789abcdef';
 const APPS = ['app-1', 'app-2'];
@@ -265,6 +265,75 @@ describe('a run', () => {
     const main = input.main.concat(m(82.15, 'attempt failed (direct): no handshake within 2000 ms; next in 100 ms'), m(82.18, 'lane direct: spent (6 attempts)'));
     expect(readWake({ ...input, main }).record.conditions).toEqual(['+150 ms attempt failed (direct): no handshake within 2000 ms; next in 100 ms', '+180 ms lane direct: spent (6 attempts)']);
   });
+
+  it('records the stall’s length, from the stall to the restore', () => {
+    expect(readWake(passing('direct')).record.stallMs).toBe(72_000);
+  });
+});
+
+// Decision Log 33 (d): `conditions` holds only what §F lists, from the inject, where §F's window opens; the fourth
+// condition is about the lane that was adopted, so the other lane's failed attempts and its spent line are kept apart
+describe('the conditions', () => {
+  const conditionsOf = (input: WakeInput, ...extra: LogLine[]) => {
+    const { conditions, otherLane, beforeInject } = readWake({ ...input, main: input.main.concat(extra) }).record;
+    return { conditions, otherLane, beforeInject };
+  };
+
+  it('count from the inject: today’s attempts against the refused pipes during the stall are kept apart, as before the inject', () => {
+    expect(conditionsOf(passing('direct'), m(35, "attempt failed (today's): no relay (connect ECONNREFUSED 127.0.0.1:60705 (ECONNREFUSED)); next in 984 ms"))).toEqual({
+      conditions: [],
+      otherLane: [],
+      beforeInject: ["-47000 ms attempt failed (today's): no relay (connect ECONNREFUSED 127.0.0.1:60705 (ECONNREFUSED)); next in 984 ms"],
+    });
+  });
+
+  it('take today’s attempt failed after the inject as a condition, between the inject and the restore too', () => {
+    expect(conditionsOf(passing('relay'), m(81, "attempt failed (today's): no relay (connect ECONNREFUSED 127.0.0.1:60705 (ECONNREFUSED)); next in 984 ms")).conditions).toEqual([
+      "-1000 ms attempt failed (today's): no relay (connect ECONNREFUSED 127.0.0.1:60705 (ECONNREFUSED)); next in 984 ms",
+    ]);
+  });
+
+  it('on the relay’s launch, keep the direct lane’s failed attempt on the held pipe and its spent line as the other lane’s, not conditions (the early run’s line)', () => {
+    const input = passing('relay');
+    expect(conditionsOf(input, m(83.052, 'attempt failed (direct): ws://127.0.0.1:60706 did not open within 1000 ms; next in 99 ms'), m(90, 'lane direct: spent (6 attempts)'))).toEqual({
+      conditions: [],
+      otherLane: ['+1052 ms attempt failed (direct): ws://127.0.0.1:60706 did not open within 1000 ms; next in 99 ms', '+8000 ms lane direct: spent (6 attempts)'],
+      beforeInject: [],
+    });
+    expect(conditionsOf(input, m(82.15, 'attempt failed (relay): no handshake within 2000 ms; next in 100 ms')).conditions).toEqual(['+150 ms attempt failed (relay): no handshake within 2000 ms; next in 100 ms']);
+  });
+
+  it('on the direct launch, keep the relay lane’s as the other lane’s', () => {
+    expect(conditionsOf(passing('direct'), m(82.1, 'attempt failed (relay): no relay (connect ECONNREFUSED 127.0.0.1:60705 (ECONNREFUSED)); next in 100 ms'), m(82.12, 'lane relay: spent (no target)'))).toEqual({
+      conditions: [],
+      otherLane: ['+100 ms attempt failed (relay): no relay (connect ECONNREFUSED 127.0.0.1:60705 (ECONNREFUSED)); next in 100 ms', '+120 ms lane relay: spent (no target)'],
+      beforeInject: [],
+    });
+  });
+
+  it('read the lane adopted from the up line: an up over the other carrier makes the case’s own lane the other', () => {
+    const input = passing('direct');
+    const main = input.main.map((l) => (l.at === at(82.2) ? m(82.2, 'up over the relay carrier') : l));
+    expect(conditionsOf({ ...input, main }, m(82.1, 'attempt failed (direct): no handshake within 2000 ms; next in 100 ms'))).toMatchObject({ conditions: [], otherLane: ['+100 ms attempt failed (direct): no handshake within 2000 ms; next in 100 ms'] });
+  });
+
+  it('keep a catch-up, the floor and the acts ahead of the subscriptions whatever their lane', () => {
+    const lines = [m(82.1, 'attempt (direct): catch-up, dial 2'), m(82.11, 'attempt (relay): catch-up, dial 2'), m(82.12, "floor after 10000 ms: today's attempts from here (10 s without a channel)"), m(82.13, 'wrote 14 act message(s), 9000 bytes, ahead of the subscriptions')];
+    expect(conditionsOf(passing('direct'), ...lines)).toEqual({
+      conditions: ['+100 ms attempt (direct): catch-up, dial 2', '+110 ms attempt (relay): catch-up, dial 2', "+120 ms floor after 10000 ms: today's attempts from here (10 s without a channel)", '+130 ms wrote 14 act message(s), 9000 bytes, ahead of the subscriptions'],
+      otherLane: [],
+      beforeInject: [],
+    });
+  });
+});
+
+describe('the feed’s last page', () => {
+  it('is in once its line is at or after the hub’s restore', () => {
+    const input = passing('direct');
+    expect(lastPageIn(input.main, input.hubRestoredAt)).toBe(true);
+    expect(lastPageIn(without(input.main, '[org-feed] listings'), input.hubRestoredAt)).toBe(false);
+    expect(lastPageIn(input.main, at(85))).toBe(false);
+  });
 });
 
 describe('the bounds', () => {
@@ -302,8 +371,53 @@ describe('the pane', () => {
 });
 
 describe('the load', () => {
-  it('voids a run only under Rule B', () => {
-    expect(loadVoid([1, 2, 3], 2)).toEqual([]);
-    expect(loadVoid([6, 6, 6], null)).toEqual(["the machine's load: peak 6 at or over 5, 30 s pair 6 at or over 4.7 (Rule B)"]);
+  it('reads Rule B over the 30 s samples and the end, as context only', () => {
+    expect(ruleBContext([1, 2, 3], 2)).toEqual([]);
+    expect(ruleBContext([6, 6, 6], null)).toEqual(["the machine's load: peak 6 at or over 5, 30 s pair 6 at or over 4.7 (Rule B)"]);
+  });
+});
+
+// Decision Log 33 (c) and (d), Decision Log 31 (d): void by a window's load, outside §F's conditions, or a verdict
+describe('the verdict', () => {
+  const direct = readWake(passing('direct')).record;
+  const relay = readWake(passing('relay')).record;
+  const quiet = (...at: LoadRead['at'][]): LoadRead[] => at.map((instant) => ({ at: instant, load: 3.1 }));
+  const loads = { direct: quiet('inject', 'last subbed', "hub's restore", 'last page'), relay: quiet('inject', 'last subbed', 'last page') };
+  const late = (record: WakeRecord, conditions: string[] = []): WakeRecord => ({ ...record, upMs: 1_200, conditions });
+
+  it('is a pass for a run within its bounds at a quiet load', () => {
+    expect(wakeVerdict([direct, relay], loads, [])).toEqual({ void: false, outside: false, pass: true, voidReasons: [], boundMisses: [], outsideMisses: [], outsideConditions: [] });
+  });
+
+  it('voids the run on any window read of 5 or more, naming every read of that carrier; no verdict, though a bound was missed', () => {
+    expect(VOID_LOAD).toBe(5);
+    const verdict = wakeVerdict([late(direct), relay], { ...loads, relay: [{ at: 'inject', load: 4.99 }, { at: 'last subbed', load: 5 }, { at: 'last page', load: 5.31 }] }, []);
+    expect(verdict).toMatchObject({ void: true, outside: false, pass: null, boundMisses: ['direct: the link up 1200 ms after the restore, over 1000 ms'] });
+    expect(verdict.voidReasons).toEqual(["relay: the 1-minute load read 5 or more after the last subbed and after the feed's last page (4.99 at the inject, 5.00 after the last subbed, 5.31 after the feed's last page)"]);
+    expect(wakeVerdict([direct, relay], { ...loads, direct: [{ at: "hub's restore", load: 7.2 }] }, []).voidReasons).toEqual(["direct: the 1-minute load read 5 or more at the hub's restore (7.20 at the hub's restore)"]);
+  });
+
+  it('fails a miss with no condition as a miss', () => {
+    expect(wakeVerdict([late(direct), relay], loads, [])).toEqual({ void: false, outside: false, pass: false, voidReasons: [], boundMisses: ['direct: the link up 1200 ms after the restore, over 1000 ms'], outsideMisses: [], outsideConditions: [] });
+  });
+
+  it('labels a miss on a carrier whose conditions are not empty as outside §F’s conditions: neither a breach nor a pass', () => {
+    const conditions = ['+150 ms attempt failed (relay): no handshake within 2000 ms; next in 100 ms'];
+    expect(wakeVerdict([direct, late(relay, conditions)], loads, [])).toEqual({
+      void: false,
+      outside: true,
+      pass: null,
+      voidReasons: [],
+      boundMisses: [],
+      outsideMisses: ['relay: the link up 1200 ms after the restore, over 1000 ms'],
+      outsideConditions: ['relay: +150 ms attempt failed (relay): no handshake within 2000 ms; next in 100 ms'],
+    });
+    // conditions with no miss change nothing; a plain miss beside an outside one is still a fail
+    expect(wakeVerdict([direct, { ...relay, conditions }], loads, [])).toMatchObject({ outside: false, pass: true, outsideConditions: [] });
+    expect(wakeVerdict([late(direct), late(relay, conditions)], loads, [])).toMatchObject({ outside: true, pass: false });
+  });
+
+  it('is no pass while a line or count is missing', () => {
+    expect(wakeVerdict([direct], loads, ['relay: main.log, B’s logs or the pipes could not be read: ENOENT'])).toMatchObject({ void: false, pass: false });
   });
 });

@@ -6,8 +6,11 @@
 // - `failures` are the lines and counts §I requires under both modes (MAWS_REMOTE_LATENCY_PERF and _CHECK).
 // - `wakeMisses` are the bounds, which the measured group alone holds: every `subbed` and the link's `up` at most
 //   1,000 ms after the restore, the feed's `connected` and last listings page at most 2,000 ms after the hub's.
-// - `conditions` keeps the lines that show which of §F's six conditions a wake missed (a catch-up, a failed attempt, a
-//   spent lane, the floor, acts ahead of the subscriptions), so a wake outside them is read as neither pass nor fail.
+// - `conditions` keeps the lines from the inject on that show which of §F's six conditions a wake missed (a catch-up, a
+//   failed attempt or a spent lane of the lane adopted, the floor, acts ahead of the subscriptions), so a miss outside
+//   them is read as neither pass nor fail (Decision Log 33 (d)).
+// - `wakeVerdict` voids the run on the 1-minute load read at the instants that bracket each carrier's timed windows
+//   (Decision Log 33 (c)), labels a miss outside §F's conditions, and otherwise gives the verdict.
 import { IDLE_RUN } from './daemon-idle';
 import { requestTarget, type PipeRequest } from './loopback-pipe';
 import { caseLineOf, positionOf, type CaseLine, type LogLine, type Mode } from './main-log';
@@ -141,6 +144,8 @@ export interface WakeRecord {
   carrier: Carrier;
   /** From the inject to the restore: the drawn wait. */
   waitMs: number;
+  /** From the stall to the restore: B's writing, the settle and the wait. */
+  stallMs: number;
   wake: string | null;
   linkWake: string | null;
   feedWake: string | null;
@@ -154,11 +159,20 @@ export interface WakeRecord {
   upgrades: number;
   /** The hub's requests for the feed's socket since the stall. */
   feedOpens: number;
+  /**
+   * §F's conditions, from the inject on, `ms` from the restore: a catch-up, a failed attempt (today's, or of the lane
+   * adopted), the lane adopted spent, the floor, acts ahead of the subscriptions.
+   */
   conditions: string[];
+  /** The other lane's failed attempts and spent line from the inject on: §F's fourth condition is the adopted lane's. */
+  otherLane: string[];
+  /** The same lines from the stall to the inject (today's attempts against the refused pipes): context, no condition. */
+  beforeInject: string[];
   /** Each pipe's connections since the stall, `ms` from the restore; a null first line is a probe. */
   requests: { hub: { ms: number; firstLine: string | null }[]; direct: { ms: number; firstLine: string | null }[] };
 }
 
+const CONDITION_KINDS: readonly CaseLine['kind'][] = ['catch-up', 'attempt-failed', 'lane-spent', 'floor', 'acts-ahead'];
 const behind = (a: { seq: number; idx: number | null }, b: { seq: number; idx: number | null }) => a.seq < b.seq || (a.seq === b.seq && (a.idx ?? -1) < (b.idx ?? -1));
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
@@ -288,12 +302,22 @@ export function readWake(input: WakeInput): { record: WakeRecord; failures: stri
   }
 
   const answeredMs = subscriptions.flatMap((s) => (s.after === null ? [] : [s.after.ms]));
-  const conditions = link
-    .filter((r) => r.at >= stalledAt && ['catch-up', 'attempt-failed', 'lane-spent', 'floor', 'acts-ahead'].includes(r.line.kind))
-    .map((r) => `${ms(r.at) >= 0 ? '+' : ''}${ms(r.at)} ms ${linkText(ref, r.text)}`);
+  // §F's lines, from the inject, where its window opens; the lane adopted is the one the link came up over after the
+  // restore (the case's carrier when it came up over none). A lane's own failed attempt or spent line is the other
+  // lane's when it names the other carrier; today's attempt, a catch-up, the floor and the acts name no lane of theirs
+  const adopted = up?.line.carrier ?? carrier;
+  const laneOf = (line: CaseLine) => (line.kind === 'attempt-failed' ? line.which : line.kind === 'lane-spent' ? line.lane : null);
+  const otherLane = (r: Read) => {
+    const lane = laneOf(r.line);
+    return (lane === 'direct' || lane === 'relay') && lane !== adopted;
+  };
+  const timed = (r: Read) => `${ms(r.at) >= 0 ? '+' : ''}${ms(r.at)} ms ${linkText(ref, r.text)}`;
+  const conditionLines = link.filter((r) => CONDITION_KINDS.includes(r.line.kind));
+  const windowed = conditionLines.filter(since(injectedAt));
   const record: WakeRecord = {
     carrier,
     waitMs: restoredAt - injectedAt,
+    stallMs: restoredAt - stalledAt,
     wake: wake?.text ?? null,
     linkWake: linkWake === undefined ? null : linkText(ref, linkWake.text),
     feedWake: feedWake?.text ?? null,
@@ -306,7 +330,9 @@ export function readWake(input: WakeInput): { record: WakeRecord; failures: stri
     feed: { connectedMs: connected === undefined ? null : ms(connected.at, hubRestoredAt), lastPageMs: lastPage === undefined ? null : ms(lastPage.at, hubRestoredAt), records: lastPage?.line.records ?? null, pages: lastPage?.line.pages ?? null },
     upgrades,
     feedOpens,
-    conditions,
+    conditions: windowed.filter((r) => !otherLane(r)).map(timed),
+    otherLane: windowed.filter(otherLane).map(timed),
+    beforeInject: conditionLines.filter((r) => r.at >= stalledAt && r.at < injectedAt).map(timed),
     requests: { hub: hub.map((r) => ({ ms: ms(r.at), firstLine: r.firstLine })), direct: direct.map((r) => ({ ms: ms(r.at), firstLine: r.firstLine })) },
   };
   return { record, failures };
@@ -323,6 +349,67 @@ export function wakeMisses(record: WakeRecord): string[] {
   if (over(record.feed.connectedMs, WAKE_CASE.feedWithinMs)) misses.push(`${record.carrier}: the feed connected ${record.feed.connectedMs} ms after the hub's restore, over ${WAKE_CASE.feedWithinMs} ms`);
   if (over(record.feed.lastPageMs, WAKE_CASE.feedWithinMs)) misses.push(`${record.carrier}: the feed's last listings page ${record.feed.lastPageMs} ms after the hub's restore, over ${WAKE_CASE.feedWithinMs} ms`);
   return misses;
+}
+
+/** Whether main's log has the feed's `[org-feed] listings: last page` line at or after `from` (the hub's restore). */
+export function lastPageIn(main: readonly LogLine[], from: number): boolean {
+  return kindOf(readAll(main), 'feed-last-page').some((r) => r.at >= from);
+}
+
+/** The 1-minute load at or over which a read voids the run (Decision Log 33 (c), in the artifacts case's form). */
+export const VOID_LOAD = 5;
+
+/**
+ * Where a carrier's 1-minute load is read, so that no timed window lies outside a pair of reads: at the inject, after the
+ * last `subbed` (the link's window), at the hub's restore where it comes later (the direct launch's), and after the
+ * feed's last page is in (the feed's window).
+ */
+export type LoadInstant = 'inject' | 'last subbed' | "hub's restore" | 'last page';
+export interface LoadRead {
+  at: LoadInstant;
+  load: number;
+}
+const INSTANT: Record<LoadInstant, string> = { inject: 'at the inject', 'last subbed': 'after the last subbed', "hub's restore": "at the hub's restore", 'last page': "after the feed's last page" };
+
+export interface WakeVerdict {
+  /** A window's read at VOID_LOAD or more: no verdict on the bounds either way. */
+  void: boolean;
+  /** A bound missed on a carrier whose `conditions` are not empty: outside §F's conditions, neither a breach nor a pass. */
+  outside: boolean;
+  /** True: every line and count there and every bound held; false: a line or count missing, or a bound missed inside the conditions; null: void, or only outside them. */
+  pass: boolean | null;
+  voidReasons: string[];
+  /** The misses of carriers whose `conditions` are empty: a bound missed. */
+  boundMisses: string[];
+  /** The misses of carriers whose `conditions` are not empty, and those conditions, each with its carrier. */
+  outsideMisses: string[];
+  outsideConditions: string[];
+}
+
+/** The run's verdict from each carrier's record, each carrier's load reads, and the lines and counts it lacks. */
+export function wakeVerdict(records: readonly WakeRecord[], loads: Partial<Record<Carrier, readonly LoadRead[]>>, failures: readonly string[]): WakeVerdict {
+  const voidReasons = (Object.entries(loads) as [Carrier, readonly LoadRead[]][]).flatMap(([carrier, reads]) => {
+    const over = reads.filter((r) => r.load >= VOID_LOAD);
+    if (over.length === 0) return [];
+    const all = reads.map((r) => `${r.load.toFixed(2)} ${INSTANT[r.at]}`).join(', ');
+    return [`${carrier}: the 1-minute load read ${VOID_LOAD} or more ${over.map((r) => INSTANT[r.at]).join(' and ')} (${all})`];
+  });
+  const boundMisses: string[] = [];
+  const outsideMisses: string[] = [];
+  const outsideConditions: string[] = [];
+  for (const record of records) {
+    const misses = wakeMisses(record);
+    if (misses.length === 0) continue;
+    if (record.conditions.length === 0) boundMisses.push(...misses);
+    else {
+      outsideMisses.push(...misses);
+      outsideConditions.push(...record.conditions.map((line) => `${record.carrier}: ${line}`));
+    }
+  }
+  const isVoid = voidReasons.length > 0;
+  const outside = outsideMisses.length > 0;
+  const pass = isVoid ? null : failures.length > 0 || boundMisses.length > 0 ? false : outside ? null : true;
+  return { void: isVoid, outside, pass, voidReasons, boundMisses, outsideMisses, outsideConditions };
 }
 
 /** The job log's line for one carrier. */
@@ -352,8 +439,11 @@ export function markersNotOnce(text: string, markers: readonly string[]): { mark
   return markers.map((marker) => ({ marker, count: text.split(marker).length - 1 })).filter((m) => m.count !== 1);
 }
 
-/** The file's load rule (Rule B, as the first test words it): the run is void, or not. */
-export function loadVoid(loads: readonly number[], terminal: number | null): string[] {
+/**
+ * The file's load rule (Rule B, as the first test words it) over the wake case's 30 s samples and its end: printed as
+ * context, it voids nothing of this case (Decision Log 33 (c)); `wakeVerdict` holds the case's own void rule.
+ */
+export function ruleBContext(loads: readonly number[], terminal: number | null): string[] {
   const load = loadVerdict(loads, terminal);
   if (!load.void) return [];
   const f = (value: number) => Number(value.toFixed(1));
