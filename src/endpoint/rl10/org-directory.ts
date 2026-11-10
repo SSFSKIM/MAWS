@@ -18,7 +18,7 @@
 // sminos matches a stored signer by any of the three (`signer_revoked`), so a device id or member id still in the head is
 // never named: one member's revoked device must not revoke their other device's words.
 import { machineProjectId } from 'desk-hub/protocol';
-import { isMachineCert, isSigned, keyId, machineNameKey, standingCertNames, type Certificates, type OrgState } from 'org-protocol';
+import { isMachineCert, isSigned, keyId, machineNameKey, machineProjectNames, standingCertNames, type Certificates, type OrgState } from 'org-protocol';
 
 export type OrgDirectory = {
   t: 'org';
@@ -28,21 +28,9 @@ export type OrgDirectory = {
 
 export type RevocationSet = { version: number; devices: string[]; members: string[]; keys: string[] };
 
-/** The names the machines of the head go by: enrolled machines', and those of certificates under a live delegation. */
-function machineNames(head: OrgState, certificates: Certificates, now: Date): string[] {
-  const names = new Map<string, string>();
-  for (const m of head.machines) names.set(machineNameKey(m.name), m.name);
-  const live = new Set(head.delegations.filter((d) => Date.parse(d.expires) > now.getTime()).map((d) => d.id));
-  const revoked = new Set(head.revoked.flatMap((r) => ('delegation' in r.holder ? [r.holder.delegation] : [])));
-  for (const c of certificates.certs) {
-    if (isSigned(c, isMachineCert) && live.has(c.body.delegation) && !revoked.has(c.body.delegation)) names.set(machineNameKey(c.body.name), c.body.name);
-  }
-  return [...names.values()].sort();
-}
-
 /** DX2's `org` frame from the head; `seen` gives each machine name's newest relayed event time. */
 export async function orgDirectory(head: OrgState, certificates: Certificates, now: Date, seen: (name: string) => string | null): Promise<OrgDirectory> {
-  const names = machineNames(head, certificates, now);
+  const names = machineProjectNames(head, certificates, now);
   const refs = new Set(head.machines.map((m) => m.ref));
   const enrolled = new Set([...head.machines, ...head.machineNames.filter((p) => refs.has(p.ref))].map((m) => machineNameKey(m.name)));
   const standing = await standingCertNames(head, certificates, now);

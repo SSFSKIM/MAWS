@@ -456,8 +456,8 @@ Owned in `apps/org-protocol/vectors/`: `project-rule.json` (the rule) and the re
 
 `project-rule.json`:
 
-    { "version": 1, "org": "<org>", "machine": "<machine name>",
-      "cases": [ { "name": "…", "platform"?: "darwin" | "linux",
+    { "about": "…", "version": 1, "org": "<org>", "machine": "<machine name>",
+      "cases": [ { "name": "…", "platform"?: "darwin" | "linux", "under"?: "/tmp",
                    "tree": [ Entry… ], "statements": [ Statement… ], "ask": [ Ask… ] } ] }
 
     Entry     = { "dir": P }                                        // a folder
@@ -468,7 +468,7 @@ Owned in `apps/org-protocol/vectors/`: `project-rule.json` (the rule) and the re
     Statement = { "path": P, "minted"?: ID, "linked"?: ID, "removed"?: true, "replaced"?: true }
     Ask       = { "dir": P, "project": ID | { "remote": KEY } | "machine", "by": "link" | "minted" | "smns" | "remote" | "machine", "at"?: P }
 
-A harness creates each case's tree under a fresh real directory (every `P` is relative to it), writing git's files directly, with no git command, and hands its implementation the statements as that implementation receives them in production (sminos: an org file's `locations`; MAWS: the index's lookup). `removed` is a removed row's statement; `replaced` is a statement whose anchor does not match the folder. An expected `{ "remote": KEY }` is `uuid5` of the org and the key by the existing rule; `"machine"` is the machine's own project id. `at` is the folder that decided. `dir` may run through a `symlink` entry, which is how one spelling of a path is asked against a statement made on another.
+A harness creates each case's tree under a fresh real directory (every `P` is relative to it; made in `under`, and asked through that spelling, when a case names one), writing git's files directly, with no git command, and hands its implementation the statements as that implementation receives them in production (sminos: an org file's `locations`; MAWS: the index's lookup), at the canonical form of their paths. `about` states these conventions in the file. `removed` is a removed row's statement; `replaced` is a statement whose anchor does not match the folder. An expected `{ "remote": KEY }` is `uuid5` of the org and the key by the existing rule; `"machine"` is the machine's own project id. `at` is the folder that decided. `dir` may run through a `symlink` entry, which is how one spelling of a path is asked against a statement made on another.
 
 The file holds at least these cases: a plain folder with no statement (machine); a minted folder and its subfolder; two nested minted folders (the nearer decides); a `.smns` above a statement and one below it; at one folder a link with a `.smns`, a minted id with a `.smns`, and a link with a minted id; a clone with a remote under a minted folder (remote), a repository with no remote under one (minted), a repository with several remotes and none named `origin` under one (minted), a statement on the repository's own root (the statement); a subfolder with a `.smns` inside a linked checkout (the file); a linked worktree inside its repository, with and without a `.smns`; a linked worktree outside its repository under another project's folder (its repository's project); a main checkout that is linked, with a worktree carrying the committed `.smns` (both the link's project); a worktree outside its repository whose main checkout has a `.smns` above it (that file's project, the one change from today); a removed folder with a declared subfolder (machine); a folder linked and then unlinked (its minted project); a replaced folder (its statement does not count); a path asked through a symlink; on `darwin`, a statement made under `/private/tmp` asked as `/tmp`; a folder whose name is stored decomposed on disk and stated composed.
 
