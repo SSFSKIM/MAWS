@@ -47,6 +47,9 @@ export interface SpawnTarget {
   checkout: string | null;
   key: string | null; // the org project of the tab's local project it was chosen for; null: a place chosen on the machine
   label?: string; // the place's words on the project chip when `key` is null: that machine's project's name, or "No project"
+  // the project registry's M11: the registry project the place is a location of, for a New chat in a project with no folder
+  // on this Mac (its machine menu offers the project's other locations from it)
+  registry?: string;
   // P5 O7 M9 ("Remote setup"): the person accepted that machine's trust card for the checkout, so the spawn carries
   // `trust: 'accepted'` and the machine runs the attested bootstrap (MAWS never writes trust)
   trust?: 'accepted';

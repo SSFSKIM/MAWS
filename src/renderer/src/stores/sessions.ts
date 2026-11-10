@@ -96,6 +96,9 @@ const isTurn = (event: SessionEvent): boolean =>
 export interface UnstartedSession {
   projectId: ProjectId | null;
   createdAt: string;
+  // the project registry's M11: the registry project a New chat with no project here was opened in (a project with no
+  // folder on this Mac, started on one of its locations elsewhere: sidebar/registry-new-chat.ts)
+  registry?: string;
 }
 
 // P5 O6 M4 (docs/doperpowers/plans/2026-10-27-p5-o6-machine-dimension.md, "One store per kind, partitioned inside"): one

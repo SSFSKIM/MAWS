@@ -29,7 +29,7 @@ import { machineOf } from '@shared/machine/address';
 import { ipc } from '../../ipc/client';
 import { openDialog } from '../../sessions/dialogs';
 import { useRemoteSpawn, useSpawnTarget, type SpawnTarget } from '../../sessions/remote-spawn';
-import { knownCheckouts, readPlaces, SETUP_WORDS, suggestionsFor, type Places } from '../../sessions/remote-setup';
+import { knownCheckouts, readPlaces, SETUP_WORDS, suggestionsFor, tabProject, type Places } from '../../sessions/remote-setup';
 import { projectsByRecency } from '../../sidebar/derive';
 import { selectProjectOrder, useSessions } from '../../stores/sessions';
 import type { HookResult } from '../setup-intent';
@@ -98,7 +98,7 @@ function RemoteMenu({ appSessionId, target, projectId, projectKey, disabled, onD
     if (first == null) return;
     onDone();
     const home = places?.home ?? null;
-    openDialog({ kind: 'remoteSetup', request: { kind: 'folder', tab: appSessionId, machine, name, key: projectKey, home, first, suggestions: suggestionsFor(knownCheckouts(projectId), home) } });
+    openDialog({ kind: 'remoteSetup', request: { kind: 'folder', tab: appSessionId, machine, name, key: projectKey, home, first, suggestions: suggestionsFor(knownCheckouts(tabProject(projectId, useSessions.getState().unstarted.get(appSessionId)?.registry ?? null)), home) } });
   };
   return (
     <Command label={`Projects on ${name}`} shouldFilter={false} loop>

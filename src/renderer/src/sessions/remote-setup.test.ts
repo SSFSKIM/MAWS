@@ -126,6 +126,37 @@ describe('the machines the menu offers', () => {
   });
 });
 
+describe('a New chat in a project with no folder here (the project registry)', () => {
+  const P = '5d8e1c72-4b3a-4f6e-8d9c-0a1b2c3d4e5f';
+  // re-review, finding 1: the tab names the registry project, and every machine's place in it comes from the registry
+  it('offers each machine its location of the registry project, the project kept, reading nothing of them', async () => {
+    useSessions.setState({ registry: { ...EMPTY_REGISTRY, projects: [{ id: P, name: 'scrape', hub: true, renamable: true, locations: [location(OTHER_MACHINE, 'p-a', '/srv/a'), location(THIRD, 'p-b', '/srv/b', { state: 'replaced' })] }] } });
+    const fake = fakeClient({});
+    expect(await readMachines({ registry: P }, fake.client)).toEqual([
+      { kind: 'ready', target: { machine: OTHER_MACHINE, name: 'mini', checkout: '/srv/a', key: null, label: 'scrape', registry: P } },
+      { kind: 'ready', target: { machine: THIRD, name: 'vm', checkout: null, key: null } }, // replaced there: no place in it
+    ]);
+    expect(fake.invoked('session.projects.list')).toEqual([]);
+    expect(knownCheckouts({ registry: P }).sort()).toEqual(['/srv/a', '/srv/b']);
+  });
+
+  // re-review, the minor: a project the registry identifies takes its own records, never another's that shares the label
+  it('suggests the paths of the registry project’s own records alone, never those of another project sharing its label', () => {
+    const OTHER_ID = '66666666-7777-4888-9999-aaaaaaaaaaaa';
+    useSessions.setState({
+      projects: new Map([
+        [HERE, projectOn(TEST_MACHINE, 'here', '/Users/owner/app', { org: { ...org, smnsId: ID } })],
+        [addressOf(TEST_MACHINE, 'fork' as ProjectId), projectOn(TEST_MACHINE, 'fork', '/Users/owner/app-fork', { org: { ...org, smnsId: OTHER_ID } })],
+        [addressOf(THIRD, 'there' as ProjectId), projectOn(THIRD, 'there', '/home/vm/app', { org: { ...org, smnsId: ID } })],
+      ]),
+      registry: { ...EMPTY_REGISTRY, projects: [{ id: ID, name: 'app', hub: true, renamable: true, locations: [location(OTHER_MACHINE, 'p-app', '/Users/mini/app')] }] },
+    });
+    const paths = knownCheckouts(HERE);
+    expect(paths.sort()).toEqual(['/Users/mini/app', '/Users/owner/app', '/home/vm/app']);
+    expect(paths).not.toContain('/Users/owner/app-fork');
+  });
+});
+
 describe('a machine’s places (the project chip on it)', () => {
   it('reads its projects and its home’s first page: an owner’s New project, and Don’t work in a project where its endpoint takes a chat in its home', async () => {
     useMachines.getState().applyRoster([machine(OTHER_MACHINE, 'mini', { capabilities: ['rl2.feeds', SPAWN_HOME_CAPABILITY] }), machine(THIRD, 'vm', { capabilities: ['rl2.feeds'] })]);

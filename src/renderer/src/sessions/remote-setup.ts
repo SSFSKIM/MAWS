@@ -138,25 +138,44 @@ export function suggestionsFor(known: readonly string[], home: string | null): s
 const rl2Machines = () => [...useMachines.getState().machines.values()].filter((m) => !m.local && m.state === 'up' && (m.carrier === 'direct' || m.carrier === 'relay'));
 
 /**
- * The machines the menu offers, in the roster's order: each to start on, with the checkout there of the tab's local
- * project's org project (its record's `org.key`) when that machine's projects hold one, else no place yet; or, where the
- * member's rights there are known and hold no `spawn`, greyed with why. Unknown rights grey nothing: the machine decides
- * at the Send. The project registry: a project the registry holds (by the id the tab's project's own record carries,
- * never by its label, which two projects may share) takes each machine's location from the registry.
+ * The project a New chat tab is in, for its machine menu: this Mac's project (its record), a registry project with no
+ * folder here (the project registry's M11: the tab was opened on one of its locations elsewhere), or none.
  */
-export async function readMachines(project: ProjectId | null, client: MawsBridge = ipc): Promise<MachineChoice[]> {
-  const record = project === null ? undefined : useSessions.getState().projects.get(project);
-  const key = record?.org?.key ?? null;
-  const registered = registryProjectOf(record);
+export type TabProject = ProjectId | { registry: string } | null;
+
+/** A tab's project from its binding's project (this Mac's) and its unstarted context's registry project. */
+export const tabProject = (projectId: ProjectId | null, registry: string | null): TabProject => projectId ?? (registry === null ? null : { registry });
+
+/** The tab's project: its record's label and, where the registry holds it, its registry project (by id, never by label). */
+function projectOfTab(of: TabProject): { key: string | null; registered: RegistryProject | undefined } {
+  const { projects, registry } = useSessions.getState();
+  if (of !== null && typeof of === 'object') return { key: null, registered: registry.projects.find((p) => p.id === of.registry) };
+  const record = of === null ? undefined : projects.get(of);
+  const id = record?.org?.smnsId;
+  return { key: record?.org?.key ?? null, registered: id == null ? undefined : registry.projects.find((p) => p.id === id) };
+}
+
+/**
+ * The machines the menu offers, in the roster's order: each to start on, with the checkout there of the tab's project
+ * when that machine holds one, else no place yet; or, where the member's rights there are known and hold no `spawn`,
+ * greyed with why. Unknown rights grey nothing: the machine decides at the Send. A project the registry holds takes each
+ * machine's location from the registry, with no read over the link: for this Mac's project, as that project's checkout
+ * there (`key`); for a registry project with no folder here, as a place in that project (`key` null, its name and id).
+ * Any other local project's checkout is read live (`session.projects.list`), by its org project's label.
+ */
+export async function readMachines(of: TabProject, client: MawsBridge = ipc): Promise<MachineChoice[]> {
+  const { key, registered } = projectOfTab(of);
   return Promise.all(
     rl2Machines().map(async (machine): Promise<MachineChoice> => {
       if (machine.rights !== undefined && !machine.rights.includes('spawn')) return { kind: 'closed', machine: machine.ref, name: machine.name, words: SETUP_WORDS.noSpawn(machine.name) };
       const none: MachineChoice = { kind: 'ready', target: { machine: machine.ref, name: machine.name, checkout: null, key: null } };
-      if (key === null) return none;
       if (registered !== undefined) {
         const location = registered.locations.find((l) => l.machine === machine.ref && l.state === undefined);
-        return location === undefined ? none : { kind: 'ready', target: { machine: machine.ref, name: machine.name, checkout: location.path, key } };
+        if (location === undefined) return none;
+        const place = key === null ? { key: null, label: registered.name, registry: registered.id } : { key };
+        return { kind: 'ready', target: { machine: machine.ref, name: machine.name, checkout: location.path, ...place } };
       }
+      if (key === null) return none;
       const projects = await client.invoke('session.projects.list', undefined, { machine: machine.ref }).catch(() => null);
       const checkout = projects?.ok === true ? projects.value.projects.find((p) => p.org?.key === key && p.discovered !== true) : undefined;
       return checkout === undefined ? none : { kind: 'ready', target: { machine: machine.ref, name: machine.name, checkout: checkout.directory, key } };
@@ -165,21 +184,16 @@ export async function readMachines(project: ProjectId | null, client: MawsBridge
 }
 
 /**
- * The paths the checkouts of the tab's local project's org project have on every machine the sessions store holds (this
- * Mac's included), and the registry's locations of its project, which a new project's folder there is suggested by.
+ * The paths the tab's project has on every machine, which a new project's folder there is suggested by: for a project
+ * the registry identifies, its locations and the declared records that carry its id (never another project's that shares
+ * its label); otherwise the declared records of its org project's label, as before.
  */
-export function knownCheckouts(project: ProjectId | null): string[] {
-  const record = project === null ? undefined : useSessions.getState().projects.get(project);
-  const key = record?.org?.key;
-  if (key === undefined) return [];
-  const labelled = [...useSessions.getState().projects.values()].filter((p) => p.org?.key === key && p.discovered !== true).map((p) => p.directory);
-  return [...new Set([...labelled, ...(registryProjectOf(record)?.locations.map((l) => l.path) ?? [])])];
-}
-
-/** The registry's project of a project record, by the id the record carries. */
-function registryProjectOf(record: ProjectRecord | undefined): RegistryProject | undefined {
-  const id = record?.org?.smnsId;
-  return id == null ? undefined : useSessions.getState().registry.projects.find((p) => p.id === id);
+export function knownCheckouts(of: TabProject): string[] {
+  const { key, registered } = projectOfTab(of);
+  const declared = [...useSessions.getState().projects.values()].filter((p) => p.discovered !== true);
+  if (registered !== undefined) return [...new Set([...declared.filter((p) => p.org?.smnsId === registered.id).map((p) => p.directory), ...registered.locations.map((l) => l.path)])];
+  if (key === null) return [];
+  return [...new Set(declared.filter((p) => p.org?.key === key).map((p) => p.directory))];
 }
 
 /** What the project chip's menu offers on another machine (`readPlaces`): `newProject` and `noProject` null when offered, else why not. */

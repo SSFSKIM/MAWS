@@ -15,7 +15,8 @@ import { Popover } from 'radix-ui';
 import { useEffect, useState } from 'react';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { useRemoteSpawn, useSpawnTarget, type SpawnTarget } from '../../sessions/remote-spawn';
-import { readMachines, type MachineChoice } from '../../sessions/remote-setup';
+import { readMachines, tabProject, type MachineChoice } from '../../sessions/remote-setup';
+import { useSessions } from '../../stores/sessions';
 import { useMachines } from '../../stores/machines';
 import { CHIP, NOTE, POPOVER } from './chip-style';
 
@@ -55,16 +56,18 @@ function ClosedItem({ label, line }: { label: string; line: string }) {
 export function MachineMenu({ appSessionId, projectId, projectKey, disabled }: { appSessionId: AppSessionId; projectId: ProjectId | null; projectKey: string | null; disabled: string | null }) {
   const reaches = useReachesRl2();
   const chosen = useSpawnTarget(appSessionId, projectKey);
+  const registry = useSessions((s) => s.unstarted.get(appSessionId)?.registry ?? null); // the project registry's M11
+  const of = tabProject(projectId, registry);
   const [open, setOpen] = useState(false);
   const [choices, setChoices] = useState<MachineChoice[] | null>(null); // null while asked
   useEffect(() => {
     if (!open) return;
     let live = true;
-    void readMachines(projectId).then((found) => live && setChoices(found)); // the project registry: by the tab's project, not its label
+    void readMachines(tabProject(projectId, registry)).then((found) => live && setChoices(found)); // the project registry: by the tab's project, not its label
     return () => {
       live = false;
     };
-  }, [open, projectId]);
+  }, [open, projectId, registry]);
   if (!reaches) return null;
   const choose = (target: SpawnTarget | null) => {
     // the machine already chosen, chosen again, keeps its place there and what its setup answered (an accepted trust card)
@@ -97,7 +100,7 @@ export function MachineMenu({ appSessionId, projectId, projectKey, disabled }: {
               ),
             )}
           </div>
-          {choices === null && projectKey !== null && <p className={`${NOTE} m-0`}>{MACHINE_WORDS.looking}</p>}
+          {choices === null && of !== null && <p className={`${NOTE} m-0`}>{MACHINE_WORDS.looking}</p>}
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>

@@ -1832,7 +1832,7 @@ describe('New chat in a project with no folder here', () => {
     const plus = within(row('scrape')).getByRole('button', { name: 'New chat in scrape' }) as HTMLButtonElement;
     expect(plus.disabled).toBe(false);
     await userEvent.click(plus);
-    await vi.waitFor(() => expect(spawnTargetOf(tab, null)).toEqual({ machine: OTHER_MACHINE, name: 'studio', checkout: '/srv/p-studio', key: null, label: 'scrape' }));
+    await vi.waitFor(() => expect(spawnTargetOf(tab, null)).toEqual({ machine: OTHER_MACHINE, name: 'studio', checkout: '/srv/p-studio', key: null, label: 'scrape', registry: ID }));
     expect(asked).toEqual([null]);
   });
 });

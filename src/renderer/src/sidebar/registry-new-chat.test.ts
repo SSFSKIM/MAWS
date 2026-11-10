@@ -31,7 +31,7 @@ describe('a New chat in a project with no folder here', () => {
       [LOW, machine(LOW, 'farm', { state: 'down' })],
       [OTHER_MACHINE, machine(OTHER_MACHINE, 'studio')],
     ]);
-    expect(registrySpawnTarget(scrape([location(LOW, 'p-farm'), location(OTHER_MACHINE, 'p-studio')]), machines)).toEqual({ machine: OTHER_MACHINE, name: 'studio', checkout: '/srv/p-studio', key: null, label: 'scrape' });
+    expect(registrySpawnTarget(scrape([location(LOW, 'p-farm'), location(OTHER_MACHINE, 'p-studio')]), machines)).toEqual({ machine: OTHER_MACHINE, name: 'studio', checkout: '/srv/p-studio', key: null, label: 'scrape', registry: '5d8e1c72-4b3a-4f6e-8d9c-0a1b2c3d4e5f' });
   });
 
   it('passes over a folder that is not there, a machine where the member may not start sessions, and one not reached over RL2; none is null', () => {
@@ -49,10 +49,11 @@ describe('a New chat in a project with no folder here', () => {
     const asked: unknown[] = [];
     const off = registerSessionCreator(async (projectId) => (asked.push(projectId), tab));
     try {
-      const target = { machine: OTHER_MACHINE, name: 'studio', checkout: '/srv/p-studio', key: null, label: 'scrape' };
+      const target = { machine: OTHER_MACHINE, name: 'studio', checkout: '/srv/p-studio', key: null, label: 'scrape', registry: 'project-1' };
       expect(await newChatElsewhere(target)).toBe(tab);
       expect(asked).toEqual([null]);
       expect(spawnTargetOf(tab, null)).toEqual(target);
+      expect(useSessions.getState().unstarted.get(tab)).toMatchObject({ projectId: null, registry: 'project-1' }); // the tab's project, for its machine menu
     } finally {
       off();
     }
