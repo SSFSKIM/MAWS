@@ -8,6 +8,7 @@
 // its request, which is withdrawn from the app (`projects.act.withdrawn`, Decision Log 22), and its later answer is
 // refused as not asked; the daemon's stop withdraws every waiting request the same way before answering its terminal.
 // A pending request holds nothing but its entry.
+import { randomBytes } from 'node:crypto';
 import { HostCommandError } from '@shared/host/runtime';
 import { ipcError } from '@shared/ipc/errors';
 import type { ProjectForward, ProjectForwardResult } from '@shared/ipc/schema/projects';
@@ -35,13 +36,15 @@ const noApp = (input: ProjectForward): ProjectForwardResult => ({ ok: false, cod
 
 export function createProjectActs(options: { app(): ActApp | null }): FrontProjectActs {
   const pending = new Map<string, Pending>();
+  // ids no other life of the daemon used: a page that decided `pa-…-1` keeps it, so a restart must not ask under it
+  const life = randomBytes(6).toString('base64url');
   let next = 0;
   return {
     forward(asker, input) {
       const app = options.app();
       if (app === null) return Promise.resolve(noApp(input));
       return new Promise((resolve) => {
-        const id = `pa-${++next}`;
+        const id = `pa-${life}-${++next}`;
         pending.set(id, {
           app,
           asker,

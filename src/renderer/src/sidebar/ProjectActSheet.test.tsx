@@ -65,4 +65,14 @@ describe('a maws request on the page', () => {
     act(() => fake.event('org.projectActs.changed', { asks: [] })); // the terminal left
     expect(screen.queryByRole('dialog')).toBeNull();
   });
+
+  // review 1's finding 1: a decided id is forgotten once main no longer holds it, so a request that reuses it is shown
+  it('shows a new request under an id decided before, once main held it no more', async () => {
+    mount();
+    await act(() => fake.reply('org.projectActs', { asks: [add] }));
+    fireEvent.click(sheet().getByRole('button', { name: REGISTRY.actConfirm }));
+    act(() => fake.event('org.projectActs.changed', { asks: [] }));
+    act(() => fake.event('org.projectActs.changed', { asks: [{ ...add, path: '/srv/next' }] })); // the daemon restarted
+    expect(sheet().getByText('From a terminal on this Mac: add /srv/next on mini')).toBeTruthy();
+  });
 });

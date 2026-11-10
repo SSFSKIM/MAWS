@@ -98,6 +98,19 @@ describe("maws's commands on machine.sock", () => {
     expect(ensure).not.toHaveBeenCalled();
   });
 
+  // review 1's finding 1: a page that decided a request keeps its id, so a daemon's next life never asks under it again
+  it('asks under ids no other life of the daemon used', async () => {
+    const ids: string[] = [];
+    for (const life of [front(), front()]) {
+      const app = life.client(APP_PID, PEER_CAPABILITIES.app);
+      life.client(9).ask('projects.forward', FORWARD);
+      await vi.waitFor(() => expect(app.requests()).toHaveLength(1));
+      ids.push(app.requests()[0]!.id as string);
+      life.served.close();
+    }
+    expect(new Set(ids).size).toBe(2);
+  });
+
   it('answers the terminal at once with no app, and with an attached app whose hello does not list machine.project-acts', async () => {
     const { client } = front();
     expect(await client(9).request('projects.forward', FORWARD)).toMatchObject({ ok: true, value: NO_APP });
