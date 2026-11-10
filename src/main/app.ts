@@ -33,6 +33,7 @@ import { emit, emitFrom, emitTo } from './ipc/events'; // P5 O9 M9: emitFrom, re
 import { registerMachineHandler, registerMainHandler } from './ipc/router'; // P5 O6 M1: registerMachineHandler
 import { bindLocalMachine } from './machine/local'; // P5 O6 M2
 import { startMachines } from './machines'; // P5 O6 M3: the connection manager (P5 O3-D M6: the stand-in gone)
+import { localProjectActs, PROJECT_ACT_COMMANDS, refuseUnservedProjectActs } from './machines/project-acts-peer'; // panel scalpel-3#2
 import { createRecordSigner, createStateSigner, createStepUp, promptTouchIDConfirmation } from './device/step-up'; // P5 O7 M1: the development org session's signer; P5 O8 M1: the production session's; M3: its state signer; M4b: its record signer
 import { harnessConfirmation, sheetConfirmation } from './device/step-up-sheet'; // P5 O7 M2: the step-up sheet before Touch ID
 import { createDevOrgSession } from './org/dev-session'; // P5 O7 M1
@@ -442,6 +443,8 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     register: registerMainHandler,
     dispatchLocal,
     budgets: COMMAND_BUDGETS_MS, // P5 O7 M5a: a cold machine's export is waited for its budget, not the link's 10 s
+    // panel scalpel-3#2: whether this Mac's machine serves the project acts, as its daemon's welcome says (embedded: this build)
+    localCapabilities: { read: () => localProjectActs(hosts.peer('machine'), { embedded: data !== null }), onChange: (listener) => hosts.onState('machine', () => listener()) },
     // P5 O7 M1: the org session the RL2 links read; P5 O8 M1: production's sign-in, or O7's development session
     session,
     // P5 O7 M2: the development session's directMap, read at each dial (it is set once the session signed in); P5 O7 M7:
@@ -527,6 +530,9 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     const peer = hosts.peer('machine');
     return peer === null || peer.capabilities.includes(MACHINE_DELIVERY_CAPABILITY);
   };
+  // panel scalpel-3#2: on the host shape, an act the attached daemon predates is refused `not-offered`, never sent to have
+  // its `into` passed by as an unknown field (./machines/project-acts-peer.ts)
+  if (data === null) beforeCommand(PROJECT_ACT_COMMANDS, refuseUnservedProjectActs(() => hosts.peer('machine'), localName));
   installRouter({ appUrl, local, dispatchToHost, remote: routeLaneB(routeLaneA(machines.dispatch, (ref) => machines.remote(ref), remoteLaneA), (ref) => machines.remote(ref), remoteLaneB), machine: data === null ? { kind: 'host', daemonRenders, daemonDelivers } : { kind: 'embedded' } });
   // P5 O3-C (Interfaces §A): the services bus, how the library (the spine and the checkouts) registers its commands,
   // installs its intercepts, emits its events and taps them, bound here to the router and `emit`, so every tap main's

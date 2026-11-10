@@ -24,7 +24,10 @@ describe('a project act’s refusal in words', () => {
   });
 
   it('takes a machine to serve the acts when it is this Mac or its link listed the capability', () => {
-    expect(servesProjectActs(machine(TEST_MACHINE, 'This Mac', { local: true, capabilities: undefined }))).toBe(true);
+    expect(servesProjectActs(machine(TEST_MACHINE, 'This Mac', { local: true, capabilities: undefined }))).toBe(true); // not known yet: main decides at the act
+    // panel scalpel-3#2: this Mac's daemon of a build that predates them, as main read its welcome
+    expect(servesProjectActs(machine(TEST_MACHINE, 'This Mac', { local: true, capabilities: [] }))).toBe(false);
+    expect(servesProjectActs(machine(TEST_MACHINE, 'This Mac', { local: true }))).toBe(true);
     expect(servesProjectActs(machine(OTHER_MACHINE, 'studio'))).toBe(true);
     expect(servesProjectActs(machine(OTHER_MACHINE, 'studio', { capabilities: [] }))).toBe(false);
     expect(servesProjectActs(machine(OTHER_MACHINE, 'studio', { capabilities: undefined }))).toBe(false);
@@ -71,6 +74,13 @@ describe('Add project’s machines and input', () => {
       { ref: MINI, name: 'mini', local: false, serves: false, closed: null },
       { ref: OTHER_MACHINE, name: 'studio', local: false, serves: true, closed: 'Only studio’s owners can change its projects' },
     ]);
+  });
+
+  // panel scalpel-3#2: this Mac is negotiated as another machine is, so a daemon that predates the acts gets a plain add
+  it('offers this Mac a plain add alone when its daemon does not serve the acts', () => {
+    const older = new Map([[TEST_MACHINE, machine(TEST_MACHINE, 'macbook', { local: true, capabilities: [] })]]);
+    expect(machineChoices(older, TEST_MACHINE)).toEqual([{ ref: TEST_MACHINE, name: 'This Mac', local: true, serves: false, closed: null }]);
+    expect(machineChoices(new Map(), TEST_MACHINE)[0]?.serves, 'before the machines are listed: main decides at the act').toBe(true);
   });
 
   it('keeps the machine chosen once it is no longer offered, closed with why, never another in its place', () => {

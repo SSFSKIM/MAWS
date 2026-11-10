@@ -82,6 +82,7 @@ import { listenLoopback, type LocalListener } from '../forwards';
 import type { MainContext, RemoteDispatch } from '../ipc/router';
 import type { LayoutFileStore } from '../layout/store';
 import { peerLists } from '../machines/remote/capabilities';
+import { needsProjectActs } from '../machines/project-acts-peer';
 import { callOverLink, dispatchOverLink, refusalError } from '../machines/remote/dispatch';
 import type { ActHandle, ActOutcome, RemoteLink } from '../machines/remote/link';
 import { ArtifactMachines } from '../artifacts/machines';
@@ -252,12 +253,7 @@ export const MACHINE_ACTS: ReadonlySet<CommandName> = new Set<CommandName>([
  * on the next channel follows that channel's peer), and `resolve` goes `oneChannel`, on the channel it was checked on.
  */
 const PROJECT_CALLS: ReadonlySet<CommandName> = new Set<CommandName>(['session.projects.resolve']);
-const needsProjectActs = (name: CommandName, fields: Fields): boolean =>
-  name === 'session.projects.link' ||
-  name === 'session.projects.relocate' ||
-  name === 'session.projects.resolve' ||
-  (name === 'session.projects.addFolder' && (fields.into !== undefined || fields.own !== undefined)) ||
-  (name === 'session.projects.remove' && fields.expect !== undefined);
+// `needsProjectActs` (../machines/project-acts-peer.ts) names what needs the capability; this Mac's daemon is checked by it too
 /** Acts the endpoint always asks a step-up of, signed before the first copy goes (no round trip to be asked). */
 const STEPPED_UP: ReadonlySet<CommandName> = new Set<CommandName>(['session.projects.addFolder', 'session.projects.link', 'session.projects.relocate']);
 // P5 O7 M5c ("O4's surfaces: the grade"): the six lease reads, sent as calls by name (./remote-connectors.ts)

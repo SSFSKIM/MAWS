@@ -23,6 +23,9 @@ export const MachineStateSchema = z.strictObject({
   // 2026-11-06 (the New chat's machine first): while an RL2 link is up, this device's member's machine rights there (its
   // `caps`; absent until they are known) and what the machine's endpoint listed in its handshake (its `h2`), which the
   // machine menu reads (who may start a session there; `rl2.spawn-home`, a chat in its home). Main-to-renderer only.
+  // For the local machine (panel scalpel-3#2), `capabilities` lists `rl2.project-acts` while its services serve the
+  // project acts, as main reads its daemon's welcome (src/main/machines/project-acts-peer.ts), and nothing else; absent
+  // while no daemon has welcomed.
   rights: z.array(z.enum(MACHINE_RIGHTS)).optional(),
   capabilities: z.array(z.string()).optional(),
 });
