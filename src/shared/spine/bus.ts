@@ -1,7 +1,8 @@
 // The services bus (P5 O3-C, docs/doperpowers/plans/2026-10-28-p5-o3-c-spine-library.md, Interfaces §A): how the
 // machine's services (the spine and the checkouts, O3 §5) register their commands, install their intercepts, emit their
-// events and tap them, with no import of main's IPC. Each root binds one and injects it into the modules it composes:
-// main's embedded root binds it to its router and `emit` (src/main/ipc/), O3-D's `mawsd` to its services front. A
+// events and tap them, with no import of main's IPC. `mawsd` binds one to its services front and injects it into the
+// modules it composes; main binds one to its router and `emit` (src/main/ipc/) for its own modules (P5 O15 M2: main
+// composes none of the machine's services). A
 // handler that must fail with a specific `IpcError` throws `HostCommandError` (@shared/host/runtime), which main's
 // router and every host runtime answer intact. Its members are free functions: a module may take one alone
 // (`Pick<ServicesBus, 'register'>`, or `bus.emit` as an `emit` dependency) and call it detached from the bus.
@@ -14,8 +15,9 @@ export type ServiceHandler<N extends CommandName> = (input: CommandInput<N>, con
 
 export interface ServicesBus {
   // A command the library answers; throws for a name registered twice. The spine's commands are `machine`-owned (O3-D
-  // M1), and the checkouts' with them from O3-E: main binds a `machine` name to its router's embedded machine binding and
-  // a `main` one to its main handlers; `mawsd` binds both to its services front.
+  // M1), and the checkouts' with them from O3-E: `mawsd` binds both to its services front; main binds a `machine` name to
+  // its router's machine handlers (answered there only for an older daemon, the router's `answeredHere`) and a `main` one
+  // to its main handlers.
   register<N extends CommandName>(name: N, handler: ServiceHandler<N>): void;
   // Answers a command another owner would answer, before that owner (session.answer's pending check, the scenario
   // stub, O9's reroute); the function returned removes it.

@@ -9,7 +9,7 @@ import { TEST_MACHINE } from '../../../../test/support/machine';
 import type { HostStatus } from '@shared/ipc/schema/host';
 import { useHosts } from '../stores/hosts';
 import { useNotices } from '../stores/notices';
-import { daemonShapeStatus, hostStatus, supervisorStatus, updatedStatus, waitingStatus } from '../test-support/host-status';
+import { hostStatus, supervisorStatus, updatedStatus, waitingStatus } from '../test-support/host-status';
 import { describeSupervisor, SupervisorRow } from './SupervisorRow';
 import { formatClock } from '@shared/app/date-format'; // L129
 
@@ -24,33 +24,28 @@ describe('the supervisor row’s text', () => {
 
   it('reads a running supervisor of this build', () => {
     expect(describeSupervisor(hostStatus())).toBe(
-      'supervisor · detached · pid 48213 · build matches · 3 sessions held · idle exit 10 min · orphans killed 0 · socket /u/supervisor/host.sock · no unexpected exit',
+      'supervisor · daemon · pid 48213 · build matches · 3 sessions held · idle exit 10 min · orphans killed 0 · socket /u/supervisor/host.sock · no unexpected exit',
     );
   });
 
   it('reads an older build serving its sessions until they go idle, a never-exiting one, and the e2e seam in seconds', () => {
     expect(describeSupervisor(updatedStatus(1))).toBe(
-      'supervisor · detached · pid 48213 · build differs · 1 session held · exits when its last session ends · orphans killed 0 · socket /u/supervisor/host.sock · no unexpected exit',
+      'supervisor · daemon · pid 48213 · build differs · 1 session held · exits when its last session ends · orphans killed 0 · socket /u/supervisor/host.sock · no unexpected exit',
     );
     expect(describeSupervisor(hostStatus({ supervisor: supervisorStatus({ idleExitMs: null, orphansKilled: 2 }) }))).toContain('idle exit never · orphans killed 2');
     expect(describeSupervisor(hostStatus({ supervisor: supervisorStatus({ idleExitMs: 5_000 }) }))).toContain('idle exit 5 s');
   });
 
-  it('reads the engine host inside the app (utility mode) with no socket', () => {
-    const utility = hostStatus({ transport: 'utility', supervisor: supervisorStatus({ mode: 'utility', pid: 1111, liveSessions: 0, socketPath: null, logPath: null }) });
-    expect(describeSupervisor(utility)).toBe('supervisor · utility · pid 1111 · build matches · 0 sessions held · ends with MAWS · orphans killed 0 · no unexpected exit');
-  });
-
   it('says it waits on an incompatible supervisor, and why', () => {
-    expect(describeSupervisor(waitingStatus(2))).toBe("supervisor · detached · waiting · the previous version's supervisor still runs 2 sessions · wire differs · no unexpected exit");
+    expect(describeSupervisor(waitingStatus(2))).toBe("supervisor · daemon · waiting · the previous version's supervisor still runs 2 sessions · wire differs · no unexpected exit");
   });
 
   it('reads the states between and after supervisors, with the last unexpected exit', () => {
-    expect(describeSupervisor(hostStatus({ state: 'starting', supervisor: null, matches: null }))).toBe('supervisor · detached · starting · no unexpected exit');
-    expect(describeSupervisor(crashed({ reason: 'held_lock' }))).toBe('supervisor · detached · not running · another supervisor holds its lock and does not answer · no unexpected exit');
-    expect(describeSupervisor(crashed({ lastExit: { code: 1, signal: null, at: AT, interrupted: 2 } }))).toBe(`supervisor · detached · not running · last unexpected exit ${CLOCK} (exit 1) · 2 interrupted`);
+    expect(describeSupervisor(hostStatus({ state: 'starting', supervisor: null, matches: null }))).toBe('supervisor · daemon · starting · no unexpected exit');
+    expect(describeSupervisor(crashed({ reason: 'held_lock' }))).toBe('supervisor · daemon · not running · another supervisor holds its lock and does not answer · no unexpected exit');
+    expect(describeSupervisor(crashed({ lastExit: { code: 1, signal: null, at: AT, interrupted: 2 } }))).toBe(`supervisor · daemon · not running · last unexpected exit ${CLOCK} (exit 1) · 2 interrupted`);
     expect(describeSupervisor(hostStatus({ state: 'restarting', supervisor: null, matches: null, lastExit: { code: null, signal: 'SIGKILL', at: AT, interrupted: 1 } }))).toBe(
-      `supervisor · detached · restarting · last unexpected exit ${CLOCK} (SIGKILL) · 1 interrupted`,
+      `supervisor · daemon · restarting · last unexpected exit ${CLOCK} (SIGKILL) · 1 interrupted`,
     );
     expect(describeSupervisor(hostStatus({ lastExit: { code: null, signal: null, at: AT, interrupted: 0 } }))).toContain(`· last unexpected exit ${CLOCK} · 0 interrupted`);
   });
@@ -61,10 +56,10 @@ describe('the supervisor row while an update waits for tool calls', () => {
   it('says what it waits for, served or deferred', () => {
     const served = hostStatus({ matches: 'build', supervisor: supervisorStatus({ liveSessions: 1 }), handover: { inFlight: 2, tool: 'show_pane' } });
     expect(describeSupervisor(served)).toBe(
-      'supervisor · detached · pid 48213 · build differs · Waiting for show_pane to finish before updating the engine host (2 calls running). · 1 session held · idle exit 10 min · orphans killed 0 · socket /u/supervisor/host.sock · no unexpected exit',
+      'supervisor · daemon · pid 48213 · build differs · Waiting for show_pane to finish before updating the engine host (2 calls running). · 1 session held · idle exit 10 min · orphans killed 0 · socket /u/supervisor/host.sock · no unexpected exit',
     );
     expect(describeSupervisor(hostStatus({ state: 'restarting', supervisor: null, matches: null, handover: { inFlight: 1, tool: 'artifact_list' } }))).toBe(
-      'supervisor · detached · Waiting for artifact_list to finish before updating the engine host (1 call running). · no unexpected exit',
+      'supervisor · daemon · Waiting for artifact_list to finish before updating the engine host (1 call running). · no unexpected exit',
     );
   });
 });
@@ -86,6 +81,7 @@ describe('the supervisor row', () => {
     render(<SupervisorRow />);
   };
 
+  // P5 O2 M7: the engine host behind mawsd is still the supervisor, with its own log
   it('shows the status and opens the log through main', async () => {
     show(hostStatus());
     expect(screen.getByRole('status', { name: 'supervisor' }).textContent).toBe(describeSupervisor(hostStatus()));
@@ -99,18 +95,6 @@ describe('the supervisor row', () => {
     show(hostStatus());
     await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Open log' })));
     expect(useNotices.getState().notices.map((n) => [n.kind, n.level, n.text])).toEqual([['toast', 'warning', "The supervisor's log did not open · /u/supervisor/host.log could not be opened: gone"]]);
-  });
-
-  // P5 O2 M7: the engine host behind mawsd is still the supervisor, with its own log
-  it('reads the engine host behind the machine daemon, and opens its log', () => {
-    show(daemonShapeStatus());
-    expect(screen.getByRole('status', { name: 'supervisor' }).textContent).toMatch(/^supervisor · daemon · pid 48213 · build matches/);
-    expect(screen.getByRole('button', { name: 'Open log' })).toBeTruthy();
-  });
-
-  it('offers no log for the engine host inside the app', () => {
-    show(hostStatus({ transport: 'utility', supervisor: supervisorStatus({ mode: 'utility', socketPath: null, logPath: null }) }));
-    expect(screen.queryByRole('button', { name: 'Open log' })).toBeNull();
   });
 
   it('while waiting on an incompatible supervisor it offers Restart now, which restarts it', async () => {

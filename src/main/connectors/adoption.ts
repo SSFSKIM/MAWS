@@ -1,7 +1,7 @@
 // The one-time adoption of route D's format 1 grants, bound to the machine (P5 O4 M2, docs/doperpowers/plans/
 // 2026-10-31-p5-o4-services.md, U7: Interfaces §B; D3, D23, D32): main opens each record sealed under Electron's
 // safeStorage (./legacy-custody.ts) and hands it to the machine's `connectors.adoptGrant` through main's own route, under
-// main's own client (`mawsd`'s on the daemon shape, the embedded root's in process), which re-seals it under the
+// main's own client (`mawsd`'s connectors; P5 O15 M2: the embedded root's in-process ones are gone), which re-seals it under the
 // machine's key and replaces the file only while it is still the format 1 one nobody forgot. A record the machine
 // declines, or cannot be asked to take, is left under the reason it gave. The adoption asks nothing of the sealer or the
 // machine when no format 1 file is there (`adoptLegacy` lists first).

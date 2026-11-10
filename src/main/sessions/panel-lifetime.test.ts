@@ -95,6 +95,24 @@ describe('a session’s chat panels', () => {
     expect(store.list()).toEqual([panelOf('app-bound')]);
   });
 
+  // P5 O15 M1 (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md): main-wiring.test.ts's case, on the view
+  it('an unstarted chat’s panel is written, outlives its provisional record’s removal while its intent stands, and goes with the intent', () => {
+    const store = new LayoutFileStore(file);
+    registerChatPanels(store, view, LOCAL);
+    const set = handlers.get('layout.set')!;
+    view.putIntent(intentFor(A));
+    set({ key: panelOf(A), value: panel });
+    expect(JSON.parse(readFileSync(file, 'utf8'))[panelOf(A)]).toEqual(panel);
+    view.putRecord(record(A));
+    view.removeRecord(A); // a provisional record removed: the intent still names the session
+    vi.advanceTimersByTime(PANEL_DROP_DELAY_MS);
+    expect(store.get(panelOf(A))).toEqual(panel);
+    view.removeIntent(A);
+    vi.advanceTimersByTime(PANEL_DROP_DELAY_MS);
+    expect(store.get(panelOf(A))).toBeNull();
+    expect(() => set({ key: panelOf(A), value: panel })).toThrow(/no such session/);
+  });
+
   it('keeps the key of a session removed and recreated under the same id before the delete falls due; stopping cancels a delete', () => {
     const store = new LayoutFileStore(file);
     const stop = registerChatPanels(store, view, LOCAL);

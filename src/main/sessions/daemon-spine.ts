@@ -1,7 +1,7 @@
 // The daemon shape's spine as main holds it (P5 O3-D M5b; docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md,
 // Interfaces §E, §F): the spine runs in `mawsd`, so main reads it through its mirror over the services front
 // (./spine-mirror.ts) and answers what the spine's services ask of this client through the Electron port
-// (../client/port-answers.ts). The embedded shape's `startSpine` answers the same two needs in process. P5 O3-E M2: and
+// (../client/port-answers.ts); P5 O15 M2: the only spine main holds, the embedded shape's in-process `startSpine` gone. P5 O3-E M2: and
 // gives the pages' checkout watches back at each streaming of `mawsd` (./watch-replay.ts).
 import type { ClientPort } from '@shared/client/port';
 import type { HostSupervisor } from '@shared/host/host-supervisor';

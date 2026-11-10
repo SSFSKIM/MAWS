@@ -1,8 +1,8 @@
 // The e2e's spine seams on the daemon shape (M5b fix round 2; docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, D11):
 // the scenario's manual clock (`__maws_scenario`) and the library's held refreshes (`__maws_library`) live where the spine
 // runs, so on the daemon shape main installs the same two globals under MAWS_E2E=1, each a relay to `mawsd`'s
-// `daemon.e2eSeam` (src/mawsd/e2e-seam.ts) that resolves once `mawsd` did it. A spec's `app.evaluate` reads them as it does
-// in process on the embedded shape, awaiting what they answer.
+// `daemon.e2eSeam` (src/mawsd/e2e-seam.ts) that resolves once `mawsd` did it. A spec's `app.evaluate` reads them as it did
+// in process on the embedded shape (gone at P5 O15 M2), awaiting what they answer.
 //
 // P5 O5 M4 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §K): `__maws_daemonRender.capture`, a capture
 // through `mawsd`'s render seam (`daemon.e2eRender`), its PNG written to the path the spec names; the daemon shape's

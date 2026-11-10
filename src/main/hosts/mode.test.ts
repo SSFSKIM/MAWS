@@ -1,44 +1,17 @@
-import { describe, expect, it, vi } from 'vitest';
-import { DEFAULT_PROFILE_REFUSAL, hostModeFromEnv, testLaunchRefusal } from './mode';
+import { describe, expect, it } from 'vitest';
+import { DEFAULT_PROFILE_REFUSAL, RETIRED_HOST_MODE, retiredHostModeNotice, testLaunchRefusal } from './mode';
 
-describe('hostModeFromEnv', () => {
-  // P5 O2 M7: with no override and no harness the shape decides
-  it('runs the hosts under the machine daemon on the daemon shape, and the engine host detached on the embedded one', () => {
-    expect(hostModeFromEnv({}, 'daemon')).toBe('daemon');
-    expect(hostModeFromEnv({}, 'embedded')).toBe('detached');
-  });
-
-  // P5 O3-B: the suites run the shape the owner runs, the daemon's unless the setting says embedded
-  it('lets the shape decide under the e2e harness and the component harness, as for the owner', () => {
-    for (const harness of [{ MAWS_E2E: '1' }, { MAWS_HARNESS: '1' }, { MAWS_E2E: '1', MAWS_HARNESS: '1' }]) {
-      expect(hostModeFromEnv(harness, 'daemon')).toBe('daemon');
-      expect(hostModeFromEnv(harness, 'embedded')).toBe('detached');
-    }
-  });
-
-  it('honours MAWS_HOST_MODE over every default, the shape and the harnesses alike', () => {
-    for (const shape of ['daemon', 'embedded'] as const) {
-      expect(hostModeFromEnv({ MAWS_HOST_MODE: 'utility' }, shape)).toBe('utility');
-      expect(hostModeFromEnv({ MAWS_HOST_MODE: 'detached', MAWS_E2E: '1' }, shape)).toBe('detached');
-      expect(hostModeFromEnv({ MAWS_HOST_MODE: 'detached', MAWS_HARNESS: '1' }, shape)).toBe('detached');
-      expect(hostModeFromEnv({ MAWS_HOST_MODE: 'daemon', MAWS_E2E: '1' }, shape)).toBe('daemon'); // P5 O2 M7
-      expect(hostModeFromEnv({ MAWS_HOST_MODE: 'daemon' }, shape)).toBe('daemon');
-    }
-    expect(hostModeFromEnv({ MAWS_HOST_MODE: 'detached' }, 'daemon')).toBe('detached');
-  });
-
-  it('ignores a value it does not know and falls back to the default', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(hostModeFromEnv({ MAWS_HOST_MODE: 'socket' }, 'embedded')).toBe('detached');
-    expect(hostModeFromEnv({ MAWS_HOST_MODE: 'socket' }, 'daemon')).toBe('daemon');
-    expect(warn).toHaveBeenCalledTimes(2);
-    warn.mockRestore();
-    expect(hostModeFromEnv({ MAWS_HOST_MODE: '', MAWS_E2E: '1' }, 'embedded')).toBe('detached');
+// P5 O15 M2: MAWS_HOST_MODE chooses nothing; a value other than `daemon` is said once, in one line
+describe('retiredHostModeNotice', () => {
+  it('names the variable retired for every value but daemon, and says nothing when it is unset or daemon', () => {
+    for (const asked of ['utility', 'detached', 'embedded', 'socket']) expect(retiredHostModeNotice({ MAWS_HOST_MODE: asked })).toBe(RETIRED_HOST_MODE);
+    for (const env of [{}, { MAWS_HOST_MODE: '' }, { MAWS_HOST_MODE: 'daemon' }]) expect(retiredHostModeNotice(env)).toBeNull();
+    expect(RETIRED_HOST_MODE).toBe('[hosts] MAWS_HOST_MODE is retired and ignored: the app runs on mawsd');
   });
 });
 
 // P5 O2 landing (O3's planner, P9): a test or harness launch on the default profile would plan against the owner's
-// daemon (leave it, or install or uninstall the owner's unit), so it refuses before any host work, whatever the mode
+// daemon (install, repair or start the owner's unit), so it refuses before any host work, whatever the environment
 describe('testLaunchRefusal', () => {
   const MODES = [undefined, 'utility', 'detached', 'daemon', 'socket'] as const;
   const HARNESSES: NodeJS.ProcessEnv[] = [{}, { MAWS_E2E: '1' }, { MAWS_HARNESS: '1' }, { MAWS_E2E: '1', MAWS_HARNESS: '1' }, { MAWS_E2E: '0', MAWS_HARNESS: 'true' }];

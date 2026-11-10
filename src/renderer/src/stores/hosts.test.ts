@@ -132,7 +132,7 @@ describe('renderer hosts store', () => {
 // no revision: an event is always the newest word, and a snapshot applies only if no event arrived since it was asked.
 describe('renderer hosts store: the supervisor’s status', () => {
   const status = (liveSessions: number, state: HostStatus['state'] = 'ready'): HostStatus => ({
-    transport: 'detached',
+    transport: 'daemon',
     state,
     supervisor: state === 'ready' ? { mode: 'detached', pid: 48213, startedAt: '2026-10-06T14:02:00.000Z', buildId: 'b', protocol: 1, wire: 'w', liveSessions, rows: liveSessions, idleExitMs: 600_000, idleExitAt: null, exitWhenIdle: false, socketPath: '/s', logPath: '/l', orphansKilled: 0 } : null,
     appBuildId: 'b',

@@ -175,8 +175,9 @@ test('notion: the document header’s Send to makes a readable page through MAWS
 });
 
 // WR 76/78: the real built host and SDK, with no engine/session or synthetic observation. The test supplies loopback
-// hosts only to the private host command, leaving SendToSheet's production Notion allowlist untouched.
-test('notion cold HTTP: the built host locates user/app settings and sends once per source without a session', async () => {
+// hosts only to the private host command, leaving SendToSheet's production Notion allowlist untouched. P5 O15 M1: with
+// the app quit, through the profile's mawsd (a second client of its machine.sock), which outlives the app.
+test('notion cold HTTP: with the app quit, the built host locates user/app settings through mawsd and sends once per source without a session', async () => {
   await coldHttpDelivery(test.info());
 });
 

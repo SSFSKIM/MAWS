@@ -1,5 +1,6 @@
 // E10 Task 2.3b: `host.status`, composed in main from the supervisor's last status and main's own facts, and the two
-// actions behind it (`host.restart`, `host.openLog`).
+// actions behind it (`host.restart`, `host.openLog`). P5 O15 M2: every launch that reaches the app runs on `mawsd`, so
+// every case is the daemon's: the transport `daemon`, the engine host compared with the build the daemon would start.
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('electron', () => ({ BrowserWindow: { getAllWindows: () => [] }, ipcMain: { handle: vi.fn() } }));
@@ -12,7 +13,6 @@ import type { DaemonStatus } from '@shared/ipc/schema/daemon';
 import { daemonStatus } from '../../../test/support/builders';
 import { CommandFailure } from '../ipc/router';
 import type { HostFacts } from './supervisor';
-import type { EngineHandoverState } from '@shared/host/host-supervisor';
 import type { EngineHandoverWatch } from './engine-handover';
 import { startHostStatus, type HostStatusDeps } from './status';
 
@@ -26,17 +26,19 @@ const supervisorStatus = (over: Partial<SupervisorStatus> = {}): SupervisorStatu
   socketPath: '/u/supervisor/host.sock', logPath: '/u/supervisor/host.log', orphansKilled: 0, ...over,
 });
 
-function harness(transport: HostFacts['transport'] = 'detached', shape: Pick<HostStatusDeps, 'daemon' | 'daemonUnavailable' | 'spineRefused' | 'engineHandover'> = {}) {
+// The daemon's status, whose engine host is the app's own build, unless a case says otherwise
+const DAEMON = daemonStatus({ build: { ...daemonStatus().build, engineHostBuildId: APP_BUILD } });
+
+function harness(shape: Partial<Pick<HostStatusDeps, 'daemon' | 'engineHandover'>> = {}) {
   let state: HostState = { state: 'starting', pid: null, restarts: 0, revision: 0 };
-  let machine: HostState = { state: 'ready', pid: 77, restarts: 0, revision: 0 }; // the daemon shape's machine.sock
-  let facts: HostFacts = { transport, reason: null, refused: null, waitingLiveSessions: null, lastExit: null };
+  let machine: HostState = { state: 'ready', pid: 77, restarts: 0, revision: 0 }; // mawsd's machine.sock
+  let facts: HostFacts = { transport: 'detached', reason: null, refused: null, waitingLiveSessions: null, lastExit: null };
   const stateListeners = new Set<(s: HostState) => void>();
   const machineListeners = new Set<(s: HostState) => void>();
   let machineStreaming = true; // from main's ready line on machine.sock until it leaves ready
   const streamingListeners = new Set<() => void>();
   const eventListeners = new Set<(s: SupervisorStatus) => void>();
-  let handover: EngineHandoverState | null = null; // P5 O16 M3c fix wave 2: main's own transport's (the embedded shape)
-  const handoverListeners = new Set<(s: EngineHandoverState | null) => void>();
+  const handoverListeners = new Set<() => void>(); // P5 O16 M3c fix wave 2: mawsd's report's
   const handlers = new Map<string, (input: unknown) => unknown>();
   const emitted: HostStatus[] = [];
   const restartSupervisor = vi.fn(async (): Promise<CommandResult<'host.restart'>> => ({ ok: true, value: undefined }));
@@ -62,16 +64,16 @@ function harness(transport: HostFacts['transport'] = 'detached', shape: Pick<Hos
       onEvent: ((_name: string, l: (s: SupervisorStatus) => void) => (eventListeners.add(l), () => void eventListeners.delete(l))) as HostStatusDeps['hosts']['onEvent'],
       facts: () => facts,
       restartSupervisor,
-      handoverState: () => handover, // P5 O16 M3c fix wave 2
-      onHandover: (_owner, l) => (handoverListeners.add(l), () => void handoverListeners.delete(l)),
     },
     appBuildId: () => APP_BUILD,
     appWire: () => APP_WIRE,
     mainBuild: MAIN_BUILD,
-    logPath: () => (transport === 'detached' ? '/u/supervisor/host.log' : null),
+    logPath: () => '/u/supervisor/host.log',
     emit: (status) => void emitted.push(status),
     register: ((name: string, handler: (input: unknown) => unknown) => void handlers.set(name, handler)) as HostStatusDeps['register'],
     openPath,
+    daemon: () => DAEMON,
+    engineHandover: { reason: () => null, onChange: (l) => (handoverListeners.add(l), () => void handoverListeners.delete(l)) },
     ...shape,
   };
   const service = startHostStatus(deps);
@@ -100,10 +102,6 @@ function harness(transport: HostFacts['transport'] = 'detached', shape: Pick<Hos
     status(next: SupervisorStatus) {
       eventListeners.forEach((l) => l(next));
     },
-    handover(next: EngineHandoverState | null) {
-      handover = next;
-      handoverListeners.forEach((l) => l(next));
-    },
     asked,
     askedOn,
     answerWith(next: (owner: string) => Promise<CommandResult<'host.supervisorStatus'>>) {
@@ -118,15 +116,16 @@ describe('host.status', () => {
   it('answers with no supervisor while none has reported, and is emitted at every transition', async () => {
     const h = harness();
     await expect(h.call('host.status')).resolves.toEqual({
-      transport: 'detached', state: 'starting', supervisor: null, appBuildId: APP_BUILD, appWire: APP_WIRE, mainBuild: MAIN_BUILD, matches: null, reason: null, waitingLiveSessions: null, lastExit: null,
-      daemon: null, daemonUnavailable: null, // P5 O2 M7: the embedded shape
-      spineRefused: null, // P5 O3-A: this run holds spine.lock
+      transport: 'daemon', state: 'starting', supervisor: null, appBuildId: APP_BUILD, appWire: APP_WIRE, mainBuild: MAIN_BUILD, matches: null, reason: null, waitingLiveSessions: null, lastExit: null,
+      daemon: DAEMON, // P5 O2 M7
+      daemonUnavailable: null, // P5 O15 M2: a launch `mawsd` cannot start never reaches the app
+      spineRefused: null, // P5 O3-D M5b: the daemon's spine is not refused
     });
     h.move({ state: 'ready', pid: 4242 });
     expect(h.emitted.at(-1)).toMatchObject({ state: 'ready', supervisor: null, matches: null });
   });
 
-  it('carries the supervisor’s last status, emitted on every one, and how its build compares with the app’s', () => {
+  it('carries the supervisor’s last status, emitted on every one, and how its build compares with the one the daemon would start', () => {
     const h = harness();
     h.move({ state: 'ready', pid: 4242 });
     h.status(supervisorStatus());
@@ -271,18 +270,11 @@ describe('host.status', () => {
     expect(h.emitted.at(-1)?.lastExit).toEqual({ ...exit, interrupted: 2 });
   });
 
-  it('a utility host reports its own transport', async () => {
-    const h = harness('utility');
-    h.move({ state: 'ready', pid: 9 });
-    h.status(supervisorStatus({ mode: 'utility', socketPath: null, logPath: null }));
-    await expect(h.call('host.status')).resolves.toMatchObject({ transport: 'utility', supervisor: { mode: 'utility' }, matches: 'same' });
-  });
-
-  // P5 O2 M7: on the daemon shape the engine host is `mawsd`'s to update, so the banner's comparison is with the build
-  // the daemon would start, not the app's own
-  it('on the daemon shape reports the daemon and compares the engine host with the build the daemon would start', () => {
+  // P5 O2 M7: the engine host is `mawsd`'s to update, so the banner's comparison is with the build the daemon would
+  // start, not the app's own
+  it('reports the daemon and compares the engine host with the build the daemon would start', () => {
     let daemon: DaemonStatus | null = null;
-    const h = harness('detached', { daemon: () => daemon });
+    const h = harness({ daemon: () => daemon });
     h.move({ state: 'ready', pid: 4242 });
     h.status(supervisorStatus());
     expect(h.emitted.at(-1)).toMatchObject({ transport: 'daemon', daemon: null, matches: null }); // not yet read: no banner either way
@@ -295,15 +287,15 @@ describe('host.status', () => {
     h.status(supervisorStatus({ buildId: 'newer00000000000' }));
     expect(h.emitted.at(-1)?.matches).toBe('same');
     h.move({ state: 'crashed' }, { reason: 'incompatible', refused: 'protocol', waitingLiveSessions: 1 });
-    expect(h.emitted.at(-1)).toMatchObject({ transport: 'daemon', matches: 'protocol' }); // a refusal says itself, as embedded
+    expect(h.emitted.at(-1)).toMatchObject({ transport: 'daemon', matches: 'protocol' }); // a refusal says itself
     for (const status of h.emitted) expect(validateEventPayload('host.status', status).ok).toBe(true);
   });
 
-  // M5b fix round 2 (e2e:connectors hot relaunch): on the daemon shape mawsd's link to the engine host is permanent, so an
+  // M5b fix round 2 (e2e:connectors hot relaunch): mawsd's link to the engine host is permanent, so an
   // app that attaches to a running host gets no connect burst and no host.supervisorStatus until the host's status
   // changes; main asks for it each time the host is ready, an event heard while the answer is out winning over it
-  it('on the daemon shape asks the supervisor’s status at each ready, a status heard meanwhile winning', async () => {
-    const h = harness('detached', { daemon: () => null });
+  it('asks the supervisor’s status at each ready, a status heard meanwhile winning', async () => {
+    const h = harness({ daemon: () => null });
     h.answerWith(async () => ({ ok: true, value: supervisorStatus({ pid: 4242 }) }));
     h.move({ state: 'ready', pid: 4242 });
     expect(h.asked).toEqual(['host.supervisorStatus']);
@@ -325,8 +317,8 @@ describe('host.status', () => {
   // engine-host.sock), so the ask goes there too: on one ordered connection an event the host sent before its answer
   // arrives before it, and the event-wins rule above covers the one sent after. Asked over engine-host.sock, the answer
   // could overtake an older event still on machine.sock, which then rolled the status back.
-  it('on the daemon shape asks over machine.sock, where the events come, so an event sent before the answer never lands after it', async () => {
-    const h = harness('detached', { daemon: () => null });
+  it('asks over machine.sock, where the events come, so an event sent before the answer never lands after it', async () => {
+    const h = harness({ daemon: () => null });
     // each socket delivers in the order the engine host sent; engine-host.sock is the faster one here
     const sockets: Record<string, (() => void)[]> = { machine: [], other: [] };
     const sent = (on: string, deliver: () => void) => void sockets[on === 'machine' ? 'machine' : 'other']!.push(deliver);
@@ -348,8 +340,8 @@ describe('host.status', () => {
 
   // M5b fix round 4: machine.sock can restream while engine-host.sock stays (a dropped socket), losing the events between;
   // main asks again then, and only while the engine host is ready
-  it('on the daemon shape asks again when machine.sock is ready again, while the engine host is ready', async () => {
-    const h = harness('detached', { daemon: () => null });
+  it('asks again when machine.sock is ready again, while the engine host is ready', async () => {
+    const h = harness({ daemon: () => null });
     h.answerWith(async () => ({ ok: true, value: supervisorStatus({ liveSessions: 3 }) }));
     h.move({ state: 'ready', pid: 4242 });
     h.moveMachine({ state: 'restarting', pid: null }); // machine.sock drops; engine-host.sock stays
@@ -365,8 +357,8 @@ describe('host.status', () => {
 
   // M5b fix round 5: machine.sock is `ready` before main's ready line, and the front sends that connection no event until
   // the line; a read begun at `ready` could be answered before a change whose event the front then never sent
-  it('on the daemon shape asks over machine.sock only once it streams, not at its ready state', () => {
-    const h = harness('detached', { daemon: () => null });
+  it('asks over machine.sock only once it streams, not at its ready state', () => {
+    const h = harness({ daemon: () => null });
     h.move({ state: 'ready', pid: 4242 });
     h.moveMachine({ state: 'restarting', pid: null });
     h.moveMachine({ state: 'ready', pid: 78 }, false); // welcomed; main's ready line not yet sent
@@ -377,35 +369,21 @@ describe('host.status', () => {
     expect(h.askedOn).toEqual(['machine', 'machine']);
   });
 
-  it('the embedded shape waits for the connect burst and asks nothing', () => {
-    const h = harness('detached');
-    h.move({ state: 'ready', pid: 4242 });
-    expect(h.asked).toEqual([]);
+  it('says no unavailability on every launch', async () => {
+    await expect(harness().call('host.status')).resolves.toMatchObject({ transport: 'daemon', daemonUnavailable: null });
   });
 
-  it('says why a launch asked for the daemon runs embedded', async () => {
-    const h = harness('detached', { daemonUnavailable: 'no LaunchAgent is installed' });
-    await expect(h.call('host.status')).resolves.toMatchObject({ transport: 'detached', daemon: null, daemonUnavailable: 'no LaunchAgent is installed' });
-  });
-
-  // P5 O3-A (the O3 document §2; O3-A acceptance 5): a run refused the spine says so, naming the holder, for Diagnostics
-  it('carries why this run does not run the spine, in the answer and in every emission', async () => {
-    const refused = 'spine.lock is held by pid 4242 (build 1.0.0+abc), so this run starts none of the machine\'s services and writes none of its files';
-    const h = harness('detached', { spineRefused: refused });
+  // P5 O3-D M5b: the spine is `mawsd`'s, so why it does not run is the daemon's last word on it
+  it('carries the daemon’s spine refusal, read at each status, in the answer and in every emission', async () => {
+    const refused = 'spine.lock is held by pid 4242 (build 1.0.0+abc)';
+    let daemon: DaemonStatus | null = null;
+    const h = harness({ daemon: () => daemon });
+    await expect(h.call('host.status')).resolves.toMatchObject({ spineRefused: null }); // no daemon.status yet
+    daemon = daemonStatus({ spine: { state: 'refused', refused, loadedAt: null, heldDropped: 0 } });
     await expect(h.call('host.status')).resolves.toMatchObject({ spineRefused: refused });
     h.move({ state: 'ready', pid: 4242 });
     expect(h.emitted.at(-1)).toMatchObject({ spineRefused: refused });
     expect(validateEventPayload('host.status', h.emitted.at(-1)).ok).toBe(true);
-  });
-
-  // P5 O3-D M5b: on the daemon shape the spine is `mawsd`'s, so why it does not run is the daemon's last word on it
-  it('on the daemon shape carries the daemon’s spine refusal, read at each status', async () => {
-    const refused = 'spine.lock is held by pid 4242 (build 1.0.0+abc)';
-    let daemon: DaemonStatus | null = null;
-    const h = harness('detached', { daemon: () => daemon, spineRefused: 'this run’s own refusal, which the daemon shape never has' });
-    await expect(h.call('host.status')).resolves.toMatchObject({ spineRefused: null }); // no daemon.status yet
-    daemon = daemonStatus({ spine: { state: 'refused', refused, loadedAt: null, heldDropped: 0 } });
-    await expect(h.call('host.status')).resolves.toMatchObject({ spineRefused: refused });
     daemon = daemonStatus({ spine: { state: 'loaded', refused: null, loadedAt: '2026-10-29T10:00:00.000Z', heldDropped: 0 } });
     await expect(h.call('host.status')).resolves.toMatchObject({ spineRefused: null });
   });
@@ -426,43 +404,23 @@ describe('host.restart and host.openLog', () => {
     await expect(h.call('host.restart', { stopSessions: false })).rejects.toBeInstanceOf(CommandFailure);
   });
 
-  it('host.openLog opens the supervisor’s log, also while none is connected; a utility host keeps none', async () => {
+  it('host.openLog opens the supervisor’s log, also while none is connected', async () => {
     const h = harness();
     await h.call('host.openLog');
     expect(h.openPath).toHaveBeenCalledWith('/u/supervisor/host.log');
     h.openPath.mockResolvedValueOnce('no application can open it');
     await expect(h.call('host.openLog')).rejects.toMatchObject({ error: { code: 'internal', message: expect.stringContaining('no application can open it') } });
-    const utility = harness('utility');
-    await expect(utility.call('host.openLog')).rejects.toMatchObject({ error: { code: 'internal' } });
-    expect(utility.openPath).not.toHaveBeenCalled();
   });
 });
 
-// P5 O16 M3c fix wave 2 (D63): an update that waits for MAWS tool calls says so in host.status (`handover`): from main's
-// own transport on the embedded shape, from mawsd's report on the daemon shape; absent when nothing is waited for
+// P5 O16 M3c fix wave 2 (D63): an update that waits for MAWS tool calls says so in host.status (`handover`), from mawsd's
+// report; absent when nothing is waited for
 describe('host.status’s handover', () => {
-  it('on the embedded shape, main’s own transport’s wait, emitted at each change, absent with nothing in flight', async () => {
-    const h = harness();
-    h.move({ state: 'ready', pid: 4242 });
-    expect(h.emitted.at(-1)).not.toHaveProperty('handover');
-    h.handover({ state: 'waiting', inFlight: 2, tool: 'artifact_list' });
-    expect(h.emitted.at(-1)?.handover).toEqual({ inFlight: 2, tool: 'artifact_list' });
-    expect(validateEventPayload('host.status', h.emitted.at(-1)).ok).toBe(true);
-    h.handover({ state: 'draining', inFlight: 1 });
-    expect(h.emitted.at(-1)?.handover).toEqual({ inFlight: 1 });
-    h.handover({ state: 'draining', inFlight: 0 });
-    expect(h.emitted.at(-1)).not.toHaveProperty('handover');
-    h.handover(null);
-    await expect(h.call('host.status')).resolves.not.toHaveProperty('handover');
-    h.service.stop();
-    expect(h.listeners()).toBe(0);
-  });
-
-  it('on the daemon shape, mawsd’s report, emitted at each change', () => {
+  it('is mawsd’s report, emitted at each change', () => {
     let reason: ReturnType<EngineHandoverWatch['reason']> = null;
     const changes = new Set<() => void>();
     const engineHandover: EngineHandoverWatch = { drainingAt: () => null, reason: () => reason, onChange: (l) => (changes.add(l), () => void changes.delete(l)), bind: () => () => {} };
-    const h = harness('detached', { daemon: () => null, engineHandover });
+    const h = harness({ daemon: () => null, engineHandover });
     reason = { inFlight: 3, tool: 'show_pane' };
     changes.forEach((l) => l());
     expect(h.emitted.at(-1)?.handover).toEqual({ inFlight: 3, tool: 'show_pane' });

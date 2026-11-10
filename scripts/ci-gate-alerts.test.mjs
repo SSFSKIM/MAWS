@@ -245,7 +245,7 @@ test("gate.yml's env: scalars and folded lists are read, anything else throws", 
   assert.equal(own.POOL_E2E, 'desk-web');
   assert.equal(own.PEER_E2E, 'cross-build');
   assert.ok(own.CLASS1_E2E.split(' ').includes('library'));
-  assert.equal(own.MAC_VM_E2E, 'document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations deliverables supervisor browser browser-comment browser-import agents c12 available design-systems browser-chrome composer layout delivery connectors-oauth artifacts browser-cua connectors connectors-direct');
+  assert.equal(own.MAC_VM_E2E, 'document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations deliverables browser browser-comment browser-import agents c12 available design-systems browser-chrome composer layout delivery connectors-oauth artifacts browser-cua connectors connectors-direct');
 });
 
 test('a runs-on label set is the guest, the trial slot, no Mac, or a host', () => {
@@ -315,7 +315,7 @@ test("the guest decision follows the tested tree's workflow; own-workflow runs t
   const own = tree(readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8').replace(/^ {2}HOSTED_MAC_E2E: (?:>-\n(?: {4}.*\n)+|.*\n)/m, "  HOSTED_MAC_E2E: ''\n"), readFileSync(join(root, 'package.json'), 'utf8'));
   const routes = [{}, { runner: 'macos' }, { lane: 'vm' }, { lane: 'vm-trial' }];
   for (const gates of ['e2e:library', 'e2e:library,e2e:document', 'static,unit,e2e:panel', 'e2e:dashboard', 'e2e:panel,e2e:dashboard', 'e2e:side', 'e2e:panel,e2e:side', 'e2e:dashboard,e2e:side', 'e2e:presentations', 'e2e:panel,e2e:presentations', 'e2e:side,e2e:presentations',
-    'e2e:browser', 'e2e:agents,e2e:browser-comment', 'e2e:c12,e2e:supervisor', 'e2e:composer,e2e:layout', 'e2e:panel,e2e:browser-chrome', 'e2e:delivery,e2e:connectors-oauth', 'e2e:artifacts,e2e:browser-cua', 'e2e:connectors,e2e:connectors-direct'])
+    'e2e:browser', 'e2e:agents,e2e:browser-comment', 'e2e:c12,e2e:deliverables', 'e2e:composer,e2e:layout', 'e2e:panel,e2e:browser-chrome', 'e2e:delivery,e2e:connectors-oauth', 'e2e:artifacts,e2e:browser-cua', 'e2e:connectors,e2e:connectors-direct'])
     for (const extra of routes) assert.equal(ask(own, gates, extra), extra.lane ?? 'vm', `${gates} ${JSON.stringify(extra)}`);
   for (const gates of ['', 'unit:darwin', 'packaged', 'e2e:design', 'e2e:side,e2e:design', 'e2e:presentations,e2e:design', 'e2e:browser,e2e:terminal', 'e2e:artifacts,e2e:terminal', 'e2e:browser-cua,e2e:design', 'e2e:connectors,e2e:document-scale',
     'e2e:panel,unit:darwin', 'e2e:panel,packaged', 'e2e:panel,e2e:design', 'e2e:panel,e2e:document-scale'])

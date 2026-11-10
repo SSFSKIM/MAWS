@@ -1,8 +1,11 @@
 // P5 O3-A acceptance 1 and 2 (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md §1 to §4): a profile last run by master
 // with O2 (a unified settings.json at version 20, an index at version 13 holding the browser's tables) through the data
-// half of main's start as src/main/index.ts runs it: spine.lock, the settings split, both halves, the index (migration 14,
-// staged), the browser's database (promoted on the index's version) and the spine's snapshot of the sessions. Every value
-// and every row is still there with its id and times, nothing re-indexed, and each file holds exactly its owner's data.
+// start: spine.lock, the settings split, both halves, the index (migration 14, staged), the browser's database (promoted
+// on the index's version) and the spine's snapshot of the sessions. Every value and every row is still there with its id
+// and times, nothing re-indexed, and each file holds exactly its owner's data. P5 O15 M1
+// (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md): main no longer runs that start (the embedded shape is
+// gone), so the first case calls the services' `openSpineData` directly, as `mawsd`'s spine does; which process owns the
+// data is src/main/profile-upgrade-mawsd.test.ts's.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -15,9 +18,12 @@ import { machineRows, O2_CHOSEN_SETTINGS as CHOSEN, O2_LIBRARY_ARTIFACT, O2_PART
 import { BrowserData } from './browser/data';
 import { composeSettings } from './client/settings-store';
 import { createMachineSettingsMirror } from './client/machine-settings-mirror';
+
+// P5 O15 M2: what Settings shows of the O2 profile, whose `supervisor.shape: embedded` main reads and stores as `daemon`
+// (the field is retired); every other value as chosen
+const SHOWN = { ...CHOSEN, supervisor: { ...CHOSEN.supervisor, shape: 'daemon' as const } };
 import { openSpineData } from '../services/spine-root';
 import { Index } from '../services/index/index';
-import { startMachineSettings } from '../services/settings/machine';
 import { takeSpineLock } from '../services/settings/spine-lock';
 import { settingsPaths } from '@shared/settings/paths';
 import { splitSettingsFiles } from '../services/settings/split';
@@ -39,19 +45,20 @@ describe('a profile O2 left starts under O3-A’s build with no visible change',
     // added since, empty (ADDED_TABLES: P5 O8 M7b's project channel journal; M6a's reader state and drafts per member)
     const rows = { ...before, sessions: before.sessions!.map((row) => ({ ...(row as object), launched_by: null })), channel_entries: [], member_drafts: [], reader_state: [] };
 
-    // O3-A's start, in main's order
+    // the data start, the services' (spine.lock, then the split under it and the machine half), then the index and the
+    // browser's database in the order the spine and the app open them
     const spine = await takeSpineLock(profile, { build: '0.0.0+o3a' });
     expect(spine.refused).toBeNull();
-    const paths = settingsPaths(profile);
-    const split = splitSettingsFiles(paths, undefined, () => {});
-    expect(split.outcome).toBe('split');
-    const settings = composeSettings({ clientFile: paths.client, machine: startMachineSettings(paths.machine, { refused: split.machineRefused, unsplit: split.unsplit }) });
+    const data = await openSpineData(profile, { build: '0.0.0+o3a', lock: spine });
+    expect(data.refused).toBeNull();
+    const { paths } = data;
+    const settings = composeSettings({ clientFile: paths.client, machine: data.machineSettings });
     const index = new Index(indexPath);
     const browser = new BrowserData({ file: join(profile, 'browser', 'browser.sqlite'), index: indexPath });
     browser.reattach(index.sessions.appIds());
     try {
       // Settings shows every value as before
-      expect(settings.settings).toEqual(CHOSEN);
+      expect(settings.settings).toEqual(SHOWN);
       // the files: each exactly its owner's fields, the client file at 21, the machine file at 1
       expect(JSON.parse(readFileSync(paths.client, 'utf8'))).toEqual(splitSettings(CHOSEN).client);
       expect(JSON.parse(readFileSync(paths.machine, 'utf8'))).toEqual(splitSettings(CHOSEN).machine);
@@ -135,10 +142,10 @@ describe('a profile O2 left starts under O3-A’s build with no visible change',
       answer = { settings: data.machineSettings.state(), version: 0 };
       streaming = true;
       for (const listener of onStreaming) listener();
-      await vi.waitFor(() => expect(settings.settings).toEqual({ ...CHOSEN, theme: 'light' }));
+      await vi.waitFor(() => expect(settings.settings).toEqual({ ...SHOWN, theme: 'light' }));
       // the change made in the window is in the converted client file; main wrote nothing else
-      expect(await changing).toEqual({ ...CHOSEN, theme: 'light' });
-      expect(JSON.parse(readFileSync(paths.client, 'utf8'))).toEqual({ ...splitSettings(CHOSEN).client, theme: 'light' });
+      expect(await changing).toEqual({ ...SHOWN, theme: 'light' });
+      expect(JSON.parse(readFileSync(paths.client, 'utf8'))).toEqual({ ...splitSettings(SHOWN).client, theme: 'light' });
       expect(JSON.parse(readFileSync(paths.machine, 'utf8'))).toEqual(splitSettings(CHOSEN).machine);
     } finally {
       mirror.stop();

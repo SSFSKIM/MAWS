@@ -6,6 +6,11 @@
 // peer the group runs nothing. Of the two builds the older is the one of the lower WIRE_MINOR (on a tie, the peer).
 //   (update)    the older app starts a kept session and quits with keep; the newer app attaches to its supervisor;
 //   (downgrade) the newer app keeps the session; the older one attaches.
+// P5 O15 M1 (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md): both apps run on the daemon shape there, the
+// crossing every swap makes: the attaching app meets the keeper's private `mawsd`, of the other build, and its build
+// check has it restart onto the attacher's (src/main/hosts/daemon.ts, watchDaemon), the kept engine host running on
+// under the new `mawsd`. A peer this build's `mawsd` refuses (one before O4, whose app lists no `machine.connectors`:
+// D11) skips both, saying so; the scenes below that pin the peer to its embedded shape cover it.
 // In each, the attaching app's hello crosses the minor (host.log names the app's wire, the app's main the supervisor's),
 // the app is served as another build (`matches: 'build'`, the update banner, exit-when-idle armed), the kept session's
 // tail reaches its main (the background failure journaled while no app ran raises the Needs-you item only main's live
@@ -240,8 +245,11 @@ const DROPPED = /dropped \S+ from .*, a field this build does not know|dropped e
 type Shape = 'detached' | 'daemon';
 interface Shapes { keeper: Shape; attacher: Shape }
 const DAEMON_SHAPE_MINOR = 5; // P5 O2's wire minor: a build at or past it knows the daemon shape, and leaves it on purpose
-const EMBEDDED: Shapes = { keeper: 'detached', attacher: 'detached' };
+// P5 O15 M1: (update) and (downgrade) run both builds on the daemon shape
+const ON_MAWSD: Shapes = { keeper: 'daemon', attacher: 'daemon' };
 const onShape = (shape: Shape) => (st: HostStatus) => shape === 'detached' || st.daemon !== null; // the daemon shape's main also knows its mawsd
+// P5 O15 M1: and the attacher's on its own `mawsd`, not the keeper's it met first and had restart (`keeperDaemon`)
+const onOwnShape = (shape: Shape, keeperDaemon: number | null) => (st: HostStatus) => onShape(shape)(st) && (shape === 'detached' || st.daemon!.pid !== keeperDaemon);
 // P5 O3-D M6: whether a build's engine host serves `host.attachment` (its manifest's capabilities, the union its peers
 // list), so a post-D `mawsd` keeps one permanent connection to it rather than O2's per attachment
 const hostsAttachment = (build: Build) => build.manifest.capabilities.includes('host.attachment');
@@ -281,6 +289,9 @@ function welcomedWith(daemonLog: string, hostPid: number): string[] | null {
   const listed = line === undefined ? null : /capabilities \[([^\]]*)\]/.exec(line);
   return listed ? listed[1]!.split(', ').filter(Boolean) : null;
 }
+// P5 O15 M1: what an app's build check logs as it asks a private `mawsd` of another build to restart (src/main/hosts/daemon.ts,
+// watchDaemon; the same words at the merge-base peer)
+const restartAsked = (daemonPid: number) => new RegExp(`\\[hosts\\] mawsd pid ${daemonPid} runs build \\S+, this app's is \\S+; asking it to restart`);
 const recyclesTo = (daemonLog: string, hostPid: number) => daemonLog.split('\n').filter((l) => l.includes(`recycling the connection to pid ${hostPid}`)).length;
 
 // P5 O4 M4: what a scene adds to a crossing, each answering the lines it records: `keeperReady`, once the keeper's app
@@ -295,7 +306,7 @@ interface CrossingSteps {
   attacherMoved?(run: Run): Promise<string[]>;
 }
 
-async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer: Build; older: Build } | null, shapes: Shapes = EMBEDDED, steps: CrossingSteps = {}): Promise<string[]> {
+async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer: Build; older: Build } | null, shapes: Shapes, steps: CrossingSteps = {}): Promise<string[]> {
   if (holds(keeper) && holds(attacher)) return handedOverCrossing(s, keeper, attacher, shapes, steps); // P5 O16 M3c
   const shapeOf = (shape: Shape) => (shape === 'daemon' ? ' on the daemon shape' : '');
   const said: string[] = [`${keeper.label} (wire ${wireOf(keeper)})${shapeOf(shapes.keeper)} keeps a session; ${attacher.label} (wire ${wireOf(attacher)})${shapeOf(shapes.attacher)} attaches`];
@@ -330,7 +341,7 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   const attach = () => s.launch({ MAWS_HOST_MODE: shapes.attacher, MAWS_E2E_SUPERVISOR_IDLE_MS: String(idleMs), ...(legacyRoute !== null && { MAWS_E2E_REPLAY_FIXTURES: legacyRoute }), ...steps.env }, attacher.root);
   let second = await attach();
   const attacherRuns: Run[] = [second]; // P5 O3-D M6: the attacher's launches (acceptance 9 quits and reattaches it)
-  const served = await s.ready(second.page, (st) => st.supervisor!.exitWhenIdle && onShape(shapes.attacher)(st));
+  const served = await s.ready(second.page, (st) => st.supervisor!.exitWhenIdle && onOwnShape(shapes.attacher, keeperDaemon)(st));
   expect(served, `${attacher.label} served by ${keeper.label}'s supervisor`).toMatchObject({ matches: 'build', supervisor: { pid: kept.pid, buildId: kept.buildId, liveSessions: 1, exitWhenIdle: true } });
   const build = served.appBuildId;
   expect(build, 'two builds').not.toBe(kept.buildId);
@@ -345,13 +356,18 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   if (attacherDaemon !== null) expect(s.daemonLog(), "mawsd's log: the upstream's welcome, at the supervisor's minor").toContain(welcome);
   said.push(`  hello: ${hello}…`, `  welcome: ${welcome}…`);
   if (keeperDaemon !== null) {
-    // How the keeper's `mawsd` goes depends on the attacher's build. One that knows the daemon shape (P5 O2, wire minor 5)
-    // leaves it on purpose: launched embedded on a profile with a `mawsd`, it ends that `mawsd` before its own hosts start
-    // (src/main/hosts/daemon.ts, prepareShape and leaveDaemonShape), and the kept engine host runs on. One from before
-    // O2 takes the engine host from the `mawsd`, which stops reaching it and exits 0 (residue 38).
+    // How the keeper's `mawsd` goes depends on the attacher's build and shape. On the daemon shape (P5 O15 M1) its build
+    // check asks that `mawsd`, of another build, to restart, and its own serves the kept engine host. One that knows the
+    // daemon shape (P5 O2, wire minor 5) launched embedded leaves it on purpose: on a profile with a `mawsd`, it ends that
+    // `mawsd` before its own hosts start (src/main/hosts/daemon.ts, prepareShape and leaveDaemonShape), and the kept
+    // engine host runs on. One from before O2 takes the engine host from the `mawsd`, which stops reaching it and exits 0
+    // (residue 38).
     const leaves = attacher.manifest.minor >= DAEMON_SHAPE_MINOR;
     await expect.poll(() => isAlive(keeperDaemon), { timeout: 15_000, message: 'the keeper’s mawsd exits once the engine host is taken' }).toBe(false);
-    if (leaves) {
+    if (shapes.attacher === 'daemon') {
+      expect(second.output(), `${attacher.label}'s main asks the keeper's mawsd, of another build, to restart`).toMatch(restartAsked(keeperDaemon));
+      said.push(`  mawsd pid ${keeperDaemon} exited: ${attacher.label}'s app had it restart onto its own build, pid ${attacherDaemon}`);
+    } else if (leaves) {
       expect(second.output(), `${attacher.label}'s main ends the profile's mawsd as it leaves the daemon shape`).toContain(`[hosts] ending mawsd, pid ${keeperDaemon}, as the profile leaves the daemon shape`);
       expect(s.daemonLog(), 'mawsd says why it left').toContain('exiting (signal)');
       said.push(`  mawsd pid ${keeperDaemon} exited: ${attacher.label}'s app ended it, leaving the daemon shape`);
@@ -508,7 +524,7 @@ async function handedOverCrossing(s: Scratch, keeper: Build, attacher: Build, sh
   const attach = () => s.launch({ MAWS_HOST_MODE: shapes.attacher, MAWS_E2E_SUPERVISOR_IDLE_MS: String(shapes.attacher === 'daemon' ? REATTACH_IDLE_MS : IDLE_MS), ...steps.env }, attacher.root);
   let second = await attach();
   const attacherRuns: Run[] = [second];
-  const served = await s.ready(second.page, (st) => st.supervisor!.pid !== kept.pid && onShape(shapes.attacher)(st), 90_000);
+  const served = await s.ready(second.page, (st) => st.supervisor!.pid !== kept.pid && onOwnShape(shapes.attacher, keeperDaemon)(st), 90_000);
   const build = served.appBuildId;
   expect(build, 'two builds').not.toBe(kept.buildId);
   expect(served, `${attacher.label} on a supervisor of its own build at once`).toMatchObject({ matches: 'same', supervisor: { buildId: build, exitWhenIdle: false } });
@@ -520,7 +536,8 @@ async function handedOverCrossing(s: Scratch, keeper: Build, attacher: Build, sh
   await expect(banner(second.page, 'MAWS was updated.'), 'no banner: the kept host hands over, never waits for idle (P5 O16 M3c fix wave 2: served at most until its first quiet status)').toHaveCount(0);
   if (keeperDaemon !== null) {
     await expect.poll(() => isAlive(keeperDaemon), { timeout: 15_000, message: 'the keeper’s mawsd exits once the engine host is taken' }).toBe(false);
-    expect(second.output(), `${attacher.label}'s main ends the profile's mawsd as it leaves the daemon shape`).toContain(`[hosts] ending mawsd, pid ${keeperDaemon}, as the profile leaves the daemon shape`);
+    if (shapes.attacher === 'daemon') expect(second.output(), `${attacher.label}'s main asks the keeper's mawsd, of another build, to restart`).toMatch(restartAsked(keeperDaemon)); // P5 O15 M1
+    else expect(second.output(), `${attacher.label}'s main ends the profile's mawsd as it leaves the daemon shape`).toContain(`[hosts] ending mawsd, pid ${keeperDaemon}, as the profile leaves the daemon shape`);
   }
   await expect.poll(() => adoptedOf(second.page, id), { timeout: 60_000, message: 'the kept session adopted' }).toBe(true);
   expect((await statusOf(second.page, id)).pid, 'the same engine process').toBe(engine);
@@ -897,14 +914,23 @@ async function unreadableRows(page: Page, artifactId: string): Promise<string[] 
 
 test.beforeEach(() => test.setTimeout(240_000));
 
+// P5 O15 M1: a peer whose app lists no `machine.connectors` (before O4) is refused by this build's `mawsd` on each of
+// its sockets (D11), so it cannot run on the daemon shape beside this build: (pre-O4 app, daemon) holds that refusal,
+// and (update, daemon) and (downgrade, daemon) cross with it on its embedded shape
+const crossesOnMawsd = (peer: Build) => [appObeysConnectors(peer), `the peer (wire ${wireOf(peer)}) lists no ${CONNECTORS_CLIENT_CAPABILITY}: this build's mawsd refuses its app (D11), so it cannot cross on the daemon shape; (pre-O4 app, daemon) holds the refusal`] as const;
+
 test('(update) the older build’s app keeps a session; the newer build’s app attaches across the minor, is served, launches, meets what the older lacks, and moves to its own supervisor', async () => {
-  const { older, newer } = builds();
-  await withScratch('xb-update', async (s) => record(await crossing(s, older, newer, { newer, older })));
+  const { older, newer, peer } = builds();
+  const [crosses, why] = crossesOnMawsd(peer);
+  test.skip(!crosses, why);
+  await withScratch('xb-update', async (s) => record(await crossing(s, older, newer, { newer, older }, ON_MAWSD)));
 });
 
 test('(downgrade) the newer build’s app keeps a session; the older build’s app attaches across the minor, is served, launches, and moves to its own supervisor', async () => {
-  const { older, newer } = builds();
-  await withScratch('xb-downgrade', async (s) => record(await crossing(s, newer, older, null)));
+  const { older, newer, peer } = builds();
+  const [crosses, why] = crossesOnMawsd(peer);
+  test.skip(!crosses, why);
+  await withScratch('xb-downgrade', async (s) => record(await crossing(s, newer, older, null, ON_MAWSD)));
 });
 
 // P5 O4 M4 (acceptance 3's old-host rule at app level, acceptance 10): besides which engine host lists host.connectors
@@ -964,6 +990,131 @@ test('(downgrade, daemon) this build’s app keeps a session under its mawsd; th
         return [`  grant ${grant.id}: ${peer.label}'s Connectors sheet lists it ${unreadableToPeer ? 'as an unreadable row (Forget, then Connect again: the downgrade’s residual, D11)' : 'as readable: it knows the machine’s format'}`];
       },
     });
+    record(said);
+  });
+});
+
+// P5 O15 M2 (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, acceptance 3, Interfaces §C "Acceptance 3's
+// data"; Decision Log 14): nothing lost. The peer, a real build that still has the embedded shape (its main composes the
+// spine and holds spine.lock), makes on one profile a session (a turn played to its end), an artifact, a draft and a
+// layout of more than one tab (the library's tab and the artifact's, opened as a person opens them), and quits; this
+// build, which has no embedded shape, opens that profile on `mawsd`. After the library's first successful reconciliation,
+// and again after a relaunch of this build on a fresh `mawsd` (whose own first reconciliation runs again): the session is
+// listed, the artifact is in the library and its page loads, the draft is back, the layout holds the same tabs, and
+// `mawsd.log` says the spine loaded with no line of the index's rebuild (the database moved aside as unusable,
+// src/services/index/db.ts) or of its refusal as newer than the build knows. A peer with no embedded shape skips, saying so.
+// Fix wave 3: `library.list` reads the index at once, so the artifact's presence proves no reconciliation; what does is a
+// canary, a library row whose artifact the engine host no longer holds (deleted while the library's refreshes were held,
+// the e2e seam `__maws_library.holdRefreshes`, MAWS_E2E=1 only: the library misses that change until the next host
+// connection). Only a reconciliation that read the host's snapshot and applied it removes that row
+// (src/services/library/sync.ts `reconcile` → store.ts `reconcile`, which deletes every row the snapshot lists not; a
+// snapshot that fails keeps the last state), so each pass waits for its canary to leave the library first.
+const runsEmbedded = (build: Build) => {
+  const mode = join(build.root ?? REPO_ROOT, 'src/main/hosts/mode.ts');
+  return existsSync(mode) && readFileSync(mode, 'utf8').includes('export function hostModeFromEnv');
+};
+const INDEX_REBUILT = /\[index\] \S+ is not a usable database \(.*\); moved aside as /; // db.ts: the index moved aside and made anew
+const INDEX_REFUSED = /\[index\] \S+: user_version \d+ is newer than this app knows/; // db.ts: the index left unopened
+const DATA_ARTIFACT = 'Acceptance 3 page';
+const DATA_MARK = 'ACCEPTANCE_3_PAGE';
+const DATA_DRAFT = 'the draft the embedded shape kept';
+// Every tab id in a `main.tabs` value, whatever its version: the ids of each `tabs` list's entries, sorted
+function tabIdsOf(value: unknown): string[] {
+  const ids: string[] = [];
+  const walk = (node: unknown, key: string | null) => {
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        if (key === 'tabs' && item !== null && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'string') ids.push((item as { id: string }).id);
+        walk(item, null);
+      }
+    } else if (node !== null && typeof node === 'object') for (const [k, v] of Object.entries(node)) if (k !== 'closedTabs') walk(v, k);
+  };
+  walk(value, null);
+  return ids.sort();
+}
+const mainTabsOf = async (page: Page) => value(await invoke(page, 'layout.get', { key: 'main.tabs' })).value;
+const inLibrary = async (page: Page, artifactId: string) => value(await invoke(page, 'library.list', {})).rows.some((row) => row.id === artifactId);
+const createHtmlArtifact = async (page: Page, title: string, body: string) =>
+  value(
+    (await page.evaluate(
+      ([html, t]) => window.maws.invoke('artifacts.create' as never, { kind: 'html', title: t, content: { bytes: new TextEncoder().encode(html), name: 'index.html' } } as never),
+      [`<!doctype html><html><head><title>x</title></head><body><p>${body}</p></body></html>`, title] as const,
+    )) as CommandResult<'artifacts.create'>,
+  ).artifact.id;
+// A canary: an artifact the library lists while the engine host holds it no more, deleted once the library holds its
+// refreshes (main's seam, which on this build's daemon shape relays to `mawsd`'s library)
+async function plantCanary(run: Run, title: string): Promise<string> {
+  const id = await createHtmlArtifact(run.page, title, 'canary');
+  await expect.poll(() => inLibrary(run.page, id), { timeout: 20_000, message: `the canary ${title} in the library` }).toBe(true);
+  await run.maws.app.evaluate(() => (globalThis as unknown as { __maws_library: { holdRefreshes(): Promise<void> } }).__maws_library.holdRefreshes());
+  value(await invoke(run.page, 'artifacts.delete', { artifactId: id }));
+  expect(await inLibrary(run.page, id), `the canary ${title} still listed: the library missed its deletion`).toBe(true);
+  return id;
+}
+
+test('(embedded profile, mawsd) a profile the peer made on its embedded shape opens on this build’s mawsd with its session, artifact, draft and layout, after the library’s first reconciliation and after a relaunch onto a fresh mawsd, and no index rebuild', async () => {
+  test.setTimeout(300_000);
+  const { here, peer } = builds();
+  test.skip(!runsEmbedded(peer), `the peer (wire ${wireOf(peer)}) has no embedded shape (its src/main/hosts/mode.ts has no hostModeFromEnv): acceptance 3's data needs a build that still composes the spine in its app; M5 files this scene's retirement`);
+  await withScratch('xb-embedded-data', async (s) => {
+    const said: string[] = [`${peer.label} (wire ${wireOf(peer)}) on its embedded shape makes the data; ${here.label} (wire ${wireOf(here)}) opens the profile on mawsd`];
+    // the peer, embedded: its main holds spine.lock and composes the spine
+    const old = await s.launch({ MAWS_HOST_MODE: 'detached', MAWS_E2E_QUIT_ANSWER: 'quit' }, peer.root);
+    const theirs = await s.ready(old.page, (st) => st.transport !== 'daemon');
+    expect(theirs.daemon, `${peer.label} runs no mawsd on its embedded shape`).toBeNull();
+    expect(spineLockOf(s.userData)?.pid, `${peer.label}'s main holds spine.lock`).toBe(old.child.pid);
+    // a session: the seeded record, with a turn played to its end. Fix wave 4: the journal's turn is a human one, which
+    // the replay plays only once its `out` row is sent (`turn 1`), as crossing's launch does
+    const id = await s.record(old.page);
+    await launchOn(peer, old.page, id, turnsJournal(s.root, 'acceptance-3', 1), s);
+    value(await invoke(old.page, 'session.send', { appSessionId: id, content: 'turn 1' }));
+    await turnEnded(old.page, id);
+    // an artifact, in the peer's engine host's store
+    const artifactId = await createHtmlArtifact(old.page, DATA_ARTIFACT, DATA_MARK);
+    // a draft, as the composer keeps one (src/renderer/src/composer/editor/controller.ts), for a session with no tab open
+    const doc = { type: 'doc', attrs: { attachments: [] }, content: [{ type: 'paragraph', content: [{ type: 'text', text: DATA_DRAFT }] }] };
+    value(await invoke(old.page, 'session.drafts.set', { appSessionId: id, draft: { doc, attachments: [], updatedAt: new Date().toISOString() } }));
+    // a layout of more than one tab: the library's, then the artifact's from its row, as a person opens them
+    await old.page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click({ timeout: 15_000 });
+    await old.page.locator('[data-library]').getByRole('article', { name: DATA_ARTIFACT, exact: true }).click({ timeout: 20_000 });
+    await expect(old.page.locator(`[data-region="main"] [data-artifact-tab="${artifactId}"]`), `${peer.label} opened the artifact's tab`).toBeVisible({ timeout: 20_000 });
+    let tabs: string[] = [];
+    await expect
+      .poll(async () => (tabs = tabIdsOf(await mainTabsOf(old.page))), { timeout: 20_000, message: `${peer.label} saved its layout: the library's tab and the artifact's among more than one` })
+      .toEqual(expect.arrayContaining(['artifacts', expect.stringContaining(artifactId)]));
+    expect(tabs.length, 'more than one tab').toBeGreaterThan(1);
+    // the first pass's canary, planted last: from here the peer's library follows no change
+    let canary = await plantCanary(old, 'Acceptance 3 canary (the peer’s)');
+    expect(old.maws.consoleErrors()).toEqual([]);
+    await s.quit(old);
+    await endProfileProcesses(s.userData); // the embedded shape's detached supervisor: this build's mawsd starts afresh
+    said.push(`  made: session ${id} (a turn to its end), artifact ${artifactId}, a draft, the tabs ${tabs.join(', ')}`);
+
+    // this build on mawsd, twice: after its library's first reconciliation, and after a relaunch on a fresh mawsd
+    const passes = ['after the library’s first reconciliation', 'after a relaunch, on a fresh mawsd, after its reconciliation'];
+    for (const [n, pass] of passes.entries()) {
+      const run = await s.launch();
+      const ours = await s.ready(run.page, (st) => st.daemon !== null, 60_000);
+      await expect.poll(() => spineLockOf(s.userData)?.pid ?? null, { timeout: 30_000, message: `${pass}: ${here.label}'s mawsd holds spine.lock` }).toBe(ours.daemon!.pid);
+      await expect.poll(() => inLibrary(run.page, canary), { timeout: 60_000, message: `${pass}: the canary gone, so a reconciliation read the host's snapshot and applied it` }).toBe(false);
+      expect(await inLibrary(run.page, artifactId), `${pass}: the artifact in the library`).toBe(true);
+      expect(value(await invoke(run.page, 'session.list', {})).sessions.map((row) => row.appId), `${pass}: the session listed`).toContain(id);
+      const page = await run.maws.app.evaluate(async ({ session }, target) => {
+        const response = await session.defaultSession.fetch(target);
+        return { status: response.status, text: await response.text() };
+      }, `maws-artifact://${artifactId}/live/index.html`);
+      expect(page.status, `${pass}: the artifact's page loads`).toBe(200);
+      expect(page.text).toContain(DATA_MARK);
+      expect(JSON.stringify(value(await invoke(run.page, 'session.drafts.get', { appSessionId: id }))), `${pass}: the draft`).toContain(DATA_DRAFT);
+      await expect.poll(async () => tabIdsOf(await mainTabsOf(run.page)), { timeout: 20_000, message: `${pass}: the layout's tabs` }).toEqual(expect.arrayContaining(tabs));
+      await expect.poll(() => s.daemonLog(), { timeout: 30_000, message: `${pass}: mawsd's spine loaded` }).toMatch(/\[spine\] loaded in \d+ ms/);
+      expect(s.daemonLog(), `${pass}: no index rebuild in mawsd.log`).not.toMatch(INDEX_REBUILT);
+      expect(s.daemonLog(), `${pass}: the index opened, not refused`).not.toMatch(INDEX_REFUSED);
+      said.push(`  ${pass}: on ${here.label}'s mawsd pid ${ours.daemon!.pid}, the canary ${canary} reconciled away, all four present, no rebuild`);
+      if (n === 0) canary = await plantCanary(run, 'Acceptance 3 canary (this build’s)'); // the relaunch's, before mawsd ends
+      await s.quit(run);
+      if (n === 0) await endProfileProcesses(s.userData); // the relaunch starts a fresh mawsd, whose library reconciles again
+    }
     record(said);
   });
 });

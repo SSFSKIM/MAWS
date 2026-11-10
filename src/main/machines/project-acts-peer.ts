@@ -5,8 +5,8 @@
 // it does not know and adds a plain folder (panel scalpel-3#2). Its welcome lists no capability for them; its wire minor
 // says it, since the acts' fields came at minor 34 (src/shared/ipc/wire.ts). So the local machine's state carries the
 // same capability while it serves them (`localProjectActs`, which the page reads as it reads another machine's), and an
-// act it would take for a plain one is refused `not-offered` before it goes (`refuseUnservedProjectActs`, on the host
-// shape's route), in the words an older peer's missing offer reads in.
+// act it would take for a plain one is refused `not-offered` before it goes (`refuseUnservedProjectActs`, on the
+// route), in the words an older peer's missing offer reads in.
 import type { BeforeHook } from '../ipc/router';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandName } from '@shared/ipc/schema';
@@ -32,11 +32,10 @@ export const needsProjectActs = (name: CommandName, fields: Record<string, unkno
 export const PROJECT_ACT_COMMANDS: readonly CommandName[] = ['session.projects.addFolder', 'session.projects.link', 'session.projects.relocate', 'session.projects.resolve', 'session.projects.remove'];
 
 /**
- * This Mac's machine's capabilities as far as the acts go: served embedded (main's own services, this build) or by a
- * daemon whose welcome is of the acts' minor or later; none by an older one; null while no daemon has welcomed.
+ * This Mac's machine's capabilities as far as the acts go: served by a daemon whose welcome is of the acts' minor or
+ * later; none by an older one; null while no daemon has welcomed.
  */
-export function localProjectActs(peer: Pick<WirePeer, 'minor'> | null, { embedded }: { embedded: boolean }): readonly string[] | null {
-  if (embedded) return [PROJECT_ACTS_CAPABILITY];
+export function localProjectActs(peer: Pick<WirePeer, 'minor'> | null): readonly string[] | null {
   if (peer === null) return null;
   return peer.minor >= PROJECT_ACTS_MINOR ? [PROJECT_ACTS_CAPABILITY] : [];
 }
@@ -56,15 +55,12 @@ export function refuseUnservedProjectActs(peer: () => Pick<WirePeer, 'minor'> | 
 }
 
 /**
- * The local state's capabilities as the connection manager reads them (`localCapabilities`). On the daemon shape, from
- * the attached daemon's welcome, heard again at each of its state's changes. On the embedded shape no machine host runs
- * in this process (the supervisor throws at a read of one: CI's e2e:cross-build), and the acts are this build's own
- * services', so the supervisor is never asked and nothing is subscribed.
+ * The local state's capabilities as the connection manager reads them (`localCapabilities`): from the attached daemon's
+ * welcome, heard again at each of its state's changes. Main always reads its machine host (P5 O15: the app runs on mawsd
+ * alone).
  */
 export function localProjectActsSource(
   hosts: { peer(owner: 'machine'): Pick<WirePeer, 'minor'> | null; onState(owner: 'machine', listener: () => void): () => void },
-  { embedded }: { embedded: boolean },
 ): { read(): readonly string[] | null; onChange(listener: () => void): () => void } {
-  if (embedded) return { read: () => localProjectActs(null, { embedded: true }), onChange: () => () => {} };
-  return { read: () => localProjectActs(hosts.peer('machine'), { embedded: false }), onChange: (listener) => hosts.onState('machine', () => listener()) };
+  return { read: () => localProjectActs(hosts.peer('machine')), onChange: (listener) => hosts.onState('machine', () => listener()) };
 }
