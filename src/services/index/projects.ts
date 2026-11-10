@@ -20,6 +20,7 @@ import { slugOf } from '../../engine-host/fs/paths';
 import { gitBinary, gitEnv } from '../git/runner';
 import { readFolder, sameFolder } from './anchor';
 import type { Db } from './db';
+import type { RemoteReads } from './org-project';
 
 interface ProjectRow {
   id: string;
@@ -395,6 +396,7 @@ export interface OrgRow {
   directory: string;
   name: string;
   files?: GitFiles; // P5 O7 M9 round 3: a remote setup's registration's checked reader, read through before trust
+  remoteReads?: RemoteReads; // M8's Fix 3: the act's reads of the remotes, which the act's every derivation shares
 }
 export type DeriveOrgOf = (row: OrgRow) => void;
 
@@ -500,7 +502,7 @@ export class ProjectStore {
   // discovery created, or one the user removed, makes it the user's and visible again; discovery never unhides.
   // `files` (P5 O7 M9 round 3): a remote setup's registration's checked reader, which the new row's org derivation reads
   // through (org-project.ts' `OrgIo`)
-  ensureForDirectory(realpath: string, origin: Origin, files?: GitFiles): ProjectRecord {
+  ensureForDirectory(realpath: string, origin: Origin, files?: GitFiles, remoteReads?: RemoteReads): ProjectRecord {
     return this.db.transaction(() => {
       const existing = this.db.get<ProjectRow>('SELECT * FROM projects WHERE directory = ?', realpath);
       if (existing) {
@@ -526,16 +528,16 @@ export class ProjectStore {
       });
       this.changed();
       this.attachOrphans(id, realpath);
-      this.db.defer(`org:${id}`, () => this.deriveOrg?.({ id, directory: realpath, name: basename(realpath) || realpath, ...(files === undefined ? {} : { files }) }));
+      this.db.defer(`org:${id}`, () => this.deriveOrg?.({ id, directory: realpath, name: basename(realpath) || realpath, ...(files === undefined ? {} : { files }), ...(remoteReads === undefined ? {} : { remoteReads }) }));
       return project(this.row(id));
     });
   }
 
   // `session.projects.add`: an existing directory, realpathed, as the user's project.
-  add(directory: string): ProjectRecord {
+  add(directory: string, remoteReads?: RemoteReads): ProjectRecord {
     const { realpath } = locate(directory);
     if (realpath === null || !statSync(realpath).isDirectory()) throw new Error(`not a directory: ${directory}`);
-    return this.ensureForDirectory(realpath, 'user');
+    return this.ensureForDirectory(realpath, 'user', undefined, remoteReads);
   }
 
   // `nameRev` (the project registry, Interfaces §G): with a name, the rename's counter, written in the same statement

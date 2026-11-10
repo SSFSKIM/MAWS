@@ -25,7 +25,7 @@ import type { DeclaredRow, ProjectsSource, RegistrySeam } from '@shared/machine/
 import type { Location } from '@shared/sessions/intent';
 import { addFolder } from './add-folder';
 import { readAnchor } from './anchor';
-import { deriveProject, folderSmns, ORG_GIT_TIMEOUT_MS, type OrgDerivation } from './org-project';
+import { deriveProject, folderSmns, ORG_GIT_TIMEOUT_MS, type OrgDerivation, type RemoteReads } from './org-project';
 import { isBroadFolder, locate, prospectiveRow, type OrgRow, type ProjectStore } from './projects';
 
 export type DeriveRule = typeof deriveProject;
@@ -117,7 +117,7 @@ export class Statements {
     const derived = await (context.derive ?? deriveProject)(
       { directory: row.directory, machine: context.machine, projectId: row.id, name: row.name, ...(row.files === undefined ? {} : { files: row.files }) },
       enrollment,
-      { statements: this.lookup, gitTimeoutMs },
+      { statements: this.lookup, gitTimeoutMs, ...(row.remoteReads === undefined ? {} : { remoteReads: row.remoteReads }) },
     );
     if (derived === null) return null;
     this.projects.setOrg(row.id, derived.org, enrollment === null ? null : { remote: derived.remote, hub: derived.hub, by: derived.by, at: derived.at });
@@ -131,11 +131,13 @@ export class Statements {
 
   // `files` (M8's review 1, finding 1): a remote setup's checked reader, which every derivation of its act reads through; a
   // read it refuses gives no answer
-  private async deriveId(id: ProjectId, files?: GitFiles): Promise<OrgDerivation | null> {
+  // `reads`: the act's reads of the remotes, shared by its derivations
+  private async deriveId(id: ProjectId, files?: GitFiles, reads?: RemoteReads): Promise<OrgDerivation | null> {
     const { directory, name } = this.projects.statementRow(id);
-    if (files === undefined) return answerOf(await this.deriveRow({ id, directory, name }));
+    const shared = reads === undefined ? {} : { remoteReads: reads };
+    if (files === undefined) return answerOf(await this.deriveRow({ id, directory, name, ...shared }));
     try {
-      return answerOf(await this.deriveRow({ id, directory, name, files }));
+      return answerOf(await this.deriveRow({ id, directory, name, files, ...shared }));
     } catch (error) {
       console.warn(`[index] the rule for ${directory} read past what the setup opened, so it answers nothing now:`, error instanceof Error ? error.message : error);
       return null;
@@ -182,14 +184,14 @@ export class Statements {
    * it now, or the row there as derived, under the statement the act will make: `into`'s link, or the minted id moment (a)
    * or `own` gives it (a fresh UUID: the length of the one it will be). Nothing is written.
    */
-  private async prospective(folder: string, files?: GitFiles, { into, own }: { into?: string; own?: true } = {}): Promise<DeclaredRow> {
+  private async prospective(folder: string, files?: GitFiles, { into, own }: { into?: string; own?: true } = {}, remoteReads: RemoteReads = new Map()): Promise<DeclaredRow> {
     const context = this.context;
     const pid = randomUUID();
     const existing = this.projects.statementRowAt(folder);
     const derived =
       context === null
         ? null
-        : await (context.derive ?? deriveProject)({ directory: folder, machine: context.machine, projectId: existing?.id ?? pid, name: existing?.name ?? basename(folder), ...(files === undefined ? {} : { files }) }, context.enrollment(), { statements: this.lookup }).catch(
+        : await (context.derive ?? deriveProject)({ directory: folder, machine: context.machine, projectId: existing?.id ?? pid, name: existing?.name ?? basename(folder), ...(files === undefined ? {} : { files }) }, context.enrollment(), { statements: this.lookup, remoteReads }).catch(
             () => null, // a read the setup refused: the folder row's size stands in
           );
     const minted = existing?.minted ?? null;
@@ -228,7 +230,7 @@ export class Statements {
    * moment (a), `into`'s link and `own`'s minted id, the rule's answer after them and the restatement. Today's act keeps
    * its own refusals.
    */
-  async declare<T extends { project: ProjectRecord }>(directory: string, declare: () => T, options: { into?: string; own?: true; files?: GitFiles } = {}): Promise<T & Decided> {
+  async declare<T extends { project: ProjectRecord }>(directory: string, declare: (remoteReads: RemoteReads) => T, options: { into?: string; own?: true; files?: GitFiles } = {}): Promise<T & Decided> {
     const decided = await this.oneAtATime(() => this.admit(directory, declare, options));
     if (!('derived' in decided)) return decided.answer as T & Decided;
     const { answer, derived } = decided;
@@ -237,7 +239,7 @@ export class Statements {
   }
 
   // The declaration through its statements, one at a time (finding 4): its restatement is asked after, outside the turn.
-  private async admit<T extends { project: ProjectRecord }>(directory: string, declare: () => T, { into, own, files }: { into?: string; own?: true; files?: GitFiles }): Promise<{ answer: T } | { answer: T; derived: OrgDerivation | null }> {
+  private async admit<T extends { project: ProjectRecord }>(directory: string, declare: (remoteReads: RemoteReads) => T, { into, own, files }: { into?: string; own?: true; files?: GitFiles }): Promise<{ answer: T } | { answer: T; derived: OrgDerivation | null }> {
     if (into !== undefined && own) refuse('into-and-own', 'a folder is linked into a project or made a project of its own, not both');
     if (into !== undefined || own) this.unavailable();
     const folder = canonicalFolder(directory);
@@ -245,20 +247,22 @@ export class Statements {
       if (folder === null) refuse('not-a-directory', directory);
       await this.target(into, folder, files);
     }
+    // one read of the folder's remotes for the act's every derivation, the new row's own after its commit included (Fix 3)
+    const reads: RemoteReads = new Map();
     const before = folder === null ? [] : this.projects.admissionRows();
     const wasDeclared = before.some((row) => row.path === folder);
     // the record's bound is asked with the row as it will be published (review 1, finding 8; review 2, finding 5), and
     // with every declared row, one not yet derived included (finding 4)
     if (folder !== null && (!wasDeclared || into !== undefined || own === true)) {
-      const shape = await this.prospective(folder, files, { ...(into === undefined ? {} : { into }), ...(own === true ? { own } : {}) });
+      const shape = await this.prospective(folder, files, { ...(into === undefined ? {} : { into }), ...(own === true ? { own } : {}) }, reads);
       if (!this.registry.fits([...before.filter((row) => row.path !== folder), shape])) refuse('too-many-locations', 'the declared folders would not fit one projects record');
     }
-    const answer = declare();
+    const answer = declare(reads);
     // a statement kept on a removed row counts again, for the folder and the rows beneath it
     if (!wasDeclared) this.beneath(answer.project.directory);
     if (!this.registry.statements().possible || this.context === null) return { answer };
     const id = answer.project.id;
-    let derived = await this.deriveId(id, files);
+    let derived = await this.deriveId(id, files, reads);
     let changed = false;
     const row = this.projects.statementRow(id);
     // review 1, finding 11: the broadest folders are minted only by an add of that very folder, never one that folds to it
@@ -267,7 +271,7 @@ export class Statements {
     if (derived !== null && row.minted === null && (own === true || derived.by === 'machine') && this.mintable(row.directory, explicit)) changed = this.mintRow(id) || changed;
     if (into !== undefined) changed = this.projects.setLink(id, into, readAnchor(row.directory)) || changed;
     if (changed) {
-      derived = await this.deriveId(id, files);
+      derived = await this.deriveId(id, files, reads);
       this.beneath(row.directory);
     }
     return { answer, derived };
@@ -275,7 +279,7 @@ export class Statements {
 
   /** `addFolder`'s act: the folder by the membership rule, then `declare`. */
   addFolder(directory: string, options: { into?: string; own?: true; files?: GitFiles; locateIn?: typeof locate } = {}): Promise<{ project: ProjectRecord; location: Location } & Decided> {
-    return this.declare(directory, () => addFolder(this.projects, directory, options.locateIn, options.files), options);
+    return this.declare(directory, (reads) => addFolder(this.projects, directory, options.locateIn, options.files, reads), options);
   }
 
   /** `session.projects.resolve`: the rule for a directory, changing nothing. */

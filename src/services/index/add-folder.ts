@@ -8,13 +8,15 @@ import { statSync } from 'node:fs';
 import type { ProjectRecord } from '@shared/ipc/schema/session';
 import type { GitFiles } from '@shared/machine/git-reads';
 import type { Location } from '@shared/sessions/intent';
+import type { RemoteReads } from './org-project';
 import { locate, type ProjectStore } from './projects';
 
-// `files` (P5 O7 M9 round 3): a remote setup's checked reader, which the new project's org derivation reads through.
-export function addFolder(projects: Pick<ProjectStore, 'ensureForDirectory'>, directory: string, locateIn: typeof locate = locate, files?: GitFiles): { project: ProjectRecord; location: Location } {
+// `files` (P5 O7 M9 round 3): a remote setup's checked reader, which the new project's org derivation reads through;
+// `remoteReads` (M8's Fix 3): the act's reads of the remotes, which that derivation shares.
+export function addFolder(projects: Pick<ProjectStore, 'ensureForDirectory'>, directory: string, locateIn: typeof locate = locate, files?: GitFiles, remoteReads?: RemoteReads): { project: ProjectRecord; location: Location } {
   const where = locateIn(directory);
   if (where.realpath === null || where.projectDirectory === null || !statSync(where.realpath).isDirectory()) throw new Error(`not a directory: ${directory}`);
-  const project = projects.ensureForDirectory(where.projectDirectory, 'user', files);
+  const project = projects.ensureForDirectory(where.projectDirectory, 'user', files, remoteReads);
   const location: Location =
     where.worktreePath !== null && where.worktreePath === where.realpath
       ? { kind: 'existingWorktree', repoRoot: project.directory, path: where.worktreePath }

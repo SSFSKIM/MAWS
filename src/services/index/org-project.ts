@@ -383,6 +383,27 @@ export interface OrgDerivation {
 type Decision = { by: ProjectDecidedBy; at: string | null; id: string | null; smns?: SmnsFile };
 
 const nfc = (path: string) => path.normalize('NFC');
+/**
+ * One act's reads of the repositories' remotes, by common dir: the derivations an act makes of one folder (the row it
+ * would publish, then the row's own, before and after its statement) spend one git process on its config, as one
+ * derivation does (a remote setup's untrusted path is one isolated config read; M8's Fix 3). An answer of no answer is
+ * not kept, so a later derivation asks again.
+ */
+export type RemoteReads = Map<string, Promise<Map<string, string> | null>>;
+
+function readRemotes(common: string, timeoutMs: number, io: OrgIo, reads: RemoteReads | undefined): Promise<Map<string, string> | null> {
+  if (reads === undefined) return configRemotes(common, timeoutMs, io);
+  const kept = reads.get(common);
+  if (kept !== undefined) return kept;
+  const read = configRemotes(common, timeoutMs, io);
+  reads.set(common, read);
+  void read.then(
+    (remotes) => remotes === null && reads.delete(common),
+    () => reads.delete(common),
+  );
+  return read;
+}
+
 // `folder` is `path` or lies above it
 const holds = (folder: string, path: string) => folder === path || path.startsWith(folder.endsWith(sep) ? folder : folder + sep);
 
@@ -393,7 +414,7 @@ const holds = (folder: string, path: string) => folder === path || path.startsWi
 export async function deriveProject(
   { directory, machine, projectId, name, files }: OrgSubject,
   enrollment: Enrollment | null,
-  { statements = NO_STATEMENTS, gitTimeoutMs = ORG_GIT_TIMEOUT_MS }: { statements?: StatementLookup; gitTimeoutMs?: number } = {},
+  { statements = NO_STATEMENTS, gitTimeoutMs = ORG_GIT_TIMEOUT_MS, remoteReads }: { statements?: StatementLookup; gitTimeoutMs?: number; remoteReads?: RemoteReads } = {},
 ): Promise<OrgDerivation | null> {
   const io = files === undefined ? LOCAL_IO : checkedIo(files);
   const lookup = enrollment === null ? NO_STATEMENTS : statements;
@@ -401,7 +422,7 @@ export async function deriveProject(
   const layout = await gitLayout(start, gitTimeoutMs, io);
   if (layout === null) return null;
   const owningRepo = layout.common === '' ? '' : dirname(layout.common);
-  const remotes = owningRepo === '' ? new Map<string, string>() : await configRemotes(layout.common, gitTimeoutMs, io);
+  const remotes = owningRepo === '' ? new Map<string, string>() : await readRemotes(layout.common, gitTimeoutMs, io, remoteReads);
   if (remotes === null) return null;
   const remote = remotes.has('origin') ? 'origin' : remotes.size === 1 ? [...remotes.keys()][0] : undefined;
   const url = remote === undefined ? '' : remotes.get(remote)!;

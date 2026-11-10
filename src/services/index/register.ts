@@ -35,7 +35,7 @@ export function registerIndexHandlers(index: Index, { register }: Pick<ServicesB
   // The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §G): every declaration, and
   // each act on a stored statement, through the index's statements (src/services/index/statements.ts), which leave
   // today's answer as it was while no stored statement is possible
-  register('session.projects.add', async ({ directory }) => (await index.statements.declare(directory, () => ({ project: index.projects.add(directory) }))).project);
+  register('session.projects.add', async ({ directory }) => (await index.statements.declare(directory, (reads) => ({ project: index.projects.add(directory, reads) }))).project);
   // New chat: "Open folder…"; P5 O7 M9: another machine's owner's, claimed under `machine.op`, on the directory the
   // endpoint checked, checked again here before anything reads in it
   // (its linked-worktree answer read from git's files beforehand, so `setupLocate` asks no git: a miss would not fold)
