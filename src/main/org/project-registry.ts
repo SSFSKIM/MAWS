@@ -12,7 +12,8 @@
 //   over every location, so every device names a project alike.
 // - The key table is filled at each computation from every record's locations and this Mac's own rows that are not
 //   hidden. An own row's project is its `org.smnsId`; on a Mac signed in and not enrolled, a `remote:` row's is computed
-//   from its key, as `joinIds` did (M10: the join is by id, and a key written in a record joins nothing).
+//   from its key, as `joinIds` did (M10: the join is by id, and a key written in a record joins nothing), and told to the
+//   page in `ownIds`, which has no uuid5 to compute it (panel scalpel-2#1).
 // - The first computation waits for the persisted key table and the first own rows, so no entry is given from an empty
 //   table and then replaced.
 // - Each roster machine's link is watched: its transitions are `seen`; its coming up sends its held removals and reads
@@ -255,7 +256,14 @@ export function createProjectRegistry(deps: ProjectRegistryDeps): ProjectRegistr
       if (locations.length === 0 && !seenSessions.has(p.id)) continue;
       projects.push({ id: p.id, name: p.name, hub: p.hub, renamable: p.renamable, locations });
     }
-    publish({ projects, keys: table.keys(), moved: table.moved(carriers, mine), removals: removals.list(), seen: records.seen() });
+    // panel scalpel-2#1: the ids computed for this Mac's rows that carry none (hidden ones too, as a row's own id groups it
+    // hidden or not), the page's to group them by
+    const ownIds: Record<string, string> = {};
+    for (const row of local) {
+      const id = row.org?.smnsId === null ? ownProject(org, row) : null;
+      if (id !== null) ownIds[row.id] = id;
+    }
+    publish({ projects, keys: table.keys(), moved: table.moved(carriers, mine), removals: removals.list(), seen: records.seen(), ...(Object.keys(ownIds).length > 0 && { ownIds }) });
   }
 
   function publish(next: OrgProjects): void {

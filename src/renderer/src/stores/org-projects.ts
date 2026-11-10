@@ -13,9 +13,10 @@
 //   address is never an org key, so the layout's keys migrate when it does: `layout-model.ts`'s `rekeySets`).
 //
 // The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §J.1; design §2, §6): one row
-// per project id. A record's row key is main's key table's entry for its project (`org.smnsId`), else its own label
-// (`org.key`), else its address, so two labels of one id are one row, one label of two ids two rows, and a record with
-// no id (signed out, not enrolled) is grouped by its label as before. Other machines' locations are records in the same
+// per project id. A record's row key is main's key table's entry for its project (`org.smnsId`, or for this Mac's row
+// that carries none the id main computed, `ownIds`), else its own label (`org.key`), else its address, so two labels of
+// one id are one row, one label of two ids two rows, and a record with no id (signed out, not enrolled) is grouped by
+// its label as before. Other machines' locations are records in the same
 // map (`stores/registry.ts`). A registry project is named as main assembled it (§A), and one the member sees only
 // through a session of it (no location to show) is still a row, with its sessions and no checkout. A key that is no
 // row's any more finds its successor (§J.2, `successorOf`).
@@ -48,10 +49,16 @@ export type RowKeys = Readonly<Record<string, OrgKey>>;
 
 // A record's label: what its machine's files derive (`org.key`), or its address while it has none.
 export const labelOf = (project: ProjectRecord): RowKey => project.org?.key ?? project.id;
+/**
+ * A record's project id: its own (`org.smnsId`), else the one main computed for this Mac's row that carries none
+ * (`OrgProjects.ownIds`: a `remote:` label, signed in and not enrolled; panel scalpel-2#1); null for none.
+ */
+export const projectIdOf = (project: ProjectRecord, ownIds?: Readonly<Record<string, string>>): string | null =>
+  project.org?.smnsId ?? (ownIds !== undefined && Object.hasOwn(ownIds, project.id) ? ownIds[project.id] : null);
 // A record's row key (§J.1): the key table's entry for its project, else its label.
-export const orgKeyOf = (project: ProjectRecord, keys: RowKeys): RowKey => {
-  const id = project.org?.smnsId;
-  return (id != null && Object.hasOwn(keys, id) ? keys[id] : undefined) ?? labelOf(project);
+export const orgKeyOf = (project: ProjectRecord, keys: RowKeys, ownIds?: Readonly<Record<string, string>>): RowKey => {
+  const id = projectIdOf(project, ownIds);
+  return (id !== null && Object.hasOwn(keys, id) ? keys[id] : undefined) ?? labelOf(project);
 };
 export const isCheckout = (project: ProjectRecord): boolean => !project.discovered;
 
@@ -74,7 +81,8 @@ const byMachine = (local: MachineRef) => (a: MachineRef, b: MachineRef) => (a ==
 export function orgIndex(all: Iterable<ProjectRecord>, local: MachineRef, registry: OrgProjects = EMPTY_REGISTRY): OrgIndex {
   const order = byMachine(local);
   const keys = registry.keys;
-  const keyOf = (project: ProjectRecord) => orgKeyOf(project, keys);
+  const idOf = (project: ProjectRecord) => projectIdOf(project, registry.ownIds);
+  const keyOf = (project: ProjectRecord) => orgKeyOf(project, keys, registry.ownIds);
   const byId = new Map(registry.projects.map((p) => [p.id, p]));
   const projects = new Map<RowKey, ProjectRecord[]>();
   for (const project of all) {
@@ -88,7 +96,8 @@ export function orgIndex(all: Iterable<ProjectRecord>, local: MachineRef, regist
     const sorted = [...list].sort((a, b) => order(machineOf(a.id), machineOf(b.id)) || Number(isCheckout(b)) - Number(isCheckout(a)));
     const named = sorted[0];
     // the id the key table gives this key, else the first a record carries
-    const smnsId = sorted.find((p) => p.org?.smnsId != null && keys[p.org.smnsId] === key)?.org?.smnsId ?? sorted.find((p) => p.org?.smnsId)?.org?.smnsId ?? null;
+    const ids = sorted.map(idOf);
+    const smnsId = ids.find((id) => id !== null && keys[id] === key) ?? ids.find((id) => id !== null) ?? null;
     const registered = smnsId === null ? undefined : byId.get(smnsId);
     orgs.set(key, {
       id: key,

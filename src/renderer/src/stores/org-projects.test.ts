@@ -173,6 +173,18 @@ describe('the project registry: rows by project id', () => {
     expect(sessionSetKey(gone, TEST_MACHINE, tab, () => null)).toBeNull();
   });
 
+  // panel scalpel-2#1: on a Mac signed in and not enrolled, a clone here carries no id; main computes it from the
+  // `remote:` label (`ownIds`), and the page groups the clone by it, one row with the project's location elsewhere
+  it('groups a clone here that carries no id by the id main computed for it', () => {
+    const clone = project(at('clone'), 0, { org: withId('remote:example.org/app', null) });
+    const registry = { ...registryOf([registered(ID, 'app', [location(OTHER_MACHINE, 'app')])], { [ID]: `id:${ID}` }), ownIds: { [clone.id]: ID } };
+    const index = orgIndex([clone, ...registryRecords(registry, TEST_MACHINE).values()], TEST_MACHINE, registry);
+    expect([...index.listed]).toEqual([`id:${ID}`]);
+    expect(index.projects.get(`id:${ID}` as OrgKey)?.map((p) => p.id)).toEqual([clone.id, studio('app')]);
+    expect(index.orgs.get(`id:${ID}` as OrgKey)).toMatchObject({ smnsId: ID, name: 'app' });
+    expect(registryOnly(index, `id:${ID}` as OrgKey), 'a clone here answers for it').toBe(false);
+  });
+
   it('makes no row of a machine’s own project: main leaves it out of the registry, so its location makes no record and its sessions sit under the machine’s row', () => {
     const registry = registryOf([registered(ID, 'app', [location(OTHER_MACHINE, 'app')])], { [ID]: 'remote:example.org/app' });
     const records = registryRecords(registry, TEST_MACHINE);
