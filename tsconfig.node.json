@@ -106,6 +106,7 @@
     "src/renderer/src/attention/derive.ts",
     "src/renderer/src/attention/glyph.ts",
     "src/renderer/src/overview/derive.ts",
+    "src/renderer/src/sessions/listed-state.ts", // P5 O7 M10: what glyph.ts and overview/derive.ts read a remote lane B record's state from
     // P5 O8 M6a's re-review: test/lane-b/drafts-enumerated.test.ts runs the renderer's draft queue against the machine's
     // index, and the graph that queue imports (DOM-free)
     "src/renderer/src/lane-b/remote-drafts.ts",
