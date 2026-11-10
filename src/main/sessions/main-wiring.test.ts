@@ -43,6 +43,7 @@ vi.mock('../pty-links', () => ({ registerPtyOpenLink: vi.fn() }));
 vi.mock('../open-external', () => ({ registerOpenExternal: vi.fn() }));
 vi.mock('../attention', () => ({ startAttention: vi.fn() }));
 vi.mock('../menu', () => ({ startMenu: vi.fn(), registerMenuHandlers: vi.fn() }));
+vi.mock('../log-file', () => ({ captureMainLog: () => ({ install: () => false }) })); // P5 O15 M2b §H: no wrapped console, no main.log (log-file.test.ts holds the module)
 vi.mock('../window-state', () => ({ restoreWindowState: vi.fn(), trackWindowState: vi.fn() }));
 vi.mock('../lifecycle/quit-guard', () => ({ installQuitGuard: () => ({}), askToQuit: vi.fn(), listProcesses: vi.fn(), trackUnsavedFiles: () => ({}) /* E5 */ }));
 vi.mock('../../services/sessions', () => ({ startSessions: () => ({ model: state.model, stop: vi.fn() }) }));

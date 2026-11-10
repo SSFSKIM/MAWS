@@ -24,6 +24,7 @@ import { daemonPaths } from '@shared/daemon/files'; // P5 O5 M2: artifacts.sock
 import { launchMode, scenarioPath } from '@shared/sessions/select-source'; // P5 O3-D M5b (D11)
 import { settingsPaths } from '@shared/settings/paths';
 import { startWithProfileLock } from './files/profile-lock';
+import { captureMainLog } from './log-file'; // P5 O15 M2b §H: main's log file
 import { describeMainBuild, loadedBundlePath, olderInstanceNotice, staleBuildCheck, type MainBuild } from './build-identity'; // E11 §2.7; F2b 2.7b
 import { builtAtLabel } from '@shared/app/build-time'; // E11 §2.7
 import { registerPtyOpenLink } from './pty-links'; // C9
@@ -159,6 +160,9 @@ import { exportHeldFor } from './delivery/e2e-hold';
 // P5 O2 landing: a test or harness launch never runs on the default profile, whose daemon and LaunchAgent are the
 // owner's; it exits here, before the profile lock, the machine identity, the settings or a host (hosts/mode.ts).
 refuseTestLaunchOnDefaultProfile();
+// P5 O15 M2b §H: from here each console line is also held, with the time it was said, until this instance holds the
+// profile lock and installs the file (the start below); a second launch never does, and writes only its own streams.
+const mainLog = captureMainLog(console);
 
 // macOS convention (D-11): closing the last window keeps the app running; the dock icon re-creates it (`activate`
 // below). This empty listener is load-bearing: with no `window-all-closed` listener Electron quits when the last
@@ -204,6 +208,7 @@ const diskBuildIsNewer = (): string | null =>
     formatTime: builtAtLabel,
   }))();
 function answerSecondLaunch(launched: MainBuild | null): void {
+  console.log(`[main] a second launch (${launched === null ? 'an unknown build' : describeMainBuild(launched)}) was handed to this instance`); // P5 O15 M2b §H
   const win = bringForward();
   if (win === null) return; // quitting (or not yet started): nothing to bring forward or offer
   const onDisk = diskBuildIsNewer(); // asked either way, so the build on disk this answer covers is not said again
@@ -212,6 +217,7 @@ function answerSecondLaunch(launched: MainBuild | null): void {
 }
 
 void startWithProfileLock(app, () => {
+  mainLog.install(join(app.getPath('userData'), 'logs')); // P5 O15 M2b §H: the profile lock's holder alone writes main.log
   // P5 O6 M1 (OX2): the profile's MachineRef, minted at its first start into <userData>/machine.json and read ever after,
   // before anything starts or any window opens. A malformed file stops startup, naming its path: a fresh ref would
   // re-address everything kept under the old one.
