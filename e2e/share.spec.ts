@@ -226,6 +226,25 @@ async function openShare(page: Page, row: Locator): Promise<Locator> {
   return sheet;
 }
 
+/**
+ * Turns a project's People toggle on from its menu, as a person does. The project's hover card opens 300 ms into a hover
+ * of its line, beside the sidebar, where it covers the menu's items, and `openProject` leaves the pointer on the line: so
+ * the pointer leaves and the card closes before the right-click. A card the right-click's own hover opened in time to
+ * take the item's click is closed with the menu, and the click is made again (one that landed is never repeated).
+ */
+async function showPeople(page: Page, name: string): Promise<void> {
+  const card = page.locator('[data-hover-card]');
+  const menu = page.getByRole('menu');
+  await expect(async () => {
+    if ((await menu.count()) > 0) await page.keyboard.press('Escape'); // the card first when it is the topmost layer
+    await expect(menu).toHaveCount(0, { timeout: 1_000 });
+    await page.mouse.move(900, 400);
+    await expect(card).toHaveCount(0, { timeout: 2_000 });
+    await projectLine(projectRow(page, name)).click({ button: 'right' });
+    await page.getByRole('menuitemcheckbox', { name: /Show people’s sessions/ }).click({ timeout: 2_000 });
+  }, 'the People toggle takes the click').toPass({ timeout: 20_000 });
+}
+
 test.skip(!HARNESS_BUILT, "the seeded org needs a harness build's main (pnpm e2e:settings)");
 
 test('share: the reach marks across machines, a row’s hover card, the private session’s sheet and its save, an unknown outcome stopping a save, and a machine whose sminos can’t keep a reach; each photographed; nothing overflows and every action is whole', async () => {
@@ -247,8 +266,7 @@ test('share: the reach marks across machines, a row’s hover card, the private 
       await expect(project).toBeVisible({ timeout: 15_000 });
       await openProject(page, PROJECT_NAME);
       // Others' sessions show while the project's People toggle is on: from its menu, as a person turns it on.
-      await projectLine(projectRow(page, PROJECT_NAME)).click({ button: 'right' });
-      await page.getByRole('menuitemcheckbox', { name: /Show people’s sessions/ }).click();
+      await showPeople(page, PROJECT_NAME);
       await openProject(page, FARM_NAME);
 
       const sidebar = sidebarOf(page);

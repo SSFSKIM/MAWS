@@ -5,7 +5,8 @@
 // carry the row's People toggle where the row offers it (its `data-people`: others to show, or the toggle on), checked
 // while it draws other people's sessions. P5 O8 M7a (Q5): an org project's row whose sminos id the index knows offers
 // Channel, the project's one channel tab. P5 O8 M6b: a session's menu offers Share for a session you own, a listed row's
-// with no record here included (its row's `data-menu` names it only then).
+// with no record here included (its row's `data-menu` names it only then). P5 O8 M5b: Add owner… after Share, for the
+// session's owners (sessions/share/target.ts' `useCanAddOwner`).
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import type { ReactNode } from 'react';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
@@ -29,8 +30,8 @@ import { KEEP_RUNNING } from './copy'; // P5 O2 M2
 import { isRemoteLaneB } from '../lane-b/remote-session'; // P5 O7 M2
 import { setRemoteReading } from '../lane-b/remote-reading'; // P5 O8 M6a
 import { useReaderRowsOf } from '../lane-b/reader-rows'; // P5 O8 M6a
-import { openShare, useCanShare } from '../sessions/share/target'; // P5 O8 M6b
-import { SHARE } from '../sessions/share/copy'; // P5 O8 M6b
+import { openAddOwner, openShare, useCanAddOwner, useCanShare } from '../sessions/share/target'; // P5 O8 M6b, M5b
+import { OWNER, SHARE } from '../sessions/share/copy'; // P5 O8 M6b, M5b
 
 // P5 O8 M5: a project's or machine's `people` says whether its row offers the People toggle.
 export type MenuTarget = { kind: 'machine'; machine: MachineRef; people: boolean } | { kind: 'session'; appSessionId: AppSessionId } | { kind: 'project'; projectId: ProjectId; people: boolean };
@@ -86,13 +87,20 @@ function SessionItems({ appSessionId, dropdown = false }: { appSessionId: AppSes
   const kept = useSessions((s) => s.engine.get(appSessionId)?.kept); // P5 O2 M2: undefined while no status reports it
   const remoteReading = useReaderRowsOf(appSessionId) !== 'refused'; // P5 O8 M6a
   const shareable = useCanShare(appSessionId); // P5 O8 M6b
-  if (!record) return shareable ? <ShareItem appSessionId={appSessionId} dropdown={dropdown} /> : null;
+  const ownable = useCanAddOwner(appSessionId); // P5 O8 M5b
+  const reach = (
+    <>
+      {shareable && <ShareItem appSessionId={appSessionId} dropdown={dropdown} />}
+      {ownable && <AddOwnerItem appSessionId={appSessionId} dropdown={dropdown} />}
+    </>
+  );
+  if (!record) return shareable ? reach : null;
   const foreign = record.holder.kind === 'terminal' || record.holder.kind === 'background_job'; // D-12: the opens only
   return (
     <>
       {sessionActionsFor(record, { bridged, remote: isRemoteLaneB(appSessionId) /* P5 O7 M2 */, remoteReading }).map((id) => <SessionItem key={id} id={id} record={record} dropdown={dropdown} />)}
       {kept !== undefined && !foreign && <KeepItem appSessionId={appSessionId} kept={kept} dropdown={dropdown} />}
-      {shareable && <ShareItem appSessionId={appSessionId} dropdown={dropdown} />}
+      {reach}
     </>
   );
 }
@@ -102,6 +110,15 @@ export function ShareItem({ appSessionId, dropdown }: { appSessionId: AppSession
   return (
     <Item dropdown={dropdown} enabled onSelect={() => openShare(appSessionId)}>
       {SHARE.menuItem}
+    </Item>
+  );
+}
+
+// P5 O8 M5b: the session's Add owner sheet
+function AddOwnerItem({ appSessionId, dropdown }: { appSessionId: AppSessionId; dropdown?: boolean }) {
+  return (
+    <Item dropdown={dropdown} enabled onSelect={() => openAddOwner(appSessionId)}>
+      {OWNER.menuItem}
     </Item>
   );
 }

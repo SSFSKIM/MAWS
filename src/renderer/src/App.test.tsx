@@ -84,6 +84,8 @@ function fakeMain(initial: SettingsState['settings']['theme'], { onAnnounce }: {
         return { state: 'none' };
       case 'org.rows': // P5 O8 M2: the org's rows at connect: no other machine, nothing listed
         return { machines: [], rows: [], complete: true, pending: [], members: [], member: null }; // M5: and no owners
+      case 'org.view': // P5 O8 M5b: this Mac's one owner, read at connect: no held head
+        return null;
       case 'session.list':
         return { sessions: [], revision: 1 };
       case 'session.projects.list':

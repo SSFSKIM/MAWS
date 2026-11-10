@@ -1,6 +1,6 @@
 # P5 O8 — The org interface (2026-10-28)
 
-> **Parent:** `docs/doperpowers/plans/2026-10-27-p5-org.md` (P5), child **O8**, §"O8: The org interface". Parent pin: blob `7026ea72dd48e0a805b5c9b82b91a0d2d6c0c4e5` at master `cfff902f7` (P5's Decision Logs 1–258; re-pinned on 2026-11-08 at M4c's cut. Of 252–258, only 258 bears on M4c: it lands M4b, whose composer guard, settlement-bound hub halves and certificate set M4c builds on. 230 (earlier) landed the desk track's renew route M4c consumes. 252 and 255 are the channel reach and its reader fixes, 253 the joined notifications, 254 the key-bound machine delete, 256 and 257 the swap and M7b's live check. Before that, at blob `5cb515f365cc18780df3cd8451c3c7d828ffca95` and master `bd2b59baa`, P5's Decision Logs 1–251, re-pinned on 2026-11-08 at M4b's cut. Of 249–251, only 251 bears on M4b: it lands M6b (`signActions`, `actMany`, `policy.ts`, the local door, `WIRE_MINOR` 32) and records the channel-reach fix in flight. 249 is the three machines' swaps, and 250 makes the wire fingerprint a committed file that `pnpm wire:manifest` refreshes. Before that, at blob `257faf80e19062a89fb24caafa28f2c448b68bac` and master `48e0ed15a`, P5's Decision Logs 1–248, re-pinned on 2026-11-07 at M6b's cut, where 246–248 change nothing M6b consumes: 246 lands M7b, 247 puts O18's build on the production hub and has sminos 1.40.0 remove phase 1's hub path, 248 lands M6a and adds M6a's endpoint rule to Decision Log 235's second-member precondition. Before that, at blob `7781e2d50a7a4a5f86576f11354128d444b8fe39` and master `14ec11778`, P5's Decision Logs 1–245, re-pinned on 2026-11-07 at M6a's cut, where 239–245 change nothing M6a consumes: 239 and 240 swap both Macs to f857f0450, 241 lands #506's RL2 11 and `WIRE_MINOR` 29, 242 ends O14, 243 and 244 shape and pass O18 M6 on staging without `record`, 245 meets Decision Log 227's floor. Before that, at blob `92141de56e15ff65c3da5baa8fa135cdecf075c7` and master `f857f0450`, P5's Decision Logs 1–238, re-pinned on 2026-11-06 at M7b's cut, where 229–238 change nothing M7b consumes: 232 sets the order, 238 lands M7a. Before that, at blob `b99c1767` and master `910539147`, re-pinned for the re-plan of the rest: 223 to 228 make M6's Share sheet O18's M5, with the `list` grade and audience streams; 154 moves the last machine, so the owner's words no longer wait; 155 waives B4's wait on M7's reader; 168 closes O3 and 222 closes O7; 190 makes the spawner an owner and leaves its residue (b) due before owners move; earlier pin blob `d07bfc4ea2466d7d5ca7ca3164aed4d93021311a` at master `6fb933626`, P5's Decision Logs 1–129, re-pinned on 2026-10-29 for M4's re-plan: 121 lands H1, 126 leaves M4 the refused attempt and the section's split, 129 lands M5 and names M4 next; earlier pin blob `e74a3c5d58e682790627cf0fc54abe23e161930e` at master `1bf619c83`, Decision Logs 1–116; first drafted at `5b46682f1`, re-pinned for Decision Logs 95 to 97, and again on 2026-10-28 for M3's and M5's re-plan: Decision Log 101 refuses O3's D2, so lane B's owner changes route to sminos's member record; 105 and 113 land M1 and M2; 111 answers Q1 to Q7; 116 passes M1's staging sitting and finds the double sign-in, fixed in its own PR; the others, 114 and 115 among them, change nothing here).
+> **Parent:** `docs/doperpowers/plans/2026-10-27-p5-org.md` (P5), child **O8**, §"O8: The org interface". Parent pin: blob `653f79b63c4418e5ee3060a205f322dd3cdfa40e` at master `e181a1944` (P5's Decision Logs 1–260; re-pinned on 2026-11-09 at M5b's cut. Neither 259 nor 260 changes what M5b consumes: 259 is the swap that put cfff902f7 (M4b) on all three machines, and 260 lands M4c. M5b's own preconditions were met earlier: 251 landed M6b's `record.owners` offer, its record path, the local door and `org.owners.add`; 190 (b)'s fix is on master; and sminos 1.38.0 or later carries the executor (Decision Log, "M5b's refresh at its cut"). Before that, at blob `7026ea72dd48e0a805b5c9b82b91a0d2d6c0c4e5` and master `cfff902f7`, P5's Decision Logs 1–258, re-pinned on 2026-11-08 at M4c's cut. Of 252–258, only 258 bears on M4c: it lands M4b, whose composer guard, settlement-bound hub halves and certificate set M4c builds on. 230 (earlier) landed the desk track's renew route M4c consumes. 252 and 255 are the channel reach and its reader fixes, 253 the joined notifications, 254 the key-bound machine delete, 256 and 257 the swap and M7b's live check. Before that, at blob `5cb515f365cc18780df3cd8451c3c7d828ffca95` and master `bd2b59baa`, P5's Decision Logs 1–251, re-pinned on 2026-11-08 at M4b's cut. Of 249–251, only 251 bears on M4b: it lands M6b (`signActions`, `actMany`, `policy.ts`, the local door, `WIRE_MINOR` 32) and records the channel-reach fix in flight. 249 is the three machines' swaps, and 250 makes the wire fingerprint a committed file that `pnpm wire:manifest` refreshes. Before that, at blob `257faf80e19062a89fb24caafa28f2c448b68bac` and master `48e0ed15a`, P5's Decision Logs 1–248, re-pinned on 2026-11-07 at M6b's cut, where 246–248 change nothing M6b consumes: 246 lands M7b, 247 puts O18's build on the production hub and has sminos 1.40.0 remove phase 1's hub path, 248 lands M6a and adds M6a's endpoint rule to Decision Log 235's second-member precondition. Before that, at blob `7781e2d50a7a4a5f86576f11354128d444b8fe39` and master `14ec11778`, P5's Decision Logs 1–245, re-pinned on 2026-11-07 at M6a's cut, where 239–245 change nothing M6a consumes: 239 and 240 swap both Macs to f857f0450, 241 lands #506's RL2 11 and `WIRE_MINOR` 29, 242 ends O14, 243 and 244 shape and pass O18 M6 on staging without `record`, 245 meets Decision Log 227's floor. Before that, at blob `92141de56e15ff65c3da5baa8fa135cdecf075c7` and master `f857f0450`, P5's Decision Logs 1–238, re-pinned on 2026-11-06 at M7b's cut, where 229–238 change nothing M7b consumes: 232 sets the order, 238 lands M7a. Before that, at blob `b99c1767` and master `910539147`, re-pinned for the re-plan of the rest: 223 to 228 make M6's Share sheet O18's M5, with the `list` grade and audience streams; 154 moves the last machine, so the owner's words no longer wait; 155 waives B4's wait on M7's reader; 168 closes O3 and 222 closes O7; 190 makes the spawner an owner and leaves its residue (b) due before owners move; earlier pin blob `d07bfc4ea2466d7d5ca7ca3164aed4d93021311a` at master `6fb933626`, P5's Decision Logs 1–129, re-pinned on 2026-10-29 for M4's re-plan: 121 lands H1, 126 leaves M4 the refused attempt and the section's split, 129 lands M5 and names M4 next; earlier pin blob `e74a3c5d58e682790627cf0fc54abe23e161930e` at master `1bf619c83`, Decision Logs 1–116; first drafted at `5b46682f1`, re-pinned for Decision Logs 95 to 97, and again on 2026-10-28 for M3's and M5's re-plan: Decision Log 101 refuses O3's D2, so lane B's owner changes route to sminos's member record; 105 and 113 land M1 and M2; 111 answers Q1 to Q7; 116 passes M1's staging sitting and finds the double sign-in, fixed in its own PR; the others, 114 and 115 among them, change nothing here).
 >
 > **What binds.** O8's section in P5 is this document's design, and P5's approval covers it. Binding with it:
 > - P5 §7 (people: owners, visibility, machine owners and grants, agents talk as today, credentials) and §8 (the sidebar's per-project toggle, the project channel, the Org page, attention across machines); parent acceptance 3 (its remote rows: Decision Log 93), 11 and 12.
@@ -144,7 +144,10 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-11-08) Refresh at the cut: branch `p5-o8-m4c`, cut from master cfff902f7 after M4b landed as #539. The cited lines were reconciled, the parent was re-pinned at Decision Log 258, and the plan made: six tasks (Decision Log, "M4c's refresh at its cut" and "M4c is built as six tasks").
   - [x] (2026-11-08) Task 1, reviewed clean. Commits: e5655af5f (the move, `apps/` only, desk 701 CORRECT) and 76f72df85 (`checks.ts`). Our task reviewer's one Important, a retired diagnostic, is recorded as a decided exception (Decision Log, "M4c Task 1, the move"). Green: static at e5655af5f (42538332291); static and unit at 76f72df85 (42538499882).
   - [x] (2026-11-08) Task 2, reviewed clean. Commits: 1650daf4f (the unsent slot) and its fix wave 0e332c014 (publication bound to the holding run, the review's I1). Green: static and unit at 1650daf4f (42541105062) and 0e332c014 (42542743616).
-- [ ] M5b — Add owner — *executable; after M4c; lands once the desk track's `record.owners` executor and DL190 (b)'s fix are on master*
+- [x] (2026-11-09) M5b — Add owner — PR from `p5-o8-m5b`; the final gate green at 427ce3462 (42710549674; `packaged` 42717057290 on its rerun); its live proof is M8's step 7
+  - [x] (2026-11-09) Refresh at the cut: branch `p5-o8-m5b`, cut from master e181a1944 after M4c landed as #543. Both waits were met. The scope shrank to the renderer and one local case, since M6b built the main side. The parent was re-pinned at Decision Log 260. The live proof moved to M8's sitting, as a staging step. The plan is two tasks (Decision Log, "M5b's refresh at its cut" and "M5b is built as two tasks").
+  - [x] (2026-11-09) Task 1, reviewed clean. Commits: fea94bdaa (the sheet, both menus, `stores/local-owner.ts`) and the fix wave 4d33e84f9 (Share takes the same one-owner clause through one gate). Our task reviewer took two rounds. I1, the head skew, the architect accepted as residue (Decision Log, "M5b Task 1, the renderer", item 6). Green: static and unit at 4d33e84f9 (42702690877); `e2e:settings` at 4d33e84f9 (42701162112).
+  - [x] (2026-11-09) Task 2, reviewed clean. Commits: 67af5b945 (the stand-in's `add_owner`, the lane A and lane B case, the share holder's refusal), 3767a4ba6 (share.spec's `showPeople`), 51b93834e. Approved on the first round, with two Minors: lane B's authorization fixture, and noise in the run's output. Green: static and unit at 51b93834e (42708248610); `e2e:settings` at 3767a4ba6 (42706609911, the share spec passing on its first attempt).
 - [ ] M8 — The deployment admin's end, and acceptance — *owner steps and evidence; last; needs O14's B4 steps 4 to 8 and M3's root-add sitting (its first step)*
 
 ## Acceptance
@@ -242,7 +245,7 @@ M1 runs now and lands by its own PR. M2 needs M1 and O7 M1 on master, and lands 
   - M6b's offers on master;
   - the desk track's executors (sminos 1.38.0 or later);
   - a real second member, admitted by the owner's Access change.
-- **M5b lands** only once the desk track's `record.owners` executor and DL190 (b)'s fix are on master.
+- **M5b lands** only once the desk track's `record.owners` executor and DL190 (b)'s fix are on master. Both were met at its cut (2026-11-09). Its live proof moved to M8's sitting.
 - **M8 is last.** It is owner steps and evidence. Its first step is M3's root-add sitting, and its revocation waits on B4's steps 4 to 8.
 
 ### M1 — The app's org session
@@ -1311,22 +1314,22 @@ Rejected:
 - The session's next listing names the new owner, and M5's label shows them.
 - No removal: RL §6.1 grades another's removal differently, and the owner never asked for it.
 
-**Touches.**
-- Renderer: `sessions/share/AddOwnerSheet.tsx` (new), the row menus' item (M6b's menus), `copy.ts`, tests.
-- Main: `src/main/org/policy.ts` gains `org.owners.add {address, member}` (M6b's act builder).
-- Shared: `org.ts`, `routes.json`.
+**Touches** (revised 2026-11-09 at the cut: M6b built the main side; Decision Log, "M5b's refresh at its cut").
+- Renderer: `sessions/share/AddOwnerSheet.tsx` (new), its dialog kind beside `share` (`sessions/dialogs.ts`, `SessionDialogs.tsx`), the "Add owner…" item beside Share in the row menu (`sidebar/menus.tsx:103`) and the session's header menu (`app/Toolbar.tsx:250`), `sessions/share/copy.ts`, tests.
+- Test: `test/org/policy.local.test.ts`'s sminos stand-in appends the verified act to `ownersProof`, and one new case.
+- Already on master, from M6b: `org.owners.add {address, member}` in `src/main/org/policy.ts:263-264`, its schema, name and route (`schema/org.ts:875`, `names/org.ts:44`, `routes.json:88`), its handler (`register.ts:203`), the fixtures' answers (`share-fixture.ts:73`, `page-fixture.ts:119`), the act's shape test (`policy.test.ts:135-140`) and the stand-in's `record.owners` branch (`policy.local.test.ts:209-210`). M5b changes none of these unless a test it adds shows a defect.
 
-**Interfaces.** It consumes M6b's `record.owners` offer, record path and local door (§Q), and the desk track's sminos executor for `record.owners`. That executor appends the act to `ownersProof` and re-lists the session.
+**Interfaces.** It consumes M6b's `record.owners` offer, record path and local door (§Q), `org.owners.add`, and the desk track's sminos executor for `record.owners` (sminos 1.38.0 or later). The executor adds the member to `owners`, appends the signed act verbatim to `ownersProof`, bumps `policyRev` and re-lists the session; a member who is already an owner changes nothing (`sminos_visibility.py`'s `add_owner`, pinned by `test_visibility.py`'s `test_record_owners_*`).
 
-**Waits on.**
-- The desk track's executor, behind sminos's `record` capability (M6b, *Offered only when sminos can*).
-- DL190 (b)'s fix: the endpoint places a lane B record by the `opId` of its `ownersProof` entry that is the spawn's act (action `session.spawn`), not `ownersProof[0]`, which an owner add can occupy, failing closed when one opId names two app sessions (`src/endpoint/rl10/members.ts:280-298`; tracker row `docs/tech-debt-tracker.md:556`). It must be on master first, since an owner add re-lists a lane B record.
+**Waits on.** Nothing now (met at the cut, 2026-11-09):
+- The desk track's executor, behind sminos's `record` capability (M6b, *Offered only when sminos can*), ships in sminos 1.38.0.
+- DL190 (b)'s fix is on master: the endpoint places a lane B record by the `opId` of its `ownersProof` entry that is the spawn's act (action `session.spawn`), not `ownersProof[0]`, which an owner add can occupy, and fails closed when one opId names two app sessions (`#bySpawn`, `src/endpoint/rl10/members.ts:338-347`).
 
 **Proves.** Acceptance 5's add half.
-- `AddOwnerSheet.test.tsx` (the members offered; the outcome shown).
-- `policy.test.ts`: the act's shape, which is M6b's record target, never M5's old sample with `session` and no context.
-- `test/org/policy.local.test.ts` gains: A adds B as an owner of a lane A and a lane B session on a real endpoint with a sminos stand-in that executes as the desk track's contract says, and the next listing names both.
-- Live, at M6's staging run: B's name appears on the owner's row.
+- `AddOwnerSheet.test.tsx`: the members offered (the head's members who aren't owners), and the outcome shown.
+- `policy.test.ts`: the act's shape, which is M6b's record target, never M5's old sample with `session` and no context. This test is already on master.
+- `test/org/policy.local.test.ts` gains: A adds B as an owner of a lane A and a lane B session on a real endpoint, with a sminos stand-in that executes as the desk track's contract says (owners, `ownersProof`, `policyRev`, re-list), and the next listing names both. The lane B record carries its spawn act ahead of the owner act, so the re-list goes through DL190 (b)'s placement.
+- Live, at M8's owner sitting (moved there from M6's staging run, which has passed; the architect, 2026-11-09): B's name appears on the owner's row. See M8, Concrete Steps.
 
 ### M6a — Reader state and drafts per member *(executable; re-planned 2026-11-06)*
 
@@ -1695,6 +1698,7 @@ The door adds no authority. An act through it is authenticated by its step-up si
 - The owner has deleted its key file and anchor.
 - `admin show`, run once more by the owner before the deletion, and the Org page both name the app's device as the only root.
 - Acceptance items 1 to 7 are recorded in Outcomes with their evidence.
+- M5b's live proof (acceptance 5's add half) is recorded in Outcomes: a second member's name on a row the owner co-owns, after "Add owner…" (moved here from M6's staging run; the architect, 2026-11-09).
 
 **Touches.** O8's document (Outcomes, Progress) and the report. No code: M4a's `device.remove` already composes the revocation for any device but this profile's own (`edits.ts:232-246`), and M3 delivers it. A defect found on the way gets its own PR.
 
@@ -1713,6 +1717,7 @@ The door adds no authority. An act through it is authenticated by its step-up si
   - The checks refuse it unless the app's device is a root (`empty-roots`).
   - Removing it from the app is the intended path, since admin's own `remove-device` refuses its own device (`admin.ts:676-693`).
 - **Copy.** The Org group's root lines name the deployment admin device as such until it is gone (Q6's "ending the deployment admin" as a guided step): "Deployment admin (the CLI's software root): remove it once O14's last step has run". The row offers its removal only while this Mac is a root.
+- **M5b's live proof runs on staging, not production** (added 2026-11-09 at M5b's cut). The architect moved it to this sitting so the owner sits once. Production has no second member, and none joins during P5: a second member is deferred, behind Decision Log 235's precondition (P5 §"Deferred"; P5 Decision Logs 235 and 248). So the step runs on the staging org, with the owner's second staging identity as M6b's layer 2 used it. It runs inside this sitting, as its first part, on staging, before the production steps, with the adder a MAWS profile the owner drives (the architect, 2026-11-09). The desk track sets its scene. It is step 7 below.
 
 **The owner's steps.** These are in Concrete Steps, M8, each with its check, and go to the architect for a sitting.
 
@@ -1996,7 +2001,7 @@ The live check is the owner's, on staging first. In the Delegations section the 
     npx vitest run --project node src/main/org/policy.test.ts
     npx vitest run --project node-timing test/org/policy.local.test.ts
 
-Live: at the staging run, or the next sitting after it: the owner adds the second member as an owner of a lane A and a lane B session, and both rows name them.
+Live: at M8's sitting, step 7 (moved there on 2026-11-09; the architect).
 
 **M8.** The owner's, at the owner's hand, each in Terminal or iTerm from a checkout of master at or after this re-plan. The architect sets the sitting.
 1. **The root add, unless done.** Run `apps/desk-hub/deploy/production-run.sh admin show`.
@@ -2013,6 +2018,15 @@ Live: at the staging run, or the next sitting after it: the owner adds the secon
    - Check: the files are gone (`ls` of the directory). The Org page still reads "This Mac signs the org state."
 5. **O15's check**, read-only: the Org page's root lines name one device, the app's. The architect records it for O15.
 6. **The acceptance run.** Items 1 to 7 on production (and staging where the item says so), each recorded in Outcomes with its evidence: a screenshot, a version, or a transcript line.
+7. **Add owner, on staging** (M5b's live proof; acceptance 5's add half). It runs on staging with the owner's second staging identity as B, because production has no second member (M8's Decisions). It runs **inside this sitting, as its first part, on staging, before the production steps 1 to 6** (the architect, 2026-11-09), so the owner sits once.
+   - **The scene.** The desk track sets it up from M6b's layer 2 (Concrete Steps, M6b): the email file, `real-member add` and `access-sync`, the pitfall, and the teardown.
+     - **The adder is a MAWS profile the owner drives**, signed in to staging with the owner's own staging identity, as M6b's layer 2 profile was. It is launched from a worktree at or after M5b's merge.
+     - The machine runs sminos 1.38.0 or later and a build at or after M5b's merge. It holds one lane A session and one lane B session that the owner's staging member owns.
+     - B is the owner's second staging identity, a member of the staging head.
+   - **The act.** In the owner's staging profile, "Add owner…" on each session's row offers B. Saving asks Touch ID once and shows its outcome.
+   - **Check.** On the owner's row for each session, the owners read "you, <B's first name>", and the hover card lists B with their email. The owner, as B's identity, confirms that the name is B's. The row must show it from the session's next listing, not from a local guess: a relaunch of the profile still shows it. A screenshot of each row and hover card is the record.
+   - **Fallback.** If at the sitting that profile can't be signed in to staging, the harness member is the adder and signs the act, as at M6b. The check is then B's paired profile: it reads each session as its own, co-owned with the harness's member, and doesn't count it under "+N others". Outcomes records that the sheet is proved by the unit and local suites only.
+   - **Teardown.** As M6b's: B is removed, with its device keys revoked if B paired, and Access admits only the owner's address again. The owner's staging profile's processes and directory go as the second member's did at M6b. Then the production steps begin.
 
 ### Interfaces and Dependencies
 
@@ -2621,6 +2635,8 @@ Each is built as its recommendation when its milestone is re-planned, unless the
 - Observation (M7b Task 2): `INTEGER PRIMARY KEY` reuses a pruned maximum id, so opaque cursors needed `AUTOINCREMENT`; and the `channel` feed needed an `apps/org-protocol` hunk the spec hadn't foreseen (`MachineFeed`).
 - Observation (M7b's final gate): `e2e/library.spec.ts` rewinds the index to version 9 from a template built by the numbered migrations plus `ADDED_COLUMNS`, so an `ADDED_TABLES` entry the opener creates at any version was missing from the template, and the rewound index failed "is a version-9 index". The template now takes `ADDED_TABLES` too (9bb79f34e). Any later `ADDED_TABLES` entry is covered.
   Evidence: run 42344559621 (e2e:library, packaged 1/2 red), 42357252517 (green).
+- Observation (M5b Task 1): `e2e/share.spec.ts:251` is a race in the test itself. A project row's hover card covered the People toggle before any session menu opened. It was red once on fea94bdaa and green on the rerun (42697938520), with master e181a1944 green as a control (42696748705). M5b reaches this spec, so Task 2 fixes the race (the architect, 2026-11-09).
+  Evidence: e2e:settings on fea94bdaa; the friction tracker's entry by Task 1's executor.
 
 ## Decision Log
 
@@ -4397,6 +4413,60 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   - 14 mutations caught. Green: static, unit and `e2e:settings` at 5fc80df73 (42592828180), after a typecheck red on bac4a425e (42588381451) that the API quota hid for half an hour.
   Date/Author: 2026-11-09, O8's executor (controller), under the architect's rulings.
 
+- Decision: M5b's refresh at its cut (2026-11-09, master e181a1944, branch `p5-o8-m5b`). M5b's section was reconciled against master. The parent is re-pinned at P5 Decision Log 260; 259 and 260 change nothing M5b consumes. These corrections bind M5b, and each keeps the section's intent.
+  1. **Both waits are met.** DL190 (b)'s spawn-act placement is `#bySpawn` (`src/endpoint/rl10/members.ts:338-347`). sminos ships the `record.*` executors from 1.38.0 (Decision Log, "The record.* executors ship in sminos 1.38.0"). The executor's contract, read from doperpowers main 8afbfb6b: the member is added to `owners`, the signed act is appended verbatim to `ownersProof`, `policyRev` is bumped, and the session is re-listed; an existing owner changes nothing (`sminos_visibility.py`'s `add_owner`; `test_visibility.py`'s `test_record_owners_*`).
+  2. **The scope shrinks to the renderer and one local case.** M6b built the main side, which the section listed as M5b's: `org.owners.add` (`policy.ts:263-264`), its schema, name, route and handler, the fixtures' answers, the act's shape test (`policy.test.ts:135-140`) and the stand-in's `record.owners` branch. What remains:
+     - the renderer: `AddOwnerSheet.tsx`, its dialog kind, the "Add owner…" item beside Share in the row menu and the header menu, copy, and tests;
+     - the local suite: the stand-in appends the verified act to `ownersProof` (it keeps only `owners` today, `policy.local.test.ts:209-210`), and one case, in which A adds B as an owner of a lane A and a lane B session and the next listing names both.
+     The architect accepted the shrink (2026-11-09) and carries it into P5's Decision Log at landing.
+  3. **Where the item is offered: Share's gate.** The section says "a listed row you own" and "a local session's row that has a listing". Add owner acts through the same record path and door as Share, so it is offered exactly where Share is (`useCanShare`, `sessions/share/target.ts`): a remote listing that names you an owner, or a session on this Mac whose `record.policy` names it. A machine whose sminos can't keep a reach shows the sheet's "can't yet" line and offers nothing, as Share's does. Rejected: a narrower gate of listed rows only. It would hide the item on a private session of yours that the same act serves.
+  4. **Who the sheet offers.** It offers the head's members (`org.view`) who aren't you and whom the session's known owners don't name: the listing's `owners` where there is one. A local session with no listing reads no owners, so it offers every member but you. An add that changes nothing (`changed: false`) reads "already an owner", not as a failure.
+  5. **The lane B record in the local case carries its spawn act ahead of the owner act**, so its re-list goes through DL190 (b)'s placement, which is why M5b waited on that fix.
+  6. **The live proof moves to M8's sitting** (the architect, 2026-11-09, so the owner sits once). Production has no second member, and none joins in P5 (P5 §"Deferred"; Decision Logs 235 and 248). So the step is staging's, with the owner's second staging identity as M6b's layer 2 used it: M8's Concrete Steps, step 7.
+  Date/Author: 2026-11-09, O8's executor (controller); items 2 and 6 the architect's rulings.
+
+- Decision: The architect's rulings on M5b's refresh (2026-11-09).
+  1. **Item 3 is accepted, on a condition.** The act's authority must be enforced below the renderer: the endpoint grades every `record.*` act `manage` (`offers.ts:163`), and `manage` is held only by the session's owners and the machine's (`grades.ts:8, 38`). A share tops out at `approve`, so a share holder never qualifies. The menu item is only a hint.
+     - Task 2 pins this: a non-owner who holds a share at `approve` and forces `record.owners` is refused `grade`, and the record is unchanged.
+     - Task 1's review confirms that `useCanShare` admits only owners. If it admits anyone the door would refuse for an owners act, the item narrows to owners, and the architect is told.
+  2. **Step 7 runs inside M8's sitting**, as its first part, on staging, before the production steps.
+  3. **The adder is a MAWS profile the owner drives**, signed in to staging with the owner's own staging identity. The row names B, the owner's second staging identity, so the sheet itself is proved. If that profile can't be signed in to staging at the sitting, the harness member adds, and Outcomes records that the sheet is proved by the unit and local suites only.
+  Date/Author: 2026-11-09, the architect; recorded by O8's executor (controller).
+
+- Decision: M5b Task 1, the renderer (fea94bdaa). Built as briefed, with these decisions:
+  1. **The ruling 1 check found `useCanShare` admitting non-owners on this Mac's own sessions.** This Mac's `record.policy` answers for all of its owners and names every session any of them owns. The local door, though, authorizes the act as the member who owns the signed-in device. So Add owner is offered:
+     - on a listing that names you an owner, which is exact already;
+     - on this Mac's own session, only while you are this Mac's one owner.
+     The architect accepted the narrowing (2026-11-09) as what ruling 1 asked for.
+  2. **"This Mac's one owner" comes from a new store, `stores/local-owner.ts`.** It reads `org.view` at connect and at each `org.changed`, and finds the machine whose ref is this Mac's. An org-owned Mac resolves to its admins. The store is wired in `App.tsx`.
+  3. **The sheet opens on a policy read, as Share's does.** If the Mac's sminos can't keep a reach, it shows the "can't yet" line. If the reach can't be read, it offers Reload. It adds one person per save. "Already an owner" reads as a no-op, not as a failure.
+  4. **`copy.ts` gains a `grade` refusal line**, so both sheets name the endpoint's owners-only refusal.
+  5. Main and the e2e fixture are unchanged, because no test showed a defect in `org.owners.add`.
+  6. **The architect's rulings on the task's concerns:**
+     - Share's own gate admits the same non-owners on this Mac. It takes the same one-owner clause in this milestone: in Task 1's fix wave, or in Task 2 if the review finds nothing to fix. The endpoint's contract doesn't change.
+     - The exact check needs a local `record.policy` that answers as the calling device's member. That is a residue row for the architect, with the desk track reviewing. It carries two costs. On a Mac with more than one owner, Add owner and Share are hidden on its own sessions, which costs nothing while every Mac has one owner. Under `MAWS_DEV_ORG`, `org.view` is null, so neither shows on this Mac's sessions. It triggers on a Mac with more than one owner, or a change of a Mac's owners (widened on 2026-11-09 for the review's I1). It ends when the local `record.policy` answers as the calling device's member and both menus use the exact check.
+     - **I1, the head skew, is one of its costs** (the architect accepted it as residue, 2026-11-09). The gate reads "you are this Mac's one owner" from the app's `org.view`, and the session from mawsd's `record.policy`, which answers from mawsd's own held head. Until mawsd takes the head that hands this Mac to you, both menus and the sheet can offer an add the door refuses `grade`. The door stays the authority, so this is a wrong offer, not a bypass.
+     - In the fix wave (4d33e84f9), Share takes the same one-owner clause through one helper, `useOneOwnerHere`, and Add owner's gate is `useCanShare` itself. The gate's comments call it a hint that the door decides. The PR lists I1 under Unresolved Review Findings, and M5b makes no endpoint change.
+  Date/Author: 2026-11-09, O8's executor (Task 1) and controller; item 6 the architect's rulings.
+
+- Decision: M5b Task 2, the local suite (67af5b945, 3767a4ba6, 51b93834e). Built as briefed. Its decisions:
+  1. **The stand-in executes `record.owners` as sminos's `add_owner` does.** The member is added, the verified act is appended verbatim to `ownersProof`, and `policyRev` is bumped. An existing owner changes nothing.
+  2. **Lane B is placed by its spawn from its first join.** A record is placed only once, at its first join, so the owner add's re-list can't run `#bySpawn` again. Instead `app-c` is placed by its spawn from the start, as when a `/clear` races its first record. The re-list carries [spawn act, owner act] and keeps its listing under `app-c`. The case asserts both the order and the placement. The spawn act is the minimal `{device, opId, action: 'session.spawn'}` that `targets.test.ts` uses; the endpoint reads only `action` and `opId`.
+  3. **One case covers both routes.** S's owner is added over A's link, and `app-c`'s through the local door.
+  4. **The refusal of a share holder is pinned (the architect's ruling 1).** B, at `approve` and not an owner, adds through the app's own `createOrgPolicies.addOwner`, with B's real signing and step-up. The act is refused `grade`, and the record is unchanged. Grading `record.*` at `approve` makes the case fail.
+  5. **The race at `share.spec.ts:251` has a `showPeople` helper.** It waits for the project's hover card to close before the right-click. If the right-click's own hover opens the card again, it closes the menu and the card with Escape and retries inside `toPass`.
+  6. **What the case proves, by its review** (the architect asked for this). For both lanes, B's real rows go from `owners: [A], mine: false` to `owners: [A, B], mine: true` from the next listing. Lane B is also confirmed in the hub's machine-signed listing under `app-c`. So both halves prove the outcome, the owners a row shows, and not only that the act was carried.
+     - **What it doesn't prove.** For lane B, it doesn't prove that B gains effective owner authority: the suite's lane B authorization records are a fixture separate from the member frames, and they still name A alone after the add. It doesn't prove the label rendered on the row: `owners.test.ts` (M5) covers the label from row data, and M8's step 7 covers the label on staging. And it doesn't prove execution by real sminos, which step 7 also covers.
+     - The review left this as a Minor, carried to the PR's Unresolved Review Findings. A future case in which B acts as an owner derives the lane B authorization records from the member updates and asserts a `manage`-only act by B.
+  Date/Author: 2026-11-09, O8's executor (Task 2).
+  Item 6: the controller, from Task 2's review.
+
+- Decision: M5b is built as two tasks under subagent-driven execution, each reviewed at its frontier, then one branch review at reviewer-medium (the section names none; M5b signs nothing new and adds no wire). Neither task touches `src/endpoint` or `apps/`, so the desk track has no hunk to review.
+  1. **The renderer**: `AddOwnerSheet.tsx` and its test, the `addOwner` dialog kind, the menu items in `menus.tsx` and `Toolbar.tsx` under Share's gate, the copy, and the e2e fixture's answer if a spec opens it.
+  2. **The local suite**: the stand-in's `ownersProof` append and the lane A and lane B case.
+  Disk on this MacBook is thin (about 7 GiB free at the cut): one worktree, and its install limited to what the gates need. Work stops if free space falls under about 2 GiB.
+  Date/Author: 2026-11-09, O8's executor (controller).
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
@@ -4669,3 +4739,27 @@ Retrospective (M4c). The milestone was built as six tasks, each reviewed at its 
 - **An outcome claimed from an inference rather than from the authority that knew it.** "Published" was read from a slot's absence. "Not minted" was read from an unreadable 201. A renderer adopted whichever unsent row was there. A row treated the status as current though it travels a different Electron pipe from the answer. The fixes all moved the claim to its source: the signer's own word, main's run identity, and a revision the answer names.
 
 A future child that holds a secret across awaits should state, before it builds, which owner holds each secret and which endings drop it. Its tests should end the run while each external step is still out, and they should read every outcome from the party that performed the step.
+
+**M5b (2026-11-09, PR from `p5-o8-m5b`).** An owner adds an owner.
+- **Where it is offered.** "Add owner…" sits beside Share, in the row menu and in the session's header menu, under one gate:
+  - on a remote listing that names you an owner;
+  - on a session of this Mac while you are its one owner.
+  Share takes the same gate. The gate is a hint, and the door decides: every `record.*` act is graded `manage`, which only an owner holds.
+- **The sheet.** It offers the head's members who aren't you and aren't already owners. Saving sends `record.owners {add: true, member}` behind one Touch ID, through M6b's record path or this Mac's door, and the outcome shows in the sheet: added, already an owner, or the endpoint's refusal in words.
+- **The scope shrank to the renderer and one local case**, because M6b had built main's `org.owners.add`.
+- **The live proof moved to M8's sitting.** It is its first part, step 7, on staging with the owner's second staging identity, since production has no second member.
+
+Evidence:
+- the renderer: `AddOwnerSheet` 9, `local-owner` 5, `reach` 9, `App` 12, `ShareSheet` 15;
+- `test/org/policy.local.test.ts`, 8 cases. The sminos stand-in runs `record.owners` as sminos's `add_owner` does. A adds B as an owner of a lane A session over A's link, and of a lane B session placed by its spawn act through this Mac's door. B's rows then read both as `[A, B]` and B's own, and the hub's signed listing under `app-c` agrees. B, holding a share at `approve`, is refused `grade`, and the record is unchanged;
+- `e2e:settings`, with `share.spec.ts`'s race fixed;
+- the gates the PR body lists.
+
+Not proved here: B's effective authority over the lane B session (the suite's lane B authorization fixture is separate from the member frames), the label rendered on a row (covered by M5's `owners.test.ts`), and execution by real sminos. M8's step 7 proves the last two.
+
+Retrospective (M5b). The refresh mattered more than the build. Read against master at the cut, half the section had already landed with M6b, so the plan became two tasks instead of a main, shared and renderer build. Both task reviews turned on one question the architect asked up front: is the menu's gate the door's authority, or only a hint at it?
+- The first answer found the gate admitting non-owners on this Mac's own sessions. This Mac's `record.policy` answers for all its owners, while the door authorizes as the device's member.
+- The second answer found a head skew, which no renderer check can close.
+Both came from reading the renderer's evidence against the authority that decides. That is M4c's lesson of reading every outcome from the party that performed it, applied to a permission instead of an outcome. The exact check needs the local `record.policy` to answer as the calling member, which is residue.
+
+A future child that shows an action conditionally should name the authority that decides it, and say what evidence the menu reads and whose head that evidence comes from. Where the two differ, it should test the case in which they disagree.
