@@ -380,8 +380,11 @@ describe('the polling', () => {
   it('two entries answering the code end it: start over', async () => {
     const h = await harness();
     const pair = started(h, BEA);
-    h.hub.post(BEA, await posted(pair.code, await freshEntry()));
-    h.hub.post(BEA, await posted(pair.code, await freshEntry()));
+    // both are built before either is posted: an await between the posts lets a poll read one entry alone and freeze it
+    // as the candidate, which is the next case's scene (`two-entries` with the candidate kept), not this one's
+    const [first, second] = [await posted(pair.code, await freshEntry()), await posted(pair.code, await freshEntry())];
+    h.hub.post(BEA, first);
+    h.hub.post(BEA, second);
     await until(() => status(h).problem !== null, 'the end');
     expect(status(h)).toMatchObject({ problem: 'two-entries', entry: null });
     const reads = h.hub.reads.length;
