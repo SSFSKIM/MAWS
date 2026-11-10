@@ -13,6 +13,7 @@
 // one the Worker admitted before the revocation and delivered after it opens nothing, and the name enrolled again (a
 // new credential) is served.
 import { DurableObject } from 'cloudflare:workers';
+import type { ProjectsRecord, Signed } from 'org-protocol';
 import { CLIENT_HEADER, heartbeatMs, type Env } from '../env';
 import { LEASE_PERIODS, type DownFrame } from '../protocol/machine';
 import { described } from './project';
@@ -54,7 +55,7 @@ export class Machine extends DurableObject<Env> {
   /** The RL1 sockets, in the object addressed by the machine's ref; made on first use, so a name's object never makes
    * it. */
   private get relay(): Relay {
-    return (this.relayInstance ??= new Relay(this.ctx, this.env, () => this.timing()));
+    return (this.relayInstance ??= new Relay(this.ctx, this.env, () => this.timing(), () => this.retryBaseMs()));
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -207,6 +208,11 @@ export class Machine extends DurableObject<Env> {
     this.relay.relayState(version, members);
   }
 
+  /** A projects record the Registry stored, for this ref's endpoint (the project registry, Interfaces §C). */
+  relayProjects(record: Signed<ProjectsRecord>): void {
+    this.relay.relayProjects(record);
+  }
+
   /** Ends the RL1 connection of this generation, if it is still the current one (a project could not deliver to it). */
   async close(generation: number): Promise<void> {
     const rl1 = this.rl1();
@@ -230,6 +236,12 @@ export class Machine extends DurableObject<Env> {
       await Promise.all(revoked.map((claim) => this.owe('revoke', claim, claim.generation)));
     }
     return this.ctx.storage.kv.get<number>('generation') ?? 0;
+  }
+
+  /** How long the first retry of the relay's failed snapshot read waits at most (retry.ts; the suites' Worker shortens
+   * it). */
+  protected retryBaseMs(): number {
+    return RETRY_BASE_MS;
   }
 
   /** The configured heartbeat (15 s deployed; shorter under the local command), a lease of LEASE_PERIODS of it, and a

@@ -167,7 +167,7 @@ export const ERROR_CODES: ReadonlySet<string> = new Set([
   'key-purged', 'key-revoked', 'last-key', 'malformed', 'method-not-allowed', 'mint-failed', 'name-taken', 'no-endpoint', 'no-key',
   'no-member', 'no-ref', 'no-state', 'not-a-member', 'not-active', 'not-admin', 'not-bound', 'not-configured', 'not-enrolled', 'not-found',
   'not-head', 'not-key-holder', 'not-listed', 'not-on-rl1', 'not-org-admin', 'not-renewed', 'not-retired', 'not-yours', 'prefix-mismatch', 'ref-taken', 'removed',
-  'retired', 'rollback', 'stale-attestation', 'stale-endpoint', 'stale-generation', 'stale-listing', 'state-unavailable', 'token-used',
+  'retired', 'rollback', 'stale-attestation', 'stale-endpoint', 'stale-generation', 'stale-listing', 'stale-projects', 'state-unavailable', 'token-used',
   'too-long', 'too-many', 'unknown-device', 'unknown-enrollment', 'unknown-key', 'unknown-machine', 'unknown-project', 'unknown-token',
   'upgrade-required', 'wrong-use',
 ]);

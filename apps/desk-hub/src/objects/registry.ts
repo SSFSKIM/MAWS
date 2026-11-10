@@ -42,7 +42,7 @@ import type { AccessIdentity } from '../identity/access';
 import { ServiceTokenApiError, serviceTokens } from '../identity/service-tokens';
 import { importVapidKey, pushRequest, type VapidKey } from '../push/web-push';
 import { base64urlEncode, isBase64urlOf } from '../protocol/base64url';
-import { isListingGone, LISTINGS_PAGE_BYTES, REGISTRY_APP_PARAM, type Delegation, type HistoryInventory, type Listing, type RegistryAppFrame, type Signed } from 'org-protocol';
+import { isListingGone, LISTINGS_PAGE_BYTES, REGISTRY_APP_PARAM, type Delegation, type HistoryInventory, type Listing, type ProjectsRecord, type RegistryAppFrame, type Signed } from 'org-protocol';
 import type { GridDown, ProjectSummary, PushNotice, RegistryDown } from '../protocol/browser';
 import { toWire } from '../protocol/parts';
 import {
@@ -794,8 +794,9 @@ export class Registry extends DurableObject<Env> {
   /**
    * A member's registry socket (the Worker sends only a member's): every project's summary, then each change. An app's
    * (`?app=1`, OX8; O11 M7) gets after the grid the org state's head version and every listing held, in pages of at
-   * most `LISTINGS_PAGE_BYTES`, the last marked, then a `state` notice at each accepted state and each listing as it is
-   * stored. A socket without the query, desk-web's grid, gets none of it: listings are no use to it, every phone's
+   * most `LISTINGS_PAGE_BYTES`, the last marked, and every projects record held in pages the same way (`projects-all`,
+   * Interfaces §C), then a `state` notice at each accepted state and each listing and projects record as it is stored.
+   * A socket without the query, desk-web's grid, gets none of it: listings are no use to it, every phone's
    * reconnect would carry them all, and a snapshot past its parts bound would close it into a reconnect loop.
    */
   async fetch(request: Request): Promise<Response> {
@@ -815,6 +816,8 @@ export class Registry extends DurableObject<Env> {
       if (version !== undefined) this.send(server, { t: 'state', version });
       const pages = this.records.listingPages(LISTINGS_PAGE_BYTES);
       pages.forEach((records, i) => this.send(server, { t: 'listings', records, last: i === pages.length - 1 }));
+      const projects = this.records.projectPages(LISTINGS_PAGE_BYTES);
+      projects.forEach((records, i) => this.send(server, { t: 'projects-all', records, last: i === projects.length - 1 }));
     }
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -1588,6 +1591,57 @@ export class Registry extends DurableObject<Env> {
   /** A machine-signed endpoint record (RL1's `endpoint`, through M6's Machine DO). */
   storeEndpoint(record: unknown): Promise<Result<{ stored: boolean }>> {
     return this.records.storeEndpoint(record);
+  }
+
+  // ---- Projects records (the project registry, Interfaces §C) ---------------------------------------------------
+
+  /**
+   * The probe a machine's RL1 object asks before it advertises `projects` in a welcome: this object keeps projects
+   * records. A Registry on the code before them lacks the method, and the welcome leaves the capability out; a deploy
+   * replaces the two objects at different moments, so a Relay of this build can run against a Registry of the last.
+   */
+  keepsProjects(): true {
+    return true;
+  }
+
+  /** One page of the projects records held, those of the machine refs after `after` (the first page when null), within
+   * `LISTINGS_PAGE_BYTES`: the snapshot an endpoint's socket is sent after its welcome, read a page per call so that no
+   * answer nears an RPC's size limit however many records the org holds. */
+  async projectPage(after: string | null): Promise<{ records: Signed<ProjectsRecord>[]; last: boolean }> {
+    return this.records.projectPage(after, LISTINGS_PAGE_BYTES);
+  }
+
+  /** A machine-signed projects record (RL1's `projects`, through the machine's ref object). One stored goes to every
+   * app's Registry socket and to every machine's ref object, for its endpoint, the machine's own included; one held
+   * already goes nowhere. */
+  async storeProjects(record: unknown): Promise<Result<{ stored: boolean }>> {
+    const kept = await this.records.storeProjects(record);
+    if (!kept.ok || !kept.value.stored) return kept;
+    const frame = { t: 'projects', record: record as Signed<ProjectsRecord> } as const;
+    this.toApps(frame);
+    const org = this.ensureOrg().id;
+    for (const { ref } of this.sql.exec<{ ref: string }>('SELECT ref FROM relays').toArray()) void this.relayProjects(org, ref, frame.record, 1);
+    return kept;
+  }
+
+  /**
+   * A stored projects record to a machine's ref object (`Machine.relayProjects`), which writes it to its endpoint when
+   * that connection was welcomed with `projects`. A call that failed goes again (retry.ts), in memory: a reset ref object
+   * drops its endpoint's socket, whose next welcome brings the whole snapshot, but a lost connection between the two
+   * objects heals nothing. A ref object on the code before projects records lacks the method, and its endpoint was
+   * welcomed without `projects`: it is passed by.
+   */
+  private async relayProjects(org: string, ref: string, record: Signed<ProjectsRecord>, attempt: number): Promise<void> {
+    try {
+      await this.env.MACHINE.get(this.env.MACHINE.idFromName(relayObjectName(org, ref))).relayProjects(record);
+    } catch (error) {
+      if (lacksMethod(error, 'relayProjects')) return;
+      const wait = attempt < RETRY_ATTEMPTS ? retryDelay(attempt, this.retryBaseMs(), error) : null;
+      console.log(JSON.stringify({ desk: 'registry', event: 'projects-relay-failed', ref, machine: record.body.machine, revision: record.body.revision, attempt, error: described(error), retry_ms: wait === null ? null : Math.round(wait) }));
+      if (wait === null) return;
+      await new Promise((resolve) => setTimeout(resolve, wait));
+      return this.relayProjects(org, ref, record, attempt + 1);
+    }
   }
 
   /** The listings kept, a project's alone when named, with their machines' endpoint records. */

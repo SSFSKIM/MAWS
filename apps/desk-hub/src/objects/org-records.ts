@@ -3,8 +3,9 @@
 //   - each v2 machine's posted key: its public key, ref and pairing MAC, per enrollment, for the enrolling member's
 //     device to check (the hub never checks the MAC);
 //   - delegation-signed machine certificates and their delegations' retirements, served beside the state;
-//   - machine-signed listings, per (machine ref, session) at the highest revision, and endpoint records per machine ref
-//     at the newest `issued`.
+//   - machine-signed listings, per (machine ref, session) at the highest revision, endpoint records per machine ref
+//     at the newest `issued`, and projects records (the project registry, Interfaces §C) per machine ref at the highest
+//     revision, in `projects_records`: the Registry's own `projects` table is the projects that have a log, apart.
 // Every record is verified by the protocol package against the head, a courtesy (RL §5.5): it refuses early what a
 // machine or an app would refuse, and nothing it keeps confers authority. A record is verified against the head and the
 // certificates read before the verification's awaits, and kept only if neither moved meanwhile (else verified again),
@@ -20,6 +21,7 @@ import {
   isListingGone,
   isMachineCert,
   isMachineRef,
+  isProjectsRecord,
   isPublicKey,
   isSigned,
   keyId,
@@ -30,12 +32,14 @@ import {
   verifyEndpointRecord,
   verifyListing,
   verifyMachineCert,
+  verifyProjectsRecord,
   type CertRetirement,
   type Certificates,
   type EndpointRecord,
   type Listing,
   type MachineCert,
   type OrgState,
+  type ProjectsRecord,
   type Signed,
   type Verdict,
   type VerdictCode,
@@ -56,6 +60,7 @@ CREATE TABLE IF NOT EXISTS listings (
   machine TEXT NOT NULL, session TEXT NOT NULL, revision INTEGER NOT NULL, project TEXT, owners TEXT NOT NULL,
   body TEXT NOT NULL, stored TEXT NOT NULL, PRIMARY KEY (machine, session));
 CREATE TABLE IF NOT EXISTS endpoints (machine TEXT PRIMARY KEY, issued TEXT NOT NULL, body TEXT NOT NULL, stored TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS projects_records (machine TEXT PRIMARY KEY, revision INTEGER NOT NULL, body TEXT NOT NULL, stored TEXT NOT NULL);
 `;
 
 /** A `listings` row's condition for a live listing (not withdrawn), bound to `LISTING_GONE`. */
@@ -79,6 +84,23 @@ const fail = (status: number, error: string, message?: string, conflicts?: CertC
 });
 const iso = () => new Date().toISOString();
 const parsed = <T>(rows: Array<{ body: string }>) => rows.map((r) => JSON.parse(r.body) as T);
+
+/** Kept records' bodies in pages whose records come to at most `budget` bytes of JSON each, a larger record alone in its
+ * page; one empty page for none. */
+function paged<T>(rows: Iterable<{ body: string }>, budget: number): Signed<T>[][] {
+  const pages: Signed<T>[][] = [[]];
+  let bytes = 0;
+  for (const { body } of rows) {
+    const size = utf8Length(body);
+    if (pages.at(-1)!.length > 0 && bytes + size > budget) {
+      pages.push([]);
+      bytes = 0;
+    }
+    pages.at(-1)!.push(JSON.parse(body) as Signed<T>);
+    bytes += size;
+  }
+  return pages;
+}
 
 /** The posting machine, as the Worker resolved it: its name, and how it enrolled. */
 export type Poster = { name: string; delegation: string | null; use: number | null };
@@ -295,9 +317,26 @@ export class OrgRecords {
     });
   }
 
+  /**
+   * A machine's projects record, kept at its highest revision; `409 stale-projects` for one not above it, naming the
+   * revision held (the same bytes again are taken, and nothing is stored). A record of a machine the head has since
+   * retired stays kept: every reader verifies it, and refuses it then.
+   */
+  async storeProjects(body: unknown): Promise<Result<{ stored: boolean }>> {
+    if (!isSigned(body, isProjectsRecord)) return fail(400, 'malformed', 'a projects record is a machine-signed ProjectsRecord, {body, sig}');
+    const r = body.body;
+    return this.machineSigned<ProjectsRecord, { stored: boolean }>(verifyProjectsRecord, body, () => {
+      const held = this.sql.exec<{ revision: number; body: string }>('SELECT revision, body FROM projects_records WHERE machine = ?', r.machine).toArray()[0];
+      if (held && held.body === canonicalize(body)) return ok({ stored: false });
+      if (held && r.revision <= held.revision) return fail(409, 'stale-projects', `the projects record held is at revision ${held.revision}`);
+      this.sql.exec('INSERT OR REPLACE INTO projects_records (machine, revision, body, stored) VALUES (?, ?, ?, ?)', r.machine, r.revision, canonicalize(body), iso());
+      return ok({ stored: true });
+    });
+  }
+
   /** A machine-signed record verified by `verify`, then judged against what is held and committed by `keep`, in one
    * synchronous step, so two submissions at once never both pass the freshness check. */
-  private machineSigned<T extends Listing | EndpointRecord, V extends { stored: boolean }>(
+  private machineSigned<T extends Listing | EndpointRecord | ProjectsRecord, V extends { stored: boolean }>(
     verify: (state: OrgState, record: Signed<T>, certs: Certificates, now: Date) => Promise<Verdict>,
     record: Signed<T>,
     keep: () => Result<V>,
@@ -327,18 +366,32 @@ export class OrgRecords {
    * (OX8; O11 M7), so that no frame grows with the org's listings.
    */
   listingPages(budget: number): Signed<Listing>[][] {
-    const pages: Signed<Listing>[][] = [[]];
+    return paged<Listing>(this.sql.exec<{ body: string }>(`SELECT body FROM listings WHERE ${LIVE} ORDER BY machine, session`, LISTING_GONE), budget);
+  }
+
+  /** Every projects record kept, by machine ref, in pages as `listingPages`' (Interfaces §C): the snapshot an app's
+   * Registry socket is sent. */
+  projectPages(budget: number): Signed<ProjectsRecord>[][] {
+    return paged<ProjectsRecord>(this.sql.exec<{ body: string }>('SELECT body FROM projects_records ORDER BY machine'), budget);
+  }
+
+  /**
+   * One page of that snapshot, the records of the machine refs after `after` (from the first when null) coming to at
+   * most `budget` bytes of JSON, a larger record alone; `last` when none is left after it. An endpoint's snapshot is read
+   * so, a page per call, so no answer grows with the org's records. A record stored between two calls is in a later page
+   * when its ref is after the cursor, and is sent live either way.
+   */
+  projectPage(after: string | null, budget: number): { records: Signed<ProjectsRecord>[]; last: boolean } {
+    const rows = this.sql.exec<{ body: string }>('SELECT body FROM projects_records WHERE machine > ? ORDER BY machine', after ?? '');
+    const records: Signed<ProjectsRecord>[] = [];
     let bytes = 0;
-    for (const { body } of this.sql.exec<{ body: string }>(`SELECT body FROM listings WHERE ${LIVE} ORDER BY machine, session`, LISTING_GONE)) {
+    for (const { body } of rows) {
       const size = utf8Length(body);
-      if (pages.at(-1)!.length > 0 && bytes + size > budget) {
-        pages.push([]);
-        bytes = 0;
-      }
-      pages.at(-1)!.push(JSON.parse(body) as Signed<Listing>);
+      if (records.length > 0 && bytes + size > budget) return { records, last: false };
+      records.push(JSON.parse(body) as Signed<ProjectsRecord>);
       bytes += size;
     }
-    return pages;
+    return { records, last: true };
   }
 
   /**
