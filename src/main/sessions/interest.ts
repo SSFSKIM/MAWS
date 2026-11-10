@@ -20,8 +20,8 @@ export function interestSet(mainTabs: unknown, onScreen: Iterable<AppSessionId>,
 }
 
 // P5 O3-C (D11): the app's interest, memoized: read again only after `main.tabs` is written or a session's visibility
-// changes. The report sends it, and on the embedded shape it is the sweep's `interest()` (at O3-D, mawsd's union of every
-// client's report). A tab is written at once when it opens but nothing before the layout hydrates, so a session on
+// changes. The report sends it to `mawsd`, whose sweep keeps the union of every client's report (P5 O15 M2: the
+// embedded shape, whose sweep read it in process, is gone). A tab is written at once when it opens but nothing before the layout hydrates, so a session on
 // screen counts too: a tab opened in that window is the one on screen.
 export interface AppInterest {
   set(): ReadonlySet<AppSessionId>;
