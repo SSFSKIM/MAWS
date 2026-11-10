@@ -47,7 +47,7 @@ export interface SessionStreamOptions {
   ringSize?: number;
   batchMs?: number;
   exitedRingSize?: number; // C12: the ring once the launch has exited (EXITED_RING)
-  log?: (line: string) => void; // E10: the burst's tail_gap line, a refused batch
+  log?: (line: string) => void; // E10: the burst's tail_gap line, a refused batch; P5 O15 M2b: the ring's first eviction, a journal read
   // E10: whether a client is still connected after an emit answered false: the runtime answers false for an invalid
   // payload too, and a batch refused while the client is there can never be delivered, so it is skipped (absent: false
   // means the client is gone)
@@ -93,6 +93,7 @@ export class SessionStream {
   private readonly ring: SessionEvent[] = [];
   private cursor: JournalCursor | null = null;
   private evictedThrough: number | null = null; // the seq of the last event the ring dropped
+  private evictionLogged = false; // P5 O15 M2b: the launch's first eviction is in host.log
   private pending: SessionEvent[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
   private readonly requests = new Map<string, SessionEvent>();
@@ -147,6 +148,9 @@ export class SessionStream {
     const dropped = this.ring.splice(0, this.ring.length - size);
     if (dropped.length === 0) return;
     this.evictedThrough = dropped.at(-1)!.seq;
+    // P5 O15 M2b (§H): where a replay comes from, ring or journal, is read off host.log from here
+    if (!this.evictionLogged) this.opts.log?.(`ring evicted ${this.opts.appSessionId} launch ${this.opts.launchId}: events through seq ${this.evictedThrough} are the journal's now`);
+    this.evictionLogged = true;
     // E10: the delivered cursor moves with the ring, and is gone once the ring rolled past it; the undelivered events
     // dropped are lost to the client's listeners (the burst logs them as a tail_gap)
     const firstUndelivered = this.deliveredTo === null ? 0 : this.deliveredTo.index + 1;
@@ -270,11 +274,14 @@ export class SessionStream {
   // the row read past a full page) lets the next page, whose `afterSeq` is this one's `lastSeq`, go on from there, so
   // paging reads each row once (whole-branch review); the journal is append-only, so rows written meanwhile are simply
   // read next. Any other `afterSeq` starts over from the first row. Null when the files cannot be read back whole (a
-  // rotated file pruned, a file removed by an archive).
+  // rotated file pruned, a file removed by an archive). P5 O15 M2b (§H): a read that starts over and is served writes
+  // one line at its end with the rows it read and its time, which is most of the endpoint's `J` for an evicted cursor.
   private async fromJournal(afterSeq: number | null, limit: number | null, bound: number | null = null): Promise<EventsSnapshot | null> {
     const prefix = `${basename(this.opts.journalPath, '.jsonl')}.`; // `<file id>.jsonl`, then `<file id>.<n>.jsonl`
     const files = JournalReader.forSession(dirname(this.opts.journalPath)).filter((file) => basename(file).startsWith(prefix));
+    const started = performance.now();
     const resumable = this.cursor !== null && afterSeq !== null && afterSeq >= this.cursor.through;
+    let rows = 0;
     const cursor = resumable ? this.cursor! : { normalizer: new Normalizer({ appSessionId: this.opts.appSessionId, launchId: this.opts.launchId, sessionId: this.opts.sessionId }), file: 0, offset: 0, expected: 1, carried: [], through: 0 };
     this.cursor = null; // re-armed only by a page that read cleanly
     if (files.length === 0) return null;
@@ -311,6 +318,7 @@ export class SessionStream {
             cursor.offset += Buffer.byteLength(line, 'utf8') + 1;
             if (line.length === 0) continue;
             const row = parseJournalRow(JSON.parse(line));
+            rows += 1;
             if (row.seq !== cursor.expected) return null; // a gap: part of the launch is gone
             cursor.expected += 1;
             const out = cursor.normalizer.push(row).filter(wanted);
@@ -335,6 +343,7 @@ export class SessionStream {
     const lastSeq = left?.seq ?? events.at(-1)?.seq ?? afterSeq ?? 0;
     cursor.through = lastSeq;
     this.cursor = cursor;
+    if (!resumable) this.opts.log?.(`session.events ${this.opts.appSessionId} after ${afterSeq ?? 'start'}: from the journal, ${rows} rows read in ${Math.round(performance.now() - started)} ms`);
     return { events, lastSeq, complete, ...(left && { omitted: left }) }; // `lastSeq` is the cursor for the next call
   }
 }

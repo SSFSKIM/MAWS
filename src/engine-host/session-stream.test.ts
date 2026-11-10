@@ -374,6 +374,69 @@ describe('an exited stream keeps a bounded ring (C12)', () => {
 });
 // C12 end
 
+// P5 O15 M2b (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, §H): host.log says when a launch's ring first
+// evicted, and when a read was served from the journal that does not continue the page before it, with the rows it read.
+describe('what host.log says of the ring and the journal (P5 O15 M2b)', () => {
+  const evictions = (lines: string[]) => lines.filter((line) => line.startsWith('ring evicted '));
+  const journalReads = (lines: string[]) => lines.filter((line) => line.startsWith('session.events '));
+
+  it('names a launch\'s first eviction once, whatever the count of trims, the exit\'s included', async () => {
+    const { events, launchId, sessionId, appSessionId, status, journalPath } = await recordedInit();
+    const lines: string[] = [];
+    const stream = new SessionStream({ appSessionId, launchId, sessionId: sessionId as never, journalPath, emit: recorder().emit, ringSize: 5, exitedRingSize: 2, log: (line) => lines.push(line) });
+    stream.events(events.slice(0, 6));
+    expect(evictions(lines), 'nothing evicted yet').toEqual([]);
+    for (const event of events.slice(6)) stream.events([event]); // a trim every few events
+    stream.status({ ...status, process: 'exited' });
+    const firstDropped = events[1]!.seq; // the first trim, at the seventh event, keeps the newest 5
+    expect(evictions(lines)).toEqual([`ring evicted ${appSessionId} launch ${launchId}: events through seq ${firstDropped} are the journal's now`]);
+  });
+
+  it('says nothing of an eviction for an adopted launch\'s history, which the ring never held', async () => {
+    const { events, launchId, sessionId, appSessionId, journalPath } = await recordedInit();
+    const lines: string[] = [];
+    const through = events[Math.floor(events.length / 2)]!.seq!;
+    const stream = new SessionStream({ appSessionId, launchId, sessionId: sessionId as never, journalPath, emit: recorder().emit, historyThrough: through, log: (line) => lines.push(line) });
+    stream.events(events.filter((e) => e.seq! > through));
+    expect(evictions(lines)).toEqual([]);
+  });
+
+  it('names a journal read at its first page with the rows it read, not at the pages that continue it, and again at a read that starts over', async () => {
+    const { events, launchId, sessionId, appSessionId, journalPath } = await recordedInit();
+    const lines: string[] = [];
+    const stream = new SessionStream({ appSessionId, launchId, sessionId: sessionId as never, journalPath, emit: recorder().emit, ringSize: 5, log: (line) => lines.push(line) });
+    stream.events(events);
+    stream.flush();
+    const push = vi.spyOn(Normalizer.prototype, 'push');
+    const first = await stream.snapshot(null, 5);
+    const firstRows = push.mock.calls.length;
+    expect(firstRows).toBeGreaterThan(0);
+    expect(journalReads(lines)).toHaveLength(1);
+    expect(journalReads(lines)[0]).toMatch(new RegExp(`^session\\.events ${appSessionId} after start: from the journal, ${firstRows} rows read in \\d+ ms$`));
+    const pages = [first];
+    while (!pages.at(-1)!.complete) pages.push(await stream.snapshot(pages.at(-1)!.lastSeq, 5));
+    expect(pages.length).toBeGreaterThan(3);
+    expect(journalReads(lines), 'the pages that continue it').toHaveLength(1);
+
+    push.mockClear();
+    const from = events[2]!.seq!;
+    await stream.snapshot(from, 5); // not the last page's cursor: the journal is read from its first row again
+    expect(journalReads(lines)).toHaveLength(2);
+    expect(journalReads(lines)[1]).toMatch(new RegExp(`^session\\.events ${appSessionId} after ${from}: from the journal, ${push.mock.calls.length} rows read in \\d+ ms$`));
+  });
+
+  it('says nothing of a read the ring serves, or of one the journal cannot serve', async () => {
+    const { events, launchId, sessionId, appSessionId } = await recordedInit();
+    const lines: string[] = [];
+    const stream = new SessionStream({ appSessionId, launchId, sessionId: sessionId as never, journalPath: join(dir, 'gone', 'LAUNCHS1.jsonl'), emit: recorder().emit, ringSize: 5, log: (line) => lines.push(line) });
+    stream.events(events);
+    stream.flush();
+    await stream.snapshot(events.at(-2)!.seq!, null); // inside the ring
+    expect((await stream.snapshot(null, null)).historyUnavailable).toBe(true); // the journal is gone: the ring answers
+    expect(journalReads(lines)).toEqual([]);
+  });
+});
+
 // E10 start: the delivered cursor and the connect burst (E10 execution document, §Design 3 "The delivered cursor",
 // Task 2.1). The fake client reports each emit written while connected and dropped while not, as the runtime's emit does.
 describe('the delivered cursor and the connect burst (E10)', () => {
@@ -485,11 +548,12 @@ describe('the delivered cursor and the connect burst (E10)', () => {
     fake.state.connected = true;
     s.republish(STATE);
     expect(fake.batches().at(-1)).toEqual(rows(13, 10).map((e) => e.id));
-    expect(lines).toEqual([expect.stringContaining('tail_gap')]);
-    expect(lines[0]).toContain(`${APP}:L:3:0`); // the first event lost to the client
-    expect(lines[0]).toContain(`${APP}:L:12:0`); // and the last
+    const gaps = () => lines.filter((line) => !line.startsWith('ring evicted ')); // P5 O15 M2b: the first eviction has its own line
+    expect(gaps()).toEqual([expect.stringContaining('tail_gap')]);
+    expect(gaps()[0]).toContain(`${APP}:L:3:0`); // the first event lost to the client
+    expect(gaps()[0]).toContain(`${APP}:L:12:0`); // and the last
     s.republish(STATE);
-    expect(lines).toHaveLength(1); // logged once
+    expect(gaps()).toHaveLength(1); // logged once
   });
 
   it('a second ready delivers nothing twice, and nothing the burst delivered is flushed again', async () => {
