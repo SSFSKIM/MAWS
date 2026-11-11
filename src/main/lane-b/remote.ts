@@ -374,6 +374,14 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   // ---- Lanes, the tabs and the links -------------------------------------------------------------------------------------
 
   /** The machine's lanes under `link`; a new link for the machine (its roster entry made again) ends what the old one carried. */
+  // P5 O15 M2b: each session's count of its stream's answers, kept across its records (a new link makes them again)
+  const answerCounts = new Map<string, number>();
+  const countAnswer = (machine: MachineRef, app: string): number => {
+    const n = (answerCounts.get(`${machine}/${app}`) ?? 0) + 1;
+    answerCounts.set(`${machine}/${app}`, n);
+    return n;
+  };
+
   function lanesOf(link: RemoteLink): Map<string, Lane> {
     const held = machines.get(link.machine);
     if (held !== undefined && held.link === link) return held.lanes;
@@ -401,6 +409,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
         attentionFed: () => attention.fed(machine), // fix waves 1, 5: the feed's items are the session's attention once fed
         attentionChanged: () => attention.streamsChanged(machine, app), // fix wave 4: the badge and the notifier hear them
         othersSession: () => deps.othersOf?.(machine, app) ?? false, // board #525: a refused read is a reader's grade only there
+        nextAnswer: () => countAnswer(machine, app), // P5 O15 M2b
         log: deps.log,
       });
       lanes.set(app, (lane = { session, open: false, sends: [], sending: false, acquiring: null }));

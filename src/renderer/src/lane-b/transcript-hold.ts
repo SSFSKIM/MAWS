@@ -10,8 +10,8 @@
 //   machine is `up`. A tab that has only shown the placeholder (restored at launch, opened while offline) holds nothing,
 //   and its pane hydrates at `up` as before.
 // - A held key not whole at the return (its hydration failed, or was still out at the loss and fails) is read again,
-//   as a remount used to: once the machine is `up` and main says the session's stream is back (its `remote.session` past
-//   `paused` and `opening`, said at the stream's `subbed` or its end), never before; a hydration still out waits first.
+//   as a remount used to: once the machine is `up` and main has said the stream's next answer since its word of the
+//   loss (its `remote.session` `answer`, at a `subbed` or an end), never before; a hydration still out waits first.
 // - A socket-linked profile's sessions are no lane B session here (./remote-session.ts) and a local session's never are:
 //   their tabs hold nothing.
 import { useEffect } from 'react';
@@ -22,9 +22,6 @@ import { useTranscriptStore } from '../stores/transcript';
 import { ipcSource } from '../transcript/source/ipc';
 import { useIsRemoteLaneB, useRemoteLaneB } from './remote-session';
 
-/** The stream not yet back from a loss: paused (the link offline), or opening. */
-const NOT_BACK: ReadonlySet<string> = new Set(['paused', 'opening']);
-
 /** Holds the session's transcript key from when a pane attached it with the machine `up`; the returned function lets go. */
 export function holdRemoteTranscript(appSessionId: AppSessionId): () => void {
   const source = ipcSource(appSessionId);
@@ -32,10 +29,10 @@ export function holdRemoteTranscript(appSessionId: AppSessionId): () => void {
   const machine = machineOf(appSessionId);
   const transcripts = () => useTranscriptStore.getState();
   const up = () => useMachines.getState().machines.get(machine)?.state === 'up';
-  const back = () => {
-    const stream = useRemoteLaneB.getState().states.get(appSessionId)?.stream;
-    return stream !== undefined && !NOT_BACK.has(stream);
-  };
+  const said = () => useRemoteLaneB.getState().states.get(appSessionId);
+  const answered = () => said()?.answer?.n ?? 0; // the stream's latest answer, as main counts it
+  let lostAt = 0; // the answer main's word of the loss carried: the return's is the next
+  let linkWas = said()?.link.state ?? null; // the link as main last said it for the session
   const phase = () => transcripts().entries[key]?.phase;
   let held = false;
   let ended = false;
@@ -56,6 +53,11 @@ export function holdRemoteTranscript(appSessionId: AppSessionId): () => void {
   };
   const check = () => {
     if (ended) return;
+    // the loss is main's own word (the link `down` after `up`), in main's order with its answers; the roster says when
+    // the pane may join and when the machine is back
+    const link = said()?.link.state ?? null;
+    const lost = link === 'down' && linkWas === 'up';
+    linkWas = link;
     if (!held) {
       if (!up() || !transcripts().attached(key)) return;
       held = true;
@@ -63,12 +65,12 @@ export function holdRemoteTranscript(appSessionId: AppSessionId): () => void {
       void transcripts().attach(key, source); // the same source: the pane's attachment, counted once more
       return;
     }
-    if (!up()) {
-      if (!returning) losses += 1;
+    if (lost && !returning) {
+      losses += 1;
+      lostAt = answered();
       returning = true;
-      return;
     }
-    if (returning && back()) {
+    if (returning && up() && answered() > lostAt) {
       returning = false;
       void readAgainIfNotWhole(losses);
     }

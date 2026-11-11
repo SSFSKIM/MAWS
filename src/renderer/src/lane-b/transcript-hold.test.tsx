@@ -17,6 +17,7 @@ import { builder } from '../transcript/model/test-events';
 import { ipcSourceOver } from '../transcript/source/ipc';
 import { applyRemoteSession, resetRemoteLaneBStore } from './remote-session';
 import { remoteSessionState } from './test-support/remote-session';
+import type { RemoteAnswer, RemoteSession } from '@shared/ipc/schema/remote';
 import { useRemoteTranscriptHold } from './transcript-hold';
 
 // A fake X2 client: every `session.events` waits for the test to answer it; `session.appEvents` answers none at once.
@@ -59,13 +60,18 @@ let generation = 1;
 // The roster as `connectShell` applies it (the store), and as the session source hears it (the event).
 const roster = (state: MachineState['state']) => {
   if (state === 'up') generation += 1;
+  linkState = state === 'up' ? 'up' : 'down';
   const machines = [here, machineState(state, generation)];
   useMachines.getState().applyRoster(machines);
   f.emit('machines.changed', { machines });
 };
-// main's word on the stream, as `connectShell` applies it (the store) and as the session source hears it (the event)
-const stream = (state: 'live' | 'paused' | 'gap' | 'opening' | 'idle' | 'ended') => {
-  const said = remoteSessionState(REMOTE, { stream: state });
+// main's word on the stream, as `connectShell` applies it (the store) and as the session source hears it (the event):
+// with `mode`, the stream's next answer (a `subbed`, or an end leaving it idle or ended); without, the latest said again
+let answer: RemoteAnswer | null = null;
+let linkState: 'up' | 'down' = 'up'; // the link main names, as the roster last moved it
+const stream = (state: RemoteSession['stream'], mode?: RemoteAnswer['mode']) => {
+  if (mode !== undefined) answer = { n: (answer?.n ?? 0) + 1, mode };
+  const said = remoteSessionState(REMOTE, { stream: state, answer, link: { state: linkState, carrier: linkState === 'up' ? 'relay' : null, refusal: null, member: 'member-1', rights: [] } });
   applyRemoteSession(said);
   f.emit('remote.session', said, OTHER_MACHINE);
 };
@@ -96,7 +102,9 @@ beforeEach(() => {
   f = fakeClient();
   fake.current = f;
   resetRemoteLaneBStore();
-  stream('live'); // main streams the session: it is lane B on another machine
+  answer = null;
+  linkState = 'up';
+  stream('live', 'snapshot'); // main streams the session: it is lane B on another machine
   useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() });
 });
 afterEach(() => {
@@ -123,7 +131,7 @@ describe('the hold', () => {
     expect(attached(), 'held through the placeholder').toBe(true);
     roster('up');
     const again = pane();
-    stream('live');
+    stream('live', 'replay');
     await again.hydrated;
     await settle();
     expect(reads(), 'one read in all: the first hydration').toHaveLength(1);
@@ -182,7 +190,7 @@ describe('the hold', () => {
     useSessions.getState().applyList({ sessions: [], revision: 1 }, OTHER_MACHINE);
     const hold = await heldThroughALoss();
     roster('up');
-    stream('live');
+    stream('live', 'replay');
     useSessions.getState().applyList({ sessions: [], revision: 2 }, OTHER_MACHINE);
     await settle();
     expect(reads()).toHaveLength(1);
@@ -219,7 +227,10 @@ describe('a held key not whole at the return', () => {
     const again = pane(); // joins the failed attachment
     await settle();
     expect(reads(), 'the stream has not answered yet').toHaveLength(1);
-    stream('live');
+    stream('live'); // the link's change said again: no answer
+    await settle();
+    expect(reads()).toHaveLength(1);
+    stream('live', 'replay');
     await settle();
     expect(reads()).toHaveLength(2);
     answered(1);
@@ -242,7 +253,7 @@ describe('a held key not whole at the return', () => {
       stream('paused');
       first.unmount();
       roster('up');
-      stream('live');
+      stream('live', 'replay');
       await settle();
       expect(reads(), outcome).toHaveLength(1);
       if (outcome === 'failed') refused(0);
@@ -256,8 +267,8 @@ describe('a held key not whole at the return', () => {
   it('whose staged re-read failed in a second loss is read again at the next return, once', async () => {
     const hold = await heldThroughALoss();
     roster('up');
-    stream('gap');
     f.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L2' }, OTHER_MACHINE);
+    stream('gap', 'snapshot');
     await vi.waitFor(() => expect(reads()).toHaveLength(2));
     roster('down');
     stream('paused');
@@ -267,7 +278,7 @@ describe('a held key not whole at the return', () => {
     roster('up');
     await settle();
     expect(reads()).toHaveLength(2);
-    stream('live');
+    stream('live', 'replay');
     await settle();
     expect(reads()).toHaveLength(3);
     answered(2);
@@ -283,7 +294,7 @@ describe('a held key not whole at the return', () => {
     const hold = await heldThroughALoss();
     roster('up');
     const again = pane();
-    stream('idle');
+    stream('idle', 'unavailable');
     await vi.waitFor(() => expect(reads()).toHaveLength(2));
     expect(entry().state.seen.size, 'the old rows kept').toBe(history.length);
     answered(1);
@@ -297,7 +308,7 @@ describe('a held key not whole at the return', () => {
   it('a whole key reads nothing at the stream’s return', async () => {
     const hold = await heldThroughALoss();
     roster('up');
-    stream('live');
+    stream('live', 'replay');
     await settle();
     expect(reads()).toHaveLength(1);
     hold.unmount();
