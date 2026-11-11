@@ -75,6 +75,12 @@ const stream = (state: RemoteSession['stream'], mode?: RemoteAnswer['mode']) => 
   applyRemoteSession(said);
   f.emit('remote.session', said, OTHER_MACHINE);
 };
+// the link lost past its grace, in main's order: the session's word (the link `down`), then the roster
+const lose = (state: RemoteSession['stream'] = 'paused') => {
+  linkState = 'down';
+  stream(state);
+  roster('down');
+};
 const reads = () => f.calls.filter((call) => call.name === 'session.events');
 const entry = (key: AppSessionId = REMOTE) => useTranscriptStore.getState().entries[key];
 const attached = (key: AppSessionId = REMOTE) => useTranscriptStore.getState().attached(key);
@@ -119,13 +125,34 @@ async function heldThroughALoss() {
   const hold = tab();
   answered(0);
   await first.hydrated;
-  roster('down');
-  stream('paused');
+  lose();
   first.unmount();
   return hold;
 }
 
 describe('the hold', () => {
+  // the panel's finding 1: the store publishes `hydrating` before it counts the attachment, so a hold mounted with its
+  // pane first acquires at the next notification, here main's word of the loss (said before the roster's)
+  it('acquiring at main’s word of the loss arms it: a hydration that fails in the outage is read again at the replay', async () => {
+    roster('up');
+    const hold = tab();
+    const first = pane();
+    expect(attached()).toBe(true);
+    lose(); // main's word of the loss, the roster still up, is the hold's next notification: it acquires there
+    refused(0);
+    await first.hydrated;
+    expect(entry().phase).toBe('failed');
+    first.unmount();
+    roster('up');
+    const again = pane();
+    stream('live', 'replay');
+    await vi.waitFor(() => expect(reads()).toHaveLength(2));
+    answered(1);
+    await vi.waitFor(() => expect(entry().phase).toBe('live'));
+    again.unmount();
+    hold.unmount();
+  });
+
   it('keeps the key the pane attached across offline: at up the pane joins it, and nothing is read again', async () => {
     const hold = await heldThroughALoss();
     expect(attached(), 'held through the placeholder').toBe(true);
@@ -155,7 +182,7 @@ describe('the hold', () => {
   });
 
   it('never creates an attachment: a tab that has only shown the placeholder holds nothing, and its pane hydrates at up as today', async () => {
-    roster('down');
+    lose();
     const hold = tab();
     expect(attached()).toBe(false);
     roster('up');
@@ -165,7 +192,7 @@ describe('the hold', () => {
     answered(0);
     await shown.hydrated;
     // from here it holds what the pane attached
-    roster('down');
+    lose();
     shown.unmount();
     expect(attached()).toBe(true);
     hold.unmount();
@@ -174,7 +201,7 @@ describe('the hold', () => {
   it('holds nothing a pane attached before the roster said the machine is up: a tab restored at launch while offline', async () => {
     const shown = pane(); // the roster unread: the tab draws the pane
     const hold = tab();
-    roster('down');
+    lose();
     shown.unmount();
     expect(attached(), 'its read went to a link not known up').toBe(false);
     refused(0);
@@ -220,8 +247,7 @@ describe('a held key not whole at the return', () => {
     refused(0);
     await first.hydrated;
     expect(entry().phase).toBe('failed');
-    roster('down');
-    stream('paused');
+    lose();
     first.unmount();
     roster('up');
     const again = pane(); // joins the failed attachment
@@ -249,8 +275,7 @@ describe('a held key not whole at the return', () => {
       roster('up');
       const first = pane();
       const hold = tab();
-      roster('down');
-      stream('paused');
+      lose();
       first.unmount();
       roster('up');
       stream('live', 'replay');
@@ -270,8 +295,7 @@ describe('a held key not whole at the return', () => {
     f.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L2' }, OTHER_MACHINE);
     stream('gap', 'snapshot');
     await vi.waitFor(() => expect(reads()).toHaveLength(2));
-    roster('down');
-    stream('paused');
+    lose();
     refused(1);
     await vi.waitFor(() => expect(entry().phase).toBe('failed'));
     expect(entry().state.seen.size, 'the old rows kept').toBe(history.length);

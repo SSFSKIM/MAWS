@@ -63,7 +63,8 @@ export function holdRemoteTranscript(appSessionId: AppSessionId): () => void {
       held = true;
       offTranscripts();
       void transcripts().attach(key, source); // the same source: the pane's attachment, counted once more
-      return;
+      // and on: the store counts a pane's attachment after it publishes `hydrating`, so the call that acquires may be
+      // main's word of the loss itself (said before the roster's), which must arm
     }
     if (lost && !returning) {
       losses += 1;

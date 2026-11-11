@@ -978,11 +978,14 @@ describe('ipcSource', () => {
       useTranscriptStore.getState().detach(REMOTE);
     });
 
-    it('a local session’s source listens for no machine’s link', async () => {
-      const fake = fakeClient();
-      const source = ipcSourceOver(fake.client, APP);
-      await subscribed(fake, source, () => {});
-      expect(fake.listeners.get('machines.changed')?.size ?? 0).toBe(0);
+    it('a local session’s source listens for no machine’s link; another machine’s session’s does', async () => {
+      const said = (fake: ReturnType<typeof fakeClient>) => fake.listeners.get('remote.session')?.size ?? 0;
+      const local = fakeClient();
+      await subscribed(local, ipcSourceOver(local.client, APP), () => {});
+      expect(said(local), 'local').toBe(0);
+      const remote = fakeClient();
+      await subscribed(remote, ipcSourceOver(remote.client, REMOTE), () => {});
+      expect(said(remote), 'remote').toBe(1);
     });
   });
 
