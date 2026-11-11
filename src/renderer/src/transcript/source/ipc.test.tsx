@@ -707,11 +707,10 @@ describe('ipcSource', () => {
         fake.emit('machines.changed', roster('down', 1));
       };
       // the link up again: the roster, then main says the stream again for the link's change, its answer still to come
-      // (with `mode`: main's own, `none`, for a stream with no subscription out)
-      const restore = (mode?: RemoteAnswer['mode']) => {
+      const restore = () => {
         linkState = 'up';
         fake.emit('machines.changed', roster('up', 2));
-        said(stream, mode);
+        said(stream);
       };
       return { fake, source, b, history, lose, restore, said, fewest: () => fewest };
     }
@@ -923,44 +922,6 @@ describe('ipcSource', () => {
         expect(reads(h.fake), 'once').toHaveLength(2);
       });
     }
-
-    // the architect's ruling on the return: a stream with no subscription out at the link's return (idle, its retry
-    // scheduled or waiting on the feed; ended) is answered by main itself, `none`, in the same word as the link's `up`
-    for (const [word, mode] of [['idle', 'unavailable'], ['ended', 'ended']] as const) {
-      it(`a stream ${word} at the loss: main’s none at the return reads once, staged, and a later answer reads nothing more`, async () => {
-        const h = await held();
-        h.said(word, mode); // released (or ended) before the loss
-        h.lose(word);
-        await settle();
-        const drawn = entry().rows;
-        h.restore('none');
-        await vi.waitFor(() => expect(reads(h.fake)).toHaveLength(2));
-        expect(reads(h.fake)[1]!.input).toEqual({ appSessionId: REMOTE, afterSeq: null, limit: null });
-        expect(entry().rows, 'staged: the old rows stay drawn').toBe(drawn);
-        const more = nextTurn(2, h.history.length);
-        reads(h.fake)[1]!.answer({ ok: true, value: { events: [...h.history, ...more], lastSeq: h.history.length + more.length, complete: true } } as never);
-        await vi.waitFor(() => expect(entry().phase).toBe('live'));
-        expect([...entry().state.seen]).toEqual([...h.history, ...more].map((event) => event.id));
-        expect(h.fewest(), 'staged').toBe(1);
-        h.said('idle', 'unavailable'); // the feed's kick (or the probe), its try ended `unavailable`
-        await settle();
-        expect(reads(h.fake), 'once').toHaveLength(2);
-      });
-    }
-
-    it('a history read’s gap heard while armed joins main’s none re-read, its bar drawn after the install', async () => {
-      const h = await held();
-      h.said('idle', 'unavailable');
-      h.lose('idle');
-      h.fake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L1', at: { seq: 2, idx: 0 } }, OTHER_MACHINE); // a history read's left-out rows
-      await settle();
-      expect(kinds(), 'held while armed').not.toContain('gap');
-      h.restore('none');
-      await vi.waitFor(() => expect(reads(h.fake)).toHaveLength(2));
-      reads(h.fake)[1]!.answer({ ok: true, value: { events: h.history, lastSeq: h.history.length, complete: true } } as never);
-      await vi.waitFor(() => expect(entry().phase).toBe('live'));
-      expect(kinds().filter((kind) => kind === 'gap')).toHaveLength(1);
-    });
 
     it('reads once at an unavailable answer with a gap held before it', async () => {
       const h = await held();

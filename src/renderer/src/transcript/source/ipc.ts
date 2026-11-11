@@ -376,13 +376,11 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
       // tab holds the key while the machine is offline, lane-b/transcript-hold.ts). Armed at main's own word of the loss
       // (a `remote.session` whose link is `down`, after one that said it `up`: a source that attached during the loss has
       // nothing armed), with the stream's answer that word carries (`answer.n`), until main says a later one: that answer
-      // decides. Main counts an answer from the machine (a `subbed`, or an end the machine sends while the link is up),
-      // and one of its own at the link's return for a stream with no subscription out (`none`: idle, ended), so nothing
-      // it does while the link is down passes for the return's, and a return that no subscription follows is still
-      // answered. `replay` (the paused subscription resumed from its cursor) delivers what the loss held back, and nothing
-      // is read again; any other (`missing`, `snapshot`: a relaunch or a lost range; `unavailable`, `ended`: B lost or
-      // ended the launch meanwhile; `none`: what ran meanwhile went untold) starts the key over staged from the whole
-      // history, at that answer, so never before a subscription out has its `subbed`. A `remote.gap` heard while armed
+      // decides. Main counts an answer only from the machine (a `subbed`, or an end the machine sends while the link is
+      // up), so nothing it does while the link is down passes for the return's. `replay` (the paused subscription resumed
+      // from its cursor) delivers what the loss held back, and nothing is read again; any other (`missing`, `snapshot`: a
+      // relaunch or a lost range; `unavailable`, `ended`: B lost or ended the launch meanwhile) starts the key over staged
+      // from the whole history, at that answer, so never before the stream's `subbed`. A `remote.gap` heard while armed
       // (the stream's own, told in its `subbed` just before the answer, or a history read's, whenever it answers) waits
       // for the answer: it joins the re-read, its bar carried into it, or after a `replay` draws its bar as before.
       let armedAt: number | null = null; // the answer main's word of the loss carried, while the return's is to come

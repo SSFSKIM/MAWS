@@ -11,8 +11,7 @@
 //   and its pane hydrates at `up` as before.
 // - A held key not whole at the return (its hydration failed, or was still out at the loss and fails) is read again,
 //   as a remount used to: once the machine is `up` and main has said the stream's next answer since its word of the
-//   loss (its `remote.session` `answer`, at a `subbed`, an end, or main's own `none` at the return of a stream with no
-//   subscription out), never before; a hydration still out waits first.
+//   loss (its `remote.session` `answer`, at a `subbed` or an end), never before; a hydration still out waits first.
 // - A socket-linked profile's sessions are no lane B session here (./remote-session.ts) and a local session's never are:
 //   their tabs hold nothing.
 import { useEffect } from 'react';
