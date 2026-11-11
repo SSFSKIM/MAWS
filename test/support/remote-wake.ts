@@ -3,7 +3,8 @@
 // pipes' records (test/support/loopback-pipe.ts), what one launch's wake showed, and each way it fell short of step 5
 // or step 6. Times are the logs' own, against the runner's wall clock at each restore: one Mac, one wall clock.
 //
-// - `failures` are the lines and counts §I requires under both modes (MAWS_REMOTE_LATENCY_PERF and _CHECK).
+// - `failures` are the lines and counts §I requires under both modes (MAWS_REMOTE_LATENCY_PERF and _CHECK), and
+//   (Decision Log 39) no whole-launch read of a session on B between the restore and that session's `subbed`.
 // - `wakeMisses` are the bounds, which the measured group alone holds: every `subbed` and the link's `up` at most
 //   1,000 ms after the restore, the feed's `connected` and last listings page at most 2,000 ms after the hub's.
 // - `conditions` keeps the lines from the inject on that show which of §F's six conditions a wake missed (a catch-up, a
@@ -324,6 +325,12 @@ export function readWake(input: WakeInput): { record: WakeRecord; failures: stri
       else if (read !== undefined && bound !== null && read.line.rows > bound) {
         const from = read.line.checkpoint === null ? 'read from the first row' : `read from the checkpoint at seq ${read.line.checkpoint}`;
         fail(`B's read of session.events ${stream} after ${read.line.after} took ${read.line.rows} rows, over its bound of ${bound}: ${CHECKPOINT_ROWS} rows (CHECKPOINT_ROWS) plus the page's ${page}, the rows B's journal holds from the cursor through the page's look-ahead row, ${from}`);
+      }
+      // Decision Log 39 (b): no pane reads its session's whole launch (`after start`) on B between the restore and that
+      // session's `subbed`, where the read contends with the stream's opening; B writes the line at the read's end
+      const subbedAt = answered?.at ?? answer.at;
+      for (const r of reads.filter((r) => r.line.after === null && r.at - r.line.ms < subbedAt)) {
+        fail(`${name}: B read its session's whole launch (session.events ${stream} after start, ${r.line.rows} rows in ${r.line.ms} ms, from +${ms(r.at - r.line.ms)} ms to +${ms(r.at)} ms) before B's subbed at +${ms(subbedAt)} ms`);
       }
       const firstAt = first === undefined ? null : positionOf(first.line.position);
       if (first === undefined) fail(`${name} has no first event after subbed line after its subbed`);

@@ -35,7 +35,9 @@
 // channel closed by its own silence check, its interest's window over and a margin, counted from the stall. Then the
 // quiet admission (e2e/support/quiet.ts) settles the machine, the pipes still stalled, and the 1-minute load read at
 // the instants that bracket the timed windows voids the run at 5 or more; Rule B is the first test's rule and, for this
-// case, context only (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, Decision Log 33).
+// case, context only (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, Decision Log 33). In both modes a
+// session's whole launch read on B between the restore and that session's `subbed` fails the case (Decision Log 39): A's
+// tabs hold their panes' sessions through the stall, so the replay alone brings what the panes missed.
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { loadavg, tmpdir } from 'node:os';
 import { join } from 'node:path';

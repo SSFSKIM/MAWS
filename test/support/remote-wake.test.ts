@@ -230,6 +230,23 @@ describe('a run', () => {
     expect(failuresOf(resumedAt('warn: [engine-host] session.events app-1 after 11999: from the journal, 12100 rows read in 80 ms'))).toEqual(["direct: B's read of session.events app-1 after 11999 took 12100 rows, over its bound of 10101: 10000 rows (CHECKPOINT_ROWS) plus the page's 101, the rows B's journal holds from the cursor through the page's look-ahead row, read from the first row"]);
   });
 
+  // Decision Log 39 (b): A's panes hold their sessions through the stall, so none reads its session's whole launch on B
+  // (`after start`, the pane's hydration) between the restore and that session's `subbed`, where it contends with the
+  // stream's own opening. B's line is written at the read's end; the read began its `ms` before.
+  it('names a whole-launch read of a session that landed on B between the restore and that session’s subbed, in both modes', () => {
+    const whole = (s: number, app: string, ms: number) => line(s, `warn: [engine-host] session.events ${app} after start: from the journal, 6843 rows read in ${ms} ms`);
+    for (const carrier of ['direct', 'relay'] as const) {
+      const input = passing(carrier);
+      const withReads = (...reads: LogLine[]) => failuresOf({ ...input, host: [...input.host, ...reads] });
+      // app-1's sub answered on B at +240 ms, app-2's at +290 ms
+      expect(withReads(whole(82.1, 'app-1', 40))).toEqual([`${carrier}: subscription s1 (session B:app-1): B read its session's whole launch (session.events app-1 after start, 6843 rows in 40 ms, from +60 ms to +100 ms) before B's subbed at +240 ms`]);
+      expect(withReads(whole(82.5, 'app-1', 400)), 'begun before the subbed, ended after it').toEqual([`${carrier}: subscription s1 (session B:app-1): B read its session's whole launch (session.events app-1 after start, 6843 rows in 400 ms, from +100 ms to +500 ms) before B's subbed at +240 ms`]);
+      expect(withReads(whole(82.28, 'app-2', 5)), 'each session against its own subbed').toEqual([`${carrier}: subscription s2 (session B:app-2): B read its session's whole launch (session.events app-2 after start, 6843 rows in 5 ms, from +275 ms to +280 ms) before B's subbed at +290 ms`]);
+      // after the session's own subbed, or before the restore (the launch's hydration, at 3 s): none
+      expect(withReads(whole(82.5, 'app-1', 100), whole(82.4, 'app-2', 50), whole(81.9, 'app-2', 30))).toEqual([]);
+    }
+  });
+
   it('names a repeated event', () => {
     const input = passing('direct');
     expect(failuresOf({ ...input, main: input.main.concat(m(83, 'subscription s1: dropped a repeated event at L1:400:2')) })).toEqual(['direct: main.log says subscription s1: dropped a repeated event at L1:400:2']);
