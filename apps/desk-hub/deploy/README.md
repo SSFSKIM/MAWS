@@ -490,10 +490,47 @@ one the head does not list (`real-member add` first), and a control file that do
 
 `sweep-leftovers` is the reach run's undo for what a run could not undo itself (its CLI token revoked mid-run, its
 process killed): each machine named is taken out of the state with its key retired and its hub credential revoked, as
-the run's own cleanup does. It takes only names of the reach run's shape, `o18-<a1|a2|a3|b1|pa|pb>-<6 hex>`, so no other
-machine can be named to it, and staging's hub alone.
+the run's own cleanup does. It takes only names of the reach run's shape, `o18-<a1|a2|a3|b1|pa|pb>-<6 hex>`, and of
+`hub-reads`'s probes, `hr-<p|q>-<6 hex>` (below), so no other machine can be named to it, and staging's hub alone.
 
     zsh apps/desk-hub/deploy/staging-run.sh sweep-leftovers o18-a1-5eb586 o18-pa-3c09d1
+
+## `hub-reads`: the next hub build's two changes, shown on staging
+
+Before production's hub is deployed from a build carrying the project registry's M2 (06278ee89, 9aff030f0, b947d5e8b)
+and the key-bound machine removal (d222606fd, 118d98580), the desk track deploys that build to staging and runs
+`hub-reads` there (`hub-reads.ts`), which shows the two behaviour changes production would get:
+
+    zsh apps/desk-hub/deploy/staging-run.sh hub-reads
+
+It needs the owner's staging Access token (`cloudflared access login` once) and the admin device's `keys.json`
+(`DESK_STAGING_DEVICE`), and takes no arguments. The admin device enrolls and lists two probe machines in this process,
+`hr-p-<tag>` and `hr-q-<tag>` (reach-acceptance.ts's `listProbe`: a FakeEndpoint on each, its RL1 socket open), and the
+run prints one `PASS` or `FAIL` line per claim:
+
+| Claim | Shown by |
+|---|---|
+| `welcome-projects` | each probe's RL1 welcome lists `projects` in its `capabilities` (the Relay adds it once the Registry answers its probe) |
+| `snapshot-last` | each probe's socket gets, after its welcome, `projects-all` pages ending with one marked `last: true` (pages and records counted) |
+| `record-live` | a projects record P's endpoint sends up its socket (signed by P's key, revision 1, no locations) reaches Q's socket as `projects` after Q's snapshot, so only live; a refusal P was sent is named |
+| `keyed-wrong-refused` | `DELETE /api/machines/<P>?ref=<P's ref>&pub=<another key>` answers 200 `{revoked}` with P still in `/api/machines` (the hub's code is printed; a hub before the change removes P, one whose Registry lacks the method answers 503 `hub-updating`) |
+| `keyed-removed` | the same with P's posted key answers 200 and P leaves `/api/machines` within 10 s |
+| `plain-removed` | `DELETE /api/machines/<Q>`, no query, answers 200 and Q leaves `/api/machines` within 10 s |
+
+It exits 0 only when all six pass and nothing is left. However it ends, a failure or a SIGINT or SIGTERM included
+(proof.ts's `interruptible`), its cleanup closes both sockets, takes both probes out of the state with their keys
+retired and revokes both at the hub (one already removed counts as revoked); then it reads the head and the hub's
+machines back and prints `LEFT …` for anything of the run's still there, and `KEPT` for P's projects record (the hub
+keeps every machine's record, which every reader refuses once its key is retired), the probes' names in `machineNames`
+and the state's new versions. A run killed outright (SIGKILL) leaves the probes listed and held: `staging-run.sh
+sweep-leftovers hr-p-<tag> hr-q-<tag>` (the tag is on the run's first line) takes them out. It holds the admin
+device's anchor lock (`keys.json.org.json.lock`, the `admin` verbs', below) for the whole run, so no admin verb signs
+meanwhile and a second run is refused; a run killed outright leaves that lock, removed by hand once nothing runs. The
+step's log is `$DESK_STAGING_DIR/hub-reads-<stamp>.log`, filtered as every step's is and searched after the run for the
+token and the probes' service-token secrets. It takes a few minutes, most of it Access admitting each probe's
+freshly minted service token (up to about a minute each). `test/deploy/hub-reads.test.ts` runs it against the suites'
+local hub: all six pass there, and against the suite's stand-ins for a Registry before projects records and one before
+the keyed removal, the claims that build lacks fail and the rest pass.
 
 ## `admin`: the owner's hand on the org state (P5 O13 M2)
 
@@ -781,6 +818,8 @@ production's Worker or host, or a preview alias of it (`<alias>-desk-hub.…`), 
     `reach-acceptance` (below) under `staging-ssfskim` with the admin device's keys, the secrets it handled searched
     for in its log after, production's build compared before and after; it deploys nothing, and refuses `--config`,
     `--device-keys`, `--scan`, `--production` and the VM's setup among its arguments. `reach-vm` reads no token.
+  - `hub-reads`: `deployment hub-reads` (above) under `staging-ssfskim` with the admin device's keys, the token on its
+    stdin alone, the probes' secrets searched for in its log after; it deploys nothing and takes no arguments.
   - `access-sync`: the people policy read back at the org state's head, with the machine credentials access-sync uses.
   - `admin <args…>`: `deployment admin` against `staging-ssfskim` with the admin device's `keys.json` (its anchor,
     `keys.json.org.json`, beside it once `admin adopt` ran). `adopt`, `devices` and `refresh` run unattended; `pair` and

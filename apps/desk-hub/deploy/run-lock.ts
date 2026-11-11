@@ -31,6 +31,18 @@ export async function withRunLock<T>(file: string, run: () => Promise<T>): Promi
 }
 
 /**
+ * Takes the lock `file` with no signal handling of its own, for a run whose own handler undoes it before exiting
+ * (proof.ts's `interruptible`, whose cleanup a lock's exit at the first signal would skip); the release it returns
+ * removes the lock while it is still this run's, and does nothing after. Refuses (throws) while any lock is there.
+ */
+export function takeRunLock(file: string): () => void {
+  const holder = take(file);
+  return () => {
+    if (tokenOf(file) === holder.token) unlinkSync(file);
+  };
+}
+
+/**
  * Runs `run`, then `undo`, however `run` ends; and while it runs, a SIGINT, SIGHUP or SIGTERM runs `undo` before the
  * process exits, as a held lock's release runs (`undo` is synchronous for that: the exit is at once). What a run lock is
  * built on, for anything else a run makes that must not outlive it (real-member pair's code file).

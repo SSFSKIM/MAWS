@@ -46,9 +46,12 @@
 #                            `deployment keep-a1`: reach scene A1 on the run's VM kept up for member B with A's sessions
 #                            S and L, A's acts made on the commands appended to <file>, undone at `down` or a signal;
 #                            production's X-Desk-Build compared before and after
-#   sweep-leftovers <o18-…-xxxxxx>…
+#   sweep-leftovers <o18-…-xxxxxx | hr-…-xxxxxx>…
 #                            `deployment sweep-leftovers`: the reach scenes' and probes' machines a run left listed, each
 #                            taken out of the state with its key retired and its hub credential revoked
+#   hub-reads                `deployment hub-reads`: the project registry's M2 (the welcome's `projects`, the snapshot's
+#                            `last: true`, a record live across machines) and the key-bound machine removal, through two
+#                            probe machines enrolled, listed and removed by the admin device; PASS/FAIL per claim
 # Any further arguments go to the step's command. Environment (README "Staging runs"):
 #   DESK_STAGING_SECRETS  the directory holding CF_ACCESS_SETUP_TOKEN and CF_DESK_HUB_SERVICE_TOKENS
 #   DESK_STAGING_DIR      logs and state (default ~/.local/state/desk-hub-staging): one log per step; prod/; the
@@ -432,6 +435,33 @@ case $step in
     ran=${pipestatus[2]}
     say "$step exit $ran"
     exit $ran ;;
+  hub-reads)
+    # The desk track's staging proof of the hub build production goes to next (deploy/README.md, `hub-reads`): the token on
+    # the command's stdin alone, the probes' service-token secrets listed in $SCAN for the search of its log after it. It
+    # deploys nothing and takes no arguments: staging, the keys and the scan are the step's own.
+    (( $# == 0 )) || { print -r -- "hub-reads takes no arguments (given: $*): stop. Nothing was changed."; exit 2; }
+    [[ -f $H/keys.json ]] || { print -r -- "hub-reads: no admin device keys at $H/keys.json (DESK_STAGING_DEVICE): stop. Nothing was changed."; exit 2; }
+    LOG=$O/hub-reads-$(stamp).log; : > $LOG
+    SCAN=$O/hub-reads.scan; : > $SCAN
+    say() { print -r -- "$*" | tee -a $LOG; }
+    owner_token
+    ran=1 finished=0
+    finish() {
+      (( finished )) && return; finished=1
+      leaked=$(secret_scan <(print -r -- "$T"; cat $SCAN) $LOG)
+      unset T
+      rm -f $SCAN
+      say "files holding the Access token or a secret the run handled: $leaked; log $LOG"
+      (( ran == 0 && leaked == 0 )) && exit 0
+      exit $(( ran ? ran : 1 ))
+    }
+    trap finish EXIT
+    trap 'exit 130' INT TERM
+    trap 'exit 129' HUP
+    printf 'DESK_ACCESS_TOKEN=%s\n' "$T" | deployment hub-reads --device-keys $H/keys.json --scan $SCAN 2>&1 | filter | tee -a $LOG
+    ran=${pipestatus[2]}
+    say "hub-reads exit $ran"
+    exit $ran ;;
   reach-vm)
     # P5 O18 M6: the reach scenes' setup (vm/setup.sh's RUN=o18) or teardown on the run's VM, through `devcloud vm ssh`
     # alone. No token is read: neither touches the hub.
@@ -578,5 +608,5 @@ case $step in
       checks+=(${pipestatus[2]}); say "redeploy-check exit ${checks[-1]}"
     fi
     exit 0 ;;
-  *) print -r -- "prod <label> | deploy | build | acceptance [--no-push] | relay-measure | access-sync | admin [--pipe] <args…> | throwaway <n> | phone <n> [--rehearse] [--lane-b] [--device <id>] | endpoint [args…] | endpoint-vm setup <base> --vm <vm> | teardown --vm <vm> | reach [args…] | reach-vm setup|teardown [args…] | real-member add|pair|remove [args…] | keep-a1 [args…] | sweep-leftovers <name>…"; exit 2 ;;
+  *) print -r -- "prod <label> | deploy | build | acceptance [--no-push] | relay-measure | access-sync | admin [--pipe] <args…> | throwaway <n> | phone <n> [--rehearse] [--lane-b] [--device <id>] | endpoint [args…] | endpoint-vm setup <base> --vm <vm> | teardown --vm <vm> | reach [args…] | reach-vm setup|teardown [args…] | real-member add|pair|remove [args…] | keep-a1 [args…] | sweep-leftovers <name>… | hub-reads"; exit 2 ;;
 esac

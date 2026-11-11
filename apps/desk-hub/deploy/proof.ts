@@ -181,3 +181,15 @@ export async function revoke(person: Person, name: string): Promise<void> {
   if (response.status === 200 || response.status === 404) return;
   throw new Error(`revoking ${name}: ${response.status} ${(await response.text()).slice(0, 200)}`);
 }
+
+/**
+ * An admin's removal of `name` bound to a key (`DELETE /api/machines/<name>?ref=&pub=`, the hub's Registry.revokeKeyed,
+ * P5 O8 M4b): the hub removes the row only while its enrollment's posted key is `key`, and answers any other row
+ * `{revoked: name}` with nothing touched. A hub before it ignores the query and removes whatever holds the name. The
+ * hub's status and its answer's text, whatever they are.
+ */
+export async function revokeKeyed(person: Person, name: string, key: { ref: string; pub: string }): Promise<{ status: number; text: string }> {
+  const query = new URLSearchParams({ ref: key.ref, pub: key.pub });
+  const response = await person.fetch(`/api/machines/${encodeURIComponent(name)}?${query}`, { method: 'DELETE' });
+  return { status: response.status, text: (await response.text()).slice(0, 200) };
+}
