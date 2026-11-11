@@ -61,12 +61,21 @@ export type RemoteLinkState = z.infer<typeof RemoteLinkStateSchema>;
 export const REMOTE_STREAM_STATES = ['opening', 'idle', 'live', 'paused', 'gap', 'ended'] as const;
 export type RemoteStreamState = (typeof REMOTE_STREAM_STATES)[number];
 
+// P5 O15 M2b (Decision Log 39): the stream's latest answer, which a republish for a link or caps change leaves as it was:
+// `n` rises by one at each `subbed` (its mode, whichever subscription answered) and at each end that leaves the stream
+// `idle` (`unavailable`) or `ended`; null before the first. A page that held a session's transcript through a loss reads
+// the return from the first answer past the one it had seen. Additive: absent, as from main before it, is none said.
+export const REMOTE_ANSWERS = ['replay', 'missing', 'snapshot', 'ended', 'unavailable'] as const;
+export const RemoteAnswerSchema = z.strictObject({ n: z.number().int().positive(), mode: z.enum(REMOTE_ANSWERS) });
+export type RemoteAnswer = z.infer<typeof RemoteAnswerSchema>;
+
 export const RemoteSessionSchema = z.strictObject({
   address: AppSessionIdSchema,
   link: RemoteLinkStateSchema,
   stream: z.enum(REMOTE_STREAM_STATES),
   controls: z.record(z.enum(CONTROL_KEYS), RemoteCapabilitySchema),
   reason: z.string().nullable(),
+  answer: RemoteAnswerSchema.nullable().optional(),
 });
 export type RemoteSession = z.infer<typeof RemoteSessionSchema>;
 

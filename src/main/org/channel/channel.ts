@@ -38,6 +38,8 @@
 import { isHubWriter, type Certificates, type HistoryAttestation, type Signed, type SignedOrgState } from '../../../../apps/org-protocol/src/index.ts';
 import type { ChannelAnswer, ChannelChanged, ChannelEvent, ChannelHost, ChannelSendResult } from '@shared/ipc/schema/org';
 import { hubClient } from '../hub-client';
+import type { Reach } from '../../net/reach';
+import type { WakeSource } from '../../net/wake';
 import type { HubAccess, OrgSession, SignedIn } from '../session';
 import { orgTiming, type OrgTiming } from '../timing';
 import { addressOf } from './address';
@@ -62,6 +64,10 @@ export interface ChannelsDeps {
   /** The project's history attestations; null when they can't be read. The hub client's by default. */
   attestations?(hub: HubAccess, project: string): Promise<Signed<HistoryAttestation>[] | null>;
   socket?: ProjectSocketDeps['socket'];
+  /** P5 O15 M2b §G: each channel's socket drops at a wake and pings; none: no wake is heard. */
+  wake?: WakeSource;
+  /** P5 O15 M2b §G: each open waits on the hub's path while the window is open; NO_REACH by default. */
+  reach?: Reach;
   /** M7b: every machine's to-human entries, opened per channel; none without it. */
   machines?: ChannelMachines;
   fetch?: typeof fetch;
@@ -429,6 +435,8 @@ export function createChannels(deps: ChannelsDeps): Channels {
           scheduleEmit();
         },
         socket: deps.socket,
+        wake: deps.wake,
+        reach: deps.reach,
         timing: deps.timing,
         random: deps.random,
         log: deps.log,

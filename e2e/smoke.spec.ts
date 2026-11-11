@@ -65,6 +65,12 @@ test('MAWS opens light, hosts answer, pty echoes, survives reload and window clo
   const mainPid = await app.evaluate(() => process.pid);
   expect(new Set([mainPid, enginePid, ptyPid]).size, 'main, engine host and pty host are three processes').toBe(3);
 
+  // P5 O15 M2b §H: main writes its log to <userData>/logs/main.log from the launch's first line, the build line with this
+  // launch's pid, said before the profile lock was held and written with the time it was said. The packaged job runs this
+  // file against the packaged app, the first launch with no terminal to have a log.
+  const firstLine = readFileSync(join(maws.userData, 'logs', 'main.log'), 'utf8').split('\n')[0];
+  expect(firstLine, 'main.log opens with this launch’s build line at its time').toMatch(new RegExp(`^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z \\[main\\] MAWS \\S+ · build .+ · pid ${mainPid}$`));
+
   // P5 O3-B: on the daemon shape (`host.status`, the shape the owner's app runs) both hosts are the profile's `mawsd`'s,
   // which main reaches through its relay: outside the app's metrics, and outliving the app (below). The utility shape
   // forks them as the app's own Utility processes, each under its serviceName.

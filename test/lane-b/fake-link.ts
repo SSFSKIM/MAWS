@@ -117,6 +117,7 @@ export class FakeLink implements RemoteLink {
   }
   close(): void {}
   probe(): void {}
+  wake(): void {}
   ping(): Promise<PongStamps | null> {
     return Promise.resolve(null);
   }

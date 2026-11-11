@@ -5,13 +5,23 @@
 // other kind (`grid`, `summary`, anything new) is ignored.
 //
 // The socket is held while `session.current()?.hub` is non-null, and opened again when a change of the session changes
-// the hub's address or headers. It reconnects on FEED_BACKOFF_MS, jittered, and at once on `probe()` (main wires the
-// wake and unlock to it). Two ends wait for the session's next change instead: a `4403` close (the hub no longer admits
-// the member; the session reads `denied`), and an upgrade refused by Access rather than the Worker (no `X-Desk-Build`: the
-// credential has ended). A Worker's own 403 on the upgrade (`not-a-member`) is the first of those.
+// the hub's address or headers. It reconnects on FEED_BACKOFF_MS, jittered, and at once on `probe()`. Two ends wait for
+// the session's next change instead: a `4403` close (the hub no longer admits the member; the session reads `denied`),
+// and an upgrade refused by Access rather than the Worker (no `X-Desk-Build`: the credential has ended). A Worker's own
+// 403 on the upgrade (`not-a-member`) is the first of those.
+//
+// P5 O15 M2b §G (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md), its five rules, which the Project socket
+// follows too: a wake of WAKE_DROP_MS or more opens the reach's window and drops the socket, a shorter one or an unlock
+// is `probe()`; a protocol ping every HUB_PING_MS from the open, a socket with no pong within HUB_PONG_MS dropped;
+// one socket at a time, each open behind the reach's answer for the hub or WINDOW_FLOOR_MS of waiting on it
+// (hub-socket.ts), an open made in the window given HUB_WINDOW_OPEN_MS; every end the app decides is a terminate,
+// told in the same turn, since neither of the hub's objects completes a close handshake.
 import WebSocket from 'ws';
 import type { Listing, Signed } from '../../../apps/org-protocol/src/index.ts';
+import { NO_REACH, type Reach } from '../net/reach';
+import { WAKE_DROP_MS, type WakeNotice, type WakeSource } from '../net/wake';
 import { BUILD_HEADER } from './hub-client';
+import { startPings, waitForHub, type HubWait, type Pings } from './hub-socket';
 import type { OrgSession } from './session';
 import { orgTiming, type OrgTiming } from './timing';
 
@@ -45,7 +55,11 @@ export interface WebSocketLike {
   /** The upgrade was answered without a `101`. */
   on(event: 'refused', listener: (status: number, headers: Record<string, string | string[] | undefined>) => void): void;
   on(event: 'error', listener: (error: Error) => void): void;
-  close(): void;
+  /** A protocol pong (§G rule 2). */
+  on(event: 'pong', listener: () => void): void;
+  ping(): void;
+  /** The app's own end of the socket, whatever its state (§G rule 5); it never sends a close frame and waits for none. */
+  terminate(): void;
 }
 
 type Part = { t: 'part'; id: string; index: number; count: number; data: string };
@@ -115,15 +129,21 @@ export function wsSocket(url: string, headers: Record<string, string>): WebSocke
         socket.terminate();
       });
       else if (event === 'error') socket.on('error', (error) => call(error));
+      else if (event === 'pong') socket.on('pong', () => call());
     },
     send: (text: string) => socket.send(text),
-    close: () => socket.close(1000, 'done'),
+    ping: () => socket.ping(),
+    terminate: () => socket.terminate(),
   } as WebSocketLike & { send(text: string): void };
 }
 
 export function createRegistryFeed(deps: {
   session: OrgSession;
   socket?: (url: string, headers: Record<string, string>) => WebSocketLike;
+  /** None: no wake is heard. */
+  wake?: WakeSource;
+  /** NO_REACH by default: no window opens, and every open is today's. */
+  reach?: Reach;
   timing?: Partial<OrgTiming>;
   random?(): number;
   log(line: string): void;
@@ -132,6 +152,7 @@ export function createRegistryFeed(deps: {
   const random = deps.random ?? Math.random;
   const log = (line: string) => deps.log(`[org-feed] ${line}`);
   const makeSocket = deps.socket ?? wsSocket;
+  const reach = deps.reach ?? NO_REACH;
   const listeners = {
     open: new Set<() => void>(),
     close: new Set<() => void>(),
@@ -160,8 +181,12 @@ export function createRegistryFeed(deps: {
   let closed = false;
   let socket: WebSocketLike | null = null;
   let open = false;
-  /** The hub and headers the socket was opened with (or is being opened with). */
+  /** The hub and headers the socket was opened with (or is being opened with, or awaited for). */
   let target: string | null = null;
+  /** §G rule 3: the wait on the hub's path before the next open; it outlives the open the floor starts until that opens. */
+  let waiting: HubWait | null = null;
+  /** §G rule 2, while a socket is open. */
+  let pings: Pings | null = null;
   /** Waiting for the session's next change: a 4403 or Access's answer ended the last socket. */
   let parked = false;
   let attempt = 0;
@@ -173,15 +198,25 @@ export function createRegistryFeed(deps: {
     if (timer !== null) clearTimeout(timer);
     timer = null;
   };
-  /** Ends the feed's socket by its own decision; one that was open is told as closed (but not on `close()`). */
+  const stopWaiting = () => {
+    waiting?.cancel();
+    waiting = null;
+  };
+  /**
+   * Ends the feed's socket by its own decision, and any wait for one: terminated, forgotten, and one that was open told
+   * as closed in the same turn (but not on `close()`).
+   */
   const drop = () => {
     clearTimer();
+    stopWaiting();
+    pings?.stop();
+    pings = null;
     const held = socket;
     const wasOpen = open;
     socket = null;
     open = false;
     target = null;
-    held?.close();
+    held?.terminate();
     if (wasOpen && !closed) tell(listeners.close);
   };
 
@@ -221,10 +256,42 @@ export function createRegistryFeed(deps: {
     if (closed || mine !== generation) return;
     const key = `${hub.url}\n${JSON.stringify(Object.entries(headers).sort())}`;
     if (changed) parked = false;
-    if (socket !== null && target === key) return;
+    if ((socket !== null || waiting !== null) && target === key) return;
     if (parked) return;
     drop();
-    connect(hub.url, headers, key);
+    begin(hub.url, headers, key);
+  }
+
+  /** §G rule 3: an open now when no window is open, else behind the reach's answer for the hub or its floor. */
+  function begin(hub: string, headers: Record<string, string>, key: string): void {
+    target = key;
+    if (!reach.windowOpen()) return connect(hub, headers, key);
+    const wait: HubWait = waitForHub(
+      reach,
+      hub,
+      {
+        answered: () => {
+          if (waiting !== wait) return;
+          waiting = null;
+          // the floor's open, not opened yet: the hub's answer ends it for an open of its own
+          const floorOpen = socket;
+          socket = null;
+          floorOpen?.terminate();
+          connect(hub, headers, key);
+        },
+        floor: () => {
+          if (waiting === wait && socket === null) connect(hub, headers, key);
+        },
+      },
+      log,
+    );
+    waiting = wait;
+  }
+
+  /** One open ended with nothing from the hub: a floor's open goes back to its wait, unpaced; any other backs off. */
+  function failed(): void {
+    if (waiting !== null) waiting.again();
+    else retry();
   }
 
   function connect(hub: string, headers: Record<string, string>, key: string): void {
@@ -235,28 +302,59 @@ export function createRegistryFeed(deps: {
       current = makeSocket(socketUrl(hub), headers);
     } catch (error) {
       log(`the socket could not be made: ${(error as Error).message}`);
-      retry();
+      failed();
       return;
     }
     socket = current;
     target = key;
+    let listingsPages = 0;
+    let listingsRecords = 0;
     const mine = () => socket === current && !closed;
+    // an open made in the window is given HUB_WINDOW_OPEN_MS, so a hub whose upgrade hangs frees the socket
+    let deadline: ReturnType<typeof setTimeout> | null = null;
+    if (reach.windowOpen()) {
+      deadline = setTimeout(() => {
+        deadline = null;
+        if (!mine() || open) return;
+        log(`the open had no answer within ${timing.HUB_WINDOW_OPEN_MS} ms`);
+        current.terminate();
+        end(failed);
+      }, timing.HUB_WINDOW_OPEN_MS);
+      (deadline as { unref?: () => void }).unref?.();
+    }
     const end = (then: () => void) => {
       if (ended) return;
       ended = true;
+      if (deadline !== null) clearTimeout(deadline);
+      deadline = null;
       // a socket the feed dropped (`drop`) ends as the feed's own decision: nothing to retry, nothing to tell
       if (socket !== current) return;
       const wasOpen = open;
       socket = null;
       open = false;
-      target = null;
+      pings?.stop();
+      pings = null;
+      if (waiting === null) target = null; // a floor's open that failed leaves its wait, and its target, standing
       if (wasOpen) tell(listeners.close);
       if (!closed) then();
     };
+    /** The hub answered the upgrade: a wait still standing behind this open (the floor's) is over. */
+    const heard = () => {
+      if (deadline !== null) clearTimeout(deadline);
+      deadline = null;
+      stopWaiting();
+    };
     current.on('open', () => {
       if (!mine()) return;
+      heard();
       open = true;
       attempt = 0;
+      pings = startPings(current, timing, () => {
+        if (!mine()) return;
+        log(`no pong within ${timing.HUB_PONG_MS} ms: dropped the socket`);
+        drop();
+        void reconcile(false);
+      });
       log(`connected to ${new URL(hub).host}`);
       tell(listeners.open);
     });
@@ -271,8 +369,16 @@ export function createRegistryFeed(deps: {
       }
       if (frame === undefined) return;
       if (frame.t === 'state' && typeof frame.version === 'number' && Number.isInteger(frame.version)) tell(listeners.state, frame.version);
-      else if (frame.t === 'listings' && Array.isArray(frame.records)) tell(listeners.listings, { records: frame.records as Signed<Listing>[], last: frame.last === true });
-      else if (frame.t === 'listing' && isObject(frame.record)) tell(listeners.listing, frame.record as unknown as Signed<Listing>);
+      else if (frame.t === 'listings' && Array.isArray(frame.records)) {
+        const page = { records: frame.records as Signed<Listing>[], last: frame.last === true };
+        listingsPages++;
+        listingsRecords += page.records.length;
+        if (page.last) {
+          log(`listings: last page, ${listingsRecords} records in ${listingsPages} pages`);
+          listingsPages = listingsRecords = 0;
+        }
+        tell(listeners.listings, page);
+      } else if (frame.t === 'listing' && isObject(frame.record)) tell(listeners.listing, frame.record as unknown as Signed<Listing>);
     });
     current.on('close', (code) =>
       end(() => {
@@ -281,11 +387,12 @@ export function createRegistryFeed(deps: {
           log('the hub closed the feed 4403: it no longer admits this member');
           tell(listeners.removed);
         } else {
-          retry();
+          failed();
         }
       }),
     );
-    current.on('refused', (status, answer) =>
+    current.on('refused', (status, answer) => {
+      if (mine()) heard();
       end(() => {
         const fromWorker = answer[BUILD_HEADER] !== undefined;
         if (!fromWorker && (status === 401 || status === 403 || (status >= 300 && status < 400))) {
@@ -300,16 +407,46 @@ export function createRegistryFeed(deps: {
           log(`the upgrade was answered ${status}`);
           retry();
         }
-      }),
-    );
+      });
+    });
     current.on('error', (error) => {
       if (mine()) log(`socket error: ${error.message}`);
       // a 'close' follows an error on an opened socket; one that never opened gets none from every stack
-      if (!open) end(retry);
+      if (!open) end(failed);
     });
   }
 
+  /** `probe()`, and a wake under WAKE_DROP_MS (§G rules 1 and 4): an open socket pinged now; with none, today's reconnect. */
+  function probe(what: string): void {
+    if (closed || parked) return;
+    if (pings !== null) {
+      log(`${what}: ping sent`);
+      pings.ping();
+    } else if (socket !== null || waiting !== null) {
+      log(`${what}: opening`);
+    } else {
+      log(`${what}: no socket`);
+      attempt = 0;
+      clearTimer();
+      void reconcile(false);
+    }
+  }
+
+  /** §G rule 1: at WAKE_DROP_MS or more, the window opened and the socket dropped, then opened again from the first step. */
+  function woke({ sleptMs }: WakeNotice): void {
+    if (closed) return;
+    if (parked) return void log(`wake after ${sleptMs} ms: parked`);
+    if (sleptMs < WAKE_DROP_MS) return probe(`wake after ${sleptMs} ms`);
+    reach.openWindow('wake');
+    log(`wake after ${sleptMs} ms: ${socket !== null ? 'dropped the socket' : 'no socket'}`);
+    drop();
+    attempt = 0;
+    void reconcile(false);
+  }
+
   const unsubscribe = deps.session.onChanged(() => void reconcile(true));
+  const offWake = deps.wake?.onWake(woke);
+  const offUnlock = deps.wake?.onUnlock(() => probe('probe'));
   void reconcile(true);
 
   return {
@@ -321,16 +458,13 @@ export function createRegistryFeed(deps: {
     onListings: subscribe(listeners.listings),
     onListing: subscribe(listeners.listing),
     connected: () => open,
-    probe() {
-      if (closed || socket !== null || parked) return;
-      attempt = 0;
-      clearTimer();
-      void reconcile(false);
-    },
+    probe: () => probe('probe'),
     close() {
       if (closed) return;
       closed = true;
       unsubscribe();
+      offWake?.();
+      offUnlock?.();
       drop();
     },
   };

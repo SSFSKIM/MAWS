@@ -323,3 +323,61 @@ describe('a subagent’s transcript', () => {
     expect(later.table.size).toBe(0);
   });
 });
+
+// P5 O15 M2b §H: the link's lines at each `subbed` and at the first delivery after it, which M4's 7e and §I's gate case read
+describe('the subscription lines', () => {
+  const lines = (h: ReturnType<typeof harness>) => h.logs.filter((l) => l.startsWith('subscription '));
+
+  it('writes each `subbed` with its mode, its position and the cursor its `sub` asked from, and `none` for a feed', () => {
+    const h = harness();
+    h.channel.peer = ['rl2.feeds'];
+    const s = h.table.subscribe({ session: { lane: 'B', id: 'app-1' }, cursor: { epoch: 'L1', seq: 3, idx: 1 } }, h.sink, null);
+    const f = h.table.subscribe({ feed: 'attention' }, h.sink, null);
+    h.table.receive({ t: 'subbed', sub: s.id, mode: 'replay', epoch: 'L1', seq: 3, idx: 1 });
+    h.table.receive({ t: 'subbed', sub: f.id, mode: 'snapshot', epoch: 'A', seq: 7 });
+    expect(lines(h)).toEqual([`subscription ${s.id} session B:app-1: subbed replay at L1:3:1, asked from L1:3:1`, `subscription ${f.id} feed attention: subbed snapshot at A:7:-, asked from none`]);
+    // the next channel asks from where the stream stood then
+    h.table.receive(ev(s.id, 4, 0));
+    h.table.onCurrent();
+    h.table.receive({ t: 'subbed', sub: s.id, mode: 'replay', epoch: 'L1', seq: 4, idx: 0 });
+    expect(lines(h).at(-1)).toBe(`subscription ${s.id} session B:app-1: subbed replay at L1:4:0, asked from L1:4:0`);
+  });
+
+  it('names a cards view, a subagent’s transcript, a session’s feed and a project’s channel', () => {
+    const h = harness();
+    h.channel.peer = ['rl2.feeds', 'rl2.agent-scope', 'rl2.channel'];
+    const cards = h.table.subscribe({ session: { lane: 'A', id: 'la-1' }, view: 'cards' }, h.sink, null);
+    const agent = h.table.subscribe({ session: { lane: 'A', id: 'la-1' }, agentId: 'agent-7' }, h.sink, null);
+    const checkout = h.table.subscribe({ session: { lane: 'B', id: 'app-1' }, feed: 'checkout' }, h.sink, null);
+    const channel = h.table.subscribe({ feed: 'channel', project: 'p0123456789abcdef' }, h.sink, null);
+    for (const s of [cards, agent, checkout, channel]) h.table.receive({ t: 'subbed', sub: s.id, mode: 'snapshot', epoch: 'E', seq: 0 });
+    expect(lines(h)).toEqual([
+      `subscription ${cards.id} session A:la-1 cards: subbed snapshot at E:0:-, asked from none`,
+      `subscription ${agent.id} session A:la-1 agent agent-7: subbed snapshot at E:0:-, asked from none`,
+      `subscription ${checkout.id} feed checkout B:app-1: subbed snapshot at E:0:-, asked from none`,
+      `subscription ${channel.id} feed channel p0123456: subbed snapshot at E:0:-, asked from none`,
+    ]);
+  });
+
+  it('writes the first event after a replay and the first whole snapshot after a snapshot or a missing, once on a channel, and again on the next', () => {
+    const h = harness();
+    const s = h.table.subscribe({ session: { lane: 'B', id: 'app-1' }, cursor: { epoch: 'L1', seq: 3, idx: 1 } }, h.sink, null);
+    h.table.receive({ t: 'subbed', sub: s.id, mode: 'replay', epoch: 'L1', seq: 3, idx: 1 });
+    h.table.receive(ev(s.id, 3, 1)); // a repeat delivers nothing, so it is no first event
+    h.table.receive(ev(s.id, 3, 2));
+    h.table.receive(ev(s.id, 4, 0));
+    const first = `subscription ${s.id} session B:app-1: first event after subbed, at L1:3:2`;
+    expect(lines(h).filter((l) => l.includes('first'))).toEqual([first]);
+    h.table.onCurrent();
+    h.table.receive({ t: 'subbed', sub: s.id, mode: 'snapshot', epoch: 'L2', seq: 0 });
+    const [head, ...rest] = pages(s.id, { epoch: 'L2', seq: 0 }, { status: { process: 'ready' } }, 10);
+    h.table.receive(head);
+    expect(lines(h).filter((l) => l.includes('first'))).toEqual([first]); // not before the snapshot is whole
+    for (const page of rest) h.table.receive(page);
+    h.table.receive(ev(s.id, 1, 0, 'L2'));
+    h.table.onCurrent();
+    h.table.receive({ t: 'subbed', sub: s.id, mode: 'missing', epoch: 'L2', seq: 1 });
+    for (const page of pages(s.id, { epoch: 'L2', seq: 1 }, { rows: [] }, 100)) h.table.receive(page);
+    expect(lines(h).filter((l) => l.includes('first'))).toEqual([first, `subscription ${s.id} session B:app-1: first snapshot after subbed, at L2:0:-`, `subscription ${s.id} session B:app-1: first snapshot after subbed, at L2:1:-`]);
+  });
+});

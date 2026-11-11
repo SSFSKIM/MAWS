@@ -15,7 +15,7 @@ import type { AgentsHarnessApi } from '../src/renderer/src/harness/agents/api';
 import { FAKE_STOP_REFUSAL } from '../src/renderer/src/harness/agents/api';
 import type { PanelHarnessApi } from '../src/renderer/src/harness/panel/api';
 import { relayText } from '../src/renderer/src/tools/agents/model/relay';
-import { AGENTS_CRON_TAIL, AGENTS_RELAY_TAIL, AGENTS_STOP_SHELL_TAIL, AGENTS_STOP_WORKFLOW_TAIL, E7_NESTED_AGENTS, E7_PEER_A } from '../test/support/agents-fixtures-tail';
+import { AGENTS_CRON_TAIL, AGENTS_RELAY_TAIL, AGENTS_STOP_SHELL_TAIL, AGENTS_STOP_WORKFLOW_TAIL, E7_NESTED_AGENTS, E7_PEER_A, E7_PEER_OWNERS /* P5 O15 M2b */ } from '../test/support/agents-fixtures-tail';
 import { nextCronMatch, parseCron } from '../src/shared/engine/cron'; // E7
 import { formatIn } from '../src/renderer/src/tools/agents/model/elapsed'; // E7
 import { PANEL_CHILD_TAIL } from '../test/support/panel-child-tail';
@@ -784,7 +784,7 @@ test.describe('E7: the orchestration views', () => {
     const { address, name, text } = E7_PEER_A;
     const peerRows = () => h.agents('peerRows');
     const expandAll = () => h.page.evaluate(() => (window as unknown as HarnessWindow).__maws_harness!.panel!.transcript('A').expandAll());
-    const inbound = (preview: string) => ({ kind: 'message', direction: 'inbound', who: `@ ${name}`, address, preview, result: null, resultText: null });
+    const inbound = (preview: string) => ({ kind: 'message', direction: 'inbound', who: `@ ${name}`, owners: null, address, preview, result: null, resultText: null });
     const outbound = (to: string, preview: string, result: string) => ({ kind: 'message', direction: 'outbound', who: `To @ ${name}`, address: to, preview, result });
     await h.load('A', 'pass3/e7-peer-a', { releaseTo: E7_PEER_A.replyFrom });
     await h.agents('patchStatus', 'A', { turn: null });
@@ -852,6 +852,21 @@ test.describe('E7: the orchestration views', () => {
       await expect(reply.locator('textarea')).toBeEnabled();
       await expect(reply.locator('textarea')).toHaveValue(text);
       expect((await h.agents('calls')).steer, 'the refused start asks nothing more').toHaveLength(1);
+    });
+
+    // P5 O15 M2b (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, §J; Decision Log 20 (b)): the built renderer
+    // draws the owners a sminos frame names after the sender; signed out, as the harness is, the names as written.
+    await test.step('a sminos frame that names its sender’s owners draws them after the sender; one that names none draws nothing', async () => {
+      await h.load('A', 'events/agents-peer-owners');
+      await h.agents('clearStatus', 'A');
+      await expandAll();
+      const inboundOwners = async () => (await peerRows()).flatMap((row) => (row.kind === 'message' && row.direction === 'inbound' ? [[row.who, row.owners, row.preview]] : []));
+      await expect.poll(inboundOwners).toEqual([
+        [`@ ${name}`, E7_PEER_OWNERS.label, 'E7 probe: hello from B'],
+        [`@ ${name}`, null, 'E7 probe: second message while you work'],
+      ]);
+      await h.agents('scrollColumnTo', 'E7 probe: hello from B');
+      await bothThemes(h, 'g3-owners', h.page.locator('[data-agents-harness-transcript]'));
     });
     h.expectQuietConsole();
   });

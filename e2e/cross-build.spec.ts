@@ -10,7 +10,8 @@
 // crossing every swap makes: the attaching app meets the keeper's private `mawsd`, of the other build, and its build
 // check has it restart onto the attacher's (src/main/hosts/daemon.ts, watchDaemon), the kept engine host running on
 // under the new `mawsd`. A peer this build's `mawsd` refuses (one before O4, whose app lists no `machine.connectors`:
-// D11) skips both, saying so; the scenes below that pin the peer to its embedded shape cover it.
+// D11) skips both, saying so; the scenes below that pin the peer to its embedded shape cover it, where the peer still
+// has that shape.
 // In each, the attaching app's hello crosses the minor (host.log names the app's wire, the app's main the supervisor's),
 // the app is served as another build (`matches: 'build'`, the update banner, exit-when-idle armed), the kept session's
 // tail reaches its main (the background failure journaled while no app ran raises the Needs-you item only main's live
@@ -32,8 +33,9 @@
 // The `(pre-O3 app, daemon)` scene asserts the refusal, not a probe.
 // P5 O2 M8 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M9's two-build check, "this branch's mawsd against that
 // build's engine host"): the same crossing with this build on the daemon shape (MAWS_HOST_MODE=daemon), whose private
-// `mawsd` is the engine host's client, the peer on the embedded shape's detached supervisor, which every build since
-// E10 has and a build before O2 is limited to:
+// `mawsd` is the engine host's client, the peer on the embedded shape's detached supervisor, which every build from
+// E10 to O15 M2 has and a build before O2 is limited to. A peer from after O15 M2 has no embedded shape (its app runs on
+// `mawsd` whatever MAWS_HOST_MODE says), so both skip for it, saying so: (update) and (downgrade) cross such a peer.
 //   (update, daemon)    the peer's app keeps a session on its own supervisor; this build's app attaches on the daemon
 //                       shape: its `mawsd` connects to the peer's engine host across the minor, which it serves until
 //                       idle (exit-when-idle armed, as E10's replace policy), relays it to the app, and then starts an
@@ -917,6 +919,10 @@ test.beforeEach(() => test.setTimeout(240_000));
 // P5 O15 M1: a peer whose app lists no `machine.connectors` (before O4) is refused by this build's `mawsd` on each of
 // its sockets (D11), so it cannot run on the daemon shape beside this build: (pre-O4 app, daemon) holds that refusal,
 // and (update, daemon) and (downgrade, daemon) cross with it on its embedded shape
+// P5 O15 M2b (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, Decision Log 35): a peer with no embedded shape
+// (after O15 M2) runs on `mawsd` whatever MAWS_HOST_MODE says, so the two scenes that pin the peer to the embedded shape
+// skip for it; this pair crosses it
+const embeddedPeer = (peer: Build): [boolean, string] => [runsEmbedded(peer), `the peer (wire ${wireOf(peer)}) has no embedded shape (its src/main/hosts/mode.ts has no hostModeFromEnv): its app runs on mawsd whatever MAWS_HOST_MODE says, so it is crossed by (update) and (downgrade), not on the embedded shape`];
 const crossesOnMawsd = (peer: Build) => [appObeysConnectors(peer), `the peer (wire ${wireOf(peer)}) lists no ${CONNECTORS_CLIENT_CAPABILITY}: this build's mawsd refuses its app (D11), so it cannot cross on the daemon shape; (pre-O4 app, daemon) holds the refusal`] as const;
 
 test('(update) the older build’s app keeps a session; the newer build’s app attaches across the minor, is served, launches, meets what the older lacks, and moves to its own supervisor', async () => {
@@ -940,6 +946,8 @@ test('(downgrade) the newer build’s app keeps a session; the older build’s a
 test('(update, daemon) the peer’s app keeps a session on its own supervisor; this build’s app attaches on the daemon shape, its mawsd relays the peer’s engine host across the minor until idle, then starts its own', async () => {
   test.setTimeout(600_000); // P5 O3-D M6: acceptance 9's two quits and reattaches; P5 O4 M4: a refresh at each, 200 s at most
   const { here, peer, newer, older } = builds();
+  const [embedded, notEmbedded] = embeddedPeer(peer);
+  test.skip(!embedded, notEmbedded);
   const gap = here === newer ? { newer, older } : null;
   // a short root: the browser reading with no app (O17 §A) needs the daemon's cua socket for the session to fit 103 bytes
   await withScratch('xb-daemon-update', async (s) => {
@@ -967,6 +975,8 @@ test('(update, daemon) the peer’s app keeps a session on its own supervisor; t
 test('(downgrade, daemon) this build’s app keeps a session under its mawsd; the peer’s app ends mawsd (or, before O2, takes the engine host from it), attaches that engine host, is served as another build, and moves to its own supervisor', async () => {
   test.setTimeout(300_000); // the sealing launch before the crossing
   const { here, peer, newer, older } = builds();
+  const [embedded, notEmbedded] = embeddedPeer(peer);
+  test.skip(!embedded, notEmbedded);
   const gap = peer === newer ? { newer, older } : null;
   await withScratch('xb-daemon-downgrade', async (s) => {
     const sealing = await s.launch({ MAWS_HOST_MODE: 'daemon' });

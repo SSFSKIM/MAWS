@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
+import type { OrgMember } from '@shared/ipc/schema/org'; // P5 O15 M2b
 import { bareOf } from '@shared/machine/address';
 import { digest, record, status } from '../../../../../../test/support/builders';
 import { fakeClient } from '../../../../../../test/support/fake-client';
@@ -177,6 +178,49 @@ describe('a message from another session', () => {
     renderRow(inbound('  just this  \n'), { storeKey: A });
     expect(screen.getByText('just this')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Show the whole message' })).toBeNull();
+  });
+});
+
+// P5 O15 M2b (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, §J): the owners sminos's frame names for the
+// sender, after its name, by the sidebar's rule (P5 Decision Log 111); a name the store doesn't hold is drawn as written.
+describe('the owners of a message from another session', () => {
+  const ME = 'mem-sam';
+  const members = new Map<string, OrgMember>([
+    { id: ME, email: 'sam@example.com', name: 'Sam' },
+    { id: 'mem-ana', email: 'ana@example.com', name: 'Ana' },
+  ].map((member) => [member.id, member]));
+  const labelled = (owners: string) =>
+    derived((b) => {
+      b.emit('turn.started', { userMessageUuid: null, origin: 'peer' });
+      const body = `[sminos chat hp 6d0000ff:1 from peer, owned by ${owners} → @you]\nhello from B`;
+      b.emit('user.message', { messageUuid: uuid('p1'), content: `<cross-session-message from="${B}" from-name="repo-b">\n${body}\n</cross-session-message>`, isReplay: true, isSynthetic: true, origin: 'peer', bash: null });
+      b.emit('peer.message', { messageUuid: uuid('p1'), from: B, fromSession: null, fromName: 'repo-b', fromMode: null, fromPlugin: null, hopChain: [], text: 'hello from B', midTurn: false, lineage: 'peer', replyable: true });
+    }).find((row): row is Message => row.kind === 'agent_message')!;
+  const owners = () => document.querySelector('[data-owners]');
+
+  beforeEach(() => useSessions.setState({ member: ME, members }));
+  afterEach(() => useSessions.setState({ member: null, members: new Map() }));
+
+  it('draws nothing when you alone own the sender’s session, nor for a frame that names no owner', () => {
+    renderRow(labelled('sam@example.com'), { storeKey: A });
+    expect(screen.getByText('@ repo-b')).toBeTruthy();
+    expect(owners()).toBeNull();
+    cleanup();
+    renderRow(inbound(), { storeKey: A });
+    expect(owners()).toBeNull();
+  });
+
+  it('names you first when you share it, the member when you don’t own it, and a name the store doesn’t hold as written', () => {
+    renderRow(labelled('ana@example.com, sam@example.com'), { storeKey: A });
+    expect(owners()?.textContent).toBe('you, Ana');
+    expect(owners()?.getAttribute('title')).toBe('you <sam@example.com>, Ana <ana@example.com>');
+    cleanup();
+    renderRow(labelled('ana@example.com'), { storeKey: A });
+    expect(owners()?.textContent).toBe('Ana');
+    cleanup();
+    renderRow(labelled('zed@example.com, mem-ana'), { storeKey: A });
+    expect(owners()?.textContent).toBe('zed@example.com, Ana');
+    expect(owners()?.getAttribute('title')).toBe('zed@example.com, Ana <ana@example.com>');
   });
 });
 

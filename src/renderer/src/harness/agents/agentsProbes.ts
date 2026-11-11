@@ -249,10 +249,12 @@ function peerRowOf(el: HTMLElement): PeerRowView | null {
     const state = message.querySelector<HTMLElement>('.transcript-peer-state');
     const error = message.querySelector('.transcript-peer-error');
     const line = message.querySelector('[data-part="peer-line"]');
+    const owners = message.querySelector('[data-owners]'); // P5 O15 M2b
     return {
       kind: 'message',
       direction: message.dataset.peer as 'inbound' | 'outbound',
       who: text(who),
+      owners: owners ? text(owners) : null,
       address: who?.getAttribute('title') ?? null,
       preview: text(message.querySelector('.transcript-peer-text > span:last-child')),
       result: state?.dataset.result ?? null,

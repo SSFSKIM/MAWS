@@ -2,7 +2,7 @@
 // label"; Q2): nothing for your own alone, "you" first, two shown and "+N" past them, former members by that name.
 import { describe, expect, it } from 'vitest';
 import type { OrgMember } from '@shared/ipc/schema/org';
-import { ownerEntries, ownersLabel } from './owners';
+import { ownerEntries, ownerIdsOf, ownersLabel } from './owners';
 
 const ME = 'me';
 const members = new Map<string, OrgMember>(
@@ -52,5 +52,21 @@ describe('ownerEntries', () => {
       { id: 'ana', name: 'Ana', email: 'ana.lopez@example.com' },
       { id: 'gone', name: 'former member', email: null },
     ]);
+  });
+});
+
+// P5 O15 M2b (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, §J): a peer message's owners are the names its
+// sminos frame wrote, an email or a member id; the label reads them by the same rule, a name it can't place as written.
+describe('ownerIdsOf', () => {
+  it('reads an email a member holds as that member, and leaves any other name as written', () => {
+    expect(ownerIdsOf(['ana.lopez@example.com', 'ben', 'zed@example.com', 'Sam@Example.com'], members)).toEqual(['ana', 'ben', 'zed@example.com', ME]);
+  });
+});
+
+describe('a name the label cannot place', () => {
+  it('reads as a former member by default, and as the caller says otherwise', () => {
+    expect(ownersLabel(['zed@example.com', 'ana'], ME, members)).toBe('former member, Ana');
+    expect(ownersLabel(['zed@example.com', 'ana'], ME, members, (id) => id)).toBe('zed@example.com, Ana');
+    expect(ownerEntries(['zed@example.com'], ME, members, (id) => `?${id}`)).toEqual([{ id: 'zed@example.com', name: '?zed@example.com', email: null }]);
   });
 });
