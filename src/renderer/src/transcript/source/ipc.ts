@@ -301,6 +301,8 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
   // P5 O7 M4 (acceptance 12): a page a budgeted read answered with items left out marks where they were
   const omittedWords = (omitted: { events: number; bytes: number }) => HISTORY_OMITTED(omitted.events, omitted.bytes, remoteMachineName(appSessionId));
   const gapPlaces = new WeakMap<SessionEvent, GapPlace>(); // P5 O7 M2: a gap told during a read, by where it goes
+  // P5 O15 M2b: the gaps an armed subscription heard, carried into the subscription its re-read makes (below)
+  let carried: { gap: SessionEvent; place: GapPlace }[] = [];
   // P5 O7 M2 (M2's reviews): a gap told while the history was being read is held behind it, and so would land after the
   // events the read already holds of the launch it names. It goes before the first of them at or after its `at` instead
   // (a lost range's end), or before the launch's first event without one (a relaunch's `snapshot`), by the live journal's
@@ -369,8 +371,40 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
       // what the key shows: the parent's own events and the child traffic under its tool uses, the live form once seen
       const shown = (event: SessionEvent) => ofParent(event) && !(subscription.live && diskForm(event));
       latest = subscription;
+      // P5 O15 M2b (Decision Log 39): another machine's session whose subscription lives through its link's loss (its
+      // tab holds the key while the machine is offline, lane-b/transcript-hold.ts). Armed from the roster's word that the
+      // machine left `up` until the stream's first batch after it is `up` again: a `replay` opening delivers what the
+      // loss held back, and nothing is read again; a `remote.gap` heard while armed (a `snapshot` or `missing` opening, a
+      // relaunch during the loss) starts the key over staged from the whole history, its bar carried into the read. Main
+      // tells such a gap only inside the stream's `subbed`, or at the first event after a `missing` one
+      // (src/main/lane-b/remote-session.ts), so the read never starts before that stream's `subbed`.
+      let armed: 'lost' | 'returned' | null = null;
+      const machine = machineOf(appSessionId);
+      const offRoster = machine === client.localMachine ? () => {} : client.on('machines.changed', ({ machines }) => {
+        const state = machines.find((m) => m.ref === machine)?.state;
+        if (state === undefined) return;
+        if (state !== 'up') armed = 'lost';
+        else if (armed === 'lost') armed = 'returned';
+      });
+      let rereading: { gap: SessionEvent; place: GapPlace }[] | null = null; // the gaps an armed re-read carries, once queued
+      const reread = (gap: SessionEvent, place: GapPlace) => {
+        if (rereading !== null) return void rereading.push({ gap, place });
+        rereading = [{ gap, place }];
+        // after this event's dispatch: a subscription the re-read makes must not hear the gap that started it
+        queueMicrotask(() => {
+          const gaps = rereading!;
+          rereading = null;
+          if (latest !== subscription) return; // ended meanwhile: a hydration after it reads the history anyway
+          carried = gaps;
+          pager.refresh(); // the store rebuilds the key, staged; its snapshot, with no history prepared, asks the host
+          carried = [];
+          // no store hears the rebuild (a bare subscriber): the gaps are told here, as an unarmed one's are
+          if (latest === subscription) for (const held of gaps) tellGap(held.gap, held.place);
+        });
+      };
       const off = client.on('session.eventBatch', (batch) => {
         if (batch.appSessionId !== appSessionId) return;
+        if (armed === 'returned') armed = null; // P5 O15 M2b: the stream speaks after the return
         // P5 O7 M8, by arrival: only a turn of the parent's own, as the key shows it (a child's slice is not)
         if ((subscription.gapped || heldHeal !== null) && batch.events.some((event) => isTurnEvent(event) && shown(event))) liveTurnArrived();
         subscription.batch?.();
@@ -435,16 +469,23 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
       };
       // P5 O7 M2: a remote lane B stream that went on past events it could not deliver says so in order with its batches;
       // the gap bar goes in here, where they would have been (model/gap.ts)
+      const tellGap = (gap: SessionEvent, place: GapPlace) => {
+        if (subscription.held) {
+          gapPlaces.set(gap, place); // placed by the snapshot when the history it reads holds its place
+          subscription.held.push([gap]);
+        } else subscription.pass([gap]);
+        awaitHealing(); // P5 O7 M8
+      };
       const offGap = client.on('remote.gap', ({ appSessionId: gapped, launchId, at }) => {
         if (gapped !== appSessionId) return;
         const sessionId = subscription.running?.sessionId ?? (bareOf(appSessionId) as string as SessionId);
         const gap = historyGapEvent(bareOf(appSessionId), `${launchId}:${Date.now()}:${++gaps}`, new Date().toISOString(), sessionId);
-        if (subscription.held) {
-          gapPlaces.set(gap, { launchId, at: at ?? null }); // placed by the snapshot when the history it reads holds its place
-          subscription.held.push([gap]);
-        } else subscription.pass([gap]);
-        awaitHealing(); // P5 O7 M8
+        const place = { launchId, at: at ?? null };
+        if (armed !== null) reread(gap, place); // P5 O15 M2b
+        else tellGap(gap, place);
       });
+      // P5 O15 M2b: the gaps the re-read that made this subscription carries, held behind its snapshot as any gap is
+      for (const held of carried.splice(0)) tellGap(held.gap, held.place);
       const offTooLarge = client.on('remote.historyTooLarge', ({ appSessionId: said, window }) => {
         if (said === appSessionId) tooLarge.add(window);
       });
@@ -454,6 +495,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         offReleased();
         offLoss();
         offGap();
+        offRoster();
         stopHealing();
         offTooLarge();
         subscription.held = null;
