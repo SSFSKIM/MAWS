@@ -3,7 +3,8 @@
 // 28, T5) leaves the key attached, its subscription live through the link's loss. At `up` the pane joins that
 // attachment and nothing hydrates: a `replay` opening delivers what the loss held back into the subscription, and the
 // whole-launch read that contended with B's stream openings is not made. The armed gap (a `missing` or `snapshot`
-// opening, a relaunch) re-reads in the source (../transcript/source/ipc.ts).
+// opening, a relaunch) and a return whose stream first says neither `live` nor `gap` (`idle`, `ended`: B lost or ended
+// the launch meanwhile) re-read, staged, in the source (../transcript/source/ipc.ts).
 //
 // - The hold keeps an attachment and never makes one: it joins only what a pane attached while the roster says the
 //   machine is `up`. A tab that has only shown the placeholder (restored at launch, opened while offline) holds nothing,

@@ -380,13 +380,22 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
       // after a `missing` one (src/main/lane-b/remote-session.ts), but a history read tells the gaps of its rows too large
       // to carry whenever it answers (src/main/lane-b/remote.ts), so an armed gap heard before main's `remote.session`
       // says the stream is back (past `paused` and `opening`: at its `subbed`, or its end) holds its re-read until it does.
+      // The key keeps its rows unread only when that first word is `live` (this subscription resumed by replay: a plain
+      // loss keeps main's subscription, which resubscribes from its cursor, src/main/machines/remote/subs.ts `onCurrent`)
+      // or `gap` (its gap comes); any other (`idle`, `ended`: B lost or ended the launch meanwhile, and tells no gap and
+      // sends no batch) reads the key again, staged, at that word, with no opening for the read to contend with.
       let armed: 'lost' | 'returned' | null = null;
       let said: string | null = null; // the stream's state as main last said it since the loss
+      let judged = false; // the return's first word on the stream is taken
       const waiting: { gap: SessionEvent; place: GapPlace }[] = []; // armed gaps held until the stream is back
       const back = () => armed !== 'lost' && said !== null && said !== 'paused' && said !== 'opening';
       const startWaiting = () => {
         if (!back()) return;
-        for (const held of waiting.splice(0)) reread(held.gap, held.place);
+        if (!judged) {
+          judged = true;
+          if (said !== 'live' && said !== 'gap') reread(null);
+        }
+        for (const held of waiting.splice(0)) reread(held);
       };
       const machine = machineOf(appSessionId);
       const offRoster = machine === client.localMachine ? () => {} : client.on('machines.changed', ({ machines }) => {
@@ -395,6 +404,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         if (state !== 'up') {
           if (armed !== 'lost') said = null; // only a word said after the loss speaks for the stream's return
           armed = 'lost';
+          judged = false;
         } else if (armed === 'lost') {
           armed = 'returned';
           startWaiting();
@@ -406,9 +416,10 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         startWaiting();
       });
       let rereading: { gap: SessionEvent; place: GapPlace }[] | null = null; // the gaps an armed re-read carries, once queued
-      const reread = (gap: SessionEvent, place: GapPlace) => {
-        if (rereading !== null) return void rereading.push({ gap, place });
-        rereading = [{ gap, place }];
+      // one re-read, carrying `held`'s gap when one started it; another asked before it starts joins it
+      const reread = (held: { gap: SessionEvent; place: GapPlace } | null) => {
+        if (rereading !== null) return void (held !== null && rereading.push(held));
+        rereading = held === null ? [] : [held];
         // after this event's dispatch: a subscription the re-read makes must not hear the gap that started it
         queueMicrotask(() => {
           const gaps = rereading!;
@@ -501,7 +512,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         const gap = historyGapEvent(bareOf(appSessionId), `${launchId}:${Date.now()}:${++gaps}`, new Date().toISOString(), sessionId);
         const place = { launchId, at: at ?? null };
         if (armed === null) tellGap(gap, place);
-        else if (back()) reread(gap, place); // P5 O15 M2b
+        else if (back()) reread({ gap, place }); // P5 O15 M2b
         else waiting.push({ gap, place });
       });
       // P5 O15 M2b: the gaps the re-read that made this subscription carries, held behind its snapshot as any gap is

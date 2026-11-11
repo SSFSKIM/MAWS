@@ -64,7 +64,7 @@ const roster = (state: MachineState['state']) => {
   f.emit('machines.changed', { machines });
 };
 // main's word on the stream, as `connectShell` applies it (the store) and as the session source hears it (the event)
-const stream = (state: 'live' | 'paused' | 'gap' | 'opening') => {
+const stream = (state: 'live' | 'paused' | 'gap' | 'opening' | 'idle' | 'ended') => {
   const said = remoteSessionState(REMOTE, { stream: state });
   applyRemoteSession(said);
   f.emit('remote.session', said, OTHER_MACHINE);
@@ -274,6 +274,23 @@ describe('a held key not whole at the return', () => {
     await vi.waitFor(() => expect(entry().phase).toBe('live'));
     await settle();
     expect(reads()).toHaveLength(3);
+    hold.unmount();
+  });
+
+  // reviewer-high's P1: B restarted during the loss without restoring the launch; its stream comes back `idle`, with no
+  // gap and no batch, while the key is still `live` from before the loss
+  it('a whole key whose stream comes back idle is read again once, staged', async () => {
+    const hold = await heldThroughALoss();
+    roster('up');
+    const again = pane();
+    stream('idle');
+    await vi.waitFor(() => expect(reads()).toHaveLength(2));
+    expect(entry().state.seen.size, 'the old rows kept').toBe(history.length);
+    answered(1);
+    await vi.waitFor(() => expect(entry().phase).toBe('live'));
+    await settle();
+    expect(reads()).toHaveLength(2);
+    again.unmount();
     hold.unmount();
   });
 

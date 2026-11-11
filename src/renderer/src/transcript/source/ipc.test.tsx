@@ -702,8 +702,9 @@ describe('ipcSource', () => {
       const h = await held();
       h.lose();
       // what main says at the return before and around the replay: the roster's new generation, the record and the
-      // status said again, the panels' relists, the stream's own state
+      // status said again, the panels' relists, the stream's own state: `live`, a replay's `subbed`
       h.restore();
+      h.said('live');
       h.fake.emit('session.changed', { record: record(REMOTE), cause: 'live', revision: 1 }, OTHER_MACHINE);
       h.fake.emit('session.status', { appSessionId: REMOTE, status: { ...status(bareOf(REMOTE)), appSessionId: REMOTE } }, OTHER_MACHINE);
       h.fake.emit('fs.tasksChanged', { listId: 'tasks-1' }, OTHER_MACHINE);
@@ -855,6 +856,59 @@ describe('ipcSource', () => {
       expect(reads(h.fake)).toHaveLength(1);
       h.said('live');
       await vi.waitFor(() => expect(reads(h.fake)).toHaveLength(2));
+    });
+
+    // The architect's ruling on reviewer-high's P1: the key keeps its rows unread only when the stream's first word after
+    // the loss is `live` (the paused subscription resumed by replay) or `gap` (the armed gap re-reads). A stream that comes
+    // back `idle` or `ended` (B restarted without restoring the launch, the session finished meanwhile) tells no gap and
+    // sends no batch, so the key is read again, staged, at that word: there is no opening for it to contend with.
+    for (const word of ['idle', 'ended'] as const) {
+      it(`a return whose stream first says ${word} starts one staged re-read of the live key`, async () => {
+        const h = await held();
+        h.lose();
+        h.restore();
+        await settle();
+        expect(reads(h.fake)).toHaveLength(1);
+        const drawn = entry().rows;
+        h.said(word);
+        await vi.waitFor(() => expect(reads(h.fake)).toHaveLength(2));
+        expect(reads(h.fake)[1]!.input).toEqual({ appSessionId: REMOTE, afterSeq: null, limit: null });
+        expect(entry().rows, 'the old rows stay drawn').toBe(drawn);
+        h.said(word);
+        await settle();
+        const more = nextTurn(2, h.history.length);
+        reads(h.fake)[1]!.answer({ ok: true, value: { events: [...h.history, ...more], lastSeq: h.history.length + more.length, complete: true } } as never);
+        await vi.waitFor(() => expect(entry().phase).toBe('live'));
+        expect([...entry().state.seen]).toEqual([...h.history, ...more].map((event) => event.id));
+        expect(h.fewest(), 'staged').toBe(1);
+        expect(reads(h.fake), 'once').toHaveLength(2);
+      });
+    }
+
+    it('reads once when the stream comes back idle with a gap held before it', async () => {
+      const h = await held();
+      h.lose();
+      h.restore();
+      h.fake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L1', at: { seq: 9, idx: 0 } }, OTHER_MACHINE);
+      h.said('idle');
+      await vi.waitFor(() => expect(reads(h.fake)).toHaveLength(2));
+      await settle();
+      expect(reads(h.fake)).toHaveLength(2);
+    });
+
+    it('after the re-read, the fresh subscription behaves as with no loss: a later gap draws its bar only', async () => {
+      const h = await held();
+      h.lose();
+      h.restore();
+      h.said('idle');
+      await vi.waitFor(() => expect(reads(h.fake)).toHaveLength(2));
+      reads(h.fake)[1]!.answer({ ok: true, value: { events: h.history, lastSeq: h.history.length, complete: true } } as never);
+      await vi.waitFor(() => expect(entry().phase).toBe('live'));
+      h.said('live'); // the session runs again: a fresh subscription's opening
+      h.fake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L1', at: { seq: 9, idx: 0 } }, OTHER_MACHINE);
+      await settle();
+      expect(reads(h.fake)).toHaveLength(2);
+      expect(kinds().at(-1)).toBe('gap');
     });
 
     it('a local session’s source listens for no machine’s link', async () => {
