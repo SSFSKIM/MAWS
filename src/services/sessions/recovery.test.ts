@@ -653,7 +653,7 @@ describe('recovery with kept sessions (E10)', () => {
       expect(h.removed(id)).toBe(false);
       h.host.becomeReady();
       await h.service.listIntents();
-      expect(h.removed(id)).toBe(true); // no live row on this host: as today, the record goes and the intent fails
+      await h.until(() => h.removed(id)); // no live row on this host: as today, the record goes and the intent fails (session.removed follows the recovery, as in notStarted)
       expect(intentFile(h, id)).toMatchObject({ progress: { lastFailure: { message: 'MAWS quit before the session started' } } });
     });
   });
