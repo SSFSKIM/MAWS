@@ -517,20 +517,24 @@ run prints one `PASS` or `FAIL` line per claim:
 | `keyed-removed` | the same with P's posted key answers 200 and P leaves `/api/machines` within 10 s |
 | `plain-removed` | `DELETE /api/machines/<Q>`, no query, answers 200 and Q leaves `/api/machines` within 10 s |
 
-It exits 0 only when all six pass and nothing is left. However it ends, a failure or a SIGINT or SIGTERM included
-(proof.ts's `interruptible`), its cleanup closes both sockets, takes both probes out of the state with their keys
+It exits 0 only when all six pass and nothing is left. However it ends, a failure or a SIGINT, SIGTERM or SIGHUP
+included (proof.ts's `interruptible`, its `hangup` option on), its cleanup closes both sockets, takes both probes out of the state with their keys
 retired and revokes both at the hub (one already removed counts as revoked); then it reads the head and the hub's
 machines back and prints `LEFT …` for anything of the run's still there, and `KEPT` for P's projects record (the hub
 keeps every machine's record, which every reader refuses once its key is retired), the probes' names in `machineNames`
-and the state's new versions. A run killed outright (SIGKILL) leaves the probes listed and held: `staging-run.sh
+and the state's new versions. A successor whose POST had no definite answer (none within 30 s, the run interrupted
+under it, or a 5xx) may still land: from then on the run signs nothing more (a second successor of that version would
+fork the chain), and before and after the cleanup it reads the head; one the chain now holds is `settled` and the run
+goes on as usual, and one it does not is `LEFT <name>: its listing POST had no answer; it may still land — run
+sweep-leftovers <name> once it has, or check the head`, failing the run. A run killed outright (SIGKILL) leaves the probes listed and held: `staging-run.sh
 sweep-leftovers hr-p-<tag> hr-q-<tag>` (the tag is on the run's first line) takes them out. It holds the admin
 device's anchor lock (`keys.json.org.json.lock`, the `admin` verbs', below) for the whole run, so no admin verb signs
 meanwhile and a second run is refused; it also refuses to start while that anchor holds a `pending` successor an
 admin verb signed and has not seen settled (one signed here on the same head would fork it: the next signing admin verb
 settles it, or `admin abandon-pending` drops it). A run killed outright leaves that lock, removed by hand once nothing
-runs. The
-step's log is `$DESK_STAGING_DIR/hub-reads-<stamp>.log`, filtered as every step's is and searched after the run for the
-token and the probes' service-token secrets. It takes a few minutes, most of it Access admitting each probe's
+runs. The step's log is `$DESK_STAGING_DIR/hub-reads-<stamp>.log`, filtered as every step's is and searched after the
+run for the token and the probes' service-token secrets, listed in a scan file of the invocation's own
+(`hub-reads.scan.XXXXXX` beside it, removed as the step ends); a list or log the search cannot read fails the step. It takes a few minutes, most of it Access admitting each probe's
 freshly minted service token (up to about a minute each). `test/deploy/hub-reads.test.ts` runs it against the suites'
 local hub: all six pass there, and against the suite's stand-ins for a Registry before projects records and one before
 the keyed removal, the claims that build lacks fail and the rest pass.

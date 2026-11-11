@@ -442,17 +442,23 @@ case $step in
     (( $# == 0 )) || { print -r -- "hub-reads takes no arguments (given: $*): stop. Nothing was changed."; exit 2; }
     [[ -f $H/keys.json ]] || { print -r -- "hub-reads: no admin device keys at $H/keys.json (DESK_STAGING_DEVICE): stop. Nothing was changed."; exit 2; }
     LOG=$O/hub-reads-$(stamp).log; : > $LOG
-    SCAN=$O/hub-reads.scan; : > $SCAN
     say() { print -r -- "$*" | tee -a $LOG; }
     owner_token
+    # This invocation's own scan list (0600 under umask 077), removed by its own trap; a list or log that cannot be read
+    # fails the audit, never counts as no finding.
+    SCAN=$(mktemp $O/hub-reads.scan.XXXXXX) || { print -r -- "hub-reads: no scan list could be made under $O: stop. Nothing was changed."; exit 2; }
     ran=1 finished=0
     finish() {
       (( finished )) && return; finished=1
-      leaked=$(secret_scan <(print -r -- "$T"; cat $SCAN) $LOG)
+      if [[ -f $SCAN && -r $SCAN && -r $LOG ]]; then
+        leaked=$(secret_scan <(print -r -- "$T"; cat $SCAN) $LOG)
+      else
+        leaked="unknown (the scan list $SCAN or the log could not be read)"
+      fi
       unset T
       rm -f $SCAN
       say "files holding the Access token or a secret the run handled: $leaked; log $LOG"
-      (( ran == 0 && leaked == 0 )) && exit 0
+      (( ran == 0 )) && [[ $leaked == 0 ]] && exit 0
       exit $(( ran ? ran : 1 ))
     }
     trap finish EXIT

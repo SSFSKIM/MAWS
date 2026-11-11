@@ -11,16 +11,19 @@
 //   designed answer is 200 `{revoked}` with nothing touched; a hub before it removes P);
 // - keyed-removed: P's removal bound to its ref and posted key removes it;
 // - plain-removed: Q's removal by name alone removes it.
-// Then, however the run ends (a failure, SIGINT or SIGTERM), its cleanup: the sockets closed, both out of the state with
+// Then, however the run ends (a failure, SIGINT, SIGTERM or SIGHUP), its cleanup: the sockets closed, both out of the state with
 // their keys retired, both revoked at the hub (gone already counts); a read-back of the head and the hub's machines says
 // `LEFT …` for anything still there. Staging alone (production refused by name before a credential is read); the admin
 // device's anchor lock (admin.ts's `<keys>.org.json.lock`) is held for the run, so no admin verb signs meanwhile.
+// A successor whose POST had no definite answer (none within its deadline, the run interrupted under it, or a 5xx) may
+// still land: from then on the run signs nothing more, and unless the head is then seen to hold it, it is LEFT.
 import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { generateSigningKey, type ProjectsRecord, type Signed } from 'org-protocol';
+import { generateSigningKey, stateHash, type ProjectsRecord, type Signed, type SignedOrgState } from 'org-protocol';
 import { projectsRecord } from '../fake-machine/org';
+import { ORG_STATE_PATH, type OrgStateView } from '../src/protocol/identity';
 import { checkTestHub, PRODUCTION_HOST, readDeployConfig } from './config';
 import { readSecrets } from './deploy';
 import { afterEndpointCleanup, type Made } from './endpoint-acceptance';
@@ -50,6 +53,46 @@ export type HubReadsOptions = {
   /** How long a frame the hub owes (a snapshot's last page, the live record) is waited for. */
   frameMs?: number;
 };
+
+/** A successor this run posted with no definite answer: it may land yet. `listing` names the probe it lists. */
+type Uncertain = { signed: SignedOrgState; listing: string | null };
+
+/**
+ * Watches `person`'s org-state POSTs (OrgAdmin.amend's): one that throws (no answer within its deadline, the run's
+ * interruption, the network) or is answered 5xx is kept in `uncertain`, and while any is kept every later POST is
+ * refused before it is sent, so no successor is signed beside one that may still land (two of one version, a fork).
+ */
+export function watchStatePosts(person: Person, listing: () => string | null, uncertain: Uncertain[]): void {
+  const fetch = person.fetch.bind(person);
+  person.fetch = async (path, init = {}) => {
+    if (path !== ORG_STATE_PATH || init.body === undefined || (init.method ?? 'POST') !== 'POST') return fetch(path, init);
+    if (uncertain.length) throw new Error(`not signed: the successor version ${uncertain[0].signed.state.version}'s POST had no answer and may still land`);
+    const kept = { signed: init.body as SignedOrgState, listing: listing() };
+    try {
+      const response = await fetch(path, init);
+      if (response.status >= 500) uncertain.push(kept);
+      return response;
+    } catch (error) {
+      uncertain.push(kept);
+      throw error;
+    }
+  };
+}
+
+/** Each uncertain successor the head's chain is now seen to hold, taken off `uncertain` (it landed): a line for each. */
+async function settleLanded(person: Person, uncertain: Uncertain[]): Promise<string[]> {
+  const lines: string[] = [];
+  for (const u of [...uncertain]) {
+    const v = u.signed.state.version;
+    const { head, chain = [] } = await person.json<OrgStateView>(`${ORG_STATE_PATH}?since=${v - 1}`);
+    const at = [...chain, ...(head ? [head] : [])].find((s) => s.state.version === v);
+    if (at && (await stateHash(at.state)) === (await stateHash(u.signed.state))) {
+      uncertain.splice(uncertain.indexOf(u), 1);
+      lines.push(`settled: the successor version ${v}${u.listing ? ` listing ${u.listing}` : ''}, whose POST had no answer, is the hub's`);
+    }
+  }
+  return lines;
+}
 
 /** The names the hub holds now. */
 async function held(person: Person): Promise<string[]> {
@@ -91,6 +134,12 @@ export function runHubReads(o: HubReadsOptions, interrupt: InterruptOptions = {}
   let recordSent = false;
   checkTestHub(o.person.hub, 'run hub-reads against it');
   const { person, cleanup } = o;
+  const uncertain: Uncertain[] = [];
+  let listing: string | null = null;
+  watchStatePosts(person, () => listing, uncertain);
+  const settle = async () => {
+    for (const line of await settleLanded(person, uncertain).catch((error: unknown) => [`the head could not be read to settle a POST with no answer: ${error instanceof Error ? error.message : String(error)}`])) print(line);
+  };
   return interruptible(
     cleanup,
     async () => {
@@ -99,7 +148,8 @@ export function runHubReads(o: HubReadsOptions, interrupt: InterruptOptions = {}
       const probe = async (which: 'p' | 'q') => {
         const name = probeName(which, tag);
         made.machines.push(name);
-        const listed = await listProbe(admin, person.hub, name, admin.member, undefined, cleanup, (value) => o.secrets.add(value));
+        listing = name;
+        const listed = await listProbe(admin, person.hub, name, admin.member, undefined, cleanup, (value) => o.secrets.add(value)).finally(() => (listing = null));
         print(`${name}: enrolled, listed and connected (ref ${listed.machine.ref}, generation ${listed.welcome.generation})`);
         return listed;
       };
@@ -157,13 +207,21 @@ export function runHubReads(o: HubReadsOptions, interrupt: InterruptOptions = {}
       const why = status === 1 ? 'the run failed before it (its FAIL line above)' : `the run was interrupted (${status}) before it`;
       for (const claim of CLAIMS) if (!verdicts.has(claim)) judge(claim, false, `not reached: ${why}`);
       cleanup.interrupt(status === 0 ? 'the run ended' : 'the run failed');
+      // A POST with no answer that the hub has taken meanwhile is the head, and the cleanup signs on it as on any other.
+      await settle();
       const failed = await cleanup.run();
+      await settle();
       const left = await afterEndpointCleanup(person, made, AbortSignal.timeout(STEP_MS)).catch((error: unknown) => [`the check after cleanup failed: ${error instanceof Error ? error.message : String(error)}`]);
-      for (const line of [...failed.map((f) => `cleanup: ${f}`), ...left]) print(`LEFT ${line}`);
-      if (failed.length === 0 && left.length === 0) print(made.machines.length ? `cleanup: the head lists none of ${made.machines.join(', ')}, and the hub holds none of them` : 'cleanup: the run made no machine');
+      const unsettled = uncertain.map((u) =>
+        u.listing
+          ? `${u.listing}: its listing POST had no answer; it may still land — run sweep-leftovers ${u.listing} once it has, or check the head`
+          : `the successor version ${u.signed.state.version}: its POST had no answer; it may still land — check the head`,
+      );
+      for (const line of [...failed.map((f) => `cleanup: ${f}`), ...left, ...unsettled]) print(`LEFT ${line}`);
+      if (failed.length === 0 && left.length === 0 && unsettled.length === 0) print(made.machines.length ? `cleanup: the head lists none of ${made.machines.join(', ')}, and the hub holds none of them` : 'cleanup: the run made no machine');
       if (recordSent) print(`KEPT ${probeName('p', tag)}'s projects record at the hub (no path removes one; every reader refuses it once its key is retired)`);
       if (made.machines.length) print(`KEPT the probes' names in machineNames and their retired keys; the state's new versions`);
-      const code = failed.length || left.length ? 1 : status;
+      const code = failed.length || left.length || unsettled.length ? 1 : status;
       print(`hub-reads: ${code === 0 ? 'PASS' : 'FAIL'}`);
       return code;
     },
@@ -233,8 +291,10 @@ export async function main(argv: string[]): Promise<number> {
     const person = new Person(`https://${config.host}`, read.DESK_ACCESS_TOKEN, () => cleanup.check(), { requestMs: 30_000, signal: cleanup.signal });
     return await runHubReads(
       { person, scope: { org: config.org.id, pinnedGenesis: config.orgGenesis }, device, cleanup, secrets },
-      // A second signal exits at once: the lock goes first, so it is never what such an exit leaves.
+      // A second signal exits at once: the lock goes first, so it is never what such an exit leaves. A closed terminal
+      // (SIGHUP) runs the cleanup as Ctrl-C does.
       {
+        hangup: true,
         exit: (status) => {
           release();
           process.exit(status);

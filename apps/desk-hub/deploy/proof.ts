@@ -116,8 +116,9 @@ export class Cleanup {
   }
 }
 
-/** The signals that end a run early — an operator's Ctrl-C, a timeout's kill — and the status each leaves. */
-const SIGNAL_STATUS = { SIGINT: 130, SIGTERM: 143 } as const;
+/** The signals that end a run early — an operator's Ctrl-C, a timeout's kill, and with `hangup` its terminal closed — and
+ * the status each leaves. */
+const SIGNAL_STATUS = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 } as const;
 type EndingSignal = keyof typeof SIGNAL_STATUS;
 
 export type InterruptOptions = {
@@ -127,6 +128,9 @@ export type InterruptOptions = {
   signals?: Pick<NodeJS.EventEmitter, 'on' | 'off'>;
   /** Ends the process at a second signal: `process.exit`, or a suite's spy. */
   exit?: (status: number) => void;
+  /** A SIGHUP too (status 129), for a run whose terminal may close under it; off by default, where SIGHUP keeps Node's
+   * own action. */
+  hangup?: boolean;
 };
 
 /**
@@ -140,12 +144,12 @@ export async function interruptible(
   cleanup: Cleanup,
   work: () => Promise<number>,
   finish: (status: number) => Promise<number>,
-  { settleMs = SETTLE_MS, signals = process, exit = (status) => process.exit(status) }: InterruptOptions = {},
+  { settleMs = SETTLE_MS, signals = process, exit = (status) => process.exit(status), hangup = false }: InterruptOptions = {},
 ): Promise<number> {
   let caught: EndingSignal | undefined;
   let interrupted!: () => void;
   const interruption = new Promise<undefined>((resolve) => (interrupted = () => resolve(undefined)));
-  const handlers = (Object.keys(SIGNAL_STATUS) as EndingSignal[]).map((signal) => {
+  const handlers = (Object.keys(SIGNAL_STATUS) as EndingSignal[]).filter((signal) => hangup || signal !== 'SIGHUP').map((signal) => {
     const handler = () => {
       if (caught) {
         const left = cleanup.pending;
