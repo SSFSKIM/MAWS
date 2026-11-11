@@ -827,4 +827,77 @@ describe('the stream’s answer', () => {
     expect(answer(l)).toEqual({ n: 3, mode: 'replay' });
     l.session.stop();
   });
+
+  // the architect's ruling on the return: a stream with no subscription out at the link's return is answered by main
+  // itself (`none`), since nothing the machine says may follow (an ended stream, a probe up to 30 minutes off)
+  describe('at the link’s return', () => {
+    it('is `none` for an idle stream the feed follows, and the kick’s try that follows answers again', async () => {
+      const l = lab({ followed: () => true });
+      (await opened(l)).sink.ended('unavailable');
+      l.link.set('down');
+      expect(answer(l)).toEqual({ n: 2, mode: 'unavailable' });
+      l.link.set('up');
+      expect(answer(l)).toEqual({ n: 3, mode: 'none' });
+      expect(l.lastState()).toMatchObject({ link: { state: 'up' }, stream: 'idle' });
+      l.session.kick(); // the checkout feed's `subbed` on the new channel (`following`)
+      l.link.open().at(-1)!.sink.ended('unavailable');
+      expect(answer(l)).toEqual({ n: 4, mode: 'unavailable' });
+      l.session.stop();
+    });
+
+    it('is `none` for an idle stream on its probe (a peer without feeds), and the probe’s end answers again', async () => {
+      const l = lab();
+      (await opened(l)).sink.ended('unavailable'); // the probe scheduled, nothing out
+      l.link.set('down');
+      l.link.set('up');
+      expect(answer(l)).toEqual({ n: 3, mode: 'none' });
+      await vi.advanceTimersByTimeAsync(1000);
+      l.link.open().at(-1)!.sink.ended('unavailable');
+      expect(answer(l)).toEqual({ n: 4, mode: 'unavailable' });
+      l.session.stop();
+    });
+
+    it('is `none` for a stream that ended (its reason neither `removed` nor `closed`)', async () => {
+      const l = lab();
+      (await opened(l)).sink.ended('gone');
+      l.link.set('down');
+      l.link.set('up');
+      expect(l.lastState()).toMatchObject({ stream: 'ended', answer: { n: 3, mode: 'none' } });
+      l.session.stop();
+    });
+
+    it('is the machine’s for a stream whose subscription is out: nothing at the return, then its `subbed`', async () => {
+      const l = lab();
+      const sub = await opened(l);
+      l.link.set('down');
+      sub.sink.paused('offline');
+      l.link.set('up');
+      expect(answer(l)).toEqual({ n: 1, mode: 'snapshot' });
+      sub.sink.subbed('replay', { epoch: 'L1', seq: 0 });
+      expect(answer(l)).toEqual({ n: 2, mode: 'replay' });
+      l.session.stop();
+    });
+
+    it('is nothing at a change that is no return (the carrier, a channel replaced within the grace) or after `removed`/`closed`', async () => {
+      const l = lab({ followed: () => true });
+      (await opened(l)).sink.ended('unavailable');
+      l.link.set('up', 'relay');
+      l.link.lose();
+      l.link.relink();
+      expect(answer(l)).toEqual({ n: 2, mode: 'unavailable' });
+      l.session.stop();
+      const refused = lab();
+      const sub = await opened(refused);
+      refused.link.set('down');
+      sub.sink.ended('removed');
+      refused.link.set('up');
+      expect(answer(refused)).toEqual({ n: 1, mode: 'snapshot' });
+      const closed = lab();
+      await opened(closed);
+      closed.session.stop('closed');
+      closed.link.set('down');
+      closed.link.set('up');
+      expect(answer(closed)).toEqual({ n: 1, mode: 'snapshot' });
+    });
+  });
 });

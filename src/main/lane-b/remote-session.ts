@@ -55,7 +55,9 @@
 // - An event that doesn't read (P5 O7 M8, "What draws Working…") is a gap at its place, never a silent drop: the
 //   session's status and record are read again (`session.status`, `session.get`) and folded in, so a turn a dropped
 //   `turn.ended` left open closes by the machine's word; a status the stream delivers meanwhile stands over the re-read.
-// - `remote.session` at each change (the link's state and caps included), said once per change.
+// - `remote.session` at each change (the link's state and caps included), said once per change, with the stream's
+//   latest answer (P5 O15 M2b): each `subbed`, an end the machine sends while the link is up, and main's own `none` at
+//   the link's return for a stream with no subscription out.
 // - A replay (`replay`): the record, the last of each part and `remote.session` said again, for a page that has just
 //   subscribed (a reload, a second window); what it said before was said to no one listening.
 import { readTolerant } from '@shared/ipc/tolerant';
@@ -197,6 +199,8 @@ export class RemoteSession {
   #rereading: { token: object; again: boolean } | null = null;
   /** P5 O15 M2b: the stream's latest answer, said with `remote.session`. */
   #answer: RemoteAnswer | null = null;
+  /** P5 O15 M2b: the link's state as it was last heard, so its return (`down`, then `up`) is told apart. */
+  #linkWas: ReturnType<RemoteLink['state']> | null = null;
 
   constructor(deps: RemoteSessionDeps) {
     this.#deps = deps;
@@ -216,7 +220,10 @@ export class RemoteSession {
     this.#running = true;
     this.state.stream = 'opening';
     this.state.ended = null;
-    if (this.#offs.length === 0) this.#offs = [this.link.onState(() => this.publish()), this.link.onCaps(() => this.publish())];
+    if (this.#offs.length === 0) {
+      this.#linkWas = this.link.state();
+      this.#offs = [this.link.onState(() => this.#linkMoved()), this.link.onCaps(() => this.publish())];
+    }
     this.publish();
     if (this.state.record === null) void this.#readRecord(0, this.#token);
     else this.#subscribe();
@@ -708,9 +715,23 @@ export class RemoteSession {
     this.#deps.emit(this.state.machine, name, read.value as never);
   }
 
-  /** P5 O15 M2b: the machine answered the stream (a `subbed`, or an end leaving it idle or ended). */
+  /** P5 O15 M2b: the stream was answered (a `subbed`, an end leaving it idle or ended, or main's own at the link's return). */
   #answeredWith(mode: RemoteAnswer['mode']): void {
     this.#answer = { n: this.#deps.nextAnswer?.() ?? (this.#answer?.n ?? 0) + 1, mode };
+  }
+
+  /**
+   * The link moved: said. At its return (`down`, then `up`; a channel replaced within the grace stays `up`), a stream
+   * with no subscription out (idle, its retry scheduled or waiting on the feed; ended; its record still read) is
+   * answered here, `none`: what follows from the machine, if anything, may be a probe minutes off or nothing at all, and
+   * no subscription is out for a page's read to contend with. One out (paused through the loss) has the machine's answer.
+   */
+  #linkMoved(): void {
+    const now = this.link.state();
+    const back = this.#linkWas === 'down' && now === 'up';
+    this.#linkWas = now;
+    if (back && this.#running && this.#sub === null) this.#answeredWith('none');
+    this.publish();
   }
 
   /**

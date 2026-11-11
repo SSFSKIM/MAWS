@@ -305,6 +305,34 @@ describe('a held key not whole at the return', () => {
     hold.unmount();
   });
 
+  // the architect's ruling on the return: a stream with no subscription out at the link's return (idle, its retry
+  // scheduled or waiting on the feed; ended) is answered by main itself, `none`, with the link's `up`
+  for (const [word, mode] of [['idle', 'unavailable'], ['ended', 'ended']] as const) {
+    it(`whose hydration failed on a stream ${word} at the loss is read again once at main’s own answer at the return`, async () => {
+      roster('up');
+      const first = pane();
+      const hold = tab();
+      refused(0);
+      await first.hydrated;
+      expect(entry().phase).toBe('failed');
+      stream(word, mode); // released (or ended) before the loss: no subscription out
+      roster('down');
+      stream(word);
+      first.unmount();
+      roster('up');
+      await settle();
+      expect(reads()).toHaveLength(1);
+      stream(word, 'none');
+      await vi.waitFor(() => expect(reads()).toHaveLength(2));
+      answered(1);
+      await vi.waitFor(() => expect(entry().phase).toBe('live'));
+      if (word === 'idle') stream('idle', 'unavailable'); // the feed's kick, its try ended `unavailable`
+      await settle();
+      expect(reads(), 'once').toHaveLength(2);
+      hold.unmount();
+    });
+  }
+
   it('a whole key reads nothing at the stream’s return', async () => {
     const hold = await heldThroughALoss();
     roster('up');

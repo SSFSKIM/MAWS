@@ -63,9 +63,11 @@ export type RemoteStreamState = (typeof REMOTE_STREAM_STATES)[number];
 
 // P5 O15 M2b (Decision Log 39): the stream's latest answer, which a republish for a link or caps change leaves as it was:
 // `n` rises by one at each `subbed` (its mode, whichever subscription answered) and at each end that leaves the stream
-// `idle` (`unavailable`) or `ended`; null before the first. A page that held a session's transcript through a loss reads
-// the return from the first answer past the one it had seen. Additive: absent, as from main before it, is none said.
-export const REMOTE_ANSWERS = ['replay', 'missing', 'snapshot', 'ended', 'unavailable'] as const;
+// `idle` (`unavailable`) or `ended`, and at the link's return (`down`, then `up`) for a stream with no subscription out
+// (`none`: main's own, since nothing the machine says may follow); null before the first. A page that held a session's
+// transcript through a loss reads the return from the first answer past the one it had seen. Additive: absent, as from
+// main before it, says no answer.
+export const REMOTE_ANSWERS = ['replay', 'missing', 'snapshot', 'ended', 'unavailable', 'none'] as const;
 export const RemoteAnswerSchema = z.strictObject({ n: z.number().int().positive(), mode: z.enum(REMOTE_ANSWERS) });
 export type RemoteAnswer = z.infer<typeof RemoteAnswerSchema>;
 
