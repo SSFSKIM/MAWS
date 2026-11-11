@@ -7,15 +7,24 @@ import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocketServer } from 'ws';
 import type { Listing, ProjectsRecord, Signed } from '../../../apps/org-protocol/src/index.ts';
+import { DEFAULT_HEARTBEAT_MS } from '../../endpoint/hub-link';
+import { fakeReach, fakeWake } from '../../../test/support/wake-reach';
+import type { Reach } from '../net/reach';
+import type { WakeSource } from '../net/wake';
 import { BUILD_HEADER } from './hub-client';
 import { CLOSE_REMOVED, createRegistryFeed, MAX_PART_SETS, MAX_PART_TEXT, REGISTRY_APP_PATH, type RegistryFeed, type WebSocketLike } from './registry-feed';
 import { heldOrgSession, type SignedIn } from './session';
+import { ORG_TIMING } from './timing';
 
 type Listener = (...args: never[]) => void;
 
 class FakeSocket implements WebSocketLike {
   readonly #listeners = new Map<string, Listener[]>();
-  closed = false;
+  /** The app ended it (§G rule 5: always a terminate). */
+  terminated = false;
+  /** A `close()` call, which the app never makes of its own socket (§G rule 5). */
+  closeCalls = 0;
+  pings = 0;
   constructor(
     readonly url: string,
     readonly headers: Record<string, string>,
@@ -23,14 +32,23 @@ class FakeSocket implements WebSocketLike {
   on(event: string, listener: Listener): void {
     this.#listeners.set(event, [...(this.#listeners.get(event) ?? []), listener]);
   }
+  ping(): void {
+    this.pings++;
+  }
+  terminate(): void {
+    this.terminated = true;
+  }
   close(): void {
-    this.closed = true;
+    this.closeCalls++;
   }
   #emit(event: string, ...args: unknown[]): void {
     for (const listener of this.#listeners.get(event) ?? []) (listener as (...a: unknown[]) => void)(...args);
   }
   open(): void {
     this.#emit('open');
+  }
+  pong(): void {
+    this.#emit('pong');
   }
   send(frame: unknown): void {
     this.#emit('message', typeof frame === 'string' ? frame : JSON.stringify(frame));
@@ -63,7 +81,7 @@ const flush = async () => {
   for (let i = 0; i < 5; i++) await Promise.resolve();
 };
 
-function harness(initial: SignedIn | null = signedIn(HUB), random: () => number = () => 0.5) {
+function harness(initial: SignedIn | null = signedIn(HUB), random: () => number = () => 0.5, around: { wake?: WakeSource; reach?: Reach } = {}) {
   const session = heldOrgSession(initial);
   const sockets: FakeSocket[] = [];
   const lines: string[] = [];
@@ -74,6 +92,7 @@ function harness(initial: SignedIn | null = signedIn(HUB), random: () => number 
       sockets.push(socket);
       return socket;
     },
+    ...around,
     random,
     log: (line) => lines.push(line),
   });
@@ -144,7 +163,7 @@ describe('the socket', () => {
 
     h.session.set(null);
     await flush();
-    expect(h.last().closed).toBe(true);
+    expect(h.last().terminated).toBe(true);
     expect(h.feed.connected()).toBe(false);
     expect(h.seen.close).toBe(1);
     // the dropped socket's own close arrives later: it schedules nothing and is not told twice
@@ -167,7 +186,7 @@ describe('the socket', () => {
     h.session.set(signedIn(HUB, { ...HEADERS }));
     await flush();
     expect(h.sockets).toHaveLength(1);
-    expect(h.sockets[0].closed).toBe(false);
+    expect(h.sockets[0].terminated).toBe(false);
     expect(h.seen.close).toBe(0);
   });
 
@@ -180,7 +199,7 @@ describe('the socket', () => {
     h.session.set(signedIn(HUB, { 'cf-access-token': 'two' }));
     await flush();
     expect(h.sockets).toHaveLength(2);
-    expect(h.sockets[0].closed).toBe(true);
+    expect(h.sockets[0].terminated).toBe(true);
     expect(h.seen.close).toBe(1);
     expect(h.feed.connected()).toBe(false);
     expect(h.last().headers).toEqual({ 'cf-access-token': 'two' });
@@ -190,7 +209,7 @@ describe('the socket', () => {
     h.session.set(signedIn('https://other.example.com', { 'cf-access-token': 'two' }));
     await flush();
     expect(h.sockets).toHaveLength(3);
-    expect(h.sockets[1].closed).toBe(true);
+    expect(h.sockets[1].terminated).toBe(true);
     expect(h.last().url).toBe(`wss://other.example.com${REGISTRY_APP_PATH}`);
     expect(h.seen.close).toBe(1); // the second socket never opened
   });
@@ -226,7 +245,7 @@ describe('the socket', () => {
     await flush();
     g.last().open();
     g.feed.close();
-    expect(g.last().closed).toBe(true);
+    expect(g.last().terminated).toBe(true);
     expect(g.feed.connected()).toBe(false);
     g.last().end(1000);
     expect(g.seen.close).toBe(0);
@@ -515,6 +534,322 @@ describe('the ends that wait for the session', () => {
   });
 });
 
+// P5 O15 M2b §G: the five rules. A wake of WAKE_DROP_MS or more drops the socket in the turn it is heard and reopens
+// it behind the reach's answer or its floor, one socket at a time; a protocol ping every HUB_PING_MS, answered within
+// HUB_PONG_MS or dropped; an open in the window has HUB_WINDOW_OPEN_MS; the app's own end is a terminate.
+describe('after a wake, and the pings (P5 O15 M2b §G)', () => {
+  function woken(options: { open?: boolean; session?: SignedIn | null } = {}) {
+    const wake = fakeWake();
+    const reach = fakeReach({ open: options.open });
+    const h = harness(options.session === undefined ? signedIn(HUB) : options.session, () => 0.5, { wake: wake.source, reach: reach.reach });
+    feed = h.feed;
+    /** The sockets the feed has not terminated. */
+    const live = () => h.sockets.filter((socket) => !socket.terminated);
+    return { ...h, wake, reach, live };
+  }
+
+  it('holds the ping period to mawsd’s own heartbeat to the hub', () => {
+    expect(ORG_TIMING.HUB_PING_MS).toBe(DEFAULT_HEARTBEAT_MS);
+    expect(ORG_TIMING).toMatchObject({ HUB_PING_MS: 15_000, HUB_PONG_MS: 5_000, HUB_WINDOW_OPEN_MS: 2_000 });
+  });
+
+  it('a wake of 10 s terminates the open socket in the same turn, tells its end once, and opens exactly one socket when the hub answers', async () => {
+    const h = woken();
+    await flush();
+    h.last().open();
+    h.wake.wake(10_000);
+    expect(h.sockets[0].terminated).toBe(true);
+    expect(h.seen.close).toBe(1);
+    expect(h.feed.connected()).toBe(false);
+    expect(h.reach.windows).toEqual(['wake']);
+    expect(h.lines).toContain('[org-feed] wake after 10000 ms: dropped the socket');
+    await flush();
+    expect(h.sockets).toHaveLength(1); // waiting on the hub's path
+    expect(h.reach.waiting.map((waiter) => waiter.target)).toEqual([HUB]);
+    h.sockets[0].end(1006); // the old socket's own end, later: nothing more is told or scheduled
+    expect(h.seen.close).toBe(1);
+    h.reach.answer(true);
+    await flush();
+    expect(h.sockets).toHaveLength(2);
+    expect(h.last().url).toBe(`wss://hub.example.com${REGISTRY_APP_PATH}`);
+    h.last().open();
+    expect(h.seen.open).toBe(2);
+    await advance(10_000);
+    expect(h.sockets).toHaveLength(2);
+  });
+
+  it('a wake with no socket says so and opens behind the hub’s answer, its backoff back at the first step', async () => {
+    const h = woken();
+    await flush();
+    for (const wait of [1_000, 2_000, 4_000]) {
+      h.last().end(1006);
+      await advance(wait);
+    }
+    h.last().end(1006); // the next wait would be 8 s
+    expect(h.sockets).toHaveLength(4);
+    h.wake.wake(3_600_000);
+    expect(h.lines).toContain('[org-feed] wake after 3600000 ms: no socket');
+    await flush();
+    h.reach.answer(true);
+    await flush();
+    expect(h.sockets).toHaveLength(5);
+    h.last().end(1006);
+    await advance(999);
+    expect(h.sockets).toHaveLength(5);
+    await advance(1); // the first step, then the reach
+    expect(h.reach.waiting).toHaveLength(1);
+    expect(h.sockets).toHaveLength(5);
+    h.reach.answer(true);
+    await flush();
+    expect(h.sockets).toHaveLength(6);
+  });
+
+  it('holds no second socket while one is opening or awaited, whatever is heard meanwhile', async () => {
+    const h = woken();
+    await flush();
+    h.last().open();
+    h.wake.wake(10_000);
+    await flush();
+    h.feed.probe();
+    h.session.changed();
+    await flush();
+    expect(h.lines).toContain('[org-feed] probe: opening');
+    expect(h.reach.waiting).toHaveLength(1);
+    h.reach.answer(true);
+    await flush();
+    expect(h.live()).toHaveLength(1);
+    h.feed.probe();
+    h.session.changed();
+    h.wake.wake(5_000);
+    await flush();
+    expect(h.live()).toHaveLength(1);
+    expect(h.sockets).toHaveLength(2);
+    // a wake while that socket opens drops it (never open, so nothing told) and waits again
+    h.wake.wake(20_000);
+    expect(h.live()).toHaveLength(0);
+    expect(h.seen.close).toBe(1);
+    await flush();
+    h.reach.answer(true);
+    await flush();
+    expect(h.live()).toHaveLength(1);
+  });
+
+  it('pings every 15 s from the open: a pong within 5 s keeps the socket, none drops it and opens again', async () => {
+    const h = woken();
+    await flush();
+    await advance(20_000);
+    expect(h.last().pings).toBe(0); // nothing before the open
+    h.last().open();
+    await advance(14_999);
+    expect(h.last().pings).toBe(0);
+    await advance(1);
+    expect(h.last().pings).toBe(1);
+    await advance(4_999);
+    h.last().pong();
+    await advance(10_001);
+    expect(h.last().pings).toBe(2);
+    expect(h.last().terminated).toBe(false);
+    await advance(4_999);
+    expect(h.last().terminated).toBe(false);
+    await advance(1);
+    expect(h.sockets[0].terminated).toBe(true);
+    expect(h.seen.close).toBe(1);
+    expect(h.lines).toContain('[org-feed] no pong within 5000 ms: dropped the socket');
+    expect(h.sockets).toHaveLength(2); // no window open: today's open, at once
+    h.sockets[0].pong(); // a late pong answers nothing
+    expect(h.sockets).toHaveLength(2);
+  });
+
+  it('only a pong answers a ping: a frame from the hub does not', async () => {
+    const h = woken();
+    await flush();
+    h.last().open();
+    await advance(15_000);
+    h.last().send({ t: 'state', version: 3 });
+    await advance(5_000);
+    expect(h.sockets[0].terminated).toBe(true);
+  });
+
+  it('a wake of 9 s pings an open socket and drops nothing; with no socket it opens now', async () => {
+    const h = woken();
+    await flush();
+    h.last().open();
+    h.wake.wake(9_000);
+    expect(h.last().pings).toBe(1);
+    expect(h.last().terminated).toBe(false);
+    expect(h.reach.windows).toEqual([]);
+    expect(h.lines).toContain('[org-feed] wake after 9000 ms: ping sent');
+    h.last().pong();
+    await advance(5_000);
+    expect(h.last().terminated).toBe(false);
+    h.last().end(1006);
+    expect(h.sockets).toHaveLength(1);
+    h.wake.wake(9_000); // the 1 s backoff not waited out
+    await flush();
+    expect(h.sockets).toHaveLength(2);
+    expect(h.lines).toContain('[org-feed] wake after 9000 ms: no socket');
+  });
+
+  it('probe(), and the unlock, ping an open socket and reconnect when there is none', async () => {
+    const h = woken();
+    await flush();
+    h.last().open();
+    h.feed.probe();
+    expect(h.last().pings).toBe(1);
+    expect(h.lines).toContain('[org-feed] probe: ping sent');
+    h.wake.unlock();
+    expect(h.last().pings).toBe(2);
+    h.last().end(1006);
+    h.wake.unlock();
+    await flush();
+    expect(h.sockets).toHaveLength(2);
+    expect(h.lines).toContain('[org-feed] probe: no socket');
+  });
+
+  it('an open made in the window that gets no answer ends at 2 s and takes the backoff', async () => {
+    const h = woken({ open: true });
+    await flush();
+    h.reach.answer(true);
+    await flush();
+    expect(h.sockets).toHaveLength(1);
+    await advance(1_999);
+    expect(h.last().terminated).toBe(false);
+    await advance(1);
+    expect(h.last().terminated).toBe(true);
+    expect(h.lines).toContain('[org-feed] the open had no answer within 2000 ms');
+    await advance(999);
+    expect(h.reach.waiting).toHaveLength(0);
+    await advance(1);
+    expect(h.reach.waiting).toHaveLength(1);
+    // outside the window an open keeps wsSocket's own deadline
+    h.reach.closeWindow();
+    await flush();
+    expect(h.sockets).toHaveLength(2);
+    await advance(60_000);
+    expect(h.last().terminated).toBe(false);
+  });
+
+  it('opens anyway once it has waited 10 s on the reach, and the hub’s answer before that open opened terminates it for one more', async () => {
+    const h = woken({ open: true });
+    await flush();
+    await advance(9_999);
+    expect(h.sockets).toHaveLength(0);
+    await advance(1);
+    expect(h.sockets).toHaveLength(1);
+    expect(h.reach.waiting).toHaveLength(1); // the floor's open keeps its wait
+    h.reach.answer(true);
+    await flush();
+    expect(h.sockets[0].terminated).toBe(true);
+    expect(h.sockets).toHaveLength(2);
+    expect(h.live()).toHaveLength(1);
+    expect(h.seen.close).toBe(0);
+    h.last().open();
+    expect(h.feed.connected()).toBe(true);
+  });
+
+  it('a floor’s open that opens ends its wait', async () => {
+    const h = woken({ open: true });
+    await flush();
+    await advance(10_000);
+    h.last().open();
+    expect(h.reach.waiting).toHaveLength(0);
+    await advance(14_000); // no second floor, before the first ping
+    expect(h.sockets).toHaveLength(1);
+    expect(h.feed.connected()).toBe(true);
+  });
+
+  it('a floor’s open that ends with nothing from the hub waits again with no backoff; one the hub refused takes the backoff', async () => {
+    const h = woken({ open: true });
+    await flush();
+    await advance(10_000);
+    h.last().fail('ECONNREFUSED');
+    expect(h.reach.waiting).toHaveLength(1);
+    await advance(9_999);
+    expect(h.sockets).toHaveLength(1);
+    await advance(1);
+    expect(h.sockets).toHaveLength(2); // the next floor, ten seconds on
+    await advance(2_000); // its 2 s in the window: nothing from the hub either
+    expect(h.last().terminated).toBe(true);
+    expect(h.reach.waiting).toHaveLength(1);
+    await advance(10_000);
+    expect(h.sockets).toHaveLength(3);
+    h.last().refuse(503, { [BUILD_HEADER]: '2026.11.10' });
+    expect(h.reach.waiting).toHaveLength(0);
+    await advance(999);
+    expect(h.reach.waiting).toHaveLength(0);
+    await advance(1);
+    expect(h.reach.waiting).toHaveLength(1);
+    expect(h.sockets).toHaveLength(3);
+  });
+
+  it('the app’s own ends are a terminate, never a close(): a wake, a missed pong, the hub gone, a new hub, close()', async () => {
+    const h = woken();
+    await flush();
+    h.last().open();
+    h.wake.wake(60_000);
+    await flush();
+    h.reach.answer(true);
+    await flush();
+    h.last().open();
+    await advance(20_000); // a ping with no pong
+    h.reach.answer(true); // the window is still open: each open waits on the hub's path
+    await flush();
+    h.last().open();
+    h.session.set(signedIn('https://other.example.com'));
+    await flush();
+    h.reach.answer(true);
+    await flush();
+    h.last().open();
+    h.session.set(null);
+    await flush();
+    h.session.set(signedIn(HUB));
+    await flush();
+    h.reach.answer(true);
+    await flush();
+    h.feed.close();
+    expect(h.sockets).toHaveLength(5);
+    expect(h.sockets.every((socket) => socket.terminated)).toBe(true);
+    expect(h.sockets.map((socket) => socket.closeCalls)).toEqual([0, 0, 0, 0, 0]);
+  });
+
+  it('counts the listings pages since the open and says so at the last', async () => {
+    const h = woken();
+    await flush();
+    h.last().open();
+    h.last().send({ t: 'listings', records: [record('a'), record('b')], last: false });
+    h.last().send({ t: 'listings', records: [record('c')], last: true });
+    expect(h.lines).toContain('[org-feed] listings: last page, 3 records in 2 pages');
+    expect(h.seen.listings).toHaveLength(2);
+    h.last().end(1006);
+    await advance(1_000);
+    h.last().open();
+    h.last().send({ t: 'listings', records: [], last: true });
+    expect(h.lines).toContain('[org-feed] listings: last page, 0 records in 1 pages');
+  });
+
+  it('a parked feed hears a wake and opens nothing', async () => {
+    const h = woken();
+    await flush();
+    h.last().open();
+    h.last().end(CLOSE_REMOVED);
+    h.wake.wake(3_600_000);
+    h.wake.wake(9_000);
+    h.wake.unlock();
+    await advance(60_000);
+    expect(h.sockets).toHaveLength(1);
+    expect(h.reach.windows).toEqual([]);
+    expect(h.lines).toContain('[org-feed] wake after 3600000 ms: parked');
+  });
+
+  it('close() leaves the wake source', async () => {
+    const h = woken();
+    await flush();
+    expect(h.wake.listeners()).toBe(2);
+    h.feed.close();
+    expect(h.wake.listeners()).toBe(0);
+  });
+});
+
 describe('the default ws adapter', () => {
   it('sends the headers, delivers a text frame, and sees a refused upgrade’s status and headers', async () => {
     vi.useRealTimers();
@@ -530,8 +865,12 @@ describe('the default ws adapter', () => {
       },
     });
     await new Promise<void>((resolve) => server.once('listening', () => resolve()));
+    const serverEnds: number[] = [];
+    let serverPings = 0;
     server.on('connection', (socket, request) => {
       received.push({ ...request.headers, url: request.url });
+      socket.on('close', (code) => serverEnds.push(code));
+      socket.on('ping', () => serverPings++);
       socket.send(Buffer.from(JSON.stringify({ t: 'state', version: 99 })), { binary: true });
       socket.send(JSON.stringify({ t: 'state', version: 5 }));
     });
@@ -551,11 +890,25 @@ describe('the default ws adapter', () => {
       expect(live.connected()).toBe(true);
       expect(received).toHaveLength(1);
       expect(received[0]).toMatchObject({ 'cf-access-token': 'good', url: REGISTRY_APP_PATH });
+      // §G: a probe is a protocol ping, which the server's stack answers itself; the app's own end is a terminate,
+      // which the server reads as 1006, no close frame sent
+      const before = lines.length;
+      live.probe();
+      await new Promise<void>((resolve) => {
+        const check = () => (serverPings === 1 ? resolve() : setTimeout(check, 5));
+        check();
+      });
+      expect(lines.slice(before)).toEqual(['[org-feed] probe: ping sent']);
 
       const ended = new Promise<void>((resolve) => live.onCredentialsEnded(resolve));
       session.set(signedIn(hub, { 'cf-access-token': 'expired' }));
       await ended;
       expect(live.connected()).toBe(false);
+      await new Promise<void>((resolve) => {
+        const check = () => (serverEnds.length > 0 ? resolve() : setTimeout(check, 5));
+        check();
+      });
+      expect(serverEnds).toEqual([1006]);
 
       const removed = new Promise<void>((resolve) => live.onRemoved(resolve));
       session.set(signedIn(hub, { 'cf-access-token': 'removed' }));

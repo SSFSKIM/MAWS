@@ -4,7 +4,9 @@
 // against a hub that stops reading.
 import { CHANNEL_CLOSE, decodeChannelFrame, encodeChannelFrame, RL1_PROTOCOL } from 'org-protocol';
 import { toWire } from 'desk-hub/protocol';
-import { afterEach, describe, expect, it } from 'vitest';
+import dns from 'node:dns';
+import { createServer, type AddressInfo } from 'node:net';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HubLink, reconnectDelay, RECONNECT_MAX_MS, STEADY_MS, type ChannelHandler, type HubLinkOptions, type HubStop } from '../../src/endpoint/hub-link';
 import type { SendLimits } from '../../src/endpoint/send-buffer';
 import { mintRef } from './fake-services';
@@ -127,6 +129,33 @@ describe('the connection', () => {
     expect(link.connected).toBe(false);
     await link.stop();
     expect(hub.upgrades).toHaveLength(1);
+  });
+
+  // P5 O15 M2b §H: a connect that failed on every address is Node's aggregate, whose message is empty; the line names its
+  // code and each address it tried (P5 Decision Log 262). The name resolves to two loopback addresses whatever the
+  // runner's hosts file says, and nothing listens on the port.
+  it('names a failed connect’s code and each address it tried', async () => {
+    const closed = createServer();
+    await new Promise<void>((resolve) => closed.listen(0, '127.0.0.1', resolve));
+    const port = (closed.address() as AddressInfo).port;
+    await new Promise<void>((resolve) => closed.close(() => resolve()));
+    const both = [{ address: '127.0.0.1', family: 4 }, { address: '::1', family: 6 }];
+    const lookup = vi.spyOn(dns, 'lookup').mockImplementation(((_host: string, options: unknown, callback: (...args: unknown[]) => void) => {
+      if ((options as { all?: boolean }).all) callback(null, both);
+      else callback(null, both[0].address, both[0].family);
+    }) as unknown as typeof dns.lookup);
+    try {
+      const link = new HubLink({ target: () => ({ hub: `http://localhost:${port}`, credentials: { clientId: 'client-id.access', clientSecret: CREDENTIAL }, ref: mintRef() }), build: 'test-build', log: (line) => void lines.push(line), random: () => 0 });
+      links.push(link);
+      link.start();
+      await until(() => lines.some((line) => line.startsWith('endpoint: the hub connection failed:')), 'the failed line');
+    } finally {
+      lookup.mockRestore();
+    }
+    const line = lines.find((each) => each.startsWith('endpoint: the hub connection failed:'))!;
+    expect(line).toMatch(/^endpoint: the hub connection failed: \(E[A-Z]+; .+\); connecting again in \d+ ms$/);
+    expect(line).toContain(`ECONNREFUSED 127.0.0.1:${port}`);
+    expect(line).toContain(` ::1:${port}`);
   });
 });
 

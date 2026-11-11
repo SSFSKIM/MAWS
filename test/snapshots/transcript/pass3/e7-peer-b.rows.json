@@ -242,6 +242,7 @@
       "sender": {
         "address": "uds:/tmp/cc-socks/10560.sock",
         "name": "repo-h6xooi-51",
+        "owners": null,
         "session": null
       },
       "summary": null,
@@ -327,6 +328,7 @@
       "sender": {
         "address": "uds:/tmp/cc-socks/10560.sock",
         "name": "repo-h6xooi-51",
+        "owners": null,
         "session": null
       },
       "summary": null,

@@ -67,6 +67,31 @@ const SMINOS_UNREAD = / \| unread [1-9][0-9]*$/;
 const SMINOS_STATE = '(?:busy|idle|waiting|stopped|gone|vacant|retired)';
 const SMINOS_ORG_TARGET = new RegExp(`@org(?: \\(${SMINOS_STATE}(?:,${SMINOS_STATE})*\\))?$`, 'y');
 const SMINOS_MESSAGE_FRAME = /^\[sminos message from (.+) id=\S+\]$/;
+// P5 O15 M2b (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, §J): after the alias, sminos writes whose session
+// sent the event (`sender_labels`): `, owned by <name>[, <name>…]`, a name an owner's email or its member id, or another
+// label in parentheses, or none.
+const OWNED_BY = ', owned by ';
+const OWNER_NAME = /^[^\s,()]+$/;
+const BARE_ALIAS_END = /,| \(/;
+
+/**
+ * The JSON string literal `text` opens with, decoded, and its length; null when the literal does not parse. sminos
+ * writes an alias that could be mistaken (one holding `,` `(` `)` `"` `→` `[` `]` or a newline) as one, so the label
+ * and the chat frame's arrow are always outside it.
+ */
+function quotedAlias(text: string): { alias: string; length: number } | null {
+  for (let at = 1; at < text.length; at += 1) {
+    if (text[at] === '\\') at += 1;
+    else if (text[at] === '"') {
+      try {
+        return { alias: JSON.parse(text.slice(0, at + 1)) as string, length: at + 1 };
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
+}
 
 /**
  * Whether a chat frame's target starts at `at` and runs to the end of `rest` (the frame between its sender and its
@@ -87,15 +112,19 @@ function chatTargetAt(rest: string, at: number, lastBracket: number): boolean {
  * Who a chat frame line names as its sender, read in one pass. The header is taken at its first place, as a pattern
  * would; the sender then runs to a ` → ` that opens a whole target. A sender's alias and a scope's project names are
  * both open, so a line may split there more than one way (an alias `a → @all in b` saying `→ @you`, a project named
- * `ops → @all`): such a line names no one sender, and is read as no frame rather than credited to a guess.
+ * `ops → @all`): such a line names no one sender, and is read as no frame rather than credited to a guess. A sender that
+ * opens with `"` is a quoted alias, and the arrow is looked for after its literal (P5 O15 M2b); a literal that does not
+ * parse makes the line no frame.
  */
 function chatFrameSender(line: string): string | null {
   const head = SMINOS_CHAT_HEAD.exec(line);
   if (head === null || !line.endsWith(']') || line.includes('\n')) return null;
   const rest = line.slice(head[0].length, -1).replace(SMINOS_UNREAD, '');
   const lastBracket = rest.lastIndexOf(']');
+  const quoted = rest.startsWith('"') ? quotedAlias(rest) : null;
+  if (rest.startsWith('"') && quoted === null) return null;
   let sender: string | null = null;
-  for (let at = rest.indexOf(' → ', 1); at >= 0; at = rest.indexOf(' → ', at + 1)) {
+  for (let at = rest.indexOf(' → ', quoted?.length ?? 1); at >= 0; at = rest.indexOf(' → ', at + 1)) {
     if (!chatTargetAt(rest, at + 3, lastBracket)) continue;
     if (sender !== null) return null;
     sender = rest.slice(0, at);
@@ -106,6 +135,32 @@ function chatFrameSender(line: string): string | null {
 /** Who a sminos frame line says sent the event, or null when the line is not a whole frame. */
 export function sminosFrameSender(line: string): string | null {
   return chatFrameSender(line) ?? SMINOS_MESSAGE_FRAME.exec(line)?.[1] ?? null;
+}
+
+/**
+ * The owners a sminos frame line attests for its sender; null for a frame with any other label or none (P5 O15 M2b,
+ * §J). The alias is a quoted one's literal, decoded, or a bare one up to its first `,` or ` (`; the label after it
+ * answers only as `, owned by ` and then names, each one token. This is a display of sminos's frame, not a verification:
+ * while sminos writes an alias as its writer wrote it, a bare alias can imitate the label.
+ */
+export function sminosFrameOwners(frame: string): { alias: string; owners: string[] } | null {
+  const sender = sminosFrameSender(frame);
+  if (sender === null) return null;
+  let alias: string;
+  let label: string;
+  if (sender.startsWith('"')) {
+    const quoted = quotedAlias(sender);
+    if (quoted === null) return null;
+    alias = quoted.alias;
+    label = sender.slice(quoted.length);
+  } else {
+    const end = sender.search(BARE_ALIAS_END);
+    alias = end < 0 ? sender : sender.slice(0, end);
+    label = end < 0 ? '' : sender.slice(end);
+  }
+  if (!label.startsWith(OWNED_BY)) return null;
+  const owners = label.slice(OWNED_BY.length).split(', ');
+  return owners.every((name) => OWNER_NAME.test(name)) ? { alias, owners } : null;
 }
 
 /** A sminos message's text as drawn: its frame line (whole, the first, with the text after it) and its reply line cut. */

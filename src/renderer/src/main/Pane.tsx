@@ -16,6 +16,7 @@ import { EditorHostScopeContext, useEditorHostRegistration, type EditorHostScope
 import { EditorHeader } from '../panel/PanelHeader'; // P3-G
 import { ArtifactTab } from '../library/ArtifactTab'; // P3-L
 import { SessionPane } from '../session/SessionPane';
+import { useRemoteTranscriptHold } from '../lane-b/transcript-hold'; // P5 O15 M2b
 import { cardSession, expandPane } from '../shell/floating'; // P3-G; P4-B3: expandPane
 import { DropOverlay } from '../shell/DropOverlay'; // P4-B3 M4
 import { dropPanelRecord, useCoverState } from '../shell/transfer'; // P4-B3 M4
@@ -185,10 +186,13 @@ function TabContent({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
 // session, one focus target); the main region is at 0 px and inert then, so nothing is lost on screen. Held through the
 // pill too, so closing and reopening the card does not remount the pane behind it. (P4-B3: the split's card draws a
 // pane's session the main area no longer renders, so this holds there with nothing to hide.)
-// P5 O6 M5 (P5 Decision Log 28, T5): a kept tab of an offline machine's session says only that.
+// P5 O6 M5 (P5 Decision Log 28, T5): a kept tab of an offline machine's session says only that. P5 O15 M2b: a remote lane B
+// session's tab holds its transcript through that placeholder, so the pane rejoins it at `up` rather than reading the
+// whole history again (lane-b/transcript-hold.ts).
 function SessionTab({ tab, paneIndex }: { tab: Extract<TabRef, { kind: 'session' }>; paneIndex: PaneIndex }) {
   const inCard = useLayout((s) => cardSession(s) === tab.appSessionId);
   const machine = useMachineMark(tab.appSessionId);
+  useRemoteTranscriptHold(tab.appSessionId);
   if (machine.offline) return <p data-machine-offline className="m-0 flex h-full items-center justify-center text-ui text-fg-faint">{`${machine.name} is offline`}</p>;
   return inCard ? <div data-session-in-card className="h-full" /> : <SessionPane appSessionId={tab.appSessionId} paneIndex={paneIndex} />;
 }

@@ -9,7 +9,8 @@
 // and is empty signed out.
 //
 // The network watch reads the non-internal interface addresses every NETWORK_POLL_MS while any link exists, and probes
-// every link (`network`) when the set changes. Electron-free: wake, unlock and focus reach `probeAll` from index.ts.
+// every link (`network`) when the set changes. Electron-free: unlock and focus reach `probeAll` from index.ts, and a
+// wake (P5 O15 M2b) reaches `wakeAll` from the wake source there.
 import { networkInterfaces, type NetworkInterfaceInfo } from 'node:os';
 import { join } from 'node:path';
 import { machineKeys, verifyMachineCert } from '../../../../apps/org-protocol/src/index.ts';
@@ -80,6 +81,8 @@ function addressesOf(table: NodeJS.Dict<NetworkInterfaceInfo[]>): string {
 export function createRemoteSource(deps: RemoteSourceDeps): RemoteSource & {
   link(machine: MachineRef): RemoteLink | null;
   probeAll(reason: ProbeReason): void;
+  /** P5 O15 M2b §F: every link's `wake`. */
+  wakeAll(sleptMs: number): void;
   close(): void;
 } {
   const now = deps.now ?? Date.now;
@@ -155,6 +158,9 @@ export function createRemoteSource(deps: RemoteSourceDeps): RemoteSource & {
     link: (ref) => links.get(ref) ?? null,
     probeAll(reason) {
       for (const link of links.values()) link.probe(reason);
+    },
+    wakeAll(sleptMs) {
+      for (const link of links.values()) link.wake(sleptMs);
     },
     close() {
       closed = true;

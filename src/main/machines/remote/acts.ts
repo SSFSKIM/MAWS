@@ -159,9 +159,14 @@ function terminalOf(outcome: unknown): ActOutcome | null {
   return null;
 }
 
+/** What `onCurrent` wrote on the new channel: its messages, acts and queries alike, and their UTF-8 JSON bytes. */
+export type ActsWritten = { messages: number; bytes: number };
+
 export class ActTable {
   readonly #entries = new Map<string, Entry>();
   readonly #deps: ActTableDeps;
+  /** While `onCurrent` runs: what it has written so far. */
+  #written: ActsWritten | null = null;
 
   constructor(deps: ActTableDeps) {
     this.#deps = deps;
@@ -390,14 +395,34 @@ export class ActTable {
     return handle;
   }
 
-  /** A channel became current: every unsettled act is sent, resealed or queried on it. */
-  onCurrent(): void {
-    for (const entry of [...this.#entries.values()]) {
-      if (entry.settled || entry.signing) continue;
-      if (!entry.outstanding) this.#trySend(entry);
-      else if (entry.ambiguous && !entry.acked && !entry.signed && !entry.oneChannel && this.#inWindow(entry)) this.#transmit(entry, true);
-      else this.#query(entry);
+  /**
+   * A channel became current: every unsettled act is sent, resealed or queried on it. P5 O15 M2b §F: answers what that
+   * wrote, since the link writes the subscriptions after it and the wake's bound holds only while it is small.
+   */
+  onCurrent(): ActsWritten {
+    const written: ActsWritten = { messages: 0, bytes: 0 };
+    this.#written = written;
+    try {
+      for (const entry of [...this.#entries.values()]) {
+        if (entry.settled || entry.signing) continue;
+        if (!entry.outstanding) this.#trySend(entry);
+        else if (entry.ambiguous && !entry.acked && !entry.signed && !entry.oneChannel && this.#inWindow(entry)) this.#transmit(entry, true);
+        else this.#query(entry);
+      }
+    } finally {
+      this.#written = null;
     }
+    return written;
+  }
+
+  /** One message on the current channel, counted while `onCurrent` runs. */
+  #send(message: DeviceMessage): boolean {
+    const sent = this.#deps.send(message);
+    if (sent && this.#written !== null) {
+      this.#written.messages += 1;
+      this.#written.bytes += Buffer.byteLength(JSON.stringify(message), 'utf8');
+    }
+    return sent;
   }
 
   /** The current channel was lost: every act a copy of which went out on it is ambiguous. */
@@ -556,7 +581,7 @@ export class ActTable {
     this.#clearTimers(entry);
     if (!this.#offered(entry)) return;
     if (!entry.signed) entry.action = { ...entry.action, ...(reseal ? { nonce: random(NONCE_BYTES) } : {}), created: new Date(this.#deps.now()).toISOString() };
-    if (!this.#deps.send({ t: 'act', action: entry.action })) {
+    if (!this.#send({ t: 'act', action: entry.action })) {
       if (!entry.outstanding) this.#armWindow(entry);
       return;
     }
@@ -575,7 +600,7 @@ export class ActTable {
     this.#progress(entry, 'unknown');
     if (this.#deps.now() - Date.parse(entry.opCreated) > OP_HORIZON_S * 1000) return this.#settle(entry, { state: 'unknown', reason: 'expired' });
     if (!this.#deps.current() || !this.#offered(entry)) return;
-    if (this.#deps.send({ t: 'query', opId: entry.opId, opCreated: entry.opCreated, executor: entry.executor })) entry.querying = true;
+    if (this.#send({ t: 'query', opId: entry.opId, opCreated: entry.opCreated, executor: entry.executor })) entry.querying = true;
   }
 
   #requery(entry: Entry): void {

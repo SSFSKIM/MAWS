@@ -52,6 +52,7 @@ import {
 import { MACHINE_SOCKET_PATH, PartAssembler, toWire, type Part } from 'desk-hub/protocol';
 import WebSocket, { type RawData } from 'ws';
 import type { IncomingMessage } from 'node:http';
+import { errorWords } from '@shared/host/error-words';
 import type { Credentials } from './hub-http';
 import { SendBuffer, type SendLimits } from './send-buffer';
 
@@ -374,9 +375,10 @@ export class HubLink {
     });
     socket.on('message', (data, isBinary) => this.#message(attempt, data, isBinary));
     socket.on('ping', (data: Buffer) => attempt.buffer.pong(data));
-    // A failed upgrade or a broken socket: its close follows, and decides.
+    // A failed upgrade or a broken socket: its close follows, and decides. P5 O15 M2b §H: in `errorWords`, since a connect
+    // that failed on several addresses has an empty message and its causes only in its code and inner errors.
     socket.on('error', (error) => {
-      if (attempt.ending === null) attempt.ending = { kind: 'failed', why: error.message };
+      if (attempt.ending === null) attempt.ending = { kind: 'failed', why: errorWords(error) };
     });
     socket.on('close', (code, reason) => this.#closed(attempt, code, reason.toString()));
   }

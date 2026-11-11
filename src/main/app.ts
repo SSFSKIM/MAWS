@@ -26,6 +26,7 @@ import { daemonPaths } from '@shared/daemon/files'; // P5 O5 M2: artifacts.sock
 import { launchMode, scenarioPath } from '@shared/sessions/select-source'; // P5 O3-D M5b (D11)
 import { settingsPaths } from '@shared/settings/paths';
 import { startWithProfileLock } from './files/profile-lock';
+import { captureMainLog } from './log-file'; // P5 O15 M2b §H: main's log file
 import { describeMainBuild, loadedBundlePath, olderInstanceNotice, staleBuildCheck, type MainBuild } from './build-identity'; // E11 §2.7; F2b 2.7b
 import { builtAtLabel } from '@shared/app/build-time'; // E11 §2.7
 import { registerPtyOpenLink } from './pty-links'; // C9
@@ -43,7 +44,7 @@ import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2
 import type { RemoteLink } from './machines/remote/link'; // P5 O8 M3: the deliveries' links
 import type { LocalAnswer } from './org/channel/machines'; // P5 O8 M7b
 import type { HostEntry } from '@shared/ipc/schema/channel'; // P5 O8 M7b
-import { powerMonitor } from 'electron'; // P5 O8 M1: the Registry feed reconnects at wake and unlock
+import { powerMonitor } from 'electron'; // P5 O15 M2b: the wake source's one listener to suspend, resume and unlock
 import { openExternalUrl } from './open-external'; // P5 O8 M1: the Access login's browser trip
 import { createOrgSession } from './org/org-session'; // P5 O8 M1
 import { openProvisioningSecret, PROVISIONING_SECRET_FILE } from './org/provisioning-secret-store'; // P5 O8 M4c
@@ -66,6 +67,8 @@ import { createRemoteLaneB, routeLaneB, standInForMachines } from './lane-b/remo
 import { ArtifactMachines } from './artifacts/machines'; // P5 O7 M5a
 import { dialDirect } from './machines/remote/carriers'; // P5 O7 M2: the dev session's directMap in front of it
 import { relayOnlyDial } from './machines/remote/bench-seam'; // P5 O7 M7: the live bench's relay case
+import { createWakeSource, installWakeSeam } from './net/wake'; // P5 O15 M2b: main's one listener to suspend, resume and unlock
+import { createReach } from './net/reach'; // P5 O15 M2b: the window after a wake or an address change, and its probes
 // C3 end
 // C5 start (emit comes with C3's imports)
 import { notificationActions } from './attention/actions';
@@ -162,6 +165,9 @@ import { exportHeldFor } from './delivery/e2e-hold';
 // P5 O2 landing: a test or harness launch never runs on the default profile, whose daemon and LaunchAgent are the
 // owner's; it exits here, before the profile lock, the machine identity, the settings or a host (hosts/mode.ts).
 refuseTestLaunchOnDefaultProfile();
+// P5 O15 M2b §H: from here each console line is also held, with the time it was said, until this instance holds the
+// profile lock and installs the file (the start below); a second launch never does, and writes only its own streams.
+const mainLog = captureMainLog(console);
 
 // macOS convention (D-11): closing the last window keeps the app running; the dock icon re-creates it (`activate`
 // below). This empty listener is load-bearing: with no `window-all-closed` listener Electron quits when the last
@@ -209,6 +215,7 @@ const diskBuildIsNewer = (): string | null =>
 // P5 O15 M2: while the repair window is up, a second launch brings it forward and tries the launch once more
 let repairSecondLaunch: (() => void) | null = null;
 function answerSecondLaunch(launched: MainBuild | null): void {
+  console.log(`[main] a second launch (${launched === null ? 'an unknown build' : describeMainBuild(launched)}) was handed to this instance`); // P5 O15 M2b §H
   if (repairSecondLaunch !== null) return repairSecondLaunch();
   const win = bringForward();
   if (win === null) return; // quitting (or not yet started): nothing to bring forward or offer
@@ -218,6 +225,7 @@ function answerSecondLaunch(launched: MainBuild | null): void {
 }
 
 void startWithProfileLock(app, () => {
+  mainLog.install(join(app.getPath('userData'), 'logs')); // P5 O15 M2b §H: the profile lock's holder alone writes main.log
   // P5 O6 M1 (OX2): the profile's MachineRef, minted at its first start into <userData>/machine.json and read ever after,
   // before anything starts or any window opens. A malformed file stops startup, naming its path: a fresh ref would
   // re-address everything kept under the old one.
@@ -331,6 +339,12 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
     gcloud: () => resolveGcloud({ loginPath: async () => (await engineEnv).PATH ?? null, home: app.getPath('home') }),
     log: (line) => console.log(`[org] ${line}`),
   });
+  // P5 O15 M2b (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md §D to §G): the wake source and the reach, made
+  // once for the profile and handed to the org session's project channels, the Registry feed and the machines' links;
+  // §I's seam tells a wake that did not happen, under MAWS_E2E=1 in a build that is not packaged
+  const wake = createWakeSource({ power: powerMonitor, log: (line) => console.log(line) });
+  const reach = createReach({ log: (line) => console.log(line) });
+  const removeWakeSeam = installWakeSeam(process.env, app.isPackaged, wake);
   // One handle on <userData>/org/ for the session and M2's rows cache; excluded from Time Machine at its creation
   const orgDir = orgFiles({ userData: app.getPath('userData'), excludeFromBackup: (path) => excludeFromBackup(path), log: (line) => console.log(`[org] ${line}`) });
   const orgSession =
@@ -346,6 +360,8 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
           // `<userData>/org/` stays out of Time Machine, as the device keys do: a restored token or chain is no one's
           excludeFromBackup: (path) => excludeFromBackup(path),
           local, // M4b: this Mac's own machine, which a drop refuses
+          wake, // P5 O15 M2b §G: each project channel's socket drops at a wake and waits on the hub's path in the window
+          reach,
           delegations: { secrets: provisioningCustody, destination: provisioningSecret }, // M4c: the create transaction's custody
           // M3: the app as the org's signer. Org states are signed with the device's step-up key behind Touch ID (the
           // key stays in step-up.ts); the weekly successor asks at a window's focus, and notifies once a day while no
@@ -393,7 +409,7 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
         })
       : null;
   const session = devOrg ?? orgSession!;
-  const orgFeed = createRegistryFeed({ session, log: (line) => console.log(line) });
+  const orgFeed = createRegistryFeed({ session, wake, reach, log: (line) => console.log(line) }); // P5 O15 M2b §G: its wake, unlock and window
   orgSession?.attach(orgFeed);
   // P5 O8 M7a: the project channels (org/channel/), composed in the production session; org.channel.changed forwarded
   // for the app's life
@@ -418,8 +434,6 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
     installShareFixture({ env: process.env, packaged: app.isPackaged, intercept: interceptCommand, unpublish: unpublishOrgStatus, holdRows: () => void (rowsHeld = true) });
     installRegistryFixture({ env: process.env, packaged: app.isPackaged, intercept: interceptCommand, standIn: standInForMachines, emit, onEmitted, unpublish: unpublishOrgStatus, holdRows: () => void (rowsHeld = true) }); // the project registry's M11: org.* and org.projects seeded, the other machines' project acts stood in for (org/registry-fixture.ts)
   }
-  powerMonitor.on('resume', () => orgFeed.probe());
-  powerMonitor.on('unlock-screen', () => orgFeed.probe());
   // P5 O6 M3: every other machine through the connection manager (one link per machine; MAWS_LOCAL_MACHINES names another
   // profile's serve directory in a build that is not packaged), and machines.list and machines.changed
   const relayOnly = relayOnlyDial(process.env, app.isPackaged);
@@ -437,9 +451,17 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
     localCapabilities: localProjectActsSource(hosts),
     // P5 O7 M1: the org session the RL2 links read; P5 O8 M1: production's sign-in, or O7's development session
     session,
+    wake, // P5 O15 M2b: its wake notices reach every link, its unlocks probe them
+    reach,
     // P5 O7 M2: the development session's directMap, read at each dial (it is set once the session signed in); P5 O7 M7:
-    // the live bench's relay case before it (MAWS_E2E_REMOTE_CARRIER=relay, MAWS_E2E, unpackaged), every direct dial refused
-    ...(relayOnly !== null ? { linkDeps: { dialDirect: relayOnly } } : devOrg === null ? {} : { linkDeps: { dialDirect: (url: string, timeoutMs: number) => dialDirect(devOrg.directMap()[url] ?? url, timeoutMs) } }),
+    // the live bench's relay case before it (MAWS_E2E_REMOTE_CARRIER=relay, MAWS_E2E, unpackaged), every direct dial refused.
+    // P5 O15 M2b §F: the window's probes go where the dials go (`directTarget`): through the directMap, and on the relay
+    // case nowhere, so its direct lane has no target
+    ...(relayOnly !== null
+      ? { linkDeps: { dialDirect: relayOnly, directTarget: () => null } }
+      : devOrg === null
+        ? {}
+        : { linkDeps: { dialDirect: (url: string, timeoutMs: number, signal?: AbortSignal) => dialDirect(devOrg.directMap()[url] ?? url, timeoutMs, signal), directTarget: (url: string) => devOrg.directMap()[url] ?? url } }),
   });
   // P5 O9 M9: `laneA.*` for a machine O7's link reaches is remote lane A's (src/main/lane-a/remote.ts), over that link;
   // every other command for another machine, and `laneA.*` for a socket-linked profile, goes to the manager. It writes
@@ -1083,5 +1105,11 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
   shutdown.add('org', () => {
     orgFeed.close();
     return Promise.all([orgSession?.close(), remoteRows.close()]).then(() => undefined);
+  });
+  // P5 O15 M2b: the wake source's three powerMonitor listeners and its timer, and the reach's probes, after their users
+  shutdown.add('wake and reach', () => {
+    removeWakeSeam();
+    wake.close();
+    reach.close();
   });
 }

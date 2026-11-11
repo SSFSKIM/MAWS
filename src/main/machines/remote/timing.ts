@@ -38,6 +38,14 @@ export interface RemoteTiming {
   /** Credit goes back once this many bytes were delivered, or `CREDIT_BATCH_MS` after the first undelivered byte. */
   CREDIT_BATCH_BYTES: number;
   CREDIT_BATCH_MS: number;
+  /** P5 O15 M2b §F: a relay socket's open by a lane's attempt (today's attempt keeps the carrier's 10 s). */
+  WINDOW_OPEN_MS: number;
+  /** Each handshake message of a lane's attempt (today's keeps connectChannel's 10 s). */
+  WINDOW_HANDSHAKE_MS: number;
+  /** A lane's delay after each failed attempt, the last repeated; each jittered by `BACKOFF_JITTER`. */
+  LANE_BACKOFF_MS: readonly number[];
+  /** A lane's attempts from one entry of the link into the lanes to the next. */
+  LANE_ATTEMPTS: number;
 }
 
 /** How many subscriptions the endpoint allows one channel (its `MAX_SUBS`); one more is `ended('busy')` without a round trip. */
@@ -64,6 +72,10 @@ export const REMOTE_TIMING: RemoteTiming = {
   SUB_INITIAL_CREDIT: 1024 * 1024,
   CREDIT_BATCH_BYTES: 256 * 1024,
   CREDIT_BATCH_MS: 250,
+  WINDOW_OPEN_MS: 2_000,
+  WINDOW_HANDSHAKE_MS: 2_000,
+  LANE_BACKOFF_MS: [100, 250, 500, 1_000, 2_000],
+  LANE_ATTEMPTS: 6,
 };
 
 /** `REMOTE_TIMING` with a test's overrides. */
@@ -85,10 +97,10 @@ export class TokenBucket {
     this.#at = now();
   }
 
-  /** Whether a whole token is there, taking none. */
-  holds(): boolean {
+  /** Whether `tokens` whole tokens are there, taking none. */
+  holds(tokens = 1): boolean {
     this.#refill();
-    return this.#tokens >= 1;
+    return this.#tokens >= tokens;
   }
 
   take(): boolean {

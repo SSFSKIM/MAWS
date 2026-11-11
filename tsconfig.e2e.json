@@ -154,7 +154,10 @@
     "test/support/latency-budget.ts",
     "test/support/latency-engine.ts", // P5 O1 M1: the local-latency bench's engine wrapper and markers
     "test/support/local-latency.ts", // P5 O1 M1: the local-latency bench's statistics, baseline and budget
+    "test/support/loopback-pipe.ts", // P5 O15 M2b: the remote scene's pipes, with the states a sleep leaves (§I)
+    "test/support/main-log.ts", // P5 O15 M2b: the wake case's reading of main.log, mawsd.log and host.log
     "test/support/remote-latency.ts", // P5 O7 M7: the remote bench's bounds, validity and live clock
+    "test/support/remote-wake.ts", // P5 O15 M2b: the wake case's record, its failures and its bounds
     "test/support/remote-bench.ts", // P5 O7 M7: the live bench's runner (the bench agent is bundled by path, never imported)
     "test/support/sminos-frames.ts", // P5 O7 M7: the fake sminos's frames, shared with the live bench's agent
     "test/support/bench-sign-in.ts", // P5 O7 M7: the live bench app's sign-in

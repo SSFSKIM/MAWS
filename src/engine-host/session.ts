@@ -11,6 +11,7 @@
 // the asks in SessionMaws (session-maws.ts).
 import { readFileSync, realpathSync } from 'node:fs'; // P5 O16 M3
 import { dirname, join } from 'node:path'; // P5 O16 M3
+import { serialize } from 'node:v8'; // P5 O15 M2b (§L)
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, MessageUuid, RequestId } from '@shared/graph/ids';
@@ -38,6 +39,7 @@ import { REAP_TERM_MS, type ReapView } from './holder/reap'; // O16 M5
 import { expectedArgv, type Binding, type StdioServers } from './holder/descendants'; // O16 M5, D52; D69
 import { RELAY_URL, spawnMeta, type LaunchPlan } from './launch';
 import { HostMap } from './holder/checkpoint'; // P5 O16 M2
+import { numbersReadBack, type JournalPosition } from './journal'; // P5 O15 M2b (§L; Decision Log 30)
 import { launchRows, OutstandingSet, type Outstanding } from './holder/restore'; // P5 O16 M3
 import { UnsettledFold } from './prompt-history'; // P5 O16 M3
 import { resolveStorePaths, slugOf } from './fs/paths'; // P5 O16 M3: the reseed's transcript
@@ -74,7 +76,7 @@ import type { DatasetRefreshRequests } from './connectors/dataset-requests'; // 
 // P2-A end
 import { connectorLaunchContext, type ConnectorLaunchContext } from './connectors/provenance'; // P3-HD
 import type { ConnectorLocalKey } from './connectors/local-key'; // P3-HD
-import { isRequested } from './session-stream'; // P5 O16 M3c fix wave 1
+import { CHECKPOINT_ROWS, isRequested, type Checkpoint } from './session-stream'; // P5 O16 M3c fix wave 1; P5 O15 M2b (§L): the checkpoints
 
 export { HostHookRegistry } from './host-hooks';
 export type { Catalog } from './session-status';
@@ -101,6 +103,8 @@ export interface SessionJournal {
   // P5 O16 M2: what a hosted launch's host map needs (holder/checkpoint.ts): the last row's seq and the file rows go to now
   readonly lastSeq?: number;
   readonly currentPath?: string;
+  // P5 O15 M2b (§L): where the last row ends, for the stream's checkpoints; absent or null, the live path takes none
+  readonly position?: JournalPosition | null;
 }
 
 export interface EngineSessionOptions {
@@ -161,6 +165,7 @@ export interface EngineSessionOptions {
   // come from the state file.
   adopted?: AdoptedLaunch;
   reinitializeMs?: number; // P5 O16 M3a fix wave 1: the adopted re-initialize's wait before it logs and waits on (tests)
+  checkpointRows?: number; // P5 O15 M2b (§L): the rows between the stream's checkpoints, CHECKPOINT_ROWS (tests)
 }
 
 // P5 O16 M3a fix wave 1 (D58): how long an adopted engine's re-initialize is waited for before the wait is logged and
@@ -215,6 +220,7 @@ interface SessionListeners {
   catalog: (catalog: Catalog) => void; // C7: the whole catalogue, whenever its revision moved
   models: (models: unknown[]) => void; // C10: the initialize response's model list, for the catalogue cache
   delivery: () => void; // P5 O16 M3c fix wave 2 (D63): the calls in flight through delivery, or the first one's tool, changed
+  checkpoint: (checkpoint: Checkpoint) => void; // P5 O15 M2b (§L): the live normaliser's state at a boundary row, and where that row ends
 }
 // E1, E2: paneShow, artifactCapture; P3-A M7: artifactExport (session-maws.ts)
 type Listeners = SessionListeners & MawsListeners;
@@ -244,8 +250,9 @@ export class EngineSession {
   readonly sideQuestions = new SideQuestionLog(); // E3: this process's `/btw` exchanges (host memory, X13)
   private readonly reconnect: boolean;
   private readonly log: (message: string) => void;
-  private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set(), catalog: new Set() /* C7 */, models: new Set() /* C10 */, delivery: new Set() /* P5 O16 M3c fix wave 2 */, paneShow: new Set() /* E1 */, artifactCapture: new Set() /* E2 */, artifactExport: new Set() /* P3-A M7 */ };
+  private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set(), catalog: new Set() /* C7 */, models: new Set() /* C10 */, delivery: new Set() /* P5 O16 M3c fix wave 2 */, checkpoint: new Set() /* P5 O15 M2b */, paneShow: new Set() /* E1 */, artifactCapture: new Set() /* E2 */, artifactExport: new Set() /* P3-A M7 */ };
   private readonly pendingWarnings: NormalizerWarning[] = [];
+  private liveCheckpoints = true; // P5 O15 M2b (Decision Log 30): false from the first engine line whose numbers the journal writes otherwise
   private readonly stderrTail: string[] = [];
   private readonly storeWrites = new Set<Promise<void>>();
   private readonly launchedAt = new Date().toISOString();
@@ -1010,6 +1017,7 @@ export class EngineSession {
     this.outstanding?.observe(row); // P5 O16 M3: the barrier's set sees every row until the replay has caught up
     this.noteMessage(row); // P5 O16 M3
     const events = this.normalizer.push(row);
+    if (row.seq % (this.opts.checkpointRows ?? CHECKPOINT_ROWS) === 0) this.checkpoint(row.seq); // P5 O15 M2b (§L): before any row the warnings add
     this.durableCrons.note(this.normalizer.state.sessionId); // P5 O2 M2: every id the process carries joins the lineage
     for (const w of this.pendingWarnings.splice(0)) this.record('meta', { event: w.event, rowSeq: w.seq, detail: w.detail }); // journaled and normalised like any row; they yield no events
     if (events.length > 0) {
@@ -1022,6 +1030,15 @@ export class EngineSession {
       if (compat !== null) this.notice(ENGINE_COMPAT_NOTICE_KEY, compat);
     }
     return row;
+  }
+
+  // P5 O15 M2b (§L): the stream's checkpoint at a boundary row, in the turn that normalised it: the live normaliser's
+  // state copied whole, and the writer's position, just past that row. The session's own fold of an adopted journal takes
+  // none: the adopted stream's first scan does. Decision Log 30: none either once an engine line held a number the journal
+  // writes otherwise (`liveCheckpoints`), since the live state may then hold what no scan of the journal does.
+  private checkpoint(through: number): void {
+    const at = !this.liveCheckpoints || this.listeners.checkpoint.size === 0 ? null : this.journal.position;
+    if (at) this.emit('checkpoint', { through, ...at, state: serialize(this.normalizer.state) });
   }
 
   private async run(): Promise<void> {
@@ -1747,7 +1764,12 @@ export class EngineSession {
         this.transportProblem(item.error, item.hseq);
         return;
       }
+      // P5 O15 M2b (Decision Log 30): a line whose numbers the journal writes otherwise ends the launch's live checkpoints
+      // before its row is normalised, so none holds what the journal does not
+      const offLine = this.liveCheckpoints && !numbersReadBack(item.raw);
+      if (offLine) this.liveCheckpoints = false;
       const row = this.recordHosted('in', item.frame, item.hseq);
+      if (offLine) this.log(`live checkpoints off for launch ${this.plan.launchId} at seq ${row.seq}: an engine line holds a number the journal writes otherwise`);
       const frame = item.frame as Frame;
       if (!this.handshakeDone) this.hookBeforeAnswer(frame);
       this.tracker.observe(frame, typeof frame.timestamp === 'string' ? frame.timestamp : row.at);

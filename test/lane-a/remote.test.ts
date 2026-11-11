@@ -119,7 +119,7 @@ async function lab(options: { relay?: boolean; upGraceMs?: number } = {}): Promi
   const link = createRemoteLink({
     machine: { ref: f.ref as MachineRef, name: 'mini' },
     session,
-    records: { resolve: async () => ({ body: { org: ORG, machine: f.ref, addresses: ['ws://100.101.102.108:47830'], issued: iso(Date.now()) }, sig: { kid: 'k', alg: 'ES256', value: 'v' } }) as never },
+    records: { resolve: async () => ({ body: { org: ORG, machine: f.ref, addresses: ['ws://100.101.102.108:47830'], issued: iso(Date.now()) }, sig: { kid: 'k', alg: 'ES256', value: 'v' } }) as never, cached: async () => null },
     // The tailnet address, at the listener's loopback port in its place, while it lives.
     dialDirect: async (_url, timeoutMs) => {
       if (direct.dead) throw new Error('refused');

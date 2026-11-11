@@ -55,6 +55,7 @@ import {
 import type { ClientId } from '@shared/ipc/client';
 import { OrgStatusSchema, type DelegationResult, type OrgStatus } from '@shared/ipc/schema/org';
 import type { MachineRef } from '@shared/machine/ref';
+import { fakeReach, fakeWake } from '../../../test/support/wake-reach';
 import { createNextDeviceKeys, deviceKeyIds, DeviceKeysError, loadDeviceKeys, promoteNextDeviceKeys, type DeviceKeys } from '../device/keys';
 import { createRecordSigner, type HeldOrgView, type StepUpPrompt } from '../device/step-up';
 import { DEVICE_CAPABILITIES } from '../machines/remote/capabilities';
@@ -3165,7 +3166,8 @@ describe('M7a: the project channels', () => {
         deliver: (frame: unknown) => listeners.get('message')?.forEach((l) => l(JSON.stringify(frame))),
         on: (event: string, listener: (...args: unknown[]) => void) => void listeners.set(event, [...(listeners.get(event) ?? []), listener]),
         send: (text: string) => void made.sent.push(JSON.parse(text) as Record<string, unknown>),
-        close: () => void (made.closed = true),
+        ping: () => {},
+        terminate: () => void (made.closed = true), // the app's own end (P5 O15 M2b §G rule 5)
       };
       sockets.push(made);
       return made as never;
@@ -3201,6 +3203,27 @@ describe('M7a: the project channels', () => {
     expect(file.after).toBe(1);
     expect(file.events.map((e) => e.offset)).toEqual([1]);
     expect((await stat(join(orgDir(), 'channel'))).mode & 0o777).toBe(0o700);
+  });
+
+  // P5 O15 M2b §G: the session hands its wake source and reach to every channel's socket
+  it('hands its wake source and reach to the channels: a wake of an hour drops a channel’s socket and opens the next behind the hub’s answer', async () => {
+    const { sockets, socket } = channelSockets();
+    const wake = fakeWake();
+    const reach = fakeReach();
+    const { session } = await signedIn({ channelSocket: socket, wake: wake.source, reach: reach.reach, timing: { CHANNEL_WRITE_MS: 3_600_000 } });
+    await session.channelOpen(PROJECT);
+    await until(() => sockets.length === 1, 'a channel socket');
+    sockets[0].deliver({ t: 'welcome' });
+    wake.wake(3_600_000);
+    expect(sockets[0].closed).toBe(true);
+    expect(reach.windows).toEqual(['wake']);
+    await until(() => reach.waiting.length === 1, 'the wait on the hub');
+    expect(reach.waiting[0].target).toBe('https://hub.example.test');
+    reach.answer(true);
+    await until(() => sockets.length === 2, 'the channel socket after the wake');
+    await session.close();
+    expect(sockets[1].closed).toBe(true);
+    expect(wake.listeners()).toBe(0);
   });
 
   it('answers signed-out, and opens no socket, for a profile that never signed in', async () => {

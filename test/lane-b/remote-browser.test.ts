@@ -100,7 +100,7 @@ async function app(l: Lab, member: 'A' | 'B', id: string): Promise<App> {
   const link = createRemoteLink({
     machine: { ref: l.f.ref as MachineRef, name: 'mini' },
     session,
-    records: { resolve: async () => ({ body: { org: ORG, machine: l.f.ref, addresses: ['ws://100.101.102.108:47830'], issued: iso(Date.now()) }, sig: { kid: 'k', alg: 'ES256', value: 'v' } }) as never },
+    records: { resolve: async () => ({ body: { org: ORG, machine: l.f.ref, addresses: ['ws://100.101.102.108:47830'], issued: iso(Date.now()) }, sig: { kid: 'k', alg: 'ES256', value: 'v' } }) as never, cached: async () => null },
     dialDirect: (_url, timeoutMs) => dialDirect(`ws://127.0.0.1:${l.f.port()}`, timeoutMs),
     openRelay: async () => {
       throw new Error('no hub');
