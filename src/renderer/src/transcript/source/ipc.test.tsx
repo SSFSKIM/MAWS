@@ -24,6 +24,7 @@ import type { TranscriptSource } from './types';
 import { HISTORY_GAP, HISTORY_OMITTED, HISTORY_TOO_LARGE } from '../model/gap'; // P5 O7 M2; M4: HISTORY_OMITTED
 import { useMachines } from '../../stores/machines'; // P5 O7 M2
 import { humanTurn, record, status } from '../../../../../test/support/builders'; // P5 O7 M8
+import { remoteSessionState } from '../../lane-b/test-support/remote-session'; // P5 O15 M2b
 
 const APP = at('app-1' as AppSessionId); // the page's: the sources run behind the client, over addresses
 const MAIN_APP = bareOf(APP); // P5 O6 M2: an event id is main's, under the bare app id
@@ -663,6 +664,7 @@ describe('ipcSource', () => {
       b.end([`u${n}`]);
     };
     const reads = (fake: ReturnType<typeof fakeClient>) => fake.calls.filter((call) => call.name === 'session.events');
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
     const entry = () => useTranscriptStore.getState().entries[REMOTE];
     const kinds = () => entry().rows.map((row) => row.kind).filter((kind) => kind !== 'time');
     const ofTurn = (n: number) => uuid(`u${n}`);
@@ -680,9 +682,14 @@ describe('ipcSource', () => {
       let fewest = entry().state.order.length;
       const off = useTranscriptStore.subscribe((state) => void (fewest = Math.min(fewest, state.entries[REMOTE]?.state.order.length ?? 0)));
       onTestFinished(off);
-      const lose = () => fake.emit('machines.changed', roster('down', 1));
+      // main's word on the stream (`remote.session`): `paused` as the link goes offline, then its state at its `subbed`
+      const said = (stream: 'paused' | 'opening' | 'live' | 'gap' | 'ended') => fake.emit('remote.session', remoteSessionState(REMOTE, { stream }), OTHER_MACHINE);
+      const lose = () => {
+        fake.emit('machines.changed', roster('down', 1));
+        said('paused');
+      };
       const restore = () => fake.emit('machines.changed', roster('up', 2));
-      return { fake, source, b, history, lose, restore, fewest: () => fewest };
+      return { fake, source, b, history, lose, restore, said, fewest: () => fewest };
     }
     // the next turn of L1 after `from` events of it, as the stream delivers it
     const nextTurn = (n: number, from: number) => {
@@ -724,6 +731,7 @@ describe('ipcSource', () => {
       const drawn = entry().rows;
       // a relaunch during the loss: the stream answers `snapshot`, and main tells the gap at its `subbed`
       h.fake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L2' }, OTHER_MACHINE);
+      h.said('gap'); // the `subbed`'s own word, after its gap
       await vi.waitFor(() => expect(reads(h.fake)).toHaveLength(2));
       expect(reads(h.fake)[1]!.input).toEqual({ appSessionId: REMOTE, afterSeq: null, limit: null });
       expect(entry().phase).toBe('hydrating');
@@ -761,6 +769,7 @@ describe('ipcSource', () => {
       h.fake.emit('session.eventBatch', batch(nextTurn(2, h.history.length), REMOTE), OTHER_MACHINE); // flushed after the roster's down
       h.restore();
       h.fake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L2' }, OTHER_MACHINE);
+      h.said('gap'); // the `subbed`'s own word, after its gap
       await vi.waitFor(() => expect(reads(h.fake)).toHaveLength(2));
     });
 
@@ -769,11 +778,13 @@ describe('ipcSource', () => {
       h.lose();
       h.restore();
       h.fake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L2' }, OTHER_MACHINE);
+      h.said('gap'); // the `subbed`'s own word, after its gap
       await vi.waitFor(() => expect(reads(h.fake)).toHaveLength(2));
       h.lose(); // the re-read is still out
       h.restore();
       expect(reads(h.fake)).toHaveLength(2);
       h.fake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L3' }, OTHER_MACHINE);
+      h.said('gap');
       await vi.waitFor(() => expect(reads(h.fake)).toHaveLength(3));
       await Promise.resolve();
       expect(reads(h.fake), 'once').toHaveLength(3);
@@ -787,6 +798,63 @@ describe('ipcSource', () => {
       expect([...entry().state.seen].filter((id) => !id.includes('history-gap'))).toEqual([...h.history, ...relaunched].map((event) => event.id));
       expect(kinds().filter((kind) => kind === 'gap'), 'the second return’s bar alone: the first was told to the superseded read').toHaveLength(1);
       expect(h.fewest()).toBe(1);
+    });
+
+    // The coordinator's guard on the ruling's constraint: a re-read still due never starts before that stream's `subbed`.
+    // A history read also tells gaps (a row too large for the channel, src/main/lane-b/remote.ts's `gap`), whenever it
+    // answers: one heard while armed, before main says the stream is back, holds its re-read until it does.
+    it('holds the re-read of a gap heard before the stream is back until remote.session says it is: then exactly one', async () => {
+      const h = await held();
+      h.lose();
+      h.restore();
+      h.said('paused'); // the link up, the stream not yet answered
+      h.fake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L1', at: { seq: 9, idx: 0 } }, OTHER_MACHINE); // a history read's
+      await settle();
+      expect(reads(h.fake), 'held: the stream has not answered').toHaveLength(1);
+      h.said('opening');
+      await settle();
+      expect(reads(h.fake)).toHaveLength(1);
+      h.said('live'); // its `subbed`, a replay
+      await vi.waitFor(() => expect(reads(h.fake)).toHaveLength(2));
+      await settle();
+      h.said('live');
+      await settle();
+      expect(reads(h.fake), 'exactly one').toHaveLength(2);
+      reads(h.fake)[1]!.answer({ ok: true, value: { events: h.history, lastSeq: h.history.length, complete: true } } as never);
+      await vi.waitFor(() => expect(entry().phase).toBe('live'));
+      expect(kinds().filter((kind) => kind === 'gap'), 'its bar, placed as the snapshot places it').toHaveLength(1);
+    });
+
+    it('starts a held re-read when the stream ends instead', async () => {
+      const h = await held();
+      h.lose();
+      h.restore();
+      h.fake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L1', at: { seq: 9, idx: 0 } }, OTHER_MACHINE);
+      await settle();
+      expect(reads(h.fake)).toHaveLength(1);
+      h.said('ended');
+      await vi.waitFor(() => expect(reads(h.fake)).toHaveLength(2));
+    });
+
+    it('re-reads at once for a gap heard once the stream is back (a missing opening tells it before its first event)', async () => {
+      const h = await held();
+      h.lose();
+      h.restore();
+      h.said('gap'); // the `missing` subbed: its gap waits for its first event's place
+      h.fake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L1', at: { seq: 9, idx: 0 } }, OTHER_MACHINE);
+      await vi.waitFor(() => expect(reads(h.fake)).toHaveLength(2));
+    });
+
+    it('takes no word of the stream from before the loss: a live said before it does not start a re-read held after the return', async () => {
+      const h = await held();
+      h.said('live');
+      h.fake.emit('machines.changed', roster('down', 1)); // no `paused` said
+      h.restore();
+      h.fake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L1', at: { seq: 9, idx: 0 } }, OTHER_MACHINE);
+      await settle();
+      expect(reads(h.fake)).toHaveLength(1);
+      h.said('live');
+      await vi.waitFor(() => expect(reads(h.fake)).toHaveLength(2));
     });
 
     it('a local session’s source listens for no machine’s link', async () => {

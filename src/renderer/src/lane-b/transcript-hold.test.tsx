@@ -63,7 +63,12 @@ const roster = (state: MachineState['state']) => {
   useMachines.getState().applyRoster(machines);
   f.emit('machines.changed', { machines });
 };
-const stream = (state: 'live' | 'paused' | 'gap' | 'opening') => applyRemoteSession(remoteSessionState(REMOTE, { stream: state }));
+// main's word on the stream, as `connectShell` applies it (the store) and as the session source hears it (the event)
+const stream = (state: 'live' | 'paused' | 'gap' | 'opening') => {
+  const said = remoteSessionState(REMOTE, { stream: state });
+  applyRemoteSession(said);
+  f.emit('remote.session', said, OTHER_MACHINE);
+};
 const reads = () => f.calls.filter((call) => call.name === 'session.events');
 const entry = (key: AppSessionId = REMOTE) => useTranscriptStore.getState().entries[key];
 const attached = (key: AppSessionId = REMOTE) => useTranscriptStore.getState().attached(key);

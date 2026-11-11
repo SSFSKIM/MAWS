@@ -375,16 +375,35 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
       // tab holds the key while the machine is offline, lane-b/transcript-hold.ts). Armed from the roster's word that the
       // machine left `up` until the stream's first batch after it is `up` again: a `replay` opening delivers what the
       // loss held back, and nothing is read again; a `remote.gap` heard while armed (a `snapshot` or `missing` opening, a
-      // relaunch during the loss) starts the key over staged from the whole history, its bar carried into the read. Main
-      // tells such a gap only inside the stream's `subbed`, or at the first event after a `missing` one
-      // (src/main/lane-b/remote-session.ts), so the read never starts before that stream's `subbed`.
+      // relaunch during the loss) starts the key over staged from the whole history, its bar carried into the read. The
+      // read never starts before that stream's `subbed`: main tells the stream's gaps inside it, or at the first event
+      // after a `missing` one (src/main/lane-b/remote-session.ts), but a history read tells the gaps of its rows too large
+      // to carry whenever it answers (src/main/lane-b/remote.ts), so an armed gap heard before main's `remote.session`
+      // says the stream is back (past `paused` and `opening`: at its `subbed`, or its end) holds its re-read until it does.
       let armed: 'lost' | 'returned' | null = null;
+      let said: string | null = null; // the stream's state as main last said it since the loss
+      const waiting: { gap: SessionEvent; place: GapPlace }[] = []; // armed gaps held until the stream is back
+      const back = () => armed !== 'lost' && said !== null && said !== 'paused' && said !== 'opening';
+      const startWaiting = () => {
+        if (!back()) return;
+        for (const held of waiting.splice(0)) reread(held.gap, held.place);
+      };
       const machine = machineOf(appSessionId);
       const offRoster = machine === client.localMachine ? () => {} : client.on('machines.changed', ({ machines }) => {
         const state = machines.find((m) => m.ref === machine)?.state;
         if (state === undefined) return;
-        if (state !== 'up') armed = 'lost';
-        else if (armed === 'lost') armed = 'returned';
+        if (state !== 'up') {
+          if (armed !== 'lost') said = null; // only a word said after the loss speaks for the stream's return
+          armed = 'lost';
+        } else if (armed === 'lost') {
+          armed = 'returned';
+          startWaiting();
+        }
+      });
+      const offStream = machine === client.localMachine ? () => {} : client.on('remote.session', ({ address, stream }) => {
+        if (address !== appSessionId || (armed === null && waiting.length === 0)) return;
+        said = stream;
+        startWaiting();
       });
       let rereading: { gap: SessionEvent; place: GapPlace }[] | null = null; // the gaps an armed re-read carries, once queued
       const reread = (gap: SessionEvent, place: GapPlace) => {
@@ -481,8 +500,9 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         const sessionId = subscription.running?.sessionId ?? (bareOf(appSessionId) as string as SessionId);
         const gap = historyGapEvent(bareOf(appSessionId), `${launchId}:${Date.now()}:${++gaps}`, new Date().toISOString(), sessionId);
         const place = { launchId, at: at ?? null };
-        if (armed !== null) reread(gap, place); // P5 O15 M2b
-        else tellGap(gap, place);
+        if (armed === null) tellGap(gap, place);
+        else if (back()) reread(gap, place); // P5 O15 M2b
+        else waiting.push({ gap, place });
       });
       // P5 O15 M2b: the gaps the re-read that made this subscription carries, held behind its snapshot as any gap is
       for (const held of carried.splice(0)) tellGap(held.gap, held.place);
@@ -496,6 +516,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         offLoss();
         offGap();
         offRoster();
+        offStream();
         stopHealing();
         offTooLarge();
         subscription.held = null;
