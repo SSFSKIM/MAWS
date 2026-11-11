@@ -16,6 +16,7 @@
 // `LEFT …` for anything still there. Staging alone (production refused by name before a credential is read); the admin
 // device's anchor lock (admin.ts's `<keys>.org.json.lock`) is held for the run, so no admin verb signs meanwhile.
 import { randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { generateSigningKey, type ProjectsRecord, type Signed } from 'org-protocol';
@@ -170,6 +171,35 @@ export function runHubReads(o: HubReadsOptions, interrupt: InterruptOptions = {}
   );
 }
 
+/**
+ * The admin device's anchor lock (admin.ts's `<keys>.org.json.lock`), taken for the run, or why not: another run holds
+ * it, or the anchor holds a successor an `admin` verb signed and has not seen settled (`pending`), which a successor
+ * signed here on the same head would fork.
+ */
+export function holdAnchorLock(keys: string): { release: () => void } | { refused: string } {
+  let release: () => void;
+  try {
+    release = takeRunLock(`${keys}.org.json.lock`);
+  } catch (error) {
+    return { refused: error instanceof Error ? error.message : String(error) };
+  }
+  let pending = false;
+  try {
+    pending = (JSON.parse(readFileSync(`${keys}.org.json`, 'utf8')) as { pending?: unknown }).pending !== undefined;
+  } catch (error) {
+    // No anchor (admin adopt never ran) holds nothing pending; one that does not parse is admin's to refuse.
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      release();
+      return { refused: `${keys}.org.json does not parse as the admin device's anchor` };
+    }
+  }
+  if (pending) {
+    release();
+    return { refused: `${keys}.org.json holds a pending successor an admin verb signed and the hub has not been seen to hold: the next signing admin verb settles it first (or admin abandon-pending drops it); run hub-reads after` };
+  }
+  return { release };
+}
+
 export async function main(argv: string[]): Promise<number> {
   const { values } = parseArgs({ args: argv, options: { config: { type: 'string' }, 'device-keys': { type: 'string' }, scan: { type: 'string' } } });
   const config = readDeployConfig(values.config ?? join(process.env.DESK_HUB_APP!, 'deploy', 'staging.json'));
@@ -183,25 +213,26 @@ export async function main(argv: string[]): Promise<number> {
     return 2;
   }
   if (!isTestTarget(config)) return 2;
-  let release: () => void;
-  try {
-    release = takeRunLock(`${keys}.org.json.lock`);
-  } catch (error) {
-    console.error(`${error instanceof Error ? error.message : String(error)}: stop. Nothing was changed.`);
+  const secrets = new Secrets(values.scan ?? null);
+  const read = await readSecrets();
+  if (!read.DESK_ACCESS_TOKEN) {
+    console.error('DESK_ACCESS_TOKEN on stdin');
     return 2;
   }
+  secrets.add(read.DESK_ACCESS_TOKEN);
+  const device = await loadAdminDevice(keys);
+  // From the lock's taking to interruptible's signal handlers, nothing awaits: no signal can end the run between them.
+  const lock = holdAnchorLock(keys);
+  if ('refused' in lock) {
+    console.error(`${lock.refused}: stop. Nothing was changed.`);
+    return 2;
+  }
+  const { release } = lock;
   try {
-    const secrets = new Secrets(values.scan ?? null);
-    const read = await readSecrets();
-    if (!read.DESK_ACCESS_TOKEN) {
-      console.error('DESK_ACCESS_TOKEN on stdin');
-      return 2;
-    }
-    secrets.add(read.DESK_ACCESS_TOKEN);
     const cleanup = new Cleanup();
     const person = new Person(`https://${config.host}`, read.DESK_ACCESS_TOKEN, () => cleanup.check(), { requestMs: 30_000, signal: cleanup.signal });
     return await runHubReads(
-      { person, scope: { org: config.org.id, pinnedGenesis: config.orgGenesis }, device: await loadAdminDevice(keys), cleanup, secrets },
+      { person, scope: { org: config.org.id, pinnedGenesis: config.orgGenesis }, device, cleanup, secrets },
       // A second signal exits at once: the lock goes first, so it is never what such an exit leaves.
       {
         exit: (status) => {

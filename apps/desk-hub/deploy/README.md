@@ -525,7 +525,10 @@ keeps every machine's record, which every reader refuses once its key is retired
 and the state's new versions. A run killed outright (SIGKILL) leaves the probes listed and held: `staging-run.sh
 sweep-leftovers hr-p-<tag> hr-q-<tag>` (the tag is on the run's first line) takes them out. It holds the admin
 device's anchor lock (`keys.json.org.json.lock`, the `admin` verbs', below) for the whole run, so no admin verb signs
-meanwhile and a second run is refused; a run killed outright leaves that lock, removed by hand once nothing runs. The
+meanwhile and a second run is refused; it also refuses to start while that anchor holds a `pending` successor an
+admin verb signed and has not seen settled (one signed here on the same head would fork it: the next signing admin verb
+settles it, or `admin abandon-pending` drops it). A run killed outright leaves that lock, removed by hand once nothing
+runs. The
 step's log is `$DESK_STAGING_DIR/hub-reads-<stamp>.log`, filtered as every step's is and searched after the run for the
 token and the probes' service-token secrets. It takes a few minutes, most of it Access admitting each probe's
 freshly minted service token (up to about a minute each). `test/deploy/hub-reads.test.ts` runs it against the suites'

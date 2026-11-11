@@ -4,12 +4,12 @@
 // that build lacks fail and the rest still pass, nothing left. Then what the command line refuses before it reads a
 // credential, and `staging-run.sh hub-reads`'s hand-off: the token on the command's stdin alone, the log filtered.
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stateHash } from 'org-protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CLAIMS, main, runHubReads } from '../../deploy/hub-reads.ts';
+import { CLAIMS, holdAnchorLock, main, runHubReads } from '../../deploy/hub-reads.ts';
 import { deviceEntry, type AdminDevice } from '../../deploy/org-admin.ts';
 import { Secrets } from '../../deploy/endpoint-verdicts.ts';
 import { Cleanup } from '../../deploy/proof.ts';
@@ -92,14 +92,27 @@ describe('hub-reads on the local hub', () => {
 });
 
 describe('the command line', () => {
-  it('refuses production, a run without the device’s keys, and a held anchor lock, before a credential is read', async () => {
+  it('refuses production and a run without the device’s keys, before a credential is read', async () => {
     expect(await main(['--config', join(deploy, 'config.json'), '--device-keys', '/k.json'])).toBe(2);
     expect(await main(['--config', join(deploy, 'staging.json')])).toBe(2);
+  });
+
+  it('takes the anchor lock, refused while another run holds it or the anchor holds a pending successor', () => {
     const keys = join(mkdtempSync(join(tmpdir(), 'hub-reads-lock-')), 'keys.json');
-    writeFileSync(`${keys}.org.json.lock`, JSON.stringify({ pid: 1, host: 'elsewhere', at: 'then', token: 't' }));
-    expect(await main(['--config', join(deploy, 'staging.json'), '--device-keys', keys])).toBe(2);
-    // The lock refused the run; it is left as it was, the other run's.
-    expect(readFileSync(`${keys}.org.json.lock`, 'utf8')).toContain('"token":"t"');
+    const lock = `${keys}.org.json.lock`;
+    const taken = holdAnchorLock(keys);
+    expect(existsSync(lock)).toBe(true);
+    expect(holdAnchorLock(keys)).toEqual({ refused: expect.stringMatching(/^another run holds /) });
+    if ('release' in taken) taken.release();
+    expect(existsSync(lock)).toBe(false);
+    // An admin verb's successor not yet seen at the hub: refused, and the lock let go.
+    writeFileSync(`${keys}.org.json`, JSON.stringify({ hub: 'h', org: 'o', version: 3, pending: { state: {}, sigs: [] } }));
+    expect(holdAnchorLock(keys)).toEqual({ refused: expect.stringMatching(/holds a pending successor/) });
+    expect(existsSync(lock)).toBe(false);
+    writeFileSync(`${keys}.org.json`, JSON.stringify({ hub: 'h', org: 'o', version: 3 }));
+    const settled = holdAnchorLock(keys);
+    expect('release' in settled).toBe(true);
+    if ('release' in settled) settled.release();
   });
 });
 
