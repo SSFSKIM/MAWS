@@ -393,6 +393,8 @@ From the grounding and from the writing of the sections (2026-11-12); each is ci
   Evidence: `main-process/index.chunk-BjORVu2_.js:22660` tests a function that returns false (`index.chunk-BV3uOqbK.js:252052`). U4 had given Desktop's dropping of waiting messages as the reason for its own hold.
 - Observation: Claude Desktop does not bound an opened group of tool calls, in either of its transcript renderers: no cap on steps, no maximum height, no inner scroller.
   Evidence: U2's check 8, read in the source on 2026-11-12 (the disclosure component both renderers share, its panel's classes, the default renderer's loop over the group's runs, and the stylesheets). The question to the owner on a long opened run was sent before this reading; its recommended answer, full height, is Desktop's.
+- Observation: Claude Desktop hands a Space's instructions to the agent in the system prompt of a session that belongs to the Space, unseen; MAWS's sessions do not belong to a Space, and U10 keeps the chip and the tools' answers as a stated departure.
+  Evidence: U10's file, l8-settings-13 (the reading the Desktop audit left for before U10's dispatch, done on 2026-11-12). Taken from it: the tools' answers carry the instructions again after a compaction, which is what the system prompt gave Desktop and a chip does not.
 
 ## Decision Log
 
