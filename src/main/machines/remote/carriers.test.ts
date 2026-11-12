@@ -1,6 +1,6 @@
 // The link's carriers (P5 O7 M1, "Carriers"): which addresses are dialled, the direct race, and the relay socket's
 // multiplex against a stand-in hub on loopback.
-import type { AddressInfo } from 'node:net';
+import { createServer, type AddressInfo, type Socket } from 'node:net';
 import { decodeChannelFrame, encodeChannelFrame, tagBytes, CHANNEL_CLOSE, type ByteDuplex } from 'org-protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocketServer, type WebSocket as ServerSocket } from 'ws';
@@ -84,6 +84,58 @@ describe('the direct race', () => {
     socket.close(4000, 'removed');
     await until(() => ends.length === 1);
     expect(ends).toEqual([CARRIER_CLOSED]);
+  });
+});
+
+// P5 O15 M2b §F: both opens take an abort signal; aborted, the socket is terminated and the open rejects.
+describe('an aborted open', () => {
+  /** A listener that accepts TCP and never answers the upgrade: an open that hangs above TCP. */
+  async function silent(): Promise<{ url: string; sockets: Socket[]; ended: Set<Socket>; close(): Promise<void> }> {
+    const sockets: Socket[] = [];
+    const ended = new Set<Socket>();
+    const server = createServer((socket) => {
+      sockets.push(socket);
+      socket.on('close', () => void ended.add(socket));
+      socket.resume(); // the upgrade request read and never answered
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+    return {
+      url: `ws://127.0.0.1:${(server.address() as AddressInfo).port}`,
+      sockets,
+      ended,
+      close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    };
+  }
+
+  it('rejects a direct dial at its abort and terminates the socket', async () => {
+    const hub = await silent();
+    try {
+      const controller = new AbortController();
+      const dial = dialDirect(hub.url, 5_000, controller.signal);
+      const [socket] = await until(() => (hub.sockets.length === 1 ? hub.sockets : null));
+      controller.abort(new Error('the window opened'));
+      await expect(dial).rejects.toThrow('the window opened');
+      await until(() => hub.ended.has(socket));
+      await expect(dialDirect(hub.url, 5_000, controller.signal), 'aborted before it begins').rejects.toThrow('the window opened');
+    } finally {
+      for (const socket of hub.sockets) socket.destroy();
+      await hub.close();
+    }
+  });
+
+  it('rejects a relay socket’s open at its abort and terminates the socket', async () => {
+    const hub = await silent();
+    try {
+      const controller = new AbortController();
+      const open = openRelaySocket(hub.url, {}, 10_000, controller.signal);
+      const [socket] = await until(() => (hub.sockets.length === 1 ? hub.sockets : null));
+      controller.abort();
+      await expect(open).rejects.toThrow(/aborted/);
+      await until(() => hub.ended.has(socket));
+    } finally {
+      for (const socket of hub.sockets) socket.destroy();
+      await hub.close();
+    }
   });
 });
 

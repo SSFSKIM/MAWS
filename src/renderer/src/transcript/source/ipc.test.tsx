@@ -24,6 +24,9 @@ import type { TranscriptSource } from './types';
 import { HISTORY_GAP, HISTORY_OMITTED, HISTORY_TOO_LARGE } from '../model/gap'; // P5 O7 M2; M4: HISTORY_OMITTED
 import { useMachines } from '../../stores/machines'; // P5 O7 M2
 import { humanTurn, record, status } from '../../../../../test/support/builders'; // P5 O7 M8
+import { remoteSessionState } from '../../lane-b/test-support/remote-session'; // P5 O15 M2b
+import { applyRemoteSession, resetRemoteLaneBStore } from '../../lane-b/remote-session'; // P5 O15 M2b
+import type { RemoteAnswer, RemoteSession } from '@shared/ipc/schema/remote'; // P5 O15 M2b
 
 const APP = at('app-1' as AppSessionId); // the page's: the sources run behind the client, over addresses
 const MAIN_APP = bareOf(APP); // P5 O6 M2: an event id is main's, under the bare app id
@@ -640,6 +643,349 @@ describe('ipcSource', () => {
         const state = await f.state();
         expect(state.current, 'u2 runs').toBe(turnId.ofMessage(uuid('u2')));
       });
+    });
+  });
+
+  // P5 O15 M2b (Decision Log 39): a remote lane B session's tab holds its key while the machine is offline, so the
+  // subscription lives through the link's loss. A `replay` opening delivers what it missed into it, and nothing reads the
+  // history again; a `remote.gap` heard from the loss until the stream's first batch after the return (`missing`,
+  // `snapshot`, a relaunch: main says it only inside the stream's `subbed`, or at the first event after a `missing` one)
+  // starts the key over staged, its bar placed in the history as a hydration places one; any later gap only draws its bar.
+  describe('held across a lost link', () => {
+    const REMOTE = addressOf(OTHER_MACHINE, 'app-h' as AppSessionId);
+    const roster = (state: 'up' | 'down', generation: number): EventPayload<'machines.changed'> => ({
+      machines: [
+        { ref: TEST_MACHINE, name: 'this Mac', local: true, state: 'up', since: '2026-11-10T08:00:00.000Z', generation: 0 },
+        { ref: OTHER_MACHINE, name: 'mini', local: false, state, since: '2026-11-10T08:00:00.000Z', generation, ...(state === 'up' && { carrier: 'relay' as const }) },
+      ],
+    });
+    const launched = (b: ReturnType<typeof builder>, launch: string, from: number) => b.events.map((event, i) => ({ ...event, seq: from + i, id: `app-h:${launch}:${from + i}:0` as EventId }));
+    const turnOf = (b: ReturnType<typeof builder>, n: number) => {
+      b.turn(`u${n}`);
+      b.text(`m${n}`, 0, `Answer ${n}`);
+      b.end([`u${n}`]);
+    };
+    const reads = (fake: ReturnType<typeof fakeClient>) => fake.calls.filter((call) => call.name === 'session.events');
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+    const entry = () => useTranscriptStore.getState().entries[REMOTE];
+    const kinds = () => entry().rows.map((row) => row.kind).filter((kind) => kind !== 'time');
+    const ofTurn = (n: number) => uuid(`u${n}`);
+    // A key hydrated from launch L1's first turn, its source subscribed (the tab's hold and the pane share it).
+    async function held() {
+      resetRemoteLaneBStore();
+      onTestFinished(resetRemoteLaneBStore);
+      const fake = fakeClient();
+      const source = ipcSourceOver(fake.client, REMOTE);
+      const hydrated = useTranscriptStore.getState().attach(REMOTE, source);
+      const b = builder();
+      turnOf(b, 1);
+      const history = launched(b, 'L1', 1);
+      reads(fake)[0]!.answer({ ok: true, value: { events: history, lastSeq: history.length, complete: true } } as never);
+      await hydrated;
+      // a reset empties the key: the fewest turns it held from here on
+      let fewest = entry().state.order.length;
+      const off = useTranscriptStore.subscribe((state) => void (fewest = Math.min(fewest, state.entries[REMOTE]?.state.order.length ?? 0)));
+      onTestFinished(off);
+      // main's word on the stream (`remote.session`), as `connectShell` keeps it and the source hears it: with `mode`, the
+      // stream's next answer (a `subbed`, or an end leaving it idle or ended); without, a republish of the latest one. The
+      // link it names is the one main last said; the roster's word goes with it, as main says both
+      let answer: RemoteAnswer | null = null;
+      let linkState: 'up' | 'down' = 'up';
+      let stream: RemoteSession['stream'] = 'live';
+      const said = (now: RemoteSession['stream'], mode?: RemoteAnswer['mode']) => {
+        stream = now;
+        if (mode !== undefined) answer = { n: (answer?.n ?? 0) + 1, mode };
+        const state = remoteSessionState(REMOTE, { stream, answer, link: { state: linkState, carrier: linkState === 'up' ? 'relay' : null, refusal: null, member: 'member-1', rights: [] } });
+        applyRemoteSession(state);
+        fake.emit('remote.session', state, OTHER_MACHINE);
+      };
+      said('live', 'snapshot'); // the stream's opening, before any loss
+      // the link offline past its grace: main pauses the stream (or says an idle one again) with the link down, then the roster
+      const lose = (now: RemoteSession['stream'] = 'paused') => {
+        linkState = 'down';
+        said(now);
+        fake.emit('machines.changed', roster('down', 1));
+      };
+      // the link up again: the roster, then main says the stream again for the link's change, its answer still to come
+      const restore = () => {
+        linkState = 'up';
+        fake.emit('machines.changed', roster('up', 2));
+        said(stream);
+      };
+      return { fake, source, b, history, lose, restore, said, fewest: () => fewest };
+    }
+    // the next turn of L1 after `from` events of it, as the stream delivers it
+    const nextTurn = (n: number, from: number) => {
+      const b = builder();
+      turnOf(b, n);
+      return launched(b, 'L1', from + 1);
+    };
+
+    it('a plain loss and a replay return leave the key unreset and read nothing; the replay’s batches land in order, none twice', async () => {
+      const h = await held();
+      h.lose();
+      // what main says at the return before and around the replay: the roster's new generation, the record and the
+      // status said again, the panels' relists, the stream's own state: `live`, a replay's `subbed`
+      h.restore();
+      h.said('live', 'replay');
+      h.fake.emit('session.changed', { record: record(REMOTE), cause: 'live', revision: 1 }, OTHER_MACHINE);
+      h.fake.emit('session.status', { appSessionId: REMOTE, status: { ...status(bareOf(REMOTE)), appSessionId: REMOTE } }, OTHER_MACHINE);
+      h.fake.emit('fs.tasksChanged', { listId: 'tasks-1' }, OTHER_MACHINE);
+      h.fake.emit('remote.reopened', { appSessionId: REMOTE }, OTHER_MACHINE);
+      const second = nextTurn(2, h.history.length);
+      const third = nextTurn(3, h.history.length + second.length);
+      // the replay from the cursor: its first batch repeats the cursor's event, which the store already holds
+      h.fake.emit('session.eventBatch', batch([h.history.at(-1)!, ...second.slice(0, 2)], REMOTE), OTHER_MACHINE);
+      h.fake.emit('session.eventBatch', batch([...second.slice(2), ...third], REMOTE), OTHER_MACHINE);
+      await Promise.resolve();
+      expect(reads(h.fake), 'no history read: the replay delivers what the loss held back').toHaveLength(1);
+      expect(h.fake.calls.map((call) => call.name)).not.toContain('engine.sessions');
+      expect(h.fewest(), 'never reset').toBe(1);
+      expect(entry().phase).toBe('live');
+      expect(entry().state.order).toEqual([turnId.ofMessage(ofTurn(1)), turnId.ofMessage(ofTurn(2)), turnId.ofMessage(ofTurn(3))]);
+      expect([...entry().state.seen]).toEqual([...h.history, ...second, ...third].map((event) => event.id));
+      expect(kinds()).not.toContain('gap');
+    });
+
+    it('a remote.gap from the loss to the first batch after the return starts one staged re-read, the drawn rows kept until it installs', async () => {
+      const h = await held();
+      h.lose();
+      h.restore();
+      expect(reads(h.fake), 'not before the stream speaks').toHaveLength(1);
+      const drawn = entry().rows;
+      // a relaunch during the loss: the stream answers `snapshot`, and main tells the gap at its `subbed`
+      h.fake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L2' }, OTHER_MACHINE);
+      h.said('gap', 'snapshot'); // the `subbed`'s own word, after its gap
+      await vi.waitFor(() => expect(reads(h.fake)).toHaveLength(2));
+      expect(reads(h.fake)[1]!.input).toEqual({ appSessionId: REMOTE, afterSeq: null, limit: null });
+      expect(entry().phase).toBe('hydrating');
+      expect(entry().rows, 'the old rows stay drawn while the history is read').toBe(drawn);
+      const b = builder();
+      turnOf(b, 2);
+      const relaunched = launched(b, 'L2', 1);
+      h.fake.emit('session.eventBatch', batch(relaunched.slice(0, 2), REMOTE), OTHER_MACHINE); // held behind the read
+      reads(h.fake)[1]!.answer({ ok: true, value: { events: [...h.history, ...relaunched.slice(0, 1)], lastSeq: 1, complete: true } } as never);
+      await vi.waitFor(() => expect(entry().phase).toBe('live'));
+      expect(h.fewest(), 'staged: the key never drew empty').toBe(1);
+      const order = kinds();
+      expect(order.filter((kind) => kind === 'gap'), 'one bar').toHaveLength(1);
+      expect(order.indexOf('gap'), 'placed before the relaunch’s first event').toBeGreaterThan(order.indexOf('assistant_text'));
+      expect(order.indexOf('gap')).toBeLessThan(order.lastIndexOf('user'));
+      expect([...entry().state.seen].filter((id) => !id.includes('history-gap'))).toEqual([...h.history, ...relaunched.slice(0, 2)].map((event) => event.id));
+      expect(reads(h.fake), 'once').toHaveLength(2);
+    });
+
+    it('a remote.gap after a replay answer since the return only draws its bar', async () => {
+      const h = await held();
+      h.lose();
+      h.restore();
+      h.said('live', 'replay');
+      h.fake.emit('session.eventBatch', batch(nextTurn(2, h.history.length), REMOTE), OTHER_MACHINE);
+      h.fake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L1', at: { seq: 40, idx: 0 } }, OTHER_MACHINE); // an omitted event mid-stream
+      await Promise.resolve();
+      expect(reads(h.fake)).toHaveLength(1);
+      expect(kinds().at(-1)).toBe('gap');
+      expect(entry().phase).toBe('live');
+    });
+
+    it('a batch said between the loss and the return arms nothing away: the return’s gap still re-reads', async () => {
+      const h = await held();
+      h.lose();
+      h.fake.emit('session.eventBatch', batch(nextTurn(2, h.history.length), REMOTE), OTHER_MACHINE); // flushed after the roster's down
+      h.restore();
+      h.fake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L2' }, OTHER_MACHINE);
+      h.said('gap', 'snapshot'); // the `subbed`'s own word, after its gap
+      await vi.waitFor(() => expect(reads(h.fake)).toHaveLength(2));
+    });
+
+    it('a second loss during the staged re-read re-arms it; the next return’s gap re-reads once', async () => {
+      const h = await held();
+      h.lose();
+      h.restore();
+      h.fake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L2' }, OTHER_MACHINE);
+      h.said('gap', 'snapshot'); // the `subbed`'s own word, after its gap
+      await vi.waitFor(() => expect(reads(h.fake)).toHaveLength(2));
+      h.lose(); // the re-read is still out
+      h.restore();
+      expect(reads(h.fake)).toHaveLength(2);
+      h.fake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L3' }, OTHER_MACHINE);
+      h.said('gap', 'snapshot');
+      await vi.waitFor(() => expect(reads(h.fake)).toHaveLength(3));
+      await Promise.resolve();
+      expect(reads(h.fake), 'once').toHaveLength(3);
+      // the first re-read answers late: its hydration was superseded, and it installs nothing
+      reads(h.fake)[1]!.answer({ ok: true, value: { events: h.history.slice(0, 1), lastSeq: 1, complete: true } } as never);
+      const b = builder();
+      turnOf(b, 2);
+      const relaunched = launched(b, 'L3', 1);
+      reads(h.fake)[2]!.answer({ ok: true, value: { events: [...h.history, ...relaunched], lastSeq: relaunched.length, complete: true } } as never);
+      await vi.waitFor(() => expect(entry().phase).toBe('live'));
+      expect([...entry().state.seen].filter((id) => !id.includes('history-gap'))).toEqual([...h.history, ...relaunched].map((event) => event.id));
+      expect(kinds().filter((kind) => kind === 'gap'), 'the second return’s bar alone: the first was told to the superseded read').toHaveLength(1);
+      expect(h.fewest()).toBe(1);
+    });
+
+    // The architect's rulings on the reviews (P1, the two P2s): the stream's answer after the loss decides, as main says it
+    // with `remote.session` (`answer`), never the published state, which a link change says again. `replay` keeps the
+    // rows; `missing`, `snapshot`, `unavailable` and `ended` read the key again, staged, at that answer; nothing is read
+    // before it, and a gap heard meanwhile (the stream's own, or a history read's: src/main/lane-b/remote.ts) joins it.
+    it('holds a gap heard before the answer: a replay answer draws its bar and reads nothing', async () => {
+      const h = await held();
+      h.lose();
+      h.restore(); // the link up, the stream not yet answered
+      h.fake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L1', at: { seq: 9, idx: 0 } }, OTHER_MACHINE); // a history read's
+      h.said('opening');
+      await settle();
+      expect(reads(h.fake), 'held: the stream has not answered').toHaveLength(1);
+      expect(kinds()).not.toContain('gap');
+      h.said('live', 'replay');
+      await settle();
+      expect(reads(h.fake)).toHaveLength(1);
+      expect(kinds().at(-1)).toBe('gap');
+    });
+
+    it('holds a gap heard before the answer: a snapshot answer reads once, the bar placed as its snapshot places it', async () => {
+      const h = await held();
+      h.lose();
+      h.restore();
+      h.fake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L1', at: { seq: 9, idx: 0 } }, OTHER_MACHINE);
+      await settle();
+      expect(reads(h.fake)).toHaveLength(1);
+      h.said('live', 'snapshot');
+      await vi.waitFor(() => expect(reads(h.fake)).toHaveLength(2));
+      h.said('live');
+      await settle();
+      expect(reads(h.fake), 'exactly one').toHaveLength(2);
+      reads(h.fake)[1]!.answer({ ok: true, value: { events: h.history, lastSeq: h.history.length, complete: true } } as never);
+      await vi.waitFor(() => expect(entry().phase).toBe('live'));
+      expect(kinds().filter((kind) => kind === 'gap')).toHaveLength(1);
+    });
+
+    // P2-1: an idle stream's retry opened while the link was offline, so no `paused` came; at the return `remote.session`
+    // says `idle` again for the link's change, while that subscription still waits for its answer
+    it('reads nothing at a republish with no new answer: an idle stream’s retry still out at the return', async () => {
+      const h = await held();
+      h.said('idle', 'unavailable'); // the session released before the loss
+      h.lose('idle'); // no subscription to pause: the link's change said again
+      h.restore(); // and again at the return, while the retry opened during the loss waits for its answer
+      await settle();
+      expect(reads(h.fake)).toHaveLength(1);
+      h.said('idle', 'unavailable'); // the retry's answer
+      await vi.waitFor(() => expect(reads(h.fake)).toHaveLength(2));
+    });
+
+    // P2-2: `behind` replaced the subscription and the link failed before its first answer; a fresh sink's `snapshot` (B
+    // relaunched the session) tells no gap and says `live`
+    it('reads again at a snapshot answer that told no gap and says live', async () => {
+      const h = await held();
+      h.lose();
+      h.restore();
+      const drawn = entry().rows;
+      h.said('live', 'snapshot');
+      await vi.waitFor(() => expect(reads(h.fake)).toHaveLength(2));
+      expect(entry().rows, 'staged: the old rows stay drawn').toBe(drawn);
+    });
+
+    it('re-reads at a missing answer, and its gap told after it is placed by that read', async () => {
+      const h = await held();
+      h.lose();
+      h.restore();
+      h.said('gap', 'missing'); // the `missing` subbed: its gap waits for its first event's place
+      await vi.waitFor(() => expect(reads(h.fake)).toHaveLength(2));
+      h.fake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L1', at: { seq: 2, idx: 0 } }, OTHER_MACHINE);
+      await settle();
+      expect(reads(h.fake)).toHaveLength(2);
+      reads(h.fake)[1]!.answer({ ok: true, value: { events: h.history, lastSeq: h.history.length, complete: true } } as never);
+      await vi.waitFor(() => expect(entry().phase).toBe('live'));
+      expect(kinds().filter((kind) => kind === 'gap')).toHaveLength(1);
+    });
+
+    for (const [word, mode] of [['idle', 'unavailable'], ['ended', 'ended']] as const) {
+      it(`a return answered ${mode} (the stream ${word}) starts one staged re-read of the live key`, async () => {
+        const h = await held();
+        h.lose();
+        h.restore();
+        await settle();
+        expect(reads(h.fake)).toHaveLength(1);
+        const drawn = entry().rows;
+        h.said(word, mode);
+        await vi.waitFor(() => expect(reads(h.fake)).toHaveLength(2));
+        expect(reads(h.fake)[1]!.input).toEqual({ appSessionId: REMOTE, afterSeq: null, limit: null });
+        expect(entry().rows, 'the old rows stay drawn').toBe(drawn);
+        h.said(word);
+        await settle();
+        const more = nextTurn(2, h.history.length);
+        reads(h.fake)[1]!.answer({ ok: true, value: { events: [...h.history, ...more], lastSeq: h.history.length + more.length, complete: true } } as never);
+        await vi.waitFor(() => expect(entry().phase).toBe('live'));
+        expect([...entry().state.seen]).toEqual([...h.history, ...more].map((event) => event.id));
+        expect(h.fewest(), 'staged').toBe(1);
+        expect(reads(h.fake), 'once').toHaveLength(2);
+      });
+    }
+
+    it('reads once at an unavailable answer with a gap held before it', async () => {
+      const h = await held();
+      h.lose();
+      h.restore();
+      h.fake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L1', at: { seq: 9, idx: 0 } }, OTHER_MACHINE);
+      h.said('idle', 'unavailable');
+      await vi.waitFor(() => expect(reads(h.fake)).toHaveLength(2));
+      await settle();
+      expect(reads(h.fake)).toHaveLength(2);
+    });
+
+    it('after the re-read, the fresh subscription behaves as with no loss: a later gap draws its bar only', async () => {
+      const h = await held();
+      h.lose();
+      h.restore();
+      h.said('idle', 'unavailable');
+      await vi.waitFor(() => expect(reads(h.fake)).toHaveLength(2));
+      reads(h.fake)[1]!.answer({ ok: true, value: { events: h.history, lastSeq: h.history.length, complete: true } } as never);
+      await vi.waitFor(() => expect(entry().phase).toBe('live'));
+      h.said('live', 'snapshot'); // the session runs again: a fresh subscription's opening
+      h.fake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L1', at: { seq: 9, idx: 0 } }, OTHER_MACHINE);
+      await settle();
+      expect(reads(h.fake)).toHaveLength(2);
+      expect(kinds().at(-1)).toBe('gap');
+    });
+
+    // the architect's condition (d): main had the return's answer before the renderer's roster said the machine left `up`;
+    // the source armed at main's own word of the loss, in main's order, so the answer still decides
+    it('decides on an answer main said before the roster said the machine left up', async () => {
+      const h = await held();
+      // main's word of the loss (the stream paused, the link down), then its answer at the return, both before the roster
+      h.fake.emit('remote.session', { ...remoteSessionState(REMOTE, { stream: 'paused', answer: { n: 1, mode: 'snapshot' } }), link: { state: 'down', carrier: null, refusal: null, member: 'member-1', rights: [] } }, OTHER_MACHINE);
+      h.said('live', 'snapshot'); // the return's answer (B relaunched it), the link up again in main's word
+      await vi.waitFor(() => expect(reads(h.fake)).toHaveLength(2));
+      h.fake.emit('machines.changed', roster('down', 1)); // the roster, late
+      h.fake.emit('machines.changed', roster('up', 2));
+      await settle();
+      expect(reads(h.fake), 'once').toHaveLength(2);
+    });
+
+    // the architect's condition (c): a source that attached after the loss has nothing armed
+    it('arms nothing for a subscription made during the loss', async () => {
+      const h = await held();
+      h.lose();
+      useTranscriptStore.getState().drop(REMOTE); // the key let go during the loss; a mount attaches it again then
+      const again = useTranscriptStore.getState().attach(REMOTE, h.source);
+      reads(h.fake)[1]!.answer({ ok: true, value: { events: h.history, lastSeq: h.history.length, complete: true } } as never);
+      await again;
+      h.restore();
+      h.said('live', 'snapshot');
+      await settle();
+      expect(reads(h.fake), 'no re-read: its own read came after the loss').toHaveLength(2);
+      useTranscriptStore.getState().detach(REMOTE);
+    });
+
+    it('a local session’s source listens for no machine’s link; another machine’s session’s does', async () => {
+      const said = (fake: ReturnType<typeof fakeClient>) => fake.listeners.get('remote.session')?.size ?? 0;
+      const local = fakeClient();
+      await subscribed(local, ipcSourceOver(local.client, APP), () => {});
+      expect(said(local), 'local').toBe(0);
+      const remote = fakeClient();
+      await subscribed(remote, ipcSourceOver(remote.client, REMOTE), () => {});
+      expect(said(remote), 'remote').toBe(1);
     });
   });
 

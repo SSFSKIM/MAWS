@@ -42,7 +42,7 @@ vi.mock('electron', () => {
     BrowserWindow: { getAllWindows: () => fake.windows },
     dialog: { showMessageBox: fake.showMessageBox }, // E11 F2b
     screen: { getAllDisplays: () => [display], getPrimaryDisplay: () => display },
-    powerMonitor: { on: vi.fn() }, // P5 O8 M1: the Registry feed's wake and unlock probes
+    powerMonitor: { on: vi.fn(), off: vi.fn() }, // P5 O8 M1: the Registry feed's wake and unlock probes; P5 O15 M2b: the wake source's, off at shutdown
     systemPreferences: { promptTouchID: vi.fn() }, // P5 O7 M2: the step-up sheet's Touch ID, behind the confirm every signer takes
   };
 });
@@ -77,6 +77,7 @@ vi.mock('../services/command-budgets', () => ({ COMMAND_BUDGETS_MS: {} }));
 vi.mock('./machine/identity', () => ({ readMachineIdentity: vi.fn(() => ({ ref: 'TestMachineRef00000000', name: 'test' })) }));
 vi.mock('./window', () => ({ appUrl: 'file:///index.html', createWindow: fake.createWindow, installContentSecurityPolicy: vi.fn() }));
 vi.mock('./ipc/events', () => ({ emit: vi.fn(), onEmitted: vi.fn(() => () => {}) })); // onEmitted: the services bus's taps (P5 O3-C)
+vi.mock('./log-file', () => ({ captureMainLog: () => ({ install: () => false }) })); // P5 O15 M2b §H: no wrapped console, no main.log (log-file.test.ts holds the module)
 // C5 start: the layout store and the external-link command
 vi.mock('./layout/store', () => ({ LayoutFileStore: class { flush() {} get() { return null; } set() {} onChange() { return () => {}; } /* P5 O7 M2: remote lane B follows main.tabs */ }, registerLayoutHandlers: vi.fn() }));
 vi.mock('./sessions/panel-lifetime', () => ({ registerChatPanels: () => () => {} }));

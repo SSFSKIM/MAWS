@@ -20,21 +20,24 @@
 // - P5 O7 M8: optionally a second app of the same member (`secondUserData`): its own device keys, listed beside A's, and
 //   its own `MAWS_DEV_ORG` directory (`devOrgDir(…, 'second')`), on the same pipe to the hub, so two clients are attached
 //   to B at once, each over its own channel.
-// - A's way to the hub (P5 O7 M4): a loopback TCP pipe in front of the hub, which `devOrgDir` names as A's hub, so a spec
-//   cuts A off from B (and from the hub) and joins it again, as a lost network would: the pipe ends every connection
-//   through it and refuses new ones until restored. B's own hub link does not go through it. With the relay launch's
-//   direct dial failing at once, the cut leaves A no carrier to B.
+// - A's way to the hub (P5 O7 M4): a loopback TCP pipe in front of the hub (test/support/loopback-pipe.ts), which
+//   `devOrgDir` names as A's hub, so a spec cuts A off from B (and from the hub) and joins it again, as a lost network
+//   would: the pipe ends every connection through it and refuses new ones until restored. B's own hub link does not go
+//   through it. With the relay launch's direct dial failing at once, the cut leaves A no carrier to B. P5 O15 M2b §I:
+//   the pipe can also leave a sleep's state behind, its connections dead and silent and a new connect refused (`stall`),
+//   or answer TCP and forward nothing (`hold`), and it records each connection's first line (`requests`).
 //
 // The scene changes nothing the machine checks: the device keys, the handshakes, the endpoint's authorization and the
 // listings are all production's. Nothing reaches beyond 127.0.0.1.
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { connect, createServer, type AddressInfo, type Socket } from 'node:net';
+import { createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { expect } from '@playwright/test';
 import { build } from 'esbuild';
 import type { MachineRef } from '../../src/shared/machine/ref';
+import { pipeTo, type LoopbackPipe } from '../../test/support/loopback-pipe';
 import { startFakeSminos, type FakeSminos, type LaneAPlane, type LaneASession } from './fake-sminos';
 import { startLocalOrg, type LocalOrg } from './local-org';
 import { startProfileDaemon, type ProfileDaemon } from './profile-daemon';
@@ -68,14 +71,17 @@ export interface RemoteScene {
    * 'second' is the second device's (the scene started with `secondUserData`), the same member's, on the same hub pipe. */
   devOrgDir(directMap: boolean, client?: 'first' | 'second'): string;
   /** A's way to the hub (the pipe `devOrgDir` names): `cut` ends every connection through it and refuses new ones until
-   * `restore`. */
-  aHub: { cut(): void; restore(): void };
+   * `restore`; P5 O15 M2b: `stall`, `hold` and `requests` as test/support/loopback-pipe.ts gives them. */
+  aHub: PipeControl;
   /** P5 O7 M7: A's way to B's direct listener, a pipe as `aHub` is, which `devOrgDir(true)` maps B's address to when the
    * scene was started with `directPipe` (else null): `cut` ends every direct connection and refuses new ones until
    * `restore`, so a forced drop of the direct carrier is the network's. */
-  aDirect: { cut(): void; restore(): void } | null;
+  aDirect: PipeControl | null;
   stop(): Promise<void>;
 }
+
+/** What a spec does with one of A's ways (test/support/loopback-pipe.ts). */
+export type PipeControl = Pick<LoopbackPipe, 'cut' | 'stall' | 'hold' | 'restore' | 'requests'>;
 
 // What the bundle of A's key loader gives (src/main/device/keys.ts), as far as the scene uses it.
 type KeysModule = {
@@ -105,6 +111,8 @@ async function deviceOf(scratch: string, userData: string): Promise<{ device: st
   return ids;
 }
 
+const controlOf = (pipe: LoopbackPipe): PipeControl => ({ cut: () => pipe.cut(), stall: () => pipe.stall(), hold: () => pipe.hold(), restore: () => pipe.restore(), requests: () => pipe.requests() });
+
 /** A loopback port free now (the listener's, or the closed one the relay launch maps B's address to). */
 function freePort(): Promise<number> {
   return new Promise((done, fail) => {
@@ -115,49 +123,6 @@ function freePort(): Promise<number> {
       server.close(() => done(port));
     });
   });
-}
-
-// A loopback TCP pipe to `target` (an http://127.0.0.1:<port> URL), which `cut` ends and keeps refusing until `restore`.
-async function pipeTo(target: string): Promise<{ url: string; cut(): void; restore(): void; close(): Promise<void> }> {
-  const port = Number(new URL(target).port);
-  const open = new Set<Socket>();
-  let cut = false;
-  const server = createServer((socket) => {
-    if (cut) return void socket.destroy();
-    const upstream = connect({ host: '127.0.0.1', port });
-    for (const [side, other] of [[socket, upstream], [upstream, socket]] as const) {
-      open.add(side);
-      side.on('error', () => undefined); // a cut's reset, on either side; the close below ends the other
-      side.on('close', () => {
-        open.delete(side);
-        other.destroy();
-      });
-    }
-    socket.pipe(upstream).pipe(socket);
-  });
-  await new Promise<void>((done, fail) => {
-    server.once('error', fail);
-    server.listen(0, '127.0.0.1', () => done());
-  });
-  const endAll = () => {
-    for (const socket of open) socket.destroy();
-  };
-  return {
-    url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
-    cut() {
-      cut = true;
-      endAll();
-    },
-    restore() {
-      cut = false;
-    },
-    close: () =>
-      new Promise<void>((done) => {
-        cut = true;
-        endAll();
-        server.close(() => done());
-      }),
-  };
 }
 
 // B's preload: its interface table is one tailnet-shaped address, which it listens on through loopback.
@@ -289,8 +254,8 @@ export async function startRemoteScene(opts: { scratch: string; aUserData: strin
         said: () => sminos.said(),
       },
       devOrgDir,
-      aHub: { cut: () => aHub.cut(), restore: () => aHub.restore() },
-      aDirect: aDirect === null ? null : { cut: () => aDirect.cut(), restore: () => aDirect.restore() },
+      aHub: controlOf(aHub),
+      aDirect: aDirect === null ? null : controlOf(aDirect),
       stop: unwind,
     };
   } catch (error) {

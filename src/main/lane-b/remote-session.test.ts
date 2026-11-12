@@ -742,3 +742,89 @@ describe('a gap’s re-read and the record feed', () => {
     expect(l.of('session.changed').at(-1)).toMatchObject({ record: renamed });
   });
 });
+
+// P5 O15 M2b (Decision Log 39, the architect's ruling on the re-review's P2s): `remote.session` says the stream's latest
+// answer itself, so a page that held a session's transcript through a loss reads its return from what the machine
+// answered, never from a published state a link change says again. `n` rises at each `subbed` (whatever sink, a fresh
+// one after `behind` included) and at each end that leaves the stream `idle` (`unavailable`) or `ended`.
+describe('the stream’s answer', () => {
+  const answer = (l: ReturnType<typeof lab>) => l.lastState()?.answer;
+
+  it('is none before the first answer, then each `subbed` with its mode, a fresh sink’s after `behind` included', async () => {
+    const l = lab();
+    l.session.start();
+    expect(answer(l)).toBeNull();
+    const sub = await opened(l);
+    expect(answer(l)).toEqual({ n: 1, mode: 'snapshot' });
+    sub.sink.subbed('replay', { epoch: 'L1', seq: 3 });
+    expect(answer(l)).toEqual({ n: 2, mode: 'replay' });
+    sub.sink.subbed('missing', { epoch: 'L1', seq: 3 });
+    expect(answer(l)).toEqual({ n: 3, mode: 'missing' });
+    sub.sink.ended('behind');
+    const fresh = l.link.open()[0]!;
+    expect(fresh).not.toBe(sub);
+    expect(answer(l), 'a reopening is no answer').toEqual({ n: 3, mode: 'missing' });
+    fresh.sink.subbed('snapshot', { epoch: 'L2', seq: 0 });
+    expect(answer(l), 'the fresh sink’s, though it tells no gap').toEqual({ n: 4, mode: 'snapshot' });
+    l.session.stop();
+  });
+
+  it('is `unavailable` at an end that leaves the stream idle, `ended` at one that ends it', async () => {
+    const idle = lab();
+    (await opened(idle)).sink.ended('unavailable');
+    expect(idle.lastState()).toMatchObject({ stream: 'idle', answer: { n: 2, mode: 'unavailable' } });
+    idle.session.stop();
+    const gone = lab();
+    (await opened(gone)).sink.ended('gone');
+    expect(gone.lastState()).toMatchObject({ stream: 'ended', answer: { n: 2, mode: 'ended' } });
+  });
+
+  // the architect's condition (b): nothing main does while the link is down reads as the return's answer
+  it('is left as it was by an end the link itself makes (its loss, its refusal, its close), or one heard while it is down', async () => {
+    const refused = lab();
+    const sub = await opened(refused);
+    refused.link.set('down');
+    sub.sink.ended('removed'); // the link refused for good: its table ends every subscription
+    expect(refused.lastState()).toMatchObject({ stream: 'ended', answer: { n: 1, mode: 'snapshot' } });
+    const down = lab();
+    const held = await opened(down);
+    down.link.set('down');
+    held.sink.ended('unavailable'); // a refusal made with no channel current (`busy`), not B's answer
+    expect(down.lastState()).toMatchObject({ stream: 'idle', answer: { n: 1, mode: 'snapshot' } });
+    down.session.stop();
+    const stopped = lab();
+    await opened(stopped);
+    stopped.session.stop('closed'); // a new link for the machine ends what the old one carried
+    expect(stopped.lastState()).toMatchObject({ stream: 'ended', answer: { n: 1, mode: 'snapshot' } });
+  });
+
+  // the architect's condition (c): `n` only grows for the session, a record made again (a new link) included
+  it('goes on from the session’s count when its record is made again', async () => {
+    let count = 7; // the adapter's count for the session, kept across its records (remote.ts)
+    const link = new FakeLink();
+    link.answers.set('session.get', () => ({ ok: true, output: record(APP) }));
+    const said: unknown[] = [];
+    const watched = new RemoteSession({ machine: MINI, app: APP, link, emit: (_m, name, payload) => void (name === 'remote.session' && said.push((payload as { answer?: unknown }).answer)), timing: { recordRetryMs: [500], idleRetryMs: [1000, 30_000], idleProbeMaxMs: 60_000, batchMax: 500 }, revision: () => 1, log: () => {}, nextAnswer: () => ++count });
+    watched.start();
+    await vi.advanceTimersByTimeAsync(0);
+    link.open().at(-1)!.sink.subbed('snapshot', { epoch: 'L2', seq: 0 });
+    expect(said.at(-1)).toEqual({ n: 8, mode: 'snapshot' });
+    watched.stop();
+  });
+
+  it('is left as it was by a republish a link change makes, an idle stream’s retry opened while offline included', async () => {
+    const l = lab();
+    const sub = await opened(l);
+    sub.sink.ended('unavailable');
+    const said = l.of('remote.session').length;
+    l.link.set('down');
+    await vi.advanceTimersByTimeAsync(1000); // the idle retry opens a subscription while the link is down
+    l.link.set('up');
+    const after = l.of('remote.session').slice(said);
+    expect(after.length).toBeGreaterThan(0);
+    expect(after.map((s) => s.answer)).toEqual(after.map(() => ({ n: 2, mode: 'unavailable' })));
+    l.link.open()[0]!.sink.subbed('replay', { epoch: 'L1', seq: 0 });
+    expect(answer(l)).toEqual({ n: 3, mode: 'replay' });
+    l.session.stop();
+  });
+});

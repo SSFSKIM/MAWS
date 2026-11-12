@@ -1,7 +1,8 @@
 // The subscription table's own rules (O10 M8; RL3), on a channel stand-in: a `sub` is registered before it is decided,
 // so the device's `credit` can come first; a later `sub` of the same id replaces it, and the replaced one's decision,
-// when it comes, answers nothing that would end the newer one; and the stream's credit rule.
-import type { EndpointMessage, SessionSubMessage } from 'org-protocol';
+// when it comes, answers nothing that would end the newer one; and the stream's credit rule. P5 O15 M2b §H: the line
+// each `subbed` writes, with the time from the `sub`'s receipt on a fake clock.
+import type { EndpointMessage, SessionSubMessage, SubMessage } from 'org-protocol';
 import { describe, expect, it } from 'vitest';
 import { endableClientRef } from '@shared/ipc/client';
 import type { RemoteChannel } from '../../src/endpoint/channels';
@@ -46,17 +47,17 @@ function channel(options: { hold?: boolean } = {}): RemoteChannel & { sent: Endp
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-function table(seams: { transmitDeadlineMs?: number } = {}): { subs: Subscriptions; opened: Subscription[] } {
+function table(seams: { transmitDeadlineMs?: number; now?: () => number; log?: (line: string) => void } = {}): { subs: Subscriptions; opened: Subscription[] } {
   const opened: Subscription[] = [];
   const plane: Plane = { open: (sub) => void opened.push(sub), close: () => {}, stop: () => {} };
   const subs = new Subscriptions({
-    ...seams,
+    transmitDeadlineMs: seams.transmitDeadlineMs,
     authorize: () => Promise.resolve({ ok: true }) as never,
     planes: { A: plane, B: plane, feeds: plane },
     interest: new Interest({ interest: () => null, log: () => {} }),
     records: NO_RECORDS,
-    now: () => Date.now(),
-    log: () => {},
+    now: seams.now ?? (() => Date.now()),
+    log: seams.log ?? (() => {}),
   });
   return { subs, opened };
 }
@@ -250,5 +251,69 @@ describe('the subscription table', () => {
     const snaps = ch.sent.filter((x) => x.t === 'snap');
     const last = JSON.parse((snaps.at(-1) as { body: string }).body) as { raised: unknown[] };
     expect(last.raised).toHaveLength(20);
+  });
+});
+
+describe('the line each subbed writes (P5 O15 M2b §H)', () => {
+  function clocked() {
+    let clock = 1_000;
+    const lines: string[] = [];
+    const { subs, opened } = table({ now: () => clock, log: (line) => void lines.push(line) });
+    return { subs, opened, lines, ch: channel(), tick: (ms: number) => void (clock += ms) };
+  }
+
+  it('writes one line per subbed it queues, with its mode, position and asked cursor, and the ms since the sub was received', () => {
+    const { subs, opened, lines, ch, tick } = clocked();
+    const m: SessionSubMessage = { ...sub(), cursor: { epoch: 'L1', seq: 7, idx: 3 } };
+    subs.receive(ch, m, () => {});
+    tick(30);
+    subs.start(ch, m, { ok: true } as never);
+    tick(12);
+    expect(lines).toEqual([]);
+    opened[0].subbed('replay', { epoch: 'L1', seq: 7, idx: 3 });
+    expect(lines).toEqual(['endpoint: channel direct:1 sub s1 session B:app-1: subbed replay at L1:7:3, asked from L1:7:3, after 42 ms']);
+    tick(5);
+    opened[0].subbed('snapshot', { epoch: 'L2', seq: 0 });
+    expect(lines.slice(1)).toEqual(['endpoint: channel direct:1 sub s1 session B:app-1: subbed snapshot at L2:0:-, asked from L1:7:3, after 47 ms']);
+    expect(ch.sent.filter((x) => x.t === 'subbed')).toHaveLength(2);
+  });
+
+  it('names what each subscription reads in the forms the app writes', () => {
+    const { subs, opened, lines, ch } = clocked();
+    const messages: SubMessage[] = [
+      { t: 'sub', sub: 'c1', session: { lane: 'A', id: 'la-1' }, view: 'cards', cursor: null, credit: 1 },
+      { t: 'sub', sub: 'g1', session: { lane: 'A', id: 'la-1' }, agentId: 'agent-9', cursor: { epoch: 'e', seq: 4 }, credit: 1 },
+      { t: 'sub', sub: 'k1', session: { lane: 'B', id: 'app-1' }, feed: 'checkout', cursor: null, credit: 1 },
+      { t: 'sub', sub: 'f1', feed: 'attention', cursor: null, credit: 1 },
+      { t: 'sub', sub: 'p1', feed: 'channel', project: '0123abcdef456789', cursor: null, credit: 1 },
+    ];
+    for (const m of messages) {
+      subs.receive(ch, m, () => {});
+      subs.start(ch, m, { ok: true } as never);
+    }
+    for (const s of opened) s.subbed('missing', { epoch: 'e', seq: 5 });
+    expect(lines).toEqual([
+      'endpoint: channel direct:1 sub c1 session A:la-1 cards: subbed missing at e:5:-, asked from none, after 0 ms',
+      'endpoint: channel direct:1 sub g1 session A:la-1 agent agent-9: subbed missing at e:5:-, asked from e:4:-, after 0 ms',
+      'endpoint: channel direct:1 sub k1 feed checkout B:app-1: subbed missing at e:5:-, asked from none, after 0 ms',
+      'endpoint: channel direct:1 sub f1 feed attention: subbed missing at e:5:-, asked from none, after 0 ms',
+      'endpoint: channel direct:1 sub p1 feed channel 0123abcd: subbed missing at e:5:-, asked from none, after 0 ms',
+    ]);
+  });
+
+  it('times a replacing sub from its own receipt, and writes nothing for a subscription that is over', () => {
+    const { subs, opened, lines, ch, tick } = clocked();
+    const first = sub();
+    subs.receive(ch, first, () => {});
+    subs.start(ch, first, { ok: true } as never);
+    tick(10);
+    const second = sub();
+    subs.receive(ch, second, () => {});
+    subs.start(ch, second, { ok: true } as never);
+    tick(5);
+    opened[0].subbed('replay', { epoch: 'e', seq: 1 });
+    expect(lines).toEqual([]);
+    opened[1].subbed('replay', { epoch: 'e', seq: 1 });
+    expect(lines).toEqual(['endpoint: channel direct:1 sub s1 session B:app-1: subbed replay at e:1:-, asked from none, after 5 ms']);
   });
 });

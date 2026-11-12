@@ -1,10 +1,11 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
 import { createRedactor, redactJournal } from '../../test/live/support/live';
-import { JOURNAL_MAX_BYTES, JOURNAL_PRUNE_EVERY_MS, JournalReader, JournalWriter, pruneJournals, scheduleJournalPruning } from './journal';
+import { JOURNAL_MAX_BYTES, JOURNAL_PRUNE_EVERY_MS, JournalReader, JournalWriter, numbersReadBack, pruneJournals, scheduleJournalPruning } from './journal';
+import { FIXTURE_DIR } from '../../test/support/fixtures'; // P5 O15 M2b (Decision Log 30)
 
 let root: string;
 beforeEach(() => {
@@ -115,6 +116,94 @@ describe('transport frames and journals', () => {
       const writer = new JournalWriter(join(root, 'app-1'), 'abcdefgh', { maxBytes: JOURNAL_MAX_BYTES });
       await writer.close();
       expect(() => writer.row('meta', { event: 'exit' })).toThrow(/closed/);
+    });
+  });
+
+  // P5 O15 M2b (§L): where the last row ends, for the session stream's checkpoints
+  describe('JournalWriter.position', () => {
+    it('names the file the last row went to, its rotation index and the bytes written to it, a resumed writer\'s too', async () => {
+      const dir = join(root, 'app-1');
+      const writer = new JournalWriter(dir, 'L', { maxBytes: 200 });
+      writer.row('meta', { event: 'spawn', pad: 'x'.repeat(120) });
+      expect(writer.position).toEqual({ file: 'L.jsonl', index: 0, offset: statSync(join(dir, 'L.jsonl')).size });
+      writer.row('in', { type: 'system', pad: 'x'.repeat(120) }); // rotates
+      expect(writer.position).toEqual({ file: 'L.1.jsonl', index: 1, offset: statSync(join(dir, 'L.1.jsonl')).size });
+      await writer.close();
+      const resumed = JournalWriter.resume(dir, 'L', { maxBytes: 200 });
+      expect(resumed.position).toEqual({ file: 'L.1.jsonl', index: 1, offset: statSync(join(dir, 'L.1.jsonl')).size });
+      await resumed.close();
+    });
+
+    it('is null under a redactor, whose file no longer holds the rows as they were', async () => {
+      const writer = new JournalWriter(join(root, 'app-1'), 'L', { maxBytes: JOURNAL_MAX_BYTES, redact: (line) => line });
+      writer.row('meta', { event: 'spawn' });
+      expect(writer.position).toBeNull();
+      await writer.close();
+    });
+  });
+
+  // P5 O15 M2b (Decision Log 30): whether an engine line's numbers read back from the journal as they were read
+  describe('numbersReadBack', () => {
+    const line = (event: string) => `{"type":"stream_event","session_id":"S","parent_tool_use_id":null,"uuid":"u2","event":${event}}`;
+    // what the journal does to a value: JSON.parse of the line, written back with JSON.stringify and read again
+    const readsBack = (text: string) => {
+      const read = JSON.parse(text) as unknown;
+      return Object.is(JSON.parse(JSON.stringify([read]))[0], read);
+    };
+
+    it("trips on the review's two frames: an index past a double's range and a negative zero", () => {
+      expect(numbersReadBack(line('{"type":"content_block_start","index":1e400,"content_block":{"type":"tool_use","id":"use-1","name":"Read"}}'))).toBe(false);
+      expect(numbersReadBack(line('{"type":"content_block_start","index":-0,"content_block":{"type":"text","text":""}}'))).toBe(false);
+    });
+
+    it('never looks inside a string: the same texts in a message, a key or an id, escaped quotes and backslashes included', () => {
+      for (const text of [
+        '{"type":"assistant","text":"index -0 and 1e400, -0.0 and -1e-400"}',
+        '{"-0":1,"1e400":2}',
+        '{"t":"a \\"-0\\" b","u":"c\\\\","n":1}', // an escaped quote inside, then an escaped backslash before the close
+        `{"digits":"${'9'.repeat(400)}","date":"2026-01-05T09:00:00.000Z"}`,
+      ]) {
+        expect(JSON.parse(text), text).toBeTruthy();
+        expect(numbersReadBack(text), text).toBe(true);
+      }
+      expect(numbersReadBack('{"t":"c\\\\","n":-0}'), 'after a string that ends in a backslash').toBe(false);
+    });
+
+    it('trips exactly on the numbers the journal writes otherwise, wherever they are outside a string', () => {
+      const tokens = ['-0', '-0.0', '-0.000', '-0e5', '-0E+2', '-1e-400', '-0.5e-330', '1e400', '1E309', '-1e309', '1.8e308', `${'9'.repeat(400)}`, `-${'1'.repeat(320)}.5`,
+        '0', '1', '-1', '-0.5', '-10', '1e308', '1.7976931348623157e308', '1e-400', '0.1e-5', '-1.5e-300', '12345678901234567890123', `${'1'.repeat(300)}`, '-5e-324', '4.9e-324'];
+      for (const token of tokens) {
+        for (const text of [token, `[1,${token},2]`, `{"a":[{"b":${token}}],"c":"x"}`, `{"a" : ${token} }`]) expect(numbersReadBack(text), text).toBe(readsBack(token));
+      }
+      expect(tokens.filter((t) => !readsBack(t)).length).toBeGreaterThan(5);
+      expect(tokens.filter((t) => readsBack(t)).length).toBeGreaterThan(5);
+    });
+
+    it('agrees with the journal\'s round trip on random numbers', () => {
+      let seed = 0x25;
+      const rand = () => ((seed = (seed * 1103515245 + 12345) >>> 0) / 4294967296);
+      const digits = (n: number) => Array.from({ length: n }, () => Math.floor(rand() * 10)).join('');
+      for (let n = 0; n < 5_000; n += 1) {
+        const int = rand() < 0.3 ? '0' : `${1 + Math.floor(rand() * 9)}${digits(Math.floor(rand() * 6))}`;
+        const frac = rand() < 0.5 ? '' : `.${digits(1 + Math.floor(rand() * 4))}`;
+        const exp = rand() < 0.4 ? '' : `${rand() < 0.5 ? 'e' : 'E'}${['', '+', '-'][Math.floor(rand() * 3)]}${Math.floor(rand() * 450)}`;
+        const token = `${rand() < 0.5 ? '-' : ''}${int}${frac}${exp}`;
+        expect(numbersReadBack(`{"v":[${token}]}`), token).toBe(readsBack(token));
+      }
+    });
+
+    it('passes every line of the probe\'s recordings, and every frame in them', () => {
+      const files = readdirSync(FIXTURE_DIR, { recursive: true, encoding: 'utf8' }).filter((name) => name.endsWith('.jsonl')).map((name) => join(FIXTURE_DIR, name));
+      let lines = 0;
+      for (const file of files) {
+        for (const text of readFileSync(file, 'utf8').split('\n').filter((l) => l.length > 0)) {
+          lines += 1;
+          expect(numbersReadBack(text), relative(FIXTURE_DIR, file)).toBe(true);
+          const frame = (JSON.parse(text) as { frame?: unknown }).frame;
+          if (frame !== undefined) expect(numbersReadBack(JSON.stringify(frame)), relative(FIXTURE_DIR, file)).toBe(true);
+        }
+      }
+      expect(lines).toBeGreaterThan(10_000);
     });
   });
 

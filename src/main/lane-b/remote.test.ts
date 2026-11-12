@@ -1240,3 +1240,22 @@ describe('the remote setup (M9)', () => {
     expect(await l.cmd('session.projects.addFolder', { directory: '/Users/o/Documents/other' })).toMatchObject({ ok: false, error: { issues: { refusal: 'protected' } } });
   });
 });
+
+// P5 O15 M2b (the panel's finding 2): the adapter keeps each session's count of its stream's answers, so a record made
+// again for a new link object goes on from it, and a page's armed `answer.n` is passed by the new record's first answer
+describe('the stream’s answer across records', () => {
+  it('a record made again for a new link object continues the session’s count', async () => {
+    const l = lab();
+    await live(l);
+    const said = () => l.of('remote.session').filter((s) => s.address === APP).at(-1)?.answer;
+    expect(said()).toEqual({ n: 1, mode: 'snapshot' });
+    const next = new FakeLink();
+    next.answers.set('session.get', (input) => ({ ok: true, output: record(String(input.appSessionId)) }));
+    l.setLinks(new Map([[MINI, next]]));
+    await vi.advanceTimersByTimeAsync(0);
+    const sub = next.open().find((s) => s.request.session?.id === APP)!;
+    sub.sink.subbed('snapshot', { epoch: 'L2', seq: 0 });
+    expect(said()).toEqual({ n: 2, mode: 'snapshot' });
+    l.adapter.stop();
+  });
+});

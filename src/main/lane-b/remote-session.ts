@@ -66,7 +66,7 @@ import { sanitiseListId } from '@shared/engine/task-list';
 import type { SessionRecord } from '@shared/graph/session';
 import { REGISTRY } from '@shared/ipc/registry';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
-import type { RemoteStreamState } from '@shared/ipc/schema/remote';
+import type { RemoteAnswer, RemoteStreamState } from '@shared/ipc/schema/remote';
 import { codecOf } from '@shared/ipc/validate';
 import type { MachineRef } from '@shared/machine/ref';
 import { LINK_REGISTRY } from '../machines/link-surface';
@@ -130,6 +130,11 @@ export interface RemoteSessionDeps {
    * said as `READ_REFUSED`; an owner's (a session this app spawned or resumed included) is the machine not placing it yet.
    */
   othersSession?(): boolean;
+  /**
+   * P5 O15 M2b: the session's next answer count (`remote.session`'s `answer.n`), kept by the adapter for the session
+   * across its records, so it only grows; absent, the record counts from 1.
+   */
+  nextAnswer?(): number;
   log(line: string): void;
 }
 
@@ -190,6 +195,8 @@ export class RemoteSession {
   #statuses = 0;
   /** P5 O7 M8: a re-read after a gap is out; `again`: another gap came meanwhile, so one more follows it. */
   #rereading: { token: object; again: boolean } | null = null;
+  /** P5 O15 M2b: the stream's latest answer, said with `remote.session`. */
+  #answer: RemoteAnswer | null = null;
 
   constructor(deps: RemoteSessionDeps) {
     this.#deps = deps;
@@ -349,6 +356,7 @@ export class RemoteSession {
       stream: this.state.stream,
       controls: controlsOverlay(this.state, view, this.link.name),
       reason: sessionReason(this.state, view, this.link.name),
+      answer: this.#answer,
     };
     const text = JSON.stringify(payload);
     if (!force && text === this.#said) return;
@@ -423,6 +431,7 @@ export class RemoteSession {
           this.#pendingGap = at.epoch;
         } else if (gap) this.#gap(at.epoch);
         else this.state.stream = 'live';
+        this.#answeredWith(mode);
         this.publish();
         this.#openings += 1;
         this.#askOperations(token);
@@ -485,10 +494,12 @@ export class RemoteSession {
         if (reason !== 'unavailable') {
           this.state.stream = 'ended';
           this.state.ended = reason;
+          this.#endAnswered('ended');
           this.publish();
           return;
         }
         this.state.stream = 'idle';
+        this.#endAnswered('unavailable');
         this.publish();
         if (this.#started) {
           this.#started = false;
@@ -695,6 +706,20 @@ export class RemoteSession {
     const read = events.readEventPayload(name, payload);
     if (!read.ok) return this.#deps.log(`lane B: ${this.link.name}/${this.state.app}: ${name} doesn't read; left out`);
     this.#deps.emit(this.state.machine, name, read.value as never);
+  }
+
+  /** P5 O15 M2b: the machine answered the stream (a `subbed`, or an end leaving it idle or ended). */
+  #answeredWith(mode: RemoteAnswer['mode']): void {
+    this.#answer = { n: this.#deps.nextAnswer?.() ?? (this.#answer?.n ?? 0) + 1, mode };
+  }
+
+  /**
+   * An end is the stream's answer only while the link is up: an end the link makes itself (its refusal, its close: a
+   * `removed` or `closed` end goes to `stop`, which answers nothing) or one made with no channel current (a `busy`
+   * refusal while offline) says nothing of what the machine answered, so a page never takes it for the return's.
+   */
+  #endAnswered(mode: 'ended' | 'unavailable'): void {
+    if (this.link.state() === 'up') this.#answeredWith(mode);
   }
 
   #gap(launchId: string, at?: EventPayload<'remote.gap'>['at']): void {

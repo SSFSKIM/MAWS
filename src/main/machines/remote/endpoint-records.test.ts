@@ -82,4 +82,23 @@ describe('endpoint records', () => {
     await s.records().resolve(s.ref, s.signedIn);
     expect(JSON.parse(readFileSync(s.file, 'utf8')).version).toBe(1);
   });
+
+  // P5 O15 M2b §F: the lanes dial the held record at once while the hub's is read in the background
+  it('answers the held record that verifies now, from memory or the file, and fetches nothing', async () => {
+    const s = await setup();
+    s.hub.answer = 'down';
+    expect(await s.records().cached(s.ref, s.signedIn)).toBeNull();
+    expect(s.hub.seen).toHaveLength(0);
+    const held = await s.record('2026-10-28T11:00:00.000Z');
+    s.hub.answer = held;
+    const r = s.records();
+    await r.resolve(s.ref, s.signedIn);
+    const fetched = s.hub.seen.length;
+    expect(await r.cached(s.ref, s.signedIn)).toEqual(held); // memory
+    expect(await s.records().cached(s.ref, s.signedIn)).toEqual(held); // a relaunch: the file
+    expect(s.hub.seen).toHaveLength(fetched);
+    const forged = await s.record('2026-10-28T12:00:00.000Z', await generateSigningKey());
+    writeFileSync(s.file, JSON.stringify({ version: 1, records: { [s.ref]: forged } }), { mode: 0o600 });
+    expect(await s.records().cached(s.ref, s.signedIn)).toBeNull(); // one the held state no longer verifies
+  });
 });

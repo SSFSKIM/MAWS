@@ -13,6 +13,9 @@ import { ChannelOrg, NOW, ORG, PROJECT, S1, S2 } from '../../../../test/org/chan
 import type { ChannelAnswer, ChannelChanged, ChannelEvent, ChannelHost, ChannelMachine, ChannelSession, ChannelWord } from '@shared/ipc/schema/org';
 import type { MachineRef } from '@shared/machine/ref';
 import { BUILD_HEADER } from '../hub-client';
+import { fakeReach, fakeWake } from '../../../../test/support/wake-reach';
+import type { Reach } from '../../net/reach';
+import type { WakeSource } from '../../net/wake';
 import type { WebSocketLike } from '../registry-feed';
 import { heldOrgSession, type SignedIn } from '../session';
 import { emptyLog, type ChannelCacheFile, type ChannelStore } from './cache';
@@ -45,7 +48,9 @@ class FakeSocket implements WebSocketLike {
   send(text: string): void {
     this.sent.push(JSON.parse(text) as Record<string, unknown>);
   }
-  close(): void {
+  ping(): void {}
+  /** The app's own end of its socket (P5 O15 M2b §G rule 5): `closed` reads it. */
+  terminate(): void {
     this.closed = true;
   }
   emit(event: string, ...args: unknown[]): void {
@@ -110,6 +115,8 @@ async function harness(
     reading?: Promise<void>;
     coalesce?: number;
     machines?: ChannelMachines;
+    wake?: WakeSource;
+    reach?: Reach;
   } = {},
 ) {
   const o = await ChannelOrg.make();
@@ -161,6 +168,8 @@ async function harness(
     },
     now: () => NOW,
     ...(options.machines === undefined ? {} : { machines: options.machines }),
+    ...(options.wake === undefined ? {} : { wake: options.wake }),
+    ...(options.reach === undefined ? {} : { reach: options.reach }),
     timing: { CHANNEL_RELEASE_MS: 60, CHANNEL_WRITE_MS: 5, CHANNEL_COALESCE_MS: options.coalesce ?? 5, ...(options.events === undefined ? {} : { CHANNEL_CACHE_EVENTS: options.events }) },
     random: () => 0.5,
     log: () => {},
@@ -243,6 +252,33 @@ describe('a project channel', () => {
     expect(socket.closed).toBe(true);
     expect(offline.events.map((e) => e.event.text)).toEqual(['kept']);
     expect(offline.asOf).toBe(new Date(NOW).toISOString());
+  });
+
+  // P5 O15 M2b §G: the channel's socket hears the wake source it was given: a wake of an hour drops it in the same turn,
+  // the tab reads as catching up, and the hub's answer opens one socket, which resumes after the offset the channel held
+  it('drops its socket at a wake, reads as catching up, and resumes after its offset at the hub’s answer', async () => {
+    const wake = fakeWake();
+    const reach = fakeReach();
+    const h = await harness({ wake: wake.source, reach: reach.reach });
+    opened(await h.channels.open(PROJECT));
+    const socket = await until(() => h.last(), 'a socket');
+    socket.welcome();
+    socket.frame({ t: 'log', events: [{ offset: 3, event: await h.o.say(h.o.mini, 1, 'before the sleep') }] });
+    socket.frame({ t: 'caught-up', offset: 3 });
+    await until(() => opened(h.latest()).live, 'live');
+    wake.wake(3_600_000);
+    expect(socket.closed).toBe(true);
+    expect(reach.windows).toEqual(['wake']);
+    await until(() => !opened(h.latest()).live, 'catching up');
+    await until(() => reach.waiting.length === 1, 'the wait on the hub');
+    expect(h.sockets).toHaveLength(1);
+    reach.answer(true);
+    const next = await until(() => (h.sockets.length === 2 ? h.last() : null), 'the socket after the wake');
+    next.welcome();
+    expect(next.sent).toEqual([{ t: 'resume', after: 3 }]);
+    next.frame({ t: 'caught-up', offset: 3 });
+    await until(() => opened(h.latest()).live, 'live again');
+    expect(opened(h.latest()).events.map((e) => e.event.text)).toEqual(['before the sleep']);
   });
 
   // Task 2's fix wave: a tab applies only the changes numbered past its open answer

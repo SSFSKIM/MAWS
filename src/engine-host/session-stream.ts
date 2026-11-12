@@ -8,10 +8,12 @@
 // kept aside for `session.pendingRequest`, whatever the ring has evicted since, and dropped once its item has left the
 // list, or without a listing when the broker retired the request unlisted (a re-delivered retired id; the exit). C12:
 // once the launch has exited, its ring keeps only the last EXITED_RING events (the budget's exited-history cap); older
-// ranges rebuild from the journal.
+// ranges rebuild from the journal. P5 O15 M2b (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, §L): such a
+// rebuild starts at the newest checkpoint before its cursor, not at the launch's first row.
 import { createReadStream } from 'node:fs';
 import { basename, dirname } from 'node:path';
 import { createInterface } from 'node:readline';
+import { deserialize, serialize } from 'node:v8'; // P5 O15 M2b (§L)
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import { eventUtf8Bytes } from '@shared/graph/history-window'; // P5 O7 M4
@@ -24,7 +26,7 @@ import type { HostEmit } from '@shared/host/runtime';
 import { parseJournalRow } from '@shared/wire/journal';
 import { EXITED_RING } from './budget'; // C12
 import { JournalReader } from './journal';
-import { Normalizer } from './normalizer';
+import { Normalizer, type NormalizerState } from './normalizer';
 
 export const RING_SIZE = 5_000;
 export const BATCH_MS = 16;
@@ -33,6 +35,27 @@ export const BATCH_MAX = 500;
 // quarter of the socket's line cap (LINE_CAP), since inline screenshots ride the events as base64 and 500 of them can
 // pass the cap, which closes the connection with the batch counted delivered. A single event over it goes alone.
 export const BATCH_BYTES = 16 * 1024 * 1024;
+
+// P5 O15 M2b start (§L): checkpoints. A checkpoint is the journal's position between two rows with the normaliser's state
+// at that point, so a rebuild for an evicted cursor reads at most one interval of rows before it, whatever the launch's
+// length. They are taken by the live path (the session, which owns the writer and the live normaliser) and by every
+// journal scan, and are kept in memory only: nothing is written to disk, and a hand-over carries none.
+export const CHECKPOINT_ROWS = 10_000; // a checkpoint after each row whose seq is a multiple of this
+export const CHECKPOINTS_DENSE = 24; // the newest boundaries, every one kept
+export const CHECKPOINT_SPARSE_EVERY = 8; // of the older boundaries, one in this many is kept
+export const CHECKPOINTS_MAX = 40; // for one stream
+export const CHECKPOINT_BYTES = 2 * 1024 * 1024; // the states' buffers for one stream, in all
+
+export interface Checkpoint {
+  through: number; // the seq of the last row the state has seen
+  file: string; // the journal file that holds that row, by name
+  index: number; // its place among the launch's files when the checkpoint was taken
+  offset: number; // bytes into it, just past that row
+  // v8.serialize(normalizer.state) of the normaliser that has seen every row through `through`: the structured clone
+  // format, a deep copy that keeps Maps, Sets, NaN, -0 and undefined, restored with v8.deserialize into a new Normalizer
+  state: Buffer;
+}
+// P5 O15 M2b end
 
 const REQUESTED_KINDS = new Set(['permission.requested', 'question.requested', 'plan.requested', 'dialog.requested', 'elicitation.requested']);
 // E1 M4b: an ask's attention item originates in its `maws.ask.opened` (P2-C2: an async ask's `async_input` item too)
@@ -47,7 +70,7 @@ export interface SessionStreamOptions {
   ringSize?: number;
   batchMs?: number;
   exitedRingSize?: number; // C12: the ring once the launch has exited (EXITED_RING)
-  log?: (line: string) => void; // E10: the burst's tail_gap line, a refused batch
+  log?: (line: string) => void; // E10: the burst's tail_gap line, a refused batch; P5 O15 M2b: the ring's first eviction, a journal read
   // E10: whether a client is still connected after an emit answered false: the runtime answers false for an invalid
   // payload too, and a batch refused while the client is there can never be delivered, so it is skipped (absent: false
   // means the client is gone)
@@ -60,6 +83,7 @@ export interface SessionStreamOptions {
   // P5 O16 M3c fix wave 1: an adopted launch's originating request events its fold read (the successor told none), for a
   // live broker item whose event this stream never saw (absent: none)
   restored?: (requestId: string) => SessionEvent | null;
+  checkpointRows?: number; // P5 O15 M2b (§L): CHECKPOINT_ROWS (tests)
 }
 
 // E10: what a connect burst republishes for the row, read from its EngineSession (the stream keeps no copy): the queue
@@ -93,6 +117,9 @@ export class SessionStream {
   private readonly ring: SessionEvent[] = [];
   private cursor: JournalCursor | null = null;
   private evictedThrough: number | null = null; // the seq of the last event the ring dropped
+  private evictionLogged = false; // P5 O15 M2b: the launch's first eviction is in host.log
+  private checkpoints: Checkpoint[] = []; // P5 O15 M2b (§L): oldest first, as the rule keeps them
+  private readonly checkpointRows: number; // P5 O15 M2b (§L)
   private pending: SessionEvent[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
   private readonly requests = new Map<string, SessionEvent>();
@@ -110,6 +137,7 @@ export class SessionStream {
     this.ringSize = opts.ringSize ?? RING_SIZE;
     this.batchMs = opts.batchMs ?? BATCH_MS;
     this.exitedRingSize = opts.exitedRingSize ?? EXITED_RING; // C12
+    this.checkpointRows = opts.checkpointRows ?? CHECKPOINT_ROWS; // P5 O15 M2b (§L)
     if (opts.historyThrough !== undefined && opts.historyThrough > 0) this.evictedThrough = opts.historyThrough; // P5 O16 M3c
   }
 
@@ -147,6 +175,9 @@ export class SessionStream {
     const dropped = this.ring.splice(0, this.ring.length - size);
     if (dropped.length === 0) return;
     this.evictedThrough = dropped.at(-1)!.seq;
+    // P5 O15 M2b (§H): where a replay comes from, ring or journal, is read off host.log from here
+    if (!this.evictionLogged) this.opts.log?.(`ring evicted ${this.opts.appSessionId} launch ${this.opts.launchId}: events through seq ${this.evictedThrough} are the journal's now`);
+    this.evictionLogged = true;
     // E10: the delivered cursor moves with the ring, and is gone once the ring rolled past it; the undelivered events
     // dropped are lost to the client's listeners (the burst logs them as a tail_gap)
     const firstUndelivered = this.deliveredTo === null ? 0 : this.deliveredTo.index + 1;
@@ -203,7 +234,56 @@ export class SessionStream {
   dispose(): void {
     this.flush();
     this.cursor = null;
+    this.checkpoints = []; // P5 O15 M2b (§L)
   }
+
+  // P5 O15 M2b start (§L): a checkpoint of the launch's journal, the live path's or a scan's; one already held for its
+  // row is kept as it was. With `head` the newest boundary held, the one at boundary `b` stays while `head - b` is under
+  // CHECKPOINTS_DENSE or `b` is a multiple of CHECKPOINT_SPARSE_EVERY; then the oldest go while more than
+  // CHECKPOINTS_MAX are held or their states pass CHECKPOINT_BYTES. Each one taken is a host.log line.
+  checkpoint(c: Checkpoint): void {
+    if (this.checkpoints.some((held) => held.through === c.through)) return;
+    const held = [...this.checkpoints, c].sort((x, y) => x.through - y.through);
+    const head = held.at(-1)!.through / this.checkpointRows;
+    const kept = held.filter((k) => this.boundaryKept(k.through, head));
+    let bytes = kept.reduce((n, k) => n + k.state.length, 0);
+    while (kept.length > CHECKPOINTS_MAX || bytes > CHECKPOINT_BYTES) bytes -= kept.shift()!.state.length;
+    this.checkpoints = kept;
+    this.opts.log?.(`checkpoint ${this.opts.appSessionId} launch ${this.opts.launchId} at seq ${c.through}: ${c.state.length} bytes; ${kept.length} held, ${bytes} bytes`);
+  }
+
+  private boundaryKept(through: number, head: number): boolean {
+    const boundary = through / this.checkpointRows;
+    return head - boundary < CHECKPOINTS_DENSE || boundary % CHECKPOINT_SPARSE_EVERY === 0;
+  }
+
+  // Whether a scan that has just normalised row `through`, a boundary, takes a checkpoint there: none is held for it,
+  // and the rule would keep it (so a scan behind the newest held serialises nothing the rule drops at once; only the
+  // byte cap is not known before the copy).
+  private wantsCheckpoint(through: number): boolean {
+    if (through % this.checkpointRows !== 0 || this.checkpoints.some((held) => held.through === through)) return false;
+    if (this.checkpoints.length >= CHECKPOINTS_MAX && through < this.checkpoints[0]!.through) return false;
+    return this.boundaryKept(through, Math.max(through, this.checkpoints.at(-1)?.through ?? 0) / this.checkpointRows);
+  }
+
+  // The newest checkpoint at or before `afterSeq`, when the launch's files still hold its file at its place, every
+  // earlier file with it, which is what a scan from the first row needs of them; else null.
+  private usableCheckpoint(afterSeq: number, files: readonly string[]): Checkpoint | null {
+    const c = this.checkpoints.findLast((held) => held.through <= afterSeq);
+    return c !== undefined && files[c.index] !== undefined && basename(files[c.index]!) === c.file ? c : null;
+  }
+
+  // A page cursor that goes on from a checkpoint: a fresh normaliser on its state restored, its file and offset, the
+  // next seq. Null for a state that cannot be read back.
+  private cursorAt(c: Checkpoint): JournalCursor | null {
+    try {
+      const state = deserialize(c.state) as NormalizerState;
+      return { normalizer: new Normalizer({ appSessionId: this.opts.appSessionId, launchId: this.opts.launchId, sessionId: this.opts.sessionId, state }), file: c.index, offset: c.offset, expected: c.through + 1, carried: [], through: c.through };
+    } catch {
+      return null;
+    }
+  }
+  // P5 O15 M2b end
 
   // E10 start: the delivered cursor and the connect burst (E10 execution document, §Design 3 "The delivered cursor").
   // The last event written to a connected client; null before the first one, or once the ring rolled past it.
@@ -270,14 +350,42 @@ export class SessionStream {
   // the row read past a full page) lets the next page, whose `afterSeq` is this one's `lastSeq`, go on from there, so
   // paging reads each row once (whole-branch review); the journal is append-only, so rows written meanwhile are simply
   // read next. Any other `afterSeq` starts over from the first row. Null when the files cannot be read back whole (a
-  // rotated file pruned, a file removed by an archive).
+  // rotated file pruned, a file removed by an archive). P5 O15 M2b (§H): a read that starts over and is served writes
+  // one line at its end with the rows it read and its time, which is most of the endpoint's `J` for an evicted cursor.
+  // P5 O15 M2b (§L): a read that starts over starts at the newest checkpoint at or before `afterSeq` where there is a
+  // usable one, and so does a read whose kept cursor stands before that checkpoint; a read from a checkpoint that fails
+  // is read again from the first row, so the answer is always the one a scan from the first row gives.
   private async fromJournal(afterSeq: number | null, limit: number | null, bound: number | null = null): Promise<EventsSnapshot | null> {
     const prefix = `${basename(this.opts.journalPath, '.jsonl')}.`; // `<file id>.jsonl`, then `<file id>.<n>.jsonl`
     const files = JournalReader.forSession(dirname(this.opts.journalPath)).filter((file) => basename(file).startsWith(prefix));
-    const resumable = this.cursor !== null && afterSeq !== null && afterSeq >= this.cursor.through;
-    const cursor = resumable ? this.cursor! : { normalizer: new Normalizer({ appSessionId: this.opts.appSessionId, launchId: this.opts.launchId, sessionId: this.opts.sessionId }), file: 0, offset: 0, expected: 1, carried: [], through: 0 };
+    const started = performance.now();
+    const kept = this.cursor;
     this.cursor = null; // re-armed only by a page that read cleanly
     if (files.length === 0) return null;
+    const checkpoint = afterSeq === null ? null : this.usableCheckpoint(afterSeq, files);
+    // the kept cursor goes on unless a checkpoint stands past the rows it has read (never so for the page after it)
+    if (kept !== null && afterSeq !== null && afterSeq >= kept.through && (checkpoint === null || checkpoint.through < kept.expected)) return (await this.readJournal(files, kept, afterSeq, limit, bound)).answer;
+    let rows = 0;
+    const restored = checkpoint === null ? null : this.cursorAt(checkpoint);
+    if (restored !== null) {
+      const read = await this.readJournal(files, restored, afterSeq, limit, bound);
+      rows += read.rows;
+      if (read.answer !== null) {
+        this.opts.log?.(`session.events ${this.opts.appSessionId} after ${afterSeq}: from the journal, ${rows} rows read in ${Math.round(performance.now() - started)} ms, from the checkpoint at seq ${checkpoint!.through}`);
+        return read.answer;
+      }
+    }
+    const fresh: JournalCursor = { normalizer: new Normalizer({ appSessionId: this.opts.appSessionId, launchId: this.opts.launchId, sessionId: this.opts.sessionId }), file: 0, offset: 0, expected: 1, carried: [], through: 0 };
+    const read = await this.readJournal(files, fresh, afterSeq, limit, bound);
+    rows += read.rows;
+    if (read.answer !== null) this.opts.log?.(`session.events ${this.opts.appSessionId} after ${afterSeq ?? 'start'}: from the journal, ${rows} rows read in ${Math.round(performance.now() - started)} ms`);
+    return read.answer;
+  }
+
+  // One page read from `cursor` on, and the rows it parsed; the cursor is kept for the next page when the page read
+  // cleanly. P5 O15 M2b (§L): at each boundary row it passes, the scan takes the stream's checkpoint where none is held.
+  private async readJournal(files: readonly string[], cursor: JournalCursor, afterSeq: number | null, limit: number | null, bound: number | null): Promise<{ answer: EventsSnapshot | null; rows: number }> {
+    let rows = 0;
     const wanted = (e: SessionEvent) => afterSeq === null || (e.seq !== null && e.seq > afterSeq);
     const events: SessionEvent[] = [];
     let bytes = 0;
@@ -311,9 +419,11 @@ export class SessionStream {
             cursor.offset += Buffer.byteLength(line, 'utf8') + 1;
             if (line.length === 0) continue;
             const row = parseJournalRow(JSON.parse(line));
-            if (row.seq !== cursor.expected) return null; // a gap: part of the launch is gone
+            rows += 1;
+            if (row.seq !== cursor.expected) return { answer: null, rows }; // a gap: part of the launch is gone
             cursor.expected += 1;
             const out = cursor.normalizer.push(row).filter(wanted);
+            if (this.wantsCheckpoint(row.seq)) this.checkpoint({ through: row.seq, file: basename(files[cursor.file]!), index: cursor.file, offset: cursor.offset, state: serialize(cursor.normalizer.state) }); // P5 O15 M2b (§L)
             if (out.length === 0) continue;
             if (!admit(out)) {
               complete = false; // the page is full and more follows (the row carried opens the next page), or a row was left out
@@ -329,13 +439,13 @@ export class SessionStream {
         cursor.offset = 0;
       }
     } catch {
-      return null;
+      return { answer: null, rows };
     }
     const left = omitted as EventsSnapshot['omitted'] | null;
     const lastSeq = left?.seq ?? events.at(-1)?.seq ?? afterSeq ?? 0;
     cursor.through = lastSeq;
     this.cursor = cursor;
-    return { events, lastSeq, complete, ...(left && { omitted: left }) }; // `lastSeq` is the cursor for the next call
+    return { answer: { events, lastSeq, complete, ...(left && { omitted: left }) }, rows }; // `lastSeq` is the cursor for the next call
   }
 }
 

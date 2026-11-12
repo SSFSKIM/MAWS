@@ -131,6 +131,8 @@ import {
 } from '../device/keys';
 import type { HeldOrgView, RecordSigner, StateSigner } from '../device/step-up';
 import { DEVICE_CAPABILITIES } from '../machines/remote/capabilities';
+import type { Reach } from '../net/reach';
+import type { WakeSource } from '../net/wake';
 import { cloudflareLoginTransfer, hubAdmission, hubHeaders, standinLogin, tokenClaims, AccessLoginError, type AccessLogin, type HubCredential } from './access-login';
 import {
   ACCESS_FILE,
@@ -306,6 +308,9 @@ export interface OrgSessionDeps {
   keyFiles?: Partial<DeviceKeyFiles>;
   /** M7a: the channels' Project socket; `ws` by default (tests inject one). */
   channelSocket?: ProjectSocketDeps['socket'];
+  /** P5 O15 M2b §G: the profile's wake source and reach, handed to every channel's socket; none: no wake is heard. */
+  wake?: WakeSource;
+  reach?: Reach;
   /** M4b: this Mac's own machine ref, which a drop refuses (`this-machine`) and whose grants go through the local door: main's `machine.identity`. */
   local?: MachineRef;
   /** M4b: the grants' signer, door and links; without it no grant is read or signed. */
@@ -1422,6 +1427,8 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     store: channelStore(files, log),
     commit: channelCommit,
     socket: deps.channelSocket,
+    wake: deps.wake,
+    reach: deps.reach,
     ...(deps.channelMachines === undefined
       ? {}
       : { machines: createChannelMachines({ ...deps.channelMachines, session: channelSession, store: machinesStore(files, log), commit: channelCommit, timing: deps.timing, now: deps.now, log: deps.log }) }),
