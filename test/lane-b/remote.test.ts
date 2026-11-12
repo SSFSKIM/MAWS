@@ -591,7 +591,7 @@ describe('remote lane B over a real link', { timeout: 30_000 }, () => {
     // mawsd's park clock over the endpoint's seams, as daemon.ts wires them: every engine-host request goes through
     // engineRequests (a park need), and the viewers' union is the interest. The park window here is 1.5 s.
     const parks: number[] = [];
-    const clocks = new DaemonClocks('unit', { armEnginePark: () => (parks.push(Date.now()), true), disarmEnginePark: () => {}, exitDaemon: () => {}, quiet: () => {} });
+    const clocks = new DaemonClocks('unit', { armEnginePark: () => (parks.push(Date.now()), true), disarmEnginePark: () => {}, exitDaemon: () => {}, quiet: () => {}, activity: () => {} });
     cleanups.push(() => clocks.stop());
     const needs = vi.spyOn(clocks, 'engineNeeded');
     const flips = vi.spyOn(clocks, 'interest');

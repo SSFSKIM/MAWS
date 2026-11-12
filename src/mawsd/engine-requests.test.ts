@@ -58,7 +58,7 @@ describe('a client’s request to the engine host and the park', () => {
 
   it('on the real clocks, a request that outlives the idle time asks no park as it ends, and the idle time runs again from there (P5 O5)', async () => {
     const parks: string[] = [];
-    const clocks = new DaemonClocks('unit', { armEnginePark: (why) => (parks.push(why), true), disarmEnginePark: () => {}, exitDaemon: () => {}, quiet: () => {} });
+    const clocks = new DaemonClocks('unit', { armEnginePark: (why) => (parks.push(why), true), disarmEnginePark: () => {}, exitDaemon: () => {}, quiet: () => {}, activity: () => {} });
     try {
       clocks.configure(1_000);
       clocks.served();
@@ -133,7 +133,7 @@ describe('a client’s request to the engine host and the park', () => {
 
   it('on the real clocks, a hold kept past the idle time asks no park, and its release starts the idle time again from there (P5 O7 M5b)', async () => {
     const parks: string[] = [];
-    const clocks = new DaemonClocks('unit', { armEnginePark: (why) => (parks.push(why), true), disarmEnginePark: () => {}, exitDaemon: () => {}, quiet: () => {} });
+    const clocks = new DaemonClocks('unit', { armEnginePark: (why) => (parks.push(why), true), disarmEnginePark: () => {}, exitDaemon: () => {}, quiet: () => {}, activity: () => {} });
     try {
       clocks.configure(1_000);
       clocks.served();

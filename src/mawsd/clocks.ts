@@ -30,6 +30,9 @@
 //   and none between its socket and the count (a hello waiting on its admission, a departure's drain), an empty interest
 //   union and no hold out. It is told at every evaluation, so `mawsd` collects at every entry, and `quiet()` answers it
 //   again at the moment of collecting.
+// - Settled (P5 Decision Log 273, the collection's quiet entry): served, no hold out, none between a socket and the count
+//   and no client's request to the engine host in flight, clients connected or not. `settled()` is part of what the
+//   quiet entry asks at the moment of collecting, and a hold or a request beginning or ending is activity (`activity`).
 // (The pty host's park is a check, not a clock: the daemon asks `pty.list` at the app's departure and at each `pty.exit`.)
 
 export const DEFAULT_IDLE_EXIT_MS = 10 * 60_000;
@@ -39,6 +42,7 @@ export interface ClockActions {
   disarmEnginePark(): void; // `host.exitWhenIdle {armed: false}`, and the transport told
   exitDaemon(): void; // a private daemon's idle exit
   quiet(quiet: boolean): void; // the daemon's quiet as it stands, told at each evaluation from `served()` on
+  activity(): void; // P5 Decision Log 273: a hold or a client's engine request began or ended
 }
 
 export class DaemonClocks {
@@ -112,6 +116,7 @@ export class DaemonClocks {
 
   holds(count: number): void {
     this.holdCount = count;
+    this.actions.activity();
     this.evaluate();
   }
 
@@ -132,6 +137,7 @@ export class DaemonClocks {
   // P5 O5 (landing 1): the clients' requests to the engine host in flight (the header's terms)
   engineRequests(count: number): void {
     this.requestsInFlight = count;
+    this.actions.activity();
     this.evaluate();
   }
 
@@ -165,6 +171,11 @@ export class DaemonClocks {
 
   quiet(): boolean {
     return this.serving && !this.stopped && this.clientCount === 0 && !this.between && this.interestEmpty && this.holdCount === 0;
+  }
+
+  // P5 Decision Log 273: the header's settled
+  settled(): boolean {
+    return this.serving && !this.stopped && !this.between && this.holdCount === 0 && this.requestsInFlight === 0;
   }
 
   // Start step (8) is done: the daemon serves, and its quiet is told from now on.

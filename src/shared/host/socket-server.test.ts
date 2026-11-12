@@ -37,12 +37,14 @@ interface StartOptions {
   many?: { runtimeFor(client: { appPid: number; capabilities: readonly string[] }): HostRuntime };
   halfOpen?: boolean;
   admitHello?: SocketServerOptions['admitHello']; // P5 O2 M5
+  onActivity?: () => void; // P5 Decision Log 273
+  pingGate?: () => Promise<unknown>; // P5 Decision Log 273: what each `engine.ping` waits for before it answers
 }
 
 async function start(options: StartOptions = {}) {
   let emit!: HostEmit;
   const runtime: HostRuntime = createHostRuntime((on, e, client) => {
-    on('engine.ping', async () => ({ pid: 4242, uptimeMs: 1, hostVersion: 'test' }));
+    on('engine.ping', async () => (await options.pingGate?.(), { pid: 4242, uptimeMs: 1, hostVersion: 'test' }));
     emit = e;
     if (options.onDocPort) client.onDocPort(options.onDocPort); // P3-A M5
   });
@@ -71,6 +73,7 @@ async function start(options: StartOptions = {}) {
     log,
     helloTimeoutMs: options.helloTimeoutMs,
     docHighWater: options.docHighWater, // P3-A M5
+    onActivity: options.onActivity, // P5 Decision Log 273
   });
   temp = await listenTemp(server);
   const connect = async () => {
@@ -395,6 +398,34 @@ describe('the socket layer handshake (server side)', () => {
     expect(client.isClosed()).toBe(false);
     host.served.closeClient();
     await client.closed;
+  });
+
+  it('tells activity at each line in and out, and counts a request in flight until its answer or its client’s end (P5 Decision Log 273)', async () => {
+    let activity = 0;
+    let gate: Promise<unknown> = Promise.resolve();
+    let answer!: (value: unknown) => void;
+    const host = await start({ onActivity: () => void (activity += 1), pingGate: () => gate });
+    const client = await host.connect();
+    client.send(hello());
+    await client.next();
+    expect(activity).toBe(0); // the handshake is the layer's own
+    client.send({ t: 'req', id: '1', name: 'engine.ping', input: undefined });
+    await client.next((line) => (line as { t: string }).t === 'res');
+    expect(activity).toBe(2); // the request and its answer
+    expect(host.served.inFlight()).toBe(0);
+    gate = new Promise((resolve) => (answer = resolve));
+    client.send({ t: 'req', id: '2', name: 'engine.ping', input: undefined });
+    await until(() => host.served.inFlight() === 1);
+    answer({});
+    await client.next((line) => (line as { id?: string }).id === '2');
+    expect(host.served.inFlight()).toBe(0);
+    gate = new Promise(() => {}); // never answered
+    client.send({ t: 'req', id: '3', name: 'engine.ping', input: undefined });
+    await until(() => host.served.inFlight() === 1);
+    const second = await host.connect();
+    second.send(hello({ appPid: 8 })); // replaces the first, whose unanswered requests no longer count
+    await second.next();
+    expect(host.served.inFlight()).toBe(0);
   });
 
   it('closeClient closes the connected client', async () => {

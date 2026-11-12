@@ -38,8 +38,11 @@ import {
   mawsdSpineLine,
   o17IdleProblems,
   browserWindowProblems,
+  categoriesLine,
+  footprintCategories,
   topMem,
   topOutside,
+  vmmapSummary,
   vmPaging,
 } from './daemon-idle';
 
@@ -167,6 +170,47 @@ describe('the physical footprint, read by pid without privilege (P5 Decision Log
     ]);
     expect(readerMismatches([{ ...supervisor, footprintKiB: 50_000, top: null }])).toEqual(['top printed no MEM for maws-supervisor pid 11 (the footprint reader read 50000 KiB)']);
     expect(readerMismatches([])).toEqual([]);
+  });
+});
+
+// P5 Decision Log 273: the memory by category at the window's edges, recorded only
+describe("the window's memory by category, recorded at its edges and read by no verdict", () => {
+  const json = JSON.stringify({
+    unit: 'bytes',
+    processes: [
+      { name: 'mawsd', pid: 11, footprint: 40 * 1_048_576, categories: { MALLOC_SMALL: { dirty: 3_145_728, swapped: 1_024, clean: 0, reclaimable: 0, wired: 0, regions: 3 }, __TEXT: { dirty: 0, swapped: 0, clean: 14_680_064, regions: 348 }, __CTF: { dirty: 0, swapped: 0, clean: 0, regions: 1 }, 'app-specific tag 255': { dirty: 20_971_520, swapped: 0, clean: 0, regions: 24 } } },
+    ],
+    errors: ['could not read pid 12'],
+  });
+
+  it("reads footprint's JSON in KiB, largest held first, dropping the categories that hold nothing, with its errors", () => {
+    const { processes, errors } = footprintCategories(json);
+    expect([...processes.keys()]).toEqual([11]);
+    expect(processes.get(11)).toEqual({
+      footprintKiB: 40_960,
+      categories: {
+        'app-specific tag 255': { dirtyKiB: 20_480, swappedKiB: 0, cleanKiB: 0, regions: 24 },
+        MALLOC_SMALL: { dirtyKiB: 3_072, swappedKiB: 1, cleanKiB: 0, regions: 3 },
+        __TEXT: { dirtyKiB: 0, swappedKiB: 0, cleanKiB: 14_336, regions: 348 },
+      },
+    });
+    expect(Object.keys(processes.get(11)!.categories)).toEqual(['app-specific tag 255', 'MALLOC_SMALL', '__TEXT']);
+    expect(errors).toEqual(['could not read pid 12']);
+  });
+
+  it("keeps vmmap's tables and leaves its header out, and refuses output with no summary", () => {
+    const text = 'Process:         mawsd [11]\nPath:            /somewhere/mawsd\n----\n\nReadOnly portion of Libraries: Total=967.1M\nREGION TYPE    SIZE\nMALLOC_SMALL   12.0M\n\n';
+    expect(vmmapSummary(text)).toBe('ReadOnly portion of Libraries: Total=967.1M\nREGION TYPE    SIZE\nMALLOC_SMALL   12.0M');
+    expect(() => vmmapSummary('vmmap cannot examine process 1')).toThrow('vmmap printed no summary');
+  });
+
+  it('prints each process’s footprint at both edges and the categories that moved most, or which reader read it', () => {
+    const at = (malloc: number, v8: number) => ({ pid: 11, argv0: 'mawsd', tool: 'footprint' as const, footprintKiB: malloc + v8, categories: { MALLOC_SMALL: { dirtyKiB: malloc, swappedKiB: 0, cleanKiB: 0, regions: 3 }, 'app-specific tag 255': { dirtyKiB: v8, swappedKiB: 0, cleanKiB: 0, regions: 24 } } });
+    const vmmap = { pid: 12, argv0: 'maws-supervisor', tool: 'vmmap' as const, summary: 'REGION TYPE' };
+    expect(categoriesLine([at(3_000, 20_000), vmmap], [at(4_100, 19_900), { pid: 12, argv0: 'maws-supervisor', tool: null, errors: [] }])).toBe(
+      "[daemon-idle] memory by category at the window's edges (recorded only) · mawsd 23000 to 24000 KiB (MALLOC_SMALL +1100, app-specific tag 255 -100); maws-supervisor by vmmap then no reader",
+    );
+    expect(categoriesLine([vmmap], [])).toBe("[daemon-idle] memory by category at the window's edges (recorded only) · maws-supervisor by vmmap then gone");
   });
 });
 

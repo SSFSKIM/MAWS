@@ -38,6 +38,10 @@
 // P5 O3-D M5 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §L): `admitHello` is told the hello's
 // `appPid` too, and may refuse on its own account (`own`: `mawsd`'s refusal of an app that runs a spine of its own)
 // rather than reflect the upstream's line; the one exit that connection may send says which (`onExit`'s `from.own`).
+//
+// P5 Decision Log 273 (the idle collection's quiet entry, idle-collect.ts): `onActivity` is told each line a welcomed
+// client sends or is sent and each document frame it sends, and `inFlight()` counts the requests the welcomed clients
+// sent and have not been answered yet (a replaced or closed client's are no longer counted).
 import { timingSafeEqual } from 'node:crypto';
 import type { Server, Socket } from 'node:net';
 import { HostClientGoneSchema, HostReadySchema, HostRequestSchema } from '../ipc/host-protocol';
@@ -101,6 +105,7 @@ export interface SocketServerOptions {
   onClient?(connected: boolean, peer?: WirePeer, appPid?: number): void; // a client was welcomed (P5 O3-D M3: with what its hello said of it; M4: and its appPid), or a client left (not called for a replaced one)
   admitHello?(peer: WirePeer, appPid: number): Promise<Admission>; // P5 O2 M5: a relay's reflected handshake (above); P5 O3-D M5: with the hello's appPid
   log(line: string): void;
+  onActivity?(): void; // P5 Decision Log 273 (above)
   helloTimeoutMs?: number;
   lineCap?: number;
   docHighWater?: number; // P3-A M5: the document channels' reset mark (DOC_HIGH_WATER unless a test lowers it)
@@ -111,6 +116,7 @@ export interface SocketClients {
   peer(): WirePeer | null; // P5 O1 M6: what the connected client's hello said of it (a protocol-2 one: major 2, minor 0, no capabilities); with `many`, the latest's
   count(): number; // P5 O2 M3: the welcomed clients
   closeClient(): void; // with `many`, every client
+  inFlight(): number; // P5 Decision Log 273: the welcomed clients' requests not answered yet
 }
 
 interface Client {
@@ -119,6 +125,7 @@ interface Client {
   runtime: ServedRuntime; // P5 O2 M3: the one runtime, or this client's own
   documents: HostDocChannels; // P3-A M5
   peer: WirePeer; // P5 O1 M6
+  pending: Set<string>; // P5 Decision Log 273: its requests' ids not answered yet
 }
 
 export function serveSocketClients(server: Server, options: SocketServerOptions): SocketClients {
@@ -327,9 +334,10 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
       const port = new SocketPort(socket, splitter.rest(), { lineCap, log, ptyFrames: peer.capabilities.includes(PTY_FRAMES_CAPABILITY) }); // P5 O2 M4
       const runtime = many ? many.runtimeFor({ appPid, capabilities: peer.capabilities }) : options.runtime!; // P5 O2 M3; P5 O3-D M2: the hello's facts
       const documents = new HostDocChannels(port, (message, end) => runtime.docPort(message, end), { highWater: options.docHighWater, log }); // P3-A M5
-      const client: Client = { socket, port, runtime, documents, peer };
+      const client: Client = { socket, port, runtime, documents, peer, pending: new Set() };
       clients.add(client);
       port.onDoc((channel, frame) => {
+        options.onActivity?.();
         if (clients.has(client)) documents.deliver(channel, frame); // P3-A M5: a replaced client's frames are dropped
       });
       port.onEnd(() => {
@@ -353,11 +361,17 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
   // runtime reads (and logs) what it is passed itself.
   function envelopeOnly(port: SocketPort, client: Client): HostPort {
     return {
-      postMessage: (message: unknown) => port.postMessage(message),
+      postMessage: (message: unknown) => {
+        options.onActivity?.();
+        const answer = message as { t?: unknown; id?: unknown } | null;
+        if (answer?.t === 'res' && typeof answer.id === 'string') client.pending.delete(answer.id);
+        port.postMessage(message);
+      },
       start: () => port.start(),
       on: (_event: 'message', listener: (event: { data: unknown }) => void) =>
         port.on('message', (event) => {
           if (!clients.has(client)) return;
+          options.onActivity?.();
           const exit = readTolerant(ClientExitSchema, event.data);
           if (exit.ok) {
             logDropped('socket exit', exit.dropped);
@@ -365,7 +379,9 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
             options.onExit(exit.value.when, { refused: false, capabilities: client.peer.capabilities });
             return;
           }
-          if (readTolerant(HostRequestSchema, event.data).ok || readTolerant(HostReadySchema, event.data).ok || readTolerant(HostClientGoneSchema, event.data).ok) {
+          const request = readTolerant(HostRequestSchema, event.data);
+          if (request.ok || readTolerant(HostReadySchema, event.data).ok || readTolerant(HostClientGoneSchema, event.data).ok) {
+            if (request.ok) client.pending.add(request.value.id);
             listener(event);
             return;
           }
@@ -391,6 +407,7 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
     connected: () => clients.size > 0,
     peer: () => [...clients].at(-1)?.peer ?? null, // P5 O1 M6
     count: () => clients.size, // P5 O2 M3
+    inFlight: () => [...clients].reduce((sum, client) => sum + client.pending.size, 0), // P5 Decision Log 273
     closeClient() {
       for (const client of clients) client.port.close();
     },

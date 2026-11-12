@@ -1,10 +1,12 @@
 // The idle collection (P5 Decision Log 124's lever): an entry into idle collects once, after its caller's turn; a busy
 // return before then collects nothing, told or found by the process's quiet asked again as it collects; a later entry
 // collects again only if the heap grew, in use or in pages; a dropped holding collects while it stays idle; a stopped
-// collector collects nothing again; and the real collection's gc stays private to its module.
+// collector collects nothing again; and the real collection's gc stays private to its module. The quiet entry (Decision
+// Log 273): a quiet period with clients connected collects once, never on work, past nothing grown only by the guard,
+// and its clock is armed again only by activity.
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it, vi } from 'vitest';
-import { GROWTH_BYTES, idleCollector, lastResortCollect, type HeapSize } from './idle-collect';
+import { ACTIVITY_QUIET_MS, GROWTH_BYTES, idleCollector, lastResortCollect, type HeapSize } from './idle-collect';
 
 const MIB = GROWTH_BYTES;
 
@@ -163,6 +165,149 @@ describe('the idle collector', () => {
     queued.splice(0).forEach((run) => run());
     expect(collect).toHaveBeenCalledTimes(2);
     expect(lines[0]).toBe('idle: the collection failed: no extension');
+  });
+});
+
+// A process whose idle predicate stays false (clients connected), with a clock of its own and the timers it armed.
+function quietRig() {
+  const heap: HeapSize = { used: 20 * MIB, physical: 40 * MIB };
+  const queued: (() => void)[] = [];
+  const lines: string[] = [];
+  const live = { settled: true, quiet: false };
+  let clock = 0;
+  const timers: { at: number; run: () => void; cleared: boolean }[] = [];
+  const collect = vi.fn(() => void Object.assign(heap, { used: 5 * MIB, physical: 10 * MIB }));
+  const collector = idleCollector({
+    log: (line) => lines.push(line), collect, heap: () => ({ ...heap }), defer: (run) => queued.push(run), now: () => clock, quiet: () => live.quiet,
+    activity: { settled: () => live.settled },
+    timer: (run, ms) => {
+      const timer = { at: clock + ms, run, cleared: false };
+      timers.push(timer);
+      return () => void (timer.cleared = true);
+    },
+  });
+  const armed = () => timers.filter((t) => !t.cleared && t.at >= 0).length;
+  // time passes: every timer due by then fires in order, and each turn after it runs
+  const advance = (ms: number) => {
+    const until = clock + ms;
+    for (;;) {
+      const due = timers.filter((t) => !t.cleared && t.at >= 0 && t.at <= until).sort((a, b) => a.at - b.at)[0];
+      if (due === undefined) break;
+      clock = due.at;
+      due.at = -1; // fired
+      due.run();
+      queued.splice(0).forEach((run) => run());
+    }
+    clock = until;
+  };
+  const turn = () => queued.splice(0).forEach((run) => run());
+  return { heap, collector, collect, lines, live, advance, armed, turn };
+}
+
+describe('the quiet entry (Decision Log 273)', () => {
+  it('collects once a quiet period passes with no activity while the process is not idle, and says so', () => {
+    const { collector, collect, lines, advance } = quietRig();
+    collector.set(false); // clients connected
+    collector.activity();
+    advance(ACTIVITY_QUIET_MS - 1);
+    expect(collect).not.toHaveBeenCalled();
+    advance(1);
+    expect(collect).toHaveBeenCalledOnce();
+    expect(lines).toEqual([`idle: collected in 0 ms, heap 40.0 to 10.0 MiB (used 20.0 to 5.0), after ${ACTIVITY_QUIET_MS / 1000} s with no activity`]);
+  });
+
+  it('waits out activity: each one starts the quiet period again', () => {
+    const { collector, collect, advance } = quietRig();
+    collector.activity();
+    advance(20_000);
+    collector.activity();
+    advance(20_000); // the first activity's period has run out, the second's has not
+    expect(collect).not.toHaveBeenCalled();
+    advance(ACTIVITY_QUIET_MS - 20_000);
+    expect(collect).toHaveBeenCalledOnce();
+  });
+
+  it('never collects on work: a period that runs out while something is in flight collects nothing, and the work’s end arms the next', () => {
+    const { collector, collect, live, advance, armed } = quietRig();
+    collector.activity();
+    live.settled = false; // a command still unanswered
+    advance(ACTIVITY_QUIET_MS);
+    expect(collect).not.toHaveBeenCalled();
+    expect(armed()).toBe(0);
+    live.settled = true;
+    collector.activity(); // its answer
+    advance(ACTIVITY_QUIET_MS);
+    expect(collect).toHaveBeenCalledOnce();
+  });
+
+  it('never collects on work told between the period’s end and the collection’s turn', () => {
+    const heap: HeapSize = { used: 20 * MIB, physical: 40 * MIB };
+    const queued: (() => void)[] = [];
+    let fire: (() => void) | null = null;
+    let clock = 0;
+    const collect = vi.fn();
+    const collector = idleCollector({ log: () => {}, collect, heap: () => ({ ...heap }), defer: (run) => queued.push(run), now: () => clock, quiet: () => false, activity: { settled: () => true }, timer: (run) => ((fire = run), () => {}) });
+    collector.activity();
+    clock = ACTIVITY_QUIET_MS;
+    fire!();
+    collector.activity(); // a request arrived before the loop turned
+    queued.splice(0).forEach((run) => run());
+    expect(collect).not.toHaveBeenCalled();
+  });
+
+  it('collects at most once per quiet period: with no activity after it, its clock is never armed again', () => {
+    const { heap, collector, collect, advance, armed } = quietRig();
+    collector.activity();
+    advance(ACTIVITY_QUIET_MS);
+    expect(collect).toHaveBeenCalledOnce();
+    expect(armed()).toBe(0);
+    heap.used += 10 * MIB; // grown, but nothing happened to end a period
+    advance(10 * ACTIVITY_QUIET_MS);
+    expect(collect).toHaveBeenCalledOnce();
+    expect(armed()).toBe(0);
+  });
+
+  it('re-arms only at activity, and the guard skips a period that finds nothing grown: a client idling repeatedly costs nothing after the first', () => {
+    const { heap, collector, collect, advance } = quietRig();
+    collector.activity();
+    advance(ACTIVITY_QUIET_MS);
+    expect(collect).toHaveBeenCalledOnce();
+    collector.activity(); // the client's next request
+    heap.used += MIB - 1;
+    heap.physical += MIB - 1;
+    advance(ACTIVITY_QUIET_MS);
+    expect(collect).toHaveBeenCalledOnce();
+    collector.activity(); // and one whose work grew the heap
+    heap.used += 1;
+    advance(ACTIVITY_QUIET_MS);
+    expect(collect).toHaveBeenCalledTimes(2);
+  });
+
+  it('shares the guard with the idle entry: the one that comes second finds nothing grown', () => {
+    const { collector, collect, live, advance, turn } = quietRig();
+    collector.activity();
+    advance(ACTIVITY_QUIET_MS);
+    expect(collect).toHaveBeenCalledOnce();
+    live.quiet = true;
+    collector.set(true); // the last client left, its departure no work: an idle entry, weighed against the quiet entry's floor
+    turn();
+    expect(collect).toHaveBeenCalledOnce();
+  });
+
+  it('does nothing for a process that did not opt in, and nothing once stopped', () => {
+    const queued: (() => void)[] = [];
+    const timer = vi.fn(() => () => {});
+    const collect = vi.fn();
+    const plain = idleCollector({ log: () => {}, collect, heap: () => ({ used: 0, physical: 0 }), defer: (run) => queued.push(run), quiet: () => false, timer });
+    plain.activity();
+    expect(timer).not.toHaveBeenCalled();
+    const { collector, collect: quietCollect, advance, armed } = quietRig();
+    collector.activity();
+    collector.stop();
+    expect(armed()).toBe(0);
+    collector.activity();
+    advance(ACTIVITY_QUIET_MS);
+    expect(quietCollect).not.toHaveBeenCalled();
   });
 });
 

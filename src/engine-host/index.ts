@@ -5,7 +5,7 @@
 // forked by main, served over a MessagePort, as before); `--detached <supervisorDir>` in argv → `detached` (the
 // supervisor: the Electron binary as Node, outliving the app, served over a Unix socket; detached.ts).
 import { idleCollector } from '@shared/host/idle-collect';
-import { hostPing, runHost, type HostOn, type HostRegister } from '@shared/host/runtime';
+import { hostPing, runHost, type HostEmit, type HostOn, type HostRegister } from '@shared/host/runtime';
 import { captureShellEnvironment } from '@shared/host/shell-env';
 // C3 start
 import { dirname, join } from 'node:path';
@@ -100,10 +100,28 @@ const sessionHostDeps = (dir: string) => ({ hostsDir: hostsDirOf(dir), binary: s
 // P5 O16 M3: a session host's token, written beside it by the launch that started it
 const tokenOf = (dir: string, holderId: string): string => readFileSync(sessionHostPaths(hostsDirOf(dir), holderId, { userData: userData!, tmpdir: tmpdir() }).token, 'utf8').trim();
 
-const register: HostRegister = (untimedOn, emit, client) => {
+const register: HostRegister = (untimedOn, untrackedEmit, client) => {
+  // P5 Decision Log 124's lever: a collection at each entry into Supervision's quiet, asked again as it collects. Decision
+  // Log 273: and a quiet period's, while a client holds interest or a row holds work but nothing runs: every request
+  // handled (in flight until its handler settles) and every event emitted is activity
+  let requests = 0;
+  const idle = idleCollector({ log: (line) => console.log(`[supervisor] ${line}`), quiet: () => supervision?.quiet() ?? false, activity: { settled: () => requests === 0 && (supervision?.unoccupied() ?? false) } });
+  const emit: HostEmit = (name, payload) => {
+    idle.activity();
+    return untrackedEmit(name, payload);
+  };
   // P4-R6: each request's synchronous part recorded as the host's work while a scale seam watches (documents/host-work.ts)
   // P5 O7 M5a: every registration keeps its artifact writes for host.artifactOp, wherever the host registers them
-  const writes = keepArtifactWrites((name, handler) => untimedOn(name, (input, ctx) => timed('request', () => handler(input, ctx), () => name)));
+  const writes = keepArtifactWrites((name, handler) => untimedOn(name, (input, ctx) => timed('request', async () => {
+    idle.activity();
+    requests += 1;
+    try {
+      return await handler(input, ctx);
+    } finally {
+      requests -= 1;
+      idle.activity();
+    }
+  }, () => name)));
   const on: HostOn = writes.on;
   on('engine.ping', async () => hostPing(HOST_VERSION));
   // C4 start: the filesystem state service (fs.*) over the engine's store, read-only; C3's `session.events` answers an
@@ -148,7 +166,6 @@ const register: HostRegister = (untimedOn, emit, client) => {
     gateFailed = true;
     console.warn(`[supervisor] the gate could not listen at ${gatePath}: ${error instanceof Error ? error.message : String(error)}`);
   });
-  const idle = idleCollector({ log: (line) => console.log(`[supervisor] ${line}`), quiet: () => supervision?.quiet() ?? false }); // P5 Decision Log 124's lever: a collection at each entry into Supervision's quiet, asked again as it collects
   // C3 start
   ipc = registerEngineIpc(on, emit, {
     afterShutdown: () => {
