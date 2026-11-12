@@ -133,7 +133,12 @@ describe('the latency engine stub', () => {
         expect(result).toMatchObject({ result: 'success', isError: false, resultText: markers.join(''), userMessageUuids: [userUuid] });
         const rows = samplesOf(samples).filter((s) => s.turn === turn);
         expect(rows.map((s) => s.k)).toEqual(markers.map((_, k) => k + 1));
-        expect(rows.at(-1)!.writtenAt - rows[0]!.writtenAt).toBeGreaterThanOrEqual(299 * LATENCY_STUB_PACE_MS - 5); // paced (Node's timers keep whole milliseconds)
+        // Paced, not written in a burst. The stub writes marker k at start + (k - 1) * PACE on an absolute schedule
+        // (latency-engine-stub.mjs), so a timer's earliness or lateness never adds up, and this span is 299 * PACE less
+        // however late the FIRST write was: its timer is setTimeout(0), behind whatever the loop holds, and a loaded
+        // runner delays it by milliseconds (a floor of 299 * PACE - 5 failed five times, 7.2 ms short at the worst,
+        // 2026-11-12). The floor allows a millisecond a marker: a burst would span almost nothing.
+        expect(rows.at(-1)!.writtenAt - rows[0]!.writtenAt).toBeGreaterThanOrEqual(299 * (LATENCY_STUB_PACE_MS - 1));
       }
       expect(messageIds.size).toBe(2); // each turn its own message
 

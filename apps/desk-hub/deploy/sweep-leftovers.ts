@@ -2,7 +2,7 @@
 // on staging when its cleanup could not finish (a CLI token revoked mid-run, a killed process). Each machine named is
 // taken out of the org state with its key retired (OrgAdmin.unlist) and its hub credential revoked (proof.ts's revoke),
 // as the harness's enrollListed cleanup does. Staging alone, and only names of the reach run's shape
-// (`o18-<scene or probe>-<tag>`), so no other machine can be named to it.
+// (`o18-<scene or probe>-<tag>`) or hub-reads's probes' (`hr-<p|q>-<tag>`), so no other machine can be named to it.
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { checkTestHub, PRODUCTION_HOST, readDeployConfig } from './config';
@@ -11,8 +11,9 @@ import { Person } from './hub';
 import { loadAdminDevice, OrgAdmin } from './org-admin';
 import { isTestTarget, revoke } from './proof';
 
-/** The names the reach run gives its machines: a scene's (a1, a2, a3, b1) or a probe's (pa, pb), then the run's tag. */
-export const LEFTOVER = /^o18-(a1|a2|a3|b1|pa|pb)-[0-9a-f]{6}$/;
+/** The names the reach run gives its machines: a scene's (a1, a2, a3, b1) or a probe's (pa, pb), then the run's tag; and
+ * hub-reads's two probes (hub-reads.ts's `probeName`). */
+export const LEFTOVER = /^(o18-(a1|a2|a3|b1|pa|pb)|hr-(p|q))-[0-9a-f]{6}$/;
 
 /** The names to sweep, or why the command line is refused: staging's config alone, a device's keys, and every name
  * one of the reach run's, checked before a secret is read or anything reaches the hub. */
@@ -21,7 +22,7 @@ export function sweepMode(values: { 'device-keys'?: string }, names: readonly st
   if (!values['device-keys']) return { refused: '--device-keys <file>: the staging admin device whose step-up key signs the org state' };
   if (names.length === 0) return { refused: 'sweep-leftovers <o18-…-xxxxxx>…: name the reach run’s scene or probe machines to sweep' };
   const others = names.filter((n) => !LEFTOVER.test(n));
-  if (others.length) return { refused: `not a reach run’s machine name (o18-<a1|a2|a3|b1|pa|pb>-<6 hex>): ${others.join(', ')}` };
+  if (others.length) return { refused: `not a reach run’s or hub-reads’s machine name (o18-<a1|a2|a3|b1|pa|pb>-<6 hex>, hr-<p|q>-<6 hex>): ${others.join(', ')}` };
   return { names: [...new Set(names)] };
 }
 

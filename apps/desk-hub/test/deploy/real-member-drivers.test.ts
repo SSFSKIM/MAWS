@@ -137,14 +137,14 @@ describe('keep-a1’s printed lines', () => {
 describe('sweep-leftovers’s command line', () => {
   it('sweeps only the reach run’s scene and probe machines, each once', () => {
     expect(sweepMode({ 'device-keys': '/k' }, ['o18-a1-5eb586', 'o18-pa-3c09d1', 'o18-a1-5eb586'], staging)).toEqual({ names: ['o18-a1-5eb586', 'o18-pa-3c09d1'] });
-    for (const name of ['o18-a1-5eb586', 'o18-a2-000000', 'o18-a3-abcdef', 'o18-b1-123456', 'o18-pb-ffffff']) expect(LEFTOVER.test(name), name).toBe(true);
+    for (const name of ['o18-a1-5eb586', 'o18-a2-000000', 'o18-a3-abcdef', 'o18-b1-123456', 'o18-pb-ffffff', 'hr-p-5eb586', 'hr-q-000000']) expect(LEFTOVER.test(name), name).toBe(true);
   });
 
   it('is refused for production, without the admin device, with no name, or with any other machine’s name', () => {
     expect(sweepMode({ 'device-keys': '/k' }, ['o18-a1-5eb586'], production)).toEqual({ refused: expect.stringMatching(/names production/) });
     expect(sweepMode({}, ['o18-a1-5eb586'], staging)).toEqual({ refused: expect.stringMatching(/--device-keys/) });
     expect(sweepMode({ 'device-keys': '/k' }, [], staging)).toEqual({ refused: expect.stringMatching(/name the reach run/) });
-    for (const name of ['macbook', 'mini', 'o10-acceptance-1', 'o18-a4-5eb586', 'o18-a1-5EB586', 'o18-a1-5eb58', 'o18-a1-5eb5867', 'o18-l1-5eb586', ' o18-a1-5eb586']) {
+    for (const name of ['macbook', 'mini', 'o10-acceptance-1', 'o18-a4-5eb586', 'o18-a1-5EB586', 'o18-a1-5eb58', 'o18-a1-5eb5867', 'o18-l1-5eb586', ' o18-a1-5eb586', 'hr-r-5eb586', 'hr-p-5eb58', 'o18-p-5eb586']) {
       expect(sweepMode({ 'device-keys': '/k' }, ['o18-a1-5eb586', name], staging), name).toEqual({ refused: expect.stringContaining(name) });
     }
   });
