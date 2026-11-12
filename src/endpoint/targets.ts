@@ -61,8 +61,9 @@ import { dirname, isAbsolute, sep } from 'node:path';
 import type { Action, SessionRef } from 'org-protocol';
 import { parseArtifactUrl } from '@shared/artifacts/scheme';
 import { sanitiseListId } from '@shared/engine/task-list';
-import type { LaunchedBy } from '@shared/graph/session';
+import type { LaunchedBy, SessionRecord } from '@shared/graph/session';
 import { coversHome, machineHomes } from '@shared/machine/machine-home';
+import { workingFolder } from '@shared/sessions/working-folder';
 import type { TargetRule } from './offers';
 import type { EndpointServices } from './services';
 import type { SessionTarget } from './sources';
@@ -520,12 +521,21 @@ export async function withinCheckout(input: unknown, appSessionId: string, placi
   return real !== null && withinBounds(within.within, real) && (await bounds.reaches(real, placing.dispatch));
 }
 
-/** A record's scm checkout, as the scm service reads it: its worktree's path, else its directory. */
+/**
+ * A record's scm checkout, as the scm service reads it: the session's working folder (`workingFolder`, UX wave U8), of
+ * the same object, so the two agree by construction. A value the selector cannot read (its directory no string, its
+ * worktree neither null, absent nor an object with a string path) names no checkout; no `SessionRecord` is such a value.
+ */
 function checkoutOf(record: unknown): string | null {
-  const worktree = field(field(record, 'worktree'), 'path');
-  const directory = field(record, 'directory');
-  const checkout = typeof worktree === 'string' ? worktree : directory;
-  return typeof checkout === 'string' && isAbsolute(checkout) ? checkout : null;
+  if (!folderReadable(record)) return null;
+  const checkout = workingFolder(record).path;
+  return isAbsolute(checkout) ? checkout : null;
+}
+
+/** Whether `value` holds the fields `workingFolder` reads, as a `SessionRecord` holds them. */
+function folderReadable(value: unknown): value is Pick<SessionRecord, 'directory' | 'worktree'> {
+  const worktree = field(value, 'worktree');
+  return typeof field(value, 'directory') === 'string' && (worktree === null || worktree === undefined || (typeof worktree === 'object' && typeof field(worktree, 'path') === 'string'));
 }
 
 /** A record's roots, as the files service reads them: its directory, its additional directories and its worktree. */

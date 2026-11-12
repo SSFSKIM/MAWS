@@ -33,7 +33,7 @@ export interface GitEntry {
 }
 
 export interface GitStore {
-  entries: Map<string, GitEntry>; // by checkoutKey(machine, session.worktree?.path ?? session.directory)
+  entries: Map<string, GitEntry>; // by checkoutKey(machine, workingFolder(session).path)
   watch(machine: MachineRef, directory: string, session?: AppSessionId): () => void; // ref-counted here; the first watcher invokes git.watch, then git.diff when dirty
   applyChanged(event: EventPayload<'git.changed'>, machine: MachineRef): void; // every watched directory of the root on that machine takes the status and re-runs git.diff
   retryUnanswered(machine: MachineRef): void; // that machine's host was heard again (host.status): its watches it could not answer are asked again

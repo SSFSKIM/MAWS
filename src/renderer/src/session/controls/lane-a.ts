@@ -37,6 +37,7 @@ import type { CommandName, CommandResult, IpcError, MawsBridge } from '@shared/i
 import { ipcError } from '@shared/ipc/errors';
 import { AGENT_SCOPE_CAPABILITY, type ControlResult, type LaneAAct, type LaneARaised, type LaneAState } from '@shared/ipc/schema/lane-a';
 import { aliasOf, chipLabel } from '@shared/sessions/model-label';
+import { workingFolder } from '@shared/sessions/working-folder';
 import type { HookResult, ModelInfo } from '../../composer/setup-intent';
 import type { FrameBindings } from '../../composer/frame/bindings';
 import type { HumanPromptResult } from '../../composer/submit/send-human-prompt';
@@ -299,7 +300,7 @@ export function laneAControls(state: LaneAState, record: SessionRecord | null, {
     const modelClosed = capability('model');
     const refusedWith = (reason: string) => async (): Promise<HookResult> => ({ ok: false, error: reason });
     return {
-      location: { path: record?.worktree?.path ?? record?.directory ?? '', branch: branchLabel(recordBranch(record), null), note: LANE_A_WORDS.location },
+      location: { path: record ? workingFolder(record).path : '', branch: branchLabel(recordBranch(record), null), note: LANE_A_WORDS.location },
       project: null,
       model: {
         value: { model: override?.model ?? null, effort: (override?.effort ?? null) as BridgeEffort | null },
