@@ -13,9 +13,12 @@ Verdict. The frame is there in the opposite cases from the ones the spec's desig
     true, origin {kind: "task-notification", producer: "session-task", runId?}) for commands, agents and monitor
     events alike: 10 of 10 (5 notifications in each of two runs).
   - Told to an idle model, in a turn the engine opens: NO, for every form tried (a command that exits 0 or 1, an
-    agent, a resumed agent, a monitor's events and its end, the engine's stall notice): 0 of 16 (9 in r1, 7
-    in r2). The turn shows only as `system/init` without user_message_uuids and a `result` whose origin is {kind: "task-notification",
-    producer: "session-task", runId?}. The file has the `user` row.
+    agent whose report was withheld, a monitor's events and its end, the engine's stall notice): 0 of 14 (8 in r1,
+    6 in r2). The turn shows only as `system/init` without user_message_uuids and a `result` whose origin is
+    {kind: "task-notification", producer: "session-task", runId?}. The file has the `user` row.
+  - An agent that hands back its report: the hand-back is a `peer`-origin message and is replayed even when idle (2 of
+    2); its task notification is then written to the file only (`queueTranscriptOnly: true`) and the model is not
+    told (an empty turn, num_turns 0).
   - A notification that arrives while idle but is not given a turn of its own (a task the host stopped with
     stop_task) waits, and is replayed with the next prompt the person sends (2 of 2).
   - All of it depends on `--replay-user-messages`: without MAWS's three product flags not one notification frame
@@ -32,6 +35,9 @@ Verdict. The frame is there in the opposite cases from the ones the spec's desig
   the model at all. A design choice is therefore open that the spec closed on a premise now false (see Inference).
   `<duration_ms>` is in agent notifications only (inside `<usage>`, and as usage.duration_ms on the system frame);
   no command notification carries a duration.
+  A check-in on a quiet command cannot reach a session MAWS runs: the engine arms it only in an interactive session.
+  In a terminal session, with the gate forced on (the owner's cache has it off), it is a block with no <status>.
+  An MCP task was not run.
 
 Method.
   Engine 2.1.322 (/opt/maws-probe/engines/2.1.322; system/init claude_code_version "2.1.322"), model haiku
@@ -67,6 +73,7 @@ Method.
     u3-tasks-fg.jsonl (+ .transcript.jsonl): fg, idle-ok, fg (foreground commands of 1 s, 5 s exit 0, 5 s exit 3).
     u3-tasks-checkin.jsonl (+ .transcript.jsonl): checkin with the scratch HOME's feature cache set to
       tengu_silent_heron 10000 (the owner's cache has 0, which turns the check-in off).
+    u3-terminal-checkin-r1.terminal.json (+ .transcript.jsonl): the same in an interactive engine in tmux.
 
 Observed (r1 seqs and transcript lines; r2 confirms where it says so).
   idle-ok: system/task_updated {patch: {status: completed}} (57), system/task_notification {status: "completed",
@@ -77,19 +84,22 @@ Observed (r1 seqs and transcript lines; r2 confirms where it says so).
     system frame's summary verbatim.
   idle-fail: the same shape, status "failed", summary "Background command \"uxw fail\" failed with exit code 1"
     (148, 159, 177; file line 60).
-  idle-stop: stop_task answered success; task_updated {patch: {status: "killed"}} (215), system/task_notification {status:
-    "stopped", summary: "uxw stop"} (the description, 216). No turn opened. The block (status killed, "Task \"uxw
-    stop\" was stopped by the user or by the app connected to this session") was replayed with the person's NEXT prompt:
-    `user` isReplay true, origin {kind: "task-notification", runId: "0mwdo1wz6-1b311c22"} (228), just before that
-    prompt's own replay (230); file line 89: a queued_command attachment, commandMode "task-notification".
-  agent: task_started (313); the hand-back as a replayed `user` frame, isSynthetic true, origin {kind: "peer", from:
-    <agent id>, senderTaskId, name: "general-purpose", body: "[Subagent hand-back] …"}, text in <agent-message>
-    (337), which opens a turn (result 354, origin peer); then system/task_notification {status completed, summary:
-    "This agent's report was delivered to you as a message from …", handback: "send", handback_report {text},
-    usage {total_tokens, tool_uses, duration_ms: 10249}} (333) and a SECOND engine turn with no `user` frame (init 355,
-    result 356 origin task-notification, runId = the frame's run_id). File: the hand-back as a `user` row of origin
-    peer, turnOrigin "peer" (line 104), and the notification row, line 114: <summary>Agent "uxw agent" finished</summary>, <note>,
-    <result> with the hand-back note, <usage> with <duration_ms>10249</duration_ms>.
+  idle-stop: stop_task answered success; task_updated {patch: {status: "killed"}} (215),
+    system/task_notification {status: "stopped", summary: "uxw stop"} (the description, 216). No turn opened. The
+    block (status killed, "Task \"uxw stop\" was stopped by the user or by the app connected to this session") was
+    replayed with the person's NEXT prompt: `user` isReplay true, origin {kind: "task-notification", runId:
+    "0mwdo1wz6-1b311c22"} (228), just before that prompt's own replay (230); file line 89: a queued_command
+    attachment, commandMode "task-notification".
+  agent: task_started (313); system/task_notification {status completed, summary: "This agent's report was
+    delivered to you as a message from …", handback: "send", handback_report {text: "PONG"}, usage {total_tokens,
+    tool_uses, duration_ms: 10249}} (333); then the hand-back as a replayed `user` frame, isSynthetic true, origin
+    {kind: "peer", from: <agent id>, senderTaskId: <the task id>, name: "general-purpose", handback: true,
+    handbackReportText: "PONG", body: "[Subagent hand-back] …"}, text in <agent-message> (337), which opens a turn
+    (result 354, origin peer); then a second engine "turn" with no `user` frame and no model call (init 355, result
+    356: origin task-notification with runId = the frame's run_id, num_turns 0, duration_api_ms 0). File: the
+    hand-back as a `user` row of origin peer, turnOrigin "peer" (line 104); the notification row, line 114, with
+    queueTranscriptOnly true: <summary>Agent "uxw agent" finished</summary>, <note>, <result> with the hand-back note,
+    <usage> with <duration_ms>10249</duration_ms>.
   agent-resume: SendMessage answered "Resuming agent …"; task_started again for the same task id with a new run_id
     (394); system/task_notification {handback: "withheld", summary "The subagent ended without delivering a report …"}
     (418); engine turn, no `user` frame (420, 500). File line 133.
@@ -115,12 +125,22 @@ Observed (r1 seqs and transcript lines; r2 confirms where it says so).
     origin without runId); file line 297: <summary>Background command "uxw stall" appears to be waiting for interactive
     input</summary>, no status, then after the closing tag "Last output: Continue? (y/n)" and the advice. stop_task
     then gave task_notification {status: "stopped", summary: "uxw stall"} (902) and, idle, no turn.
-  checkin: no check-in arrived within 150 s of quiet with the gate forced to 10000 ms (u3-tasks-checkin.jsonl);
-    not provoked. The owner's own cache holds tengu_silent_heron 0, so the owner's sessions get none today.
+  checkin, headless: no check-in arrived within 150 s of quiet with the gate forced to 10000 ms
+    (u3-tasks-checkin.jsonl). The source says why: the quiet-command watch is registered only in an interactive
+    session (cli.pretty.js:502399, `ye() ? void 0 : mSo(…)`, where ye() is `!launchOptions.isInteractive()`,
+    :1375902-1375904), so a session MAWS runs never gets a check-in, whatever the gate.
+  checkin, terminal (scenarios/pass3/uxwave-u3-terminal.mjs UXW_TERM=checkin, the same gate forced;
+    u3-terminal-checkin-r1.terminal.json and .transcript.jsonl): 10 s after a quiet `sleep 300` started, line 38: a
+    `user` row, origin {kind: "task-notification", producer: "session-task"} (no runId), turnOrigin
+    "task_notification", the block <task-id>, <tool-use-id>, <output-file>, NO <status>, <summary>Background command
+    \"uxw quiet\" is still running after 10s, with no new output for 10s</summary>, then after the closing tag the
+    engine's advice ("This is a check-in, not a completion. …"); the pane draws "● Background command "uxw quiet" is
+    still running after 10s, with no new output for 10s". 1 of 1. The owner's own cache holds tengu_silent_heron 0,
+    so the owner's terminal sessions get none today either.
   bare launch (u3-tasks-bare.jsonl): idle-fail as above (45, result 77 origin task-notification); busy: both
     task_notification frames (121, 126) and NO replayed `user` frame; agent: no hand-back frame on the wire, the
     turns visible only by their results (276 origin peer, 278 origin task-notification).
-  the same in every case (r2 seqs): idle-ok 59/77, idle-fail 107/135 with no `user` frame; idle-stop's
+  r2 (u3-tasks-r2.jsonl), the same in every case: idle-ok 59/77, idle-fail 107/135 with no `user` frame; idle-stop's
     block replayed with the next prompt (186, origin {task-notification, runId}); the agent's hand-back replayed (273,
     origin peer with handback true, handbackReportText "PONG", senderTaskId = the task id) then its notification
     turn with num_turns 0 (331); busy 426 and 449 replayed; busy-agent hand-back 513 and notification 514 replayed;
@@ -173,12 +193,15 @@ Inference, in the spec's terms.
     backfill's default of `completed` would colour both green (U3's pitfall 1 confirmed).
   - The `<status>` values seen: completed, failed, killed (the host's stop; the system frame says "stopped").
   - A3's "the duration after it when the engine gave one": only agents give one.
-  - The hand-back arrives as its own `peer`-origin message (class `subagent`, report) before the task notification,
-    and each opens a turn when idle, so one agent's end makes two turns.
+  - The hand-back is its own `peer`-origin message (class `subagent`, report) and comes before the task
+    notification; idle, the session then shows two `result` frames for one agent's end, the second empty.
   - A replayed notification merged into the person's prompt (idle-stop) arrives before the prompt's own replay; its
     row belongs above that prompt.
 
-Not provoked or not run. The engine's check-in on a quiet command (gate forced; nothing in 150 s). An MCP task: it
+  - A check-in is a terminal-only arrival (and only with the gate on): the file and remote routes need the
+    no-status reading (outcome null, which folds); the live route never sees one.
+
+Not provoked or not run. The check-in in a session MAWS runs (impossible by the source, see above). An MCP task: it
   needs a server that speaks MCP's task protocol (2.1.322's client takes `execution.taskSupport` and the sep2663
   task runtime, cli.pretty.js:685075-685093 and 824500-824560); the probe has no such server and none was written.
   A Workflow run and a remote agent. The stalled command's stop while busy.

@@ -8,7 +8,7 @@
 // UXW_TERM=commands: /compact on an empty session, one exchange, /compact, /cost, /context, /reload-plugins,
 // /rename, /effort low, /model with a model that does not exist, a command that does not exist, /compact.
 import {execFileSync} from 'node:child_process';
-import {readdirSync,statSync,writeFileSync,mkdirSync,existsSync} from 'node:fs';
+import {readdirSync,statSync,writeFileSync,mkdirSync,existsSync,readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {redact} from '../../harness.mjs';
 import {BIN,ENGINE_VERSION,FIXTURES,rowsOf,fileArrivals,keepTranscript,slug,delay,U3} from './uxwave-common.mjs';
@@ -25,8 +25,11 @@ const transcript=()=>{if(!existsSync(projectDir))return null;const f=readdirSync
 const until=async(test,timeout,step=2000)=>{const end=Date.now()+timeout;while(Date.now()<end){const v=test();if(v)return v;await delay(step);}return null;};
 
 export default async()=>{
- if(!['cron','commands'].includes(MODE))throw new Error('UXW_TERM=cron or commands');
- const record={provenance:{...U3,probe:MODE==='cron'?'U3 probe 2 (terminal)':'U3 probe 4 (terminal)',engine:BIN,engineVersion:ENGINE_VERSION,launch:'interactive engine in tmux, as vm-run.sh term starts it',args:['--model','haiku'],route:'gateway (vm-run.sh loopback forward)'},steps:[]};
+ if(!['cron','commands','checkin'].includes(MODE))throw new Error('UXW_TERM=cron, commands or checkin');
+ if(MODE==='checkin'){ // the check-in's gate (the owner's cache has 0), in this scratch HOME's cache only
+  const file=join(process.env.HOME,'.claude.json');const d=JSON.parse(readFileSync(file,'utf8'));d.cachedGrowthBookFeatures={...d.cachedGrowthBookFeatures,tengu_silent_heron:10000};writeFileSync(file,JSON.stringify(d));
+ }
+ const record={provenance:{...U3,probe:MODE==='cron'?'U3 probe 2 (terminal)':MODE==='checkin'?'U3 probe 1 (terminal, check-in, tengu_silent_heron 10000)':'U3 probe 4 (terminal)',engine:BIN,engineVersion:ENGINE_VERSION,launch:'interactive engine in tmux, as vm-run.sh term starts it',args:['--model','haiku'],route:'gateway (vm-run.sh loopback forward)'},steps:[]};
  tmux('new-session','-d','-s',NAME,'-x','160','-y','48','-c',WORK,'-e','TERM=xterm-256color',BIN,'--model','haiku');
  let lastLine=0;
  const step=async(name,extra={})=>{const t=transcript();const rows=t?rowsOf(t):[];const file=fileArrivals(rows,lastLine);lastLine=rows.length;record.steps.push({step:name,at:new Date().toISOString(),...extra,pane:redact(pane()),file:JSON.parse(redact(JSON.stringify(file)))});console.log(name,file.length);};
@@ -44,6 +47,14 @@ export default async()=>{
    }
    await type('Use CronDelete to delete every job you created (CronList first if you need the ids). Then reply with only the word DELETED.');
    await delay(8000);await idlePane();await step('delete');
+  }else if(MODE==='checkin'){
+   await type('Run exactly `sleep 300` with the Bash tool, run_in_background true, description "uxw quiet". Then reply with only the word STARTED. If you are later told it is quiet, reply with only the word NOTED and do nothing else.');
+   await delay(8000);await idlePane();await step('started');
+   const before=lastLine;
+   const seen=await until(()=>{const t=transcript();return t&&rowsOf(t).slice(before).some(({row:r})=>JSON.stringify(r).includes('is still running after'));},180000,3000);
+   await delay(8000);await idlePane();await step('checkin',{checkinSeen:!!seen});
+   await type('Stop the background task "uxw quiet" with TaskStop. Then reply with only the word STOPPED.');
+   await delay(8000);await idlePane();await step('stopped');
   }else{
    const commands=[['compact-empty','/compact'],['warm','Without using any tool, write two sentences about the colour blue, then end with the word READY.'],['compact-short','/compact'],['cost','/cost'],['context','/context'],['reload-plugins','/reload-plugins'],['rename','/rename uxw renamed'],['effort','/effort low'],['model-bad','/model uxw-no-such-model'],['unknown','/uxw-no-such-command'],['warm-2','Without using any tool, write two sentences about the colour green, then end with the word READY.'],['compact-ok','/compact']];
    for(const [name,text] of commands){
