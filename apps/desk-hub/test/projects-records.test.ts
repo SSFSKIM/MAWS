@@ -3,7 +3,9 @@
 // Registry socket and to every machine's endpoint on its own: a snapshot in `projects-all` pages (after the listings on
 // an app's socket, after the welcome on an endpoint's), then `projects` as each is stored. The Relay advertises
 // `projects` only once the Registry has answered its probe; a deploy replaces the two objects at different moments, so
-// each is run here against the other as the build before projects records left it.
+// each is run here against the other as the build before projects records left it. A push to a machine's object is owed
+// in storage from its store until that object answers, so one lost with a reset of the Registry, or failing for longer
+// than an in-memory retry would wait, reaches the endpoint by the alarm, on the connection it has.
 import { base64urlEncode, generateSigningKey, keyId, LISTINGS_PAGE_BYTES, SIGNING_DOMAINS, signRecord, type ProjectLocation, type ProjectsRecord, type Signed, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { HubClient } from 'org-protocol/test-support';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -379,5 +381,60 @@ describe('the Relay and the Registry deployed at different moments', () => {
     app.close();
     own.close();
     old.close();
+  });
+});
+
+describe('a push the Registry lost', () => {
+  beforeAll(() => hub.retryBase('registry', 20));
+
+  /** Two endpoints connected, each past its snapshot; `other`'s generation for its heartbeats. */
+  async function connected() {
+    const own = endpointOf(mini);
+    const other = endpointOf(peer);
+    await own.connect();
+    await snapshot(own);
+    const { generation } = await other.connect();
+    await snapshot(other);
+    return { own, other, generation };
+  }
+
+  /** The connection kept, with no welcome or snapshot since `from`: what reached it came live. */
+  async function sameConnection(endpoint: FakeEndpoint, generation: number, from: number): Promise<void> {
+    expect(endpoint.frames.slice(from).filter((f) => f.t === 'welcome' || f.t === 'projects-all')).toEqual([]);
+    const at = endpoint.frames.length;
+    endpoint.sendText({ t: 'hb', generation });
+    await endpoint.next((f) => f.t === 'hb-ack', 'hb-ack', at);
+    expect([endpoint.isOpen, endpoint.ends]).toEqual([true, []]);
+  }
+
+  it('with a reset between the store and the push reaches every endpoint by the alarm, on the same connections', async () => {
+    hub.expectRuntimeLog(/terminated by the suite/);
+    const { own, other, generation } = await connected();
+    await hub.projectsPushReset(true);
+    const [ownFrom, otherFrom] = [own.frames.length, other.frames.length];
+    own.sendText(sent(await projectsRecord(mini, 30, [location(8)])));
+    await other.next((f) => f.t === 'projects', 'the record at another machine', otherFrom);
+    await own.next((f) => f.t === 'projects', 'the record at its own machine', ownFrom);
+    // The Registry was reset once, after the store and before any push left it: what came, the alarm sent.
+    expect(await hub.projectsPushReset()).toEqual({ armed: false, resets: 1 });
+    expect([live(other, otherFrom), live(own, ownFrom)]).toEqual([[`${mini.ref}@30`], [`${mini.ref}@30`]]);
+    await sameConnection(other, generation, otherFrom);
+    own.close();
+    other.close();
+  });
+
+  it('failing past retry.ts’s attempts is sent again by the alarm until it arrives, on the same connection', async () => {
+    const { own, other, generation } = await connected();
+    // Every attempt the in-memory retry made fails; the next one is the alarm's.
+    await hub.relayFault(peer.ref, 'relayProjects', RETRY_ATTEMPTS);
+    const calls = await hub.relayProjectsCalls(peer.ref);
+    const from = other.frames.length;
+    own.sendText(sent(await projectsRecord(mini, 31, [location(9)])));
+    await other.next((f) => f.t === 'projects', 'the record after every attempt failed', from, 20_000);
+    expect(live(other, from)).toEqual([`${mini.ref}@31`]);
+    expect(await hub.relayProjectsCalls(peer.ref)).toBe(calls + RETRY_ATTEMPTS + 1);
+    await sameConnection(other, generation, from);
+    own.close();
+    other.close();
   });
 });

@@ -320,9 +320,10 @@ export class OrgRecords {
   /**
    * A machine's projects record, kept at its highest revision; `409 stale-projects` for one not above it, naming the
    * revision held (the same bytes again are taken, and nothing is stored). A record of a machine the head has since
-   * retired stays kept: every reader verifies it, and refuses it then.
+   * retired stays kept: every reader verifies it, and refuses it then. `stored` runs in the step that stores it, so
+   * what the caller keeps beside it (the Registry's owed pushes) commits with it or not at all.
    */
-  async storeProjects(body: unknown): Promise<Result<{ stored: boolean }>> {
+  async storeProjects(body: unknown, stored?: (record: ProjectsRecord) => void): Promise<Result<{ stored: boolean }>> {
     if (!isSigned(body, isProjectsRecord)) return fail(400, 'malformed', 'a projects record is a machine-signed ProjectsRecord, {body, sig}');
     const r = body.body;
     return this.machineSigned<ProjectsRecord, { stored: boolean }>(verifyProjectsRecord, body, () => {
@@ -330,8 +331,15 @@ export class OrgRecords {
       if (held && held.body === canonicalize(body)) return ok({ stored: false });
       if (held && r.revision <= held.revision) return fail(409, 'stale-projects', `the projects record held is at revision ${held.revision}`);
       this.sql.exec('INSERT OR REPLACE INTO projects_records (machine, revision, body, stored) VALUES (?, ?, ?, ?)', r.machine, r.revision, canonicalize(body), iso());
+      stored?.(r);
       return ok({ stored: true });
     });
+  }
+
+  /** The projects record kept for the machine ref `machine`, or null for none. */
+  projectsRecord(machine: string): Signed<ProjectsRecord> | null {
+    const row = this.sql.exec<{ body: string }>('SELECT body FROM projects_records WHERE machine = ?', machine).toArray()[0];
+    return row ? (JSON.parse(row.body) as Signed<ProjectsRecord>) : null;
   }
 
   /** A machine-signed record verified by `verify`, then judged against what is held and committed by `keep`, in one

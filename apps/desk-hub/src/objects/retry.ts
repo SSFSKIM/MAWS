@@ -1,6 +1,6 @@
 // A call from one of the hub's objects to another that failed is sent again, where nothing else would heal what it
-// carried: the Registry's push of the org's directory to a machine's object, and a project's summary report to the
-// Registry. The deployed runtime fails such calls and Miniflare does not; a code update's reset of the object called is
+// carried: a project's summary report to the Registry, and a ref object's read of a projects snapshot page from it. The
+// deployed runtime fails such calls and Miniflare does not; a code update's reset of the object called is
 // the commonest, since every deploy is one, and the rollout reaches objects one by one, so the caller is often on the
 // new code while the callee is reset under the call. A lost connection or an overloaded object fails them too.
 //
@@ -11,7 +11,9 @@
 // whatever its `retryable` reads: what the runtime sets on a code update's reset is not documented, and the retries are
 // bounded. A call goes RETRY_ATTEMPTS times at most, the first included: one to two minutes in all, well inside the 15
 // minutes a pending timer keeps an object in memory. The retry waits in memory, so an object reset itself before its
-// retry's time forgets it.
+// retry's time forgets it. A call whose loss would outlast that keeps what it owes in storage and is sent again by its
+// object's alarm, its waits taken from `retryDelay`, for as long as it takes: the Registry's state announcements and
+// its projects records to each machine's ref object, and a machine's fences (machine.ts).
 
 /** How many times a call goes at most, the first included. */
 export const RETRY_ATTEMPTS = 8;

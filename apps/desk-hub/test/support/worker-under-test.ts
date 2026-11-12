@@ -35,7 +35,8 @@
 //     Relay calls of a Registry that keeps projects records, as the build before them (the project registry, §C);
 //   - a `Machine` (a ref's) that lacks `relayProjects`, as a ref object of the build before projects records, and
 //     counts the calls of it it took; whose first retry of a failed snapshot read waits another time than the deployed
-//     second; and a `Registry` armed to throw from its next reads of a projects page, counting the reads;
+//     second; and a `Registry` armed to throw from its next reads of a projects page, counting the reads, or to be reset
+//     between a projects record's store and its pushes, as a code update's reset under them would;
 //   - a `Registry` that answers its projection of the org state, moves a pending
 //     device's expiry back, and calls a method no `Project` has, saying whether it takes the refusal for older code;
 //   - a `Project` armed to throw from its next state announcements, as a reset object's call fails or as a project on
@@ -108,6 +109,7 @@ import {
   RELAY_FAULT_PATH,
   RELAY_PROJECTS_PATH,
   PROJECT_PAGE_FAULT_PATH,
+  PROJECTS_PUSH_RESET_PATH,
   RELAY_SNAPSHOT_PATH,
   CLAIM_PATH,
   WRAPPED_KEY_SEED_PATH,
@@ -130,6 +132,8 @@ const REGISTRY_RPCS = ['storeListing', 'storeEndpoint', 'notify', 'ownersOf', 'p
 export class Registry extends DeployedRegistry {
   private leaveRelease: (() => void) | undefined;
   private pageRelease: (() => void) | undefined;
+  /** Set once an armed reset of the projects pushes began (`pushProjects`). */
+  private resetting = false;
 
   /** Armed, the org-state head a `Project` reads to check a v2 event fails, as an unreachable Registry's would. */
   head(): ReturnType<DeployedRegistry['head']> {
@@ -142,7 +146,8 @@ export class Registry extends DeployedRegistry {
     return this.ctx.storage.kv.get<number>('offline-retry-ms') ?? super.offlineRetryMs();
   }
 
-  /** A suite's first wait before a failed push of the directory is sent again, over the deployed second. */
+  /** A suite's first wait before a failed push of a projects record or a state announcement is sent again, over the
+   * deployed second. */
   protected retryBaseMs(): number {
     return this.ctx.storage.kv.get<number>('retry-base-ms') ?? super.retryBaseMs();
   }
@@ -213,6 +218,19 @@ export class Registry extends DeployedRegistry {
   storeProjects(record: unknown): ReturnType<DeployedRegistry['storeProjects']> {
     if (this.ctx.storage.kv.get<string>('lacks') === 'projects') throw new TypeError('The RPC receiver does not implement the method "storeProjects".');
     return super.storeProjects(record);
+  }
+
+  /** Armed, the first push after a store resets this object once what the store wrote is durable, and every push this
+   * instance began goes with it: none reaches a ref object. */
+  protected async pushProjects(org: string, ref: string, machine: string): Promise<void> {
+    if (this.resetting || this.ctx.storage.kv.delete('projects-push-reset')) {
+      if (!this.resetting) this.ctx.storage.kv.put('projects-push-resets', (this.ctx.storage.kv.get<number>('projects-push-resets') ?? 0) + 1);
+      this.resetting = true;
+      await this.ctx.storage.sync();
+      this.ctx.abort(ABORT_REASON);
+      return;
+    }
+    return super.pushProjects(org, ref, machine);
   }
 
   /** Armed, refused as a Registry on the code before the relay's binding check would refuse it. */
@@ -354,6 +372,10 @@ export class Registry extends DeployedRegistry {
       if (method === null) this.ctx.storage.kv.delete('lacks');
       else this.ctx.storage.kv.put('lacks', method);
       return new Response('armed');
+    }
+    if (url.pathname === PROJECTS_PUSH_RESET_PATH) {
+      if (((await request.json()) as { arm?: boolean }).arm) this.ctx.storage.kv.put('projects-push-reset', true);
+      return Response.json({ armed: this.ctx.storage.kv.get<boolean>('projects-push-reset') === true, resets: this.ctx.storage.kv.get<number>('projects-push-resets') ?? 0 });
     }
     if (url.pathname === AS_MEMBER_PATH) {
       const { call, member, args } = (await request.json()) as { call: string; member: MemberRecord; args: unknown[] };
