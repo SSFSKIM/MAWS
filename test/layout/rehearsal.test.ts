@@ -15,8 +15,9 @@ const session = (address: string, pinned = false) => ({ id: `session:${address}`
 const agent = (address: string) => ({ id: `agent:${address}:a1`, kind: 'agent', appSessionId: address, agentId: 'a1', pinned: false });
 const file = (path: string) => ({ id: `file:${L}:${path}`, kind: 'file', machine: L, path, line: null, appSessionId: null, pinned: false });
 const artifacts = { id: 'artifacts', kind: 'artifacts', pinned: false };
-const pane = (tabs: { id: string }[]) => ({ tabs, activeTabId: tabs[0]?.id ?? '' });
-const set = (...panes: { id: string }[][]) => ({ panes: panes.map(pane), focusedPane: 0, splitRatio: 0.5 });
+type Tab = { id: string; [field: string]: unknown };
+const pane = (tabs: Tab[]) => ({ tabs, activeTabId: tabs[0]?.id ?? '' });
+const set = (...panes: Tab[][]) => ({ panes: panes.map(pane), focusedPane: 0, splitRatio: 0.5 });
 const v3 = (sets: Record<string, unknown>, current = Object.keys(sets)[0]) => ({ version: 3, current, sets, closedTabs: [] });
 
 let directories: string[] = [];

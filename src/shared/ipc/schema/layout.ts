@@ -492,8 +492,9 @@ export function stripOf(stored: LayoutMain | LayoutMainV1): { strip: Strip; merg
   }
   const strip: Strip = { ...base, ...(floating === undefined ? {} : { floating }), closedTabs: stored.closedTabs };
   if (taken.length === 0) return { strip, merged: false, canonical };
-  const at = base.panes[base.focusedPane] === undefined ? 0 : base.focusedPane;
-  const pane = base.panes[at];
+  const focused = base.panes[base.focusedPane];
+  const at = focused === undefined ? 0 : base.focusedPane;
+  const pane = focused ?? base.panes[0];
   const pinnedEnd = pane.tabs.findLastIndex((tab) => tab.pinned) + 1;
   const tabs = [...pane.tabs.slice(0, pinnedEnd), ...taken.filter((tab) => tab.pinned), ...pane.tabs.slice(pinnedEnd), ...taken.filter((tab) => !tab.pinned)];
   const panes = [...base.panes] as PaneState[];
