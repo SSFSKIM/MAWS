@@ -38,13 +38,12 @@ interface StartOptions {
   halfOpen?: boolean;
   admitHello?: SocketServerOptions['admitHello']; // P5 O2 M5
   onActivity?: () => void; // P5 Decision Log 273
-  pingGate?: () => Promise<unknown>; // P5 Decision Log 273: what each `engine.ping` waits for before it answers
 }
 
 async function start(options: StartOptions = {}) {
   let emit!: HostEmit;
   const runtime: HostRuntime = createHostRuntime((on, e, client) => {
-    on('engine.ping', async () => (await options.pingGate?.(), { pid: 4242, uptimeMs: 1, hostVersion: 'test' }));
+    on('engine.ping', async () => ({ pid: 4242, uptimeMs: 1, hostVersion: 'test' }));
     emit = e;
     if (options.onDocPort) client.onDocPort(options.onDocPort); // P3-A M5
   });
@@ -400,11 +399,9 @@ describe('the socket layer handshake (server side)', () => {
     await client.closed;
   });
 
-  it('tells activity at each line in and out, and counts a request in flight until its answer or its client’s end (P5 Decision Log 273)', async () => {
+  it('tells activity at each line in and out, and keeps a port’s answer to a post (P5 Decision Log 273)', async () => {
     let activity = 0;
-    let gate: Promise<unknown> = Promise.resolve();
-    let answer!: (value: unknown) => void;
-    const host = await start({ onActivity: () => void (activity += 1), pingGate: () => gate });
+    const host = await start({ onActivity: () => void (activity += 1) });
     const client = await host.connect();
     client.send(hello());
     await client.next();
@@ -412,20 +409,13 @@ describe('the socket layer handshake (server side)', () => {
     client.send({ t: 'req', id: '1', name: 'engine.ping', input: undefined });
     await client.next((line) => (line as { t: string }).t === 'res');
     expect(activity).toBe(2); // the request and its answer
-    expect(host.served.inFlight()).toBe(0);
-    gate = new Promise((resolve) => (answer = resolve));
-    client.send({ t: 'req', id: '2', name: 'engine.ping', input: undefined });
-    await until(() => host.served.inFlight() === 1);
-    answer({});
-    await client.next((line) => (line as { id?: string }).id === '2');
-    expect(host.served.inFlight()).toBe(0);
-    gate = new Promise(() => {}); // never answered
-    client.send({ t: 'req', id: '3', name: 'engine.ping', input: undefined });
-    await until(() => host.served.inFlight() === 1);
-    const second = await host.connect();
-    second.send(hello({ appPid: 8 })); // replaces the first, whose unanswered requests no longer count
-    await second.next();
-    expect(host.served.inFlight()).toBe(0);
+    client.send({ t: 'ready' });
+    await until(() => host.runtime.hasClient());
+    expect(host.emit()).toBe(true);
+    expect(activity).toBe(4); // ready, and the event
+    client.socket.destroy();
+    await until(() => !host.runtime.hasClient());
+    expect(host.emit()).toBe(false); // a gone client's post still reads false through the layer
   });
 
   it('closeClient closes the connected client', async () => {

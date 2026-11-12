@@ -72,6 +72,7 @@ export interface CuaSocketsOptions {
   pendingBudget?: { session: number; total: number };
   cold?: CuaColdRoute; // P5 O17 M1
   loadBroker?: () => Promise<CuaBrokerChunk>; // P5 O17 M1: the broker's chunk (a counting double in tests)
+  activity?(): void; // P5 Decision Log 273: each chunk a relayed pair carries, either way (the broker's too)
 }
 
 export interface CuaSocketInspection {
@@ -230,6 +231,7 @@ export function createCuaSockets(options: CuaSocketsOptions): CuaSockets {
         app.on('close', () => engine.destroy());
         engine.pipe(app);
         app.pipe(engine);
+        if (options.activity) for (const side of [engine, app]) side.on('data', options.activity); // after the pipes: already flowing
       });
       app.on('error', (error: NodeJS.ErrnoException) => {
         if (connected) return void engine.destroy(); // a relayed pair's error: both end (the app's close follows)
@@ -246,6 +248,7 @@ export function createCuaSockets(options: CuaSocketsOptions): CuaSockets {
     brokerLoad ??= (options.loadBroker ?? loadCuaBroker)().then(
       (chunk) => {
         broker = chunk.createCuaBroker({
+          activity: options.activity,
           machine: cold.machine,
           version: cold.version,
           route: (id) => cold.reading(id),

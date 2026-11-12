@@ -285,7 +285,8 @@ export function readVmPaging(): VmPaging {
 // P5 Decision Log 273 (recorded only): each measured process's memory by category, read at the window's two edges outside
 // its sampled CPU (before its first sample, after its last), so a run can say where a footprint outside the V8 heap
 // went. `footprint` (macOS's own, unprivileged for the user's own processes) gives each category's dirty, swapped and
-// clean KiB, the dirty and swapped of all of them summing to the phys_footprint the window reads; a pid it cannot read
+// clean KiB: the dirty of all of them sums to the phys_footprint the window reads, and the swapped is the part of a
+// category's dirty that is compressed or swapped out, a breakdown never added to it; a pid it cannot read
 // keeps `vmmap --summary`'s region and malloc zone tables as printed; a pid neither reads keeps what each said.
 export interface CategoryKiB {
   dirtyKiB: number;
@@ -299,7 +300,8 @@ export type MemoryByCategory = { pid: number; argv0: string } & (
   | { tool: null; errors: string[] }
 );
 
-// `footprint --json`'s file (`-f bytes`) by pid: its footprint and each category that holds a byte, largest dirty first;
+// `footprint --json`'s file (`-f bytes`) by pid: its footprint and each category that holds a byte, largest dirty first
+// (what it holds of the footprint);
 // a pid it holds no process for is absent, and the file's own errors come back beside them.
 export function footprintCategories(json: string): { processes: Map<number, { footprintKiB: number; categories: Record<string, CategoryKiB> }>; errors: string[] } {
   type Bytes = { dirty?: number; swapped?: number; clean?: number; regions?: number };
@@ -310,7 +312,7 @@ export function footprintCategories(json: string): { processes: Map<number, { fo
       const held = Object.entries(p.categories)
         .map(([name, b]): [string, CategoryKiB] => [name, { dirtyKiB: kiB(b.dirty), swappedKiB: kiB(b.swapped), cleanKiB: kiB(b.clean), regions: b.regions ?? 0 }])
         .filter(([, c]) => c.dirtyKiB + c.swappedKiB + c.cleanKiB > 0)
-        .sort(([, a], [, b]) => b.dirtyKiB + b.swappedKiB - (a.dirtyKiB + a.swappedKiB));
+        .sort(([, a], [, b]) => b.dirtyKiB - a.dirtyKiB);
       return [p.pid, { footprintKiB: kiB(p.footprint), categories: Object.fromEntries(held) }] as const;
     }),
   );
@@ -362,21 +364,24 @@ export function readMemoryCategories(procs: readonly { pid: number; argv0: strin
   });
 }
 
-// The two captures' line: each process's footprint by `footprint` at both edges and the categories that moved most
-// between them (or, read by vmmap or by neither, which). Recorded only.
+// The two captures' line: each process's footprint by `footprint` at both edges and the categories whose dirty (what
+// they hold of the footprint) moved most between them, with the swapped part's own move beside it when it moved (or,
+// read by vmmap or by neither, which). Recorded only.
 export function categoriesLine(first: readonly MemoryByCategory[], last: readonly MemoryByCategory[]): string {
-  const held = (c: CategoryKiB) => c.dirtyKiB + c.swappedKiB;
   const each = first.map((a) => {
     const b = last.find((p) => p.pid === a.pid);
     if (a.tool !== 'footprint' || b?.tool !== 'footprint') return `${a.argv0} by ${a.tool ?? 'no reader'} then ${b === undefined ? 'gone' : (b.tool ?? 'no reader')}`;
     const names = new Set([...Object.keys(a.categories), ...Object.keys(b.categories)]);
     const zero: CategoryKiB = { dirtyKiB: 0, swappedKiB: 0, cleanKiB: 0, regions: 0 };
     const moved = [...names]
-      .map((name) => [name, held(b.categories[name] ?? zero) - held(a.categories[name] ?? zero)] as const)
-      .filter(([, d]) => d !== 0)
-      .sort(([, x], [, y]) => Math.abs(y) - Math.abs(x))
+      .map((name) => {
+        const [before, after] = [a.categories[name] ?? zero, b.categories[name] ?? zero];
+        return { name, dirty: after.dirtyKiB - before.dirtyKiB, swapped: after.swappedKiB - before.swappedKiB };
+      })
+      .filter((m) => m.dirty !== 0 || m.swapped !== 0)
+      .sort((x, y) => Math.abs(y.dirty) - Math.abs(x.dirty) || Math.abs(y.swapped) - Math.abs(x.swapped))
       .slice(0, 3)
-      .map(([name, d]) => `${name} ${signed(d)}`);
+      .map((m) => `${m.name} ${signed(m.dirty)}${m.swapped !== 0 ? ` (swapped ${signed(m.swapped)})` : ''}`);
     return `${a.argv0} ${a.footprintKiB} to ${b.footprintKiB} KiB${moved.length > 0 ? ` (${moved.join(', ')})` : ''}`;
   });
   return `[daemon-idle] memory by category at the window's edges (recorded only) · ${each.join('; ')}`;

@@ -910,7 +910,10 @@ export class Endpoint implements EndpointModule {
   syncNow(): Promise<unknown> {
     const parts = this.parts;
     if (parts === null || !parts.state.enrolled || this.#stopped) return Promise.resolve();
-    this.#syncing ??= syncAndPromote(this.enrollContext()).finally(() => {
+    if (this.#syncing !== null) return this.#syncing;
+    const release = parts.services.hold('the hub sync'); // P5 Decision Log 273: work to the daemon, which collects over none
+    this.#syncing = syncAndPromote(this.enrollContext()).finally(() => {
+      release();
       this.#syncing = null;
       // Judged again after every read: a delegation that expired since the last change is noticed here.
       void this.#judge();

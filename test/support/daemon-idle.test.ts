@@ -204,6 +204,14 @@ describe("the window's memory by category, recorded at its edges and read by no 
     expect(() => vmmapSummary('vmmap cannot examine process 1')).toThrow('vmmap printed no summary');
   });
 
+  it('counts swapped as part of dirty, never on top: a move that is only a swap holds the footprint and says so', () => {
+    const at = (dirty: number, swapped: number) => ({ pid: 11, argv0: 'mawsd', tool: 'footprint' as const, footprintKiB: dirty, categories: { MALLOC_SMALL: { dirtyKiB: dirty, swappedKiB: swapped, cleanKiB: 0, regions: 3 } } });
+    expect(categoriesLine([at(3_000, 0)], [at(3_000, 2_000)])).toBe("[daemon-idle] memory by category at the window's edges (recorded only) · mawsd 3000 to 3000 KiB (MALLOC_SMALL +0 (swapped +2000))");
+    expect(categoriesLine([at(3_000, 1_000)], [at(4_000, 1_000)])).toBe("[daemon-idle] memory by category at the window's edges (recorded only) · mawsd 3000 to 4000 KiB (MALLOC_SMALL +1000)");
+    const sorted = footprintCategories(JSON.stringify({ processes: [{ pid: 11, footprint: 0, categories: { small: { dirty: 2_048, swapped: 2_048 }, large: { dirty: 3_072, swapped: 0 } } }] })).processes.get(11)!;
+    expect(Object.keys(sorted.categories)).toEqual(['large', 'small']); // by dirty alone: 3 KiB held before 2 KiB, however much of it is swapped
+  });
+
   it('prints each process’s footprint at both edges and the categories that moved most, or which reader read it', () => {
     const at = (malloc: number, v8: number) => ({ pid: 11, argv0: 'mawsd', tool: 'footprint' as const, footprintKiB: malloc + v8, categories: { MALLOC_SMALL: { dirtyKiB: malloc, swappedKiB: 0, cleanKiB: 0, regions: 3 }, 'app-specific tag 255': { dirtyKiB: v8, swappedKiB: 0, cleanKiB: 0, regions: 24 } } });
     const vmmap = { pid: 12, argv0: 'maws-supervisor', tool: 'vmmap' as const, summary: 'REGION TYPE' };

@@ -533,11 +533,14 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
 
   // --- the clocks -----------------------------------------------------------------------------------------------------
   // P5 Decision Log 124's lever: a collection at each quiet entry, asked again as it collects. Decision Log 273: and once
-  // per quiet period with clients connected: a line on any of the three sockets, an event from either host, a hold or a
-  // client's engine request beginning or ending is activity, and a socket's request unanswered holds it off
+  // per quiet period with clients connected. Activity is a line on any of the three sockets, an event from either host, a
+  // hold or a client's engine request beginning or ending, an endpoint document frame and each chunk a cua pipe carries.
+  // Work, held open until it settles, is each request a relay or the front took (its client gone or not), each endpoint
+  // dispatch, each artifacts.sock request until its response closes and each artifact fetch until its body ends; the
+  // endpoint holds the daemon through a hub sync. The I/O any of it starts is the collector's own last check.
   const idle = idleCollector({
     log, collect: options.collect, quiet: () => clocks.quiet(), ...(options.idleQuiet && { heap: options.idleQuiet.heap }),
-    activity: { settled: () => clocks.settled() && [engineClients, ptyClients, machineClients].every((clients) => (clients?.inFlight() ?? 0) === 0), quietMs: options.idleQuiet?.quietMs },
+    activity: { settled: () => clocks.settled(), quietMs: options.idleQuiet?.quietMs },
   });
   const clocks = new DaemonClocks(kind, {
     armEnginePark: (why) => {
@@ -683,6 +686,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   const engineRelay = new Relay({
     owner: 'engine-host',
     hosts,
+    work: () => idle.work(), // P5 Decision Log 273
     log: (line) => log(`engine-host.sock: ${line}`),
     startedAt: (pid) => lockStartedAt(join(profileDir, 'supervisor'), pid),
     // P5 O3-D M5a (D44(3)): a post-D app's request the spine intercepts goes through it, the spine loaded for it if cold
@@ -831,6 +835,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   const ptyRelay = new Relay({
     owner: 'pty-host',
     hosts,
+    work: () => idle.work(), // P5 Decision Log 273
     log: (line) => log(`pty-host.sock: ${line}`),
     startedAt: (pid) => lockStartedAt(paths.ptyHost, pid),
     refuseHello: (peer, appPid) => refuseConnectorless('pty-host.sock', peer, appPid), // P5 O4 M4 (D45): no socket for a refused app
@@ -1341,6 +1346,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   let engineAppPid: number | null = null; // the app welcomed on engine-host.sock: the port's requests with no client go to its machine.sock connection
   const front = createServicesFront({
     spine,
+    work: () => idle.work(), // P5 Decision Log 273
     hosts: { forward: clientEngine.forward, onRaw: hosts.onRaw, onStreaming: hosts.onStreaming, parked: hosts.parked }, // P5 O5: forward through the park's guard
     intercept: (request) => interceptEngine(request),
     daemon: daemonCommand,
@@ -1391,6 +1397,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       return refused === null ? loadEndpointChunk() : Promise.reject(new Error(refused));
     },
     log: (line) => log(`[artifacts] ${line}`),
+    work: () => idle.work(), // P5 Decision Log 273
   });
 
   // --- the endpoint seam -----------------------------------------------------------------------------------------------
@@ -1507,6 +1514,15 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     log: (line) => log(`[endpoint] ${line}`),
   };
 
+  // P5 Decision Log 273: the endpoint's dispatches are work until they settle, and its document frames activity
+  const untrackedDispatch = services.dispatch.bind(services);
+  services.dispatch = (...args) => {
+    const end = idle.work();
+    return untrackedDispatch(...args).finally(end);
+  };
+  const untrackedFrame = services.documents.frame.bind(services.documents);
+  services.documents.frame = (channel, bytes) => (idle.activity(), untrackedFrame(channel, bytes));
+
   // --- (6) the sockets --------------------------------------------------------------------------------------------------
   const servers: Server[] = [];
   let engineClients: SocketClients | null = null;
@@ -1530,6 +1546,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     const appPath = join(dirname(options.modules.self), '..', '..');
     const loadAddon = options.cua?.loadAddon ?? (() => loadPeerAddon(peerAddonPath({ packaged, resourcesPath: dirname(appPath), appRoot: appPath })));
     cua = createCuaSockets({
+      activity: () => idle.activity(), // P5 Decision Log 273
       dir: cuaDir,
       loadAddon: () => {
         const addon = loadAddon();

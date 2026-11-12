@@ -20,10 +20,14 @@
 // A collection is synchronous (12 to 28 ms), so it must never land on work. The entry's telling can come late: a source
 // can begin work before it tells (a send marks its use before its queue changes, and tells that only once its save
 // settles). So the moment of collecting asks the process's own predicate again, over its live state: `quiet` for an idle
-// entry, `settled` (nothing in flight or running, clients or not) for a quiet one, and activity told since the period
-// ran out holds it off as well. A process it finds busy is not idle: an idle entry's collection waits for the next
-// entry, a dropped holding still owed, and a quiet one's for the next quiet period, which the work's end arms. A late
-// signal can only delay a collection, never land one on work.
+// entry; for a quiet one, its caller's `settled` (nothing in flight or running, clients or not), no work lifetime open
+// (`work()`, for work that runs past a request or outside one: a response body still streaming, a sync with the hub),
+// no activity told since the period ran out, and no I/O of the process's own in flight (a file read or write, a socket
+// write not yet flushed: `ioInFlight`, which sees background work no caller tells, a periodic reconcile's or a watch
+// callback's reads). A process it finds busy is not idle: an idle entry's collection waits for the next entry, a
+// dropped holding still owed; a quiet one's for the next quiet period, which the work's end arms (the end of a request
+// or of a work lifetime is activity), or, held off by I/O alone, is asked again IO_RETRY_MS later, IO_RETRIES times at
+// most before the period is given up. A late signal can only delay a collection, never land one on work.
 import { getHeapStatistics, setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
 
@@ -38,6 +42,21 @@ export const GROWTH_BYTES = 1 << 20;
 // its steps), has ended rather than paused, so the 12 to 28 ms collection lands after it; short enough that the garbage
 // of a scene is given back well inside the measured scenes' 120 s settle, before their first sample.
 export const ACTIVITY_QUIET_MS = 30_000;
+
+// A quiet entry held off by the process's own I/O alone is asked again this much later, so many times at most (I/O that
+// never settles, a socket write to a peer that stopped reading, must not become a clock).
+export const IO_RETRY_MS = 1_000;
+export const IO_RETRIES = 5;
+
+// The kinds of libuv request `process.getActiveResourcesInfo()` lists while I/O is in flight: a file system request, a
+// file handle's, a socket write or shutdown not yet flushed, a DNS lookup. Handles (sockets, servers, timers) are the
+// process's standing state, not work, and are not among them.
+const IO_REQUEST = /^(FSReq|FileHandle)|(WriteWrap|ShutdownWrap|GetAddrInfoReqWrap|GetNameInfoReqWrap|QueryWrap)$/;
+
+/** Whether any of the process's own I/O is in flight now (the quiet entry's last check before it collects). */
+export function ioInFlight(resources: readonly string[] = process.getActiveResourcesInfo()): boolean {
+  return resources.some((type) => IO_REQUEST.test(type));
+}
 
 type GcExtension = (options: { type: 'major'; execution: 'sync'; flavor: 'last-resort' }) => void;
 let gc: GcExtension | null = null;
@@ -83,6 +102,7 @@ export interface IdleCollectorOptions {
   defer?(run: () => void): void; // setImmediate: the entry's caller finishes its turn first
   now?(): number; // performance.now()
   timer?(run: () => void, ms: number): () => void; // an unref'd setTimeout, and its clear
+  io?(): boolean; // ioInFlight
 }
 
 export interface IdleCollector {
@@ -96,6 +116,11 @@ export interface IdleCollector {
    * now, and its clock is armed if none is. Cheap, for every message.
    */
   activity(): void;
+  /**
+   * Work that runs past a request or outside one begins: activity now, the quiet entry held off while it is open, and
+   * activity again at its end (the returned call, which a second time does nothing).
+   */
+  work(): () => void;
   /** A holding was dropped while idle (a session released, a process ended): its garbage is collected, past the guard. */
   dropped(): void;
   /** The process is exiting: nothing collects from now on, a collection already queued included. */
@@ -116,6 +141,7 @@ export function idleCollector(options: IdleCollectorOptions): IdleCollector {
     return () => clearTimeout(handle);
   });
   const quietMs = options.activity?.quietMs ?? ACTIVITY_QUIET_MS;
+  const io = options.io ?? (() => ioInFlight());
   let idle: boolean | null = null;
   let deferred = false;
   let entry: 'idle' | 'quiet' | null = null; // what the queued run answers: an idle entry outranks a quiet one
@@ -125,6 +151,8 @@ export function idleCollector(options: IdleCollectorOptions): IdleCollector {
   let lastActivity = 0; // when activity was last told (now()'s clock)
   let cancel: (() => void) | null = null; // the quiet period's clock, while armed
   let ranOut = 0; // when the last quiet period ran out: activity after it holds its collection off
+  let open = 0; // work lifetimes begun and not ended
+  let retries = 0; // this period's asks again, held off by I/O alone
   const mib = (bytes: number) => (bytes / 1_048_576).toFixed(1);
   // An entry that finds neither size grown by GROWTH_BYTES since the last collection has nothing to give back.
   const grown = (before: HeapSize) => floor === null || before.used >= floor.used + GROWTH_BYTES || before.physical >= floor.physical + GROWTH_BYTES;
@@ -139,7 +167,16 @@ export function idleCollector(options: IdleCollectorOptions): IdleCollector {
         idle = false; // busy by its live state, told or not yet: the next reading that finds it quiet is an entry
         return;
       }
-    } else if (lastActivity >= ranOut || !options.activity!.settled()) return; // the work's end is activity: the next period answers it
+    } else {
+      if (lastActivity >= ranOut || open > 0 || !options.activity!.settled()) return; // the work's end is activity: the next period answers it
+      if (io()) {
+        if (retries < IO_RETRIES && cancel === null) {
+          retries += 1;
+          arm(IO_RETRY_MS); // asked again unless activity comes first, which moves the period on
+        }
+        return;
+      }
+    }
     const before = heap();
     if (!forced && !grown(before)) return;
     const started = now();
@@ -173,16 +210,30 @@ export function idleCollector(options: IdleCollectorOptions): IdleCollector {
       queue('quiet');
     }, ms);
   };
+  const activity = () => {
+    if (stopped || options.activity === undefined) return;
+    lastActivity = now();
+    retries = 0;
+    if (cancel === null) arm(quietMs);
+  };
   return {
     set(next) {
       const entered = next && idle !== true;
       idle = next;
       if (entered) queue('idle');
     },
-    activity() {
-      if (stopped || options.activity === undefined) return;
-      lastActivity = now();
-      if (cancel === null) arm(quietMs);
+    activity,
+    work() {
+      if (stopped || options.activity === undefined) return () => {};
+      open += 1;
+      activity();
+      let ended = false;
+      return () => {
+        if (ended) return;
+        ended = true;
+        open -= 1;
+        activity();
+      };
     },
     dropped() {
       if (idle !== true) return; // the next entry weighs it

@@ -6,7 +6,7 @@
 // and its clock is armed again only by activity.
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it, vi } from 'vitest';
-import { ACTIVITY_QUIET_MS, GROWTH_BYTES, idleCollector, lastResortCollect, type HeapSize } from './idle-collect';
+import { ACTIVITY_QUIET_MS, GROWTH_BYTES, idleCollector, ioInFlight, IO_RETRIES, IO_RETRY_MS, lastResortCollect, type HeapSize } from './idle-collect';
 
 const MIB = GROWTH_BYTES;
 
@@ -173,13 +173,14 @@ function quietRig() {
   const heap: HeapSize = { used: 20 * MIB, physical: 40 * MIB };
   const queued: (() => void)[] = [];
   const lines: string[] = [];
-  const live = { settled: true, quiet: false };
+  const live = { settled: true, quiet: false, io: false };
   let clock = 0;
   const timers: { at: number; run: () => void; cleared: boolean }[] = [];
   const collect = vi.fn(() => void Object.assign(heap, { used: 5 * MIB, physical: 10 * MIB }));
   const collector = idleCollector({
     log: (line) => lines.push(line), collect, heap: () => ({ ...heap }), defer: (run) => queued.push(run), now: () => clock, quiet: () => live.quiet,
     activity: { settled: () => live.settled },
+    io: () => live.io,
     timer: (run, ms) => {
       const timer = { at: clock + ms, run, cleared: false };
       timers.push(timer);
@@ -292,6 +293,64 @@ describe('the quiet entry (Decision Log 273)', () => {
     collector.set(true); // the last client left, its departure no work: an idle entry, weighed against the quiet entry's floor
     turn();
     expect(collect).toHaveBeenCalledOnce();
+  });
+
+  it('never collects while a work lifetime is open, however long; its end arms the next period', () => {
+    const { collector, collect, advance, armed } = quietRig();
+    const end = collector.work(); // a response body still streaming after its request was answered
+    advance(10 * ACTIVITY_QUIET_MS);
+    expect(collect).not.toHaveBeenCalled();
+    expect(armed()).toBe(0);
+    end();
+    end(); // a second end does nothing
+    advance(ACTIVITY_QUIET_MS - 1);
+    expect(collect).not.toHaveBeenCalled();
+    advance(1);
+    expect(collect).toHaveBeenCalledOnce();
+  });
+
+  it('counts each open lifetime: one still open holds it off', () => {
+    const { collector, collect, advance } = quietRig();
+    const first = collector.work();
+    const second = collector.work();
+    first();
+    advance(2 * ACTIVITY_QUIET_MS);
+    expect(collect).not.toHaveBeenCalled();
+    second();
+    advance(ACTIVITY_QUIET_MS);
+    expect(collect).toHaveBeenCalledOnce();
+  });
+
+  it('never collects over the process’s own I/O in flight: asked again shortly, a bounded number of times', () => {
+    const { collector, collect, live, advance, armed } = quietRig();
+    collector.activity();
+    live.io = true; // a periodic reconcile's read, told to no one
+    advance(ACTIVITY_QUIET_MS);
+    expect(collect).not.toHaveBeenCalled();
+    expect(armed()).toBe(1);
+    live.io = false;
+    advance(IO_RETRY_MS);
+    expect(collect).toHaveBeenCalledOnce();
+  });
+
+  it('gives a period up when its I/O never settles, so a stuck write is no clock', () => {
+    const { collector, collect, live, advance, armed } = quietRig();
+    collector.activity();
+    live.io = true;
+    advance(ACTIVITY_QUIET_MS + IO_RETRIES * IO_RETRY_MS);
+    expect(armed()).toBe(0);
+    live.io = false;
+    advance(10 * ACTIVITY_QUIET_MS);
+    expect(collect).not.toHaveBeenCalled();
+    collector.activity(); // the next period asks again
+    advance(ACTIVITY_QUIET_MS);
+    expect(collect).toHaveBeenCalledOnce();
+  });
+
+  it('reads in-flight I/O from the process’s active resources: requests, never its standing handles', () => {
+    expect(ioInFlight(['TCPServerWrap', 'TCPSocketWrap', 'PipeWrap', 'Timeout', 'Immediate', 'ProcessWrap', 'FSEventWrap', 'TTYWrap'])).toBe(false);
+    for (const request of ['FSReqCallback', 'FSReqPromise', 'FileHandleCloseReq', 'WriteWrap', 'SimpleWriteWrap', 'ShutdownWrap', 'GetAddrInfoReqWrap']) expect(ioInFlight(['TCPSocketWrap', request]), request).toBe(true);
+    expect(typeof ioInFlight()).toBe('boolean'); // this process's own
   });
 
   it('does nothing for a process that did not opt in, and nothing once stopped', () => {
