@@ -20,7 +20,7 @@ The build on the owner's machines today, build F (commit `f1852de3a`), reads the
 
 - [x] (2026-11-12 22:46Z) Document written against master `85e934368`; the section checked against the code at that head ("What the code holds today").
 - [x] (2026-11-12 23:09Z) Adversarial review of this document: its five findings and two remarks, and the architect's rulings on the six points reported at authoring, are folded in (Decision Log).
-- [ ] Step 0 on master (U6a and U8a landed); this branch rebased onto it (this document is the branch's only commit until then).
+- [ ] Step 0 on master (U6a and U8a landed); this branch merges it (not a rebase: Decision Log, 2026-11-12 23:40Z). M1 runs before it, on the architect's word, over a merge of master at `eeba4e916`.
 - [ ] M1 — The stored form and its reader.
 - [ ] M2 — One strip in the store, and the current project.
 - [ ] M3 — New chat.
@@ -521,6 +521,12 @@ The pull request carries the dated amendments of the two rulings this landing re
     Date/Author: 2026-11-12, the document's author, on review finding 5.
   - The architect's rulings on the reported points, 2026-11-12: (1) going back to F is accepted as §H states it, and the section's "nothing is lost" and root acceptance 6 are reworded to "no tab is lost"; (2) `newChatIn` stays unedited; (3) the section's e2e list takes `e2e/sessions.spec.ts` and drops `e2e/ux2-shell.spec.ts`; (4) its unit-test list is corrected; (5) the insertions in `customize/CustomizeView.tsx`, `shell/transfer.ts`, `sidebar/ProjectRow.tsx`, `sidebar/menus.tsx`, `sidebar/registry-new-chat.ts` and `panel/surface-model.ts` are added to root UC-8; (6) the three wording points are corrected in the section. The owner's answer on an empty chat at a relaunch (Q1) is still open, and §E's last paragraph stays a default.
   - Without a change of decision: M2 is said to be kept whole by choice, with the adapter route named and its cost; §H and the Purpose say in full what F does with a profile the wave's build has written.
+- **2026-11-12 23:40Z · Execution starts on M1 alone; how the branch takes master.** The architect dispatched the controller for M1 only: M2 waits for the rehearsal of M1's reader (a failure there reconsiders the stored shape) and for step 0 to reach master.
+  - Decision: Concrete Steps 1 and constraint 9 are not followed as written for M1. Step 0 is not on master yet and M1 touches none of its files, so the branch merged `origin/master` (`eeba4e916`, documents only) instead of rebasing onto it; from here on the branch takes master by merge, never by rebase or force-push, because reviewers pin ranges on it. Step 0 is merged the same way when it lands, before M2.
+    Rationale: the architect's word at dispatch; a rebase would invalidate the ranges the M1 review and the rehearsal pin.
+    Date/Author: 2026-11-12, the controller, on the architect's dispatch.
+  - Decision: no executor or controller runs `scripts/ci-gate.sh`, opens a pull request or starts an Electron e2e on this branch; class 1a, the review panel, the cross-build run and the pull request are the architect's (as "Proof that an executor does not run" already says for most of them). Checks run on the VM through `vmcheck.sh` only.
+    Date/Author: 2026-11-12, the controller, on the architect's dispatch.
 
 ## Outcomes & Retrospective
 
