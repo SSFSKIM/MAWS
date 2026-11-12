@@ -516,6 +516,7 @@ export class Endpoint implements EndpointModule {
     const seams = options.subscriptions ?? {};
     this.forwards = new Forwards({ log, resumeMs: seams.resumeMs });
     this.streams = new Streams({
+      activity: () => this.#services?.activity?.(), // P5 Decision Log 273
       authorize: (request, who, now) => this.authorizer.authorize(request, who, now),
       dispatch,
       // P5 O7 M5b: an `http` read open's request, to the machine's artifact endpoint (read when asked: a suite may replace it).

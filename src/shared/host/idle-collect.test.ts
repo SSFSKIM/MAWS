@@ -359,7 +359,7 @@ describe('the quiet entry (Decision Log 273)', () => {
     const { heap, collector, collect, advance, armed } = quietRig();
     const news = eventNews();
     const status = (over: Record<string, unknown> = {}, rssKiB = 1_000) => ({ appSessionId: 'app-1', status: { process: 'ready', turn: null, lastUsedAt: 't0', memory: { rssKiB, treeRssKiB: rssKiB, sampledAt: `s${rssKiB}` }, ...over } });
-    const tell = (name: string, payload: unknown) => void (news(name, payload) && collector.activity());
+    const tell = (name: string, payload: unknown) => void (news.news(name, payload) && collector.activity());
     tell('session.status', status()); // the session's first status: news
     tell('engine.budget', { enabled: true, totalKiB: 1_000, sampledAt: 's0', over: false });
     for (let sample = 1; sample <= 12; sample += 1) {
@@ -378,15 +378,35 @@ describe('the quiet entry (Decision Log 273)', () => {
   it('tells news per subject: a change of state, any other event, never a repeat whose change is telemetry alone', () => {
     const news = eventNews();
     const status = (id: string, lastUsedAt: string, rssKiB: number) => ({ appSessionId: id, status: { lastUsedAt, memory: { rssKiB, treeRssKiB: null, sampledAt: String(rssKiB) } } });
-    expect(news('session.status', status('a', 't0', 1))).toBe(true);
-    expect(news('session.status', status('a', 't0', 2))).toBe(false);
-    expect(news('session.status', status('b', 't0', 2))).toBe(true); // another session's first
-    expect(news('session.status', status('a', 't1', 2))).toBe(true); // used again
-    expect(news('engine.budget', { totalKiB: 1, sampledAt: 'x', over: false })).toBe(true);
-    expect(news('engine.budget', { totalKiB: 2, sampledAt: 'y', over: false })).toBe(false);
-    expect(news('engine.budget', { totalKiB: 2, sampledAt: 'y', over: true })).toBe(true);
-    expect(news('session.eventBatch', { appSessionId: 'a', events: [] })).toBe(true);
-    expect(news('session.eventBatch', { appSessionId: 'a', events: [] })).toBe(true); // not a sampled event: always news
+    expect(news.news('session.status', status('a', 't0', 1))).toBe(true);
+    expect(news.news('session.status', status('a', 't0', 2))).toBe(false);
+    expect(news.news('session.status', status('b', 't0', 2))).toBe(true); // another session's first
+    expect(news.news('session.status', status('a', 't1', 2))).toBe(true); // used again
+    expect(news.news('engine.budget', { totalKiB: 1, sampledAt: 'x', over: false })).toBe(true);
+    expect(news.news('engine.budget', { totalKiB: 2, sampledAt: 'y', over: false })).toBe(false);
+    expect(news.news('engine.budget', { totalKiB: 2, sampledAt: 'y', over: true })).toBe(true);
+    expect(news.news('session.eventBatch', { appSessionId: 'a', events: [] })).toBe(true);
+    expect(news.news('session.eventBatch', { appSessionId: 'a', events: [] })).toBe(true); // not a sampled event: always news
+  });
+
+  it('lets a session’s reading go at its exit or removal and every reading at a reset, and holds no more than its cap', () => {
+    const news = eventNews(8);
+    const status = (id: string, process: string, rssKiB = 1) => ({ appSessionId: id, status: { process, memory: { rssKiB, treeRssKiB: null, sampledAt: null } } });
+    for (let n = 0; n < 1_000; n += 1) {
+      // many sessions come and go: a ready status, a sample, then an exit or a removal
+      expect(news.news('session.status', status(`s${n}`, 'ready'))).toBe(true);
+      expect(news.news('session.status', status(`s${n}`, 'ready', 2))).toBe(false);
+      if (n % 2 === 0) expect(news.news('session.status', status(`s${n}`, 'exited'))).toBe(true);
+      else expect(news.news('session.removed', { appSessionId: `s${n}`, revision: 1 })).toBe(true);
+    }
+    expect(news.size()).toBe(0);
+    for (let n = 0; n < 1_000; n += 1) news.news('session.status', status(`live${n}`, 'ready')); // exits missed
+    expect(news.size()).toBe(8);
+    expect(news.news('session.status', status('live999', 'ready', 9))).toBe(false); // the newest kept
+    expect(news.news('session.status', status('live0', 'ready', 9))).toBe(true); // the oldest let go: news once
+    news.reset();
+    expect(news.size()).toBe(0);
+    expect(news.news('session.status', status('live999', 'ready', 9))).toBe(true);
   });
 
   it('does nothing for a process that did not opt in, and nothing once stopped', () => {

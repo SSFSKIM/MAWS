@@ -51,6 +51,7 @@ export interface EndpointServices {
   onUpstream(listener: (link: { connected: boolean; generation: number }) => void): () => void;
   /** A private mawsd's idle exit waits while one is out; the returned function releases it. */
   hold(reason: string, standing?: boolean): () => void; // P5 Decision Log 273: `standing`, DaemonServices' (a connection's, no operation)
+  activity?(): void; // P5 Decision Log 273: DaemonServices'; none, a fake's
   /** A remote viewer's subscriptions join the union (OX5). */
   interest: { report(viewer: string, sessions: readonly AppSessionId[]): void; drop(viewer: string): void };
   /**

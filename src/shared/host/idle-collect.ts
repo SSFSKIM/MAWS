@@ -32,6 +32,12 @@
 // dropped holding still owed; a quiet one's for the next quiet period, which the work's end arms (the end of a request
 // or of a work lifetime is activity), or, held off by I/O alone, is asked again IO_RETRY_MS later, IO_RETRIES times at
 // most before the period is given up. A late signal can only delay a collection, never land one on work.
+//
+// What no hook names can still be under way when a quiet collection lands: work that runs past its answer with no
+// lifetime, on no I/O at that instant (an async step parked on a timer, a CPU pass between macrotasks). The cost is one
+// 12 to 28 ms pause of that work per quiet period, behind the growth guard, never a lost or wrong result; the rule that
+// keeps it rare is that a new kind of long-running work (an operation that answers before it ends, a background loop)
+// takes a work lifetime where it is created.
 import { getHeapStatistics, setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
 
@@ -64,27 +70,51 @@ export function ioInFlight(resources: readonly string[] = process.getActiveResou
 
 // The events a periodic sample re-sends: each one's subject and its reading with the telemetry left out (the engine host's
 // 10 s memory sample moves a live session's `memory` and the budget's `totalKiB` and `sampledAt`, and nothing else).
-const TELEMETRY: Record<string, (payload: unknown) => [subject: string, reading: string] | null> = {
+// `ends` says the subject is gone (an exited session), so its reading is dropped.
+const TELEMETRY: Record<string, (payload: unknown) => { subject: string; reading: string; ends: boolean } | null> = {
   'session.status': (payload) => {
     const { appSessionId, status } = (payload ?? {}) as { appSessionId?: unknown; status?: unknown };
-    return typeof appSessionId === 'string' && typeof status === 'object' && status !== null ? [`session ${appSessionId}`, JSON.stringify({ ...status, memory: null })] : null;
+    if (typeof appSessionId !== 'string' || typeof status !== 'object' || status === null) return null;
+    return { subject: `session ${appSessionId}`, reading: JSON.stringify({ ...status, memory: null }), ends: (status as { process?: unknown }).process === 'exited' };
   },
-  'engine.budget': (payload) => (typeof payload === 'object' && payload !== null ? ['budget', JSON.stringify({ ...payload, totalKiB: null, sampledAt: null })] : null),
+  'engine.budget': (payload) => (typeof payload === 'object' && payload !== null ? { subject: 'budget', reading: JSON.stringify({ ...payload, totalKiB: null, sampledAt: null }), ends: false } : null),
 };
 
-/**
- * Whether a host event is news, a change of state that is activity: any event but one of TELEMETRY's whose reading,
- * telemetry left out, is the last one seen for its subject. One reader per stream of events it is told in order.
- */
-export function eventNews(): (name: string, payload: unknown) => boolean {
+// The most subjects a reader keeps, the oldest reading let go first: a subject let go only makes its next sample news once.
+export const EVENT_NEWS_SUBJECTS = 1_024;
+
+export interface EventNews {
+  /**
+   * Whether a host event is news, a change of state that is activity: any event but one of TELEMETRY's whose reading,
+   * telemetry left out, is the last one seen for its subject. A session's exit or removal lets its subject go.
+   */
+  news(name: string, payload: unknown): boolean;
+  reset(): void; // the stream of events broke (its host's link ended): every reading goes
+  size(): number; // the subjects it holds
+}
+
+/** One reader per stream of events it is told in order. */
+export function eventNews(cap = EVENT_NEWS_SUBJECTS): EventNews {
   const last = new Map<string, string>();
-  return (name, payload) => {
-    const read = TELEMETRY[name]?.(payload) ?? null;
-    if (read === null) return true;
-    const [subject, reading] = read;
-    if (last.get(subject) === reading) return false;
-    last.set(subject, reading);
-    return true;
+  return {
+    news(name, payload) {
+      if (name === 'session.removed') {
+        const { appSessionId } = (payload ?? {}) as { appSessionId?: unknown };
+        if (typeof appSessionId === 'string') last.delete(`session ${appSessionId}`);
+        return true;
+      }
+      const read = TELEMETRY[name]?.(payload) ?? null;
+      if (read === null) return true;
+      const { subject, reading, ends } = read;
+      if (ends) return (last.delete(subject), true);
+      if (last.get(subject) === reading) return false;
+      last.delete(subject); // to the newest end, so the cap lets the oldest go
+      last.set(subject, reading);
+      if (last.size > cap) last.delete(last.keys().next().value!);
+      return true;
+    },
+    reset: () => last.clear(),
+    size: () => last.size,
   };
 }
 

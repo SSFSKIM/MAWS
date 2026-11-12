@@ -87,6 +87,29 @@ describe('the idle collection (P5 Decision Log 124)', () => {
     channel();
   });
 
+  it('collects over no loaded spine’s work in flight, and the work’s settling arms the next quiet period (P5 Decision Log 273)', async () => {
+    const root = { busy: false, settle: () => {} };
+    const load = async (): Promise<SpineEntry> => ({
+      takeSpineLock,
+      openSpineData: async (_profile, { lock }) => ({ lock: lock!, refused: lock!.refused, machineSettings: null as never, paths: { client: '', machine: '' } }),
+      startSpine: (started) => {
+        started.bus.register('session.launchMode', () => ({ mode: 'index' }));
+        return { view: { engineStatuses: () => [], on: () => () => {} } as never, settled: () => (root.busy ? new Promise<void>((resolve) => (root.settle = resolve)) : Promise.resolve()), busy: () => root.busy, stop: () => {} };
+      },
+    });
+    let grown = 0;
+    await scene.start({ claimSpine: true, permanentClient: true, spine: { load }, idleQuiet: { quietMs: 150, heap: () => ({ used: (grown += 2) * GROWTH_BYTES, physical: grown * GROWTH_BYTES }) } });
+    await until(() => scene.collect.mock.calls.length === 1, 5_000, 'the start’s collection');
+    const app = await scene.app('machine');
+    root.busy = true; // the command loads the spine, whose sweep then runs on
+    await app.request('session.launchMode');
+    await sleep(600);
+    expect(scene.collect).toHaveBeenCalledOnce();
+    root.busy = false;
+    root.settle();
+    await until(() => scene.collect.mock.calls.length === 2, 5_000, 'the quiet period after the spine settled');
+  });
+
   it('collects nothing once its exit began, a collection already queued included', async () => {
     const daemon = await scene.start(); // its start's entry is queued behind this turn
     await daemon.stop('test');

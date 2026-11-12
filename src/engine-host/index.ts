@@ -130,7 +130,7 @@ function activePort(port: DocPortEnd): DocPortEnd {
 const register: HostRegister = (untimedOn, untrackedEmit, untrackedClient) => {
   const client: typeof untrackedClient = { ...untrackedClient, onDocPort: (handler) => untrackedClient.onDocPort((message, port) => (idle.activity(), handler(message, activePort(port)))) };
   const emit: HostEmit = (name, payload) => {
-    if (news(name, payload)) idle.activity();
+    if (news.news(name, payload)) idle.activity();
     return untrackedEmit(name, payload);
   };
   // P4-R6: each request's synchronous part recorded as the host's work while a scale seam watches (documents/host-work.ts)
@@ -247,7 +247,7 @@ const register: HostRegister = (untimedOn, untrackedEmit, untrackedClient) => {
   // C3 end
   // P3-H H3b: route E's engine leg and the grant store's commands, main's alone; ended when the app goes (P5 O3-D M3), or,
   // for a client listing `host.connectors`, at its connection's end (P5 O4 M2, Interfaces §D)
-  connectors = registerConnectors(on, emit, client.connectorsPresence, { sessions: table, store, datasetRefresh, deliveryConfig: { userData, captureEnv: captureShellEnvironment } }); // WR 76/78: cold owner delivery; E3: its registry
+  connectors = registerConnectors(on, emit, client.connectorsPresence, { work: () => idle.work() /* P5 Decision Log 273 */, sessions: table, store, datasetRefresh, deliveryConfig: { userData, captureEnv: captureShellEnvironment } }); // WR 76/78: cold owner delivery; E3: its registry
   // C3: journal pruning at host start (E10: here, so a detached candidate that finds the lock held prunes nothing; and
   // every 24 h after, keeping every launch the table holds a row for, since a supervisor outlives the app by days)
   // P5 O16 M3 (D25): a detached host's starts once its adoptions have ended (`adoptAtStart`), keeping every launch a

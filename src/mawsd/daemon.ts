@@ -540,9 +540,24 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   // dispatch, each artifacts.sock request until its response closes and each artifact fetch until its body ends; the
   // endpoint holds the daemon through a hub sync. The I/O any of it starts is the collector's own last check.
   const engineNews = eventNews(); // P5 Decision Log 273
+  // P5 Decision Log 273: a loaded spine with work in flight (a command, a session's setup or recovery, a sweep, an
+  // attention pass: SpineRoot.busy) is not settled; its settling is activity, so the next quiet period is armed
+  let spineWaited: ReturnType<typeof spine.root> = null;
+  const spineSettled = (): boolean => {
+    const root = spine.root();
+    if (root === null || !root.busy()) return true;
+    if (spineWaited !== root) {
+      spineWaited = root;
+      void root.settled().then(() => {
+        spineWaited = null;
+        idle.activity();
+      });
+    }
+    return false;
+  };
   const idle = idleCollector({
     log, collect: options.collect, quiet: () => clocks.quiet(), ...(options.idleQuiet && { heap: options.idleQuiet.heap }),
-    activity: { settled: () => clocks.settled(), quietMs: options.idleQuiet?.quietMs },
+    activity: { settled: () => clocks.settled() && spineSettled(), quietMs: options.idleQuiet?.quietMs },
   });
   const clocks = new DaemonClocks(kind, {
     armEnginePark: (why) => {
@@ -875,6 +890,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   let upstreamConnected = false;
   hosts.onState('engine-host', (state) => {
     const ready = state.state === 'ready';
+    if (!ready) engineNews.reset(); // P5 Decision Log 273: the link's events break here; the next host's are news afresh
     clocks.engineHost(ready ? state.pid : null);
     if (ready) permanentLink = permanentClient && (hosts.peer('engine-host')?.capabilities.includes(ATTACHMENT_CAPABILITY) ?? false); // P5 O3-D M3: at each welcome
     if (ready && !upstreamConnected) {
@@ -911,7 +927,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     }
   });
   hosts.onRaw('engine-host', (message) => {
-    if (engineNews(message.name, message.payload)) idle.activity(); // P5 Decision Log 273: a change of state, not a periodic sample
+    if (engineNews.news(message.name, message.payload)) idle.activity(); // P5 Decision Log 273: a change of state, not a periodic sample
     if (render.event(message.name, message.payload)) return; // P5 O5 M4: the render seam answers it, no client hears it
     if (message.name === 'host.browserIdle') return browserIdle(message.payload); // P5 O17 M3, M5: mawsd's own, no app hears it
     if (message.name === 'session.status') engineSeen(message.payload); // P5 O5 M5: the cua socket's peer check
@@ -1491,6 +1507,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       if (upstreamConnected) listener({ connected: true, generation });
       return () => void upstreamListeners.delete(listener);
     },
+    activity: () => idle.activity(), // P5 Decision Log 273
     hold(reason, standing = false) {
       const id = ++nextHold;
       holds.set(id, { reason, standing });
