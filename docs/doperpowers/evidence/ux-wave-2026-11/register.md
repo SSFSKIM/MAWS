@@ -209,7 +209,7 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 | l6-artifacts-05 | mark | build | Send to main confirms with a short note naming the session; the comment count ignores drafts. |
 | l6-artifacts-19 | mark | build | After the agent answers a comment, only the commented passage is highlighted once, and the card folds to its pin in a narrow window. |
 | l6-artifacts-20 | mark | build | The agent's reply to a comment is its own words, not tool output. The export dialog opens in the last export folder. |
-| l5-code-01 | mark | build | Review gets line comments through the same comment card, opened with "Send to main" ticked; comments made in one pass are sent together. |
+| l5-code-01 | mark | build | Review gets line comments through the same comment card, opened with "Send to main" ticked; comments made in one pass are sent together. Checked on 11-12 in the app's own browser engine: the diff library closes an open card whenever the diff is re-read, so while you write a comment the diff of that file holds still and its header says "This file changed · Refresh". |
 | l9-browser-delivery-05 | mark | build | Several comments on a page are collected into one message, as Claude Desktop does, designed once for the shared card. |
 | X-216 | tracker | build | The page stops auto-scrolling after the comment card closes. |
 | X-218 | tracker | build | The browser's comment card keeps its draft like the others. |
@@ -323,7 +323,7 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 
 | id | from | state | the line |
 |---|---|---|---|
-| l6-artifacts-07 | mark | build | A format cleanup is never a write of its own. Page size and density are document settings the agent can set. The agent may delete its own drafts, with Undo. |
+| l6-artifacts-07 | mark | build | A format cleanup is never a write of its own. Checked on 11-12 with a failing test through the real document service: the cause is the one inferred, and the refused edit is one that leaves part of a bold run without its bold. The fix is to switch the library's clean-up off on every document; the narrower fix I had first described misses three paths (restore, accepting and rejecting a suggestion). Page size and density are document settings the agent can set. The agent may delete its own drafts, with Undo. |
 | X-141 | tracker | build | A presence redraw no longer writes a phantom revision. |
 | O-43 | observation | build | The compact composer becomes the bar alone, and can be closed; a "Show chat" control in the artifact's header brings it back, as in Claude Desktop 5. |
 | l6-artifacts-08 | mark | build | "Make something new" keeps four kinds as cards and the rest under More, with a small design-system picker. |
