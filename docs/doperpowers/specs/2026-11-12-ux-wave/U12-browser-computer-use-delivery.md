@@ -266,6 +266,7 @@ What MAWS builds without waiting, and what waits:
   - **E4a Decision Log 12 and P1 Decision log row A-31**: no line; they stand, and this section cites them as the reason a permission prompt is not built.
 
 - **Waiting:**
+  - **Open questions.** The register (`docs/doperpowers/evidence/ux-wave-2026-11/register.md`, "Questions still open") is the one list of what is asked of the owner for this child's items, each with its recommended answer and when it is asked; where a sentence in this file differs from it, the register holds.
   - **#400, Drive through a connector instead of `gws`:** later, as its own design. It waits for a Drive MCP server that can create a file with conversion (the ticket's first step) and for a decision on whether `gws` stays beside it. Until then the `gws` route has a weekly cost worth knowing: a Google OAuth client left in testing mode issues sign-ins that lapse after seven days, so the sheet's "expired" state returns every week on such a client; publishing the client ends that (recorded in the `gws` onboarding notes, `spikes/gws-onboarding/README.md`, on a branch not yet on master). The tracker row of 2026-10-19 on Drive delivery waits for one delivery run by the owner; the sitting on A7 is one.
   - **Both tickets on the computer-use plugin's board,** and with them the right-hand column of the table above.
   - **The Browser opening by itself on another device** when the agent starts acting there: waits for U9's one-shot delivery (UC-7) and then for a decision that it is worth a new signal from the tab engine.
