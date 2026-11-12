@@ -60,16 +60,17 @@ const FILE = () => ({ status: STATUS, view: VIEW, rows: ROWS, machines: MACHINES
 const logged = () => (existsSync(logPath()) ? readFileSync(logPath(), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as unknown) : []);
 
 type Handler = (input: unknown) => unknown;
+type Tap = (payload: unknown) => void;
 function deps(env: Record<string, string>, packaged = false) {
   const handlers = new Map<string, Handler>();
   const held: string[] = [];
-  const said: OrgProjects[] = [];
-  const taps = new Set<(payload: OrgProjects) => void>();
+  const said: Array<{ name: string; payload: unknown }> = [];
+  const taps = new Map<string, Set<Tap>>();
   let standIn: MachineStandIn | null = null;
   // main's emit: to the windows (`said`), then its taps, as src/main/ipc/events.ts's
-  const emit = (_name: 'org.projects.changed', payload: OrgProjects) => {
-    said.push(payload);
-    for (const tap of [...taps]) tap(payload);
+  const emit: RegistryFixtureInstall['emit'] = (name, payload) => {
+    said.push({ name, payload });
+    for (const tap of [...(taps.get(name) ?? [])]) tap(payload);
   };
   const d: RegistryFixtureInstall = {
     env,
@@ -83,14 +84,18 @@ function deps(env: Record<string, string>, packaged = false) {
       return () => void (standIn = null);
     },
     emit,
-    onEmitted: (_name, listener) => {
-      taps.add(listener);
-      return () => void taps.delete(listener);
+    onEmitted: (name, listener) => {
+      const set = taps.get(name) ?? new Set<Tap>();
+      taps.set(name, set);
+      set.add(listener as Tap);
+      return () => void set.delete(listener as Tap);
     },
     unpublish: () => void held.push('org.changed'),
     holdRows: () => void held.push('org.rows.changed'),
   };
-  return { d, handlers, held, said, emit, taps, standIn: () => standIn };
+  const saidOf = <P>(name: string) => said.filter((s) => s.name === name).map((s) => s.payload as P);
+  const tapCount = () => [...taps.values()].reduce((n, set) => n + set.size, 0);
+  return { d, handlers, held, saidOf, emit, tapCount, standIn: () => standIn };
 }
 
 describe("the project registry's e2e fixture in main", () => {
@@ -106,7 +111,7 @@ describe("the project registry's e2e fixture in main", () => {
       expect(installRegistryFixture(f.d)).toBeNull();
       expect(f.handlers.size).toBe(0);
       expect(f.held).toEqual([]);
-      expect(f.taps.size).toBe(0);
+      expect(f.tapCount()).toBe(0);
       expect(f.standIn()).toBeNull();
     }
   });
@@ -124,10 +129,14 @@ describe("the project registry's e2e fixture in main", () => {
     expect(await ask('org.projects')).toEqual(PROJECTS);
     // the production registry's word is followed by the seeded value, which is not heard as another
     f.emit('org.projects.changed', { projects: [], keys: {}, moved: {}, removals: [], seen: {} });
-    expect(f.said.map((p) => p.projects.length)).toEqual([0, 1]);
+    expect(f.saidOf<OrgProjects>('org.projects.changed').map((p) => p.projects.length)).toEqual([0, 1]);
+    // and so is the production roster's, whose list holds this Mac alone: the page keeps the seeded machines, whichever
+    // of the two reaches it after its `machines.list` read
+    f.emit('machines.changed', { machines: [MACHINES[0]!] });
+    expect(f.saidOf('machines.changed')).toEqual([{ machines: [MACHINES[0]] }, { machines: MACHINES }]);
     stop!();
     expect(f.handlers.size).toBe(0);
-    expect(f.taps.size).toBe(0);
+    expect(f.tapCount()).toBe(0);
     expect(f.standIn()).toBeNull();
   });
 
@@ -154,7 +163,7 @@ describe("the project registry's e2e fixture in main", () => {
     installRegistryFixture(f.d);
     await f.handlers.get('org.removals.cancel')!({ id: 'held-1' });
     expect(logged()).toEqual([{ name: 'org.removals.cancel', input: { id: 'held-1' } }]);
-    expect(f.said.map((p) => p.removals)).toEqual([[]]);
+    expect(f.saidOf<OrgProjects>('org.projects.changed').map((p) => p.removals)).toEqual([[]]);
     expect(((await f.handlers.get('org.projects')!(undefined)) as OrgProjects).removals).toEqual([]);
   });
 
