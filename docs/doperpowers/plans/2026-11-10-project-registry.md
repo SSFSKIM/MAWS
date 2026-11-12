@@ -38,7 +38,7 @@ Status words: *specified* (ready to build), *building*, *landed* (on master, or 
 - [ ] M9 — The endpoint: the record signed and published, locations to sminos, the directory from the records, the offers (architect) — built and reviewed clean on `registry-app` (2026-11-10 14:07Z; 862266399..11f5be9ca, five review rounds at reviewer-high, Decision Logs 15 and 16; class 1a green, run 42827137236); lands with the branch
 - [ ] M10 — Main: the registry read, verified and kept; row keys; held removals (architect) — built and reviewed clean on `registry-app` (2026-11-10 15:17Z; 7407b65e1..cf8e2b2fe, five review rounds at reviewer-high, Decision Log 17; class 1a green, run 42840236348); lands with the branch
 - [ ] M11 — The page: one project per id, its locations, Add project, states (architect) — built and reviewed clean on `registry-app` (2026-11-10 16:50Z; 1ba432458..da785cb15, three review rounds at task-reviewer, Decision Log 18; class 1a green, run 42854702293; `e2e:settings` green on a hosted Mac with `e2e/registry.spec.ts`, 19 passed where the group held 18, run 42857042412); lands with the branch
-- [ ] M12 — `maws project` (architect) — specified; after M9 for a machine's own folders, after M11 for another machine's
+- [ ] M12 — `maws project` (architect) — built and reviewed clean on `registry-app` (2026-11-10 to 2026-11-12, 14:19Z; 0fc1d62d6..057a43d00, three review rounds at task-reviewer, Decision Logs 20 to 24; class 1a green, runs 42869703126 and 42872437271); then the whole-branch review at reviewer-high and the xhigh panel's fourteen findings (Decision Logs 25 and 26), the Mac gates on 9dd64cbe4 (see Outcomes); lands with the branch
 - [ ] M13 — The live check on three machines, and acceptance (architect, desk track, owner) — specified
 - [x] (2026-11-10) This document written from the approved design; the desk track's three requirements carried (Decision Log 1).
 - [x] (2026-11-10) First round of both reviews folded: the desk track's seven findings on M1 to M7 and Interfaces §A to §E (Decision Log 5) and the independent reviewer's seven on the whole execution section (Decision Log 6).
@@ -756,4 +756,14 @@ Minimum sminos versions: stored statements need the version that merges M5, whic
 
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+**2026-11-12, the app track, at the branch's finish (M8 to M12 on `registry-app`; M13, the live check, is the owner's).**
+
+What was built. M8 to M12 as the Plan of Work names them: the index's stored statements, anchors and the rule (§F, §G; `WIRE_MINOR` 34); the endpoint's signed record, `locations` for sminos and the directory from the records (§D, §H; 35); main's verified and kept records, row keys and held removals (§I); the page's one row per project id with its locations, Add project and states (§J); `maws project` with the page's confirmation sheet and its withdrawal (§K; 36). The wire from 34 to 36 is additive throughout; the fingerprint never moved.
+
+How it was checked. Each milestone converged in its own review loop (reviewer-high for M8 to M10, task-reviewer for M11 and M12, three to five rounds each). A whole-branch review at reviewer-high, scoped to the seams, then found two material faults no milestone review could see (a hub-supplied certificate could aim `maws` at another machine; retained rows were not derived again across an enrollment change: Decision Log 25), which put the branch through the xhigh panel: fourteen findings, all reproduced and fixed (Decision Log 26), and the reviewer-high pass on those fixes found one more, a short-circuited delete (1839872f5). Class 1a went green at every boundary and after every merge of master, P5 O15's two landings included; the Mac gates' account is the report file's.
+
+What surprised. The seams carried the faults: certificate trust between org-protocol and the targets `maws` reads, the index's lifecycle across enrollment, ordering between a statement change and its derivation, and the page's grouping meeting a test written before the registry (`e2e/remote.spec.ts`, by design under §J.1). Two reds on the Mac gates were the branch's own and invisible to every node suite: the per-session project check's cost (a memo per transaction, the measured case itself runner noise) and a harness race that a panel fix exposed (`machines.changed` at each change of mawsd's link replacing the fixture's seeded roster).
+
+What it leaves. M13's live check on three machines, and the residue the report file lists (each with where it lives and why it was left). The measured cases on the mini: MEASURED-CASES (pending the mini).
+
+Lesson for the next composite of this size: review the seams before the milestones are all built, not only after; the per-milestone reviews were thorough within their boundaries and blind across them by construction.
