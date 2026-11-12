@@ -10,12 +10,15 @@
 //   - `org.policy.set` and `org.owners.add`: the save the file holds for the address, else refused `busy`; nothing is
 //     signed or sent, so the production session behind it stays untouched.
 // The session's `org.changed` forwarding is stopped (`unpublish`), as the other org fixtures stop it, and so are the
-// production rows' `org.rows.changed` (`holdRows`): signed out, they would replace the seeded rows with none. Only a
-// harness build's main contains this module at all (app.ts's guard on `__MAWS_HARNESS_BUILD__`); a production launch
-// never installs it.
+// production rows' `org.rows.changed` (`holdRows`): signed out, they would replace the seeded rows with none. Each
+// `machines.changed` the production connection manager says (this Mac alone, again at each change of its daemon's link)
+// is followed at once by the seeded machines, so the page keeps them whichever reaches it after its read. Only a harness
+// build's main contains this module at all (app.ts's guard on `__MAWS_HARNESS_BUILD__`); a production launch never
+// installs it.
 import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import * as z from 'zod';
+import type { EventPayload } from '@shared/ipc/schema';
 import { MachinesSchema } from '@shared/ipc/schema/machines';
 import { OrgPolicySchema, OrgPolicySetResultSchema, OrgRowsSchema, OrgStatusSchema, OrgViewSchema, type OrgPolicy, type OrgPolicySetResult } from '@shared/ipc/schema/org';
 import { bareOf, isAddress, machineOf } from '@shared/machine/address';
@@ -32,6 +35,10 @@ export interface ShareFixtureInstall {
   unpublish(): void;
   /** Stops the production rows' `org.rows.changed`; called once installed. */
   holdRows(): void;
+  /** Main's `emit`, for the seeded `machines.changed`. */
+  emit(name: 'machines.changed', payload: EventPayload<'machines.changed'>): unknown;
+  /** Main's `onEmitted`: hears the connection manager's `machines.changed`. */
+  onEmitted(name: 'machines.changed', listener: (payload: EventPayload<'machines.changed'>) => void): () => void;
 }
 
 /** Null unless the fixture is asked for; throws, naming the file, when the schemas refuse it. Returns the uninstall. */
@@ -56,6 +63,16 @@ export function installShareFixture(deps: ShareFixtureInstall): (() => void) | n
 
   const readOf = (machine: MachineRef): OrgPolicy => policies.find((p) => p.machine === machine) ?? { ok: false, machine, reason: 'offline' };
   const saveOf = (address: string): OrgPolicySetResult => saves[address] ?? { ok: false, reason: 'busy' };
+  // the seeded machines said again after each roster the production says; never heard as its own
+  let saying = false;
+  const sayMachines = () => {
+    saying = true;
+    try {
+      deps.emit('machines.changed', { machines });
+    } finally {
+      saying = false;
+    }
+  };
   const offs = [
     deps.intercept('org.status', () => status),
     deps.intercept('org.view', () => view),
@@ -71,6 +88,9 @@ export function installShareFixture(deps: ShareFixtureInstall): (() => void) | n
     }),
     deps.intercept('org.policy.set', (input) => saveOf(input.address)),
     deps.intercept('org.owners.add', (input) => saveOf(input.address)),
+    deps.onEmitted('machines.changed', () => {
+      if (!saying) sayMachines();
+    }),
   ];
   return () => offs.forEach((off) => off());
 }

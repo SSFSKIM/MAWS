@@ -430,8 +430,9 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
     // P5 O8 M7a Task 3: the Channel tab's e2e look seeds org.status and a project's org.channel.open (org/channel-fixture.ts)
     installChannelFixture({ env: process.env, packaged: app.isPackaged, intercept: interceptCommand, unpublish: unpublishOrgStatus });
     // P5 O8 M6b Task 3: the Share sheet's and the reach marks' e2e look seeds org.*, org.rows and machines.list
-    // (org/share-fixture.ts), and holds the production rows' org.rows.changed, which signed out would clear the seed
-    installShareFixture({ env: process.env, packaged: app.isPackaged, intercept: interceptCommand, unpublish: unpublishOrgStatus, holdRows: () => void (rowsHeld = true) });
+    // (org/share-fixture.ts), holds the production rows' org.rows.changed, which signed out would clear the seed, and
+    // follows each production machines.changed (this Mac alone) with the seeded machines
+    installShareFixture({ env: process.env, packaged: app.isPackaged, intercept: interceptCommand, unpublish: unpublishOrgStatus, holdRows: () => void (rowsHeld = true), emit, onEmitted });
     installRegistryFixture({ env: process.env, packaged: app.isPackaged, intercept: interceptCommand, standIn: standInForMachines, emit, onEmitted, unpublish: unpublishOrgStatus, holdRows: () => void (rowsHeld = true) }); // the project registry's M11: org.* and org.projects seeded, the other machines' project acts stood in for (org/registry-fixture.ts)
   }
   // P5 O6 M3: every other machine through the connection manager (one link per machine; MAWS_LOCAL_MACHINES names another
