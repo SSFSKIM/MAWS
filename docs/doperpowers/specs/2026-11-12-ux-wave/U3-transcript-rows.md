@@ -40,7 +40,7 @@
    *  Empty for the person's typed prompt and for anything that is no arrival. */
   export function readArrivals(row: unknown): Arrival[];
 
-  /** Whose turn it is when the arrival opens one: `own` is the person's, `peer` a peer's, every other class the engine's. */
+  /** Whose turn it is when the arrival opens one: `own` and `consent` are the person's, `peer` a peer's, every other class the engine's. */
   export function turnOriginOf(arrival: Arrival): 'human' | 'peer' | 'engine';
 
   /** MAWS's own answer envelope read from a message's text alone, for a message still waiting in MAWS's queue. */
