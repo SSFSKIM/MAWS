@@ -1,16 +1,17 @@
 # Readable sources of the reference apps
 
-The research under this directory reads the code of the three apps that set MAWS's bar: the ChatGPT/Codex
-desktop app (UX quality), Claude Desktop (engine integration, the same engine) and T3 Code (source readability;
-open source, so its tree is a plain clone). Their extractions live
+The research under this directory reads the code of the apps that set MAWS's bar: Claude Desktop, the single
+benchmark for UX quality and engine integration (the same engine; the owner's ruling of 2026-11-12, charter D-14),
+and T3 Code (source readability; open source, so its tree is a plain clone). The ChatGPT/Codex desktop app was a
+reference until that ruling; its tree is deleted, and research that cites its builds stands as written. Their extractions live
 outside the repository, because the vendors' terms forbid redistribution, and are regenerated per build by one
 toolchain. This page says where everything is and how to cite it.
 
 | | location | current build | older builds kept |
 |---|---|---|---|
-| ChatGPT / Codex app | `~/codex-app-src/readable/<build>/` | `chatgpt-26.1016.62342` (published 2026-10-22 17:33Z, runtime 0.0.33; acquired from the appcast, not installed) | `chatgpt-26.1016.51333` (published 2026-10-21 02:19Z, runtime 0.0.33), `chatgpt-26.1013.40934` (published 2026-10-16; installed build at acquisition), `chatgpt-26.1013.31256` (published 2026-10-15; incomplete conversion, see below), `chatgpt-26.928.40906` (published 2026-10-01, runtime 0.0.27, `@oai/cua` 0.2.5), `chatgpt-26.928.31416`, `chatgpt-26.924`, `chatgpt-26.917`, `codex-26.623`, `cua-node-0.0.24` |
-| Claude Desktop | `~/claude-desktop-re/readable/<build>/` | `app-3.6556.2` (published 2026-10-23, Electron 44.9.3; acquired from the update feed's stable channel, not installed) | `app-2.42304.2` (installed build at acquisition; Electron 44.7.2), `app-2.42304.0` (2026-10-18, Electron 44.7.2), `app-2.16120.0`, `app-2.9939.2` |
-| claude.ai web app | inside `app-2.42304.0/web/` (shipped with the app from 2.16120 on) | | `app-2.16120.0/web/`, `~/claude-desktop-re/readable/web-2026-09-25/` (cache capture) |
+| ChatGPT / Codex app (no longer a reference) | `~/codex-app-src/readable/<build>/`, deleted 2026-11-12 on both Macs | none | none; research citing `chatgpt-*` and `codex-*` builds can no longer be re-read |
+| Claude Desktop | `~/claude-desktop-re/readable/<build>/` | `app-5.1231.2` (Electron 45.2.1; the installed build; `CHANGES-app-3.6556.2..app-5.1231.2.md` in its directory) | `app-3.6556.2` (published 2026-10-23, Electron 44.9.3). The 2.x builds' readable trees are gone; `~/claude-desktop-re/app-2.9939.2/` and `ARCHITECTURE-2.9939.2.md` remain |
+| claude.ai web app | inside `app-5.1231.2/web/` (shipped with the app from 2.16120 on) | | `app-3.6556.2/web/`, `~/claude-desktop-re/readable/web-2026-09-25/` (cache capture) |
 | T3 Code (open source, MIT) | `~/t3code-src` (git clone of `pingdotgg/t3code`) | `148e6dee` (2026-10-01) | `git -C ~/t3code-src log` holds the history; cite `<path>:<line>` at a named commit |
 | toolchain | `~/app-source-tools` (git) | | |
 
