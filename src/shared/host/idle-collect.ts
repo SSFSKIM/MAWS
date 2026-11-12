@@ -21,8 +21,9 @@
 // guard finds nothing grown), and the next is armed only by the next activity, so an idle process is never woken by it
 // more than once after its last activity, and never periodically.
 //
-// A collection is synchronous (12 to 28 ms), so it must never land on work. The entry's telling can come late: a source
-// can begin work before it tells (a send marks its use before its queue changes, and tells that only once its save
+// A collection is synchronous (12 to 28 ms at an idle entry; 48 to 54 ms for the engine host's quiet entries on the
+// mini, run 43310045595), so it must never land on work. The entry's telling can come late: a source can begin work
+// before it tells (a send marks its use before its queue changes, and tells that only once its save
 // settles). So the moment of collecting asks the process's own predicate again, over its live state: `quiet` for an idle
 // entry; for a quiet one, its caller's `settled` (nothing in flight or running, clients or not), no work lifetime open
 // (`work()`, for work that runs past a request or outside one: a response body still streaming, a sync with the hub),
@@ -35,9 +36,9 @@
 //
 // What no hook names can still be under way when a quiet collection lands: work that runs past its answer with no
 // lifetime, on no I/O at that instant (an async step parked on a timer, a CPU pass between macrotasks). The cost is one
-// 12 to 28 ms pause of that work per quiet period, behind the growth guard, never a lost or wrong result; the rule that
-// keeps it rare is that a new kind of long-running work (an operation that answers before it ends, a background loop)
-// takes a work lifetime where it is created.
+// pause of that work per quiet period, about 50 ms (48 to 54 ms measured on the mini), behind the growth guard, never a
+// lost or wrong result; the rule that keeps it rare is that a new kind of long-running work (an operation that answers
+// before it ends, a background loop) takes a work lifetime where it is created.
 import { getHeapStatistics, setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
 
@@ -49,8 +50,9 @@ export type Collect = () => void;
 export const GROWTH_BYTES = 1 << 20;
 
 // Decision Log 273: a quiet entry's period. Long enough that a burst of work, a person's or an agent's (seconds between
-// its steps), has ended rather than paused, so the 12 to 28 ms collection lands after it; short enough that the garbage
-// of a scene is given back well inside the measured scenes' 120 s settle, before their first sample.
+// its steps), has ended rather than paused, so the collection's pause (48 to 54 ms measured on the mini) lands after it;
+// short enough that the garbage of a scene is given back well inside the measured scenes' 120 s settle, before their
+// first sample.
 export const ACTIVITY_QUIET_MS = 30_000;
 
 // A quiet entry held off by the process's own I/O alone is asked again this much later, so many times at most (I/O that
