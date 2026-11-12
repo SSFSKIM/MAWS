@@ -450,6 +450,9 @@ export class ProjectStore {
 
   // The project registry (Interfaces §F.4, moment (b)): told after the commit that made a row the user's by a first MAWS use
   private usedListener: ((id: ProjectId) => void) | null = null;
+  // Moved by each write to what `sessionJoined` reads of the rows, besides its own checks' writes: a statement moved (a
+  // declaration, a removal, a mint, a link, a relocation, a restore) or an org answer written
+  private joinInputs = 0;
   onUsed(listener: ((id: ProjectId) => void) | null): void {
     this.usedListener = listener;
   }
@@ -607,6 +610,7 @@ export class ProjectStore {
       const at = observed?.at ?? null;
       if (before !== null && before.key === org.key && before.name === org.name && before.source === org.source && before.smnsId === org.smnsId && row.org_remote === remote && row.org_hub === hub && row.org_by === by && row.org_at === at) return;
       this.db.update('projects', 'id', id, { org_key: org.key, org_name: org.name, org_source: org.source, org_smns_id: org.smnsId, org_remote: remote, org_hub: hub, org_by: by, org_at: at });
+      this.joinInputs += 1;
       this.changed();
     });
   }
@@ -816,8 +820,12 @@ export class ProjectStore {
    * replaced one files nothing under the old project (M8's review 1, finding 3). And where a `.smns` on the row's path
    * belongs to a folder that is not declared yet, the row is derived again after the commit, so that folder is declared
    * (§F.5; finding 9). Without a git call: a `stat` per folder up the path, and a derivation only where a promotion is due.
+   * Once per row in a transaction, until what the checks read of the rows is written there (`joinInputs`): a scan that
+   * files thousands of sessions under one row checks it for the first, and the answer stands for the rest. A folder that
+   * changes on disk meanwhile is the folder checks' to find, as it is between any two sessions.
    */
   sessionJoined(id: ProjectId): void {
+    if (!this.db.firstInTransaction(`joined:${id}:${this.joinInputs}`)) return;
     const row = this.db.get<ProjectRow>('SELECT * FROM projects WHERE id = ?', id);
     if (!row) return;
     if (declared(row) && ownStatement(row) !== null) this.observeRow(row);
@@ -885,6 +893,7 @@ export class ProjectStore {
 
   // in the open transaction: a stored statement, or whether one counts (a declared row's path, its hiding), changed
   private statementsMoved(): void {
+    this.joinInputs += 1;
     this.db.run("UPDATE index_meta SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT) WHERE key = 'statements_gen'");
   }
 

@@ -593,6 +593,42 @@ describe('the stored statements', () => {
       expect(row(other)?.org?.smnsId).not.toBe(otherId);
     });
 
+    it('F3a: sessions filed in one transaction check their project once, and the first still finds a replaced folder', async () => {
+      await open();
+      const plain = folder('swapped-batch');
+      const id = (await add(plain)).project.org!.smnsId;
+      renameSync(plain, `${plain}-old`);
+      mkdirSync(plain);
+      // the join's checks: the statement's anchor read and the walk up for a `.smns` (ProjectStore's private steps)
+      const store = index.projects as unknown as Record<'observeRow' | 'undeclaredSmns', (...args: never[]) => unknown>;
+      const observed = vi.spyOn(store, 'observeRow');
+      const walked = vi.spyOn(store, 'undeclaredSmns');
+      let checks: number[] = [];
+      const records = index.transaction(() => {
+        const filed = Array.from({ length: 3 }, () => index.sessions.upsertFromSummary(summary({ directory: plain })).record);
+        checks = [observed.mock.calls.length, walked.mock.calls.length];
+        return filed;
+      });
+      expect(new Set(records.map((record) => record.projectId)).size).toBe(1);
+      expect(index.projects.record(records[0]!.projectId!)).toMatchObject({ state: 'replaced' });
+      expect(index.projects.record(records[0]!.projectId!).org?.smnsId).not.toBe(id);
+      expect(checks).toEqual([1, 1]);
+      // a session filed in a later transaction checks again, and so does one filed after a statement moved in it
+      const other = folder('swapped-batch-other');
+      await add(other);
+      observed.mockClear();
+      walked.mockClear();
+      index.transaction(() => {
+        index.sessions.upsertFromSummary(summary({ directory: plain }));
+        index.sessions.upsertFromSummary(summary({ directory: plain }));
+        checks = [observed.mock.calls.length, walked.mock.calls.length];
+        index.projects.hide(row(other)!.id);
+        index.sessions.upsertFromSummary(summary({ directory: plain }));
+        checks.push(observed.mock.calls.length, walked.mock.calls.length);
+      });
+      expect(checks).toEqual([1, 1, 2, 2]);
+    });
+
     it('F3b: a session filed into a row under a replaced folder’s statement is not filed under the old project', async () => {
       await open();
       const parent = folder('swapped-parent');

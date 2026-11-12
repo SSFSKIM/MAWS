@@ -1,7 +1,8 @@
 // The index's one SQLite connection (C4 execution document, M4; residue *SQLite binding*): `node:sqlite`'s synchronous
 // `DatabaseSync` behind a small wrapper, so a swap to another driver is this file. Statements are cached by SQL text;
 // `transaction` is `BEGIN IMMEDIATE` … `COMMIT` (a nested call joins the outer one); work deferred with `defer` runs once
-// per key after the outermost commit and is dropped on rollback, which is how the stores notify only what committed.
+// per key after the outermost commit and is dropped on rollback, which is how the stores notify only what committed;
+// `firstInTransaction` answers once per key per transaction, for work whose answer stands until it ends.
 import { existsSync, renameSync } from 'node:fs';
 import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlite';
 import type { AddedColumn, AddedTable, Migration, Repair } from './migrations';
@@ -13,6 +14,7 @@ export type Value = SQLInputValue | boolean;
 export class Db {
   private readonly statements = new Map<string, StatementSync>();
   private deferred: Map<string, () => void> | null = null; // non-null exactly while a transaction is open
+  private seen: Set<string> | null = null; // the keys `firstInTransaction` took in the open transaction
 
   constructor(
     private readonly db: DatabaseSync,
@@ -69,16 +71,19 @@ export class Db {
     const deferred = new Map<string, () => void>();
     this.db.exec('BEGIN IMMEDIATE');
     this.deferred = deferred;
+    this.seen = new Set();
     let result: T;
     try {
       result = fn();
       this.db.exec('COMMIT');
     } catch (error) {
       this.deferred = null;
+      this.seen = null;
       if (this.db.isTransaction) this.db.exec('ROLLBACK');
       throw error;
     }
     this.deferred = null;
+    this.seen = null;
     for (const [key, run] of deferred) {
       try {
         run();
@@ -93,6 +98,15 @@ export class Db {
   defer(key: string, fn: () => void): void {
     if (!this.deferred) fn();
     else if (!this.deferred.has(key)) this.deferred.set(key, fn);
+  }
+
+  // Whether `key` is new to the open transaction, which then holds it until the transaction ends; true every time
+  // outside one.
+  firstInTransaction(key: string): boolean {
+    if (!this.seen) return true;
+    if (this.seen.has(key)) return false;
+    this.seen.add(key);
+    return true;
   }
 
   private usable(): void {
