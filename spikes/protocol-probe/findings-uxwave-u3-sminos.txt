@@ -1,0 +1,134 @@
+UX wave, child U3, probe 3: sminos's deliveries, on the live wire and in the file, on engine 2.1.322
+(docs/doperpowers/specs/2026-11-12-ux-wave/U3-transcript-rows.md, "Probes and checks" 3; it serves O-41, X-032 and the
+`peer`, `own` and `answer` classes of UC-2 in docs/doperpowers/specs/2026-11-12-ux-wave-design.md; 2026-11-12, VM
+dc-uxprobe-dc94, branch ux-wave/probe-arrivals)
+
+Question. In a session MAWS runs with the sminos bridge loaded, does the wire carry (a) the bridge's prompt as the user
+with its origin object whole (`asUser`, the plugin's name); (b) a row the bridge appends into a running turn; (c) a
+hook's added context, by which an answer to a question asked without waiting can arrive?
+
+Verdict. The spec's premise does not hold for a session MAWS runs: under MAWS's launch the bridge delivers nothing.
+  - MAWS sets MAWS_LANE=B and SMNS_MEMBER=<the engine's parent>, and sminos 1.46.2's bridge then only observes: it
+    refuses `deliver`, `steer` and `answer` with code lane-b (hooks/mods/bridge.tsx:309-319, 413-414, 1825), and
+    `sminos send` falls back to the engine's inbox (skills/sminos/scripts/sminos_control.py:109, 238). Observed: every
+    send to such a session, the owner's and a peer's, idle and busy, arrived through the inbox as origin `peer`
+    (4 of 4), and `sminos steer` was refused outright, idle and busy ("refused (lane-b): MAWS controls this session"),
+    with no fallback at all (2 of 2). So in a session MAWS runs, forms (a) and (b) never occur, and X-032's fallback
+    (`[sminos steer from human]` through the inbox) does not either: the steer simply fails.
+  - Where the bridge does control (any session without the lane-B marker: a terminal session, or a headless run
+    started by something else), the probe recorded the forms the spec asks about:
+      (a) the idle owner's send: YES, on the wire as a replayed `user` frame with origin {kind: "plugin", name:
+          "sminos", asUser: true} whole, text opening "[sminos message from human id=…]" (1 of 1 headless; the file
+          row the same, 1 of 1 headless and 1 of 1 terminal).
+      (b) the owner's send and the owner's steer during a running turn: NOT on the wire as a `user` frame (0 of 2).
+          The file holds a meta `user` row of origin {kind: "plugin", name: "sminos"} (no asUser) with the frame
+          line. The only live trace is the mod's own log line, `system/ui_log {plugin: "sminos", text: "delivered:
+          [sminos message from human id=…] …"}` (and "steer: …"), sent because MAWS attaches as the desktop surface.
+      (c) the answer to sminos's asynchronous question: sminos registers that question tool only in an interactive
+          session (hooks/mods/ask.tsx:1509-1514), so it cannot occur in a session MAWS runs. In a terminal session
+          the answer was written as a `hook_additional_context` attachment (1 of 1). Whether such context reaches the
+          wire, asked of the engine with a command hook of the probe's own under MAWS's launch: the attachment never
+          does, but `--include-hook-events` puts the hook's raw stdout, the JSON holding `additionalContext`, in
+          `system/hook_response.output` (2 of 2: PostToolUse and UserPromptSubmit). sminos's answer comes from a mod
+          (a function hook), not a command hook; whether a mod's context also shows in a hook_response was not shown.
+  - A peer's message is always the inbox's (origin `peer`, `<cross-session-message>`), on every arm, idle and busy,
+    and it is on the wire (replayed, isSynthetic true) both idle and busy (8 of 8).
+  - The owner's send through the inbox is marked only by its frame line: origin {kind: "peer", from: "unknown",
+    name: "human", body: "[sminos message from human id=…]\n…"}. UC-2 rule 2 ("sender human is the person: own") is
+    what tells it from a peer's; the origin's `name: "human"` says the same.
+  Spec outcomes: (a) is on the wire as expected but only off MAWS's lane; (b) is not on the wire, so the spec's branch
+  "it is drawn when the session is read from its file … the acceptance names the routes" applies, and for a session
+  MAWS runs the case does not arise; (c): U1 is to be told that sminos's asynchronous answer cannot arrive in a
+  session MAWS runs (MAWS's own ask replaces it), and that a hook's added context is on the wire only inside
+  hook_response's raw output.
+
+Containment. The run could not reach the owner's desk, and this was established before it ran: sminos keeps all its
+  state under $SMINOS_HOME, by default $HOME/.claude/sminos (skills/sminos/scripts/sminos.py:283-291); the hub is
+  reached only by a daemon's uplink through mawsd's endpoint file rl10.json under ~/.config/MAWS (sminos_rl10.py, its
+  head comment and path(), :78-93), and only once daemon/identity.json exists. vm-run.sh's namespace gives a scratch
+  HOME and masks the owner's ~/.claude, ~/.config and ~/.ssh, so the plugin's state is private and unenrolled. The
+  scenario refuses to run otherwise (`contained()` in uxwave-u3-sminos.mjs: HOME under /tmp, no SMINOS_HOME,
+  DAEMON_HOME, SMINOS_RL10, MAWS_USER_DATA, XDG_CONFIG_HOME or MAWS_HOLDER_SOCKET, the owner's endpoint file and
+  sminos state not visible, no identity.json, no managed settings), and checks it again before each sminos verb. The
+  CLI's only connections are local sockets (the bridge's and the target engine's inbox). `sminos list --json` in the
+  scratch state lists only the probe's own project "uxw" (project_kind "local") and its one session, before and after.
+
+Method.
+  Engine 2.1.322, model haiku (claude-haiku-5-5), route: the gateway through vm-run.sh's loopback forward
+  (spikes/protocol-probe/VM.md); sminos 1.46.2 from the VM's marketplace copy
+  (/var/lib/devcloud/marketplaces/doperpowers/sminos), loaded with `--plugin-dir`, with
+  CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 (its mods, the bridge among them, run only under it; the owner's user settings
+  set it). `sminos project init --name uxw` in the scratch work folder; sends from the scenario's own process inside
+  the namespace: `sminos send <session id> <text>` with no CLAUDE_CODE_SESSION_ID (the sender is `human`), the same
+  with CLAUDE_CODE_SESSION_ID=<a uuid of the probe's> (a peer), `sminos steer <session id> <text>`, and in the
+  terminal `sminos answer <session> <request> mango`, the request id read from `sminos watch <session> --json`.
+  scenarios/pass3/uxwave-u3-sminos.mjs:
+    arm maws (u3-sminos-r1-maws.jsonl + .transcript.jsonl): launched as MAWS launches (uxwave-common.mjs: the flags
+      of src/engine-host/launch.ts with --replay-user-messages and --include-hook-events, setting sources
+      user,project,local, --permission-mode auto, --await-initialize, --session-id, the maws server's allow and
+      disallow pair, --settings {"dialogExpiry":"never"}; MAWS's environment constants with MAWS_LANE=B and
+      SMNS_MEMBER = the engine's parent; MAWS's initialize, ui_attach, ui_panes, set_max_thinking_tokens), plus
+      --plugin-dir. Busy cases send 5 s into a 25 s foreground python wait.
+    arm bridge (u3-sminos-r1-bridge.jsonl + .transcript.jsonl): the same launch without MAWS_LANE.
+    arm terminal (u3-sminos-r1-terminal.terminal.json + .transcript.jsonl): the interactive engine in tmux
+      (--model haiku --plugin-dir …, auto mode), the same sends typed around, and the asynchronous question.
+  scenarios/pass3/uxwave-u3-hookctx.mjs (u3-hookctx.jsonl + .transcript.jsonl): MAWS's launch, project settings with a
+    PostToolUse(Bash) and a UserPromptSubmit command hook each printing {"hookSpecificOutput": {…, "additionalContext":
+    …}}.
+  Each case ran once per arm.
+
+Observed.
+  arm maws:
+    owner idle: `user` isReplay true, isSynthetic true, origin {kind: "peer", from: "unknown", verifiedPeerPid,
+      verifiedPeerProcStart, name: "human", body: "[sminos message from human id=328cfd59]\n…"}, text "Another Claude
+      session sent a message:\n<cross-session-message from-name=\"human\">…" (seq 54), opening a turn; file line 32:
+      the same origin, isMeta true, promptSource "system", turnOrigin "peer".
+    peer idle: the same with name "session:7ef6ac00" and sminos's reply line in the body (100; line 41).
+    owner busy: `user` isReplay true, isSynthetic true, origin peer name "human", text the bare
+      <cross-session-message> (264); file line 59: queued_command, commandMode "prompt", the same origin.
+    peer busy: the same, name "session:…" (387; line 80).
+    steer busy and idle: `sminos steer` exit 1, "refused (lane-b): MAWS controls this session" (meta 440, 461);
+      nothing reached the session.
+  arm bridge:
+    owner idle: `user` isReplay true, origin {kind: "plugin", name: "sminos", asUser: true}, text "[sminos message
+      from human id=cf037396]\nUXW owner idle: …" (53), result origin the same (63); file line 31: the same origin,
+      promptSource "system", turnOrigin "system".
+    peer idle: inbox, origin peer (72; line 39).
+    owner busy: no `user` frame on the wire; `system/ui_log {plugin: "sminos", text: "delivered: [sminos message from
+      human id=40b84d2e] UXW owner busy: also say THREE."}` (255); the model read it (result 309 "DONE\nTHREE"); file
+      line 64: `user`, isMeta true, origin {kind: "plugin", name: "sminos"}, content [text "[sminos message from human
+      id=40b84d2e]\n…"], no promptSource or turnOrigin.
+    peer busy: inbox, origin peer, replayed (340; line 82 queued_command commandMode "prompt").
+    steer busy: `sminos steer` "steered …: its next model request reads it (row dedfb4ef…)"; no `user` frame;
+      `system/ui_log` "steer: UXW steer busy: also say FIVE." (499); result "DONE\nFIVE" (550); file line 110: `user`
+      isMeta true, origin {kind: "plugin", name: "sminos"}, "[sminos steer from human]\nUXW steer busy: …", uuid =
+      the row id sminos printed.
+    steer idle: refused, "no turn is running to steer: send it instead".
+  arm terminal (file only): owner idle, line 37 (origin plugin asUser, turnOrigin "system"); peer idle, line 46
+    (origin peer); owner busy, line 69 (origin plugin, isMeta, no asUser) followed by line 70, `system` informational
+    level notice "sminos: delivered: …"; steer busy, lines 84-85 the same with "[sminos steer from human]" and
+    "sminos: steer: …"; the asynchronous question (mcp__sminos__AskUserQuestion, request = its tool-use id), answered
+    while a later foreground command ran: line 112, attachment `hook_additional_context`, content ["The human
+    responded to your async AskUserQuestion (call toolu_01LH…): Your questions have been answered: \"Which fruit do you
+    prefer?\"=\"Mango\". You can now continue with these answers in mind."]; the model used it.
+  hook context (u3-hookctx.jsonl): hook_started/hook_response for UserPromptSubmit (26, 27) and PostToolUse:Bash (87,
+    88), each hook_response with `output` and `stdout` = the hook's JSON with additionalContext, exit_code 0, outcome
+    success; no frame of type attachment and no `user` frame holding the context; file lines 10 and 29 (and 43 for the
+    second prompt): attachment hook_additional_context, content [the context]. The model saw both (results 175, 200).
+
+Inference, in the spec's terms.
+  - O-41's live route for a session MAWS runs: today's inbox reading (origin `peer`) is the whole of it; the bridge
+    forms are file-route matters (terminal sessions), where (a) is the `user` row with asUser and (b) the meta row
+    of origin plugin without asUser. A reader keyed on `asUser` alone misses (b); the frame line is the mark for
+    both, as UC-2 rule 2 says.
+  - X-032: in a session MAWS runs, `sminos steer` is refused rather than delivered by a fallback. The person's steer
+    to such a session is MAWS's own (its steer event); the `own` class by fallback arises only for a session with
+    no bridge at all, which this probe did not run.
+  - The terminal writes the mod's log line as a `system` informational row after each appended delivery ("sminos:
+    delivered: …", "sminos: steer: …"); a file reader that draws informational rows draws the delivery twice.
+  - For U1: an answer by hook context is not an arrival a session MAWS runs can receive from sminos; from a command
+    hook it is on the wire only as the raw stdout of hook_response.
+
+Not run. A session with no bridge (X-032's fallback route). A peer that is a real second Claude session (the peer
+  sends carried a session id of the probe's own; the delivery route is the same inbox). sminos's asynchronous answer
+  delivered while the session is idle (a plugin prompt without asUser, per ask.tsx) or on the next prompt.

@@ -16,6 +16,7 @@
 //   monitor      a Monitor on a command that prints three lines and exits, the model idle
 //   monitor-busy a Monitor whose events arrive during a foreground command
 //   prompt-stall a background command that waits on an interactive prompt (the engine's stall notice), then stopped
+//   fg           foreground commands of 1 s, 5 s (exit 0) and 5 s (exit 3), none of which the model is notified of
 //   checkin      a quiet background command (the engine's check-in; needs tengu_silent_heron, which the owner's cache
 //                has at 0: run it with UXW_CHECKIN_MS=10000, which writes the gate into the scratch HOME's cache)
 import {mawsLaunch,wireArrivals,fileArrivals,rowsOf,keepTranscript,waitFor,idle,prompt,turn,sys,textOf,delay,cost} from './uxwave-common.mjs';
@@ -82,6 +83,10 @@ export default async()=>{
     const first=await waitFor(p,f=>f.type==='result',{after:from});const n=await engineTurn(p.frames.find(r=>r.frame===first)?.seq??from,120000);await idle(p);
     const stopAt=p.seq;if(task)p.note({event:'uxw_stop',task_id:task.task_id,response:await p.request('stop_task',{task_id:task.task_id}).catch(e=>({error:e.message}))});
     await told(/uxw stall/,stopAt,30000);await engineTurn(stopAt,30000);await idle(p);record(name,from,{stallTurnSeen:!!n,stopSeq:stopAt});
+   }
+   else if(name==='fg'){ // foreground commands (no notification to the model): what the wire and the file show for them
+    const from=p.seq;await turn(p,'Do these in order with the Bash tool, each in the foreground (run_in_background false): (1) run exactly `python3 -c "import time; time.sleep(1)"`, description "uxw fg short"; (2) run exactly `python3 -c "import time; time.sleep(5); print(\'UXW-FG-OK\')"`, description "uxw fg ok"; (3) run exactly `python3 -c "import time,sys; time.sleep(5); sys.exit(3)"`, description "uxw fg fail". Then reply with only the word DONE.');
+    await idle(p);record(name,from);
    }
    else if(name==='checkin'){
     const from=p.seq;prompt(p,`Run exactly \`sleep 240\` with the Bash tool, run_in_background true, description "uxw quiet". ${NOTE} If you are later told it is quiet, reply with only the word NOTED and do nothing else.`);
