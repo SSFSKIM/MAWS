@@ -19,15 +19,18 @@ How to see it working: the tests named under Acceptance fail at the commit that 
 - [x] (2026-11-12 22:33Z) Execution document written; the section checked against the code at `25942f5d1`; six points reported to the wave's architect (Surprises & Discoveries).
 - [x] (2026-11-12 22:45Z) The architect's rulings on the six points folded in (Decision Log): five Shift conditions, the rebinding guard and the hint are in scope; decisions 4, 8 and 10 stand.
 - [x] (2026-11-12 22:59Z) Adversarial review of the revised document: two findings (the order of `effectiveChord`'s rules; the sample rows against U3's row), both fixed here, and three additions from the architect folded in (Decision Log).
-- [ ] Master merged into the branch (Concrete Steps, 1).
-- [ ] The tests of Acceptance 1 to 3 and 8 committed first and run on the VM; the failing summary lines recorded here.
-- [ ] The table: the three fields, the rows of View and Go in menu order with their `submenu`, the nine surface titles, the three defaults, `effectiveChord`'s rules.
-- [ ] `menuTemplate`: nesting, the Edit placement, Developer ▸, separators.
-- [ ] The rebinding guard: the constant of build F's ids, the stored keymap's keys, `isRebindable`.
-- [ ] `keymapGroups` and the capture's conflict rule; Settings ▸ Keyboard's row that is not rebindable, and its hint; the dispatcher and the palette blind to fixed rows.
-- [ ] The five Shift conditions with their tests; the two filter pins of A7.
-- [ ] The e2e edits written and typechecked (not run by the executor).
-- [ ] The record: the charter's two sentences, three insertions.
+- [x] (2026-11-12) Master merged into the branch (Concrete Steps, 1): `origin/master` `48619c824`, merge `12236850c`; it brought `docs/` only (the root and the register), nothing outside `docs/`.
+- [x] (2026-11-12) The tests of Acceptance 1 to 3 and 8 committed first (`d61674b96`, with the constant of build F's ids and the sample rows they read: decision 16) and run on the VM. The failing summary lines, at `d61674b96`:
+  - the first command of Concrete Steps 2: `Test Files  11 failed | 13 passed (24)`, `Tests  39 failed | 448 passed (487)`, exit 1. Among the failures: `surface.terminal: expected null to be 'Cmd+J'`; `expected [ 'Toggle Terminal surface', …(8) ] to deeply equal [ 'Terminal', 'Review', 'Files', …(6) ]`; `expected [ 'Appearance' ] to deeply equal [ 'Tabs', 'More surfaces', …(3) ]`; `expected 'Cmd+Y' to be 'Cmd+Enter'` (an override of a row that is not rebindable read); `expected 'Cmd+1' to be null` (Select tab not yielding to a stored rebinding); `Unable to find an accessible element with the role "table" and name "View › Tabs"`; and `TypeError: idsOf is not a function` / `isRebindable is not a function` where a test reaches a helper the head adds.
+  - the second: `Test Files  8 failed | 13 passed (21)`, `Tests  10 failed | 411 passed (421)`, exit 1: each of the five handlers takes ⇧⌘D or ⇧⌘F (`d: expected false to be true`, the key prevented; the design canvas `{ kept: [ false, false ], reached: +0 }`, prevented and stopped), in both of the artifact projects.
+  - Not red, by construction: the schema test of Acceptance 8 (the table's ids and the constant are the same 58 at this landing, so it pins the guard for the first row added after it) and the two filter pins of Acceptance 3 (the terminal's filter and `keyAction` already leave the three chords to the menu).
+- [x] (2026-11-12) The table: the three fields, the rows of View and Go in menu order with their `submenu`, the nine surface titles, the three defaults, `effectiveChord`'s rules (`9038349ff`).
+- [x] (2026-11-12) `menuTemplate`: nesting, the Edit placement, Developer ▸, separators.
+- [x] (2026-11-12) The rebinding guard: the constant of build F's ids (`src/shared/keymap/build-f.ts`), the stored keymap's keys, `isRebindable`.
+- [x] (2026-11-12) `keymapGroups` and the capture's conflict rule; Settings ▸ Keyboard's row that is not rebindable, and its hint; the dispatcher and the palette blind to fixed rows.
+- [x] (2026-11-12) The five Shift conditions with their tests; the two filter pins of A7.
+- [x] (2026-11-12) The e2e edits written (`e2e/shell.spec.ts`'s palette step; one scene in `e2e/ux2-shell.spec.ts`) and typechecked (not run by the executor).
+- [x] (2026-11-12) The record: the charter's two sentences, three insertions.
 - [ ] On the VM: typecheck, lint on the changed paths, the whole unit suite. Hand-back: the executor stops here.
 - [ ] The architect's: class 1a green on the head the executor hands back; the xhigh panel, run by the session that keeps master; its findings settled; class 1a again on the final head if the panel changed the branch; the pull request.
 
@@ -340,6 +343,17 @@ The collision table's other statements about the three chords hold: no row or me
 - Decision: the adversarial review's two findings and the architect's three additions, folded in. (1) `effectiveChord`'s order (Interfaces, A; decisions 7, 10 and 11): only a fixed row answers its default always; a row that is not rebindable has its own override ignored and still yields its default to another row's stored rebinding. (2) The sample rows (Interfaces, F; decision 12): the `menu` sample moves off ⌘F and out of the Find submenu, and the samples must stay green with every row of Interfaces, E present. (3) Verification is settled as the first entry now reads. (4) The charter gains a second sentence, for the settings guard (The record; decision 13). (5) Master is merged first; the executor stops after the checks on the VM; the class 1a gate and the pull request are the architect's.
   Rationale: (1) as first written, a row that is not rebindable returned its default before the yield was looked at. Every row the wave adds is such a row, so a stored `palette.open` on ⌘P and U6b's Go to file would both have held ⌘P: decision 10 defeated for exactly the rows it exists for. (2) U3's `transcript.find` is a `menu` row on ⌘F; a `menu` sample on the same chord would have failed the sharing rule on a correct table the day U3 landed, and U3 would have had to repair U6's test. (3) to (5) as the architect gave them: one gate, on the final head.
   Date/Author: 2026-11-12, the adversarial reviewer (the findings), the wave's architect (the additions), the author of this document (the fold).
+
+- Decision: the executor's choices on means the document left open (2026-11-12, M1), numbered after the decisions settled at authoring.
+  16. The tests-first commit carries `src/shared/keymap/build-f.ts` and `src/shared/keymap/sample-rows.ts`, both data, so the red run fails on assertions rather than on a missing module; the code those tests test (`idsOf`, `isRebindable`, `heldChords`, the table's rows and every consumer) lands after. Rationale: "fails before" should name what is missing.
+  17. `BUILD_F_ACTION_IDS` is an `as const` literal tuple that `satisfies readonly [ActionId, ...ActionId[]]`, not a value annotated with that type, so `z.enum` over it narrows the stored keymap's type to F's ids, as Constraints ask; `KeymapOverrides` stays keyed by every id. At this landing the two key sets are equal, so no reader or writer changes.
+  18. The version 2 file's schema takes `SettingsSchema.shape.keymap` itself, so the stored keys have one definition without a new export.
+  19. How the tests reach the extended table: `dispatchKey`, `keymapBinds`, `paletteEntries`, `captureChord` and `conflictOf` take the table as an optional last argument (defaulting to `ACTIONS`), as `menuTemplate` and `keymapGroups` do; the sheet's and Settings ▸ Keyboard's tests mock `keymapGroups` to hand it the extended table, so neither component changes. Rationale: one pattern for the pure functions; no prop added to U11's component.
+  20. `heldChords(id, chord)` in `actions.ts` is the one expansion of Select tab's nine chords for `effectiveChord`, the capture and `keymapBinds`; `menu.ts` keeps its own (it numbers and labels the nine items) and `terminal/keys.ts` is unchanged, as the document expects.
+  21. A row whose override is not read reports `overridden: false` in `keymapGroups`, so nothing on screen suggests a binding that does not apply.
+  22. `artifacts.open` joins the `tab.` group by its id, not by the prefix `artifacts.`, so a later `artifacts.*` row groups by its own prefix (Interfaces C: aliases for today's rows only). Separators inside a submenu follow the same rule as in a menu.
+  23. The handlers' tests press both `d` and `D` (and `f`, `F`) with Shift, since macOS reports the unshifted key with ⌘ held and other layouts may not; and they check the key reaches `document` unstopped, besides not prevented.
+  Date/Author: 2026-11-12, the executor.
 
 ## Outcomes & Retrospective
 
