@@ -1,0 +1,40 @@
+UX wave U1 check: the next mode on a plan approval, engine 2.1.322
+(docs/doperpowers/specs/2026-11-12-ux-wave/U1-requests.md, "Probes and checks", "Check: the next mode on a plan
+approval", serving l4-approvals-11 "Plan approval names the mode that follows"; recorded 2026-11-12)
+
+Question. The CLI's terminal approves a plan with a permission update {type: "setMode", mode, destination: "session"}.
+Does an allow of ExitPlanMode that carries that update leave the session in the named mode?
+
+Verdict. Yes. With {type: "setMode", mode: "acceptEdits", destination: "session"} the session left plan mode in
+acceptEdits (2/2) and the plan's file write was allowed by the mode; with mode "default" it left in default (1/1) and
+the write asked; a plain allow restored the mode the session had before plan, auto (1/1). So "Implement · <mode>" can
+carry the chosen mode inside the answer, as l4-approvals-11 writes it; the fallback (answer, then set the mode with
+set_permission_mode) is not needed.
+
+Method. Scenario scenarios/pass3/uxwave-u1-classifier.mjs, cases plan-<mode> (`-e UXW_CASE=plan-acceptEdits` etc.),
+launched by vm-run.sh on the VM dc-uxprobe-dc94; engine 2.1.322, model sonnet (claude-sonnet-5-5), the gateway route
+(no direct-route result exists on this VM), the launch line and handshake of findings-uxwave-u1-classifier-block.txt
+(MAWS's flags, setting sources user,project,local, --permission-mode auto) with empty user settings. The pattern is
+pass3/plan-outcomes (C3, 2.1.283): set_permission_mode {mode: "plan"}, then "Make a short plan to create a file named
+plan.txt in this folder containing the single word PLANNED, and present it for approval. Then carry it out." The
+ExitPlanMode can_use_tool is answered {behavior: "allow", updatedInput: <its input>, updatedPermissions: [{type:
+"setMode", mode: <mode>, destination: "session"}]} (plan-none: no updatedPermissions); any later can_use_tool is
+allowed. Afterwards get_status, then one more turn ("Reply with the single word OK.").
+Fixtures fixtures/uxwave/u1-plan-<mode>-seeded-<n>.jsonl: acceptEdits 1 and 2, default 1, auto 1, none 1.
+
+Observations.
+- u1-plan-acceptEdits-seeded-1: status permissionMode "plan" (16); ExitPlanMode's can_use_tool (82), answered with the
+  update (84); `system/status` permissionMode "acceptEdits" (87); the tool result "User has approved your plan. ..."
+  (88); the Write of plan.txt (102) ran with no can_use_tool, permission_decision {accept, config, reason_type "mode"}
+  (106); get_status after the turn reads "Auto mode server: Disabled" (143). acceptEdits-seeded-2 the same (status 86,
+  write allowed by mode 104).
+- u1-plan-default-seeded-1: answered with mode "default" (85); status permissionMode "default" (90); the Write raised
+  can_use_tool (106), allowed (108).
+- u1-plan-none-seeded-1 (the control, a plain allow): status permissionMode "auto" (87), the mode before plan; the write
+  allowed by the mode; get_status "Auto mode server: Enabled".
+- u1-plan-auto-seeded-1: mode "auto" named, status "auto" (90) (the same as the restored mode, so this run shows only
+  that naming auto is accepted).
+
+Differences from the spec's reading: none. The answer's mode is applied before the tool result reaches the model, and
+the `system/status` frame that reports it arrives between the answer and the tool result, so MAWS's mode chip can
+follow that frame.

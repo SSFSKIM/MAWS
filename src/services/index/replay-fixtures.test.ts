@@ -46,6 +46,9 @@ describe('replay fixtures in the index', () => {
       // transcripts, under p5/p5-o3-rewind-resume-transcripts/, are not journals); O16's gate fixture is not one either
       // (OX10's exchange on the gate socket, which O12 M4's bridge test replays; no engine journal rows)
       ...(['p4', 'p5'] as const).flatMap((dir) => readdirSync(join(FIXTURE_DIR, dir)).filter((name) => name.endsWith('.jsonl') && name !== 'p5-o16-gate.jsonl').map((name) => join(FIXTURE_DIR, dir, name))),
+      // The UX wave's probes (2026-11-12): MAWS-launch journals under pass3/uxwave/ and uxwave/, the VM launcher's under
+      // vm/; U3's engine transcripts and U5 P2's renderer measurements beside them in uxwave/ are not journals
+      ...(['pass3/uxwave', 'uxwave', 'vm'] as const).flatMap((dir) => readdirSync(join(FIXTURE_DIR, dir)).filter((name) => name.endsWith('.jsonl') && !name.endsWith('.transcript.jsonl') && name !== 'u5-p2-diffview.jsonl').map((name) => join(FIXTURE_DIR, dir, name))),
     ];
     expect(listJournals('pass3').length).toBeGreaterThan(0);
     expect(journals.map((f) => f.path).sort()).toEqual(expected.sort());

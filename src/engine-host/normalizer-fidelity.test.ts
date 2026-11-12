@@ -102,6 +102,10 @@ describe('the remote reader over the recorded journals', () => {
     'pass3/w7-collision-disk/transcript.jsonl',
     'subagent-sidecars/agent-ad286defbc77bc090.jsonl',
     'subagent-sidecars/agent-ae75ba6ce5d866acc.jsonl',
+    // The UX wave's probes (2026-11-12): U3's engine transcripts kept beside their journals, and U5 P2's renderer
+    // measurements.
+    ...readdirSync(join(FIXTURES, 'uxwave')).filter((name) => name.endsWith('.transcript.jsonl')).map((name) => `uxwave/${name}`),
+    'uxwave/u5-p2-diffview.jsonl',
   ];
   const named = (file: string) => file.slice(FIXTURES.length + 1);
   const journal = (file: string): JournalRow[] =>
