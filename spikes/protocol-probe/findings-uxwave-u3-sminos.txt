@@ -13,8 +13,8 @@ Verdict. The spec's premise does not hold for a session MAWS runs: under MAWS's 
     `sminos send` falls back to the engine's inbox (skills/sminos/scripts/sminos_control.py:109, 238). Observed: every
     send to such a session, the owner's and a peer's, idle and busy, arrived through the inbox as origin `peer`
     (8 of 8, two runs), and `sminos steer` was refused outright, idle and busy ("refused (lane-b): MAWS controls
-    this session"), with no fallback at all (4 of 4). So in a session MAWS runs, forms (a) and (b) never occur, and X-032's fallback
-    (`[sminos steer from human]` through the inbox) does not either: the steer simply fails.
+    this session"), with no fallback at all (4 of 4). So in a session MAWS runs, forms (a) and (b) never occur,
+    and X-032's fallback (`[sminos steer from human]` through the inbox) does not either: the steer simply fails.
   - Where the bridge does control (any session without the lane-B marker: a terminal session, or a headless run
     started by something else), the probe recorded the forms the spec asks about:
       (a) the idle owner's send: YES, on the wire as a replayed `user` frame with origin {kind: "plugin", name:
