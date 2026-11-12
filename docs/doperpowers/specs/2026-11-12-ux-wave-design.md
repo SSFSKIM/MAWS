@@ -1,6 +1,6 @@
 # The UX wave (2026-11-12)
 
-> **Parent:** `docs/charter.md`, the root spec (MAWS's standing purpose, §1), parent pin `dee757515`. **Level name:** the UX wave, a child of the charter beside phases P0 to P5; the charter's §3 paragraph and §19 entry that name it are carried by the pull request that lands this document. **Consumes:** the comparison of 2026-10-23 and the owner's marks on it; P4's UX waves (`docs/doperpowers/ledgers/2026-10-23-P4-UX1.md`, `2026-10-24-P4-UX2.md`, `docs/doperpowers/evidence/p4/ux-wave/`); P5 as built (`docs/doperpowers/plans/2026-10-27-p5-org.md`); the project registry (`docs/doperpowers/specs/2026-11-10-project-registry-design.md`). Children dispatch per their grain hint, each carrying its section as its spec; each child's execution document, ledger and pull request open by citing this document (path, child id, parent pin).
+> **Parent:** `docs/charter.md`, the root spec (MAWS's standing purpose, §1), parent pin `dee757515`. **Level name:** the UX wave, a child of the charter beside phases P0 to P5; the charter's §3 paragraph and §19 entry that name it are carried by the pull request that lands this document. **Consumes:** the comparison of 2026-10-23 and the owner's marks on it; P4's UX waves (`docs/doperpowers/ledgers/2026-10-23-P4-UX1.md`, `2026-10-24-P4-UX2.md`, `docs/doperpowers/evidence/p4/ux-wave/`); P5 as built (`docs/doperpowers/plans/2026-10-27-p5-org.md`); the project registry (`docs/doperpowers/specs/2026-11-10-project-registry-design.md`). **Layout:** this file is the root; each child's section is a file of its own under `docs/doperpowers/specs/2026-11-12-ux-wave/`, and the root and those files are one document (Decision Log, "One document in several files"). Children dispatch per their grain hint, each carrying its section as its spec; each child's execution document, ledger and pull request open by citing this document (path, child id, parent pin).
 
 ## Purpose
 
@@ -8,7 +8,7 @@ The owner uses MAWS every day to supervise Claude Code sessions, and has kept a 
 
 This wave turns that list into changes the owner can see, under the owner's own bar: **every change a clear improvement, nothing hasty.** A change is made only when the code shows what is wrong and the direction of the fix is settled, by the owner's words, by Claude Desktop's behaviour where the owner named it as the answer, or by a question put to the owner. Where none of these holds, the item waits for an answer, a design round or a hands-on check, and this document says which.
 
-After the wave: requests for the owner's attention are drawn where the work is and stop counting once answered; the transcript reads as the agent produced it, with tool runs folded into one line and the to-human view drawn by the mod; what arrives in a session from elsewhere takes one line; the composer queues and steers as Claude Desktop's does; Review, comments and source control are one simpler flow; a session on another machine can be forked, renamed and stopped like a local one; and the smaller defects in each surface are gone.
+After the wave: requests for the owner's attention are drawn where the work is and stop counting once answered; the transcript reads as the agent produced it, with tool runs folded into one line and the to-human view drawn by the mod; what arrives in a session from elsewhere takes one line; the composer queues and steers as Claude Desktop's does; Review, comments and source control are one simpler flow; a session on another machine can be forked, renamed and archived from this Mac, and an act that cannot reach it says why; and the smaller defects in each surface are gone.
 
 How to see it working: the owner's sitting on the wave's build, following the scene script composed from the children's acceptance (Parent-level acceptance, 2).
 
@@ -21,10 +21,11 @@ The wave closes when all of these hold. They are checked as written at recomposi
 3. **What the owner marked `keep` is unchanged.** The 23 `keep` items in the register behave as before; the scene script includes a check for each one a child's work could have touched.
 4. **Every reversed ruling is recorded.** Each earlier ruling this wave reverses (Decision Log, "Rulings reversed") has a dated entry in the document that held it, written when the reversing change lands.
 5. **Nothing gated got worse.** The final build passes the gates of `scripts/ci-gate.sh` (class 1a), the Electron e2e groups on a Mac under the load rule, and the measured cases master is gated on at that time (the render group and the idle daemon's cases, as P5 left them); a case that was void or over its bound on build F (`f1852de3a`) by the owner's ruling is compared with its reading on F, not with its bound.
+6. **Going back is safe.** A profile the wave's build has written still opens on build F with its tabs and its sessions (UC-14), shown by the cross-build run named there before the wave's build runs on a profile the owner uses.
 
 ## Grounding baseline
 
-The grounding ran on 2026-11-12 against `03cee6582` (build F plus documents; the source tree equals master `dee757515` outside `apps/desk-hub`). Eleven agents each grounded one surface in the code and in Claude Desktop `app-5.1231.2`, and a twelfth read the debt tracker and P5's records for further candidates; their files stay outside the repository (they describe the owner's screenshots).
+The grounding ran on 2026-11-12 against `03cee6582` (build F plus documents; the source tree equals master `dee757515` outside `apps/desk-hub`). Eleven agents each grounded one surface in the code and in Claude Desktop `app-5.1231.2`, and a twelfth read the debt tracker and P5's records for further candidates; their files stay outside the repository (they describe the owner's screenshots). Twelve writers then wrote the child sections against the same commit and the registry branch, each re-reading the code and Claude Desktop's source for its items; where a section found the grounding or the cut wrong, the section says so and Surprises and discoveries lists it.
 
 | | count |
 |---|---|
@@ -62,207 +63,358 @@ These bind every child. [binding: they are the owner's standing positions and ru
 
 ### Words used in this document
 
-- **Request:** something a session needs from the person before it can go on or finish: a permission prompt, a question (the engine's AskUserQuestion, MAWS's own ask tool, the sminos ask tool), a plan to approve, a trust decision. In code a request is an *attention item* (`src/shared/attention/`).
+- **Request:** something a running session needs from the person before it can go on or finish: a permission prompt, a question (the engine's AskUserQuestion, MAWS's own ask tool, the sminos ask tool), a plan to approve, an engine dialog or an MCP server's form. In code a request is an *attention item* (`src/shared/attention/`). The cards that are steps of a send (trusting a folder, a relay that is down, a start that failed) are not requests: they keep the composer's place and UC-1 does not count them.
 - **Arrival:** anything that enters a session other than the person's typed prompt: a message from another session or a subagent, a background task's notification, a scheduled trigger, an answer to an asynchronous question, a slash command's output.
 - **Tool run:** consecutive tool calls with no text between them, drawn as one group.
 - **The to-human view:** the report the to-human mod draws: the agent's messages to the person, with the work between them folded under "working record".
-- **Card column:** the right-hand column of cards beside the transcript (Environment, Context, Artifacts and others). **Side surface:** a tool opened beside the transcript (Review, Files, Terminal, Browser, Source control). **Main tabs:** the tab strip over the main area.
+- **Card column:** the column of cards that floats over the right of the main area beside the transcript (Environment, Context, Connectors and others; UC-9). **Side surface:** a tool opened beside the transcript (Review, Files, Terminal, Browser, Source control). **Main tabs:** the tab strip over the main area. **Destination:** a place that replaces the main area without being a tab (Settings, Customize, Projects, the Artifacts library; UC-12).
 - **The machine link:** the connection from this window to another machine's daemon; an *offer* is an act that machine accepts over it (`src/endpoint/offers.ts`).
 
 ### The owner's answers of 2026-11-12
 
-Eight questions were put to the owner as cards; the answers are recorded verbatim beside the register. In short:
+Eight questions were put to the owner as cards; the answers are recorded verbatim in the register. In short:
 
-- **The to-human view:** the mod draws first, and MAWS mirrors it. The mod draws in sessions MAWS runs; in terminal sessions and sessions on another machine, MAWS applies the mod's fold rule itself. The mod change the owner ruled on 2026-10-24 (the unmerged doperpowers branch `to-human-draw-in-maws`) is rebased by this wave and merged by the owner. (U2)
-- **Thinking:** its own step, in order, inside the tool run. Two conditions from the owner: thinking keeps the shape it has today and does not look like a tool row; and an opened run must not grow too long. (U2)
+- **The to-human view:** the mod draws first, and MAWS mirrors it. The mod draws in sessions MAWS runs; in terminal sessions and sessions on another machine, MAWS applies the mod's fold rule itself. The mod change the owner ruled on 2026-10-24 (the unmerged doperpowers branch `to-human-draw-in-maws`) is redone by this wave on the mod's current main and merged by the owner (UC-13). (U2)
+- **Thinking:** its own step, in order, inside the tool run. Two conditions from the owner: thinking keeps the shape it has today and does not look like a tool row; and an opened run must not grow too long. U2 meets the second with a rule for which thoughts get a line, and shows it to the owner in a drawn example beside the alternatives before the group work is built. (U2)
 - **Where a request is drawn:** in the transcript, with the composer free: a question in the row of the call that asked, a permission prompt at the transcript's end. The owner added a queue of what waits, in the card column, and confirmed this reading. The jump-to-latest button says when a request waits. (U1)
 - **Tabs:** one strip for everything open, across projects and machines, restored after a relaunch; no hidden per-project sets. A group is then a named set of sessions opened as tabs. (U13)
-- **Settings, Customize and the Library:** a page that replaces the main area with the sidebar kept, as Claude Desktop does; not a tab, not a window. (U7)
+- **Settings, Customize and the Library:** the owner answered "a page, like Desktop", on a card that was wrong about Claude Desktop: there Settings opens as a dialog over the window and only Customize is a page. The question was put again the same day and is open. Either way these places stop being tabs (UC-12); only the frame that draws Settings waits for the answer. (U7)
 - **Background work in the card column:** two cards, Subagents and Background tasks, each present only while it has something running. The owner added: Subagents is a tree that lists the first level and opens a nested agent when its parent is clicked. (U8)
 
-Eleven smaller questions are asked when their child starts; each is named in that child's section and under Deferred.
+Twenty-six smaller questions are open; the register lists each with its recommended answer and when it is asked (most when their child starts; four were put to the owner with this document).
 
 ## Children
 
-The sections U1 to U14 rely on the cross-child contracts that follow them. Items are named by their register ids: `l<n>-…` a mark on the comparison, `O-nn` an observation, `#nnn` a board ticket, `S-nn` a sitting finding, `X-nnn` a tracker row.
+Each child's section is a file under `docs/doperpowers/specs/2026-11-12-ux-wave/`. A section holds the child's purpose, its acceptance (numbered, observable, per route), its edges, the contracts it owns or consumes, its design inheritance, and one entry per item (today, after, why this and not that, not included), then its probes and checks, the rulings it reverses with the sentence to record, what waits, and what is not in the child. An executor reads this root and its child's file. The summaries below say enough to see the cut; the files bind. Items are named by their register ids: `l<n>-…` a mark on the comparison, `O-nn` an observation, `#nnn` a board ticket, `S-nn` a sitting finding, `X-nnn` a tracker row.
 
-| child | surface | items it builds | grain |
-|---|---|---|---|
-| U1 | Requests: permission prompts and questions | l4-approvals-07, #358, S-04, S-07, O-22, O-21, l4-approvals-08 (with l2-transcript-16), O-17, l2-transcript-10, l4-approvals-02, l4-approvals-04, O-23, l4-approvals-05, l4-approvals-11, l4-approvals-13, l4-approvals-12, l4-approvals-09, #333 | plan |
-| U2 | Transcript structure: tool runs, thinking, the to-human view | O-29 (with O-26), O-27 (with O-25), O-15, #479, #351, l6-artifacts-12, O-49, O-13 (with O-06, l2-transcript-06), O-30, #332, l2-transcript-04 | plan, after a drawn example the owner looks at |
-| U3 | Transcript rows: arrivals, messages and blocks, find and navigation | O-12, O-28, O-34, O-41, X-032, O-07, O-08, O-02, l2-transcript-07, O-18, #331, #146, l2-transcript-08, l2-transcript-09 | plan |
-| U4 | Composer | l3-input-01, -02, -03, -04, -05, -08, -15, X-049, l3-input-06, -07, -09, -10, -12, -14, O-32, O-20 | plan |
-| U5 | Review, comments and source control | O-45, l6-artifacts-05, l6-artifacts-19, l6-artifacts-20, l5-code-01, l9-browser-delivery-05, X-216, X-218, l5-code-05, l5-code-03, l5-code-04, l5-code-12, X-072, l5-code-02, l5-code-06 | plan |
-| U6 | Files, links and the keyboard | l5-code-11, l5-code-09, l5-code-10, l9-browser-delivery-08, O-37, l9-browser-delivery-03, l5-code-08, l7-shell-06, l7-shell-07, l7-shell-08, l7-shell-09, l7-shell-13 | plan |
-| U7 | Sidebar, title bar and destinations | S-11, O-16, O-38, #559, #407, O-03, O-47, O-40 | plan |
-| U8 | Card column, background work and the working folder | O-10, X-165, O-05, O-09, #359, X-168, l5-code-16, l5-code-14 | plan |
-| U9 | Sessions on other machines | O-11b, O-39, #563, #565, S-05, O-48, S-02, S-01, S-13 | plan |
-| U10 | Artifacts | l6-artifacts-07, X-141, O-43, l6-artifacts-08, l6-artifacts-15, l6-artifacts-18, l8-settings-13 | plan |
-| U11 | Settings, connectors and the Org pages | l8-settings-01, l8-settings-03, l8-settings-04, l8-settings-06, #540, #523, #505, #456, S-09, S-10 | plan |
-| U12 | In-app browser, computer use and delivery | l9-browser-delivery-01, -02, -06, #435, l9-browser-delivery-07, l9-browser-delivery-09 | plan |
-| U13 | Tabs, New chat and session groups | O-01, O-31, #497 now; the groups half of O-31, O-42 and O-24 after a design round | plan for the one strip; design with the owner for groups |
-| U14 | Checks on the owner's machines | S-03, l6-artifacts-13, O-33, l5-code-07, #429, S-08, #476, and the reproductions other children name | spike (findings) |
+| child | surface | items it builds | grain | section |
+|---|---|---|---|---|
+| U1 | Requests: permission prompts and questions | l4-approvals-07, #358, S-04, S-07, O-22, O-21, l4-approvals-08 (with l2-transcript-16), O-17, l2-transcript-10, l4-approvals-02, l4-approvals-04, O-23, l4-approvals-05, l4-approvals-11, l4-approvals-13, l4-approvals-12, l4-approvals-09, #333 | plan | `U1-requests.md` |
+| U2 | Transcript structure: tool runs, thinking, the to-human view | O-29 (with O-26), O-27 (with O-25), O-15, #479, #351, l6-artifacts-12, O-49, O-13 (with O-06, l2-transcript-06), O-30, #332, l2-transcript-04 | plan; the group work after a drawn example the owner looks at | `U2-transcript-structure.md` |
+| U3 | Transcript rows: arrivals, messages and blocks, find and navigation | O-12, O-28, O-34, O-41, X-032, O-07, O-08, O-02, l2-transcript-07, O-18, #331, #146, l2-transcript-08, l2-transcript-09 | plan | `U3-transcript-rows.md` |
+| U4 | Composer | l3-input-01, -02, -03, -04, -05, -08, -15, X-049, l3-input-06, -07, -09, -10, -12, -14, O-32, O-20 | plan | `U4-composer.md` |
+| U5 | Review, comments and source control | O-45, l6-artifacts-05, l6-artifacts-19, l6-artifacts-20, l5-code-01, l9-browser-delivery-05, X-216, X-218, l5-code-05, l5-code-03, l5-code-04, l5-code-12, X-072, l5-code-02, l5-code-06 | plan | `U5-review-comments-source-control.md` |
+| U6 | Files, links and the keyboard | l5-code-11, l5-code-09, l5-code-10, l9-browser-delivery-08, O-37, l9-browser-delivery-03, l5-code-08, l7-shell-06, l7-shell-07, l7-shell-08, l7-shell-09, l7-shell-13 | plan | `U6-files-links-keyboard.md` |
+| U7 | Sidebar, title bar and destinations | S-11, O-16, O-38, #559, #407, O-03, O-47, O-40 | plan | `U7-sidebar-title-bar-destinations.md` |
+| U8 | Card column, background work and the working folder | O-10, X-165, O-05, O-09, #359, X-168, l5-code-16, l5-code-14 | plan | `U8-card-column-working-folder.md` |
+| U9 | Sessions on other machines | O-11b, O-39, #563, #565, S-05, O-48, S-02, S-01, S-13 | plan | `U9-other-machines.md` |
+| U10 | Artifacts | l6-artifacts-07, X-141, O-43, l6-artifacts-08, l6-artifacts-15, l6-artifacts-18, l8-settings-13 | plan | `U10-artifacts.md` |
+| U11 | Settings, connectors and the Org pages | l8-settings-01, l8-settings-03, l8-settings-04, l8-settings-06, #540, #523, #505, #456, S-09, S-10 | plan | `U11-settings-connectors-org.md` |
+| U12 | In-app browser, computer use and delivery | l9-browser-delivery-01, -02, -06, #435, l9-browser-delivery-07, l9-browser-delivery-09 | plan | `U12-browser-computer-use-delivery.md` |
+| U13 | Tabs, New chat and session groups | O-01, O-31 (the chip), #497 now; the groups half of O-31, O-42 and O-24 after a design round | plan for the one strip; design with the owner for groups | `U13-tabs-new-chat-groups.md` |
+| U14 | Checks on the owner's machines | S-03, l6-artifacts-13, O-33, O-35, O-39's timing, O-46, l6-artifacts-09, #429, S-08, #476, l5-code-07, l6-artifacts-04, l1-sessions-08, S-09, O-37 and Stop during a computer-use call | spike (findings, never a merge) | `U14-checks.md` |
 
-<!-- CHILD SECTIONS -->
+**U1 · Requests.** A request no longer takes the composer's place, and stops being announced the moment it is answered. A question's form is in the transcript in the row of the call that asked; a permission prompt is a card at the transcript's end, three buttons and under half its old height, answered by a click or by ⌘↩, ⇧⌘↩ and Esc under Claude Desktop's guards; the composer and Stop stay usable throughout. What waits out of view is named by the "Waiting for you" card in the card column and by the jump button. A terminal session's asynchronous question behaves as one and shows its answer on its own row. From a notification or the hover card a waiting permission can be denied, and allowed once when it is a read or a shell command shown whole. A call auto mode blocked gets "Approve and retry". Owns UC-1; consumes UC-2, UC-3, UC-6, UC-7, UC-9. Three pull requests: UC-1 and what does not draw in the transcript; the placement (after U3's reader and U8's slot); l4-approvals-12 after its probe of a classifier block.
+
+**U2 · Transcript structure.** Consecutive tool calls read as one caption line, folded by default while the turn runs and after it, in Claude Desktop's wording; opening it shows today's rows with thinking in the order it happened and in the shape it has today. A closed turn's line says what the turn did by kind instead of counting calls, and a turn the person did not start reads "Continued for". The to-human view is the mod's where a mod can draw and MAWS's mirror of the mod's per-stretch rule elsewhere; MAWS's own report bar, its per-turn "Working record" row and its "To you" label go. Owns UC-13; consumes UC-1 (a run is drawn open while one of its calls waits for permission), UC-2, UC-3. The group work (O-29, O-27, #479, O-15) starts after the owner has looked at a drawn example; nothing in MAWS waits for the mod's pull request.
+
+**U3 · Transcript rows.** Whatever enters a session from elsewhere reads the same on every route and takes one line: a peer's or a subagent's message is a dim line that opens on demand and folds with its turn; the end of a background task is one line coloured by outcome, and a failed one raises no error card; a peer's message is never drawn as the owner's bubble, nor the owner's steer as a peer's message; a slash command's output is a light line under the command. Code blocks wrap inside the text column, message actions sit under the message, an answer can be copied and forked from, a compaction in progress says so, ⌘F finds in the session and ⌥⌘↑ and ⌥⌘↓ move between prompts. Owns UC-2; lands first in the transcript's model (UC-3). Two pull requests: the reader with its three callers and the arrival rows, then the rest. Four engine probes come first.
+
+**U4 · Composer.** Enter always sends. While the agent works, Enter hands the message to the running turn and ⌘Enter keeps it for after the turn; a message not yet read is drawn once, in a stack above the composer, where it can be sent now, taken back with ↑, edited or deleted. Send now delivers without killing the running command (the engine moves it to the background), and Stop still stops and holds what waited. One small icon serves send, stop and "this will wait"; the slash palette lists names; the mode menu sets Bypass apart; the model chip reads as a name; pasted text stays text; `/btw` is a small card at the bottom right. Owns no contract; consumes UC-2, UC-3, UC-6, UC-7, UC-9. Probe P1 (eight cases, on a Mac other than the owner's MacBook) is the first work. Whether a waiting message also moves a running command to the background by itself is an open question to the owner; the section is written with it on.
+
+**U5 · Review, comments and source control.** One comment card everywhere (a document, an HTML page, a diff line, a page in the in-app browser) with one checkbox for where the comment goes, drafts that survive, and comments that reach terminal sessions and sessions on other machines, where today none can be sent. Review is one scroll of the whole change with comments on its lines; new files are counted; "This branch" means one thing; staging and discarding happen where the diff is read; Commit, Push and Create PR are one click that asks the agent, with the forms kept smaller for doing it by hand. Owns UC-5; consumes UC-3, UC-4, UC-7. Two pull requests: the card and its sends first (U10 and U12 code against them), Review and source control second, after the owner has seen the stacked Review on a real change.
+
+**U6 · Files, links and the keyboard.** A file opens beside the chat, as a tab inside the Files side surface, and moves to the main area only when the person moves it. Files shows what changed and finds a file by name. A link the agent writes opens in MAWS whatever its form, and when it cannot, the notice says why. "Open in" hands a file or the session's folder to an editor, a terminal or Finder. Chords reach the side surfaces, Back and Forward, and zoom; one table stands behind the menus, the shortcut sheet and every child's new chord. Owns UC-6; consumes UC-4, UC-7, UC-12, UC-14. Two pull requests: the keymap's shape first and alone (U1, U3 and U4 add chords against it), the rest after U8's selector.
+
+**U7 · Sidebar, title bar and destinations.** A session can be hidden with one menu act and brought back; a new session is named by the first six words of its prompt; a row of a session on another machine opens in a new tab like a local one; the title bar's project name no longer runs under the first tab; usage is a small ring in the title bar; Settings, Customize, Projects and the Artifacts library stop being tabs. Owns UC-12; consumes UC-1, UC-9, UC-14. One pull request, after U13's strip and U9's insertion in the sidebar's menus. The frame that draws Settings waits for the owner's answer.
+
+**U8 · Card column, background work and the working folder.** The column shows Environment (open), Context and Connectors, and, only while there is any, the waiting requests, a tree of running subagents and a list of running background tasks; Artifacts moves to the title bar's "More surfaces" menu. Finished work no longer takes the top of the two panels, and a panel for watching work opens narrow. Once an agent moves into a worktree, the Environment card, Review, Source control, Files and a new terminal follow it. Owns UC-4 and UC-9. Three landings: the working folder's selector with today's behaviour, first and small (U5 and U6 branch from it); the column and the panels; the live signal, after a probe of what the engine reports when the agent moves.
+
+**U9 · Sessions on other machines.** A remote tab says "Connecting" while the link comes up and keeps its transcript and the reader's place through every reconnect; its row reads Working when its turn starts. From this Mac the owner can fork a session there (the machine's owners, with no Touch ID on a machine they own), rename it, and archive and unarchive it; a Stop that cannot reach the machine says so; the Touch ID sheet names the machine. Owns UC-7, which settles for every act on a session whether it works on another machine or says why not. One pull request; it lands before U7 because it inserts the session menu on a listed row. The words for a link that is not up reverse the owner's ruling of 2026-10-27 and are an open question to the owner.
+
+**U10 · Artifacts.** An agent's edit to a document is no longer refused because of a formatting clean-up nobody asked for, and a document's history gains no revision from someone who only looked. The agent can make a document fit a page, publish an HTML page from a file, and remove a draft it abandoned (with an Undo for the owner). Over an artifact the chat shrinks to the composer's bar and can be hidden, with "Show chat" in the header. "Make something new" is four cards with one design-system choice that binds. A Space can carry instructions for agents. Owns no contract; amends X9 by dated lines (UC-15). An early pull request of its own for the two fixes to writes nobody made, reviewed by the panel.
+
+**U11 · Settings, connectors and the Org pages.** A connector that needs a sign-in can be signed in from the chat that uses it, whichever kind it is. The dialog that lists a chat's connectors is one line per connector. A new chat shows its plugins, connectors and skills before the first message. Settings is regrouped (App; Sessions and engine; Org), each row reads in one line, and a search finds a row by its words. On the Org pages every refusal says what to do next, every sheet dims the window, and the Channel says when it is offline and opens from the palette and the View menu. Owns no contract. One pull request, at any time; the owner sees the regrouped Settings before it lands.
+
+**U12 · In-app browser, computer use and delivery.** An agent asked to open and test a page uses the Browser side surface without being told which tool reaches it; a page the agent shows again is reloaded; the Browser gains two device sizes and a screenshot to the clipboard; a pane the agent opens from a session on another machine appears on the device the person is at (#435, after U9); while an agent drives the Mac through computer use the session says so and offers Stop; a document or deck sent to Google Drive arrives as a Google Docs or Slides file. Two changes only the computer-use plugin can make are written as tickets for that project. Owns no contract; amends X9 by a dated line (UC-15).
+
+**U13 · Tabs, New chat and session groups.** One strip holds everything open, from every project and machine, the same after a relaunch. New chat adds one tab beside the others and brings an empty one back instead of adding another; a New chat tab that arrives late takes nothing from the tab opened meanwhile; the title bar's chip names the current project and starts no session. Owns UC-14 and the strip's model (UC-8). The one strip is a plan; session groups, the sidebar's views (O-42) and the folded sidebar (O-24) are designed with the owner on top of it, six questions in order, none decided.
+
+**U14 · Checks on the owner's machines.** Sixteen questions the code cannot settle, each answered on the owner's own machines with its outcomes and what each changes; three need the owner in person (about forty minutes), the rest an agent on the mini. A spike: its deliverable is `docs/doperpowers/evidence/ux-wave-2026-11/checks.md`, never a merge.
 
 ## Cross-child contracts
 
-Each contract names its owner (the child whose landing defines it) and the children it binds. The owner's section carries the content; the others code against it and do not re-decide it.
+Each contract names its owner (the child whose landing defines it) and the children it binds. The statement here is what every child may rely on; the owner's file carries the full content (types, tables, wording), and the others code against it and do not re-decide it. Where a child's file and a statement here differ, the statement here binds and the difference is reported to the wave's architect.
 
-**UC-1 · A request waits only until it is answered.** Owner U1; binds U3, U7, U8, U9. A request counts as waiting, everywhere it can show (the request's own card, the session's row and tab, Needs you, badges, notifications, the feed another machine reads), only until the person answers it. Once answered it raises nothing, whether or not the engine has yet confirmed the tool's first frame. Today `isOpen` in `src/shared/attention/kinds.ts` counts an answered, unconfirmed request as open, against charter §4.6 ("delivered is not an alarm state"); this one cause produced #358, S-04, S-07 and X-066. U1 defines the predicate; no child adds a second definition of "waiting".
+**UC-1 · A request waits only until it is answered.** Owner U1; binds U2, U3, U7, U8, U9, U10, U12, U13. A request counts as waiting, everywhere it can show (its own drawing, the session's row and tab, Needs you, badges, notifications, the counts told to another device, the feed another machine reads), only until the person answers it. Once answered it raises nothing, whether or not the engine has yet confirmed the tool's first frame. The predicate is `waits(item)`, true only for a `pending` item, in `src/shared/attention/kinds.ts`, with `waitsOnAnswer` beside it; `isOpen`, which counts an answered and unconfirmed request as open against charter §4.6, is removed. The attention service publishes only waiting items, so a machine on an older build that reads the feed is right too. U1 also gives the predicate by tool-use id (for U2's runs) and by agent (for U8's "Approval needed"). On the terminal route an item stays `pending` until the bridge reports it settled, and "answered" there means the bridge accepted MAWS's answer; U1's file states the route's rule. No child adds a second definition of "waiting".
 
-**UC-2 · One reading of every arrival.** Owner U3; binds U1, U2, U4, U9. One reader under `src/shared/` classifies what enters a session other than the person's typed prompt, and every route uses it: the engine host's normaliser for the live wire, the transcript-file backfill, and the reader for another machine's rows. The same arrival draws the same row on every route. Classes, at least: a peer session's message; a subagent's message or hand-back; a background task's notification, by outcome; a scheduled trigger; an answer to an asynchronous question; a slash command's output; the person's own steer delivered by a fallback route (which stays the person's). Arrivals are drawn as one line each, in the CLI's wording (U3 carries the forms). U1 consumes the "answer to a question" class to fill the question's row; U4 consumes it to word a waiting answer; U2 consumes the classes to decide what the to-human view folds and how a turn the person did not start is named.
+**UC-2 · One reading of every arrival.** Owner U3; binds U1, U2, U4, U8, U9. One pure reader, `readArrivals(row)` in `src/shared/engine/arrival.ts`, classifies what enters a session other than the person's typed prompt. Its input is the raw wire frame or transcript row, never an X1 event (X1 lowers the origin to one word, and the origin object is the only proof of who sent a row). Three callers use it: the engine host's normaliser for the live wire, the transcript-file backfill, and the reader that serves a terminal session on another machine; a session MAWS runs on another machine arrives as events its own engine host made, so it is right once that machine runs the wave's build. Classes: a peer session's message; a subagent's message or hand-back; a background task's notification, by outcome, and one with no outcome (a monitor's event, a check-in); a scheduled trigger; the sminos bridge's own wake prompt; an answer to an asynchronous question (with the call's id and the answer in words, or "dismissed"); MAWS's own consent message for a blocked call; a slash command's output; the person's own steer delivered by a fallback route, which stays the person's. The reader classifies; where a delivered row is placed stays with each caller. The class reaches the window on the existing companion events and one optional field, `arrival`, on X1's `user.message`: an amendment of X1, recorded in the charter when U3 lands. Arrivals are drawn one line each, in the CLI's wording, and the divider row gains `opener`, the class of what opened the turn. U1 fills a question's row from the answer class; U4 words a waiting answer from it; U2 reads the classes for the to-human fold and names a turn from `opener`; U8 relies on the task line as the trace of work that left its card.
 
-**UC-3 · The transcript's model has one writer at a time.** Owner: the wave's architect; binds U1, U2, U3. `src/renderer/src/transcript/model/` is changed by three children. U3 lands its arrivals first. U2's grouping and fold work starts from a master that contains it. U1 draws requests in the transcript through row kinds it owns and leaves grouping to U2: a request's row always breaks a tool run and is never folded while it waits. U2 owns `groups.ts`, the group row and `src/renderer/src/owner/`; U3 owns the arrival and message rows; U1 owns the request rows.
+**UC-3 · The transcript's model has one writer at a time.** Owner: the wave's architect; binds U1, U2, U3 and the children that insert. `src/renderer/src/transcript/model/` and `transcript/view/` are changed by three children in this order: U3 lands its reader and arrival rows first; U1's placement and U2's grouping start from a master that contains them. U3 owns the arrival and message rows and `transcript/view/Transcript.tsx`; U2 owns `groups.ts`, `classify.ts`, the group row, the turn line and `src/renderer/src/owner/`; U1 owns the question, ask and plan rows, the region at the transcript's end, and the waiting state of a call's row and of the jump button. Rules between them:
+- A row that holds a waiting request (a question's, an ask's or a plan's form) ends a tool run, is never inside a fold (a run's, a turn's, the to-human view's working record), and asks no mod's site while its request waits.
+- A call that waits for the person's permission stays in its tool run; that run is drawn open while the call waits and returns to the state the reader left it in after the answer (Claude Desktop's rule). An allowed call is then an ordinary member of its run; a denied call is a row of its own.
+- In a session whose mods surface is attached, U3's arrival rows ask the engine's `UserMessage` site and its sent-message row asks `ToolUse`, with the engine's props, so that a mod can fold or draw them as it does in the terminal; a mod that keeps the engine's drawing leaves MAWS's line.
+- A row that folds still opens under the store's `jumpTo`, which find, the prompt chords and the waiting-requests card use.
+- Insertions by other children are single rows or filters, rebased onto the last landing: U4's view-level filter that removes the held tail (`TranscriptSlot.tsx`); U5's user row that draws several anchored comments in one message; U10's third action on the `artifact` row; U9's two insertions in `Transcript.tsx`; one string each from U9, U11 and U12 in `transcript/model/copy.ts`.
 
-**UC-4 · The session's working folder.** Owner U8; binds U5, U6. *The working folder* is where the agent is working now: the launch folder until the engine reports that the agent moved (into a worktree it made, or elsewhere), then that folder. One selector answers it. Review, Source control, Files, the terminal's starting folder, "Open in" and the Environment card read the selector, and none reads `record.worktree?.path ?? record.directory` itself (28 places do today). U8 lands the selector with today's behaviour first, as its own small pull request, so that U5 and U6 build on it; the live signal follows after U8's probe of what the engine reports.
+**UC-4 · The session's working folder.** Owner U8; binds U1, U5, U6. *The working folder* is the checkout the agent's main loop is working in now: the launch folder until the engine's own record shows that the main loop moved to another checkout (a worktree it entered, or another repository), then that one; a move inside a checkout and a subagent's move do not count. One selector answers it: `workingFolder(record)` in `src/shared/sessions/working-folder.ts` and `useWorkingFolder(appSessionId)` in the renderer. Review, Source control, Files, a terminal's starting folder, "Open in" and the Environment card read it; none reads `record.worktree?.path ?? record.directory` itself (29 lines do today), and a test keeps it so. What is about the record and not about where the agent is (the archive and delete dialogs, the Resume picker, the index's writes) stays on the record. Two landings: the selector with today's behaviour, first and alone, so that U5 and U6 branch from it; then the live signal after U8's probe. The second landing also widens the folders a session's files may be read from (`recordDirectories`, `src/services/files/allowlist.ts`, `src/endpoint/targets.ts`), because Files and Review must read where the agent is: that is a security boundary, and the landing takes the review panel with a reviewer on that boundary.
 
-**UC-5 · One comment card.** Owner U5; binds U10, U12. A comment on a document, an HTML page, a diff in Review or a page in the in-app browser is written in the same card with the same draft model. The card has one destination control, a "Send to main" checkbox, unchecked by default except in Review; unchecked, the comment opens a side thread. Several comments made in one pass are sent together. A draft survives the card closing. A sent comment names the session it went to.
+**UC-5 · One comment card.** Owner U5; binds U3, U4, U9, U10, U12. A comment on a document, an HTML page, a diff in Review or a page in the in-app browser is written in the same card with the same draft model. The card has one destination control, a "Send to main" checkbox: unchecked by default, ticked by default in Review and for a session started blank for the comment, and ticked and locked for a session on another machine until a side thread can be opened there (UC-7). Unchecked, the comment opens a side thread. A ticked comment is sent through the composer's own send path (`sendToSession`), which is what makes comments work for terminal sessions and sessions on other machines; `side.sendToMain` is retired. Several comments made in one pass are sent together on Review, the in-app browser and HTML pages; documents, decks and designs stay at one unsent comment per artifact. A draft survives the card closing, except the person's own Close, and does not survive a relaunch. After a send to main the card's place says "Sent to <title>", and a composing card says which session receives it when that is not the one on screen.
 
-**UC-6 · One keymap.** Owner U6; binds every child that adds a chord. The table below is the authority for the wave's new default chords; a child adds its own actions to `src/shared/keymap/actions.ts`, and U6's shortcut sheet and menus are drawn from that table, so they need no second list. Existing chords do not move (⌘0 Overview, ⌘K palette, ⌘L focus the composer, ⌘. stop, ⇧⌘J next Needs you, ⌘/ shortcuts, ⌘B, ⇧⌘B, ⌘\). ⌘F acts on the focused region: the transcript's find when the transcript or composer has focus, the editor's own in a file, the page's in the browser.
+**UC-6 · One keymap.** Owner U6; binds every child that adds a chord. `ACTIONS` in `src/shared/keymap/actions.ts` is the one list of the app's keys; the application menu, the shortcut sheet, Settings › Keyboard, the palette and the tooltips are drawn from it, and a child writes its key nowhere else. U6 lands the table's shape first, as its own small pull request: `ActionSpec` gains an `'edit'` menu placement, `submenu`, and `fixed` (a key its own editor handles, listed and never dispatched). **Focus first:** a region that has its own meaning for a key keeps that key while it holds the keyboard (the page's find and history in the browser, an editor's own commands, the deck's stage); everywhere else the key is the app's. A chord an editor may keep is a `menu` row; a chord that must win inside editors and terminals is a `renderer` row with scope `app`. Existing chords do not move (⌘0 Overview, ⌘K palette, ⌘L focus the composer, ⌘. stop, ⇧⌘J next Needs you, ⌘/ shortcuts, ⌘B, ⇧⌘B, ⌘\). The wave's new keys, each row added by the child named (U6's file holds the collisions found and what each becomes):
 
-| action | default chord | child |
+| action | default | child |
 |---|---|---|
-| Send | Enter, always | U4 |
-| New line | Shift+Enter, Option+Enter | U4 |
-| Queue for after the turn | ⌘Enter while a turn runs; sends when idle | U4 |
-| Take back the last waiting message | ↑ in an empty composer | U4 |
-| Model menu / effort / mode menu | ⇧⌘I / ⇧⌘E / ⇧⌘M | U4 |
+| Send; new line | Enter, always; Shift+Enter, Option+Enter (fixed keys of the editor) | U4 |
+| Queue for after the turn | ⌘Enter while a turn runs; sends when idle (`composer.queue`; the reply fields keep `composer.send`) | U4 |
+| Send the first waiting message now, or stop | Esc in the composer while a turn runs (fixed) | U4 |
+| Take back the newest waiting message | ↑ in an empty composer, before the prompt history (fixed) | U4 |
+| Model menu, effort, mode menu | ⇧⌘I, ⇧⌘E, ⇧⌘M | U4 |
 | Search prompt history | Ctrl+R, composer focused | U4 |
-| Find in session; next, previous | ⌘F; ⌘G, ⇧⌘G | U3 |
+| Find in session; next, previous | ⌘F; ⌘G, ⇧⌘G (Edit › Find) | U3 |
 | Previous, next prompt | ⌥⌘↑, ⌥⌘↓ | U3 |
-| Terminal / Review / Files | ⌘J / ⇧⌘D / ⇧⌘F | U6 |
+| On a permission prompt in view: allow once, allow lasting, deny | ⌘↩ (with an empty draft), ⇧⌘↩, Esc; under Claude Desktop's guards, ahead of the composer's own ⌘Enter and Esc | U1 |
+| On a question's or a plan's form | ↩, digits, Esc, only with focus inside the form | U1 |
+| Terminal, Review, Files | ⌘J, ⇧⌘D, ⇧⌘F | U6 |
 | Go to file | ⌘P | U6 |
 | Attach selection to chat | ⇧⌘L | U6 |
 | Back, Forward | ⌘[, ⌘] | U6 |
-| Zoom in, out | ⌘=, ⌘−; Actual Size has no chord | U6 |
-| Keys on a permission prompt | U1's section | U1 |
+| Zoom in, out | ⌘=, ⌘−; Actual Size has no chord (⌘0 is Overview) | U6 |
+| Project channel | no default chord; a View menu row | U11 |
 
-**UC-7 · An act on a session works on another machine, or says why not.** Owner U9; binds U1, U3, U4, U12. `src/endpoint/offers.ts`, `src/main/lane-b/remote.ts` and `src/shared/ipc/remote-unavailable.ts` are U9's files. A child that adds or changes an act on a session (send now, fork from a message, dismiss, show a pane) states what happens for a session on another machine: it works, through an offer U9 adds, or it is refused with a sentence that names the reason. No act fails silently and none is drawn enabled where it cannot work. Fork is one act with an optional message to fork from; U9 owns it for local and remote sessions, and U3 and U4 mount it.
+**UC-7 · An act on a session works on another machine, or says why not.** Owner U9; binds every child that adds or changes an act on a session (U1, U3, U4, U5, U10, U12). Every act a person can take on a session is, for a session on another machine, in exactly one of three states: carried by an offer; answered by main itself; or declared unavailable, with its control drawn disabled and one sentence. No control is drawn enabled where the act cannot work now, and no act ends without its effect or a sentence that names the reason; one function in `src/shared/ipc/remote-unavailable.ts` words both. `src/endpoint/offers.ts`, `src/main/lane-b/remote.ts`, `src/shared/ipc/remote-unavailable.ts` and `src/endpoint/capabilities.ts` are U9's files. U9 adds, behind one capability (`rl2.session-acts`): Fork (in place, optionally from a prompt and with a first message; the machine's owners; signed unasked on a machine the member owns), Archive, Unarchive, Rename, the owner's read of archived sessions, Dismiss (`attention.acknowledge`), taking back a waiting message (`session.steer.cancel`) and a pane's answer (`maws.pane.answer`). An act known only later goes into the asking child's pull request as an insertion in U9's files, with a capability of its own, and U9 reviews it: U4's two new commands for Send now and the automatic move (after its probe), U5's side thread (a fork with the thread's lineage), and U12's one-shot request from a session's machine to one device on the client port. Fork's point is a prompt: `rewindTo` is the id of one of the person's prompts and the fork holds what precedes it, so "Fork from here" on an answer passes the next prompt, or null. A remote pane stays mounted while its machine is unreachable; cards and side surfaces there keep their last content and draw no error for a read the link could not carry. A machine on an older build does not list the capability, and the control says to update it.
 
-**UC-8 · Shared files have an owner.** Binds all. A child that must edit a file another child owns keeps the edit to the smallest insertion and rebases onto the owner's landing. Owners: `src/renderer/src/sidebar/` and `src/renderer/src/app/Toolbar.tsx` U7; `src/renderer/src/panel/summary/` and `src/renderer/src/tools/agents/` U8; `src/renderer/src/composer/` U4, except `composer/docked/` U1; `src/renderer/src/request-card/` U1; `src/renderer/src/transcript/` per UC-3; `src/renderer/src/tools/code/` and `src/renderer/src/side/card/` U5; `src/renderer/src/main/` (the tab strip and its model, `stores/layout-model.ts`) U13, except `main/Pane.tsx` U9; `src/shared/keymap/` and `src/main/menu.ts` U6; `src/renderer/src/settings-tab/` U11; `src/shared/maws/instructions.ts` and `tools.ts` are edited by several children, one sentence or one tool each.
+**UC-8 · Shared files have an owner.** Binds all. A child that must edit a file another child owns keeps the edit to the smallest insertion, names it in its section, and rebases onto the owner's landing; when two children each insert in a third's file, whoever lands second rebases.
 
-**UC-9 · What the card column holds.** Owner U8; binds U1, U7. U8 owns which cards the column shows and when: Environment (open by default) and Context always; Subagents, Background tasks and the queue of waiting requests only while each has something to show; Artifacts behind the column's three-dot menu. U1 supplies the content of the waiting-requests card and U8 its place and its presence rule. A card that has nothing to show is absent, not empty.
+| files | owner | others insert |
+|---|---|---|
+| `src/renderer/src/request-card/`, `composer/docked/`, `tools/maws/ask/`, `sessions/TrustCard.tsx`, `SetupCard.tsx`, `src/shared/attention/`, `src/main/attention/`, `src/services/attention/`, `src/services/lane-a/attention.ts` | U1 | U3 (O-34's branch in `services/attention/service.ts`; one tool name in `request-card/tools.ts`) |
+| `src/renderer/src/session/SessionPane.tsx` | U1 | U2 (the report bar's mount leaves), U4, U10, U11, U12 (one line each) |
+| `src/renderer/src/transcript/` | per UC-3 | per UC-3 |
+| `src/shared/engine/arrival.ts` and its three callers | U3 | — |
+| `src/renderer/src/owner/`, `src/shared/owner/`, `src/services/owner/` | U2 | — |
+| `src/renderer/src/composer/` except `docked/` | U4 | U2 (the view switch's mount), U9 (S-01's notice, the offline state), U11 (the plus menu, two scrim classes) |
+| `src/renderer/src/side/` (the comment card), `tools/code/review/`, `tools/code/anchor/`, the comment gutter in `tools/code/editor/`, `tools/scm/`, `src/shared/anchor/`, the browser's comment files (`preload/browser-comment.ts`, `shared/browser/comment-protocol.ts`, `tools/browser/comment/`) | U5 | U4 (the `/btw` files in `side/`) |
+| `tools/code/files/`, `tools/code/viewer/`, `tools/code/open-file.ts`, the rest of `tools/code/editor/`, `src/shared/keymap/`, `src/main/menu.ts`, `src/renderer/src/keymap/`, `palette/`, `terminal/`, `shell/transfer.ts`, `panel/TabStrip.tsx`, `settings-tab/keymap.ts` | U6 | every child that adds a chord (rows in `actions.ts`); U11 (palette entries for S-10); U13 (`newChat()` and the current project in `keymap/actions-runtime.ts`) |
+| `src/renderer/src/sidebar/`, `app/Toolbar.tsx`, `usage/` | U7 | U9 (the session menu on a listed row, landing first), U13 (the chip, the New chat row), U3 (one line in `HoverCard.tsx`), U4 (one export in `project-labels.ts`) |
+| `src/renderer/src/panel/` except `TabStrip.tsx`, `tools/agents/`, `app/Shell.tsx`, `app/shell-geometry.ts`, `app/slots.ts`, `src/shared/sessions/working-folder.ts` | U8 | U7 (the destination's gate in `Shell.tsx`), U4 (the `/btw` card's mount), U1 (its card through the slot), U5 (the next-step button on the Environment card's push row), U10 (one control in `PanelHeader.tsx`) |
+| `src/endpoint/offers.ts`, `capabilities.ts`, `src/main/lane-b/remote.ts`, `src/shared/ipc/remote-unavailable.ts`, `src/renderer/src/lane-b/`, `main/Pane.tsx`, `app/session-actions.ts` (its remote branch), `app/machine-mark.ts`, `sessions/listed-state.ts`, `sessions/remote-setup.ts`, `src/main/device/step-up.ts`, `test/lane-b/offer-coverage.test.ts` | U9 | per UC-7; U10 ("Show chat") and U13 (the empty pane's New chat) in `main/Pane.tsx` |
+| `src/renderer/src/library/`, `shell/` except `transfer.ts`, `src/artifacts/`, `src/engine-host/documents/`, `src/engine-host/tool-server/` | U10 | U5 (`artifact_edit`'s reply, in `shared/maws/document-tools.ts` and `artifacts/document/edit-plan.ts`), U12 (the pane bridge: `tool-server/panes.ts`, `session-maws.ts`, `ops.ts`) |
+| `src/renderer/src/settings-tab/` except `keymap.ts`, `customize/`, `channel/`, `widgets/`, `sessions/Sheet.tsx`, `sessions/share/`, `styles/app.css`, `src/main/org/channel/` | U11 | U7 (one entry, Usage, in the Settings section table) |
+| `src/main/browser/`, `src/renderer/src/tools/browser/` outside `comment/`, `src/services/delivery/`, `src/renderer/src/delivery/` | U12 | U5 (the comment dock in `tools/browser/Pane.tsx`), U6 (the link opener) |
+| `src/renderer/src/main/` except `Pane.tsx`, `stores/layout.ts`, `stores/layout-model.ts`, `overview/Overview.tsx` | U13 | U7 (the destination, through the store's one commit function), U8 (regions) |
+| `src/shared/ipc/schema/layout.ts` | by key: `main.tabs` U13; `regions` and `cards.open` U8; `sidebar.hidden` and the retired tab kinds U7 | a child adds a key of its own (UC-14) |
+| `src/shared/maws/tools.ts`, `instructions.ts` | per UC-15 | per UC-15 |
+
+**UC-9 · What the card column holds.** Owner U8; binds U1, U4, U7. The column floats over the right of the main area when a session's tab is active, no side surface is open, the person has not turned the cards off, and there is room. It is not drawn while a side surface or a destination is open, and no request, agent or task opens the column, a surface or a panel by itself; so the waiting-requests card is an aid, and the jump button's mark (U1) is the signal that always shows. The cards, in order: Waiting requests (only while a request of the session waits, UC-1; U1 supplies the component through the slot `sessionCardWaiting`, U8 mounts it first); Environment (open by default); Context; Connectors; Subagents (only while an agent of the session runs); Background tasks (only while a background task runs). A card with nothing to show is absent, not empty. Artifacts is an entry of the title bar's "More surfaces" menu, not a card. The three cards that fold remember it per device under the layout key `cards.open`. While a `/btw` side chat is open, U4's card sits at the column's foot through a slot U8 gives; when the column is not drawn U4 places the card over the pane's corner. A session with no record in this window has only the three conditional cards.
 
 **UC-10 · Building and landing.** Binds all.
 - **Base.** Every child branches from a master that contains the project registry's app branch (`registry-app`), which changes 54 renderer files including the sidebar, New chat and `sessions/actions.ts`. Until it lands no child branches.
-- **Where work happens.** A child is built in a git worktree on a branch `ux-wave/<child id>` and opens one pull request, or several where its section names an early one.
-- **This MacBook.** No local typecheck, no multi-file eslint or vitest, and no local Electron on the owner's MacBook, at any load: one-file eslint and one-file vitest only. Typecheck, lint, the unit suite and the probes run on GitHub Actions through `scripts/ci-gate.sh <worktree>` (class 1a); Electron e2e groups run on a Mac under the load rule; a new or reworked e2e scene runs alone on a Mac before a final gate.
-- **Review.** Each child's execution document gets an adversarial review before its executor starts. Each branch gets `doperpowers:review-code` before it lands: the panel (xhigh) for a branch of panel size or a delicate change, a single reviewer otherwise.
+- **Where work happens.** A child is built in a git worktree on a branch `ux-wave/<child id>` (with a suffix where its section names several pull requests).
+- **This MacBook.** No local typecheck, no multi-file eslint or vitest, and no local Electron on the owner's MacBook, at any load: one-file eslint and one-file vitest only. Typecheck, lint, the unit suite and the probes run on GitHub Actions through `scripts/ci-gate.sh <worktree>` (class 1a); Electron e2e groups run on a Mac under the load rule; a new or reworked e2e scene runs alone on a Mac before a final gate. An engine probe that needs a live engine runs on a Mac other than the MacBook.
+- **Review.** Each child's execution document gets an adversarial review before its executor starts. Each branch gets `doperpowers:review-code` before it lands: the panel (xhigh) for a branch of panel size or a delicate change, a single reviewer otherwise. Delicate by this document: UC-4's second landing, U10's early pull request, U6's route that serves a session's file to a frame, U13's reader of the stored layout, U9's offers.
 - **Landing.** Nothing lands on master, and no build of the wave reaches the owner's machines, without the owner's word; the machines stay on build F until P5's verdict. A child's pull request is reviewed and landed by the session that keeps master (the P5 architect at this writing), by its gated merge: a merge commit built with `git merge-tree`, class 1a green on that exact tree, master unmoved, then the push.
-- **The record.** A child's pull request carries the edits to the documents its items amend: each reversed ruling amended where it stands, dated, naming the owner's words (Decision Log, "Rulings reversed"). At landing the register's rows are updated, and the board tickets and tracker rows the child closes are closed through the board scripts.
+- **The record.** A child's pull request carries the edits to the documents its items amend: each reversed ruling amended where it stands, dated, naming the owner's words (Decision Log, "Rulings reversed"), and each contract amended by a dated line (UC-15). At landing the register's rows are updated, and the board tickets and tracker rows the child closes are closed through the board scripts.
 
-**UC-11 · The repository is public.** Binds all. No screenshot of the owner's, no text of the owner's sessions, no account name and no email address enters the repository, a pull request or a ticket. The comparison's screenshots, the grounding files and the vendor's sources stay outside it.
+**UC-11 · The repository is public.** Binds all. No screenshot of the owner's, no text of the owner's sessions, no account name and no email address enters the repository, a pull request or a ticket. The comparison's screenshots, the grounding files, the owner's layout files and the vendor's sources stay outside it. A drawn example shown to the owner uses invented labels, paths and text.
+
+**UC-12 · The destination.** Owner U7; binds U6, U8, U10, U11, U13. Settings, Customize, Projects and the Artifacts library are *destinations*: places that replace the main area beside the sidebar and are not tabs. The layout store holds one `Destination` with `openDestination` and `closeDestination`. The strip holds no destination: opening or closing one opens, closes, activates and reorders no tab; any act of the person's that brings a tab to the front closes it, through the store's one commit function (U13's file names it); ⌘W closes the destination and never the tab behind it. Four tab kinds retire, and a stored tab of one is dropped at read. While a destination is open the card column is not drawn. A control on a destination can leave it for a given tab (a new chat, a new artifact), and the Library keeps its narrowed view for the return. A destination is not restored after a relaunch. U6's Back and Forward take a destination as a place; U11 fills Settings and switches Customize's sections through `openDestination`. Whether Settings is drawn as a dialog over the window or as a page is the owner's open answer; the state is the same either way.
+
+**UC-13 · The to-human advertisement.** Owner U2; binds U1 (for O-19). MAWS tells the engine's mods what it draws through the launch setting `MAWS_NATIVE_TO_HUMAN`, whose value is `TO_HUMAN_CONTRACT_VERSION` in `src/shared/owner/contract.ts`: 8 today. U2 raises it to 9 in the same change that removes MAWS's own drawing of the report for sessions it runs, and never before. The mod's view (doperpowers `to-human`) draws on MAWS's surfaces when the value is 9 or more and steps aside for any other non-empty value, so build F, which advertises 8 and still draws its own report, is not drawn twice whenever the mod's change is merged. The mod's other readers do not change: the message tool registers at 8 and up; the notifier, the streaming hook and the sminos ask mod stay out for any non-empty value. MAWS decides at each launch who draws the view, from the mod's install record, and publishes it as `drawnBy: 'mod' | 'maws'`: the mod when the launch advertised 9 and the installed mod is the release that draws at 9 or a later one, MAWS everywhere else (a terminal session, a session on another machine, a session at rest, a session under an older mod). So no MAWS work waits for the mod's merge. A later change of the ask mod's row (O-19) takes the next number of the same sequence.
+
+**UC-14 · What the wave stores, build F can still read.** Owner U13; binds U6, U7, U8, U12. Going back to build F after a trial of the wave's build is expected (UC-10), and F reads stored layout strictly: an unknown version makes it open default tabs and overwrite the file. So `main.tabs` keeps version 3 and its envelope, always written with one set under the key `none`; a stored value with several sets is merged into one strip on every read (U13's file gives the function). While F may run on the same profile, no field is added to a stored tab of an existing kind and none to `main.tabs`; a new tab kind is fine (F drops such a tab); new state gets a layout key of its own (`cards.open`, `sidebar.hidden`); a child that retires a tab kind adds it to the reader's retired list. Two rules siblings code against: only a tab holds a session open (a group's membership holds nothing); and showing a tab shows the tabs, through one commit function in `stores/layout.ts`. Proof before the wave's build runs on a profile the owner uses: a cross-build e2e run with F as the peer, and a rehearsal of the new reader over a copy of each of the owner's machines' layout files, kept outside the repository.
+
+**UC-15 · The `maws` tool texts are frozen, and the instructions have a budget.** Owner: the wave's architect; binds U5, U6, U10, U12. Charter X9 freezes the `maws` tool server's tool names, descriptions and result shapes; each changes only by a dated line in the charter's X9 record, written in the pull request that makes the change, and `src/shared/maws/tools.test.ts` pins the list by name and order. Known changes: U10 (the tool `artifact_delete`; `path` on `artifact_publish`; the op `set_page`; `designSystem` on `artifact_create`; `space` on `artifact_describe_type`; export formats; Space instructions in three answers), U12 (`show_pane`'s description, result and one refusal; a paragraph of instructions on the in-app browser), U5 (`reply` on `artifact_edit`), U6 (one sentence of instructions on file links). The server's instructions (`MAWS_SERVER_INSTRUCTIONS`, 699 characters today) are read by the model in every session MAWS runs. The engine's default cap on such a text reads as 4,096 characters in the CLI's bundle (`cli.pretty.js`, the default of `CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH`), and another record says 2,048; until a probe settles it the total stays under 2,048, each child states the characters it adds, and the architect keeps the sum.
 
 ## Ordering and dependency map
 
-- **Before anything:** `registry-app` on master (UC-10).
-- **First, in parallel:** U3 (its arrivals reader first, UC-2), U4, U9, U8 (the working folder's selector first, UC-4), U13's one strip, and U1's work that does not draw in the transcript (UC-1, the cards' contents, approving from outside).
-- **Then:** U1's placement in the transcript and O-21 (after U3's reader, and after U8 gives the card column its slot for the queue, UC-9); U5 and U6 (after U8's selector); U7 (after U13's strip model, because a page that replaces the main area and the strip are one layout); U2's MAWS work (after U3's arrivals, after the owner has looked at the drawn example of an opened tool run, and after the owner merges the mod's pull request for the part that depends on it).
-- **Any time:** U10, U11, U12 touch separate code.
-- **U14** needs about forty minutes of the owner's time on their machines, or an agent on the mini where a check needs no person; its findings feed U7 (S-03), U13 (l6-artifacts-13), U3 and U9 (O-33, O-35), U5 (O-46) and U10 (l6-artifacts-09).
-- **U13's groups** start with a design round: drawn examples of a group opened as tabs, the sidebar's views (O-42) and the folded sidebar (O-24), put to the owner before anything is built.
-- **Engine probes** (law 6) come first inside their children: send-now on a running command (U4), what the engine reports when the agent changes folder (U8), a classifier block on MAWS's own wire (U1).
+Nothing is dispatched before two things hold: `registry-app` is on master (UC-10), and the owner has given the word to build. A child's pull requests are named with a letter where it has several.
+
+**First, in parallel** (each needs only the base):
+- **U6a**, the keymap's shape (UC-6), small and alone: U1, U3 and U4 add chords against it.
+- **U8a**, the working folder's selector with today's behaviour (UC-4): U5 and U6b branch from it.
+- **U3a**, the arrivals reader, its three callers, the arrival rows and their mod-site asks (UC-2, UC-3), after U3's four probes.
+- **U1a**, UC-1 and the request work that does not draw in the transcript.
+- **U13a**, the one strip (UC-14), with its small edits in the title bar, the sidebar and the empty pane.
+- **U9**, the link's phases and the session acts (UC-7).
+- **U4**, after its probe P1; its two late offers ride its own pull request.
+- **U10a** (the writes nobody made), **U11**, **U12** without #435.
+
+**Then:**
+- **U8b**, the column and the panels (UC-9), then **U1b**, the placement in the transcript and O-21: after U3a (the answer class), after U8b (the slot for the waiting-requests card) and on U6a's rows.
+- **U2**: after U3a. Its group work (O-29, O-27, #479, O-15) also waits for the owner's look at the drawn example; its run-forced-open rule reads U1a's predicate. The mod's pull request on doperpowers is opened in parallel and gates nothing in MAWS (UC-13).
+- **U3b**, the rest of the transcript rows; "Fork from here" mounts once U9 has landed.
+- **U5a**, the comment card and its sends: after U8a; U10 and U12 code their hosts against it. **U5b**, Review and source control: after the owner has seen the stacked Review; its side thread on another machine after U9.
+- **U7**: after U13a (a destination and the strip are one layout) and after U9 (the listed row's menu).
+- **U6b**, files, links and the rest of the keyboard: after U8a, U13a (a file moved to the main area; Back and Forward) and U3's landing; its parts that name destinations after U7.
+- **U12's #435**: after U9.
+- **U8c**, the live working folder: after U8's probe of what the engine reports; then the code surfaces of U5 and U6 follow the agent.
+- **U1c**, "Approve and retry": after its probe provokes a classifier block.
+- **U10b**, the rest of the artifacts work; its Library parts are accepted on U7's page.
+- **U13's groups**: after a design round with the owner (drawn examples of a group opened as tabs, the sidebar's views, the folded sidebar) and after U7.
+
+**U14** needs about forty minutes of the owner's time for three checks, and an agent on the mini for the rest; some checks need the wave's build of the child that adds their log lines or their fix. Its findings feed U7 (S-03, S-08), U13 (l6-artifacts-13), U3 and U9 (O-33, O-35, O-39, #429), U5 (O-46), U10 (l6-artifacts-09, l6-artifacts-04), U11 (#476, S-09), U6 (l5-code-07, O-37), U12 (Stop during a computer-use call) and U1 (l1-sessions-08).
+
+**Engine probes** (law 6) come first inside their children: Send now and the move to the background (U4, eight cases); what the engine reports when the agent changes folder (U8); a classifier block on MAWS's own wire (U1); the live forms of a task notification, a scheduled trigger, a bridge delivery and a command's output (U3, four); a `memory_recall` frame and what the mod answers on MAWS's surface at 8 and at 9 (U2); a dynamic server's sign-in (U11, on the mini); the browser and delivery probes (U12).
+
+**Looks the owner is asked for before a landing** (each a drawn example or a running branch, with invented content, UC-11): the opened tool run and the folded to-human view (U2, five questions); the composer's button glyphs and the `/btw` card (U4); the mixed strip with the chip (U13); the stacked Review on a real change (U5b); the regrouped Settings (U11); a memo at two densities, the component cards, and the bar with "Show chat" (U10).
 
 How many children run at once is decided at dispatch, against the shared GitHub Actions budget and the review load.
 
 ## Risks and mitigations
 
-- **A fix that is not a clear improvement.** Mitigation: Parent-level acceptance 2; each child's section names what the owner will see, and a child whose result is doubtful shows it to the owner before landing.
-- **Three children in the transcript's model.** Mitigation: UC-3's order and ownership.
-- **The registry branch moves the base.** Mitigation: UC-10's base rule; the sidebar items were grounded against that branch's diff and are re-read at dispatch.
-- **An engine behaviour assumed, not seen.** Mitigation: law 6 and the three probes; an item whose probe fails falls back as its section says.
-- **Reversing earlier rulings silently.** Mitigation: the Decision Log's list and Parent-level acceptance 4.
-- **Review and CI load from thirteen children.** Mitigation: staged dispatch; the class 1a gates run off this MacBook.
+- **A fix that is not a clear improvement.** Mitigation: Parent-level acceptance 2; each child's section names what the owner will see; the looks listed above come before the landing they concern.
+- **Three children in the transcript's model.** Mitigation: UC-3's order, ownership and rules.
+- **The registry branch moves the base.** Mitigation: UC-10's base rule; the sidebar, tabs and composer sections were written against that branch's diff and are re-read at dispatch.
+- **An engine behaviour assumed, not seen.** Mitigation: law 6 and the probes; an item whose probe fails falls back as its section says.
+- **Reversing earlier rulings silently.** Mitigation: the Decision Log's table and Parent-level acceptance 4.
+- **A trial of the wave's build damages what build F reads.** Mitigation: UC-14, and Parent-level acceptance 6.
+- **A section rests on a reading of Claude Desktop that is wrong.** It happened twice in the cards put to the owner (Decision Log, "Corrections"). Mitigation: a claim about Claude Desktop that an owner-facing question rests on is re-read in the source by the architect before the question is sent; each section cites file and line.
+- **Review and CI load from thirteen children and more than twenty pull requests.** Mitigation: staged dispatch; the class 1a gates run off this MacBook; small early pull requests (U6a, U8a) are single-reviewer size.
 
 ## Deferred and out of scope
 
-**Waiting, inside this wave** (each joins its child when its condition is met; the register holds every row):
+**Waiting, inside this wave** (each joins its child when its condition is met; the register holds every row and every open question with its recommended answer):
 
-- For the owner's answer, asked when the child starts: tabs in the side column instead of stacking (O-36; U13); the next-step suggestion (l2-transcript-13, l3-input-11, l6-artifacts-11; U4); the question tool for sessions MAWS runs (O-19, #420, with #421 after it; U1); Customize's structure and icons (O-14; U11); where a default model and mode are written (l8-settings-11; U11); PDF preview (l6-artifacts-01; U6); what an artifact link opens (O-44; U6); Korean typing (l6-artifacts-14; U10); Touch ID for a machine's connectors (#455; U11).
+- For the owner's answer, put with this document: how Settings is drawn (O-40; U7); whether anything besides its line tells of a failed background task (O-34; U3); whether a waiting message moves a running command to the background by itself (l3-input-01; U4); whether a message typed while a question waits answers it (l4-approvals-08; U1); the words for a link that is not up (#563, O-39; U9).
+- For the owner's answer, asked when the child starts: tabs in the side column instead of stacking (O-36; U13); the next-step suggestion (l2-transcript-13, l3-input-11, l6-artifacts-11; U4); the question tool for sessions MAWS runs (O-19, #420, with #421 after it; U1); Customize's structure and icons (O-14; U11); where a default model and mode are written (l8-settings-11; U11); PDF preview (l6-artifacts-01; U6); what an artifact link opens (O-44; U6); Korean typing (l6-artifacts-14; U10); Touch ID for a machine's connectors (#455; U11); an empty New chat after a relaunch (U13); the agent's tab when the Browser opens by itself (U12); a linked file outside the session's folders (O-37; U6); collecting comments in one pass and where the source-control buttons sit (U5); the export folder (l6-artifacts-20; U5); "End session" over the link (O-48; U9); the Drive check's two files and the remembered computer-use ticket (U12); where per-chat connector switches sit (#476, l8-settings-05; U11, after its check).
 - For a design round with the owner: session groups, the sidebar's views and the folded sidebar (O-31's second half, O-42, O-24; U13).
-- For a hands-on check (U14): S-03, l6-artifacts-13, O-33, l5-code-07, #429, S-08, #476, and the reproductions of O-46, O-35 and l6-artifacts-09, whose fixes are decided and follow the check.
+- For a hands-on check (U14): the sixteen checks of its section; the fixes of O-46, O-35 and l6-artifacts-09 are decided and follow their check.
 - For other items: X-184, l8-settings-05, l8-settings-07 (U11, after O-14 and #476); l6-artifacts-16 (U10, last).
 
-**Deferred, may return:** a reader's grade before the first send (#526, X-237); pop-out windows (l7-shell-10; the owner chose a page for O-40); a project settings page (l8-settings-12, after the registry); Drive through a connector (#400). The 247 tracker candidates not taken stay in `docs/tech-debt-tracker.md`.
+**Deferred, may return:** a reader's grade before the first send (#526, X-237); pop-out windows (l7-shell-10); a project settings page (l8-settings-12, after the registry); Drive through a connector (#400); a message that answers a waiting question and the automatic move to the background, if the owner's answers leave them out; a sent message drawn as a step of the run around it (U2 names the condition). The 247 tracker candidates not taken stay in `docs/tech-debt-tracker.md`.
 
-**Handed to the visual renewal:** roundness of tabs and older components (O-04), row alignment on the Org People page (#342), the thinking mark (PR #144, rebased after U2).
+**Handed to the visual renewal:** roundness of tabs and older components (O-04), row alignment on the Org People page (#342), the thinking mark (PR #144, rebased after U2), a scrim token of its own (#523 uses an existing value).
 
-**Out of scope, standing:** desk web; a chapter rail in the transcript; a site-permission prompt in the in-app browser; hunk staging; a bottom terminal drawer; an agent tool that reads the person's terminal; Read aloud and ratings on answers. Each is recorded with its reason in its item.
+**Out of scope, standing:** desk web; a chapter rail in the transcript; a site-permission prompt in the in-app browser; hunk staging; a bottom terminal drawer; an agent tool that reads the person's terminal; Read aloud and ratings on answers; a stop-the-process act over the machine link. Each is recorded with its reason in its item.
 
 ## Tracking map
 
-| child | execution document | ledger or findings | status |
+No child is dispatched: all wait for `registry-app` on master and the owner's word to build. The last column says what else each waits for.
+
+| child | execution document | ledger or findings | status and what it waits for |
 |---|---|---|---|
-| U1 | — | — | not dispatched: waits for `registry-app` on master and the owner's word to build |
-| U2 | — | — | not dispatched: the mod's rebase and the drawn example come first |
-| U3 | — | — | not dispatched: as U1 |
-| U4 | — | — | not dispatched: as U1 |
-| U5 | — | — | not dispatched: blocked by U8's selector |
-| U6 | — | — | not dispatched: blocked by U8's selector |
-| U7 | — | — | not dispatched: blocked by U13's strip model |
-| U8 | — | — | not dispatched: as U1 |
-| U9 | — | — | not dispatched: as U1 |
-| U10 | — | — | not dispatched: as U1 |
-| U11 | — | — | not dispatched: as U1 |
-| U12 | — | — | not dispatched: as U1 |
-| U13 | — | — | not dispatched: as U1 for the one strip; groups wait for the design round |
+| U1 | — | — | not dispatched. U1a: U6a's rows. U1b: U3a, U8b. U1c: its probe |
+| U2 | — | — | not dispatched. U3a; the drawn example for the group work; the mod's pull request is opened beside it |
+| U3 | — | — | not dispatched. Its four probes first |
+| U4 | — | — | not dispatched. Probe P1 first; the owner's answer on the automatic move |
+| U5 | — | — | not dispatched. U5a: U8a. U5b: the owner's look at the stacked Review |
+| U6 | — | — | not dispatched. U6a: nothing. U6b: U8a, U13a, U3's landing, U7 for the destinations |
+| U7 | — | — | not dispatched. U13a, U9; the owner's answer on Settings for that frame |
+| U8 | — | — | not dispatched. U8a: nothing. U8b: nothing. U8c: its probe |
+| U9 | — | — | not dispatched. Nothing; the owner's answer on the link's words before that part is built |
+| U10 | — | — | not dispatched. U10a: nothing. U10b: U5a for the comment host, U7 for the Library page |
+| U11 | — | — | not dispatched. Nothing; the owner's look at the regrouped Settings before landing |
+| U12 | — | — | not dispatched. #435: U9. The two tickets on the computer-use plugin are filed when it starts |
+| U13 | — | — | not dispatched. U13a: nothing. Groups: the design round, U7 |
 | U14 | — | — | not dispatched: waiting for a sitting |
 
 ## Surprises and discoveries
 
-From the grounding (2026-11-12); each is cited in the item it changed.
+From the grounding and from the writing of the sections (2026-11-12); each is cited in the item it changed.
 
-- Observation: four items about requests that keep "waiting" after they were answered have one cause.
-  Evidence: `src/shared/attention/kinds.ts` `isOpen` is `pending || delivered`; `src/engine-host/broker.ts` `confirm()` leaves `delivered` only at the first frame that names the tool use; charter §4.6 says delivered is not an alarm state.
-- Observation: the to-human mod draws nothing inside MAWS, and the change the owner ruled on 2026-10-24 was never merged.
-  Evidence: the mod's render hooks return early when `MAWS_NATIVE_TO_HUMAN` is set (`src/shared/owner/contract.ts` advertises it); doperpowers branch `to-human-draw-in-maws` (`d17d9b73`, 2026-10-23) is not an ancestor of its `main`.
+- Observation: four items about requests that keep "waiting" after they were answered have one cause on the wire route, and a different one for a terminal session.
+  Evidence: `src/shared/attention/kinds.ts` `isOpen` is `pending || delivered`; `src/engine-host/broker.ts` `confirm()` leaves `delivered` only at the first frame that names the tool use; charter §4.6 says delivered is not an alarm state. A terminal session's item never becomes `delivered`: it stays `pending` until the bridge reports it settled (U1's file).
+- Observation: the to-human mod draws nothing inside MAWS, the change the owner ruled on 2026-10-24 was never merged, and merging it as written would draw the report twice on build F.
+  Evidence: the mod's render hooks return early when `MAWS_NATIVE_TO_HUMAN` is set (`src/shared/owner/contract.ts` advertises 8); doperpowers branch `to-human-draw-in-maws` (`d17d9b73`, 2026-10-23) is not an ancestor of its `main` and removes the deferral outright; F's report bar and report rows consult no mod. Hence UC-13's gate at 9.
 - Observation: thinking reads out of order because of the fix of 2026-10-23 that flattened tool groups.
   Evidence: commit `5ab559bcd`; `src/renderer/src/transcript/view/rows/Group.tsx` draws a group's thinking after all its calls under "Internal activity".
 - Observation: clicking a project does not start a session; the title bar's project chip does.
   Evidence: `src/renderer/src/app/Toolbar.tsx`, the chip's click calls `createSession(project.id)`; a sidebar project row only selects and expands.
-- Observation: Claude Desktop opens Settings as a page with the sidebar kept, not as a floating window.
-  Evidence: `app-5.1231.2/main-process/index.chunk-BV3uOqbK.js` dispatches navigation to `/settings/…`; `settings` is a route under `_withSidebar` in `web/app/v1/index-m4Lmn-QT.js`.
-- Observation: "Send now" stops a running command only because MAWS sends a plain interrupt; the engine can now move the command to the background instead.
-  Evidence: `~/claude-code-bundle/2.1.322/cli.pretty.js` sends `interrupt` with `send_now: true` and a `message_uuid`; `src/renderer/src/composer/queue/QueueList.tsx` calls `controls.interrupt({cancelEngineQueued: false})`.
-- Observation: once the agent moves into a worktree, every code surface keeps reading the launch folder.
-  Evidence: 28 non-test places read `record.worktree?.path ?? record.directory`; nothing under `src/` handles a change of the engine's folder.
-- Observation: a failed background task raises an error card because every failed task notification becomes an error item.
-  Evidence: `src/services/attention/service.ts`, the task-notification branch.
+- Observation: Claude Desktop opens Settings as a dialog over the window, and Customize as a page; the first card put to the owner said both were pages.
+  Evidence: `app-5.1231.2/web/app/v1/index-m4Lmn-QT.js`, the settings route's component (page, blank host or redirect; about lines 22700 to 22815) and the settings store's `openFromRoute` (22500 to 22541): the route redirects to the host page with `#settings/<section>` and opens the modal; the full page is the fallback.
+- Observation: Claude Desktop draws a question in its call's row, and a permission prompt at the transcript's end, only behind a feature gate; its default is a dock above a composer that stays usable.
+  Evidence: U1's file, under l4-approvals-08 (the gate `claudeai_cc_epitaxy_session_presets_main`). The owner's answer stands: it is the owner's own mark.
+- Observation: in auto mode nothing a host can do grants one exact shell command once.
+  Evidence: `~/claude-code-bundle/2.1.322/cli.pretty.js:478076-478081`: a hook's allow of a shell command is sent back to the classifier; the classifier's prompt treats a user's go-ahead after a block as consent to that action (`:450631`). Hence "Approve and retry" as a message (U1, l4-approvals-12).
+- Observation: "Send now" stops a running command only because MAWS sends a plain interrupt; the engine can move the command to the background instead. The automatic form of that move is behind a switch that is off in Claude Desktop.
+  Evidence: `cli.pretty.js` sends `interrupt` with `send_now: true` and a `message_uuid`; `src/renderer/src/composer/queue/QueueList.tsx` calls `controls.interrupt({cancelEngineQueued: false})`; Desktop's flag at `web/app/v1/c8a3f7430-DPEJjikp.js:13`.
+- Observation: once the agent moves into a worktree, every code surface keeps reading the launch folder, although the engine reports the move.
+  Evidence: 29 lines outside tests read `record.worktree?.path ?? record.directory`. The index re-files a session on a `relocated` transcript row and the record's branch follows the newest row, but the window's surfaces do not; CLI `2.1.322` emits `vcs_state_changed` with a cwd, which MAWS parses and ignores.
+- Observation: a failed background task raises an error card because every failed task notification becomes an error item, and its Dismiss is dead for a session on another machine.
+  Evidence: `src/services/attention/service.ts`, the task-notification branch; `attention.acknowledge` has no offer.
+- Observation: no comment can be sent today for a session on another machine, and "Send to main" is refused for a terminal session.
+  Evidence: the message is built in main (`src/services/side/content.ts`, `send-to-main.ts`), and `side.sendToMain` and `side.thread.open` are both in `REMOTE_UNAVAILABLE`.
+- Observation: a link to a file outside the session's own folders is refused on this Mac too, not only on another machine.
+  Evidence: the files service admits only the folders in the session's record (`src/services/files/allowlist.ts`); P5 Decision Log 237 is narrower than the cut's line said.
+- Observation: the stored tab layout is version 3, and build F discards a layout whose version it does not know.
+  Evidence: U13's file, "As stored" and "As read". Hence UC-14.
+- Observation: who sent a row can be proved only from the raw frame.
+  Evidence: X1 lowers the origin object to one word (U3's file, UC-2). The file route draws a peer's delivery as the owner's bubble for two separate causes.
+- Observation: a `Thought for Ns` duration exists only for a thinking block MAWS saw streaming.
+  Evidence: U2's file, #479: none exists for a terminal session, a session on another machine, or history read from disk.
+- Observation: Claude Desktop's find in a session is the transcript's own search, which loads earlier history and opens folded rows; it is not the browser's find.
+  Evidence: U3's file, l2-transcript-08.
+- Observation: a fork made over the machine link cannot name its starter as owner.
+  Evidence: the proof that makes a starter the owner is keyed on the action name `session.spawn` in four places (U9's file, UC-7.4). Hence fork for the machine's owners only in this wave.
+- Observation: signing in a connector a plugin brings is larger than it read, and has never been seen to complete.
+  Evidence: the schema refuses a plugin connector's name and has no `dynamic` scope (U11's file, l8-settings-01); a probe on the mini comes first.
+- Observation: MAWS has no spreadsheet export, so nothing can be converted to Google Sheets.
+  Evidence: U12's file, l9-browser-delivery-09; the cut's line named Excel.
 
 ## Decision Log
 
-- **2026-11-12 · Verification.** This document: one independent review of the design and the cut by a frontier-model reviewer, and one adversarial review of the cut, the contracts and the edges for buildability; findings are judged, not adopted wholesale. Each child's execution document: an adversarial review before its executor starts. Each branch: `doperpowers:review-code`, the xhigh panel for a branch of panel size or a delicate change, a single reviewer otherwise. A new or reworked e2e scene: run alone on a Mac before the final gate. The wave: the owner's sitting (Parent-level acceptance 2).
+- **2026-11-12 · Verification.** This document: one independent review of the design and the cut by a frontier-model reviewer, and one adversarial review of the cut, the contracts and the edges for buildability; findings are judged, not adopted wholesale. Each child's execution document: an adversarial review before its executor starts. Each branch: `doperpowers:review-code`, the xhigh panel for a branch of panel size or a delicate change (UC-10 names them), a single reviewer otherwise. A new or reworked e2e scene: run alone on a Mac before the final gate. The wave: the owner's sitting (Parent-level acceptance 2).
 - **2026-11-12 · Scope.** Tracker rows enter the wave only when they ride with an item (13 of 260 candidates); desk web's candidates stay out; the visual renewal takes O-04, #342 and PR #144. Rejected: taking every tracker row that touches a surface, which would have doubled the wave with rows nobody asked for.
-- **2026-11-12 · The owner's answers** to the eight first questions, as summarised under Design and recorded verbatim beside the register. On placement the owner picked no option and wrote an addition; the architect's reading of it was put back to the owner and confirmed the same day.
+- **2026-11-12 · The owner's answers** to the eight first questions, as summarised under Design and recorded verbatim in the register. On placement the owner picked no option and wrote an addition; the architect's reading of it was put back to the owner and confirmed the same day.
+- **2026-11-12 · One document in several files.** The child sections came to about 124,000 words, too much for one file that every executor reads. The root holds what binds everyone (purpose, laws, contracts, ordering, the record) and a summary of each child; each child's section is its own file under `docs/doperpowers/specs/2026-11-12-ux-wave/`. This departs from the composite template's single file. Rejected: cutting the sections down to fit, which would have dropped the per-route behaviour and the reasons that make each fix checkable.
+- **2026-11-12 · The mod's gate (UC-13).** The mod's view draws on MAWS's surfaces at 9 and steps aside below, instead of the unconditional change of the 10-23 branch. Reason: build F advertises 8 and draws its own report, so the unconditional change, merged before the wave's build is installed, would draw the report twice. With the gate the mod's pull request can merge at any time. The branch is redone by hand on the mod's current main (its base is eighteen commits behind in that directory).
+- **2026-11-12 · Settled between sections at assembly.** (1) A call waiting for permission stays in its run and the run is drawn open while it waits, as Claude Desktop does (U2's rule); rejected: the row standing outside its run (U1's draft), which departs from Desktop for a case that is rare under auto mode. A row that holds a question's, an ask's or a plan's form is never folded and asks no mod's site while it waits. (2) On a permission prompt in view, ⌘↩ with an empty draft, ⇧⌘↩ and Esc act ahead of the composer's own keys, under Claude Desktop's guards (U1's rule); U4's table follows. (3) Arrival rows ask the engine's `UserMessage` site where a mods surface is attached (U2's need); rejected: U3's draft, which kept that site for the person's prompts only, because the mod then could not fold arrivals and the mod-drawn view would differ from the mirror (laws 2 and 5). (4) Offers: U9 adds the rows known now; U4, U5 and U12 insert theirs later in U9's files (UC-7). (5) File ownership as UC-8's table. (6) Up and down between messages follow Claude Desktop, with its guards, as U3 wrote it.
+- **2026-11-12 · Corrections to what the owner was told.** Each was sent to the owner the same day. Settings in Claude Desktop is a dialog, not a page: asked again. The in-row question in Claude Desktop is behind a gate: the owner's answer stands. "Approve grants that exact call once" cannot be built in auto mode: it is "Approve and retry", a message. A link outside the session's folders is refused on this Mac too. Send to Drive converts documents and decks, not spreadsheets. The shortcut for Files is ⇧⌘F (⇧⌘E is effort).
+- **2026-11-12 · Decisions the sections made beyond the cut's lines** that the owner is most likely to see differently are listed for the owner with this document and recorded in each child's file; an answer that differs is recorded here, dated, and the child's file is revised.
 
-**Rulings reversed.** A later word of the owner's wins over an earlier ruling; each reversal is recorded in the document that held the ruling when the change lands (Parent-level acceptance 4). The items' sections carry the reasons.
+**Rulings reversed.** A later word of the owner's wins over an earlier ruling; each reversal is recorded in the document that held the ruling when the change lands (Parent-level acceptance 4). Each child's file gives the place and the sentence to record.
 
 | item | the earlier ruling | child |
 |---|---|---|
-| l3-input-03 | 2026-10-01, W10: "no hold option, no ⌥Enter and no send menu" (charter §4.2, §5.4) | U4 |
-| l3-input-05 | 2026-10-01, W1: queued and steered messages drawn as dimmed bubbles at the transcript's tail (charter §4.2) | U4 |
-| l3-input-10 | W3: the mode menu's order (charter §5.4) | U4 |
-| l3-input-14 | W3: the model chip reads "<alias> <effort>" (charter §5.4) | U4 |
-| l3-input-06 | W3: slash commands listed "with their hints" (charter §5.4) | U4 |
-| l3-input-08 | charter §5.8: ⌘Enter sends a multi-line draft | U4 |
-| l3-input-01 | charter §4.2: "now" preempts the turn | U4 |
+| S-07, #358 | C7: an answered card keeps the composer's place until its item retires | U1 |
+| l4-approvals-08 | charter §13 X4 and §5.8, and C7: a request is docked at the composer | U1 |
+| O-17 | 2026-10-06, E1 M4b: a pending ask opens the Question sheet at once | U1 |
+| l4-approvals-09, #333 | charter §5.1, §12 C5, §13 X4: only a read-only tool is approved from outside the session | U1 |
+| l4-approvals-02 | C7: the scope list and its digit keys | U1 |
+| O-22 | P5 O9: the kind of a terminal session's asynchronous question | U1 |
+| O-29 | the fix of 2026-10-23 for l2-transcript-01 (P4 Decision Log 76), which flattened tool groups | U2 |
+| O-29, O-15 | charter §5.3: the turn line's "N tool calls", the fixed category order, an opened group as a bounded scroller | U2 |
+| O-29 | C6, X3: a call the person decided stands alone; bookkeeping tools are hidden | U2 |
+| #479 | 2026-10-01, W1: a thinking block with no text has no row | U2 |
+| O-30, O-06 | P2-C §7 and §8, and Decision Log 19: the per-turn report and the control at the pane's top | U2 |
+| O-13 | the owner's ruling of 2026-10-24: "MAWS keeps the advertisement unchanged" | U2 |
+| l2-transcript-04 | C6's Copy table: "Peer session worked for" | U2 |
+| l6-artifacts-12 | E2, P3-B, P3-E, P4-B4: artifact calls as rows of their own | U2 |
+| O-12 | E7 Design §4: peer messages stay in view through a fold | U3 |
+| O-41 | P4 DC9 M6: a peer's delivery drawn as a bubble labelled "From X" | U3 |
 | O-08 | 2026-10-01, W2: code blocks and tables break out of the text column | U3 |
 | O-02 | W2: message actions beside the bubble | U3 |
-| O-41 | P4 DC9 M6: a peer's delivery drawn as a bubble labelled "From X" | U3 |
-| O-12 | P1 E7: peer messages stay in view through a fold | U3 |
-| O-29 | the fix of 2026-10-23 for l2-transcript-01, which flattened tool groups | U2 |
-| l5-code-11 | charter D-8: main tabs hold file viewers | U6 |
-| l5-code-02 | the accepted proposal for a commit dialog with a generated message | U5 |
-| S-07 | C7's rule: an answered card stays docked until its tool confirms | U1 |
+| O-34 | charter §5.7 and the owner's ruling of 2026-10-30: a failed background task enters Needs you | U3 |
+| l3-input-03 | 2026-10-01, W10: "no hold option, no ⌥Enter and no send menu" (charter §4.2, §5.4) | U4 |
+| l3-input-05 | 2026-10-01, W1: queued and steered messages drawn as dimmed bubbles at the transcript's tail (charter §4.2) | U4 |
+| l3-input-01 | charter §4.2: "now" preempts the turn | U4 |
+| l3-input-08 | charter §5.8: ⌘Enter sends a multi-line draft | U4 |
+| l3-input-10 | W3: the mode menu's order (charter §5.1) | U4 |
+| l3-input-14 | W3: the model chip reads "<alias> <effort>" (charter §5.4) | U4 |
+| l3-input-06 | W3: slash commands listed "with their hints" (charter §5.4) | U4 |
+| l3-input-15 | charter §5.4: the submit control's label follows state | U4 |
+| l3-input-09 | charter §5.4: pasted text beyond a threshold becomes an attachment | U4 |
+| O-20 | E3 Design §7: the Side pane's question view | U4 |
 | O-45 | X10: the comment card's two-way destination control | U5 |
-| l6-artifacts-08 | X9 as written, if a design system must bind at creation | U9 |
-| S-11 | P4 W11 I1: the prompt as a new session's provisional title | U7 |
+| l5-code-02 | the accepted proposal for a commit dialog with a generated message | U5 |
+| l6-artifacts-20 | 2026-10-23, WR candidate 50: "Export always starts in Downloads", kept | U5 |
+| l5-code-11 | charter §3 P0, §5.6 Files, §12 C8's acceptance: a file opens as a main tab | U6 |
+| l5-code-08 | charter §5.8: ⌘J is the bottom dock's | U6 |
+| O-37 | charter §12 C6: a `file:` URL loses its attribute | U6 |
+| S-11 | 2026-10-01, W11 I1: the prompt as a new session's provisional title | U7 |
+| O-40 | Settings, Customize, Projects and the Library opening as tabs (as built; charter §5.2) | U7 |
+| O-47 | 2026-10-24: the usage reading moved to the sidebar's foot | U7 |
+| O-05 | 2026-10-24, D4 and D3: Artifacts as a default card; each card folded | U8 |
+| l5-code-16 | 2026-10-01, W13: the engine's version on the Environment card | U8 |
+| #563, O-39 | the owner's ruling of 2026-10-27 (P5 Decision Log 28): "offline" for every state that is not up | U9 |
+| O-48, S-02 | P5 O7 Interfaces §L: fork, archive and rename not offered over the link | U9 |
+| O-48 | P5 Decision Log 219: only `session.spawn` is signed unasked | U9 |
+| S-13 | P5 Decision Log 126: the step-up sheet's words come from the action alone | U9 |
+| l6-artifacts-08 | X9 as written, and P3-L Decision Log 13: one card per kind | U10 |
+| O-43 | P4 Decision Log 83: the compact composer and what reopens the conversation | U10 |
+| l6-artifacts-07 | P3-B Decision Log 43: the order that decides an export's page | U10 |
+| l8-settings-06 | C11: every Settings row says where its value comes from | U11 |
+| l8-settings-01 | the aggregator's Decision Log of 2026-10-25, and P5 O7 M8: dynamic servers are signed in nowhere | U11 |
+| l8-settings-04 | C11: the engine's record said beside each switch | U11 |
+| #505 | P5 O8 M7a: an alias capped at 24 characters | U11 |
+| S-09 | P5 O8 M7a: the Channel draws offline from the org status | U11 |
 | O-01 | 2026-10-01, I3, and charter §5.2 W12: a tab set per project | U13 |
-| O-05 | 2026-10-24, D4: Artifacts as a default card | U8 |
-| O-40 | Settings, Customize and the Library opening as tabs (as built) | U7 |
+| O-31 | 2026-10-19 (charter §5.2): a click on the chip opens a new session | U13 |
 
-Waiting on an answer and so not yet reversed: O-36 against the answer of 2026-10-24 (a second side surface stacks under the first); O-44 against X9 (the agent may open an artifact pane).
+Contracts amended by a dated line, not reversed: X1 (the optional `arrival` field on `user.message`; U3); X9 (UC-15); X10, X21 and X36 (the comment card's anchors, hosts and draft rule; U5); X23 (a Space's instructions; U10); the charter's C9 line on links (a loopback link from a session on this Mac opens in the in-app browser; U6); P5 §6, "Pane display" (U12).
+
+Waiting on an answer and so not yet reversed: O-36 against the answer of 2026-10-24 (a second side surface stacks under the first); O-44 against X9 (the agent may open an artifact pane); an empty New chat not returning at a relaunch against l7-shell-12 (keep).
 
 ## Outcomes and retrospective
 

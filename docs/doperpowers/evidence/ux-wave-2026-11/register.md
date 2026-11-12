@@ -22,23 +22,38 @@ Verbatim, as chosen on the question cards; a note is the owner's own text.
 | How should Settings, Customize and the Library open? | A page, like Desktop (Recommended) |  |
 | How should running background work show in the right-hand cards? | Two cards, while running | and subagents as tree too (progressively disclosed. take account for nested ones. ( i won't list everyagent as default, list depth 1 as default and let nested ones to be opened when clicked) |
 
-## Questions still to be asked
+## Questions still open
 
-Each is asked when its child starts.
+A question is put to the owner when its child starts, unless the last column says otherwise. The last fifteen were raised by the child sections when the spec was assembled.
 
-| items | question | recommended answer |
-|---|---|---|
-| O-36 | Should two open side surfaces be tabs in the side column instead of stacking one under the other? | Keep stacking for now: the disruption you met goes away once a question no longer opens a side surface by itself. |
-| l2-transcript-13, l3-input-11, l6-artifacts-11 | Do you want the engine's next-prompt suggestion (grey ghost text in the composer, Tab accepts; one extra model call per turn)? | Build it off by default, behind a Settings switch. |
-| O-19, #420 | Is one ask tool for both the terminal and MAWS still the direction, given it needs sminos changes and a new answer path? | Two steps: first load MAWS's own ask up front with non-blocking as its default; then the sminos route, if you want one tool everywhere. |
-| O-14 | In Customize, which level is on the outside? | My items / Discover outside, with the kind (plugins, skills, connectors) as a filter inside: your second and fourth sentences, and Claude Desktop's experimental merged page. |
-| O-14 | May MAWS fetch connector icons from Google's favicon service (it tells Google which connector sites you list), behind a switch? | No fetch; every item without an icon gets a generated letter tile, which is your "just create one". |
-| l8-settings-11 | Should "make this the default" write your Claude Code settings files (so the terminal agrees), or stay an app-level default as in Claude Desktop? | Write the Claude Code user settings for model and permission mode: one default everywhere, which is what your option B wanted. |
-| l6-artifacts-01 | Do you want files the agent writes to open inside MAWS? | PDF only, now. |
-| O-44 | What did "opens the artifact on the new path" mean, and where should a click on an artifact link open it? | Keep opening it in the session's side panel. |
-| l6-artifacts-14 | Have you ever lost a first letter or a jamo while typing Korean yourself in a deck or document? | If not, the tracker row closes as not reproduced. |
-| #455 | Reading another machine's connectors asks for Touch ID each time. Which? | Make that read need no Touch ID for someone who already administers the machine. |
-| #420 | Defer the edit tools behind tool search again (about 7 s on a session's first edit, for about 2,900 tokens of context)? | No: keep them loaded. |
+| items | question | recommended answer | when |
+|---|---|---|---|
+| O-36 | Should two open side surfaces be tabs in the side column instead of stacking one under the other? | Keep stacking for now: the disruption you met goes away once a question no longer opens a side surface by itself. | when its child starts |
+| l2-transcript-13, l3-input-11, l6-artifacts-11 | Do you want the engine's next-prompt suggestion (grey ghost text in the composer, Tab accepts; one extra model call per turn)? | Build it off by default, behind a Settings switch. | when its child starts |
+| O-19, #420 | Is one ask tool for both the terminal and MAWS still the direction, given it needs sminos changes and a new answer path? | Two steps: first load MAWS's own ask up front with non-blocking as its default; then the sminos route, if you want one tool everywhere. | when its child starts |
+| O-14 | In Customize, which level is on the outside? | My items / Discover outside, with the kind (plugins, skills, connectors) as a filter inside: your second and fourth sentences, and Claude Desktop's experimental merged page. | when its child starts |
+| O-14 | May MAWS fetch connector icons from Google's favicon service (it tells Google which connector sites you list), behind a switch? | No fetch; every item without an icon gets a generated letter tile, which is your "just create one". | when its child starts |
+| l8-settings-11 | Should "make this the default" write your Claude Code settings files (so the terminal agrees), or stay an app-level default as in Claude Desktop? | Write the Claude Code user settings for model and permission mode: one default everywhere, which is what your option B wanted. | when its child starts |
+| l6-artifacts-01 | Do you want files the agent writes to open inside MAWS? | PDF only, now. | when its child starts |
+| O-44 | What did "opens the artifact on the new path" mean, and where should a click on an artifact link open it? | Keep opening it in the session's side panel. | when its child starts |
+| l6-artifacts-14 | Have you ever lost a first letter or a jamo while typing Korean yourself in a deck or document? | If not, the tracker row closes as not reproduced. | when its child starts |
+| #455 | Reading another machine's connectors asks for Touch ID each time. Which? | Make that read need no Touch ID for someone who already administers the machine. | when its child starts |
+| #420 | Defer the edit tools behind tool search again (about 7 s on a session's first edit, for about 2,900 tokens of context)? | No: keep them loaded. | when its child starts |
+| O-40 | How should Settings, Customize and the Library open in MAWS? (Asked again: my first card was wrong about Claude Desktop.) | As Claude Desktop really does: Settings a dialog over the tabs; Customize and the Library pages that replace the main area with the sidebar kept; none of them a tab. | asked again on 11-12, not yet answered |
+| O-34 | When a background task fails, should anything besides its line in the transcript tell you? | No: the line says it, and the agent is told and acts. No card, no Needs you entry, no notification. In the to-human view the line is inside the folded working record, as in the terminal. | asked on 11-12 with the spec |
+| l3-input-01 | When your message has waited three seconds behind a command the agent is running, should MAWS move that command to the background by itself so that the agent reads the message? | No, only when you press Send now or Esc: Claude Desktop keeps its automatic move behind a switch that is off, and an automatic move lets the agent go on before the command's result is in. | asked on 11-12 with the spec |
+| l4-approvals-08 | While a question waits, should a message you send from the composer count as its answer (Claude Desktop marks such a question "Replied in chat")? | No: the message is sent as a message and the question keeps waiting. MAWS's three question tools take answers in different shapes, some of them typed (files, a folder), and a message that silently answers a question it was not about is the worse fault. | asked on 11-12 with the spec |
+| #563, O-39 | What should the tab of a session on another machine say while the link is not up? (Your ruling of 10-27: "offline" for every such state, rows greyed.) | "Connecting" on the first attempt and "Reconnecting" for the first minute after a drop, with the transcript kept on screen and nothing greyed; "offline" only when the first attempt failed or the link has been down a minute. | asked on 11-12 with the spec |
+| O-01 | After a relaunch, should a New chat tab with nothing typed in it come back? | No: only a chat with a draft or a started session returns. | when its child starts |
+| l9-browser-delivery-01 | When the Browser opens by itself because the agent started acting in it, should it show the agent's tab? | Yes, unless you are using the tab that is selected. | when its child starts |
+| O-37 | On this Mac, should a file the agent linked in a session's transcript open read-only on click when it lies outside that session's folders? | Yes, limited to files that session's transcript links to, checked by the main process against the transcript. | when its child starts |
+| #476, l8-settings-05 | Where should a per-chat connector switch sit, and does the Settings connector list go once "Add custom connector" moves to Customize? | Put to you with the result of the hands-on check of #476, which shows which switches can act on a running session. | after the hands-on check of #476 |
+| l5-code-01, l9-browser-delivery-05 | In Review and the in-app browser, should opening a second comment keep the first one unsent, so that they are sent together? | Yes: the card lists the others and Send reads "Send N comments". | when its child starts |
+| l5-code-02 | Where should the buttons that ask the agent to commit, push and open a pull request sit? | All three in Source control, and one next-step button on the Environment card; all off while the agent works. | when its child starts |
+| l6-artifacts-20 | On 10-23 you marked "keep" on the export dialog always starting in Downloads, and "fix" on the finding that asks it to remember the last folder. Which holds? | Remember the last export folder. | when its child starts |
+| O-48 | Should "End session" (stop the process without archiving) exist for a session on another machine? | No: Stop ends a turn and Archive ends the process. | when its child starts |
+| l9-browser-delivery-09 | May the Drive check create two small files in your Google Drive (removed afterwards)? | Yes. | when its child starts |
+| l9-browser-delivery-01 | Which computer-use ticket did you mean by "the ticket is already registered" (the in-app browser as a surface of the computer-use tool)? | If you do not recall it, a new ticket is filed on the computer-use plugin's board. | when its child starts |
 
 ## U1 · Requests
 
@@ -59,7 +74,7 @@ Each is asked when its child starts.
 | l4-approvals-05 | mark | build | A file-change approval shows a real diff, says "create" for a new file, and shortens paths. |
 | l4-approvals-11 | mark | build | The plan approval button names the mode that follows, with a menu. Editing the plan is left out. |
 | l4-approvals-13 | mark | build | The trust card lists only what would really load. |
-| l4-approvals-12 | mark | build | Yes, it can work, as "approve and retry": by the time the row shows the block, the call is over. Approve grants that exact call once and asks the agent to retry. Claude Desktop only offers a Retry message that can be blocked again. A probe comes first: MAWS has never seen such a block on its own wire. |
+| l4-approvals-12 | mark | build | Yes, as "Approve and retry", but not as I first told you: nothing MAWS can do grants one exact call in auto mode (the engine sends a command approved by a hook back to its classifier). The button sends the engine's own consent sentence as a message, and the classifier treats your go-ahead after a block as consent to that action; it is the classifier's judgment, not a guarantee. A probe comes first, because MAWS has never seen such a block on its own wire, and it decides whether an exact-rule step is added. |
 | l4-approvals-09 | mark | build | From a notification you can allow a shell command (shown in full) or a read-only tool, and deny anything. An edit opens the app. |
 | #333 | ticket | build | The same rule on the sidebar hover card. |
 | O-19 | observation | question to the owner | Larger than it reads: the sminos ask cannot serve a session MAWS runs today, for three separate reasons, and MAWS has no path to deliver its async answer. Two repositories. |
@@ -80,7 +95,7 @@ Each is asked when its child starts.
 | O-29 | observation | build | A run of tool calls collapses into one line worded as Claude Desktop words it ("Ran 3 commands, edited 2 files +12 −4, used 1 agent"), collapsed by default even while running, and opens to today's rows. MAWS had collapsed groups until the 10-23 fix flattened them. |
 | O-27 | observation | build | You answered on 11-12: thinking is its own step, in order, inside the group. Your two conditions hold: thinking keeps the shape it has today and does not look like a tool row, and an opened group must not grow too long. I draw an opened long turn for you to look at before this is built. |
 | O-15 | observation | build | The closed turn's line carries Claude Desktop's summary of the whole turn, at most three parts and "and N more actions". |
-| #479 | ticket | build | A thinking block with no text shows as a "Thought for Ns" step inside its group. |
+| #479 | ticket | build | Inside an opened group, a thinking block with no text gets a "Thought for Ns" line only when it ran ten seconds or more, and thoughts next to each other merge; otherwise an opened twenty-call group would grow to about thirty lines. The drawn example shows this rule beside "every thought a line" for you to choose. The duration exists only for a session MAWS runs and saw streaming. |
 | #351 | ticket | build | Memory recall shows as a step ("Recalled 2 memories"); the engine's permission-check and intent frames stay silent. |
 | O-49 | observation | build | No path loses a description that a call carried. When a call has none, the row shows the command itself, or "Ran a command" when it is unsafe to show, as Claude Desktop does. |
 | l6-artifacts-12 | mark | build | Artifact tool rows read by the artifact's title; a failed call shows the first line of its error. |
@@ -104,7 +119,7 @@ Each is asked when its child starts.
 |---|---|---|---|
 | O-12 | observation | build | A peer or subagent message is one line ("› Message from @name: …"), opened on demand, and folds with its turn. This is the CLI's form; Claude Desktop draws these as bordered cards, which is what you are asking to leave. |
 | O-28 | observation | build | A background job's notification is drawn as one row where it reached the model, coloured by outcome, as the CLI does. Claude Desktop instead updates the task's own row. |
-| O-34 | observation | build | A failed background task no longer raises an error card; it is one row (O-28). Dismiss looked dead because the session was on another machine, where dismissing is not carried yet. |
+| O-34 | observation | build | A failed background task no longer raises an error card, a Needs you entry or a notification; its red line in the transcript says it (O-28). Dismiss looked dead because the session was on another machine, where dismissing is not carried yet (it will be). Whether anything else should tell you about such a failure is asked on 11-12. |
 | O-41 | observation | build | Two defects. A terminal session on this Mac draws a peer's delivery as your own message; and even the remote path draws it as a bubble labelled "From X" by an earlier decision. Every route will draw a peer row; your own sends stay your bubble. |
 | X-032 | tracker | build | A steer of yours that went through the fallback route is drawn as yours, not as a peer's message. |
 | O-07 | observation | build | Code blocks wrap long lines and have one frame with no empty header band, as Claude Desktop's do. |
@@ -115,7 +130,7 @@ Each is asked when its child starts.
 | #331 | ticket | build | While a session compacts, its working line says "Compacting session…". The engine host already knows; nothing reads it. |
 | #146 | ticket | build | The web plugin's fetch is drawn like a web fetch. |
 | l2-transcript-08 | mark | build | ⌘F finds in the session: messages, answers and tool labels, opening the fold that holds a match. |
-| l2-transcript-09 | mark | build | Up and down move between messages and a chord jumps between your prompts. No chapter rail: it would need a new agent tool and more on screen. |
+| l2-transcript-09 | mark | build | A chord jumps between your prompts (⌥⌘↑, ⌥⌘↓), and with a message itself focused, up and down move between messages: both as Claude Desktop does. No chapter rail: it would need a new agent tool and more on screen. |
 | O-33 | observation | hands-on check (U14) | The table frame is O-07/O-08 and the "0s" line is O-35. The missing prompt bubble needs the same session opened on the mini to tell a lost delivery from a drawing fault. A live side-by-side with Claude Desktop is a step after this wave's transcript work. |
 | #44 | ticket | already built | Its six items are covered elsewhere or fixed; the ticket closes. |
 | l2-transcript-15 | mark | already built | Built: a stopped turn has its mark and no raw tag. |
@@ -129,7 +144,7 @@ Each is asked when its child starts.
 | id | from | state | the line |
 |---|---|---|---|
 | X-049 | tracker | build | The queue row for such an answer reads "Answer to <question>: <choice>", not the raw envelope. |
-| l3-input-01 | mark | build | Cheaper than it reads: the engine now moves a running command to the background when a message is sent "now". MAWS's Send now kills the command only because it sends a plain interrupt. A probe on the current engine comes first. |
+| l3-input-01 | mark | build | Cheaper than it reads: the engine now moves a running command to the background when a message is sent "now". MAWS's Send now kills the command only because it sends a plain interrupt. A probe on the current engine comes first. The accepted proposal also moves a command to the background by itself when your message has waited three seconds behind it; Claude Desktop keeps that behind a switch that is off, so you are asked on 11-12 before it is built. |
 | l3-input-02 | mark | build | Stop keeps pausing the queue; Send now no longer does. |
 | l3-input-03 | mark | build | ⌘Enter queues a message for after the turn. This reverses the 10-01 rule "no hold, no send menu". |
 | l3-input-04 | mark | build | Up-arrow in an empty box takes back a waiting message for editing. |
@@ -181,7 +196,7 @@ Each is asked when its child starts.
 | l5-code-09 | mark | build | Files gets a Changed group on top, status colours and dimmed ignored files, then ⌘P quick open. |
 | l5-code-10 | mark | build | "Open in" for VS Code, Cursor, Zed, Xcode, Terminal and Finder, where installed. |
 | l9-browser-delivery-08 | mark | build | The same "Open in" on a session's menu and its sidebar row. |
-| O-37 | observation | build | The choice does not exist: the engine's SendUserFile is already retired and MAWS's own send-file tool delivers. Three real defects are fixed: the refusal on a remote session reads as a permissions problem when it is not; a link to a PDF, HTML or media file opens outside the app; file:// links are not clickable. A link into a folder outside the session's own stays refused on another machine, by a P5 security decision. |
+| O-37 | observation | build | The choice does not exist: the engine's SendUserFile is already retired and MAWS's own send-file tool delivers. Fixed: the refusal reads as a permissions problem when it is not; a link to a PDF, HTML or media file opens outside the app; file:// links and relative paths are not clickable. One correction to what I told you: a link to a file outside the session's own folders is refused on this Mac too, not only on another machine. Whether such a link should open read-only is a question for you when this part starts; until then the notice says plainly why it did not open. |
 | l9-browser-delivery-03 | mark | build | A local session's localhost links open in the in-app browser, as a remote session's already do; ⌘-click sends one to the system browser. |
 | l5-code-08 | mark | build | Chords for the surfaces (⌘J Terminal, ⌘⇧D Review, ⌘⇧F Files, as in Claude Desktop) and "Attach selection to chat". No bottom drawer. Letting the agent read your terminal is left out. |
 | l7-shell-06 | mark | build | ⌘K opens on your recent sessions and artifacts and can find artifacts. |
@@ -198,13 +213,13 @@ Each is asked when its child starts.
 
 | id | from | state | the line |
 |---|---|---|---|
-| O-16 | observation | build | Hide is built as its own thing, not as archive (archive stops a process and is refused for terminal and remote sessions). One click hides; hidden sessions sit behind "Hidden · N" at the end of the project; a hidden session comes back when it starts a new turn. |
+| O-16 | observation | build | Hide is built as its own thing, not as archive (archive stops a process and cannot reach a session a terminal holds). Hide is one item in the row's three-dot menu, with no confirmation and nothing stopped; hidden sessions sit behind "Hidden · N" at the end of the project; Unhide brings one back, and a hidden session comes back by itself when it starts a new turn. |
 | O-38 | observation | build | Local rows already have "Open in new tab". Rows of sessions on other machines do not; they get it. |
 | #559 | ticket | build | The same change as O-38: a remote row also honours ⌘-click and middle-click. |
 | #407 | ticket | build | While the machine daemon restarts, the sidebar shows what it has with a "reconnecting" mark instead of ending the skeleton early. |
 | S-11 | sitting | build | A new session is titled by the first six words of its prompt (60 characters at most) until a title is generated. The whole prompt stays searchable. |
 | O-03 | observation | build | One regression from 10-24: the project chip's box is 96 px wide but its text may grow to 192 px, so a long name runs under the first tab. |
-| O-40 | observation | build | You answered on 11-12: a page, as Claude Desktop does. Settings, Customize and the Library open as a page that replaces the main area, with the sidebar still there; Back or Esc returns to your tabs. They no longer open as tabs. |
+| O-40 | observation | build | You answered "a page, like Desktop" on 11-12, on a card of mine that was wrong about Claude Desktop: there Settings opens as a dialog over the window and only Customize is a page. Asked again the same day. Until you answer, the spec makes Settings, Customize, Projects and the Library places that are not tabs; whether Settings is drawn as a dialog or a page is the one thing that waits. |
 | O-47 | observation | build | Usage becomes a small ring in the title bar that opens a compact one-column popover; the full multi-account grid moves to a Settings › Usage section. The sidebar footer keeps only the gear. |
 | S-03 | sitting | hands-on check (U14) | The mini's own window showed none of one project's sessions. The cause is not found; it has to be diagnosed on the mini, and the fix goes on top of the registry branch. |
 | S-08 | sitting | hands-on check (U14) | Chromium slows a hidden window; it matters to agents driving MAWS more than to a person. One timed check first, then throttling goes off only while something drives the app, as Claude Desktop does. |
@@ -234,14 +249,14 @@ Each is asked when its child starts.
 
 | id | from | state | the line |
 |---|---|---|---|
-| O-05 | observation | build | You answered on 11-12: two cards, Subagents and Background tasks, each present only while it has something running. Your addition: Subagents is a tree, listing the first level by default, and a nested agent opens when its parent is clicked. Artifacts leaves the default cards for the three-dot menu, and Environment opens by default. |
+| O-05 | observation | build | You answered on 11-12: two cards, Subagents and Background tasks, each present only while it has something running. Your addition: Subagents is a tree, listing the first level by default, and a nested agent opens when its parent is clicked. Artifacts leaves the cards for the title bar's three-dot menu, Connectors stays, and Environment opens by default. |
 | O-09 | observation | build | The list reads "Running N" with every running kind together, then one folded "Done N" with counts by kind. Narrow tools remember their own width (about 360 px) apart from wide ones; today one shared width makes them open as wide as the browser. |
 | O-10 | observation | build | The Context card drops its compaction, subagent and background rows. |
-| #359 | ticket | build | The agents list draws failed and stopped apart from completed, and shows "waiting on background" only when a child task is really running. |
+| #359 | ticket | build | Mostly built already: an ended agent reads finished, finished with errors, stopped or ended with the session, and one with a request of its own reads "Approval needed". What remains: an agent with work still running under it says how much; Done counts the failed and the stopped; a terminal session's agents stop reading "Working" once its process is gone (tracker row X-168). |
 | X-165 | tracker | build | A panel width saved as exactly 380 px is no longer read as "automatic". |
 | X-168 | tracker | build | A terminal session's background agent stops reading "working" once its terminal has ended. |
 | l5-code-14 | mark | build | Larger than the display you asked for: once the agent moves into a worktree, Review, Source control, Files and the Environment card all keep reading the launch folder. They will follow the agent, as Claude Desktop does, and the card shows the live folder and branch. A probe of the engine's signal comes first. |
-| l5-code-16 | mark | build | The Environment card's change line opens Review; its rows are trimmed. |
+| l5-code-16 | mark | build | The Environment card's change line already opens Review; it is drawn as a control so that this shows. The second Review button and the Claude Code version row leave the card (the version stays in Session info). |
 | l7-shell-04 | mark | same ask as another item | Your words on this mark are O-05. |
 | l6-artifacts-06 | mark | same ask as another item | Overtaken by your later O-44 (no automatic opening) and O-05 (card order). |
 | #566 | ticket | not MAWS's to fix | What the window draws while sessions work unattended: context for the cards work, not a change of its own. |
@@ -255,7 +270,7 @@ Each is asked when its child starts.
 | #563 | ticket | build | A remote tab stays mounted and readable under a thin "Reconnecting…" line, so the reader keeps their place. |
 | #565 | ticket | build | No whole-history read beside a live resume when a link returns; a failed hold heals by itself. |
 | S-05 | sitting | build | A remote row with its tab open reads the tab's live stream, so it shows Working at once instead of 5 to 10 s late. |
-| O-48 | observation | build | Fork was left off the link to other machines on purpose in P5, with Stop, Archive and Rename. They are added together as one change. Fork also becomes a /fork item and "Fork from here" on a message, for local sessions too. |
+| O-48 | observation | build | Fork, Archive and Rename were left off the link to other machines on purpose in P5. They are added together, with Unarchive; Fork is for the machine's owners in this wave, needs no Touch ID on a machine you own, and also becomes a /fork item and "Fork from here" on an answer, for local sessions too. Stopping a turn already works there; ending a remote session's process without archiving is not added. |
 | S-02 | sitting | build | Archive and Rename for a session on another machine, in the same change as O-48. |
 | S-01 | sitting | build | A Stop that fails says so, and reads "Stopping…" while it is on its way. |
 | S-13 | sitting | build | The Touch ID sheet names the machine by its name. |
@@ -300,7 +315,7 @@ Each is asked when its child starts.
 | #505 | ticket | build | Channel tab: a stable scrollbar gutter and sensible truncation of names. |
 | #456 | ticket | build | The LiveQuery sheet gets its missing line for a paused query. |
 | S-09 | sitting | build | The Channel tab says it is offline and retrying as soon as its read fails. |
-| S-10 | sitting | build | The Channel opens from the command palette, and the project row shows its waiting count. No new button. |
+| S-10 | sitting | build | The Channel opens from the command palette (one entry per project that has one, with its waiting count) and from the View menu. No new button; the project row already shows its waiting count. |
 | X-184 | tracker | build, after an answer | Plugin-provided connectors appear under My items, with Sign in. |
 | l8-settings-05 | mark | build, after an answer | "Add custom connector…" moves to Customize and writes the Claude Code config with a scope. |
 | l8-settings-07 | mark | build, after an answer | A skill can be switched off (the engine now supports it), revealed in Finder and opened. "New skill…" starts a chat with the skill creator. |
@@ -323,7 +338,7 @@ Each is asked when its child starts.
 | l9-browser-delivery-06 | mark | build | Device sizes and a page screenshot. No site-permission prompt: Claude Desktop has none and it would reverse an earlier security decision. |
 | #435 | ticket | build | A pane the agent opens from a remote session appears on the device that sent the turn. |
 | l9-browser-delivery-07 | mark | build | MAWS shows "computer use running · Stop" while a cua call is in flight. The wire cannot say which app is driven; I file a cua ticket for that. The on-screen cursor gets the session's name. |
-| l9-browser-delivery-09 | mark | build | Send to Drive converts Word, PowerPoint and Excel files to Google formats by default (one field was missing), with "As a file" kept. |
+| l9-browser-delivery-09 | mark | build | Send to Drive converts a document to Google Docs and a deck to Google Slides by default (one field was missing), with "As a file" kept. Nothing converts to Sheets: MAWS has no spreadsheet export. |
 | #400 | ticket | later | Drive through a connector instead of gws: its own design. Note that gws sign-in expires weekly while its Google client is in testing mode. |
 | l9-browser-delivery-04 | mark | keep | Kept. |
 | l9-browser-delivery-11 | mark | keep | Kept. |
