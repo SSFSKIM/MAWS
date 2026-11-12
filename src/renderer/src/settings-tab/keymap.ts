@@ -1,8 +1,9 @@
 // The Keyboard section's rules (C11 execution document, Interfaces "Settings tab" Keyboard; M5 decisions), pure: a
 // keydown read into Electron accelerator syntax through C5's chord vocabulary (`KeyboardEvent.code` for letters, digits
 // and punctuation, `key` for named keys, exactly as C5's `Chord` matches), the capture's outcome for one action, and
-// the action table as the section lists it. Every action is editable (C5's residue: all bindings editable).
-import { ACTIONS, ACTION_IDS, effectiveChord, type ActionId, type ActionSpec, type KeymapOverrides } from '@shared/keymap/actions';
+// the action table as the section lists it. U6a: every row is listed, and a row takes a rebinding only when it is
+// rebindable (`isRebindable`: not a fixed key of an editor, and an action build F knows, UC-14).
+import { ACTIONS, effectiveChord, heldChords, idsOf, isRebindable, type ActionId, type ActionSpec, type ActionTable, type KeymapOverrides } from '@shared/keymap/actions';
 import { formatChord, parseChord, type Chord, type KeyEventLike } from '@shared/keymap/chord';
 import { MENU_ROLE_CHORDS } from '@shared/keymap/menu-roles';
 import { KEYBOARD } from './copy';
@@ -41,11 +42,9 @@ export function acceleratorOf(event: KeyEventLike): string {
 const same = (a: Chord, b: Chord) => a.meta === b.meta && a.ctrl === b.ctrl && a.alt === b.alt && a.shift === b.shift && a.key === b.key;
 
 // The chords an action holds: its effective chord, and for Select tab 1–9 the nine the menu expands it into.
-function chordsHeld(id: ActionId, overrides: KeymapOverrides): string[] {
-  const chord = effectiveChord(id, overrides);
-  if (chord === null) return [];
-  if (id === 'tab.select' && chord.endsWith('1')) return Array.from({ length: 9 }, (_, i) => `${chord.slice(0, -1)}${i + 1}`);
-  return [chord];
+function chordsHeld(id: ActionId, overrides: KeymapOverrides, table: ActionTable): string[] {
+  const chord = effectiveChord(id, overrides, table);
+  return chord === null ? [] : heldChords(id, chord);
 }
 
 // The application menu's role item that holds `chord` window-wide (Undo, Copy, Quit…), if any.
@@ -54,12 +53,18 @@ export function reservedItemOf(chord: string): string | null {
   return MENU_ROLE_CHORDS.find((role) => same(parseChord(role.chord), wanted))?.item ?? null;
 }
 
-// The action other than `id` that already holds `chord`, if any.
-export function conflictOf(id: ActionId, chord: string, overrides: KeymapOverrides): ActionId | null {
-  const wanted = chordsHeld(id, { ...overrides, [id]: chord }).map(parseChord);
-  for (const other of ACTION_IDS) {
-    if (other === id) continue;
-    if (chordsHeld(other, overrides).some((held) => wanted.some((candidate) => same(parseChord(held), candidate)))) return other;
+// The action other than `id` that already holds `chord`, if any. U6a (the U6a execution document, Interfaces D): a fixed
+// row is never a holder (its key is its editor's); and an action given back its own default is not refused for a row
+// that holds that chord as its own default too, so the table's own sharing (two composer rows on ⌘Enter) is restorable.
+export function conflictOf(id: ActionId, chord: string, overrides: KeymapOverrides, table: ActionTable = ACTIONS): ActionId | null {
+  const wanted = heldChords(id, chord).map(parseChord);
+  const holds = (chords: string[]) => chords.some((held) => wanted.some((candidate) => same(parseChord(held), candidate)));
+  const ownDefault = table[id].chord !== null && holds(heldChords(id, table[id].chord!));
+  for (const other of idsOf(table)) {
+    if (other === id || table[other].fixed) continue;
+    const byDefault = !(isRebindable(other, table) && overrides[other] !== undefined);
+    if (ownDefault && byDefault && table[other].chord !== null && holds(heldChords(other, table[other].chord!))) continue;
+    if (holds(chordsHeld(other, overrides, table))) return other;
   }
   return null;
 }
@@ -73,7 +78,7 @@ export type CaptureOutcome =
 
 const bare = (e: KeyEventLike) => !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey;
 
-export function captureChord(event: KeyEventLike, id: ActionId, overrides: KeymapOverrides): CaptureOutcome {
+export function captureChord(event: KeyEventLike, id: ActionId, overrides: KeymapOverrides, table: ActionTable = ACTIONS): CaptureOutcome {
   if (MODIFIER_KEYS.has(event.key)) return { kind: 'wait' };
   if (bare(event) && event.key === 'Escape') return { kind: 'cancel' };
   if (bare(event) && event.key === 'Backspace') return { kind: 'unbind' };
@@ -84,13 +89,13 @@ export function captureChord(event: KeyEventLike, id: ActionId, overrides: Keyma
     return { kind: 'refused', message: (error as Error).message };
   }
   // Menu and app-wide renderer actions own their chord even in text fields. Only a function key may be bare.
-  const spec: ActionSpec = ACTIONS[id];
+  const spec: ActionSpec = table[id];
   if ((spec.sink === 'menu' || spec.scope === 'app') && !event.metaKey && !event.ctrlKey && !event.altKey && !FUNCTION_KEY.test(event.key)) return { kind: 'refused', message: spec.sink === 'menu' ? KEYBOARD.menuNeedsModifier : KEYBOARD.appNeedsModifier };
   // A role item's chord never reaches an action, whatever its sink: the menu takes it first.
   const reserved = reservedItemOf(chord);
   if (reserved !== null) return { kind: 'refused', message: KEYBOARD.reserved(reserved) };
-  const taken = conflictOf(id, chord, overrides);
-  if (taken !== null) return { kind: 'refused', message: KEYBOARD.conflict(ACTIONS[taken].title) };
+  const taken = conflictOf(id, chord, overrides, table);
+  if (taken !== null) return { kind: 'refused', message: KEYBOARD.conflict(table[taken].title) };
   return { kind: 'chord', chord };
 }
 
@@ -100,6 +105,7 @@ export interface KeymapRow {
   chord: string | null; // effective
   display: string; // the chord in symbols, `Unbound` when none
   overridden: boolean;
+  rebindable: boolean; // U6a: Settings › Keyboard offers Change only here
 }
 export interface KeymapGroup {
   label: string;
@@ -112,22 +118,33 @@ export function displayChord(id: ActionId, chord: string | null): string {
   return id === 'tab.select' && chord.endsWith('1') ? `${shown}…9` : shown;
 }
 
-const PLACEMENTS: [ActionSpec['menu'], string][] = [['app', 'MAWS menu'], ['file', 'File'], ['view', 'View'], ['go', 'Go'], ['help', 'Help']];
+const PLACEMENTS: [ActionSpec['menu'], string][] = [['app', 'MAWS menu'], ['file', 'File'], ['edit', 'Edit'], ['view', 'View'], ['go', 'Go'], ['help', 'Help']];
 const SCOPES: [ActionSpec['scope'], string][] = [['app', 'App-wide'], ['pane', 'In a pane'], ['composer', 'In the composer']];
 const SCOPE_ORDER: ActionSpec['scope'][] = ['app', 'pane', 'composer'];
 
-// The table as the section lists it: by menu placement, then the actions no menu holds by scope; within a group by
-// scope, then the table's own order.
-export function keymapGroups(overrides: KeymapOverrides): KeymapGroup[] {
+// The table as the section and the shortcut sheet list it, grouped as the menus draw it (U6a): for each menu placement,
+// its rows that name no submenu, then one group per submenu in the order the submenus first appear in the table,
+// labelled with its path (`View › Tabs`, as the app writes a menu path); then the rows no menu holds by scope, fixed
+// keys among them. Within a group by scope, then the table's own order.
+export function keymapGroups(overrides: KeymapOverrides, table: ActionTable = ACTIONS): KeymapGroup[] {
+  const ids = idsOf(table);
   const row = (id: ActionId): KeymapRow => {
-    const chord = effectiveChord(id, overrides);
-    return { id, title: ACTIONS[id].title, chord, display: displayChord(id, chord), overridden: overrides[id] !== undefined };
+    const chord = effectiveChord(id, overrides, table);
+    const rebindable = isRebindable(id, table);
+    return { id, title: table[id].title, chord, display: displayChord(id, chord), overridden: rebindable && overrides[id] !== undefined, rebindable };
   };
-  const byScope = (ids: ActionId[]) => [...ids].sort((a, b) => SCOPE_ORDER.indexOf(ACTIONS[a].scope) - SCOPE_ORDER.indexOf(ACTIONS[b].scope));
-  const spec = (id: ActionId): ActionSpec => ACTIONS[id];
+  const byScope = (rows: ActionId[]) => [...rows].sort((a, b) => SCOPE_ORDER.indexOf(table[a].scope) - SCOPE_ORDER.indexOf(table[b].scope));
+  const placed = (menu: ActionSpec['menu'], label: string): KeymapGroup[] => {
+    const inMenu = ids.filter((id) => table[id].menu === menu);
+    const submenus = [...new Set(inMenu.flatMap((id) => table[id].submenu ?? []))];
+    return [
+      { label, rows: byScope(inMenu.filter((id) => table[id].submenu === undefined)).map(row) },
+      ...submenus.map((name) => ({ label: `${label} › ${name}`, rows: byScope(inMenu.filter((id) => table[id].submenu === name)).map(row) })),
+    ];
+  };
   const groups: KeymapGroup[] = [
-    ...PLACEMENTS.map(([menu, label]) => ({ label, rows: byScope(ACTION_IDS.filter((id) => spec(id).menu === menu)).map(row) })),
-    ...SCOPES.map(([scope, label]) => ({ label, rows: ACTION_IDS.filter((id) => spec(id).menu === null && spec(id).scope === scope).map(row) })),
+    ...PLACEMENTS.flatMap(([menu, label]) => placed(menu, label)),
+    ...SCOPES.map(([scope, label]) => ({ label, rows: ids.filter((id) => table[id].menu === null && table[id].scope === scope).map(row) })),
   ];
   return groups.filter((g) => g.rows.length > 0);
 }

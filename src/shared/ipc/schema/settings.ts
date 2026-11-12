@@ -9,7 +9,7 @@
 // renderer keeps one merged `Settings` whose version is the client file's. Migrations live in
 // `src/shared/settings/defaults.ts`, run by main's stores; the schema never defaults.
 import * as z from 'zod';
-import { ACTION_IDS } from '../../keymap/actions';
+import { BUILD_F_ACTION_IDS } from '../../keymap/build-f'; // U6a (UC-14)
 import { CHORD_PATTERN } from '../../keymap/chord';
 import type { CommandSpec } from './common';
 // W3 start
@@ -148,8 +148,11 @@ export const SettingsSchema = z.strictObject({
   version: z.literal(21), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth); W3: version 6 (permissions.autoFallback); W7: version 7 (engine.memoryBudget); W13: version 8 (engine.pinnedVersion removed); E9: version 9 (voice); E10: version 10 (supervisor); E4a: version 11 (browser); cua #90: version 12 (browser.bookmarksBar); P2-C: version 13 (mods, notifications.kinds.asyncInput and .essential); P3-D: version 14 (artifacts); P4-B1: version 15 (artifacts.commentsView); P4-R8: version 16 (engine.mcpServers); P4-A2: version 17 (engine.launchProfile); UX1: version 18 (sessions.archiveInactiveDays, notifications.kinds.turnFinished); version 19 (engine.launchProfile.outputStyle removed); P5 O2: version 20 (supervisor.shape); P5 O3-A: version 21, the client file's (the merged settings have no file of their own; the split by owner below)
   theme: ThemeSettingSchema,
   // Overrides only; null unbinds; absent means the default. `partialRecord`, because zod 4's enum-keyed `record` is
-  // exhaustive and would reject `{}` and every single override; unknown keys are still rejected.
-  keymap: z.partialRecord(z.enum(ACTION_IDS), ChordSchema.nullable()),
+  // exhaustive and would reject `{}` and every single override; unknown keys are still rejected. U6a (UC-14): keyed by
+  // the ids build F knows, not the table's, so what the file may hold does not widen when a row is added and F can always
+  // read it; a row F does not know takes no rebinding meanwhile (`isRebindable`). The client file, the patch and the
+  // version 2 file's migration share this one definition.
+  keymap: z.partialRecord(z.enum(BUILD_F_ACTION_IDS), ChordSchema.nullable()),
   notifications: NotificationSettingsSchema, // C11: C5's two fields plus kinds
   // C11 start
   engine: EngineSettingsSchema,

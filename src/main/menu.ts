@@ -6,11 +6,14 @@
 // The menu is rebuilt on every `settings.changed` (overrides, the checked appearance) and every change of that set.
 // Items carry `id` (the action id; `tab.select:<n>` for the nine tab items; `edit.selectAll`, `edit.undo` and `edit.redo`
 // for the Edit menu's own items) so the smoke can click them by id.
+// U6a (the UX wave's UC-6, "How the sheet and the menus are drawn"): each menu lists its placement's `menu`-sink rows in
+// the table's order; rows naming one `submenu` fold into that submenu where its first row stands; a separator stands
+// between two neighbours whose group of ids differs. A row a later child adds needs no edit here.
 import { Menu, webContents, type BaseWindow, type MenuItemConstructorOptions } from 'electron';
 import { appWindows } from './windows'; // E2
 import type { Settings, ThemeSetting } from '@shared/ipc/schema';
 import type { EditOp } from '@shared/ipc/schema/layout'; // P4-B2 K6
-import { ACTIONS, ACTION_IDS, type ActionId, type ActionSpec, type KeymapOverrides } from '@shared/keymap/actions';
+import { ACTIONS, effectiveChord, idsOf, type ActionId, type ActionSpec, type ActionTable, type KeymapOverrides } from '@shared/keymap/actions';
 import { pageOf } from './ipc/clients';
 import type { emit as emitEvent } from './ipc/events';
 import { emitTo, onEmitted } from './ipc/events';
@@ -19,15 +22,26 @@ import { registerMainHandler } from './ipc/router';
 type Emit = typeof emitEvent;
 type Item = MenuItemConstructorOptions;
 type Placement = NonNullable<ActionSpec['menu']>;
-type ActionTable = Readonly<Record<ActionId, ActionSpec>>;
 
 const APPEARANCE: Partial<Record<ActionId, { label: string; theme: ThemeSetting }>> = {
   'theme.light': { label: 'Light', theme: 'light' },
   'theme.dark': { label: 'Dark', theme: 'dark' },
   'theme.system': { label: 'System', theme: 'system' },
 };
-// Consecutive actions of one group sit together; a separator goes between groups.
-const group = (id: ActionId) => (id.startsWith('sidebar.') || id.startsWith('panel.') ? 'regions' : id.split('.')[0]);
+// Consecutive actions of one group sit together; a separator goes between groups. A row's group is its id's prefix,
+// except where the View and Go menus' groups (l7-shell-07) join several prefixes; these aliases are for today's rows only,
+// and a row a later child adds groups by its own prefix.
+const GROUP_OF_PREFIX: Readonly<Record<string, string>> = {
+  sidebar: 'regions', panel: 'regions', region: 'regions', // the sidebar, card column and side-surface layout; Go's region steps
+  main: 'pane', // Expand pane among the pane items
+  attention: 'session', // Next Needs-you among the session steps
+  comments: 'looks', theme: 'looks', accounts: 'looks', // Comments ▸, Appearance ▸ and Usage
+};
+const group = (id: ActionId) => {
+  if (id === 'artifacts.open') return 'tab'; // Artifacts beside Overview: a place, as Overview is
+  const prefix = id.split('.')[0]!;
+  return GROUP_OF_PREFIX[prefix] ?? prefix;
+};
 
 // Edit ▸ Select All is the app's own item, not the `selectAll` role (sitting finding, 2026-09-30). On macOS the role sends
 // AppKit's `selectAll:` to the focused element, which in a terminal is xterm's empty helper textarea, so the buffer was
@@ -99,8 +113,8 @@ export function menuTemplate(
     ...extra,
   });
 
-  // The effective chord against the table given (overrides first; null unbinds).
-  const chordOf = (id: ActionId) => (overrides[id] === undefined ? actions[id].chord : overrides[id]);
+  // The effective chord against the table given (the table's rules: `effectiveChord`).
+  const chordOf = (id: ActionId) => effectiveChord(id, overrides, actions);
 
   const itemsFor = (id: ActionId): Item[] => {
     const chord = chordOf(id);
@@ -115,27 +129,33 @@ export function menuTemplate(
     return [item(id, actions[id].title, chord, null)];
   };
 
+  // A row's items; the theme rows are radio items with the short label Appearance ▸ reads.
+  const rowItems = (id: ActionId): Item[] => {
+    const look = APPEARANCE[id];
+    return look ? [item(id, look.label, chordOf(id), null, { type: 'radio', checked: theme === look.theme })] : itemsFor(id);
+  };
+  // Items, or submenus of items, each with its group; a separator between neighbours whose group differs.
+  const separated = (entries: { group: string; items: Item[] }[]): Item[] =>
+    entries.flatMap((entry, i) => (i > 0 && entries[i - 1]!.group !== entry.group ? [{ type: 'separator' } as Item, ...entry.items] : entry.items));
+
   const section = (placement: Placement): Item[] => {
-    const ids = ACTION_IDS.filter((id) => actions[id].sink === 'menu' && actions[id].menu === placement);
-    const out: Item[] = [];
-    const appearance: Item[] = [];
-    let last: string | null = null;
+    const ids = idsOf(actions).filter((id) => actions[id].sink === 'menu' && actions[id].menu === placement);
+    // the rows in table order, those of one submenu gathered where its first row stands
+    const entries: ({ id: ActionId } | { submenu: string; ids: ActionId[] })[] = [];
     for (const id of ids) {
-      const look = APPEARANCE[id];
-      if (look) {
-        appearance.push(item(id, look.label, chordOf(id), null, { type: 'radio', checked: theme === look.theme }));
-        continue;
-      }
-      if (last !== null && group(id) !== last) out.push({ type: 'separator' });
-      last = group(id);
-      out.push(...itemsFor(id));
+      const name = actions[id].submenu;
+      const open = name === undefined ? undefined : entries.find((entry) => 'submenu' in entry && entry.submenu === name);
+      if (open && 'ids' in open) open.ids.push(id);
+      else entries.push(name === undefined ? { id } : { submenu: name, ids: [id] });
     }
-    if (appearance.length > 0) out.push({ type: 'separator' }, { label: 'Appearance', submenu: appearance });
-    return out;
+    return separated(entries.map((entry) => 'id' in entry
+      ? { group: group(entry.id), items: rowItems(entry.id) }
+      : { group: group(entry.ids[0]!), items: [{ label: entry.submenu, submenu: separated(entry.ids.map((id) => ({ group: group(id), items: rowItems(id) }))) }] }));
   };
 
   // The application menu spelled out (what `role: 'appMenu'` builds), so actions placed in it sit after About.
   const own = section('app');
+  const editRows = section('edit');
   const appMenu: Item[] = [
     { role: 'about' },
     { type: 'separator' },
@@ -160,12 +180,17 @@ export function menuTemplate(
         { type: 'separator' },
         { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'pasteAndMatchStyle' }, { role: 'delete' },
         { id: 'edit.selectAll', label: 'Select All', accelerator: 'Cmd+A', click: () => selectAll(emit) },
+        ...(editRows.length > 0 ? [{ type: 'separator' } as Item, ...editRows] : []), // U6a: the table's Edit rows
       ],
     },
     {
       label: 'View',
-      // No zoom roles: ⌘0 is the Overview.
-      submenu: [...section('view'), { type: 'separator' }, { role: 'reload' }, { role: 'forceReload' }, { role: 'toggleDevTools' }, { type: 'separator' }, { role: 'togglefullscreen' }],
+      // No zoom roles: ⌘0 is the Overview. U6a: the developer roles under Developer ▸, the menu's own
+      submenu: [
+        ...section('view'), { type: 'separator' },
+        { label: 'Developer', submenu: [{ role: 'reload' }, { role: 'forceReload' }, { role: 'toggleDevTools' }] },
+        { type: 'separator' }, { role: 'togglefullscreen' },
+      ],
     },
     { label: 'Go', submenu: section('go') },
     // Explicit rather than `windowMenu`, so no `close` role can take ⌘W from the tab strip.
