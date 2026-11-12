@@ -35,7 +35,7 @@
 - **Contracts:**
   - **Consumes UC-1** (U1): the reader of a remote session's state asks U1's predicate what waits; it adds none.
   - **Consumes UC-2** (U3): nothing in U9 reads an arrival for itself; O-35's later fix reads the turn's state, not the arrival.
-  - **Consumes UC-8, UC-10, UC-11.** Under UC-8, U9's files are, beside the three the root names: `src/endpoint/capabilities.ts`, `src/main/machines/remote/answered-in-main.ts`, `test/lane-b/offer-coverage.test.ts`, `src/renderer/src/lane-b/` (the remote helper and the transcript hold), `src/renderer/src/app/machine-mark.ts`, `src/renderer/src/app/session-actions.ts` (its remote branch), `src/renderer/src/sessions/listed-state.ts`, `src/renderer/src/sessions/remote-setup.ts`, `src/main/device/step-up.ts`.
+  - **Consumes UC-8, UC-10, UC-11.** Under UC-8, U9's files are, beside the three the root names: `src/endpoint/capabilities.ts`, `src/endpoint/calls.ts` (the per-session cut of an offered call), `src/main/machines/remote/answered-in-main.ts`, `test/lane-b/offer-coverage.test.ts`, `src/renderer/src/lane-b/` (the remote helper and the transcript hold), `src/renderer/src/app/machine-mark.ts`, `src/renderer/src/app/session-actions.ts` (its remote branch), `src/renderer/src/sessions/listed-state.ts`, `src/renderer/src/sessions/remote-setup.ts`, `src/main/device/step-up.ts`.
   - **Owns UC-7 · An act on a session works on another machine, or says why not.** The content follows.
 
   **UC-7.1 The rule.** Every act a person can take on a session is in exactly one of three states for a session on another machine: it works, carried by an offer; main answers it itself; or it is declared unavailable, and then its control is drawn disabled with one sentence. No control is drawn enabled where the act cannot work now, and no act ends without either its effect or one sentence that names the reason. Disabling a control is never the authorisation: the other machine decides every request again (remote layer design §5.5).
@@ -67,12 +67,12 @@
   | **Archive** | `session.archive`; a machine act | `manage`: the session's owners | none | read-only mode; a session a terminal or a background job holds answers "held" |
   | **Unarchive** | `session.update` narrowed to `{patch: {archived: false}}`; a machine act | `manage` | none | read-only mode |
   | **Rename** | `session.rename`; a machine act | `manage` | none | read-only mode |
-  | **Archived sessions** (the read behind Unarchive) | `session.list {includeArchived: true}`; a call answered per session | any member is admitted; the answer holds only sessions the caller has `manage` on | — | — |
+  | **Archived sessions** (the read behind Unarchive) | `session.list {includeArchived: true}`; a call answered per session | any member is admitted (`list`); the answer holds only sessions the caller has `manage` on. This needs a cut of its own: `each-session` calls are filtered by an entry in `EACH_SESSION` (`src/endpoint/calls.ts`), `session.list` has none today, and the generic cut would filter at the command's own grade, `list`, and so hand archived records to every member who can list. U9 adds the entry with a `manage` cut, checked again when the answer is built, and tests an owner's and a non-owner's read | — | — |
   | **Dismiss** (U3) | `attention.acknowledge`; a machine act | `converse` | none | read-only mode |
   | **Take back a waiting message** (U4) | `session.steer.cancel` (exists locally; declared unavailable today); an engine-host act | `converse` | none | — |
   | **Send now** and **the automatic move** (U4) | `session.steer.sendNow` and `session.steer.expedite`, two new commands (a new field on `session.interrupt` would be refused by an older machine); engine-host acts; a capability of their own; inserted by U4's pull request after its probe (UC-7.6) | `converse` | none | — |
   | **Answer a pane** (U12, #435) | `maws.pane.answer`; an act on a session MAWS runs; leaves `REMOTE_UNAVAILABLE` | `converse` | none | — |
-  | **A side thread** (U5) | `side.thread.open`: a fork with the thread's lineage and first message; inserted by U5's second pull request (UC-7.6) | as Fork: the machine's owners | as Fork | as Fork |
+  | **A side thread** (U5) | `side.thread.open`: a fork with the thread's lineage and first message; inserted by U5's second pull request (UC-7.6) | as Fork: the machine's owners | as Fork | the ceiling and read-only mode as Fork; not Fork's rule against a running turn: a side thread opens while the parent's turn runs, under the side thread's own guard (`sideThreadRefusal` in `src/services/sessions/start-guards.ts`), and is tested with the parent running |
   | **Show a pane** (U12) | the client port, machine to device | the device holds `view` on the session | — | — |
 
   ```ts
