@@ -1,0 +1,562 @@
+# U9 · Sessions on other machines: execution (2026-11-12)
+
+> **Composite:** `docs/doperpowers/specs/2026-11-12-ux-wave-design.md` (the UX wave; cited below as *the root*). **Child:** U9. **Parent pin:** `25942f5d1`, the head of branch `ux-wave-spec` this document was written against.
+>
+> **Design:** the child's own file, `docs/doperpowers/specs/2026-11-12-ux-wave/U9-other-machines.md` (cited as *the section*): its acceptance A1 to A15, its items O-11b, O-39, #563, #565, S-05, O-48, S-02, S-01 and S-13, and the contract it owns, UC-7.1 to UC-7.6. This file carries the constraints, the interfaces, the milestones and the record, and nothing of the design. Where this file and the section differ, the section holds, and where the section and a contract in the root differ, the root holds; report either.
+>
+> **Scope:** the whole child, one pull request, branch `ux-wave/U9`. **Checked against the code** at master `85e934368` (the same tree as the pin outside documents). Until the wave's documents land on master, the root and the section are read on branch `ux-wave-spec` (`git show origin/ux-wave-spec:<path>`).
+
+## Purpose
+
+A session on another machine stops behaving worse than one on this Mac. After this landing its tab says "Connecting" while the machine link comes up and keeps the transcript and the reader's place through a reconnect; its row reads Working when its turn starts; the owner forks, renames, archives and unarchives it from this Mac with no Touch ID on a machine they own; a Stop that cannot reach the machine says so; the Touch ID sheet names the machine. Under all of it sits one contract, UC-7: every act on a session either works on another machine, carried by an *offer* (a row of `OFFERS` in `src/endpoint/offers.ts`: an act that machine accepts over the link), or its control is drawn disabled with one sentence.
+
+How to see it working: the section's acceptance A1 to A15. The table under "Acceptance: who proves what" says, for each, which milestone builds it, which test proves the part an executor can run, and which run the architect arranges.
+
+Sibling children code against what this landing exposes: U7 mounts on the listed row's menu and lands after it; U3 and U4 call the fork act; U4, U5, U11 and U12 insert offers of their own in this child's files. What they may rely on is defined once, in "Interfaces and Dependencies", and is the part of this document that must not drift: an executor who needs to change a name or a signature there stops and reports.
+
+## Progress
+
+- [ ] Before M1: the branch takes in the master the architect names, which holds U6a and U8a, and `p5-idle-margin` if it has landed (Concrete Steps; section 14).
+- [ ] Before M1 (the architect): check T1, whether a listing follows an archive and a rename today. Its answer changes one step of M1 (the listing rule).
+- [ ] M1 — The offers at both ends
+- [ ] M2 — Fork over the link, and the sheet's words
+- [ ] M3 — The link's phases and the pane that stays
+- [ ] M4 — The session acts in the window
+- [ ] M5 — A link's return, the live row, the chooser and the measurement
+- [ ] The whole unit suite on the build VM; class 1a on GitHub Actions; the `doperpowers:review-code` xhigh panel; the architect's runs T2 to T7; the pull request.
+
+Open points this document reports and does not settle are listed under "Reported to the architect"; each names the default an executor builds and the one place an answer changes.
+
+## Constraints
+
+These bind every milestone. A milestone entry restates none of them.
+
+1. **The design binds.** The section, and in the root: the wave's laws 1 to 8, UC-7 (owned here), UC-1 and UC-2 (consumed), UC-8 (who owns which files), UC-10 (building and landing), UC-11 (the repository is public) and UC-14 (what the wave stores). Exact words come from the section's tables (UC-7.5, O-39's phases, S-13's messages), with their typographic apostrophes and ellipses as written there.
+2. **The other machine decides** (remote layer design §5.5; `docs/doperpowers/specs/2026-10-26-remote-layer-design.md`). Every request is graded again at that machine's endpoint, and the offer table is its only door. A disabled control, a capability check on the device and a field of the roster are conveniences of this Mac: nothing a device says about itself is trusted by a machine, and every new or changed row is tested at the endpoint for each refusal it can give.
+3. **Two builds meet on the link.** The owner's second machine stays on build F (`f1852de3a`) while the wave is tried on the first, so everything this landing changes on the link is an addition an older peer passes by: new rows, one capability string, the RL2 minor. It adds no RL2 message kind, no field to an existing RL2 message and no refusal reason (`REFUSAL_REASONS` in `apps/org-protocol/src/messages.ts` is one closed vocabulary that F reads), and it changes no input or output schema of a command owned by `machine` or `engine-host` and no host event. So `src/shared/ipc/wire-manifest.json`, `wire-fingerprint.json` and `WIRE_MINOR` do not move, and `src/shared/ipc/wire.test.ts` passes untouched. An executor who finds one of these must move stops and reports. What each offer does against F is the table "Against build F".
+4. **What is signed.** Main builds a signed act from typed fields, and every signed field is shown (remote layer design §5.6). The one exemption from the confirmation, `signsUnasked` in `src/main/device/step-up.ts`, is judged on the action as built and is extended by one name with every other condition kept.
+5. **A link that is down closes nothing for a minute.** An act waits under the link's hold and then answers offline; there is no outbox (`REMOTE_ACT_PENDING_MS`, `src/shared/machine/remote-pending.ts`). A pause of the link is not a break in the transcript and draws no row.
+6. **Nothing new is stored** (UC-14). The link's phase, the remembered chooser listing, the settled word and the live word are state of the run. No layout key, no field of a stored tab and no file is added.
+7. **The engine is not patched and not guessed at.** This landing depends on no engine behaviour that today's code does not already depend on; a milestone that finds it must stops and names the probe (law 6).
+8. **Files.** This child's files are the root's UC-8 row and the section's Contracts list. Edits in files another child owns are only the insertions listed in "Insertions in files other children own"; anything further there is handed back, not made.
+9. **Tokens and shapes.** Components use today's tokens; light theme is the default; visual language is not this wave's (law 7). The status line of M3 takes the shape of the existing "older messages didn't load" bar.
+10. **Where checks run.** The MacBook that holds this worktree runs no typecheck, no eslint, no vitest, no `pnpm install`, no Electron and no build; the worktree has no `node_modules` and stays so. Every check runs on the wave's build VM in a checkout of the pushed head (Concrete Steps). Electron e2e is never an executor's to run: an executor writes or edits the scene and names it in its report. The gate of record is class 1a on GitHub Actions, once, when the branch is complete.
+11. **The repository is public.** Fixtures, test names, comments and commit messages use invented machine names (for example `Studio` and `Loft`), invented titles and invented paths; nothing of the owner's sessions, accounts or home paths.
+12. **Git.** Commit as you go and push the branch. No attribution trailer but this one line, which ends every commit message and the pull request's body exactly: `Sminos-Session: ux-wave#10d85d03 (MAWS on macbook)`.
+
+## Orientation: the parts, and what the code says today
+
+Three processes take part. The *renderer* (`src/renderer/src/`) draws; *main* (`src/main/`) holds the machine links; another machine's *endpoint* (`src/endpoint/`, running inside its daemon `mawsd`) authorises and runs what arrives, through that machine's *services* (`src/services/`) or its engine host. The link is RL2 (the remote layer's channel protocol, `apps/org-protocol/`). Main's *lane B adapter* (`src/main/lane-b/remote.ts`) is the device's half of every offer for a session MAWS runs (in code: lane B); a terminal session (lane A) has its own adapter, `src/main/lane-a/remote.ts`. A *listed row* is a session on another machine of which this Mac holds only the hub's listing (`ListedSession` in `src/renderer/src/stores/sessions.ts`) and no record.
+
+The section's statements about today's code were checked at `85e934368`. They hold except where "Reported to the architect" says otherwise. What the check added, and an executor should know before reading the code:
+
+- **The roster** (`MachineState`, `src/shared/ipc/schema/machines.ts`; produced by `src/main/machines/manager.ts` from `src/main/machines/remote/link.ts`). A link is `connecting` once, from its creation to its first answer; a first failure makes it `down`. A link that was `up` and lost its channel is still reported `up` for a 2 s grace (`UP_GRACE_MS`), then `down`, and it stays `down` through every retry: it never returns to `connecting`. `since` is restamped only when the reported state changes. `generation` counts the machine's welcomes in this run of main and is never reset, so "the machine was up earlier in this run" is `generation > 0`. `refusal: 'removed'` is set by the machine's sealed close. `capabilities` is what the endpoint listed in its handshake, present only while an RL2 link is up.
+- **The hold.** An act made while no channel is current waits in `src/main/machines/remote/acts.ts` until `min(its creation + 60 s, its sendBy)` and then settles `refused offline`. An act that went out on a channel that then stalls is *ambiguous*: it is queried, never settled offline, and lane B answers the pending sentence at the bound (`pendingResult`, `src/main/lane-b/remote-outcomes.ts`). The hold is the acts'; a read that takes the manager's path answers `host_unavailable` at once while the machine is not up.
+- **The words today.** `outcomeAsResult` and `pendingResult` (`remote-outcomes.ts`) and `refusalError` (`src/main/machines/remote/dispatch.ts`) word every refusal. A refused offline act reads "Not sent: `<machine>` is offline" whatever the act, and most of the machine's codes read "`<command>`: refused `<code>` by machine `<machine>`" with the code in `error.issues.refusal`.
+- **The offers.** None of the eight commands of the acts table has a row today; seven are in `REMOTE_UNAVAILABLE` and `session.list` is in neither set (it is not addressed by a session, so the coverage test does not hold it). `session.update` is graded by effect and its rule is `NO_RULE` (`src/endpoint/by-effect.ts`), so a row alone would answer `no-rule`; and the services' handler of `session.update` throws for any request that carries a reader (`src/services/index/register.ts`), which every machine act from another device does (R9). `session.fork` is graded `spawn`, a machine right, so the generic path checks no rank on the source session. `session.fork` has no entry in `COMMAND_BUDGETS_MS` (`src/services/command-budgets.ts`), and locally it answers `starting` before the setup's phases, which do not cross the link.
+- **The renderer.** `forkSession` (`sessions/record-ops.ts`) always opens the fork's tab and adopts the fork through `session.intent.get` and the setup store, neither of which exists for another machine. The title bar's session menu (`SessionMenuOverflow`, `app/Toolbar.tsx`) calls `sessionActionsFor` itself and does not share `SessionItems` with the sidebar. A first read's failure loses its error code in `transcript/source/ipc.ts` (`valueOf` throws the message alone), before the store. The renderer already holds a remote session's engine status (`useSessions.engine`, the composer's source for "a turn runs"); nothing in main computes a digest for a remote session. `engine.hostState` in the `useHosts` store is the host-ready signal O-11b needs.
+- **The e2e scenes.** Every gated scene runs on one host: `e2e/machines.spec.ts` drives a second profile's daemon over a *socket link* (no RL2, no hold, no remote fold), `e2e/remote.spec.ts` and `e2e/remote-latency.spec.ts` a second profile's daemon enrolled in a local org over RL2 through loopback pipes (`test/support/loopback-pipe.ts`: `stall()`, `restore()`, and the scene's `aHub.cut()`). `test/support/remote-wake.ts` reads the wake case's logs; it does not stall anything. The wake case opens two live sessions and has no cold or idle tab.
+
+### Reported to the architect
+
+Each point is a place where the code or the root differs from the section, or where the work needs something the section does not name. The default is what an executor builds until the architect says otherwise; the last column is the one place an answer changes.
+
+| # | the point | default built | changes |
+|---|---|---|---|
+| R1 | The root's UC-7 puts eight acts behind `rl2.session-acts` (the six machine rows, `session.steer.cancel`, `maws.pane.answer`); the section's code block names six. | The root's eight. | The acts table. |
+| R2 | S-02 and A9 say the project's "Archive sessions" acts on this Mac's sessions "as today". Today `archiveProjectSessions` (`sessions/actions.ts`) walks the row's sessions on every machine that is up and each remote one is refused; once `session.archive` is offered that code would end processes on other machines. | The section's After: it walks this Mac's records only, and its sheet says so. A change, not a no-op. | M4. |
+| R3 | A4 places its scene at step 4 of `e2e/machines.spec.ts`. That machine is socket-linked: none of what #563 changes on the RL2 path (the hold, the transcript hold, the resume) runs there. | A4's scene is written in `e2e/remote.spec.ts`. `machines.spec.ts` steps 4 and 5 change their two assertions to the status line, since the pane stays mounted for every machine of the roster (one rule; a socket-linked machine's acts answer at once, as today). | M3. |
+| R4 | A11 expects "Not stopped: `<machine>` is offline" for a Stop pressed "with the link stalled". A Stop that goes out on the stalled channel (the first 17 to 23 s) is ambiguous and ends with the pending sentence, which UC-7.5 also keeps. | A11's scene presses Stop after the status line shows; the earlier press keeps the pending sentence, by a unit case. | M3. |
+| R5 | #563 words the offline closing as "`<machine>` is offline"; UC-7.5's table as "`<Act>` is unavailable while `<machine>` is offline." | UC-7.5's sentence. | `disabledWords`. |
+| R6 | Insertions in files other children own that the section does not name: `app/Toolbar.tsx` (U7), `composer/InlineEdit.tsx` and `composer/frame/ProjectRow.tsx` (U4), and assertions in `sidebar/Sidebar.test.tsx` and `sidebar/HoverCard.test.tsx` (U7). `transcript/source/ipc.ts` and `stores/transcript.ts`, which no contract assigns, change for O-11b and #565. | Made, each as the smallest insertion ("Insertions in files other children own"). | That list. |
+| R7 | S-05's advice (main's fold says a digest) is not taken: a `SessionDigest` would need an invented revision, availability, cost and context, and nothing could take it back when the tab closes. | The live word of "Interfaces", carried on the listing entry. | M5. |
+| R8 | UC-7.5 gives no `<done>` word for taking back a message, and `maws.pane.answer` has no control. | No `ACT_WORDS` row for either; U4 adds its row with its mount. | The acts table. |
+| R9 | The section carries Unarchive as `session.update`. The services' handler of that command refuses every request with a reader in its context (P5 O8's ruling, Decision Log "M6a Task 1's fork": the whole record is its answer and must never go to a reader), and the endpoint runs every machine act as its caller's reader, an owner's included. As the code stands a remote unarchive fails on the machine. The same ruling's rule, that a record sent to a member who is not one of the machine's owners carries that member's own reading, also meets `session.rename`, whose answer holds a record. | The handler admits a reader for exactly the patch `{archived: false}` and answers the record as `session.get` answers that reader; every other patch under a reader stays refused. `session.rename` under a reader answers its record the same way. O8's ruling gets a dated amendment. The alternative, a command of its own for an unarchive, moves the wire manifest and was not taken. | M1; the amendments. |
+
+## Interfaces and Dependencies
+
+Everything a sibling child or a later milestone codes against is defined here, once. Names and signatures in this section are fixed; how each is built is the milestone's.
+
+### 1. The acts of this landing
+
+One capability, `rl2.session-acts`, stands for every row marked built. A row is five facts (UC-7.2): the command, its grade (declared in `src/shared/ipc/grades/`, unchanged here), its row in `OFFERS`, the device's half in `src/main/lane-b/remote.ts`, and its words.
+
+| act | command | row in `OFFERS` | device's half | who may (the endpoint decides) | words: act / done | built |
+|---|---|---|---|---|---|---|
+| Archive | `session.archive` | `laneBMachine('act')` | `MACHINE_ACTS` | `manage` | archive / archived, closes | M1 |
+| Unarchive | `session.update` | `{ ...laneBMachine('act'), accepts: isUnarchive }`: the input's `patch` is exactly `{archived: false}`; and a by-effect rule answering `manage` | `MACHINE_ACTS` | `manage` | unarchive / unarchived, closes | M1 |
+| Rename | `session.rename` | `laneBMachine('act')` | `MACHINE_ACTS` | `manage` | rename / renamed, closes | M1 |
+| The archived sessions' read | `session.list` | `{ kind: 'call', executor: 'machine', target: 'each-session', grade: 'list', accepts: isArchivedList }`: the input is exactly `{includeArchived: true}`; cut by an `EACH_SESSION` entry at `manage` | a call by name the adapter takes, on the channel whose capability it checked | any member is admitted; the answer holds only records the caller holds `manage` on | a read: its control's label is "list archived sessions" | M1 |
+| Dismiss | `attention.acknowledge` | `laneBMachine('act')` | `MACHINE_ACTS` | `converse` | dismiss / dismissed | M1 (U3 mounts it) |
+| Take back a waiting message | `session.steer.cancel` | `laneB('act')` | `ENGINE_HOST_ACTS` | `converse` | none yet (R8) | M1 (U4 mounts it) |
+| A pane's answer | `maws.pane.answer` | `laneB('act')` | `ENGINE_HOST_ACTS`; never resumes a session | `converse` | none: no control | M1 (U12 mounts #435) |
+| Fork | `session.fork` | `{ kind: 'act', executor: 'machine', target: 'appSessionId', owners: true, accepts: isInPlaceFork }`: the input's `target` is exactly `{kind: 'inPlace'}`; `rewindTo` and `message` as the schema has them | `MACHINE_ACTS`, `stepUp: 'required'`, answered within the fork's command budget | the machine's owners, who also hold `view` on the source; the source's permission mode within the machine's ceiling | fork / forked, closes | M2 |
+| End session | `session.stop` | **not built** | — | — | — | — |
+| Stop, Send (offered since P5) | `session.interrupt`; `session.send`, `session.steer` | unchanged | unchanged | unchanged | stop / stopped; send / sent | words in M1 |
+
+Each built command leaves `REMOTE_UNAVAILABLE` in the milestone that adds its row, and enters `REMOTE_NEEDS` with `rl2.session-acts`. Everything else the section lists as declared stays declared: launch, start, the setup of a new session, delete, take over, replays, `session.renameSession`, stopping a process, and the rest of `REMOTE_UNAVAILABLE`.
+
+**The open question: "End session" over the link.** The owner is asked whether a session on another machine gets an item that stops its process without archiving it (the section's default and the recommendation: no). The row above is the one place the answer lands. A yes turns it into: row `laneB('act')` for `session.stop` (owned by `engine-host`, graded `manage`), a name in `ENGINE_HOST_ACTS`, an entry in `REMOTE_NEEDS`, `ACT_WORDS` end / ended with `closes`, its entry removed from `REMOTE_UNAVAILABLE`, one more id in `remoteSessionActions` for a session the member owns, and one row test in M1's suite; the root's "Out of scope, standing" line on a stop-the-process act is then amended by the architect. Nothing else in this document moves. With no answer, or a no, an executor builds nothing for it.
+
+### 2. How a later child inserts an offer (UC-7.6)
+
+U4 (`session.steer.sendNow`), U5 (`side.thread.open`), U11 (`connectors.signInDynamicServer`) and U12 (its client-port kind) insert in this child's files after this landing. An insertion is these places and no others, and U9's reviewer reads it against this list:
+
+1. the row in `OFFERS` (`src/endpoint/offers.ts`), with `accepts` wherever a remote caller may send less than the schema allows;
+2. the name in `ENGINE_HOST_ACTS` or `MACHINE_ACTS` (`src/main/lane-b/remote.ts`), or the adapter's handling of a call it must gate;
+3. a capability of its own: appended to `ENDPOINT_CAPABILITIES` (`src/endpoint/capabilities.ts`) with its comment, one entry in `REMOTE_NEEDS`, and `RL2_PROTOCOL.minor` moved by one in `apps/org-protocol/src/channel.ts` with the number its test pins (whoever lands second takes the next number);
+4. its words: an `ACT_WORDS` row where a control can be disabled or a refusal is said, and its entry removed from `REMOTE_UNAVAILABLE`;
+5. tests: `test/lane-b/offer-coverage.test.ts` passes unchanged; a row test at the endpoint for each refusal the row can give; a device test that a peer without the capability is sent nothing.
+
+An act made over the link carries the capability as the act's `requires` (the link judges it at each transmission), which main reads from `REMOTE_NEEDS`; a child sets nothing by hand.
+
+### 3. The words
+
+```ts
+// src/shared/ipc/remote-unavailable.ts, beside REMOTE_UNAVAILABLE
+
+export const SESSION_ACTS_CAPABILITY = 'rl2.session-acts';
+
+/** A command a machine takes only when its endpoint's handshake lists the capability named. */
+export const REMOTE_NEEDS: Readonly<Partial<Record<CommandName, string>>>;
+
+/**
+ * How an act reads in a sentence. `act` follows "Can’t" and, capitalised, opens "… is unavailable" ("fork"); `done`
+ * follows "Not" ("forked"). `closes`: the act is closed with the phase's words while its machine's link connects or
+ * reconnects (the menu acts); without it the act is held under the link's hold, as Send and Stop are.
+ */
+export type ActWords = { act: string; done: string; closes?: true };
+export const ACT_WORDS: Readonly<Partial<Record<CommandName, ActWords>>>;
+
+export type LinkPhase = 'up' | 'connecting' | 'reconnecting' | 'offline' | 'removed';
+
+/** What the window knows of a session's machine when it draws a control. */
+export type RemoteStanding = {
+  machine: string;                         // the machine's name
+  phase: LinkPhase;
+  capabilities: readonly string[] | null;  // the roster's list; null while none is known (the link is not up)
+  owner: boolean | null;                   // MachineState.owner; null while not known
+};
+
+/** UC-7.5's first table: the sentence a control issuing `command` is disabled with, or null. `label` stands for the act where ACT_WORDS has no row or the control's own label differs. */
+export function disabledWords(command: CommandName, standing: RemoteStanding, label?: string): string | null;
+
+/** UC-7.5's second table: the sentence of an act that ended without its effect. `refusal` is the machine's or the link's code; `detail.mode` the permission mode a `ceiling` refusal names, when the device knows it. */
+export function refusalWords(command: CommandName, machine: string, refusal: string, detail?: { mode?: string }): string;
+
+/** The same for an act the machine ran and that failed: `Not <done>: <the machine's own sentence>`. */
+export function failureWords(command: CommandName, sentence: string): string;
+```
+
+`disabledWords` answers the first row that applies, in this order: the command is declared (`REMOTE_UNAVAILABLE`'s words, unchanged); the roster's capabilities are known and lack `REMOTE_NEEDS[command]`; the phase is `offline` and the act has words; the phase is `connecting` or `reconnecting` and the act `closes`; the command is `session.fork` and `owner` is `false`; else null. The `removed` phase is not worded here: main closes every control of such a session with its own reason today, and that stays.
+
+`refusalWords` is called by main, not by the renderer: wherever main words a refusal from another machine for a command that has an `ACT_WORDS` row (`outcomeAsResult` in `src/main/lane-b/remote-outcomes.ts`, the capability check before a send, and lane A's refusal of an interrupt), the sentence becomes `error.message`, and the code rides in `error.issues.refusal` (added for `offline` and `not-sent`, which carry none today). So a control shows `error.message` as it is and adds no words. A command with no row keeps today's sentences. The pending sentence ("`<machine>` took the request but hasn’t confirmed it") and the lost-answer sentences are unchanged for every command. A `ceiling` refusal whose mode the device does not know reads as UC-7.5's last row, "`<machine>` refused it (ceiling)".
+
+### 4. The helper that greys a control
+
+```ts
+// src/renderer/src/lane-b/remote-unavailable.ts
+export function remoteUnavailableOf(appSessionId: AppSessionId | null, ...commands: CommandName[]): string | null;  // signature unchanged
+export function useRemoteUnavailable(appSessionId: AppSessionId | null, ...commands: CommandName[]): string | null; // signature unchanged
+/** The same answer for a control whose label is not the command's act ("Edit" and "Delete" over `session.steer.cancel`). */
+export function useRemoteUnavailableAs(label: string, appSessionId: AppSessionId | null, ...commands: CommandName[]): string | null;
+/** Why Fork is disabled for a session on another machine, or null: the answer above for `session.fork`, then "Wait for the turn to end, or stop it first" while the one reader of its state says it works. Null for a session on this Mac, where Fork is unchanged. */
+export function useForkUnavailable(appSessionId: AppSessionId | null): string | null;
+```
+
+For a session on this Mac or on a socket-linked machine the helper answers null, as today. For a session reached over RL2 it answers `disabledWords` for the first command that yields a sentence, the standing read from the roster and the phase; then, for a command outside `REMOTE_NEEDS`, today's rule for a refusal heard from an older peer, with today's words. Every sibling's control for an act on a session reads this helper and nothing else: U3's Dismiss and "Fork from here", U4's stack and `/fork` row, U5's side thread, U11's Sign in, and U7's menu items through `SessionItem`.
+
+### 5. The fork act
+
+```ts
+// src/renderer/src/sessions/record-ops.ts: the one entry, for every route
+export async function forkSession(
+  appSessionId: AppSessionId,
+  target: ForkTarget,
+  first: { message: FirstMessage | null; rewindTo: MessageUuid | null } = { message: null, rewindTo: null },
+  options: { open?: boolean } = {},   // default true: the fork's tab opens. false: the person stays where they are (`/fork`)
+): Promise<{ ok: true; appSessionId: AppSessionId } | { ok: false; error: string }>;
+```
+
+`rewindTo` is the id of one of the person's prompts, and the fork holds the conversation before that prompt; `null` forks the whole conversation. `message`, when given, is sent as the fork's first message. Existing callers compile unchanged. For a session on another machine the only target is `{kind: 'inPlace'}`; the answer's `appSessionId` is the fork's address on that machine; "Forking on `<machine>`…" shows as a quiet notice while the act is out; and `error` is already UC-7.5's sentence, which a caller shows as it shows a local refusal. U3 ("Fork from here": the first prompt after the answer, or `null`) and U4 (`/fork [prompt]`: `open: false`, the prompt as `message`) decide nothing else, and both draw their control disabled with `useForkUnavailable`.
+
+### 6. The session menu of a session on another machine
+
+```ts
+// src/renderer/src/app/session-actions.ts
+/** The acts a session on another machine offers, whether this Mac holds its record or only its listing. */
+export function remoteSessionActions(facts: { lane: 'A' | 'B'; record: boolean; mine: boolean; remoteReading: boolean }): SessionActionId[];
+/** The command an action issues for a session on another machine: what `SessionItem` asks the helper about. */
+export const REMOTE_ACTION_COMMAND: Readonly<Partial<Record<SessionActionId, CommandName>>>;  // rename, fork, archive
+```
+
+`mine` is the listing's (`ListedSession.mine`), the one word the window has for "a session you own" on another machine. It answers, in `SESSION_ACTIONS`' order: with a record, the three opens; for lane B, Pin with a record that keeps the member's reading, Rename… when `mine`, Fork, Archive when `mine`; for lane A nothing more. `sessionActionsFor(record, { remote: true, … })` answers it for a record, its options gaining `mine`. `SessionItems` in `sidebar/menus.tsx` draws it for an address with a listing and no record, through the same `SessionItem`, before Share and Add owner; `SessionItem` draws an item disabled with the helper's sentence as its title. `ListedRow.tsx` names the session in `data-menu` whenever that menu has an item, which is every lane B row. U7 adds Open, Open in new tab and Hide by extending the `record: false` case of `remoteSessionActions`; it changes nothing else of this.
+
+### 7. The link's phase
+
+```ts
+// src/renderer/src/app/machine-mark.ts
+/** O-39's table, from the roster entry. A machine the roster does not name, and this Mac: 'up'. */
+export function phaseOf(entry: Pick<MachineState, 'state' | 'since' | 'generation' | 'refusal'> | undefined, now: number): LinkPhase;
+/** O-39's words for a phase; null for 'up'. */
+export function phaseWords(phase: LinkPhase, machine: string): string | null;
+export interface MachineMark { /* today's fields, and: */ phase: LinkPhase }
+```
+
+O-39's table in roster terms: `state: 'connecting'` is `connecting`; `down` with `refusal: 'removed'` is `removed`; `down` with `generation > 0` and `now - since` under `REMOTE_ACT_PENDING_MS` is `reconnecting`; any other `down` is `offline`. `MachineMark.offline` changes its meaning to the display answer, "the phase is `offline` or `removed`", so every reader that greys by it follows without an edit; `selectOffline` in `stores/machines.ts` keeps the link answer, "not up", and is what decides whether a command can go now. U13 draws a tab whose link is not up through this mark, and what U10 and U13 later insert in `main/Pane.tsx` reads the link through it and nothing else.
+
+### 8. The roster's `owner`
+
+`MachineState` (`src/shared/ipc/schema/machines.ts`) gains `owner: z.boolean().optional()`: the signed-in member is one of the machine's owners, as main reads the org state it holds, by the reading `signsUnasked` makes (`machineOwners` and `ownerMembers` of `apps/org-protocol`). Filled in `src/main/machines/manager.ts` for an RL2 machine; absent while signed out, for a machine the state does not place, and for a socket-linked machine. It is main-to-renderer only and decides a control's drawing, never an authorisation. `capabilities` lists `rl2.session-acts` for a machine whose endpoint serves this landing.
+
+### 9. The settled word (#565)
+
+```ts
+// src/shared/ipc/schema/remote.ts: an event of main's lane B adapter to its own pages
+'remote.settled': z.strictObject({ machine: MachineRefSchema, generation: z.number().int().nonnegative() })
+// src/renderer/src/lane-b/remote-session.ts: kept per machine, and said again by the adapter's `replay` to a page that has just subscribed
+settled: ReadonlyMap<MachineRef, number>   // the generation last settled
+export const SETTLE_BACKSTOP_MS = 2000;
+```
+
+Its states, events and order are M5's table. No sibling reads it; U13, when it changes the stored layout's shape, updates `remoteSessionsInTabs` (`src/main/lane-b/remote-interest.ts`), which decides which sessions main follows.
+
+### 10. The live word (S-05)
+
+`ListedSession` gains `live?: 'running' | 'resting'`, present only while all of these hold for a session MAWS runs on an RL2 machine: a tab of the strip names its address, its machine's link is `up`, the session's `remote.session` state still holds a status (`holdsRemoteStatus`), and the store holds its engine status. It is `running` while that status has a turn, else `resting`. `sessions/listed-state.ts` stays the one reader of a session's state, with its two signatures unchanged: with no digest and a lane B listing, `live: 'running'` reads as the listing's `busy`; `live: 'resting'` turns the listing's `busy` and `waiting` into `idle` and leaves every other word; no `live` is the listing's word. A request that waits is read first, by UC-1's predicate. A session with no listing (a private one) has no entry to carry the word and keeps today's reading.
+
+### 11. Consumed
+
+- **U1 (UC-1):** `waits(item)` in `src/shared/attention/kinds.ts`, if U1a is in the branch's base. If it is not, the reader takes today's pending read (`selectPendingOf` in `stores/attention`), and A7's second sentence is proven when U1a lands.
+- **U6a (UC-6):** nothing. This landing adds no chord; ⌘. and Esc exist.
+- **U8a (UC-4):** nothing is read from `workingFolder`. A fork starts in the folder the machine's own record gives, and the archive and rename dialogs read the record, which UC-4 leaves on the record. U8a edits `composer/Composer.tsx` and `transcript/view/TranscriptSlot.tsx`; M3 inserts in the first, so the branch is rebased onto U8a before M1.
+- **U3a (UC-3):** `transcript/view/Transcript.tsx` is U3's; M3's two insertions are rebased onto U3a if it has landed.
+- **P5's forms to reuse:** an older peer and a capability, as the project registry built them (`docs/doperpowers/plans/2026-11-10-project-registry.md`, Interfaces §G "Older peers"; `needsProjectActs` and the act's `requires` in `src/main/lane-b/remote.ts`); a start composed on the machine and answered at `launching` (`src/services/sessions/spawn.ts`, `untilLaunching`); the row tests of `test/endpoint/` and the real-link suite `test/lane-b/remote.test.ts`.
+
+### 12. Insertions in files other children own
+
+Each is the smallest edit that carries the behaviour, and each is rebased onto its owner's landing if that comes first.
+
+| file (owner) | the insertion | named by |
+|---|---|---|
+| `sidebar/menus.tsx` (U7) | `SessionItems`' branch for a listing with no record; `SessionItem`'s disabled sentence | the section |
+| `sidebar/ListedRow.tsx` (U7) | `data-menu` for a row whose menu has an item | the section |
+| `app/Toolbar.tsx` (U7) | `SessionMenuOverflow` hands each item's disabled sentence to the `gap` its `SessionMenuItem` already draws, and `mine` to `sessionActionsFor` | R6 |
+| `composer/Composer.tsx`, `composer/submit/submit-state.ts` (U4) | S-01's notice and "Stopping…"; Send and Stop closed in the offline phase | the section |
+| `composer/InlineEdit.tsx` (U4) | the edit's Fork disabled with `useForkUnavailable` | R6 |
+| `composer/frame/ProjectRow.tsx` (U4) | `RemoteMenu` reads the chooser's hook in place of its own state and effect | R6 |
+| `transcript/view/Transcript.tsx` (U3), `transcript/model/copy.ts` | the loading line, the healed failure; one string | the section |
+| tests beside those files, and `sidebar/Sidebar.test.tsx`, `sidebar/HoverCard.test.tsx` (U7) | the assertions that pin a reversed behaviour | R6 |
+
+### 13. Against build F
+
+Build F (`f1852de3a`; read with `git show f1852de3a:<path>`) has no row for any of the eight commands, lists no `rl2.session-acts`, and declares seven of them in its own `REMOTE_UNAVAILABLE` (all but `session.list`). Its endpoint's authorization answers `not-offered` at its first step to a name with no row, before anything is read.
+
+| what crosses | this Mac on the wave's build asks a machine on F | a device on F asks a machine on the wave's build |
+|---|---|---|
+| `session.fork`, `session.archive`, `session.rename`, `session.update` (unarchive), `attention.acknowledge`, `session.steer.cancel`, `maws.pane.answer` | Nothing is sent: the roster shows no `rl2.session-acts`, and the control is disabled with "Can’t `<act>` on `<machine>` yet. Update MAWS on `<machine>` and try again." (A14). An act already made when the channel changed to an F peer is refused by the link itself, `not-offered`, before a copy goes (`requires`). Had a copy arrived, F answers `not-offered` and nothing runs; it reads "Not `<done>`: update MAWS on `<machine>` and try again". | F never sends them: its renderer draws them declared, and its main refuses each `act-required` before any round trip. Sent by any client, each is decided by its row like anyone's request. A `session.update` sent as a call now answers `act-required` where it answered `not-offered`. |
+| `session.list {includeArchived: true}` | Not sent: the "Archived sessions…" dialog shows the update sentence for that machine in place of asking. Sent anyway, F answers `not-offered`, today's error line. | F's "Archived sessions…" dialog already sends exactly this call to each machine of the project that is up. The wave's machine now answers it, cut to the records the caller holds `manage` on, where F's refused; F lists them, and its Unarchive stays disabled by its own declaration. The cut is the authorisation, so nothing is shown that the caller may not manage. |
+| the handshake: `rl2.session-acts`, RL2 minor 14 | F's `h2` lists neither; the device reads capabilities, never the minor. | F passes by a capability it does not know, as it has passed by `rl2.project-acts` since the registry landed; the major is unchanged. |
+| the listing of an archived session, and a listing's title (M1's listing rule) | An F machine keeps listing an archived session and keeps the title its sminos reports; no archive can be sent there anyway. | The wave's machine withdraws the listing of an archived session with the existing gone record and re-issues a listing whose title changed; F drops and redraws the row as for any listing. |
+| everything else of this landing | Device-side only (the phases, the mounted pane, the settled word, the live word, the chooser, the sheet's words): nothing reaches the F machine that F's own build would not send. | — |
+
+### 14. Where this landing meets `p5-idle-margin`
+
+P5's one open branch, `origin/p5-idle-margin` (five commits over master; the idle daemon's quiet collection), changes none of this child's own endpoint files (`offers.ts`, `capabilities.ts`, `calls.ts`), nor `authorize.ts`, `by-effect.ts`, `actions.ts`, `listings.ts` or `rl10/`. The two meet in four places:
+
+- `src/endpoint/services.ts` and `src/mawsd/endpoint-seam.ts`: `hold(reason, standing?)` and a new optional `activity()`. M1's listing rule is the only new endpoint work of this landing that runs outside a call or an act, and under that branch's rule work the daemon must not collect over is inside a hold: it takes `hold('<reason>')` with the signature the base then has.
+- `src/endpoint/endpoint.ts`: that branch edits the holds' wiring and `syncNow`; M1 edits the file only if the listing rule needs a seam there.
+- `test/endpoint/fake-services.ts`: that branch adds `activities` and `activity`; M1 and M2 may register handlers on the same fake.
+- `test/lane-b/remote.test.ts`: that branch changes one line (the `DaemonClocks` constructor gains `activity`); M1 and M2 add cases to the file.
+
+Every act of this landing runs through `Actions.execute`, which already holds the daemon for the length of a `machine.op`, so the fork's wait for `launching` is held like any act.
+
+**Order: `p5-idle-margin` first.** It is small, it is complete, its bounds were measured on the mini against the endpoint as it is, and it belongs to the session that keeps master; this landing has not started. U9 then rebases before M1 and the conflicts are nil. If it has not landed when M1 starts, M1 proceeds, and whoever lands second resolves the one-line conflict in `test/lane-b/remote.test.ts` and any overlap in the fake.
+
+## Plan of Work
+
+Five milestones, each one executor's and one reviewer's pass. M1 and M2 are the delicate half (the offers; UC-10): M1 lands every row that needs nothing but the table and its cuts, at both ends at once, because the coverage test refuses a row the device does not handle or a command both offered and declared; M2 isolates the fork, whose authorisation, composition and signature are its own failure modes. M3 to M5 are the window's and main's side and consume the first two. Expected size: about 2,500 lines of source, 2,700 of tests and 300 of e2e scenes over some 75 files.
+
+### M1 — The offers at both ends
+
+**Goal.** Every act of the acts table but Fork crosses the link and is decided by the other machine, the device sends none of them to a machine that does not serve them, and one function words every refusal.
+
+**What exists at its end.**
+- At the endpoint: an owner of a session archives, unarchives and renames it and the act runs once through the services' ledger; a member below `manage` is refused `grade`; read-only mode refuses `read-only`; a `session.update` whose patch is anything but `{archived: false}` is `malformed`; an archive of a session a terminal or a background job holds answers the services' `held` outcome. A member at `converse` dismisses an attention item, takes back a waiting message and answers a pane; one below it is refused `grade`. The archived read answers an owner their own records, archived ones included, answers a member who holds no `manage` an empty list, and never hands a record to a member who can only list it.
+- On the device: each act goes only to a peer whose handshake lists `rl2.session-acts`. With a current channel that lacks it the act answers at once, nothing sent; with no channel current it waits under the link's hold carrying the capability as `requires`. The machine acts work with no tab open and resume nothing; the two engine-host acts need the session's tab.
+- The words: `disabledWords`, `refusalWords` and `failureWords` answer every row of UC-7.5's two tables, and a refused act's result carries the sentence in `error.message` and the code in `error.issues.refusal`.
+- The roster says `owner` and, for a machine on this build, lists `rl2.session-acts`.
+- The machine's listing follows its record for a session MAWS runs (unless T1 found that it already does): an archived session is withdrawn and a renamed one is re-issued with the record's title.
+
+**Touches.** `src/endpoint/offers.ts`, `by-effect.ts`, `calls.ts`, `capabilities.ts`; for the listing rule `src/endpoint/rl10/members.ts` and `listings.ts`; `apps/org-protocol/src/channel.ts` (the minor alone); `src/shared/ipc/remote-unavailable.ts`, `src/shared/ipc/schema/machines.ts`; `src/main/lane-b/remote.ts`, `remote-outcomes.ts`, `src/main/machines/manager.ts`; `src/services/index/register.ts` and `src/services/sessions/service-register.ts` (R9); `test/lane-b/offer-coverage.test.ts`, `test/endpoint/`, `test/lane-b/remote.test.ts`, and the unit files beside each source; one amendment (Pull request).
+
+**Interfaces.** Exposes sections 1 (every built row but Fork), 2, 3 and 8. Consumes nothing of this document.
+
+**Decisions.**
+- *The device's gate is one read of `REMOTE_NEEDS`*, for both act shapes. Today `machineAct` hard-codes the project acts' capability and `engineAct` the uploads'; both keep theirs and gain the table's. The check before a send differs from the project acts' on purpose: with no channel current the act is not refused `host_unavailable`, it waits (constraint 5), and the channel it goes out on judges `requires`.
+- *The archived read is the adapter's to send*, as `session.projects.resolve` is: a call by name on the channel whose capability it checked. An input other than `{includeArchived: true}` is the endpoint's `malformed`.
+- *The cut's grade is the entry's.* `#eachSession` cuts at `gradeOf(name)`, which for `session.list` is `list`; the `EACH_SESSION` entry carries its own rank, `manage`, and the cut is taken, as today, in the step that sends the answer. A unit case reads the same machine as an owner and as a member with a `list`-only standing.
+- *`session.update`'s rule answers `manage` for every input.* The row's `accepts` is what narrows it to an unarchive; the rule never grades a patch lower than the record's owners.
+- *An unarchive is the one `session.update` a reader may make* (R9). The handler keeps refusing a reader's update, with one exception: a patch that is exactly `{archived: false}`, which the endpoint has already held to `manage`. Its answer, and `session.rename`'s under a reader, is the record as `session.get` answers that reader, so a member who is not one of the machine's owners never receives the owners' reading (P5 O8, Interfaces §P). A test reads both answers as an owner and as a member who owns the session without owning the machine.
+- *A pane's answer never resumes a session.* `engineAct` resumes a session with no live launch before an act; for `maws.pane.answer` the request it answers died with its launch, so with no live context it is refused on the device and nothing is acquired. Nothing issues it for another machine until U12's landing.
+- *Main words, the window shows* (section 3). `outcomeAsResult` stays the one place an act's outcome becomes a result.
+- *The listing rule's seam* is where a sminos member frame becomes a `SessionReport` (`rl10/members.ts`) and `Listings` decides whether a report qualifies. For a lane B session joined to its app session, the endpoint reads the spine's record: `archived` withdraws the listing with the existing gone record, an unarchive lists it again, and a record title replaces the reported one. It is judged again when the spine says the record changed, which the endpoint already hears for its `each-session` calls. No listing field is added. Asynchronous work it starts is inside a hold (section 14).
+- *Tests that pin today and change:* `test/endpoint/reader-state.test.ts` (a `session.update` call is `not-offered`: now `act-required`), `test/endpoint/by-effect.test.ts` (`session.update` among the `NO_RULE` names), `src/services/index/register.test.ts` (a reader's `session.update` is refused: still so for every patch but the unarchive), `src/main/lane-b/remote.test.ts` (the adapter does not handle `session.update`), `apps/org-protocol/test/messages.test.ts` (the minor), `src/renderer/src/lane-b/remote-unavailable.test.ts` (it uses `session.rename` as its declared example: it takes one that stays declared). `test/lane-b/offer-coverage.test.ts` keeps its cases and its words pattern for what stays declared, and gains one: every `REMOTE_NEEDS` entry names an offered command and a capability `ENDPOINT_CAPABILITIES` lists.
+
+**Does not touch.** `session.fork`, which stays declared until M2. Any control of the window (M4). `src/services/attention/`, and the services' session handlers beyond R9's two answers: archive, rename and acknowledge run as they do for this Mac's own window. `apps/org-protocol` beyond the minor.
+
+**Proves.** A13's first sentence; the machine's and the device's halves of A9, A10 and A14. Beyond acceptance its tests pin: a held act is not answered `host_unavailable`; the archived read's cut for an owner, a non-owner and a list-only member; an unarchive is the only `session.update` a machine takes.
+
+### M2 — Fork over the link, and the sheet's words
+
+**Goal.** One of a machine's owners forks a session there from another device, in place, optionally from a prompt and with a first message, signed without a prompt on a machine they own; and the confirmation sheet, for every act that still shows it, names the machine by its name.
+
+**What exists at its end.**
+- At the endpoint, a `session.fork`: from a member who is not one of the machine's owners, a holder of a `spawn` grant included, `owners-only`; from an owner who does not hold `view` on the source, `grade`; of a source whose permission mode is above the machine's ceiling, `ceiling`; in read-only mode, `read-only`; with a target other than in place, `malformed`; without a valid step-up signature, `step-up`.
+- On the machine: the fork is made in the source's folder with its model, effort and permission mode, from the prompt named or whole, and sends the first message given. Its record carries no `launchedBy`. The act answers `starting` only once the fork's setup reached `launching`, so its record exists when the device opens its tab. A source whose turn runs answers the guard's own refusal and leaves nothing behind.
+- On the device: the act is signed before its first copy goes; on a machine whose owners include the signed-in member no sheet and no Touch ID show, on any other both do; two forks from one tab are two forks; the answer is waited for within the fork's budget, not the one-minute bound.
+- The sheet: its message is S-13's sentence for the action, its detail has every signed field with `Machine: <name> (<ref>)`.
+
+**Touches.** `src/endpoint/offers.ts`, `authorize.ts`; `src/services/sessions/` (the fork's composition under an operation) and `src/services/command-budgets.ts`; `src/main/lane-b/remote.ts`; `src/main/device/step-up.ts`; `src/shared/ipc/remote-unavailable.ts`; the tests beside each, `test/endpoint/`, `test/lane-b/remote.test.ts`, `src/main/device/step-up.test.ts`, `step-up-sheet.test.ts`, `step-up-owned-spawn.test.ts`; and three of the amendments (Pull request).
+
+**Interfaces.** Exposes the Fork row of section 1. Consumes M1's sections 1 to 3.
+
+**Decisions.**
+- *The fork's two checks are new code in `authorize.ts`*, because the generic path checks a machine right for a `spawn`-graded row and no rank on its session, and the spawn guard runs only for a row whose target is the machine. The `view` check reads the source's record through the decision's own reads, so a record that moves takes the decision again. The ceiling check takes the source's permission mode from the machine's own record of it and compares as `spawnRefusal` in `src/endpoint/policy.ts` compares a spawn's; a source with no recorded mode is judged as a spawn that names none. Both answer existing reasons (constraint 3).
+- *Composed on the machine, answered at `launching`.* A local `session.fork` answers `starting` before its setup's phases, which do not cross the link. Called under an operation (the handler's context carries the claim `machine.op` hands it), the fork waits for its setup's `launching` as `untilLaunching` in `spawn.ts` does and only then answers `starting` with the fork's id. Any other guard outcome is answered as it is and the fork's intent is dropped, since no card can be drawn for it on another machine; a setup that fails before its launch fails the operation with the setup's own sentence. The command's output schema does not change (constraint 3). The window's own fork on this Mac is untouched.
+- *No starter.* A spawn writes the asker as `launchedBy`; a fork over the link does not, so it belongs to the machine's owners as a fork made at the machine does. This is why the row is `owners`: the proof that makes a starter the owner is tied to the name `session.spawn` (`SPAWN_ACTIONS` in `apps/org-protocol/src/attest.ts`), which this landing does not touch. A test pins the absence.
+- *A budget.* `session.fork` has none in `COMMAND_BUDGETS_MS`; it gets a spawn's without the git call, and the device waits that long past the pending bound (`answerMs` of `machineAct`), as a spawn's own bound does. Without it a slow launch reads "took the request but hasn’t confirmed it" and the tab never opens.
+- *Not through the spawn table.* `createSpawnAttempts` keeps a New chat's spawn by tab so that a second Send starts no second session; a fork goes through `machineAct` with `stepUp: 'required'`.
+- *`signsUnasked` gains one name.* The one exempt action becomes the two names `session.spawn` and `session.fork`; the shape test (no session, no launch context, no request digest) holds for a fork because a machine act is placed by its arguments. `step-up-owned-spawn.test.ts` gains the fork's cases beside the spawn's: owned and unasked; another person's machine and asked; any extra field and asked.
+- *The sheet's name is org data.* `renderAction` and `renderActions` read the machine's name from the org view `createStepUp` already holds (the head's machine entry, else its certificate, else the ref, as `machineName` in `src/main/org/grants.ts` reads it) and pass it through the same escaping as every shown value (`src/main/device/prompt-text.ts`): a member wrote that name, and a control or bidi character in it must not forge a line. A name two machines share is followed by its ref in the message. With no view held the message falls back to the ref.
+- *Tests that pin today and change:* the summaries in `step-up.test.ts` ("`3 actions on machine`", "`session.answer on machine`", "`Machine: <ref>`"), `step-up-owned-spawn.test.ts` ("`session.spawn on machine …`") and the fixture prompt of `step-up-sheet.test.ts`.
+
+**Does not touch.** `SPAWN_ACTIONS` and anything else in `apps/org-protocol`. `src/endpoint/step-up.ts`: a `spawn`-graded act already needs the signature. Fork to a new worktree, a terminal session's fork, a fork while the source's turn runs, a fork by a grant holder: each stays as the section's "Not included" has it. The window (M4).
+
+**Proves.** The machine's and the device's halves of A8; A12 as far as a unit test reaches (the system prompt's own text is T5); A13 for the fork's row. Beyond acceptance its tests pin: every refusal of the first bullet; the fork's record has no `launchedBy`; a second fork from the same tab makes a second session.
+
+### M3 — The link's phases and the pane that stays
+
+**Goal.** A machine that is connecting or reconnecting no longer reads as gone, a tab of a session there keeps its transcript, its place and its draft through an outage, a pane that is loading says so, a first read that failed because the engine host was away heals, and a Stop that fails says so.
+
+**What exists at its end.**
+- The phase of section 7 and its words. Rows, tabs, hover cards and chips grey and say "offline" only in the offline and removed phases.
+- `SessionTab` in `main/Pane.tsx` no longer swaps the pane for a sentence. With a record on screen the pane stays mounted and one status line above the transcript carries the phase's words; with no record yet the words stand in the pane's middle until the link is up.
+- Under the status line the transcript scrolls, selects, copies and searches, and its first visible row does not move when rows arrive at the return. The composer keeps its draft and takes typing; Send and Stop are held while connecting or reconnecting, as an act is held today, and are disabled with section 3's sentence in the offline phase.
+- A pane with nothing to draw reads "Loading…" once its history read has been out 300 ms, on every route.
+- A first read of a session on this Mac that failed because the engine host was away is made again at the host's next ready, once per ready; the pane reads "Loading…" meanwhile, "Couldn’t load this conversation" with Retry after 15 s or a second failure, and a later ready still loads it.
+- A failed Stop, Esc or ⌘. shows one notice; a Stop out for more than 300 ms reads "Stopping…" and is disabled until it settles.
+
+**Touches.** `src/renderer/src/app/machine-mark.ts`, `main/Pane.tsx`, a status line under `src/renderer/src/lane-b/`; the insertions of section 12 in `composer/Composer.tsx`, `composer/submit/submit-state.ts`, `transcript/view/Transcript.tsx` and `transcript/model/copy.ts`; `transcript/source/ipc.ts` and `stores/transcript.ts` (O-11b); `src/main/lane-a/remote.ts` if its refusal of an interrupt is worded there; the unit files beside each and the sidebar's tests that pin the greying; `e2e/machines.spec.ts`, `e2e/remote.spec.ts`; the fourth amendment.
+
+**Interfaces.** Exposes section 7. Consumes section 3 (`disabledWords`, the worded refusal).
+
+**Decisions.**
+- *`MachineMark.offline` becomes the display answer* (section 7), so the sidebar's and the strip's files, which other children own, follow without an edit. Every reader of `mark.offline` and of `selectOffline` is read once: one that greys or words takes the mark, one that decides whether a command can go takes `selectOffline`.
+- *One timer, not a tick.* A machine in the reconnecting phase turns to offline at `since` plus `REMOTE_ACT_PENDING_MS`; the mark arms one timer for that moment.
+- *No record, no mount.* A tab restored at launch for a session whose record has not been read shows the phase's words in the pane's middle from `main/Pane.tsx`, as the placeholder did, and `SessionPane` mounts when the link is up; `session/SessionPane.tsx` is U1's and is not edited, and its "Opening on `<machine>`…" stays.
+- *The hold is main's.* The window does not queue anything: in the two held phases it leaves Send and Stop as they are and main's hold answers. The case of `Composer.test.tsx` that keeps Stop while the link is down splits in two: kept while reconnecting, disabled when offline.
+- *The notice by route.* For a session on another machine the notice is `error.message` as main worded it; on this Mac and for a terminal session here it is "Not stopped: " and the error's message. The mechanism is the one End and Resume use (`toast` of `stores/notices`).
+- *O-11b needs the code.* `valueOf` in the source throws the message alone; the code is carried to the store, and only a `host_unavailable` failure of a local session's first read waits for a ready. The ready is `engine.hostState` as the `useHosts` store holds it. One retry per ready cannot loop against a host that keeps failing. A session on another machine is left to M5.
+- *The scenes* (R3, R4). A4's scene is added to `e2e/remote.spec.ts`: a remote tab scrolled up, the link taken down until the status line shows, rows written meanwhile, the link restored; it asserts the same first visible row, the new rows below it, the draft, and that no error text appeared in the pane. A11's scene presses Stop after the status line shows and reads "Stopping…" and then the notice. `e2e/machines.spec.ts` steps 4 and 5 assert the status line in place of the full-pane sentence. The scenes are written here and run by the architect (T2).
+- *Tests that pin today and change:* the offline cases of `sidebar/Sidebar.test.tsx` and `sidebar/HoverCard.test.tsx` (greyed while not up: now by phase), `transcript/view/Transcript.test.tsx` (the failure text), `Composer.test.tsx` and `submit-state.test.ts` (the remote Stop), the placeholder cases of `lane-b/transcript-hold.test.tsx`. `stores/machines.test.ts` stays: `selectOffline` keeps its meaning.
+
+**Does not touch.** Main's reconnect path and the transcript hold's rule (M5). The session menus (M4). `session/SessionPane.tsx`, `sidebar/` and `main/Tab.tsx` beyond tests. What other children's cards and side surfaces draw during an outage: T3 lists each error text, this milestone fixes those in this child's files, and each other is its owner's under #563's rule.
+
+**Proves.** A2, A3, A6; A4 and A11 by their unit cases and the scenes written. Beyond acceptance its tests pin: the phase for each row of O-39's table from roster fields; a Stop that went out on a channel that then stalled keeps the pending sentence.
+
+### M4 — The session acts in the window
+
+**Goal.** The owner forks, renames, archives and unarchives a session on another machine from its row, with its tab open or not, and no control for an act on such a session is drawn enabled where the act cannot work.
+
+**What exists at its end.**
+- The menus of section 6, on a record's row, on a listed row and in the title bar, each item disabled with the helper's sentence where UC-7.5 says so.
+- Fork from the menu opens the fork in a new tab on that machine's address; the edited message's Fork forks from before that message and sends the edit; both go through `forkSession`.
+- Rename… and Archive work from a listing alone. Archive closes the session's tab and the row leaves this window at once and stays gone; "Archived sessions…" lists the other machine's archived sessions the member owns, and Unarchive returns one.
+- "Archive sessions" on a project acts on this Mac's sessions and says so where the project has sessions elsewhere; "Archive sessions older than a week" is no longer sent to other machines.
+- Against a machine that does not list the capability: Fork, Rename, Archive and Dismiss are disabled with the update sentence and nothing is sent.
+- A test fails for a renderer module that issues a declared command without a guard.
+
+**Touches.** `src/renderer/src/app/session-actions.ts`, `sessions/record-ops.ts`, `sessions/actions.ts`, `sessions/RenameDialog.tsx`, `ArchiveDialog.tsx`, `ArchivedSessionsDialog.tsx`, `lane-b/remote-unavailable.ts`, `stores/sessions.ts`; the insertions of section 12 in `sidebar/menus.tsx`, `sidebar/ListedRow.tsx`, `app/Toolbar.tsx` and `composer/InlineEdit.tsx`; the tests beside each and the new coverage test.
+
+**Interfaces.** Exposes sections 4, 5 and 6. Consumes sections 1, 3, 7, 8 and 10 (the reader `useForkUnavailable` asks whether a turn runs; before M5 it has the listing's word alone).
+
+**Decisions.**
+- *A fork on another machine does not adopt.* `adoptFork` reads the fork's intent and follows its setup, neither of which crosses the link. The remote branch of `forkSession` makes the act and, on `starting`, opens a tab at the fork's address, which reads "Opening on `<machine>`…" until main has read its record. Any other outcome becomes `failureWords` with the outcome's own sentence.
+- *Dialogs read the listing.* `RenameDialog` and `ArchiveDialog` return nothing without a record; for a listed row they take the title and the machine from the listing and skip what needs a record (the worktree's other sessions, Regenerate). No read over the link is made to open a dialog.
+- *What this window did shows at once.* A listed row follows the hub's listing, which arrives seconds later. The sessions store keeps, for this run, what the window did to an address (archived; a new title) and applies it where it builds its listings, until a newer listing replaces it or an unarchive clears it. It lives in the store, not in the sidebar's files.
+- *The project-wide acts stay this Mac's* (R2): `archiveProjectSessions` walks local records; `archiveOlder` asks this Mac's project only. Its sheet's sentence is the section's.
+- *The archived dialog asks only a machine that is up and lists the capability*; for any other it shows `disabledWords` with the label "list archived sessions" as that machine's line, and asks nothing.
+- *One scene for the acts.* `e2e/remote.spec.ts` gains a scene on its two-daemon RL2 set-up, under the harness's accepting confirmation: Fork from a row's menu opens a tab on the other machine's address; Rename… on a listed row changes the row's title; Archive closes the tab and removes the row; "Archived sessions…" lists the session and Unarchive returns it. Written here; run by the architect (T2).
+- *The coverage test's rule.* Every renderer source that invokes a command in `REMOTE_UNAVAILABLE` either imports the helper of section 4 or is named in one declared list with the guard it relies on, as `ANSWERED_IN_MAIN` is a declaration a contract test reads. The check at authoring found these to place: the edit's Fork (no guard today: it gains the helper); the three writers of read marks and pin (a branch on `isRemoteLaneB` to `session.reader.update`); the automatic answers `session.ui.answer` and `maws.pane.answer` (no control); `/fast off` in `widgets/typed.ts` and the added directories in `composer/frame/bindings.ts` (both issue `session.applyFlagSettings`; if nothing upstream closes them for another machine they are findings for U4's file, reported, not fixed here); `session.stop` in `budget/BudgetSheets.tsx` and `gateway/switch-route.ts`; modules gated by a caller that reads the helper. A module the list cannot honestly excuse is reported with its owner.
+
+**Does not touch.** The endpoint and main. Delete, removing a worktree, fork to a new worktree and take over on another machine. A terminal session's menu beyond what it has. U7's opens and Hide.
+
+**Proves.** A8, A9, A10 and A14 in the window; A13's second sentence. Beyond acceptance its tests pin: `remoteSessionActions` for each combination of lane, record and `mine`; the project-wide archive sends nothing to another machine.
+
+### M5 — A link's return, the live row, the chooser and the measurement
+
+**Goal.** At a link's return history is read after the live sessions have resumed and a transcript that failed heals without anything resubscribing; a remote session's row reads Working when its turn starts; New chat's project chooser answers at once; and main's log carries the three lines the O-39 sitting needs.
+
+**What exists at its end.** The settled word (table below); the live word of section 10; a chooser that opens with the registry's projects for that machine and the last listing of this run, replaced when the machine answers, with "New project" and "Don't work in a project" enabled when the folder read answers; three lines in main's log.
+
+**The settled word.** State owner: main's lane B adapter, one round per machine and roster generation.
+
+| event, in main's order | meaning |
+|---|---|
+| `up(g)` | the machine's link reports `up` under a generation `g` the adapter has not settled |
+| `opening(s)`, `opened(s)` | a session's fold starts its record read; the read ended (a record, a refusal, or given up) |
+| `asked(s)`, `answered(s)` | a subscription of the fold went out on this generation; its `subbed` or its end arrived (the moment the fold's answer count moves) |
+| `let-go(s)` | the lane closed: its last tab went and the linger ended |
+| `down` | the link left `up` |
+
+| state | on | does |
+|---|---|---|
+| none | `up(g)` | becomes settling(g); then evaluates |
+| settling(g) | any event but `down` | evaluates: if no lane is opening and no lane has a subscription asked and unanswered, says `remote.settled {machine, generation: g}` once and becomes settled(g). With no lane at all this is at `up(g)` itself |
+| settled(g) | any event but `down` | nothing: the word is said once per generation, whatever opens later |
+| any | `down` | becomes none; a round that had not settled says nothing |
+
+The word is emitted on the queue the session's events take, after the `remote.session` that carried the round's last answer, so a page that handles events in order has every answer before it. A loss that heals inside the link's 2 s grace makes no generation and no round. The first attempt at such a signal (`76ccfafec`, reverted by `276440763`) read "no subscription out" as "nothing to wait for" and so spoke while a session was still being opened; `opening` is what this table adds.
+
+What reads at the word, for a session on an RL2 machine:
+
+| read | today | after |
+|---|---|---|
+| a pane's first read with nothing held (restored at launch, opened while the machine was away) | when the roster says `up` | at settled for the roster's current generation, or `SETTLE_BACKSTOP_MS` after the roster said `up`, whichever is first; a pane mounted after either reads at once |
+| a held idle session's re-read at a return (an answer whose mode is not `replay`) | at that answer | the same re-read, at settled or the backstop |
+| a held transcript that is not whole (its read failed, or was out at the loss and failed) | at the next answer after the loss; never if nothing answers | decided at settled or the backstop: failed is read again, once |
+
+**Touches.** `src/main/lane-b/remote.ts`, `remote-session.ts`, `remote-history.ts`; `src/shared/ipc/schema/remote.ts`; `src/renderer/src/lane-b/remote-session.ts`, `lane-b/transcript-hold.ts`, `transcript/source/ipc.ts`, `sessions/listed-state.ts`, `stores/sessions.ts`, `sessions/remote-setup.ts`, the insertion in `composer/frame/ProjectRow.tsx`; the tests beside each; `e2e/remote-latency.spec.ts` and `test/support/remote-wake.ts` for A5's case.
+
+**Interfaces.** Exposes sections 9 and 10. Consumes M3's mounted pane and UC-1's predicate (section 11).
+
+**Decisions.**
+- *The transcript hold shrinks.* With the pane mounted through an outage (M3) the hold no longer keeps an attachment alive across an unmount; what stays is its rule for reading a transcript that is not whole again, now decided at the word.
+- *The live word is the window's to derive* (R7). The engine status of a held remote session already reaches the store; the word needs no new event from main. Whatever the mechanism, these hold: no reader but `sessions/listed-state.ts` changes and no reader's signature changes (they sit in files other children own and reach the listing through existing plumbing); the word is absent the moment any of its conditions fails, so a closed tab's row returns to the listing's word.
+- *The chooser is a hook in this child's file.* `readPlaces` waits for two reads together and keeps nothing. `sessions/remote-setup.ts` exports the chooser's state as one hook, `useRemotePlaces(machine, name)`: projects known at once (the registry's locations on that machine and this run's last listing), replaced by the machine's answer; folders null until the folder read answers; "Reading `<machine>`'s projects…" only while nothing is known. `RemoteMenu` reads the hook and disables its two folder-dependent items while folders is null.
+- *The three lines share one prefix,* `lane B: timing`, so the sitting finds them with one search: `lane B: timing history <machine>/<session>: <path>, <pages> pages, <bytes> bytes, <ms> ms` for each remote history read, the path one of the reads `remote-history.ts` makes; `lane B: timing open <machine>/<session>: link up +<ms>, record +<ms>, history asked +<ms>, first rows +<ms>` for each remote tab, counted in main from the moment the tab's interest opens the session; `lane B: timing chooser <machine>: session.projects.list <ms> ms, machine.folders.list <ms> ms`. They go through the adapter's `log`, which reaches `<profile>/logs/main.log`. Session ids are ids; no title and no path is logged (constraint 11).
+- *A5's scene* is a second case beside the wake case of `e2e/remote-latency.spec.ts`: one tab of a live session and one of a cold or idle session on the other machine, the stall and the restore as the wake case makes them, and, through the reader in `test/support/remote-wake.ts`, no whole-launch read of a session there between the restore and the live session's `subbed` line. Written here; run on CI's mini (T4).
+- *Tests that pin today and change:* the re-read rules of `lane-b/transcript-hold.test.tsx`; `composer/frame/ProjectRow.test.tsx`'s remote menu cases where they answer both reads at once.
+
+**Does not touch.** The link's own connect path. Reading a long live session newest window first (it waits for the sitting). A terminal session's live word (it joins after O-35's check). #429.
+
+**Proves.** A1, A7, A15; A5 by a unit case for each of the ticket's three cases, each in main's order of words and each failing first, and by the scene written. As the last milestone it also runs the whole unit suite (Concrete Steps) and fills "Acceptance: who proves what" with each test's name.
+
+## Concrete Steps
+
+All commands run from the branch's worktree (the dispatch names its path). The build VM runs each check in a checkout of the pushed head, so commit and push first. The first call for the branch installs dependencies there and takes a few minutes.
+
+**Before M1.** Bring in the base the architect names, by a merge (the branch is already pushed; it is not rebased):
+
+    git fetch origin
+    git merge origin/master
+    git push origin ux-wave/U9
+
+The base holds U6a and U8a when `src/shared/keymap/actions.ts` has `fixed` on `ActionSpec` and `src/shared/sessions/working-folder.ts` exists.
+
+**During every milestone**, after each push:
+
+    V=~/.local/share/maws-ux-wave/tools/vmcheck.sh
+    $V ux-wave/U9 -- 'pnpm typecheck'
+    $V ux-wave/U9 -- 'pnpm exec eslint <the paths changed>'
+    $V ux-wave/U9 -- 'pnpm exec vitest run <the test files touched>'
+
+Each prints `vmcheck: ux-wave/U9 at <short sha>` and then the tool's own output; the exit status is the command's. A test is written and seen failing before the code that passes it. A file of the `node-timing` or `renderer-timing` project is not found under another project's name: name files, not projects.
+
+**The files each milestone's run must include**, beside the new ones:
+
+- M1: `test/lane-b/offer-coverage.test.ts test/endpoint/reader-state.test.ts test/endpoint/by-effect.test.ts test/endpoint/each-session.test.ts test/endpoint/actions.test.ts test/lane-b/remote.test.ts src/main/lane-b/remote.test.ts src/main/machines/manager.test.ts src/services/index/register.test.ts apps/org-protocol/test/messages.test.ts src/shared/ipc/wire.test.ts src/shared/ipc/wire-fingerprint.test.ts`
+- M2: `test/endpoint/setup-rows.test.ts test/lane-b/remote.test.ts src/services/sessions/spawn.test.ts src/services/sessions/service.test.ts src/main/device/step-up.test.ts src/main/device/step-up-sheet.test.ts src/main/device/step-up-owned-spawn.test.ts test/lane-b/offer-coverage.test.ts src/shared/ipc/wire.test.ts`
+- M3: `src/renderer/src/stores/machines.test.ts src/renderer/src/sidebar/Sidebar.test.tsx src/renderer/src/sidebar/HoverCard.test.tsx src/renderer/src/transcript/view/Transcript.test.tsx src/renderer/src/composer/Composer.test.tsx src/renderer/src/composer/submit/submit-state.test.ts src/renderer/src/lane-b/transcript-hold.test.tsx`
+- M4: `src/renderer/src/app/session-actions.test.ts src/renderer/src/lane-b/remote-unavailable.test.ts src/renderer/src/lane-b/remote-reading.test.ts src/renderer/src/sidebar/Sidebar.test.tsx`
+- M5: `src/main/lane-b/remote-session.test.ts src/main/lane-b/remote.test.ts src/main/lane-b/remote-history.test.ts src/renderer/src/lane-b/transcript-hold.test.tsx src/renderer/src/lane-b/remote-session.test.ts src/renderer/src/composer/frame/ProjectRow.test.tsx`
+
+`src/shared/ipc/wire.test.ts` and `wire-fingerprint.test.ts` pass with the manifest untouched; if either fails, a wire schema moved and constraint 3 applies. Neither is ever run through `pnpm wire:manifest`, which rewrites the manifest.
+
+**At M5's end**, the whole unit suite and the static checks:
+
+    $V ux-wave/U9 -- 'pnpm typecheck && pnpm lint'
+    $V ux-wave/U9 -- 'pnpm test'
+
+**When the branch is complete** (the session that runs the milestones, once, in the background; it waits for the run by itself, up to half an hour, and is never polled):
+
+    scripts/ci-gate.sh "$PWD" --gates static,unit,probes --label ux-wave-U9
+
+It prints each job's conclusion and ends with `ci-gate: run <id> <conclusion>`; exit 0 is green. That run's id goes in the pull request's body.
+
+## Acceptance: who proves what
+
+The acceptance is the section's A1 to A15, as written there. An executor proves what a unit test can; an Electron scene is written by its milestone and run by the architect on a Mac; some items need two machines. M5's executor replaces each "unit" entry with the test's file and name.
+
+| item | built in | an executor proves | the architect's run |
+|---|---|---|---|
+| A1 the chooser answers at once | M5 | the hook's states, unit | by hand in T5, timed in T7 |
+| A2 connecting is not offline | M3 | the phase per row of O-39's table; rows and tabs by phase | T2 (`e2e/remote.spec.ts`, `e2e/machines.spec.ts`) |
+| A3 a loading pane says so | M3 | the 300 ms rule, unit | T2 |
+| A4 the reader keeps their place | M3 | — | T2, the scene run alone first |
+| A5 no history read beside a resume | M5 | three unit cases, in main's order of words | T4 (CI's mini) |
+| A6 a failed first read heals | M3 | retry at ready, the 15 s line, a later ready | T2, by restarting the engine host under a scratch home |
+| A7 a remote row reads Working | M5 | the one reader's cases | T5 |
+| A8 fork on another machine | M2, M4 | every refusal at the endpoint; no prompt on an owned machine; the menu, the edit's Fork | T2 (the acts' scene); T5 for "no Touch ID sheet" |
+| A9 archive and unarchive | M1, M4 | the rows; the cut of the archived read; the project-wide act stays local | T2; T5 for "every other device's within a few seconds" |
+| A10 rename | M1, M4 | the row; the dialog from a listing | T2; T5 for the other machine's own window |
+| A11 a Stop that fails says so | M3 | a refused interrupt on each route; the pending sentence for a Stop that went out | T2 (the Stop scene) |
+| A12 the sheet names the machine | M2 | the message and the detail for each action of S-13's table | T5: Touch ID's own prompt, a person at the Mac |
+| A13 UC-7 holds by test | M1, M2, M4 | `test/lane-b/offer-coverage.test.ts` and the renderer coverage test | — |
+| A14 an older machine says so | M1, M4 | a peer without the capability is sent nothing; the four controls' sentence | T6 |
+| A15 the measurement can be made | M5 | the three lines' text, unit | T7 reads them |
+
+## Checks an executor cannot run
+
+These are handed to the architect as steps. None is a gate an executor waits on, except T1 for one step of M1.
+
+| step | what it settles | what it needs | when |
+|---|---|---|---|
+| T1 | The section's check 2: in a machine's own window, archive a session MAWS runs and rename a stopped one; does its row on another device, with no tab open, go and follow? It goes and follows: M1's listing rule is not built. It does not (what the code predicts): it is built. | Two real participants on today's build F: a machine whose sminos is enrolled in an org, and a second device; or that machine alone, reading the listings its endpoint keeps. No wave build. | before M1's listing step |
+| T2 | A2, A3, A4, A6, A11 and the acts' scene, in Electron | A Mac under the load rule, one host: `e2e/remote.spec.ts` (two daemons over RL2 through loopback pipes) with each new scene alone first, then the group; `e2e/machines.spec.ts` | after M3, and again after M4 |
+| T3 | The section's check 3: which card or side surface draws an error in a pane kept mounted through a two-minute outage | An agent on a Mac with the same two-daemon set-up, every card and side surface open | after M3; each text goes to the owner of its file |
+| T4 | A5's case beside the wake case | CI's mini, the measured group of `e2e/remote-latency.spec.ts` | after M5 |
+| T5 | What only two real machines on the wave's build show: no sheet and no Touch ID for a fork on a machine the owner owns (the harness accepts every confirmation, so no scene can show it); a row leaving a second device within seconds of an archive, and a rename reaching the other machine's own window (a third participant); Touch ID's own prompt for "Add a project folder" (a person); A1 and A7 by eye | Two of the owner's machines on the wave's build, which needs the owner's word (UC-10), and a person for Touch ID | after M5 |
+| T6 | A14, and the other direction of "Against build F": F's "Archived sessions…" against a machine on the wave's build | One machine on the wave's build and one on build F: the arrangement of the trial itself. Whether the gate's two-build lane (`scripts/ci-gate.sh --peer`) can stand an F daemon as the RL2 peer was not checked | after M5 |
+| T7 | The O-39 sitting (U14): how long a remote open, a history read and the chooser take on the LAN and through the relay | Two real machines on the wave's build; it reads the `lane B: timing` lines | after M5 |
+
+## Pull request
+
+One pull request, opened when the architect says, from `ux-wave/U9`. Its body opens by citing the root, the child id U9 and the parent pin, and names: its class 1a run (the id `scripts/ci-gate.sh` printed, green on the head it lands); the verdict of the `doperpowers:review-code` xhigh panel and how each finding ended; the e2e specs it touches (`e2e/remote.spec.ts`, `e2e/machines.spec.ts`, `e2e/remote-latency.spec.ts`) with T2's and T4's results; and its residue: the checks of T5 to T7 still open, whatever "Reported to the architect" still holds, and every finding logged rather than fixed. It ends with the line of constraint 12.
+
+It carries the dated amendments of the rulings this landing reverses, each written where the ruling stands, dated the day it is written, naming the owner's words, with the section's sentence verbatim (the section, "Rulings reversed"):
+
+| ruling, and where it stands | written by | the owner's words it rests on |
+|---|---|---|
+| P5 Decision Log 28 (`docs/doperpowers/plans/2026-10-27-p5-org.md`): "offline" for every state that is not up, and a kept tab that says only that | M3 | "Three states", the answer of 2026-11-12 to the wave's card on a link that is not up |
+| P5 O7's Interfaces §L and "The offer audit and its contract" (`docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md`), and O8's Interfaces §P note that the record's title and archived flag are not offered (`docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md`) | M2 | the observation behind O-48 ("I cannot create a fork session from the remote machine …") and "Approve and start", 2026-11-12 |
+| P5 Decision Log 219, and the same O7 plan's M10 B ("Not on my machines"): one act signed unasked | M2 | the same; the ruling's own reason extends to a fork on a machine the member owns |
+| P5 Decision Log 126 and the remote layer design §5.6 (`docs/doperpowers/specs/2026-10-26-remote-layer-design.md`): the sheet's words come from the action alone | M2 | "Approve and start", 2026-11-12 (S-13) |
+
+A fifth amendment follows from R9 and is not in the section's list; it is written only if the architect keeps R9's default: P5 O8's Decision Log entry "M6a Task 1's fork" and its Interfaces §P line "`session.update` stays local and is refused with any reader" (`docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md`), by M1: "Amended by the UX wave (U9; S-02): a reader's `session.update` whose patch is exactly `{archived: false}` is taken, at `manage`, and answered with the record as that reader reads it; every other patch under a reader is refused as before."
+
+At landing the architect updates the register's rows and closes the tickets and tracker rows the child closes (#563, #565, #352 as replaced, the tracker's rows of 2026-11-11 and 2026-11-12 the section names).
+
+## Surprises & Discoveries
+
+- Observation: `e2e/machines.spec.ts` step 4, where the section places A4's scene, drives a socket-linked machine, on which none of the RL2 path this child changes runs.
+  Evidence: the spec's header (a second profile's daemon named in `MAWS_LOCAL_MACHINES`); `remoteLaneBIn` in `src/renderer/src/lane-b/remote-session.ts` takes a session as remote lane B only with a `remote.session` state or a machine the org rows cover. Reported as R3.
+- Observation: a Stop that goes out on a channel that then stalls is never answered "offline".
+  Evidence: `src/main/machines/remote/acts.ts` marks an act whose channel was lost after it went as ambiguous and queries it; lane B answers `pendingResult` at the bound. Reported as R4.
+- Observation: the project's "Archive sessions" already reaches for sessions on other machines.
+  Evidence: `archiveProjectSessions` in `src/renderer/src/sessions/actions.ts` filters the row's sessions by "its machine is up", not by "this Mac". Reported as R2.
+- Observation: `session.update` cannot be offered by a row alone, twice over.
+  Evidence: `'session.update': NO_RULE` in `src/endpoint/by-effect.ts`, pinned by `test/endpoint/by-effect.test.ts`; and `if (reader !== undefined) throw new Error('session.update takes no reader: …')` in `src/services/index/register.ts`, with `dispatchAs(this.ctx.dispatch, channel.client, decision.reader)` in `src/endpoint/actions.ts`. Reported as R9.
+- Observation: a link is `connecting` once and `down` through every retry, and the roster's `generation` tells a machine that was up from one that never was.
+  Evidence: `REPORTED` and the state assignments in `src/main/machines/remote/link.ts`; the restamp of `since` in `src/main/machines/manager.ts`.
+
+## Decision Log
+
+- Decision: the verification call. This document gets an adversarial review before any executor starts, dispatched by the architect (`doperpowers:adversarial-reviewer`), with the offers, the table "Against build F" and the settled word as its focus. Each milestone is reviewed at its boundary before the next consumes it. The branch gets the `doperpowers:review-code` xhigh panel before it lands. Class 1a on GitHub Actions is the gate of record; the Electron scenes and the two-machine checks are the architect's runs T2 to T7.
+  Rationale: UC-10 names this child's offers as delicate: they change what two machines agree on, and the owner's second machine stays on build F while the wave is tried. A single reviewer was rejected for the branch for that reason; a panel per milestone was rejected because the delicate half is two milestones the whole-branch panel reads together.
+  Date/Author: 2026-11-12, the author of this document, at authoring.
+
+## Outcomes & Retrospective
+
+Pending — written at finish.
