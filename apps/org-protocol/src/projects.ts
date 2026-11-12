@@ -7,6 +7,7 @@
 // records list it among the projects with live sessions and no location there. A machine's own project is no project of
 // the registry: a location or known entry carrying one sits under its machine's row, so it is left out here.
 import { machineNameKey } from './names.ts';
+import { standingCertMachines } from './records.ts';
 import { isMachineCert, isSigned } from './shapes.ts';
 import type { Certificates, MachineRef, OrgState, ProjectLocation, ProjectsRecord } from './types.ts';
 
@@ -28,7 +29,8 @@ export type RegistryProject = {
  * The names the endpoint's RL10 directory lists, each with its machine project and its `machines` entry: enrolled
  * machines' names, and those of certificates under a live, unrevoked delegation, so a devcloud VM that exists only by
  * its certificate is one of them. Sorted. A former name is not one: the directory would list it as a machine that is
- * enrolled and never online.
+ * enrolled and never online. A certificate whose key the head retired stays on purpose: `orgDirectory` marks its name
+ * `retired`, so sminos reads the VM's machine project as retired rather than unknown (`directoryMachines` drops it).
  */
 export function directoryMachineNames(state: OrgState, certificates: Certificates, now: Date): string[] {
   const names = new Map<string, string>();
@@ -39,6 +41,26 @@ export function directoryMachineNames(state: OrgState, certificates: Certificate
     if (isSigned(c, isMachineCert) && live.has(c.body.delegation) && !revoked.has(c.body.delegation)) names.set(machineNameKey(c.body.name), c.body.name);
   }
   return [...names.values()].sort();
+}
+
+/**
+ * The machines a person aims at by name (`maws project add vm-1:/srv`), each with its ref, and the names no one may be
+ * aimed at by. The machines: the enrolled ones, then those a live, uncontested certificate stands for
+ * (`standingCertMachines`: authentic, its key neither revoked nor retired, its delegation unexpired), so a devcloud VM
+ * that exists only by its certificate is one and a retired VM is none. One per name as `directoryMachineNames` keys it
+ * (`machineNameKey`), an enrolled machine before any certificate. `contested`: the names of live certificates that are
+ * contested (two refs claiming one name, a ref claimed with two keys, or one a state entry holds), which name no target
+ * however many claim them; an enrolled machine's name is never one. Its machines' names are some of
+ * `directoryMachineNames`', which also keeps a name only a retired or contested certificate bears. Each sorted by name.
+ */
+export async function directoryMachines(state: OrgState, certificates: Certificates, now: Date): Promise<{ machines: Array<{ ref: MachineRef; name: string }>; contested: string[] }> {
+  const machines = new Map<string, { ref: MachineRef; name: string }>();
+  for (const m of state.machines) machines.set(machineNameKey(m.name), { ref: m.ref, name: m.name });
+  const enrolled = new Set(machines.keys());
+  const standing = (await standingCertMachines(state, certificates, now)).filter((c) => !enrolled.has(machineNameKey(c.name)));
+  for (const c of standing) if (!c.contested) machines.set(machineNameKey(c.name), { ref: c.ref, name: c.name });
+  const contested = [...new Set(standing.filter((c) => c.contested).map((c) => c.name))];
+  return { machines: [...machines.values()].sort((a, b) => byText(a.name, b.name)), contested: contested.sort(byText) };
 }
 
 /**

@@ -84,6 +84,10 @@ function fakeMain(initial: SettingsState['settings']['theme'], { onAnnounce }: {
         return { state: 'none' };
       case 'org.rows': // P5 O8 M2: the org's rows at connect: no other machine, nothing listed
         return { machines: [], rows: [], complete: true, pending: [], members: [], member: null }; // M5: and no owners
+      case 'org.projects': // the project registry's M11: signed out, no project and no key
+        return { projects: [], keys: {}, moved: {}, removals: [], seen: {} };
+      case 'org.projectActs': // the project registry's M12: no maws command waits for a confirmation
+        return { asks: [] };
       case 'org.view': // P5 O8 M5b: this Mac's one owner, read at connect: no held head
         return null;
       case 'session.list':

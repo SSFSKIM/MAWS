@@ -6,7 +6,10 @@
 // while it draws other people's sessions. P5 O8 M7a (Q5): an org project's row whose sminos id the index knows offers
 // Channel, the project's one channel tab. P5 O8 M6b: a session's menu offers Share for a session you own, a listed row's
 // with no record here included (its row's `data-menu` names it only then). P5 O8 M5b: Add owner… after Share, for the
-// session's owners (sessions/share/target.ts' `useCanAddOwner`).
+// session's owners (sessions/share/target.ts' `useCanAddOwner`). The project registry (docs/doperpowers/plans/
+// 2026-11-10-project-registry.md, Interfaces §J): a registry project's row offers Add location… (Add project with the
+// project filled) and, unless a `.smns` names it, Rename…; Channel for a hub project only; and a row of a project you see
+// only through its sessions (`registry:<id>`) offers Channel alone.
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import type { ReactNode } from 'react';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
@@ -17,13 +20,17 @@ import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../ipc/client';
 import { createSession, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { openDialog } from '../sessions/dialogs';
-import { machineKey } from '@shared/machine/org-key';
-import { orgKeyOf, selectOrgIndex, sessionsOfRow, type RowKey } from '../stores/org-projects';
+import { idKey, machineKey } from '@shared/machine/org-key';
+import { selectOrgIndex, sessionsOfRow, type RowKey } from '../stores/org-projects';
 import { useLayout } from '../stores/layout'; // P5 O8 M7a
 import { CHANNEL } from '../channel/copy'; // P5 O8 M7a
 import { useLaneAState } from '../stores/lane-a'; // P5 O9 M5
 import { usePeople } from '../stores/people'; // P5 O8 M5
 import { useSessions } from '../stores/sessions';
+import { useMachines } from '../stores/machines'; // the project registry
+import { locationAddress, type OrgProjectLocation } from '../stores/registry'; // the project registry
+import { REGISTRY } from './registry-copy'; // the project registry
+import { newChatElsewhere, registrySpawnTarget } from './registry-new-chat'; // the project registry
 import { PROJECT_ACTION_IDS, PROJECT_ACTIONS, runProjectAction, useProjectActionEnabled, type ProjectActionId } from './project-actions';
 import { openResumeChooser } from '../resume/host'; // P2-D
 import { KEEP_RUNNING } from './copy'; // P5 O2 M2
@@ -34,7 +41,11 @@ import { openAddOwner, openShare, useCanAddOwner, useCanShare } from '../session
 import { OWNER, SHARE } from '../sessions/share/copy'; // P5 O8 M6b, M5b
 
 // P5 O8 M5: a project's or machine's `people` says whether its row offers the People toggle.
-export type MenuTarget = { kind: 'machine'; machine: MachineRef; people: boolean } | { kind: 'session'; appSessionId: AppSessionId } | { kind: 'project'; projectId: ProjectId; people: boolean };
+export type MenuTarget =
+  | { kind: 'machine'; machine: MachineRef; people: boolean }
+  | { kind: 'session'; appSessionId: AppSessionId }
+  | { kind: 'project'; projectId: ProjectId; people: boolean }
+  | { kind: 'registry'; id: string; people: boolean }; // the project registry: a row with no location to act on
 
 // The target a `data-menu` attribute names: `session:<appSessionId>`, `project:<projectId>` (an org project's row, by the
 // checkout its actions act on) or `machine:<ref>` (a machine's own row, P5 O6 M5).
@@ -45,6 +56,7 @@ export function menuTargetOf(element: Element | null): MenuTarget | null {
   if (value?.startsWith('machine:')) return { kind: 'machine', machine: value.slice('machine:'.length) as MachineRef, people };
   if (value?.startsWith('session:')) return { kind: 'session', appSessionId: value.slice('session:'.length) as AppSessionId };
   if (value?.startsWith('project:')) return { kind: 'project', projectId: value.slice('project:'.length) as ProjectId, people };
+  if (value?.startsWith('registry:')) return { kind: 'registry', id: value.slice('registry:'.length), people };
   return null;
 }
 
@@ -74,6 +86,7 @@ export function SidebarMenuContent({ target }: { target: MenuTarget | null }) {
         )}
         {target?.kind === 'session' && <SessionItems appSessionId={target.appSessionId} />}
         {target?.kind === 'project' && <ProjectItems projectId={target.projectId} people={target.people} />}
+        {target?.kind === 'registry' && <RegistryItems id={target.id} people={target.people} />}
       </ContextMenu.Content>
     </ContextMenu.Portal>
   );
@@ -151,17 +164,29 @@ const projectRowOf = (projectId: ProjectId): HTMLElement | null =>
   [...document.querySelectorAll<HTMLElement>('[role="treeitem"][data-menu]')].find((el) => el.dataset.menu === `project:${projectId}`) ?? null;
 
 function ProjectItems({ projectId, people }: { projectId: ProjectId; people: boolean }) {
-  const canCreate = useSessionCreatorRegistered() && machineOf(projectId) === ipc.localMachine; // a New chat on another machine is O7's picker
+  const creator = useSessionCreatorRegistered();
+  const here = machineOf(projectId) === ipc.localMachine;
   const records = useSessions((s) => s.records);
   const projects = useSessions((s) => s.projects);
+  const registry = useSessions((s) => s.registry);
   const project = projects.get(projectId);
+  const index = useSessions((s) => selectOrgIndex(s, ipc.localMachine));
+  const rowKey = project === undefined ? null : index.keyOf(project);
   // the row's sessions, from every machine
-  const unread = project === undefined ? [] : sessionsOfRow({ records, projects }, ipc.localMachine, orgKeyOf(project)).filter((r) => r.unread && !r.archived);
-  // P5 O8 M7a: the org project's sminos id, which keys its channel at the hub
-  const smnsId = useSessions((s) => (project === undefined ? null : (selectOrgIndex(s, ipc.localMachine).orgs.get(orgKeyOf(project))?.smnsId ?? null)));
+  const unread = rowKey === null ? [] : sessionsOfRow({ records, projects, registry }, ipc.localMachine, rowKey).filter((r) => r.unread && !r.archived);
+  // P5 O8 M7a: the org project's sminos id, which keys its channel at the hub; the project registry: a hub project's only
+  const org = rowKey === null ? undefined : index.orgs.get(rowKey);
+  const smnsId = org?.registry?.hub === false ? null : (org?.smnsId ?? null);
+  const registered = org?.registry;
+  const machines = useMachines((s) => s.machines);
+  const renameAt = registered === undefined || !registered.renamable ? null : renameTarget(registered.locations, machines);
+  // a New chat on another machine is O7's picker; the project registry: a project with no folder here starts on one of its
+  // locations elsewhere, the machine already chosen (registry-new-chat.ts)
+  const elsewhere = here || registered === undefined ? null : registrySpawnTarget(registered, machines);
+  const canCreate = creator && (here || elsewhere !== null);
   return (
     <>
-      <Item enabled={canCreate} onSelect={() => void createSession(projectId)}>
+      <Item enabled={canCreate} onSelect={() => void (elsewhere !== null ? newChatElsewhere(elsewhere) : createSession(projectId))}>
         New chat
       </Item>
       {/* W11 (I7): the project's Resume… picker, as the row's search icon opens it */}
@@ -171,10 +196,20 @@ function ProjectItems({ projectId, people }: { projectId: ProjectId; people: boo
       <Item enabled={unread.length > 0} onSelect={() => void markAllRead(unread)}>
         Mark all read
       </Item>
-      {people && project !== undefined && <PeopleItem rowKey={orgKeyOf(project)} />}
+      {people && rowKey !== null && <PeopleItem rowKey={rowKey} />}
       {smnsId !== null && (
         <Item enabled onSelect={() => useLayout.getState().openTab({ kind: 'channel', project: smnsId })}>
           {CHANNEL.menuItem}
+        </Item>
+      )}
+      {registered !== undefined && registered.hub && (
+        <Item enabled onSelect={() => openDialog({ kind: 'addProject', into: registered.id })}>
+          {REGISTRY.addLocation}
+        </Item>
+      )}
+      {registered !== undefined && renameAt !== null && (
+        <Item enabled onSelect={() => openDialog({ kind: 'renameProject', address: renameAt, name: registered.name })}>
+          {REGISTRY.rename}
         </Item>
       )}
       <ContextMenu.Separator className="my-1 h-px bg-border" />
@@ -183,6 +218,31 @@ function ProjectItems({ projectId, people }: { projectId: ProjectId; people: boo
       ))}
     </>
   );
+}
+
+// The project registry: a row of a project you see only through its sessions (no location to act on): its People toggle
+// where it has others' sessions (as any project row's), and its Channel.
+function RegistryItems({ id, people }: { id: string; people: boolean }) {
+  const hub = useSessions((s) => s.registry.projects.find((p) => p.id === id)?.hub ?? false);
+  const rowKey = useSessions((s) => s.registry.keys[id] ?? idKey(id)); // its row's key, as orgIndex gives it
+  return (
+    <>
+      {people && <PeopleItem rowKey={rowKey} />}
+      {hub && (
+        <Item enabled onSelect={() => useLayout.getState().openTab({ kind: 'channel', project: id })}>
+          {CHANNEL.menuItem}
+        </Item>
+      )}
+    </>
+  );
+}
+
+// The location a rename is sent to (§J.3): this Mac's when the project has one, else the first in order whose machine is
+// up; only one you may act on. Null: none now.
+function renameTarget(locations: readonly OrgProjectLocation[], machines: ReadonlyMap<MachineRef, { state: string }>): ProjectId | null {
+  const acting = locations.filter((l) => l.acts);
+  const chosen = acting.find((l) => l.machine === ipc.localMachine) ?? acting.find((l) => machines.get(l.machine)?.state === 'up');
+  return chosen === undefined ? null : locationAddress(chosen);
 }
 
 // P5 O8 M5: the row's People toggle (its hover action's twin), checked while the row draws other people's sessions.

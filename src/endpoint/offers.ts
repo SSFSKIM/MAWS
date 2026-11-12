@@ -129,6 +129,15 @@ const machineAdmin: OfferRow = { kind: 'act', executor: 'machine', target: 'mach
  * spawn guard.
  */
 const ownersCall: OfferRow = { kind: 'call', executor: 'machine', target: 'machine', grade: 'list', owners: true };
+/**
+ * The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, M9's offers; design §3): the project acts
+ * on a machine's own folders, `machine-admin` and the machine's owners' alone, as `addFolder` is; `resolve` an owners'
+ * read of the rule, as the folder list is.
+ */
+const projectAct: OfferRow = { kind: 'act', executor: 'machine', target: 'machine', grade: 'machine-admin', owners: true };
+/** Over the network a rename takes a name alone: a row's order is its own machine's. */
+const isRenameArgs = (input: unknown): boolean =>
+  isFields(input, ['id', 'patch']) && isFields(input.patch, ['name']) && typeof (input.patch as { name?: unknown }).name === 'string';
 /** P5 O7 M8: `fs.unfollow` from another machine names the agent whose follow it lets go of. */
 const namesAnAgent = (input: unknown): boolean => typeof input === 'object' && input !== null && typeof (input as { agentId?: unknown }).agentId === 'string';
 /** `forward.open`'s args: exactly a port. */
@@ -267,7 +276,15 @@ export const OFFERS: Offers = {
     // read for the trust card (whose answer goes as `session.spawn`'s `trust`), each the machine's owners' alone.
     'machine.folders.list': ownersCall,
     'session.trust.check': ownersCall,
-    'session.projects.addFolder': { kind: 'act', executor: 'machine', target: 'machine', grade: 'machine-admin', owners: true },
+    'session.projects.addFolder': projectAct,
+    // The project registry (M9): a link set or cleared, a location pointed at its folder's new path, a rename and a
+    // removal; `link` and `relocate` always step up as `addFolder` does, `update` and `remove` never (step-up.ts).
+    // `relocate` and `resolve` name a directory, held to the setup policy as `addFolder` is (policy.ts).
+    'session.projects.link': projectAct,
+    'session.projects.relocate': projectAct,
+    'session.projects.update': { ...projectAct, accepts: isRenameArgs },
+    'session.projects.remove': projectAct,
+    'session.projects.resolve': ownersCall,
     // P5 O7 M3: a remote terminal's acts, each `shell` on the machine, under the pty host's ledger; the terminal's bytes go
     // over a stream opened under the spawn or the attach (streams.ts). `pty.listFor` is `pty.list` for one session, since an
     // act's args are an object and `pty.list` takes none.

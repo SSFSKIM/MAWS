@@ -89,6 +89,8 @@ export const STOP_WAIT_MS = 2000;
  * M6a) a composer's draft, written at each pause in the typing, which no handler reads a proof from.
  */
 export const KEPT_WITHOUT_ACTION: ReadonlySet<string> = new Set(['files.upload', 'session.drafts.set']);
+/** The setup acts that read in their checked directory, and so take the asking member's opens with it. */
+const OPENED_ACTS: ReadonlySet<string> = new Set(['session.projects.addFolder', 'session.projects.relocate']);
 
 /**
  * P5 O7 M5a: the engine host's ledger command for an act with no session (an artifact's write), and the answer of a host
@@ -307,8 +309,10 @@ export class Actions {
         const kept = row.executor === 'pty-host' || KEPT_WITHOUT_ACTION.has(action.action) ? {} : { action };
         const target = onArtifact ? { target: artifactTarget(decision.artifact!) } : {};
         // P5 O7 M9: a setup act runs on the directory the setup policy checked, guarded by the asking member's opens; the
-        // sealed action keeps what was signed
-        const input = decision.setup === undefined ? action.args : { directory: decision.setup.directory, opened: decision.setup.opened };
+        // sealed action keeps what was signed. The project registry: its other args go as signed (`addFolder`'s `into` and
+        // `own`, `relocate`'s row), and the acts that read in the directory take the opens (M9's review 1, F1).
+        const setupInput = decision.setup === undefined ? action.args : { ...action.args, directory: decision.setup.directory, ...(OPENED_ACTS.has(action.action) ? { opened: decision.setup.opened } : {}) };
+        const input = decision.opened === undefined ? setupInput : { ...setupInput, opened: decision.opened }; // a link's (Fix 1c)
         const op = { opId: action.opId, opCreated: action.opCreated, claim: { ...who, fingerprint, ...target }, name: action.action, input, ...kept };
         const answer = row.executor === 'machine' ? await dispatch('machine', 'machine.op', op) : await dispatch('pty-host', 'pty.op', op);
         // A pty host older than `pty.op` (adopted by a newer mawsd) knows no ledger: nothing ran, ask again later.

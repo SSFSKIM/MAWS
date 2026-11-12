@@ -9,13 +9,14 @@
 // owner or a wider mode refuses the install, writing no unit); with `--delegation-id`, the profile's machine ref minted
 // with the delegation's id as its prefix when it has none (before the unit's first start, so the daemon reads it), and
 // an existing ref without that prefix kept and the id reported as ignored (O14 residue 9: the CLI warns); the
-// wrapper `<profile>/mawsd/bin/mawsd` and, for the default profile, its link `~/.local/bin/mawsd`; then the unit applied
+// wrapper `<profile>/mawsd/bin/mawsd` and, for the default profile, its link `~/.local/bin/mawsd` (the project registry's
+// M12: and `maws`'s, `<profile>/mawsd/bin/maws` and `~/.local/bin/maws`); then the unit applied
 // (units/unit.ts's `apply`: written when changed, loaded, the daemon restarted when a loaded unit changed, or when
 // `current` now names another release). On Linux the release is activated as one transition: a failure after `current`
 // flipped (the wrapper, the unit, its restart) puts `current` back, as a failed unit transition puts its file back, so a
 // retry sees the flip again and completes it; only once it is active are older releases pruned. Idempotent.
 // An uninstall unloads the unit (which ends `mawsd`; the hosts and their sessions keep running, and the next app
-// connects to the engine host in either shape), removes its file, the wrapper and the link if it is ours.
+// connects to the engine host in either shape), removes its file, the wrappers and the links that are ours.
 //
 // The label: `dev.maws.mawsd` (systemd: `mawsd.service`) for the default profile; any other profile, and every test,
 // names its own, which the wrapper then carries for the commands run through it.
@@ -72,20 +73,24 @@ export function resolveLabel(query: LabelQuery): string | null {
   return isDefaultProfile(query.profileDir, query.platform, query.env, query.home) ? DEFAULT_LABEL : null;
 }
 
-export const wrapperPath = (profileDir: string): string => join(profileDir, DAEMON_FILES.dir, DAEMON_FILES.bin, 'mawsd');
+// The project registry's M12 (Interfaces §K): `maws`, the same program with `maws` as its first argument, is a second
+// wrapper beside mawsd's, and for the default profile a second link beside its.
+export type Command = 'mawsd' | 'maws';
+export const wrapperPath = (profileDir: string, command: Command = 'mawsd'): string => join(profileDir, DAEMON_FILES.dir, DAEMON_FILES.bin, command);
 
 const sh = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
 
 // The command line for one profile: the unit's program, with the profile and its label. ELECTRON_RUN_AS_NODE makes the
 // app binary Node on a Mac and is inert under a plain Node.
-export function wrapperText({ label, profileDir, program }: UnitSpec): string {
+export function wrapperText({ label, profileDir, program }: UnitSpec, command: Command = 'mawsd'): string {
+  const what = command === 'maws' ? "maws, mawsd's project commands," : "mawsd's command line";
   return [
     '#!/bin/sh',
-    `# mawsd's command line for the profile ${profileDir.replace(/\n/g, ' ')}, written by \`mawsd install\``,
+    `# ${what} for the profile ${profileDir.replace(/\n/g, ' ')}, written by \`mawsd install\``,
     `export MAWS_USER_DATA=${sh(profileDir)}`,
     `export ${LABEL_ENV}=${sh(label)}`,
     'export ELECTRON_RUN_AS_NODE=1',
-    `exec ${sh(program.runtime)} --disable-sigusr1 ${sh(program.entry)} "$@"`,
+    `exec ${sh(program.runtime)} --disable-sigusr1 ${sh(program.entry)}${command === 'maws' ? ' maws' : ''} "$@"`,
     '',
   ].join('\n');
 }
@@ -114,6 +119,7 @@ export interface InstallResult {
   change: UnitChange; // 'updated' too when the unit's text is unchanged but `current` named another release (restarted)
   wrapper: string;
   linked: string | 'other' | null; // the link's path; 'other' when another mawsd is there; null when none is made
+  maws: { wrapper: string; linked: string | 'other' | null }; // the project registry's M12: `maws`'s, as mawsd's
   ref: MachineRef | null; // the ref, when --delegation-id asked for one
   // O14 residue 9: the --delegation-id the profile's existing identity did not take (it is never re-minted); null when
   // none was given or the ref already carries it as its prefix
@@ -137,13 +143,18 @@ export async function installDaemon(options: InstallOptions, deps: InstallDeps):
   const spec: UnitSpec = { label, profileDir, program: pack === null ? options.program : releaseProgram(deps.home) };
 
   const wrapper = wrapperPath(profileDir);
+  const mawsWrapper = wrapperPath(profileDir, 'maws');
   const unitWasInstalled = existsSync(unit.file);
   let linked: InstallResult['linked'];
+  let mawsLinked: InstallResult['linked'];
   let change: UnitChange;
   try {
     mkdirSync(dirname(wrapper), { recursive: true, mode: 0o700 });
     writeWhole(wrapper, wrapperText(spec), 0o700);
-    linked = isDefaultProfile(profileDir, deps.platform, deps.env, deps.home) ? link(join(deps.home, '.local', 'bin'), wrapper) : null;
+    writeWhole(mawsWrapper, wrapperText(spec, 'maws'), 0o700);
+    const linking = isDefaultProfile(profileDir, deps.platform, deps.env, deps.home);
+    linked = linking ? link(join(deps.home, '.local', 'bin'), wrapper, 'mawsd') : null;
+    mawsLinked = linking ? link(join(deps.home, '.local', 'bin'), mawsWrapper, 'maws') : null;
     change = await unit.apply(unit.render(spec));
     if (change === 'unchanged' && flip?.flipped) {
       unit.restart(); // the unit runs `current`, which now names another release; its hosts and sessions keep running (KillMode=process)
@@ -158,7 +169,7 @@ export async function installDaemon(options: InstallOptions, deps: InstallDeps):
     throw error;
   }
   const release = flip === null ? null : { ...flip, pruned: pruneReleases(deps.home) };
-  return { unit, change, wrapper, linked, ref, ignoredDelegationId, release };
+  return { unit, change, wrapper, linked, maws: { wrapper: mawsWrapper, linked: mawsLinked }, ref, ignoredDelegationId, release };
 }
 
 export interface UninstallResult {
@@ -169,21 +180,23 @@ export interface UninstallResult {
 export async function uninstallDaemon({ profileDir, label }: { profileDir: string; label: string }, deps: InstallDeps): Promise<UninstallResult> {
   const unit = unitFor(label, deps);
   const removed = await unit.remove();
-  const wrapper = wrapperPath(profileDir);
-  const linkPath = join(deps.home, '.local', 'bin', 'mawsd');
-  if (linkTarget(linkPath) === wrapper) rmSync(linkPath, { force: true });
-  rmSync(wrapper, { force: true });
+  for (const command of ['mawsd', 'maws'] as const) {
+    const wrapper = wrapperPath(profileDir, command);
+    const linkPath = join(deps.home, '.local', 'bin', command);
+    if (linkTarget(linkPath) === wrapper) rmSync(linkPath, { force: true });
+    rmSync(wrapper, { force: true });
+  }
   return { unit, removed };
 }
 
-// `<bin>/mawsd` → the wrapper, when `bin` exists and holds no other `mawsd`.
-function link(bin: string, wrapper: string): string | 'other' | null {
+// `<bin>/<command>` → the wrapper, when `bin` exists and holds no other `<command>`.
+function link(bin: string, wrapper: string, command: Command): string | 'other' | null {
   try {
     if (!lstatSync(bin).isDirectory()) return null;
   } catch {
     return null;
   }
-  const path = join(bin, 'mawsd');
+  const path = join(bin, command);
   const target = linkTarget(path);
   if (target === wrapper) return path;
   if (target !== null || exists(path)) return 'other';

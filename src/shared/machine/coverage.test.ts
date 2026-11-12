@@ -137,6 +137,12 @@ const HTTP_HEADERS = "an HTTP response's header names → their values (a consen
 // sminos's (sessions, members, machines' names), never a MAWS address, and the renderer reads them as text
 const LOG_EVENT = "a project log event's own fields (DX1/RL8, as the hub stores it): sminos's ids, no MAWS address";
 const RENDER_AUTHOR_SESSIONS = "a document comment actor's appSessionId → that session's title (the export's comment authors)";
+// The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §I): the page's value. None of
+// its keys is a machine-bound id: an org project id is one uuid on every machine (not a row's ProjectId), a row key is a
+// label (OrgKey), and a machine ref is the machine itself, not an address under one
+const ORG_PROJECT_KEYS = "an org project id (one uuid org-wide, not a machine's ProjectId) → this device's row key (OrgKey)";
+const ORG_KEYS_MOVED = "a row key (OrgKey, a label) no project has any more → the key its tabs belong under now";
+const MACHINES_SEEN = 'a machine ref (the machine itself, not an address under one) → when it was last seen (ISO)';
 const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'commands.artifacts.datasetRefreshRequest.output.request.args': TOOL_ARGUMENTS,
   'commands.artifacts.setDefaults.input.spaces': SPACE_SYSTEMS,
@@ -170,6 +176,9 @@ const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'commands.machineSettings.set.input.patch.artifacts.spaceDesignSystems': SPACE_SYSTEMS,
   'commands.machineSettings.set.output.settings.artifacts.spaceDesignSystems': SPACE_SYSTEMS,
   'commands.org.channel.open.output.events[].event': LOG_EVENT, // P5 O8 M7a
+  'commands.org.projects.output.keys': ORG_PROJECT_KEYS, // the project registry (§I)
+  'commands.org.projects.output.moved': ORG_KEYS_MOVED,
+  'commands.org.projects.output.seen': MACHINES_SEEN,
   'commands.maws.artifact.exported.input.answer<ok=false>.refusal.data': "a refusal's detail fields (ArtifactRefusalSchema.data)",
   'commands.render.answer.input.answer<ok=false>.refusal.data': "a refusal's detail fields (ArtifactRefusalSchema.data), the render host's answer to the bridge's export (P5 O5 M3)",
   'commands.session.appEvents.output.events[]<kind=question.answered>.answers': ANSWERS,
@@ -204,6 +213,9 @@ const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'events.laneA.changed.state.pending[].input': TOOL_ARGUMENTS,
   'events.machineSettings.changed.settings.artifacts.spaceDesignSystems': SPACE_SYSTEMS, // P5 O3-D M1
   'events.org.channel.changed.upserts[].event': LOG_EVENT, // P5 O8 M7a
+  'events.org.projects.changed.keys': ORG_PROJECT_KEYS, // the project registry (§I)
+  'events.org.projects.changed.moved': ORG_KEYS_MOVED,
+  'events.org.projects.changed.seen': MACHINES_SEEN,
   'events.plugins.operation.outcome.result': ENGINE_JSON,
   // P5 O5 M4: a Word comment's author session, by the appSessionId its actor carries in the document → that session's title;
   // mawsd posts render.request to its own machine's render host alone, so the keys are the store's, never addressed

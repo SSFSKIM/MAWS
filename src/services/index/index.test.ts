@@ -46,7 +46,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     expect(inspect(path)).toEqual({
       version: 15,
       tables: [
-        'attention_items', 'channel_entries' /* P5 O8 M7b: an ADDED_TABLES entry */, 'drafts',
+        'attention_items', 'channel_entries' /* P5 O8 M7b: an ADDED_TABLES entry */, 'drafts', 'index_meta' /* the project registry: ADDED_TABLES */,
         'library_artifacts', 'library_links', 'library_spaces', 'library_text', 'library_text_config', 'library_text_content', 'library_text_data', 'library_text_docsize', 'library_text_idx', // P3-L
         'member_drafts' /* P5 O8 M6a: ADDED_TABLES */, 'owner_channel_marks', 'owner_channel_sessions', 'projects', 'reader_state' /* P5 O8 M6a */, 'replay_fixtures', 'session_text', 'session_text_chunks', 'session_text_config', 'session_text_content', 'session_text_data', 'session_text_docsize', 'session_text_idx', 'session_text_state', 'sessions', 'side_threads', 'sqlite_sequence',
       ],
@@ -96,7 +96,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
   it('creates each added table and its indexes on any file that lacks it, user_version unmoved, and keeps one it holds', () => {
     const path = join(dir.path, 'index.sqlite');
     const first = open(path);
-    expect(ADDED_TABLES.map((table) => table.table)).toEqual(['channel_entries', 'reader_state', 'member_drafts']); // P5 O8 M6a: a member's reader state and drafts
+    expect(ADDED_TABLES.map((table) => table.table)).toEqual(['channel_entries', 'reader_state', 'member_drafts', 'index_meta']); // P5 O8 M6a: a member's reader state and drafts; the project registry: the index's own facts
     const member = 'b'.repeat(32);
     const appId = first.sessions.upsertFromSummary(summary()).record.appId;
     first.sessions.setPinned(appId, true, member);

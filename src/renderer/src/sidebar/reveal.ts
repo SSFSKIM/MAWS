@@ -10,7 +10,7 @@ import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { useLayout } from '../stores/layout';
 import { machineOf } from '@shared/machine/address';
-import { orgKeyOf, type RowKey } from '../stores/org-projects';
+import { selectOrgIndex, type RowKey } from '../stores/org-projects';
 
 // P5 O6 M5: a project is revealed by its row, its org project's (one row whatever machines check it out).
 let revealer: ((key: RowKey) => void) | null = null;
@@ -48,8 +48,9 @@ export function revealProject(projectId: ProjectId): void {
 }
 
 function revealVisibleProject(projectId: ProjectId): void {
-  const project = useSessions.getState().projects.get(projectId);
-  const key = project ? orgKeyOf(project) : projectId;
+  const sessions = useSessions.getState();
+  const project = sessions.projects.get(projectId);
+  const key = project ? selectOrgIndex(sessions, ipc.localMachine).keyOf(project) : projectId; // the project registry: its row's key
   useLayout.getState().setSidebar(({ expandedProjects }) => ({
     collapsed: false,
     expandedProjects: expandedProjects.includes(key) ? expandedProjects : [...expandedProjects, key],

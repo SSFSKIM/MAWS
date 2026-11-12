@@ -9,10 +9,18 @@ import { isSidebarProject, projectGroups } from './project-groups';
 import { runAddProject, useAddProjectEnabled } from './project-actions';
 import { Search } from './Search';
 import { machineOf } from '@shared/machine/address';
+import { useMachines } from '../stores/machines';
+import { openDialog } from '../sessions/dialogs';
+import { machineChoices } from './AddProjectSheet';
 
 // Discovery supplies choices, never membership. Adding uses the persisted user-origin path, also used by Finder.
+// The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §J; design §6): while there is
+// more to choose than a folder on this Mac (another machine to add on, or a registry project to add the folder to),
+// "Choose folder…" opens Add project's sheet (AddProjectSheet.tsx); otherwise the native chooser, as before.
 export function AddProject() {
   const projects = useSessions((s) => s.projects);
+  const registered = useSessions((s) => s.registry.projects.length > 0);
+  const elsewhere = useMachines((s) => machineChoices(s.machines, ipc.localMachine).length > 1);
   const groups = useMemo(() => projectGroups([...projects.values()]), [projects]);
   const labels = useMemo(() => projectLabels([...projects.values()]), [projects]);
   const canChooseFolder = useAddProjectEnabled();
@@ -52,7 +60,7 @@ export function AddProject() {
         </div>
         {error && <p role="alert" className="m-0 text-ui-sm text-danger">{error}</p>}
         <div className="flex justify-between gap-2 border-t border-border pt-3">
-          <button type="button" disabled={!canChooseFolder || busy} onClick={() => { setOpen(false); runAddProject(); }}
+          <button type="button" disabled={(!canChooseFolder && !registered && !elsewhere) || busy} onClick={() => { setOpen(false); if (registered || elsewhere) openDialog({ kind: 'addProject', into: null }); else runAddProject(); }}
             className="rounded-sm px-2 py-1 outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint">Choose folder…</button>
           <Dialog.Close className="rounded-sm px-2 py-1 outline-accent hover:bg-bg-hover focus-visible:outline-2">Cancel</Dialog.Close>
         </div>

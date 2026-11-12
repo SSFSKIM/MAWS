@@ -16,6 +16,10 @@
 // alone) draws other people's sessions among them; while it is off, "+N others", faint, counts those it leaves out. The
 // toggle is offered only where it can act, with others to show or while it is on (`data-people` tells the menu), so a
 // row with neither (every row of a person with no org) is as it was before M5.
+// The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §J.3): a row whose folders are
+// on another machine names its machines after its name (` · `, this Mac's first; a row on this Mac alone, and every row
+// signed out, still names none, T4), faint, giving way to the hover actions as the counts do; a row of a project you see only through its
+// sessions has no actions and no card, and its menu is `registry:<id>`'s.
 import { useState } from 'react';
 import type { ProjectId } from '@shared/graph/ids';
 import { machineOf } from '@shared/machine/address';
@@ -30,6 +34,10 @@ import { isListedRow, type ProjectEntry, type ProjectKey, type SidebarTreeRow } 
 import { ListedRow } from './ListedRow'; // P5 O8 M2
 import { focusVisible } from './HoverCard';
 import { ProjectHoverCard } from './ProjectHoverCard';
+import { machinesWords } from './locations'; // the project registry
+import { newChatElsewhere, registrySpawnTarget } from './registry-new-chat'; // the project registry
+import type { RegistryProject } from '../stores/registry'; // the project registry
+import { useLocationView } from './location-view'; // the project registry
 import { runProjectAction, useProjectActionEnabled } from './project-actions';
 import { openResumeChooser } from '../resume/host'; // P2-D
 import { SessionRow } from './SessionRow';
@@ -52,6 +60,8 @@ export function ProjectRow({ entry, open, sessions, more, matchCount, onToggle, 
     const machines = entry.machine !== null ? [entry.machine] : entry.org.checkouts.map((c) => c.machine);
     return machines.length > 0 && machines.every((m) => selectOffline(s, m));
   });
+  const view = useLocationView();
+  const machinesLine = entry.registry !== null ? machinesWords(entry.machines, view) : null; // signed out, a row names no machine, as before
   const tree = useTree();
   const nodeId = projectNodeId(key);
   // The rows stay as they were through the close, so the body folds over what it showed.
@@ -70,6 +80,11 @@ export function ProjectRow({ entry, open, sessions, more, matchCount, onToggle, 
     >
       {open ? <FolderOpenIcon className={`size-[13px] ${project ? 'text-fg-muted' : 'text-fg-faint'}`} /> : <FolderIcon className={`size-[13px] ${project ? 'text-fg-muted' : 'text-fg-faint'}`} />}
       <span className={`min-w-0 flex-1 truncate text-ui ${offline ? 'text-fg-faint' : project ? 'text-fg' : 'text-fg-muted'}`}>{name}</span>
+      {machinesLine !== null && (
+        <span data-row-machines title={machinesLine} className="max-w-[45%] shrink-0 truncate text-ui-sm text-fg-faint group-hover/line:hidden group-focus-visible/project:hidden">
+          {machinesLine}
+        </span>
+      )}
       {matchCount !== undefined && <span aria-label={`${matchCount} matching sessions`} className="text-ui-sm text-fg-muted tabular-nums">{matchCount}</span>}
       {entry.others > 0 && (
         <span aria-label={othersText(entry.others).slice(1)} className="shrink-0 text-ui-sm text-fg-faint tabular-nums group-hover/line:hidden group-focus-visible/project:hidden">
@@ -90,7 +105,16 @@ export function ProjectRow({ entry, open, sessions, more, matchCount, onToggle, 
           )}
         </span>
       )}
-      {project ? <ProjectActions projectId={project.id} rowKey={key} name={name} people={people} /> : <span aria-hidden className="size-[22px] shrink-0" />}
+      {project ? (
+        <ProjectActions projectId={project.id} rowKey={key} name={name} people={people} registry={entry.registry} />
+      ) : entry.registry !== null && people !== null ? (
+        // the project registry: a project seen only through sessions (no folder to act through) keeps its People toggle
+        <span className={HOVER_ACTIONS}>
+          <PeopleAction rowKey={key} name={name} people={people} />
+        </span>
+      ) : (
+        <span aria-hidden className="size-[22px] shrink-0" />
+      )}
     </div>
   );
 
@@ -105,7 +129,7 @@ export function ProjectRow({ entry, open, sessions, more, matchCount, onToggle, 
       data-tree-id={nodeId}
       data-kind="project"
       data-offline={offline || undefined}
-      data-menu={project ? `project:${project.id}` : `machine:${entry.machine}`}
+      data-menu={project ? `project:${project.id}` : entry.machine !== null ? `machine:${entry.machine}` : entry.registry !== null ? `registry:${entry.registry.id}` : undefined}
       data-people={people !== null || undefined}
       onFocus={(event) => {
         if (event.target !== event.currentTarget) return;
@@ -139,6 +163,28 @@ export function ProjectRow({ entry, open, sessions, more, matchCount, onToggle, 
 const ACTION =
   'inline-flex size-[22px] shrink-0 items-center justify-center rounded-sm text-fg-muted hover:bg-bg-active hover:text-fg disabled:text-fg-faint disabled:hover:bg-transparent';
 
+const HOVER_ACTIONS = 'hidden shrink-0 items-center group-hover/line:flex group-focus-visible/project:flex';
+
+// The row's People toggle (P5 O8 M5): pressed while the row draws other people's sessions.
+function PeopleAction({ rowKey, name, people }: { rowKey: ProjectKey; name: string; people: boolean }) {
+  return (
+    <button
+      type="button"
+      tabIndex={-1}
+      aria-label={`${peopleActionLabel(people)} in ${name}`}
+      aria-pressed={people}
+      title={peopleActionLabel(people)}
+      onClick={(event) => {
+        event.stopPropagation();
+        usePeople.getState().toggle(rowKey);
+      }}
+      className={`${ACTION} aria-pressed:bg-bg-active aria-pressed:text-fg`}
+    >
+      <PeopleIcon className="size-[13px]" />
+    </button>
+  );
+}
+
 // "+N others" (P5 O8 M5): how many of other people's sessions the row's People toggle leaves out.
 const othersText = (count: number) => `+${count} ${count === 1 ? 'other' : 'others'}`;
 const peopleActionLabel = (on: boolean) => (on ? 'Hide people’s sessions' : 'Show people’s sessions');
@@ -149,25 +195,16 @@ const peopleActionLabel = (on: boolean) => (on ? 'Hide people’s sessions' : 'S
 // it keep their places), the search icon opens the Resume… picker on the project (I7, "Resume a session…"), the minus
 // removes the project from the sidebar after a confirm (I5; the menu's "Remove from sidebar…"), and "+" opens an
 // unstarted session tab in the project ("New chat in X", the New chat landing's open copy item).
-function ProjectActions({ projectId, rowKey, name, people }: { projectId: ProjectId; rowKey: ProjectKey; name: string; people: boolean | null }) {
-  const canCreate = useSessionCreatorRegistered() && machineOf(projectId) === ipc.localMachine;
+function ProjectActions({ projectId, rowKey, name, people, registry }: { projectId: ProjectId; rowKey: ProjectKey; name: string; people: boolean | null; registry: RegistryProject | null }) {
+  // the project registry: a project with no folder on this Mac starts on one of its locations elsewhere (registry-new-chat.ts)
+  const machines = useMachines((s) => s.machines);
+  const here = machineOf(projectId) === ipc.localMachine;
+  const elsewhere = here || registry === null ? null : registrySpawnTarget(registry, machines);
+  const canCreate = useSessionCreatorRegistered() && (here || elsewhere !== null);
   const canRemove = useProjectActionEnabled('removeProject');
   return (
-    <span className="hidden shrink-0 items-center group-hover/line:flex group-focus-visible/project:flex">
-      {people !== null && <button
-        type="button"
-        tabIndex={-1}
-        aria-label={`${peopleActionLabel(people)} in ${name}`}
-        aria-pressed={people}
-        title={peopleActionLabel(people)}
-        onClick={(event) => {
-          event.stopPropagation();
-          usePeople.getState().toggle(rowKey);
-        }}
-        className={`${ACTION} aria-pressed:bg-bg-active aria-pressed:text-fg`}
-      >
-        <PeopleIcon className="size-[13px]" />
-      </button>}
+    <span className={HOVER_ACTIONS}>
+      {people !== null && <PeopleAction rowKey={rowKey} name={name} people={people} />}
       <button
         type="button"
         tabIndex={-1}
@@ -203,7 +240,7 @@ function ProjectActions({ projectId, rowKey, name, people }: { projectId: Projec
         disabled={!canCreate}
         onClick={(event) => {
           event.stopPropagation();
-          void createSession(projectId);
+          void (elsewhere !== null ? newChatElsewhere(elsewhere) : createSession(projectId));
         }}
         className={ACTION}
       >

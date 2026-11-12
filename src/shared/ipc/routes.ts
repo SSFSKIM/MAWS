@@ -48,6 +48,8 @@ export const PATH_COMMANDS = [
   'machine.folders.list', // P5 O7 M9: a folder under the machine's home, named for that machine
   'machine.setupTrust', // P5 O7 M9: main-only (the endpoint's guarded trust read), never bridged; a directory
   'render.answer', // P5 O5 M3: main-only (the render host's answer to mawsd), never bridged; an export's answer's `path`
+  'session.projects.resolve', // the project registry (Interfaces §G): design §8's rule for a directory on that machine
+  'projects.forward', // the project registry's M12: main-only (`maws` aimed at another machine), never bridged; a path there
 ] as const satisfies readonly CommandName[];
 export type PathCommandName = (typeof PATH_COMMANDS)[number];
 

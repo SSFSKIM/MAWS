@@ -9,7 +9,10 @@
 // serves every row, and the tree is one roving tab stop (`tree.ts`). A project removed from the sidebar (I5) is listed
 // nowhere, its sessions with it, and "Hidden projects…" at the end offers it back. P5 O8 M2: other machines' listed
 // sessions the member owns join their rows' sessions (`projectItems`), under the same caps and search. P5 O8 M5: other
-// people's join them too under a row whose People toggle is on (`stores/people.ts`), each row naming its owners.
+// people's join them too under a row whose People toggle is on (`stores/people.ts`), each row naming its owners. The
+// project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §J): one row per project id, every
+// project of the org the person can reach, the registry's own after this app's machines' (`projectList`); a removal held
+// for a machine that is off is listed in Hidden projects…, which shows while one waits.
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { FolderIcon, GearIcon, IconButton, SortIcon } from '../app/IconButton';
@@ -94,6 +97,7 @@ function SidebarBody() {
   const greyedRows = useAttention((s) => selectGreyedNeedsYou(s, { records, recordsVersion, listed: listedSessions })); // P5 O7 M6
   // P5 O6 M5: every machine's projects, grouped by org project; a machine's sessions with no checkout under its own row
   const projects = useSessions((s) => s.projects);
+  const registry = useSessions((s) => s.registry); // the project registry
   const machines = useMachines((s) => s.machines);
   const local = ipc.localMachine;
   const index = useSessions((s) => selectOrgIndex(s, local));
@@ -153,10 +157,10 @@ function SidebarBody() {
   const scroller = useRef<HTMLDivElement>(null);
   const search = useRef<HTMLDivElement>(null);
 
-  const rankedEntries = useMemo((): RankedEntry[] => projectList({ records, digests, projects, rows, local, machineName: (m) => machineName(machines, m, local), alsoListed: projectFilter ?? undefined, listed: listedSessions, people, seen }).map((entry) => {
+  const rankedEntries = useMemo((): RankedEntry[] => projectList({ records, digests, projects, rows, local, machineName: (m) => machineName(machines, m, local), alsoListed: projectFilter ?? undefined, listed: listedSessions, people, seen, registry }).map((entry) => {
     const sorted = projectSessions({ sessions: entry.sessions, digests, rows, sort: sidebar.sort, matches: () => true, spawned, seen, listings: listedSessions, now });
     return { ...entry, sessions: sorted, items: projectItems({ sorted, listed: entry.listed, digests, rows, sort: sidebar.sort, spawned, seen, listings: listedSessions, now }) };
-  }), [records, digests, projects, rows, local, machines, projectFilter, sidebar.sort, listedSessions, people, spawned, seen, now]);
+  }), [records, digests, projects, rows, local, machines, projectFilter, sidebar.sort, listedSessions, people, spawned, seen, now, registry]);
   // Hold ranks, not data: titles, glyphs and counts remain live. Pointer presence, keyboard focus (including
   // portalled cards/menus), or an open context menu keeps the same targets in place until the person leaves.
   // A deliberate sort change is immediate; no timer can reshuffle a row between two actions.
@@ -374,7 +378,7 @@ function SidebarBody() {
                   {moreAt === shown.length && moreProjects}
                 </div>
               )}
-              {hiddenProjects.length > 0 && !searching && (
+              {(hiddenProjects.length > 0 || registry.removals.length > 0) && !searching && (
                 <button
                   type="button"
                   onClick={() => openDialog({ kind: 'hiddenProjects' })}

@@ -69,6 +69,45 @@ describe('the wrapper', () => {
   });
 });
 
+// The project registry's M12 (Interfaces §K): `maws` is the same program with `maws` as its first argument, a second
+// wrapper beside mawsd's and, for the default profile, a second link
+describe('the maws wrapper', () => {
+  it('runs the same program as maws, with the profile and its label', () => {
+    expect(wrapperPath('/p', 'maws')).toBe(join('/p', 'mawsd', 'bin', 'maws'));
+    expect(wrapperText({ label: 'dev.maws.mawsd', profileDir: '/Users/me/MAWS', program: PROGRAM }, 'maws')).toBe(
+      [
+        '#!/bin/sh',
+        "# maws, mawsd's project commands, for the profile /Users/me/MAWS, written by `mawsd install`",
+        "export MAWS_USER_DATA='/Users/me/MAWS'",
+        "export MAWS_MAWSD_LABEL='dev.maws.mawsd'",
+        'export ELECTRON_RUN_AS_NODE=1',
+        `exec '${PROGRAM.runtime}' --disable-sigusr1 '${PROGRAM.entry}' maws "$@"`,
+        '',
+      ].join('\n'),
+    );
+  });
+
+  it('is installed beside mawsd’s with its own link, and both are removed at uninstall; another maws is left', async () => {
+    const bin = join(home, '.local', 'bin');
+    mkdirSync(bin, { recursive: true });
+    const profileDir = darwinProfile();
+    const result = await installDaemon({ profileDir, label: 'dev.maws.mawsd', program: PROGRAM }, deps('darwin'));
+    expect(result.maws).toEqual({ wrapper: wrapperPath(profileDir, 'maws'), linked: join(bin, 'maws') });
+    expect(lstatSync(wrapperPath(profileDir, 'maws')).mode & 0o777).toBe(0o700);
+    expect(readlinkSync(join(bin, 'maws'))).toBe(wrapperPath(profileDir, 'maws'));
+    expect(readlinkSync(join(bin, 'mawsd'))).toBe(wrapperPath(profileDir));
+    await uninstallDaemon({ profileDir, label: 'dev.maws.mawsd' }, deps('darwin'));
+    for (const path of [wrapperPath(profileDir, 'maws'), join(bin, 'maws'), wrapperPath(profileDir), join(bin, 'mawsd')]) expect([path, existsSync(path)]).toEqual([path, false]);
+
+    writeFileSync(join(bin, 'maws'), '#!/bin/sh\n# another maws\n');
+    await expect(installDaemon({ profileDir, label: 'dev.maws.mawsd', program: PROGRAM }, deps('darwin'))).resolves.toMatchObject({ linked: join(bin, 'mawsd'), maws: { linked: 'other' } });
+    await uninstallDaemon({ profileDir, label: 'dev.maws.mawsd' }, deps('darwin'));
+    expect(readFileSync(join(bin, 'maws'), 'utf8')).toContain('another maws');
+    const scratch = join(home, 'scratch-profile');
+    await expect(installDaemon({ profileDir: scratch, label: 'dev.maws.mawsd.e2e-9', program: PROGRAM }, deps('darwin'))).resolves.toMatchObject({ maws: { wrapper: wrapperPath(scratch, 'maws'), linked: null } });
+  });
+});
+
 describe('install and uninstall on macOS', () => {
   it('installs: the agent written and bootstrapped, the wrapper, its link; a second install changes nothing', async () => {
     mkdirSync(join(home, '.local', 'bin'), { recursive: true });

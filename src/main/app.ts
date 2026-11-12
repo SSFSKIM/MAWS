@@ -36,6 +36,7 @@ import { emit, emitFrom, emitTo } from './ipc/events'; // P5 O9 M9: emitFrom, re
 import { registerMachineHandler, registerMainHandler } from './ipc/router'; // P5 O6 M1: registerMachineHandler
 import { bindLocalMachine } from './machine/local'; // P5 O6 M2
 import { startMachines } from './machines'; // P5 O6 M3: the connection manager (P5 O3-D M6: the stand-in gone)
+import { localProjectActsSource, PROJECT_ACT_COMMANDS, refuseUnservedProjectActs } from './machines/project-acts-peer'; // panel scalpel-3#2
 import { createRecordSigner, createStateSigner, createStepUp, promptTouchIDConfirmation } from './device/step-up'; // P5 O7 M1: the development org session's signer; P5 O8 M1: the production session's; M3: its state signer; M4b: its record signer
 import { harnessConfirmation, sheetConfirmation } from './device/step-up-sheet'; // P5 O7 M2: the step-up sheet before Touch ID
 import { createDevOrgSession } from './org/dev-session'; // P5 O7 M1
@@ -50,7 +51,9 @@ import { openProvisioningSecret, PROVISIONING_SECRET_FILE } from './org/provisio
 import { resolveGcloud, secretStore } from './org/secret-store'; // P5 O8 M4c
 import { excludeFromBackup } from '@shared/fs/backup-exclusion';
 import { createRegistryFeed } from './org/registry-feed'; // P5 O8 M1
-import { registerOrgHandlers, registerPolicyHandlers, registerRowsHandler } from './org/register'; // P5 O8 M1; M2: org.rows; M6b: org.policy.*
+import { registerOrgHandlers, registerPolicyHandlers, registerProjectsHandlers, registerRowsHandler } from './org/register'; // P5 O8 M1; M2: org.rows; M6b: org.policy.*; the project registry: org.projects, org.removals.*
+import { createProjectRegistry } from './org/project-registry'; // the project registry (M10)
+import { startProjectActs } from './org/project-acts'; // the project registry's M12: maws aimed at another machine
 import { orgFiles } from './org/files'; // P5 O8 M1
 import { createRemoteRows } from './org/rows'; // P5 O8 M2
 import { createOrgPolicies } from './org/policy'; // P5 O8 M6b
@@ -58,8 +61,9 @@ import type { GrantDoor } from './org/grants'; // P5 O8 M4b
 import { installOrgPageFixture } from './org/page-fixture'; // P5 O8 M4a Task 8: a harness build's only
 import { installChannelFixture } from './org/channel-fixture'; // P5 O8 M7a Task 3: a harness build's only
 import { installShareFixture } from './org/share-fixture'; // P5 O8 M6b Task 3: a harness build's only
+import { installRegistryFixture } from './org/registry-fixture'; // the project registry's M11: a harness build's only
 import { createRemoteLaneA, routeLaneA } from './lane-a/remote'; // P5 O9 M9
-import { createRemoteLaneB, routeLaneB } from './lane-b/remote'; // P5 O7 M2
+import { createRemoteLaneB, routeLaneB, standInForMachines } from './lane-b/remote'; // P5 O7 M2; the project registry's M11: standInForMachines, its e2e fixture's
 import { ArtifactMachines } from './artifacts/machines'; // P5 O7 M5a
 import { dialDirect } from './machines/remote/carriers'; // P5 O7 M2: the dev session's directMap in front of it
 import { relayOnlyDial } from './machines/remote/bench-seam'; // P5 O7 M7: the live bench's relay case
@@ -426,8 +430,10 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
     // P5 O8 M7a Task 3: the Channel tab's e2e look seeds org.status and a project's org.channel.open (org/channel-fixture.ts)
     installChannelFixture({ env: process.env, packaged: app.isPackaged, intercept: interceptCommand, unpublish: unpublishOrgStatus });
     // P5 O8 M6b Task 3: the Share sheet's and the reach marks' e2e look seeds org.*, org.rows and machines.list
-    // (org/share-fixture.ts), and holds the production rows' org.rows.changed, which signed out would clear the seed
-    installShareFixture({ env: process.env, packaged: app.isPackaged, intercept: interceptCommand, unpublish: unpublishOrgStatus, holdRows: () => void (rowsHeld = true) });
+    // (org/share-fixture.ts), holds the production rows' org.rows.changed, which signed out would clear the seed, and
+    // follows each production machines.changed (this Mac alone) with the seeded machines
+    installShareFixture({ env: process.env, packaged: app.isPackaged, intercept: interceptCommand, unpublish: unpublishOrgStatus, holdRows: () => void (rowsHeld = true), emit, onEmitted });
+    installRegistryFixture({ env: process.env, packaged: app.isPackaged, intercept: interceptCommand, standIn: standInForMachines, emit, onEmitted, unpublish: unpublishOrgStatus, holdRows: () => void (rowsHeld = true) }); // the project registry's M11: org.* and org.projects seeded, the other machines' project acts stood in for (org/registry-fixture.ts)
   }
   // P5 O6 M3: every other machine through the connection manager (one link per machine; MAWS_LOCAL_MACHINES names another
   // profile's serve directory in a build that is not packaged), and machines.list and machines.changed
@@ -442,6 +448,8 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
     register: registerMainHandler,
     dispatchLocal,
     budgets: COMMAND_BUDGETS_MS, // P5 O7 M5a: a cold machine's export is waited for its budget, not the link's 10 s
+    // panel scalpel-3#2: whether this Mac's machine serves the project acts, as its daemon's welcome says
+    localCapabilities: localProjectActsSource(hosts),
     // P5 O7 M1: the org session the RL2 links read; P5 O8 M1: production's sign-in, or O7's development session
     session,
     wake, // P5 O15 M2b: its wake notices reach every link, its unlocks probe them
@@ -535,6 +543,9 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
     const peer = hosts.peer('machine');
     return peer === null || peer.capabilities.includes(MACHINE_DELIVERY_CAPABILITY);
   };
+  // panel scalpel-3#2: an act the attached daemon predates is refused `not-offered`, never sent to have its `into`
+  // passed by as an unknown field (./machines/project-acts-peer.ts)
+  beforeCommand(PROJECT_ACT_COMMANDS, refuseUnservedProjectActs(() => hosts.peer('machine'), localName));
   installRouter({ appUrl, local, dispatchToHost, remote: routeLaneB(routeLaneA(machines.dispatch, (ref) => machines.remote(ref), remoteLaneA), (ref) => machines.remote(ref), remoteLaneB), machine: { kind: 'host', daemonRenders, daemonDelivers } });
   // P5 O3-C (Interfaces §A): the services bus, bound here to the router and `emit`, so every tap main's own code holds
   // (the menu's) hears mawsd's events, and main's own calls take main's own route. P5 O15 M2: no library registers its
@@ -642,18 +653,46 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
   // P5 O8 M2: other machines' sessions, from their signed listings through the feed, verified against the held org state,
   // for the machines of O7's RL2 roster (src/main/org/rows.ts); org.rows and org.rows.changed carry them to the sidebar.
   // P5 O3-C (reader R10): this machine's projects, as session.projects.list answers them, through the spine's view.
+  // The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, M10): the machines' projects records
+  // through the feed, verified, kept and keyed (src/main/org/project-registry.ts); org.projects and org.projects.changed
+  // carry them to the page, the rows file each listing under the key it gives the listing's project, and a removal for
+  // a machine that is off is held and sent over its link (remote lane B's act) when it is next up.
+  const registry = createProjectRegistry({
+    session,
+    feed: orgFeed,
+    local,
+    files: orgDir,
+    roster: () => roster,
+    onRoster,
+    link: (ref) => machines.remote(ref),
+    localProjects: async () => view.projects(),
+    onLocalProjects: (listener) => view.on('projects', () => listener()),
+    sessions: () => remoteRows.rows().rows.map((row) => row.project),
+    remove: async (machine, input) => {
+      const link = machines.remote(machine);
+      if (link === null) return { ok: false, error: { code: 'host_unavailable', message: `session.projects.remove: machine ${machine} is not reachable` } };
+      return (await remoteLaneB.dispatch(link, 'session.projects.remove', input, { client: mainClient, target: machine })) as CommandResult<'session.projects.remove'>;
+    },
+    emit: (projects) => void emit('org.projects.changed', projects),
+    notify: (text) => void clientPort.notify(null, { title: 'MAWS', body: text, silent: false }, () => {}),
+    log: (line) => console.log(line),
+  });
+  shutdown.add('project registry', () => registry.close());
+  registerProjectsHandlers({ register: registerMainHandler, registry });
+  const projectActs = startProjectActs({ hosts, registry, roster: () => roster, link: (ref) => machines.remote(ref), send: (link, name, input) => remoteLaneB.dispatch(link, name, input, { client: mainClient, target: link.machine }), register: registerMainHandler, emit: (value) => void emit('org.projectActs.changed', value), log: (line) => console.log(line) });
+  shutdown.add('project acts', projectActs.stop);
   const remoteRows = createRemoteRows({
     session,
     feed: orgFeed,
     roster: () => roster,
     onRoster,
-    localProjects: async () => view.projects(),
-    onLocalProjects: (listener) => view.on('projects', () => listener()),
+    keys: registry, // the project registry (M10): a listing's row key is the key table's for its project
     link: (ref) => machines.remote(ref), // P5 O8 M6b: each roster machine's channel listings (a private session's)
     files: orgDir,
     emit: (rows) => {
       if (!rowsHeld) void emit('org.rows.changed', rows);
       remoteLaneB.refresh(); // P5 O7 M2: a row's lane decides whether its tab is remote lane B's
+      registry.refresh(); // the project registry: a project the member sees only through a session
     },
     log: (line) => console.log(`[org-rows] ${line}`),
   });

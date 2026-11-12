@@ -134,6 +134,7 @@ import { DaemonClocks, DEFAULT_IDLE_EXIT_MS } from './clocks';
 import { engineRequests } from './engine-requests';
 import { createArtifactsEndpoint, loadEndpointChunk } from './artifacts-endpoint'; // P5 O5 M2
 import { ENDPOINT_CHANNEL_BASE, ENDPOINT_STOP_MS, loadEndpointModule, NO_ENDPOINT_MODULE, spineChannel, type CheckoutSource, type DaemonServices, type EndpointModule } from './endpoint-seam';
+import { spineProjects } from './projects-seam'; // the project registry
 import { createServicesFront, spineTakes } from './front';
 import { tellEngineHandover } from './engine-handover-event'; // P5 O16 M3c fix wave 2
 import { runE2eBrowserView, runE2eRender, runE2eSeam } from './e2e-seam'; // M5b fix round 2; P5 O5 M4
@@ -353,7 +354,10 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       // read at the hello, as before
     }
   }
-  const endpoint = options.endpoint === undefined ? loadEndpointModule(buildId, { projects }, deferredLoadRefused) : options.endpoint;
+  // The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §H; projects-seam.ts): the
+  // endpoint reads the loaded spine's index, and the index asks the endpoint (`endpoint.registry`, given at each load)
+  const projectsSource = spineProjects(() => spine.root());
+  const endpoint = options.endpoint === undefined ? loadEndpointModule(buildId, { projects, projectsSource }, deferredLoadRefused) : options.endpoint;
   // The machine's enrollment, the endpoint's in process (D16, D38): machine.identity's project and the spine's org projects
   const enrollment = () => machineEnrollment(() => endpoint?.enrollment() ?? null);
 
@@ -422,6 +426,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       devRoot: process.cwd(),
       home: homedir(),
       enrollment,
+      ...(endpoint?.registry === undefined ? {} : { registry: endpoint.registry }),
     }),
     quietMs: () => spineQuietMs ?? clocks.idleMs() ?? DEFAULT_IDLE_EXIT_MS,
     reexecute: kind === 'unit' && (SPINE_REEXECUTE_DEFAULT || env.MAWS_SPINE_REEXECUTE === '1'),
@@ -447,6 +452,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     yieldCandidate: () => (claimSpine && singletonSignal ? singletonHolder() : null), // D21's second signal
     onState: (state) => {
       if (state !== 'loading' && state !== 'loaded' && state !== 'releasing') front.unbind(); // the parts stopped: the next load registers afresh
+      projectsSource.spineState(state); // the project registry: the loaded index's declared rows, read by the endpoint
     },
     log,
     // a provisional yield waits as long as a hello may wait for its upstream (the relay's hold)
@@ -1031,6 +1037,11 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       case 'endpoint.local.call': {
         const call = input as CommandInput<'endpoint.local.call'>;
         return endpoint?.local === undefined ? { ok: false, code: 'unavailable' } : endpoint.local.call(call.name, call.input);
+      }
+      // the project registry's M12 (§K): `maws`'s read of the org's projects; with no enrolled endpoint, this machine alone
+      case 'projects.registry': {
+        const read = await endpoint?.registryRead?.read();
+        return read?.enrolled === true ? read : { enrolled: false, machine: { ref, name: machineName(env, hostname()) }, machines: [], contested: [], projects: [] };
       }
       // P5 O8 M4b: the machine's grant ledger as its owners read it, the door's `endpoint.grants`
       case 'endpoint.local.grants':

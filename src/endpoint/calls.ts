@@ -348,6 +348,7 @@ export class Calls {
     else if (m.name === 'fs.unfollow' && row?.executor === 'engine-host' && !this.ctx.engineHostLists(FOLLOW_OWNERS_CAPABILITY)) run = Promise.resolve(this.#unownedUnfollow());
     else if (m.name === 'machine.folders.list' && row?.executor === 'machine') run = this.#folders(dispatch, channel.member, m);
     else if (m.name === 'session.trust.check' && row?.executor === 'machine') run = this.#setupTrust(dispatch, m, decision);
+    else if (m.name === 'session.projects.resolve' && row?.executor === 'machine') run = this.#resolve(dispatch, m, decision);
     else if (m.name === 'session.reader.update' && row?.executor === 'machine') run = this.#readerUpdate(dispatch, channel.member, m, decision);
     else if (row?.executor === 'engine-host' || (row?.executor === 'machine' && m.name !== 'daemon.status')) run = this.#forward(dispatch, row.executor, m);
     else if (row?.executor === 'sminos' && Object.hasOwn(LANE_A, m.name)) run = Promise.resolve(this.#laneA(channel, m));
@@ -388,6 +389,15 @@ export class Calls {
   #setupTrust(dispatch: EndpointServices['dispatch'], m: CallMessage, decision: Granted): Promise<Result> {
     if (decision.setup === undefined) return Promise.resolve({ ok: false, code: 'unavailable' });
     return this.#forward(dispatch, 'machine', { ...m, name: 'machine.setupTrust', input: { directory: decision.setup.directory, opened: decision.setup.opened } });
+  }
+
+  /**
+   * The project registry: the rule's answer for a directory, on the directory the setup policy resolved and checked, read
+   * there through the asking member's opens (M9's review 1, F1).
+   */
+  #resolve(dispatch: EndpointServices['dispatch'], m: CallMessage, decision: Granted): Promise<Result> {
+    if (decision.setup === undefined) return Promise.resolve({ ok: false, code: 'unavailable' });
+    return this.#forward(dispatch, 'machine', { ...m, input: { directory: decision.setup.directory, opened: decision.setup.opened } });
   }
 
   /** A read its executor answers raw: the engine host's, or the machine's services', a failure with its message (M8). */

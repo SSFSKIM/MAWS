@@ -322,3 +322,24 @@ describe('the seam’s local door', () => {
     expect(await door.local.act({ action: 'record.access' }), 'stopped').toEqual({ state: 'refused', reason: 'unavailable' });
   });
 });
+
+// The project registry's M12 (Interfaces §H's RegistryRead, §K's `projects.registry`): what `maws` reads of the org's
+// projects is the loaded module's own read; unloaded, there is none, and the daemon answers for an unenrolled machine.
+describe('the seam’s registry read', () => {
+  const READ = { enrolled: true, machine: { ref: 'r'.repeat(22) as never, name: 'mini' }, machines: [], contested: [], projects: [] };
+  class ReadModule extends Module {
+    readonly registryRead = { read: async () => READ };
+  }
+
+  it('is the loaded module’s, and none while nothing is loaded or the module has none', async () => {
+    const unloaded = new LazyEndpoint('b1', loader().load);
+    await unloaded.start(services());
+    expect(unloaded.registryRead).toBeUndefined();
+    const readless = new LazyEndpoint('b1', loader().load);
+    await readless.start(services(true));
+    expect(readless.registryRead).toBeUndefined();
+    const reading = new LazyEndpoint('b1', async () => ({ createEndpoint: (options) => new ReadModule(options) }));
+    await reading.start(services(true));
+    expect(await reading.registryRead?.read()).toEqual(READ);
+  });
+});

@@ -65,7 +65,7 @@ describe('shell event subscription', () => {
     const subscriptions = fake.calls.slice(0, firstInvoke);
     expect(subscriptions.sort()).toEqual(
       [
-        'attention.changed', 'attention.notified', 'engine.hostState', 'fs.scanProgress', 'host.status', 'machines.changed', 'org.rows.changed', 'remote.attention', 'remote.session', 'session.changed', 'session.digest', 'session.eventBatch', 'session.projects.changed', 'session.removed', 'session.status',
+        'attention.changed', 'attention.notified', 'engine.hostState', 'fs.scanProgress', 'host.status', 'machines.changed', 'org.projects.changed', 'org.rows.changed', 'remote.attention', 'remote.session', 'session.changed', 'session.digest', 'session.eventBatch', 'session.projects.changed', 'session.removed', 'session.status',
       ].map((n) => `on ${n}`),
     );
     expect(fake.calls.slice(firstInvoke).filter((c) => c.startsWith('on'))).toEqual([]);
@@ -826,5 +826,57 @@ describe('the org rows', () => {
     await answerSnapshots(fake);
     await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
     expect(tabIds(stores).sort()).toEqual([`session:${A}`, `session:${onB('b1')}`].sort());
+  });
+});
+
+// The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §J.1): main's `org.projects`
+// and each `org.projects.changed`, the whole value, held by the sessions store with its other machines' locations as
+// records; an answer older than an event is not applied.
+describe('the project registry', () => {
+  const ID = '11111111-2222-4333-8444-555555555555';
+  const onB = (id: string) => addressOf(OTHER_MACHINE, id as ProjectId);
+  const registryOf = (pids: string[]) => ({
+    projects: [{ id: ID, name: 'scrape', hub: true, renamable: true, locations: pids.map((pid) => ({ machine: OTHER_MACHINE, pid, path: `/srv/${pid}`, key: `id:${ID}` as OrgKey, name: pid, source: 'folder', acts: true })) }],
+    keys: { [ID]: `id:${ID}` },
+    moved: {},
+    removals: [],
+    seen: {},
+  });
+
+  it('applies org.projects at connect and each org.projects.changed whole, its locations on other machines as project records', async () => {
+    const { fake, stores } = setup();
+    expect(fake.invoked('org.projects')).toHaveLength(1);
+    await fake.reply('org.projects', registryOf(['p-1']));
+    expect(stores.sessions.getState().registry.projects.map((p) => p.id)).toEqual([ID]);
+    expect([...stores.sessions.getState().projects.keys()]).toEqual([onB('p-1')]);
+    fake.event('org.projects.changed', registryOf(['p-2']));
+    expect([...stores.sessions.getState().projects.keys()]).toEqual([onB('p-2')]);
+  });
+
+  it('applies no org.projects answer older than an org.projects.changed', async () => {
+    const { fake, stores } = setup();
+    fake.event('org.projects.changed', registryOf(['newer']));
+    await fake.reply('org.projects', registryOf(['older']));
+    expect([...stores.sessions.getState().projects.keys()]).toEqual([onB('newer')]);
+  });
+
+  // §J.2: a set saved under a project's label, once its project's id takes a key of the table, moves whole to that key
+  it('moves a set saved under a label whole to the key main gave the label’s project, panes and ratio kept', async () => {
+    const LABEL = 'remote:example.org/app';
+    const session = (id: string) => ({ id: `session:${at(id)}`, kind: 'session', appSessionId: at(id), pinned: false });
+    const split = { panes: [{ tabs: [session('a')], activeTabId: `session:${A}` }, { tabs: [session('c')], activeTabId: `session:${at('c')}` }], focusedPane: 1, splitRatio: 0.3 };
+    const { fake, stores } = setup(0, { tabs: { version: 3, current: LABEL, sets: { [LABEL]: split }, closedTabs: [] } });
+    const app = project('p1', 0, { org: { key: LABEL as OrgKey, name: 'app', source: 'remote', smnsId: ID } });
+    await fake.reply('session.list', { sessions: [record('a', { projectId: 'p1' as ProjectId }), record('c', { projectId: 'p1' as ProjectId })], revision: 1 });
+    await fake.reply('session.projects.list', { projects: [app], revision: 1 });
+    await fake.reply('session.digests', { digests: [] });
+    await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
+    await vi.waitFor(() => expect(stores.machines.getState().loaded.has(TEST_MACHINE)).toBe(true));
+    const shape = () => Object.fromEntries(Object.entries(stores.layout.getState().main.sets).map(([key, set]) => [key, { panes: set!.panes.map((p) => p.tabs.map((t) => t.id)), splitRatio: set!.splitRatio }]));
+    const whole = { panes: [[`session:${A}`], [`session:${at('c')}`]], splitRatio: 0.3 };
+    expect(shape()).toEqual({ [LABEL]: whole }); // signed out so far: the row is the label's
+    await fake.reply('org.projects', { ...registryOf([]), keys: { [ID]: `id:${ID}` } });
+    await vi.waitFor(() => expect(stores.layout.getState().main.current).toBe(`id:${ID}`));
+    expect(shape()).toEqual({ [`id:${ID}`]: whole });
   });
 });

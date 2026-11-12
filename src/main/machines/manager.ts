@@ -63,6 +63,9 @@ export interface ConnectionManagerDeps {
   emitFrom: <N extends EventName>(machine: MachineRef, name: N, payload: EventPayload<N>) => boolean;
   connect(dir: string): MachineLink; // a socket link to the profile `dir`'s mawsd (socket-link.ts); a test's fake otherwise
   remote?: RemoteSource; // the RL2 machines (P5 O7 M1)
+  // panel scalpel-3#2: this machine's capabilities as main reads them (the project acts' as its daemon's welcome says,
+  // ./project-acts-peer.ts), null while not known, and when they change; absent, the local state lists none
+  localCapabilities?: { read(): readonly string[] | null; onChange(listener: () => void): () => void };
   log(line: string): void;
 }
 
@@ -118,7 +121,8 @@ export function createConnectionManager(deps: ConnectionManagerDeps): Connection
   }
 
   function list(): MachineState[] {
-    const machines: MachineState[] = [{ ref: local, name: localName, local: true, state: 'up', since: started, generation: 0 }];
+    const localCapabilities = deps.localCapabilities?.read() ?? null;
+    const machines: MachineState[] = [{ ref: local, name: localName, local: true, state: 'up', since: started, generation: 0, ...(localCapabilities === null ? {} : { capabilities: [...localCapabilities] }) }];
     for (const entry of listed()) {
       const carrier = entry.state !== 'up' ? undefined : entry.dir !== null ? 'socket' : (entry.link.carrier?.() ?? undefined);
       const refusal = entry.dir === null ? (entry.link.refusal?.() ?? undefined) : undefined;
@@ -261,6 +265,7 @@ export function createConnectionManager(deps: ConnectionManagerDeps): Connection
   let closed = false;
   const unsubscribeRemote = remote?.onChanged(reconcile);
   reconcile();
+  const unsubscribeLocal = deps.localCapabilities?.onChange(() => !closed && changed());
 
   return {
     local,
@@ -278,6 +283,7 @@ export function createConnectionManager(deps: ConnectionManagerDeps): Connection
     close() {
       closed = true;
       unsubscribeRemote?.();
+      unsubscribeLocal?.();
       for (const entry of entries) entry.link.close();
       for (const entry of remoteEntries.values()) entry.link.close();
     },

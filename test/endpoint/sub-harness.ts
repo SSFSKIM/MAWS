@@ -540,7 +540,8 @@ export class FakeSpine {
 
   async dispatch(name: string, input: unknown, client?: ClientRef, reader?: Reader): Promise<HostResponse | null> {
     const appSessionId = (input as { appSessionId?: unknown } | null | undefined)?.appSessionId;
-    const context = { client: client ?? {}, ...(reader === undefined ? {} : { reader }) } as HandlerContext;
+    // as mawsd's front gives it (src/mawsd/front.ts): every request through the endpoint is another machine's (`remote`)
+    const context = { client: client ?? {}, remote: true, ...(reader === undefined ? {} : { reader }) } as HandlerContext;
     const handler = this.handlers.get(name);
     if (name === 'session.get' && handler === undefined) return ok(typeof appSessionId === 'string' ? (this.records.get(appSessionId) ?? null) : null);
     if (name === 'session.list' && handler === undefined) return ok({ sessions: [...this.records.values()].map((record) => ({ appId: record.appSessionId, ...record })), revision: 1 });

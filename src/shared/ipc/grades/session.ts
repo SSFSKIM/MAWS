@@ -73,6 +73,9 @@ export const grades = {
   'session.projects.update': 'machine-admin',
   'session.projects.remove': 'machine-admin',
   'session.projects.addFolder': 'spawn',
+  'session.projects.resolve': 'list', // the project registry (Interfaces §G)
+  'session.projects.link': 'machine-admin',
+  'session.projects.relocate': 'machine-admin',
   'session.drafts.get': 'view',
   'session.drafts.set': 'converse',
   'session.replay.start': 'spawn',

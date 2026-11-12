@@ -57,7 +57,7 @@ import type { ChannelLink, LocalAnswer } from '../../src/main/org/channel/machin
 import { orgFiles } from '../../src/main/org/files';
 import type { OrgSessionService } from '../../src/main/org/org-session';
 import { createRegistryFeed, wsSocket, type RegistryFeed } from '../../src/main/org/registry-feed';
-import { createRemoteRows, type RemoteRows } from '../../src/main/org/rows';
+import { createRemoteRows, NO_ROW_KEYS, type RemoteRows } from '../../src/main/org/rows';
 import { CHANNEL } from '../../src/renderer/src/channel/copy';
 import { channelEntries, placeByTime, toHumanEntries, type ChannelEntry, type ExchangeEntry, type SayEntry, type ToHumanEntry, type WordsEntry } from '../../src/renderer/src/channel/project';
 import { applyChange, held, openedWith, tailOf, type ChannelHeld, type OpenHeld } from '../../src/renderer/src/channel/state';
@@ -452,8 +452,7 @@ beforeAll(async () => {
       rosterListeners.add(listener);
       return () => void rosterListeners.delete(listener);
     },
-    localProjects: async () => [],
-    onLocalProjects: () => () => {},
+    keys: NO_ROW_KEYS,
     link: () => null, // M6b's channel listings: the rows here are the hub's
     files: orgFiles({ userData: profile, log }),
     emit: (next) => void (latestRows = next),

@@ -16,7 +16,7 @@ import { BUILTIN_MODELS } from '@shared/sessions/models';
 import { project, record, status } from '../../../test/support/builders';
 import { FakeLink, MINI, type FakeAct } from '../../../test/lane-b/fake-link';
 import type { MainContext } from '../ipc/router';
-import { AGENT_TOO_LARGE, createRemoteLaneB, routeLaneB, type RemoteLaneB } from './remote';
+import { AGENT_TOO_LARGE, createRemoteLaneB, routeLaneB, standInForMachines, type RemoteLaneB } from './remote';
 import { UNRESOLVED_MAX } from './remote-spawn';
 import { startNotifier } from '../attention/notifier';
 import { fakeSpineView } from '../../../test/support/fake-spine-view';
@@ -108,6 +108,22 @@ describe('routeLaneB', () => {
     }
     expect(l.adapter.handles('session.events')).toBe(true); // read in pages the channel carries
     for (const name of ['session.status', 'session.get', 'session.update', 'session.drafts.get', 'laneA.send'] as CommandName[]) expect(l.adapter.handles(name), name).toBe(false);
+  });
+
+  // The project registry's M11: a harness build's e2e fixture (src/main/org/registry-fixture.ts) stands in for a machine
+  // ahead of its link and step-up; what it leaves, and everything once it is removed, goes on as before.
+  it('answers from a harness stand-in first, ahead of the link, and as before once it is removed', async () => {
+    const l = lab();
+    const stood: string[] = [];
+    const remove = standInForMachines((machine, name) => (name === 'session.projects.addFolder' ? (stood.push(`${machine} ${name}`), { ok: true, value: 'stood in' } as unknown as CommandResult<CommandName>) : undefined));
+    expect(() => standInForMachines(() => undefined)).toThrow(/already installed/);
+    expect(await l.cmd('session.projects.addFolder', { directory: '/srv/next' })).toEqual({ ok: true, value: 'stood in' });
+    expect(await l.cmd('session.status', { appSessionId: APP })).toEqual({ ok: true, value: 'base' });
+    expect(stood).toEqual([`${MINI} session.projects.addFolder`]);
+    expect(l.link.acts).toEqual([]);
+    remove();
+    expect(await l.cmd('session.status', { appSessionId: APP })).toEqual({ ok: true, value: 'base' });
+    expect(l.base).toEqual(['session.status', 'session.status']);
   });
 });
 
@@ -1238,6 +1254,68 @@ describe('the remote setup (M9)', () => {
     expect(l.link.acts.map((a) => a.request)).toEqual([{ action: 'session.projects.addFolder', args: { directory: '/Users/o/Documents/proj' }, executor: 'machine', sendBy: expect.any(Number), stepUp: 'required' }]);
     l.link.onAct = settleWith({ state: 'refused', reason: 'protected' });
     expect(await l.cmd('session.projects.addFolder', { directory: '/Users/o/Documents/other' })).toMatchObject({ ok: false, error: { issues: { refusal: 'protected' } } });
+  });
+});
+
+// The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §G, "Older peers"): a machine
+// whose endpoint does not list `rl2.project-acts` in its RL2 handshake is sent none of `into`, `own`, `link`,
+// `relocate`, `resolve` or `expect`: an older endpoint could drop a field it does not know and do a plain add unsaid.
+// Each is refused here, before anything goes, `not-offered`, the refusal the page already reads for an older peer.
+describe('the project acts (the project registry)', () => {
+  const guarded: Array<[string, Record<string, unknown>]> = [
+    ['session.projects.addFolder', { directory: '/srv/a', into: 'p-1' }],
+    ['session.projects.addFolder', { directory: '/srv/a', own: true }],
+    ['session.projects.link', { id: 'p-1', into: null }],
+    ['session.projects.relocate', { id: 'p-1', directory: '/srv/b' }],
+    ['session.projects.remove', { id: 'p-1', expect: { path: '/srv/a', project: 'q-1' } }],
+    ['session.projects.resolve', { directory: '/srv/a' }],
+  ];
+
+  it('are taken by the adapter, `resolve` among them', () => {
+    const l = lab();
+    for (const name of ['session.projects.link', 'session.projects.relocate', 'session.projects.update', 'session.projects.remove', 'session.projects.resolve'] as CommandName[]) expect(l.adapter.handles(name), name).toBe(true);
+  });
+
+  it('go to a peer that lists `rl2.project-acts`: the acts as `machine` acts, `resolve` as a call', async () => {
+    const l = lab();
+    l.link.relink(['rl2.executor.machine', 'rl2.project-acts']);
+    l.link.onAct = settleWith({ state: 'done', result: null });
+    l.link.answers.set('session.projects.resolve', () => ({ ok: true, output: { project: null, by: 'machine', at: null, label: { key: 'folder:x:a', name: 'a', source: 'folder', smnsId: null } } }));
+    for (const [name, input] of guarded) await l.cmd(name, input);
+    expect(l.link.acts.map((a) => a.request.action)).toEqual(guarded.slice(0, 5).map(([name]) => name));
+    expect(l.link.calls.filter((c) => c.name === 'session.projects.resolve')).toEqual([{ name: 'session.projects.resolve', input: { directory: '/srv/a' } }]);
+    expect(l.base).toEqual([]);
+  });
+
+  // Review 1, finding 7: the check at the command's start is not the last word. An act waiting on Touch ID or resent after
+  // a reconnection carries the capability as `requires`, which the act table judges at each transmission; `resolve` goes
+  // only on the channel it was checked against, and fails `offline` at that channel's end rather than going to the next.
+  it('carry the capability to every send: the acts as `requires`, `resolve` bound to the channel it was checked on', async () => {
+    const l = lab();
+    l.link.relink(['rl2.executor.machine', 'rl2.project-acts']);
+    l.link.onAct = settleWith({ state: 'done', result: null });
+    for (const [name, input] of guarded.slice(0, 5)) await l.cmd(name, input);
+    await l.cmd('session.projects.addFolder', { directory: '/srv/a' });
+    expect(l.link.acts.map((a) => a.request.requires)).toEqual([...guarded.slice(0, 5).map(() => 'rl2.project-acts'), undefined]);
+    l.link.answers.set('session.projects.resolve', () => new Promise<never>(() => {}));
+    const resolving = l.cmd('session.projects.resolve', { directory: '/srv/a' });
+    await vi.waitFor(() => expect(l.link.calls.filter((c) => c.name === 'session.projects.resolve')).toHaveLength(1));
+    l.link.lose();
+    expect(await resolving).toMatchObject({ ok: false });
+    l.link.relink(['rl2.executor.machine']);
+    expect(l.link.calls.filter((c) => c.name === 'session.projects.resolve')).toHaveLength(1);
+  });
+
+  it('are refused `not-offered`, unsent, to a peer that does not; a plain add, a remove with no expectation and a rename still go', async () => {
+    const l = lab();
+    l.link.onAct = settleWith({ state: 'done', result: null });
+    for (const [name, input] of guarded) expect([name, await l.cmd(name, input)]).toMatchObject([name, { ok: false, error: { code: 'internal', issues: { refusal: 'not-offered' } } }]);
+    expect(l.link.acts).toEqual([]);
+    expect(l.link.calls.filter((c) => c.name === 'session.projects.resolve')).toEqual([]);
+    await l.cmd('session.projects.addFolder', { directory: '/srv/a' });
+    await l.cmd('session.projects.remove', { id: 'p-1' });
+    await l.cmd('session.projects.update', { id: 'p-1', patch: { name: 'A' } });
+    expect(l.link.acts.map((a) => a.request.action)).toEqual(['session.projects.addFolder', 'session.projects.remove', 'session.projects.update']);
   });
 });
 

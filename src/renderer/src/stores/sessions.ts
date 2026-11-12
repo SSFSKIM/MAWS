@@ -10,17 +10,21 @@
 // rejects nothing. Digests carry a per-session revision that main never repeats for an app id, even across a removal;
 // a removed session's digest and engine status go with its record, and the revision it last had still refuses a late
 // digest from before the removal. Projects travel as a whole list with the index revision.
+// The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §J.1): main's `org.projects`
+// is held whole (`registry`), and its locations on other machines are records in `projects` too (`stores/registry.ts`),
+// under the address of the machine and its row id there, wherever no record that machine answered itself holds it.
 import { create } from 'zustand';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SessionEvent } from '@shared/graph/events';
 import type { EventPayload, ProjectRecord, SessionDigest } from '@shared/ipc/schema';
-import type { OrgMember, OrgRows, RemoteRow } from '@shared/ipc/schema/org';
+import type { OrgMember, OrgProjects, OrgRows, RemoteRow } from '@shared/ipc/schema/org';
 import { addressOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import type { NeedsYouRow } from '../attention/derive';
 import { orderProjects, seenAt, sortSessions, type SidebarSort } from '../overview/derive';
+import { EMPTY_REGISTRY, registryRecords } from './registry';
 
 export interface SessionsState {
   loaded: boolean;
@@ -65,6 +69,10 @@ export interface SessionsState {
   members: ReadonlyMap<string, OrgMember>;
   member: string | null;
   applyRows(rows: OrgRows): void;
+  // The project registry (§J.1): main's whole value (`org.projects`, `org.projects.changed`; signed out, none), and its
+  // locations on machines other than `local` as records in `projects`.
+  registry: OrgProjects;
+  applyRegistry(registry: OrgProjects, local: MachineRef): void;
   // P5 O7 M10 (A; docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M10's *A remote session ranks by a stale
   // activity time*): another machine's lane B session has no digest (no lane B module emits one), so the latest turn
   // start or end its stream delivered to this window is kept per session, as the digest's fold reads them (a child
@@ -88,6 +96,9 @@ const isTurn = (event: SessionEvent): boolean =>
 export interface UnstartedSession {
   projectId: ProjectId | null;
   createdAt: string;
+  // the project registry's M11: the registry project a New chat with no project here was opened in (a project with no
+  // folder on this Mac, started on one of its locations elsewhere: sidebar/registry-new-chat.ts)
+  registry?: string;
 }
 
 // P5 O6 M4 (docs/doperpowers/plans/2026-10-27-p5-o6-machine-dimension.md, "One store per kind, partitioned inside"): one
@@ -117,6 +128,23 @@ export function createSessionsStore() {
   // latest snapshot, whose silence about it is as new as the snapshot. (The counter is index-wide and bumped on every
   // change, so no two events share a revision; an equal one is the same fact again.)
   const known = (p: Partition, id: AppSessionId, held: boolean) => Math.max(p.recordRevs.get(id) ?? -1, held ? -1 : p.listRevision);
+
+  // The project registry: its records (`registryRecords`), and which of them `projects` holds now: those at an address no
+  // record a machine answered itself holds.
+  let fromRegistry = new Map<ProjectId, ProjectRecord>();
+  let placed = new Set<ProjectId>();
+  const answered = (projects: ReadonlyMap<ProjectId, ProjectRecord>) => [...projects].filter(([id]) => !placed.has(id)); // the machines' own records
+  // `projects` from the machines' own records: each registry record placed where none of them is
+  const withRegistry = (own: Iterable<[ProjectId, ProjectRecord]>): Map<ProjectId, ProjectRecord> => {
+    const next = new Map(own);
+    placed = new Set();
+    for (const [id, record] of fromRegistry) {
+      if (next.has(id)) continue;
+      next.set(id, record);
+      placed.add(id);
+    }
+    return next;
+  };
 
   return create<SessionsState>()((set, get) => {
     // A record arriving for an unstarted session makes it an ordinary session.
@@ -196,6 +224,11 @@ export function createSessionsStore() {
       listedMachines: new Set(),
       members: new Map(),
       member: null,
+      registry: EMPTY_REGISTRY,
+      applyRegistry(registry, local) {
+        fromRegistry = registryRecords(registry, local);
+        set({ registry, projects: withRegistry(answered(get().projects)), projectsVersion: get().projectsVersion + 1 });
+      },
       turnsSeen: new Map(),
       applyTurnsSeen({ appSessionId, events }) {
         const held = get().turnsSeen.get(appSessionId) ?? Number.NEGATIVE_INFINITY;
@@ -253,10 +286,11 @@ export function createSessionsStore() {
         const p = partition(machine);
         if (revision < p.projectsRevision) return;
         p.projectsRevision = revision;
-        const next = new Map([...get().projects].filter(([id]) => !p.projects.has(id)));
+        // the machine's own records replace what it said before, and any registry record at their addresses
+        const next = new Map(answered(get().projects).filter(([id]) => !p.projects.has(id)));
         p.projects = new Set(projects.map((project) => project.id));
         for (const project of projects) next.set(project.id, project);
-        set({ projects: next, projectsVersion: get().projectsVersion + 1 });
+        set({ projects: withRegistry(next), projectsVersion: get().projectsVersion + 1 });
       },
       applyDigests: keepDigests,
       applyDigest: (digest, machine) => keepDigests([digest], machine),

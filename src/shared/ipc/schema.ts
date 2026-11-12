@@ -74,6 +74,7 @@ import * as remote from './schema/remote'; // P5 O7 M2
 import * as browserEngine from './schema/browser-engine'; // P5 O17
 import * as channel from './schema/channel'; // P5 O8 M7b
 import * as endpoint from './schema/endpoint'; // P5 O8 M6b
+import * as projects from './schema/projects'; // the project registry's M12
 export { CustomizationInventorySchema, type CustomizationInventory, type CustomizationSkill, type CustomizationServer, type CustomizationEndpoint } from './schema/customization';
 
 export {
@@ -185,6 +186,7 @@ export const commands = {
   ...browserEngine.commands, // P5 O17
   ...channel.commands, // P5 O8 M7b
   ...endpoint.commands, // P5 O8 M6b
+  ...projects.commands, // the project registry's M12
 } as const satisfies Record<`${Namespace}.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -244,6 +246,7 @@ export const events = {
   ...browserEngine.events, // P5 O17
   ...channel.events, // P5 O8 M7b
   ...endpoint.events, // P5 O8 M6b
+  ...projects.events, // the project registry's M12
 } as const satisfies Record<`${Namespace}.${string}`, z.ZodType>;
 
 export type CommandName = keyof typeof commands;
@@ -311,6 +314,8 @@ export const MACHINE_EVENTS = [
   'catalog.engineChanged', // P5 O4 M3: the catalog's machine half, composed with the spine
   'daemon.engineHandover', // P5 O16 M3c fix wave 2: `mawsd`'s engine host update under way (the front's own)
   'channel.changed', // P5 O8 M7b: the project channel's journal, composed with the spine
+  'projects.act.request', // the project registry's M12: `maws` aimed at another machine, to the attached app alone (the front's own)
+  'projects.act.withdrawn', // the project registry's M12 (Decision Log 22): that request's terminal has gone (the front's own)
 ] as const satisfies readonly EventName[];
 export type CommandInput<N extends CommandName> = z.input<(typeof commands)[N]['input']>;
 export type CommandOutput<N extends CommandName> = z.output<(typeof commands)[N]['output']>;

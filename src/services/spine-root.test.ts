@@ -55,7 +55,7 @@ const SPINE_REFUSED_COMMANDS = [
   'machine.folders.list', // P5 O7 M9: the home's folders hold no spine file
   'machineSettings.get', 'machineSettings.set', // P5 O3-D M5b: read, and a set refused (the machine half is read-only)
   'session.appEvents', 'session.digests', 'session.drafts.get', 'session.drafts.set', 'session.engineStatuses', 'session.get', 'session.launchMode', 'session.list', 'session.observedFacts',
-  'session.projects.add', 'session.projects.addFolder', 'session.projects.list', 'session.projects.remove', 'session.projects.update',
+  'session.projects.add', 'session.projects.addFolder', 'session.projects.link' /* the project registry */, 'session.projects.list', 'session.projects.relocate', 'session.projects.remove', 'session.projects.resolve', 'session.projects.update',
   'session.reader.update' /* P5 O8 M6a */, 'session.recentTurns', 'session.search', 'session.setVisible', 'session.update', 'session.visible',
   'settings.engineApplied', 'settings.userEngineDefaults',
 ].sort();
@@ -63,13 +63,13 @@ const SPINE_REFUSED_COMMANDS = [
 // lane B's claimed op, for a phone's rewind or act
 const SPINE_INTERCEPTS = ['session.answer', 'session.rewind', 'session.send', 'session.steer', 'session.queue.promote', 'session.bash', 'host.op'];
 const SPINE_REFUSED_INTERCEPTS = ['session.answer']; // no session service: nothing to repair
-const SPINE_TAPS = ['attention.changed', 'ownerChannel.changed' /* P5 O8 M7b: the project channel's answered questions */, 'session.eventBatch', 'session.intent.changed', 'session.projects.changed'];
+const SPINE_TAPS = ['attention.changed', 'ownerChannel.changed' /* P5 O8 M7b: the project channel's answered questions */, 'session.eventBatch', 'session.intent.changed', 'session.projects.changed', 'session.setup' /* the project registry: a failed start's folder check */];
 const SPINE_REFUSED_TAPS = ['attention.changed', 'session.eventBatch', 'session.intent.changed']; // no projects to follow: the index is unavailable
 // P5 O3-D M1 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §I): what the services front emits of
 // its own beside the spine's events; with them, the machine host's event list (`REGISTRY.machineEvents`). M5b: the
 // machine half's and the visible set's changes are the spine's own emits (the parts that hold them emit them), so the
 // front's own is the client port's request alone.
-const FRONT_EVENTS = ['clientPort.request', 'render.request', 'render.exit', 'render.hostGeneration', 'session.capabilitiesChanged', 'daemon.engineHandover' /* P5 O16 M3c fix wave 2: the daemon's own */, 'browserEngine.request']; // P5 O5 M3: render.* the front posts to its render client (M4; M4: the link's generation too); M5: a session's capabilities, posted by mawsd; P5 O17 M4: mawsd's request to a tab engine
+const FRONT_EVENTS = ['clientPort.request', 'render.request', 'render.exit', 'render.hostGeneration', 'session.capabilitiesChanged', 'daemon.engineHandover' /* P5 O16 M3c fix wave 2: the daemon's own */, 'browserEngine.request', 'projects.act.request', 'projects.act.withdrawn' /* the project registry's M12: the front's to the attached app */]; // P5 O5 M3: render.* the front posts to its render client (M4; M4: the link's generation too); M5: a session's capabilities, posted by mawsd; P5 O17 M4: mawsd's request to a tab engine
 // Every event the spine's parts emit through the bus, read from the library's source: each `emit('<event>'` under
 // src/services/ (P5 O3-E: the checkouts' root's `git.changed`, `files.changed` and `scm.remote.output` included). A part
 // emits through a function it was handed, always with the event's name written.

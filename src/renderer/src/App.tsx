@@ -156,6 +156,7 @@ import { registerDashboardEditor } from './tools/dashboard';
 import { connectDelivery } from './delivery/store';
 import { connectRemoteSurfaces } from './artifacts/remote-surfaces'; // P5 O7 M5c
 import { SendToHost } from './delivery/SendToSheet';
+import { ProjectActSheet } from './sidebar/ProjectActSheet'; // the project registry's M12: maws aimed at another machine
 // P4-B5 end
 
 // C10 start: C7's composer binds an unstarted session's chips and Send through C10's hook; registered at module load,
@@ -415,6 +416,8 @@ export function App() {
       <ProfileSheets />
       {/* P4-B5: the Send to sheet, from an editor header's Send to or a library row's Export menu */}
       <SendToHost />
+      {/* the project registry's M12: the confirmation of a maws command aimed at another machine */}
+      <ProjectActSheet />
       {/* P3-D start */}
       </DesignSystemHostProvider>
       {/* P3-D end */}

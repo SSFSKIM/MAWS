@@ -18,6 +18,7 @@ import { resetRemoteSpawn, spawnTargetOf, useRemoteSpawn } from '../../sessions/
 import { SETUP_WORDS } from '../../sessions/remote-setup';
 import type { MachineRef } from '@shared/machine/ref';
 import { useMachines } from '../../stores/machines';
+import { useSessions } from '../../stores/sessions';
 import { MACHINE_WORDS, MachineLine, MachineMenu } from './MachineMenu';
 
 const TAB = addressOf(TEST_MACHINE, 'new-1' as AppSessionId);
@@ -25,13 +26,17 @@ const THIRD = 'ThirdMachineRef0000000' as MachineRef;
 const KEY = 'repo:github.com/acme/app' as OrgKey;
 const up = (ref: MachineRef, name: string, over: Partial<MachineState> = {}): MachineState => ({ ref, name, local: false, state: 'up', since: '2026-10-31T10:00:00Z', generation: 1, carrier: 'relay', ...over });
 const theirs = (over: Partial<ProjectRecord> = {}): ProjectRecord => ({ ...project('app', 0), id: addressOf(OTHER_MACHINE, 'app' as ProjectId), directory: '/srv/app', org: { key: KEY, name: 'app', source: 'remote', smnsId: null }, ...over });
-const view = (key: string | null = KEY) =>
-  render(
+// the tab's local project, whose record's label is the org project the menu looks for on the other machines
+const HERE = addressOf(TEST_MACHINE, 'here' as ProjectId);
+const view = (key: string | null = KEY) => {
+  if (key !== null) useSessions.setState({ projects: new Map([[HERE, { ...project('here', 0), id: HERE, org: { key: key as OrgKey, name: 'app', source: 'remote', smnsId: null } }]]) });
+  return render(
     <>
-      <MachineMenu appSessionId={TAB} projectKey={key} disabled={null} />
+      <MachineMenu appSessionId={TAB} projectId={key === null ? null : HERE} projectKey={key} disabled={null} />
       <MachineLine appSessionId={TAB} projectKey={key} />
     </>,
   );
+};
 
 beforeEach(() => {
   resetRemoteSpawn();
@@ -41,6 +46,7 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() });
+  useSessions.setState({ projects: new Map(), unstarted: new Map(), registry: { projects: [], keys: {}, moved: {}, removals: [], seen: {} } });
 });
 
 describe('the machine menu', () => {
@@ -111,8 +117,29 @@ describe('the machine menu', () => {
     expect(spawnTargetOf(TAB, KEY)).toEqual({ machine: OTHER_MACHINE, name: 'mini', checkout: '/Users/mini/notes', key: null, label: 'notes', trust: 'accepted' });
   });
 
+  // The project registry's M11 (re-review, finding 1): a New chat in a project with no folder here, opened on one of its
+  // locations, keeps that project: another machine chosen takes the project's location there from the registry.
+  it('in a project with no folder here, keeps the project when another machine is chosen, its location there from the registry', async () => {
+    const P = '5d8e1c72-4b3a-4f6e-8d9c-0a1b2c3d4e5f';
+    const at = (ref: MachineRef, pid: string) => ({ machine: ref, pid, path: `/srv/${pid}`, key: `folder:${ref}:${pid}` as OrgKey, name: pid, source: 'folder' as const, acts: true });
+    useMachines.getState().applyRoster([{ ...up(TEST_MACHINE, 'This Mac'), local: true, carrier: undefined }, up(OTHER_MACHINE, 'mini'), up(THIRD, 'vm')]);
+    useSessions.setState({
+      unstarted: new Map([[TAB, { projectId: null, createdAt: '2026-11-10T09:00:00Z', registry: P }]]),
+      registry: { projects: [{ id: P, name: 'scrape', hub: true, renamable: true, locations: [at(OTHER_MACHINE, 'p-a'), at(THIRD, 'p-b')] }], keys: {}, moved: {}, removals: [], seen: {} },
+    });
+    useRemoteSpawn.getState().choose(TAB, { machine: OTHER_MACHINE, name: 'mini', checkout: '/srv/p-a', key: null, label: 'scrape', registry: P });
+    const invoke = vi.spyOn(ipc, 'invoke');
+    view(null);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Machine mini' }));
+    const menu = screen.getByRole('dialog', { name: 'Choose a machine' });
+    await user.click(await within(menu).findByRole('menuitemradio', { name: 'vm' }));
+    expect(spawnTargetOf(TAB, null)).toEqual({ machine: THIRD, name: 'vm', checkout: '/srv/p-b', key: null, label: 'scrape', registry: P });
+    expect(invoke).not.toHaveBeenCalledWith('session.projects.list', undefined, expect.anything());
+  });
+
   it('is closed while the row is, and absent with no RL2 machine up', () => {
-    const { unmount } = render(<MachineMenu appSessionId={TAB} projectKey={null} disabled="Starting…" />);
+    const { unmount } = render(<MachineMenu appSessionId={TAB} projectId={null} projectKey={null} disabled="Starting…" />);
     const chip = screen.getByRole<HTMLButtonElement>('button', { name: 'Machine This Mac' });
     expect(chip.disabled).toBe(true);
     expect(chip.title).toBe('Starting…');

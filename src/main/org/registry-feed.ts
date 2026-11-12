@@ -17,7 +17,7 @@
 // (hub-socket.ts), an open made in the window given HUB_WINDOW_OPEN_MS; every end the app decides is a terminate,
 // told in the same turn, since neither of the hub's objects completes a close handshake.
 import WebSocket from 'ws';
-import type { Listing, Signed } from '../../../apps/org-protocol/src/index.ts';
+import type { Listing, ProjectsRecord, Signed } from '../../../apps/org-protocol/src/index.ts';
 import { NO_REACH, type Reach } from '../net/reach';
 import { WAKE_DROP_MS, type WakeNotice, type WakeSource } from '../net/wake';
 import { BUILD_HEADER } from './hub-client';
@@ -42,6 +42,10 @@ export interface RegistryFeedHooks {
 export interface RegistryFeed extends RegistryFeedHooks {
   onListings(listener: (page: { records: Signed<Listing>[]; last: boolean }) => void): () => void;
   onListing(listener: (record: Signed<Listing>) => void): () => void;
+  /** The project registry (§C): the hub's projects records as `projects-all` pages, after the listings pages. */
+  onProjectsPages(listener: (page: { records: Signed<ProjectsRecord>[]; last: boolean }) => void): () => void;
+  /** The project registry (§C): a record the hub stored, as each `projects` frame brings it. */
+  onProjects(listener: (record: Signed<ProjectsRecord>) => void): () => void;
   connected(): boolean;
   probe(): void;
   close(): void;
@@ -161,6 +165,8 @@ export function createRegistryFeed(deps: {
     credentials: new Set<() => void>(),
     listings: new Set<(page: { records: Signed<Listing>[]; last: boolean }) => void>(),
     listing: new Set<(record: Signed<Listing>) => void>(),
+    projectsPages: new Set<(page: { records: Signed<ProjectsRecord>[]; last: boolean }) => void>(),
+    projects: new Set<(record: Signed<ProjectsRecord>) => void>(),
   };
   const subscribe =
     <T>(set: Set<T>) =>
@@ -379,6 +385,8 @@ export function createRegistryFeed(deps: {
         }
         tell(listeners.listings, page);
       } else if (frame.t === 'listing' && isObject(frame.record)) tell(listeners.listing, frame.record as unknown as Signed<Listing>);
+      else if (frame.t === 'projects-all' && Array.isArray(frame.records)) tell(listeners.projectsPages, { records: frame.records as Signed<ProjectsRecord>[], last: frame.last === true });
+      else if (frame.t === 'projects' && isObject(frame.record)) tell(listeners.projects, frame.record as unknown as Signed<ProjectsRecord>);
     });
     current.on('close', (code) =>
       end(() => {
@@ -457,6 +465,8 @@ export function createRegistryFeed(deps: {
     onCredentialsEnded: subscribe(listeners.credentials),
     onListings: subscribe(listeners.listings),
     onListing: subscribe(listeners.listing),
+    onProjectsPages: subscribe(listeners.projectsPages),
+    onProjects: subscribe(listeners.projects),
     connected: () => open,
     probe: () => probe('probe'),
     close() {

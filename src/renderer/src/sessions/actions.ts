@@ -19,7 +19,9 @@ import { displayTitle } from './title';
 import { machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import { selectOffline, useMachines } from '../stores/machines';
-import { orgKeyOf, reachableCheckouts, rowProjects, selectOrgIndex, sessionsOfRow } from '../stores/org-projects';
+import { reachableCheckouts, rowProjects, selectOrgIndex, sessionsOfRow } from '../stores/org-projects';
+import { isRegistryRecord, locationAddress } from '../stores/registry'; // the project registry
+import { removeLocation } from '../sidebar/registry-acts';
 
 const fail = (text: string) => toast({ level: 'danger', text, actions: [], dismissible: true });
 
@@ -36,7 +38,8 @@ function rowOf(projectId: ProjectId) {
   const sessions = useSessions.getState();
   const project = sessions.projects.get(projectId);
   if (!project) return null;
-  return { sessions, project, key: orgKeyOf(project), index: selectOrgIndex(sessions, ipc.localMachine) };
+  const index = selectOrgIndex(sessions, ipc.localMachine);
+  return { sessions, project, key: index.keyOf(project), index };
 }
 
 async function removeProject(projectId: ProjectId): Promise<void> {
@@ -45,6 +48,13 @@ async function removeProject(projectId: ProjectId): Promise<void> {
   const { sessions, project, key, index } = row;
   const name = index.orgs.get(key)?.name ?? project.name;
   const checkouts = index.listed.has(key) ? reachableCheckouts(index, key, up) : [project];
+  // The project registry (Interfaces §I, design §6: "Remove from sidebar" removes the project's locations on every
+  // machine): each location of its project on a machine you own, hidden there now while that machine is up, else held
+  // by main and sent when it is next up; a checkout the registry does not name, as before.
+  const registered = index.orgs.get(key)?.registry;
+  const acting = registered?.locations.filter((l) => l.acts).map((location) => ({ ...location, project: registered.id })) ?? [];
+  const named = new Set(acting.map(locationAddress));
+  const linked = (machine: MachineRef) => machine === ipc.localMachine || useMachines.getState().machines.get(machine)?.state === 'up';
   const count = sessionsOfRow(sessions, ipc.localMachine, key).filter((r) => !r.archived).length;
   // W11 (I5): the project row's archive icon and the menu's "Remove from sidebar…"; nothing is deleted
   const yes = await confirm({
@@ -56,8 +66,15 @@ async function removeProject(projectId: ProjectId): Promise<void> {
   if (!yes) return;
   // each checkout is hidden on its own machine (`session.projects.remove` routes by the project's address)
   for (const checkout of checkouts) {
+    if (named.has(checkout.id) || isRegistryRecord(checkout)) continue; // the registry's location: below, where you own its machine
     const result = await ipc.invoke('session.projects.remove', { id: checkout.id });
     if (!result.ok) fail(result.error.message);
+  }
+  for (const location of acting) {
+    const machine = useMachines.getState().machines.get(location.machine)?.name ?? location.machine;
+    // the location's path and project, which another machine expects (panel 1, A2)
+    const answer = await removeLocation({ address: locationAddress(location), machine: location.machine, pid: location.pid, path: location.path, project: location.project, local: location.machine === ipc.localMachine, up: linked(location.machine) }, machine);
+    if (!answer.ok) fail(answer.words);
   }
 }
 

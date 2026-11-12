@@ -1,0 +1,408 @@
+// The project registry's acts over the network (docs/doperpowers/plans/2026-11-10-project-registry.md, M9's offers;
+// Interfaces §G; design §3), through the real gate and a real index behind the machine's services: `addFolder`'s `into`
+// and `own`, `link`, `relocate`, `update` and `remove` are `machine-admin` acts of the machine's owners alone, the first
+// three always stepped up and the last two never; `resolve` is an owners' read. `relocate` and `resolve` name a
+// directory, held to the setup policy before anything reads in it; a remote `addFolder` keeps its checked path and its
+// `into`. An `into` the verified records do not name is the machine's own refusal, `unknown-project`. The endpoint's
+// `h2` lists `rl2.project-acts`.
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { Action } from 'org-protocol';
+import { PROJECT_ACTS_CAPABILITY } from '@shared/ipc/schema/session';
+import { ENDPOINT_CAPABILITIES } from '../../src/endpoint/capabilities';
+import { OFFERS } from '../../src/endpoint/offers';
+import { OwnProjects } from '../../src/endpoint/projects';
+import { NO_PROJECTS_KEPT } from '../../src/endpoint/state/store';
+import { stepUpRequired } from '../../src/endpoint/step-up';
+import { Index } from '../../src/services/index/index';
+import { registerIndexHandlers } from '../../src/services/index/register';
+import { registerFolders } from '../../src/services/machine/folders';
+import type { SetupGuard } from '../../src/services/machine/setup';
+import { act, done, makeOrg, openRemote, ORG, sminos, startEndpoint, stopAll, until, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
+
+let org: Org;
+const started: Fixture[] = [];
+const dirs: string[] = [];
+const indexes: Index[] = [];
+
+beforeAll(async () => {
+  org = await makeOrg();
+});
+afterEach(async () => {
+  await stopAll(started);
+  for (const index of indexes.splice(0)) index.close();
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+afterAll(() => stopAll(started));
+
+const tempDir = (prefix: string) => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+  dirs.push(dir);
+  return dir;
+};
+
+/** The machine with a fake macOS home and a real index answering the project commands, its sminos reading locations. */
+async function setup(capabilities = ['audience', 'record', 'locations']): Promise<{ f: Fixture; home: string; index: Index; a: Remote; b: Remote }> {
+  const home = tempDir('project-acts-home-');
+  for (const dir of ['work/scrape', 'work/moved', 'work/other']) mkdirSync(join(home, dir), { recursive: true });
+  const f = await startEndpoint(org, started, { setup: { home, platform: 'darwin' } });
+  const index = new Index(join(tempDir('project-acts-index-'), 'index.sqlite'), { registry: f.endpoint.registry });
+  indexes.push(index);
+  const guard: SetupGuard = { where: { home, platform: 'darwin' } };
+  registerIndexHandlers(index, f.spine.bus as never, guard);
+  registerFolders(f.spine.bus.register as never, guard);
+  await sminos(f, [], capabilities);
+  await index.refreshOrgProjects({ machine: f.services.machine.ref, enrollment: () => ({ org: ORG, machine: 'mini' }), home });
+  return { f, home, index, a: await openRemote(f, org.a1, org.A), b: await openRemote(f, org.b1, org.B) };
+}
+
+const action = (f: Fixture, r: Remote, name: string, args: Record<string, unknown>): Action => r.device.action({ machine: f.ref, action: name, args });
+const stepped = (f: Fixture, r: Remote, name: string, args: Record<string, unknown>): Promise<Action> => r.device.stepUp(action(f, r, name, args));
+async function call(r: Remote, name: string, input: unknown): Promise<Msg> {
+  const id = `c${r.inbox.length}-${Math.random().toString(36).slice(2, 8)}`;
+  await r.channel.send({ t: 'call', id, name, input });
+  return waitFor(r, (m) => m.t === 'result' && m.id === id, `the result of ${name}`);
+}
+const code = (m: Msg) => (m.ok === true ? 'ok' : (m.error as { code: string }).code);
+/** An admitted act's outcome. */
+async function admitted(r: Remote, a: Action): Promise<{ state: string; result?: unknown; reason?: string; error?: { message?: string } }> {
+  const from = r.inbox.length;
+  expect([a.action, await act(r, a)]).toEqual([a.action, 'ok']);
+  return (await done(r, a, from)) as never;
+}
+const claimed = (f: Fixture, name: string) => f.spine.claimed.filter((c) => c.name === name);
+
+describe('the project acts over the network', () => {
+  it('are offered as M9 has them, and the endpoint lists `rl2.project-acts`', () => {
+    for (const name of ['session.projects.addFolder', 'session.projects.link', 'session.projects.relocate', 'session.projects.update', 'session.projects.remove']) {
+      expect([name, { ...OFFERS.commands[name], accepts: undefined }]).toEqual([name, { kind: 'act', executor: 'machine', target: 'machine', grade: 'machine-admin', owners: true, accepts: undefined }]);
+    }
+    expect(OFFERS.commands['session.projects.resolve']).toEqual({ kind: 'call', executor: 'machine', target: 'machine', grade: 'list', owners: true });
+    expect(ENDPOINT_CAPABILITIES).toContain(PROJECT_ACTS_CAPABILITY);
+    const owner = { grade: 'machine-admin' as const, ownsSession: false, ownsMachine: true };
+    expect(['addFolder', 'link', 'relocate', 'update', 'remove'].map((verb) => [verb, stepUpRequired({ name: `session.projects.${verb}`, ...owner })])).toEqual([
+      ['addFolder', true],
+      ['link', true],
+      ['relocate', true],
+      ['update', false],
+      ['remove', false],
+    ]);
+  });
+
+  it('refuse a member each act and the read, `owners-only`, unrun; refuse an owner’s addFolder {into}, link and relocate without a step-up', async () => {
+    const { f, home, a, b } = await setup();
+    const folder = join(home, 'work/scrape');
+    const added = await admitted(a, await stepped(f, a, 'session.projects.addFolder', { directory: folder }));
+    const pid = (added.result as { project: { id: string } }).project.id;
+    const acts: Array<[string, Record<string, unknown>]> = [
+      ['session.projects.addFolder', { directory: join(home, 'work/other'), into: 'id-x' }],
+      ['session.projects.link', { id: pid, into: null }],
+      ['session.projects.relocate', { id: pid, directory: folder }],
+      ['session.projects.update', { id: pid, patch: { name: 'renamed' } }],
+      ['session.projects.remove', { id: pid }],
+    ];
+    const before = f.spine.claimed.length;
+    for (const [name, args] of acts) expect([name, await act(b, await stepped(f, b, name, args))]).toEqual([name, 'owners-only']);
+    expect(code(await call(b, 'session.projects.resolve', { directory: folder }))).toBe('owners-only');
+    for (const [name, args] of acts.slice(0, 3)) expect([name, await act(a, action(f, a, name, args))]).toEqual([name, 'step-up']);
+    expect(f.spine.claimed.length).toBe(before);
+  });
+
+  it('admit an owner’s update and remove with no step-up; a rename takes a name alone', async () => {
+    const { f, home, a, index } = await setup();
+    const folder = join(home, 'work/scrape');
+    const pid = ((await admitted(a, await stepped(f, a, 'session.projects.addFolder', { directory: folder }))).result as { project: { id: string } }).project.id;
+    expect(await act(a, action(f, a, 'session.projects.update', { id: pid, patch: { name: 'Scrape', order: 3 } }))).toBe('malformed');
+    expect(await admitted(a, action(f, a, 'session.projects.update', { id: pid, patch: { name: 'Scrape' } }))).toMatchObject({ state: 'done', result: { name: 'Scrape' } });
+    expect(await admitted(a, action(f, a, 'session.projects.remove', { id: pid }))).toMatchObject({ state: 'done' });
+    expect(index.projects.list({ includeHidden: true }).find((p) => p.id === pid)?.hidden).toBe(true);
+  });
+
+  it('run relocate on its checked path with its row, refuse one outside the home unrun, and answer resolve on its checked path', async () => {
+    const { f, home, a } = await setup();
+    const pid = ((await admitted(a, await stepped(f, a, 'session.projects.addFolder', { directory: join(home, 'work/scrape') }))).result as { project: { id: string } }).project.id;
+    const moved = join(home, 'work/moved');
+    expect(await admitted(a, await stepped(f, a, 'session.projects.relocate', { id: pid, directory: `${home}/work/../work/moved` }))).toMatchObject({ state: 'done', result: { project: { id: pid, directory: moved }, merged: false } });
+    expect(claimed(f, 'session.projects.relocate').map((c) => c.input)).toEqual([{ id: pid, directory: moved, opened: [] }]);
+    const outside = tempDir('project-acts-outside-');
+    expect(await act(a, await stepped(f, a, 'session.projects.relocate', { id: pid, directory: outside }))).toBe('outside-home');
+    expect(claimed(f, 'session.projects.relocate')).toHaveLength(1);
+    const resolved = await call(a, 'session.projects.resolve', { directory: `${home}/work/../work/moved` });
+    expect(resolved).toMatchObject({ ok: true, output: { by: 'minted', at: moved } });
+  });
+
+  it('carry addFolder’s `into` to the machine, which refuses an id no verified record names `unknown-project`', async () => {
+    const { f, home, a } = await setup();
+    await until(() => f.endpoint.registry.statements().possible, 'statements possible');
+    const folder = join(home, 'work/other');
+    const outcome = await admitted(a, await stepped(f, a, 'session.projects.addFolder', { directory: `${home}/work/../work/other`, into: 'id-nobody-has' }));
+    expect(claimed(f, 'session.projects.addFolder').at(-1)?.input).toMatchObject({ directory: folder, into: 'id-nobody-has', opened: [] });
+    expect(JSON.stringify(outcome)).toContain('unknown-project');
+  });
+
+  // the registry branch's panel 1, A2 (scalpel-1#1's link half): a link carries the path its asker confirmed, which the
+  // machine checks against the row before it changes anything
+  it('carry a link’s `expect` to the machine, which refuses `changed` a row no longer at that path, nothing changed', async () => {
+    const { f, home, a, index } = await setup();
+    await until(() => f.endpoint.registry.statements().possible, 'statements possible');
+    const folder = join(home, 'work/scrape');
+    const pid = ((await admitted(a, await stepped(f, a, 'session.projects.addFolder', { directory: folder }))).result as { project: { id: string } }).project.id;
+    writeFileSync(join(folder, '.smns'), JSON.stringify({ project: 'public-id', name: 'Public', hub: { org: ORG } }));
+    expect(await admitted(a, await stepped(f, a, 'session.projects.link', { id: pid, into: 'public-id', expect: { path: folder } }))).toMatchObject({ state: 'done', result: { project: { org: { smnsId: 'public-id' } } } });
+    expect(claimed(f, 'session.projects.link').at(-1)?.input).toEqual({ id: pid, into: 'public-id', expect: { path: folder }, opened: [] });
+    const moved = join(home, 'work/moved');
+    expect(await admitted(a, await stepped(f, a, 'session.projects.relocate', { id: pid, directory: moved }))).toMatchObject({ state: 'done' });
+    const stale = await admitted(a, await stepped(f, a, 'session.projects.link', { id: pid, into: null, expect: { path: folder } }));
+    expect(JSON.stringify(stale)).toContain('changed');
+    expect(index.projects.list().find((p) => p.id === pid)).toMatchObject({ directory: moved, org: { smnsId: 'public-id' } });
+  });
+
+  // M9's review 1, F1: the setup's checked reader, which a remote addFolder derives through, guards resolve and relocate
+  it('read a folder’s `.smns` for resolve and relocate through the setup’s checked reader, never one linked into a folder macOS protects that was not opened', async () => {
+    const { f, home, a, index } = await setup();
+    mkdirSync(join(home, 'Desktop'), { recursive: true });
+    writeFileSync(join(home, 'Desktop/private-smns'), JSON.stringify({ project: 'private-id', name: 'private label' }));
+    const linked = join(home, 'work/linked');
+    mkdirSync(linked, { recursive: true });
+    symlinkSync(join(home, 'Desktop/private-smns'), join(linked, '.smns'));
+    const resolved = await call(a, 'session.projects.resolve', { directory: linked });
+    expect(JSON.stringify(resolved)).not.toMatch(/private-id|private label/);
+    const pid = ((await admitted(a, await stepped(f, a, 'session.projects.addFolder', { directory: join(home, 'work/scrape') }))).result as { project: { id: string } }).project.id;
+    const moved = await admitted(a, await stepped(f, a, 'session.projects.relocate', { id: pid, directory: linked }));
+    for (let k = 0; k < 100; k++) await new Promise((resolve) => setImmediate(resolve));
+    expect(JSON.stringify(moved)).not.toMatch(/private-id|private label/);
+    expect(JSON.stringify(index.projects.list({ includeHidden: true }))).not.toMatch(/private-id|private label/);
+  });
+
+  // M9's review 1, Fix 1c: a remote link's own-`.smns` read is the setup guard's too, so its refusal is no oracle
+  it('read a remote link’s own `.smns` through the setup’s checked reader: one linked into an unopened protected folder names nothing', async () => {
+    const { f, home, a } = await setup();
+    await until(() => f.endpoint.registry.statements().possible, 'statements possible');
+    mkdirSync(join(home, 'Desktop'), { recursive: true });
+    writeFileSync(join(home, 'Desktop/private-smns'), JSON.stringify({ project: 'private-id', hub: { org: ORG } }));
+    const add = async (folder: string) => ((await admitted(a, await stepped(f, a, 'session.projects.addFolder', { directory: join(home, folder) }))).result as { project: { id: string } }).project.id;
+    const leaked = await add('work/scrape');
+    symlinkSync(join(home, 'Desktop/private-smns'), join(home, 'work/scrape/.smns'));
+    const probe = await admitted(a, await stepped(f, a, 'session.projects.link', { id: leaked, into: 'private-id' }));
+    expect(JSON.stringify(probe)).toContain('unknown-project'); // as for an id it guessed wrong
+    // once the member opened that folder, the read is theirs: the endpoint carries their opens to the machine
+    expect(await call(a, 'machine.folders.list', { path: '~/Desktop', open: true })).toMatchObject({ ok: true });
+    expect(await admitted(a, await stepped(f, a, 'session.projects.link', { id: leaked, into: 'private-id' }))).toMatchObject({ state: 'done', result: { project: { id: leaked, org: { smnsId: 'private-id' } } } });
+    // the folder's own file, in no protected folder: its id links over the network as here
+    const own = await add('work/other');
+    writeFileSync(join(home, 'work/other/.smns'), JSON.stringify({ project: 'own-id', hub: { org: ORG } }));
+    expect(await admitted(a, await stepped(f, a, 'session.projects.link', { id: own, into: 'own-id' }))).toMatchObject({ state: 'done', result: { project: { id: own } } });
+  });
+
+  // M9's re-review, Fix 2: every derivation a remote act answers reads through the setup's checked reader
+  describe('answer no derivation that read past the asker’s opens', () => {
+    /** A declared folder linked to the id its own `.smns` names, whose `.smns` then turns into a link into an unopened ~/Desktop. */
+    async function swapped() {
+      const s = await setup();
+      const { f, home, a } = s;
+      await until(() => f.endpoint.registry.statements().possible, 'statements possible');
+      const folder = join(home, 'work/scrape');
+      const pid = ((await admitted(a, await stepped(f, a, 'session.projects.addFolder', { directory: folder }))).result as { project: { id: string } }).project.id;
+      writeFileSync(join(folder, '.smns'), JSON.stringify({ project: 'public-id', name: 'Public', hub: { org: ORG } }));
+      expect(await admitted(a, await stepped(f, a, 'session.projects.link', { id: pid, into: 'public-id' }))).toMatchObject({ state: 'done' });
+      mkdirSync(join(home, 'Desktop'), { recursive: true });
+      writeFileSync(join(home, 'Desktop/private-smns'), JSON.stringify({ project: 'private-id', name: 'private label', hub: { org: ORG } }));
+      rmSync(join(folder, '.smns'));
+      symlinkSync(join(home, 'Desktop/private-smns'), join(folder, '.smns'));
+      return { ...s, folder, pid };
+    }
+    const quiet = () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      return () => warn.mockRestore();
+    };
+
+    it('an unlink', async () => {
+      const { f, a, pid, index } = await swapped();
+      const restore = quiet();
+      try {
+        const answer = await admitted(a, await stepped(f, a, 'session.projects.link', { id: pid, into: null }));
+        expect(answer.state).toBe('done');
+        expect(JSON.stringify(answer)).not.toMatch(/private-id|private label/);
+        expect(JSON.stringify(index.projects.list({ includeHidden: true }))).not.toMatch(/private-id|private label/);
+      } finally {
+        restore();
+      }
+    });
+
+    it('a link to an id the records already name', async () => {
+      const { f, a, home, index } = await swapped();
+      // a second folder, its own `.smns` a link into the same unopened folder, linked to the id this machine's record names
+      const other = join(home, 'work/other');
+      const oid = ((await admitted(a, await stepped(f, a, 'session.projects.addFolder', { directory: other }))).result as { project: { id: string } }).project.id;
+      symlinkSync(join(home, 'Desktop/private-smns'), join(other, '.smns'));
+      // a verified record names `public-id` (the suite's index has no projects source to sign this machine's own)
+      vi.spyOn(f.endpoint.registry, 'project').mockImplementation((id) => (id === 'public-id' ? { hub: true, nameRev: 0 } : null));
+      const restore = quiet();
+      try {
+        const answer = await admitted(a, await stepped(f, a, 'session.projects.link', { id: oid, into: 'public-id' }));
+        expect(answer.state).toBe('done');
+        expect(JSON.stringify(answer)).not.toMatch(/private-id|private label/);
+        expect(JSON.stringify(index.projects.list({ includeHidden: true }))).not.toMatch(/private-id|private label/);
+      } finally {
+        restore();
+      }
+    });
+
+    it('a remove that expects a project: the right guess and a wrong one answer alike, and name nothing read', async () => {
+      // a row with no statement (declared while no sminos reads locations), so the folder's own `.smns` decides its project
+      const { f, a, home } = await setup(['audience', 'record']);
+      const folder = join(home, 'work/scrape');
+      const pid = ((await admitted(a, await stepped(f, a, 'session.projects.addFolder', { directory: folder }))).result as { project: { id: string } }).project.id;
+      mkdirSync(join(home, 'Desktop'), { recursive: true });
+      writeFileSync(join(home, 'Desktop/private-smns'), JSON.stringify({ project: 'private-id', name: 'private label', hub: { org: ORG } }));
+      symlinkSync(join(home, 'Desktop/private-smns'), join(folder, '.smns'));
+      const restore = quiet();
+      try {
+        const wrong = await admitted(a, action(f, a, 'session.projects.remove', { id: pid, expect: { path: folder, project: 'guess' } }));
+        const right = await admitted(a, action(f, a, 'session.projects.remove', { id: pid, expect: { path: folder, project: 'private-id' } }));
+        expect(JSON.stringify(wrong)).not.toMatch(/private-id|private label/);
+        expect([right.state, right.error?.message?.split(':')[0]]).toEqual([wrong.state, wrong.error?.message?.split(':')[0]]);
+      } finally {
+        restore();
+      }
+    });
+
+    // the re-review of Fix 2 (Fix 2b): a statement at the row's own folder decides with no file read; with none left, the
+    // act is refused before anything changes
+    /** What sminos would be told of the index's declared rows now (the endpoint's own build of them). */
+    async function told(f: Fixture, index: Index) {
+      let file = structuredClone(NO_PROJECTS_KEPT);
+      const own = new OwnProjects({ ref: () => f.ref, enrollment: () => ({ org: ORG, name: 'mini' }), key: () => null, head: () => null, now: Date.now, send: () => false, hubKeeps: () => false, source: index.projectsSource(), store: { read: () => file, write: (next) => void (file = next) }, known: () => [], moved: () => {}, log: () => {} });
+      return own.publish();
+    }
+
+    it('an unlink of a minted row: its minted id decides, the label stays as stored, and sminos is told the minted id', async () => {
+      const { f, a, pid, index, folder } = await swapped();
+      const minted = index.projects.statementRow(pid as never).minted;
+      expect(minted).not.toBeNull();
+      const restore = quiet();
+      try {
+        const answer = await admitted(a, await stepped(f, a, 'session.projects.link', { id: pid, into: null }));
+        expect(answer).toMatchObject({ state: 'done', result: { project: { id: pid, org: { key: 'smns:public-id', name: 'Public', smnsId: minted } } } });
+        expect(index.projects.statementRow(pid as never).linked).toBeNull();
+        const locations = await told(f, index);
+        expect(locations?.at.find((l) => l.path === folder)?.project).toBe(minted);
+      } finally {
+        restore();
+      }
+    });
+
+    it('an unlink that would leave the rule a file the asker cannot read: refused `unresolved`, nothing changed', async () => {
+      const { f, a, home, index } = await setup();
+      await until(() => f.endpoint.registry.statements().possible, 'statements possible');
+      const folder = join(home, 'work/other');
+      writeFileSync(join(folder, '.smns'), JSON.stringify({ project: 'public-id', name: 'Public', hub: { org: ORG } })); // its file decides: no minted id
+      const pid = ((await admitted(a, await stepped(f, a, 'session.projects.addFolder', { directory: folder }))).result as { project: { id: string } }).project.id;
+      expect(index.projects.statementRow(pid as never).minted).toBeNull();
+      expect(await admitted(a, await stepped(f, a, 'session.projects.link', { id: pid, into: 'public-id' }))).toMatchObject({ state: 'done' });
+      mkdirSync(join(home, 'Desktop'), { recursive: true });
+      writeFileSync(join(home, 'Desktop/private-smns'), JSON.stringify({ project: 'private-id', name: 'private label', hub: { org: ORG } }));
+      rmSync(join(folder, '.smns'));
+      symlinkSync(join(home, 'Desktop/private-smns'), join(folder, '.smns'));
+      const restore = quiet();
+      try {
+        const answer = await admitted(a, await stepped(f, a, 'session.projects.link', { id: pid, into: null }));
+        expect(answer.state).toBe('failed');
+        expect(answer.error?.message).toMatch(/^unresolved: /);
+        expect(JSON.stringify(answer)).not.toMatch(/private-id|private label/);
+        expect(index.projects.statementRow(pid as never).linked).toBe('public-id');
+        expect((await told(f, index))?.at.find((l) => l.path === folder)?.project).toBe('public-id');
+      } finally {
+        restore();
+      }
+    });
+
+    it('a remove that expects a stated row’s project: its own statement decides, with no file read', async () => {
+      const { f, a, pid, index, folder } = await swapped();
+      const restore = quiet();
+      try {
+        // its link decides, the file never read
+        expect(await admitted(a, action(f, a, 'session.projects.remove', { id: pid, expect: { path: folder, project: 'public-id' } }))).toMatchObject({ state: 'done' });
+        expect(index.projects.list({ includeHidden: true }).find((p) => p.id === pid)?.hidden).toBe(true);
+      } finally {
+        restore();
+      }
+    });
+
+    // the re-review of Fix 2b (Fix 2c): in a linked worktree the owning checkout decides (design §8), never a statement on
+    // the worktree folder; the rule is asked, and a read of it the asker cannot make refuses the act before anything changes
+    /** A main checkout under the home with a linked worktree beside it, made from git's files; the worktree declared. */
+    async function worktree(index: Index, f: Fixture, home: string) {
+      const main = join(home, 'work/main');
+      const wt = join(home, 'work/side');
+      const admin = join(main, '.git/worktrees/side');
+      for (const dir of [join(main, '.git/objects'), join(main, '.git/refs'), admin, wt]) mkdirSync(dir, { recursive: true });
+      writeFileSync(join(main, '.git/config'), '[core]\nrepositoryformatversion = 0\nbare = false\n');
+      writeFileSync(join(main, '.git/HEAD'), 'ref: refs/heads/main\n');
+      writeFileSync(join(admin, 'HEAD'), 'ref: refs/heads/side\n');
+      writeFileSync(join(admin, 'commondir'), '../..\n');
+      writeFileSync(join(admin, 'gitdir'), `${join(wt, '.git')}\n`);
+      writeFileSync(join(wt, '.git'), `gitdir: ${admin}\n`);
+      const pid = index.projects.add(wt).id;
+      return { main, wt, pid, refresh: () => index.refreshOrgProjects({ machine: f.services.machine.ref, enrollment: () => ({ org: ORG, machine: 'mini' }), home }) };
+    }
+
+    it('a linked worktree’s row: the link answers and a checked remove expects the owning checkout’s project', async () => {
+      const { f, a, home, index } = await setup();
+      await until(() => f.endpoint.registry.statements().possible, 'statements possible');
+      const { main, wt, pid, refresh } = await worktree(index, f, home);
+      writeFileSync(join(main, '.smns'), JSON.stringify({ project: 'root-project', name: 'Root', hub: { org: ORG } }));
+      await refresh();
+      expect((await index.statements.resolve(wt)).project).toBe('root-project');
+      vi.spyOn(f.endpoint.registry, 'project').mockImplementation((id) => (id === 'linked-project' ? { hub: true, nameRev: 0 } : null));
+      expect(await admitted(a, await stepped(f, a, 'session.projects.link', { id: pid, into: 'linked-project' }))).toMatchObject({ state: 'done', result: { project: { org: { smnsId: 'root-project' } } } });
+      expect(await admitted(a, action(f, a, 'session.projects.remove', { id: pid, expect: { path: wt, project: 'root-project' } }))).toMatchObject({ state: 'done' });
+    });
+
+    it('a linked worktree’s row whose owning checkout’s `.smns` the asker cannot read: a link is refused `unresolved`, nothing changed', async () => {
+      const { f, a, home, index } = await setup();
+      await until(() => f.endpoint.registry.statements().possible, 'statements possible');
+      // every derivation the machine makes of a row (the new row's own, a refresh's, a retry's) goes through `deriveRow`:
+      // counted, so the file changes only once none is in flight and the last one answered (none waits to be retried)
+      const derive = index.statements.deriveRow.bind(index.statements);
+      let inFlight = 0;
+      let answered = true;
+      vi.spyOn(index.statements, 'deriveRow').mockImplementation(async (...args) => {
+        inFlight += 1;
+        try {
+          const out = await derive(...args);
+          answered = out !== null;
+          return out;
+        } finally {
+          inFlight -= 1;
+        }
+      });
+      const { main, wt, pid, refresh } = await worktree(index, f, home);
+      writeFileSync(join(main, '.smns'), JSON.stringify({ project: 'root-project', name: 'Root', hub: { org: ORG } }));
+      await refresh();
+      // the machine's own derivations of the new row done before the file changes (they read as the machine, unguarded):
+      // the row's creation started one before the file was written, which a slow runner finishes after the refresh's
+      await until(() => index.projects.record(pid).org?.smnsId === 'root-project' && inFlight === 0 && answered, 'the row derived, no derivation in flight');
+      mkdirSync(join(home, 'Desktop'), { recursive: true });
+      writeFileSync(join(home, 'Desktop/private-smns'), JSON.stringify({ project: 'private-id', name: 'private label', hub: { org: ORG } }));
+      rmSync(join(main, '.smns'));
+      symlinkSync(join(home, 'Desktop/private-smns'), join(main, '.smns'));
+      vi.spyOn(f.endpoint.registry, 'project').mockImplementation((id) => (id === 'linked-project' ? { hub: true, nameRev: 0 } : null));
+      const restore = quiet();
+      try {
+        const answer = await admitted(a, await stepped(f, a, 'session.projects.link', { id: pid, into: 'linked-project' }));
+        expect([answer.state, answer.error?.message?.split(':')[0]]).toEqual(['failed', 'unresolved']);
+        expect(JSON.stringify(answer)).not.toMatch(/private-id|private label/);
+        expect(index.projects.statementRow(pid as never).linked).toBeNull();
+        expect(index.projects.record(pid as never).org?.smnsId).toBe('root-project');
+        const removed = await admitted(a, action(f, a, 'session.projects.remove', { id: pid, expect: { path: wt, project: 'root-project' } }));
+        expect([removed.state, removed.error?.message?.split(':')[0]]).toEqual(['failed', 'unresolved']);
+      } finally {
+        restore();
+      }
+    });
+  });
+});
+

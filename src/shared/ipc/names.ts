@@ -67,6 +67,7 @@ import * as remote from './names/remote'; // P5 O7 M2
 import * as browserEngine from './names/browser-engine'; // P5 O17
 import * as channel from './names/channel'; // P5 O8 M7b
 import * as endpoint from './names/endpoint'; // P5 O8 M6b
+import * as projects from './names/projects'; // the project registry's M12
 
 export const NAMESPACES = [
   'session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings',
@@ -115,6 +116,7 @@ export const NAMESPACES = [
   'browserEngine', // P5 O17
   'channel', // P5 O8 M7b
   'endpoint', // P5 O8 M6b
+  'projects', // the project registry's M12
 ] as const;
 export type Namespace = (typeof NAMESPACES)[number];
 
@@ -150,17 +152,18 @@ export const NAMES = {
   browserEngine, // P5 O17
   channel, // P5 O8 M7b
   endpoint, // P5 O8 M6b
+  projects, // the project registry's M12
 } as const satisfies { [N in Namespace]: { commands: readonly `${N}.${string}`[]; events: readonly `${N}.${string}`[] } };
 
 type Names = typeof NAMES;
 export type BridgedCommandName = { [N in Namespace]: Names[N]['commands'][number] }[Namespace];
-export type MainOnlyCommandName = (typeof engine.mainOnlyCommands)[number] | (typeof host.mainOnlyCommands)[number] /* E10: host's */ | (typeof artifacts.mainOnlyCommands)[number] /* P3-A M4 */ | (typeof library.mainOnlyCommands)[number] /* P3-L M1 */ | (typeof designSystems.mainOnlyCommands)[number] /* P3-D */ | (typeof connectors.mainOnlyCommands)[number] /* P3-H H3b */ | (typeof maws.mainOnlyCommands)[number] /* P3-E E3 */ | (typeof session.mainOnlyCommands)[number] | (typeof customization.mainOnlyCommands)[number] /* P4-AGG M4 */ | (typeof pty.mainOnlyCommands)[number] /* P5 O2 M4 */ | (typeof daemon.mainOnlyCommands)[number] /* P5 O2 M5 */ | (typeof fs.mainOnlyCommands)[number] | (typeof machine.mainOnlyCommands)[number] | (typeof clientPort.mainOnlyCommands)[number] /* P5 O3-D */ | (typeof files.mainOnlyCommands)[number] /* P5 O3-E */ | (typeof render.mainOnlyCommands)[number] /* P5 O5 M3 */ | (typeof delivery.mainOnlyCommands)[number] /* P5 O4 M2 */ | (typeof browserEngine.mainOnlyCommands)[number] /* P5 O17 */ | (typeof channel.mainOnlyCommands)[number] /* P5 O8 M7b */ | (typeof endpoint.mainOnlyCommands)[number]; // P5 O8 M6b
-export const MAIN_ONLY_COMMANDS: readonly MainOnlyCommandName[] = [...engine.mainOnlyCommands, ...host.mainOnlyCommands, ...artifacts.mainOnlyCommands /* P3-A M4 */, ...library.mainOnlyCommands /* P3-L M1 */, ...designSystems.mainOnlyCommands /* P3-D */, ...connectors.mainOnlyCommands /* P3-H H3b */, ...maws.mainOnlyCommands /* P3-E E3 */, ...session.mainOnlyCommands /* P4-AGG M4 */, ...customization.mainOnlyCommands /* P4-AGG M4 */, ...pty.mainOnlyCommands /* P5 O2 M4 */, ...daemon.mainOnlyCommands /* P5 O2 M5 */, ...fs.mainOnlyCommands, ...machine.mainOnlyCommands, ...clientPort.mainOnlyCommands /* P5 O3-D */, ...files.mainOnlyCommands /* P5 O3-E */, ...render.mainOnlyCommands /* P5 O5 M3 */, ...delivery.mainOnlyCommands /* P5 O4 M2 */, ...browserEngine.mainOnlyCommands /* P5 O17 */, ...channel.mainOnlyCommands /* P5 O8 M7b */, ...endpoint.mainOnlyCommands /* P5 O8 M6b */];
+export type MainOnlyCommandName = (typeof engine.mainOnlyCommands)[number] | (typeof host.mainOnlyCommands)[number] /* E10: host's */ | (typeof artifacts.mainOnlyCommands)[number] /* P3-A M4 */ | (typeof library.mainOnlyCommands)[number] /* P3-L M1 */ | (typeof designSystems.mainOnlyCommands)[number] /* P3-D */ | (typeof connectors.mainOnlyCommands)[number] /* P3-H H3b */ | (typeof maws.mainOnlyCommands)[number] /* P3-E E3 */ | (typeof session.mainOnlyCommands)[number] | (typeof customization.mainOnlyCommands)[number] /* P4-AGG M4 */ | (typeof pty.mainOnlyCommands)[number] /* P5 O2 M4 */ | (typeof daemon.mainOnlyCommands)[number] /* P5 O2 M5 */ | (typeof fs.mainOnlyCommands)[number] | (typeof machine.mainOnlyCommands)[number] | (typeof clientPort.mainOnlyCommands)[number] /* P5 O3-D */ | (typeof files.mainOnlyCommands)[number] /* P5 O3-E */ | (typeof render.mainOnlyCommands)[number] /* P5 O5 M3 */ | (typeof delivery.mainOnlyCommands)[number] /* P5 O4 M2 */ | (typeof browserEngine.mainOnlyCommands)[number] /* P5 O17 */ | (typeof channel.mainOnlyCommands)[number] /* P5 O8 M7b */ | (typeof endpoint.mainOnlyCommands)[number] /* P5 O8 M6b */ | (typeof projects.mainOnlyCommands)[number]; // the project registry's M12
+export const MAIN_ONLY_COMMANDS: readonly MainOnlyCommandName[] = [...engine.mainOnlyCommands, ...host.mainOnlyCommands, ...artifacts.mainOnlyCommands /* P3-A M4 */, ...library.mainOnlyCommands /* P3-L M1 */, ...designSystems.mainOnlyCommands /* P3-D */, ...connectors.mainOnlyCommands /* P3-H H3b */, ...maws.mainOnlyCommands /* P3-E E3 */, ...session.mainOnlyCommands /* P4-AGG M4 */, ...customization.mainOnlyCommands /* P4-AGG M4 */, ...pty.mainOnlyCommands /* P5 O2 M4 */, ...daemon.mainOnlyCommands /* P5 O2 M5 */, ...fs.mainOnlyCommands, ...machine.mainOnlyCommands, ...clientPort.mainOnlyCommands /* P5 O3-D */, ...files.mainOnlyCommands /* P5 O3-E */, ...render.mainOnlyCommands /* P5 O5 M3 */, ...delivery.mainOnlyCommands /* P5 O4 M2 */, ...browserEngine.mainOnlyCommands /* P5 O17 */, ...channel.mainOnlyCommands /* P5 O8 M7b */, ...endpoint.mainOnlyCommands /* P5 O8 M6b */, ...projects.mainOnlyCommands /* the project registry's M12 */];
 export type BridgedEventName = { [N in Namespace]: Names[N]['events'][number] }[Namespace];
 // P5 O8 M7b: an event main and the endpoint hear and no window does: the preload refuses its subscription, and main sends
 // it to no window, whichever path brings it (src/main/ipc/events.ts).
-export type MainOnlyEventName = (typeof channel.mainOnlyEvents)[number];
-export const MAIN_ONLY_EVENTS: readonly MainOnlyEventName[] = [...channel.mainOnlyEvents];
+export type MainOnlyEventName = (typeof channel.mainOnlyEvents)[number] | (typeof projects.mainOnlyEvents)[number]; // the project registry's M12: the act request, main's to show
+export const MAIN_ONLY_EVENTS: readonly MainOnlyEventName[] = [...channel.mainOnlyEvents, ...projects.mainOnlyEvents];
 
 // Pure, so a bundle that takes only `NAMESPACES` or a channel (the renderer and main, through `./schema.ts`) drops
 // the lists; the renderer's and main's bundles are byte-identical to before the split.

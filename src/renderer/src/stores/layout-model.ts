@@ -536,10 +536,17 @@ export function refile(main: LayoutMain, setOf: SetOfTab, rekeyOf?: RekeyOf): La
 // still an address is still to migrate, which makes the migration resumable with no version, across machines that load
 // late. `RekeyOf` answers for an address key what it becomes: the key its project's sessions file under now, 'gone' when
 // its machine has loaded and no longer has the project, or 'wait' while its machine's projects (or the project's key)
-// are not known; an address that is what its project files under now answers itself. It is asked of address keys only.
-export type RekeyOf = (key: ProjectId) => TabSetKey | 'gone' | 'wait';
+// are not known; an address that is what its project files under now answers itself.
+// The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §J.2; design §2, "the second's
+// set is moved whole into the first's"): it is asked of every other project key too, neither a machine's row nor the
+// no-project set, and answers the key that entry belongs under now: itself while it is a row's, else its successor
+// (`stores/org-projects.ts`'s `successorOf`); 'wait' while it can't say. Such a key is never 'gone': with no successor it
+// stays, as a hidden project's set does.
+export type RekeyOf = (key: TabSetKey) => TabSetKey | 'gone' | 'wait';
 
 const isProjectAddress = (key: string): key is ProjectId => key !== NO_PROJECT && isAddress(key);
+// The keys `RekeyOf` is asked of: a project's address, an org project's key; never a machine's row or the no-project set.
+const isRekeyable = (key: string): key is TabSetKey => key !== NO_PROJECT && !key.startsWith('machine:');
 
 // Whole sets move, not tabs one by one (W12's `refile` moves session tabs only, which would strand a set's file and
 // artifact tabs under a key nothing shows). Sets landing on one key merge: the base is the one that was current, else
@@ -551,7 +558,7 @@ export function rekeySets(main: LayoutMain, rekeyOf: RekeyOf, setOf: SetOfTab): 
   const keys = setKeys(main);
   const target = new Map<TabSetKey, TabSetKey | 'gone'>();
   for (const key of keys) {
-    if (!isProjectAddress(key)) continue;
+    if (!isRekeyable(key)) continue;
     const to = rekeyOf(key);
     if (to !== 'wait' && to !== key) target.set(key, to);
   }
@@ -607,7 +614,7 @@ export function rekeySets(main: LayoutMain, rekeyOf: RekeyOf, setOf: SetOfTab): 
 export function rekeyContexts<V>(contexts: Readonly<Record<string, V>>, rekeyOf: RekeyOf, bases: ReadonlyMap<TabSetKey, TabSetKey>): Record<string, V> {
   const out: Record<string, V> = {};
   for (const [key, value] of Object.entries(contexts)) {
-    const to = isProjectAddress(key) ? rekeyOf(key) : key;
+    const to = isRekeyable(key) ? rekeyOf(key) : key;
     if (to === 'gone') continue;
     const at = to === 'wait' ? key : to;
     if (Object.hasOwn(out, at) && bases.get(at as TabSetKey) !== key) continue; // the base's, or the first, stands
@@ -621,7 +628,7 @@ export function rekeyContexts<V>(contexts: Readonly<Record<string, V>>, rekeyOf:
 export function rekeyExpanded(list: readonly ProjectKey[], rekeyOf: RekeyOf, local: MachineRef): ProjectKey[] {
   const out: ProjectKey[] = [];
   for (const key of list) {
-    const to = key === 'other' ? machineKey(local) : isProjectAddress(key) ? rekeyOf(key) : key;
+    const to = key === 'other' ? machineKey(local) : isRekeyable(key) ? rekeyOf(key) : key;
     const at = (to === 'wait' ? key : to) as ProjectKey | 'gone'; // a row's key is never the no-project set's
     if (at !== 'gone' && !out.includes(at)) out.push(at);
   }

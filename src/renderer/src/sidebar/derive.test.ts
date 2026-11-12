@@ -15,6 +15,7 @@ import { holderLine, needsYou, waitingItem, type NeedsYouRow } from '../attentio
 import { listedGlyph } from '../attention/glyph';
 import type { ListedSession } from '../stores/sessions';
 import type { RowKey } from '../stores/org-projects';
+import { EMPTY_REGISTRY, registryRecords, type OrgProjectLocation, type OrgProjects } from '../stores/registry';
 import { lastActivity, orderProjects, seenActivity, type SeenActivity } from '../overview/derive';
 import { pageScenario } from '../test-support/shell-stores';
 import {
@@ -702,5 +703,53 @@ describe('sidebar row text', () => {
     const discovered = record('d', { updatedAt: '2026-09-28T10:29:30Z' });
     expect(sessionAge(discovered, digest('d', { phase: 'exited', lastTurnEndedAt: '2026-09-26T10:00:00Z' }), now)).toBe(REL.amount(2, 'day'));
     expect(needsYouAge(item('r', 'permission', '2026-09-28T10:26:00Z'), now)).toBe(REL.amount(4, 'minute'));
+  });
+});
+
+// The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §J.1; M11's decisions): one row
+// per project id, named as main assembled it and naming its machines; a row whose folders only the registry names follows
+// this app's machines' rows, by name (provisional: Plan of Work, M11).
+describe('the project registry’s rows', () => {
+  const ID = '11111111-2222-4333-8444-555555555555';
+  const AWAY_ID = '66666666-7777-4888-9999-aaaaaaaaaaaa';
+  const SEEN_ID = '99999999-8888-4777-8666-555555555555';
+  const location = (machine: MachineRef, pid: string, key: string): OrgProjectLocation => ({ machine, pid, path: `/srv/${pid}`, key: key as OrgKey, name: pid, source: 'remote', acts: true });
+  const registry: OrgProjects = {
+    ...EMPTY_REGISTRY,
+    projects: [
+      { id: ID, name: 'Northwind app', hub: true, renamable: true, locations: [location(TEST_MACHINE, 'app', 'remote:example.org/app'), location(OTHER_MACHINE, 'app-clone', 'remote:example.org/app')] },
+      { id: AWAY_ID, name: 'scrape', hub: true, renamable: true, locations: [location(OTHER_MACHINE, 'scrape', `folder:${OTHER_MACHINE}:scrape`)] },
+      { id: SEEN_ID, name: 'Alpha reports', hub: true, renamable: false, locations: [] },
+    ],
+    keys: { [ID]: 'remote:example.org/app' as OrgKey, [AWAY_ID]: `id:${AWAY_ID}` as OrgKey, [SEEN_ID]: `id:${SEEN_ID}` as OrgKey },
+  };
+  const app = projectOn(TEST_MACHINE, 'app', 0, { name: 'app', org: { key: 'remote:example.org/app' as OrgKey, name: 'app', source: 'remote', smnsId: ID } });
+  const all = new Map([[app.id, app], ...registryRecords(registry, TEST_MACHINE)]);
+
+  it('names each row as the registry does and its machines this Mac’s first, the rows only the registry names after, by name', () => {
+    const entries = projectList(input({ records: new Map(), digests: new Map(), projects: all, rows: [], registry }));
+    expect(entries.map((e) => [e.key, e.name, e.machines, e.registry?.id ?? null])).toEqual([
+      ['remote:example.org/app', 'Northwind app', [TEST_MACHINE, OTHER_MACHINE], ID],
+      [`id:${SEEN_ID}`, 'Alpha reports', [], SEEN_ID],
+      [`id:${AWAY_ID}`, 'scrape', [OTHER_MACHINE], AWAY_ID],
+    ]);
+    expect(entries[0].project?.id).toBe(app.id); // this Mac's folder acts for the row
+    expect(entries[2].project?.id).toBe(there('scrape')); // the other machine's location, from the registry
+    expect(entries[1].project).toBeNull(); // seen only through a session: no folder to act through
+  });
+
+  // review 1, finding 4: a project seen only through others' sessions keeps the People capability with no checkout
+  it('counts others’ sessions of a project with no location under its row, and draws them once its People toggle is on', () => {
+    const theirs: ListedSession = { ...remoteRow(OTHER_MACHINE, 'b9', { orgKey: `id:${SEEN_ID}` as OrgKey, project: SEEN_ID, mine: false, owners: ['ana'] }), appId: there('b9') as AppSessionId };
+    const listed = new Map([[theirs.appId, theirs]]);
+    const row = (people: ReadonlySet<RowKey>) => projectList(input({ records: new Map(), digests: new Map(), projects: all, rows: [], registry, listed, people })).find((e) => e.key === `id:${SEEN_ID}`)!;
+    expect([row(new Set()).others, row(new Set()).listed.map((l) => l.appId)]).toEqual([1, []]);
+    expect([row(new Set([`id:${SEEN_ID}` as RowKey])).others, row(new Set([`id:${SEEN_ID}` as RowKey])).listed.map((l) => l.appId)]).toEqual([0, [there('b9')]]);
+    expect(row(new Set()).project).toBeNull(); // still no folder to act through
+  });
+
+  it('signed out, rows are as before: by label, naming no registry and no machine beyond their checkouts', () => {
+    const entries = projectList(input({ records: new Map(), digests: new Map(), projects: mapOf([app]), rows: [] }));
+    expect(entries.map((e) => [e.key, e.name, e.machines, e.registry])).toEqual([['remote:example.org/app', 'app', [TEST_MACHINE], null]]);
   });
 });

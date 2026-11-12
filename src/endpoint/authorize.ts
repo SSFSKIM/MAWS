@@ -119,7 +119,11 @@ export type Who = { member: string; device: string; clientClass: DeviceClass; cl
  * placements it read, the head, the policy): an executor that must await something between the decision and the effect
  * (a lane B act's status read) asks it in the step it hands the act on.
  */
-export type Decision = { ok: true; target?: SessionTarget; artifact?: ArtifactTarget; setup?: SetupTarget; reader?: Reader; stands?: () => boolean } | { ok: false; reason: RefusalReason };
+/** The acts that read in their row's folder, which names no directory the setup policy checks: they take the asker's opens. */
+const ROW_FOLDER_ACTS: ReadonlySet<string> = new Set(['session.projects.link', 'session.projects.remove']);
+// `opened` (M9's review 1, Fix 1c): the asking member's opens for an act that reads in a folder it names by its row, not
+// by a directory the setup policy checks (`session.projects.link`, `remove`)
+export type Decision = { ok: true; target?: SessionTarget; artifact?: ArtifactTarget; setup?: SetupTarget; opened?: string[]; reader?: Reader; stands?: () => boolean } | { ok: false; reason: RefusalReason };
 /** P5 O7 M9: a setup row's directory as the setup policy resolved and checked it, which its executor acts on (never the input's spelling). */
 // `opened`: the asking member's opens, which the machine's guard reads by (never another member's; M9's review)
 export type SetupTarget = { directory: string; opened: string[] };
@@ -510,7 +514,8 @@ export class Authorizer {
     // 8. Presence, once the decision is known to stand. A read open (P5 O7 M5b) asks no step-up: its device is the head's.
     const placed: Decision = artifact !== undefined ? { ok: true, artifact: { artifactId: artifact.artifactId } } : target === undefined ? { ok: true } : { ok: true, target };
     // P5 O8 M6a: whose reading its `machine` requests read and write, by the owners this decision read (readers.ts)
-    const granted: Decision = { ...placed, ...(setup === undefined ? {} : { setup }), reader: readerOf(who.member, owners) };
+    const opened = ROW_FOLDER_ACTS.has(name) ? { opened: this.#setup.openedBy(who.member) } : {};
+    const granted: Decision = { ...placed, ...(setup === undefined ? {} : { setup }), ...opened, reader: readerOf(who.member, owners) };
     if (kind !== 'act' && kind !== 'stream') return decided(granted);
     const device = deviceOf(org.head, who.member, who.device);
     if (device === undefined) return no('removed');

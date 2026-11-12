@@ -474,6 +474,7 @@ It can:
 - see routing metadata: org, member ids, machine refs and names, project ids, session ids, sizes, timing;
 - see the listing fields of sessions that aren't `private`, and the log plane's contents, which are org-readable by design (§5.7, §6.2) except audience streams, which it serves only to their audience (O18 D6; amended 2026-11-05);
 - hold each session's audience and `policyRev` in its policy registry, and refuse at upload an event out of reach (O18 D5); a refusal confers nothing, since the receiving endpoint still authorizes every delivery;
+- read each machine's projects record, which it keeps and hands to every member's device and every machine: the declared folders' paths on that machine and their repositories' observed remote keys, beside the project ids and names. A member with a grant on a machine sees every declared path on it. Nothing else of a folder is in the record: no file name, branch or content (the project registry, `docs/doperpowers/specs/2026-11-10-project-registry-design.md` §11 and §13; amended 2026-11-10);
 - delay or drop frames, or deny service;
 - delay a revocation, but only visibly to the admin (§5.2);
 - report presence and pending counts, which the app labels as hub-reported.
@@ -483,7 +484,7 @@ It can't:
 - forge an action, a log event or an org-state version;
 - replay an action;
 - make a person approve something other than what the machine holds;
-- fabricate a listing, since listings are machine-signed (§6.2).
+- fabricate a listing or a projects record, since both are machine-signed (§6.2), nor make a machine drop a project by withholding a record: a reader keeps each machine's last verified record, and sminos leaves a project only on its lasting absence from complete directories (the project registry's design §8; amended 2026-11-10).
 
 The hub's deployer has the same limits, as long as the app comes from MAWS's signed release channel (§11).
 

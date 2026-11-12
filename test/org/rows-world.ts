@@ -12,6 +12,8 @@ import {
   type Listing,
   type MachineCert,
   type OrgView,
+  type ProjectLocation,
+  type ProjectsRecord,
   type Signed,
   type SignedOrgState,
   type SigningKey,
@@ -112,6 +114,12 @@ export class World {
     return signRecord(SIGNING_DOMAINS.listing, body, machine.key.privateKey, machine.key.pub);
   }
 
+  /** The project registry: `machine`'s projects record at `revision`, signed with its key. */
+  projects(machine: Machine, revision: number, locations: ProjectLocation[] = [], known: ProjectsRecord['known'] = [], org = ORG): Promise<Signed<ProjectsRecord>> {
+    const body: ProjectsRecord = { org, machine: machine.ref, revision, issued: iso(this.clock), locations, known };
+    return signRecord(SIGNING_DOMAINS.projects, body, machine.key.privateKey, machine.key.pub);
+  }
+
   gone(machine: Machine, session: string, revision: number): Promise<Signed<Listing>> {
     return this.list(machine, session, revision, { owners: [], project: null, title: '', state: LISTING_GONE });
   }
@@ -124,6 +132,8 @@ export function fakeFeed() {
     state: new Set<(version: number) => void>(),
     listings: new Set<(page: { records: Signed<Listing>[]; last: boolean }) => void>(),
     listing: new Set<(record: Signed<Listing>) => void>(),
+    projectsPages: new Set<(page: { records: Signed<ProjectsRecord>[]; last: boolean }) => void>(),
+    projects: new Set<(record: Signed<ProjectsRecord>) => void>(),
   };
   const on =
     <T>(set: Set<T>) =>
@@ -139,6 +149,8 @@ export function fakeFeed() {
     onCredentialsEnded: () => () => {},
     onListings: on(sets.listings),
     onListing: on(sets.listing),
+    onProjectsPages: on(sets.projectsPages),
+    onProjects: on(sets.projects),
     connected: () => true,
     probe: () => {},
     close: () => {},
@@ -150,6 +162,9 @@ export function fakeFeed() {
     state: (version: number) => sets.state.forEach((l) => l(version)),
     page: (records: Signed<Listing>[], last: boolean) => sets.listings.forEach((l) => l({ records, last })),
     push: (record: Signed<Listing>) => sets.listing.forEach((l) => l(record)),
+    /** The project registry: a `projects-all` page, and a live `projects` frame. */
+    projectsPage: (records: Signed<ProjectsRecord>[], last: boolean) => sets.projectsPages.forEach((l) => l({ records, last })),
+    projectsRecord: (record: Signed<ProjectsRecord>) => sets.projects.forEach((l) => l(record)),
   };
 }
 
@@ -214,3 +229,15 @@ export function fakeLinks(initial: LinkState = 'up') {
     },
   };
 }
+
+/** The project registry: a declared location as a record states it, a minted plain folder unless `over` says otherwise. */
+export const location = (pid: string, id: string, path: string, over: Partial<ProjectLocation> = {}): ProjectLocation => ({
+  pid,
+  id,
+  key: `folder:x:${pid}`,
+  name: path.split('/').pop()!,
+  path,
+  source: 'folder',
+  stated: 'minted',
+  ...over,
+});

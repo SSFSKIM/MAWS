@@ -83,11 +83,11 @@ describe("the Org page's e2e fixture in main", () => {
     }
   });
 
-  it("answers org.status and org.view from the file and every act without effect, leaving org.rows, org.policy.get and org.channel.* to main's", async () => {
+  it("answers org.status and org.view from the file and every act without effect, leaving org.rows, org.policy.get, org.projects and org.channel.* to main's", async () => {
     const d = deps({ MAWS_E2E: '1', [ORG_PAGE_FIXTURE_ENV]: fixtureFile({ status: STATUS, view: VIEW }) });
     const stop = installOrgPageFixture(d);
     expect(stop).not.toBeNull();
-    expect([...d.handlers.keys()].sort()).toEqual(Object.keys(commands).filter((name) => name !== 'org.rows' && name !== 'org.policy.get' && !name.startsWith('org.channel.')).sort()); // M7a: the channel stays main's; M6b: so does the policy read
+    expect([...d.handlers.keys()].sort()).toEqual(Object.keys(commands).filter((name) => name !== 'org.rows' && name !== 'org.policy.get' && name !== 'org.projects' && !name.startsWith('org.projectActs') && !name.startsWith('org.channel.')).sort()); // M7a: the channel stays main's; M6b: so does the policy read; the project registry: so do org.projects and M12's org.projectActs*
     const ask = (name: string, input?: unknown) => Promise.resolve(d.handlers.get(name)!(input));
     expect(await ask('org.status')).toEqual(STATUS);
     expect(await ask('org.view')).toEqual(VIEW);
@@ -117,6 +117,8 @@ describe("the Org page's e2e fixture in main", () => {
     expect(await ask('org.grants.regrant', { ref: 'mref-box-00000001', digest: 'd' })).toMatchObject({ ok: false, reason: 'busy' });
     expect(await ask('org.policy.set', { address: 'm/s', access: 'public', policyRev: 1 })).toEqual({ ok: false, reason: 'busy' });
     expect(await ask('org.owners.add', { address: 'm/s', member: 'a1' })).toEqual({ ok: false, reason: 'busy' });
+    expect(await ask('org.removals.hold', { machine: 'mref-box-00000001', pid: 'p1' })).toBeUndefined();
+    expect(await ask('org.removals.cancel', { id: 'h1' })).toBeUndefined();
     stop!();
     expect(d.handlers.size).toBe(0);
   });

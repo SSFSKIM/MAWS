@@ -249,17 +249,24 @@ const mainSaid = (page: Page) => (mainLines.get(page) ?? []).slice(-60).join('\n
 
 const main = (page: Page) => page.locator('[data-region="main"]');
 const composerOf = (page: Page) => main(page).getByRole('textbox', { name: 'Message' });
-// A machine's row in the sidebar (T3: another machine's sessions with no org project here), expanded (read back until
-// it holds: a restored layout may expand it under the click), and the row of a session at `address` in it: its listed
-// row, or its record's once main said it (one row per address).
+// A row of the sidebar expanded (read back until it holds: a restored layout may expand it under the click): a machine's
+// row (T3: another machine's sessions whose project is listed nowhere, design §12's `known` included), or a registry
+// project's row, keyed by main's key table (the project registry, docs/doperpowers/plans/2026-11-10-project-registry.md,
+// Interfaces §J.1: a project with a declared location on some machine is a row here, though this Mac has no checkout of
+// it); and the row of a session at `address` in it: its listed row, or its record's once main said it (one row per address).
 const machineRow = (page: Page, ref: MachineRef) => sidebarOf(page).locator(`[data-kind="project"][data-tree-id="p:machine:${ref}"]`);
-async function expandMachine(page: Page, ref: MachineRef): Promise<void> {
+async function expandSidebarRow(page: Page, row: ReturnType<typeof machineRow>): Promise<void> {
   await showProjectList(page);
-  const row = machineRow(page, ref);
   await expect(async () => {
     if ((await row.getAttribute('aria-expanded')) !== 'true') await row.locator('[data-project-line]').click();
     await expect(row).toHaveAttribute('aria-expanded', 'true', { timeout: 1_000 });
   }).toPass({ timeout: 30_000 });
+}
+const expandMachine = (page: Page, ref: MachineRef) => expandSidebarRow(page, machineRow(page, ref));
+async function expandRegistryProject(page: Page, id: string): Promise<void> {
+  const keyOf = async () => (await invoke<{ keys: Record<string, string> }>(page, 'org.projects', undefined)).keys[id] ?? null; // never changes once given
+  await expect.poll(keyOf, { timeout: 60_000, message: `project ${id} has a row key in A's main\n${mainSaid(page)}` }).not.toBeNull();
+  await expandSidebarRow(page, sidebarOf(page).locator(`[data-kind="project"][data-tree-id="p:${(await keyOf())!}"]`));
 }
 const sessionRow = (page: Page, address: string) => sidebarOf(page).locator(`[role="treeitem"][data-tree-id="s:${address}"]`);
 // The hover card's machine line for a row (P5 O7 M2, A2): the machine's name and its carrier.
@@ -574,10 +581,11 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       })
       .toMatchObject({ lane: 'B', title: TITLE, owners: [scene.member] });
 
-    // The row in A's sidebar, under B's machine row; its hover names the carrier; a click opens it in A's pane, which
-    // reads B's history over the link.
+    // The row in A's sidebar, under its project's row: B's checkout is declared on B and its `.smns` names PROJECT, so
+    // B's projects record lists the project and A has a row of it (the project registry, Interfaces §J.1); its hover
+    // names B's carrier; a click opens it in A's pane, which reads B's history over the link.
     await keepBatches(page);
-    await expandMachine(page, b.ref);
+    await expandRegistryProject(page, PROJECT);
     const row = sessionRow(page, address);
     await expect(row, `B's row in A's sidebar\n${mainSaid(page)}`).toBeVisible({ timeout: 30_000 });
     await hoverMachineLine(page, row, `${B_NAME} · via the hub`);
@@ -883,7 +891,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     await expect
       .poll(async () => (await rowsOf(again)).some((row) => row.machine === b.ref && row.session === app), { timeout: 60_000, message: `B's row again\n${mainSaid(again)}` })
       .toBe(true);
-    await expandMachine(again, b.ref);
+    await expandRegistryProject(again, PROJECT); // under its project's row, as in the first launch
     const rowAgain = sessionRow(again, address);
     await expect(rowAgain).toBeVisible({ timeout: 30_000 });
     await hoverMachineLine(again, rowAgain, `${B_NAME} · direct (tailnet)`);
@@ -1252,8 +1260,9 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await expect(sendTo).toHaveCount(0);
     });
 
-    // M4: A's own checkout of the org project B's checkout belongs to, so "+ Session" in it offers B. (Added only now:
-    // B's listed row then sits under that project's row, no longer under B's machine row, which the steps above read.)
+    // M4: A's own checkout of the org project B's checkout belongs to, so "+ Session" in it offers B. (Added only now, so
+    // the steps above show B's project listed by B's declared checkout alone; the row keeps its key, a key table's entry
+    // never changing, Interfaces §I.)
     await invoke(again, 'session.projects.add', { directory: aCheckout });
     type Projects = { projects: { directory: string; org?: { key: string } }[] };
     await expect

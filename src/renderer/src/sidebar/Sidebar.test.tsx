@@ -14,6 +14,7 @@ import { useMachines } from '../stores/machines';
 import { registerSessionAction } from '../app/session-actions';
 import { registerSessionCreator } from '../keymap/actions-runtime';
 import { closeDialog, useDialogs } from '../sessions/dialogs';
+import { resetRemoteSpawn, spawnTargetOf } from '../sessions/remote-spawn'; // the project registry's M11
 import { SessionDialogs } from '../sessions/SessionDialogs';
 import { Toolbar } from '../app/Toolbar';
 import { digest, item, project, record, remoteRow, status } from '../../../../test/support/builders';
@@ -1701,6 +1702,23 @@ describe('owners and the People toggle', () => {
     expect(entries(within(recordCard).getByRole('list', { name: 'Owners' }))).toEqual(['Benben@example.com']);
   });
 
+  // The project registry's M11 (review 1, finding 4): a project you see only through others' sessions is a row with no
+  // folder, and keeps its People toggle, on the row and in its menu, so its "+N others" can be shown.
+  it('offers the People toggle on a registry row with no location, and draws its others once on', async () => {
+    const SEEN = '99999999-8888-4777-8666-555555555555';
+    const KEY = `id:${SEEN}`;
+    fill([theirs('b7', { title: 'Their report', orgKey: KEY as OrgKey, project: SEEN })]);
+    useSessions.setState({ registry: { projects: [{ id: SEEN, name: 'Reports', hub: true, renamable: false, locations: [] }], keys: { [SEEN]: KEY as OrgKey }, moved: {}, removals: [], seen: {} } });
+    act(() => useLayout.getState().setSidebar({ expandedProjects: [KEY] as ProjectKey[] }));
+    render(<Sidebar />);
+    expect(row('Reports').dataset.menu).toBe(`registry:${SEEN}`);
+    expect(within(row('Reports')).getByLabelText('1 other').textContent).toBe('+1 other');
+    expect(peopleAction('Reports')?.getAttribute('aria-pressed')).toBe('false');
+    expect((await peopleItem('Reports'))?.getAttribute('aria-checked')).toBe('false');
+    people(KEY);
+    expect(drawn(row('Reports'))).toEqual(['Their report']);
+  });
+
   // The toggle shows only where it can act: with others to show, or while it is on (so it can be turned off). A row with
   // neither is as it was before M5, so a person with no org sees no dead control and the row's hover geometry is unchanged.
   const peopleAction = (name: string) => within(row(name)).queryByRole('button', { name: /people’s sessions in/ });
@@ -1783,5 +1801,38 @@ describe('owners and the People toggle', () => {
     expect(drawn(row('Studio'))).toEqual([]);
     expect(within(row('Studio')).getByLabelText('1 other')).toBeTruthy();
     await vi.waitFor(() => expect(fake.invoked('layout.set').at(-1)).toEqual({ key: 'sidebar.people', value: { version: 1, on: [ORG] } }));
+  });
+});
+
+// The project registry's M11 (review 1, finding 1): a project with no folder on this Mac starts a session from its row on
+// one of its locations elsewhere: the "+" opens a New chat tab with no project here, its machine already chosen, passing
+// over a location whose machine is off (here the lowest ref, the row's own primary).
+describe('New chat in a project with no folder here', () => {
+  const LOW = 'AaaLowestRefMachine000' as typeof OTHER_MACHINE;
+  const ID = '5d8e1c72-4b3a-4f6e-8d9c-0a1b2c3d4e5f';
+  const location = (machine: typeof OTHER_MACHINE, pid: string) => ({ machine, pid, path: `/srv/${pid}`, key: `folder:${machine}:${pid}` as OrgKey, name: pid, source: 'folder' as const, acts: true });
+  afterEach(() => {
+    resetRemoteSpawn();
+    useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() });
+  });
+
+  it('opens a New chat tab whose machine is the first location up over RL2', async () => {
+    fillStores({ projects: [], sessions: [], digests: [], engine: [], attention: [], timeline: [] });
+    useMachines.getState().applyRoster([
+      { ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-11-10T09:00:00Z', generation: 0 },
+      { ref: LOW, name: 'farm', local: false, state: 'down', since: '2026-11-10T09:00:00Z', generation: 1, carrier: 'direct' },
+      { ref: OTHER_MACHINE, name: 'studio', local: false, state: 'up', since: '2026-11-10T09:00:00Z', generation: 1, carrier: 'direct' },
+    ]);
+    act(() => useSessions.getState().applyRegistry({ projects: [{ id: ID, name: 'scrape', hub: true, renamable: true, locations: [location(LOW, 'p-farm'), location(OTHER_MACHINE, 'p-studio')] }], keys: { [ID]: `id:${ID}` as OrgKey }, moved: {}, removals: [], seen: {} }, TEST_MACHINE));
+    const tab = at('app-new-9' as AppSessionId);
+    const asked: unknown[] = [];
+    offs.push(registerSessionCreator(async (projectId) => (asked.push(projectId), tab)));
+    render(<Sidebar />);
+    expect(row('scrape').dataset.menu).toBe(`project:${addressOf(LOW, 'p-farm' as ProjectId)}`); // the row's primary: the machine that is off
+    const plus = within(row('scrape')).getByRole('button', { name: 'New chat in scrape' }) as HTMLButtonElement;
+    expect(plus.disabled).toBe(false);
+    await userEvent.click(plus);
+    await vi.waitFor(() => expect(spawnTargetOf(tab, null)).toEqual({ machine: OTHER_MACHINE, name: 'studio', checkout: '/srv/p-studio', key: null, label: 'scrape', registry: ID }));
+    expect(asked).toEqual([null]);
   });
 });

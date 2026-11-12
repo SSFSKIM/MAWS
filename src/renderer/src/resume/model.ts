@@ -19,6 +19,7 @@ import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { displayTitle, listedTitle } from '../sessions/title';
 import { issuedAt, listedMatcher, sessionMatcher } from '../sidebar/derive';
 import { orgIndex, rowOfListed, rowOfListedRecord, rowOfSession, type OrgIndex, type RowKey } from '../stores/org-projects';
+import type { OrgProjects } from '../stores/registry';
 import type { ListedSession } from '../stores/sessions';
 
 export interface ChooserToggles {
@@ -58,6 +59,7 @@ export interface ChooserInput {
   listed?: ReadonlyMap<AppSessionId, ListedSession>; // P5 O7 M8: other machines' listed sessions (the sessions store's)
   people?: ReadonlySet<RowKey>; // P5 O7 M8: the rows whose People toggle is on, which draw others' listed sessions
   turnsSeen?: ReadonlyMap<AppSessionId, number>; // P5 O7 M10: the turns other machines' sessions streamed here (the sessions store's)
+  registry?: OrgProjects; // the project registry (its §J.1): the row keys a row's scope groups by (the sessions store's)
 }
 
 // A row is a record's, or (P5 O7 M8) another machine's listed session with no record here, opened through its lane's
@@ -85,12 +87,12 @@ export const sessionBranch = (record: SessionRecord): string | null => branchLab
 // member's session (its listing not yours), held as a listing or as a record, is listed only under a row whose People
 // toggle is on, whatever the toggles; a row nobody draws (an all-hidden project's) never lets it through. A listing
 // names no folder, worktree or branch: All worktrees keeps them, Current branch none.
-export function chooserRows({ records, digests, projects, context, toggles, branch, query, local, listed = new Map(), people = new Set(), turnsSeen = new Map() }: ChooserInput): ChooserRow[] {
+export function chooserRows({ records, digests, projects, context, toggles, branch, query, local, listed = new Map(), people = new Set(), turnsSeen = new Map(), registry }: ChooserInput): ChooserRow[] {
   const matches = sessionMatcher(query, projects);
   const seen = seenActivity(listed, turnsSeen); // P5 O7 M10: a held remote record's activity past the record, as the sidebar ranks it
   const matchesListed = listedMatcher(query);
   let held: OrgIndex | null = null; // built when a row or a listing asks for it
-  const index = () => (held ??= orgIndex(projects.values(), local));
+  const index = () => (held ??= orgIndex(projects.values(), local, registry));
   const { row } = context;
   const shown = row === undefined ? undefined : new Set([row]); // the row it opened on is listed, as the sidebar showed it
   const recordRow = (record: SessionRecord): RowKey | null => {

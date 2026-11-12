@@ -28,7 +28,10 @@ const STATUS: OrgStatus = {
 };
 const VIEW: OrgView = { version: 7, issued: '2026-10-28T09:00:00.000Z', maySign: false, recoveryKid: 'k', members: [{ id: 'a1', email: 'ana@northwind.example', name: 'Ana', role: 'admin', you: true, devices: [] }], machines: [], roots: [], delegations: [], strayKeys: [], hubKeys: { at: null, failed: false } };
 const ROWS: OrgRows = { machines: [STUDIO], rows: [], complete: true, pending: [], members: [], member: 'a1' };
-const MACHINES: MachineState[] = [{ ref: LOCAL, name: 'ana-mbp', local: true, state: 'up', since: '2026-10-28T09:00:00.000Z', generation: 0 }];
+const MACHINES: MachineState[] = [
+  { ref: LOCAL, name: 'ana-mbp', local: true, state: 'up', since: '2026-10-28T09:00:00.000Z', generation: 0 },
+  { ref: STUDIO, name: 'studio-mini', local: false, state: 'up', since: '2026-10-28T09:00:00.000Z', generation: 1, carrier: 'direct' },
+];
 const STUDIO_READ: OrgPolicy = { ok: true, machine: STUDIO, supported: true, policies: [{ session: 's1', access: 'private', shares: [], policyRev: 3 }, { session: 's2', unavailable: true }] };
 const FARM_READ: OrgPolicy = { ok: true, machine: FARM, supported: false };
 const SAVE: OrgPolicySetResult = { ok: true, results: [{ line: { kind: 'access', access: 'listed' }, state: 'unknown', reason: 'malformed' }], policy: null };
@@ -48,9 +51,13 @@ function fixtureFile(body: unknown): string {
 }
 
 type Handler = (input: unknown) => unknown;
-function deps(env: Record<string, string>, packaged = false): ShareFixtureInstall & { handlers: Map<string, Handler>; held: string[] } {
+type Tap = (payload: unknown) => void;
+type Fake = ShareFixtureInstall & { handlers: Map<string, Handler>; held: string[]; said: unknown[]; taps: Set<Tap> };
+function deps(env: Record<string, string>, packaged = false): Fake {
   const handlers = new Map<string, Handler>();
   const held: string[] = [];
+  const said: unknown[] = [];
+  const taps = new Set<Tap>();
   return {
     env,
     packaged,
@@ -60,8 +67,19 @@ function deps(env: Record<string, string>, packaged = false): ShareFixtureInstal
     },
     unpublish: () => void held.push('org.changed'),
     holdRows: () => void held.push('org.rows.changed'),
+    // main's emit: to the windows (`said`), then its taps, as src/main/ipc/events.ts's
+    emit: (_name, payload) => {
+      said.push(payload);
+      for (const tap of [...taps]) tap(payload);
+    },
+    onEmitted: (_name, listener) => {
+      taps.add(listener as Tap);
+      return () => void taps.delete(listener as Tap);
+    },
     handlers,
     held,
+    said,
+    taps,
   };
 }
 
@@ -78,6 +96,7 @@ describe("the Share sheet's e2e fixture in main", () => {
       expect(installShareFixture(d)).toBeNull();
       expect(d.handlers.size).toBe(0);
       expect(d.held).toEqual([]);
+      expect(d.taps.size).toBe(0);
     }
   });
 
@@ -97,8 +116,13 @@ describe("the Share sheet's e2e fixture in main", () => {
     expect(await ask('org.policy.get', { machine: LOCAL })).toEqual({ ok: false, machine: LOCAL, reason: 'offline' });
     expect(await ask('org.policy.set', { address: `${STUDIO}/s1`, access: 'listed', policyRev: 3 })).toEqual(SAVE);
     expect(await ask('org.owners.add', { address: `${STUDIO}/s2`, member: 'b1' })).toEqual({ ok: false, reason: 'busy' });
+    // the production roster's word, this Mac alone, is followed by the seeded machines, which are not heard as another:
+    // the page keeps them whichever of the two reaches it after its `machines.list` read
+    d.emit('machines.changed', { machines: [MACHINES[0]!] });
+    expect(d.said).toEqual([{ machines: [MACHINES[0]] }, { machines: MACHINES }]);
     stop!();
     expect(d.handlers.size).toBe(0);
+    expect(d.taps.size).toBe(0);
   });
 
   it('refuses a file the schemas reject, naming its path', () => {

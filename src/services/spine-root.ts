@@ -28,6 +28,7 @@ import type { HandlerContext } from '@shared/ipc/client'; // P5 O7 M5c
 import type { CommandInput, CommandResult } from '@shared/ipc/schema';
 import { exportHeldFor } from '@shared/delivery/export-hold'; // P5 O7 M5c
 import { machineName, type Enrollment } from '@shared/machine/identity';
+import type { ProjectsSource, RegistrySeam } from '@shared/machine/registry'; // the project registry
 import type { MachineRef } from '@shared/machine/ref';
 import { settingsPaths } from '@shared/settings/paths';
 import type { ServicesBus } from '@shared/spine/bus';
@@ -148,6 +149,9 @@ export interface SpineDeps {
   home: string;
   enrollment?: () => Enrollment | null; // the machine's (mawsd: its endpoint's in process, D38); main's root has none
   listenLoopback?: ListenLoopback; // P5 O4 M2: the OAuth callbacks' listener on this machine's loopback; tests give their own
+  // the project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §H): what the index asks of
+  // the machine's endpoint (mawsd: its endpoint's in process); none, `NO_REGISTRY`: no stored statement is made
+  registry?: RegistrySeam;
 }
 
 export interface SpineRoot {
@@ -164,6 +168,10 @@ export interface SpineRoot {
   // P5 O8 M7b (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, Interfaces §O): the project channel's journal, to
   // which the endpoint's seam hands lane A's host messages (`EndpointServices.channel`); absent in a run refused the spine.
   channel?: ChannelRecorder;
+  // the project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §H): what the machine's
+  // endpoint reads of the index (its declared rows and stored statements), which mawsd hands on while the spine is loaded;
+  // asked only by mawsd's wiring (src/mawsd/projects-seam.ts), so building a root reads nothing of it
+  projects?: () => ProjectsSource;
 }
 
 export function startSpine(deps: SpineDeps): SpineRoot {
@@ -180,8 +188,15 @@ export function startSpine(deps: SpineDeps): SpineRoot {
   // C4: the index (<profile>/index.sqlite) answers the record side of session.*, and its session source folds the
   // engine host's store events into it once the host is ready; the read model starts the source (refused unstarted in
   // launch mode scenario) and stops it. P5 O3-A: unavailable, its file never opened, in a run refused the spine.
-  const index = new Index(join(profile, 'index.sqlite'), { refused: data.refused });
+  const index = new Index(join(profile, 'index.sqlite'), { refused: data.refused, ...(deps.registry === undefined ? {} : { registry: deps.registry }) });
   void index.refreshOrgProjects({ machine: deps.machine, enrollment: deps.enrollment }); // P5 O6 M5: each project's org project, derived again at every start (OX3)
+  // the project registry (Interfaces §F.6): a start that failed has its declared folder checked
+  if (spineRuns) {
+    const offStartFailed = bus.onEmitted('session.setup', ({ appSessionId, outcome }) => {
+      if (outcome?.kind === 'error') index.startFailed(appSessionId);
+    });
+    parts.push(['folder checks', offStartFailed]);
+  }
   // P5 O7 M9: a remote setup's home and what the folder list opened, which its handlers check again on this machine
   const setupGuard: SetupGuard = { where: { home: deps.home, platform: process.platform } };
   registerIndexHandlers(index, bus, setupGuard);
@@ -553,6 +568,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
     stop: () => stopParts('spine', parts),
     discovery: { applied: () => indexSource.discoveryApplied(), onApplied: (listener) => indexSource.onDiscoveryApplied(listener) },
     ...(channel === undefined ? {} : { channel }), // P5 O8 M7b
+    projects: () => index.projectsSource(), // the project registry: asked by mawsd alone
   };
 }
 

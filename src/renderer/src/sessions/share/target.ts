@@ -22,7 +22,7 @@ import { machineOf } from '@shared/machine/address';
 import { ipc } from '../../ipc/client';
 import { useHubAccess } from '../../stores/hub-access';
 import { useLocalOwner } from '../../stores/local-owner';
-import { orgKeyOf, selectOrgIndex } from '../../stores/org-projects';
+import { selectOrgIndex } from '../../stores/org-projects';
 import { policyAt, usePolicies } from '../../stores/policies';
 import { useSessions } from '../../stores/sessions';
 import { openDialog } from '../dialogs';
@@ -37,7 +37,8 @@ export function useCanShare(appId: AppSessionId): boolean {
   const hubProject = useSessions((s) => {
     const record = s.records.get(appId);
     const project = record?.projectId == null ? undefined : s.projects.get(record.projectId);
-    return project !== undefined && (selectOrgIndex(s, ipc.localMachine).orgs.get(orgKeyOf(project))?.smnsId ?? null) !== null;
+    const index = selectOrgIndex(s, ipc.localMachine);
+    return project !== undefined && (index.orgs.get(index.keyOf(project))?.smnsId ?? null) !== null;
   });
   const localRead = usePolicies((s) => {
     if (!local) return false;

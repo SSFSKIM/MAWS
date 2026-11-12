@@ -23,7 +23,7 @@ const PRIVATE = ['provisioning.json', 'machine-key.json', 'delegation.json'] as 
 /** The records RL10 keeps by project and position, and the marker naming the authority they were made under. */
 const RECORDS = ['signatures', 'inbound', 'records-authority.json'] as const;
 /** The enrollment's other files and directories, moved aside. */
-const MOVED = ['grants.json', 'enrollment.json', 'org.json', 'legacy.json', 'listings.json', 'notified.json', 'retirement.json'] as const;
+const MOVED = ['grants.json', 'enrollment.json', 'org.json', 'legacy.json', 'listings.json', 'notified.json', 'retirement.json', 'projects-held.json'] as const;
 
 /** The `stale-*` directories directly under `dir` (a symlink of that name is none). */
 export function staleDirectories(dir: string): string[] {

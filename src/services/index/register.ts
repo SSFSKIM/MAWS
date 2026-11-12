@@ -6,8 +6,7 @@ import { readerStateOf, type SessionRecord } from '@shared/graph/session';
 import type { Reader } from '@shared/ipc/client';
 import type { ReaderPatch, SessionPatch } from '@shared/ipc/schema/session';
 import type { ServicesBus } from '@shared/spine/bus';
-import { setupAddFolder, thisGuard, type SetupGuard } from '../machine/setup';
-import { addFolder } from './add-folder'; // New chat
+import { rowFiles, setupGuarded, thisGuard, type SetupGuard } from '../machine/setup';
 import { locate } from './projects';
 import type { Index } from './index';
 import { draftForLink, restoreWithheld } from '@shared/sessions/draft-fit'; // P5 O8 M6a
@@ -33,13 +32,40 @@ export function registerIndexHandlers(index: Index, { register }: Pick<ServicesB
   register('session.reader.update', ({ appSessionId, patch }, { reader }) => readerStateOf(index.transaction(() => applyReaderFields(index, appSessionId as AppSessionId, patch as ReaderPatch, reader ?? 'owner'))));
   // W11 (I5): hidden projects included, marked `hidden`, so the renderer keeps their sessions out of Other sessions
   register('session.projects.list', () => ({ projects: index.projects.listWithRemoved(), revision: index.revision, rows: index.projects.list({ includeHidden: true }) })); // P5 O3-D: every row too (D13)
-  register('session.projects.add', ({ directory }) => index.projects.add(directory));
+  // The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §G): every declaration, and
+  // each act on a stored statement, through the index's statements (src/services/index/statements.ts), which leave
+  // today's answer as it was while no stored statement is possible
+  register('session.projects.add', async ({ directory }) => (await index.statements.declare(directory, (reads) => ({ project: index.projects.add(directory, reads) }))).project);
   // New chat: "Open folder…"; P5 O7 M9: another machine's owner's, claimed under `machine.op`, on the directory the
   // endpoint checked, checked again here before anything reads in it
   // (its linked-worktree answer read from git's files beforehand, so `setupLocate` asks no git: a miss would not fold)
-  register('session.projects.addFolder', ({ directory, opened }, context) => (context.op === undefined ? addFolder(index.projects, directory) : setupAddFolder(directory, opened ?? [], setup, (checked, files) => addFolder(index.projects, checked, setupLocate, files))));
-  register('session.projects.update', ({ id, patch }) => index.projects.update(id as ProjectId, patch));
-  register('session.projects.remove', ({ id }) => index.projects.hide(id as ProjectId));
+  register('session.projects.addFolder', async ({ directory, opened, into, own }, context) => {
+    const acts = { ...(into === undefined ? {} : { into }), ...(own === undefined ? {} : { own }) };
+    if (context.op === undefined) return index.statements.addFolder(directory, acts);
+    return await setupGuarded(directory, opened ?? [], setup, (checked, files) => index.statements.addFolder(checked, { ...acts, files, locateIn: setupLocate }));
+  });
+  register('session.projects.update', ({ id, patch }) => index.statements.update(id as ProjectId, patch));
+  // M9's re-review, Fix 2: another machine's owner's remove derives (its `expect`) through their opens alone
+  register('session.projects.remove', ({ id, expect, opened }, context) =>
+    index.statements.remove(id as ProjectId, expect, context.op === undefined ? {} : { files: rowFiles(opened ?? [], setup) }),
+  );
+  // M9's review 1, F1: another machine's owner's resolve and relocate read the folder as its addFolder does, through the
+  // checked reader (`remote`: the endpoint's call; `op`: its claimed act)
+  register('session.projects.resolve', async ({ directory, opened }, context) => {
+    if (context.remote !== true && context.op === undefined) return index.statements.resolve(directory);
+    return await setupGuarded(directory, opened ?? [], setup, (checked, files) => index.statements.resolve(checked, { files, locateIn: setupLocate }));
+  });
+  // Fix 1c and the re-review's Fix 2: another machine's owner's link reads its row's folder (the target's own `.smns`, and
+  // the derivation it answers) through that member's opens alone: a file it may not read names nothing, as one it guessed
+  // wrong, and is no answer
+  // panel 1, A2: `expect`, the path the asker confirmed, which the row must still have
+  register('session.projects.link', ({ id, into, expect, opened }, context) =>
+    index.statements.link(id as ProjectId, into, { ...(expect === undefined ? {} : { expect }), ...(context.op === undefined ? {} : { files: rowFiles(opened ?? [], setup) }) }),
+  );
+  register('session.projects.relocate', async ({ id, directory, opened }, context) => {
+    if (context.op === undefined) return index.statements.relocate(id as ProjectId, directory);
+    return await setupGuarded(directory, opened ?? [], setup, (checked, files) => index.statements.relocate(id as ProjectId, checked, { files }));
+  });
   // P5 O8 M6a (M6a's branch review, F3): a request the endpoint dispatched (it names the reader) is answered the draft as it
   // fits one answer over the channel, naming the attachments it leaves out (@shared/sessions/draft-fit.ts). M6a's
   // re-review, K1: and a cleared draft as one with no document, so the device saving there next names the clear's stamp.

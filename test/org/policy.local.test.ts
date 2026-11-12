@@ -48,7 +48,7 @@ import { orgFiles } from '../../src/main/org/files';
 import type { OrgSessionService } from '../../src/main/org/org-session';
 import { createOrgPolicies, type OrgPolicies } from '../../src/main/org/policy';
 import { createRegistryFeed, type RegistryFeed } from '../../src/main/org/registry-feed';
-import { createRemoteRows, type ListingsLink, type RemoteRows } from '../../src/main/org/rows';
+import { createRemoteRows, NO_ROW_KEYS, type ListingsLink, type RemoteRows } from '../../src/main/org/rows';
 import type { OrgPolicy, OrgRows } from '../../src/shared/ipc/schema/org';
 import { addressOf } from '../../src/shared/machine/address';
 import type { MachineRef } from '../../src/shared/machine/ref';
@@ -305,8 +305,7 @@ beforeAll(async () => {
       rosterListeners.add(listener);
       return () => void rosterListeners.delete(listener);
     },
-    localProjects: async () => [],
-    onLocalProjects: () => () => {},
+    keys: NO_ROW_KEYS,
     link: (machine) => (channelRead && machine === ref ? bChannel : null),
     files: orgFiles({ userData: scratch.dir('b'), log }),
     emit: (next) => void (bLatest = next),

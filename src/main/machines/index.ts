@@ -23,7 +23,7 @@ import type { MainContext, MainHandler, RemoteDispatch } from '../ipc/router';
 import { configuredMachines } from './config';
 import { KNOWN_MACHINES_FILE } from './known-machines';
 import { createLocalLink } from './local-link';
-import { createConnectionManager } from './manager';
+import { createConnectionManager, type ConnectionManagerDeps } from './manager';
 import { createSocketLink } from './socket-link';
 import { installRemoteBenchSeam } from './remote/bench-seam';
 import type { RemoteLink, RemoteLinkDeps } from './remote/link';
@@ -43,6 +43,7 @@ export interface MachinesDeps {
   reach: Reach; // P5 O15 M2b: the window after a wake or an address change, and its probes
   register(name: 'machines.list', handler: MainHandler<'machines.list'>): void;
   dispatchLocal(name: CommandName, input: unknown, ctx: MainContext): Promise<CommandResult<CommandName>>;
+  localCapabilities?: ConnectionManagerDeps['localCapabilities']; // panel scalpel-3#2: the local state's, as main reads them
 }
 
 export interface Machines {
@@ -65,6 +66,7 @@ export function startMachines(deps: MachinesDeps): Machines {
     emitFrom,
     connect: (profile) => createSocketLink({ profile, build, log, budgets: deps.budgets }),
     remote,
+    ...(deps.localCapabilities !== undefined && { localCapabilities: deps.localCapabilities }),
     log,
   });
   const remoteListeners = new Set<(machines: readonly MachineRef[]) => void>();

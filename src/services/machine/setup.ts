@@ -60,6 +60,13 @@ export async function checkSetupDirectory(directory: string, asking: readonly st
   if (reads !== null) throw refuse(reads, directory);
 }
 
+/**
+ * git's files as a remote act on a declared row's folder may read them (M9's re-review, Fix 2): `link` and `remove` name a
+ * row, not a directory the setup policy checked, and its folder may be gone, so nothing is checked first and only the
+ * asking member's opens count (never the row's own folder: one in a protected folder is read only once they opened it).
+ */
+export const rowFiles = (asking: readonly string[], { where }: SetupGuard): GitFiles => guardedFiles(where, (folder) => asking.some((listed) => within(listed, folder)));
+
 /** git's files as a run on the checked `directory` may read them (round 2: no git runs before trust; git-reads.ts). */
 const setupFiles = (directory: string, asking: readonly string[], { where }: SetupGuard): GitFiles => guardedFiles(where, openedFor(directory, asking));
 
@@ -87,15 +94,15 @@ export const setupRepoDirs =
   };
 
 /**
- * A remote registration: the checked directory, checked again, its linked-worktree question answered from git's files
- * (no git run in it), then `register` (the index's `addFolder`) on it with the checked reader, which the new project's
- * org derivation reads through.
+ * A remote act that reads in a checked directory (the index's `addFolder`, `relocate` and `resolve`; M9's review 1, F1):
+ * the directory checked again, its linked-worktree question answered from git's files (no git run in it), then `run` on
+ * it with the checked reader, which the org derivation reads through; a read that reader refuses is the act's refusal.
  */
-export async function setupAddFolder<T>(directory: string, asking: readonly string[], guard: SetupGuard, register: (directory: string, files: GitFiles) => T): Promise<T> {
+export async function setupGuarded<T>(directory: string, asking: readonly string[], guard: SetupGuard, run: (directory: string, files: GitFiles) => Promise<T>): Promise<T> {
   await checkSetupDirectory(directory, asking, guard, { trustFiles: false });
   const files = setupFiles(directory, asking, guard);
   await refusing(() => warmLinkedWorktreeRead(directory, files));
-  return register(directory, files);
+  return refusing(() => run(directory, files));
 }
 
 /**

@@ -70,6 +70,7 @@ import { requestDigestOf } from '@shared/host/request-digest';
 import type { SessionEvent } from '@shared/graph/events';
 import { ipcError, type IpcErrorCode } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandResult, EventName, EventPayload } from '@shared/ipc/schema';
+import { PROJECT_ACTS_CAPABILITY } from '@shared/ipc/schema/session';
 import { validateCommandOutput } from '@shared/ipc/validate';
 import type { MachineRef } from '@shared/machine/ref';
 import { REMOTE_ACT_PENDING_MS } from '@shared/machine/remote-pending';
@@ -81,7 +82,8 @@ import { listenLoopback, type LocalListener } from '../forwards';
 import type { MainContext, RemoteDispatch } from '../ipc/router';
 import type { LayoutFileStore } from '../layout/store';
 import { peerLists } from '../machines/remote/capabilities';
-import { callOverLink, dispatchOverLink } from '../machines/remote/dispatch';
+import { needsProjectActs } from '../machines/project-acts-peer';
+import { callOverLink, dispatchOverLink, refusalError } from '../machines/remote/dispatch';
 import type { ActHandle, ActOutcome, RemoteLink } from '../machines/remote/link';
 import { ArtifactMachines } from '../artifacts/machines';
 import type { ClientWindowShown } from '../client/window-shown';
@@ -239,10 +241,21 @@ export const MACHINE_ACTS: ReadonlySet<CommandName> = new Set<CommandName>([
   'artifacts.grantConnectorTool', 'artifacts.revokeConnectorTool',
   'connectors.signInServer', // P5 O7 M8: the session's MCP widget's Sign in, the entry read on the machine
   'session.projects.addFolder', // P5 O7 M9: the remote setup's registration (`machine-admin`, the machine's owners')
+  'session.projects.link', 'session.projects.relocate', 'session.projects.update', 'session.projects.remove', // the project registry (M9, §I's acts): the machine's owners' (`machine-admin`)
   'session.drafts.set', // P5 O8 M6a: the caller's own draft, kept per member on the machine (`converse`)
 ]);
+/**
+ * The project registry (Interfaces §G, "Older peers"): what goes only to a machine whose RL2 handshake lists
+ * `rl2.project-acts`. An older endpoint could pass by a field it does not know (`addFolder`'s `into`, `own`) and do a
+ * plain add unsaid, so each is refused here before it goes, `not-offered`, as an older peer's missing offer reads.
+ * `resolve` is the adapter's to send for that reason, as a call by name. The check at the command's start is not the
+ * last: each act carries the capability as `requires` (judged at each transmission, so one waiting on Touch ID or resent
+ * on the next channel follows that channel's peer), and `resolve` goes `oneChannel`, on the channel it was checked on.
+ */
+const PROJECT_CALLS: ReadonlySet<CommandName> = new Set<CommandName>(['session.projects.resolve']);
+// `needsProjectActs` (../machines/project-acts-peer.ts) names what needs the capability; this Mac's daemon is checked by it too
 /** Acts the endpoint always asks a step-up of, signed before the first copy goes (no round trip to be asked). */
-const STEPPED_UP: ReadonlySet<CommandName> = new Set<CommandName>(['session.projects.addFolder']);
+const STEPPED_UP: ReadonlySet<CommandName> = new Set<CommandName>(['session.projects.addFolder', 'session.projects.link', 'session.projects.relocate']);
 // P5 O7 M5c ("O4's surfaces: the grade"): the six lease reads, sent as calls by name (./remote-connectors.ts)
 export { MACHINE_CALLS } from './remote-connectors';
 /** Reads the pane makes that no row offers, answered here from one that is. */
@@ -260,6 +273,23 @@ export const NOT_OPEN = 'open the session to drive it';
 /** The remote drill-in: `fs.agentEvents` takes no byte budget, so an agent's disk window past the channel's bound can't cross. */
 export const AGENT_TOO_LARGE = (machine: string) => `This agent’s transcript on ${machine} is too large to show here yet`;
 
+// ---- harness: a stand-in for another machine's acts ---------------------------------------------------------------------
+// The project registry's e2e (src/main/org/registry-fixture.ts, M11): a harness build's fixture answers some commands
+// for machines that are not there, ahead of every link, step-up and send, as C5's `interceptCommand` answers a command
+// for this Mac. Only a harness build's main installs one (app.ts's guard on `__MAWS_HARNESS_BUILD__`); otherwise none is
+// set and `routeLaneB` is as before.
+/** Answers a command for another machine, or undefined to leave it to the link. */
+export type MachineStandIn = (machine: MachineRef, name: CommandName, input: unknown) => CommandResult<CommandName> | undefined;
+let machineStandIn: MachineStandIn | null = null;
+/** Installs the stand-in (one at a time); returns its removal. */
+export function standInForMachines(standIn: MachineStandIn): () => void {
+  if (machineStandIn !== null) throw new Error('a machine stand-in is already installed');
+  machineStandIn = standIn;
+  return () => {
+    if (machineStandIn === standIn) machineStandIn = null;
+  };
+}
+
 /**
  * The router's `remote`: a name the adapter handles, for a machine `remote` answers, goes to it; everything else to
  * `base`; `session.search` refused `not-offered` (an endpoint older than M6) is answered `host_unavailable`. A `session.get` of an RL2 machine's session is a pane's opening read, after its page subscribed: once answered,
@@ -267,6 +297,8 @@ export const AGENT_TOO_LARGE = (machine: string) => `This agent’s transcript o
  */
 export function routeLaneB(base: RemoteDispatch, remote: (machine: MachineRef) => RemoteLink | null, laneB: RemoteLaneB): RemoteDispatch {
   return async (machine, name, input, ctx) => {
+    const stood = machineStandIn?.(machine, name, input); // a harness build's fixture alone (above)
+    if (stood !== undefined) return stood;
     const link = laneB.handles(name) ? remote(machine) : null;
     if (link !== null) return laneB.dispatch(link, name, input, ctx);
     const result = await base(machine, name, input, ctx);
@@ -498,7 +530,15 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
    * up to `answerMs` past it (its command's budget on the machine).
    */
   async function machineAct(link: RemoteLink, name: CommandName, fields: Fields, deadline: number, options: MachineActOptions = {}): Promise<CommandResult<CommandName>> {
-    const handle = link.act({ action: name, args: fields, executor: 'machine', sendBy: deadline, ...(options.oneChannel === true ? { oneChannel: true as const } : {}), ...(STEPPED_UP.has(name) ? { stepUp: 'required' as const } : {}) });
+    const handle = link.act({
+      action: name,
+      args: fields,
+      executor: 'machine',
+      sendBy: deadline,
+      ...(options.oneChannel === true ? { oneChannel: true as const } : {}),
+      ...(STEPPED_UP.has(name) ? { stepUp: 'required' as const } : {}),
+      ...(needsProjectActs(name, fields) ? { requires: PROJECT_ACTS_CAPABILITY } : {}), // judged at each transmission
+    });
     options.onHandle?.(handle);
     const result = await settle(link, name, handle, deadline + (options.answerMs ?? 0), String(fields.appSessionId ?? fields.artifactId ?? ''));
     if (name === 'session.acquire' && result.ok && record(result.value)?.status === 'ready') machines.get(link.machine)?.lanes.get(String(fields.appSessionId))?.session.kick();
@@ -686,6 +726,13 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
 
   async function run(link: RemoteLink, name: CommandName, fields: Fields, ctx: MainContext): Promise<CommandResult<CommandName>> {
     const deadline = now() + timing.sendPendingMs;
+    if (needsProjectActs(name, fields)) {
+      const peers = link.peerCapabilities();
+      if (peers === null) return failure('host_unavailable', `${name}: machine ${link.name} is not reachable`);
+      if (!peers.includes(PROJECT_ACTS_CAPABILITY)) return refusalError(name, link.name, { code: 'not-offered' });
+      // only on the channel checked: one that ends fails it `offline`, never carried to the next channel's peer unchecked
+      if (PROJECT_CALLS.has(name)) return callOverLink(link, name, fields, { oneChannel: true });
+    }
     if (artifacts.handles(name)) return artifacts.dispatch(link, name, fields, ctx.client); // P5 O7 M5a; M5b: the window a document opens in
     if (PTY_NAMES.has(name)) return ptys.dispatch(link, name, fields);
     if (WATCH_COMMANDS.has(name)) return checkout.dispatch(link, name, fields, ctx);
@@ -716,7 +763,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   }
 
   return {
-    handles: (name) => ENGINE_HOST_ACTS.has(name) || MACHINE_ACTS.has(name) || MACHINE_CALLS.has(name) || SUBSTITUTES.has(name) || PAGED_READS.has(name) || TARGETED_CALLS.has(name) || WATCH_COMMANDS.has(name) || PTY_NAMES.has(name) || artifacts.handles(name),
+    handles: (name) => ENGINE_HOST_ACTS.has(name) || MACHINE_ACTS.has(name) || PROJECT_CALLS.has(name) || MACHINE_CALLS.has(name) || SUBSTITUTES.has(name) || PAGED_READS.has(name) || TARGETED_CALLS.has(name) || WATCH_COMMANDS.has(name) || PTY_NAMES.has(name) || artifacts.handles(name),
     async dispatch(link, name, input, ctx) {
       try {
         return await run(link, name, record(input) ?? {}, ctx);

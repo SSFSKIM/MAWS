@@ -559,6 +559,7 @@ describe('mawsd install and uninstall', () => {
     const installed = await cli(['install', '--label', label, '--delegation-id', '0123456789abcdef0123456789abcdef']);
     expect(installed.code).toBe(0);
     expect(installed.out).toContain(`unit ${label} loaded`);
+    expect(installed.out).toContain(`wrapper ${join(scene.root, 'mawsd', 'bin', 'maws')}\n`); // the project registry's M12: maws's wrapper beside mawsd's
     expect(installed.err).toContain(ref);
     expect(installed.err).toContain('0123456789abcdef0123456789abcdef');
     expect(installed.err).toContain(join(scene.root, 'machine.json'));
