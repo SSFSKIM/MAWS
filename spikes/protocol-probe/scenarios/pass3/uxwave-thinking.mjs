@@ -1,11 +1,11 @@
 // UX wave, U2 O-27 / check 9 "which models return thinking text": per model alias the owner's sessions use (the
-// owner's user settings map each, uxwave-common.mjs), one launch as MAWS's with set_max_thinking_tokens
+// owner's user settings map each, uxwave-common-folder-memory.mjs), one launch as MAWS's with set_max_thinking_tokens
 // { max_thinking_tokens: null, thinking_display: 'summarized' } after initialize and one without, each with one turn
 // that asks for reasoning before a tool call. A `thinking_record` note per launch reads the stream's thinking blocks
 // (start, deltas), the final assistant frames' thinking blocks and their thinking_duration_ms / thinking_display, and
 // the transcript rows holding a thinking block (their thinkingDurationMs / thinkingDisplay).
 // PZ_PLAN: alias:count,... (default haiku:3,sonnet:3,opus:2,fable:1); PZ_HALVES: with,without.
-import {mawsLaunch,transcriptFiles,rows} from './uxwave-common.mjs';
+import {mawsLaunch,transcriptFiles,rows} from './uxwave-common-folder-memory.mjs';
 const PLAN=(process.env.PZ_PLAN||'haiku:3,sonnet:3,opus:2,fable:1').split(',').map(x=>x.split(':')).map(([a,n])=>[a,+n]);
 const HALVES=(process.env.PZ_HALVES||'with,without').split(',');
 const TAG=process.env.PZ_TAG||'';

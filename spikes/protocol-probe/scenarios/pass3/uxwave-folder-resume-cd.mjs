@@ -1,7 +1,7 @@
 // UX wave, U8 folder probe, one more control: a session whose main loop moved by a shell `cd` into a second worktree
 // (not by EnterWorktree) is ended there and resumed from the launch folder, as MAWS resumes it. Does the resume put the
 // main loop back where the cd left it? The init frame's cwd and the rows after the resume answer it.
-import {mawsLaunch,transcriptFiles,rows,answer,WORK,join,writeFileSync} from './uxwave-common.mjs';
+import {mawsLaunch,transcriptFiles,rows,answer,WORK,join,writeFileSync} from './uxwave-common-folder-memory.mjs';
 import {execFileSync} from 'node:child_process';
 import {dirname,basename} from 'node:path';
 const git=(...a)=>execFileSync('git',['-C',WORK,...a],{encoding:'utf8'}).trim();

@@ -6,7 +6,7 @@
 //  (2) Stop and resume from inside a worktree: the session is ended while its main loop is in the EnterWorktree
 //      worktree, then resumed twice: from the launch folder (where MAWS resumes a session it launched) and from the
 //      worktree's folder; each resume's init frame, first rows and files are recorded.
-import {mawsLaunch,transcriptFiles,rows,listTree,answer,WORK,join,existsSync,readFileSync,writeFileSync,mkdirSync} from './uxwave-common.mjs';
+import {mawsLaunch,transcriptFiles,rows,listTree,answer,WORK,join,existsSync,readFileSync,writeFileSync,mkdirSync} from './uxwave-common-folder-memory.mjs';
 import {execFileSync} from 'node:child_process';
 import {homedir} from 'node:os';
 import {dirname,basename} from 'node:path';

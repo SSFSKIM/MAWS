@@ -1,12 +1,12 @@
 // UX wave, U8 probes "Does the engine say that a subagent waits on its own background work?" (#359) and "How does a
-// shell that a subagent started name its starter?", in the folder probe's harness (MAWS's launch, uxwave-common.mjs).
+// shell that a subagent started name its starter?", in the folder probe's harness (MAWS's launch, uxwave-common-folder-memory.mjs).
 // Three turns: (A) a subagent starts a background shell and waits for it; (B) a subagent runs a command that needs a
 // permission, which the probe answers only after PZ_PERMISSION_DELAY_MS (default 20000) so the wire's account of the
 // wait can be read; (C) the main loop starts a background shell itself, for comparison. A `task_record` note per turn
 // lists every task-shaped frame of the turn whole (the permission delay stays on from (B) to the end, so a request the
 // subagent of (A) makes later waits as long) (system task_* and background_tasks_changed, session_state_changed,
 // the permission request and its agent id).
-import {mawsLaunch,answer} from './uxwave-common.mjs';
+import {mawsLaunch,answer} from './uxwave-common-folder-memory.mjs';
 const MODEL=process.env.PZ_MODEL||'haiku';
 const DELAY=+(process.env.PZ_PERMISSION_DELAY_MS||20000);
 const TASKY=f=>(f.type==='system'&&(/^task_|background_tasks_changed|session_state_changed|status/.test(f.subtype||'')))||f.type==='control_request';

@@ -12,7 +12,7 @@
 // memories, and with type `user` it selected none in seven launches.
 // Each launch writes an engine debug log; its memory lines are copied into the fixture (`debug_lines`).
 // The memory folder is written where the engine reads it (the init frame's memory_paths.auto, checked after the turn).
-import {mawsLaunch,transcriptFiles,rows,WORK,join,writeFileSync,mkdirSync,readFileSync} from './uxwave-common.mjs';
+import {mawsLaunch,transcriptFiles,rows,WORK,join,writeFileSync,mkdirSync,readFileSync} from './uxwave-common-folder-memory.mjs';
 import {homedir} from 'node:os';
 import {existsSync} from 'node:fs';
 const CASES=(process.env.PZ_CASES||'owner,memory-on,provoked,provoked').split(',');

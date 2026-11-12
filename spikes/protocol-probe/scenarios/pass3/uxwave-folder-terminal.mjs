@@ -2,14 +2,14 @@
 // engine under tmux, with only the transcript file to read. Run through vm-run.sh like a scenario:
 //   ./vm-run.sh --prefix pz --out /tmp/pz-out run scenarios/pass3/uxwave-folder-terminal.mjs
 // It starts the engine itself in tmux, as `vm-run.sh term` does (same engine, same scratch HOME and trusted work/, the
-// same namespace), with the owner's user settings of uxwave-common.mjs written to the scratch HOME's settings.json, and
+// same namespace), with the owner's user settings of uxwave-common-folder-memory.mjs written to the scratch HOME's settings.json, and
 // the terminal's own setting sources and entrypoint. The fixture (fixtures/pass3/uxwave/uxwave-folder-terminal.jsonl)
 // holds per step the prompt, the pane's last lines, any dialog answered, and the transcript rows the step added (as the
 // headless half's step_record does); then the engine is ended with /exit and started again with --resume for one step.
 import {execFileSync} from 'node:child_process';
 import {readFileSync,existsSync,readdirSync,appendFileSync,writeFileSync,mkdirSync,statSync} from 'node:fs';
 import {join,dirname} from 'node:path';
-import {writeUserSettings,ENGINE,WORK} from './uxwave-common.mjs';
+import {writeUserSettings,ENGINE,WORK} from './uxwave-common-folder-memory.mjs';
 const HERE=new URL('../..',import.meta.url).pathname;
 const OUT=(process.env.PROBE_FIXTURE_ROOT||HERE).replace(/\/?$/,'/')+'fixtures/pass3/uxwave/';mkdirSync(OUT,{recursive:true});
 const FILE=OUT+'uxwave-folder-terminal.jsonl';writeFileSync(FILE,'');let seq=0;

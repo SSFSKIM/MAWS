@@ -1,10 +1,10 @@
 // UX wave, U8 probe "What does engine 2.1.322 report when the agent changes folder?" (l5-code-14, UC-4), headless half.
-// One session launched as MAWS launches it (uxwave-common.mjs), with a CwdChanged hook callback registered at
+// One session launched as MAWS launches it (uxwave-common-folder-memory.mjs), with a CwdChanged hook callback registered at
 // initialize, walks through the moves the spec lists, one turn per step; after each step a `step_record` note keeps what
 // the four readers need: the wire's frames of the step (by seq range), the hook callbacks, and the transcript rows the
 // step added (every file of the session id, every project folder, the subagent files). Then the session is stopped and
 // resumed. PZ_MODEL picks the main loop's model (default haiku); the subagent runs on the owner's subagent model.
-import {mawsLaunch,transcriptFiles,rows,listTree,answer,WORK,join,existsSync,writeFileSync,mkdirSync} from './uxwave-common.mjs';
+import {mawsLaunch,transcriptFiles,rows,listTree,answer,WORK,join,existsSync,writeFileSync,mkdirSync} from './uxwave-common-folder-memory.mjs';
 import {execFileSync} from 'node:child_process';
 import {homedir} from 'node:os';
 import {dirname,basename} from 'node:path';
