@@ -445,6 +445,63 @@ export type WindowState = z.infer<typeof WindowStateSchema>;
 // A set with nothing open: one empty pane (W5), which is also what a set's last tab closing leaves.
 export const EMPTY_TAB_SET: TabSet = { panes: [{ tabs: [], activeTabId: '' }], focusedPane: 0, splitRatio: 0.5 };
 
+// ---- UX wave U13a: one strip (docs/doperpowers/specs/2026-11-12-ux-wave/U13-tabs-new-chat-groups.md, "The strip", "As
+// stored", "As read"; the U13a plan's Interfaces §A) -----------------------------------------------------------------
+// The strip is the one set of open main tabs for the window, as the layout store holds it. It is stored as `main.tabs`
+// version 3 with exactly one set, under `none` (root UC-14): a value build F (`f1852de3a`) writes itself and reads whole
+// with the schemas above, which this landing does not change.
+
+/** The strip, as the layout store holds it (section, "The strip"). */
+export type Strip = TabSet & { closedTabs: TabRef[] };
+export const EMPTY_STRIP: Strip = { ...EMPTY_TAB_SET, closedTabs: [] };
+
+/** What `main.tabs` is written as (UC-14): version 3, `current` none, one set under none. */
+export function storedMain({ panes, focusedPane, splitRatio, floating, closedTabs }: Strip): LayoutMain {
+  const set: TabSet = floating === undefined ? { panes, focusedPane, splitRatio } : { panes, focusedPane, splitRatio, floating };
+  return { version: 3, current: NO_PROJECT, sets: { [NO_PROJECT]: set }, closedTabs };
+}
+
+/**
+ * One strip from what `storedMainSchema(local)` parsed. The set `current` names is the strip as it was (an empty strip
+ * when no such set is stored; version 1's one layout is its own); every other set's tabs follow, in key order and left
+ * pane before right, at the end of the focused pane: unpinned ones after its last tab, pinned ones after its last pinned
+ * tab, none of them active unless that pane was empty. A tab whose id the strip already holds is skipped; the other
+ * sets' splits and floating cards go; `closedTabs` is kept. Nothing is repaired here (`repairMain` runs after).
+ * `merged`: a tab was taken from another set (the upgrade's notice). `canonical`: the value already has the stored
+ * form's envelope, version 3 with `none` the only set and `current`, whatever its tabs (hydration writes it otherwise).
+ */
+export function stripOf(stored: LayoutMain | LayoutMainV1): { strip: Strip; merged: boolean; canonical: boolean } {
+  if (stored.version === 1) {
+    const { panes, focusedPane, splitRatio, closedTabs } = stored;
+    return { strip: { panes, focusedPane, splitRatio, closedTabs }, merged: false, canonical: false };
+  }
+  const keys = Object.keys(stored.sets) as TabSetKey[];
+  const canonical = stored.current === NO_PROJECT && keys.length === 1 && keys[0] === NO_PROJECT;
+  const { floating, ...base } = stored.sets[stored.current] ?? EMPTY_TAB_SET;
+  const held = new Set(base.panes.flatMap((pane) => pane.tabs.map((tab) => tab.id)));
+  const taken: TabRef[] = [];
+  for (const key of keys) {
+    if (key === stored.current) continue;
+    for (const pane of stored.sets[key]?.panes ?? []) {
+      for (const tab of pane.tabs) {
+        if (held.has(tab.id)) continue;
+        held.add(tab.id);
+        taken.push(tab);
+      }
+    }
+  }
+  const strip: Strip = { ...base, ...(floating === undefined ? {} : { floating }), closedTabs: stored.closedTabs };
+  if (taken.length === 0) return { strip, merged: false, canonical };
+  const at = base.panes[base.focusedPane] === undefined ? 0 : base.focusedPane;
+  const pane = base.panes[at];
+  const pinnedEnd = pane.tabs.findLastIndex((tab) => tab.pinned) + 1;
+  const tabs = [...pane.tabs.slice(0, pinnedEnd), ...taken.filter((tab) => tab.pinned), ...pane.tabs.slice(pinnedEnd), ...taken.filter((tab) => !tab.pinned)];
+  const panes = [...base.panes] as PaneState[];
+  panes[at] = { tabs, activeTabId: pane.tabs.length === 0 ? tabs[0].id : pane.activeTabId };
+  return { strip: { ...strip, panes: panes as TabSet['panes'] }, merged: true, canonical };
+}
+// ---- end UX wave U13a ----------------------------------------------------------------------------------------------
+
 // Widths are the X7 tokens `--sidebar-w` and `--panel-w`.
 export const LAYOUT_DEFAULTS: { regions: LayoutRegions; main: LayoutMain; panelPinned: PanelTabRef[] } = {
   regions: {
