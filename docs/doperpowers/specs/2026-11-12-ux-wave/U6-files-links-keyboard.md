@@ -230,6 +230,7 @@
   - **l5-code-08.** Charter §5.8, "⌘J bottom dock (P1)", and §3's P1 line "Bottom dock for the auxiliary panel host (terminal drawer)". To record: "Amended 2026-11-12 (UX wave, l5-code-08): ⌘J shows and hides the Terminal side surface, as in Claude Desktop; the bottom dock stays deferred and holds no chord."
   - **O-37, the `file:` link.** Charter §12 C6, *Streamdown configuration*: "every other URL, `javascript:` and `file:` included, loses its attribute". To record there: "Amended 2026-11-12 (UX wave, O-37): a `file:` URL with no host is read as the path it names and drawn as a path link; it is still never an element's href."
   - **l9-browser-delivery-03.** Not an owner's ruling: the charter's C9 line that a link opens through the one checked `shell.openExternal` gains "except an http(s) link to a loopback host from a session on this Mac, which opens in the in-app browser (UX wave, 2026-11-12)".
+  - **The settings guard (UC-14, "Stored rebindings").** Not an owner's ruling: the charter's §5.8 says all bindings are editable, and it gains "Amended 2026-11-12 (UX wave, UC-14): an action added after build `f1852de3a` takes no rebinding while that build can still be gone back to, because its reader of the settings refuses an action it does not know; the limit goes when that build is retired." Recorded by this child's first landing, with l5-code-08's sentence.
   - **The instruction to the agent** (`src/shared/maws/instructions.ts`) changes only by a dated line; the sentence on file links is dated 2026-11-12.
 
 - **Waiting:**

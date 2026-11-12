@@ -477,6 +477,7 @@ From the grounding and from the writing of the sections (2026-11-12); each is ci
 | l5-code-02 | the accepted proposal for a commit dialog with a generated message | U5 |
 | l5-code-11 | charter §3 P0, §5.6 Files, §12 C8's acceptance: a file opens as a main tab | U6 |
 | l5-code-08 | charter §5.8: ⌘J is the bottom dock's | U6 |
+| UC-14's settings guard (not an owner's ruling) | charter §5.8: all bindings are editable; narrowed for an action added after build F, until F is retired | U6 |
 | O-37 | charter §12 C6: a `file:` URL loses its attribute | U6 |
 | S-11 | 2026-10-01, W11 I1: the prompt as a new session's provisional title | U7 |
 | O-40 | Settings, Customize, Projects and the Library opening as tabs (as built; charter §5.2) | U7 |
