@@ -11,6 +11,10 @@ describe('terminal key filter', () => {
     ['⌘⇧J', { key: 'J', code: 'KeyJ', metaKey: true, shiftKey: true }],
     ['⌘⇧C (not the copy chord)', { key: 'C', code: 'KeyC', metaKey: true, shiftKey: true }],
     ['⌘ alone', { key: 'Meta', code: 'MetaLeft', metaKey: true }],
+    // U6a (A7): the side surfaces' chords reach the menu from a terminal
+    ['⌘J (Terminal)', { key: 'j', code: 'KeyJ', metaKey: true }],
+    ['⇧⌘D (Review)', { key: 'd', code: 'KeyD', metaKey: true, shiftKey: true }],
+    ['⇧⌘F (Files)', { key: 'f', code: 'KeyF', metaKey: true, shiftKey: true }],
   ])('gives %s to the app', (_name, init) => {
     expect(terminalKeyFilter(key(init))).toBe('app');
   });

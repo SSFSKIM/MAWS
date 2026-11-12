@@ -3,8 +3,10 @@ import type { MenuItemConstructorOptions } from 'electron';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clientOf } from './ipc/clients';
 import type { Settings } from '@shared/ipc/schema';
-import { ACTIONS, ACTION_IDS, type ActionId } from '@shared/keymap/actions';
+import { ACTIONS, ACTION_IDS, idsOf, type ActionId, type ActionTable, type KeymapOverrides } from '@shared/keymap/actions';
+import { EXTENDED_TABLE, SAMPLE_ROWS, sample } from '@shared/keymap/sample-rows'; // U6a
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
+import { keyAction, type KeyInput } from './browser/keys'; // U6a: the in-app browser's page keys (A7)
 
 interface Contents {
   id: number;
@@ -37,7 +39,7 @@ const { eventChannel } = await import('@shared/ipc/schema'); // P4-B2 K6
 type Item = MenuItemConstructorOptions;
 const SETTINGS: Settings = SETTINGS_DEFAULTS_V21;
 const ALL = new Set<ActionId>(ACTION_IDS);
-const MENU_SINK = ACTION_IDS.filter((id) => ACTIONS[id].sink === 'menu');
+const TABLES: [string, ActionTable][] = [['the table', ACTIONS], ['the table with the sample rows', EXTENDED_TABLE]]; // U6a (decision 12)
 
 function items(template: Item[]): Item[] {
   return template.flatMap((item) => [item, ...(Array.isArray(item.submenu) ? items(item.submenu) : [])]);
@@ -49,13 +51,13 @@ const byId = (template: Item[], id: string) => items(template).find((item) => it
 const top = (template: Item[], label: string) => template.find((item) => item.label === label);
 
 describe('application menu', () => {
-  it('contains exactly the menu-sink actions, each with its effective chord', () => {
-    const template = menuTemplate(ACTIONS, {}, ALL, vi.fn());
-    expect([...new Set(actionItems(template).map(actionOf))].sort()).toEqual([...MENU_SINK].sort());
+  it.each(TABLES)('contains exactly the menu-sink actions, each with its effective chord (%s)', (_name, table) => {
+    const template = menuTemplate(table, {}, new Set(idsOf(table)), vi.fn());
+    expect([...new Set(actionItems(template).map(actionOf))].sort()).toEqual(idsOf(table).filter((id) => table[id].sink === 'menu').sort());
     for (const item of actionItems(template)) {
       const id = actionOf(item);
       if (id === 'tab.select') continue; // expanded below
-      expect(item.accelerator ?? null, id).toBe(ACTIONS[id].chord);
+      expect(item.accelerator ?? null, id).toBe(table[id].chord);
     }
   });
 
@@ -367,3 +369,101 @@ describe('File ▸ Save file', () => {
   });
 });
 // E5 end
+
+// U6a start (the UX wave's U6, first landing; A9, A7's first sentence, decisions 2 to 5, 10 and 12): the menus drawn
+// from the table's order, placements and submenus, with separators between groups of ids. Every generic assertion runs
+// over the table and over the table extended with sample rows shaped as the siblings' will be.
+describe('the menus drawn from the table', () => {
+  const PLACEMENT_LABEL = { app: 'MAWS', file: 'File', edit: 'Edit', view: 'View', go: 'Go', help: 'Help' } as const;
+  const submenuOf = (template: Item[], label: string) => (template.find((item) => item.label === label)?.submenu ?? []) as Item[];
+  // Each top-level menu's action items with the submenu they sit in (null directly in the menu).
+  const placed = (template: Item[]) =>
+    template.flatMap((menu) =>
+      (menu.submenu as Item[]).flatMap((item) =>
+        Array.isArray(item.submenu)
+          ? (item.submenu as Item[]).filter((child) => child.id !== undefined).map((child) => ({ menu: menu.label, submenu: item.label ?? null, id: child.id! }))
+          : item.id !== undefined ? [{ menu: menu.label, submenu: null, id: item.id }] : [],
+      ),
+    );
+  // A menu as it reads: an item its label (a role its role), a submenu `<label> ▸`, a separator '—'.
+  const shape = (items: Item[]) => items.map((item) => (item.type === 'separator' ? '—' : Array.isArray(item.submenu) ? `${item.label} ▸` : (item.label ?? String(item.role))));
+  const subsequence = (whole: string[], part: string[]) => {
+    let at = 0;
+    for (const token of whole) if (token === part[at]) at++;
+    return at === part.length;
+  };
+
+  it.each(TABLES)('places every menu-sink row once (Select tab nine times) under its placement and its submenu (%s)', (_name, table) => {
+    const where = placed(menuTemplate(table, {}, new Set(idsOf(table)), vi.fn())).filter((entry) => !EDIT_ITEMS.has(entry.id));
+    for (const id of idsOf(table).filter((id) => table[id].sink === 'menu')) {
+      const spec = table[id];
+      const found = where.filter((entry) => actionOf({ id: entry.id }) === id);
+      expect(found.length, id).toBe(id === 'tab.select' ? 9 : 1);
+      for (const entry of found) expect({ menu: entry.menu, submenu: entry.submenu }, id).toEqual({ menu: PLACEMENT_LABEL[spec.menu!], submenu: spec.submenu ?? null });
+    }
+  });
+
+  it.each(TABLES)('opens, closes and separates no menu with a separator, nor sets two in a row (%s)', (_name, table) => {
+    const menus = (items: Item[]): Item[][] => [items, ...items.flatMap((item) => (Array.isArray(item.submenu) ? menus(item.submenu as Item[]) : []))];
+    for (const items of menus(menuTemplate(table, {}, new Set(idsOf(table)), vi.fn()))) {
+      const read = shape(items);
+      expect(read[0], read.join(' ')).not.toBe('—');
+      expect(read.at(-1), read.join(' ')).not.toBe('—');
+      expect(read.join(' '), 'two separators in a row').not.toContain('— —');
+    }
+  });
+
+  it('puts an edit row after the Edit menu’s own items, in its submenu', () => {
+    const edit = submenuOf(menuTemplate(EXTENDED_TABLE, {}, new Set(idsOf(EXTENDED_TABLE)), vi.fn()), 'Edit');
+    expect(shape(edit)).toEqual(['Undo', 'Redo', '—', 'cut', 'copy', 'paste', 'pasteAndMatchStyle', 'delete', 'Select All', '—', 'Sample ▸']);
+    expect((edit.at(-1)!.submenu as Item[]).map((item) => item.id)).toEqual([sample('sample.menu')]);
+    expect(shape(submenuOf(menuTemplate(ACTIONS, {}, ALL, vi.fn()), 'Edit')).at(-1)).toBe('Select All'); // no edit row today: nothing after
+  });
+
+  it('reads View and Go in groups, with Tabs, More surfaces, Comments, Appearance and Developer as submenus', () => {
+    const template = menuTemplate(ACTIONS, {}, ALL, vi.fn());
+    const view = submenuOf(template, 'View');
+    expect(view.filter((item) => Array.isArray(item.submenu)).map((item) => item.label)).toEqual(['Tabs', 'More surfaces', 'Comments', 'Appearance', 'Developer']);
+    // a subsequence, so a later row may stand between them (U6b's zoom rows, U11's channel)
+    expect(subsequence(shape(view), [
+      'Overview', 'Artifacts', 'Tabs ▸', '—', 'Split / move to other pane', 'Focus other pane', 'Expand pane', '—',
+      'Toggle sidebar', 'Toggle session cards', 'Expand surface', 'Float conversation over surface', '—',
+      'Terminal', 'Review', 'Files', 'Browser', 'More surfaces ▸', '—', 'Move to side surface', 'Move to tab', '—',
+      'Comments ▸', 'Appearance ▸', 'Usage', '—', 'Developer ▸', '—', 'togglefullscreen',
+    ]), shape(view).join(' · ')).toBe(true);
+    expect(shape(submenuOf(view, 'Tabs'))).toEqual(Array.from({ length: 9 }, (_, i) => `Select Tab ${i + 1}`));
+    expect(shape(submenuOf(view, 'More surfaces'))).toEqual(['Source control', 'Subagents', 'Background work', 'Session info', 'Questions']);
+    expect(shape(submenuOf(view, 'Comments'))).toEqual(['Expand comments', 'Minimize comments', 'Hide comments']);
+    expect(shape(submenuOf(view, 'Developer'))).toEqual(['reload', 'forceReload', 'toggleDevTools']);
+    expect(subsequence(shape(submenuOf(template, 'Go')), [
+      'Command palette', '—', 'Previous session', 'Next session', 'Mark session unread', 'Next Needs-you', '—',
+      'Next tab in strip', 'Previous tab in strip', '—', 'Focus next region', 'Focus previous region', 'Focus sidebar',
+    ]), shape(submenuOf(template, 'Go')).join(' · ')).toBe(true);
+  });
+
+  it('gives Terminal, Review and Files their chords (l5-code-08)', () => {
+    const template = menuTemplate(ACTIONS, {}, ALL, vi.fn());
+    expect(['surface.terminal', 'surface.review', 'surface.files'].map((id) => byId(template, id)?.accelerator)).toEqual(['Cmd+J', 'Cmd+Shift+D', 'Cmd+Shift+F']);
+  });
+
+  it('a stored rebinding wins over a default added later: the menu carries the accelerator once (decision 10)', () => {
+    const chord = SAMPLE_ROWS['sample.menu'].chord;
+    const template = menuTemplate(EXTENDED_TABLE, { 'palette.open': chord }, new Set(idsOf(EXTENDED_TABLE)), vi.fn());
+    expect(byId(template, 'palette.open')!.accelerator).toBe(chord);
+    expect(byId(template, sample('sample.menu'))!.accelerator).toBeUndefined();
+    expect(items(template).filter((item) => item.accelerator === chord)).toHaveLength(1);
+    // an override of a row build F does not know is never read
+    const ignored = menuTemplate(EXTENDED_TABLE, { [sample('sample.menu')]: 'Cmd+Alt+Shift+Y' } as KeymapOverrides, new Set(idsOf(EXTENDED_TABLE)), vi.fn());
+    expect(byId(ignored, sample('sample.menu'))!.accelerator).toBe(chord);
+  });
+
+  // A7: a page of the in-app browser takes only its own chords (src/main/browser/keys.ts), so the three reach the menu
+  it('leaves ⌘J, ⇧⌘D and ⇧⌘F to the menu from a page of the in-app browser', () => {
+    const down = (key: string, shift: boolean): KeyInput => ({ type: 'keyDown', key, meta: true, control: false, alt: false, shift });
+    for (const input of [down('j', false), down('d', true), down('D', true), down('f', true), down('F', true)]) {
+      expect(keyAction(input, { findOpen: false, loading: false }), JSON.stringify(input)).toBeNull();
+    }
+    expect(keyAction(down('f', false), { findOpen: false, loading: false })).toEqual({ kind: 'chrome', command: 'openFind' }); // the page's own ⌘F stays
+  });
+});
+// U6a end
