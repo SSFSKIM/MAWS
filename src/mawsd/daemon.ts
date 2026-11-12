@@ -99,7 +99,7 @@ import { appIdentity } from '@shared/host/identity';
 import { cuaSocketDir, renderCuaSocketDir } from '@shared/daemon/files'; // P5 O5 M5; P5 O17 M5: the render host's sockets
 import { daemonCuaSocketPath } from '@shared/browser/cua-socket';
 import { BrowserRefused, type BrowserFeed } from '@shared/browser/screencast'; // P5 O17 M6
-import { idleCollector, type Collect, type HeapSize } from '@shared/host/idle-collect';
+import { eventNews, idleCollector, type Collect, type HeapSize } from '@shared/host/idle-collect';
 import { makePrivateDirectory, clearSocketPath } from '@shared/host/private-listen';
 import { PrivatePathError } from '@shared/host/private-path';
 import { captureShellEnvironment } from '@shared/host/shell-env';
@@ -533,11 +533,13 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
 
   // --- the clocks -----------------------------------------------------------------------------------------------------
   // P5 Decision Log 124's lever: a collection at each quiet entry, asked again as it collects. Decision Log 273: and once
-  // per quiet period with clients connected. Activity is a line on any of the three sockets, an event from either host, a
-  // hold or a client's engine request beginning or ending, an endpoint document frame and each chunk a cua pipe carries.
+  // per quiet period with clients connected. Activity is a line a client sends on any of the three sockets, an event from
+  // either host that is news (the engine host's periodic memory samples are not: eventNews), a hold or a client's engine
+  // request beginning or ending, an endpoint document frame and each chunk a cua pipe carries.
   // Work, held open until it settles, is each request a relay or the front took (its client gone or not), each endpoint
   // dispatch, each artifacts.sock request until its response closes and each artifact fetch until its body ends; the
   // endpoint holds the daemon through a hub sync. The I/O any of it starts is the collector's own last check.
+  const engineNews = eventNews(); // P5 Decision Log 273
   const idle = idleCollector({
     log, collect: options.collect, quiet: () => clocks.quiet(), ...(options.idleQuiet && { heap: options.idleQuiet.heap }),
     activity: { settled: () => clocks.settled(), quietMs: options.idleQuiet?.quietMs },
@@ -909,7 +911,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     }
   });
   hosts.onRaw('engine-host', (message) => {
-    idle.activity(); // P5 Decision Log 273
+    if (engineNews(message.name, message.payload)) idle.activity(); // P5 Decision Log 273: a change of state, not a periodic sample
     if (render.event(message.name, message.payload)) return; // P5 O5 M4: the render seam answers it, no client hears it
     if (message.name === 'host.browserIdle') return browserIdle(message.payload); // P5 O17 M3, M5: mawsd's own, no app hears it
     if (message.name === 'session.status') engineSeen(message.payload); // P5 O5 M5: the cua socket's peer check
@@ -1401,7 +1403,9 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   });
 
   // --- the endpoint seam -----------------------------------------------------------------------------------------------
-  const holds = new Map<number, string>();
+  const holds = new Map<number, { reason: string; standing: boolean }>();
+  // P5 Decision Log 273: the clocks told every hold (the exit's guard) and the operations among them (the collection's)
+  const tellHolds = () => clocks.holds(holds.size, [...holds.values()].filter((hold) => !hold.standing).length);
   let nextHold = 0;
   const endpointChannels = new Map<number, EndpointChannel>();
   const endpointNeeds = new Map<number, () => void>(); // P5 O7 M5b: each open channel's park need, released at its end
@@ -1487,13 +1491,13 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       if (upstreamConnected) listener({ connected: true, generation });
       return () => void upstreamListeners.delete(listener);
     },
-    hold(reason) {
+    hold(reason, standing = false) {
       const id = ++nextHold;
-      holds.set(id, reason);
-      clocks.holds(holds.size);
+      holds.set(id, { reason, standing });
+      tellHolds();
       return () => {
         if (!holds.delete(id)) return;
-        clocks.holds(holds.size);
+        tellHolds();
       };
     },
     interest: {

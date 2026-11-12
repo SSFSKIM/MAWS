@@ -70,6 +70,23 @@ describe('the idle collection (P5 Decision Log 124)', () => {
     await until(() => scene.collect.mock.calls.length === 3, 5_000, 'the next quiet period’s collection');
   });
 
+  it('collects under a remote viewer’s standing hold, never under an operation’s (P5 Decision Log 273)', async () => {
+    let services: DaemonServices | null = null;
+    const endpoint: EndpointModule = { start: async (started) => void (services = started), stop: async () => {}, status: () => null, enrollment: () => null, cli: async () => ({ code: 0, out: '' }) };
+    let grown = 0;
+    await scene.start({ endpoint, idleQuiet: { quietMs: 150, heap: () => ({ used: (grown += 2) * GROWTH_BYTES, physical: grown * GROWTH_BYTES }) } });
+    await until(() => scene.collect.mock.calls.length === 1, 5_000, 'the start’s collection');
+    await scene.app('machine'); // a client connected: the idle entry never comes
+    const channel = services!.hold('channel', true); // an idle remote channel, open for good
+    await until(() => scene.collect.mock.calls.length === 2, 5_000, 'the quiet period’s collection under the channel');
+    const op = services!.hold('op'); // an operation begins: activity, and no collection while it runs
+    await sleep(600);
+    expect(scene.collect).toHaveBeenCalledTimes(2);
+    op();
+    await until(() => scene.collect.mock.calls.length === 3, 5_000, 'the quiet period after the operation');
+    channel();
+  });
+
   it('collects nothing once its exit began, a collection already queued included', async () => {
     const daemon = await scene.start(); // its start's entry is queued behind this turn
     await daemon.stop('test');

@@ -39,9 +39,10 @@
 // `appPid` too, and may refuse on its own account (`own`: `mawsd`'s refusal of an app that runs a spine of its own)
 // rather than reflect the upstream's line; the one exit that connection may send says which (`onExit`'s `from.own`).
 //
-// P5 Decision Log 273 (the idle collection's quiet entry, idle-collect.ts): `onActivity` is told each line a welcomed
-// client sends or is sent and each document frame it sends. A request's lifetime is its runtime's to tell, which sees
-// its handler settle whether or not the client is still connected.
+// P5 Decision Log 273 (the idle collection's quiet entry, idle-collect.ts): `onActivity` is told each line and document
+// frame a welcomed client sends, never what is written to it (an answer ends its request's lifetime, an event was
+// counted where it came in). A request's lifetime is its runtime's to tell, which sees its handler settle whether or
+// not the client is still connected.
 import { timingSafeEqual } from 'node:crypto';
 import type { Server, Socket } from 'node:net';
 import { HostClientGoneSchema, HostReadySchema, HostRequestSchema } from '../ipc/host-protocol';
@@ -359,10 +360,7 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
   // runtime reads (and logs) what it is passed itself.
   function envelopeOnly(port: SocketPort, client: Client): HostPort {
     return {
-      postMessage: (message: unknown) => {
-        options.onActivity?.();
-        return port.postMessage(message);
-      },
+      postMessage: (message: unknown) => port.postMessage(message),
       start: () => port.start(),
       on: (_event: 'message', listener: (event: { data: unknown }) => void) =>
         port.on('message', (event) => {

@@ -4,7 +4,7 @@
 // E10: one bundle, two modes, decided at load: `process.parentPort` present → `utility` (an Electron utility process
 // forked by main, served over a MessagePort, as before); `--detached <supervisorDir>` in argv → `detached` (the
 // supervisor: the Electron binary as Node, outliving the app, served over a Unix socket; detached.ts).
-import { idleCollector } from '@shared/host/idle-collect';
+import { eventNews, idleCollector } from '@shared/host/idle-collect';
 import { hostPing, runHost, type DocPortEnd, type HostEmit, type HostOn, type HostRegister } from '@shared/host/runtime';
 import { captureShellEnvironment } from '@shared/host/shell-env';
 // C3 start
@@ -102,19 +102,19 @@ const tokenOf = (dir: string, holderId: string): string => readFileSync(sessionH
 
 // P5 Decision Log 124's lever: a collection at each entry into Supervision's quiet, asked again as it collects. Decision
 // Log 273: and a quiet period's, while a client holds interest or a row holds work but nothing runs. Activity is every
-// request handled (in flight until its handler settles, its client gone or not), every event emitted, every line and
-// document frame on the detached socket or a document port, and every change the store's watcher hears; the I/O those
-// start, a periodic reconcile's included, is the collector's own last check (ioInFlight).
+// request handled (in flight until its handler settles, its client gone or not), every event emitted that is news (a
+// change of state, not a periodic memory sample's: eventNews), every line and document frame its client sends on the
+// detached socket or a document port, and every change the store's watcher hears; the I/O those start, a periodic
+// reconcile's included, is the collector's own last check (ioInFlight).
 let requests = 0;
 const idle = idleCollector({ log: (line) => console.log(`[supervisor] ${line}`), quiet: () => supervision?.quiet() ?? false, activity: { settled: () => requests === 0 && (supervision?.unoccupied() ?? false) } });
 
-// P5 Decision Log 273: a document port whose every message, in and out, is activity
+const news = eventNews();
+
+// P5 Decision Log 273: a document port whose every message in is activity
 function activePort(port: DocPortEnd): DocPortEnd {
   return {
-    postMessage(message) {
-      idle.activity();
-      port.postMessage(message);
-    },
+    postMessage: (message) => port.postMessage(message),
     on(event: 'message' | 'close', listener: ((event: { data: unknown }) => void) | (() => void)) {
       if (event === 'close') return port.on('close', listener as () => void);
       return port.on('message', (data) => {
@@ -130,7 +130,7 @@ function activePort(port: DocPortEnd): DocPortEnd {
 const register: HostRegister = (untimedOn, untrackedEmit, untrackedClient) => {
   const client: typeof untrackedClient = { ...untrackedClient, onDocPort: (handler) => untrackedClient.onDocPort((message, port) => (idle.activity(), handler(message, activePort(port)))) };
   const emit: HostEmit = (name, payload) => {
-    idle.activity();
+    if (news(name, payload)) idle.activity();
     return untrackedEmit(name, payload);
   };
   // P4-R6: each request's synchronous part recorded as the host's work while a scale seam watches (documents/host-work.ts)

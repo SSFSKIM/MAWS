@@ -457,6 +457,19 @@ describe('the daemon’s settled', () => {
     expect(c.settled()).toBe(false);
   });
 
+  it('stands under standing holds and needs (an open remote channel, a document channel), not under an operation among them', () => {
+    const c = clocks();
+    c.served();
+    c.holds(2, 0); // two channels open
+    c.engineRequests(1, 0); // a document channel's need
+    expect(c.settled()).toBe(true);
+    c.holds(3, 1); // an op beside them
+    expect(c.settled()).toBe(false);
+    c.holds(2, 0);
+    c.engineRequests(2, 1); // a request beside the need
+    expect(c.settled()).toBe(false);
+  });
+
   it('tells activity as a hold or an engine request begins and ends', () => {
     const c = clocks();
     c.served();

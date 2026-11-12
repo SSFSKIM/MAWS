@@ -399,7 +399,7 @@ describe('the socket layer handshake (server side)', () => {
     await client.closed;
   });
 
-  it('tells activity at each line in and out, and keeps a port’s answer to a post (P5 Decision Log 273)', async () => {
+  it('tells activity at each line its client sends, never at what is written to it, and keeps a port’s answer to a post (P5 Decision Log 273)', async () => {
     let activity = 0;
     const host = await start({ onActivity: () => void (activity += 1) });
     const client = await host.connect();
@@ -408,11 +408,11 @@ describe('the socket layer handshake (server side)', () => {
     expect(activity).toBe(0); // the handshake is the layer's own
     client.send({ t: 'req', id: '1', name: 'engine.ping', input: undefined });
     await client.next((line) => (line as { t: string }).t === 'res');
-    expect(activity).toBe(2); // the request and its answer
+    expect(activity).toBe(1); // the request; its answer ends its lifetime, the runtime's to tell
     client.send({ t: 'ready' });
     await until(() => host.runtime.hasClient());
     expect(host.emit()).toBe(true);
-    expect(activity).toBe(4); // ready, and the event
+    expect(activity).toBe(2); // ready; the event written out is no activity
     client.socket.destroy();
     await until(() => !host.runtime.hasClient());
     expect(host.emit()).toBe(false); // a gone client's post still reads false through the layer

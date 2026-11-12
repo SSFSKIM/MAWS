@@ -178,3 +178,30 @@ describe('a completion whose raising host is gone', () => {
     await expect(asked).resolves.toMatchObject({ ok: false });
   });
 });
+
+// P5 Decision Log 273: an open document channel's need guards the park as before, but is no operation in flight: on the
+// real clocks it leaves the daemon settled for the idle collection, while a forwarded request in flight does not
+describe('the guard’s needs to the idle collection', () => {
+  it('a channel’s standing need leaves the daemon settled; a request in flight does not', async () => {
+    const clocks = new DaemonClocks('unit', { armEnginePark: () => true, disarmEnginePark: () => {}, exitDaemon: () => {}, quiet: () => {}, activity: () => {} });
+    try {
+      clocks.served();
+      let answer: (value: HostResponse) => void = () => {};
+      const forward = vi.fn(() => new Promise<HostResponse>((resolve) => (answer = resolve)));
+      const guard = engineRequests({ hosts: { forward, onState: () => () => {}, parked: () => false, completionGone: () => false } as never, clocks, log: () => {} });
+      const release = guard.hold();
+      expect(guard.inFlight()).toBe(1); // the park's count
+      expect(clocks.settled()).toBe(true);
+      const asked = guard.forward('engine-host', { name: 'artifacts.content', input: {} });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(clocks.settled()).toBe(false);
+      answer({ t: 'res', id: 'x', ok: true, value: null } as HostResponse);
+      await asked;
+      expect(clocks.settled()).toBe(true);
+      release();
+      expect(clocks.settled()).toBe(true);
+    } finally {
+      clocks.stop();
+    }
+  });
+});

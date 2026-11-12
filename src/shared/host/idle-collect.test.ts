@@ -6,7 +6,7 @@
 // and its clock is armed again only by activity.
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it, vi } from 'vitest';
-import { ACTIVITY_QUIET_MS, GROWTH_BYTES, idleCollector, ioInFlight, IO_RETRIES, IO_RETRY_MS, lastResortCollect, type HeapSize } from './idle-collect';
+import { ACTIVITY_QUIET_MS, eventNews, GROWTH_BYTES, idleCollector, ioInFlight, IO_RETRIES, IO_RETRY_MS, lastResortCollect, type HeapSize } from './idle-collect';
 
 const MIB = GROWTH_BYTES;
 
@@ -351,6 +351,42 @@ describe('the quiet entry (Decision Log 273)', () => {
     expect(ioInFlight(['TCPServerWrap', 'TCPSocketWrap', 'PipeWrap', 'Timeout', 'Immediate', 'ProcessWrap', 'FSEventWrap', 'TTYWrap'])).toBe(false);
     for (const request of ['FSReqCallback', 'FSReqPromise', 'FileHandleCloseReq', 'WriteWrap', 'SimpleWriteWrap', 'ShutdownWrap', 'GetAddrInfoReqWrap']) expect(ioInFlight(['TCPSocketWrap', request]), request).toBe(true);
     expect(typeof ioInFlight()).toBe('boolean'); // this process's own
+  });
+
+  // The review's scene: a kept session whose engine lives, its memory sampled every 10 s, each sample re-sending its status
+  // with only `memory` moved, and the budget with only its total and sample time; told through eventNews as the hosts do
+  it('collects once after a quiet period that only periodic samples crossed, then not again until real activity', () => {
+    const { heap, collector, collect, advance, armed } = quietRig();
+    const news = eventNews();
+    const status = (over: Record<string, unknown> = {}, rssKiB = 1_000) => ({ appSessionId: 'app-1', status: { process: 'ready', turn: null, lastUsedAt: 't0', memory: { rssKiB, treeRssKiB: rssKiB, sampledAt: `s${rssKiB}` }, ...over } });
+    const tell = (name: string, payload: unknown) => void (news(name, payload) && collector.activity());
+    tell('session.status', status()); // the session's first status: news
+    tell('engine.budget', { enabled: true, totalKiB: 1_000, sampledAt: 's0', over: false });
+    for (let sample = 1; sample <= 12; sample += 1) {
+      advance(10_000);
+      heap.used += MIB; // what the samples allocate
+      tell('session.status', status({}, 1_000 + sample));
+      tell('engine.budget', { enabled: true, totalKiB: 1_000 + sample, sampledAt: `s${sample}`, over: false });
+    }
+    expect(collect).toHaveBeenCalledOnce(); // at 30 s, the samples crossing it no activity
+    expect(armed()).toBe(0); // and no clock left: the next samples wake nothing
+    tell('session.status', status({ turn: { id: 'app:L1:1:0' } }, 2_000)); // a turn: a change of state
+    advance(ACTIVITY_QUIET_MS);
+    expect(collect).toHaveBeenCalledTimes(2);
+  });
+
+  it('tells news per subject: a change of state, any other event, never a repeat whose change is telemetry alone', () => {
+    const news = eventNews();
+    const status = (id: string, lastUsedAt: string, rssKiB: number) => ({ appSessionId: id, status: { lastUsedAt, memory: { rssKiB, treeRssKiB: null, sampledAt: String(rssKiB) } } });
+    expect(news('session.status', status('a', 't0', 1))).toBe(true);
+    expect(news('session.status', status('a', 't0', 2))).toBe(false);
+    expect(news('session.status', status('b', 't0', 2))).toBe(true); // another session's first
+    expect(news('session.status', status('a', 't1', 2))).toBe(true); // used again
+    expect(news('engine.budget', { totalKiB: 1, sampledAt: 'x', over: false })).toBe(true);
+    expect(news('engine.budget', { totalKiB: 2, sampledAt: 'y', over: false })).toBe(false);
+    expect(news('engine.budget', { totalKiB: 2, sampledAt: 'y', over: true })).toBe(true);
+    expect(news('session.eventBatch', { appSessionId: 'a', events: [] })).toBe(true);
+    expect(news('session.eventBatch', { appSessionId: 'a', events: [] })).toBe(true); // not a sampled event: always news
   });
 
   it('does nothing for a process that did not opt in, and nothing once stopped', () => {

@@ -10,12 +10,16 @@
 // to name: `dropped` collects past the guard.
 //
 // Two kinds of entry. The idle entry is the process's own idle predicate coming true (`set`). The quiet entry (Decision
-// Log 273, for a process that opts in with `activity`) is a quiet period: ACTIVITY_QUIET_MS with no activity told (a
-// command handled, an event passed on, work begun or ended), while the idle predicate may stay false, as it does for
-// `mawsd` while any client stays connected. Its clock is armed by activity alone and runs out once per quiet period: a
-// period that ends collects at most once (and nothing when the guard finds nothing grown), and the next is armed only
-// by the next activity, so an idle process is never woken by it more than once after its last activity, and never
-// periodically.
+// Log 273, for a process that opts in with `activity`) is a quiet period: ACTIVITY_QUIET_MS with no activity told, while
+// the idle predicate may stay false, as it does for `mawsd` while any client stays connected. Activity is what starts or
+// carries work, told where it comes in: a request or command received, a work lifetime's begin and end, a host event
+// that reports a change of state, a change the store's watcher hears, a chunk on a cua pipe or a document port. What
+// does not start work is not: a line the process writes out (an answer ends a request's lifetime, an event passed on was
+// counted where it came in), and a periodic sample, which `eventNews` tells apart (an event whose only change since its
+// last of the same subject is telemetry: a session's memory, the budget's total and sample time). Its clock is armed
+// by activity alone and runs out once per quiet period: a period that ends collects at most once (and nothing when the
+// guard finds nothing grown), and the next is armed only by the next activity, so an idle process is never woken by it
+// more than once after its last activity, and never periodically.
 //
 // A collection is synchronous (12 to 28 ms), so it must never land on work. The entry's telling can come late: a source
 // can begin work before it tells (a send marks its use before its queue changes, and tells that only once its save
@@ -56,6 +60,32 @@ const IO_REQUEST = /^(FSReq|FileHandle)|(WriteWrap|ShutdownWrap|GetAddrInfoReqWr
 /** Whether any of the process's own I/O is in flight now (the quiet entry's last check before it collects). */
 export function ioInFlight(resources: readonly string[] = process.getActiveResourcesInfo()): boolean {
   return resources.some((type) => IO_REQUEST.test(type));
+}
+
+// The events a periodic sample re-sends: each one's subject and its reading with the telemetry left out (the engine host's
+// 10 s memory sample moves a live session's `memory` and the budget's `totalKiB` and `sampledAt`, and nothing else).
+const TELEMETRY: Record<string, (payload: unknown) => [subject: string, reading: string] | null> = {
+  'session.status': (payload) => {
+    const { appSessionId, status } = (payload ?? {}) as { appSessionId?: unknown; status?: unknown };
+    return typeof appSessionId === 'string' && typeof status === 'object' && status !== null ? [`session ${appSessionId}`, JSON.stringify({ ...status, memory: null })] : null;
+  },
+  'engine.budget': (payload) => (typeof payload === 'object' && payload !== null ? ['budget', JSON.stringify({ ...payload, totalKiB: null, sampledAt: null })] : null),
+};
+
+/**
+ * Whether a host event is news, a change of state that is activity: any event but one of TELEMETRY's whose reading,
+ * telemetry left out, is the last one seen for its subject. One reader per stream of events it is told in order.
+ */
+export function eventNews(): (name: string, payload: unknown) => boolean {
+  const last = new Map<string, string>();
+  return (name, payload) => {
+    const read = TELEMETRY[name]?.(payload) ?? null;
+    if (read === null) return true;
+    const [subject, reading] = read;
+    if (last.get(subject) === reading) return false;
+    last.set(subject, reading);
+    return true;
+  };
 }
 
 type GcExtension = (options: { type: 'major'; execution: 'sync'; flavor: 'last-resort' }) => void;

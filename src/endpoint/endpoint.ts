@@ -384,7 +384,7 @@ export class Endpoint implements EndpointModule {
       org: () => (this.#identity() === null ? null : this.#org),
       adopt: (states, transitions) => this.#org?.adopt(states, transitions) ?? Promise.resolve(),
       rights: (member) => this.#rights(member),
-      hold: (reason) => this.#services?.hold(reason) ?? (() => {}),
+      hold: (reason, standing?: boolean) => this.#services?.hold(reason, standing) ?? (() => {}),
       counts: (counts) => (this.links.channels = counts),
       log,
       now: this.deps.now,
@@ -490,7 +490,7 @@ export class Endpoint implements EndpointModule {
       own: this.own,
       rl10: this.rl10,
       dispatch,
-      hold: (reason) => this.#services?.hold(reason) ?? (() => {}),
+      hold: (reason, standing?: boolean) => this.#services?.hold(reason, standing) ?? (() => {}),
       engineHostLedger: (closed) => (this.#engineHostLedger = closed),
       offers: authorization.offers,
       leases: this.leases, // P5 O7 M5c
