@@ -7,8 +7,9 @@ steer during a turn, and given as a fork's first message? The spec's branch: if 
 sent during a turn carries the first screenshot only and the card says so before sending.
 
 Verdict: kept, in all three. Each message of three images and one text reached the model with the three images in the
-order sent, 3 runs of 3 runs for each case; the model named the three colours in the order sent in 8 of 9 (the ninth
-named the earlier message's colours, a model slip: the request it answered held the steer's images in order). So the
+order sent, in 3 of 3 runs of each case. The model named the three colours in the order sent in 10 of the 12
+answers; of the other two, one named the earlier message's colours and one ended its turn before the colour line, and
+in both the request it answered held the steer's images in order (model slips, not the wire). So the
 branch "a pass sent during a turn carries the first screenshot only" is not needed. Confidence: high.
 
 Method. scenarios/pass3/uxwave-p1-images.mjs, run three times on devcloud VM dc-uxprobe-dc94 through vm-run.sh
