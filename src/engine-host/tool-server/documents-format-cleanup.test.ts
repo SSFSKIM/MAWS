@@ -152,10 +152,17 @@ describe('l6-artifacts-07 (a): accepting a suggestion that removes a bold', () =
     return { ...doc, range: { start: block._start!.id, end: last.id } };
   }
 
-  it.fails('the probe\'s own markdown in a paragraph, suggested and accepted by the person, lands', async () => {
+  // One row: holding the flag off for the length of the apply alone is not enough here. The copy's edit applies the
+  // proposal's deletions inside the copy's own transaction, which Yjs then treats as remote (`readUpdateV2` sets
+  // `transaction.local = false` on the transaction it joins), so the clean-up runs when that transaction ends, after
+  // such a hold, and reaches the live doc as a second row (the findings file, the second probe).
+  it.fails('the probe\'s own markdown in a paragraph, suggested and accepted by the person, lands as one row of the person\'s', async () => {
     const doc = await suggested('**A** text\n\nUntouched.', { op: 'replace_text', old: '**A** text', new: 'B text' });
+    const before = world.service.revision(doc.id);
     await world.service.acceptSuggestion(doc.id, [doc.range], HUMAN);
+    await world.service.whenCommitted();
     expect(textOf(world.service.live(doc.id), doc.ids[0])).toBe('B text');
+    expect(rows(doc.id).filter((row) => row.seq > before).map((row) => row.actor)).toEqual(['human']);
   });
 
   it('today: the accept is refused on the live doc\'s own clean-up, after the agent\'s host replica has echoed its clean-up into the live doc as the agent\'s', async () => {
@@ -171,5 +178,18 @@ describe('l6-artifacts-07 (a): accepting a suggestion that removes a bold', () =
       { origin: `session:${SELF}`, cleanup: false },
     ]);
     expect(seen[1].deleted).toBe(1);
+  });
+});
+
+// A restore applies the revert inside the restorer's own write (`restoreArtifact`), the same nesting as the accept's copy.
+describe('l6-artifacts-07 (a): restoring a version across a bold the agent removed', () => {
+  it.fails('the agent un-bolds what is left of a bold run, the person restores the earlier version: each lands as one row', async () => {
+    const doc = await created('**A B** text\n\nUntouched.');
+    const versionId = (await world.store.createVersion(doc.id, { kind: 'named', actor: HUMAN, label: 'before' }))!;
+    const edited = json<{ revision: number }>(await call('artifact_edit', { artifact: doc.id, baseRevision: doc.revision, ops: [{ op: 'replace_block', id: doc.ids[0], markdown: 'B text' }] }));
+    await world.store.restore(doc.id, versionId, HUMAN);
+    await world.service.whenCommitted();
+    expect(textOf(world.service.live(doc.id), doc.ids[0])).toBe('A B text');
+    expect(rows(doc.id).filter((row) => row.seq >= edited.revision).map((row) => row.actor)).toEqual([`session:${SELF}`, 'human']);
   });
 });
