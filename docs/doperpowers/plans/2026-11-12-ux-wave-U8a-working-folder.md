@@ -18,10 +18,38 @@ How to see it working: the test that reads the source tree fails while the reade
 - [x] (2026-11-12 22:28Z) Document written against master `85e934368`: the readers inventoried and sorted, the recogniser's three patterns run over `src/` (24 files, 26 spellings), the services' and the endpoint's needs checked.
 - [x] (2026-11-12) Adversarial review of this document: the inventory, the recogniser (26 matches in 24 files, every sample as stated), each reader's field and its handling of a missing record, and the suites' paths and vitest projects confirmed; one decision broken (Files' default root).
 - [x] (2026-11-12 22:45Z) Revised on the architect's rulings (Decision Log 2): Files' default root leaves the landing; decision 7's inputs corrected and pinned by a case; the merge of master added as the first step.
-- [ ] M1, step 1: master merged into the branch.
-- [ ] M1, step 2: the selector, the renderer hook, their two suites, and the tree test, red with the list in Concrete Steps.
-- [ ] M1, step 3: the readers of Interfaces §B moved, the five comments reworded, the endpoint suite's case added; the tree test green with exactly the four exceptions.
-- [ ] M1, step 4: on the VM, the surfaces' suites, the whole typecheck, lint of the changed paths, the whole unit suite.
+- [x] (2026-11-12 22:44Z) M1, step 1: master `48619c824` merged into the branch (`cb6bf6d33`), no conflict; `git diff --name-only 85e934368 origin/master | grep -v '^docs/'` printed nothing.
+- [x] (2026-11-12 22:47Z) M1, step 2: the selector, the renderer hook, their two suites, and the tree test committed and pushed (`5d6ccf182`), red on the VM with the list in Concrete Steps exactly. The run, as it came out: the two selector suites passed (5 and 3 cases; the hook's suite in both the `renderer` and `renderer-compiled` projects) and the recogniser's table passed (17 cases); the tree scan failed (`Tests 1 failed | 28 passed (29)`), its received list:
+
+      src/renderer/src/app/StoreDiagnostics.tsx 1
+      src/renderer/src/composer/Composer.tsx 1
+      src/renderer/src/harness/code/codeProbes.ts 1
+      src/renderer/src/ipc/events.ts 1
+      src/renderer/src/panel/summary/Summary.tsx 1
+      src/renderer/src/session/controls/lane-a.ts 1
+      src/renderer/src/stores/git.ts 1
+      src/renderer/src/tools/code/review/DiffTab.tsx 1
+      src/renderer/src/tools/code/review/ReviewShell.tsx 1
+      src/renderer/src/tools/code/review/ReviewSummary.tsx 1
+      src/renderer/src/tools/code/review/ReviewTool.tsx 1
+      src/renderer/src/tools/maws/ask/AskSheetTool.tsx 1
+      src/renderer/src/tools/maws/ask/HoverAsk.tsx 1
+      src/renderer/src/tools/scm/ScmShell.tsx 1
+      src/renderer/src/tools/scm/ScmTool.tsx 1
+      src/renderer/src/tools/terminal/TerminalView.tsx 1
+      src/renderer/src/transcript/view/TranscriptSlot.tsx 1
+      src/services/files/upload.ts 2
+      src/services/scm/service.ts 2
+      src/shared/ipc/schema/scm.ts 1
+
+  Twenty files, 22 spellings, the same as step 2's list.
+- [x] (2026-11-12 22:50Z) M1, step 3: the readers of Interfaces §B moved, the five comments reworded, the endpoint suite's case added (`d050a640a`); on the VM the three suites passed whole (`Test Files 4 passed (4)`, `Tests 29 passed (29)`), the tree test with exactly the four exceptions.
+- [x] (2026-11-12 23:24Z) M1, step 4 (Concrete Steps 4 and 5), on the VM at `d050a640a`:
+  - The diff's test files are exactly the four of Concrete Steps step 4; `test/endpoint/checkout-rule.test.ts` numstat `17 0`.
+  - (22:52Z) The surfaces' suites: exit 0, `Test Files 78 passed (78)`, `Tests 1653 passed | 9 skipped (1662)`. The nine skipped are `it.skipIf(process.platform !== 'darwin')` cases in `src/services/files/{service,allowlist,watch}.test.ts`, files this landing does not change; master skips them on Linux as well.
+  - (22:59Z) `pnpm typecheck`: exit 0 (the three projects and the three workspace packages).
+  - (22:59Z) `pnpm exec eslint` over the 28 changed `.ts`/`.tsx` paths: exit 0, no message.
+  - (23:21Z) `pnpm test`: exit 1, `Test Files 8 failed | 2481 passed | 26 skipped (2515)`, `Tests 44 failed | 35882 passed | 142 skipped (36068)`. None is this landing's (Surprises & Discoveries): the same six files fail 42 cases on master on the VM, and the two others are timeouts under the suite's load that pass alone on the branch (23:24Z, `Test Files 4 passed (4)`, `Tests 280 passed (280)`).
 - [ ] Class 1a on GitHub Actions, once, on the complete branch.
 - [ ] `doperpowers:review-code` on the branch (Decision Log 1), findings settled.
 - [ ] Hand-back to the architect.
@@ -240,6 +268,11 @@ Found while writing this document, against master `85e934368`, and reported to t
   Evidence: `rootsFor` in `tools/code/files/tree.ts` (the roots' roles), `underSession` in `tools/artifacts/viewers/model.ts` (whether Open as file is offered), `revealablePath` in `src/services/sessions/record-actions.ts` (what `session.revealPath` may reveal), `occupancyOf` in `src/services/sessions/holders.ts` (which sessions occupy a worktree before it is removed).
   Ruled 2026-11-12: accepted, for the second landing's list. Nothing of it is this landing's.
 
+Found while executing (2026-11-12, the executor):
+
+- Observation: the whole unit suite fails on the VM, on master as on the branch, for reasons of the VM's environment.
+  Evidence: on the branch (`d050a640a`) 44 cases fail in 8 files: `apps/desk-hub/test/deploy/{hub-reads,production-scripts,staging-scripts}.test.ts` (38; the deploy scripts reach for a hub, devcloud and a doperpowers checkout the VM does not have), `src/shared/machine/git-reads.test.ts` (2) and `src/services/machine/setup.test.ts` (1) (the VM's git writes a tab where the suites expect a space), `test/artifacts/portability.test.ts` (1, a second lint message), and two 5-second timeouts, `src/renderer/src/sidebar/Sidebar.test.tsx` (785 sessions) and `src/renderer/src/tools/code/viewer/viewer.test.tsx`. The eight files run on master `48619c824` on the VM: `Test Files 6 failed | 4 passed (10)`, `Tests 42 failed | 383 passed (425)`, the same six files and cases; the two timed-out files pass alone on the branch (`Tests 280 passed (280)`). Class 1a on Actions is the record for the whole suite. Logged in the owner's friction tracker (the build VM's unit suite on master).
+
 ## Decision Log
 
 1. **2026-11-12 (the author, at writing): the verification call.**
@@ -257,6 +290,17 @@ Found while writing this document, against master `85e934368`, and reported to t
      Date/Author: 2026-11-12, the architect's ruling; written by the author.
    - Without a change of decision: the three `record.directory` displays and `main/lane-b/remote.ts` stay unmoved, as they were; the six differences from the spec are recorded as ruled (Surprises & Discoveries); Concrete Steps opens with the merge of master, which has gained the wave's documents since the branch was cut.
 
+3. **2026-11-12 (the executor): means the document left open.**
+   - `TranscriptSlot.tsx` calls `useWorkingFolder(appSessionId)` on every render and applies the child-agent rule to its answer (`agentId === undefined ? (folder?.cwd ?? null) : null`). Rationale: a hook cannot be called conditionally; the answer is the same as the old selector's for both kinds of transcript.
+   - The endpoint's narrowing is a type guard, `folderReadable(value)`, over the same value `checkoutOf` receives, which is then passed to `workingFolder` as it is (decision 7: the same object, not a rebuilt one). It checks only the fields the selector reads (`directory` a string; `worktree` null, absent, or an object with a string `path`), not `branch`. Rationale: the guard's claim is what the selector needs; the endpoint reads nothing else of the value here.
+   - The endpoint's case is its own `it` beside the root-in-no-repository case, not an assertion inside it, so that no existing line of the suite changes (Acceptance 3). It compares the bounds of one plain root with `worktree: {}` against the same with `worktree: null`. Its failure on master's `checkoutOf` was run, not assumed: a scratch branch of master `48619c824` with only this suite's change (`f501fad2e`, branch `ux-wave/U8a-scratch`, deleted after) failed on the VM with `checkoutCovers` received `false`, expected `true`.
+   - The tree test gathers every file whose count differs from its exception entry into one list and asserts it `toEqual([])`, with the guidance as the assertion's message, so a failure names every file and count at once.
+   - The two header comments reworded under decision 11 (`src/services/scm/service.ts`, `src/shared/ipc/schema/scm.ts`) are rewrapped as their paragraph to the files' width; their other words are unchanged. The removed terminal helper's comment survives as a trailing comment on `shownDirectory`.
+
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+M1 is built and checked on the VM up to the gate (2026-11-12, the executor; the class 1a run, the branch's review and the pull request are the architect's). `workingFolder` and `useWorkingFolder` exist with the contract's shapes; the eighteen readers of Interfaces §B ask them, each passing the record it held before, so each returns what it computed on master; the terminal's `sessionDirectory` is gone; the five comments name the selector; the endpoint's `checkoutOf` reads the selector over the value it narrowed, and its one new case passes here and fails on master's code. The tree test was red with this document's twenty files and 22 spellings, as predicted to the line, and is green with the four exceptions. `FilesTool.tsx` and `tree.ts` are untouched.
+
+Against Acceptance: 1 and 2 shown by the red and green runs (Progress); 3 by the diff (four test files, the endpoint suite `17 0`); 4 by the surfaces' suites passing as they were, and the whole suite failing only where master fails on the VM (Surprises & Discoveries), so 4's "the whole unit suite" waits on class 1a for its record. Not verified here: Electron e2e (the specs are listed under M1, "What it proves") and the macOS-guarded unit cases of `src/services/files/`, which this landing does not change.
+
+What went as planned: the inventory, the recogniser and every count in this document held exactly; nothing in the code contradicted a decision. What cost time: telling the VM's own failures from the branch's in the whole suite.
