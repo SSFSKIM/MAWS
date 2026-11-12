@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AgentId, AppSessionId } from '../../graph/ids';
 import type { MachineRef } from '../../machine/ref';
-import { commands, events, LAYOUT_DEFAULTS, type LayoutMainV1, LayoutKeySchema, LayoutMainSchema, PanelActiveNoSessionSchema, PanelParamsSchema, PanelSurfacesSchema, LayoutRegionsSchema, PanelPinnedSchema, PanelSessionStateSchema, storedMainSchema, storedPanelSurfacesSchema, storedRegionsSchema, TabRefSchema, tabId, UNPINNABLE_KINDS, UsageBannersSchema, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema
+import { commands, EMPTY_STRIP, events, LAYOUT_DEFAULTS, type LayoutMain, type LayoutMainV1, LayoutKeySchema, LayoutMainSchema, PanelActiveNoSessionSchema, PanelParamsSchema, PanelSurfacesSchema, LayoutRegionsSchema, PanelPinnedSchema, PanelSessionStateSchema, storedMain, storedMainSchema, storedPanelSurfacesSchema, storedRegionsSchema, type Strip, stripOf, type TabRef, TabRefSchema, type TabTarget, tabId, UNPINNABLE_KINDS, UsageBannersSchema, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema; UX wave U13a: the strip
 
 // P5 O6 M2 (OX2): a layout holds addresses; one written before O6 held bare ids, every one the local machine's, and reads
 // lifted with it.
@@ -493,4 +494,108 @@ describe('layout value shapes', () => {
     expect(UsageBannersSchema.safeParse([1]).success).toBe(false);
   });
   // C7 end
+});
+
+// UX wave U13a (M1; the U13a plan's Interfaces §A; section, "As read"): every stored `main.tabs` this build reads becomes
+// one strip, and the strip is stored as version 3 with one set under `none`, a value build F reads whole. Every id, title
+// and path is invented.
+describe('the one strip, read from and stored as main.tabs', () => {
+  const OTHER = 'OtherMachineRef0000000' as MachineRef;
+  const sid = (n: number, machine: MachineRef = L) => `${machine}/s${n}` as AppSessionId;
+  const tabOf = (target: TabTarget, pinned = false) => ({ ...target, id: tabId(target), pinned }) as TabRef;
+  const on = (n: number, machine: MachineRef = L, pinned = false) => tabOf({ kind: 'session', appSessionId: sid(n, machine) }, pinned);
+  const file = (path: string) => tabOf({ kind: 'file', machine: L, path, line: null, appSessionId: null });
+  const agent = (n: number, agentId: string) => tabOf({ kind: 'agent', appSessionId: sid(n), agentId: agentId as AgentId });
+  const artifact = (artifactId: string) => tabOf({ kind: 'artifact', machine: L, artifactId });
+  const channel = tabOf({ kind: 'channel', project: 'invented-channel' });
+  const diagnostics = tabOf({ kind: 'diagnostics' });
+  const pane = (tabs: TabRef[], active: TabRef | null = tabs[0] ?? null) => ({ tabs, activeTabId: active?.id ?? '' });
+  const SHOWING = 'smns:invented-alpha';
+  const MACHINE_ROW = `machine:${OTHER}`;
+  const BETA = 'remote:invented-beta';
+  const GAMMA = `folder:${L}:invented-gamma`;
+  const ids = (strip: Strip) => strip.panes.flatMap((p) => p.tabs.map((t) => t.id));
+  const allIds = (main: LayoutMain) => Object.values(main.sets).flatMap((set) => set?.panes.flatMap((p) => p.tabs.map((t) => t.id)) ?? []);
+
+  // A6's fixture: the set that was showing (a split, a pinned tab, a floating card); `none`; a machine's row; two
+  // project rows, one with a pinned tab, a split and floating card of its own, and a tab the showing set also holds;
+  // and a closed-tab history.
+  const showing = {
+    panes: [pane([on(1, L, true), on(2), file('/invented/alpha/notes.md')], on(2)), pane([on(3)])],
+    focusedPane: 0, splitRatio: 0.62, floating: { sessionTabId: on(3).id },
+  };
+  const fiveSets = {
+    version: 3,
+    current: SHOWING,
+    sets: {
+      [SHOWING]: showing,
+      none: { panes: [pane([artifact('invented-deck'), diagnostics], diagnostics)], focusedPane: 0, splitRatio: 0.5 },
+      [MACHINE_ROW]: { panes: [pane([on(4, OTHER)])], focusedPane: 0, splitRatio: 0.5 },
+      [BETA]: { panes: [pane([on(5, L, true), on(2), agent(5, 'agent-x')], agent(5, 'agent-x')), pane([on(6)])], focusedPane: 1, splitRatio: 0.3, floating: { sessionTabId: on(6).id } },
+      [GAMMA]: { panes: [pane([on(7), channel], channel)], focusedPane: 0, splitRatio: 0.5 },
+    },
+    closedTabs: [on(8), file('/invented/alpha/old.md')],
+  };
+
+  it('opens a value of five sets with every tab once, the showing set as it was and the others after its tabs', () => {
+    const stored = StoredMainSchema.parse(fiveSets) as LayoutMain;
+    const { strip, merged, canonical } = stripOf(stored);
+    expect(new Set(ids(strip))).toEqual(new Set(allIds(stored)));
+    expect(ids(strip)).toHaveLength(new Set(ids(strip)).size);
+    expect(strip).toEqual({
+      panes: [
+        pane([on(1, L, true), on(5, L, true), on(2), file('/invented/alpha/notes.md'), artifact('invented-deck'), diagnostics, on(4, OTHER), agent(5, 'agent-x'), on(6), on(7), channel], on(2)),
+        pane([on(3)]),
+      ],
+      focusedPane: 0, splitRatio: 0.62, floating: { sessionTabId: on(3).id },
+      closedTabs: [on(8), file('/invented/alpha/old.md')],
+    });
+    expect(merged).toBe(true);
+    expect(canonical).toBe(false);
+  });
+
+  it('appends to the focused pane, makes none of the taken tabs active, and fills an empty strip with the first active', () => {
+    const beta = { panes: [pane([on(4), on(5, L, true)], on(5, L, true))], focusedPane: 0, splitRatio: 0.5 };
+    const main = (current: string, showingSet: unknown) => ({ version: 3, current, sets: { [SHOWING]: showingSet, [BETA]: beta }, closedTabs: [] }) as unknown as LayoutMain;
+    const right = main(SHOWING, { panes: [pane([on(1)]), pane([on(2, L, true), on(3)], on(3))], focusedPane: 1, splitRatio: 0.5 });
+    expect(stripOf(right).strip.panes).toEqual([pane([on(1)]), pane([on(2, L, true), on(5, L, true), on(3), on(4)], on(3))]);
+    const empty = main(SHOWING, { panes: [pane([])], focusedPane: 0, splitRatio: 0.5 });
+    expect(stripOf(empty)).toEqual({ strip: { panes: [pane([on(5, L, true), on(4)])], focusedPane: 0, splitRatio: 0.5, closedTabs: [] }, merged: true, canonical: false });
+    // `current` naming no stored set: the strip starts empty, and every set's tabs are taken into it
+    const absent = main(GAMMA, { panes: [pane([on(1)]), pane([on(2, L, true), on(3)], on(3))], focusedPane: 1, splitRatio: 0.5 });
+    expect(stripOf(absent).strip).toEqual({ panes: [pane([on(2, L, true), on(5, L, true), on(1), on(3), on(4)])], focusedPane: 0, splitRatio: 0.5, closedTabs: [] });
+  });
+
+  it('reads version 1 as the strip it already is', () => {
+    const v1: LayoutMainV1 = { version: 1, panes: [pane([on(1)]), pane([on(2)])], focusedPane: 1, splitRatio: 0.4, closedTabs: [on(3)] };
+    expect(stripOf(v1)).toEqual({ strip: { panes: v1.panes, focusedPane: 1, splitRatio: 0.4, closedTabs: [on(3)] }, merged: false, canonical: false });
+  });
+
+  it('stores a strip as version 3 with one set under none, which F’s reader reads whole and which reads back unchanged', () => {
+    const strips: Strip[] = [EMPTY_STRIP, stripOf(StoredMainSchema.parse(fiveSets) as LayoutMain).strip, { panes: [pane([on(1)]), pane([on(2)])], focusedPane: 1, splitRatio: 0.7, closedTabs: [] }];
+    for (const strip of strips) {
+      const stored = storedMain(strip);
+      expect(stored.version).toBe(3);
+      expect(stored.current).toBe('none');
+      expect(Object.keys(stored.sets)).toEqual(['none']);
+      expect('floating' in stored.sets.none!).toBe(strip.floating !== undefined);
+      expect(LayoutMainSchema.parse(stored)).toEqual(stored);
+      expect(StoredMainSchema.parse(stored)).toEqual(stored);
+      expect(stripOf(stored)).toEqual({ strip, merged: false, canonical: true });
+    }
+    expect(storedMain(EMPTY_STRIP)).toEqual(LAYOUT_DEFAULTS.main);
+  });
+
+  it('calls a value with one project-keyed set, or an empty or repeated set beside none, neither merged nor canonical', () => {
+    const set = { panes: [pane([on(1), on(2)], on(2))], focusedPane: 0, splitRatio: 0.5 };
+    const projectKeyed = { version: 3, current: BETA, sets: { [BETA]: set }, closedTabs: [] } as unknown as LayoutMain;
+    expect(stripOf(projectKeyed)).toEqual({ strip: { ...set, closedTabs: [] }, merged: false, canonical: false });
+    const emptyBeside = { version: 3, current: 'none', sets: { none: set, [BETA]: { panes: [pane([])], focusedPane: 0, splitRatio: 0.5 } }, closedTabs: [] } as unknown as LayoutMain;
+    expect(stripOf(emptyBeside)).toEqual({ strip: { ...set, closedTabs: [] }, merged: false, canonical: false });
+    const repeated = { ...emptyBeside, sets: { none: set, [BETA]: { panes: [pane([on(2)])], focusedPane: 0, splitRatio: 0.5 } } } as unknown as LayoutMain;
+    expect(stripOf(repeated)).toEqual({ strip: { ...set, closedTabs: [] }, merged: false, canonical: false });
+    const noneElsewhere = { version: 3, current: BETA, sets: { none: set }, closedTabs: [] } as unknown as LayoutMain;
+    expect(stripOf(noneElsewhere).canonical).toBe(false);
+    expect(stripOf({ version: 3, current: 'none', sets: {}, closedTabs: [] }).canonical).toBe(false);
+  });
 });
