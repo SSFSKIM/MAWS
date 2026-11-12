@@ -70,6 +70,7 @@ import {
   RELAY_FAULT_PATH,
   RELAY_PROJECTS_PATH,
   PROJECT_PAGE_FAULT_PATH,
+  PROJECTS_PUSH_RESET_PATH,
   RELAY_SNAPSHOT_PATH,
   CLAIM_PATH,
   WRAPPED_KEY_SEED_PATH,
@@ -137,7 +138,7 @@ export async function startLocalHub(options: { script?: string } = {}) {
   // printed, as is the hub's own record of a machine's stream and of a project's failed frame or send
   // (`{"desk":"machine-stream",…}`, `{"desk":"project",…}`, a few per test, many where a suite injects failures); every
   // other goes out as Miniflare's default handler would print it, so an unexpected error stays visible. The Registry's
-  // record of a failed push of the directory (`{"desk":"registry",…}`) is kept the same way.
+  // record of a failed push (`{"desk":"registry",…}`) is kept the same way.
   const runtimeLogs: Array<{ level: string; message: string }> = [];
   const expectedLogs: RegExp[] = [/^\{"desk":"(machine-stream|project|registry)"/];
   const handleStructuredLogs = ({ level, message }: { level: string; message: string }) => {
@@ -414,8 +415,9 @@ export async function startLocalHub(options: { script?: string } = {}) {
     async summaryFault(project: string, times?: number): Promise<{ remaining: number; calls: number }> {
       return JSON.parse(await seam('REGISTRY', ORG, SUMMARY_FAULT_PATH, { project, times })) as { remaining: number; calls: number };
     },
-    /** How long the first retry of the Registry's failed pushes of the directory waits, or of a project's failed summary
-     * reports (the deployed second; each retry after waits twice the one before). */
+    /** How long the first retry of the Registry's failed pushes of projects records and state announcements waits, of a
+     * project's failed summary reports, or of a ref object's failed snapshot reads (the deployed second; each retry
+     * after waits twice the one before). */
     async retryBase(of: 'registry' | { project: string } | { relay: string }, ms: number) {
       if (of === 'registry') await seam('REGISTRY', ORG, RETRY_BASE_PATH, { ms });
       else if ('relay' in of) await seam('MACHINE', `ref:${of.relay}`, RETRY_BASE_PATH, { ms });
@@ -426,6 +428,11 @@ export async function startLocalHub(options: { script?: string } = {}) {
      * since it was armed, and whether one is held. */
     async projectPageFault(times?: number, options: { hold?: boolean; release?: boolean } = {}): Promise<{ remaining: number; calls: number; held: boolean }> {
       return JSON.parse(await seam('REGISTRY', ORG, PROJECT_PAGE_FAULT_PATH, { times, ...options })) as { remaining: number; calls: number; held: boolean };
+    },
+    /** Arms the Registry (`arm`) to be reset between the next projects record's store and its pushes, once the store is
+     * durable, as a code update's reset under them would; answers whether it is armed and how many resets it made. */
+    async projectsPushReset(arm = false): Promise<{ armed: boolean; resets: number }> {
+      return JSON.parse(await seam('REGISTRY', ORG, PROJECTS_PUSH_RESET_PATH, { arm })) as { armed: boolean; resets: number };
     },
     /** How a machine's ref object's projects snapshot stands: null when none is being read. */
     async relaySnapshot(ref: string): Promise<{ conn: number; held: number; waiting: boolean } | null> {

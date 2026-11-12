@@ -145,6 +145,9 @@ export const RELAY_PROJECTS_PATH = '/__test/relay-projects';
  * reset or an overload failed, each held until released when `hold` is set (`{release: true}` releases the one held), and
  * says how many reads it took and whether one is held. */
 export const PROJECT_PAGE_FAULT_PATH = '/__test/project-page-fault';
+/** Where the suites' `Registry` is armed (`{arm: true}`) to be reset (`ctx.abort()`) between the next projects record's
+ * store and its pushes, once what the store wrote is durable, and says whether it is armed and how many resets it made. */
+export const PROJECTS_PUSH_RESET_PATH = '/__test/projects-push-reset';
 /** Where the suites' `Machine` (a ref's) says how its relay's projects snapshot stands: none, or the connection it is
  * read for, how many records it holds, and whether a retry's wait is pending. */
 export const RELAY_SNAPSHOT_PATH = '/__test/relay-snapshot';
