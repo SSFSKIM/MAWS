@@ -12,16 +12,16 @@ Verdict. The spec's premise does not hold for a session MAWS runs: under MAWS's 
     refuses `deliver`, `steer` and `answer` with code lane-b (hooks/mods/bridge.tsx:309-319, 413-414, 1825), and
     `sminos send` falls back to the engine's inbox (skills/sminos/scripts/sminos_control.py:109, 238). Observed: every
     send to such a session, the owner's and a peer's, idle and busy, arrived through the inbox as origin `peer`
-    (4 of 4), and `sminos steer` was refused outright, idle and busy ("refused (lane-b): MAWS controls this session"),
-    with no fallback at all (2 of 2). So in a session MAWS runs, forms (a) and (b) never occur, and X-032's fallback
+    (8 of 8, two runs), and `sminos steer` was refused outright, idle and busy ("refused (lane-b): MAWS controls
+    this session"), with no fallback at all (4 of 4). So in a session MAWS runs, forms (a) and (b) never occur, and X-032's fallback
     (`[sminos steer from human]` through the inbox) does not either: the steer simply fails.
   - Where the bridge does control (any session without the lane-B marker: a terminal session, or a headless run
     started by something else), the probe recorded the forms the spec asks about:
       (a) the idle owner's send: YES, on the wire as a replayed `user` frame with origin {kind: "plugin", name:
-          "sminos", asUser: true} whole, text opening "[sminos message from human id=…]" (1 of 1 headless; the file
-          row the same, 1 of 1 headless and 1 of 1 terminal).
-      (b) the owner's send and the owner's steer during a running turn: NOT on the wire as a `user` frame (0 of 2).
-          The file holds a meta `user` row of origin {kind: "plugin", name: "sminos"} (no asUser) with the frame
+          "sminos", asUser: true} whole, text opening "[sminos message from human id=…]" (2 of 2 headless; the file
+          row the same, 2 of 2 headless and 1 of 1 terminal).
+      (b) the owner's send and the owner's steer during a running turn: NOT on the wire as a `user` frame (0 of 4,
+          two runs). The file holds a meta `user` row of origin {kind: "plugin", name: "sminos"} (no asUser) with the frame
           line. The only live trace is the mod's own log line, `system/ui_log {plugin: "sminos", text: "delivered:
           [sminos message from human id=…] …"}` (and "steer: …"), sent because MAWS attaches as the desktop surface.
       (c) the answer to sminos's asynchronous question: sminos registers that question tool only in an interactive
@@ -32,7 +32,7 @@ Verdict. The spec's premise does not hold for a session MAWS runs: under MAWS's 
           `system/hook_response.output` (2 of 2: PostToolUse and UserPromptSubmit). sminos's answer comes from a mod
           (a function hook), not a command hook; whether a mod's context also shows in a hook_response was not shown.
   - A peer's message is always the inbox's (origin `peer`, `<cross-session-message>`), on every arm, idle and busy,
-    and it is on the wire (replayed, isSynthetic true) both idle and busy (8 of 8).
+    and it is on the wire (replayed, isSynthetic true) both idle and busy (12 of 12 inbox deliveries, two runs).
   - The owner's send through the inbox is marked only by its frame line: origin {kind: "peer", from: "unknown",
     name: "human", body: "[sminos message from human id=…]\n…"}. UC-2 rule 2 ("sender human is the person: own") is
     what tells it from a peer's; the origin's `name: "human"` says the same.
@@ -75,7 +75,10 @@ Method.
   scenarios/pass3/uxwave-u3-hookctx.mjs (u3-hookctx.jsonl + .transcript.jsonl): MAWS's launch, project settings with a
     PostToolUse(Bash) and a UserPromptSubmit command hook each printing {"hookSpecificOutput": {…, "additionalContext":
     …}}.
-  Each case ran once per arm.
+    r2: u3-sminos-r2-maws.jsonl and u3-sminos-r2-bridge.jsonl (+ .transcript.jsonl), the two headless arms again,
+      the same in every case (maws: inbox 54, 116, 392, 524, steer refused twice; bridge: asUser 53, inbox 72 and
+      315, the appended owner's send and steer absent from the wire with ui_log 214 and 461, file lines 59 and 97).
+  Each case ran twice per headless arm and once in the terminal.
 
 Observed.
   arm maws:
