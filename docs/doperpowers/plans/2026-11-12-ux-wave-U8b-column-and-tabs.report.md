@@ -14,7 +14,7 @@ The execution document is `docs/doperpowers/plans/2026-11-12-ux-wave-U8b-column-
 - **Three slices in the layout store**: `panelGroups`, `panelWidths` and `cardsOpen`.
   - They are read at hydration and written through `persistedKeys` / `storedValue`.
   - `storedLayout(state)` exports every key as `persistLayout` writes it.
-  - **The first read** happens when the listing and every read of hydration answered and the listing holds no `panelTools.groups` (revised at the boundary review: a launch with a failed read defers it whole, nothing pruned and nothing marked):
+  - **The first read** happens when the listing and every read of hydration answered and the listing holds no `panelTools.groups` (revised at the boundary review: a launch with a failed read defers it whole, nothing pruned and nothing marked, and hydration writes no key whose read failed):
     - In each session's list, a tab of a single-instance tool that is not in view (or to be shown) by §A's reading is dropped. The pins, and the tabs of multi-instance or unregistered tools, are kept.
     - Each scope whose list changed is repaired.
     - `panelTools.widths` becomes `{ wide: regions.panel.width, or null when that is 380; narrow: null }`.
