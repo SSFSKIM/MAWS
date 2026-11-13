@@ -19,7 +19,7 @@ export function hostAppliesPlanMode(status: Pick<HostStatus, 'state' | 'supervis
 }
 
 /** Whether an answer is a plan's approval that names the mode after it. */
-export const namesPlanMode = (answer: RequestAnswer): boolean => answer.kind === 'plan' && answer.mode !== undefined;
+export const namesPlanMode = (answer: Pick<RequestAnswer, 'kind'> & { mode?: unknown }): boolean => answer.kind === 'plan' && answer.mode !== undefined;
 
 /**
  * Why such an answer is not sent where `hostAppliesPlanMode` does not hold: the words the card's port gives, and the
