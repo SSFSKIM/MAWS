@@ -271,7 +271,7 @@ describe('what a remembered answer costs, and what it rests on (A8)', () => {
     expect(await named.names(S, P)).toBe(false);
     reset();
     expect(await named.names(S, P)).toBe(false);
-    expect(stats.bytes).toBe(3 * 2 * FP);
+    expect(stats.bytes).toBe(2 * FP); // the checkpoint's fingerprint, proven again and kept
   });
 
   it('keeps the least recently asked entries within its bound', async () => {
