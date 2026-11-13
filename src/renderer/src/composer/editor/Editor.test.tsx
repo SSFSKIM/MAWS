@@ -1,8 +1,8 @@
-import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { closeWidgetDialog, useWidgetDialog } from '../WidgetDialog'; // W3 (C6)
 import type { Transaction } from '@tiptap/pm/state';
 import { EditorView } from '@tiptap/pm/view';
-import { createRef } from 'react';
+import { createRef, type RefObject } from 'react';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge, PreloadBridge } from '@shared/ipc/schema';
@@ -18,6 +18,7 @@ import { useNotices } from '../../stores/notices'; // E3
 import { registerSlashWidget } from '../mentions/widgets'; // C11
 import { attachmentsOf, docOf, hardBreak, paragraph, pastedNode, textNode } from './doc';
 import { Editor, type DraftPort, type EditorHandle } from './Editor';
+import { UNAVAILABLE_TITLE } from './nodes/Pasted';
 import type { Serialized } from './serialize';
 
 const APP = at('app-1' as AppSessionId); // P5 O6 M2: the page's id; `client` is the page's client
@@ -1116,5 +1117,201 @@ describe('the editor’s take-back, Esc and load', () => {
     act(() => void (loaded = handle.current!.load(docOf([paragraph(textNode('while sending'))]))));
     expect(loaded).toBe(false);
     await act(async () => answer(true));
+  });
+});
+
+// UX wave U4a M6 (l3-input-12, l3-input-09; decisions 22 and 23): the line under the text while recalling or searching,
+// Ctrl+R's search of the prompt history, and the paste that stays text with a chip that opens.
+describe('the box’s helpers: the history line, its search and the paste', () => {
+  const listing = (displays: string[]) => {
+    const entries = displays.map((display, i) => ({ display, at: new Date(Date.UTC(2026, 8, 29, 9, i)).toISOString(), source: 'maws', sessionId: null, pastedContents: {} }));
+    return {
+      ...client,
+      invoke: vi.fn(async (name: string) => (name === 'session.history.list' ? { ok: true, value: { entries } } : { ok: false, error: { code: 'internal', message: 'no session' } })),
+    } as unknown as MawsBridge;
+  };
+  const line = () => document.querySelector('[role="status"][aria-label="Prompt history"]')?.textContent ?? null;
+  const shown = (handle: RefObject<EditorHandle | null>) => handle.current?.serialize().display;
+  async function mounted(displays: string[], props: { onSubmit?(s: Serialized): Promise<boolean>; onEscape?(): boolean } = {}) {
+    const bridge = listing(displays);
+    const handle = createRef<EditorHandle>();
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={drafts(null).port} client={bridge} handle={handle} {...props} />);
+    const content = contentOf(container);
+    await waitFor(() => expect(bridge.invoke).toHaveBeenCalledWith('session.history.list', expect.anything()));
+    await act(async () => handle.current?.restored());
+    content.focus();
+    const press = (key: string, init: KeyboardEventInit = {}) => {
+      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
+      return act(async () => void content.dispatchEvent(event)).then(() => event);
+    };
+    const type = async (text: string) => {
+      for (const key of text) await press(key);
+    };
+    const search = () => press('r', { code: 'KeyR', ctrlKey: true });
+    return { handle, content, press, type, search };
+  }
+  // oldest first: newest first the search reads "notes on deploy", "read the build log", "deploy the docs", "fix the build"
+  const PROMPTS = ['fix the build', 'deploy the docs', 'read the build log', 'notes on deploy'];
+
+  it('says the recalled entry’s place under the text at the newest, a middle and the oldest entry, and nothing once the draft is back or an edit ends it', async () => {
+    const { handle, press } = await mounted(Array.from({ length: 12 }, (_, i) => `prompt ${i + 1}`));
+    expect(line()).toBeNull();
+    await press('ArrowUp');
+    expect(shown(handle)).toBe('prompt 12');
+    expect(line()).toBe('History 1/12 · ↓ to restore your draft');
+    await press('ArrowUp');
+    await press('ArrowUp');
+    expect(line()).toBe('History 3/12 · ↓ to restore your draft');
+    for (let i = 0; i < 9; i++) await press('ArrowUp');
+    expect(shown(handle)).toBe('prompt 1');
+    expect(line()).toBe('History 12/12 · ↓ to restore your draft');
+    for (let i = 0; i < 12; i++) await press('ArrowDown');
+    expect(shown(handle)).toBe('');
+    expect(line()).toBeNull();
+    await press('ArrowUp');
+    act(() => handle.current?.insertText('!'));
+    expect(line()).toBeNull(); // the edit ended the recall
+  });
+
+  it('searches with Ctrl+R: typing narrows, Ctrl+R and ↑ go older, ↓ newer, the line counts the matches, and Esc puts the draft back without a stop', async () => {
+    const onEscape = vi.fn(() => true);
+    const { handle, search, type, press } = await mounted(PROMPTS, { onEscape });
+    act(() => handle.current?.insertText('my draft'));
+    await search();
+    expect(line()).toBe('Search history:');
+    expect(shown(handle)).toBe('my draft');
+    await type('build');
+    expect(shown(handle)).toBe('read the build log');
+    expect(line()).toBe('Search history: build — match 1 of 2');
+    await search();
+    expect(shown(handle)).toBe('fix the build');
+    expect(line()).toBe('Search history: build — match 2 of 2');
+    await press('ArrowUp'); // nothing older holds it: the match stays
+    expect(line()).toBe('Search history: build — match 2 of 2');
+    await press('ArrowDown');
+    expect(shown(handle)).toBe('read the build log');
+    await type('z');
+    expect(line()).toBe('Search history: buildz — no match');
+    expect(shown(handle)).toBe('read the build log');
+    await press('Backspace');
+    expect(line()).toBe('Search history: build — match 1 of 2');
+    const esc = await press('Escape');
+    expect(esc.defaultPrevented).toBe(true);
+    expect(shown(handle)).toBe('my draft');
+    expect(line()).toBeNull();
+    await press('Escape', { repeat: true }); // the press's repeat is the search's too
+    expect(onEscape).not.toHaveBeenCalled();
+  });
+
+  it('takes the match into the box with Enter, without sending; the next Enter sends it', async () => {
+    const onSubmit = vi.fn<(s: Serialized) => Promise<boolean>>(async () => true);
+    const { handle, search, type, press } = await mounted(PROMPTS, { onSubmit });
+    await search();
+    await type('docs');
+    await press('Enter');
+    expect(shown(handle)).toBe('deploy the docs');
+    expect(line()).toBeNull();
+    expect(onSubmit).not.toHaveBeenCalled();
+    await press('Enter');
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ display: 'deploy the docs' })));
+  });
+
+  it('leaves the draft when nothing matches, and Backspace on an empty search puts it back', async () => {
+    const { handle, search, type, press } = await mounted(PROMPTS);
+    act(() => handle.current?.insertText('kept'));
+    await search();
+    await type('q');
+    expect(line()).toBe('Search history: q — no match');
+    expect(shown(handle)).toBe('kept');
+    await press('Backspace');
+    expect(line()).toBe('Search history:');
+    expect(shown(handle)).toBe('kept');
+    await press('Backspace');
+    expect(line()).toBeNull();
+    expect(shown(handle)).toBe('kept');
+  });
+
+  it('ends the search at a composing key with the match in the box, and leaves the key to the editor', async () => {
+    const { handle, search, type, press } = await mounted(PROMPTS);
+    await search();
+    await type('notes');
+    expect(shown(handle)).toBe('notes on deploy');
+    const composing = await press('ㄱ', { isComposing: true });
+    expect(composing.defaultPrevented).toBe(false);
+    expect(line()).toBeNull();
+    expect(shown(handle)).toBe('notes on deploy');
+  });
+
+  it('starts a search from the recalled entry’s place, and its Esc puts back the draft the recall began from', async () => {
+    const { handle, search, type, press } = await mounted(PROMPTS);
+    await press('ArrowUp');
+    await press('ArrowUp');
+    expect(line()).toBe('History 2/4 · ↓ to restore your draft');
+    await search();
+    expect(line()).toBe('Search history:');
+    expect(shown(handle)).toBe('read the build log');
+    await type('deploy');
+    expect(shown(handle)).toBe('deploy the docs'); // older than the place it started from
+    expect(line()).toBe('Search history: deploy — match 2 of 2');
+    await press('Escape');
+    expect(shown(handle)).toBe('');
+    expect(line()).toBeNull();
+  });
+
+  // A paste as the system delivers it, carrying text only.
+  const paste = (content: HTMLElement, text: string) =>
+    act(async () => {
+      const event = new Event('paste', { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'clipboardData', { value: { getData: (type: string) => (type === 'text/plain' ? text : ''), files: [], items: [], types: ['text/plain'] } });
+      content.dispatchEvent(event);
+    });
+
+  it('lands a 5,000-character paste over 200 lines as text, and makes a chip of 20,001 characters', async () => {
+    const { handle, content } = await mounted([]);
+    const text = `${Array.from({ length: 200 }, (_, i) => `pasted line ${String(i).padStart(3, '0')} `.padEnd(24, 'x')).join('\n')}x`;
+    expect(text.length).toBe(5000);
+    await paste(content, text);
+    expect(content.querySelector('[data-pasted]')).toBeNull();
+    expect(shown(handle)).toBe(text);
+    act(() => handle.current?.clear());
+    await paste(content, 'y'.repeat(20_001));
+    expect(content.querySelectorAll('[data-pasted="text"]')).toHaveLength(1);
+    expect(shown(handle)).toBe('[Pasted text #1 +1 lines]');
+  });
+
+  it('opens a chip to its text, and "Show in text field" turns it into text as one undoable step', async () => {
+    const { handle, content } = await mounted([]);
+    const body = 'z'.repeat(20_001);
+    await paste(content, body);
+    fireEvent.click(within(content.querySelector('[data-pasted]') as HTMLElement).getByRole('button'));
+    const popover = await screen.findByRole('dialog', { name: 'Pasted text #1' });
+    expect(popover.textContent).toContain(body);
+    fireEvent.click(within(popover).getByRole('button', { name: 'Show in text field' }));
+    expect(content.querySelector('[data-pasted]')).toBeNull();
+    expect(shown(handle)).toBe(body);
+    expect(screen.queryByRole('dialog', { name: 'Pasted text #1' })).toBeNull();
+    await act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true })));
+    expect(shown(handle)).toBe('[Pasted text #1 +1 lines]'); // one undo brings the chip back whole
+  });
+
+  it('loads a stored draft’s old chip as that chip, which opens; a chip whose text was not kept says so and offers nothing', async () => {
+    const chip = pastedNode({ id: 'p-1', kind: 'text', name: 'Pasted text #1', lines: 3, text: 'one\ntwo\nthree' });
+    const lost = pastedNode({ id: 'p-2', kind: 'text', name: 'Pasted text #2', lines: 40, text: null });
+    const { port } = drafts({ doc: docOf([paragraph(chip, textNode(' and '), lost)]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
+    const handle = createRef<EditorHandle>();
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} handle={handle} />);
+    await waitFor(() => expect(container.querySelectorAll('[data-pasted]')).toHaveLength(2));
+    const [kept, unkept] = [...container.querySelectorAll<HTMLElement>('[data-pasted]')];
+    fireEvent.click(within(unkept).getByRole('button'));
+    const sorry = await screen.findByRole('dialog', { name: 'Pasted text #2' });
+    expect(sorry.textContent).toContain(UNAVAILABLE_TITLE);
+    expect(within(sorry).queryByRole('button', { name: 'Show in text field' })).toBeNull();
+    fireEvent.keyDown(sorry, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Pasted text #2' })).toBeNull());
+    fireEvent.click(within(kept).getByRole('button'));
+    const open = await screen.findByRole('dialog', { name: 'Pasted text #1' });
+    expect(open.textContent).toContain('one\ntwo\nthree');
+    fireEvent.click(within(open).getByRole('button', { name: 'Show in text field' }));
+    expect(handle.current?.serialize().display).toBe('one\ntwo\nthree and [Pasted text #1 +40 lines]');
   });
 });

@@ -45,6 +45,8 @@ const LANDED = [
   'composer.takeBack', 'composer.sendNowOrStop',
   // U4a: M5's rows
   'composer.modelMenu', 'composer.effortMenu', 'composer.modeMenu',
+  // U4a: M6's row
+  'composer.historySearch',
 ];
 
 // Decision 8 (A13 as amended): two dispatched rows share a default chord only if both are `renderer` rows and at most one
@@ -166,6 +168,12 @@ describe('keymap: the table', () => {
     expect(ACTIONS['composer.effortMenu']).toEqual({ title: 'Effort', chord: 'Cmd+Shift+E', sink: 'renderer', menu: null, scope: 'app' });
     expect(ACTIONS['composer.modeMenu']).toEqual({ title: 'Permission mode menu', chord: 'Cmd+Shift+M', sink: 'renderer', menu: null, scope: 'app' });
     for (const id of ['composer.modelMenu', 'composer.effortMenu', 'composer.modeMenu'] as const) expect(isRebindable(id), id).toBe(false); // build F knows none
+  });
+
+  // UX wave U4a M6 (Interfaces H; decision 22): Ctrl+R searches the prompt history, dispatched to the focused composer
+  it('carries the history search on Ctrl+R, composer-scoped and out of the menu', () => {
+    expect(ACTIONS['composer.historySearch']).toEqual({ title: 'Search prompt history', chord: 'Ctrl+R', sink: 'renderer', menu: null, scope: 'composer' });
+    expect(isRebindable('composer.historySearch')).toBe(false); // build F knows it not
   });
   // C7 end
 

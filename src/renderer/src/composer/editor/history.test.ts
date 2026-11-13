@@ -3,7 +3,7 @@ import type { HistoryEntry } from '@shared/composer/history-entry';
 import type { MessageUuid } from '@shared/graph/ids';
 import type { Row, TurnActivity } from '../../transcript';
 import { docOf, paragraph, textNode, type ComposerDoc } from './doc';
-import { historyNavigation, recallDoc, recallEntries, type HistoryNav } from './history';
+import { findMatch, historyNavigation, matchPlace, recallDoc, recallEntries, recallLine, recallText, searchKeyOf, searchLine, type HistoryNav } from './history';
 import { bodiesByPlaceholder, historyEntryToDoc, prefillToDoc } from './recall';
 import { serializeDraft } from './serialize';
 
@@ -115,5 +115,69 @@ describe('history recall rebuilds pasted atoms and marks unresolved ones', () =>
     const listed = [entry('[Pasted text #1 +40 lines]', { '1': textBody(1, 'one') }), entry('[Pasted text #1 +40 lines]', { '1': textBody(1, 'two') })];
     const recalled = recallEntries([], [], listed).map((r) => serializeDraft(recallDoc(r), ctx).pastedContents['1']?.content);
     expect(recalled).toEqual(['one', 'two']);
+  });
+});
+
+// UX wave U4a M6 (l3-input-12; decision 22): the line under the text while recalling, and the prompt-history search
+describe('the history line says where the recall is, 1 the most recent', () => {
+  it('reads the place of the newest, a middle and the oldest of twelve entries', () => {
+    expect(recallLine(11, 12)).toBe('History 1/12 · ↓ to restore your draft');
+    expect(recallLine(9, 12)).toBe('History 3/12 · ↓ to restore your draft');
+    expect(recallLine(0, 12)).toBe('History 12/12 · ↓ to restore your draft');
+  });
+});
+
+describe('the history search finds, counts and words its match', () => {
+  // newest first, as the search reads the list ↑ walks
+  const texts = ['Deploy the docs', 'fix the build', 'Read the BUILD log', 'deploy again', 'notes'];
+
+  it('finds the text anywhere in a prompt, case ignored, from a place in either direction', () => {
+    expect(findMatch(texts, 'build', 0, 1)).toBe(1);
+    expect(findMatch(texts, 'build', 2, 1)).toBe(2);
+    expect(findMatch(texts, 'build', 3, 1)).toBeNull();
+    expect(findMatch(texts, 'deploy', 3, -1)).toBe(3);
+    expect(findMatch(texts, 'deploy', 2, -1)).toBe(0);
+    expect(findMatch(texts, 'deploy', -1, -1)).toBeNull();
+    expect(findMatch(texts, 'zzz', 0, 1)).toBeNull();
+    expect(findMatch(texts, '', 4, 1)).toBe(4); // an empty search holds every prompt
+  });
+
+  it('counts the prompts that hold the text and the match’s place among them, newest first', () => {
+    expect(matchPlace(texts, 'build', 2)).toEqual({ place: 2, total: 2 });
+    expect(matchPlace(texts, 'deploy', 0)).toEqual({ place: 1, total: 2 });
+    expect(matchPlace(texts, 'zzz', null)).toBeNull();
+    expect(matchPlace(texts, 'build', 4)).toBeNull(); // what is shown does not hold the text
+    expect(matchPlace(texts, 'build', null)).toBeNull();
+  });
+
+  it('words the line with the typed text and the match, or no match', () => {
+    expect(searchLine('build', { place: 2, total: 40 })).toBe('Search history: build — match 2 of 40');
+    expect(searchLine('zzz', null)).toBe('Search history: zzz — no match');
+    expect(searchLine('', null)).toBe('Search history:');
+  });
+
+  it('reads a key as Desktop’s handler does: the moves, the restore, the take, what ends it for the editor, the typing', () => {
+    const key = (k: string, over: Partial<KeyboardEvent> = {}) => searchKeyOf({ key: k, ctrlKey: false, metaKey: false, altKey: false, isComposing: false, ...over });
+    expect(key('ArrowUp')).toEqual({ kind: 'older' });
+    expect(key('ArrowDown')).toEqual({ kind: 'newer' });
+    expect(key('Escape')).toEqual({ kind: 'restore' });
+    expect(key('Backspace')).toEqual({ kind: 'erase' });
+    for (const k of ['Enter', 'Tab', 'ArrowLeft', 'ArrowRight', 'Home', 'End']) expect(key(k), k).toEqual({ kind: 'take' });
+    expect(key('a', { isComposing: true })).toEqual({ kind: 'yield' }); // a composition goes on in the box
+    expect(key('Process')).toEqual({ kind: 'yield' });
+    expect(key('Dead')).toEqual({ kind: 'yield' });
+    expect(key('v', { metaKey: true })).toEqual({ kind: 'yield' }); // a paste or a cut is the box's
+    expect(key('x', { metaKey: true })).toEqual({ kind: 'yield' });
+    expect(key('b')).toEqual({ kind: 'type', char: 'b' });
+    expect(key('B')).toEqual({ kind: 'type', char: 'B' });
+    expect(key(' ')).toEqual({ kind: 'type', char: ' ' });
+    expect(key('a', { metaKey: true })).toEqual({ kind: 'ignore' });
+    expect(key('a', { ctrlKey: true })).toEqual({ kind: 'ignore' });
+    expect(key('Shift')).toEqual({ kind: 'ignore' });
+  });
+
+  it('searches a recall by the text it shows', () => {
+    expect(recallText({ source: 'history', entry: entry('from [Pasted text #1 +3 lines]') })).toBe('from [Pasted text #1 +3 lines]');
+    expect(recallText({ source: 'session', prefill: { text: 'typed here' } })).toBe('typed here');
   });
 });

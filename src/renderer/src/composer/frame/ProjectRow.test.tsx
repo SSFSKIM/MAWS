@@ -73,15 +73,20 @@ describe('the project row', () => {
     expect(screen.queryByLabelText(/^Branch /)).toBeNull();
   });
 
+  // UX wave U4a M6 (l3-input-07; decision 24): two projects named alike each show, dimmed in the folder name's place, the
+  // part of the path that tells them apart; every row's title is its whole path
   it('lists the projects most recently active first, the folder beside a name it differs from, then New project and Don’t work in a project', async () => {
+    const delta = at('delta' as ProjectId);
+    useSessions.setState({ projects: new Map([...useSessions.getState().projects, [delta, project(delta, 4, { name: 'Delta', directory: '/work/delta-app', createdAt: '2025-12-01T00:00:00.000Z' })]]) });
     const b = binding();
     render(<ProjectRow binding={b} />);
     await userEvent.setup().click(screen.getByRole('button', { name: 'Choose a project' }));
     expect(within(menu()).getByPlaceholderText('Search projects')).toBeTruthy();
-    expect(rows()).toEqual(['beta', 'Alphaalpha', 'Alphaalpha-two', 'New project', "Don't work in a project"]);
-    // two projects named alike: the path is the tooltip (Codex's collision rule)
-    expect(within(menu()).getAllByRole('option').slice(1, 3).map((o) => o.title)).toEqual(['/work/alpha', '/elsewhere/alpha-two']);
-    expect(within(menu()).getAllByRole('option')[0]!.title).toBe('');
+    // the two Alphas: the part of the path that tells them apart, in the folder's place
+    expect(rows()).toEqual(['beta', 'Alphawork', 'Alphaelsewhere', 'Deltadelta-app', 'New project', "Don't work in a project"]);
+    const options = within(menu()).getAllByRole('option');
+    expect(options.slice(0, 4).map((o) => o.title)).toEqual(['/work/beta', '/work/alpha', '/elsewhere/alpha-two', '/work/delta-app']);
+    expect(within(options[1]!).getByText('work').className).toContain('text-fg-muted'); // dimmed
   });
 
   it('searches names and paths, says when nothing matches, and chooses a project, a new one or none', async () => {
@@ -249,6 +254,20 @@ describe('the project row on another machine', () => {
     await user.click(within(menu()).getByRole('option', { name: 'notes' }));
     expect(spawnTargetOf(TAB, null)).toEqual({ machine: OTHER_MACHINE, name: 'mini', checkout: '/Users/mini/notes', key: null, label: 'notes' });
     expect(screen.getByRole('button', { name: 'Project notes' }).title).toBe(PLACE_WORDS.change('notes', 'mini'));
+  });
+
+  it('tells two of that machine’s projects of one name apart by the part of their path, and titles every row with its path', async () => {
+    roster();
+    vi.spyOn(ipc, 'invoke').mockImplementation((async (name: string) => {
+      if (name === 'session.projects.list') return { ok: true, value: { projects: [theirs('a', 'site', '/Users/mini/work/site', '2026-02-01T00:00:00.000Z'), theirs('b', 'site', '/Users/mini/play/site', '2026-03-01T00:00:00.000Z'), theirs('c', 'notes', '/Users/mini/notes')], revision: 1 } };
+      if (name === 'machine.folders.list') return { ok: true, value: HOME_PAGE };
+      return { ok: false, error: { code: 'internal', message: `unexpected ${name}` } };
+    }) as never);
+    onMini();
+    render(<ProjectRow binding={binding()} appSessionId={TAB} />);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Choose a project' }));
+    await vi.waitFor(() => expect(rows()).toEqual(['siteplay', 'sitework', 'notes', 'New project', "Don't work in a project"]));
+    expect(within(menu()).getAllByRole('option').slice(0, 3).map((o) => o.title)).toEqual(['~/play/site', '~/work/site', '~/notes']);
   });
 
   it('takes the home for Don’t work in a project, and opens that machine’s folder sheet for New project', async () => {
