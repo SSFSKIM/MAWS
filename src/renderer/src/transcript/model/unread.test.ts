@@ -64,7 +64,8 @@ describe('a waiting message’s row is unread until it starts or is dropped (dec
     b.emit('user.message', { messageUuid: uuid('s1'), content: 'Look at b too', isReplay: false, isSynthetic: false, origin: 'human', bash: null });
     expect(rowOf(users(rowsOf(reduce(b.events))), uuid('s1'))?.unread).toBe(true);
     b.emit('command.lifecycle', { commandUuid: uuid('s1'), state: 'cancelled' });
-    expect(rowOf(users(rowsOf(reduce(b.events))), uuid('s1'))).toMatchObject({ dropped: true, unread: undefined });
+    expect(marks(rowOf(users(rowsOf(reduce(b.events))), uuid('s1')))).toEqual({ unread: undefined, pending: undefined });
+    expect(rowOf(users(rowsOf(reduce(b.events))), uuid('s1'))?.dropped).toBe(true);
   });
 });
 

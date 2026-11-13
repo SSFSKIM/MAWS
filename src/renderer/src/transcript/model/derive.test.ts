@@ -537,7 +537,8 @@ describe('the queue tail', () => {
     b.emit('command.lifecycle', { commandUuid: uuid('s2'), state: 'cancelled' });
     const rows = rowsOf(applyEvents(createState(null, null), b.events));
     expect(rows.find((row) => row.kind === 'user' && row.messageUuid === 's1')).toMatchObject({ unread: true, pending: 'next' });
-    expect(rows.find((row) => row.kind === 'user' && row.messageUuid === 's2')).toMatchObject({ dropped: true, unread: undefined });
+    const s2 = rows.find((row) => row.kind === 'user' && row.messageUuid === 's2');
+    expect([s2?.kind === 'user' && s2.dropped, s2?.kind === 'user' && s2.unread]).toEqual([true, undefined]);
     const held = heldRow({ queueId: 'q-1', content: 'then run the tests', createdAt: '2026-09-28T10:00:09.000Z' });
     const prompts = (shown: Row[]) => shown.filter((row) => row.kind === 'user').map((row) => (row.kind === 'user' && row.messageUuid) || row.id);
     expect(prompts(withQueueTail(rows, new Set(), [held]))).toEqual(['u1', 's1', 's2', 'held:q-1']); // no stack: as today
