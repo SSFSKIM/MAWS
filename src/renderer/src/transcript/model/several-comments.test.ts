@@ -40,7 +40,7 @@ describe('the text of a message of several comments', () => {
   it('reads every comment in the order made, with no anchor, no framing and the texts joined as the row’s text', () => {
     for (const destination of ['main', 'thread'] as const) {
       const read = userTextOf(commentsMessage(two(), destination));
-      expect(read).toMatchObject({ comments: COMMENTS, anchor: null, frame: null, text: TEXTS, lines: 4, attachments: [], placeholders: [] });
+      expect(read).toMatchObject({ comments: COMMENTS, commentsTo: destination === 'thread' ? 'thread' : null, anchor: null, frame: null, text: TEXTS, lines: 4, attachments: [], placeholders: [] });
     }
   });
 
@@ -82,6 +82,7 @@ describe('the user row of several comments', () => {
     expect(row).toMatchObject({ comments: COMMENTS, text: TEXTS, editable: false });
     expect('anchor' in row!).toBe(false);
     expect('anchorFrame' in row!).toBe(false);
+    expect('commentsTo' in row!).toBe(false); // sent to the main conversation
     expect(RowSchema.safeParse(row).success).toBe(true);
   };
 
@@ -106,6 +107,15 @@ describe('the user row of several comments', () => {
     expect(rows.map((row) => row.steer)).toEqual([false, true]);
     expect(rows[1]).toMatchObject({ comments: [{ ...COMMENTS[0], attachment: 0 }, { ...COMMENTS[1], attachment: 1 }], editable: false });
     expect(RowSchema.safeParse(rows[1]).success).toBe(true);
+  });
+
+  it('a thread’s first message of several comments says so (`commentsTo`), which only a thread can open with', () => {
+    const b = builder();
+    b.emit('turn.started', { userMessageUuid: uuid('u1'), origin: 'human' });
+    sent(b, 'u1', commentsMessage(two(), 'thread'));
+    const [row] = drawn(b.events);
+    expect(row).toMatchObject({ comments: COMMENTS, commentsTo: 'thread', editable: false });
+    expect(RowSchema.safeParse(row).success).toBe(true);
   });
 
   it('from a held entry', () => {
