@@ -7,7 +7,7 @@ import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PanelSessionState, PanelTabRef } from '@shared/ipc/schema/layout';
-import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
+import { LAYOUT_DEFAULTS, storedMain } from '@shared/ipc/schema/layout';
 import { TEST_MACHINE } from '../../../../test/support/machine';
 import { queryClient } from '../ipc/query';
 import { connectPanelHost, instanceIds, panelHost, pendingAdds, registerPanelTool, resetPanelHost } from '../panel/host';
@@ -79,7 +79,7 @@ afterEach(() => {
 });
 
 describe('shell renders the panel host in the region', () => {
-  it('keeps pins first in the inventory, shows only the selected tool’s tabs, and the pin glyph moves its ref', async () => {
+  it('keeps pins first in the inventory, shows every tab in one strip with the selected one in view, and the pin glyph moves its ref', async () => {
     const user = userEvent.setup();
     register(probeTool('terminal').tool, probeTool('files').tool);
     useLayout.setState({
@@ -89,8 +89,8 @@ describe('shell renders the panel host in the region', () => {
     renderShell();
     expect(effectiveIds()).toEqual(['terminal:pin00000', 'files:aaaaaaaa']);
     expect(selectedId()).toBe('files:aaaaaaaa');
-    expect(within(panel()).getByRole('tablist', { name: 'files tabs' })).toBeTruthy();
-    expect(within(panel()).queryByRole('tablist', { name: 'terminal tabs' })).toBeNull();
+    expect(within(panel()).getAllByRole('tablist')).toHaveLength(1);
+    expect(within(panel()).getAllByRole('tab').map((tab) => [tab.textContent, tab.getAttribute('aria-selected')])).toEqual([['terminal', 'false'], ['files', 'true']]);
     expect(screen.getByTestId('body:files:aaaaaaaa').textContent).toContain(`${A} · unpinned · visible`);
     expect(screen.queryByRole('complementary', { name: 'Session cards' })).toBeNull();
 
@@ -175,14 +175,14 @@ describe('shell renders the panel host in the region', () => {
     expect(terminal.probe.created).toEqual([expect.objectContaining({ appSessionId: A, instanceId: id })]);
     expect(panelOf(B)).toBeUndefined();
     expect(screen.getByTestId(`body:${id}`).textContent).toContain(`${A} · unpinned · visible`);
-    expect(within(panel()).getByRole('tablist', { name: 'terminal tabs' })).toBeTruthy();
+    expect(within(panel()).getByRole('tablist', { name: 'Panel tools' })).toBeTruthy();
   });
 
   describe('over a held hydration and a recorded layout.json', () => {
     beforeEach(() => resetPanelStores({ hydrated: false }));
 
     it('an addTool before hydration writes nothing, lands after it, is persisted, and a relaunch from the writes shows the tab', async () => {
-      const bridge = heldBridge(persisted({ 'main.tabs': mainShowing(B) }));
+      const bridge = heldBridge(persisted({ 'main.tabs': storedMain(mainShowing(B)) }));
       const stopPersistence = persistLayout(bridge.client);
       connect();
       const terminal = probeTool('terminal');
@@ -224,7 +224,7 @@ describe('shell renders the panel host in the region', () => {
     });
 
     it('a pending add for a session removed before the barrier lands nothing under either activation or as a pin; a sessionless pin lands', async () => {
-      const bridge = heldBridge(persisted({ 'main.tabs': mainShowing(B) }));
+      const bridge = heldBridge(persisted({ 'main.tabs': storedMain(mainShowing(B)) }));
       const stopPersistence = persistLayout(bridge.client);
       connect();
       const terminal = probeTool('terminal');
@@ -276,7 +276,7 @@ describe('shell renders the panel host in the region', () => {
     it('a pending singleton replacing a restored pinned ref carries A’s, B’s and the no-session selection to the new id, opening nothing', async () => {
       const bridge = heldBridge(
         persisted({
-          'main.tabs': LAYOUT_DEFAULTS.main, // the Overview: no session shown
+          'main.tabs': storedMain(LAYOUT_DEFAULTS.main), // the Overview: no session shown
           'panel.pinned': [ref('session-info:restored', true), ref('t:pin00000', true)],
           [`panel.${A}`]: { tabs: [], activeTabId: 'session-info:restored' },
           [`panel.${B}`]: { tabs: [ref('t:bbbbbbbb')], activeTabId: 'session-info:restored' },
@@ -301,7 +301,7 @@ describe('shell renders the panel host in the region', () => {
       expect(effectiveIds()).toEqual([id, 't:pin00000']);
       expect(within(panel()).getByRole('tabpanel', { name: 'session-info' })).toBeTruthy();
       const singleton = within(panel()).getByRole('region', { name: 'session-info' });
-      expect(within(singleton).queryByRole('tablist')).toBeNull(); // other stacked tools may have their own strips
+      expect(within(singleton).getAllByRole('tab').map((tab) => tab.getAttribute('aria-selected'))).toEqual(['true', 'false']); // one strip, the pins
       expect(info.probe.created).toEqual([expect.objectContaining({ instanceId: id, params: 'p' })]);
     });
   });

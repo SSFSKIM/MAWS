@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { projectCatalog } from '../../stores/catalog';
+import { EMPTY_CATALOG, projectCatalog } from '../../stores/catalog';
 import { atItems, mawsItems, slashItems, type SlashItem } from './items';
 import { rankItems, rememberChosen, resetChosen } from './rank';
 import { registerSlashWidget, registeredWidgetNames, WIDGET_COMMANDS } from './widgets';
@@ -61,6 +61,17 @@ describe('slash items union the catalogue, the widget catalogue and MAWS actions
     expect(byName(slashItems(autoRouted(), registeredWidgetNames(), []), 'model').action).toEqual({ kind: 'text' });
   });
 
+  // UX wave U11a (§C, "Names"): `/mcp` reads as the dialog it opens, in a started chat (whose catalogue lists the engine's
+  // own description) and before the first message alike; every other name keeps the engine's description
+  it('describes /mcp in MAWS’s words in a started and an unstarted chat', () => {
+    const catalog = autoRouted();
+    expect(catalog.commands.find((c) => c.name === 'mcp')?.description).toBe('Manage MCP servers'); // the engine's own
+    const started = slashItems(catalog, new Set(), []);
+    expect(byName(started, 'mcp')).toMatchObject({ origin: 'engine', description: 'Connectors in this chat (MCP servers)' });
+    expect(byName(started, 'compact').description).toBe(catalog.commands.find((c) => c.name === 'compact')!.description);
+    expect(byName(slashItems(EMPTY_CATALOG, new Set(), []), 'mcp')).toMatchObject({ origin: 'widget', description: 'Connectors in this chat (MCP servers)' });
+  });
+
   it('classifies custom and plugin commands and skills', () => {
     const c = projectCatalog('L', {
       commands: [
@@ -91,7 +102,7 @@ describe('slash and @ ranking is deterministic', () => {
     const ranked = rankItems('mo', items).map((i) => `${i.origin}:${i.name}`);
     // `model` by prefix, then the names holding `mo` (memory: me-mo-ry), then names holding m…o apart
     expect(ranked.slice(0, 5)).toEqual(['engine:model', 'engine:__remote-workflow', 'engine:auto-mode-setup', 'widget:memory', 'engine:fewer-permission-prompts']);
-    expect(ranked).not.toContain('engine:mcp'); // `mcp` holds no `o` and its description ("Manage MCP servers") no word starting `mo`
+    expect(ranked).not.toContain('engine:mcp'); // `mcp` holds no `o` and its description ("Connectors in this chat (MCP servers)") no word starting `mo`
     // then the description-only matches, a MAWS action (matched by its description alone) last
     expect(ranked.indexOf('engine:fast')).toBeGreaterThan(ranked.indexOf('widget:memory'));
     expect(ranked.at(-1)).toBe('maws:overview');

@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { Resizer } from './Resizer';
+import { Resizer, RESIZING_ATTRIBUTE } from './Resizer';
 
 // A region whose width the resizer drives, as the shell does with the layout store.
 // P3-G: with `expand`, the region also floats (the panel's `onExpand`) when dragged past its maximum.
@@ -38,6 +38,21 @@ function Harness({ grow = 1, initial = 300, expand = false }: { grow?: 1 | -1; i
     </div>
   );
 }
+
+// UX wave U8b (Addendum 8): two separators, each its own drag, as two pointers can make them; `a` can be unmounted.
+function Two({ a = true }: { a?: boolean }) {
+  const props = { controls: 'region', value: 300, min: 200, max: 480, defaultValue: 300, onChange: () => {} };
+  return (
+    <div>
+      {a && <Resizer label="A" {...props} />}
+      <Resizer label="B" {...props} />
+    </div>
+  );
+}
+const marked = () => document.documentElement.hasAttribute(RESIZING_ATTRIBUTE);
+const press = (label: string, pointerId: number) => act(() => void fireEvent.pointerDown(screen.getByRole('separator', { name: label }), { pointerId, button: 0, clientX: 300 }));
+const up = (label: string, pointerId: number) => act(() => void fireEvent.pointerUp(screen.getByRole('separator', { name: label }), { pointerId, clientX: 300 }));
+const lose = (label: string, pointerId: number) => act(() => void fireEvent.lostPointerCapture(screen.getByRole('separator', { name: label }), { pointerId }));
 
 const state = () => screen.getByTestId('state').textContent;
 const separator = () => screen.getByRole('separator', { name: 'Resize sidebar' });
@@ -121,6 +136,92 @@ describe('resizer', () => {
     // Moving without a press does nothing.
     act(() => void fireEvent.pointerMove(separator(), { pointerId: 1, clientX: 100 }));
     expect(state()).toBe('470');
+  });
+
+  // UX wave U8b (Addendum 7): a release that never reaches the separator cannot leave a drag behind
+  it('a drag ends when it loses its pointer capture, so a later move changes nothing', () => {
+    render(<Harness />);
+    drag(300, 340);
+    expect(state()).toBe('340');
+    act(() => void fireEvent.lostPointerCapture(separator(), { pointerId: 1 }));
+    act(() => void fireEvent.pointerMove(separator(), { pointerId: 1, clientX: 400 }));
+    expect(state()).toBe('340');
+  });
+
+  it('marks the document while a drag is active, for the rule that keeps frames from taking its events', () => {
+    const { unmount } = render(<Harness />);
+    drag(300, 340);
+    expect(marked()).toBe(true);
+    release(340);
+    expect(marked()).toBe(false);
+    drag(340, 350);
+    act(() => void fireEvent.lostPointerCapture(separator(), { pointerId: 1 }));
+    expect(marked(), 'a lost capture ends the drag').toBe(false);
+    drag(350, 360);
+    unmount();
+    expect(marked(), 'a separator removed mid-drag takes the mark with it').toBe(false);
+  });
+
+  // UX wave U8b (Addendum 8): the mark is one fact of the page with as many owners as there are live drags
+  it.each([
+    ['A', 'B'],
+    ['B', 'A'],
+  ])('two drags by two pointers keep the mark until the second release (%s released first)', (first, second) => {
+    render(<Two />);
+    press('A', 1);
+    press('B', 2);
+    expect(marked()).toBe(true);
+    up(first, first === 'A' ? 1 : 2);
+    expect(marked(), 'the other drag is alive').toBe(true);
+    up(second, second === 'A' ? 1 : 2);
+    expect(marked()).toBe(false);
+  });
+
+  it('a dragging separator unmounted while another drags keeps the mark; the last drag to end clears it', () => {
+    const { rerender } = render(<Two />);
+    press('A', 1);
+    press('B', 2);
+    rerender(<Two a={false} />);
+    expect(marked(), 'B still drags').toBe(true);
+    up('B', 2);
+    expect(marked()).toBe(false);
+  });
+
+  it('the last dragging separator unmounted clears the mark', () => {
+    const { rerender, unmount } = render(<Two />);
+    press('A', 1);
+    press('B', 2);
+    up('B', 2);
+    rerender(<Two a={false} />);
+    expect(marked()).toBe(false);
+    unmount();
+  });
+
+  // React delivers no event to an unmounted node, so a late end is the separator's own handler, taken from the node's
+  // React props before the unmount and called after it
+  it('a late end from a separator already unmounted takes nothing off', () => {
+    const { rerender } = render(<Two />);
+    press('A', 1);
+    press('B', 2);
+    const a = screen.getByRole('separator', { name: 'A' });
+    const props = Object.entries(a).find(([key]) => key.startsWith('__reactProps$'))![1] as { onPointerUp(event: unknown): void };
+    rerender(<Two a={false} />);
+    act(() => props.onPointerUp({ pointerId: 1, currentTarget: a }));
+    expect(marked(), 'B still drags').toBe(true);
+    up('B', 2);
+    expect(marked()).toBe(false);
+  });
+
+  it('a separator takes off no more than it added: a second end changes nothing', () => {
+    render(<Two />);
+    press('A', 1);
+    press('B', 2);
+    up('B', 2);
+    lose('B', 2); // the capture's loss after the release, a second end
+    up('B', 2);
+    expect(marked(), 'A still drags').toBe(true);
+    up('A', 1);
+    expect(marked()).toBe(false);
   });
 
   it('a drag released less than 40 px past the minimum snaps back to the minimum', () => {

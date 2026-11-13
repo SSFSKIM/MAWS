@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
+import { LAYOUT_DEFAULTS, storedMain } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { TEST_MACHINE } from '../../../../test/support/machine';
 import { createLayoutStore, useLayout } from '../stores/layout';
@@ -36,17 +36,19 @@ describe('visible surface lifecycle', () => {
     expect(layout().effectivePanelTabs(A)).toHaveLength(2);
   });
 
-  it('keeps a non-active tool slot when its selected tab closes and another tab of the tool remains', async () => {
+  it('keeps the other group as it is when a group’s tab in view closes and another tab of its tool remains there', async () => {
     const terminal = probeTool('terminal');
     registerPanelTool(terminal.tool);
     const first = panelHost.addTool('terminal', { appSessionId: A });
     const second = panelHost.addTool('terminal', { appSessionId: A });
     const browser = add('browser');
-    expect(surfaceTabs(layout(), A).map((tab) => tab.id)).toEqual([second, browser]);
+    layout().moveSurfaceTab(A, first, 'lower'); // UX wave U8b: the terminals below, the browser above
+    layout().moveSurfaceTab(A, second, 'lower');
+    expect(surfaceTabs(layout(), A).map((tab) => tab.id)).toEqual([browser, second]);
 
     await panelHost.closeTab(second);
 
-    expect(surfaceTabs(layout(), A).map((tab) => tab.id)).toEqual([first, browser]);
+    expect(surfaceTabs(layout(), A).map((tab) => tab.id)).toEqual([browser, first]);
     expect(layout().panelBySession.get(A)?.activeTabId).toBe(browser);
     expect(terminal.probe.beforeClose).toEqual([second]);
     expect(terminal.probe.disposed).toEqual([second]);
@@ -56,7 +58,7 @@ describe('visible surface lifecycle', () => {
     const terminal = add('terminal');
     layout().setPanelParams(terminal, { attach: 'pty-1' });
     layout().setPanel({ [mode]: true, width: 444 });
-    layout().setSurfaceStack(A, []);
+    layout().hideSurfaces(A);
 
     expect(layout().regions.panel).toMatchObject({ floating: false, maximized: false, width: 444 });
     expect(cardSession(layout())).toBeNull();
@@ -97,7 +99,7 @@ describe('visible surface lifecycle', () => {
     const regions = { ...LAYOUT_DEFAULTS.regions, panel: { ...LAYOUT_DEFAULTS.regions.panel, width: 444, floating: true }, floatingCard: { [terminal.id]: { w: 420, h: 300 } } };
     const values: Record<string, unknown> = {
       regions,
-      'main.tabs': mainShowing(A),
+      'main.tabs': storedMain(mainShowing(A)),
       [`panel.${A}`]: { tabs: [terminal], activeTabId: null },
       'panelTools.params': { version: 1, params: { [terminal.id]: { attach: 'pty-1' } } },
     };

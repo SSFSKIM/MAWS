@@ -100,6 +100,31 @@ describe('the agents tool for another machine’s terminal session', () => {
     release();
   });
 
+  // X-168 (the architect's ruling of 2026-11-13): the session's presence says no live record while its machine is up, so
+  // its process is gone; the agents it left running end, whatever the machine last reported of them.
+  it('ends a running agent when the machine says the session has no live process, and not when the link pauses', async () => {
+    const store = createTaskGraphStore();
+    const release = store.getState().watch(REMOTE);
+    await wait(() => fake.invoked('laneA.watch').length > 0);
+    plane([envelope('snapshot', { rows: [], more: false, subagents: [meta('running')], presence: { record: { status: 'busy' }, bridge: true, launch: 'L1' }, streaming: [] })]);
+    const node = () => store.getState().entries.get(REMOTE)?.graph.tasks.get(AGENT as TaskId);
+    await wait(() => node() !== undefined);
+    fake.event('laneA.plane', { appSessionId: SESSION, watch: 'w1', paused: 'offline' }, OTHER_MACHINE); // the machine's link down
+    await settle();
+    expect(node()).toMatchObject({ status: 'running' });
+    fake.event('laneA.plane', { appSessionId: SESSION, watch: 'w1', resumed: true }, OTHER_MACHINE);
+    plane([envelope('presence', { record: null, bridge: false })]);
+    await wait(() => node()?.status === 'exited');
+    expect(node()).toMatchObject({ status: 'exited' });
+    plane([envelope('subagents', { subagents: [meta('running')] })]); // a status it last reported does not bring it back
+    await settle();
+    expect(node()).toMatchObject({ status: 'exited' });
+    plane([envelope('presence', { record: { status: 'busy' }, bridge: true, launch: 'L2' })]); // resumed there
+    await wait(() => node()?.status === 'running');
+    expect(node()).toMatchObject({ status: 'running' });
+    release();
+  });
+
   it('leaves a session of this machine to the agent-work reads', () => {
     const local = addressOf(OTHER_MACHINE, 'not-listed' as AppSessionId);
     const store = createTaskGraphStore();

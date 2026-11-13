@@ -1,6 +1,7 @@
-// Environment (C8 spec *The summary*): the branch with Review, the uncommitted change line, and the model row that opens
-// Session info. The git facts are the git store's for the summary's directory (Summary.tsx holds the watch); a failed
-// watch says why in words and draws no branch, a failed diff keeps the branch and says the change is unavailable.
+// Environment (C8 spec *The summary*): the branch, the uncommitted change line (Review's own control, the card's one way
+// into Review; UX wave U8b, l5-code-16), and the model row that opens Session info. The git facts are the git store's for
+// the summary's directory (Summary.tsx holds the watch); a failed watch says why in words and draws no branch, a failed
+// diff keeps the branch and says the change is unavailable.
 import { EffortSchema } from '@shared/engine/launch-spec';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -13,24 +14,24 @@ import { NOT_A_REPOSITORY } from '../../sessions/branch-label'; // C4's message 
 import { useGit, type GitEntry } from '../../stores/git';
 import { SUMMARY_COPY } from '../copy';
 import { changeLine } from './derive';
-import { FloatingCard } from './FloatingCard';
+import { FloatingCard, type CardFold } from './FloatingCard';
 import { PushState } from './PushState';
 import { Row, ToolButton, ToolSummary, useToolSummary } from './Section';
 
-export function Environment({ appSessionId, record, directory }: { appSessionId: AppSessionId; record: SessionRecord; directory: string }) {
+export function Environment({ appSessionId, record, directory, fold }: { appSessionId: AppSessionId; record: SessionRecord; directory: string; fold: CardFold }) {
   const entry = useGit((s) => s.entries.get(checkoutKey(machineFor(appSessionId), directory)));
   const reviewSummary = useToolSummary('review');
   const status = entry?.status ?? null;
   const machine = useMachineMark(appSessionId); // P5 O6 M5: where it runs, this Mac's as before, another's by name
   return (
-    <FloatingCard title="Environment" summary={status ? (status.branch ?? SUMMARY_COPY.detached(status.head)) : watchFailure(entry)}>
+    <FloatingCard title="Environment" summary={status ? (status.branch ?? SUMMARY_COPY.detached(status.head)) : watchFailure(entry)} {...fold}>
       <Row><span className="text-fg-muted">{machine.local ? 'This Mac' : machine.offline ? `${machine.name} · offline` : machine.name}</span></Row>
       <Row action={<ToolButton toolId="files" label="Files" appSessionId={appSessionId} />}>
         <span className="block truncate" title={directory}>{directory}</span>
       </Row>
       {status ? (
         <>
-          <Row action={<ToolButton toolId="review" label={SUMMARY_COPY.review} appSessionId={appSessionId} />}>
+          <Row>
             <span className="block truncate">{status.branch === null ? SUMMARY_COPY.detached(status.head) : SUMMARY_COPY.branch(status.branch)}</span>
           </Row>
           {reviewSummary ? <ToolSummary toolId="review" appSessionId={appSessionId} component={reviewSummary} /> : <ChangeLine entry={entry!} />}
@@ -41,7 +42,6 @@ export function Environment({ appSessionId, record, directory }: { appSessionId:
         </Row>
       )}
       <PushState directory={directory} appSessionId={appSessionId} embedded />
-      {record.engineVersion !== null && <Row><span className="block truncate text-fg-muted">{SUMMARY_COPY.engineVersion(record.engineVersion)}</span></Row> /* W13 */}
       <Row action={<ToolButton toolId="session-info" label={SUMMARY_COPY.sessionInfo} appSessionId={appSessionId} />}>
         <ModelLine record={record} directory={directory} />
       </Row>

@@ -14,6 +14,7 @@ import { ipc } from '../ipc/client';
 import { availabilityRefusal, useAvailability } from '../sessions/availability'; // P2-A
 import { inlineEditOf, resubmitRecordOf, setInlineText, useComposerStore, type InlineEdit, type Resubmit } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
+import { Backdrop } from '../sessions/scrim'; // board 523 (U11a): the one scrim
 import type { UserRow } from './edit-prefill';
 import { cancelInlineEdit, cancelRewind, confirmRewind, forkInlineEdit, keepEditing, resubmitProvider, rewindAgain, sendInlineEdit } from './resubmit-seam';
 
@@ -153,7 +154,9 @@ function RewindConfirm({ onConfirm, onCancel }: { onConfirm(): void; onCancel():
   return (
     <AlertDialog.Root open onOpenChange={(open) => !open && onCancel()}>
       <AlertDialog.Portal>
-        <AlertDialog.Overlay className="fixed inset-0 z-40 bg-bg opacity-60" />
+        <AlertDialog.Overlay asChild>
+          <Backdrop className="fixed inset-0 z-40" />
+        </AlertDialog.Overlay>
         <AlertDialog.Content className="fixed top-[24%] left-1/2 z-50 flex w-[min(440px,90vw)] -translate-x-1/2 flex-col gap-3 rounded-lg border border-border-strong bg-bg-overlay p-4 text-ui text-fg">
           <AlertDialog.Title className="m-0 text-ui font-semibold">Rewind past a newer turn?</AlertDialog.Title>
           <AlertDialog.Description className="m-0 text-fg-muted">A newer turn started after you began editing. Rewinding discards it too. Rewind anyway?</AlertDialog.Description>

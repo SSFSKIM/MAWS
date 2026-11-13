@@ -70,6 +70,10 @@ function originOf(command: SessionCatalog['commands'][number], skills: ReadonlyS
   return 'custom';
 }
 
+// UX wave U11a (§C, "Names"): the one name whose declared description wins over the engine's catalogue, so `/mcp` reads
+// as the dialog it opens in a started chat too
+const DECLARED_DESCRIPTION: ReadonlyMap<string, string> = new Map<string, string>(WIDGET_COMMANDS.filter((w) => w.name === 'mcp').map((w) => [w.name, w.description]));
+
 export function slashItems(catalog: SessionCatalog, widgets: ReadonlySet<string>, maws: SlashItem[]): SlashItem[] {
   const skills = new Set(catalog.skills);
   const terminalOnly = new Set(catalog.terminalOnly);
@@ -79,7 +83,7 @@ export function slashItems(catalog: SessionCatalog, widgets: ReadonlySet<string>
   const dispatch = (name: string, headless: boolean, hint: string): SlashAction =>
     widgets.has(name) ? { kind: 'widget' } : closed[name] !== undefined ? { kind: 'unavailable', hint: closed[name] } : headless ? { kind: 'text' } : { kind: 'unavailable', hint };
   const engine = catalog.commands.map(
-    (c): SlashItem => ({ name: c.name, title: `/${c.name}`, description: c.description, argumentHint: c.argumentHint, origin: originOf(c, skills), action: dispatch(c.name, !terminalOnly.has(c.name), TERMINAL_ONLY_HINT) }),
+    (c): SlashItem => ({ name: c.name, title: `/${c.name}`, description: DECLARED_DESCRIPTION.get(c.name) ?? c.description, argumentHint: c.argumentHint, origin: originOf(c, skills), action: dispatch(c.name, !terminalOnly.has(c.name), TERMINAL_ONLY_HINT) }),
   );
   const declared = WIDGET_COMMANDS.filter((w) => !listed.has(w.name)).map(
     (w): SlashItem => ({ name: w.name, title: `/${w.name}`, description: w.description, argumentHint: null, origin: 'widget', action: dispatch(w.name, false, UNAVAILABLE_HINT) }),

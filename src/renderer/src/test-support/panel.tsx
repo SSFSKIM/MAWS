@@ -10,7 +10,7 @@ import type { CommandName, CommandResult, MawsBridge, PreloadBridge } from '@sha
 import { queryClient } from '../ipc/query';
 import { useGit } from '../stores/git';
 import { useSummary } from '../stores/summary';
-import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, type LayoutMain, type PanelSessionState, type PanelTabRef, type TabRef } from '@shared/ipc/schema/layout';
+import { EMPTY_STRIP, LAYOUT_DEFAULTS, storedMain, type PanelSessionState, type PanelTabRef, type Strip, type TabRef } from '@shared/ipc/schema/layout';
 import { record } from '../../../../test/support/builders';
 import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { resetPanelHost, shownSession } from '../panel/host';
@@ -82,9 +82,10 @@ export function probeTool(id: string, over: Partial<PanelTool<ProbeState, unknow
 
 export const ref = (id: string, pinned = false): PanelTabRef => ({ id, toolId: id.split(':')[0], pinned });
 export const sessionTab = (id: AppSessionId): TabRef => ({ id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false });
-export const mainShowing = (...ids: AppSessionId[]): LayoutMain => {
+// The strip with these sessions' tabs, the last in front (U13a: the store's value; `storedMain` of it is what layout.json holds).
+export const mainShowing = (...ids: AppSessionId[]): Strip => {
   const tabs = ids.map(sessionTab);
-  return { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs, activeTabId: tabs.at(-1)?.id ?? '' }] } } };
+  return { ...EMPTY_STRIP, panes: [{ tabs, activeTabId: tabs.at(-1)?.id ?? '' }] };
 };
 
 // The host as C5's region hands it its props, with `onChange` recorded per call.
@@ -148,7 +149,7 @@ export function spyLayout() {
 }
 
 export function resetPanelStores(opts: { hydrated?: boolean } = {}): void {
-  useShellView.setState({ sidebarOverlay: false, cardsOverlay: false });
+  useShellView.setState({ sidebarOverlay: false, cardsOverlay: false, pageOpen: false });
   resetPanelHost();
   resetEditorHosts(); // P3-G
   resetArtifactMachines(); // P5 O7 M5a: the page's artifact table
@@ -162,6 +163,9 @@ export function resetPanelStores(opts: { hydrated?: boolean } = {}): void {
     panelActiveNoSession: null,
     panelParams: {}, // P4-B3
     panelSurfaces: { version: 2, stacks: {}, pinnedTools: [], contexts: {} },
+    panelGroups: { version: 1, lower: {} }, // UX wave U8b
+    panelWidths: { version: 1, wide: null, narrow: null },
+    cardsOpen: ['environment'],
     knownSession: () => true,
     dragging: null, // P4-B3
     hydrated: opts.hydrated ?? true,
@@ -211,7 +215,7 @@ export function heldBridge(values: Record<string, unknown>) {
 }
 
 // layout.json as a relaunch finds it: the renderer's fixed keys, A on screen, then the keys given.
-export const persisted = (keys: Record<string, unknown>) => ({ regions: LAYOUT_DEFAULTS.regions, 'main.tabs': mainShowing(A), 'panel.pinned': [], ...keys });
+export const persisted = (keys: Record<string, unknown>) => ({ regions: LAYOUT_DEFAULTS.regions, 'main.tabs': storedMain(mainShowing(A)), 'panel.pinned': [], ...keys });
 
 // Hydrates the layout store over a held bridge as `connectShell` does (the sessions store's records are the sessions
 // that exist), running `before` while `layout.get` is held.

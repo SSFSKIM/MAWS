@@ -42,6 +42,9 @@ export interface LaneASession {
   agents: Record<string, PlaneRow[]>;
   /** The main snapshot's subagent tree (DX4 `SubagentMeta`s). */
   subagents: Array<Record<string, unknown>>;
+  /** UX wave U8b M9: the main snapshot's jobs (DX4 `Job`s), the loop's background tasks sminos derives from its rows
+   * (sminos_jobs.py's `derive`, whose body the plane spreads into a snapshot); none when absent. */
+  jobs?: Array<Record<string, unknown>>;
   /** The newest rows a snapshot carries of a subagent's transcript (all, when absent); the main one's carries all. */
   agentWindow?: number;
 }
@@ -54,6 +57,12 @@ export interface LaneAPlane {
   subscribes(agentId: string | null): Frame[];
   /** The `rows` the endpoint asked of the transcript, in order. */
   pages(agentId: string | null): Frame[];
+  /** UX wave U8b M9 (X-168): the session's presence changed, as sminos's plane says one (sminos_plane.py's `presence`):
+   * a session-wide `presence` message (no `sub`, no `n`), which B's endpoint carries on each main subscription of the
+   * session. `record` null is the session's process gone, the plane's not-running body `{record: null, bridge: false}`;
+   * a record is a live process again, `{record, bridge: true, launch}`. Each later snapshot carries the same presence,
+   * as the plane draws a snapshot's from the session's state at that moment. */
+  presence(record: Record<string, unknown> | null): void;
 }
 
 export interface FakeSminos {
@@ -86,7 +95,7 @@ export async function startFakeSminos(scratch: string, info: { socket: string; t
   s.send(restatedFrame());
   const present = new Set<string>();
   // The lane A plane: each session's transcripts, the upstreams open on them, and the frames read so far.
-  const sessions = new Map<string, { project: string; spec: LaneASession }>();
+  const sessions = new Map<string, { project: string; spec: LaneASession; presence: Record<string, unknown> }>();
   const upstreams = new Map<string, { session: string; agentId: string | null; n: number }>();
   let read = 0;
   const envelope = (project: string, session: string, kind: string, sub: string | null, n: number | null, body: unknown) => ({ t: 'session', message: { project, machine, session, kind, sub, n, body } });
@@ -109,8 +118,7 @@ export async function startFakeSminos(scratch: string, info: { socket: string; t
         upstreams.set(sub, { session: held.spec.engine, agentId, n: 0 });
         const rows = transcriptOf(held.spec, agentId);
         const shown = agentId === null ? rows : rows.slice(-(held.spec.agentWindow ?? rows.length));
-        const presence = { record: { status: 'busy' }, bridge: true, launch: held.spec.launch };
-        s.send(envelope(held.project, held.spec.engine, 'snapshot', sub, 0, { rows: [...shown].reverse(), more: shown.length < rows.length, subagents: agentId === null ? held.spec.subagents : [], presence, streaming: [] }));
+        s.send(envelope(held.project, held.spec.engine, 'snapshot', sub, 0, { rows: [...shown].reverse(), more: shown.length < rows.length, subagents: agentId === null ? held.spec.subagents : [], ...(agentId === null && held.spec.jobs !== undefined && { jobs: held.spec.jobs }), presence: held.presence, streaming: [] }));
       } else if (f.t === 'unsubscribe') {
         upstreams.delete(sub);
       } else if (f.t === 'rows') {
@@ -140,7 +148,8 @@ export async function startFakeSminos(scratch: string, info: { socket: string; t
     member: (project, m) => s.send(memberFrame(project, m)),
     gone: (engine) => s.send(goneFrame(engine)),
     laneA(project, spec) {
-      sessions.set(spec.engine, { project, spec });
+      const held = { project, spec, presence: { record: { status: 'busy' }, bridge: true, launch: spec.launch } as Record<string, unknown> };
+      sessions.set(spec.engine, held);
       s.send({ t: 'member', session: spec.engine, alias: spec.engine.slice(0, 8), project, lane: 'A', state: 'busy', title: spec.title, cwd: spec.cwd, launch: spec.launch, owners: spec.owners, ownersProof: [], origin: { kind: 'terminal' }, access: 'listed' });
       const open = (agentId: string | null) => [...upstreams].filter(([, up]) => up.session === spec.engine && up.agentId === agentId).map(([sub]) => sub);
       const asked = (t: string, agentId: string | null) => s.received.filter((f) => f.t === t && f.session === spec.engine && (f.agentId ?? null) === agentId);
@@ -157,6 +166,10 @@ export async function startFakeSminos(scratch: string, info: { socket: string; t
         },
         subscribes: (agentId) => asked('subscribe', agentId),
         pages: (agentId) => asked('rows', agentId),
+        presence(record) {
+          held.presence = record === null ? { record: null, bridge: false } : { record, bridge: true, launch: spec.launch };
+          s.send(envelope(project, spec.engine, 'presence', null, null, held.presence));
+        },
       };
     },
     said: () => s.received.map((frame) => JSON.stringify(frame).slice(0, 300)).join('\n'),

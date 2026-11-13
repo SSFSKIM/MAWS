@@ -7,6 +7,7 @@
 // is opened by writing it into layout.json and reloading (C5's restore path).
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { expect, type Locator, type Page } from '@playwright/test';
+import type { AppSessionId } from '../src/shared/graph/ids';
 import type { PanelHarnessApi } from '../src/renderer/src/harness/panel/api';
 import type { CodeHarnessApi } from '../src/renderer/src/harness/code/api';
 import {
@@ -171,8 +172,10 @@ test.describe('the #panel harness: Review and its hand-offs', () => {
   test('split and unified show the same hunks and Wrap toggles', async ({ maws }) => {
     const h = await Harness.open(maws);
     await withScratch(h, async () => {
-      await h.panel('setWidth', 280);
       await reviewAppTs(h);
+      // UX wave U8b (M1): the width set is the width of the class in view, so it is set with Review (a wide tool) in view.
+      await h.panel('setWidth', 280);
+      await expect.poll(async () => Math.round((await h.region.boundingBox())?.width ?? 0), 'Review at 280 px').toBe(280);
       const unified = (await h.review('panel'))!;
       expect(unified.mode).toBe('unified');
       await h.code('setMode', 'split', 'panel');
@@ -264,7 +267,12 @@ test.describe('the #panel harness: Review and its hand-offs', () => {
       await hideSurfaces(h.page);
       const environment = await unfoldSessionCard(h.page, 'Environment');
       await expect(environment.getByTestId('change-line')).toHaveText('+4 −0 across 5 files · 3 untracked · 1 staged');
-      await environment.getByRole('button', { name: 'Review', exact: true }).click();
+      // UX wave U8b (M4 decision 4, A8): the change line is the card's control into Review, named Open changes with its
+      // counts as its description; the branch row's Review button is gone.
+      const changes = environment.getByRole('button', { name: 'Open changes', exact: true });
+      await expect(changes).toHaveAccessibleDescription('+4 −0 across 5 files · 3 untracked · 1 staged');
+      await expect(environment.getByRole('button', { name: 'Review', exact: true })).toHaveCount(0);
+      await changes.click();
       await expect.poll(async () => (await h.review('panel'))?.scope).toBe('uncommitted');
       await expect(h.region.locator('[data-chip="uncommitted"]')).toHaveAttribute('aria-pressed', 'true');
     });
@@ -695,8 +703,8 @@ test.describe('the product in stub mode over a scratch repository', () => {
         )
         .toContain(`session:${id}`);
       await restoreWithTab(p, [
-        { id: `diff:${id}:uncommitted @ src/app.ts`, kind: 'diff', appSessionId: id, ref: 'uncommitted @ src/app.ts', pinned: false },
-        { id: `diff:${id}:uncommitted @ /etc/hosts`, kind: 'diff', appSessionId: id, ref: 'uncommitted @ /etc/hosts', pinned: false },
+        { id: `diff:${id}:uncommitted @ src/app.ts`, kind: 'diff', appSessionId: id as AppSessionId, ref: 'uncommitted @ src/app.ts', pinned: false },
+        { id: `diff:${id}:uncommitted @ /etc/hosts`, kind: 'diff', appSessionId: id as AppSessionId, ref: 'uncommitted @ /etc/hosts', pinned: false },
       ]);
       const tabs = mainTabs(p.page);
       await expect(tabs.getByRole('tab', { name: /^Diff · uncommitted @ \/etc\/hosts/ })).toBeVisible({ timeout: 15_000 });

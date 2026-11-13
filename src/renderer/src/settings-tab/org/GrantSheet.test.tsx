@@ -54,7 +54,7 @@ describe('Settings › Org: the grant sheet (M4b)', () => {
     expect(Array.from(person(sheet).options).map((o) => o.textContent)).toEqual(['Choose a person', 'Ana (ana@example.com)', 'Ben (ben@example.com)', 'Cat (cat@example.com)']);
     expect(within(sheet).getByText('Start sessions on it.')).toBeTruthy();
     expect(within(sheet).getByText('Open a terminal and forward ports on it, outside any session.')).toBeTruthy();
-    expect(within(sheet).getByText('Set its read-only mode and its ceilings.')).toBeTruthy();
+    expect(within(sheet).getByText('Connect, sign in and disconnect its connectors, and choose the connector tools its dashboards may use.')).toBeTruthy();
     expect(box(sheet, 'spawn').disabled).toBe(true); // no person yet
 
     fireEvent.change(person(sheet), { target: { value: BEN } });
@@ -109,7 +109,7 @@ describe('Settings › Org: the grant sheet (M4b)', () => {
     await vi.waitFor(() => expect(sent('org.grants.set')).toEqual([{ ref: MINI, member: BEN, rights: [] }]));
   });
 
-  it('every refusal reads in its own words, ineligible with each problem and ledger-unread with main’s detail; a Touch ID cancel says nothing and Save stays', async () => {
+  it('every refusal reads in its own words, and names what to do next; a Touch ID cancel says nothing and Save stays', async () => {
     let answer: GrantSetResult = { ok: false, reason: 'cancelled' };
     renderSection(signing(notSigning), { 'org.view': () => VIEWED, 'org.grants.view': () => MINIS, 'org.grants.set': () => answer });
     const sheet = await openGrant();
@@ -121,49 +121,80 @@ describe('Settings › Org: the grant sheet (M4b)', () => {
     await vi.waitFor(() => expect(save.disabled).toBe(false));
     expect(within(sheet).queryByRole('alert')).toBeNull();
 
-    const said = new Map<string, string>();
+    // each its own explanation, not its detail's: with no detail, every line is apart
+    const lines = new Set<string>();
     for (const reason of GRANT_REFUSALS) {
-      answer = { ok: false, reason, detail: `why-${reason}` };
+      if (reason === 'cancelled') continue; // a Touch ID cancel with no detail says nothing (above)
+      answer = { ok: false, reason };
+      const asked = sent('org.grants.set').length;
       fireEvent.click(within(sheet).getByRole('button', { name: 'Save…' }));
-      const alert = await within(sheet).findByRole('alert');
-      expect(alert.textContent).toContain(`why-${reason}`);
-      said.set(reason, alert.textContent!);
+      await vi.waitFor(() => expect(sent('org.grants.set')).toHaveLength(asked + 1));
+      await act(async () => {}); // its answer drawn
+      const text = within(sheet).getByRole('alert').textContent!;
+      expect(text).toMatch(/^Not signed · [^·]+$/);
+      lines.add(text);
     }
-    expect(new Set(said.values()).size).toBe(GRANT_REFUSALS.length); // each its own line
-    // and each its own explanation, not its detail's: the same detail for all, then none
-    for (const detail of ['the same detail', undefined]) {
-      const lines = new Set<string>();
-      for (const reason of GRANT_REFUSALS) {
-        answer = detail === undefined ? { ok: false, reason } : { ok: false, reason, detail };
+    expect(lines.size).toBe(GRANT_REFUSALS.length - 1);
+    expect(within(sheet).getByRole('button', { name: 'Save…' })).toBeTruthy();
+  });
+
+  // U11a board 540 (§B): every reason main gives the sheet, with its detail as main words it, and the exact line drawn: main's
+  // detail follows the line only where it says something the line does not, and ineligible's list is drawn once
+  it('each reason, given main’s detail, draws its line once, and the detail only where it adds to the line', async () => {
+    const NOT = 'Not signed · ';
+    const drawn: Record<(typeof GRANT_REFUSALS)[number], readonly (readonly [string | undefined, string | null])[]> = {
+      'signed-out': [[undefined, `${NOT}This Mac isn’t signed in to the org. Sign in under Org, then try again.`]],
+      damaged: [[undefined, `${NOT}This Mac’s record of the grants it issued is damaged and can’t be repaired here, so it signs no grant. Sign from another device of the machine’s owner (an admin’s, for a machine the org owns).`]],
+      storage: [
+        ['grants.json could not be written (EIO): nothing was sent', `${NOT}The grant couldn’t be saved on this Mac. Try again; if it keeps failing, check the disk’s free space. · grants.json could not be written (EIO): nothing was sent`],
+        [
+          `${MINI} answered done, but grants.json could not record it (EIO): it is not sent again, and the record is written again at the next pass`,
+          `${NOT}The grant couldn’t be saved on this Mac. Try again; if it keeps failing, check the disk’s free space. · ${MINI} answered done, but grants.json could not record it (EIO): it is not sent again, and the record is written again at the next pass`,
+        ],
+      ],
+      busy: [['another grant is being signed', `${NOT}Another grant is being signed. Try again once it’s done.`]],
+      invalid: [['a right is named twice', `${NOT}The rights were sent wrongly (one was named twice). Close this sheet and choose them again.`]],
+      'no-change': [['the member holds these rights already', `${NOT}They hold these rights already.`]],
+      ineligible: [["this grant can't be signed here: signer-not-owner", `${NOT}This Mac can’t sign this grant. Sign it from another device of the machine’s owner, or resolve:`]],
+      'ledger-unread': [
+        ['this Mac’s own endpoint hasn’t seen this member yet', `${NOT}The machine’s grants for this person couldn’t be read, so nothing was signed. Try again in a moment. · this Mac’s own endpoint hasn’t seen this member yet`],
+        [`${MINI}'s grant ledger can't be read (offline): no version is guessed`, `${NOT}The machine’s grants for this person couldn’t be read, so nothing was signed. Try again in a moment. · ${MINI}'s grant ledger can't be read (offline): no version is guessed`],
+      ],
+      cancelled: [[undefined, null]], // Touch ID cancelled: nothing to say
+      refused: [['unknown-signer', `${NOT}The signed grant didn’t verify against the org state held now. Nothing was kept or sent: sign again. · unknown-signer`]],
+      stale: [['the org state moved after the grant was verified: nothing was kept or sent, sign again', `${NOT}What this would sign changed meanwhile. Nothing was kept or sent: sign again.`]],
+      none: [['no grant this Mac issued is missing there', `${NOT}Nothing is missing on the machine now.`]],
+    };
+    let answer: GrantSetResult = { ok: false, reason: 'cancelled' };
+    renderSection(signing(notSigning), { 'org.view': () => VIEWED, 'org.grants.view': () => MINIS, 'org.grants.set': () => answer });
+    const sheet = await openGrant();
+    fireEvent.change(person(sheet), { target: { value: CAT } });
+    fireEvent.click(box(sheet, 'machine-admin'));
+    for (const reason of GRANT_REFUSALS) {
+      for (const [detail, words] of drawn[reason]) {
+        answer = { ok: false, reason, ...(detail === undefined ? {} : { detail }), ...(reason === 'ineligible' ? { problems: ['signer-not-owner'] } : {}) };
         const asked = sent('org.grants.set').length;
         fireEvent.click(within(sheet).getByRole('button', { name: 'Save…' }));
         await vi.waitFor(() => expect(sent('org.grants.set')).toHaveLength(asked + 1));
         await act(async () => {}); // its answer drawn
-        if (reason === 'cancelled' && detail === undefined) continue; // a Touch ID cancel with no detail says nothing (pinned below)
-        const text = within(sheet).getByRole('alert').textContent!;
-        expect(text).toMatch(detail === undefined ? /^Not signed · [^·]+$/ : / · the same detail$/);
-        lines.add(text);
+        const alert = within(sheet).queryByRole('alert');
+        if (words === null) expect(alert, reason).toBeNull();
+        else expect(alert?.querySelector('p')?.textContent, `${reason}, ${detail ?? 'no detail'}`).toBe(words);
       }
-      expect(lines.size, `each refusal explained apart, with ${detail ?? 'no detail'}`).toBe(GRANT_REFUSALS.length - (detail === undefined ? 1 : 0));
     }
-    expect(said.get('stale')).toBe('Not signed · What this would sign changed meanwhile. Nothing was kept or sent: sign again. · why-stale');
 
-    answer = { ok: false, reason: 'ineligible', problems: ['signer-not-owner', 'member-not-listed', 'some-new-code'] };
+    // ineligible: the line, then each problem once, in words, a code with none as itself
+    answer = { ok: false, reason: 'ineligible', detail: "this grant can't be signed here: signer-not-owner, member-not-listed, some-new-code", problems: ['signer-not-owner', 'member-not-listed', 'some-new-code'] };
     fireEvent.click(within(sheet).getByRole('button', { name: 'Save…' }));
-    await vi.waitFor(() => expect(within(sheet).getByRole('alert').textContent).toContain('this Mac’s key isn’t an owner’s'));
-    expect(within(within(sheet).getByRole('alert')).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+    await vi.waitFor(() => expect(within(sheet).getAllByRole('listitem')).toHaveLength(3));
+    const alert = within(sheet).getByRole('alert');
+    expect(alert.querySelector('p')?.textContent).toBe(`${NOT}This Mac can’t sign this grant. Sign it from another device of the machine’s owner, or resolve:`);
+    expect(within(alert).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
       'this Mac’s key isn’t an owner’s (an admin’s, for a machine the org owns)',
       'the org state doesn’t list the person',
       'some-new-code',
     ]);
-
-    // this Mac's own machine, through the door: its endpoint hasn't seen the person yet
-    answer = { ok: false, reason: 'ledger-unread', detail: "this Mac's own endpoint hasn't seen this member yet: try again shortly" };
-    fireEvent.click(within(sheet).getByRole('button', { name: 'Save…' }));
-    await vi.waitFor(() =>
-      expect(within(sheet).getByRole('alert').textContent).toBe("Not signed · The machine’s grants for this person couldn’t be read, so nothing was signed. · this Mac's own endpoint hasn't seen this member yet: try again shortly"),
-    );
-    expect(sent('org.grants.set')).toHaveLength(GRANT_REFUSALS.length * 3 + 3);
+    expect(alert.textContent).not.toContain('signer-not-owner');
   });
 
   it('Sign again… on a refused grant opens the sheet on that person and those rights', async () => {
@@ -209,7 +240,7 @@ describe('Settings › Org: the grant sheet (M4b)', () => {
       },
       'org.grants.set': () => ({ ok: true, version: 4, delivered: 'done' }) satisfies GrantSetResult,
     });
-    const UNREAD = 'mini’s grants can’t be read now. This Mac isn’t signed in to the org.';
+    const UNREAD = 'mini’s grants can’t be read now. This Mac isn’t signed in to the org. Sign in under Org, then try again.';
     expect(await within(await found('mini')).findByText(UNREAD)).toBeTruthy();
     expect(within(row('mini')).getByRole('button', { name: 'Retry' })).toBeTruthy();
     const sheet = await openGrant();
@@ -229,6 +260,54 @@ describe('Settings › Org: the grant sheet (M4b)', () => {
     await vi.waitFor(() => expect(sent('org.grants.set')).toEqual([{ ref: MINI, member: BEN, rights: ['spawn', 'shell'] }]));
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(within(row('mini')).queryByText(UNREAD)).toBeNull();
+  });
+
+  // U11a board 540: with nobody to grant to, the sheet still says the read's own state, and says so only once the grants are known
+  it('on a machine every member owns: reading, then a refused read with Retry (kept while a retry is out), then nobody to grant to, or the person picker for an owner who still holds a grant', async () => {
+    const EVERYONES: Machine = { ...MINE, owners: [ME, ANA, BEN, CAT] };
+    const READING = 'Reading mini’s grants…';
+    const UNREAD = 'mini’s grants can’t be read now. This Mac isn’t signed in to the org. Sign in under Org, then try again.';
+    const NOBODY = 'Everyone in the org owns this machine, and owners hold every right.';
+    const answers: Extract<GrantsView, { ok: true }>['grants'][] = [[], [{ member: BEN, rights: ['spawn'], version: 2, state: 'on-machine' }]];
+    for (const held of answers) {
+      const reads: ReturnType<typeof deferred<GrantsView>>[] = [];
+      renderSection(signing(notSigning), {
+        'org.view': () => viewWith({ maySign: false, machines: [EVERYONES] }),
+        'org.grants.view': () => {
+          const read = deferred<GrantsView>();
+          reads.push(read);
+          return read.promise;
+        },
+      });
+      const sheet = await openGrant();
+      await vi.waitFor(() => expect(reads).toHaveLength(2)); // the row's read, and the sheet's
+      expect(within(sheet).getByText(READING)).toBeTruthy();
+      expect(within(sheet).queryByText(NOBODY)).toBeNull(); // not before the grants are known
+
+      await act(async () => reads[1]!.resolve({ ok: false, ref: MINI, reason: 'signed-out' }));
+      expect(within(sheet).getByText(UNREAD)).toBeTruthy();
+      expect(within(sheet).queryByText(READING)).toBeNull();
+      expect(within(sheet).queryByText(NOBODY)).toBeNull();
+
+      fireEvent.click(within(sheet).getByRole('button', { name: 'Retry' }));
+      await vi.waitFor(() => expect(reads).toHaveLength(3));
+      expect(within(sheet).getByText(UNREAD)).toBeTruthy(); // the retry is out: the earlier line and Retry stay
+      expect(within(sheet).getByRole('button', { name: 'Retry' })).toBeTruthy();
+      await act(async () => reads[0]!.resolve(grantsOf(MINI))); // an earlier read's answer lands nowhere
+      expect(within(sheet).getByText(UNREAD)).toBeTruthy();
+
+      await act(async () => reads[2]!.resolve(grantsOf(MINI, { grants: held })));
+      expect(within(sheet).queryByText(UNREAD)).toBeNull();
+      expect(within(sheet).queryByRole('button', { name: 'Retry' })).toBeNull();
+      if (held.length === 0) {
+        expect(within(sheet).getByText(NOBODY)).toBeTruthy();
+        expect(within(sheet).queryByRole('combobox', { name: 'Person' })).toBeNull();
+      } else {
+        expect(within(sheet).queryByText(NOBODY)).toBeNull();
+        expect(Array.from(person(sheet).options).map((o) => o.textContent)).toEqual(['Choose a person', 'Ben (ben@example.com)']); // an owner, offered to withdraw
+      }
+      resetHarness();
+    }
   });
 
   it('opened on a draft before the grants are read (Sign again on a row read again), it still waits: no Save, whatever is ticked', () => {
@@ -384,12 +463,12 @@ describe('Settings › Org: the re-grant sheet (M4b)', () => {
   });
 
   it('a list that moved reads stale and nothing is kept; an answer after the sheet closed lands nowhere', async () => {
-    let answer: GrantRegrantResult | Promise<GrantRegrantResult> = { ok: false, reason: 'stale', detail: 'the missing grants are no longer the ones shown' };
+    let answer: GrantRegrantResult | Promise<GrantRegrantResult> = { ok: false, reason: 'stale', detail: 'the missing grants changed since they were shown: nothing was signed' };
     renderSection(signing(notSigning), { 'org.view': () => VIEWED, 'org.grants.view': () => MISSING, 'org.grants.regrant': () => answer });
     fireEvent.click(await within(await found('mini')).findByRole('button', { name: 'Re-grant…' }));
     const sheet = await screen.findByRole('dialog', { name: 'Re-grant on mini?' });
     fireEvent.click(within(sheet).getByRole('button', { name: 'Re-grant' }));
-    expect((await within(sheet).findByRole('alert')).textContent).toBe('Not signed · What this would sign changed meanwhile. Nothing was kept or sent: sign again. · the missing grants are no longer the ones shown');
+    expect((await within(sheet).findByRole('alert')).textContent).toBe('Not signed · What this would sign changed meanwhile. Nothing was kept or sent: sign again.'); // main's detail says the same
 
     const late = deferred<GrantRegrantResult>();
     answer = late.promise;

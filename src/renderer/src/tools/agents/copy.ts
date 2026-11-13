@@ -1,20 +1,40 @@
-// Every sentence the Subagents, Background work and Log tools and their two summary sections show (C8b execution
-// document, Interfaces *Copy*; the exact strings are decisions). `<session>` is the parent's record title and `<title>`
+// Every sentence the Subagents, Background tasks and Log tools and their two summary sections show (C8b execution
+// document, Interfaces *Copy*; the exact strings are decisions; the UX wave's U8b document, Interfaces §F, for the two
+// panels' headings and rows). `<session>` is the parent's record title and `<title>`
 // an agent row's title (`name ?? description`); elapsed and token values come from `model/elapsed.ts`'s formatters.
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
+// The UX wave's U8b (M7): a panel's section heading, its label in the heading's weight and its detail (the count and
+// the parts after it) muted; null detail draws the label alone.
+export interface PanelHeading {
+  label: string;
+  detail: string | null;
+}
+
 export const SUBAGENTS_COPY = {
   title: 'Subagents',
   // lists
-  done: (n: number) => `Done · ${n}`, // the Done section's heading, and (E7) a running parent's fold over its finished children
-  onDisk: (n: number) => `On disk · ${n}`,
+  done: (n: number) => `Done · ${n}`, // (E7) a running parent's fold over its finished children
+  // The UX wave's U8b (M7; Interfaces §F) start: the sections' headings, `Running N` (N every running agent, at any
+  // depth; no number when none runs), `Done N · F failed · S stopped`, `On disk N`
+  running: (n: number): PanelHeading => ({ label: 'Running', detail: n > 0 ? String(n) : null }),
+  doneHeading: (n: number, outcomes: { failed: number; stopped: number }): PanelHeading => ({
+    label: 'Done',
+    detail: [String(n), outcomes.failed > 0 && `${outcomes.failed} failed`, outcomes.stopped > 0 && `${outcomes.stopped} stopped`].filter(Boolean).join(' · '),
+  }),
+  onDisk: (n: number): PanelHeading => ({ label: 'On disk', detail: String(n) }),
+  // an agent whose own run has ended while tasks it started still run: after its outcome word
+  tasksRunning: (n: number) => ` · ${plural(n, 'background task')} running`,
+  // a row's disclosure: `(+N)` while closed and agents run under it; its accessible name
+  under: (n: number) => `(+${n})`,
+  underLabel: (n: number, title: string) => (n > 0 ? `${plural(n, 'agent')} running under ${title}` : `Agents under ${title}`),
+  // The UX wave's U8b end
   showMore: (n: number) => `Show ${n} more`,
   working: 'Working', // a row's second line when it has neither a summary nor (under a real name) a description
   nested: '· nested',
   childOf: (parentTitle: string) => `Child of ${parentTitle}`,
   childOfUnlisted: 'Child of an agent this session does not list',
-  waiting: 'waiting',
   approvalNeeded: 'Approval needed',
   finished: (ago: string) => `finished · ${ago}`,
   finishedWithErrors: (ago: string) => `finished with errors · ${ago}`,
@@ -46,7 +66,6 @@ export const SUBAGENTS_COPY = {
   stopUncertain: 'May not have stopped', // P5 O9: a terminal session's stop whose outcome is unknown
   waitingToStart: 'Waiting for the agent to start',
   // E7 start: the topology tree (Design §3, §5)
-  agents: (running: number) => `Agents · ${running} running`,
   foldLabel: (n: number, parentTitle: string) => `Done · ${n} under ${parentTitle}`, // the fold's accessible name
   team: 'Team · led by this session',
   // the listing's own extras, then when it was listed; its `joined <age> ago` is an age at the listing's time, which would
@@ -93,13 +112,24 @@ export const RELAY_COPY = {
 } as const;
 
 export const BACKGROUND_COPY = {
-  title: 'Background work',
-  noSession: 'Open a session to see its background work', // a pinned tab while no session is shown
-  workflows: (n: number) => `Workflows · ${n}`,
-  shellsRunning: (n: number) => `Shells · ${n} running`,
-  monitors: (n: number) => `Monitors · ${n}`,
-  tasks: (completed: number, total: number) => `Tasks · ${completed}/${total}`,
-  tasksHeading: 'Tasks', // before the list is read, or when it cannot be
+  title: 'Background tasks', // the UX wave's U8b (M7): the card's name (was Background work)
+  noSession: 'Open a session to see its background tasks', // a pinned tab while no session is shown
+  // The UX wave's U8b (M7; Interfaces §F) start: the sections' headings, `Running N`, `Scheduled N`, `Tasks`, and
+  // `Done N · W workflows · S shells · M monitors · T tasks` (a kind of zero left out)
+  running: (n: number): PanelHeading => ({ label: 'Running', detail: String(n) }),
+  scheduled: (n: number): PanelHeading => ({ label: 'Scheduled', detail: String(n) }),
+  tasks: { label: 'Tasks', detail: null } satisfies PanelHeading,
+  done: (n: number, kinds: { workflows: number; shells: number; monitors: number; other: number }): PanelHeading => ({
+    label: 'Done',
+    detail: [
+      String(n),
+      kinds.workflows > 0 && plural(kinds.workflows, 'workflow'),
+      kinds.shells > 0 && plural(kinds.shells, 'shell'),
+      kinds.monitors > 0 && plural(kinds.monitors, 'monitor'),
+      kinds.other > 0 && plural(kinds.other, 'task'),
+    ].filter(Boolean).join(' · '),
+  }),
+  // The UX wave's U8b end
   // a workflow card: the node's description as its title, then this line (the frame's summary is not on X1); a run whose
   // name no frame or snapshot gave reads `workflow · …`
   workflowLine: (workflowName: string | null, elapsed: string, agents: number, tokens: string) =>
@@ -116,10 +146,13 @@ export const BACKGROUND_COPY = {
   stopping: 'stopping…',
   stopFailed: (message: string) => `Couldn't stop it: ${message}`,
   stopUncertain: 'May not have stopped', // P5 O9: a terminal session's stop whose outcome is unknown
-  running: (description: string, elapsed: string) => `${description} · running ${elapsed}`, // a shell or a monitor
-  runningUntimed: (description: string) => `${description} · running · elapsed unavailable`, // known from the status's list alone
-  ended: (description: string, status: string, ago: string) => `${description} · ${status} ${ago}`,
-  endedUndated: (description: string, status: string) => `${description} · ${status}`, // no end time known, or ended with the session
+  // a shell's, a monitor's or another task's line: its description, then its state and time (the UX wave's U8b, M7: the
+  // two drawn apart, so a narrow row cuts the description and never the state)
+  line: (description: string, state: string) => `${description}${state}`,
+  runningState: (elapsed: string) => ` · running ${elapsed}`,
+  runningUntimedState: ' · running · elapsed unavailable', // known from the status's list alone
+  endedState: (status: string, ago: string) => ` · ${status} ${ago}`,
+  endedUndatedState: (status: string) => ` · ${status}`, // no end time known, or ended with the session
   output: 'Output',
   outputPending: 'Output path not reported yet',
   earlierCompleted: (n: number) => `${plural(n, 'earlier task')} completed`,
@@ -130,11 +163,10 @@ export const BACKGROUND_COPY = {
   // 2026-09-29), so the engine is not creating one; a live and a disk-only session read the same
   noTaskLists: 'The engine is not creating task lists in this session',
   shellsDiskOnly: 'Shells and monitors are known only while the session runs here',
-  runsOnDisk: (n: number) => `Workflow runs on disk · ${n}`,
   nothingRunning: 'Nothing running',
   // E7 start: the workflow widget and the compact card (E7 execution document, Design §2): the card shows one summary
   // line where its per-phase tables were, and its title and chevron open the widget.
-  back: '‹ Background work',
+  back: '‹ Background tasks',
   openRun: (description: string) => `Open ${description}`, // the card's chevron, by its accessible name
   allPhases: 'All phases',
   phaseCount: (done: number, total: number) => `${done}/${total}`,
@@ -154,21 +186,20 @@ export const BACKGROUND_COPY = {
 } as const;
 
 // E7 start: the Tasks panel (E7 execution document, Design §6 as superseded by P-20): the read-only checklist as its own
-// tool; its list's notes are the checklist's (`BACKGROUND_COPY`), shared with the Background work section.
+// tool; its list's notes are the checklist's (`BACKGROUND_COPY`), shared with the Background tasks section.
 export const TASKS_COPY = {
   title: 'Tasks',
   noSession: 'Open a session to see its tasks', // a pinned tab while no session is shown
   progress: (completed: number, total: number) => `${completed} of ${total} completed`,
-  open: 'Open', // the Background work Tasks heading's action
+  open: 'Open', // the Background tasks Tasks heading's action
   openPanel: 'Open the Tasks panel', // its accessible name
 } as const;
 // E7 end
 
-// E7 start: Background work's Scheduled section (E7 execution document, Design §7): one row per job the engine holds for
+// E7 start: Background tasks' Scheduled section (E7 execution document, Design §7): one row per job the engine holds for
 // the session, its schedule in the create result's words (else the cron), its kind and store, the prompt's first line,
 // its next run with the engine's jitter named in the tooltip (SPEC 22 §22.7), its expiry, and a link to its creating call.
 export const SCHEDULED_COPY = {
-  heading: (n: number) => `Scheduled · ${n}`,
   recurring: 'recurring',
   oneShot: 'one-shot',
   store: { 'durable-this': 'durable · this session', 'durable-other': 'durable · another session', session: 'session-only' },
@@ -198,13 +229,18 @@ export const LOG_COPY = {
   copyFailed: "Couldn't copy the path",
 } as const;
 
-// The summary card's Subagents and Background work sections, filled by the tools' `summary` components.
+// The summary card's Subagents and Background tasks sections, filled by the tools' `summary` components.
 export const AGENTS_SUMMARY_COPY = {
   agents: (working: number, done: number) => `${working} working · ${done} done`,
   onDisk: (n: number) => `${n} on disk`,
   noAgents: 'No subagents yet',
-  background: (counts: { shells: number; workflows: number; monitors: number }) =>
-    [counts.shells && plural(counts.shells, 'shell'), counts.workflows && plural(counts.workflows, 'workflow'), counts.monitors && plural(counts.monitors, 'monitor')]
+  background: (counts: { shells: number; workflows: number; monitors: number; other: number }) =>
+    [
+      counts.shells && plural(counts.shells, 'shell'),
+      counts.workflows && plural(counts.workflows, 'workflow'),
+      counts.monitors && plural(counts.monitors, 'monitor'),
+      counts.other && plural(counts.other, 'task'),
+    ]
       .filter(Boolean)
       .join(' · ') || 'Nothing running',
   runsOnDisk: (n: number) => `${plural(n, 'workflow run')} on disk`,

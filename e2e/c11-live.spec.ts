@@ -25,6 +25,7 @@ import { c11LiveSkipReason, c11Scratch, Forwarder, FORWARDER_PORT, relayCatalogu
 import { ENGINE_BIN } from '../test/support/engine-pin';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { newChatIn, sidebarRow } from './support/sidebar';
+import { allowForTheSession } from './support/request-keys';
 
 const skip = c11LiveSkipReason();
 test.skip(skip !== null, skip ?? '');
@@ -267,8 +268,7 @@ test('every widget opens with live engine data; controls take effect and are rea
       await send(page, main, 'Use the Bash tool to run exactly this command and nothing else: touch c11-live.txt');
       const frame = main.getByRole('group', { name: 'Approval needed' });
       await expect(frame).toBeVisible({ timeout: 120_000 });
-      await frame.getByRole('radio', { name: 'Allow for this session' }).click();
-      await frame.getByRole('button', { name: 'Allow', exact: true }).click();
+      await allowForTheSession(frame); // U1a §D: the session scope, by its button or its menu entry
       await idle(page, id);
       const grantsWidget = await openWidget(live, 'permissions');
       // a read cached before the grant shows until the refetch on mount lands
@@ -282,22 +282,27 @@ test('every widget opens with live engine data; controls take effect and are rea
       expect(diff).toContain('c11-live.txt');
     });
 
-    await step('MCP: Reconnect completes; the switch discloses ~/.claude.json and the engine writes the scratch home', async () => {
+    await step('MCP: Reconnect completes; the head says what the switch reaches and the engine writes the scratch home', async () => {
       const w = await openWidget(live, 'mcp');
-      await expect(w).toContainText(/c11probe\s*connected/);
+      // UX wave U11a (§C): one line per connector, its status in words; Reconnect of a connected row in its opened part
+      const row = w.locator('[data-mcp-server="c11probe"]');
+      const state = row.locator('[data-connector-state]');
+      await expect(state).toContainText('Connected');
       const project = () => scratch.claudeJson().projects?.[repo] ?? {};
       const before = { disabled: project().disabledMcpServers ?? null };
-      await w.getByRole('button', { name: 'Reconnect' }).click();
+      await row.locator('button[aria-expanded]').click();
+      await row.getByRole('button', { name: 'Reconnect' }).click();
       await expect(w.getByRole('status')).toHaveText('Reconnected', { timeout: 30_000 });
       const toggle = w.getByRole('switch', { name: 'Enabled: c11probe' });
-      await expect(w).toContainText('Recorded by the engine for this project in ~/.claude.json');
+      await expect(w.locator('[data-widget-note]')).toHaveText(/^Off here is off for every session in .+\.$/);
+      await expect(w.locator('[data-widget-note]')).toHaveAttribute('title', 'The engine records it in ~/.claude.json.');
       await toggle.click();
       await expect(toggle).toHaveAttribute('aria-checked', 'false', { timeout: 30_000 });
-      await expect(w).toContainText(/c11probe\s*disabled/);
+      await expect(row.locator('button[aria-expanded]')).not.toContainText('Connected'); // disabled: the switch says it
       const off = { disabled: project().disabledMcpServers ?? null };
       await toggle.click();
       await expect(toggle).toHaveAttribute('aria-checked', 'true', { timeout: 30_000 });
-      await expect(w).toContainText(/c11probe\s*connected/);
+      await expect(state).toContainText('Connected');
       const on = { disabled: project().disabledMcpServers ?? null };
       observe('mcp', { before, off, on, file: join(scratch.config, '.claude.json') });
       expect(off.disabled).toEqual(['c11probe']);
@@ -385,11 +390,11 @@ test('every widget opens with live engine data; controls take effect and are rea
       await send(page, main, 'Plan adding a file named hello.txt that contains the word hi. Keep the plan to one or two short steps.');
       const card = main.getByRole('group', { name: 'Plan review' });
       await expect(card).toBeVisible({ timeout: 180_000 });
-      await card.getByRole('button', { name: 'Implement', exact: true }).click();
+      await card.getByRole('button', { name: /^Implement/ }).click(); // U1a §F: "Implement · <the mode before Plan>"
       // default mode again: the write asks
       const approval = main.getByRole('group', { name: 'Approval needed' });
       await expect.poll(async () => {
-        if (await approval.count()) await approval.getByRole('button', { name: 'Allow', exact: true }).click().catch(() => undefined);
+        if (await approval.count()) await approval.getByRole('button', { name: 'Allow once', exact: true }).click().catch(() => undefined);
         const s = await status(page, id);
         return s.turn === null && s.pendingRequests === 0;
       }, { timeout: 240_000, intervals: [1_000] }).toBe(true);

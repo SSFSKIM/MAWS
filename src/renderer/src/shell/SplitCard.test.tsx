@@ -7,8 +7,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import userEvent from '@testing-library/user-event';
 import { useEffect, useLayoutEffect } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppSessionId, ProjectId } from '@shared/graph/ids';
-import { LAYOUT_DEFAULTS, NO_PROJECT, tabId, type LayoutMain, type TabRef } from '@shared/ipc/schema/layout';
+import type { AppSessionId } from '@shared/graph/ids';
+import { LAYOUT_DEFAULTS, tabId, type Strip, type TabRef, storedMain } from '@shared/ipc/schema/layout';
 import { item as attention, record, T0 } from '../../../../test/support/builders';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { at } from '../../../../test/support/machine';
@@ -18,7 +18,7 @@ import { Shell } from '../app/Shell';
 import { registerSlot, resetSlots } from '../app/slots';
 import { runAction } from '../keymap/actions-runtime';
 import { resetEditorHosts, useEditorHost, useEditorHostScope } from '../panel/editor-host';
-import { PanelHeader } from '../panel/PanelHeader';
+import { RegionControls } from '../panel/PanelHeader';
 import { useAttention } from '../stores/attention';
 import { registerFocusTarget, useComposerStore } from '../stores/composer';
 import { useLayout } from '../stores/layout';
@@ -33,6 +33,9 @@ import { useTranscriptStore } from '../stores/transcript'; // M2 review: the rou
 import { builder } from '../transcript/model/test-events';
 import type { TranscriptSource } from '../transcript/source/types';
 import { Transcript } from '../transcript/view/Transcript';
+
+// The region's controls as the side column's first strip draws them (UX wave U8b, M2), in a header row as before.
+const PanelControls = () => <div data-editor-header><RegionControls hide={() => {}} /></div>;
 
 vi.mock('../app/Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
 
@@ -73,9 +76,9 @@ const pill = () => screen.queryByRole('button', { name: 'Show session card' });
 const composers = () => screen.queryAllByTestId('composer').map((el) => el.dataset.session);
 const set = () => currentSet(useLayout.getState().main);
 const divider = () => within(mainRegion()).getByRole('separator', { name: 'Resize panes' });
-const splitOf = (right: TabRef = SETTINGS, ratio = 0.4): LayoutMain => ({
+const splitOf = (right: TabRef = SETTINGS, ratio = 0.4): Strip => ({
   ...LAYOUT_DEFAULTS.main,
-  sets: { [NO_PROJECT]: { panes: [{ tabs: [S], activeTabId: S.id }, { tabs: [right], activeTabId: right.id }], focusedPane: 1, splitRatio: ratio } },
+  panes: [{ tabs: [S], activeTabId: S.id }, { tabs: [right], activeTabId: right.id }], focusedPane: 1, splitRatio: ratio,
 });
 
 let resize: ReturnType<typeof installResizeObserver>['resize'];
@@ -312,7 +315,7 @@ describe('the split’s floating card in the Shell', () => {
     expect(composers()).toEqual([]);
   });
 
-  it('focus and tab changes in A keep S in the card; a press in the card focuses S; another tab set hides it and its return shows it', () => {
+  it('focus and tab changes in A keep S in the card; a press in the card focuses S', () => {
     shell();
     dragTo(150);
     const shown = card()!;
@@ -323,17 +326,11 @@ describe('the split’s floating card in the Shell', () => {
     expect(within(shown).getByTestId('composer').dataset.session).toBe(A);
     act(() => void fireEvent.pointerDown(within(shown).getByTestId('composer')));
     expect(set().focusedPane).toBe(0);
-
-    act(() => useLayout.getState().setCurrentProject(at('elsewhere' as ProjectId)));
-    expect(card()).toBeNull();
-    expect(composers()).toEqual([]);
-    act(() => useLayout.getState().setCurrentProject(null));
-    expect(card()).not.toBeNull();
     expect(set().floating).toEqual({ sessionTabId: S.id });
   });
 
   it('relaunch: a stored floating split comes back with the card open', async () => {
-    const values: Record<string, unknown> = { regions: LAYOUT_DEFAULTS.regions, 'main.tabs': { ...splitOf(DIAGNOSTICS), sets: { [NO_PROJECT]: { ...splitOf(DIAGNOSTICS).sets[NO_PROJECT]!, floating: { sessionTabId: S.id } } } } };
+    const values: Record<string, unknown> = { regions: LAYOUT_DEFAULTS.regions, 'main.tabs': storedMain({ ...splitOf(DIAGNOSTICS), floating: { sessionTabId: S.id } }) };
     const { client } = fakeClient({ 'layout.list': { keys: ['regions', 'main.tabs'] }, 'layout.get': (input: unknown) => ({ value: values[(input as { key: string }).key] ?? null }) });
     useLayout.setState({ hydrated: false, main: LAYOUT_DEFAULTS.main });
     useFloatingCard.setState({ closed: true }); // a moment's choice of the last run, never restored
@@ -379,7 +376,8 @@ describe('the split’s floating card in the Shell', () => {
     const user = userEvent.setup();
     const tab = { id: 'probe:1', toolId: 'probe', pinned: false };
     useLayout.getState().setPanelTabs(A, { tabs: [tab], activeTabId: tab.id });
-    registerSlot('panelHost', (props) => <PanelHeader tabs={props.tabs} activeTabId={props.activeTabId} />);
+    useLayout.getState().showSurfaceTab(A, tab.id);
+    registerSlot('panelHost', () => <PanelControls />);
     shell();
     dragTo(150);
     const panelHeader = document.querySelector<HTMLElement>('[data-region="panel"] [data-editor-header]')!;

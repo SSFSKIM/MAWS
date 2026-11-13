@@ -96,6 +96,12 @@
     overflow: hidden;
   }
 
+  /* UX wave U8b (Addendum 7; app/Resizer.tsx): while a resizer is dragged no frame takes the pointer's events, so a drag
+     over a delivered page (a frame of another origin) stays the separator's. */
+  html[data-resizing] iframe {
+    pointer-events: none;
+  }
+
   body,
   #root {
     overflow: clip;
@@ -122,4 +128,16 @@
     margin-inline: auto;
     padding-inline: var(--measure-pad);
   }
+}
+
+/* board 505 (UX wave U11a): one rule for the shell's gutters. A scroller with a footer or a composer aligned under it reserves
+   its scrollbar's gutter whether or not it overflows, and the element under it reserves the same gutter, so under classic
+   scrollbars both centre their column in the same width; with overlay scrollbars nothing moves. `scrollbar-gutter` acts
+   only on a scroll container, so the element under the scroller clips. The session pane scopes the transcript's rule from
+   its own wrapper, since the transcript's scroller is every transcript's (an agent's, a drill-in's) and most have nothing
+   under them. */
+@layer components {
+  .scroll-gutter { scrollbar-gutter: stable; }                                    /* a scroller with a footer aligned under it */
+  .scroll-gutter-under { overflow: hidden; scrollbar-gutter: stable; }            /* that footer: it clips, so the property applies */
+  .scroll-gutter-scope [data-transcript-scroller] { scrollbar-gutter: stable; }   /* the session pane's transcript, from its wrapper */
 }

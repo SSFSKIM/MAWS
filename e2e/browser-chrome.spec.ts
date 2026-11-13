@@ -686,7 +686,7 @@ test('the cover\'s still: the profile popover over the 380 px panel shows the pa
     const [id] = s.ids as [AppSessionId];
     try {
       const panel = await browserPanel(s, id);
-      // Keep the still/hole regression narrow; the new default surface width is content-sized.
+      // Keep the still/hole regression narrow; the Browser opens at its wide default (60 % of the room).
       const resizer = s.page.getByRole('separator', { name: 'Resize right panel' });
       const before = await paneRect(paneIn(panel));
       const handle = (await resizer.boundingBox())!;
@@ -753,8 +753,8 @@ test('9, 10, 12: the extensions action bar: the probe\'s icon right of the addre
   const optionsUrl = `chrome-extension://${probeId}/options.html`;
   const OPTIONS_TITLE = 'MAWS probe extension · Options';
   const narrowPanel = async (s: ImportScene, panel: Locator) => {
-    // ActionBar folds when inline icons would leave the address slot under 160px. UX2-L's content-wide default
-    // no longer exercises that case, so restore the original 379px chrome through the real panel separator.
+    // ActionBar folds when inline icons would leave the address slot under 160px. The Browser's wide default (60 % of
+    // the room) does not exercise that case, so restore the original 379px chrome through the real panel separator.
     const resizer = s.page.getByRole('separator', { name: 'Resize right panel' });
     const chrome = panel.locator('[data-browser-chrome]');
     const before = (await chrome.boundingBox())!;

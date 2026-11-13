@@ -19,7 +19,10 @@ import { CHARTER, otherThemeColours, panelScenario, scratchRepository, SIDEBAR_D
 import type { AppSessionId } from '@shared/graph/ids'; // P4-B3
 import { closeScene, launchScene, scratchProject, show, type Scene } from './support/maws-tools'; // P4-B3: the split's float
 import { seedTranscript, transcript } from './support/side-replay'; // P4-B3
-import { closeSurface, mainTabs, openSurface, sessionCards, showSessionCards, surface, surfaceRow, unfoldSessionCard } from './support/shell';
+import {
+  closeSideTab, hideSurface, mainTabs, moveSideTab, openSurface, sessionCards, showSessionCards, sideColumn, sideGroup, sideTab, sideTabNames, surface, surfaceRow,
+  unfoldSessionCard,
+} from './support/shell';
 
 const DIR_A = '/tmp/maws-harness/a'; // session A's directory in the harness scenario
 const SCENARIO = 'stub:test/fixtures/panel/harness-sessions.json';
@@ -153,11 +156,17 @@ class PanelPage {
   get summary() {
     return sessionCards(this.page);
   }
-  // UX2: push state lives inside Environment; Sources is embedded in Context rather than a separate panel section.
-  section = (name: 'Environment' | 'Context' | 'Connectors' | 'Artifacts' | 'Sources') => name === 'Sources'
+  // UX2: push state lives inside Environment; Sources is embedded in Context rather than a separate panel section. UX wave
+  // U8b (M4): the three folding cards, and no Artifacts card; Context draws its Sources part only while it has a source.
+  section = (name: 'Environment' | 'Context' | 'Connectors' | 'Sources') => name === 'Sources'
     ? this.summary.locator('[aria-label="Sources"]')
     : this.summary.getByRole('region', { name, exact: true });
-  async unfold(...names: ('Environment' | 'Context' | 'Connectors' | 'Artifacts')[]): Promise<void> {
+  // A folding card's toggle, whose `aria-expanded` is its fold (`cards.open`).
+  fold = (name: 'Environment' | 'Context' | 'Connectors') => this.section(name).getByRole('button').first();
+  // The cards of the column by their titles, top to bottom.
+  cards = (): Promise<string[]> =>
+    this.summary.locator('[aria-label="Session cards"] > section').evaluateAll((sections) => sections.map((section) => section.getAttribute('aria-label') ?? ''));
+  async unfold(...names: ('Environment' | 'Context' | 'Connectors')[]): Promise<void> {
     for (const name of names) await unfoldSessionCard(this.page, name);
   }
   get changeLine() {
@@ -180,8 +189,8 @@ class PanelPage {
     }, key);
   }
   panelOf = async (id: 'A' | 'B') => this.layout<PanelSession>(`panel.${await addressed(this.page, id)}`);
-  // The session the relaunch will show: the focused pane's active tab in layout.json's main.tabs (W12: in the strip's
-  // tab set, `current`).
+  // The session the relaunch will show: the focused pane's active tab in layout.json's main.tabs (U13a: version 3, the one
+  // strip stored as the one set `none`, which `current` names).
   async shownOnDisk(): Promise<string | null> {
     const main = await this.layout<{ current: string; sets: Record<string, { panes: { activeTabId: string | null }[]; focusedPane: number }> }>('main.tabs');
     const shown = main?.sets[main.current];
@@ -469,9 +478,10 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
     const pin = await panel.call('addTool', 'harness-stub', { pin: true });
     await panel.call('showSummary');
 
-    // UX2: the primary tools are icons; non-primary registered tools remain reachable through overflow.
+    // UX2: the primary tools are icons; non-primary registered tools remain reachable through overflow. UX wave U8b (M7):
+    // Background tasks is the tool's name (was Background work). This page registers no Artifacts tool.
     await surfaceRow(panel.page).getByRole('button', { name: 'More surfaces', exact: true }).click();
-    await expect(panel.page.getByRole('menuitem')).toHaveText(['Subagents', 'Background work', 'Tasks', 'Session info', 'Stub']);
+    await expect(panel.page.getByRole('menuitem')).toHaveText(['Subagents', 'Background tasks', 'Tasks', 'Session info', 'Stub']);
     await panel.page.keyboard.press('Escape');
     await openSurface(panel.page, 'Terminal');
     const terminal = (await panel.tabs()).find((tab) => tab.toolId === 'terminal');
@@ -540,7 +550,9 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
     panel.expectQuietConsole();
   });
 
-  test('home glyph shows the summary with the tabs kept and a tab click returns with its scroll intact', async ({ maws }) => {
+  // UX wave U8b (M2, decision 3): no home glyph. Session cards hide the column and close nothing; the tool's own entry
+  // brings its tab back as it was left, and the icon of the tool in view hides the column again.
+  test('Session cards hide the column with its tabs kept, the tool’s entry brings its tab back with its scroll intact, and its icon hides it again', async ({ maws }) => {
     const panel = await PanelPage.open(maws);
     const stub = await panel.call('addTool', 'harness-stub');
     const scroller = panel.region.getByTestId('stub-scroller');
@@ -549,14 +561,24 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
 
     await showSessionCards(panel.page); // UX2: resting cards are selected by the chrome control, not a Home tab.
     await expect(panel.summary).toBeVisible();
-    await expect(scroller, 'the unselected tool is unmounted').toHaveCount(0);
+    await expect(sideColumn(panel.page), 'the side column is hidden').toHaveCount(0);
+    await expect(scroller, 'the tool is unmounted').toHaveCount(0);
     expect(await panel.ids(), 'the tabs are kept').toEqual([stub]);
-    expect(await panel.active()).toBeNull();
+    expect(await panel.active(), 'the tab it showed is remembered while the column is hidden').toBe(stub);
+    expect(await panel.stub('harness-stub', 'instances'), 'nothing closed').toEqual([stub]);
 
     await openSurface(panel.page, 'Stub');
     await expect(scroller).toBeVisible();
     const top = await scroller.evaluate((el) => el.scrollTop);
     expect(Math.abs(top - 400), `scrollTop ${top}`).toBeLessThanOrEqual(1);
+
+    // A tool in view has its icon in the row (pressed); a click on it hides the column.
+    const icon = surfaceRow(panel.page).getByRole('button', { name: 'Stub', exact: true });
+    await expect(icon).toHaveAttribute('aria-pressed', 'true');
+    await icon.click();
+    await expect(sideColumn(panel.page), 'the icon of the tool in view hides the column').toHaveCount(0);
+    expect(await panel.ids(), 'and closes no tab').toEqual([stub]);
+    expect(await panel.stub('harness-stub', 'instances')).toEqual([stub]);
     panel.expectQuietConsole();
   });
 
@@ -598,14 +620,24 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
       await panel.unfold('Environment', 'Context');
 
       await test.step('git, the status and the digest', async () => {
-        await expect(panel.section('Environment')).toContainText('⎇ main');
+        const environment = panel.section('Environment');
+        await expect(environment).toContainText('⎇ main');
         await expect(panel.changeLine).toHaveText('+1 −0 across 2 files · 1 untracked');
-        // UX2 embeds push state in Environment and agent/background destinations in Context.
-        await expect(panel.section('Environment')).toContainText('1 ahead of origin/main');
-        await expect(panel.section('Environment').getByRole('button', { name: 'Open on GitHub' }), 'a local remote has no GitHub page').toHaveCount(0);
-        await expect(panel.section('Context').getByRole('button', { name: 'Subagents', exact: true })).toBeEnabled();
-        await expect(panel.section('Context').getByRole('button', { name: 'Background work', exact: true })).toBeEnabled();
-        await expect(panel.section('Sources')).toContainText('Open the session to list its sources');
+        // UX2 embeds push state in Environment.
+        await expect(environment).toContainText('1 ahead of origin/main');
+        await expect(environment.getByRole('button', { name: 'Open on GitHub' }), 'a local remote has no GitHub page').toHaveCount(0);
+        // UX wave U8b, A8 (l5-code-16): the change line is the card's one way into Review, a control named Open changes
+        // whose counts are its description; the branch row has no Review button, and no row names the engine's version.
+        await expect(environment.getByRole('button', { name: 'Open changes', exact: true })).toHaveAccessibleDescription('+1 −0 across 2 files · 1 untracked');
+        await expect(environment.getByRole('button', { name: 'Review', exact: true })).toHaveCount(0);
+        await expect(environment).not.toContainText('Claude Code');
+        // A6 (O-10): Details… alone under the figures; running work has its own cards, compaction is the composer's.
+        const context = panel.section('Context');
+        await expect(context.getByRole('button', { name: 'Details…', exact: true })).toBeVisible();
+        for (const name of ['Compact…', 'Subagents', 'Background work', 'Background tasks']) await expect(context.getByRole('button', { name, exact: true }), name).toHaveCount(0);
+        // With no source to list (this page has not opened A's transcript), Context draws no Sources part and none of its notes.
+        await expect(panel.section('Sources')).toHaveCount(0);
+        await expect(context).not.toContainText('Open the session to list its sources');
       });
 
       await test.step('the transcript projection: exploration-and-web', async () => {
@@ -628,11 +660,11 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
 
       await test.step('every row opens its tool or names the child that brings it', async () => {
         const environment = panel.section('Environment');
-        // C8c (a C8a test amended by C8c): Review is registered now, so its row opens it.
-        await expect(environment.getByRole('button', { name: 'Review', exact: true }), 'Review is C8c’s').toBeEnabled();
-        // UX2's Context card keeps the existing tools reachable without their former permanent summary sections.
-        await expect(panel.section('Context').getByRole('button', { name: 'Subagents', exact: true })).toBeEnabled();
-        await expect(panel.section('Context').getByRole('button', { name: 'Background work', exact: true })).toBeEnabled();
+        // UX wave U8b (A8): the change line opens Review (C8c's, registered on this page).
+        await environment.getByRole('button', { name: 'Open changes', exact: true }).click();
+        expect((await panel.tabs()).find((tab) => tab.toolId === 'review'), 'the change line opens Review in A').toMatchObject({ active: true, pinned: false });
+        await expect(surface(panel.page, 'review')).toBeVisible();
+        await panel.call('showSummary');
 
         await environment.getByRole('button', { name: 'Session info' }).click(); // the model row
         const info = (await panel.tabs()).find((tab) => tab.toolId === 'session-info');
@@ -659,7 +691,7 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
       panel.page.evaluate((how) => (window as unknown as PanelWindow).__maws_harness!.panel!.transcript('A')[how](), how);
     const cases = [
       ['transcript/exploration-and-web', EXPLORATION_SOURCES],
-      // UX2 removes the digest glyph strip, not the disclosure-independent source projection or Subagents destination.
+      // UX2 removes the digest glyph strip, not the disclosure-independent source projection.
       ['transcript/agents-and-messages', []],
     ] as const;
     for (const [fixture, expected] of cases) {
@@ -679,8 +711,11 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
         expect(expanded, 'every turn expanded').toEqual(collapsed);
       });
     }
-    await expect(panel.section('Sources')).toContainText('No sources yet'); // agents-and-messages: the parent has none of its own
-    await expect(panel.section('Context').getByRole('button', { name: 'Subagents', exact: true })).toBeEnabled();
+    // agents-and-messages: the parent has no source of its own, so Context draws no Sources part (UX wave U8b, A6), and
+    // the Subagents destination is the card for running work and the panel, not a button of Context's.
+    await expect(panel.section('Sources')).toHaveCount(0);
+    await expect(panel.section('Context')).not.toContainText('No sources yet');
+    await expect(panel.section('Context').getByRole('button', { name: 'Subagents', exact: true })).toHaveCount(0);
     panel.expectQuietConsole();
   });
 
@@ -708,45 +743,83 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
     });
   });
 
-  test('a disk-only session marks shells unavailable in its Background work surface', async ({ maws }) => {
+  test('a disk-only session marks shells unavailable in its Background tasks surface', async ({ maws }) => {
     const panel = await PanelPage.open(maws);
-    // UX2 moves the work listing out of a permanent summary section, while preserving the live/disk read boundary.
-    await openSurface(panel.page, 'Background work');
-    await expect(surface(panel.page, 'background')).toContainText('Shells · 1 running'); // A: live
+    // UX2 moves the work listing out of a permanent summary section, while preserving the live/disk read boundary. UX wave
+    // U8b (M7): the tool is Background tasks, its sections by state (`Running N`), a shell a row of its own.
+    await openSurface(panel.page, 'Background tasks');
+    const running = surface(panel.page, 'background').locator('[data-section="running"]');
+    await expect(running.getByRole('button', { name: /^Running \d+$/ })).toBeVisible(); // A: live, its shell and workflow running
+    await expect(running).toContainText('pnpm dev');
     await panel.call('switchSession', 'B');
-    await openSurface(panel.page, 'Background work');
+    await openSurface(panel.page, 'Background tasks');
     await expect(surface(panel.page, 'background')).toContainText('Shells and monitors are known only while the session runs here');
-    // Unknown while offline is not zero: no live Shells counter should be claimed for this disk-only session.
-    await expect(surface(panel.page, 'background')).not.toContainText('Shells ·');
+    // Unknown while offline is not zero: nothing is claimed running for this disk-only session.
+    await expect(surface(panel.page, 'background').locator('[data-section="running"]')).toHaveCount(0);
+    await expect(surface(panel.page, 'background')).not.toContainText('pnpm dev');
     panel.expectQuietConsole();
   });
 
-  test('temporary cards start folded on reload without overwriting legacy section preferences', async ({ maws }) => {
-    const panel = await PanelPage.open(maws);
-    const legacy = { version: 1, collapsed: ['sources'] };
-    const saved = await panel.page.evaluate((value) => window.maws.invoke('layout.set', { key: 'summary.sections', value }), legacy);
-    expect(saved.ok).toBe(true);
-    const heading = panel.section('Context').getByRole('button').first();
-    await expect(heading).toHaveAttribute('aria-expanded', 'false');
-    await heading.click();
-    await expect(heading).toHaveAttribute('aria-expanded', 'true');
-    // UX2's disclosures are intentionally temporary, not the previous permanent-column preferences.
-    expect(await panel.layout('summary.sections')).toEqual(legacy);
-    await panel.page.reload();
-    const reloaded = await PanelPage.open(maws);
-    for (const name of ['Environment', 'Context', 'Connectors', 'Artifacts'] as const) {
-      await expect(reloaded.section(name).getByRole('button').first()).toHaveAttribute('aria-expanded', 'false');
-    }
-    expect(await reloaded.layout('summary.sections')).toEqual(legacy);
-    reloaded.expectQuietConsole();
+  // UX wave U8b, A1 (O-05, UC-9): the column of a session with a record holds Environment (open), Context and Connectors
+  // (folded) in that order and no Artifacts card; a fold is the device's (`cards.open`), the same in every session and
+  // after a relaunch. The cards for running work come after the three and only while something runs (A's status lists a
+  // running shell and workflow; B, disk-only, has nothing running). The old key `summary.sections` is left as it was.
+  test('the card column holds Environment open, Context and Connectors folded and no Artifacts card; a fold is remembered across sessions and a relaunch', async () => {
+    await withProfile(async (launch) => {
+      let panel = await launch();
+      const legacy = { version: 1, collapsed: ['sources'] };
+      const saved = await panel.page.evaluate((value) => window.maws.invoke('layout.set', { key: 'summary.sections', value }), legacy);
+      expect(saved.ok).toBe(true);
+      const folds = async (at: PanelPage) => ({
+        environment: await at.fold('Environment').getAttribute('aria-expanded'),
+        context: await at.fold('Context').getAttribute('aria-expanded'),
+        connectors: await at.fold('Connectors').getAttribute('aria-expanded'),
+      });
+
+      await test.step('a first launch: the three cards in order, Environment open', async () => {
+        await expect(panel.section('Environment')).toBeVisible();
+        expect((await panel.cards()).slice(0, 3)).toEqual(['Environment', 'Context', 'Connectors']);
+        expect(await panel.cards()).not.toContain('Artifacts');
+        expect(await folds(panel)).toEqual({ environment: 'true', context: 'false', connectors: 'false' });
+        await panel.call('switchSession', 'B');
+        await expect.poll(() => panel.cards(), 'B runs nothing: the three cards alone').toEqual(['Environment', 'Context', 'Connectors']);
+        await panel.call('switchSession', 'A');
+      });
+
+      await test.step('folding Environment in A, opening Context in B: both hold in the other session', async () => {
+        await panel.fold('Environment').click();
+        await expect(panel.fold('Environment')).toHaveAttribute('aria-expanded', 'false');
+        await expect.poll(() => panel.layout('cards.open')).toEqual({ version: 1, open: [] });
+        await panel.call('switchSession', 'B');
+        await expect(panel.fold('Environment'), 'folded in B too').toHaveAttribute('aria-expanded', 'false');
+        await panel.fold('Context').click();
+        await expect(panel.fold('Context')).toHaveAttribute('aria-expanded', 'true');
+        await expect.poll(() => panel.layout('cards.open')).toEqual({ version: 1, open: ['context'] });
+        await panel.call('switchSession', 'A');
+        await expect(panel.fold('Context'), 'open in A too').toHaveAttribute('aria-expanded', 'true');
+        expect(await folds(panel)).toEqual({ environment: 'false', context: 'true', connectors: 'false' });
+        panel.expectQuietConsole();
+      });
+
+      await test.step('a relaunch keeps both', async () => {
+        panel = await launch();
+        for (const session of ['A', 'B'] as const) {
+          await panel.call('switchSession', session);
+          await expect(panel.fold('Environment')).toHaveAttribute('aria-expanded', 'false');
+          expect(await folds(panel), session).toEqual({ environment: 'false', context: 'true', connectors: 'false' });
+        }
+        expect(await panel.layout('summary.sections'), 'the old key is not written').toEqual(legacy);
+        panel.expectQuietConsole();
+      });
+    });
   });
 
   // R7 (C8 spec *Delegated unknowns*): C6's child transcript, virtualised and following, inside the region at the
   // panel's three widths and maximized, over the derived fixture's first child.
   test('child transcript renders inside the region at 280, 380, 640 and maximized', async ({ maws }) => {
     const panel = await PanelPage.open(maws);
-    // With the sidebar collapsed this window leaves room for every explicit width plus main's 360px floor.
-    // The 380px legacy sentinel instead selects the narrow content-sized default.
+    // With the sidebar collapsed this window leaves room for every explicit width plus main's 360px floor. UX wave U8b
+    // (M1): 380 is a width like any other, the narrow class's (the child is a narrow tool).
     await panel.call('collapseSidebar', true);
     const verdict: Record<string, unknown>[] = [];
     let open: string | null = null;
@@ -761,13 +834,14 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
         else await panel.call('setWidth', width);
         await expect.poll(async () => (await panel.metrics()).rows, 'the child’s history').toBeGreaterThan(0);
         if (width === 'maximized') await expect.poll(async () => (await panel.metrics()).regionWidth, 'maximized: wider than the widest side width').toBeGreaterThan(640);
-        else await expect.poll(async () => (await panel.metrics()).regionWidth, 'UX2: automatic narrow defaults cap at 420px; explicit user widths are honored').toBe(width === 380 ? 420 : width);
+        else await expect.poll(async () => (await panel.metrics()).regionWidth, 'the width set is the width drawn').toBe(width);
 
         let last: PanelChildMetrics | null = null;
         for (const [i, count] of PANEL_CHILD_TAIL.batches.entries()) {
           expect(await panel.child('release', count), `rows after batch ${i + 1}`).toBe(PANEL_CHILD_TAIL.rows[i]);
           await expect.poll(async () => (await panel.metrics()).lastRowInView, `the end stays in view after batch ${i + 1}`).toBe(true);
           last = await panel.metrics();
+          expect(last.clientWidth, 'the slot around the child’s tab panel is found and measured').toBeGreaterThan(0);
           expect(last.following, `following through batch ${i + 1}`).toBe(true);
           expect(last.domRows, 'virtualised: fewer row elements than rows').toBeLessThan(last.rows);
           expect(last.domRows, 'within the visible rows plus twice the overscan').toBeLessThanOrEqual(last.visibleRows + 2 * last.overscan);
@@ -872,11 +946,13 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
     // As in R7: with the page's sidebar collapsed, C5's clamp cannot narrow the panel in a small window, so the default
     // width and the 640 px refit below render as set.
     await panel.call('collapseSidebar', true);
-    // UX2: no tool means no column. Terminal opens at its content-sized narrow default, capped at 420px.
+    // UX2: no tool means no column. UX wave U8b (Addendum 6, the owner's answer): a terminal opens wide, like Review, at
+    // 60 % of the room right of the sidebar (collapsed here, so the window's width).
     expect((await panel.region.boundingBox())!.width).toBe(0);
     await openSurface(page, 'Terminal');
     const defaultWidth = (await panel.region.boundingBox())!.width;
-    expect(defaultWidth).toBe(420);
+    const room = await page.evaluate(() => innerWidth);
+    expect(defaultWidth).toBe(Math.round(room * 0.6));
     await expect.poll(async () => (await panel.tabs()).find((t) => t.toolId === 'terminal')?.terminalId ?? null).not.toBeNull();
     const id = (await panel.tabs()).find((t) => t.toolId === 'terminal')!.terminalId!;
 
@@ -895,8 +971,9 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
 
     const side = await cols();
     const screen = page.locator(`[data-terminal-id="${id}"] .xterm-screen`);
-    expect((await screen.boundingBox())!.width, 'the terminal fits the content-sized side column').toBeLessThanOrEqual(defaultWidth);
-    expect(side, 'fitted to the side column, not the window').toBeLessThan(80);
+    const drawn = (await screen.boundingBox())!.width;
+    expect(drawn, 'the terminal fits the content-sized side column').toBeLessThanOrEqual(defaultWidth);
+    expect(side, 'fitted to the side column, not the window').toBeLessThan(Math.floor(room / (drawn / side)));
     expect(side).toBeGreaterThan(20);
     test.info().annotations.push({ type: `columns at ${defaultWidth} px`, description: String(side) });
 
@@ -930,11 +1007,13 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
     await type('\r');
     await expect.poll(() => hasLine('PASTED-42')).toBe(true);
 
-    // Narrower and back: UX2 caps this narrow tool, so exercise the meaningful refit from its default to the floor.
+    // Narrower, then wider than the default: the terminal refits at each width. UX wave U8b (Addendum 6): the default is
+    // the wide automatic width, past every width the harness sets, so the column's own bar takes it to its maximum (End).
     await panel.call('setWidth', 280);
     await expect.poll(cols, 'refits narrower').toBeLessThan(side);
-    await panel.call('setWidth', 380);
-    await expect.poll(cols, 'and back').toBe(side);
+    await panel.region.getByRole('separator', { name: 'Resize right panel', exact: true }).focus();
+    await page.keyboard.press('End');
+    await expect.poll(cols, 'and wider, past its default').toBeGreaterThan(side);
     const sideways = await panel.region.evaluate((region) =>
       Array.from(region.querySelectorAll<HTMLElement>('*'))
         .filter((el) => el.scrollWidth > el.clientWidth + 1 && ['auto', 'scroll'].includes(getComputedStyle(el).overflowX) && !el.closest('[role="tablist"]'))
@@ -1025,14 +1104,56 @@ test.describe('the product host over a scenario derived from C5’s records', ()
       await (await sidebarRow(page, CHARTER)).click();
       const environment = await unfoldSessionCard(page, 'Environment');
       await expect(environment).toContainText('⎇ main');
-      for (const name of ['Review', 'Files', 'Session info']) await expect(environment.getByRole('button', { name, exact: true })).toBeEnabled();
+      // UX wave U8b (A8): Review is reached by the change line, Open changes; the branch row holds no button.
+      for (const name of ['Open changes', 'Files', 'Session info']) await expect(environment.getByRole('button', { name, exact: true })).toBeEnabled();
+      await expect(environment.getByRole('button', { name: 'Review', exact: true })).toHaveCount(0);
+      // A6: Context has Details… alone; running work has its own cards and the agents' panels their icons and menu entries.
       const context = await unfoldSessionCard(page, 'Context');
-      for (const name of ['Subagents', 'Background work']) await expect(context.getByRole('button', { name, exact: true })).toBeEnabled();
+      await expect(context.getByRole('button', { name: 'Details…', exact: true })).toBeVisible();
+      for (const name of ['Compact…', 'Subagents', 'Background work', 'Background tasks']) await expect(context.getByRole('button', { name, exact: true }), name).toHaveCount(0);
       for (const name of ['Terminal', 'Review', 'Files', 'Browser']) await expect(surfaceRow(page).getByRole('button', { name, exact: true })).toBeEnabled();
       await surfaceRow(page).getByRole('button', { name: 'More surfaces', exact: true }).click();
-      // UX2: non-primary tools and the Session actions submenu share one More menu. Artifacts is the project Library card; Log is internal.
-      expect((await page.getByRole('menuitem').allTextContents()).sort()).toEqual(['Subagents', 'Background work', 'Session info', 'Tasks', 'Source control', 'Side', 'Session actions'].sort());
+      // UX2: non-primary tools and the Session actions submenu share one More menu; Log is internal. UX wave U8b: Artifacts
+      // is an entry of it like any tool (A3), and Background tasks is the tool's name (M7).
+      expect((await page.getByRole('menuitem').allTextContents()).sort()).toEqual(['Subagents', 'Background tasks', 'Session info', 'Tasks', 'Source control', 'Side', 'Artifacts', 'Session actions'].sort());
       await page.keyboard.press('Escape');
+      expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
+    });
+  });
+
+  // UX wave U8b, A3 (O-05): Artifacts is no card. The title bar's three-dot menu lists it; it opens the session's artifact
+  // list beside the chat as a tab like any other; "Pin to toolbar" in its context menu makes it an icon of the row.
+  test('Artifacts is an entry of More surfaces: it opens the session’s artifact list beside the chat, and Pin to toolbar makes it an icon', async () => {
+    await withScenario(async (maws) => {
+      const { page } = maws;
+      await (await sidebarRow(page, CHARTER)).click();
+      const cards = await showSessionCards(page);
+      await expect(cards.getByRole('region', { name: 'Environment', exact: true })).toBeVisible();
+      await expect(cards.getByRole('region', { name: 'Artifacts', exact: true }), 'no Artifacts card').toHaveCount(0);
+      const icon = surfaceRow(page).getByRole('button', { name: 'Artifacts', exact: true });
+      await expect(icon, 'not an icon until it is pinned or in view').toHaveCount(0);
+
+      await surfaceRow(page).getByRole('button', { name: 'More surfaces', exact: true }).click();
+      await page.getByRole('menuitem', { name: 'Artifacts', exact: true }).click();
+      await expect(surface(page, 'artifacts')).toBeVisible();
+      await expect(page.locator('[data-region="panel"] [data-surface]'), 'the one tool in view').toHaveCount(1);
+      await expect(sideTab(sideColumn(page), 'Artifacts')).toHaveAttribute('aria-selected', 'true');
+
+      await hideSurface(page, 'Artifacts');
+      await expect(icon, 'hidden and not pinned: no icon').toHaveCount(0);
+      await surfaceRow(page).getByRole('button', { name: 'More surfaces', exact: true }).click();
+      const entry = page.getByRole('menuitem', { name: 'Artifacts', exact: true });
+      await entry.focus();
+      await entry.press('Shift+F10');
+      await page.getByRole('menuitem', { name: 'Pin to toolbar', exact: true }).click();
+      await expect(icon, 'pinned to the toolbar').toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('menu')).toHaveCount(0);
+
+      await icon.click();
+      await expect(surface(page, 'artifacts'), 'its icon brings its tab back').toBeVisible();
+      await expect(sideColumn(page).locator('[data-side-strip]').getByRole('tab', { name: 'Artifacts', exact: true }), 'one tab of it').toHaveCount(1);
+      await expect(icon).toHaveAttribute('aria-pressed', 'true');
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
     });
   });
@@ -1148,8 +1269,9 @@ test.describe('the floating session card (P3-G)', () => {
       });
 
       await test.step('acceptance 7: over a DOM tool the card floats 16 px from the panel’s right and bottom edges', async () => {
+        // UX wave U8b (M2): Session info comes into view in place of Files (still a tab), so one tool is behind the card.
         await openSurface(page, 'Session info');
-        await closeSurface(page, 'Files'); // Keep one tool for this floating-card contract, not the separate stacking case.
+        await expect(surface(page, 'files')).toHaveCount(0);
         await expect(panel.locator(`[data-session-info="${usageId}"]`)).toBeVisible();
         await expect(card).toBeVisible();
         // P4-B3 (parent Decision Log 15.7): the card sits at the panel body's bottom right (it sat at the bottom left)
@@ -1160,18 +1282,19 @@ test.describe('the floating session card (P3-G)', () => {
         // The region's 1 px border is on its left, outside the card's side
         expect(await near()).toEqual({ right: 16, bottom: 16 });
         await openSurface(page, 'Files');
-        await closeSurface(page, 'Session info');
+        await expect(surface(page, 'session-info')).toHaveCount(0);
         await expect(surface(page, 'files').getByRole('tree')).toBeVisible();
         await expect(surface(page, 'files').getByRole('treeitem').first(), 'the real scratch root renders behind the card').toBeVisible();
         expect(await near()).toEqual({ right: 16, bottom: 16 });
         // M1 review: at its largest (its top edge dragged to the window's top) the card stops 16 px under the tool body's
-        // top, so the strip above it and its controls stay clear
+        // top, so the strip above it and its controls stay clear. UX wave U8b (M2): the strip is the column's tab strip
+        // (Files registers no header row), the body its group's tab panel.
         const handle = card.locator('[data-card-resize="top-left"]'); // P4-B3: the corner mirrored with the card
         const from = (await handle.boundingBox())!;
         await dragBy(page, handle, -2000, 1 - from.y);
         const [strip, body, box] = [
-          (await surface(page, 'files').locator('[data-editor-header]').boundingBox())!,
-          (await panel.locator('#panel-host-body-files').boundingBox())!,
+          (await sideGroup(page, 'upper').locator('[data-side-strip]').boundingBox())!,
+          (await surface(page, 'files').getByRole('tabpanel').boundingBox())!,
           (await card.boundingBox())!,
         ];
         expect(Math.round(box.y - body.y), 'the card’s top 16 px under the tool body’s').toBe(16);
@@ -1467,22 +1590,27 @@ test.describe('the panel header and X32 (P3-G)', () => {
     const panel = await PanelPage.open(maws);
     const header = surface(panel.page, 'harness-editor').locator('[data-editor-header]');
     const title = header.locator('[data-header-title]');
-    const stubHeader = surface(panel.page, 'harness-stub').locator('[data-editor-header]');
+    // UX wave U8b (M2, decision 4): the strip names the tab, the tool's own header row is drawn only for a tab that
+    // registers one (X32), and the region's controls sit at the right end of the column's first strip.
+    const upper = sideGroup(panel.page, 'upper');
+    const strip = upper.locator('[data-side-strip]');
+    const REGION_CONTROLS = ['Float conversation over surface', 'Expand surface', 'Hide side column'];
     const invoked = () => panel.page.evaluate(() => (window as unknown as PanelWindow).__maws_harness!.panel!.editor.invoked());
     const setEditor = (patch: Parameters<PanelHarnessApi['editor']['set']>[0]) =>
       panel.page.evaluate((patch) => (window as unknown as PanelWindow).__maws_harness!.panel!.editor.set(patch), patch);
-    await test.step('resting cards reserve no header; an opened tool keeps its title and controls', async () => {
+    await test.step('resting cards reserve no header; an opened plain tool is named by its tab, the region’s controls at the strip’s end', async () => {
       await expect(panel.summary).toBeVisible();
       await expect(panel.region.locator('[data-editor-header]')).toHaveCount(0);
       await panel.call('addTool', 'harness-stub');
-      // A multi-instance plain tool is named by its selected tab, not a duplicate metadata title.
-      await expect(stubHeader.getByRole('tab', { name: 'Stub', exact: true, selected: true })).toBeVisible();
-      await expect(stubHeader.locator('[data-header-title]')).toHaveCount(0);
-      for (const name of ['Float conversation over surface', 'Expand surface', 'Close surface']) await expect(stubHeader.getByRole('button', { name })).toBeVisible();
+      await expect(sideTab(upper, 'Stub')).toHaveAttribute('aria-selected', 'true');
+      await expect(surface(panel.page, 'harness-stub').locator('[data-editor-header]'), 'a tool that registers nothing has no header row').toHaveCount(0);
+      for (const name of REGION_CONTROLS) await expect(strip.getByRole('button', { name, exact: true })).toBeVisible();
+      await expect(panel.region.getByRole('button', { name: 'Close surface', exact: true }), 'Hide side column replaced it').toHaveCount(0);
     });
 
+    // The editor comes into view in place of Stub, which stays a tab of the strip.
     const editor = await panel.call('addTool', 'harness-editor');
-    await closeSurface(panel.page, 'Stub'); // Keep the editor primary while testing its region controls.
+    await expect(surface(panel.page, 'harness-stub')).toHaveCount(0);
     await test.step('acceptance 9: the registration’s breadcrumb, saved state, count, actions and Export, each invoking its handler', async () => {
       await panel.call('maximize', true); // room for the whole left side
       await expect(title).toHaveText('Q3 brief');
@@ -1498,13 +1626,14 @@ test.describe('the panel header and X32 (P3-G)', () => {
       expect(await invoked()).toEqual(['comments', 'history', 'open-in-tab', 'export:pdf']);
     });
 
-    await test.step('acceptance 9: an update to saved shows "All changes saved"; disposal returns the plain title', async () => {
+    await test.step('acceptance 9: an update to saved shows "All changes saved"; disposal leaves the tab’s plain title', async () => {
       await setEditor({ saved: 'saved' });
       await expect(header.getByText('All changes saved')).toBeVisible();
       await setEditor({ registered: false });
-      await expect(title).toHaveText('Editor');
-      await expect(header.getByText('All changes saved')).toHaveCount(0);
-      await expect(header.getByRole('button', { name: 'Export' })).toHaveCount(0);
+      // UX wave U8b (M2): with no registration the tool has no header row; the strip's tab names it.
+      await expect(header).toHaveCount(0);
+      await expect(sideTab(upper, 'Editor')).toHaveAttribute('aria-selected', 'true');
+      await expect(panel.region.getByRole('button', { name: 'Export' })).toHaveCount(0);
       await setEditor({ registered: true });
       await expect(title).toHaveText('Q3 brief');
     });
@@ -1512,7 +1641,7 @@ test.describe('the panel header and X32 (P3-G)', () => {
     await test.step('the header at the panel’s narrowest: three actions and Export fold into "More actions", the title keeps its room', async () => {
       await setEditor({ unresolved: 0 }); // the comments action is an ordinary action again: three actions plus Export
       await panel.call('setWidth', 280); // restored from maximized too
-      for (const name of ['Float conversation over surface', 'Expand surface', 'Close surface']) await expect(header.getByRole('button', { name })).toBeInViewport();
+      for (const name of REGION_CONTROLS) await expect(strip.getByRole('button', { name, exact: true })).toBeInViewport();
       await expect(title).toBeVisible();
       expect(await title.evaluate((el) => el.scrollWidth - el.clientWidth), 'the title is whole, not truncated').toBeLessThanOrEqual(0);
       for (const name of ['Version history', 'Open in tab', 'Comments', 'Export']) await expect(header.getByRole('button', { name })).toHaveCount(0);
@@ -1522,7 +1651,7 @@ test.describe('the panel header and X32 (P3-G)', () => {
       await expect(panel.page.getByRole('menuitem')).toHaveText(['Version history', 'Open in tab', 'Comments', 'PDF', 'Word document']);
       await panel.page.getByRole('menuitem', { name: 'Word document' }).click();
       expect((await invoked()).at(-1)).toBe('export:docx');
-      await panel.call('setWidth', 380);
+      await panel.call('setWidth', 380); // UX wave U8b (M1): 380 px drawn (no longer the automatic width), a header over 360
       await expect(header.getByRole('button', { name: 'Export' })).toBeVisible();
       await setEditor({ unresolved: 3 });
     });
@@ -1533,10 +1662,11 @@ test.describe('the panel header and X32 (P3-G)', () => {
       expect(await panel.call('closeTab', editor), 'the guard vetoes').toBe(false);
       expect(await panel.ids()).toContain(editor);
       await expect(title).toHaveText('Q3 brief');
-      // Switched away, the editor's body unmounts; its registration stays with the tab, and its guard still vetoes.
+      // Switched away, the editor's body unmounts; its registration stays with the tab, and its guard still vetoes. UX
+      // wave U8b (M2): Stub comes into view in place of the editor, whose tab stays in the strip.
       await openSurface(panel.page, 'Stub');
-      await closeSurface(panel.page, 'Editor'); // Close surface hides, rather than discarding the guarded editor ref.
-      await expect(stubHeader.getByRole('tab', { name: 'Stub', exact: true, selected: true })).toBeVisible();
+      await expect(sideTab(upper, 'Stub')).toHaveAttribute('aria-selected', 'true');
+      await expect(sideTab(upper, 'Editor')).toHaveAttribute('aria-selected', 'false');
       await expect(surface(panel.page, 'harness-editor')).toHaveCount(0);
       expect(await panel.call('closeTab', editor), 'the inactive ref’s guard vetoes').toBe(false);
       expect(await panel.ids()).toContain(editor);
@@ -1544,7 +1674,254 @@ test.describe('the panel header and X32 (P3-G)', () => {
       await setEditor({ allowClose: true });
       expect(await panel.call('closeTab', editor), 'the confirmed close releases the editor').toBe(true);
       await expect.poll(() => panel.ids()).not.toContain(editor);
-      await expect(stubHeader.getByRole('tab', { name: 'Stub', exact: true, selected: true })).toBeVisible();
+      await expect(sideTab(upper, 'Stub'), 'its neighbour comes into view').toHaveAttribute('aria-selected', 'true');
+      await expect(sideTab(upper, 'Editor')).toHaveCount(0);
+    });
+    panel.expectQuietConsole();
+  });
+});
+
+// ---- UX wave U8b: the side column's tabs and its second group (docs/doperpowers/plans/2026-11-12-ux-wave-U8b-column-and-tabs.md,
+// M2 decision 2 and M3) ---------------------------------------------------------------------------------------------------
+
+// A tab's menu opened from the keyboard (Shift+F10 on the tab) and its one move chosen by keys alone.
+async function moveSideTabByKeys(page: Page, name: string, to: 'below' | 'above'): Promise<void> {
+  await sideTab(sideColumn(page), name).focus();
+  await page.keyboard.press('Shift+F10');
+  const item = page.getByRole('menuitem', { name: to === 'below' ? 'Move below' : 'Move above', exact: true });
+  await expect(item).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: to === 'below' ? 'Move above' : 'Move below', exact: true }), 'a tab moves only to the other group').toHaveCount(0);
+  await page.keyboard.press('ArrowDown');
+  await expect(item).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('menu')).toHaveCount(0);
+}
+
+// A tool chosen from the lower group's "+", by the pointer or by keys alone (the menu opened with Enter, the item reached
+// with the arrow keys and chosen with Enter).
+async function addBelow(page: Page, name: string, by: 'pointer' | 'keys'): Promise<void> {
+  const add = sideGroup(page, 'lower').getByRole('button', { name: 'Add a tool', exact: true });
+  const item = page.getByRole('menuitem', { name, exact: true });
+  if (by === 'pointer') {
+    await add.click();
+    await item.click();
+    return;
+  }
+  await add.focus();
+  await page.keyboard.press('Enter');
+  await expect(item).toBeVisible();
+  // A menu opened by keys takes the keyboard to its first item once it has mounted; the walk starts only from there, since
+  // a press that lands before that entry focus moves one past it and the menu does not wrap.
+  const items = page.locator('[data-side-group-menu="lower"]').getByRole('menuitem');
+  await expect(items.first(), 'the menu opened by keys focuses its first item').toBeFocused();
+  const at = () => items.evaluateAll((nodes) => nodes.indexOf(document.activeElement as HTMLElement));
+  const count = await items.count();
+  for (let step = 1; step < count && !(await item.evaluate((element) => element === document.activeElement)); step += 1) {
+    const from = await at();
+    await page.keyboard.press('ArrowDown');
+    await expect.poll(at, { message: `ArrowDown moves the keyboard on from item ${from}` }).not.toBe(from);
+  }
+  const holder = await page.evaluate(() => {
+    const element = document.activeElement;
+    if (!element) return 'nothing';
+    return `${element.getAttribute('role') ?? element.tagName.toLowerCase()} "${(element.getAttribute('aria-label') ?? element.textContent ?? '').trim()}"`;
+  });
+  await expect(item, `${name} reached by ArrowDown; the keyboard is on ${holder}`).toBeFocused();
+  await page.keyboard.press('Enter');
+}
+
+test.describe('the side column’s tabs and groups (UX wave U8b)', () => {
+  test.use({ mawsEnv: HARNESS_ENV });
+
+  // Addendum 7 of the branch review's fix wave: a frame of another origin (the Artifacts viewer's delivered page) took the
+  // pointer's events from the bar as soon as a drag reached it, so the bar never moved toward it. A frame of the artifact
+  // scheme fills one group's body, then the other's, and the bar is dragged into it each time.
+  test('the bar between the groups drags over a frame of another origin in either group, and the release ends the drag', async ({ maws }) => {
+    const panel = await PanelPage.open(maws);
+    const { page } = maws;
+    for (const tool of ['harness-stub', 'session-info']) await panel.call('addTool', tool);
+    await moveSideTabByKeys(page, 'Stub', 'below');
+    await expect(sideGroup(page, 'lower')).toHaveAttribute('aria-label', 'Stub');
+    const bar = sideColumn(page).getByRole('separator', { name: 'Resize groups', exact: true });
+    const frameIn = (group: 'upper' | 'lower') =>
+      sideGroup(page, group).locator('[role="tabpanel"]').evaluate((body) => {
+        document.querySelector('[data-scene-frame]')?.remove();
+        body.style.position = 'relative';
+        const frame = document.createElement('iframe');
+        frame.setAttribute('sandbox', 'allow-scripts');
+        frame.setAttribute('data-scene-frame', '');
+        frame.src = 'maws-artifact://scene-frame/index.html';
+        frame.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0';
+        // loaded, so its document stands in its own process and hit-testing reaches it, as a delivered page's does
+        return new Promise<void>((resolve) => {
+          frame.addEventListener('load', () => resolve(), { once: true });
+          body.append(frame);
+        });
+      });
+    for (const [group, dy] of [['upper', -48], ['lower', 48]] as const) {
+      await frameIn(group);
+      const box = (await bar.boundingBox())!;
+      const x = Math.round(box.x + box.width / 2);
+      const y = Math.round(box.y + box.height / 2);
+      const before = Number(await bar.getAttribute('aria-valuenow'));
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      await page.mouse.move(x, y + dy, { steps: 4 });
+      await page.mouse.up();
+      await expect.poll(async () => Number(await bar.getAttribute('aria-valuenow')), { message: `dragged into the frame in the ${group} group` })[dy < 0 ? 'toBeGreaterThan' : 'toBeLessThan'](before);
+      const released = await bar.getAttribute('aria-valuenow');
+      await page.mouse.move(x, y - dy, { steps: 4 }); // no button: the drag is over
+      await expect(bar, 'the release ended the drag').toHaveAttribute('aria-valuenow', released!);
+      expect(await page.evaluate(() => document.documentElement.hasAttribute('data-resizing')), 'no drag left marked').toBe(false);
+    }
+  });
+
+  // M2, decision 2: maintaining the refs is not choosing a tab. A tab that arrives unasked joins the strip and replaces
+  // nothing; a ref removed elsewhere changes nothing in view; a hidden column stays hidden. The tab added here is the
+  // plugin roster's own call for a pane it adds (`panelHost.addTool(…, { activate: false })`, engine-surface/panes.ts),
+  // made for a stub: this page runs no engine to push a roster.
+  test('a tab added unasked, as a plugin roster adds its pane, joins the strip while Review stays in view, and a hidden column stays hidden', async ({ maws }) => {
+    await withRepository(async (repo) => {
+      const panel = await PanelPage.open(maws);
+      const { page } = maws;
+      const upper = sideGroup(page, 'upper');
+      await panel.call('setSession', 'A', { directory: repo.dir }); // Review over a real repository
+      await openSurface(page, 'Review');
+      await expect(upper).toHaveAttribute('aria-label', 'Review');
+
+      const quiet = await panel.call('addTool', 'harness-stub', { activate: false });
+      await expect.poll(() => sideTabNames(page, 'upper'), 'it joins the strip').toEqual(['Review', 'Stub']);
+      await expect(upper, 'Review stays in view').toHaveAttribute('aria-label', 'Review');
+      await expect(sideTab(upper, 'Review')).toHaveAttribute('aria-selected', 'true');
+      await expect(surface(page, 'review')).toBeVisible();
+      await expect(page.locator('[data-region="panel"] [data-surface]'), 'one tool in view').toHaveCount(1);
+
+      expect(await panel.call('closeTab', quiet)).toBe(true); // a ref removed by the host, not by the strip
+      await expect.poll(() => sideTabNames(page, 'upper')).toEqual(['Review']);
+      await expect(surface(page, 'review')).toBeVisible();
+
+      await hideSurface(page, 'Review');
+      await expect(sideColumn(page)).toHaveCount(0);
+      await panel.call('addTool', 'harness-stub', { activate: false });
+      expect((await panel.tabs()).map((tab) => tab.toolId)).toEqual(['review', 'harness-stub']);
+      await expect(sideColumn(page), 'the hidden column stays hidden').toHaveCount(0);
+      await expect(panel.summary).toBeVisible();
+
+      await openSurface(page, 'Review');
+      await expect.poll(() => sideTabNames(page, 'upper')).toEqual(['Review', 'Stub']);
+      await expect(upper).toHaveAttribute('aria-label', 'Review');
+      panel.expectQuietConsole();
+    });
+  });
+
+  // M3: the second group, by a tab's menu only ("Move below" from the upper group, "Move above" from the lower one; a right
+  // click, or Shift+F10 and the keys), the bar between the groups (its keys and a drag, each group kept to 120 px at least:
+  // panel/group-split.ts), the lower group's "+" opening below, and the lower group closing with its last tab.
+  test('Move below and Move above from a tab’s menu by pointer and by keys, the bar within its floors, the lower group’s “+” opening below, and its last tab closing', async ({ maws }) => {
+    const panel = await PanelPage.open(maws);
+    const { page } = maws;
+    const upper = sideGroup(page, 'upper');
+    const lower = sideGroup(page, 'lower');
+    const inView = () => page.locator('[data-region="panel"] [data-surface]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label')));
+    for (const tool of ['harness-stub', 'session-info', 'harness-single']) await panel.call('addTool', tool);
+
+    await test.step('three tabs, one in view: nothing is placed under another', async () => {
+      await expect.poll(() => sideTabNames(page, 'upper')).toEqual(['Stub', 'Session info', 'Single']);
+      expect(await inView()).toEqual(['Single']);
+      await expect(lower).toHaveCount(0);
+    });
+
+    await test.step('Move below by the pointer: the tab in view stays above, the moved tab is in view below', async () => {
+      await moveSideTab(page, 'Session info', 'below');
+      await expect(lower).toHaveAttribute('aria-label', 'Session info');
+      await expect(upper).toHaveAttribute('aria-label', 'Single');
+      await expect.poll(() => sideTabNames(page, 'upper')).toEqual(['Stub', 'Single']);
+      expect(await sideTabNames(page, 'lower')).toEqual(['Session info']);
+      expect(await inView()).toEqual(['Single', 'Session info']);
+      await expect(lower.getByRole('button', { name: 'Hide side column', exact: true }), 'the region’s controls stay on the first strip').toHaveCount(0);
+    });
+
+    await test.step('Move above by keys: the lower group’s only tab comes into view above, and one group is left', async () => {
+      await moveSideTabByKeys(page, 'Session info', 'above');
+      await expect(lower).toHaveCount(0);
+      await expect(upper).toHaveAttribute('aria-label', 'Session info');
+      await expect.poll(() => sideTabNames(page, 'upper')).toEqual(['Stub', 'Session info', 'Single']);
+    });
+
+    await test.step('Move below by keys', async () => {
+      await moveSideTabByKeys(page, 'Stub', 'below');
+      await expect(lower).toHaveAttribute('aria-label', 'Stub');
+      await expect(upper).toHaveAttribute('aria-label', 'Session info');
+      await expect.poll(() => sideTabNames(page, 'upper')).toEqual(['Session info', 'Single']);
+      expect(await sideTabNames(page, 'lower')).toEqual(['Stub']);
+    });
+
+    await test.step('the bar shares the height by keys and by a drag, neither group under 120 px', async () => {
+      const bar = sideColumn(page).getByRole('separator', { name: 'Resize groups', exact: true });
+      await expect(bar).toHaveAttribute('aria-orientation', 'horizontal');
+      const height = async (group: Locator) => Math.round((await group.boundingBox())!.height);
+      const share = async () => (await panel.layout<{ lower: Record<string, { share: number }> }>('panelTools.groups'))?.lower[await addressed(page, 'A')]?.share ?? null;
+      await expect.poll(share, 'an even split at first').toBe(0.5);
+      const start = await height(lower);
+      await bar.focus();
+      await page.keyboard.press('ArrowUp'); // the bar up a step: the lower group grows by 8 px
+      await expect.poll(() => height(lower)).toBe(start + 8);
+      await page.keyboard.press('Shift+ArrowDown'); // down a big step: 32 px
+      await expect.poll(() => height(lower)).toBe(start + 8 - 32);
+      await page.keyboard.press('End'); // the lower group as tall as it may be
+      await expect.poll(() => height(upper), 'the upper group keeps its floor').toBeGreaterThanOrEqual(120);
+      const tallest = await height(lower);
+      await page.keyboard.press('ArrowUp');
+      await expect.poll(() => height(lower), 'and goes no further').toBe(tallest);
+      await page.keyboard.press('Home'); // as short as it may be
+      await expect.poll(() => height(lower), 'the lower group keeps its floor').toBeGreaterThanOrEqual(120);
+      const shortest = await height(lower);
+      expect(shortest).toBeLessThan(tallest);
+
+      // A drag past either end stops at the same bounds.
+      const bottom = await page.evaluate(() => window.innerHeight - 1);
+      const dragTo = async (y: number) => {
+        const box = (await bar.boundingBox())!;
+        const x = box.x + box.width / 2;
+        await page.mouse.move(x, box.y + box.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(x, y, { steps: 8 });
+        await page.mouse.up();
+      };
+      await dragTo(1);
+      await expect.poll(() => height(lower), 'dragged to the window’s top').toBe(tallest);
+      expect(await height(upper)).toBeGreaterThanOrEqual(120);
+      await dragTo(bottom);
+      await expect.poll(() => height(lower), 'dragged to the window’s bottom').toBe(shortest);
+      const stored = await share();
+      expect(stored, 'the stored share').not.toBeNull();
+      expect(stored!).toBeGreaterThanOrEqual(0.2);
+      expect(stored!).toBeLessThanOrEqual(0.8);
+    });
+
+    await test.step('the lower group’s “+” opens below, by the pointer and by keys alone', async () => {
+      await addBelow(page, 'Subagents', 'pointer');
+      await expect(lower).toHaveAttribute('aria-label', 'Subagents');
+      await expect(upper, 'the upper group’s tab in view is left alone').toHaveAttribute('aria-label', 'Session info');
+      await expect.poll(() => sideTabNames(page, 'lower')).toEqual(['Stub', 'Subagents']);
+      await addBelow(page, 'Background tasks', 'keys');
+      await expect(lower).toHaveAttribute('aria-label', 'Background tasks');
+      await expect(upper).toHaveAttribute('aria-label', 'Session info');
+      await expect.poll(() => sideTabNames(page, 'lower')).toEqual(['Stub', 'Subagents', 'Background tasks']);
+      expect(await sideTabNames(page, 'upper')).toEqual(['Session info', 'Single']);
+    });
+
+    await test.step('closing the lower group’s last tab leaves one group', async () => {
+      await closeSideTab(page, 'Background tasks');
+      await expect(lower, 'its neighbour comes into view').toHaveAttribute('aria-label', 'Subagents');
+      await closeSideTab(page, 'Subagents');
+      await expect(lower).toHaveAttribute('aria-label', 'Stub');
+      await closeSideTab(page, 'Stub');
+      await expect(lower).toHaveCount(0);
+      await expect(sideColumn(page).getByRole('separator', { name: 'Resize groups', exact: true })).toHaveCount(0);
+      await expect(upper).toHaveAttribute('aria-label', 'Session info');
+      await expect.poll(() => sideTabNames(page, 'upper')).toEqual(['Session info', 'Single']);
+      await expect.poll(async () => (await panel.layout<{ lower: Record<string, unknown> }>('panelTools.groups'))?.lower[await addressed(page, 'A')] ?? null, 'no lower group stored').toBeNull();
     });
     panel.expectQuietConsole();
   });

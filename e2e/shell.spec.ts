@@ -6,7 +6,8 @@
 // quit guard by its stderr line, whose count is the one the driven engine state implies. Never `setViewportSize`: the
 // window's own bounds are what the test drives (it shifted hover coordinates in M3's live check). This spec is the
 // template for C7's and C8's end-to-end tests.
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { ACTIONS, type ActionId, type ActionTable } from '../src/shared/keymap/actions';
@@ -15,11 +16,12 @@ import { formatChord } from '../src/shared/keymap/chord';
 import { addressed, localName, localRef } from './support/address';
 import { invoke, value } from './support/c7-replay'; // P5 O6 M2: the upgrade scene's raw-bridge calls
 import { activateForScene, traceForeground } from './support/foreground-trace';
-import { launchMaws, type MawsLaunch } from './support/launch';
+import { clickRevealed } from './support/hover'; // UX wave U7: the row's own Hide, shown on hover
+import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { scratchProject } from './support/maws-tools'; // P5 O6 M2: the upgrade scene's indexed sessions
 import { slashPaletteMovesNothing } from './support/palette-geometry';
 import { closeProject, openProject, projectLine, projectRow, showProjectList, sidebarRow } from './support/sidebar';
-import { mainTabById, mainTabs, surfaceRow as shellSurfaceRow, usagePill } from './support/shell';
+import { mainTabById, mainTabs, openSurface, surfaceRow as shellSurfaceRow, usagePill } from './support/shell';
 
 const SHELL_ENV = {
   MAWS_HARNESS: '0',
@@ -29,7 +31,8 @@ const SHELL_ENV = {
 };
 
 // The scenario's sessions (test/fixtures/shell/nine-sessions.json).
-// UX2 l7-05: current-project session tabs omit the redundant project suffix; the title-bar chip names their set.
+// UX2 l7-05, as U13a draws it: a strip of one place names no place on its tabs; the title-bar chip names the project of
+// the session in front.
 const CHARTER = 'app-9a1d4262';
 const FIX = 'Fix sidebar drag';
 const SIP = 'Sidebar interaction pass';
@@ -134,14 +137,14 @@ test('a layout from before O6 comes back after the upgrade, addressed, and a thi
       await expect.poll(() => keys(page), { message: 'the bare panel key is renamed to the address’s' }).toContain(`panel.${address}`);
       expect(await keys(page)).not.toContain(`panel.${id}`);
       expect(await get(page, `panel.${address}`), 'the panel tab is back').toEqual(PANEL);
-      // P5 O6 M5: the set keyed by the project's address moves to its row's key once the machine has derived the project's
-      // org key; the seeded folder was only discovered (nobody opened it), so its sessions' row is the machine's own
+      // U13a (UC-14): the version-2 value's one set, keyed by the project, is read as the one strip and written back in the
+      // stored form: version 3, `current` none, the one set `none`
       await expect
-        .poll(async () => ((await get(page, 'main.tabs')) as { current: string }).current, { message: 'the set follows its row' })
-        .toBe(`machine:${ref}`);
+        .poll(async () => ((await get(page, 'main.tabs')) as { current: string }).current, { message: 'the strip is written back under none' })
+        .toBe('none');
       const main = (await get(page, 'main.tabs')) as { version: number; current: string; sets: Record<string, { panes: { tabs: { id: string; appSessionId?: string; machine?: string }[] }[] }> };
       expect(main.version).toBe(3);
-      expect(Object.keys(main.sets), 'no set is left at the project’s address').not.toContain(await addressed(page, project));
+      expect(Object.keys(main.sets), 'the one set none, none left at the project’s address').toEqual(['none']);
       expect(main.sets[main.current]!.panes[0]!.tabs.map((tab) => ({ id: tab.id, appSessionId: tab.appSessionId, machine: tab.machine }))).toEqual([
         { id: `session:${address}`, appSessionId: address, machine: undefined },
         { id: `file:${ref}:${notes}`, appSessionId: address, machine: ref },
@@ -171,84 +174,163 @@ test('a layout from before O6 comes back after the upgrade, addressed, and a thi
   }
 });
 
-// W12 (I2, I3; §5.2 as amended 2026-10-01): each project has its own tab set, which the strip shows; a project click and
-// an open of another project's session switch it; a click replaces the shown session and ⌘-click keeps a tab of its own;
-// ⌘1–9 count in the set. W11's tree: a click on a project's row toggles it in place and shows its set, whether it was
-// expanded or not. P3-F wave S (F17, the owner's obs 8): the set's project is named by the title bar's chip, not in the
-// strip; a click on the chip is the sidebar's "+" (a New chat in that project) and its context menu reveals the project.
-test('tab sets per project: the strip switches with the project, ⌘1 counts in the set, the title bar’s chip names it', async () => {
+// U13a (O-01, A1, A8, A9; the UX wave's U13, which amends I3 and W12 of 2026-10-01 and P3-F wave S's F17, 2026-11-12):
+// one strip for everything open. Sessions of two projects sit in one strip; a click on a project's row or on the
+// machine's own row opens or closes the row and changes no tab; a plain click on a session of the other project still
+// replaces the tab in front (I2) and ⌘⇧T brings it back beside the one that took its place; ⌘1–9 count over the whole
+// pane. In a strip of one place no tab names it; once places mix, every session tab names its place after its title.
+// The title bar's chip names the row of the session in front and a click on it reveals that row, creating nothing. The
+// stored `main.tabs` is version 3 with the one set `none` (UC-14). Two screenshots for the owner's look: the title bar
+// with the mixed strip and the chip, and the same strip at a narrow window, where each tab's place gives way before its
+// title (CSS only: no unit test can measure it, so the scene also holds that a truncated title has no place drawn).
+test('one strip: a project or machine row changes no tab, ⌘1 counts over the pane, tabs name their place once places mix, the chip reveals its row', async () => {
   const maws = await launchMaws({ env: SHELL_ENV });
   try {
     const { app, page } = maws;
-    const main = page.locator('[data-region="main"]');
-    const label = page.getByRole('banner').locator('[data-toolbar-project]');
-    const clickProject = async (name: string) => {
+    const chip = page.getByRole('banner').locator('[data-toolbar-project]');
+    const toggleRow = async (name: string) => {
       await showProjectList(page);
-      await projectLine(projectRow(page, name)).click();
+      const row = projectRow(page, name);
+      const expanded = await row.getAttribute('aria-expanded');
+      await projectLine(row).click();
+      await expect(row, `the click opens or closes ${name}'s row`).toHaveAttribute('aria-expanded', expanded === 'true' ? 'false' : 'true');
     };
     await expect(page.locator('[data-region="sidebar"] [data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
 
-    await clickProject('MAWS');
-    await expect(label).toHaveText('MAWS');
-    await expect(page.getByRole('banner').getByRole('button', { name: 'New chat in MAWS' })).toBeVisible();
-    await expect(label).toHaveCSS('-webkit-app-region', 'no-drag');
-    await expect(main.locator('[data-strip-project]'), 'the strip names no project').toHaveCount(0);
+    // one project's sessions: no tab names its place, and the chip names the project
     await (await sidebarRow(page, FIX)).click();
     await (await sidebarRow(page, SIP)).click({ modifiers: ['Meta'] });
     await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual([FIX, SIP]);
+    await expect(chip).toHaveText('MAWS');
+    await expect(chip).toHaveCSS('-webkit-app-region', 'no-drag');
+    await expect(page.getByRole('banner').getByRole('button', { name: 'Reveal MAWS in sidebar' })).toBeVisible();
+    await expect(mainTabs(page).locator('[data-tab-place]'), 'a strip of one place names none').toHaveCount(0);
 
-    await clickProject('codex_somersault');
-    await expect(label).toHaveText('codex_somersault');
-    await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'another project, another (empty) set' }).toEqual([]);
-    await (await sidebarRow(page, QUOTA)).click();
-    await (await sidebarRow(page, 'Trace stream reconnects')).click(); // a click replaces the shown session
-    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual(['Trace stream reconnects']);
-    await menu(app, 'tab.reopen'); // the replaced one comes back
-    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual(['Trace stream reconnects', QUOTA]);
+    // a session of another project opens in the same strip, and every session tab now names its place
+    await (await sidebarRow(page, QUOTA)).click({ modifiers: ['Meta'] });
+    const MAWS_ = (title: string) => `${title} · MAWS`;
+    const CODEX_ = (title: string) => `${title} · codex_somersault`;
+    const mixed = [MAWS_(FIX), MAWS_(SIP), CODEX_(QUOTA)];
+    await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'one strip, each session tab naming its place' }).toEqual(mixed);
+    await expect(chip).toHaveText('codex_somersault');
+
+    // a click on either project's row and on the machine's own row opens or closes the row and changes no tab
+    for (const name of ['MAWS', 'codex_somersault', await localName(page)]) {
+      await toggleRow(name);
+      expect(await tabLabels(page, 'Open tabs'), `${name}'s row changed no tab`).toEqual(mixed);
+      expect(await selectedTab(page, 'Open tabs'), `${name}'s row changed no tab in front`).toBe(CODEX_(QUOTA));
+    }
+    await expect(chip, 'the chip follows the session in front, not the row clicked').toHaveText('codex_somersault');
+
+    // I2 stands: a plain click on a session of the other project replaces the tab in front, and ⌘⇧T brings it back
     await menu(app, 'tab.select:1');
-    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe('Trace stream reconnects');
-    await menu(app, 'tab.select:3'); // no third tab in this set
-    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe('Trace stream reconnects');
+    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe(MAWS_(FIX));
+    await expect(chip).toHaveText('MAWS');
+    await (await sidebarRow(page, 'Trace stream reconnects')).click();
+    await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'the plain click took the place of the tab in front' }).toEqual([CODEX_('Trace stream reconnects'), MAWS_(SIP), CODEX_(QUOTA)]);
+    await menu(app, 'tab.reopen');
+    const four = [CODEX_('Trace stream reconnects'), MAWS_(FIX), MAWS_(SIP), CODEX_(QUOTA)];
+    await expect.poll(() => tabLabels(page, 'Open tabs'), { message: '⌘⇧T: the replaced tab back beside the one that took its place' }).toEqual(four);
+    expect(await selectedTab(page, 'Open tabs')).toBe(MAWS_(FIX));
 
-    await clickProject('MAWS'); // expanded already: the click folds it and still shows its set
-    await expect(projectRow(page, 'MAWS')).toHaveAttribute('aria-expanded', 'false');
-    await expect(label).toHaveText('MAWS');
-    await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'MAWS’s set as it was left' }).toEqual([FIX, SIP]);
-    await menu(app, 'tab.select:1');
-    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe(FIX);
+    // ⌘1–9 count over the whole pane, whatever project a tab is of; the chip follows the session in front
+    for (const [n, name] of [[3, MAWS_(SIP)], [4, CODEX_(QUOTA)], [1, CODEX_('Trace stream reconnects')]] as const) {
+      await menu(app, `tab.select:${n}`);
+      await expect.poll(() => selectedTab(page, 'Open tabs'), { message: `⌘${n}` }).toBe(name);
+      await expect(chip).toHaveText(n === 3 ? 'MAWS' : 'codex_somersault');
+    }
+    await menu(app, 'tab.select:5'); // no fifth tab
+    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe(CODEX_('Trace stream reconnects'));
 
-    // an open from elsewhere (the palette) of another project's session switches the strip to its set
-    await openPalette(app, page);
-    await page.keyboard.type('quota');
-    await page.keyboard.press('Enter');
-    await expect(label).toHaveText('codex_somersault');
-    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe(QUOTA);
+    const banner = page.getByRole('banner');
+    await test.info().attach('one-strip-title-bar', { body: await banner.screenshot(), contentType: 'image/png' });
 
-    // the chip's context menu reveals its project in the sidebar: its row expanded in place, and focused
+    // a click on the chip reveals the project's row, expanded and focused, and creates nothing
     await closeProject(page, 'codex_somersault');
-    await label.click({ button: 'right' });
-    await page.getByRole('menuitem', { name: 'Reveal in sidebar' }).click();
+    await banner.getByRole('button', { name: 'Reveal codex_somersault in sidebar' }).click();
     await expect(projectRow(page, 'codex_somersault')).toHaveAttribute('aria-expanded', 'true');
     await expect(projectRow(page, 'codex_somersault')).toBeFocused();
+    await page.waitForTimeout(500); // a New chat would have answered by now
+    expect(await tabLabels(page, 'Open tabs'), 'the chip created no tab').toEqual(four);
+    await expect(chip).toHaveText('codex_somersault');
 
-    // a click on the chip is the sidebar's "+": a New chat in that project, a new unstarted tab in front in its set (the
-    // scenario's creator)
-    const before = await tabLabels(page, 'Open tabs');
-    await label.click();
-    await expect.poll(async () => (await tabLabels(page, 'Open tabs')).length, { message: 'one more tab in the set' }).toBe(before.length + 1);
-    expect(before, 'the new tab is in front').not.toContain(await selectedTab(page, 'Open tabs'));
-    await expect(label).toHaveText('codex_somersault');
+    // a narrow window: each tab's place gives way before its title. The window steps down from 900 px (at most to its
+    // 600 px minimum) until a place is cut or gone, so the narrow screenshot shows the give-way it is taken for
+    const measure = () =>
+      page
+        .getByRole('tablist', { name: 'Open tabs' })
+        .locator('[role="tab"]')
+        .evaluateAll((tabs) =>
+          tabs.map((tab) => {
+            const place = tab.querySelector<HTMLElement>('[data-tab-place]');
+            const title = place?.previousElementSibling as HTMLElement | null;
+            // the architect's ruling of 2026-11-13: a place is drawn on the box's first line, the title's, inside the box's
+            // visible rect, or it is wrapped out of sight below a box that clips; one that is drawn is its whole text or at
+            // least its first four characters and the ellipsis
+            const boxElement = place?.parentElement ?? null;
+            const box = boxElement?.getBoundingClientRect();
+            const at = place?.getBoundingClientRect();
+            const line = title?.getBoundingClientRect();
+            const shown = at !== undefined && box !== undefined && line !== undefined && at.width > 0 && at.top < line.bottom - 1
+              && at.top >= box.top - 1 && at.top < box.bottom - 1 && at.left >= box.left - 1 && at.right <= box.right + 1;
+            const outOfSight = at !== undefined && box !== undefined && boxElement !== null && at.top >= box.bottom - 1 && getComputedStyle(boxElement).overflowY !== 'visible';
+            let readable = 0;
+            if (place !== null) {
+              const text = Array.from(place.textContent ?? '');
+              const probe = document.createElement('small');
+              probe.className = place.className;
+              probe.style.cssText = 'position:absolute;visibility:hidden;max-width:none;width:auto;flex:none';
+              probe.textContent = text.length > 4 ? `${text.slice(0, 4).join('')}…` : text.join('');
+              place.parentElement!.appendChild(probe);
+              readable = probe.getBoundingClientRect().width;
+              probe.remove();
+            }
+            return {
+              tab: Math.round(tab.getBoundingClientRect().width),
+              titleCut: title !== null && title.scrollWidth > title.clientWidth + 1,
+              place: place === null ? null : shown ? Math.round(place.getBoundingClientRect().width) : 0,
+              placeCut: place !== null && shown && place.scrollWidth > place.clientWidth + 1,
+              placeReadable: place === null || !shown || place.getBoundingClientRect().width + 1 >= readable,
+              placeDrawnOrHidden: place === null || shown || outOfSight,
+            };
+          }),
+        );
+    type Squeezed = Awaited<ReturnType<typeof measure>>;
+    const givesWay = (tabs: Squeezed) => tabs.some((t) => t.place !== null && (t.placeCut || t.place === 0));
+    // every width step is visited, down to the 600 px minimum, where the ruling bites; the first step at which a place
+    // gives way is the one the give-way assertion and the narrow screenshot are taken for
+    let squeezed: Squeezed = [];
+    let width = 0;
+    const visited: Squeezed[] = [];
+    const tried: string[] = [];
+    for (const step of [900, 800, 700, 600]) {
+      await app.evaluate(({ BrowserWindow }, width) => BrowserWindow.getAllWindows()[0].setBounds({ x: 72, y: 48, width, height: 700 }), step);
+      await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBounds().width)).toBe(step);
+      await page.waitForTimeout(300); // the strip lays out at the new width
+      const measured = await measure();
+      visited.push(measured);
+      tried.push(`${step}px ${JSON.stringify(measured)}`);
+      if (width === 0 && givesWay(measured)) {
+        [squeezed, width] = [measured, step];
+        await test.info().attach('one-strip-narrow-title-bar', { body: await banner.screenshot(), contentType: 'image/png' });
+      }
+    }
+    test.info().annotations.push({ type: 'one-strip narrow', description: tried.join('\n') });
+    expect(width, 'a place gave way by 600 px').toBeGreaterThan(0);
+    expect(givesWay(squeezed), `a place gave way by ${width} px`).toBe(true);
+    expect(squeezed.map((t) => t.place !== null), 'every session tab still has its place').toEqual([true, true, true, true]);
+    // at every width step: each place is drawn readable or not drawn, and no title is cut while its place is drawn
+    expect(visited.flat().filter((t) => !t.placeDrawnOrHidden), 'a place is drawn on the first line or wrapped out of sight').toEqual([]);
+    expect(visited.flat().filter((t) => t.titleCut && (t.place ?? 0) > 0), 'no title is cut while its place still shows').toEqual([]);
+    expect(visited.flat().filter((t) => !t.placeReadable), 'a place that shows is whole, or four characters and the ellipsis').toEqual([]);
 
-    // the machine's own row (P5 O6 M5, T3: its name, in place of "Other sessions") has a set of its own and no label
-    await clickProject(await localName(page));
-    await expect(label).toHaveCount(0);
-    // a set of a project is keyed by its address while it has no org project (the stub source's projects derive none)
-    const ref = await localRef(page);
-    const projectSets = [await addressed(page, 'proj-codex-somersault'), await addressed(page, 'proj-maws')];
-    await expect.poll(async () => {
-      const value = (await layoutGet(page, 'main.tabs')) as { version: number; current: string; sets: Record<string, unknown> };
-      return [value.version, value.current, Object.keys(value.sets).sort()];
-    }, { message: 'version 3, one set per project with tabs' }).toEqual([3, `machine:${ref}`, [`machine:${ref}`, ...projectSets].sort()]);
+    // what is stored is one strip, in the envelope build F reads (UC-14)
+    await expect
+      .poll(async () => {
+        const value = (await layoutGet(page, 'main.tabs')) as { version: number; current: string; sets: Record<string, unknown> };
+        return [value.version, value.current, Object.keys(value.sets)];
+      }, { message: 'version 3, current none, the one set none' })
+      .toEqual([3, 'none', ['none']]);
     expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
   } finally {
     await maws.cleanup();
@@ -444,6 +526,135 @@ test('sidebar at scale: the flat tree, 36px project rows, 30px session rows, fiv
   }
 });
 
+// UX wave U7a, O-03 (docs/doperpowers/plans/2026-11-12-ux-wave-U7-sidebar-title-bar-destinations.md, M4; A5): the title
+// bar's project chip owns 96 px. With a session of a project whose name is forty characters (invented here) in front,
+// the chip's button stays inside that box and left of the strip, its name ends cut by its ellipsis, and its tooltip
+// still names the whole project.
+test('a long project name stays inside the chip’s box', async () => {
+  const LONG = 'meridian-lighthouse-survey-archive-tools';
+  expect(LONG).toHaveLength(40);
+  const scratch = mkdtempSync(join(tmpdir(), 'maws-u7-chip-'));
+  const scenario = JSON.parse(readFileSync(join(REPO_ROOT, 'test/fixtures/shell/nine-sessions.json'), 'utf8')) as { projects: { id: string; name: string }[] };
+  scenario.projects.find((project) => project.id === 'proj-codex-somersault')!.name = LONG;
+  const source = join(scratch, 'scenario.json');
+  writeFileSync(source, JSON.stringify(scenario));
+  try {
+    const maws = await launchMaws({ env: { ...SHELL_ENV, MAWS_SESSION_SOURCE: `stub:${source}` } });
+    try {
+      const { app, page } = maws;
+      await expect(page.locator('[data-region="sidebar"] [data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
+      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setBounds({ x: 72, y: 48, width: 1360, height: 860 }));
+      await (await sidebarRow(page, 'Trace stream reconnects')).click();
+      await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'a session of the long-named project in front' }).toEqual(['Trace stream reconnects']);
+      const chip = page.getByRole('banner').locator('[data-toolbar-project]');
+      // U13a's chip: it names the row of the session in front, and a click reveals that row
+      await expect(chip).toHaveAccessibleName(`Reveal ${LONG} in sidebar`);
+      await expect(chip, 'the tooltip holds the whole name').toHaveAttribute('title', `Reveal ${LONG} in sidebar`);
+      const name = chip.locator('.truncate');
+      await expect(name).toHaveText(LONG);
+      const box = (await chip.boundingBox())!;
+      const strip = (await mainTabs(page).boundingBox())!;
+      expect(box.width, 'the chip is at most its 96 px').toBeLessThanOrEqual(96);
+      expect(box.x + box.width, 'the chip ends where the strip begins (half a pixel for rounding), never under the first tab').toBeLessThanOrEqual(strip.x + 0.5);
+      expect(await name.evaluate((el) => el.scrollWidth > el.clientWidth), 'the name is cut inside the chip').toBe(true);
+      expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
+      // the owner's look: more tabs open beside the long name's, at the wide width and at a narrow one
+      // (the long name's project last, so the chip still names it with a mixed strip of four behind it)
+      for (const title of [FIX, QUOTA, 'Somersault terminal run']) await (await sidebarRow(page, title)).click({ modifiers: ['Meta'] });
+      await page.mouse.move(700, 400); // off the sidebar: no hover card in the pictures
+      await attachWindowShot(maws, 'u7a-title-bar-long-name', 1280, 820);
+      await attachWindowShot(maws, 'u7a-title-bar-narrow', 700, 820);
+    } finally {
+      await maws.cleanup();
+    }
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+// UX wave U7a, O-16 (the same document, M4; A2). Hide from a row's context menu takes the row out of its project's list
+// at once, and "Hidden · 1" stands at the project's end, closed; open, it holds the hidden row, indented one step. A
+// relaunch shows the same. Unhide puts the row at the project's head, and `sidebar.hidden` in layout.json is left with no
+// entry. Then the row's own button (M3, decision 9; the owner's answer, "Button on the row"): one click hides, opening
+// nothing, and the hidden row's button unhides. The session is one at rest (no holder, exited), so no look returns it
+// by itself while the scene runs.
+test('hide and unhide', async () => {
+  const SDK = 'SDK wire inventory';
+  const shown = ['Usage reset countdown', 'Settings idle probe'];
+  const parts = (page: Page) => {
+    const project = projectRow(page, USAGE_PROJECT);
+    return { project, row: project.getByRole('treeitem', { name: SDK, exact: true }), hidden: project.locator('[data-kind="hidden"]') };
+  };
+  const closedHiddenRow = async ({ project, row, hidden }: ReturnType<typeof parts>, message: string) => {
+    await expect(row, message).toHaveCount(0);
+    expect(await treeRows(project), `${message}: the rest of the list`).toEqual(shown);
+    await expect(hidden, message).toHaveText('Hidden · 1');
+    await expect(hidden).toHaveAccessibleName('Hidden, 1 session');
+    await expect(hidden, `${message}: closed`).toHaveAttribute('aria-expanded', 'false');
+    await expect(project.locator('[role="treeitem"]').last(), `${message}: the project's last row`).toHaveAttribute('data-kind', 'hidden');
+  };
+  const openHiddenRow = async ({ project, row, hidden }: ReturnType<typeof parts>) => {
+    await hidden.click();
+    await expect(hidden).toHaveAttribute('aria-expanded', 'true');
+    await expect(row).toBeVisible();
+    await expect(row, 'the hidden row is the Hidden row’s contents').toHaveAttribute('data-indented', 'true');
+    await expect(row, 'indented one step, the inset of a nested row').toHaveCSS('padding-left', '30px');
+    await expect(project.getByRole('treeitem', { name: shown[0], exact: true }), 'a shown row keeps its inset').toHaveCSS('padding-left', '7px');
+  };
+  const unhidden = async ({ project, row, hidden }: ReturnType<typeof parts>, userData: string, message: string) => {
+    await expect(hidden, message).toHaveCount(0);
+    await expect.poll(() => treeRows(project), { message: `${message}: the row first, the pointer still in the sidebar` }).toEqual([SDK, ...shown]);
+    await expect(row).not.toHaveAttribute('data-indented', 'true');
+    await expect.poll(() => storedKey(userData, 'sidebar.hidden'), { message: `${message}: sidebar.hidden in layout.json, with no entry` }).toEqual({ version: 1, hidden: {} });
+  };
+
+  const first = await launchMaws({ env: SHELL_ENV });
+  try {
+    const { page } = first;
+    await expect(page.locator('[data-region="sidebar"] [data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
+    const at = parts(page);
+    await openProject(page, USAGE_PROJECT);
+    expect(await treeRows(at.project)).toEqual([...shown, SDK]);
+    await at.row.click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Hide', exact: true }).click();
+    await expect(page.getByRole('menu')).toHaveCount(0);
+    await closedHiddenRow(at, 'hidden from its menu');
+    const address = await addressed(page, 'app-1238089b');
+    await expect.poll(async () => Object.keys(((await layoutGet(page, 'sidebar.hidden')) as { hidden: Record<string, unknown> } | null)?.hidden ?? {}), { message: 'the hide is stored' }).toEqual([address]);
+    await openHiddenRow(at);
+    await attachWindowShot(first, 'u7a-hidden-list', 1280, 820);
+    expect(first.consoleErrors(), 'the console stays free of errors').toEqual([]);
+    await first.app.close();
+
+    const second = await launchMaws({ env: SHELL_ENV, userData: first.userData });
+    try {
+      const { page } = second;
+      const again = parts(page);
+      await expect(page.locator('[data-region="sidebar"] [data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
+      await openProject(page, USAGE_PROJECT);
+      await closedHiddenRow(again, 'after the relaunch');
+      await openHiddenRow(again);
+      await again.row.click({ button: 'right' });
+      await page.getByRole('menuitem', { name: 'Unhide', exact: true }).click();
+      await unhidden(again, second.userData, 'unhidden from its menu');
+
+      // the row's own button: one click hides and opens nothing; in the Hidden list it reads Unhide
+      const tabs = await tabLabels(page, 'Open tabs');
+      await clickRevealed(again.row, again.row.getByRole('button', { name: 'Hide', exact: true }));
+      await closedHiddenRow(again, 'hidden by its button');
+      expect(await tabLabels(page, 'Open tabs'), 'the button opened no session').toEqual(tabs);
+      await openHiddenRow(again);
+      await clickRevealed(again.row, again.row.getByRole('button', { name: 'Unhide', exact: true }));
+      await unhidden(again, second.userData, 'unhidden by its button');
+      expect(second.consoleErrors(), 'the relaunched console stays free of errors').toEqual([]);
+    } finally {
+      await second.cleanup();
+    }
+  } finally {
+    await first.cleanup(); // removes the profile both launches used
+  }
+});
+
 // UX2 owner rulings: one chrome row (tabs inside it), with the usage pill and its unit in the sidebar footer.
 async function assertToolbarPlacement(page: Page): Promise<void> {
   const toolbar = page.getByRole('banner');
@@ -493,6 +704,7 @@ interface Saved {
   main: unknown;
   panelPinned: unknown;
   surfaces: unknown;
+  side: { groups: unknown; widths: unknown; cards: unknown }; // UX wave U8b's three keys
   keys: string[];
   bounds: { x: number; y: number; width: number; height: number };
   left: string[];
@@ -510,7 +722,7 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
   const usageCard = board.getByRole('article', { name: 'Usage reset countdown' });
   const palette = page.getByRole('dialog', { name: 'Command palette' });
   const badge = () => app.evaluate(({ app }) => app.dock?.getBadge());
-  // W12: one project's sessions, since each project has its own tab set
+  // One project's sessions: a strip of one place, so no tab names it (U13a) and the labels are the titles alone
   const three = [FIX, SIP, NORTH];
 
   // UX2 optional-surfaces ruling: an empty main has no full-height summary/panel column.
@@ -602,7 +814,7 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     expect((await foreign.boundingBox())!.height, 'a 30px row').toBe(30);
     await foreign.click({ button: 'right' });
     await expect(page.getByRole('menu')).toBeVisible();
-    expect(await page.getByRole('menuitem').allTextContents(), 'a foreign-live session offers only the opens (I2)').toEqual(['Open', 'Open in new tab']);
+    expect(await page.getByRole('menuitem').allTextContents(), 'a foreign-live session offers only the opens (I2), then Hide (UX wave U7, O-16)').toEqual(['Open', 'Open in new tab', 'Hide']);
     await page.keyboard.press('Escape');
     await expect(page.getByRole('menu')).toHaveCount(0);
     expect(await noLeftovers(page, tokens.dark), 'no dark colour in the light theme').toEqual([]);
@@ -654,7 +866,7 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     });
     const fixCard = board.getByRole('article', { name: FIX });
     await expect(fixCard.getByTestId('request-input')).toHaveText('git log --oneline');
-    await expect(fixCard.getByRole('heading', { name: 'Bash' })).toBeVisible();
+    await expect(fixCard.getByRole('heading', { name: 'Run a command' })).toBeVisible(); // U1a §D: what is asked, in place of the tool's name
     const charterCard = board.getByRole('article', { name: 'Charter + research' });
     await expect(charterCard.getByTestId('card-activity')).toHaveText('Running bun test');
     await expect(charterCard).toContainText('ctx 41%');
@@ -670,12 +882,14 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     await expect(foreignCard.getByRole('button'), 'a foreign-live card holds no control').toHaveCount(0);
   });
 
-  await test.step('Item 3: the hover card on a Bash request answers nothing', async () => {
+  await test.step('Item 3 (U1a §H): the hover card on a shell command offers Allow once and Deny', async () => {
     const fixHover = await hoverRow(page, FIX);
     await expect(fixHover.getByTestId('request-input')).toHaveText('git log --oneline');
     await expect(fixHover).toContainText('/private/tmp/maws-probe-qqboLh');
     await expect(fixHover.getByRole('button', { name: 'Open session' })).toBeVisible();
-    await expect(fixHover.getByRole('button', { name: 'Approve' }), 'Bash is not read-only').toHaveCount(0);
+    // a shell command the hover card shows whole may be allowed once from it, and any permission denied; neither pressed here
+    await expect(fixHover.getByRole('button', { name: 'Allow once', exact: true }), 'a command shown whole').toBeVisible();
+    await expect(fixHover.getByRole('button', { name: 'Deny', exact: true })).toBeVisible();
     await unhover(page, fixHover);
   });
 
@@ -717,13 +931,13 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
 
   await test.step('Item 3: approve the read-only request from its hover card, by pointer only', async () => {
     // Keyboard first: arrowing onto the session's row opens its hover card (W5: every session row has one), and Enter
-    // on a focused Approve answers nothing (§5.1: approval from the hover card is an explicit click).
+    // on a focused Allow once answers nothing (§5.1: approval from the hover card is an explicit click).
     const charterDialog = page.getByRole('dialog', { name: 'Charter + research' });
     await (await sidebarRow(page, SIP)).focus();
     await page.keyboard.press('ArrowDown');
     await expect(await sidebarRow(page, 'Charter + research')).toBeFocused();
-    await expect(charterDialog.getByRole('button', { name: 'Approve' })).toBeVisible();
-    await charterDialog.getByRole('button', { name: 'Approve' }).focus();
+    await expect(charterDialog.getByRole('button', { name: 'Allow once', exact: true })).toBeVisible();
+    await charterDialog.getByRole('button', { name: 'Allow once', exact: true }).focus();
     await page.keyboard.press('Enter');
     await page.waitForTimeout(300);
     expect(await badge(), 'Enter answered nothing').toBe('4');
@@ -735,8 +949,8 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     await expect(charterHover.getByTestId('request-input')).toHaveText(/\/docs\/charter\.md$/);
     await expect(charterHover.getByRole('button', { name: 'Deny' })).toBeVisible();
     expect(await noLeftovers(page, tokens.light), 'no light colour in the dark theme (hover card)').toEqual([]);
-    await charterHover.getByRole('button', { name: 'Approve' }).click();
-    await expect(charterHover.getByRole('button', { name: 'Approve' })).toHaveCount(0);
+    await charterHover.getByRole('button', { name: 'Allow once', exact: true }).click();
+    await expect(charterHover.getByRole('button', { name: 'Allow once', exact: true })).toHaveCount(0);
     await closeProject(page, 'MAWS');
     await expect(projectRow(page, 'MAWS').getByLabel('2 waiting')).toBeVisible();
     await expect(board.getByRole('article', { name: 'Charter + research' }).getByTestId('card-activity')).toHaveText('Continuing');
@@ -898,25 +1112,32 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     const usageProjectId = await projectRow(page, USAGE_PROJECT).getAttribute('data-menu').then((menuId) => menuId!.slice('project:'.length));
     await closeProject(page, USAGE_PROJECT); // the 8 s entry left it expanded: the click below is the one that opens it
     await openProject(page, USAGE_PROJECT);
-    // W12: the strip shows that project's tab set (nothing open, the title bar's chip naming it: P3-F wave S, F17);
-    // opening a MAWS session from the palette brings MAWS's set and its split back while the sidebar stays on the project.
+    // U13a (O-01, A1): a project click opens its row and changes no tab: the split stays as it was, and the title bar's
+    // chip still names the project of the session in front, not the row clicked. Opening a MAWS session from the palette
+    // brings its open tab to the front while the sidebar stays on the project.
     const projectChip = page.getByRole('banner').locator('[data-toolbar-project]');
-    await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'the clicked project’s empty set' }).toEqual([]);
-    await expect(projectChip).toHaveText(USAGE_PROJECT);
+    expect(await tabLabels(page, 'Left pane tabs'), 'the strip as it was').toEqual([three[0], 'Charter + research']);
+    expect(await tabLabels(page, 'Right pane tabs')).toEqual([three[2]]);
+    await expect(projectChip).toHaveText('MAWS');
     await openPalette(app, page);
     await page.keyboard.type('charter');
     await page.keyboard.press('Enter');
-    await expect.poll(() => tabLabels(page, 'Left pane tabs')).toEqual([three[0], 'Charter + research']);
+    await expect.poll(() => selectedTab(page, 'Left pane tabs')).toBe('Charter + research');
+    expect(await tabLabels(page, 'Left pane tabs')).toEqual([three[0], 'Charter + research']);
+    expect(await tabLabels(page, 'Right pane tabs')).toEqual([three[2]]);
     await expect(projectChip).toHaveText('MAWS');
-    // UX2 optional surfaces: explicitly open one in the restored session before resizing it. Content-based widths
-    // replace the fixed 380px, so the pointer delta starts at the rendered size, not the former default.
+    // UX2 optional surfaces: explicitly open one in the restored session before resizing it. UX wave U8b (A5): the column
+    // remembers two widths; Files is a reading tool, so it opens at 60 % of the room right of the sidebar, and the drag
+    // moves that wide width alone (the narrow one stays automatic).
     await page.locator('[data-surface-row]').getByRole('button', { name: 'Files', exact: true }).click();
     const panelResizer = page.locator('[data-region="panel"]').getByRole('separator', { name: 'Resize right panel' });
     await expect(panelResizer).toBeVisible();
     const panelWidth = Number(await panelResizer.getAttribute('aria-valuenow'));
+    expect(panelWidth, 'Files opens at 60 % of the room').toBe(Math.round(((await page.evaluate(() => innerWidth)) - 200) * 0.6));
     await dragBy(page, panelResizer, panelWidth - 320);
     await expect(panelResizer).toHaveAttribute('aria-valuenow', '320');
-    await menu(app, 'panel.toggle'); // replace Files with session cards
+    await expect.poll(() => layoutGet(page, 'panelTools.widths'), { message: 'the drag wrote the wide width alone' }).toEqual({ version: 1, wide: 320, narrow: null });
+    await menu(app, 'panel.toggle'); // the column hides (Files stays a tab) and the session cards show
     await menu(app, 'panel.toggle'); // hide the cards
     await expect(panelResizer).toHaveCount(0);
     await expect.poll(async () => (await page.locator('[data-region="panel"]').boundingBox())?.width ?? 0).toBe(0);
@@ -927,9 +1148,11 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
         const main = (await layoutGet(page, 'main.tabs')) as { version: number; current: string; sets: Record<string, { panes: unknown[] }> };
         return [regions.sidebar.width, regions.panel.width, regions.panel.collapsed, regions.sidebar.expandedProjects.includes(usageProjectId), main.version, main.current, main.sets[main.current]?.panes.length];
       }, { message: 'the layout is written back' })
-      .toEqual([200, 320, true, true, 3, await addressed(page, 'proj-maws'), 2]);
-    // UX2 preserves the per-project layout and adds only the surface-selection key and this session's Files refs.
-    expect((await layoutList(page)).sort()).toEqual(['main.tabs', `panel.${await addressed(page, CHARTER)}`, 'panel.pinned', 'panelTools.surfaces', 'regions', 'window.main'].sort());
+      .toEqual([200, 320, true, true, 3, 'none', 2]);
+    // UX2 preserves the layout and adds only the surface-selection key and this session's Files refs; U13a stores the one
+    // strip under the set `none`; UX wave U8b's first read writes its three keys (the lower groups, the two widths, the
+    // cards' folds) at once.
+    expect((await layoutList(page)).sort()).toEqual(['cards.open', 'main.tabs', `panel.${await addressed(page, CHARTER)}`, 'panel.pinned', 'panelTools.groups', 'panelTools.surfaces', 'panelTools.widths', 'regions', 'window.main'].sort());
   });
 
   expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
@@ -938,6 +1161,7 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     main: await layoutGet(page, 'main.tabs'),
     panelPinned: await layoutGet(page, 'panel.pinned'),
     surfaces: await layoutGet(page, 'panelTools.surfaces'),
+    side: { groups: await layoutGet(page, 'panelTools.groups'), widths: await layoutGet(page, 'panelTools.widths'), cards: await layoutGet(page, 'cards.open') },
     keys: (await layoutList(page)).sort(),
     bounds: await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBounds()),
     left: await tabLabels(page, 'Left pane tabs'),
@@ -966,10 +1190,22 @@ async function relaunchedInstance(maws: MawsLaunch, saved: Saved): Promise<void>
   expect(await layoutGet(page, 'panel.pinned')).toEqual(saved.panelPinned);
   // UX2's optional-surface selections/pins round-trip without resetting the established tab sets or preferences.
   expect(await layoutGet(page, 'panelTools.surfaces')).toEqual(saved.surfaces);
+  // UX wave U8b: a second launch is no first read: the groups, the two widths and the folds are read as they were left
+  expect({ groups: await layoutGet(page, 'panelTools.groups'), widths: await layoutGet(page, 'panelTools.widths'), cards: await layoutGet(page, 'cards.open') }).toEqual(saved.side);
   expect((await layoutList(page)).sort()).toEqual(saved.keys);
   expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBounds()), 'the window bounds are restored').toEqual(saved.bounds);
   const file = JSON.parse(readFileSync(join(maws.userData, 'layout.json'), 'utf8')) as Record<string, unknown>;
   expect(file['window.main']).toMatchObject({ bounds: saved.bounds });
+
+  // UX wave U8b (A5): the two widths after the relaunch. Files, a reading tool, opens at the wide width it was dragged to;
+  // Background tasks, any other tool, at the narrow automatic 360 px; neither changes what is stored.
+  const panelResizer = page.locator('[data-region="panel"]').getByRole('separator', { name: 'Resize right panel' });
+  await page.locator('[data-surface-row]').getByRole('button', { name: 'Files', exact: true }).click();
+  await expect(page.locator('[data-region="panel"] [data-surface="files"]')).toBeVisible();
+  await expect(panelResizer, 'Files as wide as it was left').toHaveAttribute('aria-valuenow', '320');
+  await openSurface(page, 'Background tasks');
+  await expect(panelResizer, 'a narrow tool at its automatic width').toHaveAttribute('aria-valuenow', '360');
+  expect(await layoutGet(page, 'panelTools.widths'), 'opening the tools wrote no width').toEqual(saved.side.widths);
 
   expect(maws.consoleErrors(), 'the relaunched console stays free of errors').toEqual([]);
 }
@@ -977,6 +1213,22 @@ async function relaunchedInstance(maws: MawsLaunch, saved: Saved): Promise<void>
 // ---- helpers ---------------------------------------------------------------------------------------------------------------
 
 // Clicks an application-menu item in main, by the id `buildMenu` gives it (`tab.select:<n>` for the numbered tabs).
+// UX wave U7a: a full-window picture for the owner's look, attached to the run's report and written nowhere else. The
+// window takes the content size for the shot and goes back to the one it had, so the scene's own steps see what they saw.
+async function attachWindowShot(maws: MawsLaunch, name: string, width: number, height: number): Promise<void> {
+  const { app, page } = maws;
+  const contentSize = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.getContentSize());
+  const before = await contentSize();
+  const resize = async ([w, h]: readonly number[]) => {
+    await app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setContentSize(w!, h!), [w, h] as const);
+    await page.waitForFunction(([w, h]) => window.innerWidth === w && window.innerHeight === h, [w, h] as const);
+    await page.waitForTimeout(300); // the layout settles at the new size
+  };
+  await resize([width, height]);
+  await test.info().attach(name, { body: await page.screenshot(), contentType: 'image/png' });
+  await resize(before);
+}
+
 async function menu(app: ElectronApplication, id: string): Promise<void> {
   const clicked = await app.evaluate(({ Menu }, id) => {
     const item = Menu.getApplicationMenu()?.getMenuItemById(id);
@@ -1023,11 +1275,14 @@ async function captureEvents(page: Page): Promise<void> {
 
 const captured = (page: Page) => page.evaluate(() => window.__maws_e2e!);
 
-const layoutGet = async (page: Page, key: 'regions' | 'main.tabs' | 'panel.pinned' | 'panelTools.surfaces') => {
+const layoutGet = async (page: Page, key: 'regions' | 'main.tabs' | 'panel.pinned' | 'panelTools.surfaces' | 'sidebar.hidden' | 'panelTools.groups' | 'panelTools.widths' | 'cards.open') => {
   const result = await page.evaluate((key) => window.maws.invoke('layout.get', { key }), key);
   if (!result.ok) throw new Error(`layout.get ${key}: ${JSON.stringify(result.error)}`);
   return result.value.value;
 };
+
+// A key as main last wrote layout.json (UX wave U7: what a relaunch, or another build, reads)
+const storedKey = (userData: string, key: string): unknown => (JSON.parse(readFileSync(join(userData, 'layout.json'), 'utf8')) as Record<string, unknown>)[key];
 
 const layoutList = async (page: Page) => {
   const result = await page.evaluate(() => window.maws.invoke('layout.list', undefined));

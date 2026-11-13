@@ -86,17 +86,17 @@ describe("request renderer registers through C6's seam", () => {
     act(() => {
       disposeRenderer = connectRequestCard();
     });
-    await waitFor(() => expect(slot('r1')?.querySelector('h3')?.textContent).toBe('Bash'));
-    expect(slot('r2')?.querySelector('h3')?.textContent).toBe('Read');
+    await waitFor(() => expect(slot('r1')?.querySelector('h3')?.textContent).toBe('◐Run a command'));
+    expect(slot('r2')?.querySelector('h3')?.textContent).toBe('◐Read a file');
 
     let undock = () => {};
     act(() => {
       undock = markDocked(APP, 'r1' as RequestId); // a docked placement of this session shows r1
     });
     expect(slot('r1')?.textContent).toBe('◐Waiting for you · Bash · answer below ↓');
-    expect(slot('r2')?.querySelector('h3')?.textContent).toBe('Read'); // a different pending request keeps its full card
+    expect(slot('r2')?.querySelector('h3')?.textContent).toBe('◐Read a file'); // a different pending request keeps its full card
     act(() => undock());
-    expect(slot('r1')?.querySelector('h3')?.textContent).toBe('Bash');
+    expect(slot('r1')?.querySelector('h3')?.textContent).toBe('◐Run a command');
 
     act(() => useAttention.getState().applyChanged({ appSessionId: APP, items: [itemFor(read, APP)] }, TEST_MACHINE)); // r1 retired
     expect(slot('r1')?.textContent).toBe('');
@@ -123,8 +123,18 @@ describe("request renderer registers through C6's seam", () => {
     const slotRow = { id: 'slot:r1', turnId: null, at: bash.at, kind: 'request_slot', requestId: 'r1', toolUseId: 'b1', requestKind: 'permission', toolName: 'Bash', requestedAt: bash.at } as never;
     const { renderSessionRequest } = await import('./inline');
     render(<>{renderSessionRequest(slotRow)}</>);
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Bash' })).toBeTruthy());
-    expect(screen.queryByRole('heading', { name: 'Edit' })).toBeNull();
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Run a command' })).toBeTruthy());
+    expect(screen.queryByRole('heading', { name: 'Edit b.ts' })).toBeNull();
+  });
+
+  // UC-1 (A17): an answered request waits nowhere, so its slot in the transcript draws no card
+  it('draws nothing for a request whose answer was delivered', async () => {
+    act(() => useAttention.getState().applySnapshot([{ ...itemFor(bash, APP), state: 'delivered' }, itemFor(read, APP)], TEST_MACHINE));
+    const slotRow = { id: 'slot:r1', turnId: null, at: bash.at, kind: 'request_slot', requestId: 'r1', toolUseId: 'b1', requestKind: 'permission', toolName: 'Bash', requestedAt: bash.at } as never;
+    const { renderInlineRequest: forSession } = await import('./inline');
+    const { container } = render(<>{forSession(APP)(slotRow)}</>);
+    await act(async () => {});
+    expect(container.textContent).toBe('');
   });
 
   it('a docked notice for an unreadable request leaves the transcript its card, whose Retry reads it again', async () => {
@@ -154,7 +164,7 @@ describe("request renderer registers through C6's seam", () => {
     const slotRow = { id: 'slot:r1', turnId: null, at: bash.at, kind: 'request_slot', requestId: 'r1', toolUseId: 'b1', requestKind: 'permission', toolName: 'Bash', requestedAt: bash.at } as never;
     const undock = markDocked(APP, 'r1' as RequestId);
     render(<>{render1(slotRow)}</>);
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Bash' })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Run a command' })).toBeTruthy());
     expect(screen.queryByText(/answer below/)).toBeNull();
     undock();
     const other = render(<>{renderInlineRequest(at('app-other' as AppSessionId))(slotRow)}</>); // another session holds no such item

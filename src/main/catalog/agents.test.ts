@@ -5,7 +5,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { LaunchSpecSchema } from '@shared/engine/launch-spec';
-import { MAWS_SERVER_INSTRUCTIONS } from '@shared/maws/instructions';
+import { MAWS_BROWSER_INSTRUCTIONS /* U12a */, MAWS_SERVER_INSTRUCTIONS } from '@shared/maws/instructions';
 import { MAWS_TOOL_NAMES } from '@shared/maws/tools';
 import { TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract';
 import { buildLaunch, ENGINE_FLAGS } from '../../engine-host/launch';
@@ -27,8 +27,8 @@ describe('what agents see of the catalog: nothing', () => {
     expect(MAWS_TOOL_NAMES.filter((name) => CATALOG_WORDS.test(name))).toEqual([]);
   });
 
-  it('no text MAWS gives the model mentions it: the server’s instructions and the to-human supplement', () => {
-    for (const [name, text] of Object.entries({ MAWS_SERVER_INSTRUCTIONS, TO_HUMAN_SUPPLEMENT })) expect(text.match(CATALOG_WORDS), name).toBeNull();
+  it('no text MAWS gives the model mentions it: the server’s instructions (both paragraphs) and the to-human supplement', () => {
+    for (const [name, text] of Object.entries({ MAWS_SERVER_INSTRUCTIONS, MAWS_BROWSER_INSTRUCTIONS, TO_HUMAN_SUPPLEMENT })) expect(text.match(CATALOG_WORDS), name).toBeNull();
   });
 
   it('no launch argument or environment variable carries it, even when main runs with the catalog’s seams set', () => {

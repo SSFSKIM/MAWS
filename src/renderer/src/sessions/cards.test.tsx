@@ -3,7 +3,6 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import type { StartOutcome } from '@shared/sessions/setup';
-import { TRUST_GATES } from '@shared/sessions/trust';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { addressOf } from '@shared/machine/address';
@@ -11,7 +10,7 @@ import { ipc } from '../ipc/client';
 import { useNotices } from '../stores/notices';
 import { closeDialog, useDialogs } from './dialogs';
 import { health, ID as BARE_ID, intent as mainIntent, MESSAGE, putIntent, REPO, resetSetupStore, resources, trustState } from '../test-support/setup-intents';
-import { FailureCard } from './FailureCard';
+import { FAILURE_CARD_TITLE, FailureCard } from './FailureCard';
 import { NewSessionEmptyState } from './NewSessionEmptyState';
 import { RELAY_CARD_TITLE, RelayCard } from './RelayCard';
 import { connectSetupDock } from './SetupCard';
@@ -63,6 +62,8 @@ function Docked({ id = ID }: { id?: typeof ID }) {
   );
 }
 const dockedIds = () => screen.getByTestId('docked').dataset.cards;
+// The title line C7's frame draws above a docked card (UX wave U1a §J: a setup card's is its title alone)
+const frameTitle = (name: string) => screen.getByRole('group', { name }).querySelector(':scope > p')?.textContent;
 
 function withMain(auto: Parameters<typeof fakeClient>[0] = {}) {
   fake = fakeClient(auto);
@@ -90,14 +91,30 @@ const answer = (outcome: StartOutcome) => () => outcome;
 const starting: StartOutcome = { status: 'starting', appSessionId: BARE_ID };
 
 describe('trust card', () => {
-  it('lists what trust would load, or the generic gates, and names the key when it differs', () => {
-    const { rerender } = render(<TrustCard trust={trustState({ directory: `${REPO}/.claude/worktrees/one` })} busy={false} onAccept={vi.fn()} onDecline={vi.fn()} onStartWithoutTrusting={vi.fn()} />);
+  it('lists what trust would load and names the key when it differs', () => {
+    render(<TrustCard trust={trustState({ directory: `${REPO}/.claude/worktrees/one` })} busy={false} onAccept={vi.fn()} onDecline={vi.fn()} onStartWithoutTrusting={vi.fn()} />);
     expect(screen.getByText('.claude/settings.json')).toBeTruthy();
     expect(screen.getByText('1 MCP server: c10-sentinel')).toBeTruthy();
     expect(screen.getByText(`${REPO}/.claude/worktrees/one`)).toBeTruthy();
+    expect(screen.getByText(/Loads its settings, hooks, MCP servers and plugins/).textContent).toContain('/private/tmp/maws-e2e/config/.claude.json');
     expect(screen.getByText(/Trust is recorded for the repository at/).textContent).toContain(REPO);
-    rerender(<TrustCard trust={trustState({ found: [] })} busy={false} onAccept={vi.fn()} onDecline={vi.fn()} onStartWithoutTrusting={vi.fn()} />);
-    for (const gate of TRUST_GATES) expect(screen.getByText(gate)).toBeTruthy();
+    expect(screen.queryByText(/Nothing in this folder loads/)).toBeNull();
+  });
+
+  // UX wave U1a §J (A13; l4-approvals-13): a folder that holds nothing trust would load says so in one line, where the
+  // card listed five things that would load
+  it('says in one line that nothing loads when the folder holds nothing, with where trust is recorded and no list', () => {
+    const { rerender } = render(<TrustCard trust={trustState({ found: [] })} busy={false} onAccept={vi.fn()} onDecline={vi.fn()} onStartWithoutTrusting={vi.fn()} />);
+    expect(screen.getByText(REPO)).toBeTruthy();
+    expect(screen.getByText('Nothing in this folder loads or runs automatically.')).toBeTruthy();
+    expect(screen.getByText(/^Recorded in/).textContent).toBe('Recorded in /private/tmp/maws-e2e/config/.claude.json; the terminal will not ask again.');
+    expect(screen.queryByText(/Loads its settings/)).toBeNull();
+    expect(screen.queryByRole('list')).toBeNull();
+    expect(document.querySelector('dl')).toBeNull();
+    expect(screen.queryByText(/Trust is recorded for the repository at/)).toBeNull();
+    expect(['Trust and start', 'Start without trusting', 'Cancel'].map((name) => screen.getByRole('button', { name }).textContent)).toEqual(['Trust and start', 'Start without trusting', 'Cancel']);
+    rerender(<TrustCard trust={trustState({ directory: `${REPO}/.claude/worktrees/one`, found: [] })} busy={false} onAccept={vi.fn()} onDecline={vi.fn()} onStartWithoutTrusting={vi.fn()} />);
+    expect(screen.getByText(/Trust is recorded for the repository at/).textContent).toContain(REPO);
   });
 
   it('renders the home copy and no found promise for the home directory', () => {
@@ -116,7 +133,8 @@ describe('trust card', () => {
     expect(await act(() => startIntent(ID, MESSAGE))).toEqual({ ok: true });
     expect(useSpawnedHere.getState().leading.has(ID), 'P5 O7 M8: nothing started yet').toBe(false);
     expect(dockedIds(), 'docked in the composer through C7\'s dockCard').toBe('c10:trust');
-    expect(screen.getByRole('group', { name: 'Trust this folder?' }).textContent).toContain('Composer paused'); // C7's DockedCardFrame
+    // C7's DockedCardFrame; U1a §J: a card another child docks reads its title alone
+    expect(frameTitle('Trust this folder?')).toBe('Trust this folder?');
     await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
     expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: BARE_ID, message: null, options: { trust: 'accepted' } });
     await userEvent.click(await screen.findByRole('button', { name: 'Start without trusting' }));
@@ -318,6 +336,7 @@ describe('relay card', () => {
       render(<Docked />);
       await act(() => startIntent(ID, MESSAGE));
       await screen.findByRole('button', { name: 'Start anyway' });
+      expect(frameTitle(RELAY_CARD_TITLE)).toBe(RELAY_CARD_TITLE); // U1a §J: its title alone
       act(() => screen.getByRole('group', { name: RELAY_CARD_TITLE }).focus());
       await userEvent.keyboard('{Enter}');
       expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: BARE_ID, message: null, options: { startAnyway: true } });
@@ -502,6 +521,7 @@ describe('failure card', () => {
       }),
     );
     expect(dockedIds()).toBe('c10:failure');
+    expect(frameTitle(FAILURE_CARD_TITLE)).toBe(FAILURE_CARD_TITLE); // U1a §J: its title alone
     await userEvent.click(await screen.findByRole('button', { name: 'Keep the worktree' }));
     expect(fake.invoked('session.intent.resolveWorktree')).toEqual([{ appSessionId: BARE_ID, resolution: 'keep' }]);
     // the kept checkout's cleanup is reachable from the result (no record names it until a session runs there)

@@ -12,6 +12,7 @@ import { WIDGET_DIALOG_BOX } from '../composer/WidgetDialog';
 import { selectOrgIndex } from '../stores/org-projects';
 import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
+import { Backdrop } from '../sessions/scrim'; // board 523 (U11a): the one scrim
 import { RESUME_COPY } from './copy';
 import { ResumeChooser } from './ResumeChooser';
 
@@ -47,7 +48,9 @@ export function ResumeChooserHost() {
   return (
     <Dialog.Root open onOpenChange={(next) => !next && close()}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-bg opacity-60" />
+        <Dialog.Overlay asChild>
+          <Backdrop className="fixed inset-0 z-40" />
+        </Dialog.Overlay>
         <Dialog.Content
           aria-describedby={undefined}
           data-resume-chooser-host

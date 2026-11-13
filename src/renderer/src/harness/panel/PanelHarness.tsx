@@ -11,6 +11,7 @@
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
+import { EMPTY_STRIP } from '@shared/ipc/schema/layout';
 import { useWindowWidth } from '../../app/regions';
 import { useShellGeometry, useShellView } from '../../app/shell-view';
 import { SurfaceRow } from '../../panel/SurfaceRow';
@@ -24,7 +25,7 @@ import { queryClient } from '../../ipc/query';
 import { connectPanelHost, instanceIds, instanceOf, isRestoredLog, panelHost, pendingAdds, registerPanelTool, shownSession, togglePinned, usePanelHost } from '../../panel/host';
 import { PanelHost } from '../../panel/PanelHost';
 import { PanelRegion } from '../../panel/PanelRegion';
-import { persistLayout, useLayout } from '../../stores/layout';
+import { panelWidthClass, persistLayout, useLayout } from '../../stores/layout';
 import { activeTab, allTabs, sessionOfTab } from '../../stores/layout-model';
 import { useSessions } from '../../stores/sessions';
 import { useSettings } from '../../stores/settings';
@@ -113,9 +114,7 @@ function bootstrap(): () => void {
     seedFakeSessions();
     // C9: the host's ptys are re-adopted before the layout hydrates, so a restored Terminal tab finds its shell.
     const adopted = await adoptTerminals((appSessionId) => FAKE_RECORDS.has(appSessionId as AppSessionId));
-    await useLayout.getState().hydrate(ipc, (id) => useSessions.getState().records.has(id), {
-      projectOf: (id) => useSessions.getState().records.get(id)?.projectId ?? null,
-    });
+    await useLayout.getState().hydrate(ipc, (id) => useSessions.getState().records.has(id));
     // A first launch shows A; a relaunch shows what the profile's main.tabs held.
     const layout = useLayout.getState();
     if (!allTabs(layout.main).some((t) => t.kind === 'session')) layout.openSession(fakeId('A'));
@@ -136,9 +135,9 @@ function tabTitle(tabId: string, toolId: string): string {
 const api: PanelHarnessApi = {
   switchSession(id) {
     if (id === null) {
-      // Sessions are filed in their project’s set. The no-project set is genuinely session-free, unlike a
+      // A strip of no session's tabs (U13a: the one strip, where the no-project set was one), unlike a
       // document/Diagnostics tab beside a session, which correctly keeps that session’s surface context.
-      useLayout.getState().setCurrentProject(null);
+      useLayout.setState((s) => ({ main: { ...EMPTY_STRIP, closedTabs: s.main.closedTabs } }));
       useLayout.getState().openTab({ kind: 'diagnostics' });
     } else useLayout.getState().openSession(fakeId(id));
   },
@@ -173,7 +172,10 @@ const api: PanelHarnessApi = {
       disposers.get(toolId)?.();
       disposers.delete(toolId);
     }),
-  setWidth: (px) => useLayout.getState().setPanel({ width: px, collapsed: false, maximized: false }),
+  setWidth: (px) => {
+    useLayout.getState().setPanel({ collapsed: false, maximized: false });
+    useLayout.getState().setPanelWidth(px); // UX wave U8b: the width of the class in view, as the region's bar writes it
+  },
   collapseSidebar: (on) => useLayout.getState().setSidebar({ collapsed: on }),
   maximize: (on) => useLayout.getState().setPanel(on ? { maximized: true, collapsed: false } : { maximized: false }),
   collapse: (on) => useLayout.getState().setPanel(on ? { collapsed: true, maximized: false } : { collapsed: false }),
@@ -301,7 +303,8 @@ function Controls() {
 // The panel's three widths and maximize (R7), through C5's store as the region's own controls write it.
 const WIDTHS = [280, 380, 640] as const;
 function WidthControls() {
-  const { width, maximized, collapsed } = useLayout((s) => s.regions.panel);
+  const { maximized, collapsed } = useLayout((s) => s.regions.panel);
+  const width = useLayout((s) => s.panelWidths[panelWidthClass(s)]); // UX wave U8b: the width in use
   return (
     <div role="group" aria-label="panel width" className="flex gap-1">
       {WIDTHS.map((px) => (

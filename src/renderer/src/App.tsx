@@ -6,6 +6,7 @@ import { connectPluginToasts } from './app/plugin-toasts'; // R1
 import { connectEngineSurface, connectSurfaceAsks } from './engine-surface'; // R2
 import { connectPluginPanes } from './engine-surface/panes'; // R2
 import { connectAttention } from './attention/navigation';
+import { connectChannelAction } from './channel/open-action'; // U11a M5
 import { registerShellActions } from './app/shell-actions';
 import { ipc } from './ipc/client';
 import { connectShell } from './ipc/events';
@@ -23,6 +24,7 @@ import { connectVisibility } from './session/visibility';
 import { persistLayout } from './stores/layout';
 import { useSettings } from './stores/settings';
 import { usePeople } from './stores/people'; // P5 O8 M5
+import { connectHidden } from './stores/hidden'; // UX wave U7, O-16
 import { connectTranscript } from './transcript/shell'; // C6
 // C8a start
 import { registerSlot } from './app/slots';
@@ -187,6 +189,7 @@ export function App() {
   useEffect(() => persistLayout(ipc), []); // C5: changed layout keys back to main
   useEffect(() => registerShellActions(), []); // C5: the frame's action handlers
   useEffect(() => connectAttention(), []); // C5: ⌘⇧J, notification clicks and the fallback toast
+  useEffect(() => connectChannelAction(), []); // U11a M5: View › Project channel, while the tab in front has a project with a channel
   useEffect(() => connectPluginToasts(), []); // R1: a plugin's toast, for a session this window shows
   useEffect(() => connectEngineSurface(), []); // R2: the engine's drawings re-asked when it invalidates them
   useEffect(() => connectSurfaceAsks(), []); // R2: a plugin's copy and prompt requests, answered by this window
@@ -208,6 +211,7 @@ export function App() {
   }, []);
   useEffect(() => connectPanelEvents(), []); // the summary's git.changed and fs.workflowChanged
   useEffect(() => void usePeople.getState().load(), []); // P5 O8 M5: the sidebar's People toggles, read once
+  useEffect(() => connectHidden(), []); // UX wave U7, O-16: the sidebar's hidden sessions, read once and looked at as sessions change
   // Tool registration is the panel host's line (ruling O2). Never unregistered: a registration's disposer closes the
   // tool's tabs, which StrictMode's effect replay would do on every mount.
   useEffect(() => {

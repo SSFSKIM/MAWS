@@ -4,11 +4,12 @@
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ForeignHolder, SessionRecord } from '@shared/graph/session';
-import { isActionable, isOpen } from '@shared/attention/kinds';
+import { isActionable, waits } from '@shared/attention/kinds';
 import { displayTitle, listedTitle } from '../sessions/title';
 
-// The kinds and the open states are shared with main's notifier and dock badge (`@shared/attention/kinds`).
-export { ACTIONABLE_KINDS, isActionable, isOpen } from '@shared/attention/kinds';
+// The kinds and the one predicate of waiting are shared with main's notifier and dock badge (`@shared/attention/kinds`,
+// UC-1); import `waits` from there.
+export { ACTIONABLE_KINDS, isActionable } from '@shared/attention/kinds';
 
 // P5 O7 M6: `greyed`, a row of a machine whose attention main holds greyed (its link went down, and no snapshot has come
 // since): drawn, never counted.
@@ -33,7 +34,7 @@ const oldestOf = (items: AttentionItem[]) => items.reduce((a, b) => (at(b) < at(
 // The item a session's Needs-you row stands for: the oldest open item of its highest tier (actionable before held
 // messages), with the tier and the open count; null when nothing is open. The sidebar's tree row shows the same item.
 export function waitingItem(items: AttentionItem[]): Omit<NeedsYouRow, 'appSessionId'> | null {
-  const open = items.filter(isOpen);
+  const open = items.filter(waits);
   if (open.length === 0) return null;
   const actionable = open.filter(isActionable);
   const tier = actionable.length > 0 ? 1 : 2;

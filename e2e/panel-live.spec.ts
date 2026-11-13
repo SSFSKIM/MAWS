@@ -109,6 +109,8 @@ test('live: the summary over this repository matches git', async () => {
       const push = expectedPush(REPO_ROOT);
       await expect(environment).toContainText(`⎇ ${branch}`);
       await expect(changeLine).toHaveText(line);
+      // UX wave U8b (A8): the change line is the card's control into Review, its counts its description.
+      await expect(environment.getByRole('button', { name: 'Open changes', exact: true })).toHaveAccessibleDescription(line);
       await expect(environment).toContainText(push);
       Object.assign(observed, { checkout: { branch, line, push, revList: tryGit(REPO_ROOT, 'rev-list', '--count', '@{u}..HEAD') ?? 'no upstream' } });
     });

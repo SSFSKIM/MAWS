@@ -13,6 +13,8 @@ import type { SessionCatalog } from '../../stores/catalog';
 import { parseEach } from '../parts';
 import { displayNameOf, GROUP_ORDER, SKILLS_DIR, type PluginIdentity, type SourceGroup } from '../plugins/library';
 import type { ObservedPlugin } from '@shared/engine/observed-facts';
+import type { CustomizationSkill } from '@shared/ipc/schema/customization';
+import { SKILLS_LIBRARY } from '../copy';
 
 export interface SkillRow {
   name: string; // the engine's qualified name for live rows; display metadata for disk rows
@@ -21,6 +23,7 @@ export interface SkillRow {
   description: string;
   source: string; // the engine's source word; '' from the catalogue
   path?: string; // disk inventory: distinguishes same-named skills at different scopes
+  unavailable?: string | null; // why Use in chat is greyed (U11a: its plugin is off for the chat); absent: usable
 }
 export interface SkillGroup {
   group: SourceGroup | null; // null: one list (the catalogue's, or a sort that flattens)
@@ -83,6 +86,40 @@ export function skillGroups(dialog: GetSkillsDialogResponse, catalog: SessionCat
     return { group: GROUPED.get(source) ?? 'added', row: { name: s.name, plugin: null, description, source } };
   });
   return GROUP_ORDER.map((group) => ({ group, rows: placed.filter((p) => p.group === group).map((p) => p.row).sort(byLabel) })).filter((g) => g.rows.length > 0);
+}
+
+// The skills on disk (`customization.inventory`) in Customize's three groups: this project's, yours, from plugins.
+// `invocable` (UX wave U11a, §D "Skills"; P3, spikes/protocol-probe/findings-uxwave-u11-skill-names.txt): an unstarted
+// tab's `/skills`, where "Use in chat" inserts the form the engine runs: `/<name> ` for a project's and a person's skill,
+// `/<manifest name>:<name> ` for a plugin's; a plugin skill whose manifest name is not known (null, or absent from an
+// earlier engine host) has no invocation. Customize's own page lists them with none.
+// `pluginsOff` (the branch panel's finding 1): the installed plugins the chat will start without, the launch profile's
+// `plugins.off` (src/shared/engine/launch-profile.ts, which the launch writes as `enabledPlugins[id] = false`). Their
+// skills stay listed; their Use in chat is greyed with the reason, since the engine that starts loads none of them.
+// Null while the settings are unread (the task review): a plugin's skill is greyed until they are, since whether the
+// chat loads it is not known yet; the other skills do not depend on the profile.
+export type DiskSkillUse = { invocable: false } | { invocable: true; pluginsOff: ReadonlySet<string> | null };
+export function diskSkillGroups(skills: readonly CustomizationSkill[], use: DiskSkillUse): SkillGroup[] {
+  const { invocable } = use;
+  const unavailableOf = (skill: CustomizationSkill): string | null => {
+    if (!use.invocable || skill.plugin === null) return null;
+    if (use.pluginsOff === null) return SKILLS_LIBRARY.pluginsUnread;
+    return use.pluginsOff.has(skill.plugin) ? SKILLS_LIBRARY.pluginOff : null;
+  };
+  const invocationOfDisk = (skill: CustomizationSkill): string | null => {
+    if (!invocable) return null;
+    if (skill.source !== 'plugin') return skill.name;
+    return typeof skill.pluginName === 'string' ? `${skill.pluginName}:${skill.name}` : null;
+  };
+  const result: SkillGroup[] = [];
+  for (const [source, group] of [['project', 'here'], ['user', 'yours'], ['plugin', 'added']] as const) {
+    const rows = skills.filter((skill) => skill.source === source).map((skill): SkillRow => {
+      const unavailable = unavailableOf(skill);
+      return { name: skill.name, invocation: invocationOfDisk(skill), description: skill.description, source, plugin: skill.plugin, path: skill.path, ...(unavailable !== null && { unavailable }) };
+    });
+    if (rows.length) result.push({ group, rows });
+  }
+  return result;
 }
 
 export const hasPluginSkills = (groups: readonly SkillGroup[]): boolean => groups.some((g) => g.rows.some((r) => r.plugin !== null));

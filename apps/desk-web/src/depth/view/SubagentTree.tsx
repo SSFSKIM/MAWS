@@ -42,6 +42,9 @@ type Props = {
 };
 
 export const statusUnavailableHeading = (n: number) => `Status unavailable · ${n}`;
+// The desk's own words for two headings MAWS's Subagents panel no longer carries (UX wave U8b: `Running N`, `On disk N`).
+const agentsRunningHeading = (n: number) => `Agents · ${n} running`;
+const onDiskHeading = (n: number) => `On disk · ${n}`;
 
 export function SubagentTree({ tasks, view, onView, onOpen, statusesKnown = false }: Props) {
   const tree = agentTree(tasks);
@@ -50,7 +53,7 @@ export function SubagentTree({ tasks, view, onView, onOpen, statusesKnown = fals
     done: tree.done,
     disk: agentRows(tasks, 'disk').map((row): TreeRow => ({ kind: 'agent', ...row, foldedUnder: null })),
   };
-  const headings: Record<TreeSection, string> = { agents: SUBAGENTS_COPY.agents(tree.running), done: SUBAGENTS_COPY.done(rows.done.length), disk: (statusesKnown ? statusUnavailableHeading : SUBAGENTS_COPY.onDisk)(rows.disk.length) };
+  const headings: Record<TreeSection, string> = { agents: agentsRunningHeading(tree.running), done: SUBAGENTS_COPY.done(rows.done.length), disk: (statusesKnown ? statusUnavailableHeading : onDiskHeading)(rows.disk.length) };
   const boundOf = (name: TreeSection) => (name === 'disk' ? rows.disk.length : view.shown[name]);
   const visible = SECTIONS.flatMap((name) => (view.expanded[name] ? rows[name].slice(0, boundOf(name)) : []));
   const nodeOf = (row: TreeRow) => (row.kind === 'agent' ? tasks.tasks.get(row.taskId) : undefined);

@@ -14,6 +14,7 @@ import { useSessions, type ListedSession } from '../stores/sessions';
 import { runAction } from '../keymap/actions-runtime';
 import { useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
+import { surfaceTabs } from '../panel/surface-model';
 import { activeTab, currentSet } from '../stores/layout-model';
 import { useNotices } from '../stores/notices';
 import { registerFocusTarget, resetComposerStore, useComposerStore } from '../stores/composer';
@@ -32,9 +33,12 @@ const idOf = (title: string) => nine.sessions.find((r) => r.title.text === title
 const active = () => activeTab(useLayout.getState().main)?.id;
 let fake: ReturnType<typeof fakeClient>;
 let disconnect: () => void;
+// A surface opened beside the chat: the first in view, a second in the lower group (UX wave U8b: one tab in view per group).
 const showSurface = (appSessionId: AppSessionId, toolId: string) => {
   const tab = { id: `${toolId}:probe`, toolId, pinned: false };
   useLayout.getState().setPanelTabs(appSessionId, { tabs: [...useLayout.getState().effectivePanelTabs(appSessionId), tab], activeTabId: tab.id });
+  if (surfaceTabs(useLayout.getState(), appSessionId).length === 0) useLayout.getState().showSurfaceTab(appSessionId, tab.id);
+  else useLayout.getState().moveSurfaceTab(appSessionId, tab.id, 'lower');
   return tab.id;
 };
 
@@ -208,7 +212,7 @@ describe('the fallback toast', () => {
     try {
       notify();
       expect(useNotices.getState().notices).toEqual([]);
-      useLayout.getState().setSurfaceStack(parent, [terminal]);
+      useLayout.getState().moveSurfaceTab(parent, terminal, 'upper'); // the terminal alone in view
       notify();
       expect(useNotices.getState().notices.map((notice) => notice.id)).toEqual([`attention:${item.id}`]);
     } finally { hideSideChild(parent, child); }
@@ -226,7 +230,7 @@ describe('the fallback toast', () => {
     const notify = () => fake.event('attention.notified', { appSessionId: question.appSessionId, attentionId: question.id, delivery: 'fallback', at: question.createdAt });
     notify();
     expect(useNotices.getState().notices).toEqual([]);
-    useLayout.getState().setSurfaceStack(fix.appSessionId, [terminal]);
+    useLayout.getState().moveSurfaceTab(fix.appSessionId, terminal, 'upper'); // the terminal alone in view
     notify();
     expect(useNotices.getState().notices.map((notice) => notice.id)).toEqual([`attention:${question.id}`]);
   });
@@ -377,16 +381,27 @@ describe('the fallback toast', () => {
     const toasted = () => useNotices.getState().notices.map((n) => n.id);
     const notify = (item: AttentionItem) => fake.event('attention.notified', { appSessionId: item.appSessionId, attentionId: item.id, delivery: 'fallback', at: item.createdAt });
 
-    // W-C review m2: main lists only pending and delivered items (attention/service.ts drops the rest), so an answered
-    // request reaches the page as its item leaving the session's list
-    it('a permission request answered: its item, held in the list, leaves it and the toast is dismissed', () => {
+    // W-C review m2, UC-1: main lists only the items that wait (attention/service.ts drops the rest, an answered one
+    // included), so an answered request reaches the page as its item leaving the session's list
+    it('a permission request answered: its item leaves the list and the toast is dismissed', () => {
       const item = fix();
       expect(item.kind).toBe('permission');
       notify(item);
       expect(toasted()).toEqual([`attention:${item.id}`]);
-      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [{ ...item, state: 'delivered' }] }, TEST_MACHINE));
-      expect(toasted()).toEqual([`attention:${item.id}`]); // delivered is still open
       act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [] }, TEST_MACHINE)); // answered: main lists it no more
+      expect(toasted()).toEqual([]);
+    });
+
+    // UC-1 (A17): an answered request waits nowhere, so its notice is not raised, and one standing goes at the answer
+    it('an answered request: no toast is raised for it, and a standing one is dismissed at the answer', () => {
+      const item = fix();
+      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [{ ...item, state: 'delivered' }] }, TEST_MACHINE));
+      notify(item);
+      expect(toasted()).toEqual([]);
+      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [item] }, TEST_MACHINE));
+      notify(item);
+      expect(toasted()).toEqual([`attention:${item.id}`]);
+      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [{ ...item, state: 'delivered' }] }, TEST_MACHINE));
       expect(toasted()).toEqual([]);
     });
 

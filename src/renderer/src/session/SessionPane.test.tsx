@@ -1,4 +1,5 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
+import { storedMain } from '@shared/ipc/schema/layout';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'; // C7: vi
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
@@ -23,6 +24,11 @@ import { resetLaneAWatches, watchLaneA } from '../lane-a/watches'; // board 525
 import { READER } from '../sessions/share/copy'; // board 525
 import { resetReader } from '../sessions/share/reader'; // board 525
 import { connectReaderGrades, resetReaderPanes } from '../sessions/share/reader-connect'; // board 525
+import { useTranscriptStore } from '../stores/transcript'; // UX wave U12a
+import { applyEvents, createState } from '../transcript/model/reduce'; // UX wave U12a
+import { builder } from '../transcript/model/test-events'; // UX wave U12a
+import { COMPUTER_USE_COPY } from '../computer-use/copy'; // UX wave U12a
+import { COMPUTER_USE_SETTLE_MS } from '../computer-use/strip-state'; // UX wave U12a
 
 const nine = scenarioFile('nine-sessions');
 const idOf = (title: string) => pageScenario(nine).sessions.find((r) => r.title.text === title)!.appId; // P5 O6 M2: the page's id
@@ -44,6 +50,30 @@ afterEach(() => {
 });
 
 describe('session pane', () => {
+  // UX wave U12a: the computer-use strip is mounted in the full pane only, directly above the transcript's wrapper
+  it('draws the computer-use line above the transcript in the full pane, and none in the compact one', () => {
+    vi.useFakeTimers();
+    const id = idOf('Fix sidebar drag');
+    registerSlot('transcript', () => <p>transcript</p>);
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('j1', 'mcp__plugin_cua_cua_repl__js', { code: 'await cua.click()' });
+    const state = applyEvents(createState(null, null), b.events);
+    useTranscriptStore.setState({ entries: { [id]: { state, rows: [], phase: 'live', error: null, following: true, sendFollowRequest: 0, working: true, clock: null, jump: null } } });
+    try {
+      const { unmount } = render(<SessionPane appSessionId={id} paneIndex={0} />);
+      act(() => void vi.advanceTimersByTime(COMPUTER_USE_SETTLE_MS));
+      const line = screen.getByText(COMPUTER_USE_COPY.running);
+      expect(line.compareDocumentPosition(screen.getByText('transcript')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      unmount();
+      render(<SessionPane appSessionId={id} paneIndex={0} compact />);
+      act(() => void vi.advanceTimersByTime(COMPUTER_USE_SETTLE_MS));
+      expect(screen.queryByText(COMPUTER_USE_COPY.running)).toBeNull();
+    } finally {
+      useTranscriptStore.setState({ entries: {} });
+    }
+  });
+
   it('shows the transcript slot and the docked request above the composer, and nothing under it (W2: no status line)', () => {
     const id = idOf('Fix sidebar drag');
     registerSlot('transcript', ({ appSessionId, agentId, paneIndex }) => <p>transcript {`${appSessionId} ${agentId} ${paneIndex}`}</p>);
@@ -179,7 +209,7 @@ describe('session pane', () => {
       render(<SessionPane appSessionId={REMOTE} paneIndex={0} />);
       expect(screen.getByRole('status').textContent).toContain('mini can’t place this session');
       act(() => screen.getByRole('button', { name: 'Try again' }).click());
-      expect(fake.invoked('layout.set')).toEqual([{ key: 'main.tabs', value: useLayout.getState().main }]);
+      expect(fake.invoked('layout.set')).toEqual([{ key: 'main.tabs', value: storedMain(useLayout.getState().main) }]);
       useLayout.setState({ hydrated: false });
     });
 

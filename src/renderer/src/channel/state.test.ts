@@ -69,6 +69,20 @@ describe('the words after the log', () => {
   });
 });
 
+// UX wave U11a M4 (S-09; Interfaces §F): the channel's own reach and the hub's refusal of it, told with every answer and
+// change while the channel isn't live, and absent otherwise.
+describe('the channel’s reach and refusal', () => {
+  it('holds them as the open answer gives them, and takes them whole from each change: one a change leaves out is gone', () => {
+    let h = openedWith(open([], { live: false, reach: 'unreachable', refused: 'credentials' }));
+    expect(h).toMatchObject({ live: false, reach: 'unreachable', refused: 'credentials' });
+    h = applyChange(h, delta({ live: false, reach: 'connecting' }));
+    expect(h).toMatchObject({ live: false, reach: 'connecting', refused: null });
+    h = applyChange(h, delta({ live: true }));
+    expect(h).toMatchObject({ live: true, reach: null, refused: null });
+    expect(openedWith(open([]))).toMatchObject({ reach: null, refused: null });
+  });
+});
+
 // M7b: every machine's to-human entries, held by key as the events are by offset, and the machines whole.
 describe('the to-human entries', () => {
   const h = (id: string, order = 0): ChannelHost => ({ key: `${OTHER_MACHINE} ${id}`, machine: OTHER_MACHINE, id, lane: 'A', session: 'la-1', kind: 'message', text: id, at: '2026-11-06T12:00:00.000Z', src: id, order });

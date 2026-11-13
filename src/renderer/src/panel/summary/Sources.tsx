@@ -20,7 +20,8 @@ export function useSessionActivity(appSessionId: AppSessionId): TurnActivity[] |
   return useTranscriptStore((s) => (s.entries[appSessionId] ? s.activity(appSessionId) : null));
 }
 
-export function Sources({ appSessionId, directory, embedded = false }: { appSessionId: AppSessionId; directory: string; embedded?: boolean }) {
+// What the part lists, or the note it says in its place: one rule, which `useHasSources` reads too.
+function useSourceList(appSessionId: AppSessionId): { sources: Source[] | null; note: string | null } {
   const phase = useTranscriptStore((s) => s.entries[appSessionId]?.phase);
   const activity = useSessionActivity(appSessionId);
   const sources = useMemo(() => (activity ? sourcesOf(activity) : null), [activity]);
@@ -34,6 +35,14 @@ export function Sources({ appSessionId, directory, embedded = false }: { appSess
           : sources?.length
             ? null
             : SUMMARY_COPY.noSources;
+  return { sources, note };
+}
+
+// UX wave U8b (O-10): whether there is a source to list, so the Context card draws the part only then, and none of its notes.
+export const useHasSources = (appSessionId: AppSessionId): boolean => useSourceList(appSessionId).note === null;
+
+export function Sources({ appSessionId, directory, embedded = false }: { appSessionId: AppSessionId; directory: string; embedded?: boolean }) {
+  const { sources, note } = useSourceList(appSessionId);
   const body = (
     <>
       {note ? (

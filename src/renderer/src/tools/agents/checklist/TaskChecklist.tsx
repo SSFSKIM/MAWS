@@ -48,17 +48,19 @@ interface Props {
   onOpen: () => void; // E7: the heading's `Open`, the Tasks panel
 }
 
+// The UX wave's U8b (M7 decision 3): the section is drawn only while the session's list holds a task, headed `Tasks`;
+// the notes for a list not known yet, one that cannot be read and one the engine is not making are the Tasks panel's
+// alone (a read that fails after one answered keeps saying why under the heading, as the panel's body does).
 export function TaskChecklist({ status, session, expanded, onToggle, showEarlier, onToggleEarlier, onOpen }: Props) {
   const checklist = useChecklist(status, session);
-  const { list } = checklist;
-  const heading = list ? BACKGROUND_COPY.tasks(list.completed, list.total) : BACKGROUND_COPY.tasksHeading;
+  if (checklist.list === null || checklist.list.total === 0) return null;
   const open = (
     <button type="button" aria-label={TASKS_COPY.openPanel} onClick={onOpen} className={actionClass}>
       {TASKS_COPY.open}
     </button>
   );
   return (
-    <Group id="tasks" heading={heading} suffix={checklist.label} action={open} expanded={expanded} onToggle={onToggle}>
+    <Group id="tasks" heading={BACKGROUND_COPY.tasks} suffix={checklist.label} action={open} expanded={expanded} onToggle={onToggle}>
       <ChecklistBody checklist={checklist} showEarlier={showEarlier} onToggleEarlier={onToggleEarlier} />
     </Group>
   );

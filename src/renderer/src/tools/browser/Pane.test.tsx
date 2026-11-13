@@ -6,7 +6,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BrowserTab } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
-import { LAYOUT_DEFAULTS, NO_PROJECT } from '@shared/ipc/schema/layout';
+import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { useFloatingCard } from '../../shell/floating';
 import { useLayout } from '../../stores/layout';
 import { browserTab, T1 } from '../../test-support/browser';
@@ -214,8 +214,9 @@ describe('the comment card’s dock', () => {
     expect(hostId).not.toBeNull();
     act(() => openCard(ANCHOR, { appSessionId: A, placement: { kind: 'card', host: 'browser', hostId: hostId! } }));
     const column = container.querySelector('[data-browser-column]')!;
-    const [page, strip] = [...column.children] as HTMLElement[];
-    expect(page!.matches('[data-browser-pane]')).toBe(true);
+    const [box, strip] = [...column.children] as HTMLElement[];
+    const page = box!.firstElementChild!; // U12a: the page box holds the page's element
+    expect(box!.matches('[data-browser-page-box]') && page.matches('[data-browser-pane]')).toBe(true);
     expect(strip!.matches('[data-card-dock]')).toBe(true);
     expect(page!.querySelector('[data-comment-card]'), 'nothing over the page').toBeNull();
     expect(strip!.querySelector('[data-comment-card]')!.getAttribute('data-placement')).toBe('strip');
@@ -375,7 +376,7 @@ describe('the floating card’s column', () => {
     const beside = { id: 'diagnostics', kind: 'diagnostics', pinned: false } as const;
     act(() => {
       useLayout.setState({
-        main: { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { panes: [{ tabs: [session], activeTabId: session.id }, { tabs: [beside], activeTabId: beside.id }], focusedPane: 1, splitRatio: 0.5, floating: { sessionTabId: session.id } } } },
+        main: { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [session], activeTabId: session.id }, { tabs: [beside], activeTabId: beside.id }], focusedPane: 1, splitRatio: 0.5, floating: { sessionTabId: session.id } },
         regions: LAYOUT_DEFAULTS.regions,
       });
       useLayout.getState().setFloatingCardSize('main:diagnostics', { w: 480, h: 400 });
@@ -413,8 +414,112 @@ describe('the floating card’s column', () => {
     expect(spacer(container)).toBeNull();
     expect(useFloatingCard.getState().column).toBeNull();
     const column = container.querySelector('[data-browser-column]')!;
-    expect([...column.children].map((child) => (child.matches('[data-browser-pane]') ? 'page' : child.matches('[data-card-dock]') ? 'strip' : child.outerHTML))).toEqual(['page', 'strip']);
+    expect([...column.children].map((child) => (child.matches('[data-browser-page-box]') ? 'page' : child.matches('[data-card-dock]') ? 'strip' : child.outerHTML))).toEqual(['page', 'strip']); // U12a: the page in its box
     act(() => useFloatingCard.getState().setClosed(false));
     expect(spacer(container)).not.toBeNull();
+  });
+});
+
+// U12a (the UX wave's U12, l9-browser-delivery-06; Interfaces §D): a device size sizes the page's element (and so the
+// view, through the placement) inside the page box, centred and top-aligned; the box's size is the room the pane tells
+// its surface while it holds the view.
+describe('a device size (U12a)', () => {
+  const MOBILE = { width: 375, height: 812 };
+  let room = { left: 0, top: 40, right: 1000, bottom: 1140 };
+  const rectOf = (r: { left: number; top: number; right: number; bottom: number }) =>
+    ({ ...r, x: r.left, y: r.top, width: r.right - r.left, height: r.bottom - r.top, toJSON: () => r }) as DOMRect;
+  const pageOf = (container: HTMLElement) => container.querySelector<HTMLElement>('[data-browser-pane]')!;
+  const boxOf = (container: HTMLElement) => container.querySelector<HTMLElement>('[data-browser-page-box]')!;
+  const resizeRoom = async (next: typeof room) => {
+    room = next;
+    await act(async () => void window.dispatchEvent(new Event('resize')));
+    await frames();
+  };
+  beforeEach(() => {
+    room = { left: 0, top: 40, right: 1000, bottom: 1140 };
+    // happy-dom lays nothing out: the box is the room; the page's element fills it, or with a size of its own sits as
+    // the box's flex centring lays it, top-aligned
+    vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockImplementation(function (this: HTMLElement) {
+      if (this.matches('[data-browser-page-box]')) return rectOf(room);
+      if (!this.matches('[data-browser-pane]')) return rectOf({ left: 0, top: 0, right: 0, bottom: 0 });
+      const width = parseFloat(this.style.width);
+      const height = parseFloat(this.style.height);
+      if (!Number.isFinite(width)) return rectOf(room);
+      const left = room.left + (room.right - room.left - width) / 2;
+      return rectOf({ left, top: room.top, right: left + width, bottom: room.top + height });
+    });
+  });
+
+  it('draws the page at the size, centred and top-aligned in its box, and the placement reports that rect', async () => {
+    const { container } = render(<BrowserPane tab={tab({ viewport: MOBILE })} surface="panel" />);
+    await frames();
+    const page = pageOf(container);
+    expect([page.style.width, page.style.height]).toEqual(['375px', '812px']);
+    expect(boxOf(container).className).toMatch(/\bjustify-center\b/);
+    expect(boxOf(container).className).toMatch(/\bitems-start\b/);
+    expect(places().at(-1)).toMatchObject({ rect: { x: 313, y: 40, width: 375, height: 812 } });
+  });
+
+  it('at a page zoom the element is that many times as large, and Responsive fills the box again', async () => {
+    const { container, rerender } = render(<BrowserPane tab={tab({ viewport: MOBILE, zoom: 1.25 })} surface="panel" />);
+    await frames();
+    expect([pageOf(container).style.width, pageOf(container).style.height]).toEqual(['469px', '1015px']);
+    rerender(<BrowserPane tab={tab({ viewport: null, zoom: 1.25 })} surface="panel" />);
+    await frames();
+    expect([pageOf(container).style.width, pageOf(container).style.height]).toEqual(['', '']);
+    expect(places().at(-1)).toMatchObject({ rect: { x: 0, y: 40, width: 1000, height: 1100 } });
+  });
+
+  it('a pane made narrower narrows the page, and widening it restores the size', async () => {
+    const { container } = render(<BrowserPane tab={tab({ viewport: MOBILE })} surface="panel" />);
+    await frames();
+    await resizeRoom({ left: 0, top: 40, right: 300, bottom: 1140 });
+    expect(pageOf(container).style.width).toBe('300px');
+    expect(places().at(-1)).toMatchObject({ rect: { x: 0, y: 40, width: 300, height: 812 } });
+    await resizeRoom({ left: 0, top: 40, right: 1000, bottom: 1140 });
+    expect(pageOf(container).style.width).toBe('375px');
+    expect(places().at(-1)).toMatchObject({ rect: { x: 313, y: 40, width: 375, height: 812 } });
+  });
+
+  it('the comment strip stays the column’s last child, under the box, and the floating card’s column beside the column', async () => {
+    act(() => {
+      useLayout.setState({
+        main: mainShowing(A),
+        regions: { ...LAYOUT_DEFAULTS.regions, panel: { ...LAYOUT_DEFAULTS.regions.panel, floating: true } },
+        panelBySession: new Map([[A, { tabs: [{ id: 'browser:1', toolId: 'browser', pinned: false }], activeTabId: 'browser:1' }]]),
+      });
+      useFloatingCard.setState({ closed: false, column: null, columnDrag: null });
+    });
+    const { container } = render(<BrowserPane tab={tab({ viewport: MOBILE })} surface="panel" />);
+    await frames();
+    const column = container.querySelector('[data-browser-column]')!;
+    expect([...column.children].map((child) => (child.matches('[data-browser-page-box]') ? 'box' : child.matches('[data-card-dock]') ? 'strip' : child.outerHTML))).toEqual(['box', 'strip']);
+    expect([...boxOf(container).children]).toEqual([pageOf(container)]);
+    expect(column.nextElementSibling!.matches('[data-browser-reserved-column]')).toBe(true);
+  });
+
+  it('tells its surface the box’s size while it holds the view; null once another pane takes it, and at unmount', async () => {
+    const onRoom = vi.fn();
+    const { rerender, unmount } = render(<BrowserPane tab={tab()} surface="panel" onRoom={onRoom} />);
+    await frames();
+    expect(onRoom).toHaveBeenLastCalledWith({ width: 1000, height: 1100 });
+    await resizeRoom({ left: 0, top: 40, right: 700.6, bottom: 1140 });
+    expect(onRoom).toHaveBeenLastCalledWith({ width: 700, height: 1100 }); // whole points, never more than the box
+    rerender(<BrowserPane tab={tab({ placedIn: { paneId: 'other', surface: 'main' } })} surface="panel" onRoom={onRoom} />);
+    expect(onRoom).toHaveBeenLastCalledWith(null);
+    rerender(<BrowserPane tab={tab({ placedIn: null })} surface="panel" onRoom={onRoom} />); // the other let go: this one claims
+    expect(onRoom).toHaveBeenLastCalledWith({ width: 700, height: 1100 });
+    unmount();
+    expect(onRoom).toHaveBeenLastCalledWith(null);
+  });
+
+  it('a pane showing “Shown in another pane” draws no size: its element fills the box', async () => {
+    const { container, rerender } = render(<BrowserPane tab={tab({ viewport: MOBILE })} surface="panel" />);
+    await frames();
+    const paneId = places()[0]!.paneId as string;
+    rerender(<BrowserPane tab={tab({ viewport: MOBILE, placedIn: { paneId, surface: 'panel' } })} surface="panel" />);
+    rerender(<BrowserPane tab={tab({ viewport: MOBILE, placedIn: { paneId: 'other', surface: 'main' } })} surface="panel" />);
+    expect(screen.getByText(BROWSER_COPY.shownElsewhere)).toBeTruthy();
+    expect([pageOf(container).style.width, pageOf(container).style.height]).toEqual(['', '']);
   });
 });

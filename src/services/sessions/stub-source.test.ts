@@ -8,13 +8,14 @@ import type { ServicesBus } from '@shared/spine/bus';
 import { emittedAttentionSource } from '.';
 import { SessionReadModel } from './read-model';
 import { stubSource, type StubSourceDeps } from './stub-source';
+import { loadScenario, type Scenario } from '../../../test/support/scenario';
 
 const NINE = join(TEST_FIXTURE_DIR, 'shell/nine-sessions.json');
 const CHARTER = 'app-9a1d4262' as AppSessionId;
 const FIX = 'app-3eb04b84' as AppSessionId;
 const USAGE = 'app-59505fdc' as AppSessionId;
 
-function harness(scenario = NINE /* C12 */) {
+function harness(scenario: string | Scenario = NINE /* C12 */) {
   const handlers = new Map<CommandName, (input: unknown) => unknown>();
   const emitted: { name: EventName; payload: unknown }[] = [];
   // the bus's emit and its taps, as sessions/index.ts wires them: the read model hears attention only as emitted.
@@ -184,6 +185,18 @@ describe('stub source plays a timeline', () => {
     expect(h.model.digests().find((d) => d.appSessionId === CHARTER)).toMatchObject({ phase: 'working', activity: 'Continuing', pendingRequests: 0 });
     expect(h.model.engineStatus(CHARTER)).toMatchObject({ engineState: 'running', pendingRequests: 0 });
     expect(h.call('session.answer', { appSessionId: CHARTER, requestId: read.request.requestId, answer: {} })).toEqual({ outcome: 'not_pending' });
+  });
+
+  // UC-1 (A17): the test double follows the predicate: an answered item is not listed, and answering it again is refused
+  it('lists no item whose answer was delivered, and answers it not_pending', () => {
+    h.stop();
+    const scenario = loadScenario(NINE, Date.parse('2026-09-28T11:00:00.000Z'));
+    const fix = scenario.attention.find((a) => a.appSessionId === FIX)!;
+    fix.items = fix.items.map((i) => ({ ...i, state: 'delivered' as const }));
+    h = harness(scenario);
+    expect(h.call<{ appSessionId: string }[]>('attention.list').some((i) => i.appSessionId === FIX)).toBe(false);
+    const [answered] = fix.items;
+    expect(h.call('session.answer', { appSessionId: FIX, requestId: answered.request.requestId, answer: { kind: 'permission', decision: 'allow', scope: 'once' } })).toEqual({ outcome: 'not_pending' });
   });
 
   it('removes its interceptors and the clock global when stopped', () => {

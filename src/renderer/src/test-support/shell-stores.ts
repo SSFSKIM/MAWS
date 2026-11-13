@@ -11,10 +11,10 @@ import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { projectReveal } from '../sidebar/reveal';
 import { useAttention } from '../stores/attention';
 import { useShellView } from '../app/shell-view';
-import { NO_PROJECT_OF, useLayout } from '../stores/layout';
+import { useLayout } from '../stores/layout';
 import { EMPTY_REGISTRY } from '../stores/registry';
 import { useSessions } from '../stores/sessions';
-import { sessionSetKey } from '../stores/org-projects';
+import { resetHidden } from '../stores/hidden'; // UX wave U7, O-16
 import { TEST_FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { loadScenario, type Scenario } from '../../../../test/support/scenario';
 import { at, TEST_MACHINE } from '../../../../test/support/machine';
@@ -68,10 +68,11 @@ export function fillStores(bare: Scenario, opts: { loaded?: boolean } = {}): voi
 }
 
 export function resetShellStores(): void {
-  useShellView.setState({ sidebarOverlay: false, cardsOverlay: false });
+  useShellView.setState({ sidebarOverlay: false, cardsOverlay: false, pageOpen: false });
   projectReveal.setState({ pending: null });
   fillStores({ projects: [], sessions: [], digests: [], engine: [], attention: [], timeline: [] }, { loaded: false });
-  useSessions.setState({ indexing: null, listed: new Map(), listedMachines: new Set(), members: new Map(), member: null, turnsSeen: new Map() }); // P5 O8 M2, M5: no other machine's rows; P5 O7 M10: no turns seen
+  useSessions.setState({ indexing: null, reconnecting: false, listed: new Map(), listedMachines: new Set(), members: new Map(), member: null, turnsSeen: new Map() }); // P5 O8 M2, M5: no other machine's rows; P5 O7 M10: no turns seen; UX wave U7 (ticket 407): no refused read
+  resetHidden(); // UX wave U7, O-16: nothing hidden, and the key not read yet
   useSessions.getState().applyRegistry(EMPTY_REGISTRY, TEST_MACHINE); // the project registry's M11: signed out, no registry record
   // P5 O6 M4: the store's per-machine reconciliation (revisions, tombstones) is no state `setState` reaches, and a
   // suite's earlier writes would refuse a later one's lower revisions.
@@ -84,17 +85,12 @@ export function resetShellStores(): void {
     panelActiveNoSession: null,
     panelParams: {}, // P4-B3
     panelSurfaces: { version: 2, stacks: {}, pinnedTools: [], contexts: {} },
+    panelGroups: { version: 1, lower: {} }, // UX wave U8b
+    panelWidths: { version: 1, wide: null, narrow: null },
+    cardsOpen: ['environment'],
     knownSession: () => true,
     dragging: null, // P4-B3
     hydrated: true,
     overviewOpen: false,
-    projectOf: NO_PROJECT_OF,
   });
-}
-
-// W12: the layout files each session's tabs under its record's project's row, as the shell's hydration has it do (P5 O6
-// M5: `sessionSetKey`, an org project's key, a machine's row's for a session of no checkout; until this, a component test
-// keeps every tab in the no-project set). An unstarted session's tabs stay in the no-project set.
-export function fileTabsByProject(): void {
-  useLayout.setState({ projectOf: (id) => sessionSetKey(useSessions.getState(), TEST_MACHINE, id, () => null) ?? null });
 }
