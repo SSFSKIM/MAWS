@@ -24,7 +24,7 @@ How to see it working: the table test of the reader over the probes' recorded ca
 - [x] (2026-11-12 22:44Z) Execution document written; the section checked against the code at `85e934368` and against the probes' fixtures on `origin/ux-wave/probe-arrivals`; the points of Surprises & Discoveries reported to the wave's architect.
 - [x] (2026-11-12 23:27Z) Revised once for the architect's rulings on the reported points, the carrier the architect's trace of the O-41 sighting found, and the adversarial review's four findings and three notes (Decision Log, second entry).
 - [x] (2026-11-12) Master merged into the branch at `6e8c72738` (merge `4e3e0f06f`): it holds the probes' pull request (#602; the fixtures of Interfaces, H and the four findings files are there) and U8a. U6a is not on master yet; nothing of it is consumed here (Interfaces, H), and master is merged once more before the hand-back. (No file of U6a's or U8a's is edited here.)
-- [ ] M1 — the reader, the fixtures it is tested on, X1's field.
+- [x] (2026-11-13) M1 — the reader, the fixtures it is tested on, X1's field (`8bd6d223a`..`462e0675e`; `WIRE_MINOR` 37; reviewed clean).
 - [ ] M2 — the arrival rows: the model and the lines.
 - [ ] M3 — the transcript file and another machine's rows ask the reader.
 - [ ] M4 — the live wire asks the reader.
