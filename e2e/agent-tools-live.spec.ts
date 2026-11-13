@@ -34,7 +34,7 @@ import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { latencyBudgets } from './support/latency';
 import { chargeOf } from './support/p1-live';
 import { sidebarRow } from './support/sidebar';
-import { openSurface, surface } from './support/shell';
+import { openSurface, sideColumn, sideTab, surface } from './support/shell';
 
 test.skip(process.env.MAWS_C8B_LIVE !== '1', 'the C8b live acceptance runs only under MAWS_C8B_LIVE=1');
 // Under the flag only: the engine, the relay and the build the run needs.
@@ -152,7 +152,7 @@ function installProbes(): void {
         title: text(row.querySelector('[data-part="title"]')),
         elapsed: text(row.querySelector('[data-part="elapsed"]')),
         line: text(row.querySelector('[data-part="line"]')),
-        waiting: row.querySelector('[data-part="waiting"]') !== null,
+        waiting: row.dataset.waiting !== undefined, // the UX wave's U8b: the row's mark (its line reads Approval needed)
         nested: row.querySelector('[data-part="nested"]') !== null,
       }));
     const agent = body?.querySelector<HTMLElement>('[data-view="agent"]');
@@ -160,7 +160,7 @@ function installProbes(): void {
     return {
       headings: all(lists, 'section[data-section] > h3').map(text),
       notes: all(lists, ':scope > p').map(text),
-      agents: rows('agents'), // E7: the tree's Agents section (Done is collapsed by default)
+      agents: rows('running'), // the UX wave's U8b: the Running section's rows (Done and On disk are folded at first)
       done: rows('done'),
       disk: rows('disk'),
       drillIn: agent
@@ -181,8 +181,9 @@ function installProbes(): void {
   const background = () => {
     const body = bodyOf('background');
     const tasks = body?.querySelector('section[data-section="tasks"]');
+    const earlier = all(tasks, 'button').map(text).find((t) => / earlier tasks? completed$/.test(t));
     return {
-      headings: all(body, 'section[data-section] h3').map(text),
+      headings: all(body, 'section[data-section] h3 > button').map(text), // the UX wave's U8b: `Running N`, `Done N · …`
       notes: all(body, 'p').map(text).filter(Boolean),
       workflows: all<HTMLElement>(body, '[data-workflow]').map((card) => ({
         taskId: card.dataset.workflow!,
@@ -199,15 +200,17 @@ function installProbes(): void {
         buttons: all(row, 'button').map(text),
       })),
       monitors: all<HTMLElement>(body, '[data-monitor]').map((row) => text(row)),
+      // the UX wave's U8b: headed `Tasks`, drawn only while the list holds a task; its open rows and the completed fold's count
       tasks: {
-        heading: text(tasks?.querySelector('h3')),
+        heading: text(tasks?.querySelector('h3 > button')),
         label: tasks?.querySelector('[data-part="label"]') ? text(tasks.querySelector('[data-part="label"]')) : null,
         rows: all(tasks, '[data-task]').map(text),
+        earlier: earlier ? Number(earlier.split(' ')[0]) : 0,
         text: text(tasks),
       },
     };
   };
-  // E7: the run widget Background work shows for one run (its phases and the selected phase's agent table).
+  // E7: the run widget Background tasks shows for one run (its phases and the selected phase's agent table).
   const widget = () => {
     const run = bodyOf('background')?.querySelector<HTMLElement>('[data-view="run"][data-run]');
     if (!run) return null;
@@ -247,7 +250,7 @@ type Probe = {
     workflows: { taskId: string; title: string; line: string; status: string; summary: string; buttons: string[] }[];
     shells: { taskId: string; line: string; output: string; buttons: string[] }[];
     monitors: string[];
-    tasks: { heading: string; label: string | null; rows: string[]; text: string };
+    tasks: { heading: string; label: string | null; rows: string[]; earlier: number; text: string };
   };
   widget(): {
     taskId: string; title: string; line: string; status: string; phases: string[];
@@ -374,11 +377,13 @@ function expectStopOrder(order: string[], taskId: string): void {
   expect(order[notification]).toMatch(/ stopped$/);
 }
 
-// E7: the Subagents tree's Done section is collapsed by default; this opens it, once listed, unless it is open already.
-async function openDone(page: Page): Promise<void> {
-  const toggle = page.locator('[data-region="panel"] section[data-section="done"] > h3 button');
+// A panel's section unfolded, once listed, unless it is open already: Done (E7; the UX wave's U8b for Background tasks
+// too) and On disk (U8b) are folded at first.
+async function unfold(page: Page, tool: 'subagents' | 'background', section: 'done' | 'disk'): Promise<void> {
+  const toggle = page.locator(`[data-region="panel"] [data-surface="${tool}"] section[data-section="${section}"] h3 > button`);
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
 }
+const openDone = (page: Page) => unfold(page, 'subagents', 'done');
 
 // The owner's home after the run, read only (C8c's check): nothing in ~/.claude/history.jsonl or ~/.claude.json names the
 // run's session or scratch, and ~/.claude/projects has no folder for it.
@@ -529,7 +534,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
         return found.length >= 2 ? found.slice(0, 2) : undefined;
       });
       ids.first = started.map((e) => e.taskId as string);
-      await expect.poll(() => probe(page, (p) => p.subagents().headings), { timeout: 15_000 }).toContain('Agents · 2 running');
+      await expect.poll(() => probe(page, (p) => p.subagents().headings), { timeout: 15_000 }).toContain('Running 2');
       const shownActive = await probe(page, (p) => p.subagents().agents);
       const t1 = await probe(page, (p) => p.subagents().agents.map((r) => r.elapsed));
       await sleep(2_200);
@@ -544,7 +549,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
         within(`row of ${l.agentId} shown`, l.rowShownAfterMs!, 1_000, `row of ${l.agentId} shown within a second of its start`);
       }
       await s.until('both agents finished', (ev) => ids.first.every((id) => ev.some((e) => e.kind === 'subagent.finished' && e.taskId === id)), 240_000);
-      await expect.poll(() => probe(page, (p) => p.subagents().headings), { timeout: 15_000 }).toContain('Done · 2');
+      await expect.poll(() => probe(page, (p) => p.subagents().headings), { timeout: 15_000 }).toContain('Done 2');
       await openDone(page);
       const done = await probe(page, (p) => p.subagents().done);
       note('i.done', { rows: done, finished: s.after(from).filter((e) => e.kind === 'subagent.finished').map((e) => ({ taskId: e.taskId, status: e.status, summary: e.summary })) });
@@ -628,8 +633,8 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       ids.perm = asked.agentId!;
       await expect.poll(() => probe(page, (p) => p.subagents().agents.find((r) => r.waiting) ?? null), { timeout: 15_000 }).not.toBeNull();
       const row = (await probe(page, (p) => p.subagents().agents)).find((r) => r.agentId === ids.perm);
-      expect(row?.waiting, 'the waiting agent’s row carries the badge').toBe(true);
-      expect(row?.line).toMatch(/^Approval needed · /);
+      expect(row?.waiting, 'the waiting agent’s row is marked').toBe(true);
+      expect(row?.line, 'its line says it, in place of its state').toBe('Approval needed');
       await panel.locator(`[data-agent-row="${ids.perm}"]`).click();
       const card = panel.locator('[data-view="agent"] [data-request-card]');
       await expect(card).toHaveCount(1, { timeout: 15_000 });
@@ -647,7 +652,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
     });
 
     await step('iv', 'a background shell: Output opens the Log, Stop reads stopping then stopped', async () => {
-      await openSurface(page, 'Background work');
+      await openSurface(page, 'Background tasks');
       const from = await s.send(`Run exactly "sleep 300 && echo done > ${TMP.bg}" with Bash, run_in_background true; reply STARTED.`);
       const started = await s.until('the shell’s task.started', (ev) => ev.find((e) => e.seq !== null && e.seq > from && e.kind === 'task.started' && e.taskType === 'local_bash' && e.isBackground === true));
       const taskId = started.taskId as string;
@@ -658,16 +663,17 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       const shell = (await probe(page, (p) => p.background().shells)).find((r) => r.taskId === taskId);
       const result = s.events.find((e) => e.kind === 'tool.result' && e.toolUseId === started.toolUseId);
       await row.getByRole('button', { name: 'Output' }).click();
-      await expect(surface(page, 'log').getByRole('tab')).toHaveCount(1);
+      await expect(sideTab(sideColumn(page), /^Log(?: · |$)/), 'one Log tab in the side strip (the UX wave\'s U8b)').toHaveCount(1);
       await expect(surface(page, 'log')).toBeVisible();
       await expect.poll(() => probe(page, (p) => p.log().path ?? null), { timeout: 10_000 }).not.toBeNull();
       const log = await probe(page, (p) => p.log());
       note('iv.shell', { taskId, command: started.description, row: shell, outputEnabledAfterStartMs: enabledAfterMs, resultText: result?.content, log });
       expect(log.path).toMatch(/^\/private\/tmp\/claude-\d+\/.+\/tasks\/[^/]+\.output$/);
-      await openSurface(page, 'Background work');
+      await openSurface(page, 'Background tasks');
       const stopFrom = s.seq;
       await row.getByRole('button', { name: 'Stop', exact: true }).click();
       await s.until('the shell’s task.notification', (ev) => ev.find((e) => e.kind === 'task.notification' && e.taskId === taskId), 30_000);
+      await unfold(page, 'background', 'done'); // the UX wave's U8b: the stopped shell is under Done, folded at first
       await expect.poll(() => probe(page, (p) => p.background().shells.find((r) => r.line.includes('stopped'))?.line ?? null), { timeout: 10_000 }).not.toBeNull();
       const rec = await probe(page, (p) => p.rec.stopping);
       const order = s.taskLog(stopFrom, taskId);
@@ -682,13 +688,13 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
     // E7: the card is compact; its phases and agent table live in the run's widget, opened from the card's title. The
     // recorder reads the card's summary line until the widget opens and the widget's phase rows after, in one form.
     const openRun = async (taskId: string) => {
-      const back = panel.getByRole('button', { name: '‹ Background work' });
+      const back = panel.getByRole('button', { name: '‹ Background tasks' });
       if (await back.isVisible()) await back.click();
       await panel.locator(`[data-workflow="${taskId}"] h4 button`).click();
       await expect(panel.locator(`[data-view="run"][data-run="${taskId}"]`)).toBeVisible();
     };
     await step('v', 'a workflow shows its phases and agent table in its widget; Stop workflow ends a re-run', async () => {
-      await openSurface(page, 'Background work');
+      await openSurface(page, 'Background tasks');
       const from = await s.send(`Call the Workflow tool once with this exact script as the script parameter, then reply STARTED:\n\n${WORKFLOW_SCRIPT}`);
       const started = await s.until('the workflow’s task.started', (ev) => ev.find((e) => e.seq !== null && e.seq > from && e.kind === 'task.started' && e.taskType === 'local_workflow'));
       const taskId = started.taskId as string;
@@ -726,7 +732,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       expect(stopped?.taskId).toBe(slowId);
       expect(stopped?.status).toBe('stopped');
       expectStopOrder(order, slowId);
-      await panel.getByRole('button', { name: '‹ Background work' }).click(); // the list again, for the checklist's step
+      await panel.getByRole('button', { name: '‹ Background tasks' }).click(); // the list again, for the checklist's step
       await s.idle();
     });
 
@@ -856,12 +862,13 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
     });
 
     await step('ix', 'the checklist reads the list TaskCreate writes', async () => {
-      await openSurface(page, 'Background work');
+      await openSurface(page, 'Background tasks');
       const from = await s.send('Create three tasks with TaskCreate, one call each: "Survey docs", "Survey mockups", "Write the summary". Then mark "Survey docs" completed with TaskUpdate. Reply OK.');
       await s.idle(240_000);
       const st = await s.status();
       const tools = s.after(from).filter((e) => e.kind === 'tool.use' && e.agentId === null).map((e) => e.toolName);
-      await expect.poll(() => probe(page, (p) => p.background().tasks.heading), { timeout: 15_000 }).toMatch(/^Tasks · \d+\/3/);
+      // the UX wave's U8b: the heading is `Tasks`; the list's three are its open rows and its completed fold
+      await expect.poll(() => probe(page, (p) => ({ heading: p.background().tasks.heading, total: p.background().tasks.rows.length + p.background().tasks.earlier })), { timeout: 15_000 }).toEqual({ heading: 'Tasks', total: 3 });
       const tasks = await probe(page, (p) => p.background().tasks);
       const dir = join(config, 'tasks', (st.taskListId ?? '').replace(/[^A-Za-z0-9_-]/g, '-'));
       note('ix.list', { taskListId: st.taskListId, tools, tasks, onDisk: existsSync(dir) ? readdirSync(dir) : null });
@@ -884,21 +891,24 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       await step('x', 'a disk-only session: On disk, runs from disk, the shells sentence, the session list', async () => {
         await openSurface(p2, 'Subagents');
         await expect.poll(() => probe(p2, (p) => p.subagents().headings.find((h) => h.startsWith('On disk')) ?? null), { timeout: 20_000 }).not.toBeNull();
+        await unfold(p2, 'subagents', 'disk'); // the UX wave's U8b: On disk is folded at first
         const lists = await probe(p2, (p) => p.subagents());
         if (lists.disk[0]) {
           await panel2.locator(`[data-agent-row="${lists.disk[0].agentId}"]`).click();
           await expect.poll(() => probe(p2, (p) => p.subagents().drillIn?.disabled ?? null), { timeout: 10_000 }).not.toBeNull();
         }
         const drill = await probe(p2, (p) => p.subagents().drillIn);
-        await openSurface(p2, 'Background work');
-        await expect.poll(() => probe(p2, (p) => p.background().tasks.label), { timeout: 20_000 }).toBe('session list');
-        // The runs step (v) leaves this session's two workflow runs on disk.
-        if (STEPS.has('v')) await expect.poll(() => probe(p2, (p) => p.background().headings.join(' | ')), { timeout: 20_000 }).toMatch(/Workflow runs on disk · 2/);
+        await openSurface(p2, 'Background tasks');
+        // The UX wave's U8b: the Tasks section is drawn only while the list holds a task, which step ix made.
+        if (STEPS.has('ix')) await expect.poll(() => probe(p2, (p) => p.background().tasks.label), { timeout: 20_000 }).toBe('session list');
+        // The runs step (v) leaves this session's two workflow runs on disk: under Done (U8b), with nothing running.
+        if (STEPS.has('v')) await expect.poll(() => probe(p2, (p) => p.background().headings.join(' | ')), { timeout: 20_000 }).toMatch(/Done 2 · 2 workflows/);
         const bg = await probe(p2, (p) => p.background());
         note('x', { headings: lists.headings, notes: lists.notes, disk: lists.disk.map((r) => ({ agentId: r.agentId, title: r.title, line: r.line, depth: r.depth })), drillIn: drill, background: bg });
         expect(lists.disk.map((r) => r.line)).toEqual(lists.disk.map(() => 'status unavailable'));
         expect(bg.notes).toContain('Shells and monitors are known only while the session runs here');
-        expect(bg.tasks.label).toBe('session list');
+        if (STEPS.has('v')) expect(bg.notes).toContain('Nothing running');
+        expect(bg.tasks.label).toBe(STEPS.has('ix') ? 'session list' : null);
       });
 
       if (STEPS.has('ix') || STEPS.has('vii')) {
@@ -911,11 +921,11 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
         await step('ix', 'CLAUDE_CODE_TASK_LIST_ID shows that list instead', async () => {
           const st = await s2.status();
           expect(st.taskListId).toBe(TASK_LIST_OVERRIDE);
-          await openSurface(p2, 'Background work');
+          await openSurface(p2, 'Background tasks');
           const empty = await probe(p2, (p) => p.background().tasks);
           await s2.send('Create two tasks with TaskCreate, one call each: "Override one", "Override two". Reply OK.');
           await s2.idle(240_000);
-          await expect.poll(() => probe(p2, (p) => p.background().tasks.heading), { timeout: 15_000 }).toMatch(/^Tasks · 0\/2/);
+          await expect.poll(() => probe(p2, (p) => ({ heading: p.background().tasks.heading, rows: p.background().tasks.rows.length, earlier: p.background().tasks.earlier })), { timeout: 15_000 }).toEqual({ heading: 'Tasks', rows: 2, earlier: 0 });
           const tasks = await probe(p2, (p) => p.background().tasks);
           const dir = join(config, 'tasks', TASK_LIST_OVERRIDE);
           note('ix.override', { taskListId: st.taskListId, before: empty, after: tasks, onDisk: existsSync(dir) ? readdirSync(dir) : null });
