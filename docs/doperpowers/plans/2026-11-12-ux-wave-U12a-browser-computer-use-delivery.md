@@ -836,6 +836,14 @@ The pull request carries the dated lines of the two records this landing amends,
   - `reloaded` means the reload was commanded: the store does not read `reloadForAgent`'s boolean, as for the suspended-tab row.
   - The test of the wire addition against build F's schema is `src/shared/ipc/pane-answer-page.test.ts`.
 
+- **2026-11-13 · M2's executor decisions** (folded by the controller).
+  - `browser.agent.show`'s handler reads the session's selected tab through `store.list(...).selected`, so `src/main/browser/tabs.ts` is not edited by M2.
+  - `BrowserHandlerDeps` gains an optional `now()` clock (default `Date.now`) for the handler's tests; `src/main/browser/index.ts` is not edited.
+  - Outside a turn (the e2e route), one ask per session at a time: an acting event during the wait asks nothing more there either.
+  - An ask that rejects outright is treated as a refusal: the tool opens as before, so the opening cannot stay stuck. After the wait the window also checks it is still connected; a disconnect during the wait opens nothing.
+  - The command's schema entry sits after `browser.agent.activities.list`, outside E13's block markers.
+  - Until M5 reworks it, the e2e scene "the Browser panel follows the agent: … and the agent's tab is not selected" asserts what M2 reverses.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
