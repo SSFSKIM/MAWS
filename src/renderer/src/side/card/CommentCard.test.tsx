@@ -16,6 +16,7 @@ import { at } from '../../../../../test/support/machine';
 import { useNotices } from '../../stores/notices';
 import { useSessions } from '../../stores/sessions';
 import { availabilityIn } from '../../sessions/availability';
+import { submitState } from '../../composer/submit/submit-state';
 import { resetShellStores } from '../../test-support/shell-stores';
 import { openCommentComposer, registerCommentComposer, type CommentPlacement } from '../../tools/code/anchor/anchor';
 import { CommentComposerHost, useCommentComposer } from '../CommentComposer';
@@ -548,6 +549,25 @@ describe('the checkbox and the one send path', () => {
     pick();
     expect(box().disabled).toBe(false);
     expect(card()!.querySelector('[data-comment-unsendable]')).toBeNull();
+  });
+
+  // decision 6 by construction: the composer's submit table decides a session another process drives (a live bridge)
+  // before an archived digest, so a terminal session with its bridge up sends from the card as from the composer
+  it('an archived digest on a terminal session whose bridge is live, no ready process: the composer sends, and so does the card', async () => {
+    withTerminal();
+    act(() => useSessions.setState({ digests: new Map([[PARENT, digest(PARENT, { availability: 'archived' })]]) }));
+    expect(availabilityIn(useSessions.getState(), PARENT)).toBe('archived');
+    const composer = submitState({ status: null, intent: null, queue: { entries: [], paused: false }, empty: false, mode: 'send', availability: 'archived', heldBy: 'terminal · 42', driven: { running: false, send: { available: true }, stop: { available: true } } });
+    expect(composer.enabled).toBe(true);
+    fake = fakeClient({ 'side.comment.content': { content: BUILT }, 'laneA.send': { key: KEY, state: 'entered' } });
+    window.maws = fake.client as unknown as PreloadBridge;
+    mount();
+    pick();
+    expect(box().disabled).toBe(false);
+    act(() => box().click());
+    expect(card()!.querySelector('[data-comment-unsendable]')).toBeNull();
+    typeAndSend('Look here');
+    await vi.waitFor(() => expect(fake.invoked('laneA.send')).toHaveLength(1));
   });
 
   it('names the receiving session only when it is not the one the main area shows', () => {
