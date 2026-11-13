@@ -208,6 +208,22 @@ function SidebarBody() {
     return (item: SidebarSession) => (item.kind === 'record' ? matches(item.record) : matchesListed(item.listed));
   }, [query, matches]);
   const expanded = useMemo(() => new Set(sidebar.expandedProjects), [sidebar.expandedProjects]);
+  // UX wave U7, O-16: a row that returns from the Hidden list while the keyboard is on it, or on the Hidden row the return
+  // empties, keeps the keyboard and stays drawn while the keyboard stays on it: exempt from the caps as a spawned lead is, at
+  // its own rank and with no lead. Once the keyboard leaves it, it falls under the caps like any row.
+  const [kept, setKept] = useState<{ hidden: typeof hiddenSessions; id: AppSessionId | null }>({ hidden: hiddenSessions, id: null });
+  if (kept.hidden !== hiddenSessions) {
+    const empties = (id: AppSessionId) => {
+      const entry = rankedEntries.find((e) => e.items.some((item) => sidebarSessionId(item) === id));
+      return entry !== undefined && focused === hiddenNodeId(entry.key) && !entry.items.some((item) => hiddenSessions.has(sidebarSessionId(item)));
+    };
+    const back = focusWithin ? [...kept.hidden.keys()].find((id) => !hiddenSessions.has(id) && (focused === sessionNodeId(id) || empties(id))) : undefined;
+    setKept({ hidden: hiddenSessions, id: back ?? kept.id });
+    if (back !== undefined) setFocused(sessionNodeId(back));
+  } else if (kept.id !== null && !(focusWithin && focused === sessionNodeId(kept.id))) {
+    setKept({ hidden: hiddenSessions, id: null });
+  }
+  const uncapped = useMemo(() => (kept.id === null ? spawned : new Set([...spawned, kept.id])), [spawned, kept.id]);
 
   // Five project rows, then "Show more" for the rest (Codex's `maxGroups`); the machines' rows stay last whatever is
   // folded. A search lists every project it finds.
@@ -228,13 +244,13 @@ function SidebarBody() {
         if (searching) return { entry, open, sessions: nestItems(matching).flatMap((tree) => tree.rows), more: 0, items: matching, hidden: NO_HIDDEN }; // a search draws every match in place
         const split = splitHidden(matching, (id) => hiddenSessions.has(id), activityOf); // after ranking, before the caps
         const all = nestItems(split.shown); // E3: the caps count trees; rank was settled above
-        const drawn = shownTrees(all, more.has(entry.key), spawned); // P5 O7 M8: a spawned lead is never cut
+        const drawn = shownTrees(all, more.has(entry.key), uncapped); // P5 O7 M8: a spawned lead is never cut (nor a row that kept the keyboard)
         const hiddenOpen = openHidden.has(entry.key) && split.hidden.length > 0;
         const hiddenItems = holding ? holdOrder(split.hidden, settledOrder.hidden.get(entry.key) ?? [], sidebarSessionId) : split.hidden;
         const hidden = split.hidden.length === 0 ? NO_HIDDEN : { count: split.hidden.length, open: hiddenOpen, rows: hiddenOpen ? nestItems(hiddenItems).flatMap((tree) => tree.rows) : [] };
         return { entry, open, sessions: drawn.shown.flatMap((tree) => tree.rows), more: drawn.more, items: split.shown, hidden };
       }),
-    [listed, searching, expanded, itemMatches, more, spawned, hiddenSessions, activityOf, openHidden, holding, settledOrder],
+    [listed, searching, expanded, itemMatches, more, uncapped, hiddenSessions, activityOf, openHidden, holding, settledOrder],
   );
   // A Hidden row whose last session returned or was unhidden closes, so the next Hide finds it closed.
   const emptied = searching ? [] : [...openHidden].filter((key) => shown.some((p) => p.entry.key === key && p.open && p.hidden.count === 0));
