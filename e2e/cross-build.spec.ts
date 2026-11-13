@@ -1184,43 +1184,56 @@ async function replaceSaveDialog(run: Run, filePath: string | null): Promise<voi
   }, filePath);
 }
 const saveDialogOpenedAt = (run: Run) => run.maws.app.evaluate(() => (globalThis as unknown as { __u5aSaveDialog: string[] }).__u5aSaveDialog);
+// The save seam's variable, which skips the dialog's folder under test: neither build may inherit it from the runner
+const SAVE_SEAM = 'MAWS_E2E_SAVE_PATH';
+const seamOf = (run: Run) => run.maws.app.evaluate((_electron, name) => process.env[name] ?? null, SAVE_SEAM);
 const storedExportFolder = (userData: string): unknown => (JSON.parse(readFileSync(join(userData, 'layout.json'), 'utf8')) as Record<string, unknown>)[EXPORT_FOLDER_KEY];
 
 test('(export folder) the last export’s folder, kept as main’s layout key, survives the peer’s launch on the profile, which does not name the key, and opens this build’s next export dialog there', async () => {
   const { here, peer } = builds();
   test.skip(namesExportFolder(peer), `the peer (wire ${wireOf(peer)}) names ${EXPORT_FOLDER_KEY} in its LayoutKeySchema: there is no build that lacks the key to cross`);
-  await withScratch('xb-export-folder', async (s) => {
-    const folder = join(s.root, 'exports');
-    mkdirSync(folder, { recursive: true });
-    // this build: one export saved into the scratch folder, through the dialog
-    const first = await s.launch();
-    await s.ready(first.page);
-    const artifactId = await createHtmlArtifact(first.page, 'Export folder report', 'The quarter in one page.');
-    const target = join(folder, 'Export folder report.html');
-    await replaceSaveDialog(first, target);
-    expect(value(await invoke(first.page, 'library.saveAs', { artifactId, source: { content: {} } })), `${here.label}'s export, saved where the dialog answered`).toEqual({ saved: true, path: target });
-    expect(storedExportFolder(s.userData), `${here.label} kept the export's folder`).toEqual({ path: folder });
-    await s.quit(first);
+  // the launcher passes the runner's environment on (e2e/support/scratch-env.ts), so the runner's seam goes for the scene
+  const inherited = process.env[SAVE_SEAM];
+  delete process.env[SAVE_SEAM];
+  try {
+    await withScratch('xb-export-folder', async (s) => {
+      const folder = join(s.root, 'exports');
+      mkdirSync(folder, { recursive: true });
+      // this build: one export saved into the scratch folder, through the dialog
+      const first = await s.launch();
+      await s.ready(first.page);
+      expect(await seamOf(first), `${here.label} runs without ${SAVE_SEAM}`).toBeNull();
+      const artifactId = await createHtmlArtifact(first.page, 'Export folder report', 'The quarter in one page.');
+      const target = join(folder, 'Export folder report.html');
+      await replaceSaveDialog(first, target);
+      expect(value(await invoke(first.page, 'library.saveAs', { artifactId, source: { content: {} } })), `${here.label}'s export, saved where the dialog answered`).toEqual({ saved: true, path: target });
+      expect(storedExportFolder(s.userData), `${here.label} kept the export's folder`).toEqual({ path: folder });
+      await s.quit(first);
 
-    // the peer on the same profile: a tab opened, so its layout store writes the file whole, then a quit
-    const old = await s.launch({}, peer.root);
-    await s.ready(old.page);
-    await old.page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click({ timeout: 15_000 });
-    await expect.poll(async () => tabIdsOf(await mainTabsOf(old.page)), { timeout: 20_000, message: `${peer.label} saved its layout with the library's tab` }).toContain('artifacts');
-    await s.quit(old);
-    expect(tabIdsOf((JSON.parse(readFileSync(join(s.userData, 'layout.json'), 'utf8')) as Record<string, unknown>)['main.tabs']), `${peer.label} wrote layout.json`).toContain('artifacts');
-    expect(storedExportFolder(s.userData), `${peer.label} wrote the file back with the key it does not name`).toEqual({ path: folder });
+      // the peer on the same profile: a tab opened, so its layout store writes the file whole, then a quit
+      const old = await s.launch({}, peer.root);
+      await s.ready(old.page);
+      expect(await seamOf(old), `${peer.label} runs without ${SAVE_SEAM}`).toBeNull();
+      await old.page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click({ timeout: 15_000 });
+      await expect.poll(async () => tabIdsOf(await mainTabsOf(old.page)), { timeout: 20_000, message: `${peer.label} saved its layout with the library's tab` }).toContain('artifacts');
+      await s.quit(old);
+      expect(tabIdsOf((JSON.parse(readFileSync(join(s.userData, 'layout.json'), 'utf8')) as Record<string, unknown>)['main.tabs']), `${peer.label} wrote layout.json`).toContain('artifacts');
+      expect(storedExportFolder(s.userData), `${peer.label} wrote the file back with the key it does not name`).toEqual({ path: folder });
 
-    // this build again: the export dialog opens in the folder of the last export
-    const again = await s.launch();
-    await s.ready(again.page);
-    await replaceSaveDialog(again, null);
-    expect(value(await invoke(again.page, 'library.saveAs', { artifactId, source: { content: {} } })), 'the dialog cancelled').toEqual({ saved: false });
-    const opened = await saveDialogOpenedAt(again);
-    expect(opened, 'one dialog').toHaveLength(1);
-    expect(dirname(opened[0]!), `${here.label}'s dialog after ${peer.label}'s launch`).toBe(folder);
-    record([`${EXPORT_FOLDER_KEY}: ${here.label} (wire ${wireOf(here)}) kept ${folder}; ${peer.label} (wire ${wireOf(peer)}) wrote layout.json with it kept; ${here.label}'s next dialog opened at ${opened[0]}`]);
-  });
+      // this build again: the export dialog opens in the folder of the last export
+      const again = await s.launch();
+      await s.ready(again.page);
+      expect(await seamOf(again), `${here.label} runs without ${SAVE_SEAM}`).toBeNull();
+      await replaceSaveDialog(again, null);
+      expect(value(await invoke(again.page, 'library.saveAs', { artifactId, source: { content: {} } })), 'the dialog cancelled').toEqual({ saved: false });
+      const opened = await saveDialogOpenedAt(again);
+      expect(opened, 'one dialog').toHaveLength(1);
+      expect(dirname(opened[0]!), `${here.label}'s dialog after ${peer.label}'s launch`).toBe(folder);
+      record([`${EXPORT_FOLDER_KEY}: ${here.label} (wire ${wireOf(here)}) kept ${folder}; ${peer.label} (wire ${wireOf(peer)}) wrote layout.json with it kept; ${here.label}'s next dialog opened at ${opened[0]}`]);
+    });
+  } finally {
+    if (inherited !== undefined) process.env[SAVE_SEAM] = inherited;
+  }
 });
 
 // P5 O3-D M6, acceptance 11's second half (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §L; the
