@@ -3,7 +3,8 @@
 // the repository's transcript fixtures. Every path here is invented.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { AnchorSchema } from '@shared/anchor/anchor';
 import { anchoredMessage, anchorLead, anchorTag, commentsMessage, MESSAGE_COMMENTS_MAX, readAnchoredMessage } from '@shared/anchor/message';
 import { anchorPaths, callClass, chipPath, clickPath, EDIT_TOOLS, hrefOf, isMcpTool, linkPaths, linkWork, needlesOf, normalizeLexically, PAUSE, READ_TOOLS, rowClaim, rowClaimSteps, STRETCH_MAX, WORK_FLOOR, WORK_PER_CHAR } from './named';
 
@@ -485,6 +486,26 @@ describe('isMcpTool and anchorPaths', () => {
     const three = commentsMessage([fileAt(0), fileAt(1), fileAt(2)], 'main');
     expect(anchorPaths(three)).toHaveLength(3);
     expect(anchorPaths(three.replace(/^3 comments/, '2 comments')), 'more blocks than the framing names').toEqual(['/work/f2.md']);
+  });
+
+  // the reader's work is bounded by count (Decision Log 54): a tag-shaped line the schema refuses ends a framed reading,
+  // so lines of that shape after a framing line cost no more schema checks however many they are; every check goes
+  // through `AnchorSchema.omit`, counted here
+  it('tag-shaped lines the schema refuses cost the reader a bounded number of schema checks', () => {
+    const last = { kind: 'file-line' as const, label: 'plan.md', locator: `${OTHER}:1`, path: OTHER, line: 1 };
+    const textOf = (n: number) => ['2 comments, in the order made:', ...Array.from({ length: n }, (_, i) => `<maws_anchor kind="unknown" label="x${i}" locator="y${i}"/>`), anchorTag(last)].join('\n');
+    const checks = (text: string) => {
+      const omit = vi.spyOn(AnchorSchema, 'omit');
+      try {
+        expect(anchorPaths(text), 'the one-comment rule’s reading: the last tag’s path alone').toEqual([OTHER]);
+        return omit.mock.calls.length;
+      } finally {
+        omit.mockRestore();
+      }
+    };
+    const few = checks(textOf(3));
+    expect(checks(textOf(3000))).toBe(few);
+    expect(few).toBeLessThanOrEqual(2);
   });
 
   // the scanner's steps: one for each comment the reader read, so a message's comments are paced as its blocks are
