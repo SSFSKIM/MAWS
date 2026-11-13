@@ -297,6 +297,16 @@ export type Draft = z.infer<typeof DraftSchema>;
 // later, and acts are decided concurrently, so an older save could otherwise land over a newer one. Each `updatedAt` is
 // compared for identity only, never ordered, so two devices' clocks never meet. A save naming none writes as before.
 export const STALE_DRAFT_WORDS = 'session.drafts.set: the draft it replaces is no longer the one kept';
+// UX wave U4a (decision 13; Interfaces D): a take-back's stage is saved and settled through two more values of `replaces`,
+// so the command's schema does not change. The claim writes only where no draft with a document is kept (never written,
+// or cleared); a settle form is the one save a stage kept at that revision lets through, and while a stage is kept every
+// other save is refused (the fence). A store of an earlier build reads both as revisions it does not hold: stale.
+export const DRAFT_CLAIM = 'claim:no-document';
+export const settles = (updatedAt: string): string => `settle:${updatedAt}`;
+export const DRAFT_KEPT_WORDS = 'session.drafts.set: a draft with a document is kept';
+export const STAGED_DRAFT_WORDS = 'session.drafts.set: a message being taken back is kept';
+/** `attrs.takeBack` of a stage's document: the message's name in the queue, which kind of name it is, and its row's time. */
+export interface TakeBackMark { ref: string; kind: 'steer' | 'entry'; since: string }
 
 // A replay fixture the index lists (M5 seeds and plays them).
 export const ReplayFixtureSchema = z.strictObject({

@@ -55,6 +55,7 @@ export type Row = RowBase &
     | {
         kind: 'user'; messageUuid: MessageUuid | null; text: string; attachments: Attachment[]; placeholders: number[]; lines: number; editable: boolean; steer: boolean; dropped: boolean;
         pending?: 'next' | 'held'; // W1: not taken yet, a dimmed tail bubble: 'next' a steer the engine delivers at the running turn's next step, 'held' in MAWS's queue until the turn ends
+        unread?: true; // UX wave U4a (decision 12): it waited behind a turn and has neither started nor been dropped; a mount with a stack draws it there, not here
         // E3 start: what the prompt is about, when MAWS framed it as an anchored comment (X10; parsed from its own text by
         // `userTextOf`, which strips the framing from `text`); absent on every other prompt
         anchor?: Anchor;
