@@ -1974,7 +1974,7 @@ describe('listed rows from another machine', () => {
       expandAll();
       render(<Sidebar />);
       const items = await menuOf('Studio build');
-      expect(items.map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Rename…', 'Fork', 'Archive', 'Hide']);
+      expect(items.map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Hide', 'Rename…', 'Fork', 'Archive']);
       expect(items.map((m) => m.hasAttribute('data-disabled'))).toEqual([false, false, false, false, false, false]);
     });
 
@@ -1988,10 +1988,10 @@ describe('listed rows from another machine', () => {
       expect(items.map((m) => [m.textContent, m.hasAttribute('data-disabled'), m.getAttribute('title')])).toEqual([
         ['Open', false, null],
         ['Open in new tab', false, null],
+        ['Hide', false, null],
         ['Rename…', true, 'Can’t rename on Studio yet. Update MAWS on Studio and try again.'],
         ['Fork', true, 'Can’t fork on Studio yet. Update MAWS on Studio and try again.'],
         ['Archive', true, 'Can’t archive on Studio yet. Update MAWS on Studio and try again.'],
-        ['Hide', false, null],
       ]);
     });
 
@@ -2259,9 +2259,9 @@ describe('listed rows from another machine', () => {
     const tabsBefore = useLayout.getState().main;
     fireEvent.contextMenu(row('Studio build'));
     const menu = await screen.findByRole('menu');
-    // the chain merge (U7a with U9): the opens, U9's acts over the link (disabled here: this case registers no handler for
-    // them), then Hide, the order ruled on 2026-11-13
-    expect(within(menu).getAllByRole('menuitem').map((m) => [m.textContent, m.hasAttribute('data-disabled')])).toEqual([['Open', false], ['Open in new tab', false], ['Rename…', true], ['Fork', true], ['Archive', true], ['Hide', false]]);
+    // the opens, Hide (U7's rule), then U9's acts over the link (disabled here: this case registers no handler for them),
+    // the order the architect ruled on 2026-11-13
+    expect(within(menu).getAllByRole('menuitem').map((m) => [m.textContent, m.hasAttribute('data-disabled')])).toEqual([['Open', false], ['Open in new tab', false], ['Hide', false], ['Rename…', true], ['Fork', true], ['Archive', true]]);
     await userEvent.click(within(menu).getByRole('menuitem', { name: 'Open' }));
     fireEvent.contextMenu(row('Studio build'));
     await userEvent.click(await screen.findByRole('menuitem', { name: 'Open in new tab' }));
@@ -2285,8 +2285,8 @@ describe('listed rows from another machine', () => {
     act(() => useLayout.getState().setSidebar({ expandedProjects: [ORG] as ProjectKey[] }));
     render(<Sidebar />);
     await user.click(within(row('Studio build')).getByRole('button', { name: 'Actions for Studio build' }));
-    // a listing you own: the opens, U9's acts, Hide (the chain merge's order, ruled on 2026-11-13)
-    expect(within(await screen.findByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Rename…', 'Fork', 'Archive', 'Hide']);
+    // a listing you own: the opens, Hide, U9's acts (the architect's ruling of 2026-11-13)
+    expect(within(await screen.findByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Hide', 'Rename…', 'Fork', 'Archive']);
     expect(row('Studio build').getAttribute('aria-selected')).not.toBe('true'); // the dots open the menu, not the session
     await user.keyboard('{Escape}');
     await user.click(within(row('Terminal pass')).getByRole('button', { name: 'Actions for Terminal pass' }));
