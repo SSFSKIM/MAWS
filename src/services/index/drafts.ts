@@ -17,8 +17,8 @@ type Row = { doc: string; attachments: string; updated_at: string };
 const draftOf = (row: Row): Draft => ({ doc: JSON.parse(row.doc) as unknown, attachments: JSON.parse(row.attachments) as Draft['attachments'], updatedAt: row.updated_at });
 // UX wave U4a (decision 13; Interfaces D): a take-back's stage is a kept draft whose document carries `attrs.takeBack`.
 // The text is looked at first, so an ordinary save parses nothing.
-const isStage = (row: Row | null): row is Row => {
-  if (row === null || row.attachments === CLEARED || !row.doc.includes('"takeBack"')) return false;
+const isStage = (row: Row): boolean => {
+  if (row.attachments === CLEARED || !row.doc.includes('"takeBack"')) return false;
   const doc = JSON.parse(row.doc) as { attrs?: { takeBack?: unknown } } | null;
   return typeof doc?.attrs?.takeBack === 'object' && doc.attrs.takeBack !== null;
 };
@@ -53,7 +53,7 @@ export class DraftStore {
       this.requireSession(appId);
       if (draft !== null && unnameable(draft.updatedAt)) throw new Error(UNNAMEABLE_WORDS);
       const kept = this.row(appId, reader);
-      if (isStage(kept)) {
+      if (kept !== null && isStage(kept)) {
         if (replaces !== settles(kept.updated_at)) throw new Error(STAGED_DRAFT_WORDS);
       } else if (replaces === DRAFT_CLAIM) {
         if (kept !== null && kept.attachments !== CLEARED) throw new Error(DRAFT_KEPT_WORDS);
