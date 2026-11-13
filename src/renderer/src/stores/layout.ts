@@ -655,6 +655,7 @@ export function createLayoutStore() {
         if (complete) for (const key of ['panelTools.groups', 'panelTools.widths', 'cards.open'] as const) if (!held.has(key)) unsaved.add(key);
         for (const id of prunedPanels) unsaved.add(`panel.${id}`);
         if (prunedPanels.length > 0 && Object.keys(panelParams).length !== Object.keys(storedParams.params).length) unsaved.add('panelTools.params');
+        for (const key of failed) unsaved.delete(key); // UX wave U8b: hydration writes no default over a value it could not read
         const values: Partial<Record<LayoutKey, unknown>> = {
           regions, 'main.tabs': get().main, 'panel.pinned': panelPinned, 'panelTools.surfaces': get().panelSurfaces,
           'panelTools.groups': get().panelGroups, 'panelTools.widths': panelWidths, 'cards.open': storedValue('cards.open', cardsOpen),
