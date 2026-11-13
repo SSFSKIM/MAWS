@@ -769,6 +769,9 @@ Found while writing this document, against master `48619c824`, and reported to t
    - Proved by: `kindOf` over each label and type, and a `subagent` listed by its label as an agent of the tree and no background task (`model/task-graph-readings.test.ts`); a status built from the recorded Stop (`p5-o16-holder-main` seq 162) reads as the listing of the same tasks (seq 145), in the readings there and in the card counts (`panel/summary/derive.test.ts`).
    Date/Author: 2026-11-13, the architect's ruling; written by the executor of M5 (fix round A).
 
+11. **2026-11-13 (the controller, at the merge after M5): the parent re-read at master `80dcc59af`.** Master now holds the wave spec's batches 5 and 6 (pull request #613, merged at `89e25cb20`). For this landing they record what it already did: U8b's rewrite of `TabStrip.tsx` and `keymap/shell-navigation.ts`, and the transitional insertion in `tools/maws/ask/connect.ts`. They also name what later landings insert in this landing's files: U7b's second, page-less ask of `cardColumnShown` in `Shell.tsx`; `asked` on `addTool` and `selectTab`; a tool's `visible` while a page is open; two calls in `SurfaceRow.tsx`. They also name U13's type import in `panel/host.ts`, U5's two cuts in `panel/summary/PushState.test.tsx` (l5-code-06), and U4a and U11a among the wire minors. UC-9's and UC-12's new text (the side column's place taken by a destination, nothing of it written while one is open) binds U7b, which builds on §C. None of it changes M6 to M9, so the milestones stand as written and the parent is read at `80dcc59af` from here on.
+   Date/Author: 2026-11-13, the controller.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
