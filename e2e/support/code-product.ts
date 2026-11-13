@@ -221,21 +221,26 @@ export function numstat(scratch: CodeScratch): { files: number; added: number; r
 }
 
 // A tab written into layout.json's focused pane beside the session's, then the window reloaded (C5's restore path).
-// W12: `main.tabs` holds a tab set per project; the strip's is `current`.
+// UX wave U13a: `main.tabs` holds the one strip as version 3 with the one set `none` (`storedMain`), and is written back
+// in that form.
 export async function restoreWithTab(p: Product, tabs: Record<string, unknown>[]): Promise<void> {
-  type Set = { panes: { tabs: { id: string }[]; activeTabId: string }[]; focusedPane: number };
+  type Set = { panes: { tabs: { id: string }[]; activeTabId: string }[]; focusedPane: number; splitRatio: number };
+  type Stored = { version: 3; current: string; sets: Record<string, Set>; closedTabs: unknown[] };
   const main = await p.page.evaluate(async () => {
     const result = await window.maws.invoke('layout.get', { key: 'main.tabs' });
-    return result.ok ? (result.value.value as { current: string; sets: Record<string, Set> }) : null;
+    return result.ok ? (result.value.value as Stored | null) : null;
   });
   expect(main, 'the session tab reached layout.json').not.toBeNull();
-  const shown = main!.sets[main!.current];
-  const pane = shown.panes[shown.focusedPane];
+  expect(main!.version, 'the strip as U13a stores it').toBe(3);
+  const strip = main!.sets[main!.current];
+  expect(strip, 'the set `current` names').toBeDefined();
+  const pane = strip.panes[strip.focusedPane];
   pane.tabs.push(...(tabs as never[]));
   pane.activeTabId = String(tabs.at(-1)!.id);
+  const value: Stored = { version: 3, current: 'none', sets: { none: strip }, closedTabs: main!.closedTabs };
   await p.page.evaluate(async (value) => {
-    const result = await window.maws.invoke('layout.set', { key: 'main.tabs', value });
+    const result = await window.maws.invoke('layout.set', { key: 'main.tabs', value: value as never });
     if (!result.ok) throw new Error(result.error.message);
-  }, main);
+  }, value);
   await p.page.reload();
 }

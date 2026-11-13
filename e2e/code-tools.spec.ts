@@ -171,8 +171,10 @@ test.describe('the #panel harness: Review and its hand-offs', () => {
   test('split and unified show the same hunks and Wrap toggles', async ({ maws }) => {
     const h = await Harness.open(maws);
     await withScratch(h, async () => {
-      await h.panel('setWidth', 280);
       await reviewAppTs(h);
+      // UX wave U8b (M1): the width set is the width of the class in view, so it is set with Review (a wide tool) in view.
+      await h.panel('setWidth', 280);
+      await expect.poll(async () => Math.round((await h.region.boundingBox())?.width ?? 0), 'Review at 280 px').toBe(280);
       const unified = (await h.review('panel'))!;
       expect(unified.mode).toBe('unified');
       await h.code('setMode', 'split', 'panel');
@@ -264,7 +266,12 @@ test.describe('the #panel harness: Review and its hand-offs', () => {
       await hideSurfaces(h.page);
       const environment = await unfoldSessionCard(h.page, 'Environment');
       await expect(environment.getByTestId('change-line')).toHaveText('+4 −0 across 5 files · 3 untracked · 1 staged');
-      await environment.getByRole('button', { name: 'Review', exact: true }).click();
+      // UX wave U8b (M4 decision 4, A8): the change line is the card's control into Review, named Open changes with its
+      // counts as its description; the branch row's Review button is gone.
+      const changes = environment.getByRole('button', { name: 'Open changes', exact: true });
+      await expect(changes).toHaveAccessibleDescription('+4 −0 across 5 files · 3 untracked · 1 staged');
+      await expect(environment.getByRole('button', { name: 'Review', exact: true })).toHaveCount(0);
+      await changes.click();
       await expect.poll(async () => (await h.review('panel'))?.scope).toBe('uncommitted');
       await expect(h.region.locator('[data-chip="uncommitted"]')).toHaveAttribute('aria-pressed', 'true');
     });
