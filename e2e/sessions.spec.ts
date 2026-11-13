@@ -323,6 +323,28 @@ test.describe('sessions', () => {
     await expect(page.getByRole('tab')).toHaveCount(2); // the source, the fork (W5: the Overview is no tab)
   });
 
+  // U1a §J (A13): a folder with nothing to load says so in one line, in place of the list of what trust would turn on
+  test('trust card, nothing to load: a folder with no project settings and no .mcp.json shows its path, one line saying so and where trust is recorded, and no list; the frame reads its title alone', async () => {
+    const repo = await ScratchRepo.create({ sentinels: false });
+    const launched = await launchCase({ fixtures: [], trusted: [] });
+    current = { ...launched, repos: [repo] };
+    const { page, maws } = launched;
+    const project = await addProject(page, repo.root);
+    const id = await plus(page, project.name);
+    await routeDirect(page, id);
+    await send(page, 'Nothing loads in this folder.');
+    const card = page.getByRole('group', { name: 'Trust this folder?', exact: true });
+    await expect(card, 'docked in the composer’s place').toBeVisible();
+    await expect(card.getByText(repo.root, { exact: true })).toBeVisible();
+    await expect(card.getByText('Nothing in this folder loads or runs automatically.', { exact: true })).toBeVisible();
+    await expect(card.getByText(/^Recorded in .*; the terminal will not ask again\.$/)).toBeVisible();
+    await expect(card.getByText(/^Loads its settings, hooks, MCP servers and plugins/), 'no sentence of what loads').toHaveCount(0);
+    await expect(card.locator('dl'), 'and no list').toHaveCount(0);
+    await expect(card, 'the frame reads its title alone').not.toContainText('Composer paused');
+    await expect(card.getByRole('button', { name: 'Trust and start' })).toBeVisible();
+    expect(maws.consoleErrors()).toEqual([]);
+  });
+
   test('rollback keeps the tab: a launch past the fixture list is refused, the worktree and record go, the failure card stays, and Back to editing returns the message to the editor', async () => {
     const { page, untrustedRepos } = await begin({ fixtures: [BOOTSTRAP], untrusted: 1 });
     const repo = untrustedRepos[0]!;
@@ -771,7 +793,7 @@ test.describe('sessions', () => {
     expect(second.maws.consoleErrors()).toEqual([]);
   });
 
-  test("C5's acceptance item 10, replay clause: a replayed read-only request reaches the session's row through a recorded session and its hover card's Approve answers the broker", async () => {
+  test("C5's acceptance item 10, replay clause: a replayed read-only request reaches the session's row through a recorded session and its hover card's Allow once answers the broker", async () => {
     const { page, trustedRepos } = await begin({ fixtures: [READ_ONLY] });
     const project = await addProject(page, trustedRepos[0]!.root);
     const id = await plus(page, project.name);
@@ -792,7 +814,7 @@ test.describe('sessions', () => {
       await expect(card).toBeVisible({ timeout: 2_000 });
     }).toPass({ timeout: 10_000 });
     await expect(card.getByText('Approval needed')).toBeVisible();
-    await card.getByRole('button', { name: 'Approve' }).click();
+    await card.getByRole('button', { name: 'Allow once', exact: true }).click(); // U1a §H: the hover card's once-only allow
     await expect(entry.getByRole('img', { name: 'Needs approval' })).toHaveCount(0);
     await expect(entry, 'the project tree row survives attention retirement').toBeVisible();
     await turnEnded(page, id);

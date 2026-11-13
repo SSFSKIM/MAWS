@@ -185,10 +185,8 @@ async function drive(s: Sitting, session: Session, what: string, until: () => Pr
     const open = ofKind(events, 'permission.requested').filter((e) => !resolved.has(e.requestId));
     if (open.length > 0) {
       const frame = s.pane.getByRole('group', { name: 'Approval needed' });
-      const allow = frame.getByRole('button', { name: 'Allow', exact: true });
+      const allow = frame.getByRole('button', { name: 'Allow once', exact: true });
       if ((await allow.isVisible().catch(() => false)) && (await allow.isEnabled().catch(() => false))) {
-        const once = frame.getByRole('radio', { name: 'Allow once' });
-        if ((await once.count()) > 0) await once.click();
         await allow.click();
         session.allowed.push(open[0]!.toolName);
         await expect.poll(async () => ofKind(await s.events(session.id), 'permission.resolved').some((e) => e.requestId === open[0]!.requestId), { timeout: 30_000 }).toBe(true);
