@@ -616,6 +616,7 @@ export class ChainFollower {
   private startedDelivered = false; // `session.started` goes out at most once per follow
   private backfillEnded = false; // the first complete read of this follow has happened
   private exitArmed = true; // X-168: no exit was supplied since the last record delivered or the last live process seen
+  private exitOwed = false; // X-168: a holder's going was told and its decision not yet made (the file could not be read)
 
   constructor(
     private readonly reader: FileReader,
@@ -652,7 +653,8 @@ export class ChainFollower {
         if ((await this.sync(false)) === 'complete') {
           this.endBackfill(); // a start whose every read was interrupted ends its backfill here
           this.report('following');
-          this.noteHolders();
+          if (this.exitOwed) this.supplyExit(); // a decision a failed final drain left owed (`refold`)
+          else this.noteHolders();
         }
       } catch (error) {
         this.report('error', messageOf(error));
@@ -666,10 +668,12 @@ export class ChainFollower {
   // notice says why; one that held nothing back has nothing to re-fold. X-168: then, in this follower's own order, the
   // file is read to its end and the registry asked again: with no live process left, the gone process's exit is
   // supplied (`supplyExit`). A read still pending, or a holder back meanwhile, is decided on as it stands then, never on
-  // the callback's word.
+  // the callback's word. A drain that cannot read the file (absent, interrupted, failed) leaves the decision owed to the
+  // next read that completes, since the registry tells a holder's going once.
   refold(): Promise<void> {
     return this.enqueue(async () => {
       if (this.stopped) return;
+      this.exitOwed = this.agent === null;
       try {
         if (this.core.held) {
           const stat = await this.reader.stat();
@@ -714,6 +718,7 @@ export class ChainFollower {
   // session, MAWS's own included: a session MAWS runs has its exit on the wire, and a holder's going leaves it to that.
   private supplyExit(): void {
     if (this.stopped || this.agent !== null || !this.backfillEnded) return;
+    this.exitOwed = false;
     if (this.noteHolders() || !this.exitArmed) return;
     const exit = this.core.exitAtLeaf();
     if (exit === null) return;
