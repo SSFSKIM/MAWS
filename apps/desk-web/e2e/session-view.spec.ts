@@ -318,8 +318,11 @@ async function pageToFirstRow(hub: HubDouble, view: Locator): Promise<number> {
   return pages;
 }
 
+// The snapshot's newest rows must fill the view, so that nothing pages in before the reader scrolls. Since the UX wave's
+// arrival rows (U3, first landing) a hand-back's report folds with its turn and the notification it claimed makes no
+// turn, so the recording's newest six rows no longer fill it and the view pages at once; ten do.
 test('older rows page in at the top of the session view until the first row, on a live session', async ({ page, hub }) => {
-  const { player, view } = await openPaged(page, hub, 6);
+  const { player, view } = await openPaged(page, hub, 10);
   await expect(view).not.toContainText('Think briefly first');
   expect(await pageToFirstRow(hub, view)).toBeGreaterThanOrEqual(1);
   await expect(page.getByTestId('session-status')).toHaveText('');
@@ -406,10 +409,12 @@ for (const delay of [0, 300, 1500]) {
   });
 }
 
+// The snapshot must be tall enough that its top is far from the card at its tail: since the UX wave's arrival rows fold
+// a hand-back's report with its turn, forty rows of the long history draw too little, and sixty draw what forty did.
 test("a notification's landing on a request reaches its card from far up in the history: the list brings it in, focused and marked", async ({ page, hub }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await stageProject(hub);
-  const played = (player = new DepthPlayer(hub, { project: PROJECT, machine: 'mini', session: S.asks, extraRows: longHistory, limit: 40 }));
+  const played = (player = new DepthPlayer(hub, { project: PROJECT, machine: 'mini', session: S.asks, extraRows: longHistory, limit: 60 }));
   played.skip(played.script.length);
   played.holdRows = true; // the reader stays where they went: no older page lands under them
   await hub.raise(PROJECT, 'mini', { request: 'toolu_far', session: S.asks, tool: 'Bash', input: { command: 'pnpm e2e' } });

@@ -48,18 +48,26 @@ export function firstPrompt(fixture: string): string {
 }
 export const PROMPT = firstPrompt(PERMISSION);
 
-// The kept-session fixture: the permission round trip with one background task's failure (a `task_notification`, status
-// failed, as C3's frames carry one) inserted right before its request, so the span the app is closed for holds an event
-// whose derived effect only main's `session.eventBatch` listeners produce: the attention service's error item (nothing
-// else derives it, the resync folds only the digest, and the first app never saw the event).
-export const TASK_FAILED = 'e10 background check';
+// The kept-session fixture: the permission round trip with one tool result the engine denied because auto mode is
+// unavailable (its `tool_result_meta` names `non_execution_kind: 'automode-unavailable'`, the row's shape as
+// test/fixtures/transcript/denials.jsonl records it) inserted right before its request, so the span the app is closed
+// for holds an event whose derived effect only main's `session.eventBatch` listeners produce: the attention service's
+// "Auto mode unavailable" item (nothing else derives it, the resync folds only the digest, and the first app never saw
+// the event). Every build of a cross-build pair derives it, build F (`f1852de3a`) included. UX wave U3a (decision 16):
+// until O-34 the item was a failed background task's, which this build no longer raises.
+export const TAIL_TOOL_USE = 'toolu_e10tail01';
+export const TAIL_ITEM = 'Auto mode unavailable: switch out of auto mode to continue'; // the item's summary, the same at build F
 export function tailFixture(dir: string): string {
   const rows = readFileSync(join(REPO_ROOT, PERMISSION), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as JournalRow);
   const at = rows.findIndex(isRequestRow);
   const before = rows[at - 1]!;
-  const failure = { type: 'system', subtype: 'task_notification', task_id: 'e10tail01', status: 'failed', output_file: null, summary: TASK_FAILED, uuid: 'e1000000-0000-4000-8000-000000000001', session_id: before.frame.session_id };
-  rows.splice(at, 0, { seq: 0, direction: 'in', at: before.at, frame: failure });
-  const path = join(dir, 'permission-task-failure.jsonl');
+  const denied = {
+    type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: TAIL_TOOL_USE, content: 'Auto mode is unavailable for this session.', is_error: true }] },
+    parent_tool_use_id: null, uuid: 'e1000000-0000-4000-8000-000000000001', tool_use_result: 'Error: Auto mode is unavailable for this session.',
+    tool_result_meta: [{ id: TAIL_TOOL_USE, non_execution_kind: 'automode-unavailable' }], session_id: before.frame.session_id,
+  };
+  rows.splice(at, 0, { seq: 0, direction: 'in', at: before.at, frame: denied });
+  const path = join(dir, 'permission-tail-item.jsonl');
   writeFileSync(path, `${rows.map((row, k) => JSON.stringify({ ...row, seq: k + 1 })).join('\n')}\n`);
   return path;
 }
@@ -73,7 +81,8 @@ export const HOST_MODE = 'daemon';
 export const keptQuitLine = (parts = '1 mid-turn') => `quit-guard: ${parts}, not asked: they outlive the app`;
 export interface JournalRow { seq: number; direction: string; at: string; frame: Record<string, unknown> }
 export const isRequestRow = (r: JournalRow) => r.direction === 'in' && (r.frame.request as { subtype?: string } | undefined)?.subtype === 'can_use_tool';
-export const isTaskFailureRow = (r: JournalRow) => r.direction === 'in' && r.frame.type === 'system' && r.frame.subtype === 'task_notification';
+// The row tailFixture inserts: the tool result denied because auto mode is unavailable.
+export const isTailItemRow = (r: JournalRow) => r.direction === 'in' && r.frame.type === 'user' && ((r.frame.tool_result_meta as { non_execution_kind?: string }[] | undefined) ?? []).some((m) => m.non_execution_kind === 'automode-unavailable');
 
 // ---- one case's scratch profile, its launches and its supervisors ------------------------------------------------------
 

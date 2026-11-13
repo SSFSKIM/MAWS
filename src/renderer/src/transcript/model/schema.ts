@@ -61,6 +61,7 @@ export const TurnSummarySchema = z.strictObject({
 });
 
 const base = { id: z.string(), turnId: nullable(z.string()), at: z.string() };
+const ARRIVAL_CLASSES = ['peer', 'subagent', 'task', 'schedule', 'answer', 'command', 'own', 'wake', 'consent'] as const; // U3: `Arrival['class']`
 // E7 start: a message between sessions (rows.ts's PeerMessage)
 const PeerMessageSchema = z.strictObject({
   sender: nullable(z.strictObject({ name: nullable(z.string()), address: z.string(), session: nullable(z.string()), owners: nullable(z.array(z.string())) /* P5 O15 M2b */ })), recipient: nullable(z.strictObject({ name: nullable(z.string()), address: z.string() })), body: z.string(), preview: z.string(),
@@ -71,12 +72,13 @@ const AttachmentSchema = z.strictObject({ kind: z.enum(['image', 'file', 'text']
 
 export const RowSchema = z.discriminatedUnion('kind', [
   z.strictObject({ ...base, kind: z.literal('time'), label: z.string() }),
-  z.strictObject({ ...base, kind: z.literal('user'), messageUuid: nullable(z.string()), text: z.string(), attachments: z.array(AttachmentSchema), placeholders: z.array(z.number().int()), lines: z.number(), editable: z.boolean(), steer: z.boolean(), dropped: z.boolean(), pending: z.enum(['next', 'held']).optional(), anchor: AnchorSchema.optional() /* E3 */, anchorFrame: z.strictObject({ destination: nullable(z.enum(['thread', 'main'])), screenshot: z.boolean() }).optional() /* E11 */ }),
+  z.strictObject({ ...base, kind: z.literal('user'), messageUuid: nullable(z.string()), text: z.string(), attachments: z.array(AttachmentSchema), placeholders: z.array(z.number().int()), lines: z.number(), editable: z.boolean(), steer: z.boolean(), dropped: z.boolean(), pending: z.enum(['next', 'held']).optional(), anchor: AnchorSchema.optional() /* E3 */, anchorFrame: z.strictObject({ destination: nullable(z.enum(['thread', 'main'])), screenshot: z.boolean() }).optional() /* E11 */, consent: z.strictObject({ kind: z.enum(['command', 'call']), subject: z.string() }).optional() /* U3 */ }),
   z.strictObject({ ...base, kind: z.literal('assistant_text'), messageUuid: nullable(z.string()), blockIndex: z.number(), markdown: z.string(), live: z.boolean(), phase: z.enum(['answer', 'commentary']), model: nullable(z.string()), cut: z.literal(true).optional(), partway: z.literal(true).optional() }),
   z.strictObject({
     ...base, kind: z.literal('divider'), state: z.enum(['working', 'completed', 'stopped', 'failed']), cause: z.literal('crash').optional() /* E11 */, origin: z.enum(['human', 'engine', 'peer']), startedAt: z.string(), endedAt: nullable(z.string()),
     toolCalls: z.number(), denied: z.number(), autoDenied: z.number(), firstDeniedCell: nullable(z.string()), expanded: z.boolean(), summary: TurnSummarySchema,
     files: z.array(z.strictObject({ path: z.string(), change: z.enum(['create', 'update', 'delete']), added: z.number(), removed: z.number(), cellId: z.string() })).optional(),
+    opener: z.strictObject({ class: z.enum(ARRIVAL_CLASSES), line: z.string() }).optional(), // U3
   }),
   z.strictObject({ ...base, kind: z.literal('group'), state: z.enum(['active', 'completed']), cells: z.array(CellSchema), summary: z.string(), activeLabel: nullable(z.string()), icon: category, expanded: z.boolean() }),
   z.strictObject({ ...base, kind: z.literal('cell'), ...cellShape }),
@@ -102,6 +104,12 @@ export const RowSchema = z.discriminatedUnion('kind', [
   }),
   z.strictObject({ ...base, kind: z.literal('boundary'), boundaryKind: z.enum(['compaction', 'reset', 'retraction', 'rewind']), text: z.string(), secondary: z.string().optional(), detail: nullable(z.string()), hiddenRows: z.number(), revealed: z.boolean() }),
   z.strictObject({ ...base, kind: z.literal('bash'), command: z.string(), stdout: z.string(), stderr: z.string(), exitCode: nullable(z.number()), cwd: nullable(z.string()) }),
+  // U3 start
+  z.strictObject({
+    ...base, kind: z.literal('notice'), class: z.enum(['task', 'schedule', 'answer', 'wake']), outcome: nullable(z.enum(['completed', 'failed', 'stopped'])),
+    text: z.string(), durationMs: nullable(z.number()), detail: nullable(z.string()), taskId: nullable(z.string()), toolUseId: nullable(z.string()), outputFile: nullable(z.string()),
+  }),
+  // U3 end
   z.strictObject({ ...base, kind: z.literal('local_command'), messageUuid: nullable(z.string()), text: z.string() }),
   // E1 start
   z.strictObject({

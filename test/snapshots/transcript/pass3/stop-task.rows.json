@@ -119,6 +119,20 @@
     "turnId": "turn:3b554458-484d-4333-bae1-a226650ae08b"
   },
   {
+    "at": "2026-09-29T15:33:49.844Z",
+    "class": "task",
+    "detail": null,
+    "durationMs": null,
+    "id": "notice:637c1ad2-6b6a-4bc6-b60c-dad902305257:0",
+    "kind": "notice",
+    "outcome": "stopped",
+    "outputFile": null,
+    "taskId": "ba3cr5gnx",
+    "text": "Task \"Sleep then write DONE to bg.txt\" was stopped by the user",
+    "toolUseId": "toolu_01ADVdMxLsbLibjw1MgLepqS",
+    "turnId": "turn:e4fd229a-e799-4d3d-88cb-7ffe1dfd542f"
+  },
+  {
     "at": "2026-09-29T15:33:55.852Z",
     "attachments": [],
     "dropped": false,

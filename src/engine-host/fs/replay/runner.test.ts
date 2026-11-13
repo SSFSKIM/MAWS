@@ -221,6 +221,22 @@ describe('replay runner plays a transcript through the backfill', () => {
     expect(progress.at(-1)).toMatchObject({ state: 'done', index: chain.length, total: chain.length, at: chain.at(-1)!.timestamp });
   });
 
+  // UX wave U3 (the U3a document, M3's second fix round): a run that ends at a terminal's fire draws it, with nothing
+  // left held for a meta row the source never reaches
+  it('a transcript that ends at a terminal’s scheduled fire places it, in the engine’s turn it opens', async () => {
+    const record = (fields: Record<string, unknown>) => parseTranscriptRecord({ sessionId: 'orig', cwd: '/w', ...fields });
+    const { runner, events } = harness('instant');
+    await runner.runTranscript([
+      record({ type: 'user', uuid: 'u1', parentUuid: null, timestamp: '2026-09-28T10:00:00.000Z', message: { role: 'user', content: 'Set a tick.' } }),
+      record({ type: 'system', subtype: 'turn_duration', uuid: 'd1', parentUuid: 'u1', timestamp: '2026-09-28T10:00:01.000Z', durationMs: 900 }),
+      record({ type: 'system', subtype: 'scheduled_task_fire', uuid: 'f1', parentUuid: 'd1', timestamp: '2026-09-28T10:01:00.000Z', content: 'Running scheduled task (Sep 28 10:01am)', prompt: 'Say tick.', isMeta: false }),
+    ], null);
+    expect(events().slice(-2)).toMatchObject([
+      { kind: 'turn.started', userMessageUuid: 'f1', origin: 'task-notification' },
+      { kind: 'user.message', messageUuid: 'f1', arrival: [{ class: 'schedule', prompt: 'Say tick.' }] },
+    ]);
+  });
+
   it('paces records by timestamp; a record without one inherits the previous', async () => {
     vi.useFakeTimers();
     try {

@@ -144,27 +144,31 @@ export function sminosFrameSender(line: string): string | null {
  * while sminos writes an alias as its writer wrote it, a bare alias can imitate the label.
  */
 export function sminosFrameOwners(frame: string): { alias: string; owners: string[] } | null {
+  const parts = senderParts(frame);
+  if (parts === null || !parts.label.startsWith(OWNED_BY)) return null;
+  const owners = parts.label.slice(OWNED_BY.length).split(', ');
+  return owners.every((name) => OWNER_NAME.test(name)) ? { alias: parts.alias, owners } : null;
+}
+
+/** The alias a sminos frame line names its sender by, without the label after it; null when the line is no whole frame. */
+export function sminosFrameAlias(frame: string): string | null {
+  return senderParts(frame)?.alias ?? null;
+}
+
+/** A frame line's sender split into its alias (a quoted one's literal, decoded) and the label after it. */
+function senderParts(frame: string): { alias: string; label: string } | null {
   const sender = sminosFrameSender(frame);
   if (sender === null) return null;
-  let alias: string;
-  let label: string;
   if (sender.startsWith('"')) {
     const quoted = quotedAlias(sender);
-    if (quoted === null) return null;
-    alias = quoted.alias;
-    label = sender.slice(quoted.length);
-  } else {
-    const end = sender.search(BARE_ALIAS_END);
-    alias = end < 0 ? sender : sender.slice(0, end);
-    label = end < 0 ? '' : sender.slice(end);
+    return quoted === null ? null : { alias: quoted.alias, label: sender.slice(quoted.length) };
   }
-  if (!label.startsWith(OWNED_BY)) return null;
-  const owners = label.slice(OWNED_BY.length).split(', ');
-  return owners.every((name) => OWNER_NAME.test(name)) ? { alias, owners } : null;
+  const end = sender.search(BARE_ALIAS_END);
+  return end < 0 ? { alias: sender, label: '' } : { alias: sender.slice(0, end), label: sender.slice(end) };
 }
 
 /** A sminos message's text as drawn: its frame line (whole, the first, with the text after it) and its reply line cut. */
-function sminosParts(body: string): { frame: string | null; body: string } {
+export function sminosParts(body: string): { frame: string | null; body: string } {
   const first = body.split('\n', 1)[0]!;
   const frame = body.includes('\n') && sminosFrameSender(first) !== null ? first : null;
   return { frame, body: (frame === null ? body : body.slice(frame.length + 1)).replace(SMINOS_REPLY_LINE, '') };

@@ -31,21 +31,25 @@
 // The notes are read as DX4 reads them (`sminos_jobs.STOP_NOTE`; the vendored vectors' case 18): by the row's whole
 // text, never by a line found in it, so a steer that quotes a note is a steer; a steer with its line can be no note.
 //
-// A steer is drawn as the owner's prompt queued into the running turn ("Sent during this turn"), as a delivery appended
-// there is, under its row's own uuid, without its steer line (the bubble says who wrote it); the held row stays
-// verbatim. Words MAWS's backfill would read as an interrupt marker keep the line, as a delivery's keep its frame: alone,
-// the bubble would be read as the marker. One appended while no turn ran is taken by the turn that starts next
-// (`appended-turn.ts`). The bridge's mirror of a steer or a delivery, a system notice for the terminal, is not drawn.
+// A marked steer, like a delivery, is the arrivals reader's (`@shared/engine/arrival`, class `own`; UX wave U3, UC-2):
+// MAWS's backfill draws it from the row as held, as the owner's prompt queued into the running turn ("Sent during this
+// turn"), under its row's own uuid, without its steer line (the bubble says who wrote it). A steer an older bridge
+// appended with no line is drawn the same way here (`steerAsDrawn`), the held row verbatim: words MAWS's backfill would
+// read as an interrupt marker keep the line, as a delivery's keep its frame, for alone the bubble would be read as the
+// marker. One appended while no turn ran is taken by the turn that starts next (`appended-turn.ts`). The bridge's mirror
+// of a steer or a delivery, a system notice for the terminal, is not drawn.
 import type { JsonObject } from 'desk-hub/protocol';
-import { INTERRUPT_MARKER } from '../../../../engine-host/normalizer-support';
+import { INTERRUPT_MARKER } from '@shared/engine/engine-markers';
+import { markedSteerWords } from '@shared/engine/sminos-delivery';
 import { parseInterruptCut } from '@shared/lane-a/interrupt-cut';
-import { asQueuedPrompt, BRIDGE_PLUGINS, deliveryFrame, isBridgeRow } from '../conversation/delivery-frame';
+import { asQueuedPrompt, deliveryFrame, isBridgeRow } from '../conversation/delivery-frame';
 import { BRIDGE_TASK_LINE, bridgeRecordLines, isEngineMarker, singleText } from './interrupt';
 
-export type BridgeRowKind = 'delivery' | 'interrupt-marker' | 'interrupt-note' | 'stop-note' | 'interrupt-record' | 'secret-note' | 'cut-reply' | 'steer';
+// The steer's line, a marked steer's words and the bridge's mirror line are read in `@shared/engine/sminos-delivery`
+// (moved there for the arrivals reader, UX wave U3, UC-2).
+export { isMirrorLine, markedSteerWords, STEER_LINE } from '@shared/engine/sminos-delivery';
 
-/** The first line of the bridge's steer row (doperpowers `hooks/mods/bridge.tsx`, `STEER_LINE`), the owner's words after it. */
-export const STEER_LINE = '[sminos steer from human]';
+export type BridgeRowKind = 'delivery' | 'interrupt-marker' | 'interrupt-note' | 'stop-note' | 'interrupt-record' | 'secret-note' | 'cut-reply' | 'steer';
 
 const INTERRUPT_ORIGINS = new Set(['The interrupt came from the desk.', 'The interrupt came from outside the terminal.']);
 const STOP_NOTE = /^Task [A-Za-z0-9_-]{1,64}, a background task, was stopped from (?:the desk|outside the terminal): it is not running\.$/;
@@ -54,13 +58,6 @@ const SECRET_NOTE = /^The person stored a secret under (\S+)\. You never see its
 function isInterruptNote(text: string): boolean {
   const [first, ...lines] = text.split('\n');
   return INTERRUPT_ORIGINS.has(first) && lines.every((line) => BRIDGE_TASK_LINE.test(line));
-}
-
-/** The owner's words of a steer the bridge marked as one (its one text block, the steer line first), else null. */
-export function markedSteerWords(row: JsonObject): string | null {
-  if (!isBridgeRow(row)) return null;
-  const text = singleText(row);
-  return text !== null && text.startsWith(`${STEER_LINE}\n`) ? text.slice(STEER_LINE.length + 1) : null;
 }
 
 /** Which of the plugin's appended rows this is, by the rule above; null for a row the plugin did not append. */
@@ -79,19 +76,6 @@ export function bridgeRowKind(row: JsonObject): BridgeRowKind | null {
 }
 
 /**
- * The bridge's mirror of a row it appended for the owner: after a steer's or a delivery's append it logs the words
- * (`$.ui.log`: `steer: <text>`, `delivered: <text>`, a delivery's frame line still in it), which the engine keeps as a
- * system notice under the plugin's name (`<plugin>: steer: …`, either plugin the bridge has run in) for the terminal to
- * draw. The session view draws the appended row itself, as the owner's prompt, so it draws no mirror: in a turn the
- * mirror repeated the words, frame and all, and after a turn's end it was a notice in a turn of its own that never
- * ended.
- */
-export function isMirrorLine(row: JsonObject): boolean {
-  return row.type === 'system' && row.subtype === 'informational' && typeof row.content === 'string' && MIRRORS.some((prefix) => (row.content as string).startsWith(prefix));
-}
-const MIRRORS = BRIDGE_PLUGINS.flatMap((plugin) => [`${plugin}: steer: `, `${plugin}: delivered: `]);
-
-/**
  * A steer's content as its bubble draws it: a marked steer's words without the steer line (kept when the words alone
  * would read as an interrupt marker), an older bridge's steer as it is; null for any other row.
  */
@@ -103,8 +87,13 @@ export function steerContent(row: JsonObject): string | JsonObject[] | null {
   return typeof content === 'string' || Array.isArray(content) ? (content as string | JsonObject[]) : null;
 }
 
-/** The row as the session view draws it: a steer as the owner's prompt queued into the running turn; any other as it is. */
+/**
+ * The row as the session view draws it: a steer an older bridge appended with no steer line as the owner's prompt queued
+ * into the running turn; any other as it is. A marked steer is the arrivals reader's (class `own`, UX wave U3, UC-2),
+ * which MAWS's backfill maps from the row as held.
+ */
 export function steerAsDrawn(row: JsonObject): JsonObject {
+  if (markedSteerWords(row) !== null) return row;
   const content = steerContent(row);
   return content === null ? row : asQueuedPrompt(row, content);
 }
