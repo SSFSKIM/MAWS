@@ -4,15 +4,17 @@
 // Scheduled N and Tasks only when the session has them; then one Done N, folded at first, every ended one newest first,
 // its heading counting them by kind. With nothing running, `Nothing running` stands in Running's place. Each section is
 // collapsible with a sticky heading (C8a's summary `Section` pattern, reimplemented here because C8a's is not
-// exported). Stop is the one action on a task (§5.6: stop only), through the task-graph store's two-phase stop. Its state is a small handle holding
-// an immutable snapshot the body reads through useSyncExternalStore, plus the store watch for the session it shows.
+// exported). Stop is the one action on a task (§5.6: stop only), through the task-graph store's two-phase stop. Its
+// state is a small handle holding an immutable snapshot the body reads through useSyncExternalStore, plus the store
+// watch for the session it shows.
 // E7 (Design §2): its view is the list or one run's widget, as Subagents' is its lists or a drill-in (Back is a state
 // change; the host sees one tab); a card's title or chevron, the transcript's workflow ref and `open({ view: 'run' })`
 // open the widget. Its Scheduled section (Design §7) lists the session's cron jobs after Running.
 // P5 O9 M5: a terminal session driven through its bridge lists the shells and monitors main derives from its transcript
 // (../../../lane-a/jobs/lane-jobs.ts), each stopped through its bridge, with no output tail; an ended one's stay listed
-// exited. They join the graph's workflows before the sections are read (§E), so one rule orders and counts both. Whether it is driven is the port's to say (a non-null `turn()`), whatever engine status MAWS kept from an
-// earlier run of the session: that status is not live while a terminal holds it.
+// exited. They join the graph's workflows before the sections are read (§E), so one rule orders and counts both.
+// Whether it is driven is the port's to say (a non-null `turn()`), whatever engine status MAWS kept from an earlier run
+// of the session: that status is not live while a terminal holds it.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { AppSessionId, TaskId } from '@shared/graph/ids';
 import type { PanelTool, PanelToolContext } from '../../../panel/tool';
