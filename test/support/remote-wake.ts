@@ -450,10 +450,14 @@ export interface BesideInput {
   ref: string;
   /** The bare app id of the live session: its stream resumes at the restore. */
   live: string;
+  /** Every session whose pane the case opened (the live one among them): each first read shows before the stall. */
+  sessions: readonly string[];
   /** A's main.log, B's mawsd.log and host.log, whole. */
   main: readonly LogLine[];
   endpoint: readonly LogLine[];
   host: readonly LogLine[];
+  launchedAt: number;
+  stalledAt: number;
   restoredAt: number;
 }
 
@@ -462,8 +466,41 @@ export interface BesideInput {
 const HISTORY_ASKED = /^(?:\[lane-b\] )?lane B: timing history B\/(\S+): asked$/;
 const HISTORY_READ = /^(?:\[lane-b\] )?lane B: timing history B\/(\S+): (?:whole|paged|budgeted window|budgeted launch), \d+ pages, \d+ bytes, \d+ ms$/;
 
+/** A's history reads of B's sessions in main.log from `from` until `to`: each start and end, by bare app id. */
+function historyLines(main: readonly LogLine[], from: number, to: number): { asks: { app: string; at: number }[]; ends: { app: string; at: number }[] } {
+  const asks: { app: string; at: number }[] = [];
+  const ends: { app: string; at: number }[] = [];
+  for (const { at, text } of main) {
+    if (at < from || at >= to) continue;
+    const start = HISTORY_ASKED.exec(text);
+    if (start !== null) asks.push({ app: start[1]!, at });
+    const end = HISTORY_READ.exec(text);
+    if (end !== null) ends.push({ app: end[1]!, at });
+  }
+  return { asks, ends };
+}
+
+/** Of `apps`, those main.log shows no history read of from `from` until `to`: a start line with its end after it. */
+export function historySeen(main: readonly LogLine[], apps: readonly string[], from: number, to: number): string[] {
+  const { asks, ends } = historyLines(main, from, to);
+  return apps.filter((app) => !asks.some((ask) => ask.app === app && ends.some((end) => end.app === app && end.at >= ask.at)));
+}
+
 /**
- * A5's reading. `failures`: each history read A asked of B (its start line, whatever B answers it from: its ring, its
+ * The case's verdict on its bounded wait for the reading: the reading's failures when the wait completed (nothing in
+ * flight, its observation period over); otherwise why it did not, since the last read that answered may be an early
+ * one that every later read failed to repeat.
+ */
+export function besideOutcome(bounded: { done: boolean; last: { failures: string[]; inFlight: string[] } | null; error: string | null }, withinMs: number): string[] {
+  const { done, last, error } = bounded;
+  if (done && last !== null) return [...last.failures, ...last.inFlight.map((r) => `still in flight: ${r}`)];
+  const why = error ?? (last === null ? 'no answer' : last.inFlight.length > 0 ? `still in flight: ${last.inFlight.join(', ')}` : 'its observation period did not end');
+  return [`the reading did not complete within ${withinMs} ms: ${why}`];
+}
+
+/**
+ * A5's reading. It stands on each opened session's first read before the stall: without those start lines (a timing
+ * log not reached, a changed format) it would see no read at all. `failures`: each history read A asked of B (its start line, whatever B answers it from: its ring, its
  * journal or disk) between the restore and A's `subbed` of the live session's stream; and each whole-launch read on B
  * (`session.events <app> after start`) between the restore and B's own `subbed` of it, which B writes at the read's end,
  * so one that began before that subbed and ended after the restore counts. `inFlight`: each read asked since the restore
@@ -478,15 +515,10 @@ export function historyReadsBeside(input: BesideInput): { failures: string[]; in
   const answered = kindOf(readAll(input.endpoint), 'endpoint-subbed').find((r) => r.line.what === what && r.at >= restoredAt);
   if (heard === undefined) failures.push(`${carrier}: main.log has no subscription … ${what}: subbed line after the restore`);
   if (answered === undefined) failures.push(`${carrier}: B's mawsd.log has no sub … ${what}: subbed line after the restore`);
-  const asks: { app: string; at: number }[] = [];
-  const ends: { app: string; at: number }[] = [];
-  for (const { at, text } of input.main) {
-    if (at < restoredAt) continue;
-    const start = HISTORY_ASKED.exec(text);
-    if (start !== null) asks.push({ app: start[1]!, at });
-    const end = HISTORY_READ.exec(text);
-    if (end !== null) ends.push({ app: end[1]!, at });
+  for (const app of historySeen(input.main, input.sessions, input.launchedAt, input.stalledAt)) {
+    failures.push(`${carrier}: main.log has no history read of session ${app} between the launch and the stall (an asked line and its end): the check would see no read`);
   }
+  const { asks, ends } = historyLines(input.main, restoredAt, Infinity);
   if (heard !== undefined) {
     for (const ask of asks.filter((a) => a.at < heard.at)) failures.push(`${carrier}: A asked B for session ${ask.app}'s history at +${ms(ask.at)} ms, before it heard B's subbed of the live session ${live} at +${ms(heard.at)} ms`);
   }

@@ -57,7 +57,7 @@ import { FIXTURE_ENGINE_VERSION } from '../test/support/engine-pin';
 import { LATENCY_STUB, markerOf, writeLatencyEngine } from '../test/support/latency-engine';
 import { parseLogText, positionOf, readLogLines } from '../test/support/main-log';
 import { boundsOf, budgetMisses, CARRIERS, invalidReasons, loadVerdict, remoteLine, rttStats, type Bounds, type Carrier, type Exchange, type RemoteMeasures } from '../test/support/remote-latency';
-import { boundMissMessage, historyReadsBeside, INJECT_AFTER_STALL_MS, lastPageIn, linkPending, ruleBContext, RESUME_PAGE_EVENTS, markersNotOnce, placeOfEvent, readWake, sixMissing, sixSubscriptions, subscriptionsIn, unavailableSummary, VOID_LOAD, WAKE_CASE, wakeSummary, wakeTimingSummary, wakeVerdict, type LoadInstant, type LoadRead, type WakeRecord } from '../test/support/remote-wake';
+import { besideOutcome, boundMissMessage, historyReadsBeside, historySeen, INJECT_AFTER_STALL_MS, lastPageIn, linkPending, ruleBContext, RESUME_PAGE_EVENTS, markersNotOnce, placeOfEvent, readWake, sixMissing, sixSubscriptions, subscriptionsIn, unavailableSummary, VOID_LOAD, WAKE_CASE, wakeSummary, wakeTimingSummary, wakeVerdict, type LoadInstant, type LoadRead, type WakeRecord } from '../test/support/remote-wake';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { QUIET_BUDGET_MS, quietWait, type QuietAdmission } from './support/quiet';
 import { cleanupAll, lastTurn, linkOf, localCase, main, measureTurns, now, openToFirstRow, pings, probe, prompt, raw, roundTrips, statsOf, trust, TURN_MS, writtenOf, type CaseResult } from './support/remote-latency-page';
@@ -713,6 +713,8 @@ test('U9 A5: beside a live session’s resume, a cold session’s pane reads not
       await expect.poll(async () => (await paneText(page, i)).includes(last), { timeout: 60_000, message: `A's pane ${i} shows B's session ${s.app} to its last turn (${last})` }).toBe(true);
     }
     await expect.poll(() => subscriptionsIn(mainLog(), b.ref, launchedAt).has(liveWhat), { timeout: READ_WITHIN_MS, message: `main.log's subbed line for ${liveWhat} since the launch` }).toBe(true);
+    // the check below stands on A's history start lines: each pane's first read shows its start and its end before the stall
+    await expect.poll(() => historySeen(mainLog(), [live.app, cold.app], launchedAt, Infinity), { timeout: READ_WITHIN_MS, message: "main.log's history start and end lines of each pane's first read (received: the sessions without)" }).toEqual([]);
 
     // 2. and 3. The wake case's stall, the live session's turns written unseen, B past its resume window, the hour asleep
     const stalledAt = Date.now();
@@ -746,9 +748,9 @@ test('U9 A5: beside a live session’s resume, a cold session’s pane reads not
     //    read on B before B's; read once every read since the restore has ended (A's start and end lines pair) and past
     //    the settled word's backstop after that subbed, so no read that would have started is still to come
     const heardAt = Date.now();
-    const besideOf = () => historyReadsBeside({ carrier: 'direct', ref: b.ref, live: live.app, main: mainLog(), endpoint: endpointLog(), host: readLogLines(hostLog), restoredAt });
+    const besideOf = () => historyReadsBeside({ carrier: 'direct', ref: b.ref, live: live.app, sessions: [live.app, cold.app], main: mainLog(), endpoint: endpointLog(), host: readLogLines(hostLog), launchedAt, stalledAt, restoredAt });
     const final = await within(besideOf, (r) => r.inFlight.length === 0 && Date.now() >= heardAt + PAST_BACKSTOP_MS, READ_WITHIN_MS);
-    const reads = final.last === null ? [`A's main.log or B's logs could not be read: ${final.error ?? 'no answer'}`] : [...final.last.failures, ...final.last.inFlight.map((r) => `a history read still in flight after ${READ_WITHIN_MS} ms: ${r}`)];
+    const reads = besideOutcome(final, READ_WITHIN_MS); // the reading completed, or why not
     console.log(`[remote-beside] restore at +${restoredAt - stalledAt} ms after the stall; ${reads.length === 0 ? 'no history read beside the resume' : reads.join('; ')}`);
     expect(reads, 'no history read asked or made between the restore and the live session’s subbed, and none left in flight').toEqual([]);
   } finally {
