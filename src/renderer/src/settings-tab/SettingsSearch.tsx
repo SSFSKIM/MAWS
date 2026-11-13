@@ -34,6 +34,7 @@ export function SettingsSearch({ keymap, field, onChoose, children }: { keymap: 
   const searching = keymap !== null && query.trim() !== '';
   const results = searching ? searchSettings(query, { rows: SETTINGS_ROWS, shown, bindings, orgGroups }) : [];
   const current = Math.min(active, results.length - 1); // -1 with no results
+  const listed = results.length > 0; // the field controls a listbox only while one is drawn
   const optionId = (i: number) => `${listId}-${i}`;
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -69,8 +70,8 @@ export function SettingsSearch({ keymap, field, onChoose, children }: { keymap: 
             aria-label={INDEX.search}
             placeholder={INDEX.search}
             aria-autocomplete="list"
-            aria-expanded={searching}
-            aria-controls={searching ? listId : undefined}
+            aria-expanded={listed}
+            aria-controls={listed ? listId : undefined}
             aria-activedescendant={current >= 0 ? optionId(current) : undefined}
             maxLength={200}
             value={query}
@@ -88,7 +89,9 @@ export function SettingsSearch({ keymap, field, onChoose, children }: { keymap: 
         {!searching ? (
           children
         ) : results.length === 0 ? (
-          <p className="m-0 line-clamp-2 px-2 py-1.5 text-ui-sm leading-normal text-fg-muted">{INDEX.noMatch}</p>
+          <p role="status" className="m-0 line-clamp-2 px-2 py-1.5 text-ui-sm leading-normal text-fg-muted">
+            {INDEX.noMatch}
+          </p>
         ) : (
           <div role="listbox" id={listId} aria-label={INDEX.search} className="flex flex-col">
             {results.map((result, i) => (

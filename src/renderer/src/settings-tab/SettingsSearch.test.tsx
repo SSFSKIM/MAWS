@@ -101,7 +101,20 @@ describe('Search settings: the field and its results', () => {
     renderView();
     type('zebra crossing');
     expect(options()).toEqual([]);
-    expect(within(index()).getByText('No matching settings')).toBeTruthy();
+    expect(within(index()).getByRole('status').textContent).toBe('No matching settings');
+  });
+
+  it('controls the listbox only while one is drawn: expanded with results, collapsed and naming none with no match', () => {
+    renderView();
+    expect(field().getAttribute('aria-expanded')).toBe('false');
+    expect(field().hasAttribute('aria-controls')).toBe(false);
+    type('mcp');
+    expect(field().getAttribute('aria-expanded')).toBe('true');
+    expect(document.getElementById(field().getAttribute('aria-controls')!)).toBe(within(index()).getByRole('listbox'));
+    type('zebra crossing');
+    expect(field().getAttribute('aria-expanded')).toBe('false');
+    expect(field().hasAttribute('aria-controls')).toBe(false);
+    expect(field().hasAttribute('aria-activedescendant')).toBe(false);
   });
 
   it('preselects the first result and moves with Down and Up, the keyboard staying in the field', () => {
@@ -205,6 +218,14 @@ describe('Search settings: choosing a result', () => {
     expect(optionTexts()).toEqual(['Memory budget · Supervisor']);
     press('Enter');
     expect(document.activeElement).toBe(row('Memory budget'));
+  });
+
+  it('a binding’s mark is not clipped by its table, which rounds its corner rows instead', () => {
+    renderView();
+    const table = screen.getByRole('table', { name: 'Key bindings' });
+    expect(table.classList.contains('overflow-hidden')).toBe(false);
+    expect(table.className).toContain('[&>[role=rowgroup]:first-child>[role=row]:first-child]:rounded-t-sm');
+    expect(table.className).toContain('[&>[role=rowgroup]:last-child>[role=row]:last-child]:rounded-b-sm');
   });
 
   it('lands on a section’s heading and on a key binding’s row in the table', () => {

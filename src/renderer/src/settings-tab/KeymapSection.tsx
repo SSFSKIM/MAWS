@@ -13,6 +13,10 @@ import { useDrawnRow } from './drawn';
 import { captureChord, displayChord, keymapGroups, type KeymapRow } from './keymap';
 import { LANDING, TEXT_ACTION, writeSettings } from './parts';
 
+// The table's rounded corners on the rows that touch them (a group's raised heading on top, a recording row's tint at the
+// bottom), in place of clipping the table
+const TABLE_CORNERS = '[&>[role=rowgroup]:first-child>[role=row]:first-child]:rounded-t-sm [&>[role=rowgroup]:last-child>[role=row]:last-child]:rounded-b-sm';
+
 function withChord(keymap: KeymapOverrides, id: ActionId, chord: string | null): KeymapOverrides {
   const next = { ...keymap };
   if (chord === ACTIONS[id].chord) delete next[id];
@@ -66,7 +70,9 @@ export function KeymapSection({ keymap }: { keymap: KeymapOverrides }) {
 
   return (
     <>
-      <div role="table" aria-label={KEYBOARD.table} data-settings-row="keyboard.bindings" data-settings-state="default" tabIndex={-1} className={`mt-1 overflow-hidden border border-border ${LANDING}`}>
+      {/* U11a M10: the table rounds its first and last rows' corners itself rather than clipping, so a binding the search
+          lands on draws its mark 8 px around it (SettingsSearch.tsx `MARK`) */}
+      <div role="table" aria-label={KEYBOARD.table} data-settings-row="keyboard.bindings" data-settings-state="default" tabIndex={-1} className={`mt-1 border border-border ${TABLE_CORNERS} ${LANDING}`}>
         {keymapGroups(keymap).map((group) => (
           <div key={group.label} role="rowgroup" aria-label={group.label}>
             <div role="row" className="border-t border-border bg-bg-raised px-2.5 py-1 text-ui-sm font-semibold tracking-wide text-fg-muted uppercase first:border-t-0">

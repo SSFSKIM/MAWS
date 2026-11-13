@@ -2,7 +2,8 @@
 // session running): one query for Customize's page and, before a chat's first message, its Connectors and Skills dialogs
 // and the "+" › Connectors submenu (UX wave U11a, §D). One key, so they share the answer; a stale time, so opening the
 // submenu twice reads once. Every CLI change the runner makes (an MCP server added or removed among them) marks every
-// folder's answer stale at the cache itself, one listener per query client for as long as it lives, so a reader mounted
+// folder's answer stale at the cache itself, one listener per query client (the WeakSet only keeps a second from being
+// added; the event source holds the listener, and the client through it, for the window's life), so a reader mounted
 // later, or one not fetching now (the "+" menu closed), reads again instead of a pre-change answer inside the stale
 // time; a reader fetching now reads again at once, and a disabled one starts no read until it is enabled.
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
