@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { callClass, rowClaim } from '@shared/files/named';
 import { StoreFixture } from '../../../test/support/store-fixture';
-import { createNamedPaths, NAMED_CHUNK_BYTES, NAMED_FINGERPRINT_BYTES, NAMED_ROW_BYTES, NAMED_SCAN_BYTES, NAMED_WAIT_MS, NAMED_WAITING_MAX, NAMED_CACHE_ENTRIES, NAMED_PENDING_MAX, NAMED_CLAIM_STEPS, type NamedPathsOptions } from './named';
+import { createNamedPaths, NAMED_CHUNK_BYTES, NAMED_FINGERPRINT_BYTES, NAMED_ROW_BYTES, NAMED_SCAN_BYTES, NAMED_WAIT_MS, NAMED_WAITING_MAX, NAMED_CACHE_ENTRIES, NAMED_PENDING_MAX, NAMED_CLAIM_STEPS, NAMED_PATH_MAX, type NamedPathsOptions } from './named';
 
 const S = 'app-named' as AppSessionId;
 const P = '/work/out/report.md';
@@ -137,7 +137,7 @@ afterEach(async () => {
 
 describe('the bounds', () => {
   it('are the document’s', () => {
-    expect({ NAMED_SCAN_BYTES, NAMED_CHUNK_BYTES, NAMED_ROW_BYTES, NAMED_CACHE_ENTRIES, NAMED_WAITING_MAX, NAMED_WAIT_MS, NAMED_FINGERPRINT_BYTES, NAMED_PENDING_MAX, NAMED_CLAIM_STEPS }).toEqual({
+    expect({ NAMED_SCAN_BYTES, NAMED_CHUNK_BYTES, NAMED_ROW_BYTES, NAMED_CACHE_ENTRIES, NAMED_WAITING_MAX, NAMED_WAIT_MS, NAMED_FINGERPRINT_BYTES, NAMED_PENDING_MAX, NAMED_CLAIM_STEPS, NAMED_PATH_MAX }).toEqual({
       NAMED_SCAN_BYTES: 1024 ** 3,
       NAMED_CHUNK_BYTES: 1024 * 1024,
       NAMED_ROW_BYTES: 4 * 1024 * 1024,
@@ -147,6 +147,7 @@ describe('the bounds', () => {
       NAMED_FINGERPRINT_BYTES: 4096,
       NAMED_PENDING_MAX: 256,
       NAMED_CLAIM_STEPS: 64,
+      NAMED_PATH_MAX: 4096,
     });
   });
 });
@@ -620,6 +621,19 @@ describe('the queue (S14, S15)', () => {
       loop.stop();
     }
     expect(loop.ticks() - opened).toBeGreaterThanOrEqual(text.length / (64 * 1024));
+  });
+
+  // The work meter's fix pass (the task review, item 2): `files.read` asks for a missing file's path too, which no
+  // `realpath` has bounded and no schema caps; a path longer than NAMED_PATH_MAX (the largest PATH_MAX of the platforms)
+  // is not named, at once, and its session's transcript is not looked for.
+  it('a path longer than NAMED_PATH_MAX is not named, and the locator is never asked', async () => {
+    const over = `/work/missing/${'d'.repeat(NAMED_PATH_MAX)}.md`;
+    const under = `/work/missing/${'d'.repeat(NAMED_PATH_MAX - 20)}.md`;
+    await writeTranscript([linkTo(over), linkTo(under)]);
+    const locate = vi.fn(async () => file);
+    expect(await paths({ transcript: locate }).names(S, over)).toBe(false);
+    expect(locate).not.toHaveBeenCalled();
+    expect(await paths().names(S, under)).toBe(true); // under the bound, a long path is read as any
   });
 
   // fix round 1, item 3: a request's patience and its signal run from the moment it is made, the locator's wait

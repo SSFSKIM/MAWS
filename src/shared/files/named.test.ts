@@ -5,7 +5,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { anchoredMessage, parseAnchoredText } from '@shared/anchor/message';
-import { anchorPath, callClass, chipPath, clickPath, EDIT_TOOLS, hrefOf, isMcpTool, linkPaths, linkWork, needlesOf, normalizeLexically, READ_TOOLS, rowClaim, STRETCH_MAX, WORK_FLOOR, WORK_PER_CHAR } from './named';
+import { anchorPath, callClass, chipPath, clickPath, EDIT_TOOLS, hrefOf, isMcpTool, linkPaths, linkWork, needlesOf, normalizeLexically, PAUSE, READ_TOOLS, rowClaim, rowClaimSteps, STRETCH_MAX, WORK_FLOOR, WORK_PER_CHAR } from './named';
 
 const P = '/work/out/report.md';
 
@@ -258,6 +258,39 @@ describe('the scan’s work, bounded by construction (Decision Log 24)', () => {
     ['a thousand nested images, then links', `${'!['.repeat(1000)}${`[r](${P})`.repeat(1000)}`],
   ])('%s', (_, text) => {
     bounded(text);
+  });
+
+  // The round's fix pass (the task review): work the string probes cannot see. A table of a hundred rows of twelve
+  // thousand pipes makes 1.2 million empty cells, each a context the inline pass is called for; every step of every
+  // array iteration is counted (the array iterator's `next`, patched), from one pause of the scan to the next.
+  it('a table of 1.2 million empty cells: each context dispatched is charged, and the scan pauses between them', () => {
+    const text = `${'|'.repeat(4000)}\n|${'-|'.repeat(3999)}\n${`${'|'.repeat(12_000)}\n`.repeat(100)}\n[r](${P}.bak)`;
+    const iterator = Object.getPrototypeOf([][Symbol.iterator]()) as { next: (this: unknown) => IteratorResult<unknown> };
+    const { next } = iterator;
+    let since = 0;
+    let longest = 0;
+    iterator.next = function (this: unknown) {
+      since += 1;
+      return next.call(this);
+    };
+    try {
+      const steps = rowClaimSteps({ type: 'assistant', message: { content: [{ type: 'text', text }] } }, P);
+      for (let step = steps.next(); !step.done; step = steps.next()) {
+        if (step.value !== PAUSE) continue;
+        longest = Math.max(longest, since);
+        since = 0;
+      }
+    } finally {
+      iterator.next = next;
+    }
+    longest = Math.max(longest, since);
+    expect(longest).toBeLessThanOrEqual(STRETCH_MAX);
+    bounded(text);
+  });
+
+  it('a refusal at a cap counts the work spent reaching it', () => {
+    expect(linkWork(`${'> '.repeat(40)}x`).work).toBeGreaterThanOrEqual(2 * 32); // past 32 markers
+    expect(linkWork(`- x${' '.repeat(20_000)}`).work).toBeGreaterThanOrEqual(16 * 1024); // a thematic tail past 16 KiB
   });
 
   // One seeded generator of hostile shapes, each part sized from ten to twenty thousand: marker towers, bracket towers,
