@@ -8,7 +8,7 @@ import { attachQueue, resetQueueStore } from '../../stores/queue';
 import { useSessions } from '../../stores/sessions';
 import { useSetup } from '../../sessions/store';
 import { trustState } from '../../test-support/setup-intents';
-import { sendHumanPrompt } from './send-human-prompt';
+import { sendHumanPrompt, sendWithoutAcquiring } from './send-human-prompt';
 import { TEST_MACHINE } from '../../../../../test/support/machine';
 
 const APP = 'app-human' as AppSessionId;
@@ -268,5 +268,46 @@ describe('the human send seam', () => {
     const rejection = expect(sending).rejects.toThrow('write failed');
     await fake.fail('session.send', 'write failed');
     await rejection;
+  });
+});
+
+// UX wave U4a (l3-input-03; the execution document's Interfaces D): ⌘Enter is `when: 'after'` on the one seam. While a
+// turn runs it is `session.send`, which the host's queue holds for after the turn, and never a steer; with no turn
+// running it changes nothing.
+describe('a prompt kept for after the running turn (when: after)', () => {
+  const queuedAnswer = { disposition: 'queued', queueId: 'q-after', messageUuid: null };
+
+  it('sends to a busy session on this Mac, which queues it, and never steers', async () => {
+    ready({ turn: humanTurn });
+    const fake = fakeClient({ 'session.send': queuedAnswer, 'session.steer': { messageUuid: UUID }, 'session.queue.list': { entries: [], paused: false } });
+    expect(await sendHumanPrompt(APP, 'after this', { origin: 'composer', when: 'after' }, fake.client)).toEqual({ disposition: 'queued', started: false, queueId: 'q-after' });
+    expect(fake.invoked('session.send')).toEqual([{ appSessionId: APP, content: 'after this' }]);
+    expect(fake.invoked('session.steer')).toEqual([]);
+  });
+
+  it('counts a submitting entry as busy as Enter does, and still sends', async () => {
+    ready();
+    const fake = fakeClient({ 'session.queue.list': { entries: [entry], paused: false }, 'session.send': queuedAnswer, 'session.steer': { messageUuid: UUID } });
+    expect(await sendHumanPrompt(APP, 'after this', { origin: 'composer', when: 'after' }, fake.client)).toMatchObject({ disposition: 'queued' });
+    expect(fake.invoked('session.steer')).toEqual([]);
+  });
+
+  it('sends an idle session’s prompt as Enter does', async () => {
+    ready();
+    const fake = makeClient();
+    expect(await sendHumanPrompt(APP, 'now', { origin: 'composer', when: 'after' }, fake.client)).toEqual({ disposition: 'sent', started: false, messageUuid: UUID });
+    expect(fake.invoked('session.send')).toEqual([{ appSessionId: APP, content: 'now' }]);
+    expect(fake.invoked('session.steer')).toEqual([]);
+  });
+
+  it('sends to a busy session on another machine with one invocation, and never steers', async () => {
+    ready({ turn: humanTurn });
+    const fake = fakeClient({ 'session.send': queuedAnswer, 'session.steer': { messageUuid: UUID } });
+    expect(await sendWithoutAcquiring(APP, 'after this', { origin: 'composer', when: 'after' }, fake.client)).toEqual({ disposition: 'queued', started: false, queueId: 'q-after' });
+    expect(fake.invoked('session.send')).toEqual([{ appSessionId: APP, content: 'after this' }]);
+    expect(fake.invoked('session.steer')).toEqual([]);
+    // without the option the same busy session is steered, as today
+    expect(await sendWithoutAcquiring(APP, 'fold in', { origin: 'composer' }, fake.client)).toMatchObject({ disposition: 'steered' });
+    expect(fake.invoked('session.steer')).toEqual([{ appSessionId: APP, content: 'fold in', priority: 'next' }]);
   });
 });

@@ -18,7 +18,9 @@ import { fakeClient, type FakeClient } from '../../../../test/support/fake-clien
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { addressOf } from '@shared/machine/address'; // P5 O7 M2
 import { project, remoteRow } from '../../../../test/support/builders'; // P5 O7 M2; M4: project
-import { REATTACHING_STOP_REMOTE } from './submit/submit-state'; // P5 O16 M3b fix wave 2
+import { PLACEHOLDER_BOTH, PLACEHOLDER_ENTER, REATTACHING_STOP_REMOTE, TERMINAL_KEEPS_NO_QUEUE } from './submit/submit-state'; // P5 O16 M3b fix wave 2; UX wave U4a: the placeholders and the terminal's refusal
+import { applyLaneAState, resetLaneAStore } from '../stores/lane-a'; // UX wave U4a
+import { laneAState } from '../lane-a/test-support/lane-a-state'; // UX wave U4a
 import { useMachines } from '../stores/machines'; // P5 O7 M2
 import { applyRemoteSession, resetRemoteLaneBStore } from '../lane-b/remote-session'; // P5 O7 M2
 import { ALL_OPEN, remoteSessionState } from '../lane-b/test-support/remote-session'; // P5 O7 M2
@@ -51,7 +53,7 @@ import { Composer, FILES_FOR_ANOTHER_MACHINE } from './Composer';
 import { ComposerAppKeys } from './ComposerAppKeys';
 import { DockedCardFrame } from './docked/DockedCardFrame';
 import { dockCard, resetDockedCards } from './docked/registry';
-import { docOf, mentionNode, paragraph, textNode } from './editor/doc';
+import { docOf, hardBreak, mentionNode, paragraph, textNode } from './editor/doc';
 import { ON_THIS_MAC, STALE_UPLOADS } from './editor/remote-uploads'; // P5 O7 M4 (fix wave 1); M8: STALE_UPLOADS
 import { UPLOAD_KEPT_MS } from '@shared/ipc/schema/files'; // P5 O7 M8
 import { REMOTE_UPLOAD_REFUSED_WORDS } from '@shared/ipc/schema/remote'; // P5 O7 M8
@@ -218,7 +220,8 @@ describe("composer DOM under C5's dispatcher", () => {
     await type('fold this in');
     act(() => editorOf().focus());
     await waitFor(() => expect(primary().textContent).toBe('Send'));
-    expect(primary().title).toBe('Sends at the next step (Enter)');
+    expect(primary().title).toBe('Sends at the next step (Enter) · ⌘Enter queues for later'); // UX wave U4a
+    expect(primary().dataset.glyph).toBe('queue'); // UX wave U4a: the queue mark
     expect(primary().getAttribute('aria-description')).toBe('Sends at the next step');
     // ⌥ held changes nothing, and nothing sits beside the button
     await act(async () => void editorOf().dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt', altKey: true, bubbles: true })));
@@ -303,7 +306,7 @@ describe("composer DOM under C5's dispatcher", () => {
     await waitFor(() => expect(primary().textContent).toBe('Stop'));
     await type('second');
     await waitFor(() => expect(primary().textContent).toBe('Send'));
-    expect(primary().title).toBe('Sends at the next step (Enter)');
+    expect(primary().title).toBe('Sends at the next step (Enter) · ⌘Enter queues for later'); // UX wave U4a
     expect(within(composerOf(0)).queryByRole('button', { name: 'Stop' })).toBeNull(); // W10: nothing beside it
   });
 
@@ -785,6 +788,106 @@ describe("composer DOM under C5's dispatcher", () => {
     await user.click(await screen.findByRole('menuitem', { name: 'Add directory…' }));
     await waitFor(() => expect(stub.patch).toHaveBeenCalledWith({ additionalDirectories: ['/work/other', '/work/picked'] }));
     expect(invoked('session.applyFlagSettings')).toEqual([]);
+  });
+});
+
+// UX wave U4a (l3-input-08, l3-input-03): Enter always sends, ⌘Enter keeps a message for after the running turn, and
+// the empty box says which key does what while a turn runs
+describe('sending from the box', () => {
+  const placeholder = () => editorOf().querySelector('[data-placeholder]')?.getAttribute('data-placeholder') ?? null;
+  const cmdEnter = () => key(editorOf(), { key: 'Enter', code: 'Enter', metaKey: true });
+
+  it('⌘Enter during a turn sends for after it and clears the draft; idle, ⌘Enter and Enter send alike', async () => {
+    live(A);
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
+    act(() => editorOf().focus());
+    await type('idle one');
+    await cmdEnter();
+    await waitFor(() => expect(invoked('session.send')).toEqual([{ appSessionId: A_ID, content: 'idle one' }]));
+    await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
+    await type('idle two');
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(invoked('session.send')).toHaveLength(2));
+    expect(invoked('session.send')[1]).toEqual({ appSessionId: A_ID, content: 'idle two' });
+    await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
+
+    busy(A);
+    await type('after the turn');
+    await cmdEnter();
+    await waitFor(() => expect(invoked('session.send')).toHaveLength(3));
+    expect(invoked('session.send')[2]).toEqual({ appSessionId: A_ID, content: 'after the turn' });
+    await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
+    expect(invoked('session.steer')).toEqual([]);
+    expect(invoked('session.history.append').map((i) => (i as { display: string }).display)).toEqual(['idle one', 'idle two', 'after the turn']);
+  });
+
+  it('sends a draft of several lines on Enter, during a turn as at the next step', async () => {
+    busy(A);
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
+    act(() => void editorOf().editor.commands.setContent(docOf([paragraph(textNode('one'), hardBreak(), textNode('two'), hardBreak(), textNode('three'))])));
+    act(() => editorOf().focus());
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(invoked('session.steer')).toEqual([{ appSessionId: A_ID, content: 'one\ntwo\nthree', priority: 'next' }]));
+  });
+
+  it('the empty box reads both keys while a turn runs, and its own words otherwise', async () => {
+    live(A);
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(placeholder()).not.toBeNull());
+    expect(placeholder()).not.toBe(PLACEHOLDER_BOTH);
+    busy(A);
+    await waitFor(() => expect(placeholder()).toBe(PLACEHOLDER_BOTH));
+    expect(PLACEHOLDER_BOTH).toBe('Enter to send, ⌘Enter to queue for later');
+    live(A);
+    await waitFor(() => expect(placeholder()).not.toBe(PLACEHOLDER_BOTH));
+  });
+
+  it('an unstarted New chat starts on Enter whatever the line count, and on ⌘Enter as on Enter', async () => {
+    const stub = stubIntent();
+    mount([{ index: 0, id: A }]);
+    act(() => void editorOf().editor.commands.setContent(docOf([paragraph(textNode('one'), hardBreak(), textNode('two'), hardBreak(), textNode('three'))])));
+    act(() => editorOf().focus());
+    await key(editorOf(), { key: 'Enter' });
+    expect(stub.start).toHaveBeenCalledWith({ content: 'one\ntwo\nthree', display: 'one\ntwo\nthree' });
+    await stub.answer({ ok: false, error: 'refused for the test' });
+    await waitFor(() => expect(isStarting(useComposerStore.getState(), A)).toBe(false));
+    await cmdEnter();
+    await waitFor(() => expect(stub.start).toHaveBeenCalledTimes(2));
+  });
+
+  describe('a terminal session', () => {
+    const terminalTurn = (running: boolean) => {
+      live(A, { status: { process: 'exited' }, record: { holder: { kind: 'terminal', pid: 4242 } } });
+      act(() => applyLaneAState(A, laneAState(A, { turn: { running, unknown: false } })));
+    };
+    beforeEach(() => onTestFinished(() => resetLaneAStore()));
+
+    it('reads Enter alone while its turn runs, and refuses ⌘Enter there with the sentence, the draft kept and nothing sent', async () => {
+      terminalTurn(true);
+      mount([{ index: 0, id: A }]);
+      await waitFor(() => expect(placeholder()).toBe(PLACEHOLDER_ENTER));
+      act(() => editorOf().focus());
+      await type('for later');
+      await cmdEnter();
+      await waitFor(() => expect(useNotices.getState().notices.map((n) => [n.text, n.actions.map((a) => a.label)])).toEqual([[TERMINAL_KEEPS_NO_QUEUE, []]]));
+      expect(fake.invoked('laneA.send')).toEqual([]);
+      expect(editorOf().editor.getText()).toBe('for later');
+      await key(editorOf(), { key: 'Enter' });
+      await waitFor(() => expect(fake.invoked('laneA.send')).toEqual([{ appSessionId: A_ID, text: 'for later' }]));
+    });
+
+    it('sends ⌘Enter with no turn running', async () => {
+      terminalTurn(false);
+      mount([{ index: 0, id: A }]);
+      await waitFor(() => expect(editorOf()).toBeTruthy());
+      expect(placeholder()).not.toBe(PLACEHOLDER_ENTER);
+      act(() => editorOf().focus());
+      await type('now');
+      await cmdEnter();
+      await waitFor(() => expect(fake.invoked('laneA.send')).toEqual([{ appSessionId: A_ID, text: 'now' }]));
+    });
   });
 });
 

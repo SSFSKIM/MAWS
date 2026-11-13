@@ -71,8 +71,8 @@ describe('the editor mounts over its draft, takes prefills and submits through t
     expect(saved).toEqual([]); // the write waits for the pause
   });
 
-  it('sends on ⌘Enter from the editor through C5’s dispatcher, then clears and drops the draft', async () => {
-    const onSubmit = vi.fn<(s: Serialized) => Promise<boolean>>(async () => true);
+  it('submits on ⌘Enter from the editor through C5’s dispatcher, then clears and drops the draft', async () => {
+    const onSubmit = vi.fn<(s: Serialized, when?: 'after') => Promise<boolean>>(async () => true);
     const { port, saved } = drafts({ doc: docOf([paragraph(textNode('hello'))]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
     const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} />);
     const content = contentOf(container);
@@ -83,6 +83,7 @@ describe('the editor mounts over its draft, takes prefills and submits through t
     });
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit.mock.calls[0][0]).toMatchObject({ mode: 'send', content: 'hello', display: 'hello' });
+    expect(onSubmit.mock.calls[0][1]).toBe('after'); // UX wave U4a: ⌘Enter keeps it for after a running turn
     await waitFor(() => expect(content.textContent).toBe(''));
     expect(saved).toEqual([null]);
   });
@@ -245,43 +246,54 @@ describe('the editor mounts over its draft, takes prefills and submits through t
     await act(async () => {
       content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true }));
     });
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ content: 'keep me' })));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ content: 'keep me' }), 'after'));
     expect(content.textContent).toBe('keep me');
     expect(saved).toEqual([]);
   });
 
-  it('sends nothing on ⌥Enter: the hold chord is gone (W10)', async () => {
-    const onSubmit = vi.fn(async () => true);
-    const { port } = drafts({ doc: docOf([paragraph(textNode('not yet'))]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
-    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} />);
-    const content = contentOf(container);
-    await waitFor(() => expect(content.textContent).toBe('not yet'));
-    content.focus();
-    await act(async () => {
-      content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', altKey: true, bubbles: true, cancelable: true }));
-    });
-    await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 20))));
-    expect(onSubmit).not.toHaveBeenCalled();
-    expect(content.textContent).toBe('not yet');
-  });
-
-  it('sends on a plain Enter in a one-line document, and breaks the line with it once the document has more lines', async () => {
-    const onSubmit = vi.fn<(s: Serialized) => Promise<boolean>>(async () => false);
-    const multiline = docOf([paragraph(textNode('one'), hardBreak(), textNode('two'))]);
-    const { port } = drafts({ doc: multiline, attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
+  // UX wave U4a (l3-input-08): Enter sends whatever the line count; Shift+Enter and ⌥Enter break the line
+  it('sends a three-line draft on a plain Enter; Shift+Enter and ⌥Enter each break the line and send nothing; a composing Enter sends nothing', async () => {
+    const onSubmit = vi.fn<(s: Serialized, when?: 'after') => Promise<boolean>>(async () => false);
+    const threeLines = docOf([paragraph(textNode('one'), hardBreak(), textNode('two'), hardBreak(), textNode('three'))]);
+    const { port } = drafts({ doc: threeLines, attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
     const handle = createRef<EditorHandle>();
     const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} handle={handle} />);
     const content = contentOf(container);
-    await waitFor(() => expect(handle.current?.serialize().display).toBe('one\ntwo'));
+    await waitFor(() => expect(handle.current?.serialize().display).toBe('one\ntwo\nthree'));
     content.focus();
-    const enter = () => act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
-    await enter();
+    const press = (init: KeyboardEventInit) => act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...init })));
+    await press({ shiftKey: true });
+    await press({ altKey: true });
+    expect(handle.current?.serialize().display.split('\n')).toHaveLength(5); // two line breaks added, in the one paragraph
+    expect(handle.current?.doc().content).toHaveLength(1);
+    await press({ isComposing: true });
+    await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 20))));
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(handle.current?.doc().content).toHaveLength(2); // a new line, not a send
-    act(() => handle.current?.clear());
-    act(() => handle.current?.insertText('single'));
-    await enter();
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ content: 'single' })));
+    await press({});
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]).toEqual([expect.objectContaining({ mode: 'send' })]); // Enter names no `when`
+    expect(onSubmit.mock.calls[0]![0].display).toMatch(/one[\s\S]*two[\s\S]*three/);
+  });
+
+  // UX wave U4a (l3-input-03): ⌘Enter is `composer.queue`, which submits as Enter does with `when: 'after'`
+  it('submits on ⌘Enter with when: after, and the handle’s submit as Enter does', async () => {
+    const onSubmit = vi.fn<(s: Serialized, when?: 'after') => Promise<boolean>>(async () => false);
+    const { port } = drafts({ doc: docOf([paragraph(textNode('later'))]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
+    const handle = createRef<EditorHandle>();
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} handle={handle} />);
+    const content = contentOf(container);
+    await waitFor(() => expect(content.textContent).toBe('later'));
+    content.focus();
+    await act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true })));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]).toEqual([expect.objectContaining({ content: 'later' }), 'after']);
+    expect(content.textContent).toBe('later'); // refused: kept
+    act(() => handle.current?.submit());
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+    expect(onSubmit.mock.calls[1]).toEqual([expect.objectContaining({ content: 'later' })]);
+    act(() => handle.current?.submit('after'));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(3));
+    expect(onSubmit.mock.calls[2]![1]).toBe('after');
   });
 
   it('treats an open @ popup with no rows as no popup: Enter sends', async () => {
@@ -777,6 +789,25 @@ describe('the editor answers a plugin’s prompt read, fill and suggestion (R2)'
     await act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })));
     expect(content.textContent).toBe('MODS_PROBE_SUGGEST');
     expect(taken).toHaveBeenCalledTimes(1);
+  });
+
+  // UX wave U4a (Interfaces F): the composer's words for the empty box while a turn runs; a plugin's suggestion still wins
+  it('shows the placeholder it is given in place of its own, and a suggestion over it', async () => {
+    const { port } = drafts(null);
+    const handle = createRef<EditorHandle>();
+    const view = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} handle={handle} />);
+    await waitFor(() => expect(handle.current).not.toBeNull());
+    const shown = () => contentOf(view.container).querySelector('[data-placeholder]')?.getAttribute('data-placeholder');
+    await waitFor(() => expect(shown()).toBe('Do anything'));
+    view.rerender(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} handle={handle} placeholder="Enter to send" />);
+    act(() => handle.current!.refreshPlaceholder());
+    await waitFor(() => expect(shown()).toBe('Enter to send'));
+    view.rerender(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} handle={handle} placeholder="Enter to send" suggestion="MODS_PROBE_SUGGEST" />);
+    act(() => handle.current!.refreshPlaceholder());
+    await waitFor(() => expect(shown()).toBe('MODS_PROBE_SUGGEST'));
+    view.rerender(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} handle={handle} placeholder={null} />);
+    act(() => handle.current!.refreshPlaceholder());
+    await waitFor(() => expect(shown()).toBe('Do anything'));
   });
 });
 

@@ -26,6 +26,8 @@ const WAVE_DEFAULTS: Record<string, string | null> = {
   // U4
   'composer.queue': 'Cmd+Enter', 'composer.send': 'Cmd+Enter', 'composer.modelMenu': 'Cmd+Shift+I',
   'composer.effortMenu': 'Cmd+Shift+E', 'composer.modeMenu': 'Cmd+Shift+M', 'composer.historySearch': 'Ctrl+R',
+  'composer.submit': 'Enter', 'composer.newLine': 'Shift+Enter', 'composer.newLineOption': 'Alt+Enter',
+  'composer.takeBack': 'Up', 'composer.sendNowOrStop': 'Escape',
   // U1
   'request.allowOnce': 'Cmd+Enter', 'request.allowLasting': 'Cmd+Shift+Enter', 'request.decline': 'Escape', 'request.accept': 'Enter',
   // U11
@@ -35,7 +37,11 @@ const WAVE_DEFAULTS: Record<string, string | null> = {
   'shortcuts.open': 'Cmd+/', 'sidebar.toggle': 'Cmd+B', 'panel.toggle': 'Cmd+Shift+B', 'pane.split': 'Cmd+\\',
 };
 // The rows of landed children: each must exist (U6b adds its seven).
-const LANDED = ['surface.terminal', 'surface.review', 'surface.files'];
+const LANDED = [
+  'surface.terminal', 'surface.review', 'surface.files',
+  // U4a: M2's rows
+  'composer.submit', 'composer.newLine', 'composer.newLineOption', 'composer.queue',
+];
 
 // Decision 8 (A13 as amended): two dispatched rows share a default chord only if both are `renderer` rows and at most one
 // of them has scope `app`. Every chord a row holds counts, the nine of Select tab included.
@@ -124,6 +130,22 @@ describe('keymap: the table', () => {
     expect(Object.values(ACTIONS as ActionTable).filter((spec) => !spec.fixed).map((spec) => spec.chord)).not.toContain('Alt+Enter');
     expect(ACTIONS['composer.stop']).toMatchObject({ chord: 'Cmd+.', sink: 'renderer', menu: null, scope: 'app' });
     expect(ACTIONS['composer.focus']).toMatchObject({ chord: 'Cmd+L', sink: 'renderer', menu: null, scope: 'app' });
+  });
+
+  // UX wave U4a (Interfaces H): the editor's own keys are fixed rows; ⌘Enter is composer.queue in the main editor, tried
+  // before composer.send, which keeps the chord for the reply fields
+  it('carries the composer’s fixed keys, and composer.queue ahead of composer.send on ⌘Enter', () => {
+    const fixed = (['composer.submit', 'composer.newLine', 'composer.newLineOption'] as const).map((id) => [id, ACTIONS[id].title, ACTIONS[id].chord, (ACTIONS[id] as ActionSpec).fixed]);
+    expect(fixed).toEqual([
+      ['composer.submit', 'Send', 'Enter', true],
+      ['composer.newLine', 'New line', 'Shift+Enter', true],
+      ['composer.newLineOption', 'New line', 'Alt+Enter', true],
+    ]);
+    for (const [id] of fixed) expect(ACTIONS[id as ActionId]).toMatchObject({ sink: 'renderer', menu: null, scope: 'composer' });
+    expect(ACTIONS['composer.queue']).toEqual({ title: 'Queue for after the turn', chord: 'Cmd+Enter', sink: 'renderer', menu: null, scope: 'composer' });
+    expect(ACTIONS['composer.send']).toEqual({ title: 'Send (reply fields)', chord: 'Cmd+Enter', sink: 'renderer', menu: null, scope: 'composer' });
+    expect(ACTION_IDS.indexOf('composer.queue')).toBe(ACTION_IDS.indexOf('composer.send') - 1);
+    for (const id of ['composer.submit', 'composer.newLine', 'composer.newLineOption', 'composer.queue'] as const) expect(isRebindable(id), id).toBe(false); // build F knows none
   });
   // C7 end
 
