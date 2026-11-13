@@ -7,6 +7,7 @@
 // is opened by writing it into layout.json and reloading (C5's restore path).
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { expect, type Locator, type Page } from '@playwright/test';
+import type { AppSessionId } from '../src/shared/graph/ids';
 import type { PanelHarnessApi } from '../src/renderer/src/harness/panel/api';
 import type { CodeHarnessApi } from '../src/renderer/src/harness/code/api';
 import {
@@ -702,8 +703,8 @@ test.describe('the product in stub mode over a scratch repository', () => {
         )
         .toContain(`session:${id}`);
       await restoreWithTab(p, [
-        { id: `diff:${id}:uncommitted @ src/app.ts`, kind: 'diff', appSessionId: id, ref: 'uncommitted @ src/app.ts', pinned: false },
-        { id: `diff:${id}:uncommitted @ /etc/hosts`, kind: 'diff', appSessionId: id, ref: 'uncommitted @ /etc/hosts', pinned: false },
+        { id: `diff:${id}:uncommitted @ src/app.ts`, kind: 'diff', appSessionId: id as AppSessionId, ref: 'uncommitted @ src/app.ts', pinned: false },
+        { id: `diff:${id}:uncommitted @ /etc/hosts`, kind: 'diff', appSessionId: id as AppSessionId, ref: 'uncommitted @ /etc/hosts', pinned: false },
       ]);
       const tabs = mainTabs(p.page);
       await expect(tabs.getByRole('tab', { name: /^Diff · uncommitted @ \/etc\/hosts/ })).toBeVisible({ timeout: 15_000 });

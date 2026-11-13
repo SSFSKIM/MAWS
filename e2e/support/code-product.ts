@@ -232,7 +232,7 @@ export async function restoreWithTab(p: Product, tabs: TabRef[]): Promise<void> 
   const { strip, canonical } = stripOf(stored!);
   expect(canonical, 'the strip as U13a stores it').toBe(true);
   const pane = strip.panes[strip.focusedPane];
-  const next: Strip = { ...strip, panes: strip.panes.map((each) => (each === pane ? { tabs: [...each.tabs, ...tabs], activeTabId: tabs.at(-1)!.id } : each)) };
+  const next: Strip = { ...strip, panes: strip.panes.map((each) => (each === pane ? { tabs: [...each.tabs, ...tabs], activeTabId: tabs.at(-1)!.id } : each)) as Strip['panes'] };
   await p.page.evaluate(async (value) => {
     const result = await window.maws.invoke('layout.set', { key: 'main.tabs', value });
     if (!result.ok) throw new Error(result.error.message);
