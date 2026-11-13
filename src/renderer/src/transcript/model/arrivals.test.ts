@@ -303,7 +303,7 @@ describe('an engine turn that held nothing is no turn (decision 6)', () => {
 describe('a peer’s message is one turn (decision 4)', () => {
   it('a peer’s turn, its synthetic message and its peer.message give one turn, a peer’s, with the line and no bubble', () => {
     const b = builder();
-    peerTurn(b, 'hello', true, '[sminos chat hp 6d0000ff:1 from docs → @notes]\nhello');
+    peerTurn(b, 'hello', true, '[sminos chat hp 6d0000ff:1 from docs → @you]\nhello');
     const state = reduce(b.events);
     expect(state.order).toHaveLength(1);
     expect(state.turns.get(state.order[0]!)!.origin).toBe('peer');
@@ -312,7 +312,7 @@ describe('a peer’s message is one turn (decision 4)', () => {
 
   it('the same message not marked synthetic opens a second, pending turn of the person’s and draws a bubble: the defect a caller avoids by marking it', () => {
     const b = builder();
-    peerTurn(b, 'hello', false, '[sminos chat hp 6d0000ff:1 from docs → @notes]\nhello');
+    peerTurn(b, 'hello', false, '[sminos chat hp 6d0000ff:1 from docs → @you]\nhello');
     const state = reduce(b.events);
     expect(state.order).toHaveLength(2);
     expect(state.turns.get(state.order[1]!)).toMatchObject({ origin: 'human', accepted: false });
@@ -323,7 +323,7 @@ describe('a peer’s message is one turn (decision 4)', () => {
 describe('a peer’s delivery with no envelope (the bubble branch)', () => {
   it('draws no bubble when its peer.message is in the turn, and reads the owners from the frame line that opens its text', () => {
     const b = builder();
-    peerTurn(b, 'the index is stale', true, '[sminos chat hp 6d0000ff:1 from docs, owned by ana@example.com → @notes]\nthe index is stale');
+    peerTurn(b, 'the index is stale', true, '[sminos chat hp 6d0000ff:1 from docs, owned by ana@example.com → @you]\nthe index is stale');
     b.emit('user.message', { messageUuid: uuid('p2'), content: 'a peer text no reader claims', isReplay: true, isSynthetic: false, origin: 'peer', bash: null });
     b.end([], { origin: 'peer' });
     const list = expanded(b.events);

@@ -11,7 +11,8 @@
 // E3: an anchored comment opens with a chip naming what it is about (its kind's glyph and label; a chip with a path
 // opens the file at the line), above the comment, its screenshot drawn as the image attachment it is.
 // Board 525: a prompt someone else wrote (the context's `promptAuthor`: a session another member owns) is named by its
-// author, as a line above the bubble and in the region's name; the reader's own reads "Your message".
+// author, as a line above the bubble and in the region's name; the reader's own reads "Your message". UX wave U3: MAWS's
+// "Approve and retry" prompt (`consent`) is the person's act, drawn as one line and never as a bubble.
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { Anchor } from '@shared/anchor/anchor'; // E3
 import { CONSENT, NOT_SENT, PENDING_CAPTION, STEERED_CAPTION } from '../../model/copy';

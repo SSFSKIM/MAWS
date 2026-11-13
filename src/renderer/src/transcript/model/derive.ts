@@ -824,14 +824,15 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   // rows, subagent rows. The retry row updates in place: the last api.retry event's text at the first one's position.
   const retryRow = retry;
   const resolved: (WorkItem | Extract<Item, { kind: 'steer' }> | { kind: 'notice'; row: RowOf<'error'> })[] = [];
-  // UX wave U3 (decision 5): the rows of the arrivals that came before any of the turn's work, by class. A hook that ran
-  // is not the model's work; anything else ends the head.
+  // UX wave U3 (decision 5): the rows of the arrivals that came before any of the turn's work, by class. A hook, a notice
+  // and what a plugin said are not the model's work (as for where the answer starts, below); anything else ends the head.
   const heads = new Map<(typeof resolved)[number], Arrival['class']>();
+  const quiet = (item: Item) => item.kind === 'hook' || (item.kind === 'row' && item.row.kind === 'error' && (item.row.severity === 'notice' || item.row.scope === 'plugin'));
   let atHead = true;
   for (const item of items) {
     const from = resolved.length;
     const arrivalClass = arrivals.get(item);
-    if (arrivalClass === undefined && item.kind !== 'hook') atHead = false;
+    if (arrivalClass === undefined && !quiet(item)) atHead = false;
     switch (item.kind) {
       case 'tool': {
         const rec = tools.get(item.toolUseId)!;

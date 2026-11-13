@@ -355,15 +355,15 @@ describe('transcript store', () => {
     const store = createTranscriptStore();
     store.getState().setAgents(KEY, lookup);
     await store.getState().attach(KEY, pushSource(b.events).source);
-    expect(sent()).toBe('Sent message to Survey src: hi');
+    expect(sent()).toBe('Sent to Survey src: hi'); // UX wave U3 (O-12): the message line's words
     store.getState().setAgents(KEY, undefined);
-    expect(sent()).toBe('Sent to a912e224: hi');
+    expect(sent()).toBe('Sent to @a912e224: hi');
     store.getState().setAgents(KEY, lookup);
-    expect(sent()).toBe('Sent message to Survey src: hi');
+    expect(sent()).toBe('Sent to Survey src: hi');
     store.getState().detach(KEY);
     await store.getState().attach(KEY, pushSource(b.events.map((event) => ({ ...event, id: `disk:${event.id}` as EventId, seq: null }))).source); // staged restart
     expect(store.getState().entries[KEY].state.seen.has(`disk:${b.events[0].id}` as EventId)).toBe(true);
-    expect(sent()).toBe('Sent message to Survey src: hi');
+    expect(sent()).toBe('Sent to Survey src: hi');
   });
 
   it('drops a duplicate event id in a live batch', async () => {
