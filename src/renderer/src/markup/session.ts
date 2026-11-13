@@ -10,7 +10,7 @@ import type { EditorHostScope } from '../panel/editor-host';
 import { selectedPanelTabId, shownSession } from '../panel/host';
 import { surfaceSession, surfaceTabs } from '../panel/surface-model';
 import { queueComposerAttachment, useComposerStore } from '../stores/composer';
-import { useLayout } from '../stores/layout';
+import { pageOpen, useLayout } from '../stores/layout';
 import { toast } from '../stores/notices';
 import { compositeMarkup } from './composite';
 import type { Mark } from './drawing';
@@ -70,6 +70,12 @@ export async function startMarkup(scope: EditorHostScope | null = panelScope()):
   starting = true;
   let still: CapturedImage | null;
   try {
+    // UX wave U7b (M6, decision 6): Mark up leaves a page first, and takes the still once the side column it marks up is
+    // drawn again (two frames: one the compositor has drawn).
+    if (pageOpen(useLayout.getState())) {
+      useLayout.getState().closeDestination();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    }
     still = await surface.begin();
   } catch (error) {
     console.warn('[markup] the still was not taken:', error instanceof Error ? error.message : error);

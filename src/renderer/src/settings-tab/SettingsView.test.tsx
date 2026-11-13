@@ -16,7 +16,6 @@ import { MCP_SERVERS, SECTIONS } from './copy';
 import { SEND_TO_COPY } from '../delivery/copy';
 import { waitingStatus } from '../test-support/host-status';
 import { useLayout } from '../stores/layout';
-import { activeTab } from '../stores/layout-model';
 import { LAYOUT_DEFAULTS, TabRefSchema } from '@shared/ipc/schema/layout';
 // C12 start
 import type { AppSessionId } from '@shared/graph/ids';
@@ -167,13 +166,15 @@ describe('settings tab writes one field per row', () => {
     expect(SEND_TO_COPY.notionNoSession).not.toContain('Settings › Engine');
   });
 
-  it('opens the Customize destination from the index without changing settings', () => {
-    useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+  it('opens the Customize page from the index, closing the Settings dialog, without changing settings', () => {
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, destination: null, settings: { section: null } });
     renderView();
     fireEvent.click(screen.getByRole('button', { name: 'Customize' }));
-    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'customize', section: 'plugins' });
+    expect(useLayout.getState().destination).toEqual({ kind: 'customize', view: 'mine', show: 'plugins' }); // UX wave U7b: a page, no tab
+    expect(useLayout.getState().settings).toBeNull();
+    expect(useLayout.getState().main).toBe(LAYOUT_DEFAULTS.main);
     expect(b.sets).toEqual([]);
-    useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, destination: null, settings: null });
   });
 
   it('Engine and Sessions: the binary, the config home, and the subagent model as one field', async () => {

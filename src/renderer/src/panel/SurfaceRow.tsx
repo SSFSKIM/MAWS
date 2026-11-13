@@ -5,7 +5,7 @@ import type { ReactElement, ReactNode } from 'react';
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import type { ActionId } from '@shared/keymap/actions';
 import { Icon, IconButton } from '../app/IconButton';
-import { useLayout } from '../stores/layout';
+import { pageOpen, useLayout } from '../stores/layout';
 import { usePanes, openPaneTab } from '../engine-surface/panes';
 import { lastInViewOf, panelHost, usePanelHost } from './host';
 import { COPY } from './copy';
@@ -20,11 +20,14 @@ const MENU = 'z-50 min-w-48 rounded-md border border-border-strong bg-bg-overlay
 // view on an open right side: the column hides, closing nothing. Else its tab comes into view: the one of that tool last
 // in view in this run, else the one a group remembers as shown (what a relaunch restores), else its last in the strip;
 // a tool with no tab is added. Nothing is ever placed under another by it.
+// UX wave U7b (M6, decision 6; the owner's answer to question 4): with a page open it only shows. The page is left, and
+// a tool already in view behind it stays in view, so leaving the page is all it does; any other tool is shown as above.
 export function toggleSurface(toolId: string) {
   const state = useLayout.getState();
   const session = surfaceSession(state);
   if (!state.regions.panel.collapsed && surfaceTabs(state, session).some((tab) => tab.toolId === toolId)) {
-    state.hideSurfaces(session);
+    if (pageOpen(state)) state.closeDestination();
+    else state.hideSurfaces(session);
     return;
   }
   if (toolId === ASK_SHEET_TOOL_ID && session) settleWaitingAsks(session);
@@ -32,18 +35,29 @@ export function toggleSurface(toolId: string) {
   const remembered = [groups.upper.shown, groups.lower?.shown].find((tab) => tab?.toolId === toolId);
   const held = lastInViewOf(session, toolId) ?? remembered ?? surfaceRefs(state, session).findLast((tab) => tab.toolId === toolId);
   if (!held && (!session || !usePanelHost.getState().tools.has(toolId))) return;
+  state.closeDestination();
   if (held) state.showSurfaceTab(session, held.id);
   else if (session) panelHost.addTool(toolId, { appSessionId: session });
   state.setPanel({ collapsed: false });
 }
 
 // The Session cards icon and its menu row: off when the column is shown, else shown (UX wave U8b: read from its one source).
+// UX wave U7b (M6, decision 6): with a page open it only shows: the page is left, and a column placed behind it is shown
+// again by that alone.
 export function toggleSessionCards() {
   const state = useLayout.getState();
-  const { session, sessionTab, shown } = cardColumnNow(state, window.innerWidth);
+  const { session, sessionTab, placed, shown } = cardColumnNow(state, window.innerWidth);
   if (session === null || !sessionTab) return;
-  if (shown) state.setPanel({ collapsed: true });
-  else { state.hideSurfaces(session); state.setPanel({ collapsed: false, maximized: false, floating: false }); useShellView.setState({ cardsOverlay: true }); }
+  if (pageOpen(state)) {
+    state.closeDestination();
+    if (placed) return;
+  } else if (shown) {
+    state.setPanel({ collapsed: true });
+    return;
+  }
+  state.hideSurfaces(session);
+  state.setPanel({ collapsed: false, maximized: false, floating: false });
+  useShellView.setState({ cardsOverlay: true });
 }
 
 const SURFACE_ACTIONS: Readonly<Record<string, ActionId>> = {

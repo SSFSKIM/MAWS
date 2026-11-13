@@ -13,20 +13,17 @@ import { useEffect, useRef, useState } from 'react';
 import type { Destination } from '@shared/ipc/schema/layout';
 import { useSlot } from '../app/slots';
 import { CustomizeView } from '../customize/CustomizeView';
-import type { CustomizeSection } from '../customize/open';
 import { focusPaneElement, paneDomId } from '../main/pane-dom';
 import { ProjectsView } from '../projects/ProjectsView';
 import { useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
+import { SECTION_OF_SHOW } from './customize';
 import { requestDiscover } from './discover';
 import { escapeTaker, leaveField } from './escape';
 
 export const PAGE_REGION_ID = 'region-page';
 // The title bar's page name, the page's level-1 heading, which names the page's region.
 export const PAGE_TITLE_ID = 'page-title';
-
-// What Customize's view takes while it still takes a section (until U11c): its filter, as the page stores it.
-const CUSTOMIZE_SECTION: Record<Extract<Destination, { kind: 'customize' }>['show'], CustomizeSection> = { all: 'plugins', plugins: 'plugins', skills: 'skills', connectors: 'mcp' };
 
 const available = (element: Element | null): element is HTMLElement =>
   element instanceof HTMLElement && element !== document.body && element.isConnected && !element.closest('[inert], [hidden], [aria-hidden="true"]');
@@ -104,7 +101,7 @@ function Page({ destination }: { destination: Destination }) {
 // at the open, at a change of the page's fields and at a restored page (a `mine` view asks nothing: until U11c the library
 // keeps the tab the person left it on).
 function CustomizePage({ destination }: { destination: Extract<Destination, { kind: 'customize' }> }) {
-  const section = CUSTOMIZE_SECTION[destination.show];
+  const section = SECTION_OF_SHOW[destination.show];
   const discover = destination.view === 'discover' && section === 'plugins';
   useEffect(() => {
     if (discover) requestDiscover();

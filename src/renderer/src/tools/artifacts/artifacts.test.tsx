@@ -18,7 +18,7 @@ import { editorHostOf, registerEditorHost, useEditorHost, type EditorHostScope }
 import { connectPanelHost, instanceOf, panelHost, registerPanelTool, resetPanelHost } from '../../panel/host';
 import type { PanelToolContext } from '../../panel/tool';
 import { persistLayout, useLayout } from '../../stores/layout';
-import { activeTab, allTabs } from '../../stores/layout-model';
+import { allTabs } from '../../stores/layout-model';
 import { fail, installFakeMain, ok } from '../../test-support/code';
 import { A, B, heldBridge, hydrateHeld, panelOf, persisted, resetPanelStores, TestHost } from '../../test-support/panel';
 import { ARTIFACTS_TOOL_ID, artifactsTool, openArtifactInPanel, type ArtifactsHandle, type ArtifactsParams } from './ArtifactsTool';
@@ -364,10 +364,12 @@ describe('the list', () => {
     });
   });
 
-  it('Open library opens the Artifacts main tab', async () => {
+  it('Open library opens the library’s page', async () => {
     await mount();
+    const strip = useLayout.getState().main;
     fireEvent.click(button('Open library')!);
-    expect(activeTab(useLayout.getState().main)?.kind).toBe('artifacts');
+    expect(useLayout.getState().destination).toEqual({ kind: 'library' }); // UX wave U7b: a page, no tab
+    expect(useLayout.getState().main).toBe(strip);
   });
 });
 

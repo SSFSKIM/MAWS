@@ -38,7 +38,9 @@ function openSheet(appSessionId: AppSessionId, askId: string): void {
     });
     automatic.set(appSessionId, opened);
   }
-  const tabId = panelHost.addTool<AskSheetParams>(ASK_SHEET_TOOL_ID, { appSessionId, params: { askId }, activate: true });
+  // UX wave U7b (Interfaces §F): the sheet opening by itself is not the person's act, and leaves a page or the Settings
+  // dialog open (it opens for the session in front, or once the person has shown it).
+  const tabId = panelHost.addTool<AskSheetParams>(ASK_SHEET_TOOL_ID, { appSessionId, params: { askId }, activate: true, asked: 'agent' });
   // The branch review's finding 1: the sheet's group is the one the host put it in (its one resolver, which reads the
   // keyboard too), read back from where its tab now is; the tab it displaced in that group is the one it gives back.
   if (opened && before) {

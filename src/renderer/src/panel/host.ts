@@ -14,7 +14,7 @@ import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PanelTabRef, Strip } from '@shared/ipc/schema/layout';
 import { currentTabRetention } from '../keymap/actions-runtime';
-import { useLayout, type LayoutState } from '../stores/layout';
+import { quietly, useLayout, type LayoutState } from '../stores/layout';
 import { activeTab, foldEnded, sessionOfTab } from '../stores/layout-model'; // P4-B3x: foldEnded
 import { useSessions } from '../stores/sessions';
 import { askEditorHostClose, clearEditorHost } from './editor-host'; // P3-G
@@ -33,6 +33,10 @@ export interface AddToolOptions<P> {
   // UX wave U8b (M3, decision 3): the group the open comes from, while the column has two (a strip's "+"). Without it the
   // tab goes where `groupForOpen` says: the group holding a tab of its tool, else the one holding the keyboard, else above.
   group?: SideGroupName;
+  // UX wave U7b (its execution document, Interfaces §F, "Not the person's act"; M6, decision 5): an agent or a mod asked,
+  // not the person, so a session this add brings to the front closes neither the page nor the Settings dialog. Kept on a
+  // queued add and on each queued open until the open is made (`activateIn`), however late that is.
+  asked?: 'agent';
 }
 
 export interface Instance {
@@ -46,6 +50,7 @@ interface QueuedOpen {
   appSessionId: AppSessionId | null;
   params: unknown;
   activate: boolean;
+  asked: 'agent' | undefined;
 }
 
 export interface PendingAdd {
@@ -56,6 +61,7 @@ export interface PendingAdd {
   pin: boolean;
   activate: boolean;
   group: SideGroupName | undefined;
+  asked: 'agent' | undefined;
   opens: QueuedOpen[]; // later single-instance calls that resolved to this reservation, in call order
 }
 
@@ -260,10 +266,14 @@ function reveal(): void {
 }
 
 // Brings a tab of the target's scope into view (`@none`'s for `null`) in place of its group's; a session not on screen
-// is opened in the main area, so the panel follows.
-function activateIn(target: AppSessionId | null, tabId: string): void {
+// is opened in the main area, so the panel follows. The host's one open of a session: when an agent asked for it, it
+// is not the person's act (`quietly`), and leaves a page or the Settings dialog open (UX wave U7b).
+function activateIn(target: AppSessionId | null, tabId: string, asked?: 'agent'): void {
   layout().showSurfaceTab(target, tabId);
-  if (target !== null && surfaceSession(layout()) !== target) layout().openSession(target);
+  if (target !== null && surfaceSession(layout()) !== target) {
+    if (asked === 'agent') quietly(() => layout().openSession(target));
+    else layout().openSession(target);
+  }
   if (target !== null || surfaceSession(layout()) === null) requestFocus(tabId);
   reveal();
 }
@@ -294,13 +304,14 @@ interface Add {
   pin: boolean;
   activate: boolean;
   group?: SideGroupName;
+  asked?: 'agent';
 }
 
 // Opens an existing single-instance tab: its state first when it has none, then `open`, then the call's activation.
 function retarget(ref: PanelTabRef, add: Add): string {
   const instance = ensureInstance(ref, add.tool, add.target);
   add.tool.open?.(instance.state, add.params);
-  if (add.activate) activateIn(add.target, ref.id);
+  if (add.activate) activateIn(add.target, ref.id, add.asked);
   return ref.id;
 }
 
@@ -321,7 +332,7 @@ function applyAdd(add: Add, id?: string, restored?: ReadonlySet<string>): string
   // joins the strip and replaces nothing (a plugin roster's passive add; UX wave U8b, M2, decision 2). With two groups
   // it joins the one `groupFor` names (M3).
   writeRefs(target, (refs) => [...refs, ref], groupFor(target, tool.id, add.group));
-  if (activate) activateIn(target, tabId);
+  if (activate) activateIn(target, tabId, add.asked);
   return tabId;
 }
 
@@ -332,7 +343,7 @@ function replaceRestored(existing: PanelTabRef, add: Add, id: string): string {
   const ref: PanelTabRef = { id, toolId: add.tool.id, pinned: add.pin || existing.pinned };
   createInstance(ref, add.tool, { appSessionId: add.target, session: sessionRecord(add.target), instanceId: id, params: add.params });
   writeRefs(existing.pinned ? pinWriter() : add.target, (refs) => refs.map((t) => (t.id === existing.id ? ref : t)));
-  if (add.activate) activateIn(add.target, id);
+  if (add.activate) activateIn(add.target, id, add.asked);
   return id;
 }
 
@@ -348,15 +359,15 @@ function addTool<P>(toolId: string, opts: AddToolOptions<P>): string {
     if (!tool.multiInstance) {
       const reserved = pending.find((p) => p.toolId === toolId && inPendingScope(p, target));
       if (reserved) {
-        reserved.opens.push({ appSessionId: target, params: opts.params, activate });
+        reserved.opens.push({ appSessionId: target, params: opts.params, activate, asked: opts.asked });
         return reserved.id;
       }
     }
     const id = mintTabId(toolId);
-    pending.push({ id, toolId, appSessionId: target, params: opts.params, pin, activate, group: opts.group, opens: [] });
+    pending.push({ id, toolId, appSessionId: target, params: opts.params, pin, activate, group: opts.group, asked: opts.asked, opens: [] });
     return id;
   }
-  return applyAdd({ tool, target, params: opts.params, pin, activate, group: opts.group });
+  return applyAdd({ tool, target, params: opts.params, pin, activate, group: opts.group, asked: opts.asked });
 }
 
 // ---- the barrier -------------------------------------------------------------------------------------------------------
@@ -373,14 +384,14 @@ function passBarrier(): void {
     if (entry.appSessionId !== null && !known(entry.appSessionId)) continue;
     const tool = usePanelHost.getState().tools.get(entry.toolId);
     if (!tool) continue; // unregistered while it waited
-    const tabId = applyAdd({ tool, target: entry.appSessionId, params: entry.params, pin: entry.pin, activate: entry.activate, group: entry.group }, entry.id, restored);
+    const tabId = applyAdd({ tool, target: entry.appSessionId, params: entry.params, pin: entry.pin, activate: entry.activate, group: entry.group, asked: entry.asked }, entry.id, restored);
     if (tabId !== entry.id) aliases.set(entry.id, tabId);
     for (const queued of entry.opens) {
       if (queued.appSessionId !== null && !known(queued.appSessionId)) continue;
       const instance = instances.get(tabId);
       if (!instance) continue;
       tool.open?.(instance.state, queued.params);
-      if (queued.activate) activateIn(queued.appSessionId, tabId);
+      if (queued.activate) activateIn(queued.appSessionId, tabId, queued.asked);
     }
   }
 }

@@ -37,7 +37,7 @@ let main: ReturnType<typeof installFakeMain>;
 beforeEach(() => {
   resetCovering();
   resetBrowserImport();
-  useLayout.setState({ regions: LAYOUT_DEFAULTS.regions, main: LAYOUT_DEFAULTS.main, overviewOpen: false });
+  useLayout.setState({ regions: LAYOUT_DEFAULTS.regions, main: LAYOUT_DEFAULTS.main, overviewOpen: false, destination: null, settings: null });
   main = installFakeMain((name) => {
     switch (name) {
       case 'browser.profiles.list':
@@ -164,7 +164,8 @@ describe('an imported profile’s popover', () => {
     popover = await openPopover('Person 1');
     const openTab = vi.spyOn(useLayout.getState(), 'openTab');
     fireEvent.click(popover.querySelector('[data-profile-settings]')!);
-    expect(openTab).toHaveBeenCalledWith({ kind: 'settings', section: 'browser' });
+    expect(useLayout.getState().settings).toEqual({ section: 'browser' }); // UX wave U7b: the Settings dialog, no tab
+    expect(openTab).not.toHaveBeenCalled();
   });
 
   it('holds the cover while open, so the page freezes to its still under it', async () => {

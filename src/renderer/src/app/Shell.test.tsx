@@ -37,6 +37,7 @@ import { toolbarTitle } from './Toolbar';
 import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { probeTool, ref, resetPanelStores } from '../test-support/panel';
 import { registerPanelTool } from '../panel/host';
+import { surfaceTabs } from '../panel/surface-model';
 import { PanelHost } from '../panel/PanelHost';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { preloadOf } from '../test-support/preload-of';
@@ -570,10 +571,10 @@ describe('right panel', () => {
 // P3-G (§D5, acceptance 12): the sidebar's Artifacts destination opens the Artifacts main tab, a
 // singleton that a second open activates, showing P3-L's library as App.tsx registers it (the slot's fallback where no
 // host registers it).
+// UX wave U7b (O-40): the library is a page beside the sidebar, opened by the row, the action and "Open library"; it adds
+// no tab, and a maximized or floating side column is left as it is (a page covers it, and Back finds it as it was).
 describe('the Artifacts entry', () => {
-  const artifactsTabs = () => useLayout.getState().main.panes.flatMap((pane) => pane.tabs.filter((tab) => tab.kind === 'artifacts'));
-
-  it('the sidebar row opens the Artifacts tab once, titled and showing the library; a second click activates it', async () => {
+  it('the sidebar row opens the library’s page, named in the title bar, and adds no tab; a second click keeps it', async () => {
     const user = userEvent.setup();
     const previousBridge = window.maws;
     const counts = { document: 0, presentation: 0, design: 0, design_system: 0, dashboard: 0, html: 0, file: 0 };
@@ -584,66 +585,56 @@ describe('the Artifacts entry', () => {
     });
     registerSlot('artifactsLibrary', Library);
     renderShell();
+    const strip = useLayout.getState().main;
     const sidebar = region('sidebar');
     const row = within(sidebar).getByRole('button', { name: 'Artifacts' });
     expect(within(sidebar).getByRole('button', { name: 'Projects' }).nextElementSibling).toBe(row);
     expect(row.getAttribute('aria-current')).toBeNull();
 
     await user.click(row);
-    expect(artifactsTabs()).toEqual([{ id: 'artifacts', kind: 'artifacts', pinned: false }]);
-    expect(within(chromeTabs()).getByRole('tab', { name: 'Artifacts' }).getAttribute('aria-selected')).toBe('true');
-    expect(within(screen.getByRole('banner')).getByText('Artifacts')).toBeTruthy();
-    const panel = within(region('main')).getByRole('tabpanel');
-    expect(within(panel).getByRole('heading', { level: 1, name: 'Artifacts' })).toBeTruthy();
-    expect(within(panel).getByRole('radiogroup', { name: 'View' })).toBeTruthy();
-    expect(within(panel).getByRole('searchbox', { name: 'Search artifacts' })).toBeTruthy();
+    expect(useLayout.getState().destination).toEqual({ kind: 'library' });
+    expect(useLayout.getState().main).toBe(strip);
+    const header = document.querySelector<HTMLElement>('[data-toolbar]')!;
+    expect(within(header).getByRole('heading', { level: 1, name: 'Artifacts' })).toBeTruthy();
+    const page = document.getElementById('region-page')!;
+    expect(within(page).getByRole('radiogroup', { name: 'View' })).toBeTruthy();
+    expect(within(page).getByRole('searchbox', { name: 'Search artifacts' })).toBeTruthy();
     expect(row.getAttribute('aria-current')).toBe('page');
 
-    act(() => useLayout.getState().openTab({ kind: 'diagnostics' }));
-    expect(row.getAttribute('aria-current')).toBeNull();
     await user.click(row);
-    expect(artifactsTabs()).toHaveLength(1);
-    expect(within(chromeTabs()).getAllByRole('tab').map((tab) => [tab.getAttribute('aria-label'), tab.getAttribute('aria-selected')])).toEqual([
-      ['Artifacts', 'true'],
-      ['Diagnostics', 'false'],
-    ]);
+    expect(useLayout.getState().destination).toEqual({ kind: 'library' });
+    expect(useLayout.getState().main).toBe(strip);
     expect(row.getAttribute('aria-current')).toBe('page');
   });
 
-  // M5's review: the tab lives in the main area, so opening it from a maximized or floating panel docks the panel first;
-  // otherwise it would be selected behind an inert, zero-width main region while the card kept its session.
   describe.each([
     ['floating', { floating: true }],
     ['maximized', { maximized: true }],
-  ] as const)('from a %s panel', (_, patch) => {
-    const placeholder = 'Artifacts unavailable';
+  ] as const)('from a %s panel', (how, patch) => {
     const startHidden = () => {
       openSurface();
       useLayout.getState().setPanel(patch);
       renderShell();
       expect(region('main').inert).toBe(true);
     };
-    const expectShown = () => {
-      expect(useLayout.getState().regions.panel).toMatchObject({ floating: false, maximized: false, collapsed: false });
-      expect(region('main').inert).toBe(false);
-      expect(grid().style.gridTemplateColumns).toBe('240px minmax(0, 1fr) 360px'); // UX wave U8b: a narrow tool's automatic width
-      expect(screen.queryByRole('region', { name: 'Session card' })).toBeNull();
-      expect(within(within(region('main')).getByRole('tabpanel')).getByText(placeholder)).toBeTruthy();
+    const expectPage = () => {
+      expect(useLayout.getState().destination).toEqual({ kind: 'library' });
+      expect(useLayout.getState().regions.panel[how], 'the side column is left as it was').toBe(true);
+      expect(document.getElementById('region-page')).not.toBeNull();
     };
 
-    it('the sidebar row docks the panel and shows the Artifacts tab', async () => {
+    it('the sidebar row opens the library’s page and leaves the panel as it was', async () => {
       const user = userEvent.setup();
       startHidden();
-      if ('floating' in patch) expect(screen.getByRole('region', { name: 'Session card' })).toBeTruthy();
       await user.click(within(region('sidebar')).getByRole('button', { name: 'Artifacts' }));
-      expectShown();
+      expectPage();
     });
 
-    it('the artifacts.open action docks the panel and shows the Artifacts tab', () => {
+    it('the artifacts.open action opens the library’s page and leaves the panel as it was', () => {
       offs.push(registerShellActions(fakeBridge()));
       startHidden();
       act(() => runAction('artifacts.open'));
-      expectShown();
+      expectPage();
     });
   });
 
@@ -655,14 +646,15 @@ describe('the Artifacts entry', () => {
     expect(screen.queryByText('Artifacts unavailable')).toBeNull();
   });
 
-  it('the artifacts.open action opens or activates the same tab', () => {
+  it('the artifacts.open action opens the library’s page over the tabs, which it leaves as they were', () => {
     offs.push(registerShellActions(fakeBridge()));
-    runAction('artifacts.open');
     useLayout.getState().openTab({ kind: 'diagnostics' });
+    const strip = useLayout.getState().main;
     runAction('artifacts.open');
-    expect(artifactsTabs()).toHaveLength(1);
-    expect(toolbarTitle(useLayout.getState().main.panes[0].tabs.find((tab) => tab.id === 'artifacts')!, new Map()).title).toBe('Artifacts');
-    expect(useLayout.getState().main.panes[0].activeTabId).toBe('artifacts');
+    expect(useLayout.getState().destination).toEqual({ kind: 'library' });
+    runAction('artifacts.open');
+    expect(useLayout.getState().destination).toEqual({ kind: 'library' });
+    expect(useLayout.getState().main).toBe(strip);
   });
 });
 
@@ -974,5 +966,62 @@ describe('a page beside the sidebar', () => {
     useLayout.getState().closeDestination();
     runAction('session.markUnread');
     expect(fake.invoked('session.update')).toEqual([{ appSessionId: A, patch: { unread: true } }]);
+  });
+
+  // M6, decision 6 (the owner's answer to question 4): with a page open the acts on the side column only show. The page
+  // is left and what was asked for ends in view; under the Settings dialog they run as today.
+  describe('the side column’s acts with a page open', () => {
+    const inView = (toolId: string) => !useLayout.getState().regions.panel.collapsed && surfaceTabs(useLayout.getState(), A).some((tab) => tab.toolId === toolId);
+    beforeEach(() => offs.push(registerShellActions(fakeClient({}).client)));
+
+    it('a surface’s key for a tool in view behind the page leaves the page, and the tool stays in view', () => {
+      openSurface('terminal');
+      renderShell();
+      expect(inView('terminal')).toBe(true);
+      act(() => useLayout.getState().openDestination(PAGE));
+      act(() => runAction('surface.terminal'));
+      expect(useLayout.getState().destination).toBeNull();
+      expect(inView('terminal')).toBe(true);
+    });
+
+    it('a surface’s key for a tool not in view leaves the page and shows the tool', () => {
+      offs.push(registerPanelTool(probeTool('files').tool));
+      openSurface('terminal');
+      renderShell();
+      act(() => useLayout.getState().openDestination(PAGE));
+      act(() => runAction('surface.files'));
+      expect(useLayout.getState().destination).toBeNull();
+      expect(inView('files')).toBe(true);
+    });
+
+    it('Session cards with the card column placed behind the page leaves the page, and the column is still shown', () => {
+      useSessions.setState({ records: new Map([[A, record(A)]]) });
+      useLayout.setState({ main: withActive(sessionTab(A)) });
+      renderShell();
+      expect(cardColumnNow(useLayout.getState(), window.innerWidth).shown).toBe(true);
+      act(() => useLayout.getState().openDestination(PAGE));
+      expect(cardColumnNow(useLayout.getState(), window.innerWidth)).toMatchObject({ placed: true, shown: false });
+      act(() => runAction('panel.toggle'));
+      expect(useLayout.getState().destination).toBeNull();
+      expect(cardColumnNow(useLayout.getState(), window.innerWidth).shown).toBe(true);
+    });
+
+    it('Maximize leaves the page, then maximizes the side column', () => {
+      openSurface();
+      renderShell();
+      act(() => useLayout.getState().openDestination(PAGE));
+      act(() => runAction('panel.maximize'));
+      expect(useLayout.getState().destination).toBeNull();
+      expect(useLayout.getState().regions.panel).toMatchObject({ maximized: true, collapsed: false });
+    });
+
+    it('under the Settings dialog, with no page, a surface’s key hides a tool in view, as today', () => {
+      openSurface('terminal');
+      renderShell();
+      act(() => useLayout.getState().openSettings());
+      act(() => runAction('surface.terminal'));
+      expect(inView('terminal')).toBe(false);
+      expect(useLayout.getState().settings).toEqual({ section: null });
+    });
   });
 });

@@ -17,6 +17,7 @@ import { Section } from './parts';
 import { SupervisorSection } from './SupervisorSection';
 import { SupervisorSettings } from './SupervisorSettings';
 import { formatClock } from '@shared/app/date-format';
+import { escapeTaker } from '../destination/escape';
 
 vi.mock('./engine-update', () => ({ openEngineUpdate: vi.fn() }));
 
@@ -226,9 +227,11 @@ describe('Stop all', () => {
     expect(restarts()).toEqual([]);
   });
 
-  it('Escape cancels too', async () => {
+  it('Escape cancels too, and is the question’s own, so the Settings dialog around it stays (UX wave U7b)', async () => {
     await renderGroup();
     fireEvent.click(stopAll());
+    const question = ['Stop all', 'Cancel'].map((name) => within(row('Stop all')).getByRole('button', { name }));
+    expect(question.map((button) => escapeTaker(button))).toEqual(['own', 'own']);
     fireEvent.keyDown(within(row('Stop all')).getByRole('button', { name: 'Cancel' }), { key: 'Escape' });
     expect(stopAll()).toBeTruthy();
   });

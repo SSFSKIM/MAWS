@@ -19,7 +19,7 @@ import { SessionDialogs } from '../sessions/SessionDialogs';
 import { Toolbar } from '../app/Toolbar';
 import { digest, item, project, record, remoteRow, status } from '../../../../test/support/builders';
 import { registerRemoteOpener } from '../sessions/remote-openers'; // P5 O8 M2
-import { registerAction } from '../keymap/actions-runtime'; // C11
+import { registerGatewayActions } from '../gateway/actions'; // UX wave U7b: the gear's real handler
 import { useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { useNotices } from '../stores/notices';
@@ -1581,20 +1581,23 @@ describe('sidebar at scale', () => {
   });
 });
 
-// C11 start: the footer's gear opens the Settings tab once C11 registers settings.open (C11 execution document, M5)
+// C11 start: the footer's gear opens Settings once C11 registers settings.open (C11 execution document, M5); UX wave U7b:
+// the Settings dialog, over the tabs, which it leaves as they were
 describe('the footer gear', () => {
   beforeEach(() => fillStores(nine));
 
-  it('is disabled until settings.open has a handler, then runs it', () => {
+  it('is disabled until settings.open has a handler, then opens the Settings dialog', () => {
     render(<Sidebar />);
     const gear = screen.getByRole('button', { name: 'Workspace settings' }) as HTMLButtonElement;
     expect(gear.disabled).toBe(true);
-    const open = vi.fn();
-    act(() => void offs.push(registerAction('settings.open', open)));
+    act(() => void offs.push(registerGatewayActions()));
     expect(gear.disabled).toBe(false);
     expect(gear.title).toBe('Settings · ⌘,');
+    const strip = useLayout.getState().main;
     fireEvent.click(gear);
-    expect(open).toHaveBeenCalledOnce();
+    expect(useLayout.getState().settings).toEqual({ section: null });
+    expect(useLayout.getState().main).toBe(strip);
+    act(() => useLayout.getState().closeSettings());
   });
 });
 // C11 end
@@ -1620,6 +1623,24 @@ describe('the sidebar under a page', () => {
     act(() => useLayout.getState().closeDestination());
     expect(row('Fix sidebar drag').getAttribute('aria-selected')).toBe('true');
     expect(current('Artifacts')).toBeNull();
+  });
+
+  it('opens each row’s page from the row, the strip left as it was', () => {
+    render(<Sidebar />);
+    const strip = useLayout.getState().main;
+    const current = (name: string) => screen.getByRole('button', { name }).getAttribute('aria-current');
+    fireEvent.click(screen.getByRole('button', { name: 'Customize' }));
+    expect(useLayout.getState().destination).toEqual({ kind: 'customize', view: 'mine', show: 'plugins' });
+    expect(current('Customize')).toBe('page');
+    fireEvent.click(screen.getByRole('button', { name: 'Projects' }));
+    expect(useLayout.getState().destination).toEqual({ kind: 'projects' });
+    expect(current('Projects')).toBe('page');
+    expect(current('Customize')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Artifacts' }));
+    expect(useLayout.getState().destination).toEqual({ kind: 'library' });
+    expect(current('Artifacts')).toBe('page');
+    expect(useLayout.getState().main).toBe(strip);
+    act(() => useLayout.getState().closeDestination());
   });
 });
 

@@ -1,7 +1,8 @@
-// C11's handlers in C5's action table (C11 execution document, Keymap and action entries): Settings… (⌘,) opens its
-// singleton tab, and Open ClaudeUsage hands the user to ClaudeUsage's panel with the instruction as a toast. The ⌘K
-// palette lists both from the table; C10's relay card runs the hand-off. (W6: the Accounts tab retired; its action,
-// Usage, opens the top bar's usage popover and is registered by `../usage`.)
+// C11's handlers in C5's action table (C11 execution document, Keymap and action entries): Settings… (⌘,) opens Settings
+// (UX wave U7b: the dialog over the window, `openSettings`; open already, it stays open), and Open ClaudeUsage hands the
+// user to ClaudeUsage's panel with the instruction as a toast. The ⌘K palette lists both from the table; C10's relay card
+// runs the hand-off. (W6: the Accounts tab retired; its action, Usage, opens the top bar's usage popover and is
+// registered by `../usage`.)
 import type { ClaudeUsageOpenIntent, ClaudeUsageOpenResult, MawsBridge } from '@shared/ipc/schema';
 import type { TabTarget } from '@shared/ipc/schema/layout';
 import { ACCOUNTS, CLAUDE_USAGE_README_URL } from '../accounts/copy';
@@ -37,7 +38,7 @@ export async function openClaudeUsage(intent: ClaudeUsageOpenIntent, client: Maw
 
 export function registerGatewayActions(client: MawsBridge = ipc): () => void {
   const offs = [
-    registerAction('settings.open', (arg) => useLayout.getState().openTab({ kind: 'settings', section: arg === null ? null : (SETTINGS_SECTIONS[arg] ?? null) })),
+    registerAction('settings.open', (arg) => useLayout.getState().openSettings(arg === null ? undefined : SETTINGS_SECTIONS[arg])),
     registerAction('gateway.openClaudeUsage', async () => void (await openClaudeUsage({ intent: 'panel' }, client))),
   ];
   return () => offs.forEach((off) => off());

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS, type PanelTabRef, storedMain } from '@shared/ipc/schema/layout';
 import { createLayoutStore, persistLayout, useLayout } from '../stores/layout';
+import { activeTab } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import {
   A,
@@ -511,6 +512,32 @@ describe('panel host transitions', () => {
       expect(info.probe.created).toEqual([expect.objectContaining({ appSessionId: A, instanceId: s, params: 'p' })]);
       expect(info.probe.opens).toEqual([]);
       expect(pendingAdds()).toEqual([]);
+    });
+
+    // UX wave U7b (M6, decision 5; Interfaces §F, "Not the person's act"): who asked travels with a queued add, so an
+    // agent's add applied at the barrier brings its session to the front of the strip behind a page or the Settings
+    // dialog the person opened meanwhile, and closes neither; the person's own add closes them, as any act that shows a
+    // tab does.
+    describe.each([
+      ['a page', () => useLayout.getState().openDestination({ kind: 'projects' }), () => useLayout.getState().destination],
+      ['the Settings dialog', () => useLayout.getState().openSettings(), () => useLayout.getState().settings],
+    ] as const)('with %s opened while an add waits', (_, open, opened) => {
+      for (const asked of ['agent', undefined] as const) {
+        it(asked === 'agent' ? 'an agent’s add brings its session to the front and leaves it open' : 'the person’s add closes it', async () => {
+          connect();
+          register(probeTool('t').tool);
+          const bridge = heldBridge(persisted({}));
+          let id = '';
+          await hydrateHeld(bridge, () => {
+            id = panelHost.addTool('t', { appSessionId: B, activate: true, asked });
+            open();
+          });
+          expect(panelOf(B)!.tabs.map((tab) => tab.id)).toContain(id);
+          expect(activeTab(useLayout.getState().main)?.id).toBe(`session:${B}`);
+          if (asked === 'agent') expect(opened()).not.toBeNull();
+          else expect(opened()).toBeNull();
+        });
+      }
     });
 
     it('with persistence subscribed before the host, a pending pinned add is written at the barrier and restores into a fresh store', async () => {

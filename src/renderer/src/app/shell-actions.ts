@@ -33,11 +33,16 @@ export function registerShellActions(client: MawsBridge = ipc): () => void {
     // Hiding a maximized panel also un-maximizes it; maximizing a hidden one shows it.
     registerAction('panel.toggle', toggleSessionCards),
     ...(['terminal', 'review', 'browser', 'files', 'source-control', 'subagents', 'background', 'session-info', 'ask-sheet'] as const).map((id) => registerAction(`surface.${id}`, () => toggleSurface(id))),
-    registerAction('panel.maximize', () =>
-      layout().setPanel(layout().regions.panel.maximized ? { maximized: false } : { maximized: true, collapsed: false }),
-    ),
+    // UX wave U7b (M6, decision 6): with a page open, the side column's acts leave it first, then run as today.
+    registerAction('panel.maximize', () => {
+      layout().closeDestination();
+      layout().setPanel(layout().regions.panel.maximized ? { maximized: false } : { maximized: true, collapsed: false });
+    }),
     // P3-G (§D1.2): the floating state; the store's `setPanel` keeps it exclusive with maximized and collapsed.
-    registerAction('panel.float', togglePanelFloat),
+    registerAction('panel.float', () => {
+      layout().closeDestination();
+      togglePanelFloat();
+    }),
     registerAction('main.expandArtifactPane', () => expandPane()), // P4-B3 (its Decision Log 12)
     registerAction('artifact.moveToPanel', moveFocusedArtifactToPanel), // P4-B3 (its Decision Log 21)
     registerAction('artifact.moveToTab', moveShownRecordToTab),
@@ -95,7 +100,7 @@ export function registerShellActions(client: MawsBridge = ipc): () => void {
       focusPaneElement(other);
     }),
     registerAction('diagnostics.open', () => layout().openTab({ kind: 'diagnostics' })),
-    registerAction('artifacts.open', openArtifacts), // P3-G (§D5): a singleton, so a second open activates it
+    registerAction('artifacts.open', openArtifacts), // P3-G (§D5); UX wave U7b: the library's page
     registerAction('palette.open', togglePalette),
     registerAction('shortcuts.open', toggleKeyboardShortcuts),
 

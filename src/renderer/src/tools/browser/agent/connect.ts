@@ -75,7 +75,9 @@ export function connectBrowserAgent(client: MawsBridge = ipc): () => void {
         person.off();
         if (!connected || person.moved() || !mayOpen(appSessionId)) return;
         if (selected?.tabId === tabId) agentTabSelected(selected);
-        panelHost.addTool<BrowserParams>(browserTool.id, { appSessionId, params: { appSessionId }, activate: true });
+        // UX wave U7b (Interfaces §F): not the person's act. `mayOpen` already answered no behind a page, so this opens no
+        // session; the origin travels with the call all the same.
+        panelHost.addTool<BrowserParams>(browserTool.id, { appSessionId, params: { appSessionId }, activate: true, asked: 'agent' });
       };
       void client.invoke('browser.agent.show', { tabId }).then(
         (result) => answered(result.ok ? result.value.selected : null),

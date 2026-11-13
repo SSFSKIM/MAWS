@@ -13,7 +13,6 @@ import { machineSettingsDefaults, SETTINGS_DEFAULTS_V21 } from '@shared/settings
 import { useGateway } from '../gateway/store';
 import { useNotices } from '../stores/notices';
 import { useLayout } from '../stores/layout';
-import { activeTab } from '../stores/layout-model';
 import { useSettings } from '../stores/settings';
 import { importBridge, RECORD } from '../test-support/browser-import';
 import { settingsBridge, type SettingsBridge } from '../test-support/settings-bridge';
@@ -265,15 +264,16 @@ describe('Search settings: choosing a result', () => {
     expect(binding!.getAttribute('data-settings-mark')).toBe('on');
   });
 
-  it('opens Customize from its result', () => {
-    useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+  it('opens the Customize page from its result', () => {
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, destination: null, settings: null });
     renderView();
     type('marketplace');
     expect(optionTexts()).toEqual(['Customize · Plugins, skills and connectors']);
     press('Enter');
-    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'customize' });
+    expect(useLayout.getState().destination).toEqual({ kind: 'customize', view: 'mine', show: 'plugins' }); // UX wave U7b: a page, no tab
+    expect(useLayout.getState().main).toBe(LAYOUT_DEFAULTS.main);
     expect(b.sets).toEqual([]);
-    useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, destination: null });
   });
 
   it('lists an Org group the page draws and lands on it; a group it does not draw is no result', async () => {

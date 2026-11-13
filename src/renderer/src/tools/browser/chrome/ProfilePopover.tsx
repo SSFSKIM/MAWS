@@ -86,7 +86,7 @@ export function ProfilePopover({ appSessionId, surface, partition, profiles, pro
         <button
           type="button"
           data-profile-settings=""
-          onClick={act(() => useLayout.getState().openTab({ kind: 'settings', section: 'browser' }))}
+          onClick={act(() => useLayout.getState().openSettings('browser'))}
           className="rounded-sm text-ui-sm text-fg-muted outline-accent hover:text-fg hover:underline focus-visible:outline-2"
         >
           {COPY.settings}

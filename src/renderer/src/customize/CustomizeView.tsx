@@ -4,7 +4,6 @@ import { useMemo, useState, type ReactNode } from 'react';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { ipc } from '../ipc/client';
 import { useCurrentRow } from '../keymap/actions-runtime';
-import { localProjectOfSet } from '../stores/org-projects'; // P5 O6 M5
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { projectLabels } from '../sidebar/project-labels';
@@ -29,6 +28,8 @@ import { CONNECTORS } from './connectors/copy';
 import { configuredOf } from './connectors/present';
 import { machineOf } from '@shared/machine/address';
 import { useCustomizationInventory, type Inventory } from './inventory'; // UX wave U11a: shared with an unstarted tab's dialogs
+import { customizePlace } from '../destination/discover'; // UX wave U7b
+import { SHOW_OF_SECTION } from '../destination/customize'; // UX wave U7b
 import { InventoryState } from './InventoryState';
 
 const DIRECTORY_PAGE = '\0directory'; // the selector's value for a directory page: no project id or '' can equal it
@@ -57,10 +58,8 @@ export function CustomizeView({ section }: { section: CustomizeSection }) {
   const chosen = useCustomizeProject((s) => s.projectId);
   // a directory no project has as its own (Open Discover from a session there, Decision Log 10): the page is that directory
   const directory = useCustomizeProject((s) => s.directory);
-  const focused = chosen === undefined ? (current === null ? null : (localProjectOfSet({ projects: allProjects }, current, ipc.localMachine)?.id ?? null)) : chosen; // P5 O6 M5: the row's checkout here
-  const projectId = focused !== null && projects.has(focused) ? focused : null; // another machine's project: the user configuration
-  const project = directory === undefined && projectId ? projects.get(projectId) : undefined;
-  const cwd = directory ?? project?.directory ?? null;
+  // UX wave U7b: the one rule of Customize's place, which the page's Discover request reads too
+  const { project, cwd } = customizePlace({ projectId: chosen, directory }, current, allProjects);
   const labels = useMemo(() => projectLabels([...projects.values()]), [projects]);
   // Attach only a ready process in exactly the chosen directory. Project membership alone would also match a worktree
   // with different local configuration. A page never acquires a session, including after an attached process exits.
@@ -69,7 +68,12 @@ export function CustomizeView({ section }: { section: CustomizeSection }) {
   const [pickedSession, setPickedSession] = useState<AppSessionId | null>(null);
   const attached = live.find((status) => status.appSessionId === pickedSession) ?? live[0] ?? null;
   const inventory = useCustomizationInventory(cwd);
-  const selectSection = (next: string) => useLayout.getState().openTab({ kind: 'customize', section: next as CustomizeSection });
+  // UX wave U7b (Interfaces §J): a section is the page's `show`, its view kept
+  const selectSection = (next: string) => {
+    const layout = useLayout.getState();
+    const view = layout.destination?.kind === 'customize' ? layout.destination.view : 'mine';
+    layout.openDestination({ kind: 'customize', view, show: SHOW_OF_SECTION[next as CustomizeSection] });
+  };
   const setProject = (value: string) => {
     if (value === DIRECTORY_PAGE) return;
     useCustomizeProject.setState({ projectId: value === '' ? null : value as ProjectId }, true);
@@ -83,7 +87,6 @@ export function CustomizeView({ section }: { section: CustomizeSection }) {
   </label>;
   return <Tabs.Root value={section} onValueChange={selectSection} className="@container/customize flex h-full min-h-0 flex-col bg-bg text-ui text-fg">
     <header data-customize-header className="flex min-h-11 shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-3 py-1.5">
-      <h1 className="m-0 shrink-0 text-ui font-semibold">Customize</h1>
       <Tabs.List aria-label="Customize sections" className="flex flex-wrap gap-1">
         {(Object.entries(SECTIONS) as [CustomizeSection, string][]).map(([value, label]) => <Tabs.Trigger key={value} value={value} className="rounded-sm px-3 py-1.5 text-ui text-fg-muted outline-accent hover:bg-bg-hover focus-visible:outline-2 data-[state=active]:bg-bg-active data-[state=active]:font-medium data-[state=active]:text-fg">{label}</Tabs.Trigger>)}
       </Tabs.List>

@@ -1,10 +1,9 @@
-// P3-G (§D5): the one way to open the Artifacts tab, shared by the sidebar's row and the `artifacts.open` action. The
-// tab lives in the main area, so a maximized or floating panel docks first (`revealMain`, §D1.2's last row): otherwise
-// the tab would be selected behind an inert, zero-width main region while the card kept its session.
+// P3-G (§D5): the one way to open the Artifacts library, shared by the sidebar's row, the `artifacts.open` action and the
+// Artifacts list's "Open library". UX wave U7b (O-40; its execution document, Interfaces §J, "Every way in"): the library
+// is a page beside the sidebar, not a tab, and since a page covers the side column whatever its state, and Back must find
+// it as it was, a maximized or floating panel is no longer docked first.
 import { useLayout } from '../stores/layout';
 
 export function openArtifacts(): void {
-  const layout = useLayout.getState();
-  layout.revealMain();
-  layout.openTab({ kind: 'artifacts' });
+  useLayout.getState().openDestination({ kind: 'library' });
 }

@@ -29,11 +29,11 @@ export function paneTab(appSessionId: AppSessionId, paneId: string): string | nu
 // A tab's suffix: the pane's title, else its id (the engine's own rule for a tab label).
 const titleOf = (roster: PaneRoster | undefined, paneId: string) => roster?.panes.find((p) => p.id === paneId)?.title || paneId;
 
-// Selects the pane's tab, adding it when it has none.
-export function openPaneTab(appSessionId: AppSessionId, paneId: string): void {
+// Selects the pane's tab, adding it when it has none. `asked`: a mod asked, not the person (UX wave U7b, Interfaces §F).
+export function openPaneTab(appSessionId: AppSessionId, paneId: string, asked?: 'agent'): void {
   const tab = paneTab(appSessionId, paneId);
   if (tab !== null) panelHost.selectTab(tab);
-  else setTitle(panelHost.addTool(PLUGIN_PANE_TOOL, { appSessionId, params: { paneId } }), titleOf(usePaneRosters.getState().rosters.get(appSessionId), paneId));
+  else setTitle(panelHost.addTool(PLUGIN_PANE_TOOL, { appSessionId, params: { paneId }, asked }), titleOf(usePaneRosters.getState().rosters.get(appSessionId), paneId));
 }
 
 const answered = new Map<AppSessionId, string>(); // the focus request each session's roster carried and this window answered
@@ -59,7 +59,7 @@ function reconcile(appSessionId: AppSessionId): void {
   const shown = shownSession() === appSessionId && !pageOpen(useLayout.getState()); // UX wave U7b (§N): not behind a page
   for (const pane of roster.panes) {
     if (kept.has(pane.id)) continue;
-    const tab = panelHost.addTool(PLUGIN_PANE_TOOL, { appSessionId, params: { paneId: pane.id }, activate: false });
+    const tab = panelHost.addTool(PLUGIN_PANE_TOOL, { appSessionId, params: { paneId: pane.id }, activate: false, asked: 'agent' });
     setTitle(tab, titleOf(roster, pane.id));
     if (shown && pane.id === roster.shownId) panelHost.selectTab(tab, { focus: false });
   }
@@ -84,7 +84,7 @@ function reconcile(appSessionId: AppSessionId): void {
   // P5 O7 M8: a session on another machine reached over RL2 is not offered the pane commands; its tab still opens
   const answers = remoteUnavailableOf(appSessionId, 'session.ui.paneFocus') === null;
   if (shown && open.has(request)) {
-    openPaneTab(appSessionId, request);
+    openPaneTab(appSessionId, request, 'agent');
     if (answers) void panesClient().invoke('session.ui.paneFocus', { appSessionId, id: request });
   } else if (answers) void panesClient().invoke('session.ui.paneFocus', { appSessionId, id: null });
 }
