@@ -9,11 +9,12 @@
 // temp directory (`MAWS_E2E_TRASH_DIR`, main's e2e seam), never the owner's `~/.Trash`. No native panel opens:
 // under MAWS_E2E `layout.pickFiles` answers from `MAWS_E2E_PICK_PATHS` or as cancelled (main's pick seam).
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
+import { slugOf } from '../src/engine-host/fs/paths';
 import { fixtureIdentity } from '../test/support/fixture-session-id';
 import { runGit } from '../test/support/git-fixture';
 import { ScratchRepo } from '../test/support/scratch-repo';
@@ -796,5 +797,47 @@ test.describe('sessions', () => {
     await expect(entry.getByRole('img', { name: 'Needs approval' })).toHaveCount(0);
     await expect(entry, 'the project tree row survives attention retirement').toBeVisible();
     await turnEnded(page, id);
+  });
+  // U8c-1 (M1 decision 9): on EnterWorktree the engine renames the session's transcript, and its folder beside it, into
+  // the worktree's project folder, then appends a `relocated` row and the next turn's rows there (engine 2.1.322,
+  // cli.pretty.js:381469-381548). An open transcript reads on, and the session is listed throughout, never archived.
+  test('a session whose transcript the engine moves stays listed and goes on reading', async () => {
+    const repo = await ScratchRepo.create();
+    const store = await StoreFixture.create();
+    const sid = '5e551011-0000-4000-8000-0000000000c8';
+    const user = (uuid: string, parentUuid: string | null, cwd: string, text: string) => ({ type: 'user', uuid, parentUuid, cwd, sessionId: sid, timestamp: '2026-11-13T10:00:00.000Z', message: { role: 'user', content: text } });
+    const from = await store.addTranscript(repo.root, sid, [user(`u-${sid}`, null, repo.root, 'Written before the move')]);
+    await store.addSidecar(sid, 'subagents/agent-a1.jsonl', '');
+    const worktree = await repo.addManagedWorktree('w1');
+    const launched = await launchCase({ fixtures: [], trusted: [repo.root], store });
+    current = { ...launched, repos: [repo] };
+    const { page } = launched;
+    await expect.poll(async () => value(await invoke(page, 'session.list', {})).sessions.some((r) => r.engineSessionId === sid), { timeout: 20_000 }).toBe(true);
+    const record = value(await invoke(page, 'session.list', {})).sessions.find((r) => r.engineSessionId === sid)!;
+    // Every record the window is sent for the session from here on, and any removal.
+    await page.evaluate((id) => {
+      const seen: unknown[] = [];
+      (window as unknown as { __u8c: unknown[] }).__u8c = seen;
+      window.maws.on('session.changed', ({ record: changed }) => changed.appId === id && seen.push(changed.archived ? 'archived' : 'listed'));
+      window.maws.on('session.removed', ({ appSessionId }) => appSessionId === id && seen.push('removed'));
+    }, record.appId);
+    await (await sidebarRow(page, { appSessionId: record.appId })).click();
+    const main = page.locator('[data-region="main"]');
+    await expect(main.getByText('Written before the move', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+    const project = join(store.paths.projects, slugOf(worktree));
+    const target = join(project, `${sid}.jsonl`);
+    mkdirSync(project, { recursive: true });
+    renameSync(from, target);
+    renameSync(join(dirname(from), sid), join(project, sid));
+    appendFileSync(target, [{ type: 'relocated', relocatedCwd: worktree, sessionId: sid }, user('u-after-move', `u-${sid}`, worktree, 'Written after the move')].map((r) => `${JSON.stringify(r)}\n`).join(''));
+
+    await expect(main.getByText('Written after the move', { exact: true }), 'the open transcript reads on at the new path').toBeVisible({ timeout: 20_000 });
+    await expect(await sidebarRow(page, { appSessionId: record.appId })).toBeVisible();
+    expect(value(await invoke(page, 'session.list', {})).sessions.some((r) => r.appId === record.appId), 'listed, not among the archived').toBe(true);
+    expect(value(await invoke(page, 'session.get', { appSessionId: record.appId }))!.archived).toBe(false);
+    const seen = await page.evaluate(() => (window as unknown as { __u8c: unknown[] }).__u8c);
+    expect(seen, 'never told archived or removed across the move').not.toContain('archived');
+    expect(seen).not.toContain('removed');
   });
 });

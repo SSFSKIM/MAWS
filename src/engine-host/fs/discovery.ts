@@ -73,6 +73,37 @@ export class Discovery {
     return perSlug.flat();
   }
 
+  // U8c-1 (M1 decision 4): where each asked-for session's transcript lies now, from the names in every project folder
+  // (one readdir per folder, no stat); a transcript under two folders (a move caught between its two renames' ends) is
+  // the one written last, which alone is stat'ed. A session whose transcript lies nowhere is absent from the answer.
+  async find(sessionIds: ReadonlySet<SessionId>): Promise<Map<SessionId, string>> {
+    const found = new Map<SessionId, string[]>();
+    if (sessionIds.size === 0) return new Map();
+    const slugs = await readdirOrEmpty(this.paths.projects);
+    await Promise.all(
+      slugs.filter((entry) => entry.isDirectory()).map(async ({ name: slug }) => {
+        const dir = join(this.paths.projects, slug);
+        const entries = await readdirOrEmpty(dir).catch((error: unknown) => {
+          console.error(`[fs] cannot list ${dir}:`, error instanceof Error ? error.message : error);
+          return [];
+        });
+        for (const entry of entries) {
+          const sessionId = transcriptSessionId(entry.name);
+          if (sessionId === null || entry.isDirectory() || !sessionIds.has(sessionId)) continue;
+          found.set(sessionId, [...(found.get(sessionId) ?? []), join(dir, entry.name)]);
+        }
+      }),
+    );
+    const answer = new Map<SessionId, string>();
+    await Promise.all(
+      [...found].map(async ([sessionId, paths]) => {
+        const path = paths.length === 1 ? paths[0] : await writtenLast(paths);
+        if (path !== null) answer.set(sessionId, path);
+      }),
+    );
+    return answer;
+  }
+
   // The first and last 64 KiB of one transcript through `summarize`, with the `custom-title.json` beside it folded
   // in; null when the transcript does not exist. Size and mtime are the opened file's, so they describe the bytes read.
   async summarizeOne(path: string): Promise<TranscriptSummary | null> {
@@ -144,6 +175,23 @@ async function readdirOrEmpty(dir: string) {
     if (isMissing(error)) return [];
     throw error;
   }
+}
+
+// The one of `paths` modified last; null when none is there any longer.
+async function writtenLast(paths: readonly string[]): Promise<string | null> {
+  const stated = await Promise.all(
+    paths.map(async (path) => {
+      try {
+        return { path, mtimeMs: (await stat(path)).mtimeMs };
+      } catch (error) {
+        if (!isMissing(error)) console.error(`[fs] cannot stat ${path}:`, error instanceof Error ? error.message : error);
+        return null;
+      }
+    }),
+  );
+  let last: { path: string; mtimeMs: number } | null = null;
+  for (const entry of stated) if (entry !== null && (last === null || entry.mtimeMs > last.mtimeMs)) last = entry;
+  return last?.path ?? null;
 }
 
 async function readRange(file: Awaited<ReturnType<typeof open>>, position: number, length: number): Promise<Buffer> {

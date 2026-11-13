@@ -64,7 +64,8 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 // a case's clock starts once the settle rescan has run.
 const settled = () => sleep(SETTLE_MS + DEBOUNCE_MS + 50);
 
-describe('a transcript the engine moves keeps its readers', () => {
+// Each case waits on real file events for up to 5 s at a step; the suite's bound leaves a loaded machine room past that.
+describe('a transcript the engine moves keeps its readers', { timeout: 30_000 }, () => {
   let fixture: StoreFixture;
   let service: FsService | null;
   let emitted: Emitted[];

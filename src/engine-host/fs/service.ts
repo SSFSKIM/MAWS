@@ -9,7 +9,7 @@
 // Read-only: it never writes under the config home.
 import { createHash } from 'node:crypto';
 import { open } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import type { SessionEvent } from '@shared/graph/events';
 import { FOLLOW_RELEASED, type WindowBudget } from '@shared/graph/history-window';
@@ -141,6 +141,13 @@ interface AgentSync {
   waiters: { through: number; resolve: () => void }[]; // agentsCaughtUp's, each until pass `through` ends
 }
 
+// U8c-1 (M1 decision 4): a session whose transcript was missing where the listing held it, or that a scan's listing did
+// not find, until a look decides for it: its generation and the path it was listed at when it was noted.
+interface Leaving {
+  generation: number;
+  path: string | null;
+}
+
 // W7: one contested session, watched for the foreign process's first write since the contest began.
 interface Contest {
   by: ForeignHolder;
@@ -165,6 +172,14 @@ export class FsService {
   // newer than the listing, so the scan neither forgets nor re-lists them from its snapshot.
   private readonly observedSinceListing = new Set<SessionId>();
   private scans: Promise<unknown> = Promise.resolve();
+  // U8c-1 (M1 decisions 4 and 7): a session is told removed only once a look under every project folder found its
+  // transcript nowhere. Its generation is raised at every transcript event naming it and at every summary that lists it,
+  // so a look that something newer overtook commits nothing; the sessions noted leaving wait here for the next look,
+  // and looks run one at a time.
+  private readonly generations = new Map<SessionId, number>();
+  private readonly leaving = new Map<SessionId, Leaving>();
+  private looks: Promise<void> = Promise.resolve();
+  private nextLook: Promise<void> | null = null;
   private registryRead: Promise<unknown> = Promise.resolve(); // the holder registry's first read, which a scan orders by
   private lastScanAt: string | null = null;
   private lastScan: FsScanResult | null = null;
@@ -837,6 +852,7 @@ export class FsService {
         // listing as the re-summary (or removal) left it: a relocation notified new-path-then-old-path-deleted, or the
         // other way round, must leave the follower on the surviving file, not on whichever path was notified last.
         this.pokeFollows((entry) => entry.sessionId === change.sessionId && entry.agentId === null);
+        this.raise(change.sessionId); // U8c-1: a look begun before this event decides nothing for the session
         void this.summarizePath(change.path, change.sessionId, 'changed').then(() => this.locateFollows(change.sessionId));
         this.checkContest(change.sessionId, change.path); // W7
         return;
@@ -867,9 +883,9 @@ export class FsService {
   }
 
   // After a rescan: a session's transcript may have appeared or moved without a reported event; every follower is
-  // pointed at what the listing found and poked.
+  // pointed at what the listing found (an agent's beside it, `relocate`) and poked.
   private relocateFollows(): void {
-    for (const entry of this.follows.values()) if (entry.agentId === null) entry.location.path = this.listed.get(entry.sessionId)?.path ?? null;
+    for (const entry of this.follows.values()) this.relocate(entry, this.listed.get(entry.sessionId)?.path ?? null);
     this.pokeFollows(() => true);
     void this.reconcileSidecars();
   }
@@ -902,15 +918,47 @@ export class FsService {
     return work;
   }
 
-  // A session's followers take their location from the discovery listing; one that moved is poked (the new file's
-  // inode makes it a reload). A session no longer listed has no location: its follower waits for the file to reappear.
+  // A session's followers take their location from the discovery listing; one that moved is poked (a renamed file keeps
+  // its inode and is read on; another inode is a reload). A session no longer listed has no location: its follower waits
+  // for the file to reappear.
   private locateFollows(sessionId: SessionId): void {
     const path = this.listed.get(sessionId)?.path ?? null;
-    this.pokeFollows((entry) => {
-      if (entry.sessionId !== sessionId || entry.agentId !== null || entry.location.path === path) return false;
-      entry.location.path = path;
-      return true;
-    });
+    this.pokeFollows((entry) => entry.sessionId === sessionId && this.relocate(entry, path));
+  }
+
+  // U8c-1 (M1 decision 3): points a follow at where the listing holds its session's transcript, `transcript`: the
+  // session's own at the file; one of its agents' at the same place under the session's folder beside it, since the
+  // engine moves that folder whole with the transcript (an agent's follow whose file is not there waits, as one of a
+  // file not yet written does). An agent's follow keeps its path while its session is listed nowhere. Answers whether
+  // the follow moved.
+  private relocate(entry: FollowEntry, transcript: string | null): boolean {
+    const path = entry.agentId === null ? transcript : this.rebased(entry.location.path, entry.sessionId, transcript);
+    if (entry.location.path === path) return false;
+    entry.location.path = path;
+    return true;
+  }
+
+  // `<projects>/<any slug>/<sessionId>/<rest>` as `<the transcript's folder>/<sessionId>/<rest>`; any other path as it is.
+  private rebased(path: string | null, sessionId: SessionId, transcript: string | null): string | null {
+    if (path === null || transcript === null) return path;
+    const parts = relative(this.paths.projects, path).split(sep);
+    if (parts.length < 3 || parts[1] !== sessionId) return path;
+    return join(dirname(transcript), sessionId, ...parts.slice(2));
+  }
+
+  // U8c-1 (M1 decision 3): the listing holds a session at another path than it did: the engine moved its transcript and
+  // its folder. Its follows are re-pointed and poked, and an agent listing main was told is walked again at the new
+  // folder, so main is told the agents' new paths.
+  private listingMoved(sessionId: SessionId): void {
+    this.locateFollows(sessionId);
+    if (this.agents.has(sessionId)) this.listAgents(sessionId).catch(logAgentListFailure);
+  }
+
+  // Lists a session at `file`; a session listed elsewhere before has moved.
+  private setListed(file: ListedTranscript): void {
+    const previous = this.listed.get(file.sessionId)?.path;
+    this.listed.set(file.sessionId, file);
+    if (previous !== undefined && previous !== file.path) this.listingMoved(file.sessionId);
   }
 
   private enqueueScan(known: Map<SessionId, FsScanKnown> | null, mode: ScanMode): Promise<FsScanResult> {
@@ -931,8 +979,10 @@ export class FsService {
 
     const gone = new Set([...this.listed.keys()].filter((sessionId) => !present.has(sessionId)));
     for (const sessionId of known?.keys() ?? []) if (!present.has(sessionId)) gone.add(sessionId);
-    for (const sessionId of gone) if (!stale(sessionId)) this.forget(sessionId);
-    for (const file of files) if (!stale(file.sessionId)) this.listed.set(file.sessionId, file);
+    // U8c-1: what the listing did not find is looked for before it is told removed (a rename during the listing can be
+    // missed at both ends); the scan answers once that look has decided.
+    const looked = [...gone].filter((sessionId) => !stale(sessionId)).map((sessionId) => this.noteLeaving(sessionId));
+    for (const file of files) if (!stale(file.sessionId)) this.setListed(file);
 
     // Only list until main has spoken (or the fallback fired), and while main's fs.scan waits behind this pass: that
     // scan reads everything main does not hold itself, so a refresh ahead of it (at a cold start, the start-up pass)
@@ -965,6 +1015,7 @@ export class FsService {
       const visits = mapConcurrent(batch, SUMMARY_CONCURRENCY, visit)[Symbol.asyncIterator]();
       while (!(await visits.next()).done); // drain: every visit has run
     }
+    await Promise.all(looked);
     const result = { projects: countSlugs(this.listed.values()), sessions: this.listed.size, changed: todo.length, durationMs: Math.round(performance.now() - started) };
     if (!summarising) return result;
     this.send('fs.scanProgress', { scanned, total: todo.length });
@@ -990,19 +1041,82 @@ export class FsService {
       }
       this.observedSinceListing.add(sessionId);
       if (summary === null) {
-        if (this.listed.get(sessionId)?.path === path) this.forget(sessionId);
+        // U8c-1: missing where the listing holds it: moved or deleted, which a look under every project folder tells apart
+        if (this.listed.get(sessionId)?.path === path) void this.noteLeaving(sessionId);
         return;
       }
+      this.raise(sessionId);
       const before = this.summaries.get(sessionId);
       this.summaries.set(sessionId, summary);
+      const listedAt = this.listed.get(sessionId)?.path;
+      const moved = listedAt !== undefined && listedAt !== path;
       this.listed.set(sessionId, { sessionId, slug: summary.slug, path, size: summary.size, mtimeMs: summary.mtimeMs });
       if (emit === 'always' || before === undefined || !sameSummary(before, summary)) this.sendSummary(summary);
+      if (moved) this.listingMoved(sessionId);
     });
     this.perPath.set(path, run);
     void run.finally(() => {
       if (this.perPath.get(path) === run) this.perPath.delete(path);
     });
     return run;
+  }
+
+  private raise(sessionId: SessionId): void {
+    this.generations.set(sessionId, this.generationOf(sessionId) + 1);
+  }
+
+  private generationOf(sessionId: SessionId): number {
+    return this.generations.get(sessionId) ?? 0;
+  }
+
+  // U8c-1 (M1 decision 4): the session is noted leaving, with its generation and the path it is listed at, and is
+  // decided by the next look to begin. Answers when that look has decided; a look never rejects.
+  private noteLeaving(sessionId: SessionId): Promise<void> {
+    this.leaving.set(sessionId, { generation: this.generationOf(sessionId), path: this.listed.get(sessionId)?.path ?? null });
+    if (this.nextLook === null) {
+      const look = this.looks
+        .then(() => {
+          this.nextLook = null; // what is noted from here on waits for the look after this one
+          return this.look();
+        })
+        .catch((error: unknown) => console.error('[fs] cannot look for moved transcripts:', error instanceof Error ? error.message : error));
+      this.nextLook = look;
+      this.looks = look;
+    }
+    return this.nextLook;
+  }
+
+  // One look for every session noted leaving when it begins: the names in every project folder read once
+  // (`Discovery.find`). A transcript found is summarised where it lies, which lists the session there and re-points its
+  // follows; nothing is told. One found nowhere is forgotten and told removed, once, only if nothing newer was heard of
+  // the session meanwhile (its generation is the one noted) and it is still listed where it was noted; otherwise this
+  // look decides nothing for it, and a session still listed where it left is looked for again. Two moves within one look
+  // (an enter and an exit within its milliseconds) can still read as a removal and a return.
+  private async look(): Promise<void> {
+    const noted = [...this.leaving];
+    this.leaving.clear();
+    if (noted.length === 0 || this.stopped) return;
+    const found = await this.discovery.find(new Set(noted.map(([sessionId]) => sessionId)));
+    await Promise.all(
+      noted.map(async ([sessionId, note]) => {
+        if (this.hooks?.at) await this.hooks.at('look', sessionId);
+        if (this.stopped) return;
+        const path = found.get(sessionId);
+        if (path !== undefined) {
+          await this.summarizePath(path, sessionId, 'changed');
+          return;
+        }
+        const listedAt = this.listed.get(sessionId)?.path ?? null;
+        if (listedAt !== note.path) return; // a read listed it elsewhere meanwhile, or it was forgotten already
+        if (this.generationOf(sessionId) !== note.generation) {
+          void this.noteLeaving(sessionId);
+          return;
+        }
+        if (this.leaving.get(sessionId)?.generation === note.generation) this.leaving.delete(sessionId); // noted again, by nothing newer
+        this.forget(sessionId);
+        this.locateFollows(sessionId);
+      }),
+    );
   }
 
   private forget(sessionId: SessionId): void {
