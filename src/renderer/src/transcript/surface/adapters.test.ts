@@ -439,10 +439,11 @@ describe('the rows of what entered the session ask the engine’s sites', () => 
     const drawn = turnRows(state, turn.id);
     expect(noticeFollows(kept[0]!, turn, undefined, drawn)).toBeNull();
     expect(arrivalInput(kept[0]!, turn, { ...closed, drawn })).toMatchObject({ instanceId: 'n1', props: { origin: { kind: 'task-notification' } } });
-    // opened, both are drawn: the first asks again and the kept one follows it
+    // opened, both are drawn (the end above the divider, the event under it): the carrier's first asks again and the
+    // kept one follows it
     const open = turnRows(withAllExpanded(state), turn.id);
     const both = open!.filter((r): r is Extract<Row, { kind: 'notice' }> => r.kind === 'notice');
-    expect(both.map((row) => noticeFollows(row, turn, undefined, open))).toEqual([null, 'n1']);
+    expect(both.map((row) => [row.outcome, noticeFollows(row, turn, undefined, open)])).toEqual([['failed', 'n1'], [null, null]]);
   });
 
   // The whole-branch review's finding 6: the notice-to-carrier index is built once per turn's event list and read by every

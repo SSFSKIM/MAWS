@@ -179,17 +179,20 @@ describe('sminos’s deliveries, from the file and another machine’s rows (Acc
 
   // The whole-branch review's finding 1: a window of history that begins at the hook's answer (transcript line 112) has
   // no turn open for it; the answer is kept at the window's start, and the whole file, which an older page rebuilds the
-  // view from, draws it once in the turn that took it
+  // view from, draws it once in the turn that took it. The window does not hold the call, so its line words the answer
+  // from the summary's own pairs (decision 9); the whole file words it by the call's header
   it('u3-sminos-r1-terminal from line 112, the hook’s answer, on both routes: the answer’s line is drawn, as from the whole file', async () => {
     const whole = recorded('u3-sminos-r1-terminal');
     const window = `${whole.split('\n').slice(111).join('\n')}`;
     expect(rowsIn(window)[0]).toMatchObject({ type: 'attachment', attachment: { type: 'hook_additional_context' } });
     const answers = (state: TranscriptState) => arrivalRows(drawn(state)).filter((row) => row.startsWith('● answer'));
-    for (const text of [window, whole]) {
+    for (const [text, line] of [[window, '● answer: answered: Which fruit do you prefer? → Mango'], [whole, '● answer: answered: Fruit → Mango']] as const) {
       const { file, remote } = await bothRoutes(text);
-      expect(answers(file)).toEqual(['● answer: answered: Fruit → Mango']);
-      expect(answers(remote)).toEqual(['● answer: answered: Fruit → Mango']);
+      expect(answers(file)).toEqual([line]);
+      expect(answers(remote)).toEqual([line]);
     }
+    const { file } = await bothRoutes(window);
+    expect(drawn(file).find((row) => row.kind === 'notice')).toMatchObject({ class: 'answer', turnId: null }); // kept at the window's start
   });
 });
 

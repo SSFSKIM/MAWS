@@ -602,6 +602,7 @@ function apply(batch: Batch, event: SessionEvent): void {
         return batch.loose(event, false);
       }
       batch.close(turn, event);
+      if (event.origin === 'task-notification' && event.numTurns > 0 && turn.live.size > 0 && !turn.events.some((e) => e.kind === 'user.message' && e.isSynthetic)) markTaskEnds(batch, 'toldOldForm'); // UX wave U3
       return;
     }
     case 'command.lifecycle': {
@@ -971,20 +972,25 @@ function stands(state: TranscriptState, messageUuid: MessageUuid): boolean {
 // UX wave U3 (the whole-branch review's finding 3, the architect's ruling of 2026-11-13): after an update a session stays
 // with the engine host it runs under until it restarts, and a host older than this landing sends no `arrival`; it tells
 // a background task's end only as `task.notification`, which derive.ts then draws as the end's line. Such a host is
-// known by its events: none carries `arrival`, and the model was told of a task's end in the old form, a `user.message`
-// of origin `task-notification` not marked synthetic (every caller of the reader marks it, decision 4) or a turn that
-// ran and ended with that origin (the older host's word for the turn the engine opened to tell an end; a host that sends
-// arrivals has placed the end's line by then, so a turn of its that ends so never makes it the older host). Both marks
-// only grow; when the answer changes, the turns that hold a task's end derive again.
+// known by its events: none carries `arrival`, and the model was told of a task's end in the old form: a `user.message`
+// of origin `task-notification` not marked synthetic (every caller of the reader marks it, decision 4), or a turn that
+// ended with that origin after the model answered in it, holding no synthetic message (the older host's turn the
+// engine opened to tell an end while idle, which holds nothing of the end; a host that sends arrivals places the end's
+// line at that turn's head). Both marks only grow; when the answer changes, the turns that hold a task's end derive
+// again.
 export const olderHostTaskEnds = (state: TranscriptState): boolean => state.index.taskEnds.toldOldForm && !state.index.taskEnds.arrivals;
 
 function noteTaskEnds(batch: Batch, event: SessionEvent): void {
+  if (event.kind !== 'user.message') return;
+  if (event.arrival !== undefined) markTaskEnds(batch, 'arrivals');
+  else if (event.origin === 'task-notification' && !event.isSynthetic) markTaskEnds(batch, 'toldOldForm');
+}
+
+function markTaskEnds(batch: Batch, mark: keyof TranscriptState['index']['taskEnds']): void {
   const ends = batch.state.index.taskEnds;
+  if (ends[mark]) return;
   const before = olderHostTaskEnds(batch.state);
-  if (event.kind === 'user.message' && event.arrival !== undefined) ends.arrivals = true;
-  else if (event.kind === 'user.message' && event.origin === 'task-notification' && !event.isSynthetic) ends.toldOldForm = true;
-  else if (event.kind === 'turn.ended' && event.origin === 'task-notification' && event.numTurns > 0) ends.toldOldForm = true;
-  else return;
+  ends[mark] = true;
   if (olderHostTaskEnds(batch.state) === before) return;
   for (const [id, turn] of batch.state.turns) if (turn.events.some((e) => e.kind === 'task.notification')) batch.touch(id).version += 1;
 }
