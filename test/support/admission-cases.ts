@@ -22,7 +22,8 @@ export interface AdmissionPaths {
   submodule: string; // a submodule's folder inside the main checkout
   removed: string; // a worktree beside the checkout removed with `git worktree remove` and made again as a plain folder
   removedInside: string; // the same, inside the main checkout (`.claude/worktrees/removed-in`)
-  copy: string; // a folder holding a copy of `beside`'s `.git` pointer
+  copy: string; // a folder beside the checkout holding a copy of `beside`'s `.git` pointer
+  copyInside: string; // the same, inside the main checkout
   stale: string; // a worktree beside the checkout whose folder was replaced by a new repository, its registration not pruned
   linkToWorktree: string; // a link to `beside`
   linkToPlain: string; // a link to `plain`
@@ -66,7 +67,8 @@ export const ADMISSION_CASES: readonly [string, (p: AdmissionPaths) => Admission
   ['a submodule’s folder inside a listed work tree', (p) => agentAt(p, p.submodule, null)],
   ['a worktree removed and made again as a plain folder, outside every listed work tree', (p) => agentAt(p, p.removed, null)],
   ['a worktree removed and made again as a plain folder, inside a listed work tree: a sub-folder of it', (p) => agentAt(p, p.removedInside, p.removedInside)],
-  ['a folder that holds a copy of a registered worktree’s .git pointer', (p) => agentAt(p, p.copy, null)],
+  ['a folder that holds a copy of a registered worktree’s .git pointer, beside the checkout', (p) => agentAt(p, p.copy, null)],
+  ['a folder that holds a copy of a registered worktree’s .git pointer, inside a listed work tree', (p) => agentAt(p, p.copyInside, null)],
   ['a repository made at a registered worktree’s path, its registration not pruned', (p) => agentAt(p, p.stale, null)],
   ['a link to a registered worktree: judged, and used, where it lands', (p) => agentAt(p, p.linkToWorktree, p.beside)],
   ['a link to a folder in no repository', (p) => agentAt(p, p.linkToPlain, null)],
@@ -102,6 +104,7 @@ export async function admissionRepos(): Promise<{ paths: AdmissionPaths; dispose
     removed: at('removed'),
     removedInside: at('main/.claude/worktrees/removed-in'),
     copy: at('copy'),
+    copyInside: at('main/copy'),
     stale: at('stale'),
     linkToWorktree: at('link-wt'),
     linkToPlain: at('link-plain'),
@@ -126,8 +129,10 @@ export async function admissionRepos(): Promise<{ paths: AdmissionPaths; dispose
   await git(p.nested, 'init', '-q', '-b', 'nested');
   await git(p.main, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', p.other, 'sub-mod');
   await git(p.main, 'commit', '-q', '-m', 'the submodule');
-  mkdirSync(p.copy);
-  copyFileSync(join(p.beside, '.git'), join(p.copy, '.git'));
+  for (const folder of [p.copy, p.copyInside]) {
+    mkdirSync(folder);
+    copyFileSync(join(p.beside, '.git'), join(folder, '.git'));
+  }
   mkdirSync(p.plain);
   symlinkSync(p.beside, p.linkToWorktree);
   symlinkSync(p.plain, p.linkToPlain);
