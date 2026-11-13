@@ -48,8 +48,8 @@ export const commands = {
     owner: 'machine',
   },
   // UX wave U5a (decision 2, Interfaces §B.2): the content of a send to the main conversation, `[images…, text]`, built
-  // here from the comments alone: the screenshots are files of this Mac whatever machine the session is on, so the input
-  // names no session, and `<userData>` is the one root a screenshot may lie under. Graded `client`: never on a machine
+  // by the app's main process from the comments alone: the screenshots are files of this Mac whatever machine the
+  // session is on, so the input names no session, and `<userData>` is the one root a screenshot may lie under. Graded `client`: never on a machine
   // link. A refused screenshot is `invalid_input` at `comments.<i>.screenshot`.
   'side.comment.content': {
     input: z.strictObject({ comments: z.array(PassCommentSchema).min(1).max(20) }),
