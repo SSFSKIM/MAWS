@@ -451,7 +451,7 @@ function lineAt(text: string, start: number, end: number, m: Meter): Line {
     while (marker + spaces < end && spaces < 5 && isSpaceOrTab(text.charCodeAt(marker + spaces))) spaces += 1;
     i = marker + (spaces >= 5 ? 1 : spaces);
   }
-  charge(m, i - start + 1);
+  charge(m, i - start + 16); // the prefix, and what its last try read past it (at most an indentation, nine digits and a marker)
   const limit = lineLimit(i, end);
   let content = i;
   let indent = 0;
@@ -478,7 +478,7 @@ function quoteMarkers(text: string, start: number, end: number, max: number, m: 
     at = j + 1;
     if (isSpaceOrTab(text.charCodeAt(at))) at += 1;
   }
-  charge(m, at - start + 1);
+  charge(m, at - start + 4); // the markers, and the spaces the last try read past them
   return { count, at };
 }
 function columnsBetween(text: string, from: number, to: number, m: Meter): number {
@@ -794,7 +794,8 @@ function autolinkEnd(text: string, at: number, end: number, m: Meter): Scan<numb
   return text.charCodeAt(i) === 62 && AUTOLINK.test(text.slice(at, i + 1)) ? i + 1 : null;
 }
 // GFM's literal autolinks start `http://`, `https://` or `www.` (any case).
-function literalUrlAt(text: string, at: number): boolean {
+function literalUrlAt(text: string, at: number, m: Meter): boolean {
+  charge(m, 8);
   const head = text.slice(at, at + 8).toLowerCase();
   return head.startsWith('http://') || head.startsWith('https://') || head.startsWith('www.');
 }
@@ -894,8 +895,7 @@ function* contextLinks(text: string, start: number, end: number, defined: Readon
       i = autolink ?? i + 1;
       continue;
     }
-    if ((code === 104 || code === 72 || code === 119 || code === 87) && (i === start || !isAlphanumeric(text.charCodeAt(i - 1))) && literalUrlAt(text, i)) {
-      charge(m, 8);
+    if ((code === 104 || code === 72 || code === 119 || code === 87) && (i === start || !isAlphanumeric(text.charCodeAt(i - 1))) && literalUrlAt(text, i, m)) {
       opens.length = 0;
       inactiveBelow = 0;
       images = 0;
