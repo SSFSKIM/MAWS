@@ -182,7 +182,7 @@ export function mapSystemFrame(frame: SystemFrame, tasks: TaskRegistry): SystemM
       if (tasks.taskTypes.get(f.task_id) === 'local_agent') {
         return one(compact({ kind: 'subagent.finished', taskId: asTaskId(f.task_id), status: f.status, summary: f.summary, outputFile, reason: f.reason ?? null, usage: taskUsageOf(f.usage) }), f.task_id as AgentId);
       }
-      return one({ kind: 'task.notification', taskId: asTaskId(f.task_id), toolUseId: (f.tool_use_id ?? null) as ToolUseId | null, status: f.status, summary: f.summary, outputFile, reason: f.reason ?? null });
+      return one({ kind: 'task.notification', taskId: asTaskId(f.task_id), toolUseId: (f.tool_use_id ?? null) as ToolUseId | null, status: f.status, summary: f.summary, outputFile, reason: f.reason ?? null, arrivals: true }); // UX wave U3: its end is an arrival's
     }
     case 'background_tasks_changed': {
       const f = frame as SystemBackgroundTasksChangedFrame;

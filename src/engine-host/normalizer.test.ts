@@ -201,7 +201,9 @@ describe('normaliser: ids, turns and the human prompt bubble', () => {
       inRow({ type: 'user', uuid: 'm-2', session_id: 'sess-1', message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user for tool use]' }] } }),
     ]);
     expect(kinds(events)).toEqual(['user.message', 'user.message', 'user.message']);
-    expect(events[0]).toMatchObject({ messageUuid: 'l-1', origin: 'local-command', content: 'Set model to `haiku`', isReplay: true, bash: null });
+    // UX wave U3 (UC-2, class `command`; the U3a document, Interfaces C and Acceptance 6): the output keeps the engine's
+    // own tag, which says stdout or stderr
+    expect(events[0]).toMatchObject({ messageUuid: 'l-1', origin: 'local-command', content: '<local-command-stdout>Set model to `haiku`</local-command-stdout>', isReplay: true, bash: null });
     expect(events[1]).toMatchObject({ messageUuid: 'm-1', origin: 'interrupt-marker', content: [{ type: 'text', text: '[Request interrupted by user]' }], bash: null });
     expect(events[2]).toMatchObject({ messageUuid: 'm-2', origin: 'interrupt-marker' });
     expect(n.state.currentTurn).toBeNull();
@@ -653,7 +655,7 @@ describe('normaliser: meta rows, system subtypes and the unknown', () => {
     expect(events[16]).toMatchObject({ taskId: 'wf-1', workflowName: 'probe', progress: [{ type: 'workflow_phase', index: 1 }] });
     expect(events[17]).toMatchObject({ patch: { status: 'completed', endTime: 5 } });
     expect(events[18]).toMatchObject({ status: 'completed', summary: 'ONE', outputFile: '/o', reason: null });
-    expect(events[19]).toMatchObject({ status: 'stopped', outputFile: null, toolUseId: 'toolu_2' });
+    expect(events[19]).toMatchObject({ status: 'stopped', outputFile: null, toolUseId: 'toolu_2', arrivals: true }); // UX wave U3: its end is an arrival's
     expect(events[20]).toMatchObject({ tasks: [{ taskId: 'ag-1', taskType: 'local_agent', description: 'Read', ambient: false }] });
     expect(events[21]).toMatchObject({ frameType: 'system', subtype: 'turn_starting' });
     expect(events[23]).toMatchObject({ toolUseId: 'toolu_1', elapsedSeconds: 2.5, taskId: null, heartbeat: false });

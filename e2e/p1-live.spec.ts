@@ -1269,6 +1269,7 @@ test.describe('S2: agents between sessions and a team (E7’s residue)', () => {
       await expect.poll(async () => (inbound = ofKind(await events(live, b), 'peer.message').find((e) => e.text.includes(S2_TEXT.b))) !== undefined, { timeout: 120_000, message: 'B’s peer.message' }).toBe(true);
       await show(sceneOf(live), b);
       await drive(live, live.pane, b, 'B’s peer turn', async () => idleNow(live, b));
+      await unfoldWork(live.pane); // UX wave U3 (O-12): the message's line folds with the peer's turn, as the owner opens it
       const shown = live.pane.locator('.transcript-peer[data-peer="inbound"]').filter({ hasText: 'E11 S2b' });
       await expect(shown, 'B’s transcript shows the message from another session').toBeVisible({ timeout: 15_000 });
       note(`case S2(b): B's peer.message ${JSON.stringify(inbound)}; B's row ${JSON.stringify((await shown.textContent())?.trim())}`);

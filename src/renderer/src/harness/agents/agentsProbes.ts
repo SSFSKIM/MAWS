@@ -256,7 +256,7 @@ function peerRowOf(el: HTMLElement): PeerRowView | null {
       who: text(who),
       owners: owners ? text(owners) : null,
       address: who?.getAttribute('title') ?? null,
-      preview: text(message.querySelector('.transcript-peer-text > span:last-child')),
+      preview: text(message.querySelector('[data-part="preview"]')), // UX wave U3: the preview on the message line
       result: state?.dataset.result ?? null,
       resultText: error ? text(error) : (state?.getAttribute('title') ?? null),
       reply: buttonNamed(message, peerMessageCopy.reply) !== null,

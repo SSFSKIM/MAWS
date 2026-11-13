@@ -218,9 +218,9 @@ describe('TranscriptSlot', () => {
       act(() => useTranscriptStore.getState().expandAll(key));
       return useTranscriptStore.getState().rows(key).find((row) => row.kind === 'agent_message')?.text;
     };
-    expect(sent()).toBe('Sent to a912e224: ready?'); // no graph yet
+    expect(sent()).toBe('Sent to @a912e224: ready?'); // no graph yet; UX wave U3 (O-12): the message line's words
     put(graph());
-    expect(sent()).toBe('Sent message to Survey src: ready?');
+    expect(sent()).toBe('Sent to Survey src: ready?');
     const lookup = useTranscriptStore.getState().entries[key]!.state.agents;
     g.emit('subagent.progress', { taskId: task('a912e224'), description: 'Reading one.txt', usage: { totalTokens: 10, toolUses: 1, durationMs: 5 }, lastToolName: 'Read', summary: null });
     put(graph()); // the graph changed, the agents it names did not
