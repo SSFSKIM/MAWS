@@ -41,7 +41,7 @@ describe('ToHumanEntry', () => {
     expect(entry().querySelector('[data-channel-as-of]')).toBeNull();
   });
 
-  it('lets its names give way in the Channel’s one order: the name whole with no 24-character cap, the chip able to give way, the tooltip whole (#505)', () => {
+  it('lets its names give way in the Channel’s one order: the name whole with no 24-character cap, the chip able to give way, the tooltip whole (board 505)', () => {
     const long = 'ci-optimization-coordinator-for-the-clinical-research-shards';
     render(<ToHumanEntry entry={message({ name: long })} />);
     const header = entry().querySelector('header')!;
@@ -52,6 +52,10 @@ describe('ToHumanEntry', () => {
     expect(part('title').textContent).toBe('Fix the relay');
     expect(part('chip').querySelector('[data-machine-chip]')?.textContent).toBe('@mini');
     expect(part('chip').className.split(' ')).not.toContain('shrink-0');
+    // the names are one group of the row; the host's word and the time are the fixed parts that wrap under it
+    const names = header.querySelector<HTMLElement>('[data-names]')!;
+    expect([...names.querySelectorAll('[data-name-part]')].map((el) => el.getAttribute('data-name-part'))).toEqual(['alias', 'title', 'chip']);
+    expect(names.contains(header.querySelector('time'))).toBe(false);
   });
 
   it('names a machine the roster doesn’t hold by the channel’s name for it (its cached entries, signed out), and the roster’s name over it', () => {
