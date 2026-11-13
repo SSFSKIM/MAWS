@@ -117,6 +117,8 @@ test('UX1: titles keep their width on hover and conversation search stays reacha
     await shoot('u7a-row-menu');
     await page.keyboard.press('Escape');
     await rowMenu.waitFor({ state: 'detached', timeout: 3_000 }).catch(() => undefined);
+    // the menu hands focus back to its trigger; the scene before the pictures held none in the sidebar, so it holds none after
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     await page.mouse.move(700, 400);
     await attachSidebarStates(maws, info, 'rows');
     await unread.click();
