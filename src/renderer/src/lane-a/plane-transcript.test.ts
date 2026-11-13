@@ -723,6 +723,27 @@ describe('the exit a gone session leaves on another machine (X-168)', () => {
     expect([...entry().state.seen].filter((id) => String(id).startsWith(EXIT))).toEqual([`${EXIT}@2`]);
   });
 
+  // Round 4 (the re-review): presence travels outside the ordered rows, so the session's last rows can come after it.
+  it('rows that arrive after the presence said gone end too: the agents row they bring is not left working', async () => {
+    await snapshot(LIVE);
+    await presence(GONE);
+    const late = [
+      row({ type: 'user', uuid: 'g-u2', parentUuid: 'g-d1', timestamp: at(5), message: { role: 'user', content: 'One more helper.' } }),
+      row({ type: 'assistant', uuid: 'g-a2', parentUuid: 'g-u2', timestamp: at(6), message: { id: 'g-m3', role: 'assistant', model: 'example-model', content: [{ type: 'tool_use', id: 'toolu-g2', name: 'Agent', input: { description: 'Check the links', prompt: 'Check the sample links', subagent_type: 'Explore', run_in_background: true } }] } }),
+      row({ type: 'user', uuid: 'g-r2', parentUuid: 'g-a2', timestamp: at(7), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu-g2', content: 'Async agent launched successfully.' }] }, toolUseResult: { status: 'async_launched' } }),
+    ];
+    for (const body of late) {
+      plane.send('row', { row: body } as unknown as SessionBodies['row']);
+      await settle();
+    }
+    await settle();
+    expect(entry().rows.filter((r) => r.kind === 'subagent').map((r) => (r as Extract<Row, { kind: 'subagent' }>).status)).not.toContain('started');
+    expect(entry().rows.filter((r) => r.kind === 'user').length).toBe(2); // the late prompt drawn, once
+    const agents = [...controller.state.getState().tasks.tasks.values()].filter((node) => node.kind === 'agent');
+    expect(agents.map((node) => node.status)).toEqual(['exited', 'exited']);
+    expect([...entry().state.seen].filter((id) => String(id).startsWith(EXIT))).toEqual([EXIT]); // one exit, after the rows
+  });
+
   it('a snapshot of a session already gone ends its agents at once; a subagent’s own transcript takes no presence', async () => {
     await snapshot(GONE);
     expect(agentStatus()).toBe('exited');
