@@ -217,6 +217,10 @@ export class EditorController {
   // Every save of this mount's draft: one that a take-back left to settle names its settle form until acknowledged.
   private saveDraft(draft: Draft | null): void {
     const replaces = this.settleForm;
+    if (replaces === null) {
+      void this.drafts.save(draft);
+      return;
+    }
     void this.drafts.save(draft, replaces).then((taken) => {
       if (taken && this.settleForm === replaces) this.settleForm = null;
     });

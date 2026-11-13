@@ -42,6 +42,7 @@ import type { Draft } from '@shared/ipc/schema/session'; // P3-G
 import { useHosts } from '../stores/hosts'; // UX wave U4a M3
 import { hostStatus, supervisorStatus } from '../test-support/host-status'; // UX wave U4a M3
 import { HOST_UPDATING } from './queue/host-wire'; // UX wave U4a M3
+import { resetTakeBack } from './queue/take-back'; // UX wave U4a M3
 import { addMarkupToChat, MARKUP_COPY, resetMarkup, startMarkup, useMarkup } from '../markup/session'; // P3-G
 import { registerMarkupSurface, resetMarkupSurfaces } from '../markup/surface'; // P3-G
 import { MarkupLayer } from '../markup/MarkupLayer'; // P3-G
@@ -139,6 +140,7 @@ beforeEach(() => {
 afterEach(() => {
   disconnect();
   cleanup();
+  resetTakeBack(); // a take-back left in hand holds the next test's box
   registerSetupIntentHook(() => null);
   delete (window as { maws?: PreloadBridge }).maws;
   vi.useRealTimers();
