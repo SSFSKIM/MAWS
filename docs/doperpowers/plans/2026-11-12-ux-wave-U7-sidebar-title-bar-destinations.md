@@ -965,6 +965,11 @@ U7a's pull request carries the dated amendment of the ruling S-11 reverses; U7b'
   No wire bump: `layout.*` commands are not on the wire manifest, and no wire file changed. The e2e lists M3 made false were changed in M3 (`e2e/shell.spec.ts` long scene, `e2e/sessions.spec.ts` "foreign-live: …" twice, and with the button `e2e/ux1-sidebar.spec.ts`'s hover measure); M4 writes the new scenes.
   Date/Author: 2026-11-13, M3's executor; folded by the controller.
 
+- Decision (the architect's ruling, 2026-11-13, on the controller's report of M3): a Needs you row carries no Hide, neither the row's button (as M3 already says) nor the menu item, whether or not the session has a record. A session that needs the person stays listed under Needs you whatever is hidden (root UC-1), so an item that leaves its own row in place reads as an act that did nothing. The session's row in the tree keeps both the button and the item, and hiding it there still leaves it under Needs you. Pinned by a test: a Needs you row's menu holds no Hide, and the same session's tree row's menu does. Built in M3's fix round.
+  Rejected: the same items wherever a session is listed, which is the simpler code and the more confusing menu.
+  Also from the architect: the cross-build run against build F is the architect's, and waits for a gate flag (`--peer-exact`) now in a pull request, because F is off master's first-parent chain and `--peer f1852de3a` is mapped to another commit. No executor or controller starts it.
+  Date/Author: 2026-11-13, the architect; recorded by the controller.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
