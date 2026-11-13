@@ -4,30 +4,16 @@
 // two-argument form, filling the session from the focused pane (C5's Pane focuses on pointerdown, so at click time it
 // is the transcript's).
 import type { AppSessionId } from '@shared/graph/ids';
+import { normalizeLexically } from '@shared/files/named';
 import { machineFor } from '../../ipc/machine';
 import { panelHost, shownSession } from '../../panel/host';
 import { useLayout } from '../../stores/layout';
 import { useSessions } from '../../stores/sessions';
 import { useTranscriptStore, type TranscriptActions, type TurnId } from '../../transcript';
 
-// `.`, `..` and repeated separators collapsed without touching the disk (ruled 2026-09-29, O1): a receipt's path comes
-// from the model's input and may carry `..`, which `files.*` refuses as not normal; the boundary then judges the
-// normalised path as any other. A relative path stays relative (and is refused by the service as such).
-export function normalizeLexically(path: string): string {
-  const absolute = path.startsWith('/');
-  const out: string[] = [];
-  for (const segment of path.split('/')) {
-    if (segment === '' || segment === '.') continue;
-    if (segment === '..') {
-      if (out.length > 0 && out[out.length - 1] !== '..') out.pop();
-      else if (!absolute) out.push('..');
-      continue;
-    }
-    out.push(segment);
-  }
-  const joined = out.join('/');
-  return absolute ? `/${joined}` : joined || '.';
-}
+// `normalizeLexically` lives in the rule of a file the transcript names (UX wave U6c, `src/shared/files/named.ts`), so the
+// daemon's check reads a path as the click does; exported here as before.
+export { normalizeLexically };
 
 export function openFile(appSessionId: AppSessionId | null, path: string, line?: number | null): void {
   useLayout.getState().openTab({ kind: 'file', path: normalizeLexically(path), line: line ?? null, appSessionId, machine: machineFor(appSessionId) });

@@ -1,0 +1,578 @@
+// The search for a file the transcript names, its memory and its queue (UX wave U6c,
+// docs/doperpowers/plans/2026-11-12-ux-wave-U6c-linked-file.md, Interfaces §B and the sequences S4 to S15). Every
+// transcript here is made of invented records, written into a scratch store.
+import { open as fsOpen, rename, writeFile, mkdir, stat } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AppSessionId } from '@shared/graph/ids';
+import type { OpenFile } from '@shared/fs/read-tail';
+import { callClass, rowClaim } from '@shared/files/named';
+import { StoreFixture } from '../../../test/support/store-fixture';
+import { createNamedPaths, NAMED_CHUNK_BYTES, NAMED_FINGERPRINT_BYTES, NAMED_ROW_BYTES, NAMED_SCAN_BYTES, NAMED_WAIT_MS, NAMED_WAITING_MAX, NAMED_CACHE_ENTRIES, type NamedPathsOptions } from './named';
+
+const S = 'app-named' as AppSessionId;
+const P = '/work/out/report.md';
+const FP = NAMED_FINGERPRINT_BYTES;
+
+// Records in the shapes the engine writes (test/fixtures/transcripts/), invented.
+let serial = 0;
+const text = (value: string) => ({ type: 'text', text: value });
+const assistant = (...content: object[]) => ({ type: 'assistant', uuid: `a-${++serial}`, message: { role: 'assistant', content } });
+const call = (id: string, name: string, input: object) => assistant({ type: 'tool_use', id, name, input });
+const user = (content: string | object[], extra: object = {}) => ({ type: 'user', uuid: `u-${++serial}`, message: { role: 'user', content }, ...extra });
+const result = (id: string, content: string | object[], extra: object = {}) => user([{ type: 'tool_result', tool_use_id: id, content }], extra);
+const filler = (n: number, size = 200) => Array.from({ length: n }, (_, i) => (i % 2 === 0 ? user(`note ${i} ${'x'.repeat(size)}`) : assistant(text(`reply ${i} ${'y'.repeat(size)}`))));
+const linkTo = (path: string) => assistant(text(`Wrote [the report](${path}).`));
+const lineOf = (record: object) => JSON.stringify(record);
+const bytesOf = (records: object[]) => records.reduce((sum, record) => sum + Buffer.byteLength(lineOf(record)) + 1, 0);
+
+let fixture: StoreFixture;
+let file: string | null;
+let holds: Partial<Record<'opened' | 'searched', () => Promise<void>>>;
+let failRead: ((n: number) => boolean) | null;
+const stats = { opens: 0, reads: 0, bytes: 0 };
+
+// fs.open with every read counted, and a read that fails on request
+const counting: OpenFile = async (path, flags) => {
+  const handle = await fsOpen(path, flags);
+  stats.opens += 1;
+  const read = handle.read.bind(handle) as (buffer: Buffer, offset: number, length: number, position: number) => Promise<{ bytesRead: number; buffer: Buffer }>;
+  Object.assign(handle, {
+    read: async (buffer: Buffer, offset: number, length: number, position: number) => {
+      stats.reads += 1;
+      if (failRead?.(stats.reads)) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' });
+      const answer = await read(buffer, offset, length, position);
+      stats.bytes += answer.bytesRead;
+      return answer;
+    },
+  });
+  return handle;
+};
+const reset = () => Object.assign(stats, { opens: 0, reads: 0, bytes: 0 });
+
+function paths(extra: Partial<NamedPathsOptions> = {}) {
+  return createNamedPaths({
+    transcript: async () => file,
+    open: counting,
+    hooks: {
+      at: async (point) => {
+        const hold = holds[point];
+        if (!hold) return;
+        delete holds[point]; // each hold runs once
+        await hold();
+      },
+    },
+    ...extra,
+  });
+}
+
+async function writeTranscript(records: object[]): Promise<string> {
+  file = await fixture.addTranscript('/work/repo', 'engine-session-1', records.map(lineOf));
+  return file;
+}
+// Rewritten in place: the same inode, other bytes.
+const rewriteInPlace = (records: object[]) => writeFile(file!, records.map((record) => `${lineOf(record)}\n`).join(''));
+const append = (records: object[]) => fixture.appendLines(file!, records.map(lineOf));
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => (resolve = done));
+  return { promise, resolve };
+}
+// A hold at `point` that says when it is reached and waits for the test's release.
+function holdAt(point: 'opened' | 'searched', during?: () => Promise<void>) {
+  const reached = deferred();
+  const release = deferred();
+  holds[point] = async () => {
+    reached.resolve();
+    await release.promise;
+    await during?.();
+  };
+  return { reached: reached.promise, release: release.resolve };
+}
+const turns = async (n = 20) => {
+  for (let i = 0; i < n; i += 1) await new Promise((resolve) => setImmediate(resolve));
+};
+
+beforeEach(async () => {
+  fixture = await StoreFixture.create();
+  file = null;
+  holds = {};
+  failRead = null;
+  reset();
+});
+afterEach(async () => {
+  await fixture.dispose();
+});
+
+describe('the bounds', () => {
+  it('are the document’s', () => {
+    expect({ NAMED_SCAN_BYTES, NAMED_CHUNK_BYTES, NAMED_ROW_BYTES, NAMED_CACHE_ENTRIES, NAMED_WAITING_MAX, NAMED_WAIT_MS, NAMED_FINGERPRINT_BYTES }).toEqual({
+      NAMED_SCAN_BYTES: 1024 ** 3,
+      NAMED_CHUNK_BYTES: 1024 * 1024,
+      NAMED_ROW_BYTES: 4 * 1024 * 1024,
+      NAMED_CACHE_ENTRIES: 256,
+      NAMED_WAITING_MAX: 8,
+      NAMED_WAIT_MS: 8_000,
+      NAMED_FINGERPRINT_BYTES: 4096,
+    });
+  });
+});
+
+describe('names: what the transcript names', () => {
+  it('a link in the newest rows names the path; one nowhere names nothing', async () => {
+    await writeTranscript([...filler(10), linkTo(P), ...filler(2)]);
+    const named = paths();
+    expect(await named.names(S, P)).toBe(true);
+    expect(await named.names(S, '/work/out/other.md')).toBe(false);
+  });
+
+  it('every counted place names the path, through the search', async () => {
+    const cases: object[][] = [
+      [user(`Open [r](${P})`)],
+      [user([text(`Open [r](${P})`)])],
+      [{ type: 'attachment', uuid: 'q1', attachment: { type: 'queued_command', prompt: `Open [r](${P})`, source_uuid: 's1', commandMode: 'prompt', origin: { kind: 'human' } } }],
+      [call('t1', 'ExitPlanMode', { plan: `Then [r](${P})` })],
+      [call('t1', 'Read', { file_path: P })],
+      [call('t1', 'Edit', { file_path: P, old_string: 'a', new_string: 'b' })],
+      [call('t1', 'mcp__docs__save', { title: 'r' }), ...filler(3), result('t1', `Saved to [r](${P})`)],
+      [call('t1', 'Write', { file_path: '/work/out/elsewhere.md', content: 'x' }), ...filler(3), result('t1', 'File created', { toolUseResult: { type: 'create', filePath: P } })],
+    ];
+    for (const records of cases) {
+      await writeTranscript([...filler(4), ...records, ...filler(4)]);
+      expect(await paths().names(S, P), JSON.stringify(records)).toBe(true);
+    }
+  });
+
+  it('a result form names nothing without its call, or with a call of another tool', async () => {
+    const cases: object[][] = [
+      [...filler(3), result('t1', `Saved to [r](${P})`)],
+      [call('t1', 'Bash', { command: 'make' }), ...filler(3), result('t1', `Saved to [r](${P})`)],
+      [call('t1', 'Bash', { command: 'make' }), ...filler(3), result('t1', 'ok', { toolUseResult: { filePath: P } })],
+      [result('t1', `Saved to [r](${P})`), call('t1', 'mcp__docs__save', {})], // the call is older than its result
+      [call('t1', 'Bash', { command: `ls ${P}` }), result('t1', `[r](${P})`, { toolUseResult: { stdout: `[r](${P})` } })],
+    ];
+    for (const records of cases) {
+      await writeTranscript([...filler(4), ...records, ...filler(4)]);
+      expect(await paths().names(S, P), JSON.stringify(records)).toBe(false);
+    }
+  });
+
+  it('records that hold the link but do not count name nothing', async () => {
+    await writeTranscript([
+      { type: 'queue-operation', operation: 'enqueue', content: `Open [r](${P})` },
+      { type: 'api-request', messages: [{ role: 'assistant', content: `[r](${P})` }] },
+      user(`[r](${P})`, { isMeta: true }),
+      user(`[r](${P})`, { isCompactSummary: true }),
+      assistant(text(`a bare ${P} in prose`)),
+      { type: 'summary', summary: `[r](${P})` },
+    ]);
+    expect(await paths().names(S, P)).toBe(false);
+  });
+
+  it('a hit before a compaction boundary still names the path', async () => {
+    await writeTranscript([linkTo(P), ...filler(4), { type: 'system', subtype: 'compact_boundary', content: 'Conversation compacted' }, user('Summary of the conversation so far', { isCompactSummary: true }), ...filler(4)]);
+    expect(await paths().names(S, P)).toBe(true);
+  });
+
+  it('a name with a quote, a backslash, a space and non-ASCII letters is found', async () => {
+    const odd = '/work/out/say "hi" \\x 보고서.md';
+    await writeTranscript([...filler(4), assistant(text(`See [it](<${odd}>).`)), ...filler(4)]);
+    expect(await paths().names(S, odd)).toBe(true);
+  });
+
+  it('a record older than the bound is not named; one wholly inside it is', async () => {
+    const records = [linkTo(P), ...filler(20)];
+    await writeTranscript(records);
+    const after = bytesOf(records.slice(1));
+    expect(await paths({ bounds: { scan: after } }).names(S, P)).toBe(false);
+    expect(await paths({ bounds: { scan: after + Buffer.byteLength(lineOf(records[0]!)) + 1 } }).names(S, P)).toBe(true);
+  });
+
+  it('a line longer than the row bound is passed over', async () => {
+    const long = assistant(text(`[r](${P}) ${'z'.repeat(9_000)}`));
+    await writeTranscript([...filler(2), long, ...filler(2)]);
+    expect(await paths({ bounds: { row: 8_000, chunk: 1_000 } }).names(S, P)).toBe(false);
+    expect(await paths({ bounds: { row: 10_000, chunk: 1_000 } }).names(S, P)).toBe(true);
+  });
+
+  it('a last line with no end is not read, and is searched once it is whole', async () => {
+    await writeTranscript(filler(4));
+    await fixture.appendBytes(file!, Buffer.from(lineOf(linkTo(P))));
+    const named = paths();
+    expect(await named.names(S, P)).toBe(false);
+    await fixture.appendBytes(file!, Buffer.from('\n'));
+    expect(await named.names(S, P)).toBe(true);
+  });
+
+  it('no transcript, no file, a directory or a locator that throws: not named, and nothing thrown', async () => {
+    expect(await paths().names(S, P)).toBe(false);
+    expect(stats.opens).toBe(0);
+    file = join(fixture.configHome, 'projects', 'nowhere', 'gone.jsonl');
+    expect(await paths().names(S, P)).toBe(false);
+    file = join(fixture.configHome, 'projects');
+    expect(await paths().names(S, P)).toBe(false);
+    expect(await paths({ transcript: () => Promise.reject(new Error('index closed')) }).names(S, P)).toBe(false);
+  });
+
+  it('an ask whose signal has already ended answers at once and opens nothing', async () => {
+    await writeTranscript([linkTo(P)]);
+    expect(await paths().names(S, P, AbortSignal.abort())).toBe(false);
+    expect(stats.opens).toBe(0);
+  });
+});
+
+describe('what a remembered answer costs, and what it rests on (A8)', () => {
+  it('a path found in the newest rows is found without reading the older ones', async () => {
+    const records = [...filler(300), linkTo(P)];
+    await writeTranscript(records);
+    expect(await paths({ bounds: { chunk: 4096 } }).names(S, P)).toBe(true);
+    expect(bytesOf(records)).toBeGreaterThan(50_000);
+    expect(stats.bytes).toBeLessThan(5 * 4096); // a chunk, two fingerprints' worth at most, and the proof
+  });
+
+  it('after a hit, a later ask reads the naming record’s bytes again and no more', async () => {
+    const naming = linkTo(P);
+    await writeTranscript([...filler(50), naming, ...filler(5)]);
+    const named = paths();
+    expect(await named.names(S, P)).toBe(true);
+    reset();
+    expect(await named.names(S, P)).toBe(true);
+    expect(stats.bytes).toBe(Buffer.byteLength(lineOf(naming)) + 2); // the line, the byte before and the byte after
+  });
+
+  it('after a hit that rests on a result, a later ask reads the two records again and no more', async () => {
+    const records = [call('t1', 'mcp__docs__save', { title: 'r' }), ...filler(10), result('t1', `Saved to [r](${P})`), ...filler(3)];
+    await writeTranscript([...filler(5), ...records]);
+    const named = paths();
+    expect(await named.names(S, P)).toBe(true);
+    reset();
+    expect(await named.names(S, P)).toBe(true);
+    expect(stats.bytes).toBe(Buffer.byteLength(lineOf(records[0]!)) + 2 + Buffer.byteLength(lineOf(records[11]!)) + 2);
+  });
+
+  it('after a miss, only what was written since is searched', async () => {
+    await writeTranscript(filler(500));
+    const before = (await stat(file!)).size;
+    const named = paths({ bounds: { chunk: 4096 } });
+    expect(await named.names(S, P)).toBe(false);
+    const added = [...filler(5), linkTo(P), ...filler(5)];
+    await append(added);
+    reset();
+    expect(await named.names(S, P)).toBe(true);
+    expect(before).toBeGreaterThan(100_000);
+    // what was added, and three fingerprints (the miss's, and the new checkpoint's twice)
+    expect(stats.bytes).toBeLessThanOrEqual(bytesOf(added) + 3 * 2 * FP + 2 * 4096);
+  });
+
+  it('a miss with nothing written since reads its fingerprint and nothing of the transcript', async () => {
+    await writeTranscript(filler(500));
+    const named = paths();
+    expect(await named.names(S, P)).toBe(false);
+    reset();
+    expect(await named.names(S, P)).toBe(false);
+    expect(stats.bytes).toBe(3 * 2 * FP);
+  });
+
+  it('keeps the least recently asked entries within its bound', async () => {
+    const other = '/work/out/other.md';
+    await writeTranscript([linkTo(P), linkTo(other), ...filler(100)]);
+    const named = paths({ bounds: { entries: 1 } });
+    expect(await named.names(S, P)).toBe(true);
+    expect(await named.names(S, other)).toBe(true);
+    reset();
+    expect(await named.names(S, P)).toBe(true);
+    expect(stats.bytes).toBeGreaterThan(bytesOf(filler(100))); // P's entry was dropped: searched again
+  });
+});
+
+describe('the sequences (S4 to S13)', () => {
+  it('S4: the transcript grows while it is searched; the ask answers for the file as it was, the next searches what was added', async () => {
+    await writeTranscript(filler(20));
+    const named = paths();
+    const held = holdAt('opened', () => append([linkTo(P)]));
+    const asked = named.names(S, P);
+    await held.reached;
+    held.release();
+    expect(await asked).toBe(false);
+    expect(await named.names(S, P)).toBe(true);
+  });
+
+  it('S4: growth seen only after the search does not change its answer', async () => {
+    await writeTranscript(filler(20));
+    const named = paths();
+    const held = holdAt('searched', () => append([linkTo(P)]));
+    const asked = named.names(S, P);
+    await held.reached;
+    held.release();
+    expect(await asked).toBe(false);
+    expect(await named.names(S, P)).toBe(true);
+  });
+
+  it('S5: a transcript renamed into another folder between two asks: the hit is proven at the new place and stands', async () => {
+    const naming = linkTo(P);
+    await writeTranscript([...filler(20), naming, ...filler(2)]);
+    const named = paths();
+    expect(await named.names(S, P)).toBe(true);
+    const moved = join(fixture.configHome, 'projects', 'another-folder', 'engine-session-1.jsonl');
+    await mkdir(dirname(moved), { recursive: true });
+    await rename(file!, moved);
+    file = moved;
+    reset();
+    expect(await named.names(S, P)).toBe(true);
+    expect(stats.bytes).toBe(Buffer.byteLength(lineOf(naming)) + 2);
+  });
+
+  it('S6: a transcript at neither place for a moment: not named, nothing thrown, and found again once it is back', async () => {
+    const path = await writeTranscript([linkTo(P)]);
+    const named = paths();
+    file = `${path}.moving`;
+    expect(await named.names(S, P)).toBe(false);
+    file = path;
+    expect(await named.names(S, P)).toBe(true);
+  });
+
+  it('S7: two asks for one session and path at once share one job', async () => {
+    await writeTranscript([...filler(20), linkTo(P)]);
+    const locate = vi.fn(async () => file);
+    const named = paths({ transcript: locate });
+    expect(await Promise.all([named.names(S, P), named.names(S, P)])).toEqual([true, true]);
+    expect(locate).toHaveBeenCalledTimes(1);
+    expect(stats.opens).toBe(1);
+  });
+
+  it('S8: a search that fails in the middle names nothing and remembers nothing; the next ask searches again', async () => {
+    await writeTranscript([linkTo(P), ...filler(100)]);
+    const named = paths({ bounds: { chunk: 2048 } });
+    failRead = (n) => n === 3;
+    expect(await named.names(S, P)).toBe(false);
+    failRead = null;
+    reset();
+    expect(await named.names(S, P)).toBe(true);
+    expect(stats.bytes).toBeGreaterThan(bytesOf(filler(100))); // the whole transcript searched again
+  });
+
+  it('S9: rewritten in place to the same length without the naming record: proven, dropped, searched again, not named', async () => {
+    const records = [...filler(10), linkTo(P), ...filler(10)];
+    await writeTranscript(records);
+    const named = paths();
+    expect(await named.names(S, P)).toBe(true);
+    const unnamed = linkTo('/work/out/rePort.md');
+    unnamed.uuid = (records[10] as { uuid: string }).uuid;
+    const rewritten = [...records.slice(0, 10), unnamed, ...records.slice(11)];
+    expect(bytesOf(rewritten)).toBe(bytesOf(records));
+    await rewriteInPlace(rewritten);
+    expect(await named.names(S, P)).toBe(false);
+  });
+
+  it('S10: rewritten in place, longer, without the naming record: not named', async () => {
+    const records = [...filler(10), linkTo(P), ...filler(10)];
+    await writeTranscript(records);
+    const named = paths();
+    expect(await named.names(S, P)).toBe(true);
+    await rewriteInPlace([...filler(40), assistant(text('nothing linked'))]);
+    expect(await named.names(S, P)).toBe(false);
+  });
+
+  it('S11: rewritten while the search runs: a hit answers only if its record still names the path at the search’s end', async () => {
+    const records = [...filler(3), linkTo(P), ...filler(3)];
+    await writeTranscript(records);
+    const named = paths();
+    const unnamed = { ...linkTo('/work/out/rePort.md'), uuid: (records[3] as { uuid: string }).uuid };
+    const held = holdAt('searched', () => rewriteInPlace([...records.slice(0, 3), unnamed, ...records.slice(4)]));
+    const asked = named.names(S, P);
+    await held.reached;
+    held.release();
+    expect(await asked).toBe(false);
+  });
+
+  it('S11: rewritten while the search runs: a miss is not remembered, so the next ask searches the whole window', async () => {
+    const records = [...filler(3), linkTo('/work/out/rePort.md'), ...filler(3)];
+    await writeTranscript(records);
+    const named = paths();
+    const naming = { ...linkTo(P), uuid: (records[3] as { uuid: string }).uuid };
+    const held = holdAt('searched', () => rewriteInPlace([...records.slice(0, 3), naming, ...records.slice(4)]));
+    const asked = named.names(S, P);
+    await held.reached;
+    held.release();
+    expect(await asked).toBe(false);
+    expect(await named.names(S, P)).toBe(true);
+  });
+
+  it('S12: after a miss, a rewrite that puts the link before the checkpoint fails the fingerprint, and the whole window is searched', async () => {
+    const records = [...filler(3), linkTo('/work/out/rePort.md'), ...filler(3)];
+    await writeTranscript(records);
+    const named = paths();
+    expect(await named.names(S, P)).toBe(false);
+    await rewriteInPlace([...records.slice(0, 3), { ...linkTo(P), uuid: (records[3] as { uuid: string }).uuid }, ...records.slice(4)]);
+    expect(await named.names(S, P)).toBe(true);
+  });
+
+  it('S13: a result added since a miss, whose call is older than the checkpoint, is named once its call is found', async () => {
+    await writeTranscript([call('t1', 'mcp__docs__save', { title: 'r' }), call('t2', 'Edit', { file_path: '/work/out/x.md', old_string: 'a', new_string: 'b' }), ...filler(30)]);
+    const named = paths({ bounds: { chunk: 1024 } });
+    expect(await named.names(S, P)).toBe(false);
+    expect(await named.names(S, '/work/out/edited.md')).toBe(false);
+    await append([result('t1', `Saved to [r](${P})`), result('t2', 'ok', { toolUseResult: { filePath: '/work/out/edited.md' } })]);
+    expect(await named.names(S, P)).toBe(true);
+    expect(await named.names(S, '/work/out/edited.md')).toBe(true);
+  });
+});
+
+describe('the queue (S14, S15)', () => {
+  it('S14: one job runs, eight wait, a ninth distinct search is answered at once, and the others are unaffected', async () => {
+    const others = Array.from({ length: 8 }, (_, i) => `/work/out/waiting-${i}.md`);
+    await writeTranscript([linkTo(P), ...others.map(linkTo), ...filler(10)]);
+    const named = paths();
+    const held = holdAt('opened');
+    const running = named.names(S, P);
+    await held.reached;
+    const waiting = others.map((path) => named.names(S, path));
+    const sameAsWaiting = named.names(S, others[0]!); // joins a waiting job: no new one
+    expect(await named.names(S, '/work/out/ninth.md')).toBe(false);
+    expect(await named.names('app-other' as AppSessionId, P)).toBe(false); // another session's ask is a distinct job too
+    held.release();
+    expect(await running).toBe(true);
+    expect(await Promise.all(waiting)).toEqual(others.map(() => true));
+    expect(await sameAsWaiting).toBe(true);
+  });
+
+  it('S15: every waiter of the running search leaves; it stops at its next read and remembers nothing', async () => {
+    const records = [linkTo(P), ...filler(200)];
+    await writeTranscript(records);
+    const named = paths({ bounds: { chunk: 4096 } });
+    const controller = new AbortController();
+    const held = holdAt('searched');
+    const asked = named.names(S, P, controller.signal);
+    await held.reached;
+    controller.abort();
+    expect(await asked).toBe(false);
+    held.release();
+    await turns();
+    reset();
+    expect(await named.names(S, P)).toBe(true);
+    expect(stats.bytes).toBeGreaterThan(bytesOf(filler(200))); // nothing was remembered: the whole window again
+  });
+
+  it('S15: a running search left by its waiter reads nothing more', async () => {
+    await writeTranscript([linkTo(P), ...filler(200)]);
+    const named = paths({ bounds: { chunk: 4096 } });
+    const controller = new AbortController();
+    const held = holdAt('opened');
+    const asked = named.names(S, P, controller.signal);
+    await held.reached;
+    controller.abort();
+    expect(await asked).toBe(false);
+    reset();
+    held.release();
+    await turns();
+    expect(stats.bytes).toBe(0);
+  });
+
+  it('S15: a waiter whose patience runs out is answered not named; the job goes on for those still waiting', async () => {
+    await writeTranscript([linkTo(P)]);
+    const named = paths({ bounds: { waitMs: 30 } });
+    const held = holdAt('opened');
+    const impatient = named.names(S, P);
+    await held.reached;
+    expect(await impatient).toBe(false);
+    held.release();
+    expect(await named.names(S, P)).toBe(true);
+  });
+
+  it('a waiting job whose waiters all leave never runs', async () => {
+    await writeTranscript([linkTo(P), linkTo('/work/out/second.md')]);
+    const locate = vi.fn(async () => file);
+    const named = paths({ transcript: locate });
+    const held = holdAt('opened');
+    const first = named.names(S, P);
+    await held.reached;
+    const controller = new AbortController();
+    const second = named.names(S, '/work/out/second.md', controller.signal);
+    controller.abort();
+    expect(await second).toBe(false);
+    held.release();
+    expect(await first).toBe(true);
+    await turns();
+    expect(locate).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives the event loop back as it reads', async () => {
+    await writeTranscript([linkTo(P), ...filler(400)]);
+    const named = paths({ bounds: { chunk: 2048 } });
+    let ticks = 0;
+    let done = false;
+    const tick = () => {
+      ticks += 1;
+      if (!done) setImmediate(tick);
+    };
+    setImmediate(tick);
+    expect(await named.names(S, P)).toBe(true);
+    done = true;
+    expect(ticks).toBeGreaterThanOrEqual(stats.reads);
+  });
+});
+
+// The search answers what the rule answers record by record, calls resolved, within the bound: generated transcripts,
+// a seeded generator so a failure replays.
+describe('the search and the rule agree', () => {
+  function generator(seed: number) {
+    let state = seed >>> 0;
+    return () => {
+      state = (state * 1664525 + 1013904223) >>> 0;
+      return state / 2 ** 32;
+    };
+  }
+
+  it('over generated transcripts', async () => {
+    const random = generator(20261113);
+    const pick = <T,>(items: T[]) => items[Math.floor(random() * items.length)]!;
+    const other = '/work/out/report.md.bak';
+    for (let round = 0; round < 120; round += 1) {
+      const records: object[] = [];
+      const ids: string[] = [];
+      const count = 1 + Math.floor(random() * 24);
+      for (let i = 0; i < count; i += 1) {
+        const id = `toolu_${round}_${i}`;
+        const roll = random();
+        if (roll < 0.15) {
+          ids.push(id);
+          records.push(call(id, pick(['mcp__docs__save', 'Edit', 'Write', 'Bash', 'Read']), pick([{ file_path: '/work/out/x.md' }, { file_path: P }, { command: P }])));
+        } else if (roll < 0.35 && ids.length > 0) {
+          const target = random() < 0.85 ? pick(ids) : `toolu_none_${i}`;
+          records.push(pick([result(target, `[r](${P})`), result(target, [text(`[r](${pick([P, other])})`)]), result(target, 'ok', { toolUseResult: { filePath: pick([P, other]) } }), result(target, P)]));
+        } else if (roll < 0.45) {
+          records.push(pick([linkTo(pick([P, other])), assistant(text(`see ${P}`)), user(`[r](${P})`, { isMeta: true }), user(`open [r](${pick([P, other])})`)]));
+        } else if (roll < 0.55) {
+          records.push(pick([{ type: 'api-request', messages: [{ content: `[r](${P})` }] }, { type: 'queue-operation', content: `[r](${P})` }, { type: 'summary', summary: `[r](${P})` }]));
+        } else {
+          records.push(...filler(1, Math.floor(random() * 300)));
+        }
+      }
+      // what the rule says, record by record: a record that names, or a result whose nearest older call has the class it waits for
+      const scan = random() < 0.3 ? Math.floor(bytesOf(records) * random()) : NAMED_SCAN_BYTES;
+      const size = bytesOf(records);
+      let offset = 0;
+      const within = records.map((record) => {
+        const start = offset;
+        offset += Buffer.byteLength(lineOf(record)) + 1;
+        return start >= size - scan;
+      });
+      const expected = records.some((record, index) => {
+        if (!within[index]) return false;
+        const claim = rowClaim(record, P);
+        if (claim.names) return true;
+        return claim.pending.some(({ toolUseId, when }) => {
+          for (let earlier = index - 1; earlier >= 0 && within[earlier]; earlier -= 1) {
+            const found = callClass(records[earlier], toolUseId);
+            if (found !== null) return found === when;
+          }
+          return false;
+        });
+      });
+      await writeTranscript(records);
+      const chunk = 64 + Math.floor(random() * 2048);
+      expect(await paths({ bounds: { chunk, scan } }).names(S, P), `round ${round}, chunk ${chunk}, scan ${scan}: ${records.map(lineOf).join('\n')}`).toBe(expected);
+    }
+  });
+});
