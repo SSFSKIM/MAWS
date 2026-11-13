@@ -3,19 +3,16 @@
 // C8a's git store alone (the summary card holds the watch; this reads it), and a click opens Review at the default
 // scope.
 import type { AppSessionId } from '@shared/graph/ids';
+import { useWorkingFolder } from '../../../sessions/working-folder';
 import { SUMMARY_COPY } from '../../../panel/copy';
 import { changeLine } from '../../../panel/summary/derive';
 import { checkoutKey, machineFor } from '../../../ipc/machine';
 import { useGit } from '../../../stores/git';
-import { useSessions } from '../../../stores/sessions';
 import { REVIEW_COPY } from '../copy';
 import type { ReviewParams } from './review-model';
 
 export function ReviewSummary({ appSessionId, open }: { appSessionId: AppSessionId; open(params?: ReviewParams): void }) {
-  const directory = useSessions((s) => {
-    const record = s.records.get(appSessionId);
-    return record ? (record.worktree?.path ?? record.directory) : null;
-  });
+  const directory = useWorkingFolder(appSessionId)?.path ?? null;
   const entry = useGit((s) => (directory === null ? undefined : s.entries.get(checkoutKey(machineFor(appSessionId), directory))));
   if (!entry) return null;
   const line = changeLine(entry.status, entry.uncommitted?.files ?? null);

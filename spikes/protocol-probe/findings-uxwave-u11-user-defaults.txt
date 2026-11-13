@@ -1,0 +1,97 @@
+UX wave, child U11, l8-settings-11: does engine 2.1.322 take its default model and permission mode from the user
+settings file, under MAWS's launch and in a terminal, and does it rewrite that file by itself?
+(the U11 draft, ~/.local/share/maws-ux-wave/spec/drafts/U11-answered.md, l8-settings-11 and its "Probes and checks";
+2026-11-12/13, VM dc-uxwave2-e584, branch ux-wave/probe2-text-defaults)
+
+Question. With `model` and `permissions.defaultMode` in `<config home>/settings.json` and no flag: what `system/init`
+reports in a session driven as MAWS drives one, and what a terminal session uses; what `--model` and
+`--permission-mode` do over the file; what a project's file does over it; what the engine does with a value it does
+not know; whether the engine rewrites the file at start (the draft: a model's name to a newer one); and the bytes of
+the file after a settings change made through the engine (the draft: two-space JSON with a final newline).
+
+Verdict. The spec's first outcome, "as stated, the item stands", with three corrections the design should take.
+  - Both keys are taken from the user file on both routes, aliases and full ids alike; a flag beats the file; a
+    project's `.claude/settings.json` beats the user's for both keys. Nothing the catalogue would write is refused.
+  - Correction 1, a bad value: a `permissions.defaultMode` the engine does not know makes it skip the WHOLE user file,
+    so its `model` is lost too (MAWS's route: silently, the default model and `default` mode, the error only in
+    `get_settings.errors`; the terminal: a blocking "Settings Error" dialog, "Files with errors are skipped entirely,
+    not just the invalid settings."). An unknown `model` is not validated at all: it is reported verbatim and fails
+    at the first request. The writer's allow-list of four modes keeps MAWS from writing the first; a hand-edited
+    file can still hold it, and the draft's reader already answers null per key, which is not what the engine does.
+  - Correction 2, the engine's own write: after `/model haiku` in a terminal ("Set model to Haiku 5.5 and saved as
+    your default for new sessions") the file is two-space JSON with a final newline, as the draft says, every key
+    and value kept, but the keys are reordered: the engine's known keys first in its own order (`env`,
+    `permissions`, `model`, `effortLevel` here), then unknown keys in their old order. So "byte for byte the form the
+    engine writes" holds for the layout, not for key order: a writer that keeps each key's place matches the engine
+    only on a file the engine last saved, and only when the edited key already exists.
+  - Correction 3, the rewrite at start: the rewrite that fired is not the one the draft cites. `claude-opus-4-1` was
+    rewritten to `opus` at start (the legacy-Opus migration, cli.pretty.js ~564222, run once per migrationVersion),
+    and the session then ran claude-opus-5-5. The cited one (`claude-fable-5-1` to `fable`, :1090885-1090903) did
+    not fire on this route; the value was used as is. A hand-laid file with current values was not touched at start,
+    with the migrations re-armed or not. MAWS's in-chat model change (`set_model`) does not write the file.
+
+Cases, MAWS's launch (no --model and no --permission-mode unless named; init seq 26 in each journal unless noted):
+  file {}                                   init claude-opus-5-5, mode default        u11-user-defaults-maws-none.jsonl
+  model "haiku"                             claude-haiku-5-5, default                 …-maws-model-alias.jsonl
+  model "claude-haiku-5-5"                  claude-haiku-5-5, default                 …-maws-model-id.jsonl
+  model "sonnet", --model haiku             claude-haiku-5-5 (the flag)               …-maws-model-flag.jsonl
+  model "no-such-model-p2b"                 init names "no-such-model-p2b" (seq 27); the turn: "API Error: 400 …
+                                            got no-such-model-p2b", stderr [claude-code:unrecognized_model]; file kept
+                                                                                      …-maws-model-unknown.jsonl
+  user "sonnet", project "haiku"            claude-haiku-5-5 (the project's)          …-maws-model-project.jsonl
+  defaultMode acceptEdits/plan/default/auto  init permissionMode the same, each       …-maws-mode-<mode>.jsonl
+  defaultMode bypassPermissions             bypassPermissions                         …-maws-mode-bypass.jsonl
+  defaultMode plan, --permission-mode acceptEdits   acceptEdits (the flag)            …-maws-mode-flag.jsonl
+  user acceptEdits, project plan            plan (the project's)                      …-maws-mode-project.jsonl
+  defaultMode "bogus"                       default                                   …-maws-mode-unknown.jsonl
+  model "haiku", defaultMode "bogus"        claude-opus-5-5, default: the file skipped whole; get_settings errors
+                                            [{path: "permissions.defaultMode", message: "Invalid value. Expected one
+                                            of: acceptEdits, auto, bypassPermissions, default, dontAsk, plan"}]
+                                                                    u11-user-defaults-b-maws-mode-unknown-with-model.jsonl
+  model "claude-haiku-5-5", then set_model "haiku"   success; the file unchanged      u11-user-defaults-b-maws-set-model.jsonl
+Cases, the terminal (interactive, no flags unless named; the footer as drawn, the transcript's assistant model and
+user rows' permissionMode; records in u11-user-defaults.json and -b.json, `case` term-*):
+  file {}                                   claude-opus-5-5, "auto mode on"
+  "haiku" + acceptEdits                     claude-haiku-5-5, "accept edits on"
+  "claude-haiku-5-5" + plan                 claude-haiku-5-5, "plan mode on"
+  "haiku" + default                         claude-haiku-5-5, "manual mode on"
+  "haiku" + auto                            claude-haiku-5-5, "auto mode on"
+  "sonnet" + plan, --model haiku --permission-mode default    claude-haiku-5-5, "manual mode on" (the flags)
+  user "sonnet" + acceptEdits, project "haiku" + plan         banner "Using Haiku 5.5 (from .claude/settings.json)",
+                                            "plan mode on" (the project's, both keys)
+  "no-such-model-p2b" + "bogus"             the Settings Error dialog above, before any prompt
+  "no-such-model-p2b"                       banner names it, "⚠ Model "no-such-model-p2b" isn't recognized", the turn
+                                            an API 400; the file kept
+Cases, the engine's writes (u11-user-defaults.json `write-*`, -b.json `write-order-model-command`):
+  a hand-laid file (4-space, no final newline, an unknown key), migrations re-armed: unchanged at start (same
+  sha256); after `/model haiku`: `{\n  "permissions": {\n    "allow": [\n      "Bash(ls:*)"\n    ],\n    "defaultMode":
+  "acceptEdits"\n  },\n  "model": "haiku",\n  "zzUnknownKey": [\n    1,\n    2\n  ]\n}\n` (was zzUnknownKey, model,
+  permissions). A second file (zz, model, env, alpha, permissions, effortLevel) came back env, permissions, model,
+  effortLevel, zz, alpha.
+  `claude-opus-4-1`, migrations re-armed (migrationVersion absent, then 15): the file became `{\n  "model": "opus"\n}\n`
+  before the first turn; init claude-opus-5-5 (u11-user-defaults-write-legacy-opus.jsonl).
+  `claude-fable-5-1`, migrations re-armed: unchanged; init and the turn claude-fable-5-1 (…-write-legacy-fable51.jsonl).
+
+Seen beyond the question (observed; inferences marked):
+  - Plan mode with the alias `haiku` runs on Sonnet: with `haiku` (flag or a project file) and plan mode, init and
+    the banner name claude-haiku-5-5 but every turn's assistant rows are claude-sonnet-5-5 (maws-mode-plan,
+    maws-mode-project, term-project; 3 of 3). With the full id `claude-haiku-5-5` in plan mode the turn stayed on
+    haiku (term-id-plan). The engine's "haiku plan upgrade" (cli.pretty.js:1332658, `e === "opusplan" || e ===
+    "haiku"`). A "Your default" mark and a chip that name the file's model are right about the setting and wrong
+    about what a plan-mode turn runs on when the setting is the alias.
+  - With no mode in the file the terminal starts in auto, MAWS's route (no flag) in `default`. MAWS passes the mode
+    as a flag, so its chats are unaffected; the draft's "no value in the file means Auto" is the terminal's reading
+    on this setup (vm-run.sh marks the auto-mode notices seen, as on the owner's Macs).
+  - The default model on this route with no setting is claude-opus-5-5 on both routes.
+
+Method. Engine 2.1.322 (/opt/maws-probe/engines/2.1.322), routed through vm-run.sh's loopback forward to the gateway
+(spikes/protocol-probe/VM.md), no --managed; config home the scratch $HOME/.claude (no CLAUDE_CONFIG_DIR, as MAWS
+launches), the project file in the scratch work folder's .claude/settings.json. Each case writes the files, then
+starts the engine. MAWS's route: scenarios/pass3/uxwave-common-arrivals.mjs `mawsLaunch` (src/engine-host/launch.ts's
+flags, setting sources user,project,local, MAWS's environment and initialize), with `model: null` and `mode: null`
+now omitting `--model` and `--permission-mode` (harness.mjs and mawsLaunch gained that), one turn "reply with only
+OK" and a `get_settings` request. The terminal: an interactive engine in tmux, one turn, the pane and the transcript
+read. Model haiku wherever the case allowed. The migrations run once per `migrationVersion` in $HOME/.claude.json
+(cli.pretty.js ~564376); the write-* cases delete that key first. One run per case: each answer is a configuration
+read, not a sampled behaviour; the key-order result was seen on two different files.
+Scenario: scenarios/pass3/uxwave-u11-user-defaults.mjs (`UXW_CASES` selects cases; the -b record is the second pass).
