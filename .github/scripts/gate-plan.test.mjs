@@ -593,6 +593,27 @@ test("a job on the guest's labels is guest-eligible: e2e_vm with its variant, e2
   assert.deepEqual([unitOnly.unit_darwin_runner, unitOnly.e2e_vm, unitOnly.e2e_build, unitOnly.pool], [JSON.stringify(soloMac), '[]', '[]', 'false']);
 });
 
+// default alone runs the bare set, every spec: more than a guest job holds once the uplink's transfers are counted
+// (run 43435030658, cut at ci-kit's 50-minute guest bound). Beside another e2e group, or one a DefaultBeside names, it
+// runs its own specs and may take the guest.
+test('a bare default (no other e2e group, no DefaultBeside) stays on the exclusive instance, under a Lane: too; beside others it is guest-eligible', () => {
+  const lists = { MAC_VM_E2E: 'default widgets' };
+  const entry = (outputs) => JSON.parse(outputs.e2e).find((job) => job.group === 'default');
+  for (const lane of ['', '\nLane: vm']) {
+    const { outputs, summary } = plan({ ...lists, HEAD_MESSAGE: `ci-gate: test\n\nGates: e2e:default\nRunner: macos${lane}` });
+    assert.deepEqual([JSON.parse(entry(outputs).runner), entry(outputs).build, entry(outputs).variant], [mac, true, undefined], lane);
+    assert.deepEqual([outputs.e2e_vm, outputs.e2e_build], ['[]', '[]'], lane);
+    assert.match(summary, / On MAC_VM_E2E but the bare set \(no other e2e group, no DefaultBeside\), so on the exclusive instance: e2e:default\./, lane);
+  }
+  const beside = plan({ ...lists, HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:default\nRunner: macos\nDefaultBeside: widgets' }).outputs;
+  assert.deepEqual([JSON.parse(entry(beside).runner), entry(beside).variant], [soloMac, 'plain']);
+  const withOther = plan({ ...lists, HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:default,e2e:widgets\nRunner: macos' }).outputs;
+  assert.deepEqual([JSON.parse(entry(withOther).runner), entry(withOther).variant], [soloMac, 'plain']);
+  // A dispatch carries no DefaultBeside: default alone there is the bare set too.
+  const dispatched = plan({ ...lists, EVENT: 'workflow_dispatch', INPUT_GATES: 'e2e:default', INPUT_RUNNER: 'macos', HEAD_MESSAGE: 'DefaultBeside: widgets' }).outputs;
+  assert.deepEqual(JSON.parse(entry(dispatched).runner), mac);
+});
+
 // A group like desk-web-hub builds and runs in another package: it restores no e2e-build variant.
 test("a MAC_VM_E2E group not built through scripts/e2e-build.sh stays off the guest's labels, whatever the Lane:, and the summary says so", () => {
   const gates = 'Gates: e2e:desk-web-hub,e2e:widgets\nRunner: macos';
