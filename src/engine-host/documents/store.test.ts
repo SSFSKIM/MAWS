@@ -8,7 +8,7 @@ import { createDesignSystemAdapter, readOrigin, writeSystem } from '@artifacts/d
 import type { KindAdapter } from '@artifacts/host';
 import { defaultSystem } from '@artifacts/types/design_system/defaults'; // P4 W1 (L277)
 import { documentChanges, openDiff } from '@artifacts/document/history';
-import { TAB, block, body, markFormat } from '@artifacts/document/history.fixture';
+import { TAB, block, body, markFormat, textOf } from '@artifacts/document/history.fixture';
 import { schemaFor } from '@artifacts/document/schema';
 import { createDocument } from '@artifacts/document/tabs';
 import { encodeFrame } from '@artifacts/provider/frames';
@@ -1190,6 +1190,8 @@ describe('ArtifactStore: maintenance and thinning (Decision Log 5, 8)', () => {
     off();
     send!(encodeFrame({ type: 'update', update: mergeUpdates(updates) }));
     await service.whenCommitted();
+    expect(committed('SELECT actor FROM artifact_updates WHERE artifactId = ? ORDER BY seq', doc.id).slice(-2)).toEqual([{ actor: 'human' }, { actor: 'session:app-1' }]); // both landed
+    expect(textOf(block(service.live(doc.id), 'p1'))).toBe('one  two');
     expect(liveMarkers(block(service.live(doc.id), 'p1'))).toBe(2);
     const v2 = (await store.createVersion(doc.id, { kind: 'named', actor: human }))!;
     await write(doc.id, human, (d) => block(d, 'p1').insert(0, 'Then '));
