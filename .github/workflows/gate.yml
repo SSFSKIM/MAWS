@@ -188,7 +188,9 @@ env:
   # daemon-idle-render (P5 O17 M7) runs three cases once M7's engine host lists host.browserWork: the render seam's, the
   # browser warm to idle and the four kept sessions, each a scene, a 120 s settle and a 600 s window (about 13 minutes,
   # the spec's 20-minute case bound), so about 40 with its scenes, which its build and two settle guards outgrow in 60.
-  E2E_MINUTES: daemon-idle-render=90 p1-live=45
+  # default's tests took 22 minutes on the host (run 43397387398, 2026-11-13); the guest runs 1.3-1.7x the host's time,
+  # past the 30 a job on the guest's own label gets.
+  E2E_MINUTES: daemon-idle-render=90 p1-live=45 default=45
   # The Mac jobs that may run beside another: e2e groups, and `unit:darwin`, that ask for ci-kit's shared instances
   # ([ci-kit-mac-shared], their only label), which run two jobs at a time on the mini's one desktop (ci-kit's mac-lane
   # concurrency spec, SSFSKIM/ci-kit docs/doperpowers/specs/2026-10-21-mac-lane-concurrency-design.md). Every other Mac
@@ -229,10 +231,12 @@ env:
   # 40224021736, 40229482997 and 40231457492 on the same tree. None of these six
   # reaches the latency-budget helpers or enables a PERF/SCALE switch; artifacts' measured case stays skipped.
   # terminal stays held; design stays host-only.
+  # default (CI-opt, 2026-11-13): it restores e2e-build's plain out/ in the guest (the plan's variantOf); its own specs
+  # are the same wherever it runs, since the derivation reads only the run's group names (gate-plan.test.mjs).
   MAC_VM_E2E: >-
     document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations
     deliverables browser browser-comment browser-import agents c12 available design-systems browser-chrome
-    composer layout delivery connectors-oauth artifacts browser-cua connectors connectors-direct
+    composer layout delivery connectors-oauth artifacts browser-cua connectors connectors-direct default
   # The e2e groups that run on GitHub's hosted Macs on a macOS lane (ci-kit's hosted-Mac spec, Admission): a waiter on the
   # pool, the e2e-hosted job, runs each through SSFSKIM/maws-app, on macos-26 at 1920x1080@1x. A name joins on 3 of 3
   # green `Lane: hosted` runs on one tree whose count lines match a `Lane: no-hosted` baseline's, its specs reading neither
@@ -310,7 +314,10 @@ env:
   # same counts as its mini baseline, plus hosted settings/document checks after selecting overlay scrollbars.
   # Direct runs two bare-suite shards, each building the unsigned app; shard 1 owns the small packaged checks.
   # Every job sweeps launchd. Mirror keeps one unsharded build and all checks on the mini.
-  HOSTED_MAC_JOBS: packaged
+  # unit:darwin (CI-opt, 2026-11-13): the mini's exclusive desktop was the single lane for every link's unit:darwin, queued
+  # 83-95 minutes behind e2e groups for a job of about a minute. Its 22 guarded files read no keychain, launchd or TCC
+  # state. Admission: 3/3 direct hosted greens on this PR's tree, each with the mini baseline's counts (the PR body).
+  HOSTED_MAC_JOBS: packaged unit:darwin
   # Never overflow these hosted-eligible groups to EC2 (Decision Log 123: an EC2-only red leaves at once).
   # Empty after the 2026-10-29 parity audit: the supplied sessions reds predate #297, shell predates 54aab1ada,
   # and lane-a used the wrong card address (d81b1441b). None proves an EC2-only red on a tree green elsewhere.
@@ -647,8 +654,8 @@ jobs:
     name: unit:darwin
     needs: plan
     if: needs.plan.outputs.unit_darwin == 'true'
-    # The exclusive instance, a shared one when MAC_SHARED_E2E names unit:darwin, solo or the guest when MAC_VM_E2E does;
-    # the timeout as the plan says.
+    # macos-26 when HOSTED_MAC_JOBS admits unit:darwin on the direct route; else the exclusive instance, a shared one when
+    # MAC_SHARED_E2E names unit:darwin, solo or the guest when MAC_VM_E2E does; the timeout as the plan says.
     runs-on: ${{ fromJSON(needs.plan.outputs.unit_darwin_runner) }}
     timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeouts).unit_darwin }}
     steps:
@@ -895,6 +902,18 @@ jobs:
         with:
           name: e2e-build-${{ github.sha }}-${{ matrix.variant }}
           path: ${{ runner.temp }}/maws-e2e-build
+      # default's out/ in the guest: its script builds nothing (on the host its job runs `pnpm build` below), so the plain
+      # variant e2e-build made is restored here, never built (gate-plan.mjs's variantOf).
+      - if: matrix.group == 'default' && matrix.variant
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          export MAWS_E2E_BUILD_CACHE=$RUNNER_TEMP/maws-e2e-build MAWS_E2E_BUILD_KEY=$GITHUB_SHA MAWS_E2E_BUILD_REQUIRE=1
+          .github/scripts/gate-run.sh '^e2e-build: ' scripts/e2e-build.sh "$VARIANT"
+          # The guest's virtual mouse gives the app legacy 15 px scroll bars where the host's are overlays, and default's
+          # layout-transfer.spec.ts measures the document column to the pixel (guest run 43413169788: 593 against 608).
+          # Overlays in the clone, as on the host; never on the host itself (the solo label also lands there).
+          if [[ ${CI_KIT_VM_GUEST:-} == 1 ]]; then defaults write -g AppleShowScrollBars -string WhenScrolling; fi
       # A direct hosted Mac's out/ (the entry's `cached` variant), restored from the Actions cache, where the run's first job
       # to build that variant saved it under the commit and the variant; else built here and saved. A set larger than the
       # account's 5 hosted Macs runs in rounds, and only the first round builds. The command's own build restores it from
