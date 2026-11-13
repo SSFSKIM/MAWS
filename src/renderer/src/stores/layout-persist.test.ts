@@ -750,11 +750,12 @@ describe('the side column’s first read of a profile', () => {
   // Log 3): a failed read's fallback would make a scope look as if it held less than it does.
   it.each(['panelTools.surfaces', 'panel.pinned', `panel.${A}`, 'panelTools.params', 'regions'])('waits while the read of %s fails: nothing pruned, nothing marked; the next launch reads it first', async (key) => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const own = { tabs: [files, info, review, t1], activeTabId: review.id };
     const f = {
       ...fixed,
       regions: { ...LAYOUT_DEFAULTS.regions, panel: { ...LAYOUT_DEFAULTS.regions.panel, width: 512 } },
       'panel.pinned': [pin],
-      [`panel.${A}`]: { tabs: [files, info, review, t1], activeTabId: review.id },
+      [`panel.${A}`]: own,
       'panelTools.surfaces': { version: 2, stacks: { [A]: [files.id, review.id] }, pinnedTools: [], contexts: {} },
       'panelTools.params': { version: 1, params: { [info.id]: { kept: 'invented' }, [files.id]: { root: 'invented' } } },
     };
@@ -767,7 +768,7 @@ describe('the side column’s first read of a profile', () => {
     expect(failed.sets().map((write) => write.key)).not.toContain(`panel.${A}`);
     expect(failed.sets().map((write) => write.key)).not.toContain('panelTools.params');
     expect(failed.sets().map((write) => write.key)).not.toContain('panelTools.widths');
-    expect(failed.after()).toMatchObject({ [`panel.${A}`]: f[`panel.${A}`], 'panelTools.params': f['panelTools.params'] });
+    expect(failed.after()).toMatchObject({ [`panel.${A}`]: own, 'panelTools.params': f['panelTools.params'] });
     const next = await launch(failed.after());
     expect(next.store.getState().effectivePanelTabs(A)).toEqual([pin, files, review, t1]);
     expect(sideGroups(next.store.getState(), A)).toMatchObject({ upper: { shown: files }, lower: { tabs: [review], shown: review }, hidden: false });
