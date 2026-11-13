@@ -391,8 +391,9 @@ describe('held outcomes and the attach command', () => {
 
   // UX wave U7b (the architect's ruling 2): behind a page Attach leaves the page, with the session in front and its tab
   // shown, whether it opens the terminal or shows the one it remembers.
-  it('the row menu’s Attach behind a page leaves the page for the session, its new terminal shown', async () => {
+  it('the row menu’s Attach behind a page leaves the page for the session in front, its new terminal shown', async () => {
     held(JOB);
+    act(() => useLayout.getState().openSession(A)); // the session in front: the host would not open it again
     act(() => useLayout.getState().openDestination({ kind: 'projects' }));
     act(() => runSessionAction('attach', A));
     await waitFor(() => expect(opened()).toHaveLength(1));
