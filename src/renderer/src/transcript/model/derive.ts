@@ -23,7 +23,7 @@ import { glyphFor } from './glyphs';
 import { collectCells, groupItems, phrasesOf, type WorkItem } from './groups';
 import { cellId, rowId, turnId as turnIdOf } from './keys';
 import type { LiveBlock, TranscriptState, TranscriptUi, TurnState, TurnWork } from './reduce';
-import { isEngineOrigin, originOf, runningTurn, type ReceiptUndo } from './reduce';
+import { isEngineOrigin, originOf, runningTurn, taskEndArrived, type ReceiptUndo } from './reduce';
 import { closedByUnseenExit } from './reduce'; // DC9
 import { TOOL_CATEGORIES, type Cell, type ChangedFile, type Row, type RowId, type SubagentRef, type SubagentStatus, type ToolCategory, type TurnId, type TurnSummary } from './rows';
 import { firstLineOf, previewHidesBody, previewOf } from './rows'; // E7; UX wave U3
@@ -465,7 +465,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   };
   const questionsOf: CallQuestions = (call) => callQuestions(turn, state, call as ToolUseId);
   // The whole-branch review's finding 3: the tasks of this turn that ran in the background, whose ends an older engine
-  // host tells only as `task.notification` (one without the `arrivals` mark), and the lines drawn of them, which are no
+  // host tells only as `task.notification` (one without the `arrivals` mark, while the window holds no end arrival of
+  // the task: reduce.ts, taskEndArrived), and the lines drawn of them, which are no
   // work of the turn's: the wire said the task ended, mostly after the turn's answer, which stays its answer
   const backgroundTasks = new Set<TaskId>();
   const olderHostEnds = new Set<RowId>();
@@ -701,7 +702,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
           break;
         }
         for (const rec of tools.values()) if (rec.backgroundTaskId === event.taskId) rec.backgroundDone = true;
-        if (event.kind === 'task.notification' && event.arrivals !== true && backgroundTasks.has(event.taskId)) {
+        // an older host's end yields to the same task's end arrival in the window (the handover round)
+        if (event.kind === 'task.notification' && event.arrivals !== true && backgroundTasks.has(event.taskId) && !(state !== null && taskEndArrived(state, event.taskId))) {
           const row = olderHostNotice(event, turn.id);
           olderHostEnds.add(row.id);
           items.push({ kind: 'row', row });

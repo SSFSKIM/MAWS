@@ -178,8 +178,9 @@ export interface TranscriptState {
   // makes one notice per session.
   // `arrivals` (UX wave U3, decision 8): the arrival-bearing synthetic message placed under each uuid (the one whose
   // line is drawn) and the turn holding it, or null when it is kept loose (no turn was open for it), so a later one under
-  // the same uuid takes that one out (one arrival per uuid).
-  index: { toolUses: Map<ToolUseId, TurnId>; tasks: Map<TaskId, TurnId>; requests: Map<RequestId, TurnId>; hooks: Map<string, TurnId>; messages: Map<MessageUuid, TurnId>; pluginIssues: Set<string>; arrivals: Map<MessageUuid, { turn: TurnId | null; event: EventId }> };
+  // the same uuid takes that one out (one arrival per uuid). `endArrivals` (the whole-branch review's finding 3, its
+  // handover round): the uuids of the arrivals placed that tell a task's end (taskEndArrived)
+  index: { toolUses: Map<ToolUseId, TurnId>; tasks: Map<TaskId, TurnId>; requests: Map<RequestId, TurnId>; hooks: Map<string, TurnId>; messages: Map<MessageUuid, TurnId>; pluginIssues: Set<string>; arrivals: Map<MessageUuid, { turn: TurnId | null; event: EventId }>; endArrivals: Map<TaskId, Set<MessageUuid>> };
   memo: Map<TurnId, MemoEntry>;
   lineage: { latest: TranscriptState | null };
   // E3 start: where each side thread's row lives (Design §5): the turn its first event landed in, or, for one that
@@ -204,7 +205,7 @@ export function createState(sessionId: SessionId | null, agentId: AgentId | null
     sessionId, agentId, turns: new Map(), order: [], loose: [], hidden: null, pending: new Map(), seen: new Set(), echoUuids: new Set(),
     ui: { assistantInk: new Set(), expandedTurns: new Set(), collapsedTurns: new Set(), expandedGroups: new Set(), expandedCells: new Set(), revealedBoundaries: new Set(), receipts: new Map(), spills: new Map(), global: 0, stamps: new Map(), version: 0 },
     current: null, cwd: null, pluginStatus: new Map(), placement: new Map(),
-    index: { toolUses: new Map(), tasks: new Map(), requests: new Map(), hooks: new Map(), messages: new Map(), pluginIssues: new Set(), arrivals: new Map() },
+    index: { toolUses: new Map(), tasks: new Map(), requests: new Map(), hooks: new Map(), messages: new Map(), pluginIssues: new Set(), arrivals: new Map(), endArrivals: new Map() },
     memo: new Map(),
     lineage: { latest: null },
   };
@@ -434,16 +435,28 @@ class Batch {
     if (placed === undefined) return;
     if (placed.turn === null) {
       const loose = this.state.loose.findIndex((event) => event.id === placed.event);
-      if (loose >= 0) this.looseList().splice(loose, 1);
+      if (loose < 0) return;
+      const [event] = this.looseList().splice(loose, 1);
+      if (event?.kind === 'user.message') this.endsChanged(event);
       return;
     }
     if (!this.state.turns.has(placed.turn)) return;
     const at = this.state.turns.get(placed.turn)!.events.findIndex((event) => event.id === placed.event);
     if (at < 0) return;
     const turn = this.touch(placed.turn);
-    turn.events.splice(at, 1);
+    const [event] = turn.events.splice(at, 1);
     if (turn.agentsEndedAt !== undefined && at < turn.agentsEndedAt) turn.agentsEndedAt -= 1;
     turn.version += 1;
+    if (event?.kind === 'user.message') this.endsChanged(event);
+  }
+
+  // The whole-branch review's finding 3 (handover round): a task end arrival placed or taken out changes whether its
+  // task's older-host line is drawn (taskEndArrived), so the turn holding that task derives again.
+  endsChanged(event: Event<'user.message'>): void {
+    for (const taskId of endedTasks(event)) {
+      const owner = this.state.index.tasks.get(taskId);
+      if (owner !== undefined && this.state.turns.has(owner)) this.touch(owner).version += 1;
+    }
   }
 
   // UX wave U3 (decision 21): a turn closed without a turn.ended of its own (by the process's exit or a later turn's
@@ -461,6 +474,7 @@ class Batch {
       const [event] = turn.events.splice(at, 1);
       if (event?.kind === 'user.message' && event.messageUuid !== null && this.state.index.arrivals.get(event.messageUuid)?.event === event.id) this.state.index.arrivals.delete(event.messageUuid);
       if (turn.agentsEndedAt !== undefined && at < turn.agentsEndedAt) turn.agentsEndedAt -= 1;
+      if (event?.kind === 'user.message') this.endsChanged(event);
     }
     turn.version += 1;
   }
@@ -954,17 +968,44 @@ function placeArrival(batch: Batch, event: Event<'user.message'>): void {
   const turn = batch.current();
   if (turn) batch.push(turn, event);
   else batch.loose(event);
-  if (event.messageUuid !== null) batch.state.index.arrivals.set(event.messageUuid, { turn: turn?.id ?? null, event: event.id });
+  if (event.messageUuid === null) return;
+  batch.state.index.arrivals.set(event.messageUuid, { turn: turn?.id ?? null, event: event.id });
+  for (const taskId of endedTasks(event)) {
+    const uuids = batch.state.index.endArrivals.get(taskId) ?? new Set<MessageUuid>();
+    batch.state.index.endArrivals.set(taskId, uuids.add(event.messageUuid));
+  }
+  batch.endsChanged(event);
+}
+
+// The tasks whose end an arrival tells: its task entries that name a task and state an outcome. A monitor's event,
+// told under its task's id with no outcome, ends nothing.
+const endedTasks = (event: Event<'user.message'>): TaskId[] => carriedOf(event.arrival).flatMap((entry) => (entry.class === 'task' && entry.taskId !== null && entry.outcome !== null ? [entry.taskId as TaskId] : []));
+
+// The whole-branch review's finding 3, its handover round (the architect's ruling of 2026-11-13): whether the window
+// holds the task's own end arrival, standing; an older host's line for that end (derive.ts) then yields to it. Matched by
+// the task's id and an outcome, never by words.
+export function taskEndArrived(state: TranscriptState, taskId: TaskId): boolean {
+  const uuids = state.index.endArrivals.get(taskId);
+  if (uuids === undefined) return false;
+  for (const uuid of uuids) {
+    const placed = standing(state, uuid);
+    if (placed !== undefined && endedTasks(placed).includes(taskId)) return true;
+  }
+  return false;
+}
+
+// The arrival placed under the uuid, while it stands (stands).
+function standing(state: TranscriptState, messageUuid: MessageUuid): Event<'user.message'> | undefined {
+  const placed = state.index.arrivals.get(messageUuid);
+  if (placed === undefined) return undefined;
+  const events = placed.turn === null ? state.loose : state.turns.get(placed.turn)?.events;
+  const event = events?.find((e) => e.id === placed.event);
+  return event?.kind === 'user.message' ? event : undefined;
 }
 
 // Whether an arrival placed under the uuid still stands: its turn kept (a turn removed for holding nothing takes it
 // along), or, kept loose, among the loose events.
-function stands(state: TranscriptState, messageUuid: MessageUuid): boolean {
-  const placed = state.index.arrivals.get(messageUuid);
-  if (placed === undefined) return false;
-  const events = placed.turn === null ? state.loose : state.turns.get(placed.turn)?.events;
-  return events?.some((event) => event.id === placed.event) ?? false;
-}
+const stands = (state: TranscriptState, messageUuid: MessageUuid): boolean => standing(state, messageUuid) !== undefined;
 
 // A message the engine host made itself (a task's end it kept until the model was told, a scheduled fire): no frame or
 // row carried it, so it has no text (Interfaces C).
