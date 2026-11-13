@@ -1,0 +1,45 @@
+UX wave U5, P4: `reply` (docs/doperpowers/specs/2026-11-12-ux-wave/U5-review-comments-source-control.md, Probes and
+checks, P4; it serves l6-artifacts-20, the agent's reply in its own words; 2026-11-12)
+
+Question. One comment answered by an edit on a scratch document: does the agent give `artifact_edit`'s `reply` from the
+tool's description alone? If not, the description's sentence is tightened before the fallback sentence ("Edited this
+passage.") is relied on.
+
+Verdict: yes. In 10 of 10 runs on the owner's model (5 with the comment sent to the main conversation, 5 as a side
+thread's first message) the agent read the document, then made one artifact_edit carrying answering "t1" and a reply of
+one sentence in its own words about what it changed. It never fell back to artifact_reply, never omitted reply, and
+never edited without answering. The sentence as the spec words it is enough; no tightening needed. Confidence: high for
+this comment on this model (10/10); one comment shape only (below).
+
+Method. scenarios/pass3/uxwave-p4-reply.mjs on devcloud VM dc-uxprobe-dc94 through vm-run.sh (-e UXP4_RUNS=5), engine
+2.1.322 (system/init, every fixture), routed through the gateway. Model: the owner's default, `opus` with the owner's
+alias ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-5-5[1m] and CLAUDE_CODE_SUBAGENT_MODEL=opus (system/init reports
+claude-opus-5-5). Launch line as MAWS launches when it serves its `maws` server: the line of uxwave-p1-images.mjs
+(findings-uxwave-u5-images.txt) plus --disallowedTools AskUserQuestion --allowedTools mcp__maws__ask, and initialize
+declaring sdkMcpServers ["maws"]; set_max_thinking_tokens sent after initialize. Probe guard: --max-budget-usd 1.50.
+Tools: the repository's own definitions of artifact_read, artifact_edit, artifact_comments, artifact_reply and
+artifact_resolve (mawsToolList() at ux-wave/probe-setup 8bd124247, dumped to scenarios/pass3/uxwave-p4-maws-tools.json,
+served whole: title, description, input schema, annotations, and _meta anthropic/alwaysLoad, so artifact_edit is not
+deferred by tool search), from the harness's in-process MCP server. artifact_edit carries the U5 change as the spec
+words it: the optional `reply` {type string, 1 to 2,000 characters} and one sentence placed right after the description's
+`answering` sentence: "With answering, give reply: one or two sentences in your own words saying what you changed; it
+is posted as your reply in the thread." Nothing else in the description changed (it still says answering "posts the
+result into that thread"). The document is the scenario's: "Launch plan", four blocks, one open thread t1 by the user on
+"we email all customers" saying "Only customers who opted in to product news should get this email. Please change it.";
+the tool answers keep the real tools' shapes. The comment reaches the agent as X10's anchored text built as
+src/shared/anchor/message.ts builds it (lead `Comment on "Launch plan" (passage "…" in document <id>, thread t1):`, the
+comment, for a side thread the preamble, the <maws_anchor …/> tag). The side-thread runs are fresh sessions whose
+first message carries the preamble (no parent conversation was forked).
+Fixtures: fixtures/uxwave/uxwave-p4-reply-{main,thread}-{1..5}.jsonl; each has an `outcome` meta row with the tool
+calls and their arguments, the thread after the run, the answer and the cost (about US$0.06 a run).
+
+Observed (outcome row seqs 103 to 129). Every run: artifact_read, then artifact_edit {baseRevision 7, a replace_text or
+replace_block on p2, answering "t1", reply}. Replies, for instance: "Changed it so the launch email goes only to
+customers who opted in to product news, not to all customers." (main 1); "I changed the sentence so the launch-morning
+email goes only to customers who opted in to product news." (thread 3). All ten are one sentence of 70 to 120
+characters. No run called artifact_comments, artifact_reply or artifact_resolve; each answered the user in chat as well,
+quoting the new sentence.
+
+Not established. Other comment shapes (a question rather than a change request; a comment needing no edit; several
+comments at once), suggest mode (where the description tells the agent to use artifact_reply instead), and the model
+when the owner runs another one. The engine's other maws tools were not served (only the five document tools).

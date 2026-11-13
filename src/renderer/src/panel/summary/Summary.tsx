@@ -2,6 +2,7 @@
 import { useEffect, type FunctionComponent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
+import { workingFolder } from '@shared/sessions/working-folder';
 import { machineFor } from '../../ipc/machine';
 import { useGit } from '../../stores/git';
 import { useSessions } from '../../stores/sessions';
@@ -25,7 +26,7 @@ export const FloatingSummary: FunctionComponent<SummaryProps> = ({ appSessionId 
 export const Summary = FloatingSummary;
 
 function SessionSummary({ appSessionId, record }: { appSessionId: AppSessionId; record: SessionRecord }) {
-  const directory = record.worktree?.path ?? record.directory;
+  const directory = workingFolder(record).path;
   const machine = machineFor(appSessionId);
   useEffect(() => useGit.getState().watch(machine, directory, appSessionId), [machine, directory, appSessionId]); // P5 O7 M4: made from the session
   return (

@@ -5,9 +5,9 @@
 // holds it), so the tab shows no scope chips.
 import type { StoreApi } from 'zustand/vanilla';
 import type { TabRef } from '@shared/ipc/schema/layout';
+import { useWorkingFolder } from '../../../sessions/working-folder';
 import { useLayout } from '../../../stores/layout';
 import { allTabs } from '../../../stores/layout-model';
-import { useSessions } from '../../../stores/sessions';
 import { REVIEW_COPY } from '../copy';
 import { parseRef } from './review-model';
 import { ReviewShell } from './ReviewShell';
@@ -52,10 +52,7 @@ function Unavailable({ message, detail }: { message: string; detail: string }) {
 
 export function DiffTab({ tab }: { tab: DiffTabRef }) {
   const ref = parseRef(tab.ref);
-  const directory = useSessions((s) => {
-    const record = s.records.get(tab.appSessionId);
-    return record ? (record.worktree?.path ?? record.directory) : null;
-  });
+  const directory = useWorkingFolder(tab.appSessionId)?.path ?? null;
   if (!ref) return <Unavailable message={REVIEW_COPY.unavailable(REVIEW_COPY.unknownRef)} detail={tab.ref} />;
   if (directory === null) return <Unavailable message={REVIEW_COPY.noSession} detail={tab.ref} />;
   return (

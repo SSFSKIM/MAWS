@@ -58,7 +58,7 @@ describe('a client’s request to the engine host and the park', () => {
 
   it('on the real clocks, a request that outlives the idle time asks no park as it ends, and the idle time runs again from there (P5 O5)', async () => {
     const parks: string[] = [];
-    const clocks = new DaemonClocks('unit', { armEnginePark: (why) => (parks.push(why), true), disarmEnginePark: () => {}, exitDaemon: () => {}, quiet: () => {} });
+    const clocks = new DaemonClocks('unit', { armEnginePark: (why) => (parks.push(why), true), disarmEnginePark: () => {}, exitDaemon: () => {}, quiet: () => {}, activity: () => {} });
     try {
       clocks.configure(1_000);
       clocks.served();
@@ -133,7 +133,7 @@ describe('a client’s request to the engine host and the park', () => {
 
   it('on the real clocks, a hold kept past the idle time asks no park, and its release starts the idle time again from there (P5 O7 M5b)', async () => {
     const parks: string[] = [];
-    const clocks = new DaemonClocks('unit', { armEnginePark: (why) => (parks.push(why), true), disarmEnginePark: () => {}, exitDaemon: () => {}, quiet: () => {} });
+    const clocks = new DaemonClocks('unit', { armEnginePark: (why) => (parks.push(why), true), disarmEnginePark: () => {}, exitDaemon: () => {}, quiet: () => {}, activity: () => {} });
     try {
       clocks.configure(1_000);
       clocks.served();
@@ -176,5 +176,32 @@ describe('a completion whose raising host is gone', () => {
     expect(t.logs).toEqual([]);
     t.answer({ t: 'res', id: 'x', ok: false, error: { code: 'host_unavailable', message: 'gone' } } as HostResponse);
     await expect(asked).resolves.toMatchObject({ ok: false });
+  });
+});
+
+// P5 Decision Log 273: an open document channel's need guards the park as before, but is no operation in flight: on the
+// real clocks it leaves the daemon settled for the idle collection, while a forwarded request in flight does not
+describe('the guard’s needs to the idle collection', () => {
+  it('a channel’s standing need leaves the daemon settled; a request in flight does not', async () => {
+    const clocks = new DaemonClocks('unit', { armEnginePark: () => true, disarmEnginePark: () => {}, exitDaemon: () => {}, quiet: () => {}, activity: () => {} });
+    try {
+      clocks.served();
+      let answer: (value: HostResponse) => void = () => {};
+      const forward = vi.fn(() => new Promise<HostResponse>((resolve) => (answer = resolve)));
+      const guard = engineRequests({ hosts: { forward, onState: () => () => {}, parked: () => false, completionGone: () => false } as never, clocks, log: () => {} });
+      const release = guard.hold();
+      expect(guard.inFlight()).toBe(1); // the park's count
+      expect(clocks.settled()).toBe(true);
+      const asked = guard.forward('engine-host', { name: 'artifacts.content', input: {} });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(clocks.settled()).toBe(false);
+      answer({ t: 'res', id: 'x', ok: true, value: null } as HostResponse);
+      await asked;
+      expect(clocks.settled()).toBe(true);
+      release();
+      expect(clocks.settled()).toBe(true);
+    } finally {
+      clocks.stop();
+    }
   });
 });

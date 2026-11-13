@@ -1,0 +1,98 @@
+UX wave, child U5, probe P7: a message of several comments sent to a terminal session through the sminos bridge, as
+MAWS's terminal route sends it, on engine 2.1.322
+(docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md on ux-wave/U5a, "Probes", P7; the message's text as
+Interfaces §A defines it at 71e6f199b; 2026-11-12/13, VM dc-uxwave2-e584, branch ux-wave/probe2-text-defaults)
+
+Question. Does `laneA.send` deliver a text of several lines (blank lines, a `<maws_anchor …/>` line, `&gt;` in a tag's
+attribute, a non-ASCII letter, an emoji; and, at 71e6f199b, the framing line `2 comments, in the order made:` and a
+comment's own tag-shaped lines escaped with one more leading backslash) to a terminal session intact, idle, during a
+turn, after an Esc, and at about 70,000 characters? Which other mods with a prompt or append hook are loaded?
+
+Verdict. Intact, in every state: the document's branch "intact" applies, and the fallback in `sendComments` is not
+needed. The row the engine kept in the session's transcript file is byte for byte the text sent (SHA-256 equal) in
+12 of 12 deliveries: 8 with the framed text of 71e6f199b (two runs, four states each) and 4 with the earlier form
+(one run). The framing line, the blank lines, both escaped lines (`\<maws_anchor…` and `\\<maws_anchor…`), the
+`&gt;` in the tags, `é` and the emoji arrive as sent. Every delivery's fate on the bridge's stream was `submitted`,
+then `entered` naming that row's uuid; none was refused. MAWS's reader (master's `parseAnchoredText`, which a
+framed message's fallback reading is) reads the kept row exactly as it reads the text sent, in every case.
+
+Per state (framed runs r1 and r2; line numbers are the reduced transcripts'):
+  1. idle: the text is submitted as the person's prompt with no wrapper. Kept as a `user` row whose content is a
+     string, origin {kind: "plugin", name: "sminos", asUser: true} (r1 line 40, r2 line 40). 700 UTF-16 units,
+     703 bytes, sha256 478768ca75b4… sent and kept. The model answered as the comments asked (NOTED).
+  2. during a turn, the delivery posted 5 s into a running 30 s foreground call (the call was in the transcript with
+     no result at the post: `runningAtSend: true`): kept as an appended `user` row, isMeta true, content one text
+     block, origin {kind: "plugin", name: "sminos"} with no asUser (r1 51, r2 51); sha256 a4aa38492cd1… both. The
+     next request to the model carried it after the call's result (the api-request-blob row, r1 54 and r2 54, holds
+     the tool result then this text, equal to it). Asked afterwards to quote the last line of the message, the model
+     gave the second comment's tag exactly (2 of 2).
+  3. after an Esc during the same 30 s call (the transcript then holds "[Request interrupted by user for tool use]",
+     r1 77, r2 76), then a send: the bridge's prompt is refused by the engine after a stop and the bridge appends it
+     instead (sminos's documented path, hooks/mods/bridge.tsx `deliver` → `appendDelivery`); the fate still reads
+     only `submitted`, `entered`. Kept as an appended isMeta `user` row, origin plugin sminos without asUser
+     (r1 78, r2 77), sha256 7fb36c546239… both; then the bridge wakes the stopped session through its inbox: a
+     separate `user` row, isMeta, origin {kind: "peer", name: "sminos bridge"}, holding the plugin's own wake text,
+     not the comments (r1 83, r2 82). The model's next request carried both (r1 84, r2 83). Asked to quote the last
+     line of the comments, the model gave the tag exactly in r2, and in r1 quoted the wake message's last line
+     instead (1 of 2): what it read was whole, the question was ambiguous once two messages had arrived.
+  4. 70,081 UTF-16 units (72,533 bytes), idle: kept whole as the prompt row (r1 100, r2 99), sha256 436da1e271a2…;
+     the model answered.
+  The earlier form (run v1, before 71e6f199b: no framing line, comments without tag-shaped lines) was intact in all
+  four too (v1 lines 40, 56, 92, 107), but its steps 2 and 3 did not test what they name: the session refused the
+  plain `sleep 30` the document's step names (the model reported a block pointing it to Monitor or a background
+  job), so step 2's delivery landed in a short turn (still as an appended isMeta row, line 56) and step 3's Esc hit
+  no running call, so its delivery was an idle prompt (line 92). The framed runs use a 30 s foreground `python3`
+  wait instead, and check it is running before the post and the Esc.
+
+What the design should know (observed; the inferences marked):
+  - The rows differ by state, not the text: idle and long are prompt rows (string content, asUser true); during a
+    turn and after an Esc they are isMeta rows of one text block, origin plugin without asUser. A transcript reader
+    that skips isMeta rows, or keys "the person's words" on asUser, will not draw the chip for a comment sent during
+    a turn or after an Esc (inference; which rows `userTextOf` reads was not checked here; findings-uxwave-u3-sminos.txt
+    saw the same isMeta row for a busy delivery).
+  - Each appended delivery is followed by a `system` row, subtype informational, level notice, content
+    `sminos: delivered: <the text with every newline replaced by a space>` (r1 52 and 79): the mod's log line. It is
+    not the message and must not be read as one.
+  - After an Esc, the inbox wake row (origin peer, "sminos bridge") follows the delivered row; it carries none of
+    the comments' text.
+  - Step 5 (65,536 units over the machine link, 65,537 refused) needs a second machine and was not run. On this
+    machine 70,081 units passed the bridge and the engine whole.
+
+Other mods loaded (step 6). The managed settings enable and prepend three plugins from the VM's marketplace copy:
+to-human 0.7.3, sminos 1.46.3, doperpowers 7.220.0. Loaded in these runs: sminos (its bridge served the deliveries;
+its tools in the transcript's mcp_instructions_delta), doperpowers (its tools in the same attachment, its kairos
+button in the footer); to-human's load was not seen directly (its message tool registers only under its output
+style, not set here). Their hooks on a prompt or an append, read from the plugin sources (nothing else of theirs
+touches a prompt's or a row's text):
+  - prompt.submit, every prompt: doperpowers appeal.tsx:443 (bumps its epoch, passes the prompt on), to-human
+    reminder.tsx:80 (adds context beside the first prompt past 150k/300k/450k tokens, only while its message tool is
+    on), sminos ask.tsx:1601 (adds held answers as context items, not to the text), sminos bridge.tsx:2068 (observes
+    only); prompt.submit by origin: doperpowers compact.tsx:601 and :629, interim.ts:232 (task notifications).
+  - session.append: sminos bridge.tsx:2489, to-human message.tsx:293, notify.tsx:68, to-human.tsx:1197, doperpowers
+    reload.tsx:838 (door command). Each reads the stored row after `next`; none rewrites it.
+  - prompt.attachment: doperpowers compact.tsx:647, to-human reminder.tsx:64 (attachments, not the prompt).
+  - Command hooks: SessionStart (sminos smns-record.sh, smns-guide.sh; doperpowers kairos.sh), Stop (smns-record.sh),
+    PreCompact, UserPromptExpansion (matcher kairos only), MessageDisplay (to-human-stream.sh).
+  Context these add rides as separate attachments; the byte comparison above is of the row itself, with all of them
+  loaded.
+
+Method. Engine 2.1.322 (`claude --version` 2.1.322), model haiku (claude-haiku-5-5), interactive in tmux (160 x 48),
+under `./vm-run.sh --managed --prefix p2b -e CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 run run-pass3.mjs
+uxwave-u5-terminal-text` (spikes/protocol-probe/VM.md; the HOME is scratch, so sminos's state was private and
+unenrolled: `sminos list --machine <vm>` showed no member before and after). The sender is the scenario,
+scenarios/pass3/uxwave-u5-terminal-text.mjs, posting as src/services/lane-a/driver.ts and deliveries.ts do: `GET
+/status` for `launch`, then `POST /command?wait=10000` with {op: "deliver", key: {writer: "maws/probe-vm", seq},
+text, launch} on $HOME/.claude/sminos/bridge/<session>.sock, the fate read from `GET /events`. The text is built with
+master's `anchorLead` and `anchorTag` (src/shared/anchor/message.ts, bundled with esbuild) in §A's framed form, two
+comments: a browser element "Menu > Settings" (tag attributes `&gt;`) whose comment has a blank line, `café` and a
+line `<maws_anchor kind="none" …/>` (sent as `\<maws_anchor…`); and one.txt line 1, whose comment has 🎉 and a line
+`\<maws_anchor …/>` (sent as `\\<maws_anchor…`). The long text replaces the second comment with ~860 numbered lines.
+`UXW_FORMAT=v1` sends the earlier form. Comparison: SHA-256 of the UTF-8 text sent and of the kept row's text (a
+string, or its text blocks joined), the first differing offset (none), and every other row holding the step's marker.
+Runs: v1 (the earlier form, the scenario's first version), r1 and r2 (the framed form, the version committed).
+Fixtures, all reduced (the raw transcripts, panes and event streams carry the owner's plugins' hook output and stayed
+on the VM under /tmp): fixtures/uxwave/u5-terminal-text-{r1,r2,v1}.json (each step: the text sent, or its head, tail
+and hash for the long one; the post's answer; the fates; the kept row's line, type, isMeta, origin, shape, hash,
+equality; the reader over both; other rows with the marker; the model's quote) and .rows.ndjson (every transcript row
+reduced to type, origin and shape; text kept only for the probe's prompts and the model's short answers; two answers
+in r1 that restate the plugin's wake text are replaced by a note saying so).

@@ -4,6 +4,7 @@
 import { useEffect } from 'react';
 import { useStore } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
+import { workingFolder } from '@shared/sessions/working-folder';
 import { ipc } from '../../../ipc/client';
 import { useRemoteUnavailable } from '../../../lane-b/remote-unavailable';
 import { CardButton } from '../../../request-card/controls';
@@ -45,7 +46,7 @@ export function HoverAsk({ appSessionId, askId }: { appSessionId: AppSessionId; 
         {ask.questions.map((question) => <QuestionSection key={`${askId}:${question.id}`} question={question}
           draft={drafts?.get(question.id ?? '') ?? EMPTY_DRAFT} disabled={busy}
           edit={(change) => editDraft(appSessionId, askId, question.id ?? '', change)}
-          directory={record?.worktree?.path ?? record?.directory ?? null} projects={projects} />)}
+          directory={record ? workingFolder(record).path : null} projects={projects} />)}
       </TranscriptActionsProvider>
     </div>
     <div className="flex shrink-0 flex-col gap-2 border-t border-border pt-2">

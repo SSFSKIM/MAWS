@@ -21,7 +21,9 @@
 //   collecting, over the rows' live status, so work a row has begun and not yet told (a send whose queue tells only once
 //   its save settles) holds it off. A live row that ends with the host quiet (an idle release, an engine's exit) is told
 //   as a dropped holding, whose transcript is garbage the collection's guard cannot see. From a stop-all or an exit on it
-//   is never quiet again.
+//   is never quiet again. Unoccupied (Decision Log 273, the collector's quiet entry, asked at the moment of collecting
+//   after a quiet period with no activity): the same, except that interest and a row's hold (a headless tab, a
+//   connector, a background task) do not count; only a live row that is not ready or has a turn under way does.
 // - The handover (P5 O16 M3b; docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3; D9, D11, D33): `host.handover`,
 //   or `exit {when: 'idle'}` on a *refused* link from a client whose hello listed `host.holder`, freezes every hosted row
 //   in one synchronous step (admission closed) and arms the drain (handover.ts); once it settles, the exit order runs,
@@ -33,7 +35,7 @@ import { HostCommandError } from '@shared/host/runtime';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SupervisorStatus } from '@shared/ipc/schema/host';
 import type { IdleCollector } from '@shared/host/idle-collect';
-import { isIdleRow } from './budget';
+import { isIdleRow, turnUnderWay } from './budget';
 import { HANDOVER_GRACE_MS, HandoverDrain, type DrainingRow } from './handover';
 import type { HandoverRace } from './e2e-handover-race';
 import type { PluginsRunner } from './plugins/runner';
@@ -326,6 +328,12 @@ export class Supervision {
     return this.serving && this.settled && this.leaving === null && !this.stopping && this.drain === null /* P5 O16 M3b */ && !this.deps.plugins.busy()
       && !this.deps.table.interested() && !this.deps.table.launching()
       && this.deps.table.list().every((row) => row.lifecycle === 'exited' || isIdleRow(row.status(), NO_STATEFUL));
+  }
+
+  // Nothing runs here now (the header's unoccupied), whatever the clients hold: the quiet entry's live predicate.
+  unoccupied(): boolean {
+    return this.serving && this.settled && this.leaving === null && !this.stopping && this.drain === null && !this.deps.plugins.busy() && !this.deps.table.launching()
+      && this.deps.table.list().every((row) => row.lifecycle === 'exited' || (row.status().process === 'ready' && !turnUnderWay(row.status())));
   }
 
   private tellQuiet(): void {

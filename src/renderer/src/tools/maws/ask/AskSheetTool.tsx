@@ -11,6 +11,7 @@ import { useStore } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ASK_SHEET_TOOL_ID } from '@shared/maws/panes';
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
+import { workingFolder } from '@shared/sessions/working-folder';
 import { Icon } from '../../../app/IconButton';
 import { ipc } from '../../../ipc/client';
 import type { PanelTool, PanelToolContext, PanelToolInit } from '../../../panel/tool';
@@ -182,7 +183,7 @@ function Sheet({ appSessionId, ctx }: { appSessionId: AppSessionId; ctx: PanelTo
   useEffect(() => {
     setTitle(title);
   }, [setTitle, title]);
-  const directory = ctx.session?.worktree?.path ?? ctx.session?.directory ?? null;
+  const directory = ctx.session ? workingFolder(ctx.session).path : null;
   const held = [...state.asks.values()];
 
   let body: ReactNode;

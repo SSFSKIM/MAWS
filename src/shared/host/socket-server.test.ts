@@ -37,6 +37,7 @@ interface StartOptions {
   many?: { runtimeFor(client: { appPid: number; capabilities: readonly string[] }): HostRuntime };
   halfOpen?: boolean;
   admitHello?: SocketServerOptions['admitHello']; // P5 O2 M5
+  onActivity?: () => void; // P5 Decision Log 273
 }
 
 async function start(options: StartOptions = {}) {
@@ -71,6 +72,7 @@ async function start(options: StartOptions = {}) {
     log,
     helloTimeoutMs: options.helloTimeoutMs,
     docHighWater: options.docHighWater, // P3-A M5
+    onActivity: options.onActivity, // P5 Decision Log 273
   });
   temp = await listenTemp(server);
   const connect = async () => {
@@ -395,6 +397,25 @@ describe('the socket layer handshake (server side)', () => {
     expect(client.isClosed()).toBe(false);
     host.served.closeClient();
     await client.closed;
+  });
+
+  it('tells activity at each line its client sends, never at what is written to it, and keeps a port’s answer to a post (P5 Decision Log 273)', async () => {
+    let activity = 0;
+    const host = await start({ onActivity: () => void (activity += 1) });
+    const client = await host.connect();
+    client.send(hello());
+    await client.next();
+    expect(activity).toBe(0); // the handshake is the layer's own
+    client.send({ t: 'req', id: '1', name: 'engine.ping', input: undefined });
+    await client.next((line) => (line as { t: string }).t === 'res');
+    expect(activity).toBe(1); // the request; its answer ends its lifetime, the runtime's to tell
+    client.send({ t: 'ready' });
+    await until(() => host.runtime.hasClient());
+    expect(host.emit()).toBe(true);
+    expect(activity).toBe(2); // ready; the event written out is no activity
+    client.socket.destroy();
+    await until(() => !host.runtime.hasClient());
+    expect(host.emit()).toBe(false); // a gone client's post still reads false through the layer
   });
 
   it('closeClient closes the connected client', async () => {

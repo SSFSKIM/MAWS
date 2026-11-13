@@ -16,12 +16,15 @@ import type { DaemonArtifacts } from '@shared/ipc/schema/daemon';
 import type { EndpointLibrary } from '../services/artifacts/scheme/endpoint-library';
 import type { DaemonServices } from './endpoint-seam';
 
-export type EndpointChunk = { endpointLibrary(content: ArtifactsEndpointOptions['content'], onRequest?: () => void): EndpointLibrary };
+export type EndpointChunk = { endpointLibrary(content: ArtifactsEndpointOptions['content'], onRequest?: () => void, work?: () => () => void): EndpointLibrary };
 
 export interface ArtifactsEndpointOptions {
   content(input: CommandInput<'artifacts.content'>): Promise<CommandResult<'artifacts.content'>>; // the engine host's
   load?(): Promise<EndpointChunk>; // the library's chunk (a test's, or one the bundle swap refuses)
   log(line: string): void;
+  // P5 Decision Log 273: each request's lifetime, over HTTP until its response closes, through `fetch` until its body is
+  // read to its end, fails or is cancelled
+  work?(): () => void;
 }
 
 export interface ArtifactsEndpoint {
@@ -33,7 +36,7 @@ export interface ArtifactsEndpoint {
 
 export const loadEndpointChunk = (): Promise<EndpointChunk> => import('../services/artifacts/scheme/endpoint-library');
 
-export function createArtifactsEndpoint({ content, load = loadEndpointChunk, log }: ArtifactsEndpointOptions): ArtifactsEndpoint {
+export function createArtifactsEndpoint({ content, load = loadEndpointChunk, log, work }: ArtifactsEndpointOptions): ArtifactsEndpoint {
   const sockets = new Set<Socket>();
   let library: EndpointLibrary | null = null;
   let loading: Promise<EndpointLibrary> | null = null;
@@ -44,7 +47,7 @@ export function createArtifactsEndpoint({ content, load = loadEndpointChunk, log
     if (library) return Promise.resolve(library);
     loading ??= load().then(
       (chunk) => {
-        library = chunk.endpointLibrary(content, () => void requests++);
+        library = chunk.endpointLibrary(content, () => void requests++, work);
         log('the artifact endpoint’s handler loaded at its first use');
         return library;
       },
@@ -75,13 +78,21 @@ export function createArtifactsEndpoint({ content, load = loadEndpointChunk, log
   return {
     server,
     async fetch(request) {
+      const end = work?.() ?? (() => {});
       let served: EndpointLibrary;
       try {
         served = await ensure();
       } catch (error) {
+        end();
         return { status: 503, headers: { 'content-type': 'text/plain', 'cache-control': 'no-store' }, body: new Response((error as Error).message).body };
       }
-      return served.fetch(request);
+      try {
+        const answer = await served.fetch(request);
+        return { ...answer, body: endingWith(answer.body, end) };
+      } catch (error) {
+        end();
+        throw error;
+      }
     },
     status: () => ({ loaded: library !== null, requests }),
     close() {
@@ -90,6 +101,35 @@ export function createArtifactsEndpoint({ content, load = loadEndpointChunk, log
       sockets.clear();
     },
   };
+}
+
+// P5 Decision Log 273: a body that calls `ending` once, when it is read to its end, fails or is cancelled (none: at once).
+export function endingWith(body: ReadableStream<Uint8Array> | null, ending: () => void): ReadableStream<Uint8Array> | null {
+  let ended = false;
+  const end = () => {
+    if (ended) return;
+    ended = true;
+    ending();
+  };
+  if (body === null) return (end(), null);
+  const reader = body.getReader();
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (!done) return controller.enqueue(value);
+        end();
+        controller.close();
+      } catch (error) {
+        end();
+        controller.error(error);
+      }
+    },
+    cancel(reason) {
+      end();
+      return reader.cancel(reason);
+    },
+  });
 }
 
 // A 503 written on a connection with no HTTP library loaded: one line, and the connection ends.
