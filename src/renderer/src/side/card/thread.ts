@@ -18,14 +18,14 @@ const NEEDS = SIDE_COPY.card.needs;
 // anchored prompt first; a thread read from disk begins with the parent's copied history, which the card leaves out.
 // Null while nothing is loaded and no such prompt has arrived; once loaded with none, everything from 0 (showing too
 // much is recoverable, hiding the thread is not). A thread with no anchor (a promotion) starts at 0. UX wave U5a (M5): a
-// thread opened from several comments starts at its prompt of several comments, whose first comment's anchor is the
-// lineage's (the row carries no destination, so the last such prompt is the thread's, as for a thread of a thread).
+// thread opened from several comments starts at its prompt of several comments framed for a thread (`commentsTo`), whose
+// first comment's anchor is the lineage's; a pass later sent to the main conversation on the same anchor is not one.
 export function threadStartOf(lineage: Lineage | null): (rows: readonly Row[], loaded: boolean) => number | null {
   const anchor = lineage?.anchor;
   if (anchor === undefined) return () => 0;
   const same = (other: Anchor | undefined) => other?.kind === anchor.kind && other.locator === anchor.locator && other.label === anchor.label;
   return (rows, loaded) => {
-    const index = rows.findLastIndex((row) => row.kind === 'user' && (row.comments !== undefined ? same(row.comments[0]?.anchor) : row.anchorFrame?.destination === 'thread' && same(row.anchor)));
+    const index = rows.findLastIndex((row) => row.kind === 'user' && (row.comments !== undefined ? row.commentsTo === 'thread' && same(row.comments[0]?.anchor) : row.anchorFrame?.destination === 'thread' && same(row.anchor)));
     if (index >= 0) return index;
     return loaded ? 0 : null;
   };

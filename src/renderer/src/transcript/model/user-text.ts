@@ -26,6 +26,7 @@ export interface UserText {
   anchor: Anchor | null; // E3: what an anchored comment is about; null for every other message
   frame: AnchorFrame | null; // E11: the framing taken off with it, null exactly when `anchor` is
   comments: UserComment[] | null; // UX wave U5a: a message of two or more comments (then `anchor` is null), else null
+  commentsTo: 'thread' | null; // UX wave U5a: such a message framed for a side thread (its plural preamble), else null
 }
 
 // The n-th match becomes a `text` attachment; its place in the text is `[Pasted text #n +L lines]`, keeping one
@@ -130,7 +131,7 @@ export function userTextOf(content: string | ContentBlock[]): UserText {
   const text = split.text;
   const frame = anchored ? { destination: read!.destination, screenshot: anchored.screenshot } : null;
   const all = [...split.attachments, ...attachments];
-  return { text, attachments: all, placeholders: split.placeholders, lines: text.length === 0 ? 0 : text.split('\n').length, anchor: anchored?.anchor ?? null, frame, comments: several && commentsOf(several, all) };
+  return { text, attachments: all, placeholders: split.placeholders, lines: text.length === 0 ? 0 : text.split('\n').length, anchor: anchored?.anchor ?? null, frame, comments: several && commentsOf(several, all), commentsTo: several && read!.destination === 'thread' ? 'thread' : null };
 }
 
 // UX wave U5a (decision 13): the k-th image of the message is the k-th comment's whose lead announced a screenshot, when

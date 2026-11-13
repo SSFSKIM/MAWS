@@ -1777,8 +1777,8 @@ export { isEngineOrigin };
 
 // E3 start: the anchored prompt's anchor, carried only when the prompt has one (the user row's field is optional, so
 // every other row reads as before); UX wave U5a (§H): a message of several comments carries them instead
-function anchorOf(text: UserText): { anchor?: NonNullable<UserText['anchor']>; anchorFrame?: NonNullable<UserText['frame']>; comments?: NonNullable<UserText['comments']> } {
-  if (text.comments !== null) return { comments: text.comments };
+function anchorOf(text: UserText): { anchor?: NonNullable<UserText['anchor']>; anchorFrame?: NonNullable<UserText['frame']>; comments?: NonNullable<UserText['comments']>; commentsTo?: 'thread' } {
+  if (text.comments !== null) return { comments: text.comments, ...(text.commentsTo !== null && { commentsTo: text.commentsTo }) };
   return text.anchor === null || text.frame === null ? {} : { anchor: text.anchor, anchorFrame: text.frame };
 }
 
