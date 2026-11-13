@@ -870,6 +870,7 @@ Two things, kept apart. *Mounting and layout:* what a page hides stays mounted, 
 | `session.markUnread` (⌥⌘U) | its handler in `app/shell-actions.ts` · U6 | `app/Shell.test.tsx`: behind a page nothing is marked |
 | `file.save` (⌘S), `file.commentLine` | `saveFocusedFile`, `commentOnFocusedLine` in `tools/code/editor/register.ts` · U6 | `tools/code/editor/register.test.tsx`: a changed file's tab behind a page is not saved by ⌘S, and the same key after Back saves it |
 | `artifact.moveToPanel` | `moveFocusedArtifactToPanel` in `shell/transfer.ts` · U6 | `shell/transfer.test.ts`: behind a page it refuses with the notice it gives for a tab that is not an artifact's |
+| `attention.next` (⇧⌘J), the session it passes over (added at M5, the architect's ruling) | `openNextNeedsYou` in `attention/navigation.ts` · no child: the session it treats as current is read through `tabOnScreen`, so the session behind a page is not current and, when it waits, is opened first, which leaves the page | `attention/navigation.test.ts`: two waiting rows, the first the session behind a page: ⇧⌘J opens that session and the page closes |
 
 One act shows a session and skips the open when that session is already in front: `showTab` in `sessions/attach.ts` (Attach, from a session's actions or a toast). Behind a page the session is not on screen, so its guard reads `tabOnScreen` and it calls `openSession`, which leaves the page; a new case in `sessions/HolderActions.test.tsx`, where Attach is driven today, holds it.
 
@@ -991,6 +992,14 @@ U7a's pull request carries the dated amendment of the ruling S-11 reverses; U7b'
 - Observation (the re-check): the branch's head holds master's content and is not a descendant of master's head.
   Evidence: `git log 129f6d3da..origin/master` lists five merge commits (#634, #635 and three merges of master into the chain); `git diff origin/master 129f6d3da` names no file under `settings-tab/`, `usage/`, `customize/` or `sidebar/`.
 
+- Observation (M5, 2026-11-13): the card column and a side surface are never drawn together (`cardColumnShown` asks that no side tab be in view), so M5's Shell case "a session in front, the card column drawn and a side surface open" is two cases, one with each.
+  Evidence: `cardColumnShown` in `app/shell-geometry.ts` (`tabsInView === 0`).
+- Observation (M5): a stored `main.tabs` that does not parse falls back to the default strip, which has the stored form's shape, so a stored page is restored over the default strip by rule 4. Left as it is: a default strip under a page is harmless and Back leaves it.
+  Evidence: `stripOf` on a value the reader rejects, in `stores/layout.ts`'s `hydrate`.
+- Observation (M5): under a page the title bar spans three columns and the chip and the surface icons are not drawn, so the host of the strips, mounted and invisible, changes width; a strip's scroll position may be clamped at Back. Only a Mac run shows it: it is on M8's list of what the architect looks at in the layout and panel groups.
+- Observation (M5): the ring (M7) must be mounted outside the title bar's surface-row block, which is not rendered under a page.
+  Evidence: `app/Toolbar.tsx` at `5925905b9`, the surface row drawn only while `destination === null`.
+
 ## Decision Log
 
 - Decision: the verification call. This document gets one adversarial review before an executor starts, dispatched by the architect. Each branch gets the `doperpowers:review-code` xhigh panel, with the lenses of "Proof that an executor does not run": U7a by size, U7b by size and because the root calls the reader of the stored layout delicate. Class 1a on GitHub Actions is the gate of record for each landing.
@@ -1101,6 +1110,10 @@ U7a's pull request carries the dated amendment of the ruling S-11 reverses; U7b'
   Also recorded at the start of U7b's execution: the branch's base is now U8b's final head `76408bb9c` (merged at `11d12dead`), not `129f6d3da`; `git diff 129f6d3da 11d12dead -- src e2e test` is empty, so the re-check's reading holds on it, and the wire check of Concrete Steps 1 and the key diff of step 4 keep `129f6d3da` as their base.
   Rationale: the architect's rulings, binding.
   Date/Author: 2026-11-13, the controller of U7b, on the architect's word.
+
+- Decision (M5's two points, ruled by the architect, 2026-11-13): (1) `openNextNeedsYou` (⇧⌘J) reads `tabOnScreen`: a session behind a page is not the current one, and when it waits it is opened first, which leaves the page; one more reader in §N's second table, with a test of two waiting rows. (2) `setOverviewOpen(true)` does not call `revealMain` while a page is open, so Back shows the side column as it was (M5, decision 2); the store holds one invariant, "while the Overview is over the main region, the side column is docked", so when the page closes while the Overview is open, by a path that opens no tab, `revealMain` runs then. Tested both ways: the Overview opened over a page, closed, then Back (the column as it was); the Overview opened over a page, then the page left with the Overview still open (the column docked).
+  Rationale: (1) the rule already ruled for the acts behind a page, applied to one more reader. (2) a page writes nothing of the side column, and the Overview is never drawn over a main region that a maximized or floating column covers.
+  Date/Author: 2026-11-13, the controller of U7b, on the architect's ruling.
 
 ## Outcomes & Retrospective
 
