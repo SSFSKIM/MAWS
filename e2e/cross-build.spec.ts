@@ -1643,7 +1643,7 @@ const keepsSets = (build: Build) => {
 };
 const keepsSetsWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) keeps no tab set per project (its stores/layout-model.ts has no switchSet): UC-14's round trip is with build F, --peer-exact f1852de3a`;
 const ONE_STRIP_NOTICE = 'Tabs from every project are now in one strip'; // src/renderer/src/ipc/events.ts
-const PINNED_TOOL = 'Session info'; // a tool outside the icon row's first four, so it shows there only when pinned or open
+const PINNED_TOOL = 'Session info'; // a tool outside the icon row's first four, listed only when pinned or open
 const PINNED_TOOL_ID = 'session-info';
 const LAYOUT_PAGE = 'Cross-build layout page';
 type StoredSets = { version: number; current: string; sets: Record<string, { panes: { tabs: { id: string; pinned: boolean }[]; activeTabId: string }[]; focusedPane: number }> };
@@ -1657,13 +1657,38 @@ const notice = (page: Page) => page.locator('[data-toast-viewport]').getByText(O
 const consoleSaid = async (page: Page) => (await page.consoleMessages({ filter: 'all' })).map((message) => `${message.type()}: ${message.text()}`);
 const INVALID_LAYOUT = /\[layout\] \S+ is not a valid value/; // stores/layout.ts in both builds, a warning
 const SETTINGS_REFUSED = /\[settings\] (?:invalid|cannot read) /; // src/shared/settings/file-store.ts in both builds
-// A tool pinned to, or unpinned from, the icon row through its icon's menu, as a person does; opened first when it has no
-// icon (a tool past the first four shows only when pinned or open)
-async function pinToToolbar(page: Page, name: string, pin: boolean): Promise<void> {
+// A tool's own menu, as a person reaches it at any width: from its icon in the row, or, where a narrow row folds the
+// tool into "More surfaces" (the row's icons past its room, pinned and open ones among them), from its item there by
+// Shift+F10, as e2e/support/shell.ts's pinSurfaceForSessions does; the same in both builds (panel/SurfaceRow.tsx)
+async function openToolMenu(page: Page, name: string): Promise<void> {
   const icon = surfaceRow(page).getByRole('button', { name, exact: true });
-  if (!(await icon.count())) await openSurface(page, name);
-  await icon.click({ button: 'right' });
+  if (await icon.count()) await icon.click({ button: 'right' });
+  else {
+    await surfaceRow(page).getByRole('button', { name: 'More surfaces', exact: true }).click();
+    const item = page.getByRole('menuitem', { name, exact: true });
+    await item.focus();
+    await item.press('Shift+F10');
+  }
+}
+async function closeMenus(page: Page): Promise<void> {
+  await expect(async () => {
+    if (await page.getByRole('menu').count()) await page.keyboard.press('Escape');
+    await expect(page.getByRole('menu')).toHaveCount(0, { timeout: 1_000 });
+  }).toPass({ timeout: 10_000 });
+}
+// A tool pinned to, or unpinned from, the icon row through its menu; opened first for the pin (a tool past the first
+// four is listed only when pinned or open)
+async function pinToToolbar(page: Page, name: string, pin: boolean): Promise<void> {
+  if (pin) await openSurface(page, name);
+  await openToolMenu(page, name);
   await page.getByRole('menuitem', { name: pin ? 'Pin to toolbar' : 'Unpin from toolbar', exact: true }).click();
+  await closeMenus(page);
+}
+// Whether the tool is pinned as a person sees it at any width: its menu offers to unpin it, or to pin it
+async function expectToolPinned(page: Page, name: string, pinned: boolean, message: string): Promise<void> {
+  await openToolMenu(page, name);
+  await expect(page.getByRole('menuitem', { name: pinned ? 'Unpin from toolbar' : 'Pin to toolbar', exact: true }), message).toBeVisible();
+  await closeMenus(page);
 }
 // The library's tab and an artifact's, opened as a person opens them (the sidebar's Artifacts, then the page's row)
 async function openLibraryAndPage(page: Page, artifactId: string): Promise<string> {
@@ -1720,7 +1745,7 @@ test('(layout, from the peer) a layout the peer filed under two tab sets opens w
     expect(new Set(await stripIds(run.page)).size, 'each once').toBe(tabs.length);
     await expect(mainTabById(run.page, front).getByRole('img', { name: 'Pinned' }), 'the pin').toBeVisible();
     await expect(activeMainTab(run.page), 'the tab that was in front').toHaveAttribute('data-tab-id', front);
-    await expect(surfaceRow(run.page).getByRole('button', { name: PINNED_TOOL, exact: true }), 'the pinned tool in the icon row').toBeVisible();
+    await expectToolPinned(run.page, PINNED_TOOL, true, 'the pinned tool kept in the icon row');
     await expect
       .poll(async () => {
         const ours = await layoutOf<StoredSets>(run.page, 'main.tabs');
@@ -1796,7 +1821,7 @@ test('(layout, to the peer) a split strip this build stored, with a pin, a side 
     await s.ready(old.page);
     await expect(mainTabById(old.page, 'artifacts'), `${peer.label} draws the tab that was in front, selected`).toHaveAttribute('aria-selected', 'true', { timeout: 20_000 });
     await expect(mainTabById(old.page, artifact).getByRole('img', { name: 'Pinned' }), `${peer.label} draws the pin`).toBeVisible();
-    await expect(surfaceRow(old.page).getByRole('button', { name: PINNED_TOOL, exact: true }), `${peer.label} draws the pinned tool`).toBeVisible();
+    await expectToolPinned(old.page, PINNED_TOOL, true, `${peer.label} draws the pinned tool`);
     await expect(old.page.locator('[data-region="sidebar"]').getByRole('separator', { name: 'Resize sidebar' }), `${peer.label} draws the sidebar at the width written`).toHaveAttribute('aria-valuenow', '280');
     expect((await consoleSaid(old.page)).filter((line) => INVALID_LAYOUT.test(line)), `${peer.label} took every layout value as valid`).toEqual([]);
     // its acts: another tab selected, the tool unpinned, the sidebar folded; then what it writes holds every tab
@@ -1825,7 +1850,7 @@ test('(layout, to the peer) a split strip this build stored, with a pin, a side 
     await expect.poll(async () => (await stripIds(back.page)).sort(), { timeout: 20_000, message: 'every tab back in the strip' }).toEqual(tabs);
     expect(new Set(await stripIds(back.page)).size, 'each once').toBe(tabs.length);
     await expect(mainTabById(back.page, artifact).getByRole('img', { name: 'Pinned' }), 'the pin').toBeVisible();
-    await expect(surfaceRow(back.page).getByRole('button', { name: PINNED_TOOL, exact: true }), 'the tool unpinned').toHaveCount(0);
+    await expectToolPinned(back.page, PINNED_TOOL, false, 'the tool unpinned');
     expect((await layoutOf<StoredSurfaces>(back.page, 'panelTools.surfaces'))?.pinnedTools ?? []).not.toContain(PINNED_TOOL_ID);
     await expect(back.page.getByRole('banner').getByRole('button', { name: 'Toggle sidebar' }), 'the sidebar folded').toHaveAttribute('aria-pressed', 'false');
     expect(back.maws.consoleErrors()).toEqual([]);
