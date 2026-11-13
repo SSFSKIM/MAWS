@@ -85,6 +85,8 @@ export const LANE_A_WORDS = {
   // machine (sminos's `decide` there takes allow or deny)
   dismiss: 'Dismiss it in the terminal',
   remoteDismiss: (machine: string) => `Dismiss it in the terminal on ${machine}`,
+  // UX wave U1a §F: the bridge carries a plan's allow and deny, never a mode, so its card offers none
+  planMode: 'The mode after a plan is chosen in the terminal',
   unknown: 'It may have run: the transcript shows it if it did',
   // M9: a session on another machine (Q2's words where it gives them). 2026-11-06: a subagent's own transcript crosses
   // from a machine whose endpoint lists `rl2.agent-scope`; an older one is named to update
@@ -203,6 +205,7 @@ export function laneAAnswerCapability(raised: LaneARaised | null, answer: Reques
     case 'question':
       return Object.keys(answer.answers).length === 0 && raised?.async === true ? closed('An async question needs an answer') : AVAILABLE;
     case 'plan':
+      if (answer.mode !== undefined) return closed(LANE_A_WORDS.planMode); // U1a §F
       return answer.outcome === 'clear_and_implement' ? closed('/clear runs in the terminal') : AVAILABLE;
     case 'permission': {
       if (question) return answer.decision === 'deny' && raised?.async === true ? dismissal(controls, machine) : AVAILABLE;

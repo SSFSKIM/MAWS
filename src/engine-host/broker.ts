@@ -19,6 +19,7 @@ import type { ControlClient } from './rpc';
 // The dialog kinds `initialize` declares (§4.1): we render exactly these, so a request for any other kind is never
 // answered on the human's behalf (SPEC 45.22.13); it stays pending with a warning.
 import { DECLARED_DIALOG_KINDS } from '@shared/engine/initialize';
+import { PLAN_NEXT_MODES } from '@shared/sessions/plan-next-mode';
 export { DECLARED_DIALOG_KINDS } from '@shared/engine/initialize';
 
 export const TOMBSTONE_LIMIT = 1_000;
@@ -171,6 +172,10 @@ export class PermissionBroker {
     if (answerKindOf(entry.kind) !== answer.kind && !isQuestionSkip(entry.kind, answer)) throw new BrokerAnswerMismatch(`request ${requestId} is a ${entry.kind} request; a ${answer.kind} answer cannot resolve it`);
     if (entry.kind === 'dialog' && !DECLARED_DIALOG_KINDS.includes(String(entry.request.request.dialog_kind))) {
       throw new BrokerAnswerMismatch(`request ${requestId} asks for a "${String(entry.request.request.dialog_kind)}" dialog, which MAWS did not declare; it cannot be answered`);
+    }
+    // UX wave U1a §F: a plan's approval names only a mode the check of 2026-11-12 ran; any other is refused, unwritten
+    if (answer.kind === 'plan' && answer.mode !== undefined && !PLAN_NEXT_MODES.includes(answer.mode)) {
+      throw new BrokerAnswerMismatch(`request ${requestId} is a plan; its approval names ${PLAN_NEXT_MODES.join(' or ')}, not ${answer.mode}`);
     }
     const wire = toWire(entry, answer);
     entry.answering = true;
@@ -375,7 +380,10 @@ function toWire(entry: Entry, answer: RequestAnswer): Wire {
     case 'question':
       return { response: { behavior: 'allow', updatedInput: { ...((request.input ?? {}) as object), answers: answer.answers } }, grants: [], note: null };
     case 'plan':
-      if (answer.outcome === 'implement') return { response: { behavior: 'allow', updatedInput: request.input }, grants: [], note: null }; // the engine strips plan/planFilePath and restores the pre-plan mode (SPEC 21 §6.7)
+      // the engine strips plan/planFilePath and restores the pre-plan mode (SPEC 21 §6.7). UX wave U1a §F: a named mode is
+      // the terminal's own `setMode` update beside the allow, which the engine applies instead; it is no grant
+      if (answer.outcome === 'implement' && answer.mode !== undefined) return { response: { behavior: 'allow', updatedInput: request.input, updatedPermissions: [{ type: 'setMode', mode: answer.mode, destination: 'session' }] }, grants: [], note: null };
+      if (answer.outcome === 'implement') return { response: { behavior: 'allow', updatedInput: request.input }, grants: [], note: null };
       if (answer.outcome === 'keep_planning') return { response: { behavior: 'deny', message: answer.feedback ?? KEEP_PLANNING_MESSAGE }, grants: [], note: null };
       // `interrupt` ends the turn at the deny (as deny_and_stop does): without it the model read the message as approval
       // and implemented in plan mode in the same turn (M6, live 3.20); the session runs the rest after the turn's result

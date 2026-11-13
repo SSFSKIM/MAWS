@@ -10,6 +10,11 @@
 // channel (an image past the bound waits for M4's uploads), and is counted while on its way, for the composer's
 // "Sending to <machine>…". Main resumes a released session there for the act itself, under the act's one bound (A4), so
 // nothing here acquires first: a send is one invocation, and a chip changes with no acquisition.
+// UX wave U1a §F: a plan answer that names a mode is carried only for a session on this Mac whose engine host has this
+// build's wire (`hostAppliesPlanMode`, read from main's `host.status` when asked): another build's host would drop the key
+// and implement in the earlier mode, and a session on another machine is never sent one (its endpoint refuses it, and a
+// machine on an older build would refuse the whole answer). Closed in `answerCapability`, and refused again in `answer`.
+import type { RequestAnswer } from '@shared/engine/answers';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId, TaskId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -24,6 +29,8 @@ import { availabilityIn, availabilityRefusal } from '../../sessions/availability
 import { beginRemoteSend } from '../../lane-b/remote-session'; // P5 O7 M2
 import { READER } from '../../sessions/share/copy'; // board 525
 import { learnReaderGrade, whomToAsk } from '../../sessions/share/reader'; // board 525
+import { hostAppliesPlanMode } from '@shared/sessions/plan-next-mode';
+import { useHosts } from '../../stores/hosts';
 import { useSessions } from '../../stores/sessions';
 import type { Capability, ControlKey, ControlResult, SessionControls } from './types';
 
@@ -55,6 +62,12 @@ const ALWAYS = new Set<ControlKey>(['answer', 'decide', 'decide.scope', 'decide.
 const NEEDS_PROCESS = new Set<ControlKey>(['interrupt', 'stop-task']);
 
 const AVAILABLE: Capability = { available: true };
+// U1a §F: why a plan answer that names a mode is not carried
+export const PLAN_MODE_WORDS = {
+  otherHost: 'The engine host serving this session isn’t this build’s, so it can’t apply a chosen mode',
+  elsewhere: 'A mode for after the plan isn’t chosen for a session on another machine',
+} as const;
+const namesMode = (answer: RequestAnswer): boolean => answer.kind === 'plan' && answer.mode !== undefined;
 // P5 O7 M2: `session.applyFlagSettings` and the rules read are not offered over a machine's link (O7's Interfaces §L)
 const REMOTE_DIRECTORIES = 'Adding a directory isn’t offered for a session on another machine';
 const refusedWith = (error: string) => async () => ({ ok: false as const, error });
@@ -117,6 +130,12 @@ export function laneBControls(record: SessionRecord | null, { appSessionId, clie
     return NEEDS_PROCESS.has(key) && now().status !== null ? unavailable(processRefusal()) : AVAILABLE;
   };
   const capability = (key: ControlKey): Capability => (remote?.state ? remoteCapability(key, remote.state) : ownCapability(key));
+  // U1a §F: why this answer's named mode can't go, or null (none named, or this Mac's host of this build applies it)
+  const modeRefusal = (answer: RequestAnswer): string | null => {
+    if (!namesMode(answer)) return null;
+    if (remote) return PLAN_MODE_WORDS.elsewhere;
+    return hostAppliesPlanMode(useHosts.getState().supervisor) ? null : PLAN_MODE_WORDS.otherHost;
+  };
   const sendRemote = async (content: Parameters<SessionControls['send']>[0], options: Parameters<SessionControls['send']>[1]) => {
     const sendable = capability('send');
     if (!sendable.available) return { disposition: 'refused' as const, started: false, reason: sendable.reason };
@@ -148,12 +167,19 @@ export function laneBControls(record: SessionRecord | null, { appSessionId, clie
 
   return {
     capability,
-    answerCapability: () => capability('answer'), // lane B carries every RequestAnswer variant; another machine's overlay may close them
+    // lane B carries every RequestAnswer variant; another machine's overlay may close them, and a plan's named mode is
+    // carried only where it is applied (U1a §F)
+    answerCapability: (_item, answer) => {
+      const refusal = modeRefusal(answer);
+      return refusal === null ? capability('answer') : { available: false, reason: refusal };
+    },
     send: (content, options) => (remote ? sendRemote(content, options) : sendHumanPrompt(appSessionId, content, options, client)),
     interrupt: (args) => client.invoke('session.interrupt', { appSessionId, ...args }),
     answer: (item, answer) => {
       const { requestId } = item.request;
       if (requestId === null) return Promise.resolve({ ok: false, error: ipcError('invalid_input', 'The request has no id to answer') });
+      const refusal = modeRefusal(answer);
+      if (refusal !== null) return Promise.resolve({ ok: false, error: ipcError('invalid_input', refusal) });
       return client.invoke('session.answer', { appSessionId, requestId, answer });
     },
     bindings() {
