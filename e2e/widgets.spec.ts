@@ -23,7 +23,7 @@ import { KILL_GRACE_MS } from '../src/engine-host/plugins/runner';
 import { addressed } from './support/address';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
-import { newChatIn, sidebarRow } from './support/sidebar';
+import { newChatIn, openProject, sidebarRow } from './support/sidebar';
 import { unfoldSessionCard } from './support/shell';
 
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now.
@@ -70,15 +70,19 @@ function scenarioHere(userData: string, project: string): string {
 
 // The scenario launch with the widget backend and the CLI stub: the harness's window (`harness: '1'`, the widgets page),
 // or the product's (`'0'`: the panel's summary, and Customize, whose READY project is the scratch one), from the same
-// harness build.
-async function withBackend(harness: '0' | '1', use: (maws: BackendLaunch) => Promise<void>): Promise<void> {
+// harness build. U11a (Mac run 43405665313): `'index'` is the product's window in launch mode index with the CLI stub and
+// no scenario or widget backend, for a New chat: in launch mode scenario a new tab is a bare id with no setup intent
+// (app/scenario-session-creator.ts), which every dialog reads as a started session; only `session.create` makes the
+// intent an unstarted tab is.
+async function withBackend(harness: '0' | '1' | 'index', use: (maws: BackendLaunch) => Promise<void>): Promise<void> {
   const userData = realpathSync(mkdtempSync(join(tmpdir(), 'maws-e2e-')));
   const project = join(userData, 'project');
   mkdirSync(project);
   const cli = writePluginCliStub(userData, stubStart(scratchMarketplace(join(userData, 'market'), { name: MARKET, plugins: MARKET_PLUGINS })));
   try {
     const source = harness === '0' ? scenarioHere(userData, project) : SCENARIO;
-    const maws = await launchMaws({ userData, env: { MAWS_HARNESS: harness, MAWS_SESSION_SOURCE: source, MAWS_SCENARIO_CLOCK: 'manual', MAWS_WIDGET_BACKEND: 'fixtures', MAWS_E2E_ENGINE_BIN: cli.bin } });
+    const env = harness === 'index' ? { MAWS_HARNESS: '0', MAWS_E2E_ENGINE_BIN: cli.bin } : { MAWS_HARNESS: harness, MAWS_SESSION_SOURCE: source, MAWS_SCENARIO_CLOCK: 'manual', MAWS_WIDGET_BACKEND: 'fixtures', MAWS_E2E_ENGINE_BIN: cli.bin };
+    const maws = await launchMaws({ userData, env });
     try {
       await use(Object.assign(maws, { cli, project }));
     } finally {
@@ -89,7 +93,7 @@ async function withBackend(harness: '0' | '1', use: (maws: BackendLaunch) => Pro
   }
 }
 
-const test = base.extend<{ backend: BackendLaunch; appBackend: BackendLaunch; replay: MawsLaunch }>({
+const test = base.extend<{ backend: BackendLaunch; appBackend: BackendLaunch; chatBackend: BackendLaunch; replay: MawsLaunch }>({
   // eslint-disable-next-line no-empty-pattern -- Playwright requires the fixtures argument to be destructured
   backend: async ({}, use, testInfo) => {
     testInfo.skip(!HARNESS_BUILT, 'the widgets page needs a harness build (pnpm e2e:widgets)');
@@ -99,6 +103,11 @@ const test = base.extend<{ backend: BackendLaunch; appBackend: BackendLaunch; re
   appBackend: async ({}, use, testInfo) => {
     testInfo.skip(!HARNESS_BUILT, 'the widgets group runs on a harness build (pnpm e2e:widgets)');
     await withBackend('0', use);
+  },
+  // eslint-disable-next-line no-empty-pattern -- as above
+  chatBackend: async ({}, use, testInfo) => {
+    testInfo.skip(!HARNESS_BUILT, 'the widgets group runs on a harness build (pnpm e2e:widgets)');
+    await withBackend('index', use);
   },
   // eslint-disable-next-line no-empty-pattern -- as above
   replay: async ({}, use, testInfo) => {
@@ -1703,8 +1712,9 @@ test.describe('plugin management (E8)', () => {
   // read by this Mac's engine host from the scratch project and config home (invented names): "+" › Connectors and the
   // Connectors dialog the project's `.mcp.json` server with its scope, `/skills` the project's and the person's skills
   // with Use in chat inserting `/<name> `, `/plugins` the CLI's installed plugin under "Not observed yet" alone; none says
-  // "Available once the session starts", and nothing starts the chat.
-  test('a New chat lists its folder’s connectors, skills and plugins before the first message, and Use in chat inserts the skill', async ({ appBackend: backend }) => {
+  // "Available once the session starts", and nothing starts the chat. In launch mode index (`chatBackend`): the New chat
+  // is `session.create`'s, a setup intent on the scratch project.
+  test('a New chat lists its folder’s connectors, skills and plugins before the first message, and Use in chat inserts the skill', async ({ chatBackend: backend }) => {
     const { page, project } = backend;
     const write = (path: string, text: string) => {
       mkdirSync(dirname(path), { recursive: true });
@@ -1713,8 +1723,12 @@ test.describe('plugin management (E8)', () => {
     write(join(project, '.mcp.json'), JSON.stringify({ mcpServers: { 'fx-docs': { type: 'http', url: 'https://docs.example.test/mcp' } } }));
     write(join(project, '.claude', 'skills', 'fx-review', 'SKILL.md'), '---\nname: fx-review\ndescription: Review the change\n---\nReply with one word.\n');
     write(join(configHome(backend), 'skills', 'fx-mine', 'SKILL.md'), '---\nname: fx-mine\ndescription: A skill of your own\n---\nReply with one word.\n');
-    const name = 'claude-usage-menubar'; // READY's project, at the scratch project (scenarioHere)
+    await expect.poll(async () => value(await invoke(page, 'engine.hostState', undefined)).state, { timeout: 20_000, message: 'the engine host is ready' }).toBe('ready');
+    const { name } = value(await invoke(page, 'session.projects.add', { directory: project }));
+    await openProject(page, name);
     await newChatIn(page, name);
+    await expect(page.getByRole('heading', { name: `New chat in ${name}` })).toBeVisible();
+    const tab = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!.appSessionId;
     const main = page.locator('[data-region="main"]');
     const notYet = 'Available once the session starts';
 
@@ -1758,8 +1772,9 @@ test.describe('plugin management (E8)', () => {
     await expect(plugins.locator('[data-plugins-loaded]')).toHaveText('Not observed yet');
     await expectListed(plugins, `e8-tools@${MARKET}`);
     await expect(plugins).not.toContainText(notYet);
-    const launched = (await commandsOf(backend)).filter((c) => /^session\.(send|start|launch|acquire)$/.test(c.command));
-    expect(launched).toEqual([]);
+    // nothing started the chat: its setup intent stands and no session record has its id
+    expect(value(await invoke(page, 'session.intent.list', undefined)).intents.map((i) => i.appSessionId)).toContain(tab);
+    expect(value(await invoke(page, 'session.list', { includeArchived: true })).sessions.map((r) => r.appId)).not.toContain(tab);
     await page.screenshot({ path: test.info().outputPath('u11a-before-start-plugins.png') });
     expect(backend.consoleErrors()).toEqual([]);
   });
