@@ -641,6 +641,14 @@ Found while checking the section against the code at `85e934368` and the probes'
   Rationale: the M4 review.
   Date/Author: 2026-11-13, the U3a controller, from M4's executor.
 
+- Decision: M5, as built (`cd226e249`..`65d7f550e`). What the engine passes through `UserMessage` (`cli.pretty.js` of `2.1.322`) is decided by the carrier's text: `<cross-session-message>` (a peer's message and the wake by the inbox, and `own`), `<agent-message>` (a subagent's message and hand-back), `<task-notification>` with a `<summary>` (but for two forms it draws through no message site, which MAWS mirrors), `<teammate-message>`, and any other non-meta text as a plain prompt under its stored origin; not passed: the bridge's appended row and a scheduled fire's prompt (meta rows the engine never draws), a hook's added context (drawn as nothing), a command's output (`CommandOutput`). So a row asks by its carrier's envelope, not by its class: `UserMessage` for the inbox peer, the subagent's message and hand-back, a task's end from a frame or row, and the inbox wake; `ToolUse` for a sent message, its props from a shared `callProps` (also the cells' asks); nothing for a plain-prompt carrier or a teammate's message, since X1's one-word origin cannot rebuild the engine's read-only `origin`, and those carriers never reach a session MAWS runs, the only kind with a surface (probe 3). An `own` row asks as MAWS's SDK prompt (`origin sdk`, the words), not as the engine would (`origin peer` with the frame line), for the same reason; accepted. A rewrite of the site's `text` is not applied to MAWS's line; a mod's own drawing still replaces it. `isExpanded` is the line's open state (`line:<row id>`), so opening a line asks again. The instance id is the carrier's `messageUuid` (the row id when null); a carrier of several blocks is one instance with its first block's props. A subagent's `from.name` is its `subagentType`, else its agent id. A jump bumps the old target's turn only when that target is shown. Moved: `stores/transcript.test.ts`, "jumpTo a visible row only records the request" (the jump writes `revealed` and derives the target's turn again; Interfaces F).
+  Rationale: the executor's report and its reading of the engine's bundle.
+  Date/Author: 2026-11-13, the U3a controller, from M5's executor.
+
+- Decision: `revealed` is honoured by every ask in `src/renderer/src/transcript/surface/` in this landing (the user row, the assistant text, the cells, the command output, the question rows, and M5's own), not only by M5's new asks. Interfaces F states it of every row or cell, and this landing's cell jump writes a `CellId` there; an ask that ignored it would leave the jump's target drawn by a mod. U2 honours it in the asks it builds.
+  Rationale: Interfaces F as written; the condition is one line per adapter in a file M5 owns.
+  Date/Author: 2026-11-13, the U3a controller.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
