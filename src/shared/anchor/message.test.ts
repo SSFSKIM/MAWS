@@ -7,10 +7,11 @@ import { AnchorSchema, type Anchor } from './anchor';
 import { anchoredMessage, anchorLead, anchorTag, commentsMessage, promotionMessage, readAnchoredMessage, readOneComment, SIDE_THREAD_PREAMBLE, SIDE_THREAD_PREAMBLE_MANY, type Destination, type MessageComment } from './message'; // UX wave U5a: the message of several comments
 
 // UX wave U5a (decision 15): a message of one comment as `readAnchoredMessage` reads it, in the one comment's shape
-// (`{ anchor, text, destination }`); anything else read is returned whole, so an equality with one comment fails
-const one = (message: string) => {
+// (`{ anchor, text, destination }`); a message read as several comments throws, since none of these cases writes one
+const one = (message: string): { anchor: Anchor; text: string; destination: Destination | null } | null => {
   const read = readAnchoredMessage(message);
-  if (read === null || read.comments.length !== 1) return read;
+  if (read === null) return null;
+  if (read.comments.length !== 1) throw new Error(`read as ${read.comments.length} comments: ${JSON.stringify(message)}`);
   const [{ anchor, text }] = read.comments as [MessageComment];
   return { anchor, text, destination: read.destination };
 };
