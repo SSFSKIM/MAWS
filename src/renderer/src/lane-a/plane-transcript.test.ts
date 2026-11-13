@@ -724,22 +724,14 @@ describe('the exit a gone session leaves on another machine (X-168)', () => {
   });
 
   // Round 4 (the re-review): presence travels outside the ordered rows, so the session's last rows can come after it.
-  it('rows that arrive after the presence said gone end too: the agents row they bring is not left working', async () => {
-    await snapshot(LIVE);
-    await presence(GONE);
-    const late = [
-      row({ type: 'user', uuid: 'g-u2', parentUuid: 'g-d1', timestamp: at(5), message: { role: 'user', content: 'One more helper.' } }),
-      row({ type: 'assistant', uuid: 'g-a2', parentUuid: 'g-u2', timestamp: at(6), message: { id: 'g-m3', role: 'assistant', model: 'example-model', content: [{ type: 'tool_use', id: 'toolu-g2', name: 'Agent', input: { description: 'Check the links', prompt: 'Check the sample links', subagent_type: 'Explore', run_in_background: true } }] } }),
-      row({ type: 'user', uuid: 'g-r2', parentUuid: 'g-a2', timestamp: at(7), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu-g2', content: 'Async agent launched successfully.' }] }, toolUseResult: { status: 'async_launched' } }),
-    ];
-    // the machine names the late agent, still running by its last word, and its rows come after
-    const LATE = { agentId: 'a0de000000000002', meta: { agentType: 'Explore', description: 'Check the links', toolUseId: 'toolu-g2' }, status: 'running', evidence: 'bridge' } as unknown as SubagentMeta;
-    plane.send('subagents', { subagents: [RUNNING, LATE] } as unknown as SessionBodies['subagents']);
-    for (const body of late) {
-      plane.send('row', { row: body } as unknown as SessionBodies['row']);
-      await settle();
-    }
-    await settle();
+  const lateRows = () => [
+    row({ type: 'user', uuid: 'g-u2', parentUuid: 'g-d1', timestamp: at(5), message: { role: 'user', content: 'One more helper.' } }),
+    row({ type: 'assistant', uuid: 'g-a2', parentUuid: 'g-u2', timestamp: at(6), message: { id: 'g-m3', role: 'assistant', model: 'example-model', content: [{ type: 'tool_use', id: 'toolu-g2', name: 'Agent', input: { description: 'Check the links', prompt: 'Check the sample links', subagent_type: 'Explore', run_in_background: true } }] } }),
+    row({ type: 'user', uuid: 'g-r2', parentUuid: 'g-a2', timestamp: at(7), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu-g2', content: 'Async agent launched successfully.' }] }, toolUseResult: { status: 'async_launched' } }),
+  ];
+  // the machine names the late agent, still running by its last word, and its rows come after
+  const LATE = { agentId: 'a0de000000000002', meta: { agentType: 'Explore', description: 'Check the links', toolUseId: 'toolu-g2' }, status: 'running', evidence: 'bridge' } as unknown as SubagentMeta;
+  function expectEndedAfterLateRows(): void {
     expect(entry().rows.filter((r) => r.kind === 'subagent').map((r) => (r as Extract<Row, { kind: 'subagent' }>).status)).not.toContain('started');
     expect(entry().rows.filter((r) => r.kind === 'user').length).toBe(2); // the late prompt drawn, once
     const nodes = [...controller.state.getState().tasks.tasks.values()];
@@ -747,7 +739,39 @@ describe('the exit a gone session leaves on another machine (X-168)', () => {
     expect(nodes.find((node) => node.taskId === LATE.agentId)?.status).toBe('exited');
     expect(nodes.filter((node) => node.status === 'running').map((node) => node.taskId)).toEqual([]);
     expect([...entry().state.seen].filter((id) => String(id).startsWith(EXIT))).toEqual([EXIT]); // one exit, after the rows
+  }
+
+  it('rows that arrive after the presence said gone end too: the agents row they bring is not left working', async () => {
+    await snapshot(LIVE);
+    await presence(GONE);
+    plane.send('subagents', { subagents: [RUNNING, LATE] } as unknown as SessionBodies['subagents']);
+    for (const body of lateRows()) {
+      plane.send('row', { row: body } as unknown as SessionBodies['row']);
+      await settle();
+    }
+    await settle();
+    expectEndedAfterLateRows();
   });
+
+  // Round 5 (the re-review): a burst of late rows stages one rebuild, not one per row.
+  it('a burst of late rows delivered at once stages one rebuild of the rows', async () => {
+    await snapshot(LIVE);
+    await presence(GONE);
+    plane.send('subagents', { subagents: [RUNNING, LATE] } as unknown as SessionBodies['subagents']);
+    await settle();
+    let sources = 0;
+    const off = controller.state.subscribe((now, before) => {
+      if (now.source !== before.source) sources += 1;
+    });
+    for (const body of lateRows()) plane.send('row', { row: body } as unknown as SessionBodies['row']); // one delivery, no settling between
+    expect(controller.state.getState().tasks.tasks.get('a0de000000000002' as never)?.status).toBe('exited'); // the tree at once, the exit over it
+    await settle();
+    await settle();
+    off();
+    expect(sources).toBe(1);
+    expectEndedAfterLateRows();
+  });
+
 
   it('a snapshot of a session already gone ends its agents at once; a subagent’s own transcript takes no presence', async () => {
     await snapshot(GONE);
