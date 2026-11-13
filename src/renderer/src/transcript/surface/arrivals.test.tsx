@@ -3,7 +3,7 @@
 // ask the engine's UserMessage site, and a message the agent sent asks ToolUse, so that a mod can fold or draw them as
 // it does in the terminal; with no hook, or a hook that keeps the engine's drawing, MAWS's line stands. A line the host
 // made itself asks nothing, and neither does the row a jump revealed. Every word is invented.
-import { act, cleanup, fireEvent, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ArrivalEntry } from '@shared/engine/arrival-schema';
 import type { CommandInput } from '@shared/ipc/schema';
@@ -129,5 +129,51 @@ describe('the arrival rows with a mods surface attached', () => {
     const view = renderRow(of(store.rows(), 'agent_message'), { storeKey: store.key });
     expect(asks('UserMessage')).toHaveLength(0);
     expect(line(view.container)).toBe('Message from @docs: the index is stale');
+  });
+});
+
+// The engine mounts one UserMessage site per carrier (its task renderer near cli.pretty.js:925119), so a carrier of two
+// tasks' ends is one drawing: its first notice asks, with its own line's open state, and draws the mod's answer; the
+// other asks nothing, is hidden where the mod replaced the carrier, and is MAWS's line where the mod kept the engine's.
+describe('two notices from one carrier', () => {
+  const TASK_TWO = '<task-notification>\n<task-id>bt2</task-id>\n<tool-use-id>tu-bt2</tool-use-id>\n<status>completed</status>\n<summary>Background command "sort names" completed</summary>\n</task-notification>';
+  const secondEnd: ArrivalEntry = { ...taskEnd, taskId: 'bt2', toolUseId: 'tu-bt2', runId: 'run-2', outcome: 'completed', summary: 'Background command "sort names" completed' };
+  async function both() {
+    const b = builder();
+    b.emit('turn.started', { userMessageUuid: null, origin: 'engine' });
+    b.emit('user.message', { messageUuid: uuid('n1'), content: `${TASK}\n${TASK_TWO}`, isReplay: true, isSynthetic: true, origin: 'task-notification', bash: null, arrival: [taskEnd, secondEnd] });
+    const store = await mounted(b);
+    const [first, second] = store.rows().filter((row): row is Extract<Row, { kind: 'notice' }> => row.kind === 'notice');
+    return { store, first: renderRow(first!, { storeKey: store.key }), second: renderRow(second!, { storeKey: store.key }) };
+  }
+
+  it('one asks, and a drawing without the engine’s is drawn once, the other notice hidden', async () => {
+    const { first, second } = await both();
+    expect(asks('UserMessage')).toHaveLength(1);
+    expect(asks('UserMessage')[0]).toMatchObject({ instanceId: 'n1', props: { isExpanded: false } });
+    await act(() => fake.reply('session.ui.render', answer(asks('UserMessage')[0]!.props, { type: 'Text', children: ['two tasks, as a mod folds them'] })));
+    expect(document.querySelectorAll('[data-plugin-drawn="UserMessage"]')).toHaveLength(1);
+    expect(first.container.querySelector('[data-plugin-drawn="UserMessage"]')?.textContent).toBe('two tasks, as a mod folds them');
+    expect(second.container.textContent).toBe('');
+  });
+
+  it('a hook that keeps the engine’s drawing leaves both of MAWS’s lines', async () => {
+    const { first, second } = await both();
+    await act(() => fake.reply('session.ui.render', answer(asks('UserMessage')[0]!.props)));
+    expect(document.querySelectorAll('[data-plugin-drawn]')).toHaveLength(0);
+    expect(line(first.container)).toBe('Background command "count files" failed with exit code 1');
+    expect(line(second.container)).toBe('Background command "sort names" completed');
+    expect(concealed(first.container, '.transcript-notice')).toBe(false);
+  });
+
+  it('opening the second notice’s line opens it and asks nothing; opening the first asks with the message expanded', async () => {
+    const { first, second } = await both();
+    await act(() => fake.reply('session.ui.render', answer(asks('UserMessage')[0]!.props)));
+    fireEvent.click(within(second.container).getByRole('button', { name: /sort names/ }));
+    expect(second.container.querySelector('.transcript-notice-detail')).not.toBeNull();
+    expect(asks('UserMessage')).toHaveLength(1);
+    fireEvent.click(within(first.container).getByRole('button', { name: /count files/ }));
+    expect(asks('UserMessage')).toHaveLength(2);
+    expect(asks('UserMessage')[1]?.props).toMatchObject({ isExpanded: true });
   });
 });
