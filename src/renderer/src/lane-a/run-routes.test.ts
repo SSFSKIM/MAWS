@@ -188,4 +188,49 @@ describe('a stopped member of its run is the same row in the same run by every r
       expect(reading(rows, 'toolu_routes_33').run, route).toEqual({ calls: ['toolu_routes_31', 'toolu_routes_32', 'toolu_routes_33'], caption: 'Ran 3 commands (2 stopped)' });
     }
   });
+
+  // The architect's ruling of 2026-11-13 ("A refused sent message and the turn's denied count"): a fold never hides a
+  // denial. A refused send is drawn as its message row on every route, and that row folds with its turn, so the turn's
+  // line counts it as denied
+  it('a refused send to another session: its row folds with the turn, and the turn’s line counts it denied, by every route', async () => {
+    const call: Call = { id: 'toolu_routes_send', name: 'SendMessage', input: { to: 'uds:/tmp/socks/7.sock', message: 'The build is green.' } };
+    const REFUSED = 'Permission to use SendMessage has been denied.';
+    let seq = 0;
+    const row = (direction: JournalRow['direction'], ms: number, frame: unknown): JournalRow => ({ seq: (seq += 1), direction, at: at(ms), frame });
+    const message = (ms: number, id: string, content: unknown[]) => row('in', ms, {
+      type: 'assistant', message: { model: 'claude-test', id, type: 'message', role: 'assistant', content, stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 1 } },
+      parent_tool_use_id: null, uuid: `a-${id}`, timestamp: at(ms), session_id: SESSION,
+    });
+    const journal = [
+      row('meta', 0, { event: 'spawn', pid: 4101, cwd: '/tmp/maws-synth-routes', bin: 'claude', args: ['-p'] }),
+      row('out', 10, { type: 'user', uuid: 'u-routes-2', message: { role: 'user', content: PROMPT }, parent_tool_use_id: null, origin: { kind: 'human' } }),
+      row('in', 20, { type: 'command_lifecycle', command_uuid: 'u-routes-2', state: 'started', uuid: 'cl-routes-2', session_id: SESSION }),
+      row('in', 30, { type: 'system', subtype: 'init', cwd: '/tmp/maws-synth-routes', model: 'claude-test', permissionMode: 'default', tools: [], slash_commands: [], agents: [], skills: [], plugins: [], mcp_servers: [], capabilities: [], claude_code_version: '2.1.322', output_style: 'default', uuid: 'sys-routes-2', session_id: SESSION }),
+      message(40, 'msg_routes_send', [{ type: 'tool_use', ...call }]),
+      row('in', 50, {
+        type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: call.id, content: REFUSED, is_error: true }] }, parent_tool_use_id: null, uuid: 't-routes-send', timestamp: at(50),
+        tool_use_result: `Error: ${REFUSED}`, tool_result_meta: [{ id: call.id, non_execution_kind: 'permission-rule' }], session_id: SESSION,
+      }),
+      message(60, 'msg_routes_after', [{ type: 'text', text: 'I could not send it.' }]),
+      row('meta', 70, { event: 'exit', code: 0, signal: null, peakRSSKiB: 1, peakTreeRSSKiB: 1 }),
+    ];
+    const text = fileOf([
+      prompt('h-1', null, 10, PROMPT),
+      assistantRecord('h-2', 'h-1', 40, 'msg_routes_send', call),
+      resultRecord('h-3', 'h-2', 50, call.id, REFUSED, 'permission-rule'),
+      { type: 'assistant', uuid: 'h-4', parentUuid: 'h-3', timestamp: at(60), sessionId: SESSION, message: { id: 'msg_routes_after', role: 'assistant', model: 'claude-test', content: [{ type: 'text', text: 'I could not send it.' }] } },
+      prompt('h-5', 'h-4', 90_000, 'Carry on.'),
+    ]);
+    const routes = { live: fromJournal(journal), file: await fromFile(text), link: await fromRows(text) };
+    for (const [route, events] of Object.entries(routes)) {
+      const state = applyEvents(createState(null, null), events);
+      const send = rowsOf(withAllExpanded(state)).find((r): r is Extract<Row, { kind: 'agent_message' }> => r.kind === 'agent_message');
+      expect(send?.direction, route).toBe('between');
+      const line = rowsOf(state).find((r): r is Extract<Row, { kind: 'divider' }> => r.kind === 'divider' && r.turnId === send!.turnId)!;
+      expect(line.expanded, route).toBe(false);
+      expect(rowsOf(state).some((r) => r.id === send!.id), `${route}: the folded turn hides the send's row`).toBe(false);
+      expect({ denied: line.denied, caption: line.caption, firstDeniedCell: line.firstDeniedCell, denials: line.summary.denials.map((d) => [d.kind, d.disposition]) }, route)
+        .toEqual({ denied: 1, caption: '', firstDeniedCell: send!.id, denials: [['permission-rule', 'denied']] });
+    }
+  });
 });

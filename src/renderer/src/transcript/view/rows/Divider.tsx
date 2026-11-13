@@ -16,7 +16,7 @@ import { isPersistentRow } from '../../model/derive';
 import { latestPluginLine } from '../../model/plugins';
 import type { AppSessionId } from '@shared/graph/ids';
 import { useSpinnerText } from '../../../engine-surface/spinner'; // R2
-import type { CellId, Row, TurnId } from '../../model/rows';
+import type { CellId, Row, RowId, TurnId } from '../../model/rows';
 import { rowElementId, useTranscriptContext, useWorkMotion } from '../context';
 import { Chevron, LineCounts } from './parts';
 
@@ -131,7 +131,7 @@ export function PluginStatusLine({ storeKey }: { storeKey: string }) {
 }
 
 // The jump names the owning turn, so locating the cell in a collapsed turn derives that turn alone.
-function CountLink({ count, noun, cell, turnId, storeKey }: { count: number; noun: string; cell: CellId | null; turnId: TurnId; storeKey: string }) {
+function CountLink({ count, noun, cell, turnId, storeKey }: { count: number; noun: string; cell: CellId | RowId | null; turnId: TurnId; storeKey: string }) {
   return (
     <>
       <span aria-hidden="true">·</span>

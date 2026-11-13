@@ -66,7 +66,7 @@ export type Row = RowBase &
     | { kind: 'assistant_text'; messageUuid: MessageUuid | null; blockIndex: number; markdown: string; live: boolean; phase: 'answer' | 'commentary'; forHuman?: boolean; model: string | null; cut?: true; partway?: true } // cut (P5 O9): a terminal session's reply an interrupt cut before the engine wrote it, which the session kept none of; partway: its text starts partway through
     | {
         kind: 'divider'; state: 'working' | 'completed' | 'stopped' | 'failed'; cause?: 'crash' /* E11: present when the engine, not the reader, stopped it */; origin: 'human' | 'engine' | 'peer'; startedAt: string; endedAt: string | null;
-        toolCalls: number; denied: number; autoDenied: number; firstDeniedCell: CellId | null; expanded: boolean; summary: TurnSummary; files?: ChangedFile[];
+        toolCalls: number; denied: number; autoDenied: number; firstDeniedCell: CellId | RowId | null; expanded: boolean; summary: TurnSummary; files?: ChangedFile[];
         // UX wave U3 (UC-2, "The rows"): on a turn the person did not start, what stands at its head and opened it, for U2
         // to name the turn from: that arrival's class and its row's words (no lead mark, no owners)
         opener?: { class: Arrival['class']; line: string };
@@ -321,7 +321,7 @@ export interface TurnSummary {
   durationMs: number | null;
   toolCalls: number;
   byCategory: Record<ToolCategory, number>;
-  denials: { kind: DenialKind; cellId: CellId; disposition: 'denied' | 'auto_denied' | 'stopped'; interruption: boolean }[]; // `denied` counts disposition 'denied', `autoDenied` counts 'auto_denied'; 'stopped' entries are listed and counted in neither
+  denials: { kind: DenialKind; cellId: CellId | RowId; disposition: 'denied' | 'auto_denied' | 'stopped'; interruption: boolean }[]; // `denied` counts disposition 'denied', `autoDenied` counts 'auto_denied'; 'stopped' entries are listed and counted in neither. `cellId` is a refused sent message's row id where the refusal is that row's (the architect's ruling of 2026-11-13: a fold never hides a denial)
   autoDenied: number;
   safeguard: { reviewed: number; flagged: number; notEvaluated: number }; // shown here and in cell detail only (§19)
   costUsd: number | null;

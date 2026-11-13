@@ -953,7 +953,18 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const allRows = groupItems(ordered, turn, ui).map((row): Row => (row.kind === 'assistant_text' && forHuman(row) ? { ...row, forHuman: true } : row));
   const workRows = allRows.filter((row) => !isPersistentRow(row));
   const cells = collectCells(workRows);
-  const summary = summaryOf(turn, cells, subagents, model);
+  // The architect's ruling (2026-11-13, "A refused sent message and the turn's denied count"): a fold never hides a
+  // denial. A refused send is drawn as its message row, no cell, and that row folds with its turn (O-12, `staysInView`),
+  // so its refusal is one of the turn's denials, in row order with the calls'
+  const sentRefusal = (row: Row): TurnSummary['denials'] => {
+    const use = row.kind === 'agent_message' && !staysInView(row) ? sentCalls.get(row.id) : undefined;
+    const kind = use === undefined ? null : (results.get(use.toolUseId)?.denial ?? null);
+    if (use === undefined || kind === null) return [];
+    return [{ kind, cellId: row.id, ...denialDisposition(kind, context, context.continued.has(use.toolUseId)) }];
+  };
+  const denialsInOrder = workRows.flatMap((row): TurnSummary['denials'] =>
+    row.kind === 'group' || row.kind === 'cell' ? collectCells([row]).flatMap((cell) => denialOfCell(cell)) : sentRefusal(row));
+  const summary = summaryOf(turn, cells, subagents, model, denialsInOrder);
   const denials = summary.denials;
   // The owner's ruling (2026-10-30): a turn that ended on an API error (its last assistant message the engine's API error
   // envelope, what the engine's own `api_error` reason means) shows that error as its row, where it happened; its divider
@@ -1156,9 +1167,13 @@ function byPath(files: ChangedFile[]): ChangedFile[] {
   return [...merged.values()];
 }
 
-function summaryOf(turn: TurnState, cells: Cell[], subagents: SubagentGroup[], model: string | null): TurnSummary {
+const denialOfCell = (cell: Cell): TurnSummary['denials'] =>
+  cell.classification.denial ? [{ kind: cell.classification.denial.kind, cellId: cell.id, disposition: cell.classification.denial.disposition, interruption: cell.classification.denial.interruption }] : [];
+
+// `denials` are the turn's refusals in row order: its calls' and its refused sent messages' (the architect's ruling of
+// 2026-11-13)
+function summaryOf(turn: TurnState, cells: Cell[], subagents: SubagentGroup[], model: string | null, denials: TurnSummary['denials']): TurnSummary {
   const byCategory = Object.fromEntries(TOOL_CATEGORIES.map((category) => [category, 0])) as Record<ToolCategory, number>;
-  const denials: TurnSummary['denials'] = [];
   const safeguard = { reviewed: 0, flagged: 0, notEvaluated: 0 };
   let toolCalls = 0;
   for (const cell of cells) {
@@ -1166,7 +1181,6 @@ function summaryOf(turn: TurnState, cells: Cell[], subagents: SubagentGroup[], m
     const count = cell.id.startsWith('cell:reads:') && cell.detail.kind === 'read' ? cell.detail.files.length : 1;
     toolCalls += count;
     byCategory[cell.category] += count;
-    if (cell.classification.denial) denials.push({ kind: cell.classification.denial.kind, cellId: cell.id, disposition: cell.classification.denial.disposition, interruption: cell.classification.denial.interruption });
     if (cell.classification.safeguard === 'not_evaluated' || cell.classification.safeguard === 'skipped') safeguard.notEvaluated += 1;
     else {
       safeguard.reviewed += 1;
