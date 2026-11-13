@@ -1,18 +1,27 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
+import { addressOf } from '@shared/machine/address';
+import { machineKey } from '@shared/machine/org-key';
+import { project, record } from '../../../../test/support/builders';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
+import { useMachines } from '../stores/machines';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { registerFocusTarget, resetComposerStore } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import {
   createSession,
+  currentRow,
   enabledActions,
+  focusedProject,
   isActionEnabled,
   isSessionCreatorRegistered,
   registerAction,
   registerSessionCreator,
   runAction,
+  sessionRow,
 } from './actions-runtime';
 import { connectActions } from './dispatcher';
 import { currentSet } from '../stores/layout-model';
@@ -174,5 +183,68 @@ describe('session creator', () => {
     await createSession(null);
     expect(first).not.toHaveBeenCalled();
     expect(second).toHaveBeenCalledWith(null);
+  });
+});
+
+// UX wave U13a (its section's rules 4 and 5): the current project is the row of the session in front, the one whose
+// card column and side surfaces the window shows; a page in front keeps it. New chat preselects its folder here.
+describe('the current project', () => {
+  const P = at('proj-here' as ProjectId);
+  const HIDDEN = at('proj-hidden' as ProjectId);
+  const THERE = addressOf(OTHER_MACHINE, 'proj-there' as ProjectId);
+  const [IN_P, IN_HIDDEN, LOOSE] = ['in-p', 'in-hidden', 'loose'].map((id) => at(id as AppSessionId));
+  const ON_B = addressOf(OTHER_MACHINE, 'on-b' as AppSessionId);
+  const front = (id: AppSessionId) => useLayout.getState().openTab({ kind: 'session', appSessionId: id });
+  const records = (...entries: [AppSessionId, ProjectId | null][]) => new Map(entries.map(([id, projectId]) => [id, record(id, { projectId })]));
+  afterEach(() => {
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+    useSessions.setState({ projects: new Map(), records: new Map() });
+    useMachines.setState({ loaded: new Set() });
+    delete (window as { maws?: PreloadBridge }).maws;
+  });
+  const setUp = () => {
+    window.maws = fakeClient().client as unknown as PreloadBridge;
+    useMachines.setState({ loaded: new Set([TEST_MACHINE, OTHER_MACHINE]) });
+    useSessions.setState({
+      projects: new Map([[P, project(P, 0)], [HIDDEN, project(HIDDEN, 1, { hidden: true })], [THERE, project(THERE, 2)]]),
+      records: records([IN_P, P], [IN_HIDDEN, HIDDEN], [LOOSE, null], [ON_B, THERE]),
+    });
+  };
+
+  it('follows the session in front, and stays on it while a tab of no session is in front', () => {
+    setUp();
+    expect(currentRow(), 'nothing open').toBeNull();
+    front(IN_P);
+    expect(currentRow()).toBe(P);
+    expect(focusedProject()).toBe(P);
+    useLayout.getState().openTab({ kind: 'diagnostics' });
+    expect(currentRow(), 'a page in front changes no project').toBe(P);
+    front(LOOSE);
+    expect(currentRow(), 'a session in no project: its machine’s row').toBe(machineKey(TEST_MACHINE));
+    useLayout.getState().openTab({ kind: 'settings', section: null });
+    expect(currentRow()).toBe(machineKey(TEST_MACHINE));
+  });
+
+  it('is unknown while the machine of the session in front has not answered', () => {
+    setUp();
+    useMachines.setState({ loaded: new Set() });
+    front(IN_P);
+    expect(sessionRow(IN_P)).toBeUndefined();
+    expect(currentRow()).toBeNull();
+    expect(focusedProject()).toBeNull();
+  });
+
+  it('New chat preselects the folder here, and none for a machine’s row, a hidden project or a project with no folder here', () => {
+    setUp();
+    front(IN_P);
+    expect(focusedProject()).toBe(P);
+    front(LOOSE);
+    expect(focusedProject(), 'a machine’s own row').toBeNull();
+    front(IN_HIDDEN);
+    expect(currentRow(), 'a hidden project is still the session’s row').toBe(HIDDEN);
+    expect(focusedProject(), 'a hidden project').toBeNull();
+    front(ON_B);
+    expect(currentRow()).not.toBeNull();
+    expect(focusedProject(), 'another machine’s project: no folder here').toBeNull();
   });
 });

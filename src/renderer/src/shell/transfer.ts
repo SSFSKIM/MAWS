@@ -19,7 +19,7 @@
 // no page's native view covers a target.
 import { useSyncExternalStore, type DragEvent } from 'react';
 import { library, libraryRow } from '../library/store';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { MachineRef } from '@shared/machine/ref';
 import { tabId as mainTabIdOf, type PanelTabRef, type TabRef } from '@shared/ipc/schema/layout';
 import { ARTIFACTS_TOOL_ID } from '@shared/maws/panes';
@@ -27,6 +27,10 @@ import { adoptStagedArtifactEditorState, handArtifactViewOver, heldArtifactEdito
 import { askEditorHostClose, type CloseAsk, type EditorHostScope } from '../panel/editor-host';
 import { instanceOf, panelHost, usePanelHost } from '../panel/host';
 import { surfaceSession } from '../panel/surface-model';
+import { ipc } from '../ipc/client';
+import { sessionRow, subscribeSessionRows } from '../keymap/actions-runtime';
+import { selectOrgIndex, setKeyOfProject, type RowKey } from '../stores/org-projects';
+import { useSessions } from '../stores/sessions';
 import { useLayout, type LayoutState } from '../stores/layout';
 import { toast } from '../stores/notices';
 import { activeTab, allTabs, currentSet, locateTab } from '../stores/layout-model';
@@ -54,19 +58,24 @@ const layout = () => useLayout.getState();
 
 // ---- the panel side ------------------------------------------------------------------------------------------------------
 
-// The loaded Library row owns the artifact's project; an unprojected artifact uses its containing tab set. Show
-// beside that project's most recently used chat, not the Library/document its close would activate. A remembered
-// context is eligible only while that project's set still holds its actual session tab.
+// The loaded Library row owns the artifact's project. Show beside a chat of the strip that sits under that project's row
+// (an unprojected artifact: any chat of the strip), not the Library/document its close would activate: the one in
+// front, else the remembered one, else the first (UX wave U13a: the one strip, where W12 looked in one project's set).
 function panelSessionForArtifact(mainTabId: string): AppSessionId | null {
   const state = layout();
-  const at = locateTab(state.main, mainTabId);
-  if (!at) return null;
-  const tab = state.main.sets[at.set]?.panes[at.pane]?.tabs[at.index];
+  const tab = allTabs(state.main).find((t) => t.id === mainTabId);
   if (tab?.kind !== 'artifact') return null;
-  const project = libraryRow(library.getState(), tab.artifactId).value?.project?.id ?? at.set;
-  const main = { ...state.main, current: project };
-  const sessions = currentSet(main).panes.flatMap((pane) => pane.tabs.flatMap((tab) => tab.kind === 'session' ? [tab.appSessionId] : []));
-  return surfaceSession({ ...state, main, knownSession: (session) => state.knownSession(session) && sessions.includes(session) });
+  const project = libraryRow(library.getState(), tab.artifactId).value?.project?.id;
+  const row = project === undefined ? undefined : rowOfProject(project);
+  const sessions = allTabs(state.main).flatMap((t) => (t.kind === 'session' && (row === undefined || sessionRow(t.appSessionId) === row) ? [t.appSessionId] : []));
+  return surfaceSession({ ...state, knownSession: (session) => state.knownSession(session) && sessions.includes(session) });
+}
+
+// The row a project's sessions sit under (`sessionRow`'s rule for a project chosen in a chat).
+function rowOfProject(projectId: ProjectId): RowKey {
+  const sessions = useSessions.getState();
+  const record = sessions.projects.get(projectId);
+  return record === undefined ? projectId : setKeyOfProject(selectOrgIndex(sessions, ipc.localMachine), record);
 }
 
 // The Artifacts tab `openArtifactInPanel` lands in for a session (the pins first; no session: a pinned one).
@@ -136,15 +145,18 @@ export function transferRefusal(request: TransferRequest): string | null {
 }
 
 // The refusal for a render, re-read whenever the layout or the panel host changes (a record shown or left changes the
-// tool's persisted params, so the layout store hears it too).
+// tool's persisted params, so the layout store hears it too), and whenever a session's row may (UX wave U13a: a
+// project's eligibility reads `sessionRow`, which waits for the session's machine to answer).
 const subscribeTransfer = (listener: () => void) => {
   const offLayout = useLayout.subscribe(listener);
   const offHost = usePanelHost.subscribe(listener);
   const offLibrary = library.subscribe(listener);
+  const offRows = subscribeSessionRows(listener);
   return () => {
     offLayout();
     offHost();
     offLibrary();
+    offRows();
   };
 };
 export const useTransferRefusal = (request: TransferRequest | null): string | null =>
@@ -269,7 +281,7 @@ export function moveMainTab(id: string, pane: Pane, index: number, counted: bool
 // otherwise); the draft is the session's and comes back by itself. Only a tab shown before and after: one that was not
 // shown left no place of its own, and a tab switch keeps opening at the end.
 useLayout.subscribe((state, before) => {
-  if (state.main === before.main || state.main.current !== before.main.current) return;
+  if (state.main === before.main) return;
   const was = currentSet(before.main).panes;
   currentSet(state.main).panes.forEach((pane, index) => {
     const tab = pane.tabs.find((t) => t.id === pane.activeTabId);

@@ -16,10 +16,10 @@ import { createDocument } from '@artifacts/document/tabs';
 import { listThreads } from '@artifacts/document/threads';
 import type { ArtifactHost } from '@artifacts/host';
 import type { CommandName, MawsBridge, PreloadBridge } from '@shared/ipc/schema';
-import type { LayoutMain, TabRef } from '@shared/ipc/schema/layout';
+import type { Strip, TabRef, TabSet } from '@shared/ipc/schema/layout';
 import type { LibraryRow } from '@shared/ipc/schema/library';
 import { library, resetLibrary, rowKey } from '../../library/store';
-import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT } from '@shared/ipc/schema/layout';
+import { EMPTY_TAB_SET, LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
 import { TEST_MACHINE } from '../../../../../test/support/machine';
@@ -74,7 +74,7 @@ beforeEach(() => {
   memory.write((doc) => createDocument(doc, { title: 'Launch plan' }));
   offs = [registerDocumentEditor(deps), registerCommentComposer(openComment)];
   // the main area shows session A, ready: the document's comments go to it
-  const main: LayoutMain = { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [sessionTab(A)], activeTabId: sessionTab(A).id }] } } } as LayoutMain;
+  const main: Strip = { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [sessionTab(A)], activeTabId: sessionTab(A).id }] };
   useLayout.setState({ main });
   const s = useSessions.getState();
   useSessions.setState({ records: new Map([[A, record(A)]]), engine: new Map([[A, status(A, { process: 'ready' } as never)]]), recordsVersion: s.recordsVersion + 1 });
@@ -209,8 +209,8 @@ describe('an unsent comment when its document moves onto a view of it already op
 
   // The main area: `left` beside session A's tab (focused), so the panel shown is A's once the document's tab is gone.
   function mainWith(left: TabRef[]): void {
-    const set = { ...EMPTY_TAB_SET, focusedPane: 1, panes: [{ tabs: left, activeTabId: left.at(-1)!.id }, { tabs: [sessionTab(A)], activeTabId: sessionTab(A).id }] };
-    useLayout.setState({ hydrated: true, main: { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: set } } as LayoutMain });
+    const set: TabSet = { ...EMPTY_TAB_SET, focusedPane: 1, panes: [{ tabs: left, activeTabId: left.at(-1)!.id }, { tabs: [sessionTab(A)], activeTabId: sessionTab(A).id }] };
+    useLayout.setState({ hydrated: true, main: { ...LAYOUT_DEFAULTS.main, ...set } });
   }
   // A's Artifacts tab showing the document as a record.
   const recordInPanel = (): EditorHostScope => ({ surface: 'panel', tabId: panelHost.addTool(ARTIFACTS_TOOL_ID, { appSessionId: A, params: { target: DOC }, activate: false }) });
