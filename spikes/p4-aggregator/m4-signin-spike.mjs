@@ -37,6 +37,8 @@
 // session holding an SDK server as MAWS's hold `maws`; then a second process launched the same way reads the server.
 //   dynamic     fx-own, a server of the launch's own list (--mcp-config, as MAWS passes Settings' MCP servers).
 //   plugin      fx-oauth of the plugin fx-plugin, given by --plugin-dir: the engine names it plugin:fx-plugin:fx-oauth.
+// For either, a custom callback or reconnect the engine refuses is followed by a second sign-in through the engine's own
+// listener in the same session (`fallback`).
 import { spawn, execFileSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -277,6 +279,7 @@ async function signIn(engine, name, { redirectUri, consentDelayMs = 0, reconnect
   if (browsed.location === null) return { auth, browsed, connected: null };
   let callback = null;
   let reconnect = null;
+  let delivered = null;
   if (auth.response.redirectScheme === 'custom') {
     callback = await engine.request('mcp_oauth_callback_url', { serverName: name, callbackUrl: browsed.location }, 45_000);
     step('mcp_oauth_callback_url', answerOf(callback));
@@ -287,12 +290,12 @@ async function signIn(engine, name, { redirectUri, consentDelayMs = 0, reconnect
     }
   } else {
     // the engine's own listener receives the redirect, as the person's browser would deliver it
-    const delivered = await fetch(browsed.location, { redirect: 'manual' }).then(async (response) => ({ status: response.status, body: (await response.text()).slice(0, 200) }), (error) => ({ error: String(error) }));
+    delivered = await fetch(browsed.location, { redirect: 'manual' }).then(async (response) => ({ status: response.status, body: (await response.text()).slice(0, 200) }), (error) => ({ error: String(error) }));
     step('delivered to the engine listener', delivered);
   }
   const server = await engine.until(name, ['connected', 'failed'], 30_000);
   step('mcp_status after', { server: brief(server) });
-  return { auth, browsed, callback, reconnect, connected: server?.status === 'connected' };
+  return { auth, browsed, callback, reconnect, delivered, connected: server?.status === 'connected' };
 }
 
 // A control answer in a word for the summary: `ok`, the engine's refusal, or null when the step was not reached.
@@ -300,10 +303,15 @@ const outcomeOf = (answer) => (answer === null ? null : answer.subtype === 'succ
 
 // dynamic and plugin: `launch` is the Engine's options for both processes, `expectedName` the name the server should be
 // listed under, `matches` how it is found in mcp_status whatever its name turns out to be.
+// `fallback`: when the first attempt answered `custom` and its callback or reconnect was refused, a second sign-in in the
+// same session with no redirect of MAWS's (the engine's own localhost listener, which the fixture's consent is delivered
+// to), as M8 would sign that kind in instead. Null when it was not needed or not reached; `fallback.next` is the second
+// process's reading, which comes after both attempts.
 async function dynamicQuestion(kind, { launch, expectedName, matches }) {
   await question(kind, async (q, step) => {
     const options = { ...launch, sdkServers: ['spike-sdk'] };
     q.expectedName = expectedName;
+    q.fallback = null;
     const engine = new Engine(kind, options);
     const { server, redirectUri } = await listener();
     try {
@@ -324,6 +332,18 @@ async function dynamicQuestion(kind, { launch, expectedName, matches }) {
       q.connected = outcome.connected;
       if (outcome.auth.subtype !== 'success') fail(kind, 'engine', outcome.auth.error);
       else if (outcome.connected !== true) fail(kind, 'undetermined', 'the server did not report connected');
+      const refused = (answer) => answer !== null && answer !== undefined && answer.subtype !== 'success';
+      if (q.redirectScheme === 'custom' && outcome.connected !== true && (refused(outcome.callback) || refused(outcome.reconnect))) {
+        const second = await signIn(engine, q.name, {}, (label, value) => step(`fallback: ${label}`, value));
+        q.fallback = {
+          authenticate: outcomeOf(second.auth),
+          scheme: second.auth.response?.redirectScheme ?? null,
+          delivered: second.delivered ? (second.delivered.status ?? second.delivered.error) : null,
+          connected: second.connected,
+          next: null,
+        };
+        if (second.connected !== true) fail(kind, 'undetermined', 'the fallback through the engine\'s own listener did not report connected');
+      }
     } finally {
       server.close();
       step('exit', await engine.stop());
@@ -333,6 +353,7 @@ async function dynamicQuestion(kind, { launch, expectedName, matches }) {
     try {
       step('next: initialize', answerOf(await next.init()));
       q.next = brief(await next.until(q.name, ['needs-auth', 'connected', 'failed'], 30_000));
+      if (q.fallback) q.fallback.next = q.next;
       step('next: mcp_status', { server: q.next });
     } finally {
       step('next: exit', await next.stop());
