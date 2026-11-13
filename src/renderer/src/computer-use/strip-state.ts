@@ -15,9 +15,10 @@
 // leaves on evidence: a computer-use call that started after the withdrawn one has an ordinary result (`done`: the
 // plugin runs calls one after another, and an error result may be its answer before it queued a cell), the session's
 // process is known to have exited, the session's status lists no connected computer-use server; or at Dismiss. Where two
-// readings are possible the line stays: a later call's result is evidence only as it reads now (its marker can arrive
-// after it and withdraw it), so it is read again at each look; only the exit, the server's absence and Dismiss settle a
-// call for good. Both timers are counted on this window's clock from what this window saw, never from a row's
+// readings are possible the line stays: every withdrawn call the line showed is kept until its own evidence comes, a
+// later withdrawal settling none of them, and a later call's result is evidence only as it reads now (its marker can
+// arrive after it and withdraw it), so it is read again at each look; only the exit, the server's absence and Dismiss
+// settle a call for good. The line names the latest call still unresolved. Both timers are counted on this window's clock from what this window saw, never from a row's
 // timestamp. What the strip remembers lives with the mounted pane: a pane mounted mid-call starts from what it sees.
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { BROWSER_AGENT_IDLE_MS } from '@shared/browser/tab';
@@ -49,10 +50,11 @@ const ABSENT: StripState = { kind: 'absent' };
 const same = (a: StripState, b: StripState) =>
   a.kind === b.kind && (a.kind !== 'running' || a.turnId === (b as typeof a).turnId) && (a.kind !== 'lingering' || a.toolUseId === (b as typeof a).toolUseId);
 
-// The withdrawn call the line lingers for, and the turn it was read in.
+// A withdrawn call the line showed, the turn it was read in, and the calls after it as last read (its evidence).
 interface Unresolved {
   toolUseId: ToolUseId;
   turn: TurnId | null;
+  later: Map<ToolUseId, ComputerUseCall['state']>;
 }
 
 /** The strip's state for one mounted pane, told each change of what it reads (`observe`) and re-read at its own timers. */
@@ -62,9 +64,8 @@ export class StripTracker {
   private flightSince = new Map<ToolUseId, number>(); // when this window first saw each `js` call in flight, unbroken
   private quietSince: number | null = null; // when this window first saw no `js` call in flight while running
   private shown = new Set<ToolUseId>(); // the `js` calls in flight while the line read running
-  private settled = new Set<ToolUseId>(); // withdrawn calls settled for good: superseded, dismissed, or the process or server gone
-  private unresolved: Unresolved | null = null;
-  private later = new Map<ToolUseId, ComputerUseCall['state']>(); // the calls after the unresolved one, as last read
+  private settled = new Set<ToolUseId>(); // withdrawn calls settled for good: dismissed, or the process or server gone
+  private unresolved: Unresolved[] = []; // the withdrawn calls the line showed and nothing settled, in the order they started
   private timer: ReturnType<typeof setTimeout> | null = null;
   private listeners = new Set<() => void>();
 
@@ -75,8 +76,8 @@ export class StripTracker {
   }
 
   dismiss = (): void => {
-    if (this.unresolved === null) return;
-    this.settle();
+    if (this.unresolved.length === 0) return;
+    this.settleAll();
     this.evaluate();
   };
 
@@ -99,8 +100,7 @@ export class StripTracker {
     this.quietSince = null;
     this.shown = new Set();
     this.settled = new Set();
-    this.unresolved = null;
-    this.later = new Map();
+    this.unresolved = [];
     this.set(ABSENT);
   }
 
@@ -121,19 +121,17 @@ export class StripTracker {
     for (const id of this.flightSince.keys()) if (!flyingIds.has(id)) this.flightSince.delete(id);
     for (const id of flyingIds) if (!this.flightSince.has(id)) this.flightSince.set(id, now);
 
-    // A call the line showed became withdrawn while the line was up: the latest such is unresolved, and it stands for
-    // every earlier one (the plugin runs calls in order, so its cell ends after theirs).
+    // A call the line showed became withdrawn while the line was up: it is unresolved until its own evidence comes. A
+    // later withdrawal settles none of the earlier ones; a later call's `done` resolves each, since it is later than each.
     if (this.state.kind !== 'absent') {
-      const withdrawn = js.filter((call) => call.state === 'withdrawn' && this.shown.has(call.toolUseId) && !this.settled.has(call.toolUseId));
-      const latest = withdrawn.at(-1);
-      if (latest !== undefined && latest.toolUseId !== this.unresolved?.toolUseId) {
-        if (this.unresolved !== null) this.settle();
-        for (const call of withdrawn.slice(0, -1)) this.settled.add(call.toolUseId);
-        this.unresolved = { toolUseId: latest.toolUseId, turn: reading.turn };
+      const kept = new Set(this.unresolved.map((u) => u.toolUseId));
+      for (const call of js) {
+        if (call.state !== 'withdrawn' || !this.shown.has(call.toolUseId) || this.settled.has(call.toolUseId) || kept.has(call.toolUseId)) continue;
+        this.unresolved.push({ toolUseId: call.toolUseId, turn: reading.turn, later: new Map() });
       }
     }
-    if (this.unresolved !== null && (facts.processGone || facts.serverGone)) this.settle();
-    if (this.unresolved !== null) for (const call of laterCalls(reading, this.unresolved)) this.later.set(call.toolUseId, call.state);
+    if (facts.processGone || facts.serverGone) this.settleAll();
+    for (const u of this.unresolved) for (const call of laterCalls(reading, u)) u.later.set(call.toolUseId, call.state);
 
     const next = this.next(now, reading, flying.length > 0, js.some((call) => call.state === 'waiting'));
     if (next.kind === 'running') for (const id of flyingIds) this.shown.add(id);
@@ -142,16 +140,15 @@ export class StripTracker {
     this.arm(now);
   }
 
-  private settle() {
-    if (this.unresolved !== null) this.settled.add(this.unresolved.toolUseId);
-    this.unresolved = null;
-    this.later = new Map();
+  private settleAll() {
+    for (const u of this.unresolved) this.settled.add(u.toolUseId);
+    this.unresolved = [];
   }
 
-  // The unresolved call while no evidence says its cell is over: a later call read `done` is that evidence for as long as
-  // it reads so.
+  // The latest unresolved call no evidence says is over (a later call read `done` is that evidence for as long as it reads
+  // so), or null when none is left.
   private open(): Unresolved | null {
-    return this.unresolved !== null && ![...this.later.values()].includes('done') ? this.unresolved : null;
+    return this.unresolved.findLast((u) => ![...u.later.values()].includes('done')) ?? null;
   }
 
   private next(now: number, reading: ComputerUseReading, flying: boolean, waiting: boolean): StripState {

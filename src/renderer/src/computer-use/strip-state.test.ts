@@ -175,6 +175,50 @@ describe('the lingering line', () => {
     expect(state()).toEqual(lingering('j2'));
   });
 
+  // A later withdrawal is no evidence for an earlier one: both calls the line showed stay unresolved, the line naming the
+  // latest, until evidence that holds for each comes (the review's case: j2 shown past the 250 ms, then withdrawn too).
+  const bothWithdrawn = () => {
+    withdrawnAfterShowing('j1', T1);
+    withdrawnAfterShowing('j2', T2);
+    expect(state()).toEqual(lingering('j2'));
+  };
+  const afterBoth = (...calls: ComputerUseCall[]) => reading(T2, false, js('j2', 'withdrawn'), ...calls);
+
+  it('keeps every withdrawn call it showed: after j1 and then j2 are withdrawn the line lingers, and a later call’s done takes it away', () => {
+    bothWithdrawn();
+    see(afterBoth(js('j3', 'failed')));
+    expect(state()).toEqual(lingering('j2'));
+    see(afterBoth(js('j3', 'done')));
+    expect(kind()).toBe('absent');
+    see(afterBoth(js('j3', 'withdrawn'))); // read differently: neither call has its evidence any more
+    expect(state()).toEqual(lingering('j2'));
+  });
+
+  it('after two withdrawn calls, leaves when the process exits, when the server goes, or at Dismiss, and none comes back', () => {
+    for (const leave of ['process', 'server', 'dismiss'] as const) {
+      tracker.stop();
+      tracker = new StripTracker();
+      bothWithdrawn();
+      if (leave === 'dismiss') tracker.dismiss();
+      else see(afterBoth(), leave === 'process' ? { processGone: true } : { serverGone: true });
+      expect(kind(), leave).toBe('absent');
+      see(afterBoth(js('j3', 'withdrawn')));
+      see(reading(T1, false, js('j1', 'withdrawn')));
+      expect(kind(), leave).toBe('absent');
+    }
+  });
+
+  it('when a result resolves the earlier call but not the later one, the line stays for the later one', () => {
+    withdrawnAfterShowing('j1', T1);
+    see(reading(T2, true, js('jx', 'done'))); // after j1: its evidence
+    expect(kind()).toBe('absent');
+    see(reading(T2, true, js('jx', 'done'), js('j2', 'flight')));
+    vi.advanceTimersByTime(COMPUTER_USE_SETTLE_MS);
+    expect(state()).toEqual({ kind: 'running', turnId: T2 });
+    see(reading(T2, false, js('jx', 'done'), js('j2', 'withdrawn'))); // jx came before j2: no evidence for it
+    expect(state()).toEqual(lingering('j2'));
+  });
+
   it('is resolved by a later js call’s ordinary result, in a later turn, and goes back to running and then to the pause', () => {
     withdrawnAfterShowing('j1', T1);
     see(reading(T2, true, js('j2', 'flight')));
