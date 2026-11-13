@@ -52,7 +52,7 @@
     - Tests that pin today's behaviour and will change: `src/renderer/src/shell/FloatingPill.test.tsx`, `FloatingCard.test.tsx`, `SplitCard.test.tsx`, `e2e/panel.spec.ts`, `e2e/layout-transfer.spec.ts` (the title button and the compact pane); `src/shared/maws/tools.test.ts` (the tool list, pinned by name and order); `src/renderer/src/library/Library.test.tsx`, `LibraryMachineMenu.test.tsx`, `e2e/library.spec.ts` (seven cards, thirteen buttons); `src/renderer/src/tools/artifacts/viewers/viewers.test.tsx` and `src/renderer/src/tools/document/` header tests (the Export menus); `src/artifacts/design-system/page/DesignSystemPage.test.tsx`; `src/renderer/src/transcript/view/rows/Artifact.test.tsx`; `src/artifacts/types/guides.test.ts`.
     - Tests to add where none exists today: a mark change pushed through the live document and a replica (`src/engine-host/documents/service.test.ts` has no formatting case); the repair guard against a presence redraw (`src/artifacts/document/schema.test.ts`, `editor/collab.dom.test.tsx`).
 
-- **Required:** required for the wave's acceptance. **Status** (as of 2026-11-13 09:52Z; the root's Tracking map is the current record): U10a (#582) is on master (pull request #618, master `c0e7b2ae8`). U10b (#595) is registered and not started.
+- **Required:** required for the wave's acceptance. **Status** (as of 2026-11-13 10:58Z; the root's Tracking map is the current record): U10a (#582) is on master (pull request #618, master `c0e7b2ae8`). U10b (#595) is registered and not started.
 
 ## l6-artifacts-07 · an edit that resets the document; page settings; deleting a draft   (l6-artifacts-17 folds in: its extra working time was this item)
 
