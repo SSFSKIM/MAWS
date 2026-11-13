@@ -235,7 +235,7 @@ describe('dismiss, take back and a pane’s answer (`converse`)', () => {
     expect(statusReads(from)).toBe(0);
     from = f.host.calls.length;
     expect(await resultOf(b, hostAction(f, b, 'session.steer.cancel', app, { messageUuid: 'm2' }))).toEqual({ outcome: 'cancelled' }); // any other act reads it
-    expect(statusReads(from)).toBe(1);
+    expect(statusReads(from)).toBe(2); // its placement's (targets.ts) and the act's own (actions.ts)
     const live = f.host.session(app);
     const sealed = (context: { launchId: string; engineSessionId: string }) => b.device.action({ machine: f.ref, action: 'maws.pane.answer', session: app, context: { lane: 'B', ...context }, args: ANSWER });
     expect(await run(b, sealed({ launchId: 'launch-stale', engineSessionId: live.engineSessionId! }))).toMatchObject({ ack: 'ok', outcome: { state: 'refused', reason: 'context' } });
