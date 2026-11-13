@@ -457,6 +457,8 @@ export function createLayoutStore() {
       const values = valuesOf(groups, false, state.panelGroups.lower[surfaceScope(appSessionId)]?.tabs);
       set(withScopes(state, [[appSessionId, values]]));
     };
+    // UX wave U8b: a card opened or folded before the stored folds are read is replayed over them likewise.
+    const earlyCards: ((open: CardId[]) => CardId[])[] = [];
     const early: ((m: Strip) => Strip)[] = [];
     const main = (next: (m: Strip) => Strip) => {
       if (!get().hydrated) early.push(next);
@@ -604,7 +606,6 @@ export function createLayoutStore() {
           panelSurfaces = rememberSurfaceContext({ panelSurfaces, knownSession: known }, next);
           return next;
         }, repaired);
-        panelSurfaces = earlySurfaces.splice(0).reduce((state, change) => change(state), panelSurfaces);
         // P4-B3x: a fold restored with its float stands; one whose float the reader dropped opens the panel it folded,
         // and one stored beside an open panel is dropped (both written back below).
         const { main: hydratedMain, regions: foldedRegions } = reconcileFold(opened ? restored : folded, { main: model.titleTabs(repairedMain, titleOf), regions: replayedRegions });
@@ -635,10 +636,15 @@ export function createLayoutStore() {
           const { stacks, ...repaired } = scopePatch(after, repairedScopes(asRead, after));
           hydratedPanels = { ...after, ...repaired, panelSurfaces: withStacks(after.panelSurfaces, stacks) };
         }
+        // The side column's acts made while the reads were pending are replayed after the first read, which judges what
+        // was stored: an act before hydration removes no stored tab the same act after it would keep (UC-14; the branch
+        // review's finding 2).
+        const surfaceActs = earlySurfaces.splice(0);
+        if (surfaceActs.length > 0) hydratedPanels = { ...hydratedPanels, panelSurfaces: surfaceActs.reduce((state, change) => change(state), hydratedPanels.panelSurfaces) };
         // F's one width is this build's wide width once; 380, F's automatic, is automatic here too (X-165).
         const fromRegions = persistedRegions.panel.width === F_AUTOMATIC_WIDTH ? null : persistedRegions.panel.width;
         const panelWidths = storedWidths ?? { version: 1 as const, wide: fromRegions, narrow: null };
-        const cardsOpen = storedCards.open;
+        const cardsOpen = earlyCards.splice(0).reduce((open, change) => change(open), storedCards.open); // the branch review's finding 3
         const regions = surfaceRegions({ ...get(), main: hydratedMain, regions: foldedRegions, ...hydratedPanels, hydrated: true });
         // P4-B3: the params of panel tabs no list holds now (closed, or a session's not kept) are not read; the
         // no-session selection is read back if it still names a pin.
@@ -668,6 +674,7 @@ export function createLayoutStore() {
         // UX wave U8b: the three keys are written at a first read (so the next launch is not one), and each session list
         // the first read pruned, with the params it left (persistence takes the filtered params as its baseline).
         if (complete) for (const key of ['panelTools.groups', 'panelTools.widths', 'cards.open'] as const) if (!held.has(key)) unsaved.add(key);
+        if (!sameJson(cardsOpen, storedCards.open)) unsaved.add('cards.open'); // a fold made while the reads were pending
         for (const id of prunedPanels) unsaved.add(`panel.${id}`);
         if (prunedPanels.length > 0 && Object.keys(panelParams).length !== Object.keys(storedParams.params).length) unsaved.add('panelTools.params');
         for (const key of failed) unsaved.delete(key); // UX wave U8b: hydration writes no default over a value it could not read
@@ -916,9 +923,10 @@ export function createLayoutStore() {
         state.setPanel({ width: width ?? F_AUTOMATIC_WIDTH });
       },
       setCardOpen(card, open) {
-        const now = get().cardsOpen;
-        if (now.includes(card) === open) return;
-        set({ cardsOpen: CARD_IDS.filter((id) => (id === card ? open : now.includes(id))) });
+        const change = (now: CardId[]) => (now.includes(card) === open ? now : CARD_IDS.filter((id) => (id === card ? open : now.includes(id))));
+        if (!get().hydrated) earlyCards.push(change); // replayed over the stored folds (the branch review's finding 3)
+        const next = change(get().cardsOpen);
+        if (next !== get().cardsOpen) set({ cardsOpen: next });
       },
     };
   });
