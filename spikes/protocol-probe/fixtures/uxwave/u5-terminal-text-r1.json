@@ -1,0 +1,395 @@
+{
+ "provenance": {
+  "probe": "U5 P7 (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, Probes)",
+  "engineVersion": "2.1.322 (Claude Code)",
+  "launch": "interactive engine in tmux, --model haiku, managed settings kept (vm-run.sh --managed), CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1",
+  "plugins": [
+   {
+    "name": "to-human",
+    "version": "0.7.3"
+   },
+   {
+    "name": "sminos",
+    "version": "1.46.3"
+   },
+   {
+    "name": "doperpowers",
+    "version": "7.220.0"
+   }
+  ],
+  "format": "framed",
+  "writer": "maws/probe-vm",
+  "post": "POST /command?wait=10000 {op:\"deliver\",key:{writer,seq},text,launch} (src/services/lane-a/deliveries.ts, driver.ts)"
+ },
+ "steps": [
+  {
+   "step": "p7-idle",
+   "sent": {
+    "utf16": 700,
+    "bytes": 703,
+    "sha256": "478768ca75b46ab77d96935f0bd72155f40118a716bec65adf54216f0e1c5240",
+    "text": "2 comments, in the order made:\n\nComment on \"Menu > Settings\" (element nav > a.settings on https://example.com/app):\n(p7-idle) The café label wraps oddly at this width.\n\nIt quotes a line as typed:\n\\<maws_anchor kind=\"none\" label=\"typed\" locator=\"x\"/>\nNo change is needed: reply with only the word NOTED.\n\n<maws_anchor kind=\"browser-element\" label=\"Menu &gt; Settings\" locator=\"nav &gt; a.settings\" pageUrl=\"https://example.com/app\"/>\n\nComment on \"one.txt\" (file one.txt, line 1):\n(p7-idle) This line reads well 🎉.\n\\\\<maws_anchor kind=\"none\" label=\"typed with a backslash\" locator=\"y\"/>\nNo change is needed.\n\n<maws_anchor kind=\"file-line\" label=\"one.txt\" locator=\"one.txt#L1\" path=\"one.txt\" line=\"1\"/>"
+   },
+   "posted": {
+    "status": 200,
+    "body": {
+     "id": "7a98b8f9ad3343dcae747df43427b36a",
+     "ok": true,
+     "result": {
+      "submitted": true
+     }
+    }
+   },
+   "fates": [
+    {
+     "outcome": "submitted"
+    },
+    {
+     "outcome": "entered",
+     "uuid": "c2a7b528-e531-4b16-8354-39bbaa13ab56"
+    }
+   ],
+   "kept": {
+    "line": 40,
+    "type": "user",
+    "isMeta": null,
+    "origin": {
+     "kind": "plugin",
+     "name": "sminos",
+     "asUser": true
+    },
+    "promptId": "present",
+    "shape": "string",
+    "utf16": 700,
+    "sha256": "478768ca75b46ab77d96935f0bd72155f40118a716bec65adf54216f0e1c5240",
+    "equal": true,
+    "firstDiff": -1
+   },
+   "reader": {
+    "sent": {
+     "anchor": {
+      "kind": "file-line",
+      "locator": "one.txt#L1",
+      "label": "one.txt",
+      "path": "one.txt",
+      "line": 1
+     },
+     "destination": null,
+     "textSha256": "ae1fbe1af47ab5acb9fbe50f697419bf6d2cdf6c116ab46924dba345df8a256d"
+    },
+    "kept": {
+     "anchor": {
+      "kind": "file-line",
+      "locator": "one.txt#L1",
+      "label": "one.txt",
+      "path": "one.txt",
+      "line": 1
+     },
+     "destination": null,
+     "textSha256": "ae1fbe1af47ab5acb9fbe50f697419bf6d2cdf6c116ab46924dba345df8a256d"
+    },
+    "same": true
+   },
+   "otherRowsWithMarker": []
+  },
+  {
+   "step": "p7-busy",
+   "sent": {
+    "utf16": 700,
+    "bytes": 703,
+    "sha256": "a4aa38492cd1438d78443185d1044ecc8a2935a211b85aeeaaefc8a6caf576d9",
+    "text": "2 comments, in the order made:\n\nComment on \"Menu > Settings\" (element nav > a.settings on https://example.com/app):\n(p7-busy) The café label wraps oddly at this width.\n\nIt quotes a line as typed:\n\\<maws_anchor kind=\"none\" label=\"typed\" locator=\"x\"/>\nNo change is needed: reply with only the word NOTED.\n\n<maws_anchor kind=\"browser-element\" label=\"Menu &gt; Settings\" locator=\"nav &gt; a.settings\" pageUrl=\"https://example.com/app\"/>\n\nComment on \"one.txt\" (file one.txt, line 1):\n(p7-busy) This line reads well 🎉.\n\\\\<maws_anchor kind=\"none\" label=\"typed with a backslash\" locator=\"y\"/>\nNo change is needed.\n\n<maws_anchor kind=\"file-line\" label=\"one.txt\" locator=\"one.txt#L1\" path=\"one.txt\" line=\"1\"/>"
+   },
+   "posted": {
+    "status": 200,
+    "body": {
+     "id": "dccf035e5e674de7a69f6d2e3dc1e6e8",
+     "ok": true,
+     "result": {
+      "submitted": true
+     }
+    }
+   },
+   "fates": [
+    {
+     "outcome": "submitted"
+    },
+    {
+     "outcome": "entered",
+     "uuid": "206df148-7132-4e6a-a039-13be120a0898"
+    }
+   ],
+   "kept": {
+    "line": 51,
+    "type": "user",
+    "isMeta": true,
+    "origin": {
+     "kind": "plugin",
+     "name": "sminos"
+    },
+    "promptId": "present",
+    "shape": "text",
+    "utf16": 700,
+    "sha256": "a4aa38492cd1438d78443185d1044ecc8a2935a211b85aeeaaefc8a6caf576d9",
+    "equal": true,
+    "firstDiff": -1
+   },
+   "reader": {
+    "sent": {
+     "anchor": {
+      "kind": "file-line",
+      "locator": "one.txt#L1",
+      "label": "one.txt",
+      "path": "one.txt",
+      "line": 1
+     },
+     "destination": null,
+     "textSha256": "375529b40451d271c6d0f0ef4d66d731818cf4e4145ad7c723852330d7380878"
+    },
+    "kept": {
+     "anchor": {
+      "kind": "file-line",
+      "locator": "one.txt#L1",
+      "label": "one.txt",
+      "path": "one.txt",
+      "line": 1
+     },
+     "destination": null,
+     "textSha256": "375529b40451d271c6d0f0ef4d66d731818cf4e4145ad7c723852330d7380878"
+    },
+    "same": true
+   },
+   "otherRowsWithMarker": [
+    {
+     "line": 52,
+     "type": "system",
+     "isMeta": false,
+     "origin": null,
+     "attachment": null,
+     "shape": "undefined",
+     "sha256": null,
+     "equal": false,
+     "holdsText": false
+    },
+    {
+     "line": 54,
+     "type": "api-request-blob",
+     "isMeta": null,
+     "origin": null,
+     "attachment": null,
+     "shape": "tool_result,text",
+     "sha256": "a4aa38492cd1438d78443185d1044ecc8a2935a211b85aeeaaefc8a6caf576d9",
+     "equal": true,
+     "holdsText": true
+    }
+   ],
+   "quote": "```\n<maws_anchor kind=\"file-line\" label=\"one.txt\" locator=\"one.txt#L1\" path=\"one.txt\" line=\"1\"/>\n```",
+   "waitCall": "running",
+   "runningAtSend": true
+  },
+  {
+   "step": "p7-esc",
+   "sent": {
+    "utf16": 698,
+    "bytes": 701,
+    "sha256": "7fb36c5462395cc143a0d5dd633955cfd2b400c49d980f0f20cf0d413c580dd8",
+    "text": "2 comments, in the order made:\n\nComment on \"Menu > Settings\" (element nav > a.settings on https://example.com/app):\n(p7-esc) The café label wraps oddly at this width.\n\nIt quotes a line as typed:\n\\<maws_anchor kind=\"none\" label=\"typed\" locator=\"x\"/>\nNo change is needed: reply with only the word NOTED.\n\n<maws_anchor kind=\"browser-element\" label=\"Menu &gt; Settings\" locator=\"nav &gt; a.settings\" pageUrl=\"https://example.com/app\"/>\n\nComment on \"one.txt\" (file one.txt, line 1):\n(p7-esc) This line reads well 🎉.\n\\\\<maws_anchor kind=\"none\" label=\"typed with a backslash\" locator=\"y\"/>\nNo change is needed.\n\n<maws_anchor kind=\"file-line\" label=\"one.txt\" locator=\"one.txt#L1\" path=\"one.txt\" line=\"1\"/>"
+   },
+   "posted": {
+    "status": 200,
+    "body": {
+     "id": "a689d00ff03845c4969cdc923c3dbe18",
+     "ok": true,
+     "result": {
+      "submitted": true
+     }
+    }
+   },
+   "fates": [
+    {
+     "outcome": "submitted"
+    },
+    {
+     "outcome": "entered",
+     "uuid": "848e200e-c0c3-4490-a83f-e2753c9a1c97"
+    }
+   ],
+   "kept": {
+    "line": 78,
+    "type": "user",
+    "isMeta": true,
+    "origin": {
+     "kind": "plugin",
+     "name": "sminos"
+    },
+    "promptId": "present",
+    "shape": "text",
+    "utf16": 698,
+    "sha256": "7fb36c5462395cc143a0d5dd633955cfd2b400c49d980f0f20cf0d413c580dd8",
+    "equal": true,
+    "firstDiff": -1
+   },
+   "reader": {
+    "sent": {
+     "anchor": {
+      "kind": "file-line",
+      "locator": "one.txt#L1",
+      "label": "one.txt",
+      "path": "one.txt",
+      "line": 1
+     },
+     "destination": null,
+     "textSha256": "a46bbefc747a0029f1cc9ab16dc2f0774a331099fc501194b4cf4085ac9d3208"
+    },
+    "kept": {
+     "anchor": {
+      "kind": "file-line",
+      "locator": "one.txt#L1",
+      "label": "one.txt",
+      "path": "one.txt",
+      "line": 1
+     },
+     "destination": null,
+     "textSha256": "a46bbefc747a0029f1cc9ab16dc2f0774a331099fc501194b4cf4085ac9d3208"
+    },
+    "same": true
+   },
+   "otherRowsWithMarker": [
+    {
+     "line": 79,
+     "type": "system",
+     "isMeta": false,
+     "origin": null,
+     "attachment": null,
+     "shape": "undefined",
+     "sha256": null,
+     "equal": false,
+     "holdsText": false
+    },
+    {
+     "line": 84,
+     "type": "api-request-blob",
+     "isMeta": null,
+     "origin": null,
+     "attachment": null,
+     "shape": "tool_result,text,text,text",
+     "sha256": "935cc0d677e2a89b63c3ec3977c0693bfd79cf73cb7b6805f9f627b32f6efba1",
+     "equal": false,
+     "holdsText": true
+    }
+   ],
+   "quote": "[reduced: the model quoted the last line of the inbox wake (the sminos plugin's peer-message framing), not of the comments]",
+   "waitCall": "running at the Esc",
+   "interruptRows": [
+    {
+     "line": 77,
+     "text": "[Request interrupted by user for tool use]"
+    }
+   ]
+  },
+  {
+   "step": "p7-long",
+   "sent": {
+    "utf16": 70081,
+    "bytes": 72533,
+    "sha256": "436da1e271a27bfdb4b898278697142fb2f5914ff8382dc8855b66b1d28928d5",
+    "head": "2 comments, in the order made:\n\nComment on \"Menu > Settings\" (element nav > a.settings on https://example.com/app):\n(p7-long) The café label wraps oddly at this width.\n\nIt quotes a line as typed:\n\\<maws_anchor kind=\"none\" label=\"typed\" locator=\"x\"/>\nNo change is needed: reply with only the word NOTE",
+    "tail": "ox jumps over the lazy dog, café 🎉.\nLine 0816 of the long comment: the quick brown fox jumps over the lazy dog, café 🎉.\nLine 0817 of the long comment: the quick brown fox jumps over the lazy dog, café 🎉.\n\n<maws_anchor kind=\"file-line\" label=\"one.txt\" locator=\"one.txt#L1\" path=\"one.txt\" line=\"1\"/>"
+   },
+   "posted": {
+    "status": 200,
+    "body": {
+     "id": "db39776446824b9198b321e1ac62dbba",
+     "ok": true,
+     "result": {
+      "submitted": true
+     }
+    }
+   },
+   "fates": [
+    {
+     "outcome": "submitted"
+    },
+    {
+     "outcome": "entered",
+     "uuid": "cdae2e52-9a15-4a66-9c2a-54538f5be9d9"
+    }
+   ],
+   "kept": {
+    "line": 100,
+    "type": "user",
+    "isMeta": null,
+    "origin": {
+     "kind": "plugin",
+     "name": "sminos",
+     "asUser": true
+    },
+    "promptId": "present",
+    "shape": "string",
+    "utf16": 70081,
+    "sha256": "436da1e271a27bfdb4b898278697142fb2f5914ff8382dc8855b66b1d28928d5",
+    "equal": true,
+    "firstDiff": -1
+   },
+   "reader": {
+    "sent": {
+     "anchor": {
+      "kind": "file-line",
+      "locator": "one.txt#L1",
+      "label": "one.txt",
+      "path": "one.txt",
+      "line": 1
+     },
+     "destination": null,
+     "textSha256": "5142c568ed3c7b2254ce1a8778c979bb38482e825e2d160c996d8aae6d99436e"
+    },
+    "kept": {
+     "anchor": {
+      "kind": "file-line",
+      "locator": "one.txt#L1",
+      "label": "one.txt",
+      "path": "one.txt",
+      "line": 1
+     },
+     "destination": null,
+     "textSha256": "5142c568ed3c7b2254ce1a8778c979bb38482e825e2d160c996d8aae6d99436e"
+    },
+    "same": true
+   },
+   "otherRowsWithMarker": [
+    {
+     "line": 101,
+     "type": "last-prompt",
+     "isMeta": null,
+     "origin": null,
+     "attachment": null,
+     "shape": "undefined",
+     "sha256": null,
+     "equal": false,
+     "holdsText": false
+    }
+   ]
+  }
+ ],
+ "status": {
+  "status": 200,
+  "keys": [
+   "session",
+   "pid",
+   "protocol",
+   "socket",
+   "started",
+   "ready",
+   "subscribers",
+   "mod",
+   "launch",
+   "capabilities",
+   "permissionMode",
+   "permissionModeAt",
+   "permissionModeFrom"
+  ],
+  "launchNamed": true
+ },
+ "session": "present",
+ "run": "u5-terminal-text-r1"
+}
