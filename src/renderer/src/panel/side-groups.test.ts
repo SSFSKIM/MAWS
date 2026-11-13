@@ -171,9 +171,9 @@ describe('the repair every change of refs runs, in every scope it reaches (M1, d
   });
 
   it('a session dropped takes its lower entry with it', () => {
-    const store = storeWith({ panelBySession: lists([[B, [review, files], review.id]]), panelGroups: lowered({ [B]: { tabs: [files.id], share: 0.5 }, [A]: { tabs: ['x'], share: 0.5 } }) });
+    const store = storeWith({ panelBySession: lists([[A, [t1, t2], t1.id], [B, [review, files], review.id]]), panelGroups: lowered({ [B]: { tabs: [files.id], share: 0.5 }, [A]: { tabs: [t2.id], share: 0.5 } }) });
     store.getState().dropSession(B);
-    expect(store.getState().panelGroups.lower).toEqual({ [A]: { tabs: ['x'], share: 0.5 } });
+    expect(store.getState().panelGroups.lower).toEqual({ [A]: { tabs: [t2.id], share: 0.5 } });
   });
 });
 

@@ -420,7 +420,7 @@ describe('shell actions', () => {
     expect(region('main').inert).toBe(true);
     act(() => runAction('tab.overview'));
     expect(region('main').inert).toBe(false);
-    expect(grid().style.gridTemplateColumns).toBe('240px minmax(0, 1fr) 420px');
+    expect(grid().style.gridTemplateColumns).toBe('240px minmax(0, 1fr) 360px'); // UX wave U8b: a narrow tool's automatic width
     const dialog = within(region('main')).getByRole('dialog', { name: 'Overview' });
     if (alreadyOpen) expect(dialog).toBe(previousDialog);
     await vi.waitFor(() => expect(document.activeElement).toBe(dialog));
@@ -581,7 +581,7 @@ describe('the Artifacts entry', () => {
     const expectShown = () => {
       expect(useLayout.getState().regions.panel).toMatchObject({ floating: false, maximized: false, collapsed: false });
       expect(region('main').inert).toBe(false);
-      expect(grid().style.gridTemplateColumns).toBe('240px minmax(0, 1fr) 420px');
+      expect(grid().style.gridTemplateColumns).toBe('240px minmax(0, 1fr) 360px'); // UX wave U8b: a narrow tool's automatic width
       expect(screen.queryByRole('region', { name: 'Session card' })).toBeNull();
       expect(within(within(region('main')).getByRole('tabpanel')).getByText(placeholder)).toBeTruthy();
     };
