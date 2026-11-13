@@ -106,16 +106,15 @@ function SessionTree({ ui, appSessionId, session }: { ui: StoreApi<FilesUi>; app
   const roots = listings.get(listingKey(appSessionId, null));
 
   const folder = session ? workingFolder(session) : null;
-  const moved = folder?.moved ?? false;
-  const workingPath = folder?.path ?? null;
-  const listed = useMemo(() => (roots?.status === 'ok' ? roots.value.entries : []), [roots]);
   // UX wave U8c-2 (M4 decision 4): while the session is moved, the working folder's root is listed first; the order of the
   // roots is the only thing that changes, and a root the listing does not hold is never put first.
   const rootEntries = useMemo(() => {
-    if (!moved || workingPath === null) return listed;
-    const first = workingRoot(listed.map((root) => root.path), workingPath);
+    const listed = roots?.status === 'ok' ? roots.value.entries : [];
+    const working = session ? workingFolder(session) : null;
+    if (!working?.moved) return listed;
+    const first = workingRoot(listed.map((root) => root.path), working.path);
     return first === null ? listed : [...listed.filter((root) => root.path === first), ...listed.filter((root) => root.path !== first)];
-  }, [listed, moved, workingPath]);
+  }, [roots, session]);
   const roles = useMemo(() => {
     const candidates = session ? rootsFor(session) : [];
     return new Map(rootEntries.flatMap((root): [string, RootRole][] => {

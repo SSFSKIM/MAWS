@@ -1125,7 +1125,11 @@ describe('review tool', () => {
     fireEvent.click(row('src/staged.ts'));
     const late = deferred<ReturnType<typeof ok>>();
     let held = 0;
-    main.state.diff = (input) => (input.directory === '/repo' && input.path === undefined ? (held++, late.promise) : undefined);
+    main.state.diff = (input) => {
+      if (input.directory !== '/repo' || input.path !== undefined) return undefined;
+      held += 1;
+      return late.promise;
+    };
     act(() => main.emit('git.changed', { repoRoot: '/repo', status: statusOf({ ...DIRTY }), reason: 'worktree' }));
     await waitFor(() => expect(held).toBeGreaterThan(1)); // the card's diff and Review's re-read of /repo, both out
     moveTo(WT);
