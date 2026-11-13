@@ -174,6 +174,7 @@ describe('a plan answer that names a mode, at the forwarding boundary', () => {
     ['a utility host', { peer: null, transport: 'utility' as const }],
   ])('naming no mode, a plan answer and a permission answer go as today under %s', async (_name, state) => {
     for (const input of [plain, permission]) {
+      bus = fakeBus(); // one bus per start: the read side registers its handlers once
       const hostsNow = served(state);
       const sessions = startWith(hostsNow);
       expect(await bus.invoke('session.answer', input)).toEqual({ ok: true, value: { outcome: 'delivered' } });
