@@ -3,13 +3,15 @@
 // on another machine (`REMOTE_UNAVAILABLE`, src/shared/ipc/remote-unavailable.ts) reads the one helper that greys its
 // control (src/renderer/src/lane-b/remote-unavailable.ts), or is named in `GUARDED_ELSEWHERE` below with the guard it
 // relies on, as `ANSWERED_IN_MAIN` is a declaration test/lane-b/offer-coverage.test.ts reads. A module that names a
-// declared command is taken to issue it: a command's name in a string literal outside comments, its input's type
-// included. An entry the code no longer needs fails too, so the list stays the code's.
+// declared command is taken to issue it: a command's name as a literal the compiler's parser reads (quoted or a
+// template's text; never a comment), its input's type included. A module reads the helper only by importing a value from
+// it. An entry the code no longer needs fails too, so the list stays the code's.
 //
 // `reported`: a module this list cannot honestly excuse. It issues the command for a session on another machine with no
 // guard; M4's executor reported each to the file's owner rather than fixing it, and its entry goes when that is fixed.
 import { readdirSync, readFileSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { join, posix, relative, resolve, sep } from 'node:path';
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
 
@@ -18,9 +20,12 @@ const RENDERER = join(ROOT, 'src/renderer/src');
 const HELPER = 'lane-b/remote-unavailable.ts';
 
 type Entry = { commands: readonly string[]; guard: string } | { commands: readonly string[]; reported: string };
+/** A module's entries: one, or several where its commands differ in what guards them. */
+type Entries = Entry | readonly Entry[];
+const commandsOf = (entries: Entries | undefined): readonly string[] => (entries === undefined ? [] : 'commands' in entries ? entries.commands : entries.flatMap((entry) => entry.commands));
 
 /** Each renderer module that names a declared command without reading the helper, by its path under src/renderer/src. */
-const GUARDED_ELSEWHERE: Readonly<Record<string, Entry>> = {
+const GUARDED_ELSEWHERE: Readonly<Record<string, Entries>> = {
   // the session's start and setup: intents this window created, which another machine is never asked to make
   'artifacts/session-context.ts': { commands: ['session.start'], guard: 'starts an intent this window made through session.create, which no RL2 machine answers (main refuses it not-open)' },
   'gateway/session-start.ts': { commands: ['session.start'], guard: 'only reached from tools/session-info/RouteSwitch.tsx through switch-route.ts, whose controls read the helper for session.stop' },
@@ -32,11 +37,14 @@ const GUARDED_ELSEWHERE: Readonly<Record<string, Entry>> = {
   'sessions/remote-spawn.ts': { commands: ['session.intent.discard'], guard: 'discards the New chat tab’s own intent, on this Mac, once the session started on the other machine' },
   'composer/dev/ResumeLauncher.tsx': { commands: ['session.launch'], guard: 'a development tool, drawn only under import.meta.env.DEV (app/Diagnostics.tsx)' },
   // the record's acts, from controls a session on another machine is not offered
-  'sessions/record-ops.ts': {
-    commands: ['session.delete', 'session.intent.get', 'session.takeOver'],
-    guard:
-      'delete: its dialog opens from "Delete conversation…", which remoteSessionActions never offers, and from the archived dialog’s Delete…, which reads the helper; intent.get: adoptFork, which a fork on another machine skips (forkThere) and the side thread reaches behind side/comment-form.ts and side/BtwView.tsx; takeOver: see the report on HolderActions',
-  },
+  'sessions/record-ops.ts': [
+    {
+      commands: ['session.delete', 'session.intent.get'],
+      guard:
+        'delete: its dialog opens from "Delete conversation…", which remoteSessionActions never offers, and from the archived dialog’s Delete…, which reads the helper; intent.get: adoptFork, which a fork on another machine skips (forkThere) and the side thread reaches behind side/comment-form.ts and side/BtwView.tsx',
+    },
+    { commands: ['session.takeOver'], reported: 'takeOverSession, reached from sessions/HolderActions.tsx and HolderNotice for a record of another machine a background job holds, issues it with no guard (sessions/)' },
+  ],
   'sessions/DeleteDialog.tsx': { commands: ['session.deletions.preview'], guard: 'the delete dialog: opened only as record-ops.ts’ entry says' },
   'sessions/SessionDialogs.tsx': { commands: ['session.deletions.keep'], guard: 'a manifest’s notice; manifests come from session.deletions.list, which this Mac answers' },
   // the composer's extras, behind the composer's own reads of the helper
@@ -48,8 +56,6 @@ const GUARDED_ELSEWHERE: Readonly<Record<string, Entry>> = {
   'side/actions.ts': { commands: ['side.thread.open', 'side.sendToMain'], guard: 'called only behind side/comment-form.ts’ canSend and side/BtwView.tsx’s canPromote, which read the helper' },
   // what acts on this window, branched before the command
   'session/visibility.ts': { commands: ['session.setVisible'], guard: 'a lane B session on another machine goes to showRemote; only ids with a record are sent, and a terminal session there has none' },
-  'lane-b/open-copy.ts': { commands: ['files.openExternal'], guard: 'branches on isRemoteLaneB to a copy opened here' },
-  'tools/maws/actions.ts': { commands: ['files.reveal'], guard: 'its one caller, transcript/view/rows/Delivery.tsx, disables Reveal by useElsewhereMachine for a session on another machine' },
   'stores/replay-diagnostics.ts': { commands: ['session.replay.control'], guard: 'replays this Mac starts (machine: the local one) and its own progress events' },
   'budget/BudgetSheets.tsx': { commands: ['session.stop'], guard: 'its sheet lists this Mac’s engine host’s blocked sessions (engine.budget crosses no link)' },
   'engine-surface/actions.ts': {
@@ -58,6 +64,14 @@ const GUARDED_ELSEWHERE: Readonly<Record<string, Entry>> = {
   },
   'app/supervisor-notices.ts': { commands: ['session.start', 'session.takeOver', 'session.launch'], guard: 'names commands to recognise their refusals; issues none' },
   // reported: issued for a session on another machine with no guard
+  'lane-b/open-copy.ts': {
+    commands: ['files.openExternal'],
+    reported: 'openSessionFile branches to a copy opened here on isRemoteLaneB alone, so for a terminal (lane A) session over RL2 it opens the path on this Mac with files.openExternal (lane-b/)',
+  },
+  'tools/maws/actions.ts': {
+    commands: ['files.reveal'],
+    reported: 'its caller transcript/view/rows/Delivery.tsx disables Reveal by useElsewhereMachine, which is lane B’s alone, so a terminal (lane A) session over RL2 reveals the path on this Mac (tools/maws/, transcript/view/)',
+  },
   'engine-surface/asks.ts': { commands: ['session.ui.answer'], reported: 'an automatic answer to a mod’s ask, with no control, sent for every session’s plugin.ask, another machine’s included (engine-surface/)' },
   'owner/report/answering.ts': {
     commands: ['ownerChannel.answered', 'ownerChannel.markRead', 'ownerChannel.cancel'],
@@ -74,33 +88,33 @@ const GUARDED_ELSEWHERE: Readonly<Record<string, Entry>> = {
   },
 };
 
-/** The string literals of a TypeScript source outside its comments (a template literal is skipped whole). */
-function literalsOf(source: string): string[] {
+/**
+ * The literal texts of a TypeScript source, read by the compiler's parser so a comment is never one: every quoted string,
+ * a template without substitutions, and each fixed part of one with them.
+ */
+function literalsOf(path: string, source: string): string[] {
   const out: string[] = [];
-  let i = 0;
-  while (i < source.length) {
-    const c = source[i]!;
-    const next = source[i + 1];
-    if (c === '/' && next === '/') {
-      i = source.indexOf('\n', i);
-      if (i === -1) break;
-    } else if (c === '/' && next === '*') {
-      i = source.indexOf('*/', i + 2);
-      if (i === -1) break;
-      i += 2;
-    } else if (c === "'" || c === '"' || c === '`') {
-      let j = i + 1;
-      let text = '';
-      while (j < source.length && source[j] !== c) {
-        if (source[j] === '\\') j += 1;
-        else text += source[j];
-        j += 1;
-      }
-      if (c !== '`') out.push(text);
-      i = j + 1;
-    } else i += 1;
-  }
+  const visit = (node: ts.Node): void => {
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node)) out.push(node.text);
+    ts.forEachChild(node, visit);
+  };
+  visit(parsed(path, source));
   return out;
+}
+
+const parsed = (path: string, source: string) => ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, path.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+
+/** Whether the module imports a value from the helper: an import declaration, not one of types alone, whose specifier resolves to it. */
+function readsHelper(path: string, source: string): boolean {
+  return parsed(path, source).statements.some((statement) => {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) return false;
+    const clause = statement.importClause;
+    if (clause === undefined || clause.isTypeOnly) return false;
+    const bindings = clause.namedBindings;
+    if (clause.name === undefined && bindings !== undefined && ts.isNamedImports(bindings) && bindings.elements.every((element) => element.isTypeOnly)) return false;
+    const specifier = statement.moduleSpecifier.text;
+    return specifier.startsWith('.') && posix.join(posix.dirname(path), specifier).replace(/\.tsx?$/, '') === HELPER.replace(/\.ts$/, '');
+  });
 }
 
 function sources(dir: string): string[] {
@@ -112,19 +126,16 @@ function sources(dir: string): string[] {
 }
 
 const DECLARED = new Set(Object.keys(REMOTE_UNAVAILABLE));
-const readsHelper = (path: string, source: string) =>
-  /from '[^']*lane-b\/remote-unavailable'/.test(source) || (path.startsWith('lane-b/') && /from '\.\/remote-unavailable'/.test(source));
 
 type Module = { path: string; source: string; named: string[] };
-const moduleOf = (path: string, source: string): Module => ({ path, source, named: [...new Set(literalsOf(source).filter((text) => DECLARED.has(text)))].sort() });
-const modules = sources(RENDERER).map((file) => moduleOf(relative(RENDERER, file), readFileSync(file, 'utf8')));
+const moduleOf = (path: string, source: string): Module => ({ path, source, named: [...new Set(literalsOf(path, source).filter((text) => DECLARED.has(text)))].sort() });
+const modules = sources(RENDERER).map((file) => moduleOf(relative(RENDERER, file).split(sep).join('/'), readFileSync(file, 'utf8')));
 
 /** Each module that names a declared command without reading the helper or an entry that covers it, as a sentence. */
-function unguardedIn(list: readonly Module[], declared: Readonly<Record<string, Entry>>): string[] {
+function unguardedIn(list: readonly Module[], declared: Readonly<Record<string, Entries>>): string[] {
   return list.flatMap(({ path, source, named }) => {
     if (named.length === 0 || path === HELPER || readsHelper(path, source)) return [];
-    const entry = declared[path];
-    const missing = named.filter((command) => !entry?.commands.includes(command));
+    const missing = named.filter((command) => !commandsOf(declared[path]).includes(command));
     return missing.length === 0 ? [] : [`${path}: issues ${missing.join(', ')} without the helper (lane-b/remote-unavailable.ts) or an entry in GUARDED_ELSEWHERE`];
   });
 }
@@ -140,7 +151,7 @@ describe('every renderer module that issues a declared command', () => {
       const held = byPath.get(path);
       if (held === undefined) return [`${path}: no such module`];
       if (readsHelper(path, held.source)) return [`${path}: reads the helper now; its entry goes`];
-      const gone = entry.commands.filter((command) => !held.named.includes(command));
+      const gone = commandsOf(entry).filter((command) => !held.named.includes(command));
       return gone.length === 0 ? [] : [`${path}: no longer names ${gone.join(', ')}`];
     });
     expect(stale).toEqual([]);

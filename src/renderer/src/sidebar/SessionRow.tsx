@@ -48,7 +48,9 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: nu
   const glyph = glyphFor(record, digest ?? null, pending, listing);
   const selected = tree.selected === id;
   const title = displayTitle(record);
-  const hasActions = sessionActionsFor(record, { remote: isRemoteLaneB(id) /* P5 O7 M2 */ }).includes('rename');
+  // the UX wave, U9 (as ruled): another machine's row reads `mine` from its listing, and Fork counts as an act there
+  const acts = sessionActionsFor(record, { remote: isRemoteLaneB(id) /* P5 O7 M2 */, mine: listing?.mine ?? false });
+  const hasActions = acts.includes('rename') || acts.includes('fork');
   const machine = useMachineMark(id);
   const owners = useOwnersLabel(id);
 

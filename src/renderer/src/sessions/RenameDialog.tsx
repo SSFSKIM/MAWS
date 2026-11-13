@@ -4,12 +4,14 @@
 // terminal `/rename` replaces (C4's title rule).
 // The UX wave, U9 (S-02, A10): a session on another machine is renamed there, from its listing alone where this Mac holds
 // no record (its title the listing's; no provenance and no Regenerate, which read a record and a tab), and what this window
-// did shows in the sidebar at once (the sessions store's `noteRenamed`).
+// did shows in the sidebar at once (the sessions store's `noteRenamed`). While the act can't work there (the window's
+// helper) the sheet says why and its Rename is disabled, whenever that begins.
 import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { withoutLinkedReads } from '@shared/maws/linked-read'; // P4-A3: a linked read is not the prompt's words
 import { ipc } from '../ipc/client';
+import { useRemoteUnavailable } from '../lane-b/remote-unavailable';
 import { useSessions } from '../stores/sessions';
 import { closeDialog } from './dialogs';
 import { onAnotherMachine } from './record-ops';
@@ -49,6 +51,7 @@ export function RenameDialog({ appSessionId }: { appSessionId: AppSessionId }) {
   const [title, setTitle] = useState(current);
   const [error, setError] = useState<string | null>(null);
   const [regenerating, setRegenerating] = useState<string | null>(null); // the operation in flight
+  const unavailable = useRemoteUnavailable(appSessionId, 'session.rename'); // the UX wave, U9: null on this Mac
 
   useEffect(() => {
     if (regenerating === null) return;
@@ -81,7 +84,7 @@ export function RenameDialog({ appSessionId }: { appSessionId: AppSessionId }) {
 
   return (
     <Sheet title="Rename">
-      <SheetForm canSubmit={trimmed.length > 0 && trimmed !== current} onSubmit={() => void submit()} submitLabel="Rename" submitClass={PRIMARY}>
+      <SheetForm canSubmit={trimmed.length > 0 && trimmed !== current && unavailable === null} onSubmit={() => void submit()} submitLabel="Rename" submitClass={PRIMARY}>
         <input aria-label="Title" autoFocus value={title} maxLength={200} onChange={(e) => setTitle(e.target.value)} className={FIELD} />
         {record !== null && (
           <>
@@ -98,6 +101,7 @@ export function RenameDialog({ appSessionId }: { appSessionId: AppSessionId }) {
             </p>
           </>
         )}
+        {unavailable !== null && <p className="m-0 text-ui-sm text-fg-muted">{unavailable}</p>}
         {error && <p className="m-0 text-ui-sm text-danger">{error}</p>}
       </SheetForm>
     </Sheet>

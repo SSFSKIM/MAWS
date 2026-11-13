@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { ForeignHolder, SessionRecord } from '@shared/graph/session';
-import type { DeleteOutcome } from '@shared/ipc/schema/session';
+import type { ArchiveOutcome, DeleteOutcome } from '@shared/ipc/schema/session';
 import type { FirstMessage, ForkTarget } from '@shared/sessions/intent';
 import type { StartOutcome } from '@shared/sessions/setup';
 import type { ResubmitProvider } from '../composer/resubmit-seam';
@@ -51,9 +51,17 @@ export async function archiveSession(appSessionId: AppSessionId, opts: { onlyIfI
     if (onAnotherMachine(appSessionId)) useSessions.getState().noteArchived(appSessionId);
     return { archived: true };
   }
+  // the UX wave, U9 (UC-7.5's second table): another machine's typed refusal reads as the act not done
+  if (onAnotherMachine(appSessionId)) return { error: failureWords('session.archive', remoteArchiveRefusal(outcome)) };
   if (outcome.status === 'skipped_ineligible') return { skipped: 'Session is no longer eligible for archive' };
   if (outcome.status === 'skipped_live') return { skipped: holderWords(outcome.holder) };
   return { error: `Held by ${holderWords(outcome.holder)}; archive it where it runs` };
+}
+
+function remoteArchiveRefusal(outcome: Exclude<ArchiveOutcome, { archived: true }>): string {
+  if (outcome.status === 'skipped_ineligible') return 'the session is no longer eligible for archive';
+  if (outcome.status === 'skipped_live') return `it is live in ${holderWords(outcome.holder)}`;
+  return `held by ${holderWords(outcome.holder)}; archive it where it runs`;
 }
 
 // `session.delete`: whole or not at all. A delete that finished drops the tabs and any interrupted-delete note; one that
