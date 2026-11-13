@@ -78,10 +78,14 @@ export function emptyGraph(): TaskGraph {
   return { tasks: new Map(), order: [], byToolUse: new Map(), issuer: new Map(), monitorCalls: new Set() };
 }
 
+// A task type, or the label the engine's Stop callback writes for it (`Guo`, engine 2.1.322: `shell`, `subagent`,
+// `workflow`, `monitor`, `MCP task`), which a status whose list a Stop wrote carries, from this build's host or build F's
+// (the UX wave's U8b, fix round A; the architect's ruling of 2026-11-13). The one reading of a task type string: the
+// summary's counts read it too.
 export function kindOf(taskType: string): TaskKind {
-  if (taskType === 'local_agent') return 'agent';
-  if (taskType === 'local_workflow') return 'workflow';
-  if (taskType === 'local_bash') return 'shell';
+  if (taskType === 'local_agent' || taskType === 'subagent') return 'agent';
+  if (taskType === 'local_workflow' || taskType === 'workflow') return 'workflow';
+  if (taskType === 'local_bash' || taskType === 'shell') return 'shell';
   if (taskType.startsWith('monitor')) return 'monitor';
   return 'other';
 }

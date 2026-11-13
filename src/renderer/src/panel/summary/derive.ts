@@ -5,6 +5,7 @@
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { GitDiffFile, GitStatus } from '@shared/ipc/schema/git';
 import type { SubagentRef, TurnActivity } from '../../transcript';
+import { kindOf } from '../../tools/agents/model/task-graph';
 
 export type ChangeLine =
   | { kind: 'clean' }
@@ -58,16 +59,16 @@ export interface BackgroundCounts {
   other: number;
 }
 
-// Agents are Subagents' to count; a monitor is matched by prefix and anything unnamed kept as `other` rather than
-// guessed (the fixtures show `local_bash`, `local_workflow` and `local_agent` only).
+// Agents are Subagents' to count; each task's kind is the task graph's reading of its type (`kindOf`, which takes the
+// Stop callback's labels too: the UX wave's U8b, fix round A), anything unnamed kept as `other` rather than guessed.
 export function backgroundCounts(tasks: EngineSessionStatus['backgroundTasks']): BackgroundCounts {
   const counts: BackgroundCounts = { shells: 0, workflows: 0, monitors: 0, other: 0 };
   for (const { taskType } of tasks) {
-    if (taskType === 'local_agent') continue;
-    if (taskType === 'local_bash') counts.shells += 1;
-    else if (taskType === 'local_workflow') counts.workflows += 1;
-    else if (taskType.startsWith('monitor')) counts.monitors += 1;
-    else counts.other += 1;
+    const kind = kindOf(taskType);
+    if (kind === 'shell') counts.shells += 1;
+    else if (kind === 'workflow') counts.workflows += 1;
+    else if (kind === 'monitor') counts.monitors += 1;
+    else if (kind === 'other') counts.other += 1;
   }
   return counts;
 }
