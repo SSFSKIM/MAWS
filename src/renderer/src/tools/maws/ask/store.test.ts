@@ -497,6 +497,50 @@ it('releases an automatically opened Questions surface after its final answer', 
   off();
 });
 
+// UX wave U8b (M2; the architect's ruling of 2026-11-13): with one tab in view, the automatic sheet takes its group's
+// tab's place and gives it back once its asks are gone, unless the person chose another tab meanwhile.
+describe('what an automatic Questions surface gives back', () => {
+  const review = { id: 'review:aaaa0001', toolId: 'review', pinned: false };
+  const files = { id: 'files:aaaa0002', toolId: 'files', pinned: false };
+  const inView = () => surfaceTabs(useLayout.getState(), A).map((tab) => tab.toolId);
+  const connectedWith = (stack: string[]) => {
+    useSessions.setState({ records: new Map([[A, record(A)]]) });
+    registerPanelTool(probeTool(ASK_SHEET_TOOL_ID, { multiInstance: false, pinnable: false }).tool);
+    useLayout.setState({ panelBySession: new Map([[A, { tabs: [review, files], activeTabId: review.id }]]), panelSurfaces: { version: 2, stacks: { [A]: stack }, pinnedTools: [], contexts: {} } });
+    const fake = fakeClient();
+    return { fake, off: connectAsks(fake.client) };
+  };
+
+  it('brings back the tab the sheet took the place of', () => {
+    const { fake, off } = connectedWith([review.id]);
+    fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
+    expect(inView()).toEqual([ASK_SHEET_TOOL_ID]);
+    fake.event('session.eventBatch', { appSessionId: A, events: [answered('a1')] });
+    expect(inView()).toEqual(['review']);
+    expect(panelOf(A)?.tabs.map((tab) => tab.toolId)).toEqual(['review', 'files', ASK_SHEET_TOOL_ID]); // the sheet's tab stays
+    off();
+  });
+
+  it('hides the column again when it was hidden before the sheet opened', () => {
+    const { fake, off } = connectedWith([]);
+    fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
+    expect(inView()).toEqual([ASK_SHEET_TOOL_ID]);
+    fake.event('session.eventBatch', { appSessionId: A, events: [answered('a1')] });
+    expect(inView()).toEqual([]);
+    expect(panelOf(A)?.tabs).toHaveLength(3);
+    off();
+  });
+
+  it('leaves the tab the person chose meanwhile in view', () => {
+    const { fake, off } = connectedWith([review.id]);
+    fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
+    useLayout.getState().showSurfaceTab(A, files.id);
+    fake.event('session.eventBatch', { appSessionId: A, events: [answered('a1')] });
+    expect(inView()).toEqual(['files']);
+    off();
+  });
+});
+
 it.each(['exit', 'withdrawn'] as const)('keeps an automatic Questions surface for its %s cancellation notice until Dismiss', async (reason) => {
   useSessions.setState({ records: new Map([[A, record(A)]]) });
   registerPanelTool(probeTool(ASK_SHEET_TOOL_ID, { multiInstance: false, pinnable: false }).tool);

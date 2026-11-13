@@ -17,8 +17,8 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import { ASK_SHEET_TOOL_ID } from '@shared/maws/panes';
 import { ipc } from '../../../ipc/client';
 import { panelHost, shownSession, usePanelHost } from '../../../panel/host';
-import { useLayout } from '../../../stores/layout';
-import { surfaceTabs } from '../../../panel/surface-model';
+import { useLayout, type LayoutState } from '../../../stores/layout';
+import { groupForOpen, groupOf, sideGroups, surfaceRefs, surfaceTabs } from '../../../panel/surface-model';
 import { useSessions } from '../../../stores/sessions';
 import type { AskSheetParams } from '../actions';
 import { applyAskEvents, askSheet, reloadAsks } from './store';
@@ -30,10 +30,13 @@ function openSheet(appSessionId: AppSessionId, askId: string): void {
   const layout = useLayout.getState();
   const visible = layout.regions.panel.collapsed ? [] : surfaceTabs(layout, appSessionId);
   if (!visible.some((tab) => tab.toolId === ASK_SHEET_TOOL_ID) && !automatic.has(appSessionId)) {
-    automatic.set(appSessionId, askSheet(appSessionId).subscribe((state, before) => {
-      // Submit and Dismiss change the store without an engine batch. Check after any whole batch has finished too.
-      if (state.asks !== before.asks && state.asks.size === 0) queueMicrotask(() => closeEmptyAutomatic(appSessionId));
-    }));
+    automatic.set(appSessionId, {
+      inViewBefore: inViewBefore(layout, appSessionId),
+      stop: askSheet(appSessionId).subscribe((state, before) => {
+        // Submit and Dismiss change the store without an engine batch. Check after any whole batch has finished too.
+        if (state.asks !== before.asks && state.asks.size === 0) queueMicrotask(() => closeEmptyAutomatic(appSessionId));
+      }),
+    });
   }
   panelHost.addTool<AskSheetParams>(ASK_SHEET_TOOL_ID, { appSessionId, params: { askId }, activate: true });
 }
@@ -42,18 +45,32 @@ function openSheet(appSessionId: AppSessionId, askId: string): void {
 // so `openAsk` can settle it.
 const waiting = new Map<AppSessionId, string[]>();
 // Only an automatically revealed surface relinquishes its space once all questions and cancellation notices are gone.
-const automatic = new Map<AppSessionId, () => void>();
+// UX wave U8b (M2; the architect's ruling of 2026-11-13, transitional until U1 removes the automatic open, O-17): with one
+// tab in view the sheet takes the place of its group's tab, which it gives back then (null: the column was hidden).
+const automatic = new Map<AppSessionId, { stop: () => void; inViewBefore: string | null }>();
+
+function inViewBefore(layout: LayoutState, appSessionId: AppSessionId): string | null {
+  const groups = sideGroups(layout, appSessionId);
+  if (layout.regions.panel.collapsed || groups.hidden) return null;
+  const sheet = surfaceRefs(layout, appSessionId).find((tab) => tab.toolId === ASK_SHEET_TOOL_ID);
+  const group = (sheet && groupOf(groups, sheet.id)) ?? groupForOpen(groups, ASK_SHEET_TOOL_ID, null, null);
+  return (group === 'lower' ? groups.lower?.shown : groups.upper.shown)?.id ?? null;
+}
 
 function stopAutomatic(appSessionId: AppSessionId): void {
-  automatic.get(appSessionId)?.();
+  automatic.get(appSessionId)?.stop();
   automatic.delete(appSessionId);
 }
 
 function closeEmptyAutomatic(appSessionId: AppSessionId): void {
-  if (!automatic.has(appSessionId) || askSheet(appSessionId).getState().asks.size !== 0) return;
+  const opened = automatic.get(appSessionId);
+  if (!opened || askSheet(appSessionId).getState().asks.size !== 0) return;
   stopAutomatic(appSessionId);
   const state = useLayout.getState();
-  state.setSurfaceStack(appSessionId, surfaceTabs(state, appSessionId).filter((tab) => tab.toolId !== ASK_SHEET_TOOL_ID).map((tab) => tab.id));
+  if (!surfaceTabs(state, appSessionId).some((tab) => tab.toolId === ASK_SHEET_TOOL_ID)) return; // the person chose another tab
+  const back = opened.inViewBefore;
+  if (back !== null && surfaceRefs(state, appSessionId).some((tab) => tab.id === back)) state.showSurfaceTab(appSessionId, back);
+  else state.hideSurfaces(appSessionId);
 }
 
 // The person opened the session's sheet themselves (`openAsk`): its waiting asks are theirs now. Called before the open,
