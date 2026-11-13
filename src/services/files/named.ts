@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { open as openFile, type FileHandle } from 'node:fs/promises';
 import { setImmediate as nextTurn } from 'node:timers/promises';
-import { callClass, needlesOf, rowClaimSteps, type PendingCall, type RowClaim } from '@shared/files/named';
+import { callClass, needlesOf, PAUSE, rowClaimSteps, type PendingCall, type RowClaim } from '@shared/files/named';
 import type { AppSessionId } from '@shared/graph/ids';
 
 export const NAMED_SCAN_BYTES = 1024 ** 3; // read back from the transcript's end, at most: completeness, not cost
@@ -92,15 +92,15 @@ async function parse(line: Buffer): Promise<unknown> {
   return value;
 }
 
-// The rule on one parsed row, given the event loop back every NAMED_CLAIM_STEPS of its steps (each a string looked at,
-// a link read through the URL step, or 64 KiB of text scanned): a row under the row bound may hold a great many links.
-// It stops at the first that names the path.
+// The rule on one parsed row, given the event loop back at every pause of its scan (each 64 KiB of the scan's metered
+// work, Decision Log 24) and every NAMED_CLAIM_STEPS of its other steps (a value looked at, a link met): a row under the
+// row bound may hold a great many links. It stops at the first that names the path.
 async function claimOf(row: unknown, path: string): Promise<RowClaim> {
   const steps = rowClaimSteps(row, path);
   for (let n = 1; ; n += 1) {
     const step = steps.next();
     if (step.done) return step.value;
-    if (n % NAMED_CLAIM_STEPS === 0) await nextTurn();
+    if (step.value === PAUSE || n % NAMED_CLAIM_STEPS === 0) await nextTurn();
   }
 }
 
