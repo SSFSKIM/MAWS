@@ -10,6 +10,8 @@
 // - `conditions` keeps the lines from the inject on that show which of §F's six conditions a wake missed (a catch-up, a
 //   failed attempt or a spent lane of the lane adopted, more than 4 KiB ahead of the subscriptions), so a miss outside
 //   them is read as neither pass nor fail (Decision Log 33 (d)); the floor and today's attempts are context.
+// - `historyReadsBeside` is the third test's reading (UX wave U9 M5, A5, #565): no whole-launch read of any session on B
+//   between the restore and B's `subbed` of the live session's stream, where a cold or idle tab's read would contend.
 // - `wakeVerdict` voids the run on the 1-minute load read at the instants that bracket each carrier's timed windows
 //   (Decision Log 33 (c)), labels a miss outside §F's conditions, and otherwise gives the verdict.
 // - `bLines` and `streams` are context, never conditions (Decision Log 37): B's own lines from the stall on (its idle
@@ -440,6 +442,33 @@ export function wakeMisses(record: WakeRecord): string[] {
 export function boundMissMessage(records: readonly WakeRecord[]): string {
   const js = records.map((r) => `${r.carrier} ${r.streams.map((s) => `${s.app} ${s.jMs === null ? 'none' : `${s.jMs} ms`}`).join(', ')}`);
   return `every subscription within ${WAKE_CASE.linkWithinMs / 1_000} s of the restore and the feed within ${WAKE_CASE.feedWithinMs / 1_000} s of the hub’s, per carrier; each stream's J: ${js.join('; ')}`;
+}
+
+export interface BesideInput {
+  carrier: Carrier;
+  /** The bare app id of the live session: its stream resumes at the restore. */
+  live: string;
+  /** B's mawsd.log and host.log, whole. */
+  endpoint: readonly LogLine[];
+  host: readonly LogLine[];
+  restoredAt: number;
+}
+
+/**
+ * Each whole-launch read on B (`session.events <app> after start`, of any session) that ran between the restore and B's
+ * `subbed` of the live session's stream, as a failure. B writes the journal line at the read's end, so a read that began
+ * before the subbed and ended after the restore counts. The tab beside the live one reads at main's settled word, which
+ * follows that answer.
+ */
+export function historyReadsBeside(input: BesideInput): string[] {
+  const { carrier, live, restoredAt } = input;
+  const what = `session B:${live}`;
+  const ms = (at: number) => at - restoredAt;
+  const subbed = kindOf(readAll(input.endpoint), 'endpoint-subbed').find((r) => r.line.what === what && r.at >= restoredAt);
+  if (subbed === undefined) return [`${carrier}: B's mawsd.log has no sub … ${what}: subbed line after the restore`];
+  return kindOf(readAll(input.host), 'journal')
+    .filter((r) => r.line.after === null && r.at >= restoredAt && r.at - r.line.ms < subbed.at)
+    .map((r) => `${carrier}: B read session ${r.line.app}'s whole launch (session.events ${r.line.app} after start, ${r.line.rows} rows in ${r.line.ms} ms, from +${ms(r.at - r.line.ms)} ms to +${ms(r.at)} ms) before B's subbed of the live session ${live} at +${ms(subbed.at)} ms`);
 }
 
 /** Whether main's log has the feed's `[org-feed] listings: last page` line at or after `from` (the hub's restore). */
