@@ -253,6 +253,9 @@ The head is `125a3ff36`, plus this record. Master has not moved since `f8f8fda67
 
 ### Unresolved review findings (for the branch reviewer)
 
+The delta review over `a45780aad..469819693` returned correct, with no findings. The architect then ruled on the four below: the first three became tracker rows in `docs/tech-debt-tracker.md`, the third also accepted as built; the fourth goes to the test-hygiene ticket.
+
+
 - **The place and emoji** (`src/renderer/src/main/Tab.tsx:198`). `basis-[5em]` holds four glyphs and the ellipsis only while a glyph is at most 1em wide. Four colour emoji would show as three and the ellipsis. This is an edge case of names. The remedy is about `5.5em`.
 - **A duplicated formula** (`src/renderer/src/keymap/actions-runtime.ts:387`). `rowOfListed ?? orgKey ?? machineKey` copies the private `setKeyOfListed` (`stores/org-projects.ts:162`). Exporting that is a one-line change, but in a file outside this landing.
 - **Where a refused discard puts the chat back** (`actions-runtime.ts:202-215`). An unpinned chat returns at the strip's end, because §E's put-back is `openTab(..., { activate: false })`. A tab reopened from the sidebar during the pending window is closed by `dropSession` on yes, which is no worse than before the wave. Whether the chat gets its position back is a spec question.
@@ -261,3 +264,8 @@ The head is `125a3ff36`, plus this record. Master has not moved since `f8f8fda67
 ## Residue
 
 - **A pinned tool cannot be pinned or unpinned while a tab that is not a session's is in front.** In `src/renderer/src/panel/SurfaceRow.tsx`, the session tools' icons are `disabled={!session && !tab}`, and their folded items under "More surfaces" are disabled the same way. With the library, a page or Diagnostics in front, a person has no way to reach the tool's "Unpin from toolbar". Found while the cross-build scene was being fixed, and not for this landing to change. The architect registered it as board ticket 620.
+- **Three tech-debt rows** (2026-11-13, `docs/tech-debt-tracker.md`, owner UX wave U13 (U13a)):
+  - a place drawn with colour emoji against `basis-[5em]`;
+  - `rowOf` repeating `setKeyOfListed`;
+  - a refused discard putting an unpinned chat back at the strip's end, accepted.
+- **stderr noise** from test files this wave did not touch: in the architect's test-hygiene ticket, not this landing's.
