@@ -219,14 +219,18 @@ export function questionInput(row: RowOf<'question'>, turn: TurnState | undefine
 type ArrivalRow = RowOf<'agent_message'> | RowOf<'notice'>;
 type UserMessageEvent = Extract<SessionEvent, { kind: 'user.message' }>;
 
-/** What the row's ask depends on beyond the turn: the tab's revealed jump target (which asks no site), and whether its line is open. */
-export interface ArrivalAsk { revealed: RowId | CellId | undefined; expanded: boolean }
+/**
+ * What the row's ask depends on beyond the turn: the tab's revealed jump target (which asks no site), whether its line is
+ * open, and the turn's rows as drawn (`turnRows`: after its fold), among whose notices a carrier's drawing owner is
+ * elected; absent, every notice of the carrier is drawn (an opened turn).
+ */
+export interface ArrivalAsk { revealed: RowId | CellId | undefined; expanded: boolean; drawn?: readonly Row[] }
 
 /** The UserMessage ask of a message line or a notice; null where it asks none. */
-export function arrivalInput(row: ArrivalRow, turn: TurnState | undefined, { revealed, expanded }: ArrivalAsk): RowInput<'UserMessage'> | null {
+export function arrivalInput(row: ArrivalRow, turn: TurnState | undefined, { revealed, expanded, drawn }: ArrivalAsk): RowInput<'UserMessage'> | null {
   if (!turn || row.id === revealed) return null;
   const carried = row.kind === 'notice' ? noticeCarrier(row, turn) : null;
-  if (carried !== null && carried.ids.find((id) => id !== revealed) !== row.id) return null; // another notice asks for the carrier
+  if (carried !== null && drawingOwner(carried, revealed, drawn) !== row.id) return null; // another notice asks for the carrier
   const carrier = row.kind === 'notice' ? carried?.carrier ?? null : messageCarrier(row, turn);
   if (carrier === null) return null;
   const props = engineUserProps(messageText(carrier.content), expanded, row.kind === 'agent_message' ? row : null);
@@ -243,14 +247,27 @@ export function sentInput(row: RowOf<'agent_message'>, turn: TurnState | undefin
 
 /**
  * The ask a notice follows: the engine mounts one UserMessage site per carrier (its task renderer near line 925119), so of
- * a carrier's notices the first not revealed asks, with its own line's open state, and draws the answer; each other one
- * asks nothing and follows that ask's outcome by its instance id. Null for the notice that asks, for the revealed one,
- * and for a notice whose carrier is its only notice.
+ * a carrier's notices the first drawn and not revealed asks, with its own line's open state, and draws the answer; each
+ * other one asks nothing and follows that ask's outcome by its instance id. Null for the notice that asks, for the
+ * revealed one, and for a notice whose carrier is its only notice. `drawn` as in ArrivalAsk.
  */
-export function noticeFollows(row: RowOf<'notice'>, turn: TurnState | undefined, revealed: RowId | CellId | undefined): string | null {
+export function noticeFollows(row: RowOf<'notice'>, turn: TurnState | undefined, revealed: RowId | CellId | undefined, drawn?: readonly Row[]): string | null {
   const carried = turn === undefined || row.id === revealed ? null : noticeCarrier(row, turn);
-  const asking = carried?.ids.find((id) => id !== revealed);
+  const asking = carried === null ? undefined : drawingOwner(carried, revealed, drawn);
   return carried === null || asking === undefined || asking === row.id ? null : carried.carrier.messageUuid ?? asking;
+}
+
+// The carrier's drawing owner (the whole-branch review's finding 5): its first notice that the turn draws after its fold
+// and a jump did not reveal, so a drawn notice never follows an owner that is not mounted.
+function drawingOwner(carried: { ids: readonly RowId[] }, revealed: RowId | CellId | undefined, drawn: readonly Row[] | undefined): RowId | undefined {
+  const shown = drawn === undefined ? null : drawnIds(drawn);
+  return carried.ids.find((id) => id !== revealed && (shown === null || shown.has(id)));
+}
+const drawnIdsMemo = new WeakMap<readonly Row[], ReadonlySet<RowId>>();
+function drawnIds(rows: readonly Row[]): ReadonlySet<RowId> {
+  let ids = drawnIdsMemo.get(rows);
+  if (ids === undefined) drawnIdsMemo.set(rows, (ids = new Set(rows.flatMap((row) => (row.kind === 'notice' ? [row.id] : [])))));
+  return ids;
 }
 
 // The message a line stands for: a peer's by its companion's uuid, a subagent's the envelope its `subagent.message` was read from.
@@ -270,24 +287,37 @@ function messageCarrier(row: RowOf<'agent_message'>, turn: TurnState): UserMessa
 
 // The synthetic message whose arrival the notice draws, the first that gives its id, as the derivation keeps the first;
 // with the notices it draws, in its order (the ids it gives that no earlier message gave).
+function noticeCarrier(row: RowOf<'notice'>, turn: TurnState): NoticeCarrier | null {
+  return noticeIndex(turn.events).get(row.id) ?? null;
+}
+
+// The whole-branch review's finding 6: every notice's carrier in a turn, built once per turn's event list (a turn's list
+// is a new array whenever the reducer changes it) and read by every row of the turn, so a streaming update that leaves
+// the list untouched builds nothing for it.
+interface NoticeCarrier { carrier: UserMessageEvent; ids: RowId[] }
+const noticeIndexMemo = new WeakMap<readonly SessionEvent[], ReadonlyMap<RowId, NoticeCarrier>>();
 let indexBuilds = 0;
 /** How many times a turn's notice-to-carrier index was built: for tests, which count builds rather than time them. */
 export const noticeIndexBuilds = (): number => indexBuilds;
 
-function noticeCarrier(row: RowOf<'notice'>, turn: TurnState): { carrier: UserMessageEvent; ids: RowId[] } | null {
+function noticeIndex(events: readonly SessionEvent[]): ReadonlyMap<RowId, NoticeCarrier> {
+  const memo = noticeIndexMemo.get(events);
+  if (memo !== undefined) return memo;
   indexBuilds += 1;
-  const given = new Set<RowId>();
-  for (const e of turn.events) {
+  const index = new Map<RowId, NoticeCarrier>();
+  for (const e of events) {
     if (e.kind !== 'user.message' || !e.isSynthetic || e.arrival === undefined) continue;
     const ids: RowId[] = [];
     e.arrival.forEach((entry, n) => {
       const known = carriedOf([entry])[0];
       const id = known === undefined || known.class === 'consent' ? null : rowId.notice(known.class === 'task' ? known.runId : null, e.messageUuid ?? e.id, n);
-      if (id !== null && !given.has(id)) { given.add(id); ids.push(id); }
+      if (id !== null && !index.has(id) && !ids.includes(id)) ids.push(id);
     });
-    if (ids.includes(row.id)) return { carrier: e, ids };
+    const carried = { carrier: e, ids };
+    for (const id of ids) index.set(id, carried);
   }
-  return null;
+  noticeIndexMemo.set(events, index);
+  return index;
 }
 
 // The engine's props for a carrier's text; null where its transcript passes the text through no UserMessage site that
