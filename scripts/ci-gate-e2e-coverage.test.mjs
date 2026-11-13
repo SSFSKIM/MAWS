@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 import process from 'node:process';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { advisoryTrailers, checkCoverage, discoverGroups, importGraph } from './ci-gate-e2e-coverage.mjs';
+import { advisoryTrailers, checkCoverage, discoverGroups, importGraph, miniCopies, miniCopyTrailers } from './ci-gate-e2e-coverage.mjs';
 import { planOf } from '../.github/scripts/gate-plan.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -174,4 +174,28 @@ test('CLI uses the committed merge-base diff, not dirty files, and returns advis
   assert.match(result.stderr, /missing e2e:one.*src\/endpoint.ts/);
   assert.match(result.stdout, /^E2E-Coverage: missing e2e:one/m);
   assert.match(result.stderr, /missing e2e:one.*packages\/protocol\/src\/index.ts/);
+});
+
+test('mini copies: an asked-for group whose specs reach a changed path, with those paths; an unreadable asked-for group is noted', (t) => {
+  const { dir, put } = fixture(t);
+  put('package.json', { scripts: { e2e: 'playwright test', 'e2e:one': 'playwright test e2e/one.spec.ts', 'e2e:two': 'playwright test e2e/two.spec.ts', 'e2e:odd': 'playwright test --grep "$X"', 'e2e:other': 'playwright test --grep "$Y"' } });
+  put('e2e/one.spec.ts', "import './support/scene';");
+  put('e2e/two.spec.ts', "import '../src/endpoint';");
+  put('e2e/support/scene.ts', '');
+  put('src/endpoint.ts', '');
+  const changed = ['e2e/support/scene.ts', 'e2e/two.spec.ts', 'e2e/one.spec.ts'];
+  assert.deepEqual(miniCopies({ root: dir, ts, groups: ['one', 'two', 'odd'], changed }), {
+    copies: [{ group: 'one', paths: ['e2e/one.spec.ts', 'e2e/support/scene.ts'] }, { group: 'two', paths: ['e2e/two.spec.ts'] }],
+    notes: ['skipped e2e:odd: unreadable package script'],
+  });
+  assert.deepEqual(miniCopies({ root: dir, ts, groups: [], changed }), { copies: [], notes: [] });
+  assert.throws(() => miniCopies({ root: dir, ts: null, groups: ['one'], changed }), /TypeScript unavailable/);
+});
+
+test('a MiniCopy trailer keeps its group whatever its paths: three shown, the rest counted, cut at 508 bytes', () => {
+  assert.equal(miniCopyTrailers([{ group: 'one', paths: ['e2e/a.ts', 'e2e/b c.ts', 'e2e/c.ts', 'e2e/d.ts', 'e2e/e.ts'] }]), 'MiniCopy: one e2e/a.ts, "e2e/b c.ts", e2e/c.ts (+2 more)\n');
+  const long = miniCopyTrailers([{ group: 'two', paths: ['e2e/' + 'é'.repeat(300) + '.ts'] }, { group: 'three', paths: ['e2e/x.ts'] }]).split('\n');
+  assert.ok(Buffer.byteLength(long[0]) <= 511 && long[0].startsWith('MiniCopy: two e2e/') && long[0].endsWith('...'));
+  assert.ok(!long[0].includes('\ufffd'));
+  assert.equal(long[1], 'MiniCopy: three e2e/x.ts');
 });
