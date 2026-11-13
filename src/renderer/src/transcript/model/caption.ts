@@ -2,7 +2,7 @@
 // Desktop's words and by its counting: its caption builder (`web/app/v1/c24951e9f-DKQNorfR.js` of app 5.1231.2; the
 // kinds' words at :664-1000, the order at :1176-1183 and :1291-1337, a key's outcome at :615-623 and :1184-1186, the
 // marks at :161-217 and :624-641, the calls of no kind at :1103-1123 and :1313-1334, the one-file part at :1227-1282,
-// the cap at :247-302), with MAWS's three additions to its kinds (the shell's output, kill and monitor calls with the
+// the cap at :137-138 and :247-302), with MAWS's three additions to its kinds (the shell's output, kill and monitor calls with the
 // commands, LS with the file searches, the Task tools with the todos) and the turn's own steps (agents, sent messages).
 import { stoppedMember } from './classify';
 import { baseName } from './copy';
@@ -24,9 +24,12 @@ export interface CaptionStep {
   path: string | null;
 }
 
+// `count` is what the part counts (Desktop's): its keys for a part of a kind, its verbs for the one-file part, its calls
+// for a part of no kind; the cap's `N more actions` sums it over the parts left out.
 export interface CaptionPart {
   text: string;
   calls: number;
+  count: number;
   changed: boolean;
   agent: boolean;
 }
@@ -204,10 +207,10 @@ export function captionParts(steps: readonly CaptionStep[]): CaptionPart[] {
       continue;
     }
     const outcomes = [...part.keys.values()];
-    parts.push({ text: KIND_WORDS[kind](part.keys.size) + marks(countOf(outcomes, 'failed'), countOf(outcomes, 'stopped')), calls: part.calls, changed: CHANGED.has(kind), agent: kind === 'agent' });
+    parts.push({ text: KIND_WORDS[kind](part.keys.size) + marks(countOf(outcomes, 'failed'), countOf(outcomes, 'stopped')), calls: part.calls, count: part.keys.size, changed: CHANGED.has(kind), agent: kind === 'agent' });
   }
   for (const [words, part] of unkinded) {
-    parts.push({ text: (part.calls > 1 ? `${words} ${part.calls} times` : words) + marks(part.failed, part.stopped), calls: part.calls, changed: false, agent: false });
+    parts.push({ text: (part.calls > 1 ? `${words} ${part.calls} times` : words) + marks(part.failed, part.stopped), calls: part.calls, count: part.calls, changed: false, agent: false });
   }
   return parts;
 }
@@ -222,7 +225,7 @@ function oneFilePart(steps: readonly CaptionStep[], path: string): CaptionPart {
   }
   const outcomes = [...verbs.values()];
   const text = `${conjunction([...verbs.keys()])} ${baseName(path)}${marks(countOf(outcomes, 'failed'), countOf(outcomes, 'stopped'))}`;
-  return { text, calls: steps.length, changed: [...verbs.keys()].some((verb) => verb !== 'read'), agent: false };
+  return { text, calls: steps.length, count: verbs.size, changed: [...verbs.keys()].some((verb) => verb !== 'read'), agent: false };
 }
 
 // The turn's order (O-15): the parts that changed files first, then agents, then the rest, each in its run order.
@@ -230,14 +233,14 @@ export function turnOrder(parts: readonly CaptionPart[]): CaptionPart[] {
   return [...parts.filter((part) => part.changed), ...parts.filter((part) => !part.changed && part.agent), ...parts.filter((part) => !part.changed && !part.agent)];
 }
 
-// The parts joined by `, `, the first letter raised; capped, from five parts on, at the first three and `and N more
-// actions`, N the calls of the parts left out. '' for no part.
+// The parts joined by `, `, the first letter raised; capped, from five parts on, at the first three and one more item,
+// `and N more actions`, N the sum of the left-out parts' counts (Desktop's `oe` and its joiner; the architect's ruling of
+// 2026-11-13). '' for no part.
 export function captionText(parts: readonly CaptionPart[], cap: boolean): string {
   if (parts.length === 0) return '';
   const capped = cap && parts.length >= CAP_FROM;
-  const shown = capped ? parts.slice(0, CAP_KEPT) : parts;
-  const rest = capped ? parts.slice(CAP_KEPT).reduce((n, part) => n + part.calls, 0) : 0;
-  return raiseFirst(shown.map((part) => part.text).join(', ') + (capped ? ` ${moreActions(rest)}` : ''));
+  const items = capped ? [...parts.slice(0, CAP_KEPT).map((part) => part.text), moreActions(parts.slice(CAP_KEPT).reduce((n, part) => n + part.count, 0))] : parts.map((part) => part.text);
+  return raiseFirst(items.join(', '));
 }
 
 // The lines the finished edits among these cells added and removed: a failed, stopped or still running edit changed

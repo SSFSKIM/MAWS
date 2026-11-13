@@ -158,7 +158,7 @@ describe('synthetic journals', () => {
     // UX wave U2 (Interfaces §B): the kinds in the order each first occurred, then the parts of no kind; five parts are capped
     expect(ofKind(rows, 'group').map((g) => g.summary)).toEqual([
       'Searched code, searched for files, read 6 files',
-      'Searched the web, fetched a page, ran /test-driven-development and 2 more actions',
+      'Searched the web, fetched a page, ran /test-driven-development, and 2 more actions',
     ]);
     expect(cells.find((c) => c.toolName === 'mcp__docs__search')?.detail).toMatchObject({ kind: 'mcp', server: 'docs', tool: 'search' });
     expect(ofKind(rows, 'divider')[0].toolCalls).toBe(13); // Grep, Glob, six Reads, WebSearch, WebFetch, Skill, ToolSearch, one MCP call

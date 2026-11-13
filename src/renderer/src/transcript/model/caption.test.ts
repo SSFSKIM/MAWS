@@ -59,7 +59,7 @@ describe('a run’s caption (acceptance 2)', () => {
     expect(group.counts).toEqual({ added: 2, removed: 1 });
   });
 
-  it('five parts read the first three and `and N more actions`, N the calls left out; four are not capped', () => {
+  it('five parts read the first three and one more item, `and N more actions`, N the left-out parts’ counts; four are not capped', () => {
     const five = turnOf((t) => {
       read(t, 't1', '/w/a.ts');
       edit(t, 't2', '/w/b.ts');
@@ -68,7 +68,7 @@ describe('a run’s caption (acceptance 2)', () => {
       fetch(t, 't5', 'https://example.test/a');
       fetch(t, 't6', 'https://example.test/b');
     });
-    expect(runOf(five).summary).toBe('Read a file, edited a file, ran a command and 3 more actions');
+    expect(runOf(five).summary).toBe('Read a file, edited a file, ran a command, and 3 more actions');
     const four = turnOf((t) => {
       read(t, 't1', '/w/a.ts');
       edit(t, 't2', '/w/b.ts');
@@ -83,7 +83,7 @@ describe('a run’s caption (acceptance 2)', () => {
       grep(t, 't4', 'TODO');
       fetch(t, 't5', 'https://example.test/a');
     });
-    expect(runOf(one).summary).toBe('Read a file, edited a file, ran a command and 2 more actions');
+    expect(runOf(one).summary).toBe('Read a file, edited a file, ran a command, and 2 more actions');
   });
 
   it('a part of files counts paths and a part of commands counts calls', () => {
@@ -105,7 +105,7 @@ describe('a run’s caption (acceptance 2)', () => {
     });
     expect(runOf(b).summary).toBe('Read and edited copy.ts');
     const steps = stepsOfCells(runOf(b).cells);
-    expect(captionParts(steps)).toEqual([{ text: 'read and edited copy.ts', calls: 3, changed: true, agent: false }]);
+    expect(captionParts(steps)).toEqual([{ text: 'read and edited copy.ts', calls: 3, count: 2, changed: true, agent: false }]);
   });
 
   it('a file whose edit failed and then succeeded has no mark; two failed edits of one file are one failed key', () => {
@@ -251,14 +251,22 @@ describe('the parts, by hand', () => {
     expect(captionText(captionParts([step({ key: 'a', outcome: 'stopped' })]), true)).toBe('Ran a command (1 stopped)');
   });
 
-  it('the parts left out are counted by their calls; without the cap every part is kept', () => {
+  it('the parts left out are counted by what each counts (keys, or calls for a part counted by call); without the cap every part is kept', () => {
     const parts = captionParts([
       step({ kind: 'read', key: '/a', path: '/a' }), step({ kind: 'read', key: '/b', path: '/b' }), step({ kind: 'command', key: 'c1' }),
       step({ kind: 'grep', key: 'g1' }), step({ kind: 'web_fetch', key: 'f1' }), step({ kind: 'todos', key: 'd1' }), step({ kind: 'todos', key: 'd2' }),
     ]);
-    expect(captionText(parts, true)).toBe('Read 2 files, ran a command, searched code and 3 more actions');
+    expect(captionText(parts, true)).toBe('Read 2 files, ran a command, searched code, and 3 more actions');
     expect(captionText(parts, false)).toBe('Read 2 files, ran a command, searched code, fetched a page, updated todos');
     expect(captionText([], true)).toBe('');
+    // a file read twice, left out, is one action: its part counts its one key, not its two calls
+    const keyed = captionParts([
+      step({ kind: 'command', key: 'c1' }), step({ kind: 'grep', key: 'g1' }), step({ kind: 'web_fetch', key: 'f1' }), step({ kind: 'todos', key: 'd1' }),
+      step({ kind: 'read', key: '/a', path: '/a' }), step({ kind: 'read', key: '/a', path: '/a' }),
+    ]);
+    expect(captionText(keyed, true)).toBe('Ran a command, searched code, fetched a page, and 2 more actions');
+    expect(captionText([...keyed.slice(0, 4), ...captionParts([step({ kind: null, key: 'x', words: 'used docs · search' })])], true)).toBe('Ran a command, searched code, fetched a page, and 2 more actions');
+    expect(captionText(captionParts([step({ kind: 'command', key: 'c1' }), step({ kind: 'grep', key: 'g1' }), step({ kind: 'web_fetch', key: 'f1' }), step({ kind: 'todos', key: 'd1' }), step({ kind: 'glob', key: 'h1' })]), true)).toBe('Ran a command, searched code, fetched a page, and 2 more actions');
   });
 
   it('three verbs of one file are joined as a list', () => {
@@ -273,7 +281,7 @@ describe('the parts, by hand', () => {
     ]);
     expect(captionText(parts, false)).toBe('Ran a command, read a file, ran an agent, edited a file, created a file, used docs · search');
     expect(captionText(turnOrder(parts), false)).toBe('Edited a file, created a file, ran an agent, ran a command, read a file, used docs · search');
-    expect(captionText(turnOrder(parts), true)).toBe('Edited a file, created a file, ran an agent and 3 more actions');
+    expect(captionText(turnOrder(parts), true)).toBe('Edited a file, created a file, ran an agent, and 3 more actions');
   });
 });
 
@@ -291,7 +299,7 @@ describe('a turn’s line (acceptance 7, decisions 8 and 9)', () => {
       edit(t, 't8', '/w/README.md', 'error');
     });
     const line = lineOf(b);
-    expect(line.caption).toBe('Edited 2 files (1 failed), ran 3 commands, read a file and 2 more actions');
+    expect(line.caption).toBe('Edited 2 files (1 failed), ran 3 commands, read a file, and 2 more actions');
     expect(line.parts).toEqual(['edited 2 files (1 failed)', 'ran 3 commands', 'read a file', 'searched code', 'fetched a page']);
     expect(line.counts).toEqual({ added: 2, removed: 1 });
     expect(line.toolCalls).toBe(8); // the data the report reads until U2b
