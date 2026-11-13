@@ -111,10 +111,12 @@ export function readComputerUse(state: TranscriptState | null, waiting: Readonly
   const kept = readings.get(state);
   if (kept && kept.waiting === waiting && kept.runs === runs) return kept.reading;
   const turns = state.order.map((id) => state.turns.get(id)!);
-  // the latest turn the engine has taken: a prompt written but not started is no turn yet
-  const latest = turns.findLast((turn) => turn.accepted || turn.state === 'closed');
+  // the latest turn the engine has taken (accepted): a prompt written but not started is no turn yet, nor is one that
+  // was dropped before it started (cancelled, discarded or refused closes its turn unaccepted, reduce.ts `drop`), so a
+  // prompt queued and then cancelled behind a running call does not end that call's turn here
+  const latest = turns.findLast((turn) => turn.accepted);
   const running = runs && latest !== undefined && latest.state === 'open' ? latest : null;
-  const turn = running ?? turns.findLast((t) => (t.accepted || t.state === 'closed') && seenIn(t).length > 0) ?? null;
+  const turn = running ?? turns.findLast((t) => t.accepted && seenIn(t).length > 0) ?? null;
   const reading: ComputerUseReading = turn === null ? NOTHING : { turn: turn.id, running: turn === running, calls: seenIn(turn).length === 0 ? NO_CALLS : callsOf(seenIn(turn), turn === running, waiting) };
   readings.set(state, { waiting, runs, reading });
   return reading;
