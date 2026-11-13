@@ -1,7 +1,8 @@
 // The search for a file the transcript names, its memory and its queue (UX wave U6c,
 // docs/doperpowers/plans/2026-11-12-ux-wave-U6c-linked-file.md, Interfaces §B and the sequences S4 to S15). Every
 // transcript here is made of invented records, written into a scratch store.
-import { readdirSync, readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { closeSync, constants, openSync, readdirSync, readFileSync } from 'node:fs';
 import { open as fsOpen, rename, writeFile, mkdir, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -224,6 +225,24 @@ describe('names: what the transcript names', () => {
     file = join(fixture.configHome, 'projects');
     expect(await paths().names(S, P)).toBe(false);
     expect(await paths({ transcript: () => Promise.reject(new Error('index closed')) }).names(S, P)).toBe(false);
+  });
+
+  // the branch review's finding 6: a located transcript that is not a regular file is refused before any read; opened
+  // without blocking, a FIFO with no writer cannot hold the daemon's one search slot
+  it('a transcript that is a FIFO answers not named at once, and the next search runs', async () => {
+    await writeTranscript([linkTo(P)]);
+    const fifo = join(dirname(file!), 'fifo.jsonl');
+    execFileSync('mkfifo', [fifo]);
+    const piped = 'app-fifo' as AppSessionId;
+    const named = paths({ transcript: async (appSessionId) => (appSessionId === piped ? fifo : file), bounds: { waitMs: 1_000 } });
+    try {
+      const started = performance.now();
+      expect(await named.names(piped, P)).toBe(false);
+      expect(performance.now() - started).toBeLessThan(1_000); // answered, not given up on
+      expect(await named.names(S, P)).toBe(true);
+    } finally {
+      closeSync(openSync(fifo, constants.O_RDWR | constants.O_NONBLOCK)); // releases an open still waiting for a writer
+    }
   });
 
   it('an ask whose signal has already ended answers at once and opens nothing', async () => {
