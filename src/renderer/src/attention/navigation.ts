@@ -20,7 +20,7 @@ import { surfaceSession, surfaceTabs } from '../panel/surface-model';
 import { SIDE_TOOL_ID } from '../side/actions';
 import { selectNeedsYou, useAttention } from '../stores/attention';
 import { pageOpen, tabOnScreen, useLayout } from '../stores/layout';
-import { activeTab, currentSet, floatingPane } from '../stores/layout-model';
+import { currentSet, floatingPane } from '../stores/layout-model';
 import { useNotices } from '../stores/notices';
 import { queueComposerAttachment } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
