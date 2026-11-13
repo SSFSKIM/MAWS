@@ -174,3 +174,58 @@ No stop was met. No contract of another child changed, and nothing the owner see
 - **The `Shell.panel.test.tsx` case "an addTool before hydration writes nothing…".** It asserts that the 250 ms write-back has not fired yet, which the shared VM's load can break; it failed once and passed alone, as its whole file and on the rerun. A ticket could make it wait on fake timers.
 - **`ScmShell.test.tsx` ("draws the selected file's hunks…") and `viewer.test.tsx` ("a follow-the-file re-read…") failed on master on the loaded VM** (load 17 to 33) and passed in the final run on the unloaded one. They look load-bound (a `waitFor` and a 5 s time-out), as do the timing failures of the first whole run. Probably no ticket; at most a note for the wave's account of the VM's noise.
 - **The panel harness's widths** (fixed at the boundary review): `setWidth(px)` now restores the column and writes through `setPanelWidth`, and the width buttons read the width of the class in view. 380 is now a width like any other, so `e2e/panel.spec.ts`'s child scene that expects 420 for `setWidth(380)` ("automatic narrow defaults cap at 420px") reads 380 now; its "and back" steps at 380 (the terminal refit, the review header) return to 380 px rather than to the automatic width. Those scenes are M9's to bring to the new widths.
+
+## The whole run, M2 to M9 (2026-11-13, the controller)
+
+Branch `ux-wave/U8b`, from `78d343799` (the document) to `a8a96e5d5`. Each milestone was built by a fresh executor and reviewed at its boundary, and every review closed clean. The milestones, with their fix rounds, are listed in the document's Progress; the decisions are in Decision Logs 6 to 18. Masters merged: `e71334239` (U6a), `d7ca414ae`, `80dcc59af`, `c0e7b2ae8` (U10a), and `9df6b4493` (U13a, five conflicts resolved as both, reviewed).
+
+### Validation evidence (VM dc-uxwave5-26dc)
+
+**At M9's head**
+- `pnpm exec tsc --noEmit -p tsconfig.e2e.json`: 0 errors.
+- `pnpm exec eslint e2e`: clean.
+- `node --test .github/scripts/*.test.mjs scripts/*.test.mjs`: 556 of 556 pass, also at the fix round's head.
+- `pnpm typecheck`: exit 0. The first run failed in desk web, fixed in `da097279b` (Decision Log 18).
+- `pnpm exec vitest run src/shared/machine`: 129 of 131 pass. The 2 failures are the known `git-reads.test.ts`.
+- `pnpm test`, run once for the landing (Decision Log 5), detached: 2,504 files passed, 7 failed, 27 skipped. Six of the seven are the known master failures named in the common brief. The seventh, `src/main/org/rows.test.ts`, timed out at 5 s under the suite's load and passes alone (36/36); the branch touches nothing under `src/main/org`.
+- Stderr: 75 test files wrote to it in the whole run. 73 of them, and their modules, are untouched by this branch. The other 2 were traced to other tests (`history-window.test.ts`'s quiet follows, `ipc/events.test.ts`'s deliberately invalid event).
+
+**At each milestone:** the typecheck of the projects it changed, eslint on its changed files, and vitest over its directories and their importers. The counts are in each milestone's task report.
+
+### e2e groups whose spec files changed (none has run)
+
+`e2e:layout`, `e2e:default`, `e2e:panel`, `e2e:code`, `e2e:scm`, `e2e:agents`, `e2e:agents-live`, `e2e:lane-a`, `e2e:remote`, `e2e:cross-build`, `e2e:browser-comment`, `e2e:terminal`, `e2e:presentations`, `e2e:browser`, `e2e:tools`, `e2e:supervisor-daemon`, `e2e:side`, `e2e:browser-chrome`, `e2e:dashboard`.
+
+Also changed: `c12-prerun.spec.ts` (behind its flag) and `panel-live.spec.ts`.
+
+Affected through shared helpers only: `e2e:deliverables` and `e2e:design`, whose bounds are open premises below. `e2e:desk-web` joins the Mac set (Decision Log 18).
+
+### Open premises, and the scene that settles each
+
+| Premise | Scene that settles it |
+|---|---|
+| Tab shapes at 280 px | `e2e/ux2-shell.spec.ts:488–493` |
+| Strip order | `ux2-shell.spec.ts:368`; `cross-build.spec.ts:2161` |
+| Radix's focus after Shift+F10 | `panel.spec.ts:1684–1693`, called at `panel.spec.ts:1783` |
+| F keeping the session tab in front | `cross-build.spec.ts:2287` |
+| The 316 px comment host | `deliverables.spec.ts:1020` |
+| The 150 px design world under the strip | `design.spec.ts:209–215`, bound at `design.spec.ts:279` |
+| The new reverse crossing of the global pin and the no-session selection | `cross-build.spec.ts:2218–2234`, `2328–2333` |
+| A2's two roots | `agent-tools.spec.ts:702–726` |
+
+### Not verified
+
+- Every e2e scene.
+- The cross-build run with F.
+- Class 1a.
+- The branch review.
+- Desk web's rendering beyond its typecheck, though no pinned row text changed.
+- `activeNoSession` read alone by F: this build always writes the matching `stacks` entry (Decision Log 17).
+
+### Residue (ticket candidates)
+
+- `app/Shell.panel.test.tsx` "an addTool before hydration writes nothing…" relies on the real 250 ms write-back not having fired, and failed once under VM load. Move it to fake timers.
+- `panel/summary/PushState.test.tsx` "Sign in types gh auth login into a Terminal tab" registers no Terminal tool, so every run prints `panel: no tool registered as terminal`. Predates the branch.
+- Load-sensitive time-outs in a broad run, each passing alone: `transcript/view/TranscriptSlot.test.tsx` (10 s hook) and `src/main/org/rows.test.ts` (5 s).
+- No e2e fixture has a failed agent, so A7's "finished with errors" has unit proof only. No scene shows the ask sheet giving back its place.
+- Tracker row added (`docs/tech-debt-tracker.md`): a folded parent does not say that a nested agent waits.
