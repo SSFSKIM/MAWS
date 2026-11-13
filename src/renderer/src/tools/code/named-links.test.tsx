@@ -115,6 +115,9 @@ describe('a resource is read once: nothing inside it is a link', () => {
     '![i](</vault/[x](/secret).png>)',
     '[r][ref]\n\n[ref]: </vault/[x](/secret).txt>',
     '[r][ref]\n\n[ref]: /vault/a.txt "see [x](/secret)"',
+    '# Title\n[ref]: </vault/[x](/secret).txt>',
+    '[r][a]\n\n[a]: /work/a.md\n[ref]: </vault/[x](/secret).txt>',
+    '> [a\n>\n> b](/secret)',
   ])('%j', (markdown) => {
     const clicked = clickedPaths(markdown);
     expect(clicked).not.toContain(S);
@@ -123,7 +126,19 @@ describe('a resource is read once: nothing inside it is a link', () => {
     expect(named).not.toContain(S);
   });
 
-  it.each(['[a](/work/a.md "t") [b](/secret)', '![i](/work/i.png) [b](/secret)'])('%j: the link after it names its path', (markdown) => {
+  it.each([
+    '[a](/work/a.md "t") [b](/secret)',
+    '![i](/work/i.png) [b](/secret)',
+    `[r](</vault/${'a'.repeat(20_000)}>)\n\n[b](/secret)`,
+    `> [r](/outer "${'a'.repeat(20_000)}")\n>\n> [b](/secret)`,
+    // text shaped like a definition that Markdown does not take as one (fix round 1, item 1)
+    '1.2 [ref]: [b](/secret)',
+    '[ref]: [b](/secret) extra',
+    '[ref]: /a "see [b](/secret)" extra',
+    'Here is the file:\n[ref]: [b](/secret)',
+    '> Here is the file:\n[ref]: [b](/secret)',
+    '[ref]: /a\n"see [b](/secret)" extra',
+  ])('%j: the link after it names its path', (markdown) => {
     expect(clickedPaths(markdown)).toContain(S);
     expect(linkPaths(markdown)).toContain(S);
   });

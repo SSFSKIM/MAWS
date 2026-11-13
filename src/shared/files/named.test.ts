@@ -120,6 +120,12 @@ describe('the link form: linkPaths', () => {
     ['[ref]:\n  </vault/[x](/secret).txt>', []],
     ['> [ref]: </vault/[x](/secret).txt>', []],
     ['- [ref]: </vault/[x](/secret).txt>', []],
+    ['1. [ref]: </vault/[x](/secret).txt>', []],
+    ['   [ref]: </vault/[x](/secret).txt>', []], // three spaces of indentation
+    ['# Title\n[ref]: </vault/[x](/secret).txt>', []], // after a heading: a new paragraph
+    ['[a]: /work/a.md\n[ref]: </vault/[x](/secret).txt>', []], // after another definition
+    ['[ref]: </vault/[x](/secret).txt>  \nnext', []], // only spaces after it on its line
+    ['> [a\n>\n> b](/secret)', []], // a quote's blank line ends the paragraph: no link pairs across it (fix round 1, item 2)
     [`[r](</vault/${'a'.repeat(20_000)}[x](/secret).txt>)`, []], // past the bound a resource's end is not known: nothing in it is read
   ])('%j: nothing inside a resource or a definition is a link', (text, named) => {
     expect(linkPaths(text)).toEqual(named);
@@ -133,6 +139,14 @@ describe('the link form: linkPaths', () => {
     '[^1]: [b](/secret)', // a footnote's text is Markdown, not a destination
     '[a](<unclosed [b](/secret)', // no resource: what follows its `(` is text
     `[r](</vault/${'a'.repeat(20_000)}>)\n\n[b](/secret)`, // a resource past the bound ends before the next blank line
+    `> [r](/outer "${'a'.repeat(20_000)}")\n>\n> [b](/secret)`, // … and before a quote's blank line (fix round 1, item 2)
+    // fix round 1, item 1: text shaped like a definition that Markdown does not take as one
+    '1.2 [ref]: [b](/secret)', // no list marker: `1.2` is text
+    '[ref]: [b](/secret) extra', // something after the destination on its line
+    '[ref]: /a "see [b](/secret)" extra', // something after the title on its line
+    'Here is the file:\n[ref]: [b](/secret)', // a definition cannot interrupt a paragraph
+    '> Here is the file:\n[ref]: [b](/secret)', // nor a quote's paragraph, which the line continues
+    '[ref]: /a\n"see [b](/secret)" extra', // the title line fails: a definition without a title, then a paragraph
   ])('%j: a link after a resource, or where none is, still names its path', (text) => {
     expect(linkPaths(text)).toContain(S);
   });
