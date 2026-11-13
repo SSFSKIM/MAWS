@@ -4,6 +4,8 @@ import type { OrgKey } from '@shared/machine/org-key';
 import type { MachineRef } from '@shared/machine/ref';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { EMPTY_REGISTRY, type OrgProjectLocation, type OrgProjects, type RegistryProject } from '../stores/registry';
+import type { MachineState } from '@shared/ipc/schema/machines'; // the UX wave, U9
+import { locationView } from './location-view'; // the UX wave, U9
 import { defaultLinkOf, insideOf, intoChoices, locationLines, locationState, machinesWords, pendingWords, suggestionOf, type LocationView, type Resolved } from './locations';
 
 // The project registry's words on the page (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §J.3).
@@ -29,6 +31,19 @@ describe('a location’s state in words', () => {
     expect(locationState(location(MINI, 'p', { state: 'missing' }), off)).toEqual({ kind: 'offline', words: 'offline', card: `offline since ${formatDayTime(Date.parse(DOWN_SINCE))}` });
     expect(locationState(location(MINI, 'p'), view([TEST_MACHINE], { [MINI]: SEEN }))).toMatchObject({ card: `offline since ${formatDayTime(Date.parse(SEEN))}` });
     expect(locationState(location(OTHER_MACHINE, 'p'), off)).toEqual({ kind: 'offline', words: 'offline', card: 'offline' }); // never seen
+  });
+
+  // The UX wave, U9 (O-39, A2): the card reads the link's phase as the rows do (`locationView`): a machine that connects,
+  // or reconnects within the minute, is not offline; past the minute, or after a first attempt that failed, it is
+  it('says offline only from the minute on or after a failed first attempt, not while the machine connects or reconnects', () => {
+    const NOW = Date.parse('2026-11-13T09:00:00.000Z');
+    const roster = (over: Partial<MachineState>) =>
+      new Map<MachineRef, MachineState>([[MINI, { ref: MINI, name: 'mini', local: false, state: 'up', since: DOWN_SINCE, generation: 1, ...over }]]);
+    const at = (over: Partial<MachineState>, now = NOW) => locationState(location(MINI, 'p'), locationView(roster(over), {}, TEST_MACHINE, now));
+    expect(at({ state: 'connecting', generation: 0 }), 'connecting').toBeNull();
+    expect(at({ state: 'down', since: new Date(NOW - 30_000).toISOString() }), 'reconnecting').toBeNull();
+    expect(at({ state: 'down', since: new Date(NOW - 30_000).toISOString() }, NOW + 30_000), 'past the minute').toMatchObject({ kind: 'offline' });
+    expect(at({ state: 'down', generation: 0 }), 'a first attempt that failed').toEqual({ kind: 'offline', words: 'offline', card: `offline since ${formatDayTime(Date.parse(DOWN_SINCE))}` });
   });
 
   it('says a missing folder on its machine, a replaced one, and nothing for one that is there', () => {
