@@ -1173,7 +1173,19 @@ test('a pass on an HTML page: Escape keeps the text in the card, a second pick l
       { kind: 'artifact-element', locator: secondLocator, text: 'Say which quarter this is.' },
     ]);
     expect(sent, 'the writer’s text of the two, to the byte').toBe(commentsMessage(read!.comments, 'main'));
-    await expect.poll(async () => value(await invoke(s.page, 'session.status', { appSessionId: id })).turn, { timeout: 20_000, message: 'its one turn ended' }).toBeNull();
+    // the turn that prompt opened ran to its end: the replay maps the recorded ids onto the written prompt's uuid, so the
+    // result and the completed lifecycle name that prompt (a turn not yet begun reads `turn: null` too)
+    const prompt = (written()[0]!.frame as { uuid?: string }).uuid;
+    expect(typeof prompt, 'the written prompt carries its uuid').toBe('string');
+    const answered = () => {
+      const frames = s.journal(id).filter((r) => r.direction === 'in').map((r) => r.frame as { type?: string; state?: string; command_uuid?: string; user_message_uuid?: string });
+      return {
+        result: frames.some((f) => f.type === 'result' && f.user_message_uuid === prompt),
+        completed: frames.some((f) => f.type === 'command_lifecycle' && f.state === 'completed' && f.command_uuid === prompt),
+      };
+    };
+    await expect.poll(answered, { timeout: 20_000, message: 'the turn of that prompt reached its result and its completed lifecycle' }).toEqual({ result: true, completed: true });
+    await expect.poll(async () => value(await invoke(s.page, 'session.status', { appSessionId: id })).turn, { timeout: 20_000, message: 'and the session holds no turn after it' }).toBeNull();
     expect(written(), 'one message for the two comments').toHaveLength(1);
   });
 });
