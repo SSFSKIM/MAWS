@@ -22,7 +22,7 @@ How to see it working: in a session whose transcript holds a link to a text file
 - [x] (2026-11-13) The adversarial review of the document (four findings: two P1, two P2), and the architect's rulings on them and on the reported points.
 - [x] (2026-11-13 10:28Z) Revision 2: the rulings folded in (Decision Log 4 to 10); the click sources enumerated from the renderer's code at master and checked on U3a's and U13a's branches ("The click sources"); the document checked against parent pin `4d13880be`; eight points reported at the revision.
 - [x] (2026-11-13) M1 — The rule, the search and its queue, and the measurement. Commits `02db45d5d..06fe6d32b`, fix round `eb03e9e87..46fbc17d5` (the URL step, Decision Log 12; the waiting results bounded, Decision Log 13); task review clean after one fix round. Measurement within both bounds (Surprises & Discoveries).
-- [ ] M2 — The admission: the request's key, the service, the daemon's wiring, the wire.
+- [x] (2026-11-13) M2 — The admission: the request's key, the service, the daemon's wiring, the wire. Commits `392a801d7..bc7575b3d` (wire minor 37), and `6274a787a`, the test the architect asked for Decision Log 14(b); task review approved, no findings to fix.
 - [ ] M3 — The window, the e2e scene, the record, and the acceptance run.
 
 ## The landing's edge
