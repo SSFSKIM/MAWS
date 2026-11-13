@@ -14,11 +14,11 @@ The execution document is `docs/doperpowers/plans/2026-11-12-ux-wave-U8b-column-
 - **Three slices in the layout store**: `panelGroups`, `panelWidths` and `cardsOpen`.
   - They are read at hydration and written through `persistedKeys` / `storedValue`.
   - `storedLayout(state)` exports every key as `persistLayout` writes it.
-  - **The first read** happens when the listing answered and holds no `panelTools.groups`:
+  - **The first read** happens when the listing and every read of hydration answered and the listing holds no `panelTools.groups` (revised at the boundary review: a launch with a failed read defers it whole, nothing pruned and nothing marked):
     - In each session's list, a tab of a single-instance tool that is not in view (or to be shown) by §A's reading is dropped. The pins, and the tabs of multi-instance or unregistered tools, are kept.
     - Each scope whose list changed is repaired.
     - `panelTools.widths` becomes `{ wide: regions.panel.width, or null when that is 380; narrow: null }`.
-    - The three keys and each pruned `panel.<session>` are written at once.
+    - The three keys, each pruned `panel.<session>` and, when the prune dropped some, `panelTools.params` are written at once.
   - `hydrate` takes `multiInstance`, and `ipc/events.ts` passes the host registry's answer.
 - **The model** in `panel/surface-model.ts`:
   - `readGroups` / `sideGroups` implement §A's reading rule.
@@ -132,7 +132,7 @@ What the first whole run's other failures are:
    - `updatePanelTabs` keeps its `{ activeTabId }` options and `setSurfaceStack` stays.
    - A repaired scope's `activeTabId` takes §A's meaning at once. This differs from the stacking rule's only in a scope with two surfaces whose refs another session's write changed.
 6. The first read keeps a hidden column's "to be shown" tab as well as one in view.
-7. A failed `layout.list` is no first read.
+7. A launch at which `layout.list` or any `layout.get` failed is no first read (revised at the boundary review; first written as "a failed `layout.list`" alone).
 8. The bar's restore value for an automatic width is 0, so a drag past either end hands back "automatic". `floatPanel` is called without a width.
 9. F's frozen reader is in test support. The acts are tested in `panel/side-groups.test.ts`, because the node project cannot import the renderer store (composite, TS6307). That file also avoids U13a's `surface-model.test.ts`.
 10. `WIDE_SURFACES` moves to `shell-geometry.ts`.
@@ -173,3 +173,4 @@ No stop was met. No contract of another child changed, and nothing the owner see
 
 - **The `Shell.panel.test.tsx` case "an addTool before hydration writes nothing…".** It asserts that the 250 ms write-back has not fired yet, which the shared VM's load can break; it failed once and passed alone, as its whole file and on the rerun. A ticket could make it wait on fake timers.
 - **`ScmShell.test.tsx` ("draws the selected file's hunks…") and `viewer.test.tsx` ("a follow-the-file re-read…") failed on master on the loaded VM** (load 17 to 33) and passed in the final run on the unloaded one. They look load-bound (a `waitFor` and a 5 s time-out), as do the timing failures of the first whole run. Probably no ticket; at most a note for the wave's account of the VM's noise.
+- **The panel harness's widths** (fixed at the boundary review): `setWidth(px)` now restores the column and writes through `setPanelWidth`, and the width buttons read the width of the class in view. 380 is now a width like any other, so `e2e/panel.spec.ts`'s child scene that expects 420 for `setWidth(380)` ("automatic narrow defaults cap at 420px") reads 380 now; its "and back" steps at 380 (the terminal refit, the review header) return to 380 px rather than to the automatic width. Those scenes are M9's to bring to the new widths.

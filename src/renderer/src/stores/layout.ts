@@ -511,10 +511,12 @@ export function createLayoutStore() {
         localMachine = client.localMachine;
         const absent: LayoutKey[] = []; // keys layout.json does not hold yet (not keys that failed to read)
         const readAs = new Map<LayoutKey, unknown>(); // each key read as a valid value, as layout.json holds it
+        const failed: LayoutKey[] = []; // keys whose read did not answer (UX wave U8b: the first read waits for them)
         const read = async <T>(key: LayoutKey, schema: z.ZodType<T>, fallback: T): Promise<T> => {
           const result = await client.invoke('layout.get', { key });
           if (!result.ok) {
             console.error(`[layout] layout.get ${key} failed`, result.error);
+            failed.push(key);
             return fallback;
           }
           if (result.value.value === null) {
@@ -596,8 +598,12 @@ export function createLayoutStore() {
         const hydratedPins = pins(panelPinned, get().panelActiveNoSession ?? storedNoSession.activeTabId);
         // UX wave U8b (Interfaces §A, "The first read"): once per profile, each session's tabs of a single-instance tool
         // that are not in view by §A's reading are dropped (the old rule never removed a tool's tab), the pins and the
-        // tabs of a multi-instance or unregistered tool kept; each scope whose list that changed is repaired.
-        const firstRead = listed.ok && !held.has('panelTools.groups');
+        // tabs of a multi-instance or unregistered tool kept; each scope whose list that changed is repaired. It prunes and
+        // marks the profile for good, so it waits for a launch at which the listing and every read answered: a failed
+        // read's fallback would make a scope look as if it held less than it does (a value that answered but is not valid
+        // counts as read: it reads the same at every launch, as F reads it).
+        const complete = listed.ok && failed.length === 0;
+        const firstRead = complete && !held.has('panelTools.groups');
         const asRead: Scoped = { ...hydratedPins, panelBySession, panelSurfaces, panelGroups: { version: 1, lower: liveGroups(storedGroups.lower, panelBySession) } };
         let hydratedPanels: Scoped = asRead;
         const prunedPanels: AppSessionId[] = [];
@@ -645,12 +651,14 @@ export function createLayoutStore() {
         if (regions !== persistedRegions || (readAs.has('regions') && !sameJson(readAs.get('regions'), persistedRegions))) unsaved.add('regions'); // P5 O6 M2: a migrated version too
         if (!sameJson(get().panelSurfaces, storedSurfaces) || (readAs.has('panelTools.surfaces') && !sameJson(readAs.get('panelTools.surfaces'), storedSurfaces))) unsaved.add('panelTools.surfaces');
         // UX wave U8b: the three keys are written at a first read (so the next launch is not one), and each session list
-        // the first read pruned.
-        if (listed.ok) for (const key of ['panelTools.groups', 'panelTools.widths', 'cards.open'] as const) if (!held.has(key)) unsaved.add(key);
+        // the first read pruned, with the params it left (persistence takes the filtered params as its baseline).
+        if (complete) for (const key of ['panelTools.groups', 'panelTools.widths', 'cards.open'] as const) if (!held.has(key)) unsaved.add(key);
         for (const id of prunedPanels) unsaved.add(`panel.${id}`);
+        if (prunedPanels.length > 0 && Object.keys(panelParams).length !== Object.keys(storedParams.params).length) unsaved.add('panelTools.params');
         const values: Partial<Record<LayoutKey, unknown>> = {
           regions, 'main.tabs': get().main, 'panel.pinned': panelPinned, 'panelTools.surfaces': get().panelSurfaces,
           'panelTools.groups': get().panelGroups, 'panelTools.widths': panelWidths, 'cards.open': storedValue('cards.open', cardsOpen),
+          'panelTools.params': storedValue('panelTools.params', panelParams),
           ...Object.fromEntries(prunedPanels.map((id) => [`panel.${id}`, get().panelBySession.get(id)])),
         };
         for (const key of unsaved) {
