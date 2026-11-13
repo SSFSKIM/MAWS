@@ -32,7 +32,7 @@ import { applyRequest, followSelection, selectFile, toggleCollapsed, type ScmUi 
 
 export interface ScmShellProps {
   appSessionId: AppSessionId;
-  directory: string; // the checkout: session.worktree?.path ?? session.directory
+  directory: string; // the checkout: the session's working folder, workingFolder(session).path
   ui: StoreApi<ScmUi>;
 }
 
