@@ -64,7 +64,7 @@ export interface LiveDatasets {
 // E3 M3 fix: a refusal that says what is wrong, which a missing grant does not cover (P5 O7 M5c: a machine that doesn't
 // offer connectors is one: no grant would make the dashboard refresh)
 const CONCRETE: readonly LivePause[] = ['mayWrite', 'failed', 'watchLimit'];
-/** A pause that says what is wrong, which no grant would mend (U11a #456: also the source sheet's test). */
+/** A pause that says what is wrong, which no grant would mend (U11a board 456: also the source sheet's test). */
 export const concrete = (pause: LivePause) => CONCRETE.includes(pause) || notOfferedOn(pause) !== null;
 
 /** The pause a view says: a concrete refusal first (the tool may write, a failed refresh, the watch limit), then no read

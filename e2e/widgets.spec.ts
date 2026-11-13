@@ -237,7 +237,7 @@ async function detailUninstall(detail: Locator): Promise<void> {
   await detail.page().getByRole('menuitem', { name: 'Uninstall…', exact: true }).click();
 }
 const sheetOf = (page: Page, action: string) => page.locator(`[data-plugins-sheet="${action}"]`);
-// #523: the window's colour at a point, from a one-pixel screenshot decoded in the page.
+// board 523: the window's colour at a point, from a one-pixel screenshot decoded in the page.
 async function pixelAt(page: Page, point: { x: number; y: number }): Promise<number[]> {
   const shot = await page.screenshot({ clip: { ...point, width: 1, height: 1 } });
   return page.evaluate(async (base64) => {
@@ -1071,9 +1071,9 @@ test.describe('plugin management (E8)', () => {
     expect(backend.consoleErrors()).toEqual([]);
   });
 
-  // #523 (UX wave U11a M3; the execution document's Interfaces §E): where layers stack only the top one's backdrop
+  // board 523 (UX wave U11a M3; the execution document's Interfaces §E): where layers stack only the top one's backdrop
   // paints, so the window is dimmed once; Esc and the focus are the dialog library's, the top layer's first.
-  test('#523: the Plugins dialog, then a plugin’s Uninstall… confirmation over it: one backdrop paints, the confirmation’s, and the window reads as under one layer; Esc closes the confirmation, the dialog keeps the keyboard; Esc again closes the dialog', async ({ appBackend: backend }) => {
+  test('board 523: the Plugins dialog, then a plugin’s Uninstall… confirmation over it: one backdrop paints, the confirmation’s, and the window reads as under one layer; Esc closes the confirmation, the dialog keeps the keyboard; Esc again closes the dialog', async ({ appBackend: backend }) => {
     const { page } = backend;
     const w = await openSessionPlugins(backend);
     const backdrops = page.locator('[data-scrim]');

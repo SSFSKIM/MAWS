@@ -1,4 +1,4 @@
-// One scrim for every modal layer (UX wave U11a, M3; #523; the execution document's Interfaces §E): a sheet or a dialog
+// One scrim for every modal layer (UX wave U11a, M3; board 523; the execution document's Interfaces §E): a sheet or a dialog
 // dims the window with `SCRIM`, and where layers stack only the top one's backdrop paints, so the window behind is dimmed
 // once however many are open. The top layer is the one mounted last; one that leaves hands the paint back to the layer
 // under it. `Sheet` and the hand-drawn dialogs take their backdrop from here (`Backdrop` through Radix's `asChild`).

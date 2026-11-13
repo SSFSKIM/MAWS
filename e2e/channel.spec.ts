@@ -10,7 +10,7 @@
 // line that says so. The window, the stream's head and foot, its to-human entries and the opened exchange's head and foot
 // are attached as PNGs for the architect's look; the case asserts structure only: nothing in the tab is wider than its
 // box, and every action is drawn whole inside its entry. The open answer's weight in bytes of JSON is annotated.
-// UX wave U11a M3 (#505): under classic scrollbars the footer and a stream row share both edges; in a 420 px column nothing
+// UX wave U11a M3 (board 505): under classic scrollbars the footer and a stream row share both edges; in a 420 px column nothing
 // overflows and every row's names give way in one order (the title, the labels, the chip, then the alias, never under
 // twelve characters); and a live channel's composer lines up the same under classic and overlay scrollbars.
 // UX wave U11a M4 (S-09; Interfaces §F, "The footer"): while the org's hub status reads connected, a channel whose own
@@ -223,7 +223,7 @@ function overflowing(root: Element): string[] {
     .map((el) => `${el.tagName.toLowerCase()}${el.hasAttribute('data-channel-entry') ? `[${el.getAttribute('data-channel-entry')}]` : ''} "${(el.textContent ?? '').slice(0, 60)}" ${el.scrollWidth} > ${el.clientWidth}`);
 }
 
-// #505 (UX wave U11a M3; the execution document's Interfaces §E): where a row's names give way out of §E's one order.
+// board 505 (UX wave U11a M3; the execution document's Interfaces §E): where a row's names give way out of §E's one order.
 // In each row that holds names, a part that has given way (cut, or narrower than its whole) means every part that gives
 // way before it is at its minimum: the title and the chip at nothing, the recipients at their twelve characters; and an
 // alias is never narrower than twelve characters, or than its whole where that is less. Each fault as `<row> <part>: …`.
@@ -341,7 +341,7 @@ test('channel: a seeded project channel offline, its exchange of 40 opened, its 
       await expect(toHuman.and(page.locator(`[data-machine="${local}"]`))).toHaveCount(2);
 
       await expect.poll(() => log.evaluate((el) => (el as HTMLElement).offsetWidth - el.clientWidth), { message: "the stream's scrollbar takes width (classic scrollbars)" }).toBeGreaterThan(0);
-      // #505: the footer reserves the stream's gutter too, so its column is the rows'.
+      // board 505: the footer reserves the stream's gutter too, so its column is the rows'.
       await expectSameEdges(channel.locator('[data-channel-offline]'), channel.locator('[data-channel-entry="say"]').first(), "the offline footer and a stream row share both edges under classic scrollbars");
       await test.info().attach('channel-footer-offline-classic', { body: await channel.locator('[data-channel-offline]').screenshot(), contentType: 'image/png' });
       await test.info().attach('channel-window', { body: await page.screenshot(), contentType: 'image/png' });
@@ -376,7 +376,7 @@ test('channel: a seeded project channel offline, its exchange of 40 opened, its 
       await channel.evaluate((root) => root.querySelectorAll('[data-probe]').forEach((probe) => probe.remove()));
       expect(probeFaults(probed), `the check names every clipped probe and not the mirror: ${probed.join('; ')}`).toEqual([]);
 
-      // #505: in a column about 420 px wide (a split pane's) no row overflows and the names give way in the one order:
+      // board 505: in a column about 420 px wide (a split pane's) no row overflows and the names give way in the one order:
       // the long alias, title and machine of the seed's second session meet there, the exchange opened.
       await channel.evaluate((el) => void ((el as HTMLElement).style.width = '420px'));
       await expect.poll(() => channel.evaluate((el) => Math.round(el.getBoundingClientRect().width))).toBe(420);
@@ -449,7 +449,7 @@ for (const scene of FOOTERS) {
   });
 }
 
-// #505 (UX wave U11a M3): a live channel's footer, its composer, lines up with the stream under classic scrollbars and
+// board 505 (UX wave U11a M3): a live channel's footer, its composer, lines up with the stream under classic scrollbars and
 // under overlay ones (where nothing moves); each footer photographed for the frame's shadow, which the clipping footer
 // must keep (Interfaces §E).
 for (const scrollbars of ['Always', 'WhenScrolling'] as const) {

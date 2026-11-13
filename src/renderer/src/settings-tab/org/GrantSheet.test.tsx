@@ -138,7 +138,7 @@ describe('Settings › Org: the grant sheet (M4b)', () => {
     expect(within(sheet).getByRole('button', { name: 'Save…' })).toBeTruthy();
   });
 
-  // U11a #540 (§B): every reason main gives the sheet, with its detail as main words it, and the exact line drawn: main's
+  // U11a board 540 (§B): every reason main gives the sheet, with its detail as main words it, and the exact line drawn: main's
   // detail follows the line only where it says something the line does not, and ineligible's list is drawn once
   it('each reason, given main’s detail, draws its line once, and the detail only where it adds to the line', async () => {
     const NOT = 'Not signed · ';
@@ -262,7 +262,7 @@ describe('Settings › Org: the grant sheet (M4b)', () => {
     expect(within(row('mini')).queryByText(UNREAD)).toBeNull();
   });
 
-  // U11a #540: with nobody to grant to, the sheet still says the read's own state, and says so only once the grants are known
+  // U11a board 540: with nobody to grant to, the sheet still says the read's own state, and says so only once the grants are known
   it('on a machine every member owns: reading, then a refused read with Retry (kept while a retry is out), then nobody to grant to, or the person picker for an owner who still holds a grant', async () => {
     const EVERYONES: Machine = { ...MINE, owners: [ME, ANA, BEN, CAT] };
     const READING = 'Reading mini’s grants…';

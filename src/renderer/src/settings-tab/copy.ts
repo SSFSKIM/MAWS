@@ -716,7 +716,7 @@ export const ORG = {
   grantRefusals: {
     'signed-out': 'This Mac isn’t signed in to the org. Sign in under Org, then try again.',
     damaged: 'This Mac’s record of the grants it issued is damaged and can’t be repaired here, so it signs no grant. Sign from another device of the machine’s owner (an admin’s, for a machine the org owns).',
-    // U11a #540: also refused after the machine answered, when its outcome couldn't be recorded: so it says nothing of a send
+    // U11a board 540: also refused after the machine answered, when its outcome couldn't be recorded: so it says nothing of a send
     storage: 'The grant couldn’t be saved on this Mac. Try again; if it keeps failing, check the disk’s free space.',
     busy: 'Another grant is being signed. Try again once it’s done.',
     invalid: 'The rights were sent wrongly (one was named twice). Close this sheet and choose them again.',

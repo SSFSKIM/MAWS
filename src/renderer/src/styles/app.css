@@ -124,7 +124,7 @@
   }
 }
 
-/* #505 (UX wave U11a): one rule for the shell's gutters. A scroller with a footer or a composer aligned under it reserves
+/* board 505 (UX wave U11a): one rule for the shell's gutters. A scroller with a footer or a composer aligned under it reserves
    its scrollbar's gutter whether or not it overflows, and the element under it reserves the same gutter, so under classic
    scrollbars both centre their column in the same width; with overlay scrollbars nothing moves. `scrollbar-gutter` acts
    only on a scroll container, so the element under the scroller clips. The session pane scopes the transcript's rule from

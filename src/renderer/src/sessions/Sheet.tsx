@@ -3,7 +3,7 @@
 // sheet keeps disabled until its acknowledgement is checked, so Enter alone never destroys anything; Escape, the
 // overlay and Cancel close it. A sheet closes through C10's dialog store (`closeDialog`) unless its opener passes
 // `onClose`: a sheet whose answer is owed to a caller (C11's route switch, `pickDirectModel`) hears its dismissal there.
-// #523 (UX wave U11a): the overlay is the shared backdrop (scrim.tsx), the one scrim every sheet and dialog dims the
+// board 523 (UX wave U11a): the overlay is the shared backdrop (scrim.tsx), the one scrim every sheet and dialog dims the
 // window with, which yields to a layer opened over it; it keeps `data-sheet-scrim`, which e2e/share.spec.ts reads.
 import { useDialogFocus } from '../app/dialog-focus';
 import { Dialog } from 'radix-ui';

@@ -265,7 +265,7 @@ describe('the source sheet’s live query after a refusal (E3 M3 fix)', () => {
     expect(within(block()).getByText(/Too many live tools are open in MAWS/)).toBeTruthy();
   });
 
-  // U11a #456: a machine that doesn't offer connectors is a concrete pause: no grant would make it refresh
+  // U11a board 456: a machine that doesn't offer connectors is a concrete pause: no grant would make it refresh
   it('paused because its machine does not offer connectors, says why, offers no Allow and disables Refresh; a failed refresh keeps Allow', async () => {
     const live = new FakeLive({ permission: 'none', pause: notOfferedPause('build-vm') });
     const m = mountSheet(live);

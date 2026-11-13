@@ -3,7 +3,7 @@ import { Dialog } from 'radix-ui';
 import { useRef, useState } from 'react';
 import { create } from 'zustand';
 import { useDialogFocus } from '../app/dialog-focus';
-import { Backdrop } from '../sessions/scrim'; // #523 (U11a): the one scrim
+import { Backdrop } from '../sessions/scrim'; // board 523 (U11a): the one scrim
 import { keymapGroups } from '../settings-tab/keymap';
 import { useSettings } from '../stores/settings';
 

@@ -14,7 +14,7 @@ import { ipc } from '../ipc/client';
 import { availabilityRefusal, useAvailability } from '../sessions/availability'; // P2-A
 import { inlineEditOf, resubmitRecordOf, setInlineText, useComposerStore, type InlineEdit, type Resubmit } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
-import { Backdrop } from '../sessions/scrim'; // #523 (U11a): the one scrim
+import { Backdrop } from '../sessions/scrim'; // board 523 (U11a): the one scrim
 import type { UserRow } from './edit-prefill';
 import { cancelInlineEdit, cancelRewind, confirmRewind, forkInlineEdit, keepEditing, resubmitProvider, rewindAgain, sendInlineEdit } from './resubmit-seam';
 

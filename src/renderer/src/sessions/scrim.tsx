@@ -1,4 +1,4 @@
-// One scrim for every modal layer (#523, UX wave U11a M3; the execution document's Interfaces §E). A sheet or a dialog
+// One scrim for every modal layer (board 523, UX wave U11a M3; the execution document's Interfaces §E). A sheet or a dialog
 // dims the window behind it with `SCRIM`, and where one opens over another only the top layer's backdrop paints: the
 // window is dimmed once, by the one value, however many layers are open, and the top backdrop also dims the dialog under
 // it, which then reads as behind. The top layer is the one mounted last. Pitfall: mount order stands for stacking order,

@@ -870,13 +870,13 @@ test('W2: the shared column, the 14px prose, Codex’s bubble and Codex’s comp
   expect(editor.consoleErrors()).toEqual([]);
 });
 
-// #505 (UX wave U11a M3; the execution document's Interfaces §E): C5's own session pane reserves its transcript's
+// board 505 (UX wave U11a M3; the execution document's Interfaces §E): C5's own session pane reserves its transcript's
 // scrollbar gutter, and the same under its composer, so under classic scrollbars the composer's column is a transcript
 // row's; with overlay scrollbars nothing moves. The indexed session of the scratch config home, in the page's `shell` pane;
 // the composer's footer photographed under each, for the frame's shadow, which the clipping footer must keep.
 for (const scrollbars of ['Always', 'WhenScrolling'] as const) {
   // eslint-disable-next-line no-empty-pattern -- Playwright requires the fixtures argument to be destructured
-  test(`#505: the session pane's composer column and a transcript row share both edges (AppleShowScrollBars ${scrollbars}); its footer photographed`, async ({}, testInfo) => {
+  test(`board 505: the session pane's composer column and a transcript row share both edges (AppleShowScrollBars ${scrollbars}); its footer photographed`, async ({}, testInfo) => {
     testInfo.skip(!HARNESS_BUILT, 'the composer page needs a harness build (pnpm e2e:composer)');
     const maws = await launchMaws({ env: { MAWS_HARNESS: '1', MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config }, appKitDefaults: { AppleShowScrollBars: scrollbars } });
     try {

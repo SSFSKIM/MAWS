@@ -19,7 +19,7 @@ function useMachineOfName(name: string | null): MachineRef | null {
 }
 
 /**
- * #505 (UX wave U11a; the execution document's Interfaces §E, "Names, one order"): how a Channel row's names give way as
+ * board 505 (UX wave U11a; the execution document's Interfaces §E, "Names, one order"): how a Channel row's names give way as
  * it narrows, the same in say rows, exchange rows and to-human headers. Each part enters the row at its minimum (its flex
  * basis: twelve characters for an alias, nothing for the others) and stops at its whole width (`max-w-max`); the row's
  * room goes to them by grow weights a thousand apart: the alias first, then the machine chip (up to 24 characters), then

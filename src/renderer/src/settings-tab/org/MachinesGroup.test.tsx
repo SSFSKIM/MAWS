@@ -172,7 +172,7 @@ describe('Settings › Org: Machines’ actions and rights (M4b)', () => {
     expect(buttons('mini')).toEqual(['Owners…', 'Re-enroll…', 'Drop…', 'Retry']); // Retry reads again; nothing signs
   });
 
-  // U11a #540: an enrollment's end on its row names who can act, or what to do next
+  // U11a board 540: an enrollment's end on its row names who can act, or what to do next
   it('an enrollment that ended on a problem says it on its row, beside Show…: on the Enroll row for a new machine, on the machine’s row for a re-enrollment', async () => {
     const words = {
       'not-yours': 'Another admin started this enrollment, and the hub answers only to them. Ask them to finish it, or Start over to enroll the machine yourself.',

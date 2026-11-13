@@ -12,7 +12,7 @@ import { WIDGET_DIALOG_BOX } from '../composer/WidgetDialog';
 import { selectOrgIndex } from '../stores/org-projects';
 import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
-import { Backdrop } from '../sessions/scrim'; // #523 (U11a): the one scrim
+import { Backdrop } from '../sessions/scrim'; // board 523 (U11a): the one scrim
 import { RESUME_COPY } from './copy';
 import { ResumeChooser } from './ResumeChooser';
 

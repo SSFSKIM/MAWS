@@ -70,7 +70,7 @@ export function ChannelView({ project }: { project: string }) {
   const live = held.phase === 'open' && held.live;
   return (
     <div data-channel={project} className="flex h-full min-h-0 flex-col bg-bg text-ui text-fg">
-      {/* #505: the stream reserves its scrollbar's gutter and the footer the same (styles/app.css), so under classic
+      {/* board 505: the stream reserves its scrollbar's gutter and the footer the same (styles/app.css), so under classic
           scrollbars the footer's column is the rows'. The footer clips, so 8 px of the stream's foot is the footer's own
           head, where the composer frame's shadow draws. */}
       <div ref={scroller} onScroll={onScroll} role="log" aria-label={CHANNEL.title(null)} className="scroll-gutter min-h-0 flex-1 overflow-y-auto">

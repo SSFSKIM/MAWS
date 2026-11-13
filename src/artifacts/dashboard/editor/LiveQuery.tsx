@@ -53,7 +53,7 @@ export function LiveQuery({ id, title, captured, live, onReopen }: LiveQueryProp
   // then how to allow it; the permission line says a changed or lost grant itself
   const detail: LivePause | null = status.pause === 'noRoute' || (status.pause !== null && concrete(status.pause)) ? status.pause : status.permission === 'none' ? 'notAllowed' : null;
   const mayWrite = status.pause === 'mayWrite' && (!refusedBefore || tried); // refused in this opening
-  // U11a #456: its machine doesn't offer connectors: neither a grant nor a refresh can work while that holds
+  // U11a board 456: its machine doesn't offer connectors: neither a grant nor a refresh can work while that holds
   const notOffered = status.pause !== null && notOfferedOn(status.pause) !== null;
   const busy = status.busy !== null;
   const { start } = snapshot;

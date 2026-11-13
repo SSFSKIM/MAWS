@@ -6,7 +6,7 @@
 // (`placement: 'modelChip'`, C4).
 import { Dialog } from 'radix-ui';
 import { create } from 'zustand';
-import { Backdrop } from '../sessions/scrim'; // #523 (U11a): the one scrim
+import { Backdrop } from '../sessions/scrim'; // board 523 (U11a): the one scrim
 import type { AppSessionId } from '@shared/graph/ids';
 import { useComposerStore } from '../stores/composer';
 import { slashWidget, useRegisteredWidgets } from './mentions/widgets';

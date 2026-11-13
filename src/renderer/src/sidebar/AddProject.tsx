@@ -11,7 +11,7 @@ import { Search } from './Search';
 import { machineOf } from '@shared/machine/address';
 import { useMachines } from '../stores/machines';
 import { openDialog } from '../sessions/dialogs';
-import { Backdrop } from '../sessions/scrim'; // #523 (U11a): the one scrim, which yields to a sheet opened over it
+import { Backdrop } from '../sessions/scrim'; // board 523 (U11a): the one scrim, which yields to a sheet opened over it
 import { machineChoices } from './AddProjectSheet';
 
 // Discovery supplies choices, never membership. Adding uses the persisted user-origin path, also used by Finder.

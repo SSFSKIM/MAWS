@@ -19,7 +19,7 @@ import { useSpinnerText } from '../../../engine-surface/spinner'; // R2
 import type { CellId, Row, TurnId } from '../../model/rows';
 import { rowElementId, useTranscriptContext, useWorkMotion } from '../context';
 import { Chevron } from './parts';
-import { Backdrop } from '../../../sessions/scrim'; // #523 (U11a): the one scrim
+import { Backdrop } from '../../../sessions/scrim'; // board 523 (U11a): the one scrim
 
 type DividerRowData = Extract<Row, { kind: 'divider' }>;
 

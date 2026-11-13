@@ -389,7 +389,7 @@ describe('starting an enrollment', () => {
     expect(await h.enrollment.start({ name: 'hub' }, WINDOW)).toMatchObject({ ok: false, reason: 'shape' });
     expect(await h.enrollment.start({ name: 'a/b' }, WINDOW)).toMatchObject({ ok: false, reason: 'shape' });
     expect(await h.enrollment.start({ name: 'Mini' }, WINDOW)).toMatchObject({ ok: false, reason: 'machine-name-taken' });
-    expect(await h.enrollment.start({ name: 'DC-vm9' }, WINDOW)).toEqual({ ok: false, reason: 'prefix-names-machine', detail: 'DC-vm9 falls under the delegation prefix dc-' }); // the sheet's line says the rest (U11a #540)
+    expect(await h.enrollment.start({ name: 'DC-vm9' }, WINDOW)).toEqual({ ok: false, reason: 'prefix-names-machine', detail: 'DC-vm9 falls under the delegation prefix dc-' }); // the sheet's line says the rest (U11a board 540)
     expect(await h.enrollment.start({ name: 'box', replace: newRef() }, WINDOW)).toMatchObject({ ok: false, reason: 'no-machine' });
     expect(await h.enrollment.start({ name: 'other', replace: MINI }, WINDOW)).toMatchObject({ ok: false, reason: 'shape' });
     h.busy = true;

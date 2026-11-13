@@ -138,7 +138,7 @@ describe('Settings › Org: the enrollment sheet (M4b)', () => {
     expect(sent('org.enroll.start')).toHaveLength(ENROLL_REFUSALS.length * 2);
   });
 
-  // U11a #540 (§B): every reason main gives a start, with its detail as main words it, and the exact line drawn: main's
+  // U11a board 540 (§B): every reason main gives a start, with its detail as main words it, and the exact line drawn: main's
   // detail follows the line only where it says something the line does not
   it('each start refusal, given main’s detail, draws its line once, and the detail only where it adds to the line', async () => {
     const drawn: Record<(typeof ENROLL_REFUSALS)[number], readonly (readonly [string, string])[]> = {

@@ -24,7 +24,7 @@ export const REFUSALS: Readonly<Record<string, Said>> = {
   malformed: () => "This change couldn't be made as it was asked",
   empty: () => 'Nothing has changed',
   offline: (machine) => `${machine} is offline: its sessions' reach can change once it's back`,
-  'not-supported': (machine) => `${machine}'s sminos can't keep a session's reach yet. Update sminos on ${machine}, then open this again.`, // #523: the remedy, and no version (the gate is a capability)
+  'not-supported': (machine) => `${machine}'s sminos can't keep a session's reach yet. Update sminos on ${machine}, then open this again.`, // board 523: the remedy, and no version (the gate is a capability)
   unavailable: () => "Its reach can't be read right now",
   'changed-elsewhere': () => 'Changed elsewhere: reload',
   cancelled: () => 'Touch ID was cancelled: nothing was changed',
@@ -102,7 +102,7 @@ export const SHARE = {
   sharedWithYou: 'Private · shared with you',
 };
 
-/** #523: the Share and Add owner subtitle's tooltip, the session's whole title and its machine's whole name (the line cuts both). */
+/** board 523: the Share and Add owner subtitle's tooltip, the session's whole title and its machine's whole name (the line cuts both). */
 export const subtitleTooltip = (title: string, machine: string): string => [title, machine].filter((part) => part !== '').join(' · ');
 
 /** A refusal's words: a known code's own line, or the generic line with its raw word to show beside it. */

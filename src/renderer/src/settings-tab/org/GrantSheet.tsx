@@ -12,7 +12,7 @@
 // Before Touch ID, main may bring the machine up to date (push the org's head to it) and read its ledger again, so from
 // the press until the answer the sheet says so: never a dead button. Main offers no cancel for either, so none is shown:
 // the sheet's own button reads Close meanwhile, and an answer that comes after it closed lands nowhere. Every refusal reads in its own words,
-// and names what to do next or who can act (U11a #540): main's detail follows only where it says what the line does not
+// and names what to do next or who can act (U11a board 540): main's detail follows only where it says what the line does not
 // (`ledger-unread`'s which ledger, `storage`'s what could not be written, `refused`'s verdict code), and `ineligible`
 // lists each problem `grantProblems` names, once. Once this Mac may no longer sign a grant there (its grants record
 // damaged, or no longer an owner's device), Save is withdrawn and the sheet says why. With nobody to grant to, the sheet
@@ -44,7 +44,7 @@ function savedOutcome(machine: string, version: number, delivered: Extract<Grant
   return { text: `${ORG.grantedRefused(version, machine, ORG.grantVerdicts[delivered.refused])} · ${delivered.refused}`, refused: true };
 }
 
-// U11a #540 (§B): the reasons whose detail main words as the line already says it (`ineligible`'s is its list, drawn
+// U11a board 540 (§B): the reasons whose detail main words as the line already says it (`ineligible`'s is its list, drawn
 // below); any other reason's detail, one main gains later included, follows the line
 const REPEATS = new Set<Refused['reason']>(['busy', 'invalid', 'no-change', 'stale', 'none', 'ineligible']);
 

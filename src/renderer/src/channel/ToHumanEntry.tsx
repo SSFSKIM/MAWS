@@ -26,7 +26,7 @@ export function ToHumanEntry({ entry }: { entry: Entry }) {
       data-greyed={entry.greyed ? 'true' : undefined}
       className={`flex min-w-0 flex-col gap-1 ${entry.greyed ? 'opacity-60' : ''}`}
     >
-      {/* #505: the Channel's one order (parts.tsx's GIVES_WAY): the title gives way first, then the chip, then the name. */}
+      {/* board 505: the Channel's one order (parts.tsx's GIVES_WAY): the title gives way first, then the chip, then the name. */}
       <header className={`${NAMES_ROW} text-ui-sm`}>
         <span data-name-part="alias" className={`${GIVES_WAY.alias} font-medium text-fg`} title={tooltip}>
           {entry.name}
