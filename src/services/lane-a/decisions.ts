@@ -26,6 +26,8 @@ export async function decisionFor({ current, held, answer, controls }: { current
       return { ok: true, body: { behavior: 'deny', ...(intent.message !== undefined && { message: intent.message }) } };
     case 'answers':
       return { ok: true, body: { behavior: 'allow', updatedInput: { answers: intent.answers } } };
+    case 'dismiss':
+      return { ok: true, body: { behavior: 'dismiss' } }; // U1a §G: sminos 1.47.0's, carrying nothing but who made it
     case 'allow-scoped': {
       const shown = Array.isArray(held?.suggestions) && held.suggestions.length === 1 ? held.suggestions[0] : undefined;
       const [drawn, now] = await Promise.all([shown === undefined ? null : suggestionSha256(shown), suggestionSha256(intent.suggestion)]);

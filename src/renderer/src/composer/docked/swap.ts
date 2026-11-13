@@ -6,7 +6,9 @@
 // no longer holds, an error, an interruption, auto mode unavailable) shows as a notice above the frame instead. E1 M4b:
 // a blocking `maws` ask (a question item read as `maws.ask.opened`) is answered in the Question sheet, not here, so it
 // is a notice too and the editor stays. P2-C (2026-10-10): a question an agent left or a must-read is neither: its card
-// stands in the session's transcript. Pure.
+// stands in the session's transcript. UX wave U1a (Reported 1, §C): a terminal session's asynchronous question (an
+// `async_input` item with a request id and no anchor, its request read as a question) docks until U1b gives it its row;
+// MAWS's non-blocking ask, the same kind read as `maws.ask.opened`, still docks nothing. Pure.
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AttentionId } from '@shared/graph/ids';
@@ -21,6 +23,8 @@ export interface Swap {
 }
 
 const REQUEST_KINDS: ReadonlySet<AttentionItem['kind']> = new Set(['permission', 'question', 'plan', 'elicitation']); // and dialogs, by their kind
+// An `async_input` item that stands for a request (no mark anchor): read, so a terminal's asynchronous question can dock.
+const asyncRequest = (item: AttentionItem) => item.kind === 'async_input' && item.anchor === undefined && item.request.requestId !== null;
 const at = (item: AttentionItem) => Date.parse(item.createdAt);
 const byAge = (a: AttentionItem, b: AttentionItem) => at(a) - at(b);
 
@@ -31,12 +35,16 @@ export function swapOf(items: readonly AttentionItem[], requests: ReadonlyMap<At
   const answerable: AttentionItem[] = [];
   const notices: AttentionItem[] = [];
   for (const item of open) {
-    const asks = item.kind === 'dialog' || REQUEST_KINDS.has(item.kind);
+    const asks = item.kind === 'dialog' || REQUEST_KINDS.has(item.kind) || asyncRequest(item);
     const request = asks ? requests.get(item.id) : null;
     if (request === undefined) {
       // not read yet: it docks once it is, so the frame hides in the same commit the card's frame mounts (and takes focus)
       unread.push(item);
       continue;
+    }
+    if (item.kind === 'async_input') {
+      if (request?.kind === 'question.requested') answerable.push(item); // U1a: a terminal's asynchronous question
+      continue; // P2-C: the session's own card in its transcript carries the rest
     }
     if (asks && request === null) {
       // main's broker no longer holds it, or its read failed twice (the store's `unreadable`): the card can only show its
@@ -44,7 +52,7 @@ export function swapOf(items: readonly AttentionItem[], requests: ReadonlyMap<At
       notices.push(item);
       continue;
     }
-    if (item.kind === 'async_input' || item.kind === 'essential_unread') continue; // P2-C: the session's own card in its transcript carries it
+    if (item.kind === 'essential_unread') continue; // P2-C: the session's own card in its transcript carries it
     if (request?.kind === 'maws.ask.opened') notices.push(item);
     else if (item.kind === 'dialog') {
       const declared = request?.kind === 'dialog.requested' && declaredDialog(request.dialogKind, request.payload).ok;

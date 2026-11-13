@@ -154,6 +154,7 @@ export const MEDIA_GAP = 'attachments to a session on another machine wait for u
 /** 2026-11-06: an endpoint that lists no `rl2.agent-scope` carries no subagent's own transcript. */
 export const AGENT_SCOPE_GAP = (machine: string) => `${machine} can’t show a subagent’s own transcript here yet; update MAWS on ${machine}`;
 const AGENT_READ = 'a read is the session’s: ask it on the session’s own view';
+const DISMISS_GAP = (machine: string) => `dismiss it in the terminal on ${machine}`; // UX wave U1a §G (correction 5)
 export const ACCEPTED_IS_LOCAL = 'laneA.accepted is the session machine’s own word to its spine, never sent to another machine';
 
 export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
@@ -575,8 +576,12 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
     if (typeof raised.deadline === 'string' && Date.parse(raised.deadline) - timing.deadlineSlackMs <= now()) {
       return { outcome: 'not_pending', settled: null, terminalOnly: true, message: 'answer this in the terminal: its window here has closed' };
     }
-    const read = answerIntent({ raised, answer: given, controls: live.state.controls });
+    // U1a §G (correction 5): sminos's `decide` takes allow or deny, so a dismissal is not carried over the link,
+    // whatever the machine's bridge declares; refused here, before any act is built
+    const notCarried = DISMISS_GAP(live.s.link.name);
+    const read = answerIntent({ raised, answer: given, controls: { ...live.state.controls, 'decide.dismiss': { available: false, reason: notCarried } } });
     if (!read.ok) return { outcome: 'refused', code: read.code, message: read.message };
+    if (read.intent.kind === 'dismiss') return { outcome: 'refused', code: 'unsupported', message: notCarried }; // none, with the control closed
     let digest: { session: string; request: string; tool: string; input_sha256: string };
     try {
       digest = { session: live.s.id, request, tool: raised.tool, input_sha256: await inputSha256(raised.input as JsonValue) };

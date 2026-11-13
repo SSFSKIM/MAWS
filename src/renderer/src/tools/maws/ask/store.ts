@@ -18,7 +18,8 @@ import type { MachineRef } from '@shared/machine/ref';
 import type { AskCancelReason, PendingAsk } from '@shared/maws/ask';
 import type { AskRowData } from '../../../transcript';
 import { SHEET } from './copy';
-import { canSubmit, EMPTY_DRAFT, setDesignSystem, toAnswers, type Draft, type ProjectRef } from './draft';
+import type { AskQuestion } from '@shared/maws/tools';
+import { canSubmit, complete, EMPTY_DRAFT, pickOption, setDesignSystem, toAnswer, toAnswers, type Draft, type ProjectRef } from './draft';
 
 export interface SheetAsk extends PendingAsk {
   state: 'pending' | 'cancelled';
@@ -193,6 +194,17 @@ export function dismissAsk(appSessionId: AppSessionId, askId: string): void {
   if (store.getState().asks.get(askId)?.state === 'cancelled') store.setState(without(store.getState(), askId));
 }
 
+// UX wave U1a §E: a double-click on a single-choice option picks it, and submits the ask when the form is then complete
+// and `sendable` (Submit not held back for the session's machine).
+export function chooseOption(appSessionId: AppSessionId, askId: string, question: AskQuestion, label: string, client: MawsBridge, projects: readonly ProjectRef[], sendable: boolean): void {
+  const store = askSheet(appSessionId);
+  if (store.getState().submitting !== null) return;
+  editDraft(appSessionId, askId, question.id ?? '', (draft) => pickOption(question, draft, label));
+  const now = store.getState();
+  const ask = now.asks.get(askId);
+  if (sendable && ask !== undefined && complete(ask.questions, now.drafts.get(askId))) void submitAsk(appSessionId, askId, client, projects);
+}
+
 export const dismissNotice = (appSessionId: AppSessionId): void => askSheet(appSessionId).setState({ notice: null });
 
 // Submit: every question's answer (the empty ones skipped) through `maws.ask.answer`. Delivered: the ask leaves and the
@@ -201,14 +213,17 @@ export const dismissNotice = (appSessionId: AppSessionId): void => askSheet(appS
 // (`artifacts.get`, no preparation); one deleted since the pick is not sent by its id, which the host's chain would skip
 // silently: its pick is cleared, the notice names it and nothing is sent, so the owner picks again. A check that cannot
 // be read is refused like the command itself.
-export async function submitAsk(appSessionId: AppSessionId, askId: string, client: MawsBridge, projects: readonly ProjectRef[]): Promise<void> {
+//
+// UX wave U1a §E: `dismiss` sends the same one answer with every question skipped, whatever the drafts hold (a half-typed
+// Other included); it is the form's Dismiss, held back only while another answer is out.
+export async function submitAsk(appSessionId: AppSessionId, askId: string, client: MawsBridge, projects: readonly ProjectRef[], { dismiss = false }: { dismiss?: boolean } = {}): Promise<void> {
   const store = askSheet(appSessionId);
   const state = store.getState();
   const ask = state.asks.get(askId);
   // Submit's own rule, for Retry too: nothing while another answer is out, nothing while a question is half answered
-  if (!ask || ask.state !== 'pending' || state.submitting !== null || !canSubmit(ask.questions, state.drafts.get(askId))) return;
+  if (!ask || ask.state !== 'pending' || state.submitting !== null || (!dismiss && !canSubmit(ask.questions, state.drafts.get(askId)))) return;
   store.setState({ submitting: askId, failed: null, notice: null });
-  const answers = toAnswers(ask.questions, state.drafts.get(askId), projects);
+  const answers = dismiss ? ask.questions.map((question) => toAnswer(question, EMPTY_DRAFT)) : toAnswers(ask.questions, state.drafts.get(askId), projects);
   const gone: { questionId: string; name: string }[] = [];
   for (const answer of answers) {
     if (answer.designSystemId === undefined) continue;

@@ -16,6 +16,8 @@
 // where the port can't carry it. A request its session's terminal asks too says so ("Also asked in the terminal: the first
 // answer wins", the owner's Q3), and settles in place as the race ended ("Answered in the terminal: Allowed"), a late
 // answer included; past a background request's window it reads "Answer this in the terminal" (`lane-a/race.ts`).
+// UX wave U1a (M2, §E): a question's stepper has Dismiss (the decline Esc sends; on a terminal's asynchronous question,
+// the bridge's dismissal, which no key sends) and a double-click that picks a single choice and goes on.
 //
 // The card imports the docked frame from its own module, never `composer/index.ts`, so no editor code reaches it.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type MouseEvent, type PointerEvent } from 'react';
@@ -54,7 +56,7 @@ import { NoticeBody } from './variants/Notice';
 import { PermissionBody } from './variants/Permission';
 import { PlanBody } from './variants/Plan';
 import { QuestionBody } from './variants/Question';
-import type { CardKeys, Placement } from './variants/types';
+import { gated, type CardKeys, type Placement } from './variants/types';
 import { displayTitle } from '../sessions/title';
 import { waits } from '@shared/attention/kinds'; // UC-1
 // P2-C start (2026-10-10)
@@ -302,6 +304,9 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   // P2-C end
   const variant = { item, placement, busy: busy || concealed, submit, bindKeys, capability };
   const settled = sent ? null : race.settled; // M6: a settlement after our own delivered answer is ours: nothing to say
+  // U1a §G: a dismissal this app made of an asynchronous question says nothing: its card leaves at once
+  const settledText = settled === null ? null : settledWords(settled, { asyncQuestion: item.kind === 'async_input' });
+  if (settled !== null && settledText === null) return null;
 
   let body: ReactNode;
   if (loading) {
@@ -313,7 +318,7 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   } else if (settled !== null) {
     body = (
       <p role="status" className="m-0 text-fg-muted">
-        {settledWords(settled)}
+        {settledText}
       </p>
     );
   } else if (phase === 'not_pending') {
@@ -331,9 +336,13 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
       case 'permission.requested':
         body = <PermissionBody {...variant} request={request} />;
         break;
-      case 'question.requested':
-        body = <QuestionBody {...variant} request={request} />;
+      case 'question.requested': {
+        // U1a §E: Dismiss sends the decline the form's Esc sends (an asynchronous question's: the bridge's dismissal),
+        // gated as that decline is; a double-click on a single-choice option picks it and goes on
+        const declining = toAnswer({ kind: 'permission', decision: 'deny', message: '' });
+        body = <QuestionBody {...variant} request={request} dismiss={{ ...gated(capability(declining)), run: () => submit(declining, 'Dismissed') }} doubleClick />;
         break;
+      }
       case 'plan.requested':
         body = <PlanBody {...variant} request={request} />;
         break;

@@ -24,7 +24,7 @@ import type { AskSheetParams } from '../actions';
 import { SHEET } from './copy';
 import { canSubmit, EMPTY_DRAFT } from './draft';
 import { AnsweredSection, QuestionSection } from './QuestionSection';
-import { askSheet, dismissAsk, editDraft, ensureLoaded, loadAsks, selectAsk, shownAsk, submitAsk, type AskSheetState as SheetStore, type SheetAsk } from './store';
+import { askSheet, chooseOption, dismissAsk, editDraft, ensureLoaded, loadAsks, selectAsk, shownAsk, submitAsk, type AskSheetState as SheetStore, type SheetAsk } from './store';
 
 export interface AskSheetState {
   appSessionId: AppSessionId | null;
@@ -113,6 +113,8 @@ function LiveAsk({ appSessionId, ask, state, directory }: { appSessionId: AppSes
   const submit = () => void submitAsk(appSessionId, ask.askId, ipc, projects);
   // P5 O7 M8 ("An older peer"): a machine heard not offering the answer greys Submit, with why (lane-b/remote-unavailable.ts)
   const unavailable = useRemoteUnavailable(appSessionId, 'maws.ask.answer');
+  // UX wave U1a §E: Dismiss sends every question skipped; a double-click on a single choice picks, and submits when complete
+  const dismiss = () => void submitAsk(appSessionId, ask.askId, ipc, projects, { dismiss: true });
 
   if (ask.state === 'cancelled') {
     return (
@@ -147,6 +149,7 @@ function LiveAsk({ appSessionId, ask, state, directory }: { appSessionId: AppSes
                 draft={drafts?.get(question.id ?? '') ?? EMPTY_DRAFT}
                 disabled={sending}
                 edit={(change) => editDraft(appSessionId, ask.askId, question.id ?? '', change)}
+                choose={(label) => chooseOption(appSessionId, ask.askId, question, label, ipc, projects, unavailable === null)}
                 directory={directory}
                 projects={projects}
               />
@@ -165,7 +168,10 @@ function LiveAsk({ appSessionId, ask, state, directory }: { appSessionId: AppSes
             </CardButton>
           </div>
         )}
-        <div className="flex justify-end">
+        <div className="flex items-center justify-end gap-2">
+          <CardButton disabled={busy || unavailable !== null} title={unavailable ?? undefined} onClick={dismiss} className="mr-auto">
+            {SHEET.dismiss}
+          </CardButton>
           <CardButton tone="primary" disabled={busy || !ready || unavailable !== null} title={why} onClick={submit}>
             {sending ? SHEET.submitting : skipped > 0 ? SHEET.submitSkipping(skipped) : SHEET.submit}
           </CardButton>

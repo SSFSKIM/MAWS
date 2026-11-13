@@ -19,7 +19,8 @@
 //   its running jobs `exited` before it ends. A stop is refused for a job the transcript holds ended.
 // - Controls post `POST /command?wait=10000` carrying the launch `/status` named. A 504 or a closed socket is `unknown`:
 //   the op may have run. Nothing is retried on its own but `deliver` (./deliveries.ts). Decisions are built from typed
-//   fields (./decisions.ts) after a fresh `GET /requests/<id>`, with `by: 'maws'`. `from` is never sent.
+//   fields (./decisions.ts) after a fresh `GET /requests/<id>`, with `by: 'maws'`. `from` is never sent. A decision the
+//   bridge refuses with a 409 that names no winner is read again (UX wave U1a, decision 8; §G's result table).
 // - An answer the bridge took (UX wave U1's UC-1, U1a's Interfaces §B): the bridge says nothing on its stream until its
 //   `settled`, so the driver tells its `onAccepted` listeners (the lane A list) at its own decision's 200, and when this
 //   machine's endpoint says sminos took one over the link (`laneA.accepted`, naming the engine session it drives).
@@ -627,6 +628,26 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     message,
   });
 
+  // A request the bridge answers 410 or 404 for: settled (its settlement, as the bridge or the fold names it), or gone.
+  function settledAnswer(s: Session, request: string, read: BridgeAnswer): LaneAAnswerOutput {
+    const settled = record(read.body?.settled) ?? s.fold.settledOf(request);
+    return notPending(settled, settled ? `already answered: ${String(settled.outcome)} by ${String(settled.by)}` : 'it is no longer pending');
+  }
+
+  // A decision refused with a bare 409, read again: still pending, refused with the bridge's sentence (the card stays);
+  // settled meanwhile, its settlement; no answer, unknown.
+  async function reread(s: Session, request: string, path: string, message: string): Promise<LaneAAnswerOutput> {
+    let again: BridgeAnswer;
+    try {
+      again = await call(s.socket.path, 'GET', path, undefined, timing.requestMs);
+    } catch (error) {
+      return { outcome: 'unknown', why: error instanceof BridgeUnreachable ? error.why : 'gone' };
+    }
+    if (again.status === 200) return { outcome: 'refused', code: 'refused', message };
+    if (again.status === 410 || again.status === 404) return settledAnswer(s, request, again);
+    return { outcome: 'unknown', why: 'gone' };
+  }
+
   async function answer(appId: AppSessionId, request: string, given: RequestAnswer): Promise<LaneAAnswerOutput> {
     const s = sessions.get(appId);
     if (!s || s.bridge?.bridge !== 'live') return { outcome: 'refused', code: 'no-bridge', message: s?.bridge?.reason ?? NO_BRIDGE };
@@ -638,10 +659,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     } catch {
       return { outcome: 'refused', code: 'no-bridge', message: 'the session’s bridge did not answer; nothing was sent' };
     }
-    if (current.status === 410 || current.status === 404) {
-      const settled = record(current.body?.settled) ?? s.fold.settledOf(request);
-      return notPending(settled, settled ? `already answered: ${String(settled.outcome)} by ${String(settled.by)}` : 'it is no longer pending');
-    }
+    if (current.status === 410 || current.status === 404) return settledAnswer(s, request, current);
     if (current.status !== 200 || current.body === null) return { outcome: 'refused', code: 'failed', message: `the bridge answered ${current.status} for the request` };
     const controls = (record(record(s.status?.capabilities)?.controls) ?? {}) as Record<string, { available: boolean; reason?: string }>;
     const decision = await decisionFor({ current: current.body, held: s.fold.raised(request), answer: given, controls });
@@ -662,7 +680,10 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     if (posted.status === 409) {
       // another answer won: its settlement, as the child names it (or follows)
       const settled = record(body.settled) ?? (typeof body.winner === 'string' || typeof body.by === 'string' ? { ...(typeof body.winner === 'string' && { winner: body.winner }), ...(typeof body.by === 'string' && { by: body.by }) } : null);
-      return notPending(settled, message, body.terminalOnly === true);
+      if (settled !== null || body.terminalOnly === true) return notPending(settled, message, body.terminalOnly === true);
+      // U1a's decision 8: a 409 naming no winner (the mod refused a relayed answer or dismissal) leaves the request
+      // pending at the bridge, so it is read again before anything is said
+      return reread(s, request, path, message);
     }
     if (posted.status === 404) return notPending(s.fold.settledOf(request), message);
     // An async question's answer is relayed to the mod as an `answer` command, whose wait can run out after it went: the

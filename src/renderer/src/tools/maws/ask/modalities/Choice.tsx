@@ -6,7 +6,8 @@
 // not; a container query, as the panel's width is the one that varies). Focused is where the keyboard or a click last
 // landed on an option (the radios' arrow keys move focus and selection together); before that the selected option, else
 // the first with a preview. The Other row focuses nothing new. The pane's height never follows its content, so moving
-// between previews does not move the rows beneath.
+// between previews does not move the rows beneath. UX wave U1a §E: a double-click on a single-choice option hands its
+// label to `choose` (the form picks it and submits when complete); a multi-choice option and Other never do.
 import { Checkbox, RadioGroup } from 'radix-ui';
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { AskQuestion } from '@shared/maws/tools';
@@ -88,7 +89,7 @@ function PreviewPane({ option }: { option: ChoiceOption }) {
   );
 }
 
-export function Choice({ question, draft, disabled, edit }: ModalityProps) {
+export function Choice({ question, draft, disabled, edit, choose }: ModalityProps) {
   const options = question.options ?? [];
   const allowOther = question.allowOther !== false;
   const other = draft.otherText;
@@ -139,6 +140,7 @@ export function Choice({ question, draft, disabled, edit }: ModalityProps) {
           aria-label={option.label}
           onFocus={() => setFocused(option.label)}
           onClick={() => setFocused(option.label)}
+          onDoubleClick={choose && !disabled ? () => choose(option.label) : undefined}
           className={OPTION_ROW}
         >
           <Mark multi={false} />
