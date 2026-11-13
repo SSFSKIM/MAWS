@@ -37,13 +37,13 @@ export function ArchivedSessionsDialog({ projectId, machine: named }: { projectI
   const index = useSessions((s) => selectOrgIndex(s, local));
   const projects = useSessions((s) => s.projects);
   const machines = useMachines((s) => s.machines);
+  const rl2 = useSessions((s) => s.listedMachines); // the UX wave, U9: the machines reached over RL2
+  const now = usePhaseClock();
   const project = projectId === null ? undefined : projects.get(projectId);
   const row: RowKey = projectId === null ? machineKey(named ?? local) : project ? index.keyOf(project) : machineKey(machineOf(projectId));
   // the machines the row's sessions are on: a machine's row its own, an org project's those its projects are on; each asked
   // as `askOf` says, or said as a line
   const own = machineOfRow(row);
-  const rl2 = useSessions((s) => s.listedMachines);
-  const now = usePhaseClock();
   const on = own !== null ? [own] : [...new Set(rowProjects(index, row, () => true).map((p) => machineOf(p.id)))].sort();
   const plans = on.map((machine) => askOf(machine, local, rl2.has(machine), machines, now));
   const readOn = on.filter((_, i) => plans[i] === 'ask').join(' ');
