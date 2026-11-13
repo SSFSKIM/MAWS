@@ -29,7 +29,7 @@ How to see it working: the table test of the reader over the probes' recorded ca
 - [x] (2026-11-13) M3 — the transcript file and another machine's rows ask the reader (`6f9573b2d`..`28e0caa1e`, two fix rounds; review converged, one bounded finding left as debt, Decision Log).
 - [x] (2026-11-13) M4 — the live wire asks the reader (`022a4ae89`..`6db129829`, one fix round; reviewed clean).
 - [x] (2026-11-13) M5 — the rows ask the mods, and a jump's target is revealed (`cd226e249`..`76dcb3302`, an addition and two fix rounds; reviewed clean).
-- [ ] M6 — no alarm for a failed background task; the e2e edits; the record; the acceptance run on the VM; hand-back. Class 1a, the review panel and the pull request are the architect's, after the hand-back.
+- [x] (2026-11-13) M6 — no alarm for a failed background task; the e2e edits; the record (`3fe36f78d`..`a8e6929d0`; reviewed clean); the chain head `origin/ux-wave/U7` at `90a91001e` merged (`c6628b348`), `WIRE_MINOR` 38 with the manifest regenerated (`cdb04d54e`); the acceptance run on the VM at `cdb04d54e`; hand-back. Class 1a, the review panel and the pull request are the architect's, after the hand-back.
 
 ## The landing's edge
 
@@ -665,4 +665,12 @@ Found while checking the section against the code at `85e934368` and the probes'
 
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+(2026-11-13, at the hand-back; the architect's review panel and its fix waves refresh this.)
+
+What exists. The one reader of UC-2 (`src/shared/engine/arrival.ts`, its schema module and the parsers moved under `src/shared/engine/`) is asked by all three callers: the transcript file's backfill and another machine's rows (M3) and the live normaliser through Interfaces E's table (`normalizer-arrivals.ts`, M4). X1's `user.message` carries the optional `arrival` (`WIRE_MINOR` 38 over the chain head's 37). The model draws the message line, the `notice`, the consent line and `opener` (M2), with the reducer's three rules under one reading of a turn's head (`model/head.ts`) and the first carrier standing under one uuid. The rows ask the mods' sites by their carrier's envelope, a carrier of several notices has one drawing owner, and every ask honours `revealed` (M5). A failed background task raises nothing (M6). The record, three tracker rows and the e2e edits are in.
+
+Against Purpose and Acceptance. 1 to 12 are shown on the VM at `cdb04d54e` (the hand-back report gives each command and result); 7 holds with its stated differences, which grew by the command's typed name and by the file-only notices drawing their own turns when a session is read in both forms; 13 is the architect's and the owner's.
+
+What it took. Every milestone's frontier review found something real; M2, M3 and M5 needed two fix rounds each. The recurring shape: a rule written once for one path (a head boundary, a held fire, a carrier's drawing) that a second path reached differently. The fixes that held were the ones that made the paths share one predicate or one owner (`head.ts`, the fire placed at its row with nothing held, `carrier-drawing.ts`) rather than adding a guard per path. One bounded finding was left as debt (a reload between a synthesized exit and a fire's meta row) and one design rule was reversed during execution (the first carrier stands), both by the architect's word or with it told.
+
+Left for later: the tracker rows of M6; U1b's hand-over (the `answer` notice through a fold); U2's `groupInput`, which does not read `revealed`; U3b's O-18 row, which also restyles the bubble a plugin's command now draws.
