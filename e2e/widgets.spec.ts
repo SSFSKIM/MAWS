@@ -23,7 +23,7 @@ import { KILL_GRACE_MS } from '../src/engine-host/plugins/runner';
 import { addressed } from './support/address';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
-import { sidebarRow } from './support/sidebar';
+import { newChatIn, sidebarRow } from './support/sidebar';
 import { unfoldSessionCard } from './support/shell';
 
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now.
@@ -1685,6 +1685,71 @@ test.describe('plugin management (E8)', () => {
     await expect(skills.getByRole('status')).toHaveText('Reloaded · 15 skills');
     const ops = (await commandsOf(backend)).filter((c) => c.command === 'session.reloadPlugins' || c.command === 'session.reloadSkills').map((c) => c.command);
     expect(ops).toEqual(['session.reloadPlugins', 'session.reloadSkills', 'session.reloadSkills']);
+    expect(backend.consoleErrors()).toEqual([]);
+  });
+
+  // UX wave U11a (§D, l8-settings-03; A4): a New chat with nothing sent lists what is configured on disk for its folder,
+  // read by this Mac's engine host from the scratch project and config home (invented names): "+" › Connectors and the
+  // Connectors dialog the project's `.mcp.json` server with its scope, `/skills` the project's and the person's skills
+  // with Use in chat inserting `/<name> `, `/plugins` the CLI's installed plugin under "Not observed yet" alone; none says
+  // "Available once the session starts", and nothing starts the chat.
+  test('a New chat lists its folder’s connectors, skills and plugins before the first message, and Use in chat inserts the skill', async ({ appBackend: backend }) => {
+    const { page, project } = backend;
+    const write = (path: string, text: string) => {
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, text);
+    };
+    write(join(project, '.mcp.json'), JSON.stringify({ mcpServers: { 'fx-docs': { type: 'http', url: 'https://docs.example.test/mcp' } } }));
+    write(join(project, '.claude', 'skills', 'fx-review', 'SKILL.md'), '---\nname: fx-review\ndescription: Review the change\n---\nReply with one word.\n');
+    write(join(configHome(backend), 'skills', 'fx-mine', 'SKILL.md'), '---\nname: fx-mine\ndescription: A skill of your own\n---\nReply with one word.\n');
+    const name = 'claude-usage-menubar'; // READY's project, at the scratch project (scenarioHere)
+    await newChatIn(page, name);
+    const main = page.locator('[data-region="main"]');
+    const notYet = 'Available once the session starts';
+
+    // "+" › Connectors: the configured connector with its scope; then the dialog, one row with no switch
+    await main.getByRole('button', { name: 'Add files, photos or commands' }).click();
+    await page.getByRole('menuitem', { name: 'Connectors', exact: true }).hover();
+    await expect(page.getByRole('menuitem').filter({ hasText: 'fx-docs' })).toContainText('project scope');
+    await page.getByRole('menuitem', { name: /^Connectors in this chat…/ }).click();
+    const connectors = widget(page, 'mcp');
+    await expect(connectors.locator('[data-before-start]')).toHaveText(`Configured for ${name}. Connection state, and connectors from plugins, show once the chat starts.`);
+    await expect(connectors.locator('[data-mcp-server="fx-docs"] [data-connector-state]')).toHaveText('project scope');
+    await expect(connectors.getByRole('switch')).toHaveCount(0);
+    await expect(connectors).not.toContainText(notYet);
+    await page.keyboard.press('Escape');
+    await expect(connectors).toBeHidden();
+
+    // /skills: the skills on disk in Customize's groups; Use in chat puts `/fx-review ` in the composer and sends nothing
+    const message = main.getByRole('textbox', { name: 'Message' });
+    await message.click();
+    await page.keyboard.type('/skills');
+    await expect(page.getByRole('listbox', { name: 'Commands' }).locator('[role="option"][aria-selected="true"]')).toContainText('/skills');
+    await page.keyboard.press('Enter');
+    const skills = widget(page, 'skills');
+    await expect(skills.locator('[data-before-start]')).toHaveText(`On disk for ${name}. The chat may load more once it starts.`);
+    await expect(skills.locator('[data-skills-group="here"] [data-skill-row="fx-review"]')).toBeVisible();
+    await expect(skills.locator('[data-skills-group="yours"] [data-skill-row="fx-mine"]')).toBeVisible();
+    await expect(skills.getByRole('button', { name: 'Reload skills' })).toHaveCount(0);
+    await expect(skills).not.toContainText(notYet);
+    await skills.locator('[data-skill-row="fx-review"]').getByRole('button', { name: 'Use in chat' }).click();
+    await expect(skills).toBeHidden();
+    await expect(message).toContainText('/fx-review');
+
+    // /plugins: the CLI's installed plugin, under the loaded line's "Not observed yet" alone
+    await message.click();
+    await page.keyboard.press('ControlOrMeta+a');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.type('/plugins');
+    await expect(page.getByRole('listbox', { name: 'Commands' }).locator('[role="option"][aria-selected="true"]')).toContainText('/plugins');
+    await page.keyboard.press('Enter');
+    const plugins = widget(page, 'plugins').and(page.locator(':not([data-widget-variant="embedded"])'));
+    await expect(plugins.locator('[data-plugins-loaded]')).toHaveText('Not observed yet');
+    await expectListed(plugins, `e8-tools@${MARKET}`);
+    await expect(plugins).not.toContainText(notYet);
+    const launched = (await commandsOf(backend)).filter((c) => /^session\.(send|start|launch|acquire)$/.test(c.command));
+    expect(launched).toEqual([]);
+    await page.screenshot({ path: test.info().outputPath('u11a-before-start-plugins.png') });
     expect(backend.consoleErrors()).toEqual([]);
   });
 });
