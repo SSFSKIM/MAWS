@@ -12,8 +12,8 @@
 // and one on another machine (where the box is ticked and locked). The box cannot be moved into a state that can't
 // send, its reason the box's title; a state it is in that can't send says why in a line under the field. A tick sends
 // through `sendComments`, which starts a session that is not running itself (the button reads Starting… meanwhile);
-// once it went, the host's place is told where it went (`place`; the sheet, with none, says what is not a plain
-// delivery as a toast).
+// once it went, the host's place is told where it went (`place`, and the document thread its line is drawn in; the sheet,
+// with none, says what is not a plain delivery as a toast).
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
 import type { Anchor, AnchorScreenshot } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -24,16 +24,14 @@ import { useIsRemoteLaneB } from '../lane-b/remote-session';
 import { heldWords, screenshotRoom, useSessionControls } from '../session/controls/controls-for';
 import { displayTitle, listedTitle } from '../sessions/title';
 import { useAvailability } from '../sessions/availability'; // P2-A
-import { sameKey, useLaneA } from '../stores/lane-a';
-import { useLayout } from '../stores/layout';
 import { useMachines } from '../stores/machines';
 import { toast } from '../stores/notices';
 import { machineName } from '../stores/org-projects';
 import { useSessions, type SessionsState } from '../stores/sessions';
 import { sendComments, type CommentDestination, type SendOutcome } from './actions';
-import { notePlace } from './card/store';
+import { notePlace, toastPending } from './card/store';
 import { useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
-import { pendingWords, SIDE_COPY } from './copy';
+import { SIDE_COPY } from './copy';
 
 const COPY = SIDE_COPY.composer;
 const PLACE = SIDE_COPY.place;
@@ -75,18 +73,19 @@ export function receivingTitle(s: Pick<SessionsState, 'records' | 'listed'>, app
 }
 
 // Where a send to main went, told once it went whether or not the presentation is still there: the host's place shows
-// the line (decision 8: a hand-off that is not confirmed follows its pending send); the sheet, with no place, says what
-// a place would beyond a plain delivery as a toast.
-function tellWhere(place: string | undefined, parent: AppSessionId, outcome: Extract<SendOutcome, { to: 'main' }>): void {
+// the line (decision 8: a hand-off that is not confirmed follows its pending send), in the margin entry of the document
+// thread the card was on, if any; the sheet, with no place, says what a place would beyond a plain delivery as a toast,
+// a hand-off's following its pending send as the line would (Decision Log 27).
+function tellWhere(place: string | undefined, thread: string | undefined, parent: AppSessionId, outcome: Extract<SendOutcome, { to: 'main' }>): void {
   const title = receivingTitle(useSessions.getState(), parent);
+  const on = thread !== undefined ? { thread } : {};
   if (outcome.disposition === 'unconfirmed') {
-    if (place !== undefined) return notePlace(place, { kind: 'pending', appSessionId: parent, key: outcome.pending, title });
-    const held = useLaneA.getState().pendingSends.get(parent)?.find((send) => sameKey(send.key, outcome.pending));
-    if (held) toast({ level: 'info', text: pendingWords(held, title), actions: [{ label: PLACE.show, run: () => useLayout.getState().openSession(parent) }], dismissible: true });
+    if (place !== undefined) notePlace(place, { kind: 'pending', appSessionId: parent, key: outcome.pending, title, ...on });
+    else toastPending(parent, outcome.pending, title);
     return;
   }
   const text = outcome.disposition === 'steered' ? PLACE.steered(title) : outcome.disposition === 'queued' ? PLACE.queued(title) : PLACE.sent(title);
-  if (place !== undefined) notePlace(place, { kind: 'sent', text, at: Date.now() });
+  if (place !== undefined) notePlace(place, { kind: 'sent', text, at: Date.now(), ...on });
   else if (outcome.disposition === 'queued') toast({ level: 'info', text, actions: [], dismissible: true });
 }
 
@@ -147,7 +146,8 @@ export function useCommentForm({ anchor, parent, gone, onSent, reveal, onSending
   const threadRemote = useRemoteUnavailable(parent, 'side.thread.open'); // P5 O7 M8: not on another machine yet
   const machine = useMachines((s) => (isAddress(parent) ? machineName(s.machines, machineOf(parent), ipc.localMachine) : ''));
   const sendable = controls ? controls.capability('send') : { available: false as const, reason: heldWords(parent) };
-  const mainRefusal = sendable.available ? null : sendable.reason;
+  // archived refuses main too, whatever the port allows a ready process: the composer's own answer (decision 6)
+  const mainRefusal = availability === 'archived' ? ARCHIVED : sendable.available ? null : sendable.reason;
   const threadRefusal = threadRemote !== null ? COPY.threadRemote(machine) : availability === 'archived' ? ARCHIVED : forkable ? null : COPY.noConversation;
   const refusalOf = (to: CommentDestination) => (to === 'main' ? mainRefusal : threadRefusal);
   // ticked and locked for another machine's session (no side thread there yet, whatever its port says meanwhile);
@@ -185,7 +185,7 @@ export function useCommentForm({ anchor, parent, gone, onSent, reveal, onSending
     };
     const result = await sendComments(parent, [{ anchor, text: sent, screenshot }], to === 'main', reveal ? { reveal } : {}); // UX wave U5a
     settled?.(result.ok); // P3-B
-    if (result.ok && result.to === 'main') tellWhere(place, parent, result); // UX wave U5a: whether or not the form is still there
+    if (result.ok && result.to === 'main') tellWhere(place, anchor.kind === 'artifact-comment' ? anchor.threadId : undefined, parent, result); // UX wave U5a: whether or not the form is still there
     if (gone()) {
       // P4-B3
       if (kept && sendKey !== undefined && flights.get(sendKey) === kept) {

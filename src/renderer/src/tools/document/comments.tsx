@@ -25,7 +25,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { ArtifactSessionContext } from '../../artifacts/session-context'; // P3-F1
 import { QUIET } from '../../sessions/ui';
 import { CommentCardHost, type CardFrame } from '../../side/card/CardHost';
-import { closeCard, handCardTo /* P4-B3 */, useCommentCard, type CardHostMode, type OpenCard } from '../../side/card/store';
+import { closeCard, handCardTo /* P4-B3 */, noteThreadOf /* UX wave U5a */, useCommentCard, type CardHostMode, type OpenCard } from '../../side/card/store';
 import { focusAtEnd } from '../../side/card/CommentCard'; // P4-B1
 import { openCommentComposer, type CommentPlacement } from '../code/anchor/anchor'; // P4-B1: CommentPlacement
 import { commentDraftEntry, dropCommentDraft, recordCommentDraft } from './comment-drafts'; // P4-B1
@@ -281,6 +281,7 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
     // the replica the draft is withdrawn from stays open until that withdrawal is written (the tab may go first)
     const release = holdReplica?.();
     let shown: string | null = null;
+    let hosted: string | null = null; // UX wave U5a
     const follow = (open: OpenCard | null) => {
       const mine = open?.hostId === hostId ? open : null;
       const waiting = pendingThreadOf(hostId); // P3-F1: a comment waiting on its session is this host's draft too
@@ -293,7 +294,13 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
         if (mine === null || activatedCard.get(hostId) !== mine.serial) setActive(threadId); // P4-B1: not again for the same card
         if (mine === null) activatedCard.delete(hostId);
         else activatedCard.set(hostId, mine.serial); // P4-B1
-        hosting?.(threadId); // P4-B1: the margin hosts the card in that thread's entry
+      }
+      // P4-B1: the margin hosts the card in that thread's entry. UX wave U5a (§C): with no card, the line of where its
+      // send went, in the entry of the thread it was on, until the line ends
+      const host = threadId ?? (mine === null ? noteThreadOf(hostId) : null);
+      if (host !== hosted) {
+        hosted = host;
+        hosting?.(host);
       }
     };
     follow(useCommentCard.getState().open);
@@ -302,7 +309,7 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
     return () => {
       stop();
       stopPending(); // P3-F1
-      if (shown !== null) hosting?.(null); // P4-B1: at once; a remount (the overlay moving in the margin) reports again
+      if (hosted !== null) hosting?.(null); // P4-B1: at once; a remount (the overlay moving in the margin) reports again
       mountedOverlays.delete(hostId);
       queueMicrotask(() => {
         try {

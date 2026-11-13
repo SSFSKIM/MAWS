@@ -13,7 +13,9 @@ import { parseArtifactUrl, type ArtifactUrlRevision } from '@shared/artifacts/sc
 import type { CardRect, CommentContext, CommentPlacement /* P4-B1 */ } from '../../tools/code/anchor/anchor';
 import type { DeliveryKey } from '@shared/ipc/schema/lane-a';
 import { sameKey, useLaneA, type LaneAStore } from '../../stores/lane-a'; // UX wave U5a: a pending line follows its send
-import { SIDE_COPY } from '../copy';
+import { useLayout } from '../../stores/layout';
+import { toast, useNotices } from '../../stores/notices';
+import { pendingWords, SIDE_COPY } from '../copy';
 
 // What the card is about, as a host recognises it: (P2-E2) a browser page by its URL, or (P3-L M5b, Decision Log 10) an
 // HTML artifact's page on the store's scheme at a revision, whose host is the artifact viewer's. P3-L M6b: E2's
@@ -56,8 +58,9 @@ export interface ShownThread {
 // SENT_NOTE_MS; `pending` follows the pending send a terminal session's unconfirmed hand-off made under `key` and never
 // leaves by itself: it becomes the sent line when that send's delivery entered, and leaves with the send when the
 // person dismisses it or sends it again from the strip. Keyed by the place it belongs to: in M2 the host id of the card
-// that sent (each card holds one comment); M3 keys it by the pass.
-export type PlaceNote = { kind: 'sent'; text: string; at: number } | { kind: 'pending'; appSessionId: AppSessionId; key: DeliveryKey; title: string };
+// that sent (each card holds one comment); M3 keys it by the pass. `thread`: the document thread the card was on, whose
+// margin entry draws the line (§C's table) for as long as the note lasts, whatever the note is keyed by.
+export type PlaceNote = { kind: 'sent'; text: string; at: number; thread?: string } | { kind: 'pending'; appSessionId: AppSessionId; key: DeliveryKey; title: string; thread?: string };
 export const SENT_NOTE_MS = 4_000;
 
 export const useCommentCard = create<{ open: OpenCard | null; shownThread: ShownThread | null; notes: ReadonlyMap<string, PlaceNote> }>()(() => ({ open: null, shownThread: null, notes: new Map() }));
@@ -158,7 +161,29 @@ export function notePlace(place: string, note: PlaceNote): void {
   }
 }
 
-const sentNote = (text: string): PlaceNote => ({ kind: 'sent', text, at: Date.now() });
+/** The thread whose margin entry draws `place`'s line, while the line lasts; null when none. */
+export const noteThreadOf = (place: string): string | null => useCommentCard.getState().notes.get(place)?.thread ?? null;
+
+// Decision Log 27 (the architect's ruling): the sheet's hand-off, which has no place, is a keyed toast that follows its
+// pending send as a place's pending line does, by the same follower: it stays while the send is held (pending or
+// refused), its words following the send's state; it becomes "Sent to <title>" at the ordinary toast time once the
+// delivery entered; it leaves with the strip's entry otherwise (dismissed, or sent again). `text` is the words posted,
+// null before the first; a toast the person closed (or acted on: Show) is followed no further.
+interface HandOffToast {
+  appSessionId: AppSessionId;
+  key: DeliveryKey;
+  title: string;
+  text: string | null;
+}
+const handOffToasts = new Map<string, HandOffToast>();
+
+export function toastPending(appSessionId: AppSessionId, key: DeliveryKey, title: string): void {
+  handOffToasts.set(`hand-off:${appSessionId}:${key.writer}:${key.seq}`, { appSessionId, key, title, text: null });
+  followPending();
+  settlePending(useLaneA.getState());
+}
+
+const sentNote = (text: string, thread: string | undefined): PlaceNote => ({ kind: 'sent', text, at: Date.now(), ...(thread !== undefined && { thread }) });
 
 function expireSoon(place: string, note: PlaceNote): void {
   setTimeout(() => {
@@ -175,9 +200,11 @@ function followPending(): void {
   offPending ??= useLaneA.subscribe(settlePending);
 }
 
-// Each pending line against the strip's entries: one whose send is still held stays (its words follow the send's
-// state where it is drawn); one whose send left becomes the sent line if its delivery entered, and leaves otherwise.
-// The subscription ends with the last pending line.
+const enteredIn = (lane: LaneAStore, appSessionId: AppSessionId, key: DeliveryKey): boolean => lane.states.get(appSessionId)?.deliveries.find((d) => sameKey(d.key, key))?.state === 'entered';
+
+// Each pending line and hand-off toast against the strip's entries: one whose send is still held stays (a line's words
+// follow the send's state where it is drawn, a toast's here); one whose send left becomes the sent line, or the sent
+// toast, if its delivery entered, and leaves otherwise. The subscription ends with the last one followed.
 function settlePending(lane: LaneAStore): void {
   const { notes } = useCommentCard.getState();
   let next: Map<string, PlaceNote> | null = null;
@@ -190,13 +217,13 @@ function settlePending(lane: LaneAStore): void {
       continue;
     }
     next ??= new Map(notes);
-    const delivery = lane.states.get(note.appSessionId)?.deliveries.find((d) => sameKey(d.key, note.key));
-    if (delivery?.state === 'entered') {
-      const sent = sentNote(SIDE_COPY.place.sent(note.title));
+    if (enteredIn(lane, note.appSessionId, note.key)) {
+      const sent = sentNote(SIDE_COPY.place.sent(note.title), note.thread);
       next.set(place, sent);
       entered.push([place, sent]);
     } else next.delete(place);
   }
+  if (settleToasts(lane)) following = true;
   if (!following) {
     offPending?.();
     offPending = null;
@@ -206,9 +233,37 @@ function settlePending(lane: LaneAStore): void {
   for (const [place, sent] of entered) expireSoon(place, sent);
 }
 
+// The hand-off toasts' part of the follower; whether one is still followed.
+function settleToasts(lane: LaneAStore): boolean {
+  let following = false;
+  for (const [id, followed] of handOffToasts) {
+    const posted = followed.text !== null;
+    if (posted && !useNotices.getState().notices.some((n) => n.id === id)) {
+      handOffToasts.delete(id); // closed by the person, or acted on
+      continue;
+    }
+    const held = lane.pendingSends.get(followed.appSessionId)?.find((send) => sameKey(send.key, followed.key));
+    if (held) {
+      following = true;
+      const text = pendingWords(held, followed.title);
+      if (text === followed.text) continue;
+      followed.text = text;
+      const { appSessionId } = followed;
+      toast({ id, level: held.state === 'refused' ? 'warning' : 'info', text, actions: [{ label: SIDE_COPY.place.show, run: () => useLayout.getState().openSession(appSessionId) }], dismissible: true, durationMs: Infinity });
+      continue;
+    }
+    handOffToasts.delete(id);
+    if (!posted) continue; // entered before it was said: a plain delivery, which the sheet does not say
+    if (enteredIn(lane, followed.appSessionId, followed.key)) toast({ id, level: 'info', text: SIDE_COPY.place.sent(followed.title), actions: [], dismissible: true });
+    else useNotices.getState().dismiss(id);
+  }
+  return following;
+}
+
 /** Every place's line gone, and nothing followed (a test's reset). */
 export function resetPlaceNotes(): void {
   offPending?.();
   offPending = null;
+  handOffToasts.clear();
   useCommentCard.setState({ notes: new Map() });
 }
