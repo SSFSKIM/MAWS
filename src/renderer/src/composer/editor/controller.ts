@@ -33,7 +33,9 @@ import { submitSerialized } from './submit';
 // Where the draft lives: C4's `session.drafts.*` by default; C10's intent on an unstarted session (M4 passes it).
 export interface DraftPort {
   load(): Promise<Draft | null>;
-  save(draft: Draft | null): void;
+  // UX wave U4a (decision 13; Interfaces D): `replaces`, when given, names what the save replaces (a take-back's settle
+  // form, which the writer names until one save is acknowledged); the answer is whether the store took it
+  save(draft: Draft | null, replaces?: string | null): Promise<boolean>;
   // Whether an accepted submission clears the stored draft (C4's drafts: yes). C10's intent while unstarted: no, the
   // accepted first message is C10's to hold and the intent refuses a patch while its start runs (M4).
   clearsOnSend?(): boolean;
@@ -70,6 +72,11 @@ export interface EditorHandle {
   promptBox(): { text: string; cursor: number };
   fill(text: string, mode: 'replace' | 'append' | 'insert'): boolean; // false while the draft is locked or disabled
   refreshPlaceholder(): void;
+  // UX wave U4a (M3; Interfaces F): an empty box takes the document, the caret at its end; false, and nothing changed,
+  // when the box holds text or a submission is in flight (the composer refuses it while a card holds the box)
+  load(doc: ComposerDoc): boolean;
+  replaceDoc(doc: ComposerDoc | null): void; // after a take-back's settle answered stale: what is kept, in place of this copy
+  settleWith(replaces: string): void; // a take-back's settle form, which the writer names until a save is acknowledged
   // E9: a dictation's words at the caret (Design §7); null while busy or disabled. `onEnded` fires once when the editor
   // ends the sink itself (an edit inside the words, a submission, a replaced document, disabled, unmounted, or
   // `settleDictation`); the sink's own `final` and `cancel` do not fire it.
@@ -102,6 +109,11 @@ export interface ControllerInputs {
   suggestion?: string | null; // R2: a plugin's suggested prompt, the empty box's placeholder; Tab takes it
   onSuggestionTaken?(): void;
   placeholder?: string | null; // UX wave U4a: the empty box's words while a turn runs; a plugin's suggestion still wins
+  // UX wave U4a M3 (l3-input-04): ↑ in an empty box, not recalling: true when the composer took the key (a take-back began,
+  // or was refused with its sentence); false lets history walk
+  onTakeBack?(): boolean;
+  // UX wave U4a M3 (decision 13, step 5): a restored draft that is a take-back's stage is handed over, not loaded
+  onStage?(draft: Draft): void;
   // P5 O7 M4: the machine a lane B session on another machine runs on (by name), whose files go up to it at the send
   // (remote-uploads.ts); null or absent: this Mac's, where a file is mentioned by its path
   uploadsTo?: string | null;
@@ -136,12 +148,14 @@ export function ipcDrafts(client: MawsBridge, appSessionId: AppSessionId): Draft
       const result = await client.invoke('session.drafts.get', { appSessionId });
       return result.ok ? result.value : null;
     },
-    save: (draft) =>
-      void client.invoke('session.drafts.set', { appSessionId, draft }).then((result) => {
-        if (result.ok || warned) return;
+    save: async (draft, replaces) => {
+      const result = await client.invoke('session.drafts.set', { appSessionId, draft, ...(replaces != null && { replaces }) });
+      if (!result.ok && !warned) {
         warned = true;
         console.warn('[composer] session.drafts.set failed; the draft is not kept', result.error.message);
-      }),
+      }
+      return result.ok;
+    },
   };
 }
 
@@ -185,6 +199,10 @@ export class EditorController {
   // while unfocused. A dialog widget's insertion (C11's insertComposerText, "Use in chat") runs while the dialog holds
   // the keyboard, and lands there, not at the end.
   private caretLeft = false;
+  // UX wave U4a M3 (decision 14): what the last fresh Escape answered; its auto-repeats answer the same and reach no one
+  private escapeTaken = false;
+  // UX wave U4a M3 (decision 13, step 4): a take-back's settle form, named at each save until one is acknowledged
+  private settleForm: string | null = null;
 
   constructor(
     private readonly client: MawsBridge,
@@ -193,7 +211,27 @@ export class EditorController {
     inputs: ControllerInputs,
   ) {
     this.inputs = inputs;
-    this.writer = createDraftWriter((draft) => this.drafts.save(draft));
+    this.writer = createDraftWriter((draft) => this.saveDraft(draft));
+  }
+
+  // Every save of this mount's draft: one that a take-back left to settle names its settle form until acknowledged.
+  private saveDraft(draft: Draft | null): void {
+    const replaces = this.settleForm;
+    void this.drafts.save(draft, replaces).then((taken) => {
+      if (taken && this.settleForm === replaces) this.settleForm = null;
+    });
+  }
+
+  /** UX wave U4a M3: a take-back could not have its settling save acknowledged: this writer names it from now on. */
+  settleWith(replaces: string): void {
+    this.settleForm = replaces;
+  }
+
+  /** UX wave U4a M3: what is kept, in place of this mount's copy, after a take-back's settle was answered stale. */
+  replaceDoc(doc: ComposerDoc | null): void {
+    if (this.busy) return;
+    this.revision += 1;
+    this.setDoc(doc ?? emptyDoc(), { silently: true, caret: null });
   }
 
   update(inputs: ControllerInputs): void {
@@ -285,9 +323,16 @@ export class EditorController {
       this.inputs.onSuggestionTaken?.();
       return true;
     }
+    // UX wave U4a M3 (l3-input-04): ↑ in an empty box, not recalling, is the composer's take-back first
+    if (event.key === 'ArrowUp' && plain && this.nav.index === null && isEmptyDoc(editor.getJSON()) && this.inputs.onTakeBack?.()) return true;
     if (event.key === 'ArrowUp' && plain) return this.history('up');
     if (event.key === 'ArrowDown' && plain) return this.history('down');
-    if (event.key === 'Escape') return this.inputs.onEscape?.() ?? false;
+    // UX wave U4a M3 (decision 14): only a fresh press acts; a held key's repeats answer what that press answered
+    if (event.key === 'Escape') {
+      if (event.repeat) return this.escapeTaken;
+      this.escapeTaken = this.inputs.onEscape?.() ?? false;
+      return this.escapeTaken;
+    }
     return false;
   }
 
@@ -306,6 +351,11 @@ export class EditorController {
     }
     this.restoring = this.drafts.load().then((draft) => {
       if (!this.live || this.lifetime !== lifetime) return;
+      // UX wave U4a M3 (decision 13, step 5): a stage is the take-back's to carry forward, never a draft to load
+      if (draft !== null && (draft.doc as ComposerDoc | null)?.attrs?.takeBack !== undefined) {
+        this.loaded = true;
+        return this.inputs.onStage?.(draft);
+      }
       const doc = docOfDraft(draft);
       if (this.revision === revision && !this.busy && doc && this.editor && isEmptyDoc(this.editor.getJSON())) {
         this.setDoc(doc, { silently: true, caret: null });
@@ -388,7 +438,7 @@ export class EditorController {
     const widget = typed ? this.widgetFor(typed[1]) : null;
     if (typed && widget) {
       this.writer.cancel();
-      this.drafts.save(null);
+      this.saveDraft(null);
       this.setDoc(emptyDoc(), { silently: true, caret: null });
       const args = typed[2] ?? '';
       const open = () => void this.openWidget(typed[1], args);
@@ -433,7 +483,7 @@ export class EditorController {
       warn(error instanceof Error ? error.message : String(error));
     }
     if (accepted) {
-      if (this.drafts.clearsOnSend?.() ?? true) this.drafts.save(null);
+      if (this.drafts.clearsOnSend?.() ?? true) this.saveDraft(null);
     } else {
       this.writer.change(doc);
       if (!this.live) this.writer.flush();
@@ -810,6 +860,17 @@ export class EditorController {
         const view = editor().view;
         view.dispatch(view.state.tr.setMeta('placeholder', true)); // the placeholder's decoration is read again
       },
+      // UX wave U4a M3 (Interfaces F): a take-back's document into an empty box; its own read-only hold does not refuse it
+      load: (doc) => {
+        const current = this.editor;
+        if (!current || this.busy || submissions.has(this.inputs.appSessionId) || !isEmptyDoc(current.getJSON())) return false;
+        this.revision += 1; // supersedes a pending draft restore
+        this.nav = { index: null, draft: null };
+        this.setDoc(doc, { silently: true, caret: 'end' });
+        return true;
+      },
+      replaceDoc: (doc) => this.replaceDoc(doc),
+      settleWith: (replaces) => this.settleWith(replaces),
       beginDictation: (onEnded) => this.beginDictation(onEnded), // E9
       settleDictation: () => this.endDictation('keep'), // E9
     };

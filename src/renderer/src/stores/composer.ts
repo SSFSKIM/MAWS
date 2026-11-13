@@ -105,6 +105,19 @@ export interface ComposerState {
   models: ReadonlyMap<AppSessionId, readonly ListedModel[]>; // the engine's latest `session.listModels` answer per session
   chipWidgets: ReadonlyMap<AppSessionId, ChipWidgetRequest>; // W3: the model chip's open menu (`/model`, `/effort`, `/fast`, or the chip itself)
   attachmentQueue: ReadonlyMap<AppSessionId, readonly QueuedAttachment[]>; // P3-G: what waits for a composer to take it
+  // UX wave U4a M3 (decision 15): the stack's window-life state per session: whether a folded stack is open, the one
+  // notice line, and the next-step messages a Send now was answered for (each reads "Sending…" until the engine starts it)
+  stackOpen: ReadonlySet<AppSessionId>;
+  stackNotices: ReadonlyMap<AppSessionId, StackNotice>;
+  sendingNow: ReadonlyMap<AppSessionId, ReadonlySet<string>>;
+}
+
+// UX wave U4a M3: the stack's notice line: its words, and the row the act was about (null: none, or a key's act), whose own
+// leaving does not clear it; `id` tells two notices of the same words apart.
+export interface StackNotice {
+  id: number;
+  text: string;
+  subject: string | null;
 }
 
 // P3-G (§D4.3): files and the text that goes with them (Mark-up's picture and its label), for a session's composer to add
@@ -136,6 +149,9 @@ const initial = (): ComposerState => ({
   models: new Map(),
   chipWidgets: new Map(),
   attachmentQueue: new Map(),
+  stackOpen: new Set(),
+  stackNotices: new Map(),
+  sendingNow: new Map(),
 });
 
 export const useComposerStore = create<ComposerState>()(initial);
@@ -383,5 +399,46 @@ export function closeChipWidget(appSessionId: AppSessionId): void {
     const chipWidgets = new Map(s.chipWidgets);
     chipWidgets.delete(appSessionId);
     return { chipWidgets };
+  });
+}
+
+// ---- UX wave U4a M3: the stack's window-life state ------------------------------------------------------------------
+
+export function setStackOpen(appSessionId: AppSessionId, open: boolean): void {
+  useComposerStore.setState((s) => {
+    if (s.stackOpen.has(appSessionId) === open) return s;
+    const stackOpen = new Set(s.stackOpen);
+    if (open) stackOpen.add(appSessionId);
+    else stackOpen.delete(appSessionId);
+    return { stackOpen };
+  });
+}
+
+let noticeId = 0;
+/** The stack's one notice line for the session, replacing any before it. */
+export function showStackNotice(appSessionId: AppSessionId, text: string, subject: string | null = null): void {
+  noticeId += 1;
+  const notice: StackNotice = { id: noticeId, text, subject };
+  useComposerStore.setState((s) => ({ stackNotices: new Map(s.stackNotices).set(appSessionId, notice) }));
+}
+
+/** Clears the session's notice line; with an id, only that notice (a later one stays). */
+export function clearStackNotice(appSessionId: AppSessionId, id?: number): void {
+  const current = useComposerStore.getState().stackNotices.get(appSessionId);
+  if (current === undefined || (id !== undefined && current.id !== id)) return;
+  useComposerStore.setState((s) => {
+    const stackNotices = new Map(s.stackNotices);
+    stackNotices.delete(appSessionId);
+    return { stackNotices };
+  });
+}
+
+/** The next-step messages a Send now was answered for; the set replaces the session's. */
+export function setSendingNow(appSessionId: AppSessionId, messageUuids: ReadonlySet<string>): void {
+  useComposerStore.setState((s) => {
+    const sendingNow = new Map(s.sendingNow);
+    if (messageUuids.size === 0) sendingNow.delete(appSessionId);
+    else sendingNow.set(appSessionId, messageUuids);
+    return { sendingNow };
   });
 }

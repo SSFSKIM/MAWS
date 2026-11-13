@@ -13,6 +13,7 @@ import { EditorContent, useEditor } from '@tiptap/react';
 import { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
+import type { Draft } from '@shared/ipc/schema/session';
 import { ipc } from '../../ipc/client';
 import { useKeyChord } from '../../keymap/useKeyChord';
 import { useSessionCatalog } from '../../stores/catalog';
@@ -45,6 +46,8 @@ export interface EditorProps {
   onDocChange?(doc: ComposerDoc): void;
   onEscape?(): boolean;
   onRestore?(doc: ComposerDoc): void; // a stored draft was restored
+  onTakeBack?(): boolean; // UX wave U4a M3: ↑ in an empty box, not recalling; true when the composer took it
+  onStage?(draft: Draft): void; // UX wave U4a M3: a restored draft that is a take-back's stage
   suggestion?: string | null; // R2: a plugin's suggested prompt, shown as the empty box's placeholder; Tab takes it
   onSuggestionTaken?(): void;
   placeholder?: string | null; // UX wave U4a: the composer's words for the empty box while a turn runs; a suggestion wins
@@ -104,6 +107,8 @@ export function Editor(props: EditorProps) {
     onDocChange: props.onDocChange,
     onEscape: props.onEscape,
     onRestore: props.onRestore,
+    onTakeBack: props.onTakeBack, // UX wave U4a M3
+    onStage: props.onStage, // UX wave U4a M3
     suggestion: props.suggestion ?? null, // R2
     onSuggestionTaken: props.onSuggestionTaken,
     placeholder: props.placeholder ?? null, // UX wave U4a

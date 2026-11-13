@@ -49,11 +49,14 @@ export interface SessionControls {
   slash(engine: SessionCatalog, registered: ReadonlySet<string>): { catalog: SessionCatalog; widgets: ReadonlySet<string> };
 }
 
-// Today's `QueueList` and Esc operations, unchanged.
+// Today's `QueueList` and Esc operations, and (UX wave U4a, Interfaces D) the stack's two acts on a message at the next
+// step: withdrawing it, and the engine's send-now.
 export interface QueueControls {
   promote(args: Args<'session.queue.promote'>): Promise<CommandResult<'session.queue.promote'>>;
   hold(args: Args<'session.queue.hold'>): Promise<CommandResult<'session.queue.hold'>>;
   remove(args: Args<'session.queue.remove'>): Promise<CommandResult<'session.queue.remove'>>;
   edit(args: Args<'session.queue.edit'>): Promise<CommandResult<'session.queue.edit'>>;
   setPaused(args: Args<'session.queue.setPaused'>): Promise<CommandResult<'session.queue.setPaused'>>;
+  cancelSteer(args: Args<'session.steer.cancel'>): Promise<CommandResult<'session.steer.cancel'>>;
+  sendNow(args: Args<'session.steer.sendNow'>): Promise<CommandResult<'session.steer.sendNow'>>;
 }

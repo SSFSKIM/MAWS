@@ -114,7 +114,7 @@ describe('a spawn on another machine', () => {
     await expect(run).resolves.toEqual({ started: true });
     expect(fake.invoked('session.spawn')).toEqual([{ checkout: '/srv/app', permission_mode: 'acceptEdits', model: 'opus', effort: 'high' }]);
     expect(tabOpen(NEW)).toBe(true);
-    const handed = await rememberingRemoteDrafts({ load: async (): Promise<Draft | null> => null, save: () => {} }, NEW, () => true, fakeClient().client).load();
+    const handed = await rememberingRemoteDrafts({ load: async (): Promise<Draft | null> => null, save: async () => true }, NEW, () => true, fakeClient().client).load();
     expect(attachmentsOf(handed!.doc as never)).toEqual([pdf]); // whole, however large: the draft's byte budget is not applied
     expect(takeFirstSend(NEW)).toBe(true);
     expect(takeFirstSend(NEW)).toBe(false); // once
@@ -180,7 +180,7 @@ describe('a spawn on another machine', () => {
     expect(tabOpen(NEW)).toBe(true);
     expect(spawnUnconfirmed(LOCAL_TAB)).toBe(false);
     expect(takeFirstSend(NEW)).toBe(false); // the edit is kept, not sent
-    const kept = await rememberingRemoteDrafts({ load: async (): Promise<Draft | null> => null, save: () => {} }, NEW, () => true, fakeClient().client).load();
+    const kept = await rememberingRemoteDrafts({ load: async (): Promise<Draft | null> => null, save: async () => true }, NEW, () => true, fakeClient().client).load();
     expect(JSON.stringify(kept?.doc)).toContain('fix the build and the tests');
   });
 

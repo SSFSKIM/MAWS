@@ -34,7 +34,7 @@ import { useKeyChord } from '../keymap/useKeyChord';
 import { RequestCard } from '../request-card/RequestCard';
 import { nextMode } from '../statusline';
 import { useAttention, selectPendingOf } from '../stores/attention';
-import { inlineEditOf, isStarting, memoryTargetOf, registerFocusTarget, resubmitRecordOf, setStarting, useComposerStore } from '../stores/composer';
+import { clearStackNotice, inlineEditOf, isStarting, memoryTargetOf, registerFocusTarget, resubmitRecordOf, setStarting, showStackNotice, useComposerStore } from '../stores/composer';
 import { toast, useNotices } from '../stores/notices';
 import { useSessionQueue } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
@@ -71,11 +71,14 @@ import { Frame } from './frame/Frame';
 import { PluginBand, PluginHint } from './frame/PluginSites'; // R2
 import { useGitWatch, type GitWatch } from './frame/git-watch';
 import { QueueList } from './queue/QueueList';
+import { firstToSend, newestToTake, STACK_WORDS, stackRows, type TakenRow } from './queue/stack'; // UX wave U4a M3
+import { readOf, refusalsNow, sendNowRefusal, stackActs, takeBackRefusal } from './queue/stack-acts'; // UX wave U4a M3
+import { attachTakeBackBox, carryForward, retryTakeBackLoad, TAKE_BACK_WORDS, takeBack, takingBack } from './queue/take-back'; // UX wave U4a M3
 import { cancelInlineEdit, sendInlineEdit } from './resubmit-seam'; // W3 (B6)
 import { routeOf, useListModels, useModelCatalogue, type Route } from './list-models';
 import { heldModel, useModelRequests } from '../widgets/model'; // P2-F S chip (review)
 import { locationPath, useSetupIntent, type SetupIntentHook } from './setup-intent';
-import { isBusy, PLACEHOLDER_BOTH, PLACEHOLDER_ENTER, steerPriority, submitState } from './submit/submit-state';
+import { isBusy, PLACEHOLDER_BOTH, PLACEHOLDER_ENTER, submitState } from './submit/submit-state';
 import { SubmitControl } from './submit/SubmitControl';
 
 // P5 O7 M4: a New chat tab back on this Mac with files dropped for another machine, which have no path here.
@@ -83,6 +86,7 @@ export const FILES_FOR_ANOTHER_MACHINE = (names: readonly string[]): string => `
 
 // W3 (B7): how close two Escs must come to count as the terminal's Esc Esc.
 export const ESC_ESC_MS = 800;
+const NO_LASTING: ReadonlySet<string> = new Set(); // UX wave U4a M3: the keys never act on a submission's row
 
 export interface ComposerProps {
   appSessionId: AppSessionId;
@@ -117,12 +121,12 @@ function useDraftPort(appSessionId: AppSessionId, hook: SetupIntentHook | null, 
       // While C10 holds an accepted first message its intent's draft may still be the sent text: nothing to restore.
       load: async () => (current.current ? (current.current.intent.message !== null ? null : current.current.intent.draft) : drafts.load()),
       clearsOnSend: () => current.current === null, // C10 holds an accepted first message; its intent's draft is left alone
-      save: (draft: Draft | null) => {
+      save: async (draft: Draft | null, replaces?: string | null) => {
         const intent = current.current;
-        if (!intent) return drafts.save(draft);
-        void intent.patch({ draft }).then((result) => {
-          if (!result.ok) console.warn('[composer] the unstarted session kept no draft', result.error);
-        });
+        if (!intent) return drafts.save(draft, replaces);
+        const result = await intent.patch({ draft });
+        if (!result.ok) console.warn('[composer] the unstarted session kept no draft', result.error);
+        return result.ok;
       },
     };
   }, [appSessionId, client]);
@@ -404,7 +408,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     void controls?.interrupt({ cancelEngineQueued: false, holdEngineQueued: true }).then((result) => {
       if (!result.ok) console.warn('[composer] session.interrupt failed', result.error);
     });
-  // Esc's interrupt: a waiting `next` steer runs right after it (W1)
+  // Lane A's Esc: the bridge holds no MAWS queue, so it just interrupts
   const interrupt = () =>
     void controls?.interrupt({ cancelEngineQueued: false }).then((result) => {
       if (!result.ok) console.warn('[composer] session.interrupt failed', result.error);
@@ -424,11 +428,11 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     handle.current?.submit();
   };
 
-  // W1: Esc while a turn runs interrupts and sends now: the held head (a `now` promote, which preempts the turn), or,
-  // with nothing held, an interrupt after which a `next` steer still waiting runs, since the engine starts what it holds
-  // once the turn is interrupted (pass3/steer-next-interrupted, steer-next-then-now); with nothing waiting either, that
-  // is just a stop. Unlike ⌘. it holds nothing back. An uncertain head waits for the human's own decision. Not busy,
-  // Esc is not the composer's (W3: but two of them on an empty editor open the rewind picker, below).
+  // UX wave U4a (l3-input-01; decision 14): Esc while a turn runs is Send now on the stack's first row that can be sent
+  // (an uncertain entry waits for the human's own decision), which stops nothing, and the square's stop, holding what
+  // waits, when no row can be. A Send now refused here (a session on another machine, an engine host of another build)
+  // says its sentence in the stack and stops nothing; ⌘. and the square still stop. Not busy, Esc is not the composer's
+  // (W3: but two of them on an empty editor open the rewind picker, below).
   const escapeTurn = (): boolean => {
     // P5 O9 M5: the bridge holds no MAWS queue, so Esc on a running lane A turn just interrupts
     if (driven) {
@@ -438,14 +442,34 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     }
     const current = useSessions.getState().engine.get(appSessionId) ?? null;
     if (current?.process !== 'ready' || !isBusy(current, queue.entries)) return false;
-    const head = queue.entries.find((e) => e.state === 'queued' && !e.uncertain);
-    if (!head) {
-      interrupt();
+    const rows = stackRows(queue, NO_LASTING, readOf(appSessionId));
+    const first = firstToSend(rows);
+    if (first === null) {
+      stop();
       return true;
     }
-    void controls?.queue()?.promote({ queueId: head.queueId, priority: steerPriority('interrupt_and_send') }).then((result) => {
-      if (!result.ok) toast({ level: 'warning', text: result.error.message, actions: [], dismissible: true });
-    });
+    const refused = sendNowRefusal(refusalsNow(appSessionId), first, true);
+    if (refused !== null) showStackNotice(appSessionId, refused);
+    else void stackActs(appSessionId, controls).sendNow(first, rows.filter((row) => row.kind === 'next').map((row) => row.key));
+    return true;
+  };
+
+  // UX wave U4a (l3-input-04): ↑ in an empty box takes back the newest waiting message (an answer is skipped); with none,
+  // history walks. A take-back refused here says its sentence and takes nothing back; one in hand takes the key.
+  const takeBackDeps = useMemo(() => ({ client, controls: () => controls?.queue() ?? null }), [client, controls]);
+  const takeBackRow = (row: TakenRow) => {
+    if (takingBack(appSessionId)) return;
+    if (!(handle.current?.serialize().empty ?? false)) return showStackNotice(appSessionId, STACK_WORDS.boxHoldsDraft, row.key);
+    const refused = takeBackRefusal(refusalsNow(appSessionId), row);
+    if (refused !== null) return showStackNotice(appSessionId, refused, row.key);
+    void takeBack(appSessionId, row, takeBackDeps);
+  };
+  const onTakeBack = (): boolean => {
+    if (unstarted || driven) return false;
+    if (takingBack(appSessionId)) return true;
+    const newest = newestToTake(stackRows(queue, NO_LASTING, readOf(appSessionId)));
+    if (newest === null) return false;
+    takeBackRow(newest);
     return true;
   };
 
@@ -468,8 +492,20 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     return handle.current?.openWidget('rewind') ?? false;
   };
 
+  // UX wave U4a (decision 13): the session's box is held read-only while a take-back of it is in hand
+  const [holding, setHolding] = useState(false);
+  useEffect(
+    () =>
+      attachTakeBackBox(appSessionId, {
+        load: (doc) => (promptState.current.docked ? false : (handle.current?.load(doc) ?? false)), // a card holds the box
+        replace: (doc) => handle.current?.replaceDoc(doc),
+        hold: setHolding,
+        settleLater: (replaces) => handle.current?.settleWith(replaces),
+      }),
+    [appSessionId],
+  );
   // The editor is read-only while C10 holds the first send (starting, or its message retained behind a card).
-  const editorDisabled = readerClosed ?? (setup && (starting || messageHeld) ? decision.reason : null); // board 525: or the member's grade there
+  const editorDisabled = readerClosed ?? (setup && (starting || messageHeld) ? decision.reason : null) ?? (holding ? TAKE_BACK_WORDS.taking : null); // board 525: or the member's grade there
   // R2: the prompt requests' view of the composer, and a suggestion gone once a turn runs or the box holds text
   const working = driven ? driven.running : isBusy(status, queue.entries); // P5 O9 M5: a driven session's turn is its holder's
   useLayoutEffect(() => {
@@ -479,6 +515,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   useEffect(() => {
     if (docked) handle.current?.settleDictation();
   }, [docked]);
+  // UX wave U4a (decision 13, step 4): a take-back's load the box refused is tried again at its next change of state
+  useEffect(() => retryTakeBackLoad(appSessionId), [appSessionId, docked, editorDisabled, draft.empty]);
   if (suggestion !== null && (working || !draft.empty)) setSuggestion(null); // typed over, or a turn started: gone
   // UX wave U4a (Interfaces I): while a turn runs the empty box names the keys: both where ⌘Enter queues, Enter alone on
   // a terminal session, which keeps no queue
@@ -528,7 +566,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
           </button>
         </p>
       )}
-      {!unstarted && <QueueList appSessionId={appSessionId} queue={queue} busy={isBusy(status, queue.entries)} sessionId={sessionId} cwd={cwd} client={client} />}
+      {!unstarted && <QueueList appSessionId={appSessionId} queue={queue} busy={isBusy(status, queue.entries)} client={client} onTakeBack={takeBackRow} />}
       {/* P5 O9 M5: lane A's sends whose fate was not known when the bridge answered, each with its text */}
       {!unstarted && <PendingSends appSessionId={appSessionId} client={client} />}
       {/* P5 O9 M7: the images and PDFs lane A handed to the bridge, each with its state */}
@@ -563,7 +601,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
         attachments={attachmentsOf(doc)}
         editorHandle={handle}
         editor={
-          <div ref={boxRef}>
+          // UX wave U4a (decision 15): the next key in the box clears the stack's notice line (before the key's own act)
+          <div ref={boxRef} onKeyDownCapture={() => clearStackNotice(appSessionId)}>
             <Editor
               appSessionId={appSessionId}
               cwd={cwd}
@@ -575,6 +614,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
               client={client}
               onDocChange={setDoc}
               onEscape={onEscape}
+              onTakeBack={onTakeBack}
+              onStage={(stage) => void carryForward(appSessionId, stage, takeBackDeps)}
               onSubmit={onSubmit}
               suggestion={suggestion}
               onSuggestionTaken={() => setSuggestion(null)}

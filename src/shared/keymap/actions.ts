@@ -110,6 +110,8 @@ export const ACTIONS = {
   'composer.newLineOption': { title: 'New line',                  chord: 'Alt+Enter',    sink: 'renderer', menu: null, scope: 'composer', fixed: true },
   'composer.queue':       { title: 'Queue for after the turn',    chord: 'Cmd+Enter',    sink: 'renderer', menu: null, scope: 'composer' },
   'composer.send':        { title: 'Send (reply fields)',         chord: 'Cmd+Enter',    sink: 'renderer', menu: null, scope: 'composer' },  // C7 consumes
+  'composer.takeBack':    { title: 'Take back the newest waiting message', chord: 'Up', sink: 'renderer', menu: null, scope: 'composer', fixed: true }, // UX wave U4a M3: the editor's ↑ in an empty box
+  'composer.sendNowOrStop': { title: 'Send the first waiting message now, or stop', chord: 'Escape', sink: 'renderer', menu: null, scope: 'composer', fixed: true }, // UX wave U4a M3: the editor's Esc while a turn runs
   'composer.cycleMode':   { title: 'Cycle permission mode',       chord: 'Shift+Tab',    sink: 'renderer', menu: null, scope: 'composer' },  // C7 consumes
   // C7 start: the composer's own actions (C7 execution document, Keymap additions). Stop and Focus are app-scoped
   // because ⌘. is pressed while typing, where C5's dispatcher refuses every pane-scoped action, and are registered once

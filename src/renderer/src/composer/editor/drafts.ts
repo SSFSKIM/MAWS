@@ -8,7 +8,7 @@ import type { JSONContent } from '@tiptap/core';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { Draft } from '@shared/ipc/schema/session';
 import { readerRowsOf } from '../../lane-b/reader-rows';
-import { dropRemoteDraftSaves, loadRemoteDraft, resetRemoteDraftSaves, saveRemoteDraft, unsavedRemoteDraft } from '../../lane-b/remote-drafts';
+import { dropRemoteDraftSaves, loadRemoteDraft, resetRemoteDraftSaves, saveRemoteDraft, saveRemoteDraftOnce, unsavedRemoteDraft } from '../../lane-b/remote-drafts';
 import { markPersisted } from './attachments';
 import { attachmentsOf, MENTION, type ComposerDoc, type MentionAttrs } from './doc';
 
@@ -20,9 +20,11 @@ export function isEmptyDoc(doc: ComposerDoc): boolean {
   return attachmentsOf(doc).length === 0 && nodesOf(doc).every((node) => node.type === 'hardBreak' || (node.type === 'text' && (node.text ?? '').trim() === ''));
 }
 
-export function draftOf(doc: ComposerDoc, updatedAt: string): Draft | null {
+// UX wave U4a (decision 13): a take-back's stage keeps every attachment's bytes (`whole`); the draft's budget is the
+// editor's writer's.
+export function draftOf(doc: ComposerDoc, updatedAt: string, options: { whole?: boolean } = {}): Draft | null {
   if (isEmptyDoc(doc)) return null;
-  const kept = markPersisted(attachmentsOf(doc)).filter((a) => a.persisted);
+  const kept = options.whole ? attachmentsOf(doc) : markPersisted(attachmentsOf(doc)).filter((a) => a.persisted);
   const attachments = nodesOf(doc)
     .filter((node) => node.type === MENTION && (node.attrs as MentionAttrs).kind === 'file')
     .map((node) => ({ path: (node.attrs as MentionAttrs).id, kind: 'file' }));
@@ -92,7 +94,7 @@ export const resetRemoteDrafts = (): void => {
 export function rememberRemoteDraft(appSessionId: AppSessionId, doc: ComposerDoc): void {
   remoteDrafts.set(appSessionId, { doc, attachments: [], updatedAt: new Date().toISOString() });
 }
-export function rememberingRemoteDrafts<P extends { load(): Promise<Draft | null>; save(draft: Draft | null): void }>(port: P, appSessionId: AppSessionId, remote: () => boolean, client: MawsBridge): P {
+export function rememberingRemoteDrafts<P extends { load(): Promise<Draft | null>; save(draft: Draft | null, replaces?: string | null): Promise<boolean> }>(port: P, appSessionId: AppSessionId, remote: () => boolean, client: MawsBridge): P {
   const remember = (draft: Draft | null) => {
     if (draft === null) remoteDrafts.delete(appSessionId);
     else remoteDrafts.set(appSessionId, draft);
@@ -108,14 +110,21 @@ export function rememberingRemoteDrafts<P extends { load(): Promise<Draft | null
       if (remoteDrafts.has(appSessionId) || readerRowsOf(appSessionId) === 'refused') return Promise.resolve(remembered());
       return loadRemoteDraft(client, appSessionId, remembered);
     },
-    save: (draft: Draft | null) => {
-      if (!remote()) return port.save(draft);
+    save: async (draft: Draft | null, replaces?: string | null) => {
+      if (!remote()) return port.save(draft, replaces);
       if (readerRowsOf(appSessionId) === 'refused') {
         dropRemoteDraftSaves(appSessionId); // a save still out, refused later, hands nothing over this one (Task 3's review, H1)
-        return remember(draft);
+        remember(draft);
+        return true;
       }
       remoteDrafts.delete(appSessionId); // a handed document, which this save replaces
+      // UX wave U4a (decision 13): a save naming a take-back's settle form goes once, in the session's order, its answer ours
+      if (replaces != null) {
+        const result = await saveRemoteDraftOnce(client, appSessionId, draft, replaces);
+        return !('withheld' in result) && result.ok;
+      }
       saveRemoteDraft(client, appSessionId, draft, remember);
+      return true; // taken in hand: the session's saves go one after another, again where refused stale
     },
   };
 }
