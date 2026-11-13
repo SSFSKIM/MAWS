@@ -23,7 +23,7 @@ Build F (commit `f1852de3a`) is the build on the owner's machines, and the owner
 - [x] (2026-11-13) The drawn example came back with nineteen points, and the architect ruled on each; the nine points handed back with revision 2 were accepted as written. Folded in, one pass (Decision Log).
 - [x] (2026-11-13) M1 — Three small fixes: six words, "reconnecting", the chip's box. Commits `83f56a79c..d3578520b`; reviewed clean.
 - [x] (2026-11-13) M2 — A listed session opens like a local one. Commits `82c7fdebd..3f6a6ae59`, review fix `273101fd1..9303d53c4` (an anchored Needs you item of a listed session now goes through the opener too); reviewed clean.
-- [ ] M3 — Hide a session, and get it back. Its last step, the row's own button, is built on the owner's answer to question 1 (M3, decision 9). The owner answered "Button on the row" (2026-11-12): it is built.
+- [x] (2026-11-13) M3 — Hide a session, and get it back. Commits `3705b6a36..7c3cb5054` (the row's button last, `7c3cb5054`), review fix `3dcf36df0..17acf3e0d` (a Hide settles the held order at once; the Hidden row is the keyboard parent of every row under it; no Hide on a Needs you row, by the architect's ruling); reviewed clean. Its last step, the row's own button, is built on the owner's answer to question 1 (M3, decision 9). The owner answered "Button on the row" (2026-11-12): it is built.
 - [ ] M4 — U7a's e2e scenes, the record, and the acceptance run.
 - [ ] U7a: the proof an executor does not run; the pull request on the architect's word.
 - [ ] The re-check pass of "Statements to check again", once U13a is on master (the author of this document, on the architect's word). U7b does not start before it.
@@ -969,6 +969,9 @@ U7a's pull request carries the dated amendment of the ruling S-11 reverses; U7b'
   Rejected: the same items wherever a session is listed, which is the simpler code and the more confusing menu.
   Also from the architect: the cross-build run against build F is the architect's, and waits for a gate flag (`--peer-exact`) now in a pull request, because F is off master's first-parent chain and `--peer f1852de3a` is mapped to another commit. No executor or controller starts it.
   Date/Author: 2026-11-13, the architect; recorded by the controller.
+
+- Decision (M3's fix round, the executor's, folded by the controller): the menu's target records whether its row is in the tree, and Hide and Unhide are drawn only for a tree row, so Needs you keeps the one shared `SessionItems` and `NeedsYou.tsx` is untouched. With Hide reachable only from the tree, decision 6's focus rule holds without exception. The four `act()` warnings of `palette/CommandPalette.test.tsx` are on the branch before M3 too (counted at `c5bfe9cf9` and at the head): not this landing's.
+  Date/Author: 2026-11-13, M3's executor; folded by the controller.
 
 ## Outcomes & Retrospective
 
