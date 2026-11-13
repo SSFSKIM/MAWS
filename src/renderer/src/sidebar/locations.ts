@@ -50,7 +50,7 @@ export function lastSeen(view: LocationView, machine: MachineRef): string | null
 
 export function locationState(location: OrgProjectLocation, view: LocationView): LocationState {
   const machine = view.machine(location.machine);
-  if (!machine.up) {
+  if (machine.offline ?? !machine.up) { // the UX wave, U9 (O-39): by the link's phase, as the row's line reads it
     const since = lastSeen(view, location.machine);
     return { kind: 'offline', words: REGISTRY.offline, card: since === null ? REGISTRY.offline : REGISTRY.offlineSince(since) };
   }
