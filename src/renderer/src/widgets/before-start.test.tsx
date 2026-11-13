@@ -98,6 +98,10 @@ const invoked = (command: string) => backend.calls.filter((c) => c.command === c
 const lead = () => document.querySelector('[data-before-start]')?.textContent ?? null;
 const noNotYet = () => expect(document.body.textContent).not.toContain(NOT_YET);
 const startedStatus = (process: EngineSessionStatus['process']): EngineSessionStatus => ({ ...status(BARE, { process }), appSessionId: ID });
+// The settings as read, their launch profile starting the chat without `off`'s plugins.
+const profileOff = (off: string[]) =>
+  useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V21, engine: { ...SETTINGS_DEFAULTS_V21.engine, launchProfile: { plugins: { off }, hooks: 'user' } } }, resolvedTheme: 'light' } });
+const detailUse = (name: string) => within(document.querySelector<HTMLElement>(`[data-skill-detail="${name}"]`)!).getByRole('button', { name: 'Use in chat' });
 
 describe('the Connectors dialog before the first message', () => {
   it('lists one row per configured name with its scope in Customize’s words, and no switch, Reconnect or Sign in', async () => {
@@ -166,6 +170,7 @@ describe('the Skills dialog before the first message', () => {
     const close = vi.fn();
     const insertText = vi.fn();
     registerFocusTarget(ID, { focusEditor: () => {}, focusFrame: () => {}, insertText });
+    profileOff([]);
     mount(SkillsWidget, close);
     await screen.findByRole('region', { name: 'In this project' });
     const use = (name: string) => within(document.querySelector<HTMLElement>(`[data-skill-row="${name}"]`)!).queryByRole('button', { name: 'Use in chat' });
@@ -183,8 +188,6 @@ describe('the Skills dialog before the first message', () => {
 // The branch panel's finding 1: a skill of a plugin the chat will start without (the launch profile's `plugins.off`, which
 // the launch writes as `enabledPlugins[id] = false`) stays listed, and its Use in chat is greyed with the reason.
 describe('a skill of a plugin the chat starts without', () => {
-  const profileOff = (off: string[]) =>
-    useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V21, engine: { ...SETTINGS_DEFAULTS_V21.engine, launchProfile: { plugins: { off }, hooks: 'user' } } }, resolvedTheme: 'light' } });
   const useButtons = (name: string) => within(document.querySelector<HTMLElement>(`[data-skill-row="${name}"]`)!).queryAllByRole('button', { name: 'Use in chat' });
 
   it('is listed with Use in chat disabled and saying why, on its row and in its detail; the other skills stay usable', async () => {
@@ -211,6 +214,31 @@ describe('a skill of a plugin the chat starts without', () => {
     mount(SkillsWidget);
     await screen.findByRole('region', { name: 'In this project' });
     expect(useButtons('draw')[0]).toHaveProperty('disabled', true);
+    act(() => profileOff([]));
+    await waitFor(() => expect(useButtons('draw')[0]).toHaveProperty('disabled', false));
+  });
+
+  // The task review of the branch panel's fix (Important 1): an open detail follows its row as the profile changes.
+  it('greys an open detail’s Use in chat when the profile turns its plugin off, and offers it again when it turns back on', async () => {
+    profileOff([]);
+    mount(SkillsWidget);
+    fireEvent.click(await screen.findByRole('button', { name: 'View draw' }));
+    expect(detailUse('draw')).toHaveProperty('disabled', false);
+    act(() => profileOff(['fx-entry@fx-market']));
+    expect(detailUse('draw')).toHaveProperty('disabled', true);
+    expect(detailUse('draw').getAttribute('title')).toBe('Off in the sessions MAWS runs: Settings › Sessions › Plugins in sessions');
+    act(() => profileOff([]));
+    expect(detailUse('draw')).toHaveProperty('disabled', false);
+  });
+
+  // The task review (Minor 3): until the settings are read, which plugins the chat starts without is not known.
+  it('keeps a plugin skill’s Use in chat unavailable until the settings are read, and the other skills usable', async () => {
+    mount(SkillsWidget);
+    await screen.findByRole('region', { name: 'In this project' });
+    const [draw] = useButtons('draw');
+    expect(draw).toHaveProperty('disabled', true);
+    expect(draw!.getAttribute('title')).toBe('Reading Settings › Sessions › Plugins in sessions…');
+    expect(useButtons('review')[0]).toHaveProperty('disabled', false);
     act(() => profileOff([]));
     await waitFor(() => expect(useButtons('draw')[0]).toHaveProperty('disabled', false));
   });
@@ -377,6 +405,68 @@ describe('a plugin change while no reader of the inventory is fetching', () => {
     await waitFor(() => expect(document.querySelector('[data-skill-row="linear"]')).toBeTruthy());
     expect(document.querySelector('[data-skill-row="review"]')).toBeNull();
     expect(reads).toBe(2);
+  });
+
+  // The task review of the branch panel's fix (Important 2): the read owed by a change during the first read in flight
+  // is the query's, not its reader's: a reader that may not fetch meanwhile (the "+" menu closed) or that is gone (the
+  // dialog closed) reads it once it is open again, and nothing reads while none is.
+  const firstHeld = () => {
+    let first!: (value: CustomizationInventory) => void;
+    const reads = { count: 0 };
+    backend.script('customization.inventory', () => {
+      reads.count += 1;
+      return reads.count === 1 ? new Promise<CustomizationInventory>((resolve) => (first = resolve)) : withSkill('linear');
+    });
+    return { reads, answerFirst: () => first(ATLAS_INVENTORY) };
+  };
+
+  it('reads again when the "+" menu opens after a change that came during its first read, made while the menu closed', async () => {
+    const { reads, answerFirst } = firstHeld();
+    const user = userEvent.setup();
+    render(<QueryClientProvider client={client()}><PlusMenu appSessionId={ID} cwd={ATLAS} editor={{ current: null }} /></QueryClientProvider>);
+    const openConnectors = async () => {
+      await user.click(screen.getByRole('button', { name: 'Add files, photos or commands' }));
+      act(() => screen.getByRole('menuitem', { name: 'Connectors' }).focus());
+      await user.keyboard('{ArrowRight}');
+    };
+    await openConnectors();
+    await waitFor(() => expect(reads.count).toBe(1));
+    await user.keyboard('{Escape}{Escape}');
+    await waitFor(() => expect(screen.queryByRole('menuitem', { name: 'Connectors' })).toBeNull());
+    act(() => changed());
+    await act(async () => answerFirst()); // the answer read before the change
+    expect(reads.count).toBe(1); // a closed menu starts no read
+    await openConnectors();
+    await waitFor(() => expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toContain('linearproject scope'));
+    expect(reads.count).toBe(2);
+  });
+
+  it('reads again when /skills opens after a change that came during the first read of a dialog closed meanwhile', async () => {
+    const { reads, answerFirst } = firstHeld();
+    const shared = client();
+    const open = () => render(<QueryClientProvider client={shared}><SkillsWidget appSessionId={ID} args="" close={() => {}} /></QueryClientProvider>);
+    const first = open();
+    await waitFor(() => expect(reads.count).toBe(1));
+    first.unmount();
+    act(() => changed());
+    await act(async () => answerFirst());
+    expect(reads.count).toBe(1); // no dialog open, no read
+    open();
+    await waitFor(() => expect(document.querySelector('[data-skill-row="linear"]')).toBeTruthy());
+    expect(document.querySelector('[data-skill-row="review"]')).toBeNull();
+    expect(reads.count).toBe(2);
+  });
+
+  // The task review (Important 1): a detail whose skill a new answer no longer lists gives way to the list.
+  it('leaves an open detail for the list when the answer read after a change no longer lists its skill', async () => {
+    mount(SkillsWidget);
+    fireEvent.click(await screen.findByRole('button', { name: 'View review' }));
+    expect(document.querySelector('[data-skill-detail="review"]')).toBeTruthy();
+    inventories.set(ATLAS, withSkill('linear'));
+    act(() => changed());
+    await waitFor(() => expect(document.querySelector('[data-skill-row="linear"]')).toBeTruthy());
+    expect(document.querySelector('[data-skill-detail]')).toBeNull();
+    expect(document.querySelector<HTMLElement>('[data-skills-list]')!.classList.contains('hidden')).toBe(false);
   });
 
   it('reads again when /skills opens after a change made while no dialog was open', async () => {
