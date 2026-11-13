@@ -22,7 +22,8 @@ How to see it working. U8c-1: the test that renames a real transcript under the 
 U8c-1:
 
 - [ ] The architect's read of the revision; U8c-1's ticket registered.
-- [ ] M1 — A moved transcript keeps its readers.
+- [x] (2026-11-13) M1, red: at `b2fffe90f` (the hook in, no fix), on the VM: (a), (b) and (j) pass, (f) skipped; (c), (e), (g), (h) and (i), the three job-reader cases and the three `Discovery.find` cases fail. (d) fails in 2 of 7 runs and passes in 5 (Surprises & Discoveries).
+- [ ] M1 — A moved transcript keeps its readers. Fixed at `2bd63a895`: `move.test.ts`, `discovery.test.ts` and `transcript-jobs.test.ts` 26 passed and 1 skipped (f), and `move.test.ts` passed five runs in a row; the folders and their importers 1046 passed and 4 skipped across 64 files; `tsc-node` and `tsc-e2e` clean. The task review is in progress.
 - [ ] M1's cases on macOS (`unit:darwin`; the architect runs it).
 - [ ] Hand-back to the architect (class 1a, the branch's review and the pull request are the architect's).
 
@@ -717,6 +718,10 @@ Found while writing this document and in its adversarial review, against master 
   Evidence: `tools/terminal/TerminalView.tsx`, the "worktree warning" bar; `e2e/terminal.spec.ts`, "pinned tab keeps its shell across sessions and warns about the worktree".
 - Observation: Source control resolves its checkout at each call and sends no folder, so a sheet opened for one folder acts in another after a move; and its refusal codes are a closed list on the wire.
   Evidence: `src/services/scm/service.ts`, `private checkout(appSessionId)`; `tools/scm/view-state.ts` keeps the sheet across a remount; `ScmRefusalCodeSchema` in `src/shared/ipc/schema/scm.ts` is a `z.enum`, and `src/shared/ipc/wire.ts` counts an added enum member as a change of major.
+- Observation (M1's red run): on Linux, case (d), the agents' listing at the new paths, is not reliably red on master. It failed in 2 of 7 runs at `b2fffe90f` and passed in 5.
+  Evidence: Linux's watch tree (`shared/fs/watch-tree.ts`) reports the contents of a folder moved in, file by file. The moved session folder's agent files therefore arrive as sidecar changes, and `agentFileChanged` drives a walk of `sessionDir`. That walk names the new paths when the listing already holds the session at its new place, and lists nothing when it runs after master's forget. On macOS, FSEvents reports a renamed folder as one event for the folder, which `classifyStoreEvent` drops (a session id with no `.jsonl`), so there master should be red every time; that is unverified until the Mac lane runs. The document's reading holds for macOS. On Linux, master's behaviour is a race. The fix (decision 3's walk when the listing's path changes) makes the case hold on both.
+- Observation: no case of `service.test.ts` asserts a removal in a way the look changes. Every one of them passes unchanged, the watcher-overtaken scan's "never resurrects" case included, so that file is not edited.
+  Evidence: `vitest run src/engine-host/fs …` at `2bd63a895`: 63 files passed.
 - Observation: the probe's two recorded sessions agree at every step on the first row's folder, the home, the newest row's folder and the newest `gitBranch`; the review found them in agreement with §E's table.
   Evidence: the `step_record` frames of `uxwave-folder-headless.jsonl` and `uxwave-folder-terminal.jsonl`, rebuilt by index (the terminal fixture's last step leaves four row indexes unrecorded).
 
@@ -781,6 +786,21 @@ Found while writing this document and in its adversarial review, against master 
      Rationale: with uploads brought under it (entry 3, B), Source control was the one remaining service that would run in a folder taken from a fact with no check at the call. Date/Author: 2026-11-13, the author.
    - Decision: U8c-1 gains one e2e scene (M1 decision 9).
      Rationale: as a landing of its own it needs a proof a person can watch on a Mac; the scene needs no engine. Date/Author: 2026-11-13, the author.
+
+6. **2026-11-13 (the executor of U8c-1): M1's means.**
+   - Decision: a look commits a removal only while the session is still listed at the path it was noted at (with no listing, for a session main named in its scan's `known` that the host never listed), and it drops a note queued for the same generation meanwhile. That second note is a scan's: a scan does not raise the generation.
+     Rationale: decision 4's generation is raised by transcript events and summaries. A scan's own listing can list a session at a new path without raising it, and a removal must be told once. Both conditions only narrow when a removal commits. A session deleted is still listed where it was noted, under its generation, so it is told.
+   - Decision: when a look finds the file, it summarises it there and decides nothing more. Only a session found nowhere whose generation moved is noted again.
+     Rationale: a file found back at the noted path (an exit right after an enter) would otherwise be noted, found and summarised again and again. A found file whose read then misses (it moved on) is left to the move's own events, or to the next scan when none comes.
+   - Decision: a scan notes its gone sessions before it lists what it found, and waits for their look just before it answers, not before its summaries.
+     Rationale: the answer counts sessions after the look, and its removals are told before it, as decision 4 asks. Its summaries need not wait one readdir pass.
+   - Decision: every change of a session's listed path, by a summary (`summarizePath`) or by a scan's listing (`setListed`), re-points its follows and walks its agents again, the latter only when an agent listing was read before. A rescan's `relocateFollows` re-bases agents' follows too.
+     Rationale: decision 3 hangs on the listing's path changing, and a scan can be the first to see a move. A session whose agents nobody listed has no listing main was told.
+   - Decision: `Discovery.find(sessionIds)` reads every project folder's names concurrently, as `list` does, and stats only a transcript found under two folders.
+     Rationale: decision 4's cost, one readdir per folder per look.
+   - Decision: `move.test.ts` runs under a 30 s bound per case. The red run also ran `discovery.test.ts`, for `find`'s cases.
+     Rationale: each step waits up to 5 s on real file events, and the VM is shared.
+     Date/Author: 2026-11-13, the executor of U8c-1.
 
 ## Outcomes & Retrospective
 
