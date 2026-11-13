@@ -188,3 +188,66 @@ describe('the chip’s and the anchor’s readers', () => {
     expect(anchorPath('no tag here')).toBe(null);
   });
 });
+
+// The differential (fix round 1): seeded strings built from link-shaped fragments, each drawn by the window's own
+// Markdown. One direction is asserted, the one that admits: every path the rule names is a path chip the window draws.
+// The other direction (a chip the rule refuses) fails towards the refusal; it is counted and a few are printed.
+function mulberry32(seed: number): () => number {
+  let state = seed;
+  return () => {
+    state = (state + 0x6d2b79f5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const FRAGMENTS = [
+  '[', ']', '(', ')', '<', '>', '![', '](', '](<', '>)', ' ', ' ', '\n', '\n\n', '> ', '>\n', '- ', '1. ', '2) ', '1.2 ', '   ', '    ',
+  '\\', '\\[', '\\]', '\\(', '\\)', '\\<', '&amp;', '&#46;', '`', '``', '```\n', '\n```\n', ' "t"', " 't'", ' (t)', '"', "'",
+  '#L3', ':12', '%20', '%72', '/work/a.md', '/secret', '/work/my notes.md', '/w/(x).md', '/vault/key,backup', '[ref]: ', '[ref]',
+  '[^1]: ', '# ', '**', 'text', 'x', ':', 'host:', '//', '..', '/./', '[r](/work/a.md)', '[r](</secret>)', '[r](/secret "t")',
+  '![i](/secret)', '[ref]: /secret', '[ref]: </secret>', '<https://e.com/', 'Here is:\n', '[a [b](/secret) c]',
+];
+const LONG_TAIL = 'a'.repeat(17_000); // past the 16 KiB bound; few, for the time
+function generated(seed: number, count: number): string[] {
+  const random = mulberry32(seed);
+  return Array.from({ length: count }, () => {
+    let text = '';
+    for (let n = 3 + Math.floor(random() * 22); n > 0; n -= 1) text += random() < 0.0015 ? LONG_TAIL : FRAGMENTS[Math.floor(random() * FRAGMENTS.length)]!;
+    return text;
+  });
+}
+// What the window's path chips in `markdown` ask for, as `clickedPaths`, for a string that may draw nothing.
+function chipPaths(markdown: string): string[] {
+  const openFile = vi.fn();
+  const { container } = render(
+    <TranscriptActionsProvider actions={{ openFile }}>
+      <Markdown markdown={markdown} live={false} />
+    </TranscriptActionsProvider>,
+  );
+  for (const chip of container.querySelectorAll('[data-chip="path"]')) fireEvent.click(chip);
+  cleanup();
+  return openFile.mock.calls.map(([path]) => normalizeLexically(path as string));
+}
+
+describe('the differential: every path the rule names is a chip the window draws', () => {
+  it('over seeded strings of link-shaped fragments', { timeout: 300_000 }, () => {
+    const seed = 0x6c696e6b;
+    const count = 2000;
+    const started = performance.now();
+    let checked = 0;
+    const faults: { markdown: string; path: string }[] = [];
+    const windowOnly: { markdown: string; path: string }[] = [];
+    for (const markdown of generated(seed, count)) {
+      const chips = chipPaths(markdown);
+      const named = linkPaths(markdown);
+      checked += named.length;
+      for (const path of named) if (!chips.includes(path)) faults.push({ markdown, path });
+      for (const path of chips) if (!named.includes(path)) windowOnly.push({ markdown, path });
+    }
+    console.log(`named-links differential: seed ${seed}, ${count} strings, ${checked} named paths checked, ${windowOnly.length} window-only chips, ${Math.round(performance.now() - started)} ms`);
+    for (const only of windowOnly.slice(0, 5)) console.log(`window-only chip ${JSON.stringify(only.path)} in ${JSON.stringify(only.markdown.slice(0, 200))}`);
+    expect(faults.slice(0, 10).map(({ markdown, path }) => `${JSON.stringify(path)} in ${JSON.stringify(markdown.slice(0, 200))}`)).toEqual([]);
+    expect(faults).toHaveLength(0);
+  });
+});
