@@ -53,13 +53,20 @@ export function reservedItemOf(chord: string): string | null {
   return MENU_ROLE_CHORDS.find((role) => same(parseChord(role.chord), wanted))?.item ?? null;
 }
 
-// The action other than `id` that already holds `chord`, if any. U6a (the U6a execution document, Interfaces D): a fixed
-// row is never a holder (its key is its editor's); and an action given back its own default is not refused for a row
-// that holds that chord as its own default too, so the table's own sharing (two composer rows on ⌘Enter) is restorable.
+// The action other than `id` that already holds `chord`, if any. UX wave U4a (its decision 11, which U6a's decision 7
+// left to the landing with the first fixed row): a fixed row holds its key against every row that could take that key
+// from the fixed row's own surface (a row of its scope, an app-wide row, a menu row), and is named first, since a fixed
+// key cannot be unbound; a pane row is never delivered from a text field, so the pane's Enter and Esc can be given back.
+// U6a (the U6a execution document, Interfaces D): an action given back its own default is not refused for a row that
+// holds that chord as its own default too, so the table's own sharing (two composer rows on ⌘Enter) is restorable.
 export function conflictOf(id: ActionId, chord: string, overrides: KeymapOverrides, table: ActionTable = ACTIONS): ActionId | null {
   const wanted = heldChords(id, chord).map(parseChord);
   const holds = (chords: string[]) => chords.some((held) => wanted.some((candidate) => same(parseChord(held), candidate)));
-  const ownDefault = table[id].chord !== null && holds(heldChords(id, table[id].chord!));
+  const spec: ActionSpec = table[id];
+  const reaches = (fixed: ActionSpec) => spec.scope === fixed.scope || spec.scope === 'app' || spec.sink === 'menu';
+  const fixedHolder = idsOf(table).find((other) => other !== id && table[other].fixed === true && reaches(table[other]) && holds(heldChords(other, table[other].chord!)));
+  if (fixedHolder !== undefined) return fixedHolder;
+  const ownDefault = spec.chord !== null && holds(heldChords(id, spec.chord));
   for (const other of idsOf(table)) {
     if (other === id || table[other].fixed) continue;
     const byDefault = !(isRebindable(other, table) && overrides[other] !== undefined);
@@ -95,7 +102,7 @@ export function captureChord(event: KeyEventLike, id: ActionId, overrides: Keyma
   const reserved = reservedItemOf(chord);
   if (reserved !== null) return { kind: 'refused', message: KEYBOARD.reserved(reserved) };
   const taken = conflictOf(id, chord, overrides, table);
-  if (taken !== null) return { kind: 'refused', message: KEYBOARD.conflict(table[taken].title) };
+  if (taken !== null) return { kind: 'refused', message: table[taken].fixed ? KEYBOARD.fixedKey(table[taken].title) : KEYBOARD.conflict(table[taken].title) };
   return { kind: 'chord', chord };
 }
 

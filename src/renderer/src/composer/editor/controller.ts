@@ -46,10 +46,11 @@ export interface InsertOptions {
 }
 
 // A submission is asked for one way (W10): Enter and ⌘Enter, and the Composer's Send, reach the caller's `onSubmit`
-// through the same path, which decides what it does (while a turn runs the Composer makes it a `next` steer).
+// through the same path, which decides what it does (while a turn runs the Composer makes it a `next` steer). UX wave
+// U4a (l3-input-03): ⌘Enter names `when: 'after'`, which keeps the message for after a running turn.
 export interface EditorHandle {
   focus(): void;
-  submit(): void; // the submit control: as a key would (refused while one is in flight)
+  submit(when?: 'after'): void; // the submit control: as a key would (refused while one is in flight)
   insertText(text: string, options?: InsertOptions): void; // at the caret, the one it left when not focused, else at the end (C11's insertComposerText)
   doc(): ComposerDoc;
   serialize(): Serialized;
@@ -93,13 +94,14 @@ export interface ControllerInputs {
   catalog: SessionCatalog;
   widgets: ReadonlySet<string>;
   followUp: boolean;
-  onSubmit?(s: Serialized): Promise<boolean>;
+  onSubmit?(s: Serialized, when?: 'after'): Promise<boolean>;
   onPrefill?(prefill: Prefill): void;
   onDocChange?(doc: ComposerDoc): void;
   onEscape?(): boolean;
   onRestore?(doc: ComposerDoc): void; // a draft was restored into the editor
   suggestion?: string | null; // R2: a plugin's suggested prompt, the empty box's placeholder; Tab takes it
   onSuggestionTaken?(): void;
+  placeholder?: string | null; // UX wave U4a: the empty box's words while a turn runs; a plugin's suggestion still wins
   // P5 O7 M4: the machine a lane B session on another machine runs on (by name), whose files go up to it at the send
   // (remote-uploads.ts); null or absent: this Mac's, where a file is mentioned by its path
   uploadsTo?: string | null;
@@ -220,7 +222,7 @@ export class EditorController {
       catalog: catalog ?? EMPTY_CATALOG,
       widgets,
       searchesFiles: this.inputs.searchesFiles ?? true, // P5 O7 M4
-      placeholder: this.inputs.suggestion ?? (followUp ? 'Ask a follow-up…' : 'Do anything'), // R2: a plugin's suggestion
+      placeholder: this.inputs.suggestion ?? this.inputs.placeholder ?? (followUp ? 'Ask a follow-up…' : 'Do anything'), // R2: a plugin's suggestion; UX wave U4a: the turn's
       files: (files, at) => void this.addFiles(files, at),
       pasteText: (text) => this.pasteText(text),
       openWidget: (name, args) => void this.openWidget(name, args),
@@ -270,11 +272,13 @@ export class EditorController {
     if (event.isComposing || view.composing) return false;
     if (suggesting(editor) && popupTakesKeys(editor)) return false; // an open list takes Enter and the arrows
     const plain = !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey;
+    // UX wave U4a (l3-input-08): Enter sends whatever the line count; Shift+Enter (the hard break's own key) and ⌥Enter
+    // break the line; ⌘Enter reached the dispatcher as `composer.queue` above
     if (event.key === 'Enter' && plain) {
-      if (isMultiline(editor.getJSON())) return false; // the line breaks (ProseMirror's own Enter); ⌘Enter sends
       void this.submit();
       return true;
     }
+    if (event.key === 'Enter' && event.altKey && !event.shiftKey && !event.metaKey && !event.ctrlKey) return editor.commands.setHardBreak();
     // R2: Tab takes a plugin's suggestion into the empty box
     if (event.key === 'Tab' && plain && !this.busy && !submissions.has(this.inputs.appSessionId) && this.inputs.disabled === null && this.inputs.suggestion && isEmptyDoc(editor.getJSON())) {
       this.setDoc(textDoc(this.inputs.suggestion), { silently: false, caret: 'end' });
@@ -337,7 +341,7 @@ export class EditorController {
 
   // ---- behaviour ------------------------------------------------------------------------------------------------
 
-  async submit(): Promise<void> {
+  async submit(when?: 'after'): Promise<void> {
     // M4c fix wave 2: a local drop's conversion to its upload under way: the submission waits for it
     const converting = this.converting;
     if (converting !== null) {
@@ -348,7 +352,7 @@ export class EditorController {
       } finally {
         this.submitAfterConverting = false;
       }
-      return this.submit();
+      return this.submit(when);
     }
     const editor = this.editor;
     const { appSessionId, sessionId, cwd, disabled } = this.inputs;
@@ -423,7 +427,8 @@ export class EditorController {
     let accepted = false;
     try {
       // Keep C10's synchronous start gate: it owns the first message before another event can close the tab.
-      accepted = await (onSubmit ? onSubmit(s) : submitSerialized(this.client, appSessionId, s, 'send', target));
+      // a caller that names no `when` is called as before
+      accepted = await (onSubmit ? (when === undefined ? onSubmit(s) : onSubmit(s, when)) : submitSerialized(this.client, appSessionId, s, 'send', target));
     } catch (error) {
       warn(error instanceof Error ? error.message : String(error));
     }
@@ -750,7 +755,7 @@ export class EditorController {
     const editor = () => this.editor!;
     return {
       focus: () => void editor().commands.focus(),
-      submit: () => void this.submit(),
+      submit: (when) => void this.submit(when),
       insertText: (text, options) => {
         if (this.busy) return;
         const at = editor().isFocused ? editor().chain() : editor().chain().focus(this.caretLeft ? null : 'end'); // `null`: the kept selection

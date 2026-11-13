@@ -862,7 +862,7 @@ describe('sending from the box', () => {
       live(A, { status: { process: 'exited' }, record: { holder: { kind: 'terminal', pid: 4242 } } });
       act(() => applyLaneAState(A, laneAState(A, { turn: { running, unknown: false } })));
     };
-    beforeEach(() => onTestFinished(() => resetLaneAStore()));
+    afterEach(() => resetLaneAStore());
 
     it('reads Enter alone while its turn runs, and refuses ⌘Enter there with the sentence, the draft kept and nothing sent', async () => {
       terminalTurn(true);

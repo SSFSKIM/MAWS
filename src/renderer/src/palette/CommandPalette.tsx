@@ -75,6 +75,7 @@ const UNAVAILABLE: Partial<Record<ActionId, string>> = {
   'request.decline': 'Keyboard only, in a focused request',
   'request.allowOnce': 'Keyboard only, in a focused request', // UX wave U1a (§D)
   'request.allowLasting': 'Keyboard only, in a focused request',
+  'composer.queue': 'Keyboard only, in the composer', // UX wave U4a
   'composer.send': 'Keyboard only, in the composer',
   'composer.cycleMode': 'Keyboard only, in the composer',
 };

@@ -9,7 +9,9 @@
 // Every submission ends in the editor's `onSubmit`, decided here through `submitState`: an unstarted session's first
 // send goes to C10's `start` under the synchronous `starting` gate; a live one sends (C3 decides sent or queued), and
 // while a turn runs (W10, charter §4.2 as amended 2026-10-01) Send is a steer with priority `next` the engine delivers
-// at the turn's next tool boundary; `!` and `#` run through their modes. Esc in the editor interrupts and sends
+// at the turn's next tool boundary; `!` and `#` run through their modes. UX wave U4a (l3-input-08, l3-input-03): Enter
+// sends whatever the line count, and ⌘Enter keeps the message for after a running turn (`when: 'after'`, which the seam
+// sends and the host's queue holds; a terminal session refuses it during its turn); the empty box says so. Esc in the editor interrupts and sends
 // now: the held head (a `now` promote), else whatever `next` steer waits (the engine starts it once the turn is
 // interrupted), else it just stops; an open `@` or `/` list takes it before the composer does, and with no turn
 // running a second Esc within a moment on an empty editor opens the rewind picker (W3, B7). The Stop button and ⌘. are the plain stop: `session.interrupt` with `holdEngineQueued`, which first
@@ -45,7 +47,7 @@ import { PendingUploads } from './PendingUploads'; // P5 O9 M7
 import { useSettling } from '../lane-a/race'; // P5 O9 M6
 import { useDockedCards } from './docked/registry';
 import { swapOf } from './docked/swap';
-import { attachmentsOf, emptyDoc, isMultiline, type ComposerDoc } from './editor/doc';
+import { attachmentsOf, emptyDoc, type ComposerDoc } from './editor/doc';
 import { ipcDrafts, type DraftPort, type EditorHandle } from './editor/controller';
 import { rememberingRemoteDrafts } from './editor/drafts'; // P5 O7 M2
 import { isRemoteLaneB, useIsRemoteLaneB, useRemoteSending } from '../lane-b/remote-session'; // P5 O7 M2
@@ -72,7 +74,7 @@ import { cancelInlineEdit, sendInlineEdit } from './resubmit-seam'; // W3 (B6)
 import { routeOf, useListModels, useModelCatalogue, type Route } from './list-models';
 import { heldModel, useModelRequests } from '../widgets/model'; // P2-F S chip (review)
 import { locationPath, useSetupIntent, type SetupIntentHook } from './setup-intent';
-import { isBusy, steerPriority, submitState } from './submit/submit-state';
+import { isBusy, PLACEHOLDER_BOTH, PLACEHOLDER_ENTER, steerPriority, submitState } from './submit/submit-state';
 import { SubmitControl } from './submit/SubmitControl';
 
 // P5 O7 M4: a New chat tab back on this Mac with files dropped for another machine, which have no path here.
@@ -313,8 +315,10 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   const drafts = useDraftPort(appSessionId, setup, client);
   const startAnew = useRef(false); // P5 O7 M4: the next spawn is the person's "Start a new session"
 
-  const onSubmit = async (s: Serialized): Promise<boolean> => {
-    const retry = () => handle.current?.submit();
+  // UX wave U4a: `when` is ⌘Enter's keep-for-after, which a message to a started session carries (an unstarted one, `!`
+  // and `#` do as Enter does), and so does its Retry
+  const onSubmit = async (s: Serialized, when?: 'after'): Promise<boolean> => {
+    const retry = () => handle.current?.submit(when);
     if (setup) {
       // read synchronously: a second Enter in the same tick, or before C10 answers, starts nothing
       const where = setup.intent.location; // New chat: Send waits for a project
@@ -382,8 +386,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     // P2-0: the human seam owns steer-or-send, the acquisition (P2-A) and state refusals. The submit-state table above
     // still draws the button; `!` and `#` keep their existing mode gating and dispatch.
     // P5 O7 M4: to a session on another machine, its files go up first and the message names their paths there
-    if (s.mode === 'send' && controls !== null && isRemoteLaneB(appSessionId)) return submitRemoteSerialized(controls, client, appSessionId, s, attachmentsOf(handle.current?.doc() ?? emptyDoc()), cwd, retry);
-    if (s.mode === 'send') return controls !== null && submitHumanSerialized(controls, client, appSessionId, s, retry);
+    if (s.mode === 'send' && controls !== null && isRemoteLaneB(appSessionId)) return submitRemoteSerialized(controls, client, appSessionId, s, attachmentsOf(handle.current?.doc() ?? emptyDoc()), cwd, retry, when);
+    if (s.mode === 'send') return controls !== null && submitHumanSerialized(controls, client, appSessionId, s, retry, undefined, when);
     const modeUnavailable = remoteUnavailableOf(appSessionId, s.mode === 'bash' ? 'session.bash' : 'session.memoryAppend'); // P5 O7 M8: Enter, as the button
     const decided = submitState({ status, intent: null, queue, empty: s.empty, mode: s.mode, availability: availabilityIn(useSessions.getState(), appSessionId), heldBy, driven, modeUnavailable, closed: readerClosed });
     if (!decided.enabled) return false;
@@ -475,7 +479,10 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     if (docked) handle.current?.settleDictation();
   }, [docked]);
   if (suggestion !== null && (working || !draft.empty)) setSuggestion(null); // typed over, or a turn started: gone
-  useEffect(() => handle.current?.refreshPlaceholder(), [suggestion]);
+  // UX wave U4a (Interfaces I): while a turn runs the empty box names the keys: both where ⌘Enter queues, Enter alone on
+  // a terminal session, which keeps no queue
+  const placeholder = decision.queues ? PLACEHOLDER_BOTH : driven?.running ? PLACEHOLDER_ENTER : null;
+  useEffect(() => handle.current?.refreshPlaceholder(), [suggestion, placeholder]);
   // P5 O7 M4: a session the machine menu spawned with attachments sends the document it was handed (its draft) once,
   // when it can take a message: its files go up, then one message names their paths (sessions/remote-spawn.ts)
   const takesMessages = !setup && controls !== null && controls.capability('send').available;
@@ -570,12 +577,13 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
               onSubmit={onSubmit}
               suggestion={suggestion}
               onSuggestionTaken={() => setSuggestion(null)}
+              placeholder={placeholder}
               uploadsTo={uploadsTo}
               searchesFiles={spawnAt === null}
             />
           </div>
         }
-        submit={<SubmitControl decision={decision} multiline={isMultiline(doc)} onPrimary={onPrimary} />}
+        submit={<SubmitControl decision={decision} onPrimary={onPrimary} />}
       />
       {/* R2: a plugin's hint under the frame, only while a plugin draws one */}
       {!unstarted && <PluginHint appSessionId={appSessionId} isDraft={!draft.empty} isWorking={working} />}

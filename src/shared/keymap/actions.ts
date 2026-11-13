@@ -100,7 +100,16 @@ export const ACTIONS = {
   // default; the pane scope and the composer scope never meet on one target (decision 8's sharing rule)
   'request.allowOnce':    { title: 'Allow once',                  chord: 'Cmd+Enter',    sink: 'renderer', menu: null, scope: 'pane' },
   'request.allowLasting': { title: 'Allow with the lasting scope the prompt names', chord: 'Cmd+Shift+Enter', sink: 'renderer', menu: null, scope: 'pane' },
-  'composer.send':        { title: 'Send (multi-line editor)',    chord: 'Cmd+Enter',    sink: 'renderer', menu: null, scope: 'composer' },  // C7 consumes
+  // UX wave U4a (UC-6; its Interfaces H): the composer's own keys, which its editor handles (fixed: listed, never
+  // dispatched or rebound): Enter always sends, Shift+Enter and ⌥Enter break the line. ⌘Enter in the main editor is
+  // composer.queue, which keeps the message for after the running turn; composer.send keeps the chord for the reply
+  // fields (the peer reply and the two subagent relays), where Enter breaks the line. The dispatcher tries the two in
+  // this order and delivers each only to a binding whose element holds the focus.
+  'composer.submit':      { title: 'Send',                        chord: 'Enter',        sink: 'renderer', menu: null, scope: 'composer', fixed: true },
+  'composer.newLine':     { title: 'New line',                    chord: 'Shift+Enter',  sink: 'renderer', menu: null, scope: 'composer', fixed: true },
+  'composer.newLineOption': { title: 'New line',                  chord: 'Alt+Enter',    sink: 'renderer', menu: null, scope: 'composer', fixed: true },
+  'composer.queue':       { title: 'Queue for after the turn',    chord: 'Cmd+Enter',    sink: 'renderer', menu: null, scope: 'composer' },
+  'composer.send':        { title: 'Send (reply fields)',         chord: 'Cmd+Enter',    sink: 'renderer', menu: null, scope: 'composer' },  // C7 consumes
   'composer.cycleMode':   { title: 'Cycle permission mode',       chord: 'Shift+Tab',    sink: 'renderer', menu: null, scope: 'composer' },  // C7 consumes
   // C7 start: the composer's own actions (C7 execution document, Keymap additions). Stop and Focus are app-scoped
   // because ⌘. is pressed while typing, where C5's dispatcher refuses every pane-scoped action, and are registered once
