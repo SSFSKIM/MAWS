@@ -42,9 +42,11 @@ function SessionCards({ appSessionId, record }: { appSessionId: AppSessionId; re
   return (
     <div className="flex max-h-full w-70 max-w-full min-h-0 flex-col">
       <div aria-label="Session cards" className="flex min-h-0 flex-col gap-1.5 overflow-y-auto p-1">
+        {/* eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render */}
         {waiting && <Waiting appSessionId={appSessionId} />}
         {record && <RecordCards appSessionId={appSessionId} record={record} />}
       </div>
+      {/* eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render */}
       <Foot appSessionId={appSessionId} />
     </div>
   );
