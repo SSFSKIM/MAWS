@@ -1876,7 +1876,7 @@ describe('a registry row’s machines line by the link’s phase', () => {
   it('names the machine plain while it connects or reconnects, and “offline” past the minute or when its first attempt failed', () => {
     fillStores({ projects: [], sessions: [], digests: [], engine: [], attention: [], timeline: [] });
     const location = { machine: OTHER_MACHINE, pid: 'p-studio', path: '/srv/p-studio', key: `folder:${OTHER_MACHINE}:p-studio` as OrgKey, name: 'p-studio', source: 'folder' as const, acts: true };
-    act(() => useSessions.getState().applyRegistry({ projects: [{ id: ID, name: 'scrape', hub: true, renamable: true, locations: [location] }], keys: { [ID]: `id:${ID}` as OrgKey }, moved: {}, removals: [], seen: {} }));
+    act(() => useSessions.getState().applyRegistry({ projects: [{ id: ID, name: 'scrape', hub: true, renamable: true, locations: [location] }], keys: { [ID]: `id:${ID}` as OrgKey }, moved: {}, removals: [], seen: {} }, TEST_MACHINE));
     act(() => useMachines.getState().applyRoster([here, studio({ state: 'connecting', generation: 0 })]));
     render(<Sidebar />);
     expect(machinesLine(), 'connecting').toBe('studio');
