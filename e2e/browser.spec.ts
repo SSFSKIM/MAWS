@@ -1068,7 +1068,7 @@ test('U12a (reload, A2): show_pane on a page already open selects and reloads it
     // input stale) and the try made again, up to KEPT_TRIES; when none lands inside, the runner's load kept the scene
     // from staging it, and the case is skipped.
     const tookMs: number[] = [];
-    let typedAt = 0;
+    let typedAt: number;
     for (let attempt = 1; ; attempt++) {
       const loads = s.server.hits('/marker.html');
       const box = (await field.boundingBox())!;
