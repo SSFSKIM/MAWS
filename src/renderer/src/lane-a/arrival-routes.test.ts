@@ -1,10 +1,11 @@
 // The routes agree (UX wave U3, first landing; docs/doperpowers/plans/2026-11-12-ux-wave-U3a-arrivals.md, Acceptance 2, 4,
 // 6 and 7; the child's A14, last sentence, and the wave's law 5). One recorded session is drawn from its transcript file,
-// as the chain follower answers `session.events` for it on this Mac, and from the same rows as another machine sends
-// them (`freshSource`, the reader of another machine's rows), and the arrival rows of the two are the same: every
-// message line, notice and command output, every user row, and each turn's origin and opener. The rows written by hand
-// (no probe recorded them) are invented, from the carriers' key sets. M4 adds the live half (the journal through
-// `Normalizer`). It lives beside the reader of another machine's rows, not in the transcript's model: the node project
+// as the chain follower answers `session.events` for it on this Mac, from the same rows as another machine sends them
+// (`freshSource`, the reader of another machine's rows), and from its journal as a session MAWS runs draws it (the
+// journal through `Normalizer`, M4), and the arrival rows are the same: every message line, notice and command output,
+// every user row, and each turn's origin and opener; the live route lacks only what the live wire does not carry, which
+// the test states row by row. The rows written by hand (no probe recorded them) are invented, from the carriers' key
+// sets. It lives beside the reader of another machine's rows, not in the transcript's model: the node project
 // typechecks the model's directory, and that reader's graph is the renderer's.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -13,8 +14,9 @@ import { describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { SessionId } from '@shared/graph/ids';
 import { ChainFollower } from '../../../engine-host/fs/chain-follower';
-import { FIXTURE_DIR } from '../../../../test/support/fixtures';
+import { FIXTURE_DIR, loadUxwaveJournal } from '../../../../test/support/fixtures';
 import { MemoryFileReader } from '../../../../test/support/memory-reader';
+import { journalToEvents } from '../transcript/dev/journal';
 import { rowsOf, withAllExpanded } from '../transcript/model/derive';
 import { applyEvents, createState, type TranscriptState } from '../transcript/model/reduce';
 import type { Row } from '../transcript/model/rows';
@@ -47,6 +49,9 @@ async function following(text: string): Promise<{ reader: MemoryFileReader; foll
 /** The remote route: the same rows, each with its uuid, through the reader of another machine's rows. */
 const fromRows = (text: string): Promise<SessionEvent[]> =>
   freshSource(rowsIn(text).filter((row) => typeof row.uuid === 'string'), SESSION, subagentLookupOf([])).snapshot();
+
+/** The live route: the session's journal through the engine host's normaliser, as a session MAWS runs reaches the window. */
+const fromJournal = (name: string): SessionEvent[] => journalToEvents(loadUxwaveJournal(name));
 
 const stateOf = (events: SessionEvent[]): TranscriptState => applyEvents(createState(null, null), events);
 const drawn = (state: TranscriptState): Row[] => rowsOf(withAllExpanded(state));
@@ -143,9 +148,9 @@ describe('a background task’s end, from the file (Acceptance 4)', () => {
 });
 
 describe('sminos’s deliveries, from the file and another machine’s rows (Acceptance 2)', () => {
-  it('u3-sminos-r1-maws: a peer’s message is its line in a peer’s turn, never a user row; the owner’s send is their bubble without the frame line, idle, and a steer during a turn', async () => {
+  it('u3-sminos-r1-maws, from its file, the same rows and its journal: a peer’s message is its line in a peer’s turn, never a user row; the owner’s send is their bubble without the frame line, idle, and a steer during a turn', async () => {
     const { file, remote } = await bothRoutes(recorded('u3-sminos-r1-maws'));
-    for (const state of [file, remote]) {
+    for (const state of [file, remote, stateOf(fromJournal('u3-sminos-r1-maws'))]) {
       const rows = arrivalRows(drawn(state));
       expect(rows).toContain('prompt: UXW owner idle: reply with only the word ONE.');
       expect(rows).toContain('steer: UXW owner busy: also say THREE.');
@@ -344,5 +349,137 @@ describe('a slash command’s output, from the file (Acceptance 6)', () => {
     const answers = rows.flatMap((row) => (row.kind === 'assistant_text' ? [row.markdown] : [])).join('\n');
     expect(answers).not.toMatch(/Total cost|Context Usage|Reloaded:|Session renamed to|Compaction canceled|No messages to compact/);
     expect(rows.filter((row) => row.kind === 'local_command' && row.text.includes('Compaction canceled.'))).toHaveLength(1);
+  });
+});
+
+// M4: the live half. What the live wire does not carry, row by row (Acceptance 7): a monitor's event, the stall notice and
+// the withheld report's `Agent "…" finished` told while the session was idle (no frame tells the host the model was
+// told: the engine turn opens with no `user` frame, findings-uxwave-u3-tasks.txt), each with the opener of the turn it
+// opens in the file; and the prompt's text on a scheduled fire's line (the live wire's fire names no prompt). Beside
+// them, one row that is no arrival's: the person's slash command as typed (`/cost`) where the file holds the command the
+// engine ran (`/usage`, findings-uxwave-u3-commands.txt), a difference of the routes that predates this landing.
+type Notice = { class: string; outcome: string | null; text: string };
+const FILE_ONLY: Record<string, Notice[]> = {
+  'u3-tasks-r1': [
+    { class: 'task', outcome: null, text: 'Monitor event: "uxw monitor"' },
+    { class: 'task', outcome: 'completed', text: 'Agent "uxw agent" finished' },
+    { class: 'task', outcome: null, text: 'Background command "uxw stall" appears to be waiting for interactive input' },
+  ],
+  'u3-sminos-r1-maws': [],
+  'u3-cron-r1': [],
+  'u3-commands-r1': [],
+};
+const FIRE_PROMPT = ' · UXW tick: reply with only the word TOCK.';
+const TYPED: Record<string, [file: string, live: string][]> = { 'u3-commands-r1': [['prompt: /usage', 'prompt: /cost']] };
+
+/** The file's arrival rows as the live route draws them: the stated differences taken out, and nothing else. */
+function asTheLiveWireCarries(name: string, rows: string[]): string[] {
+  const only = FILE_ONLY[name]!;
+  return rows.flatMap((row) => {
+    if (only.some((notice) => row === noticeRow(notice))) return [];
+    const opened = only.find((notice) => row.endsWith(`, opened by ${notice.class}: ${notice.text}`));
+    if (opened !== undefined) return [row.slice(0, row.length - `, opened by ${opened.class}: ${opened.text}`.length)];
+    const typed = TYPED[name]?.find(([file]) => file === row);
+    if (typed !== undefined) return [typed[1]];
+    return [row.endsWith(FIRE_PROMPT) && row.includes('Running scheduled task') ? row.slice(0, -FIRE_PROMPT.length) : row];
+  });
+}
+const noticeRow = (notice: Notice) => `● ${notice.class}${notice.outcome === null ? '' : ` ${notice.outcome}`}: ${notice.text}`;
+
+describe('the live wire draws the file’s arrival rows but for what only the file carries (Acceptance 7)', () => {
+  for (const name of ['u3-tasks-r1', 'u3-sminos-r1-maws', 'u3-cron-r1', 'u3-commands-r1']) {
+    it(name, async () => {
+      const file = arrivalRows(drawn(stateOf(await fromFile(recorded(name)))));
+      const live = arrivalRows(drawn(stateOf(fromJournal(name))));
+      expect(live).toEqual(asTheLiveWireCarries(name, file));
+      // each stated difference is one: in the file, not on the live route
+      for (const notice of FILE_ONLY[name]!) {
+        expect(file, name).toContain(noticeRow(notice));
+        expect(live, name).not.toContain(noticeRow(notice));
+      }
+      for (const [inFile, onLive] of TYPED[name] ?? []) expect([file.includes(inFile), live.includes(inFile), live.includes(onLive)], name).toEqual([true, false, true]);
+      if (name === 'u3-cron-r1') expect([file.some((row) => row.endsWith(FIRE_PROMPT)), live.some((row) => row.endsWith(FIRE_PROMPT))]).toEqual([true, false]);
+    });
+  }
+});
+
+describe('a background task’s end, from the journal (Acceptance 4)', () => {
+  const r1 = fromJournal('u3-tasks-r1');
+  const at = (rows: string[], line: string) => rows.indexOf(line);
+
+  it('u3-tasks-r1: an end told while idle stands above the divider of the engine’s turn it opens, drawn when that turn opens; the stopped task’s directly above the person’s next prompt', () => {
+    const rows = arrivalRows(drawn(stateOf(r1)));
+    expect(rows.filter((row) => row.startsWith('●') || row.startsWith('›'))).toEqual([
+      '● task completed: Background command "uxw ok" completed (exit code 0)',
+      '● task failed: Background command "uxw fail" failed with exit code 1',
+      '● task stopped: Task "uxw stop" was stopped by the user or by the app connected to this session',
+      '› Report from uxw agent: PONG',
+      '› Sent to uxw agent: Reply with only the word PONG2. Use no tool.',
+      '● task failed: Background command "uxw busy fail" failed with exit code 1',
+      '● task completed: Background command "uxw busy ok" completed (exit code 0)',
+      '› Report from uxw busy agent: PONG3',
+      '● task completed: Monitor "uxw monitor" stream ended',
+      '● task: Monitor event: "uxw busy monitor"',
+      '● task completed: Monitor "uxw busy monitor" stream ended',
+    ]);
+    expect(rows[at(rows, '● task completed: Background command "uxw ok" completed (exit code 0)') + 1]).toBe('turn engine, opened by task: Background command "uxw ok" completed (exit code 0)');
+    expect(rows[at(rows, '● task failed: Background command "uxw fail" failed with exit code 1') + 1]).toBe('turn engine, opened by task: Background command "uxw fail" failed with exit code 1');
+    expect(rows[at(rows, '● task stopped: Task "uxw stop" was stopped by the user or by the app connected to this session') + 1]).toMatch(/^prompt: Use the Agent tool/);
+    // drawn when its turn opens: the journal read up to that turn's init
+    const opened = journalToEvents(loadUxwaveJournal('u3-tasks-r1').filter((row) => row.seq <= 61));
+    expect(arrivalRows(drawn(stateOf(opened))).slice(-2)).toEqual(['● task completed: Background command "uxw ok" completed (exit code 0)', 'turn engine, opened by task: Background command "uxw ok" completed (exit code 0)']);
+  });
+
+  it('u3-tasks-r1: the two commands that ended during a turn are notices where their frames arrived, among that turn’s work', () => {
+    const rows = drawn(stateOf(r1));
+    const prompt = rows.find((row) => row.kind === 'user' && row.text.startsWith('Do these in order'))!;
+    for (const text of ['Background command "uxw busy fail" failed with exit code 1', 'Background command "uxw busy ok" completed (exit code 0)']) {
+      const notice = rows.findIndex((row) => row.kind === 'notice' && row.text === text);
+      expect(rows[notice]!.turnId, text).toBe(prompt.turnId);
+      expect(rows.slice(0, notice).some((row) => row.turnId === prompt.turnId && (row.kind === 'cell' || row.kind === 'group')), text).toBe(true); // after work began
+    }
+  });
+
+  it('a monitor’s end stands on the turn whose result names its run and on no other, in u3-tasks-r1 and in u3-tasks-r2 (placed and withdrawn twice first)', () => {
+    for (const [name, endedAt] of [['u3-tasks-r1', 780], ['u3-tasks-r2', 624]] as const) {
+      const state = stateOf(fromJournal(name));
+      const ends = drawn(state).filter((row) => row.kind === 'notice' && row.text === 'Monitor "uxw monitor" stream ended');
+      expect(ends, name).toHaveLength(1);
+      const turn = state.turns.get(ends[0]!.turnId!)!;
+      expect(turn.ended, name).toMatchObject({ seq: endedAt });
+    }
+  });
+
+  it('no notice has a duration, a foreground command makes no row, and with its turn folded an end is among the rows and an event with no outcome is not', () => {
+    const state = stateOf(r1);
+    const all = drawn(state).flatMap((row) => (row.kind === 'notice' ? [row] : []));
+    expect(all.filter((row) => row.durationMs !== null)).toEqual([]);
+    expect(all.some((row) => row.text.includes('uxw foreground'))).toBe(false);
+    expect(drawn(stateOf(fromJournal('u3-tasks-fg'))).filter((row) => row.kind === 'notice').map((row) => row.text)).toEqual(['Background command "uxw ok" completed (exit code 0)']);
+    const folded = rowsOf(state).flatMap((row) => (row.kind === 'notice' ? [row.text] : []));
+    expect(folded).toContain('Background command "uxw ok" completed (exit code 0)');
+    expect(folded).not.toContain('Monitor event: "uxw busy monitor"');
+  });
+});
+
+describe('a slash command’s output, from the journal (Acceptance 6)', () => {
+  it('u3-commands-r1: each output is a command output in its command’s turn and no answer; /effort low draws nothing; “Compaction canceled.” is in the interrupted /compact’s turn once', () => {
+    const rows = drawn(stateOf(fromJournal('u3-commands-r1')));
+    for (const command of ['/cost', '/context', '/reload-plugins', '/rename uxw renamed', '/model uxw-no-such-model']) {
+      const at = rows.findIndex((row) => row.kind === 'user' && row.text === command);
+      const next = rows.slice(at + 1).find((row) => row.kind !== 'time');
+      expect(next?.kind, command).toBe('local_command');
+      expect(next?.turnId, command).toBe(rows[at]!.turnId);
+    }
+    const compacts = rows.filter((row) => row.kind === 'user' && row.text === '/compact');
+    const first = rows.findIndex((row) => row.kind === 'user' && row.text === '/compact');
+    expect(rows.slice(first + 1).find((row) => row.kind !== 'time')).toMatchObject({ kind: 'local_command', turnId: rows[first]!.turnId }); // nothing to compact
+    const effort = rows.findIndex((row) => row.kind === 'user' && row.text === '/effort low');
+    expect(rows.slice(effort + 1).find((row) => row.kind !== 'time')?.kind).toBe('user');
+    const canceled = rows.filter((row) => row.kind === 'local_command' && row.text.includes('Compaction canceled.'));
+    expect(canceled).toHaveLength(1);
+    expect(canceled[0]!.turnId).toBe(compacts[2]!.turnId); // the third /compact, which the probe interrupted
+    const answers = rows.flatMap((row) => (row.kind === 'assistant_text' ? [row.markdown] : [])).join('\n');
+    expect(answers).not.toMatch(/Total cost|Context Usage|Reloaded:|Session renamed to|Compaction canceled|No messages to compact|ClaudeUsage routes/);
   });
 });
