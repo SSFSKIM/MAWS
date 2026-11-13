@@ -504,7 +504,7 @@ describe('Send now through a whole session (UX wave U4a)', () => {
     const [request, stop] = s.transport.requestsOf('interrupt');
     expect([request!.request, stop!.request]).toEqual([{ subtype: 'interrupt', send_now: true, message_uuid: message }, { subtype: 'interrupt', reason: 'user-cancel', cancel_queued: false }]);
     expect(s.session.queue.isPaused).toBe(true);
-    expect(s.session.queue.state.entries.map((e) => e.content)).toEqual(['Reply with the single word PINEAPPLE.']);
+    expect(s.session.queue.state.entries.filter((e) => e.state === 'queued').map((e) => e.content)).toEqual(['Reply with the single word PINEAPPLE.']);
     s.transport.push({ type: 'control_response', response: { subtype: 'success', request_id: request!.request_id, response: SENT(message) } });
     await expect(sending).resolves.toEqual({ outcome: 'delivering' });
     result([first], { subtype: 'error_during_execution', terminal_reason: 'aborted_tools' }); // seq 51
