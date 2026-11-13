@@ -6,6 +6,7 @@
 // which run in `mawsd` alone; of the library it takes only the command budgets its `machine` host applies (lint rule B)
 import { COMMAND_BUDGETS_MS } from '../services/command-budgets';
 import type { AppSessionId } from '@shared/graph/ids';
+import { workingFolder } from '@shared/sessions/working-folder'; // UX wave U5: an export's fallback folder
 import type { CommandInput, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import { REGISTRY } from '@shared/ipc/registry'; // P5 O3-D M1: the bus's register reads each name's owner
 import { statSync } from 'node:fs'; // E11 F2b: the bundle on disk
@@ -977,6 +978,13 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
     env: process.env,
     local, // P5 O7 M5a: Save As of another machine's artifact reads it over that machine's link
     remote: (machine) => remoteLaneB.artifacts.files(machine),
+    // UX wave U5 (l6-artifacts-20): the dialog opens in the last export's folder, kept under main's layout key; with
+    // none, in the artifact's Space's linked folder or the working folder of the session that made it
+    layout,
+    sessionFolder: (appSessionId) => {
+      const record = view.record(appSessionId);
+      return record ? workingFolder(record).path : null;
+    },
   });
   // P3-E start (E2 M3; E's Decision Log 18): a dashboard source sheet's Download, the artifact's own asset saved through
   // main's dialog under Downloads
