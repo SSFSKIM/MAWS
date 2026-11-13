@@ -2,8 +2,8 @@
 // completions that reach the engine host that raised their request (a handover's draining one included) rather than wait
 // for a successor. Pinned against the command table: every engine-host command whose input names a request the host
 // raised (`requestId`, `askId`) is either in it or excluded here with its reason, so a new answer to a host's request
-// fails this test until someone decides which it is. And the remote endpoint offers none of them but a pane's answer (UX
-// wave U9), which crosses as an engine-host act rather than by the completion route.
+// fails this test until someone decides which it is. The remote endpoint offers one of them (UX wave U9), a pane's
+// answer, as an engine-host act whose op the supervisor sends by the same route.
 import { describe, expect, it } from 'vitest';
 import * as z from 'zod';
 import { DRAIN_REPLIES } from '@shared/host/host-supervisor';
@@ -41,11 +41,14 @@ describe('DRAIN_REPLIES', () => {
     }
   });
 
-  // UX wave U9 (UC-7; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, M1) offers a pane's answer, an
-  // engine-host act: it crosses as the endpoint's `host.op`, to the engine host serving now, not by this completion route.
-  // An answer that comes while a handover drains goes to the successor, which holds no pane's request (the drain waits on
-  // the pane's call), so it fails rather than settling it. No other completion is offered.
-  it('none is offered to a remote caller but a pane’s answer (an engine-host act)', () => {
-    expect(Object.keys(OFFERS.commands).filter((name) => DRAIN_REPLIES.has(name))).toEqual(['maws.pane.answer']);
+  // UX wave U9 (UC-7; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, M1) offers one to another machine,
+  // a pane's answer, as an engine-host act. The endpoint hands it on as `host.op` with no status read first
+  // (src/endpoint/actions.ts), and the supervisor sends that op by the completion's route, to the host that raised the
+  // request (host-supervisor.ts, `completionOf`; the drain: src/mawsd/daemon-handover.test.ts). An offered completion
+  // must reach the engine host so: one the machine's services ran would miss that route.
+  it('one offered to a remote caller goes to the engine host, which routes it to the host that raised its request', () => {
+    const offered = Object.keys(OFFERS.commands).filter((name) => DRAIN_REPLIES.has(name));
+    expect(offered).toEqual(['maws.pane.answer']);
+    for (const name of offered) expect(OFFERS.commands[name], name).toMatchObject({ kind: 'act', executor: 'engine-host' });
   });
 });

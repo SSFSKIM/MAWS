@@ -219,6 +219,29 @@ describe('dismiss, take back and a pane’s answer (`converse`)', () => {
     expect(acknowledged).toHaveLength(1);
   });
 
+  // A pane's answer completes a request the engine host raised (DRAIN_REPLIES): during a handover's drain only the host
+  // that raised it can settle it, and a status read would wait for its successor (src/mawsd/daemon-handover.test.ts). So
+  // the endpoint reads none for it: its context is checked by the ledger's claim, in the host that holds the request.
+  it('a pane’s answer reads no status first: a stale launch is refused at the claim, another engine session at the endpoint', async () => {
+    const { f, h } = await machine();
+    const app = session(f, h, { shares: [{ member: org.B, grade: 'converse' }], live: true }).appId;
+    f.host.handlers.set('session.steer.cancel', () => ({ outcome: 'cancelled' }));
+    f.host.handlers.set('maws.pane.answer', () => ({ outcome: 'delivered' }));
+    const b = await openRemote(f, org.b1, org.B);
+    const statusReads = (from: number) => f.host.calls.slice(from).filter((c) => c.name === 'session.status').length;
+    const ANSWER = { appSessionId: app, requestId: 'req-1', result: { ok: false, error: 'closed' } };
+    let from = f.host.calls.length;
+    expect(await resultOf(b, hostAction(f, b, 'maws.pane.answer', app, ANSWER))).toEqual({ outcome: 'delivered' });
+    expect(statusReads(from)).toBe(0);
+    from = f.host.calls.length;
+    expect(await resultOf(b, hostAction(f, b, 'session.steer.cancel', app, { messageUuid: 'm2' }))).toEqual({ outcome: 'cancelled' }); // any other act reads it
+    expect(statusReads(from)).toBe(1);
+    const live = f.host.session(app);
+    const sealed = (context: { launchId: string; engineSessionId: string }) => b.device.action({ machine: f.ref, action: 'maws.pane.answer', session: app, context: { lane: 'B', ...context }, args: ANSWER });
+    expect(await run(b, sealed({ launchId: 'launch-stale', engineSessionId: live.engineSessionId! }))).toMatchObject({ ack: 'ok', outcome: { state: 'refused', reason: 'context' } });
+    expect(await refusal(b, sealed({ launchId: live.launchId, engineSessionId: 'engine-other' }))).toBe('context');
+  });
+
   it('are refused `read-only` on a machine in read-only mode', async () => {
     const { f, h } = await machine();
     const app = session(f, h, { live: true }).appId;

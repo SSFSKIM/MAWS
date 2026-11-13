@@ -3,7 +3,7 @@
 // with that entry's words, before anything is asked; for an older peer, a command the machine was heard refusing
 // `not-offered` is greyed with the machine's name, until its feed opens again. A session of this Mac, or of a machine
 // whose sessions take the manager's path, greys nothing.
-import { act, renderHook } from '@testing-library/react';
+import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
@@ -28,6 +28,7 @@ beforeEach(() => {
   useSessions.setState({ listed: new Map([[R, { ...remoteRow(OTHER_MACHINE, 'app-r'), appId: R }]]), listedMachines: new Set([OTHER_MACHINE]) });
 });
 afterEach(() => {
+  cleanup(); // a hook still mounted would render the reset below after the bridge is gone, and read no local machine
   useSessions.setState({ listed: new Map(), listedMachines: new Set() });
   delete (window as { maws?: unknown }).maws;
 });

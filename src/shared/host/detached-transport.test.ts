@@ -728,6 +728,25 @@ describe('the detached transport: a reused pid is another process', () => {
     expect(answered).toEqual([]);
   });
 
+  // UX wave U9 (M1): the remote endpoint's op carrying a pane answer goes by the completion's route while its raiser
+  // lives (src/mawsd/daemon-handover.test.ts, the drain); its raiser gone, it is an ordinary op of the served host, whose
+  // ledger answers it, where the completion itself is refused
+  it('an op carrying a completion of a crashed process goes to the served host as any op, the completion itself refused', async () => {
+    const old = await startFake();
+    await supervisor.start();
+    const early = vi.spyOn(console, 'info').mockImplementation(() => {});
+    await until(() => old.emit('maws.pane.show', PANE as never)).finally(() => early.mockRestore());
+    await until(() => emit.mock.calls.some(([name]) => name === 'maws.pane.show'));
+    const ops: unknown[] = [];
+    spawnReusing(old.pid, (on) => on('host.op', async (input) => (ops.push(input), { state: 'done' as const, result: { ok: true as const, value: { outcome: 'not_pending' } } })));
+    await old.die();
+    await until(() => state().state === 'ready' && fakes.length === 2);
+    const OP = { opId: 'op-pane-answer-req-1', opCreated: '2026-11-13T00:00:00.000Z', member: 'member-b', device: 'device-b1', fingerprint: 'f'.repeat(64), name: 'maws.pane.answer', input: ANSWER, context: { launchId: 'launch-1', engineSessionId: 'engine-1' } };
+    expect(await supervisor.dispatch('engine-host', 'maws.pane.answer', ANSWER)).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    expect(await supervisor.dispatch('engine-host', 'host.op', OP as never)).toEqual({ ok: true, value: { state: 'done', result: { ok: true, value: { outcome: 'not_pending' } } } });
+    expect(ops).toEqual([OP]);
+  });
+
   it('a handover marker left by a process that exited when idle never makes the crash of the process that reuses its pid planned', async () => {
     const old = await startFake();
     await supervisor.start();
