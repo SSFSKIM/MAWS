@@ -1,0 +1,98 @@
+UX wave U2, O-27 and Probes and checks 9: does a thought carry text, per model, with and without MAWS's request
+(docs/doperpowers/specs/2026-11-12-ux-wave/U2-transcript-structure.md, item O-27 "Which thoughts get a line inside a
+run", check 9; 2026-11-12)
+
+Question. MAWS's engine host sends `set_max_thinking_tokens { max_thinking_tokens: null, thinking_display: 'summarized' }`
+after initialize at every session start (src/engine-host/session.ts, near line 1186). MAWS's own journals show every
+thinking block with text since then, but only for claude-opus-5-5. For each model alias the owner's sessions use, does
+the thinking block carry text on the wire and in the transcript file, with the request and without it?
+
+Verdict. Every model returns text under the request and none without it, on the wire and in the file alike: 18 of 18
+launches split exactly on the request. With it, the stream's thinking block is `thinking_display: "summarized"` with
+non-empty `thinking_delta`s, the final `assistant` frame's thinking block holds the same text, and the transcript row
+holds it too. Without it, the display is `"updates"`: two or three `thinking_delta`s with empty text, an empty
+`thinking` in the assistant frame and in the row, a signature in each. Both halves carry the duration and the display on
+the wire (`thinking_duration_ms`, `thinking_display` on the assistant frame) and in the file (`thinkingDurationMs`,
+`thinkingDisplay` on the row). In the spec's terms: no model returns no text under the request, so check 9's fallback
+("its thoughts fall under #479's line") applies to no model; the O-27 rule as written holds for opus, fable, sonnet and
+haiku alike. Confidence: high for these four models on this engine and route; the prompt always made the model think,
+so a turn in which a model does not think at all was not seen.
+
+Method. scenarios/pass3/uxwave-thinking.mjs over scenarios/pass3/uxwave-common.mjs, through vm-run.sh on the devcloud
+VM (spikes/protocol-probe/VM.md). Engine 2.1.322 (/opt/maws-probe/engines/2.1.322, init `claude_code_version
+"2.1.322"`), the gateway route (the only route that authenticates on the VM; the route the owner's sessions use).
+Launch as MAWS's, recorded in each fixture's provenance row:
+  flags   the harness's (-p, stream-json in and out, --verbose, --permission-prompt-tool stdio,
+          --include-partial-messages, --model <alias>, --permission-mode default) plus launch.ts's
+          --forward-subagent-text --replay-user-messages --include-hook-events --setting-sources user,project,local
+          (no --strict-mcp-config) --disallowedTools AskUserQuestion --allowedTools mcp__maws__ask
+          --settings {"dialogExpiry":"never"}
+  env     buildEnvironment's constants: CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES=false, CLAUDE_CODE_ENTRYPOINT=sdk-ts,
+          CLAUDE_CODE_FORK_SUBAGENT=true, CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING=1,
+          CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1, CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING=1,
+          CLAUDE_CODE_QUESTION_PREVIEW_FORMAT=html, TERM=dumb, DISABLE_AUTOUPDATER=1, ENABLE_TOOL_SEARCH=true (the sminos
+          marks are left out: no sminos member on the VM)
+  user    the scratch HOME's ~/.claude/settings.json holds the owner's user settings on the axes read here: the model
+          aliases (ANTHROPIC_DEFAULT_OPUS_MODEL claude-opus-5-5[1m], _FABLE_ claude-fable-5-2[1m], _SONNET_
+          claude-sonnet-5-5[1m], _HAIKU_ claude-haiku-5-5[1m]), CLAUDE_CODE_DISABLE_1M_CONTEXT=0,
+          CLAUDE_CODE_MAX_CONTEXT_TOKENS=500000, CLAUDE_CODE_SUBAGENT_MODEL=opus, effortLevel high and the owner's
+          modelSettings (fable-5-2 xhigh, opus-5-5 high, sonnet-5-5 high, haiku-5-5 low), autoMemoryEnabled false,
+          worktree.baseRef fresh
+  after initialize  ui_attach as the desktop surface (client maws-main, viewport 100x30, the four answers) and
+          ui_panes, as surface.ts does; then, in the "with" half only, set_max_thinking_tokens
+          { max_thinking_tokens: null, thinking_display: "summarized" }.
+One turn per launch, the same prompt every time: reason which two of 48, 17, 93, 62, 5 have a product closest to 1000
+before any tool, then `touch` a file named after the pair with Bash (every launch answered 17-62.txt). Runs: haiku 3
+pairs, sonnet 3, opus 2, fable 1 (the most expensive; one pair, as the task allows), interleaved with/without.
+
+Model names (scenarios/pass3/uxwave-models.mjs, fixtures uxwave-models-*.jsonl, one "Reply OK" turn each): the gateway
+accepts the four aliases and the four plain names. Under the owner's aliases, `opus` -> claude-opus-5-5, `fable` ->
+claude-fable-5-2, `sonnet` -> claude-sonnet-5-5, `haiku` -> claude-haiku-5-5 as every init frame and assistant frame
+names them; the `[1m]` suffix the aliases carry shows only as the result's modelUsage contextWindow 1000000. The
+initialize answer's model list is default, opus, fable, sonnet, haiku. Every result below was made on the model its row
+names (the assistant frames' `message.model`).
+
+Observed. Fixtures fixtures/pass3/uxwave/uxwave-thinking-<alias>-<with|without>-<n>.jsonl; each has a `thinking_record`
+note that tabulates the three readings. Columns: control response seq; stream content_block_start seq, display,
+thinking_delta count / text characters; assistant frame seq, thinking_duration_ms, display, text characters; transcript
+row (0-based line of the session file), thinkingDurationMs, thinkingDisplay, text characters.
+
+  model              half     ctl  stream                    assistant                     file
+  claude-haiku-5-5   with 1   14   23 summarized 31/323      88 1756 summarized 323         22 1756 summarized 323
+  claude-haiku-5-5   with 2   14   23 summarized 31/307      88 1887 summarized 307         21 1887 summarized 307
+  claude-haiku-5-5   with 3   14   23 summarized 22/264      70 1729 summarized 264         22 1729 summarized 264
+  claude-haiku-5-5   without  -    20 updates 2/0            26 1157 updates 0              22 1157 updates 0
+  claude-haiku-5-5   without  -    20 updates 2/0            26  882 updates 0              21  882 updates 0
+  claude-haiku-5-5   without  -    20 updates 2/0            26 1259 updates 0              22 1259 updates 0
+  claude-sonnet-5-5  with 1   14   23 summarized 19/195      64 2446 summarized 195         22 2446 summarized 195
+  claude-sonnet-5-5  with 2   14   23 summarized 18/169      62 2141 summarized 169         22 2141 summarized 169
+  claude-sonnet-5-5  with 3   14   23 summarized 23/223      72 2042 summarized 223         22 2042 summarized 223
+  claude-sonnet-5-5  without  -    20 updates 2/0            26 1244 updates 0              22 1244 updates 0
+  claude-sonnet-5-5  without  -    20 updates 2/0            26 1436 updates 0              22 1436 updates 0
+  claude-sonnet-5-5  without  -    20 updates 2/0            26 1354 updates 0              22 1354 updates 0
+  claude-opus-5-5    with 1   14   23 summarized 28/313      82 2808 summarized 313         22 2808 summarized 313
+  claude-opus-5-5    with 2   14   23 summarized 15/195      56 1770 summarized 195         22 1770 summarized 195
+  claude-opus-5-5    without  -    20 updates 3/0            28 1452 updates 0              22 1452 updates 0
+  claude-opus-5-5    without  -    20 updates 3/0            28 1553 updates 0              22 1553 updates 0
+  claude-fable-5-2   with 1   14   23 summarized 23/267      72 3550 summarized 267         22 3550 summarized 267
+  claude-fable-5-2   without  -    20 updates 2/0            26 1870 updates 0              22 1870 updates 0
+
+  - The control response to set_max_thinking_tokens is `{subtype: "success"}` with no body, every time (seq 14).
+  - The stream event frame itself carries `thinking_display` beside `parent_tool_use_id` and `api_message_id`; the
+    block start holds `thinking: ""` and `signature`, one `signature_delta` closes it in both halves.
+  - The assistant frame's keys include `thinking_duration_ms` and `thinking_display` in both halves; the transcript row's
+    keys `thinkingDurationMs` and `thinkingDisplay`, equal to the wire's.
+  - `system/thinking_tokens` frames (`estimated_tokens`, `estimated_tokens_delta`) arrive in both halves.
+  - Every turn reported thinking tokens in the result's modelUsage (121 to 439), so each model did think in both halves.
+
+Inference.
+  - The request decides the text for every model; nothing model-specific was seen. The spec's journals (opus only) are
+    therefore representative of the other three models.
+  - Without the request this engine's sdk default is "updates", not "omitted": a block exists, with its duration, but no
+    text. A launch that loses the request (it is not acknowledged before the first prompt; session.ts does not hold the
+    prompt for it) would give text-less thoughts with durations, which #479's line already covers.
+  - The duration is on every route that reads the file and on the wire, with or without the request, which is what the
+    coordinator's lead (1) stated; confirmed here for all four models.
+
+Not tried. A turn in which the model does not think; models outside the four aliases; the request sent mid-session; a
+terminal (interactive) session's display, which the spec's measured 94% text-less terminal thoughts suggest differs.
