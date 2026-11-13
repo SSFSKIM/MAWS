@@ -2,9 +2,13 @@
 // which agents are first level, and the two background lists, over built graphs and over the probe's three sessions
 // (spikes/protocol-probe/findings-uxwave-U8-subagent-tasks.txt).
 import { describe, expect, it } from 'vitest';
+import { LaunchSpecSchema } from '@shared/engine/launch-spec';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, TaskId } from '@shared/graph/ids';
 import { event, replayed, upTo } from '../../../../../../test/support/agents-events';
+import { loadP5Journal } from '../../../../../../test/support/fixtures';
+import { SessionStatusTracker } from '../../../../../engine-host/session-status';
+import { backgroundCounts } from '../../../panel/summary/derive';
 import {
   agentsRunningUnder,
   applySnapshot,
@@ -118,6 +122,36 @@ describe('the graph’s readings', () => {
     it('reads each label as its type’s kind, and an unknown one, MCP task among them, as other', () => {
       expect(['local_bash', 'shell', 'local_agent', 'subagent', 'local_workflow', 'workflow', 'monitor_mcp', 'monitor', 'mcp_task', 'MCP task', 'teammate'].map(kindOf))
         .toEqual(['shell', 'shell', 'agent', 'agent', 'workflow', 'workflow', 'monitor', 'monitor', 'other', 'other', 'other']);
+    });
+
+    // A status whose list a Stop wrote carries the Stop's labels, as build F's does; the same two tasks, listed at
+    // p5/p5-o16-holder-main seq 145 and named by the Stop at seq 162, read alike.
+    it('a status from a recorded Stop’s list gives the readings and the card counts the listing of the same tasks gives', () => {
+      const rows = loadP5Journal('p5-o16-holder-main');
+      const frameAt = (seq: number) => rows.find((row) => row.seq === seq)!.frame as Record<string, unknown>;
+      const spec = LaunchSpecSchema.parse({
+        appSessionId: 'app-labels', cwd: '/tmp/r', additionalDirectories: [], model: null, effort: null, permissionMode: null, gateway: 'gateway', subagentModel: null,
+        resume: null, sessionId: null, trust: null, mcpConfig: null, extraSettings: null, maxBudgetUsd: null, inheritGrantsFrom: null, replay: null,
+      });
+      const listed = new SessionStatusTracker(spec, () => {});
+      listed.observe(frameAt(145), '2026-10-31T00:00:00.000Z');
+      const stopped = new SessionStatusTracker(spec, () => {}, { launchKind: 'adopted' });
+      stopped.stopped((frameAt(162).request as { input: Record<string, unknown> }).input);
+      const fromListing = listed.snapshot().backgroundTasks;
+      const fromStop = stopped.snapshot().backgroundTasks;
+      expect(fromListing.map((t) => t.taskType)).toEqual(['local_bash', 'local_agent']);
+      expect(fromStop.map((t) => t.taskType)).toEqual(['shell', 'subagent']); // the status value stays as the engine wrote it
+      const readings = (graph: TaskGraph) => ({
+        kinds: graph.order.map((taskId) => [taskId, graph.tasks.get(taskId)!.kind]),
+        firstLevel: firstLevelAgents(graph),
+        runningAgents: runningAgents(graph),
+        background: backgroundRunning(graph).map((n) => [n.taskId, n.kind]),
+      });
+      const stop = readings(applySnapshot(emptyGraph(), fromStop));
+      expect(stop).toEqual(readings(applySnapshot(emptyGraph(), fromListing)));
+      expect(stop).toMatchObject({ firstLevel: { running: ['a75a34c79539c9b3c'], done: [] }, runningAgents: 1, background: [['bzgk2epjt', 'shell']] });
+      expect(backgroundCounts(fromStop)).toEqual(backgroundCounts(fromListing));
+      expect(backgroundCounts(fromStop)).toEqual({ shells: 1, workflows: 0, monitors: 0, other: 0 });
     });
 
     it('a subagent listed by its label is an agent of the tree and no background task', () => {

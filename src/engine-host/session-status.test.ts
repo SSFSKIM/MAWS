@@ -7,8 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { LaunchSpecSchema } from '@shared/engine/launch-spec';
 import { ReloadPluginsResponseSchema } from '@shared/wire/control';
 import { SessionStatusTracker } from './session-status';
-import { backgroundCounts } from '../renderer/src/panel/summary/derive';
-import { applySnapshot, backgroundRunning, emptyGraph, firstLevelAgents, runningAgents, type TaskGraph } from '../renderer/src/tools/agents/model/task-graph';
+
 
 const ROOT = resolve(__dirname, '../..');
 const fixtureRow = (seq: number) =>
@@ -201,38 +200,5 @@ describe('SessionStatusTracker: a background task’s starter', () => {
       { taskId: 'b1', taskType: 'shell', description: 'sleep 30', ambient: false, parentTaskId: 'a1' },
       { taskId: 'b2', taskType: 'shell', description: 'tail', ambient: false },
     ]);
-  });
-});
-
-// The UX wave's U8b, fix round A (the architect's ruling of 2026-11-13): a status whose list a Stop callback wrote carries
-// the Stop's labels (`shell`, `subagent`), as build F's does; the readers take them as the listing's task types. The same
-// two tasks, listed at p5/p5-o16-holder-main seq 145 and named by the Stop at seq 162, read alike.
-describe('SessionStatusTracker: a Stop’s list reads as the listing of the same tasks', () => {
-  const rows = readFileSync(resolve(ROOT, 'spikes/protocol-probe/fixtures/p5/p5-o16-holder-main.jsonl'), 'utf8')
-    .split('\n')
-    .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line) as { seq: number; frame: Record<string, unknown> });
-  const frameAt = (seq: number) => rows.find((row) => row.seq === seq)!.frame;
-  const readings = (graph: TaskGraph) => ({
-    kinds: graph.order.map((taskId) => [taskId, graph.tasks.get(taskId)!.kind]),
-    firstLevel: firstLevelAgents(graph),
-    runningAgents: runningAgents(graph),
-    background: backgroundRunning(graph).map((n) => [n.taskId, n.kind]),
-  });
-
-  it('gives the same readings and the same card counts', () => {
-    const listed = new SessionStatusTracker(spec, () => {});
-    listed.observe(frameAt(145), '2026-10-31T00:00:00.000Z');
-    const stopped = new SessionStatusTracker(spec, () => {}, { launchKind: 'adopted' });
-    stopped.stopped((frameAt(162).request as { input: Record<string, unknown> }).input);
-    const fromListing = listed.snapshot().backgroundTasks;
-    const fromStop = stopped.snapshot().backgroundTasks;
-    expect(fromListing.map((t) => t.taskType)).toEqual(['local_bash', 'local_agent']);
-    expect(fromStop.map((t) => t.taskType)).toEqual(['shell', 'subagent']); // the status value stays as the engine wrote it
-    const stop = readings(applySnapshot(emptyGraph(), fromStop));
-    expect(stop).toEqual(readings(applySnapshot(emptyGraph(), fromListing)));
-    expect(stop).toMatchObject({ firstLevel: { running: ['a75a34c79539c9b3c'], done: [] }, runningAgents: 1, background: [['bzgk2epjt', 'shell']] });
-    expect(backgroundCounts(fromStop)).toEqual(backgroundCounts(fromListing));
-    expect(backgroundCounts(fromStop)).toEqual({ shells: 1, workflows: 0, monitors: 0, other: 0 });
   });
 });
