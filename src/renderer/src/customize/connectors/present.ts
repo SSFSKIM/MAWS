@@ -124,8 +124,8 @@ export interface ReadySession {
 
 /** The session a server signs in from: the attached one, else the first ready session whose scope includes the server,
  * one in the page's directory first (the entries the page shows are the ones it reads); null when none does (Sign in then
- * says to open one). MAWS's own servers are not signed in through the engine. Main refuses a session whose engine uses
- * another entry of the name (scalpel-2#1). */
+ * says to open one). MAWS's own servers are not this one's (`ownSignInSessionOf`, U11a M8). Main refuses a session whose
+ * engine uses another entry of the name (scalpel-2#1). */
 export function signInSessionOf(scope: CustomizationServer['scope'], ready: readonly ReadySession[], attached: string | null, cwd: string | null): string | null {
   if (scope === 'app') return null;
   if (attached !== null) return attached;

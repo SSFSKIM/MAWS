@@ -34,7 +34,7 @@ import { transportWords } from '../../widgets/read';
 
 export interface SignInTarget {
   name: string;
-  scope: PluginsScope; // MAWS's own (`app`) servers are not signed in through the engine
+  scope: PluginsScope; // a configuration file's; MAWS's own (`app`) servers sign in as dynamic connectors (`startSignInDynamic`)
   cwd: string | null; // the page's directory: part of a project or local server's identity
   path: string; // the file the entry is in: main signs in only from a session whose engine uses this entry (scalpel-2#1)
 }
