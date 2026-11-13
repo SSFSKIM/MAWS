@@ -33,7 +33,7 @@ export interface NamedPaths {
 
 const NEWLINE = 0x0a;
 const REQUEST_RECORD = Buffer.from('{"type":"api-request'); // the engine's per-request records, skipped unparsed as TranscriptJobs skips them
-const EMPTY = Buffer.alloc(0);
+const EMPTY: Buffer = Buffer.alloc(0);
 const NO_CALLS: string[] = [];
 
 interface Span {
@@ -165,7 +165,7 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
         const match = pending.get(id)!.waits.find((wait) => wait.when === found);
         pending.delete(id); // the nearest older call decides
         if (match) {
-          state.found = { record: match.record, call: { ...span, toolUseId: id, when: found } };
+          state.found = { record: match.record, call: { ...span, toolUseId: id, when: match.when } };
           return;
         }
       }
@@ -184,7 +184,7 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
         const start = Math.max(low, end - chunkBytes);
         const chunk = await read(start, end - start);
         if (chunk.length !== end - start) throw new Error('the transcript shrank while it was read');
-        let buffer = head.length > 0 ? Buffer.concat([chunk, head]) : chunk;
+        let buffer: Buffer = head.length > 0 ? Buffer.concat([chunk, head]) : chunk;
         let limit = buffer.length;
         if (seeking || overlong) {
           const last = chunk.lastIndexOf(NEWLINE);
