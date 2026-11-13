@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId, AttentionId, MessageUuid, RequestId, SessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { SessionRecordSchema } from '@shared/graph/session';
-import { sessionIdFor, summary, tempDir } from '../../../test/support/index-fixture';
+import { gitCheckout, gitWorktree, sessionIdFor, summary, tempDir } from '../../../test/support/index-fixture';
 import { budgetVerdict, machineLoad } from '../../../test/support/latency-budget';
 import { Index } from './index';
 import { cutPrompt, promptTitle } from './sessions';
@@ -271,47 +271,120 @@ describe('session records in the index', () => {
   });
   // C10 end
 
+  // UX wave U8c-2 (M2 decision 11; Decision Log 3, finding F): the summaries as this build produces them, every one with
+  // its newest row's folder. 3,600 name one folder (nothing is read for them); 200 have their home in a real worktree of
+  // a real repository (the launch folder is computed); 200 have their newest row in a second real worktree after a `cd`
+  // (the agent's folder is computed and its branch read from git's files). A measurement of that workload, not a bound
+  // for a store in which every summary needs fresh repository reads.
+  const BOUND_COUNT = 4_000;
+  const boundSummaries = async (root: string) => {
+    const main = await gitCheckout(join(root, 'repo'), 'main');
+    const w1 = await gitWorktree(main, join(main, '.claude/worktrees/w1'), 'worktree-w1');
+    const w2 = await gitWorktree(main, join(root, 'repo-w2'), 'w2');
+    const groups = { oneFolder: 0, homeInWorktree: 0, cdIntoWorktree: 0 };
+    const summaries = Array.from({ length: BOUND_COUNT }, (_, i) => {
+      const base = { sessionId: sessionIdFor(i + 1), customTitle: i % 3 === 0 ? `t${i}` : null };
+      if (i % 20 === 1) return (groups.homeInWorktree++, summary({ ...base, directory: main, relocatedCwd: w1, newestCwd: w1 }));
+      if (i % 20 === 2) return (groups.cdIntoWorktree++, summary({ ...base, directory: main, newestCwd: w2 }));
+      const one = summary(base);
+      return (groups.oneFolder++, { ...one, newestCwd: one.directory });
+    });
+    expect(groups).toEqual({ oneFolder: 3_600, homeInWorktree: 200, cdIntoWorktree: 200 });
+    return { summaries, main, w1, w2 };
+  };
+
   // macOS: a CPU-time bound measured on the Apple silicon Mac (a hardware-bound gate,
   // docs/doperpowers/plans/2026-10-14-gate-offload.md §3.1).
-  it.skipIf(process.platform !== 'darwin')('upserts 4,000 synthetic summaries inside one transaction in under 500 ms of CPU time', () => {
-    const summaries = Array.from({ length: 4_000 }, (_, i) => summary({ sessionId: sessionIdFor(i + 1), customTitle: i % 3 === 0 ? `t${i}` : null }));
-    // The bound is on the work the upserts cost (this process's CPU time; vitest runs each file in its own process), so
-    // a loaded machine's scheduling does not decide it. Contention still adds to CPU time (shared caches, a slower clock
-    // with every core busy): master's own code measured 512 ms on the mini while e2e jobs ran on both its desktops (run
-    // 43429465758; 605.9, 519.5 and 518.4 ms in runs 43206290258, 43420507070 and 43427405095). So the cost is the least
-    // of three runs, each on a fresh index, and it is held to 500 ms as named only on a quiet machine; loaded (busy cores,
-    // a shared desktop, the guest, or a guest beside the host) it is recorded and held to the loose ceiling, as every
-    // latency bound is (test/support/latency-budget.ts).
-    const machine = machineLoad();
-    const at = Date.now();
-    const run = (target: Index) => {
-      const cpu = process.cpuUsage();
-      const started = performance.now();
-      target.transaction(() => {
-        for (const s of summaries) target.sessions.upsertFromSummary(s);
-      });
-      const spent = process.cpuUsage(cpu);
-      return { ms: (spent.user + spent.system) / 1000, elapsed: performance.now() - started };
-    };
-    const first = run(index);
-    expect(index.sessions.list()).toHaveLength(4_000);
-    const runs = [first];
-    for (let i = 1; i < 3; i++) {
-      const fresh = tempDir();
-      const other = new Index(join(fresh.path, 'index.sqlite'));
-      try {
-        runs.push(run(other));
-        expect(other.sessions.list()).toHaveLength(4_000);
-      } finally {
-        other.close();
-        fresh.dispose();
+  it.skipIf(process.platform !== 'darwin')('upserts 4,000 synthetic summaries inside one transaction in under 500 ms of CPU time', async () => {
+    const repos = tempDir('maws-bound-');
+    try {
+      const { summaries } = await boundSummaries(repos.path);
+      // The bound is on the work the upserts cost (this process's CPU time; vitest runs each file in its own process), so
+      // a loaded machine's scheduling does not decide it. Contention still adds to CPU time (shared caches, a slower clock
+      // with every core busy): master's own code measured 512 ms on the mini while e2e jobs ran on both its desktops (run
+      // 43429465758; 605.9, 519.5 and 518.4 ms in runs 43206290258, 43420507070 and 43427405095). So the cost is the least
+      // of three runs, each on a fresh index, and it is held to 500 ms as named only on a quiet machine; loaded (busy cores,
+      // a shared desktop, the guest, or a guest beside the host) it is recorded and held to the loose ceiling, as every
+      // latency bound is (test/support/latency-budget.ts).
+      const machine = machineLoad();
+      const at = Date.now();
+      const run = (target: Index, batch = summaries) => {
+        const cpu = process.cpuUsage();
+        const started = performance.now();
+        target.transaction(() => {
+          for (const s of batch) target.sessions.upsertFromSummary(s);
+        });
+        const spent = process.cpuUsage(cpu);
+        return { ms: (spent.user + spent.system) / 1000, elapsed: performance.now() - started };
+      };
+      const first = run(index);
+      expect(index.sessions.list()).toHaveLength(BOUND_COUNT);
+      const runs = [first];
+      for (let i = 1; i < 3; i++) {
+        const fresh = tempDir();
+        const other = new Index(join(fresh.path, 'index.sqlite'));
+        try {
+          runs.push(run(other));
+          expect(other.sessions.list()).toHaveLength(BOUND_COUNT);
+        } finally {
+          other.close();
+          fresh.dispose();
+        }
       }
+      // The three shares, on one more fresh index, printed and not asserted: what a run over the bound is reported with.
+      const shares = tempDir();
+      const shared = new Index(join(shares.path, 'index.sqlite'));
+      try {
+        const share = (pick: (i: number) => boolean) => Math.round(run(shared, summaries.filter((_, i) => pick(i))).ms * 10) / 10;
+        console.log(`[latency] 4,000 upserts by share, CPU ms: one folder ${share((i) => i % 20 > 2 || i % 20 === 0)}, home in a worktree ${share((i) => i % 20 === 1)}, cd into a worktree ${share((i) => i % 20 === 2)}`);
+      } finally {
+        shared.close();
+        shares.dispose();
+      }
+      const least = Math.round(Math.min(...runs.map((r) => r.ms)) * 10) / 10;
+      const { ceiling, reason } = budgetVerdict('4,000 upserts, CPU time', least, 500, machine, at);
+      if (reason !== null) console.log(`[latency] ${reason}`);
+      expect(least).toBeLessThan(ceiling);
+      expect(Math.min(...runs.map((r) => r.elapsed))).toBeLessThan(2000); // a sanity bound on the wall clock, as M5's instant pin keeps
+    } finally {
+      repos.dispose();
     }
-    const least = Math.round(Math.min(...runs.map((r) => r.ms)) * 10) / 10;
-    const { ceiling, reason } = budgetVerdict('4,000 upserts, CPU time', least, 500, machine, at);
-    if (reason !== null) console.log(`[latency] ${reason}`);
-    expect(least).toBeLessThan(ceiling);
-    expect(Math.min(...runs.map((r) => r.elapsed))).toBeLessThan(2000); // a sanity bound on the wall clock, as M5's instant pin keeps
+  });
+
+  // U8c-2 (M2 decision 11): the same count from an engine host that does not say where the newest row is gives exactly
+  // today's records, and neither column is written.
+  it('upserts the same 4,000 summaries without the newest row\'s folder into today\'s records and no fact', async () => {
+    const repos = tempDir('maws-bound-');
+    try {
+      const { summaries, main, w1 } = await boundSummaries(repos.path);
+      const older = summaries.map((s) => {
+        const copy = { ...s };
+        delete copy.newestCwd;
+        return copy;
+      });
+      index.transaction(() => {
+        for (const s of older) index.sessions.upsertFromSummary(s);
+      });
+      const records = index.sessions.list();
+      expect(records).toHaveLength(BOUND_COUNT);
+      const bySession = new Map(records.map((r) => [r.engineSessionId, r]));
+      older.forEach((s, i) => {
+        const record = bySession.get(s.sessionId)!;
+        const want =
+          i % 20 === 1 ? { directory: w1, worktree: { path: w1, branch: null } } : i % 20 === 2 ? { directory: main, worktree: null } : { directory: s.directory, worktree: null };
+        expect({ directory: record.directory, worktree: record.worktree, branch: record.branch, title: record.title.text }).toEqual({ ...want, branch: null, title: s.customTitle ?? 'hello' });
+        expect(record).not.toHaveProperty('launchFolder');
+        expect(record).not.toHaveProperty('agentFolder');
+      });
+      const raw = new DatabaseSync(join(dir.path, 'index.sqlite'), { readOnly: true });
+      try {
+        expect(raw.prepare('SELECT COUNT(*) AS n FROM sessions WHERE launch_folder IS NOT NULL OR agent_folder IS NOT NULL').get()).toEqual({ n: 0 });
+      } finally {
+        raw.close();
+      }
+    } finally {
+      repos.dispose();
+    }
   });
 
   it('createForLaunch takes a caller-supplied UUID v4 and answers exists with the first record on a collision', () => {
