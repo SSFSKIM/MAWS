@@ -186,7 +186,9 @@ export function continuedAfter(events: readonly SessionEvent[]): ReadonlySet<Too
     if (event.kind === 'tool.result') {
       if (event.denial !== 'user-rejected') continue;
       const of = messageOf.get(event.toolUseId) ?? null;
-      waiting.set(of, [...(waiting.get(of) ?? []), event.toolUseId]);
+      const group = waiting.get(of);
+      if (group) group.push(event.toolUseId);
+      else waiting.set(of, [event.toolUseId]);
       continue;
     }
     const message = event.kind === 'tool.use' || event.kind === 'assistant.block.delta' || (event.kind === 'assistant.block.complete' && event.isApiErrorMessage !== true) ? event.apiMessageId : null;
