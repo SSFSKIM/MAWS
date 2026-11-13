@@ -92,6 +92,11 @@ export interface SessionsState {
   noteArchived(appSessionId: AppSessionId): void;
   noteRenamed(appSessionId: AppSessionId, title: string): void;
   noteUnarchived(appSessionId: AppSessionId): void;
+  // The UX wave, U9 (S-05, M5; Interfaces §10; ../lane-b/live-word.ts): the live word of each listed session that takes
+  // one now, applied on its listing entry (`ListedSession.live`) here and at every `applyRows`, so the word is there from
+  // the moment the entry arrives and gone the moment the window stops deriving it.
+  liveWords: ReadonlyMap<AppSessionId, LiveWord>;
+  applyLive(words: ReadonlyMap<AppSessionId, LiveWord>): void;
 }
 
 /** What this window did to another machine's session (`acted`): `listedAt`, the revision of the listing held at the act. */
@@ -103,8 +108,19 @@ export interface ActedHere {
 }
 
 // P5 O8 M2: a listed session is a `RemoteRow` with its address, never a `SessionRecord`: a listing has no directory, model,
-// mode, holder or lineage, and a record built from one would plant made-up values in their readers.
-export type ListedSession = RemoteRow & { appId: AppSessionId };
+// mode, holder or lineage, and a record built from one would plant made-up values in their readers. The UX wave, U9
+// (S-05): `live`, the turn of the session's open tab, while the window derives one (`applyLive`); state of the run.
+export type ListedSession = RemoteRow & { appId: AppSessionId; live?: LiveWord };
+/** The UX wave, U9 (S-05): a remote lane B session's open tab's turn, `running` while its held status has one. */
+export type LiveWord = 'running' | 'resting';
+/** The listing with the live word it takes now, or without one. */
+const withLive = (entry: ListedSession, word: LiveWord | undefined): ListedSession => {
+  if (entry.live === word) return entry;
+  if (word !== undefined) return { ...entry, live: word };
+  const rest = { ...entry };
+  delete rest.live;
+  return rest;
+};
 
 // A turn's start or end as the digest's fold reads it (src/services/sessions/digest.ts): the session's own, never a child
 // agent's, and an echo receipt is no turn.
@@ -252,6 +268,12 @@ export function createSessionsStore() {
       member: null,
       registry: EMPTY_REGISTRY,
       acted: new Map(),
+      liveWords: new Map(),
+      applyLive(words) {
+        const listed = new Map(get().listed);
+        for (const [appId, entry] of listed) listed.set(appId, withLive(entry, words.get(appId)));
+        set({ liveWords: words, listed });
+      },
       applyRegistry(registry, local) {
         fromRegistry = registryRecords(registry, local);
         set({ registry, projects: withRegistry(answered(get().projects)), projectsVersion: get().projectsVersion + 1 });
@@ -274,7 +296,7 @@ export function createSessionsStore() {
             acted.set(appId, { ...note, hidden: entry });
             continue;
           } else if (note?.title != null) entry.title = note.title;
-          listed.set(appId, entry);
+          listed.set(appId, withLive(entry, get().liveWords.get(appId)));
         }
         set({ listed, acted, listedMachines: new Set(machines), members: new Map(members.map((m) => [m.id, m])), member });
       },

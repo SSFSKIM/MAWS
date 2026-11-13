@@ -18,7 +18,7 @@ import type { Spill, TurnId } from '../model/rows';
 import type { RewindInterface } from '../view/context';
 import { HISTORY_OMITTED, HISTORY_TOO_LARGE, historyGapEvent, unseenTurnEndEvent } from '../model/gap'; // P5 O7 M2; M4: HISTORY_OMITTED; M8: unseenTurnEndEvent
 import { remoteMachineName } from '../../lane-a/remote-session'; // P5 O7 M2: a machine's name for the bar's words
-import { remoteLaneBStateOf } from '../../lane-b/remote-session'; // P5 O15 M2b: the stream's latest answer at a loss
+import { historyReadsNow, isRemoteLaneB, remoteLaneBStateOf, whenHistoryReads } from '../../lane-b/remote-session'; // P5 O15 M2b: the stream's latest answer at a loss; U9 M5: the settled word
 import { HistoryPager, withHistoryGap, withOmittedBar, withoutOlderThanWindow } from './older';
 import type { TranscriptSource } from './types';
 
@@ -610,6 +610,10 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
       if (events === null) {
         stale = false; // this read follows the transcript again
         tooLarge.delete('newest');
+        // the UX wave, U9 (M5, #565): another machine's history is read once main settled that machine's generation, or
+        // at the backstop, never beside its live sessions' resumes; at once when either has passed or it is not up
+        const machine = machineOf(appSessionId);
+        if (machine !== client.localMachine && isRemoteLaneB(appSessionId) && !historyReadsNow(machine)) await whenHistoryReads(machine);
         const read = valueOf(await eventsOnceHostIsBack(client, appSessionId, subscription));
         const answer = withOmittedBar(withHistoryGap(read, bareOf(appSessionId), tooLargeWords('newest')), bareOf(appSessionId), omittedWords); // P5 O7 M2: the gap bar at a page partly gone; M4: and the omitted bar after its rows
         const app = valueOf(await client.invoke('session.appEvents', { appSessionId })).events;

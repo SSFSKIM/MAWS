@@ -11,8 +11,13 @@
 //   machine is `up`. A tab that has only shown the phase's words (restored at launch, opened while offline) holds nothing,
 //   and its pane hydrates at `up` as before.
 // - A held key not whole at the return (its hydration failed, or was still out at the loss and fails) is read again,
-//   as a remount used to: once the machine is `up` and main has said the stream's next answer since its word of the
-//   loss (its `remote.session` `answer`, at a `subbed` or an end), never before; a hydration still out waits first.
+//   as a remount used to. The UX wave, U9 (M5, #565): decided at the return's settled word, main's `remote.settled` for
+//   the roster's generation after the loss, or SETTLE_BACKSTOP_MS after that `up` (./remote-session.ts'
+//   `whenHistoryReads`), whether or not anything resubscribes; never beside the live sessions' resumes, and never
+//   before the machine is back. A hydration still out waits first.
+// - With the pane kept mounted through an outage (U9 M3) the hold no longer has to keep an attachment alive across the
+//   loss; it still joins the pane's attachment, since a pane can leave its tab otherwise (the floating card), and a key
+//   detached to nothing is released and read whole again at the next mount.
 // - A socket-linked profile's sessions are no lane B session here (./remote-session.ts) and a local session's never are:
 //   their tabs hold nothing.
 import { useEffect } from 'react';
@@ -21,7 +26,7 @@ import { machineOf } from '@shared/machine/address';
 import { useMachines } from '../stores/machines';
 import { useTranscriptStore } from '../stores/transcript';
 import { ipcSource } from '../transcript/source/ipc';
-import { useIsRemoteLaneB, useRemoteLaneB } from './remote-session';
+import { useIsRemoteLaneB, useRemoteLaneB, whenHistoryReads } from './remote-session';
 
 /** Holds the session's transcript key from when a pane attached it with the machine `up`; the returned function lets go. */
 export function holdRemoteTranscript(appSessionId: AppSessionId): () => void {
@@ -30,9 +35,10 @@ export function holdRemoteTranscript(appSessionId: AppSessionId): () => void {
   const machine = machineOf(appSessionId);
   const transcripts = () => useTranscriptStore.getState();
   const up = () => useMachines.getState().machines.get(machine)?.state === 'up';
+  const generation = () => useMachines.getState().machines.get(machine)?.generation ?? 0;
   const said = () => useRemoteLaneB.getState().states.get(appSessionId);
-  const answered = () => said()?.answer?.n ?? 0; // the stream's latest answer, as main counts it
-  let lostAt = 0; // the answer main's word of the loss carried: the return's is the next
+  let lostIn = 0; // the roster's generation at main's word of the loss: the return's is a later one
+  let settling = false; // the return's settled word (or its backstop) is waited for
   let linkWas = said()?.link.state ?? null; // the link as main last said it for the session
   const phase = () => transcripts().entries[key]?.phase;
   let held = false;
@@ -69,12 +75,18 @@ export function holdRemoteTranscript(appSessionId: AppSessionId): () => void {
     }
     if (lost && !returning) {
       losses += 1;
-      lostAt = answered();
+      lostIn = generation();
       returning = true;
     }
-    if (returning && up() && answered() > lostAt) {
-      returning = false;
-      void readAgainIfNotWhole(losses);
+    if (returning && !settling && up() && generation() > lostIn) {
+      settling = true;
+      const loss = losses;
+      void whenHistoryReads(machine).then(() => {
+        settling = false;
+        if (ended || loss !== losses || !up()) return check(); // a later loss, or gone again: the next return decides
+        returning = false;
+        void readAgainIfNotWhole(loss);
+      });
     }
   };
   const offTranscripts = useTranscriptStore.subscribe(check);

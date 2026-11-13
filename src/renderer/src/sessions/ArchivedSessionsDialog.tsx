@@ -9,7 +9,13 @@
 // machine's line (UC-7.5's words for "list archived sessions", else the link's phase) and is asked nothing. Unarchive there
 // returns the session to this sidebar at once (the sessions store's `noteUnarchived`); removing a worktree there is not
 // offered.
-import { useEffect, useMemo, useState } from 'react';
+// The UX wave, U9 (the architect's ruling (A) of 2026-11-13; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-
+// machines.md, Decision Log): the footer's sheet (no project, no machine named) reaches every machine's own row, since a
+// machine's row leaves the sidebar with its last listed session and its menu with it: this Mac's section first, then
+// one under each other machine's name, each asked as the sheet opens or worded by the rules above. No machine waits for
+// another: each section shows its rows, its line or that it is loading; a machine with nothing archived there shows
+// none, and this Mac's keeps "No archived sessions.". With no other machine in the roster the sheet is as before.
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { machineOf } from '@shared/machine/address';
@@ -34,15 +40,15 @@ import { displayTitle } from './title';
 
 export function ArchivedSessionsDialog({ projectId, machine: named }: { projectId: ProjectId | null; machine?: MachineRef }) {
   const local = ipc.localMachine;
+  const everyMachine = useMachines((s) => projectId === null && named === undefined && [...s.machines.keys()].some((machine) => machine !== local));
+  return everyMachine ? <EveryMachineSheet /> : <RowSheet projectId={projectId} named={named} />;
+}
+
+/** A row's archived sessions, read on the machines `readOn` names (space-separated; none for ''), and their Unarchive. */
+function useArchived(row: RowKey, readOn: string) {
+  const local = ipc.localMachine;
   const index = useSessions((s) => selectOrgIndex(s, local));
   const projects = useSessions((s) => s.projects);
-  const machines = useMachines((s) => s.machines);
-  const rl2 = useSessions((s) => s.listedMachines); // the UX wave, U9: the machines reached over RL2
-  const now = usePhaseClock();
-  const project = projectId === null ? undefined : projects.get(projectId);
-  const row: RowKey = projectId === null ? machineKey(named ?? local) : project ? index.keyOf(project) : machineKey(machineOf(projectId));
-  const { readOn, lines } = readsOf(index, row, local, rl2, machines, now);
-  const title = rowName(index, row, (m) => machineName(machines, m, local)) ?? project?.name ?? '';
   const [lists, setLists] = useState<SessionRecord[][] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [version, setVersion] = useState(0); // read again after an unarchive
@@ -74,6 +80,22 @@ export function ArchivedSessionsDialog({ projectId, machine: named }: { projectI
     else if (onAnotherMachine(appSessionId)) useSessions.getState().noteUnarchived(appSessionId); // the UX wave, U9
     setVersion((v) => v + 1);
   };
+  return { rows, error, unarchive };
+}
+
+/** One row's sheet: a project's, or a machine's own row (its menu names it; this Mac's from the footer with no other machine). */
+function RowSheet({ projectId, named }: { projectId: ProjectId | null; named: MachineRef | undefined }) {
+  const local = ipc.localMachine;
+  const index = useSessions((s) => selectOrgIndex(s, local));
+  const projects = useSessions((s) => s.projects);
+  const machines = useMachines((s) => s.machines);
+  const rl2 = useSessions((s) => s.listedMachines); // the UX wave, U9: the machines reached over RL2
+  const now = usePhaseClock();
+  const project = projectId === null ? undefined : projects.get(projectId);
+  const row: RowKey = projectId === null ? machineKey(named ?? local) : project ? index.keyOf(project) : machineKey(machineOf(projectId));
+  const { readOn, lines } = readsOf(index, row, local, rl2, machines, now);
+  const title = rowName(index, row, (m) => machineName(machines, m, local)) ?? project?.name ?? '';
+  const { rows, error, unarchive } = useArchived(row, readOn);
 
   return (
     <Sheet title={`Archived sessions${title ? ` · ${title}` : ''}`} width="w-[min(560px,92vw)]">
@@ -82,15 +104,63 @@ export function ArchivedSessionsDialog({ projectId, machine: named }: { projectI
       ) : rows.length === 0 ? (
         <NoneArchived saidElsewhere={lines.length > 0} />
       ) : (
-        <ul aria-label="Archived sessions" className="m-0 flex max-h-[50vh] list-none flex-col overflow-auto p-0">
-          {rows.map((r) => (
-            <ArchivedRow key={r.appId} record={r} onUnarchive={() => void unarchive(r.appId)} />
-          ))}
-        </ul>
+        <ArchivedList label="Archived sessions" rows={rows} onUnarchive={unarchive} />
       )}
       {rows !== null && error && <p className="m-0 mt-2 text-ui-sm text-danger">{error}</p>}
       <MachineLines lines={lines} />
     </Sheet>
+  );
+}
+
+/** The UX wave, U9 (ruling (A)): the footer's sheet with another machine in the roster: each machine's own row, this Mac's first. */
+function EveryMachineSheet() {
+  const local = ipc.localMachine;
+  const machines = useMachines((s) => s.machines);
+  const rl2 = useSessions((s) => s.listedMachines);
+  const now = usePhaseClock();
+  const order = [local, ...[...machines.keys()].filter((machine) => machine !== local)];
+  return (
+    <Sheet title="Archived sessions" width="w-[min(560px,92vw)]">
+      <div className="flex max-h-[60vh] flex-col overflow-auto">
+        {order.map((machine) => (
+          <MachineSection key={machine} machine={machine} name={machineName(machines, machine, local)} plan={askOf(machine, local, rl2.has(machine), machines, now)} />
+        ))}
+      </div>
+    </Sheet>
+  );
+}
+
+/** One machine's own row in the footer's sheet: its rows, its line, its loading, or nothing when it has none archived. */
+function MachineSection({ machine, name, plan }: { machine: MachineRef; name: string; plan: ReturnType<typeof askOf> }) {
+  const here = machine === ipc.localMachine;
+  const { rows, error, unarchive } = useArchived(machineKey(machine), plan === 'ask' ? machine : '');
+  if (plan === null) return null;
+  let body: ReactNode;
+  if (plan !== 'ask') body = <MachineLines lines={[plan.line]} />;
+  else if (rows === null) body = <p className="m-0 text-fg-muted">{error ?? 'Loading…'}</p>;
+  else if (rows.length === 0 && !here && error === null) return null;
+  else
+    body = (
+      <>
+        {rows.length === 0 ? <NoneArchived saidElsewhere={false} /> : <ArchivedList label={`Archived sessions on ${name}`} rows={rows} onUnarchive={unarchive} />}
+        {error && <p className="m-0 mt-2 text-ui-sm text-danger">{error}</p>}
+      </>
+    );
+  return (
+    <section aria-label={name} className="mb-3 last:mb-0">
+      <h3 className="m-0 mb-1 text-ui-sm font-medium text-fg-muted">{name}</h3>
+      {body}
+    </section>
+  );
+}
+
+function ArchivedList({ label, rows, onUnarchive }: { label: string; rows: SessionRecord[]; onUnarchive(appSessionId: AppSessionId): Promise<void> }) {
+  return (
+    <ul aria-label={label} className="m-0 flex max-h-[50vh] list-none flex-col overflow-auto p-0">
+      {rows.map((r) => (
+        <ArchivedRow key={r.appId} record={r} onUnarchive={() => void onUnarchive(r.appId)} />
+      ))}
+    </ul>
   );
 }
 

@@ -11,8 +11,15 @@
 // rows cover (the RL2 roster: a socket-linked profile's sessions take the manager's path, as local ones do) and the rows
 // don't list it as lane A (O9's). A session this app resumed or spawned there may be listed later, so not being listed
 // doesn't make it lane A.
+//
+// The UX wave, U9 (M5, "The settled word"; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, Interfaces
+// §9): main's `remote.settled` per machine, the generation it last settled. A history read of a session there goes once
+// the roster's current generation has settled, or SETTLE_BACKSTOP_MS after the roster said up, whichever is first, so
+// it no longer runs beside the live sessions' resumes; a read made after either, or while the roster does not say the
+// machine is up, goes at once (`historyReadsNow`, `whenHistoryReads`).
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { EventPayload } from '@shared/ipc/schema';
 import type { RemoteLinkState, RemoteSession } from '@shared/ipc/schema/remote';
 import { isAddress, machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
@@ -27,9 +34,11 @@ export interface RemoteLaneBStore {
   // P5 O7 M5c: each machine's link as the latest `remote.session` of any of its sessions said it (one link per machine, so
   // its member's rights are the machine's, whichever session carried them); absent: none heard yet
   links: ReadonlyMap<MachineRef, RemoteLinkState>;
+  // the UX wave, U9 (M5): each machine's generation main last said settled; said again by its replay to a page
+  settled: ReadonlyMap<MachineRef, number>;
 }
 
-const empty = (): RemoteLaneBStore => ({ states: new Map(), sending: new Map(), links: new Map() });
+const empty = (): RemoteLaneBStore => ({ states: new Map(), sending: new Map(), links: new Map(), settled: new Map() });
 
 export const useRemoteLaneB = create<RemoteLaneBStore>()(empty);
 
@@ -39,6 +48,49 @@ export function resetRemoteLaneBStore(): void {
 
 export function applyRemoteSession(state: RemoteSession): void {
   useRemoteLaneB.setState((s) => ({ states: new Map(s.states).set(state.address, state), ...(isAddress(state.address) && { links: new Map(s.links).set(machineOf(state.address), state.link) }) }));
+}
+
+/** The UX wave, U9 (M5): main's settled word for a machine's generation. */
+export function applyRemoteSettled({ machine, generation }: EventPayload<'remote.settled'>): void {
+  if (useRemoteLaneB.getState().settled.get(machine) === generation) return;
+  useRemoteLaneB.setState((s) => ({ settled: new Map(s.settled).set(machine, generation) }));
+}
+
+/** How long after the roster said a machine is up a history read there goes without main's settled word. */
+export const SETTLE_BACKSTOP_MS = 2000;
+
+/** The moment a history read of the machine's session may go: null for now, else the backstop's (epoch ms). */
+function historyReadsAt(machine: MachineRef): number | null {
+  if (machine === ipc.localMachine) return null;
+  const entry = useMachines.getState().machines.get(machine);
+  if (entry?.state !== 'up') return null; // nothing settles while it is not up: the read goes as before
+  if (useRemoteLaneB.getState().settled.get(machine) === entry.generation) return null;
+  const backstop = Date.parse(entry.since) + SETTLE_BACKSTOP_MS;
+  return Date.now() >= backstop ? null : backstop;
+}
+
+/** Whether a history read of a session on `machine` goes now: settled, past the backstop, or not up. */
+export const historyReadsNow = (machine: MachineRef): boolean => historyReadsAt(machine) === null;
+
+/** Settles once a history read of a session on `machine` may go: at the settled word, the backstop or a roster change. */
+export function whenHistoryReads(machine: MachineRef): Promise<void> {
+  if (historyReadsNow(machine)) return Promise.resolve();
+  return new Promise((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const offs: Array<() => void> = [];
+    const check = () => {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+      const at = historyReadsAt(machine);
+      if (at === null) {
+        offs.forEach((off) => off());
+        return resolve();
+      }
+      timer = setTimeout(check, at - Date.now());
+    };
+    offs.push(useRemoteLaneB.subscribe(check), useMachines.subscribe(check));
+    check();
+  });
 }
 
 export const remoteLaneBStateOf = (appSessionId: AppSessionId): RemoteSession | null => useRemoteLaneB.getState().states.get(appSessionId) ?? null;

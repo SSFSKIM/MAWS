@@ -20,7 +20,7 @@
 // they are the local project's. This Mac chosen again, the local row is as it was.
 import { Command } from 'cmdk';
 import { Popover } from 'radix-ui';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
@@ -29,7 +29,7 @@ import { machineOf } from '@shared/machine/address';
 import { ipc } from '../../ipc/client';
 import { openDialog } from '../../sessions/dialogs';
 import { useRemoteSpawn, useSpawnTarget, type SpawnTarget } from '../../sessions/remote-spawn';
-import { knownCheckouts, readPlaces, SETUP_WORDS, suggestionsFor, tabProject, type Places } from '../../sessions/remote-setup';
+import { knownCheckouts, suggestionsFor, tabProject, useRemotePlaces } from '../../sessions/remote-setup';
 import { projectsByRecency } from '../../sidebar/derive';
 import { selectProjectOrder, useSessions } from '../../stores/sessions';
 import type { HookResult } from '../setup-intent';
@@ -76,28 +76,23 @@ function ActionItem({ value, label, why, disabled, onSelect }: { value: string; 
 // tab's target there (sessions/remote-spawn.ts), "New project" its folder sheet.
 function RemoteMenu({ appSessionId, target, projectId, projectKey, disabled, onDone }: { appSessionId: AppSessionId; target: SpawnTarget; projectId: ProjectId | null; projectKey: string | null; disabled: boolean; onDone(): void }) {
   const [query, setQuery] = useState('');
-  const [places, setPlaces] = useState<Places | null>(null); // null while read
   const { machine, name } = target;
-  useEffect(() => {
-    let live = true;
-    void readPlaces(machine, name).then((read) => live && setPlaces(read));
-    return () => {
-      live = false;
-    };
-  }, [machine, name]);
+  // the UX wave, U9 (O-39, A1): the projects known there at once, the machine's list as it answers, the folders apart
+  const places = useRemotePlaces(machine, name);
+  const folders = places.folders;
   const records = useSessions((s) => s.records);
   const digests = useSessions((s) => s.digests);
-  const ordered = useMemo(() => recentProjects({ records, digests, projects: places?.projects ?? [] }), [records, digests, places]);
+  const ordered = useMemo(() => recentProjects({ records, digests, projects: places.projects ?? [] }), [records, digests, places.projects]);
   const shown = ordered.filter((p) => matchesProject(p, query));
   const choose = (place: Pick<SpawnTarget, 'checkout' | 'label'>) => {
     useRemoteSpawn.getState().choose(appSessionId, { machine, name, key: null, ...place });
     onDone();
   };
   const newProject = () => {
-    const first = places?.first;
+    const first = folders?.first;
     if (first == null) return;
     onDone();
-    const home = places?.home ?? null;
+    const home = folders?.home ?? null;
     openDialog({ kind: 'remoteSetup', request: { kind: 'folder', tab: appSessionId, machine, name, key: projectKey, home, first, suggestions: suggestionsFor(knownCheckouts(tabProject(projectId, useSessions.getState().unstarted.get(appSessionId)?.registry ?? null)), home) } });
   };
   return (
@@ -111,9 +106,9 @@ function RemoteMenu({ appSessionId, target, projectId, projectKey, disabled, onD
       />
       <Command.List>
         <Command.Group className="max-h-40 overflow-y-auto py-1">
-          {places === null && <p className="m-0 px-2 py-1.5 text-ui-sm text-fg-muted">{SETUP_WORDS.reading(name)}</p>}
-          {places?.error != null && <p className="m-0 px-2 py-1.5 text-ui-sm text-fg-muted">{places.error}</p>}
-          {places?.projects != null && shown.length === 0 && <p className="m-0 px-2 py-1.5 text-ui-sm text-fg-muted">No projects found</p>}
+          {places.reading !== null && <p className="m-0 px-2 py-1.5 text-ui-sm text-fg-muted">{places.reading}</p>}
+          {places.error !== null && <p className="m-0 px-2 py-1.5 text-ui-sm text-fg-muted">{places.error}</p>}
+          {places.projects !== null && shown.length === 0 && <p className="m-0 px-2 py-1.5 text-ui-sm text-fg-muted">No projects found</p>}
           {shown.map((project) => {
             const folder = basename(project.directory);
             const chosen = project.directory === target.checkout;
@@ -130,9 +125,9 @@ function RemoteMenu({ appSessionId, target, projectId, projectKey, disabled, onD
         </Command.Group>
         <Command.Separator alwaysRender className="border-t border-border" />
         <Command.Group className="py-1">
-          <ActionItem value="new-project" label={NEW_PROJECT} why={places?.newProject ?? null} disabled={disabled || places?.first == null} onSelect={newProject} />
+          <ActionItem value="new-project" label={NEW_PROJECT} why={folders?.newProject ?? null} disabled={disabled || folders?.first == null} onSelect={newProject} />
           {target.checkout !== HOME_CHECKOUT && (
-            <ActionItem value="no-project" label={NO_PROJECT} why={places?.noProject ?? null} disabled={disabled || places === null} onSelect={() => choose({ checkout: HOME_CHECKOUT, label: NO_PROJECT_LABEL })} />
+            <ActionItem value="no-project" label={NO_PROJECT} why={folders?.noProject ?? null} disabled={disabled || folders === null} onSelect={() => choose({ checkout: HOME_CHECKOUT, label: NO_PROJECT_LABEL })} />
           )}
         </Command.Group>
       </Command.List>
