@@ -567,8 +567,9 @@ describe('request card placements and delivery states', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Deny' }));
     expect(await screen.findByText('Already answered elsewhere')).toBeTruthy();
     act(() => vi.advanceTimersByTime(2_000));
-    // its closing timer is set in an effect React may still have queued under load: the card goes by then
-    await waitFor(() => expect(second.view.container.querySelector('[data-request-card]')).toBeNull());
+    // Its closing timer is set in a passive effect, which under load React can still hold queued at the advance (the text
+    // is drawn before the effect runs), so the timer then starts after it: the card goes within two seconds of that.
+    await waitFor(() => expect(second.view.container.querySelector('[data-request-card]')).toBeNull(), { timeout: 5_000 });
     second.view.unmount();
     vi.useRealTimers();
 
