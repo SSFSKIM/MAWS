@@ -178,8 +178,9 @@ export interface TranscriptState {
   // makes one notice per session.
   // `arrivals` (UX wave U3, decision 8): the arrival-bearing synthetic message placed under each uuid (the one whose
   // line is drawn) and the turn holding it, or null when it is kept loose (no turn was open for it), so a later one under
-  // the same uuid takes that one out (one arrival per uuid).
-  index: { toolUses: Map<ToolUseId, TurnId>; tasks: Map<TaskId, TurnId>; requests: Map<RequestId, TurnId>; hooks: Map<string, TurnId>; messages: Map<MessageUuid, TurnId>; pluginIssues: Set<string>; arrivals: Map<MessageUuid, { turn: TurnId | null; event: EventId }>};
+  // the same uuid takes that one out (one arrival per uuid). `taskEnds` (UX wave U3, the whole-branch review's finding 3):
+  // what the session's events say of the engine host that sent them, for an older host's task ends (olderHostTaskEnds)
+  index: { toolUses: Map<ToolUseId, TurnId>; tasks: Map<TaskId, TurnId>; requests: Map<RequestId, TurnId>; hooks: Map<string, TurnId>; messages: Map<MessageUuid, TurnId>; pluginIssues: Set<string>; arrivals: Map<MessageUuid, { turn: TurnId | null; event: EventId }>; taskEnds: { arrivals: boolean; toldOldForm: boolean } };
   memo: Map<TurnId, MemoEntry>;
   lineage: { latest: TranscriptState | null };
   // E3 start: where each side thread's row lives (Design §5): the turn its first event landed in, or, for one that
@@ -204,7 +205,7 @@ export function createState(sessionId: SessionId | null, agentId: AgentId | null
     sessionId, agentId, turns: new Map(), order: [], loose: [], hidden: null, pending: new Map(), seen: new Set(), echoUuids: new Set(),
     ui: { assistantInk: new Set(), expandedTurns: new Set(), collapsedTurns: new Set(), expandedGroups: new Set(), expandedCells: new Set(), revealedBoundaries: new Set(), receipts: new Map(), spills: new Map(), global: 0, stamps: new Map(), version: 0 },
     current: null, cwd: null, pluginStatus: new Map(), placement: new Map(),
-    index: { toolUses: new Map(), tasks: new Map(), requests: new Map(), hooks: new Map(), messages: new Map(), pluginIssues: new Set(), arrivals: new Map() },
+    index: { toolUses: new Map(), tasks: new Map(), requests: new Map(), hooks: new Map(), messages: new Map(), pluginIssues: new Set(), arrivals: new Map(), taskEnds: { arrivals: false, toldOldForm: false } },
     memo: new Map(),
     lineage: { latest: null },
   };
@@ -501,6 +502,7 @@ export function applyEvents(previous: TranscriptState, events: SessionEvent[]): 
   for (const event of events) {
     if (state.seen.has(event.id)) continue;
     state.seen.add(event.id);
+    noteTaskEnds(batch, event); // UX wave U3
     if (event.parentToolUseId !== null && state.agentId === null) applyChild(batch, event);
     else apply(batch, event);
   }
@@ -964,6 +966,27 @@ function stands(state: TranscriptState, messageUuid: MessageUuid): boolean {
   if (placed === undefined) return false;
   const events = placed.turn === null ? state.loose : state.turns.get(placed.turn)?.events;
   return events?.some((event) => event.id === placed.event) ?? false;
+}
+
+// UX wave U3 (the whole-branch review's finding 3, the architect's ruling of 2026-11-13): after an update a session stays
+// with the engine host it runs under until it restarts, and a host older than this landing sends no `arrival`; it tells
+// a background task's end only as `task.notification`, which derive.ts then draws as the end's line. Such a host is
+// known by its events: none carries `arrival`, and the model was told of a task's end in the old form, a `user.message`
+// of origin `task-notification` not marked synthetic (every caller of the reader marks it, decision 4) or a turn that
+// ran and ended with that origin (the older host's word for the turn the engine opened to tell an end; a host that sends
+// arrivals has placed the end's line by then, so a turn of its that ends so never makes it the older host). Both marks
+// only grow; when the answer changes, the turns that hold a task's end derive again.
+export const olderHostTaskEnds = (state: TranscriptState): boolean => state.index.taskEnds.toldOldForm && !state.index.taskEnds.arrivals;
+
+function noteTaskEnds(batch: Batch, event: SessionEvent): void {
+  const ends = batch.state.index.taskEnds;
+  const before = olderHostTaskEnds(batch.state);
+  if (event.kind === 'user.message' && event.arrival !== undefined) ends.arrivals = true;
+  else if (event.kind === 'user.message' && event.origin === 'task-notification' && !event.isSynthetic) ends.toldOldForm = true;
+  else if (event.kind === 'turn.ended' && event.origin === 'task-notification' && event.numTurns > 0) ends.toldOldForm = true;
+  else return;
+  if (olderHostTaskEnds(batch.state) === before) return;
+  for (const [id, turn] of batch.state.turns) if (turn.events.some((e) => e.kind === 'task.notification')) batch.touch(id).version += 1;
 }
 
 // A message the engine host made itself (a task's end it kept until the model was told, a scheduled fire): no frame or
