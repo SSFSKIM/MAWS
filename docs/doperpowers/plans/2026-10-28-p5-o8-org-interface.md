@@ -1358,7 +1358,7 @@ Rejected:
   - their tests.
 - `src/shared/spine/` or wherever the router's command context is typed: `context.reader: 'owner' | MemberId`, absent meaning `'owner'`.
 - **`src/endpoint`** (desk-track reviewed):
-  - offer rows for `session.reader.update` (revised 2026-11-07, in place of `session.update`; `title` and `archived` stay the owner's), `session.drafts.get` and `session.drafts.set`;
+  - offer rows for `session.reader.update` (revised 2026-11-07, in place of `session.update`; `title` and `archived` stay the owner's), `session.drafts.get` and `session.drafts.set`; *2026-11-13 (UTC):* Amended by the UX wave (U9; O-48, S-02; `docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md`), on the owner's words: the observation behind O-48 ("I cannot create a fork session from the remote machine …") and "Approve and start", 2026-11-12. From the UX wave (U9), behind `rl2.session-acts`: a fork in place (the machine's owners), archive, unarchive, rename, the owner's read of archived sessions, dismissing an attention item, taking back a waiting message and a pane's answer are offered. Launch, start, the setup of a new session, delete, take over and replays stay unoffered.
   - the dispatch sets `context.reader`: `'owner'` when the caller is one of the machine's owners (`machineOwners`), else the caller's member id;
   - `remote-unavailable.ts` drops the three rows;
   - tests.
