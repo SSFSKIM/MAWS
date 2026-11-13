@@ -34,6 +34,7 @@ export const WIDGET_TITLE: Record<WidgetCommandName, string> = {
   export: 'Export',
   diff: 'Changes',
   rewind: 'Rewind', // W3 (B7)
+  fork: 'Fork', // UX wave U4a (decision 18)
   btw: 'Side question', // E3
   'reload-plugins': 'Reload plugins', // E11 §2.2: the engine's terminal-only command as MAWS's action
 };
