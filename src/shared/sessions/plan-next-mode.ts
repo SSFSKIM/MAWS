@@ -26,3 +26,6 @@ export const namesPlanMode = (answer: Pick<RequestAnswer, 'kind'> & { mode?: unk
  * services' forwarding boundary for a caller that reaches it past the port (the panel's ruling, 2026-11-13).
  */
 export const PLAN_MODE_OTHER_HOST = 'The engine host serving this session isn’t this build’s, so it can’t apply a chosen mode';
+
+/** Why the services' boundary sends no such answer while no engine-host link is served (the delta's ruling, 2026-11-13). */
+export const PLAN_MODE_NO_HOST = 'The engine host isn’t serving right now, so an answer that chooses a mode isn’t sent; try again once it is';

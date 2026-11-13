@@ -3,7 +3,8 @@ import { join } from 'node:path';
 import type { AppSessionId } from '@shared/graph/ids';
 import { endableClientRef } from '@shared/ipc/client';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
-import { PLAN_MODE_OTHER_HOST } from '@shared/sessions/plan-next-mode';
+import { WIRE_MAJOR, WIRE_MINOR, type WirePeer } from '@shared/ipc/wire';
+import { PLAN_MODE_NO_HOST, PLAN_MODE_OTHER_HOST } from '@shared/sessions/plan-next-mode';
 import { digest, item } from '../../../test/support/builders';
 import { fakeBus, type FakeBus } from '../../../test/support/fake-bus';
 import { summary, tempDir } from '../../../test/support/index-fixture';
@@ -106,58 +107,79 @@ describe('answers cannot outlive attention', () => {
   });
 });
 
-// UX wave U1a §F, the panel's ruling: a plan answer that names a mode is never forwarded to an engine host that would drop
-// the mode (one of another wire reads its inputs tolerantly and implements in the earlier mode). The boundary reads the
-// serving host's own status (`host.supervisorStatus`) and applies the shared rule, `hostAppliesPlanMode`, against this
-// build's wire; the refusal is the renderer's words, and the request stays pending and unanswered.
+// UX wave U1a §F (the panel's ruling, then the delta's): a plan answer that names a mode is never forwarded to an engine
+// host that would drop the mode (one of another wire reads its inputs tolerantly and implements in the earlier mode). The
+// guard reads what this process already holds of the link the answer goes out on, the served link's welcome
+// (`peer('engine-host')`), in the same tick as the dispatch; it makes no request of its own. Nothing is dispatched on a
+// refusal, and the request still waits.
 describe('a plan answer that names a mode, at the forwarding boundary', () => {
   const id = 'app' as AppSessionId;
   const plan = item(id, 'plan', '2026-10-02T00:00:00Z');
-  const named = { appSessionId: id, requestId: plan.request.requestId, answer: { kind: 'plan', outcome: 'implement', feedback: null, mode: 'default' } };
-  const plain = { appSessionId: id, requestId: plan.request.requestId, answer: { kind: 'plan', outcome: 'implement', feedback: null } };
-  // The engine host's status answers with `wire`; every other command it answers delivered
-  const servedBy = (wire: string | null) => {
+  const asked = (answer: Record<string, unknown>) => ({ appSessionId: id, requestId: plan.request.requestId, answer });
+  const named = asked({ kind: 'plan', outcome: 'implement', feedback: null, mode: 'default' });
+  const plain = asked({ kind: 'plan', outcome: 'implement', feedback: null });
+  const permission = asked({ kind: 'permission', decision: 'deny' });
+  const thisWire: WirePeer = { major: WIRE_MAJOR, minor: WIRE_MINOR, build: 'b-this', capabilities: [] };
+  const otherMinor: WirePeer = { ...thisWire, minor: WIRE_MINOR - 1, build: 'b-older' };
+  // The supervisor as the guard may read it: the served link's welcome, and the transport. Asked for its status, it would
+  // answer late and with another host's (this build's) wire, so a guard that asked would admit what the welcome refuses.
+  const served = ({ peer, transport = 'detached' }: { peer: WirePeer | null; transport?: 'utility' | 'detached' }) => {
     const dispatch = vi.fn(async (...[, name]: [owner: string, name: string, input?: unknown]) => {
       if (name !== 'host.supervisorStatus') return { ok: true as const, value: { outcome: 'delivered' as const } };
-      return wire === null ? { ok: false as const, error: { code: 'host_unavailable' as const, message: 'engine-host is not running' } } : { ok: true as const, value: { wire, pid: 7 } };
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return { ok: true as const, value: { wire: wireFingerprint(), pid: 7 } };
     });
-    return { ...hosts, dispatch };
+    return { ...hosts, dispatch, peer: () => peer, facts: () => ({ transport }) };
   };
-  const answered = (dispatch: ReturnType<typeof servedBy>['dispatch']) => dispatch.mock.calls.filter(([, name]) => name === 'session.answer').map(([, , input]) => input);
-  const startWith = (served: ReturnType<typeof servedBy>) => {
-    const sessions = start({ env: {}, hosts: served as never });
+  const names = (dispatch: ReturnType<typeof served>['dispatch']) => dispatch.mock.calls.map(([, name]) => name);
+  const startWith = (hostsNow: ReturnType<typeof served>) => {
+    const sessions = start({ env: {}, hosts: hostsNow as never });
     sessions.model.register({ start: (writer) => (writer.observeAttention(id, [plan]), () => {}) });
     return sessions;
   };
-  const stillPending = (sessions: ReturnType<typeof start>) => sessions.model.allAttention().get(id)?.map((i) => [i.request.requestId, i.state]);
+  const stillWaiting = (sessions: ReturnType<typeof start>) => sessions.model.allAttention().get(id)?.map((i) => [i.request.requestId, i.state]);
+
+  it('under a served host of another minor is refused in the port’s words, never asking its status, dispatching nothing', async () => {
+    const hostsNow = served({ peer: otherMinor });
+    const sessions = startWith(hostsNow);
+    expect(await bus.invoke('session.answer', named)).toEqual({ ok: false, error: { code: 'invalid_input', message: PLAN_MODE_OTHER_HOST } });
+    expect(names(hostsNow.dispatch)).toEqual([]);
+    expect(stillWaiting(sessions)).toEqual([[plan.request.requestId, 'pending']]);
+    sessions.stop();
+  });
+
+  it('with no link served on a detached transport is refused host_unavailable, not held for a successor', async () => {
+    const hostsNow = served({ peer: null });
+    const sessions = startWith(hostsNow);
+    expect(await bus.invoke('session.answer', named)).toEqual({ ok: false, error: { code: 'host_unavailable', message: PLAN_MODE_NO_HOST } });
+    expect(names(hostsNow.dispatch)).toEqual([]);
+    expect(stillWaiting(sessions)).toEqual([[plan.request.requestId, 'pending']]);
+    sessions.stop();
+  });
 
   it.each([
-    ['an engine host of another wire', 'w-older'],
-    ['no engine host answering', null],
-  ])('is refused under %s: nothing is dispatched and the request still waits', async (_name, wire) => {
-    const served = servedBy(wire);
-    const sessions = startWith(served);
-    expect(await bus.invoke('session.answer', named)).toEqual({ ok: false, error: { code: 'invalid_input', message: PLAN_MODE_OTHER_HOST } });
-    expect(answered(served.dispatch)).toEqual([]);
-    expect(stillPending(sessions)).toEqual([[plan.request.requestId, 'pending']]);
-    sessions.stop();
-  });
-
-  it('is dispatched as sent to an engine host of this build’s wire', async () => {
-    const served = servedBy(wireFingerprint());
-    const sessions = startWith(served);
+    ['a served host of this build’s major and minor (another build id)', { peer: thisWire }],
+    ['a utility host, always this build', { peer: null, transport: 'utility' as const }],
+  ])('under %s is dispatched as sent, and its status is never asked', async (_name, state) => {
+    const hostsNow = served(state);
+    const sessions = startWith(hostsNow);
     expect(await bus.invoke('session.answer', named)).toEqual({ ok: true, value: { outcome: 'delivered' } });
-    expect(answered(served.dispatch)).toEqual([named]);
+    expect(hostsNow.dispatch.mock.calls).toEqual([['engine-host', 'session.answer', named]]);
     sessions.stop();
   });
 
-  it('naming no mode, goes to an engine host of another wire as today, without asking its status', async () => {
-    const served = servedBy('w-older');
-    const sessions = startWith(served);
-    expect(await bus.invoke('session.answer', plain)).toEqual({ ok: true, value: { outcome: 'delivered' } });
-    expect(served.dispatch.mock.calls.map(([, name]) => name)).toEqual(['session.answer']);
-    expect(answered(served.dispatch)).toEqual([plain]);
-    sessions.stop();
+  it.each([
+    ['another minor', { peer: otherMinor }],
+    ['no link served', { peer: null }],
+    ['a utility host', { peer: null, transport: 'utility' as const }],
+  ])('naming no mode, a plan answer and a permission answer go as today under %s', async (_name, state) => {
+    for (const input of [plain, permission]) {
+      const hostsNow = served(state);
+      const sessions = startWith(hostsNow);
+      expect(await bus.invoke('session.answer', input)).toEqual({ ok: true, value: { outcome: 'delivered' } });
+      expect(hostsNow.dispatch.mock.calls).toEqual([['engine-host', 'session.answer', input]]);
+      sessions.stop();
+    }
   });
 });
 
