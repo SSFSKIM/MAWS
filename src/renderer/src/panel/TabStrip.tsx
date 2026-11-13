@@ -6,7 +6,9 @@
 // stand as their icons alone, the rightmost first, then the tab in view is cut down to 72 px, and only then does the row
 // scroll (`fitTabs`, the owner's "Shrink to icons" of 2026-11-12). P4-B3 (X38; its Decision Log 17, 21): a tab whose
 // tool moves to main (the Artifacts tool) drags while it shows a record, and its context menu offers "Move to main
-// area", disabled with the reason a drag of it would be refused.
+// area", disabled with the reason a drag of it would be refused. UX wave U8b (M3): the menu then offers "Move below" on a
+// tab of the upper group (while the column has two groups or its one group more than one tab) and "Move above" on a tab
+// of the lower one; it opens on a right click and on Shift+F10. A strip knows its group and hands it to its "+".
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -18,19 +20,29 @@ import { openPaneTab, usePanes } from '../engine-surface/panes'; // R2
 import { PANE_COPY } from '../engine-surface/PaneTool'; // R2
 import { beginDrag, endDragFrom, moveArtifactToTab, panelTabMoves, usePanelRecord, useTransferRefusal } from '../shell/transfer'; // P4-B3
 import { TRANSFER_COPY } from '../tools/artifacts/copy'; // P4-B3
-import { panelHost, togglePinned, usePanelHost, useTabLabel, type PanelHostState } from './host';
+import { panelHost, requestFocus, togglePinned, usePanelHost, useTabLabel, type PanelHostState } from './host';
+import { sideGroups, type SideGroupName } from './surface-model';
 
 interface TabStripProps {
   appSessionId: AppSessionId | null;
+  group: SideGroupName; // the group the strip heads
   tabs: PanelTabRef[]; // the group's tabs, in strip order
   activeTabId: string | null; // the group's tab in view
   bodyId: string;
   trailing?: ReactNode; // after "+": the region's controls on the column's first strip
 }
 
-export function TabStrip({ appSessionId, tabs, activeTabId, bodyId, trailing }: TabStripProps) {
+export function TabStrip({ appSessionId, group, tabs, activeTabId, bodyId, trailing }: TabStripProps) {
   const list = useRef<HTMLDivElement>(null);
   const fit = useTabFit(list, tabs, activeTabId);
+  const split = useLayout((s) => sideGroups(s, appSessionId).lower !== null);
+  // Where a tab's menu offers to move it (M3, decision 1): below from the upper group once there is something to split or
+  // a group to join, above from the lower group.
+  const moveTo: SideGroupName | null = group === 'lower' ? 'upper' : split || tabs.length > 1 ? 'lower' : null;
+  const move = (tabId: string, to: SideGroupName) => {
+    useLayout.getState().moveSurfaceTab(appSessionId, tabId, to);
+    requestFocus(tabId); // it comes into view in the other group, as a tab that is chosen: its tool takes the keyboard
+  };
   // Arrow keys move focus along the tabs (the WAI-ARIA tabs pattern, manual activation).
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
@@ -47,10 +59,10 @@ export function TabStrip({ appSessionId, tabs, activeTabId, bodyId, trailing }: 
         {tabs.map((tab) => {
           const selected = tab.id === activeTabId;
           const shape: TabShape = fit.icons.has(tab.id) ? 'icon' : selected && fit.shownMax !== null ? 'cut' : 'whole';
-          return <Tab key={tab.id} tab={tab} selected={selected} shape={shape} maxWidth={shape === 'cut' ? fit.shownMax : null} canPin={appSessionId !== null} bodyId={bodyId} onSelect={() => panelHost.selectTab(tab.id)} />;
+          return <Tab key={tab.id} tab={tab} selected={selected} shape={shape} maxWidth={shape === 'cut' ? fit.shownMax : null} canPin={appSessionId !== null} bodyId={bodyId} onSelect={() => panelHost.selectTab(tab.id)} moveTo={moveTo} onMove={(to) => move(tab.id, to)} />;
         })}
       </div>
-      <AddMenu appSessionId={appSessionId} />
+      <AddMenu appSessionId={appSessionId} group={group} />
       {trailing}
     </div>
   );
@@ -113,7 +125,19 @@ function useTabFit(list: RefObject<HTMLDivElement | null>, tabs: readonly PanelT
 
 type TabShape = 'whole' | 'icon' | 'cut';
 
-function Tab({ tab, selected, shape, maxWidth, canPin, bodyId, onSelect }: { tab: PanelTabRef; selected: boolean; shape: TabShape; maxWidth: number | null; canPin: boolean; bodyId: string; onSelect(): void }) {
+interface TabProps {
+  tab: PanelTabRef;
+  selected: boolean;
+  shape: TabShape;
+  maxWidth: number | null;
+  canPin: boolean;
+  bodyId: string;
+  onSelect(): void;
+  moveTo: SideGroupName | null; // the group its menu offers to move it to
+  onMove(to: SideGroupName): void;
+}
+
+function Tab({ tab, selected, shape, maxWidth, canPin, bodyId, onSelect, moveTo, onMove }: TabProps) {
   const { tool, title, suffix } = useTabLabel(tab); // the header reads the same label (P3-G)
   const closing = usePanelHost((s) => s.closing.has(tab.id));
   const pinnable = tool ? tool.pinnable : true;
@@ -170,17 +194,33 @@ function Tab({ tab, selected, shape, maxWidth, canPin, bodyId, onSelect }: { tab
       )}
     </div>
   );
-  if (!panelTabMoves(tab)) return element;
+  const toMain = panelTabMoves(tab);
+  if (!toMain && moveTo === null) return element;
   return (
     <ContextMenu.Root modal={false}>
-      <ContextMenu.Trigger asChild>{element}</ContextMenu.Trigger>
+      <ContextMenu.Trigger asChild onKeyDown={openMenuOnShiftF10}>{element}</ContextMenu.Trigger>
       <ContextMenu.Portal>
         <ContextMenu.Content className="z-50 min-w-44 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
-          <MoveToMainItem tabId={tab.id} />
+          {toMain && <MoveToMainItem tabId={tab.id} />}
+          {moveTo !== null && (
+            <ContextMenu.Item onSelect={() => onMove(moveTo)} className={MENU_ITEM}>
+              {moveTo === 'lower' ? COPY.moveBelow : COPY.moveAbove}
+            </ContextMenu.Item>
+          )}
         </ContextMenu.Content>
       </ContextMenu.Portal>
     </ContextMenu.Root>
   );
+}
+
+const MENU_ITEM = 'flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover';
+
+// Shift+F10 opens a tab's menu at the tab, as it opens an icon's (`SurfaceRow.tsx`).
+function openMenuOnShiftF10(event: KeyboardEvent<HTMLDivElement>) {
+  if (!event.shiftKey || event.key !== 'F10') return;
+  event.preventDefault();
+  const box = event.currentTarget.getBoundingClientRect();
+  event.currentTarget.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: box.left, clientY: box.bottom }));
 }
 
 // P4-B3 (M3 of the prior art): the record into a main tab, appended to the focused pane, as the record bar's Move to tab.
@@ -191,7 +231,7 @@ function MoveToMainItem({ tabId }: { tabId: string }) {
       disabled={refusal !== null}
       title={refusal ?? undefined}
       onSelect={() => void moveArtifactToTab(tabId)}
-      className="flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover"
+      className={MENU_ITEM}
     >
       {TRANSFER_COPY.moveToMain}
     </ContextMenu.Item>
@@ -227,8 +267,10 @@ export function menuTools(tools: PanelHostState['tools'], tabs: PanelTabRef[]) {
     .sort((a, b) => rank(a.id) - rank(b.id));
 }
 
-// "+" reads the scope's whole list (the pins, then the session's own), whichever group's strip it ends.
-function AddMenu({ appSessionId }: { appSessionId: AppSessionId | null }) {
+// "+" reads the scope's whole list (the pins, then the session's own), whichever group's strip it ends. Its tools open in
+// that group (M3, decision 3); its menu is marked with the group, so an item that opens through an opener naming no group
+// (a plugin pane's) finds it by the keyboard's place (`panel/host.ts`).
+function AddMenu({ appSessionId, group }: { appSessionId: AppSessionId | null; group: SideGroupName }) {
   const tools = usePanelHost((s) => s.tools);
   const pinned = useLayout((s) => s.panelPinned);
   const own = useLayout((s) => (appSessionId === null ? undefined : s.panelBySession.get(appSessionId)?.tabs));
@@ -251,7 +293,7 @@ function AddMenu({ appSessionId }: { appSessionId: AppSessionId | null }) {
         </IconButton>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
-        <DropdownMenu.Content align="end" sideOffset={6} className="z-50 min-w-44 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
+        <DropdownMenu.Content align="end" sideOffset={6} data-side-group-menu={group} className="z-50 min-w-44 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
           {offered.length === 0 && (
             <DropdownMenu.Item disabled className="flex h-7 cursor-default items-center rounded-sm px-2 text-fg-faint outline-none select-none">
               {anyOffered ? COPY.allOpen : COPY.noTools}
@@ -262,7 +304,7 @@ function AddMenu({ appSessionId }: { appSessionId: AppSessionId | null }) {
             return (
               <DropdownMenu.Item
                 key={tool.id}
-                onSelect={() => panelHost.addTool(tool.id, { appSessionId })}
+                onSelect={() => panelHost.addTool(tool.id, { appSessionId, group })}
                 className="flex h-7 cursor-default items-center gap-2 rounded-sm px-2 outline-none select-none data-highlighted:bg-bg-hover"
               >
                 <ToolIcon className="size-3.5 shrink-0 text-fg-muted" />

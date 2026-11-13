@@ -44,7 +44,7 @@ import type { MachineRef } from '@shared/machine/ref';
 import type * as z from 'zod';
 import * as model from './layout-model';
 import { rememberSurfaceContext, surfaceRefs, surfaceScope, surfaceSession, surfaceTabs } from '../panel/surface-model';
-import { clampShare, groupOf, repairScope, scopeValues, sideGroups, valuesOf, type ScopeValues, type SideGroup, type SideGroups } from '../panel/surface-model'; // UX wave U8b
+import { clampShare, groupOf, joinLower, repairScope, scopeValues, sideGroups, valuesOf, type ScopeValues, type SideGroup, type SideGroupName, type SideGroups } from '../panel/surface-model'; // UX wave U8b
 import { isWideColumn } from '../app/shell-geometry'; // UX wave U8b
 
 type Pane = 0 | 1;
@@ -152,16 +152,18 @@ export interface LayoutState {
   // key; with no session only the pins are kept. UX wave U8b (M2): maintenance of the refs only. `next.tabs` is the
   // scope's whole list and `next.activeTabId` is not read: what is in view changes by `showSurfaceTab` and its kin alone,
   // and every scope the change reaches is repaired (`repairScope`).
-  setPanelTabs(appSessionId: AppSessionId | null, next: PanelSessionState): void;
+  // M3: `opts.group` 'lower' places the refs the write adds in the writer's lower group, when its scope has one.
+  setPanelTabs(appSessionId: AppSessionId | null, next: PanelSessionState, opts?: { group?: SideGroupName }): void;
   toggleSurfacePin(toolId: string): void; // the icon-row preference, separate from keep-across-session tab pins
   effectivePanelTabs(appSessionId: AppSessionId | null): PanelTabRef[]; // panelPinned first, then the session's own
   // A session's panel refs whichever session or the Overview is on screen (C8's eleventh ask: C10's Attach adds a
   // Terminal tab to session A from a sidebar row while B is shown). Read as the host reads them (the pins first) and
   // written as `setPanelTabs` splits them: pinned refs to `panel.pinned`, the rest to `panel.<appSessionId>`. UX wave
-  // U8b (M2, decision 2): the refs are maintained as `setPanelTabs` maintains them, then `opts.activate`, when given, comes
-  // into view (`showSurfaceTab`); without it nothing in view changes and a hidden column stays hidden.
+  // U8b (M2, decision 2): the refs are maintained as `setPanelTabs` maintains them (`opts.group` passed on, M3), then
+  // `opts.activate`, when given, comes into view (`showSurfaceTab`); without it nothing in view changes and a hidden
+  // column stays hidden.
   panelTabsOf(appSessionId: AppSessionId): PanelTabRef[];
-  updatePanelTabs(appSessionId: AppSessionId, fn: (refs: PanelTabRef[]) => PanelTabRef[], opts?: { activate?: string }): void;
+  updatePanelTabs(appSessionId: AppSessionId, fn: (refs: PanelTabRef[]) => PanelTabRef[], opts?: { activate?: string; group?: SideGroupName }): void;
   // P4-B3 (Decision Log 22): a tool's persistable params for one of its tabs, null clearing them. Every write keeps only
   // the params of panel tabs some list holds, and the tab written (whose instance exists before its ref is written).
   setPanelParams(tabId: string, params: unknown): void;
@@ -376,6 +378,18 @@ function repairedScopes(prev: Scoped, next: Scoped, renamed?: ReadonlyMap<string
     if (!sameJson(values, scopeValues(next, session))) repaired.push([session, values]);
   }
   return repaired;
+}
+
+// M3: the refs one write added to its writer's scope (`before` its refs then) join that scope's lower group, when it has
+// one; an id the write renamed in place is no new ref.
+function placedBelow(prev: Scoped, after: Scoped, repaired: [AppSessionId | null, ScopeValues][], session: AppSessionId | null, before: readonly PanelTabRef[], renamed?: ReadonlyMap<string, string>): [AppSessionId | null, ScopeValues][] {
+  const held = new Set([...before.map((t) => t.id), ...(renamed?.values() ?? [])]);
+  const added = surfaceRefs(after, session).flatMap((t) => (held.has(t.id) ? [] : [t.id]));
+  const at = repaired.findIndex(([scope]) => scope === session);
+  const values = at === -1 ? scopeValues(prev, session) : repaired[at][1];
+  const joined = joinLower(values, added);
+  if (joined === values) return repaired;
+  return at === -1 ? [...repaired, [session, joined]] : repaired.map((entry, i) => (i === at ? [session, joined] : entry));
 }
 
 // A group's tab that takes the place of `tabId` leaving it: the next tab to its right that stays, else the last one.
@@ -842,7 +856,7 @@ export function createLayoutStore() {
         const next = { ...prev, ...patch };
         set({ ...patch, ...withScopes(next, repairedScopes(prev, next)) });
       },
-      setPanelTabs(appSessionId, next) {
+      setPanelTabs(appSessionId, next, opts) {
         const prev = get();
         const refsBefore = prev.effectivePanelTabs(appSessionId);
         const pinned = next.tabs.filter((t) => t.pinned);
@@ -853,7 +867,9 @@ export function createLayoutStore() {
         // repaired from what it stored, the writer's own included; `next.activeTabId` is no request.
         const patch = { panelPinned, ...(appSessionId === null ? {} : { panelBySession }) };
         const after = { ...prev, ...patch };
-        set({ ...patch, ...withScopes(after, repairedScopes(prev, after, renamedIn(refsBefore, next.tabs))) });
+        const renamed = renamedIn(refsBefore, next.tabs);
+        const repaired = repairedScopes(prev, after, renamed);
+        set({ ...patch, ...withScopes(after, opts?.group === 'lower' ? placedBelow(prev, after, repaired, appSessionId, refsBefore, renamed) : repaired) });
       },
       toggleSurfacePin(toolId) {
         set({ panelSurfaces: surfaces((state) => ({
@@ -868,7 +884,7 @@ export function createLayoutStore() {
       panelTabsOf: (appSessionId) => get().effectivePanelTabs(appSessionId),
       updatePanelTabs(appSessionId, fn, opts) {
         const after = fn(get().effectivePanelTabs(appSessionId));
-        get().setPanelTabs(appSessionId, { tabs: after, activeTabId: get().panelBySession.get(appSessionId)?.activeTabId ?? null });
+        get().setPanelTabs(appSessionId, { tabs: after, activeTabId: get().panelBySession.get(appSessionId)?.activeTabId ?? null }, { group: opts?.group });
         if (opts?.activate !== undefined) get().showSurfaceTab(appSessionId, opts.activate);
       },
       setPanelParams(tabId, params) {

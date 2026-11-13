@@ -51,6 +51,7 @@ export function surfaceTabs(state: SurfaceState, session: AppSessionId | null): 
 // `shown`: the tab in view, or the one to be when the column is shown again.
 export interface SideGroup { tabs: PanelTabRef[]; shown: PanelTabRef | null }
 export interface SideGroups { upper: SideGroup; lower: (SideGroup & { share: number }) | null; hidden: boolean }
+export type SideGroupName = 'upper' | 'lower';
 // What one scope stores of its column: `panelTools.surfaces.stacks[scope]`, the scope's `activeTabId` (a session's in
 // `panel.<session>`, `@none`'s in `panelTools.activeNoSession`) and its entry of `panelTools.groups`.
 export interface ScopeValues { stack: string[] | undefined; activeTabId: string | null; lower: LowerGroup | undefined }
@@ -123,6 +124,14 @@ export function groupForOpen(groups: SideGroups, toolId: string, origin: 'upper'
   return focused ?? 'upper';
 }
 
+// A scope's values with `ids` among its lower group's tabs, when it has a lower group (shown, or remembered while the
+// column is hidden); as they were otherwise. The store's placement of refs an opener wrote for the lower group (M3).
+export function joinLower(values: ScopeValues, ids: readonly string[]): ScopeValues {
+  const lower = values.lower;
+  const joining = lower === undefined ? [] : ids.filter((id) => !lower.tabs.includes(id));
+  return lower === undefined || joining.length === 0 ? values : { ...values, lower: { ...lower, tabs: [...lower.tabs, ...joining] } };
+}
+
 // The stored lower entry of a lower group: the tab in view first, then its other tabs in the order the previous entry
 // held them, then any others in strip order.
 export function lowerEntry(shown: PanelTabRef, tabs: readonly PanelTabRef[], share: number, previous?: readonly string[]): LowerGroup {
@@ -150,7 +159,7 @@ export function valuesOf(groups: SideGroups, unstacked: boolean, previousLower?:
 // in view that is no longer a ref gives way to the next tab to its right in its group, else the group's last one; a group
 // left with no tab closes (the other is then the only one); `renamed` maps an id the host replaced in place, which keeps
 // its place. A column that was hidden stays hidden; one that was shown is not hidden by it. A ref that is new joins the
-// upper group (an opener that wants it below puts it in the lower entry first).
+// upper group (an opener that wants it below says so to the store, which then places it with `joinLower`).
 export function repairScope(before: ScopeValues & { refs: readonly PanelTabRef[] }, refs: readonly PanelTabRef[], renamed?: ReadonlyMap<string, string>): ScopeValues {
   const rename = (id: string) => renamed?.get(id) ?? id;
   const previous = readGroups(before.refs.map((tab) => ({ ...tab, id: rename(tab.id) })), {

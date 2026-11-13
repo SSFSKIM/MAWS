@@ -19,7 +19,7 @@ import { activeTab, foldEnded, sessionOfTab } from '../stores/layout-model'; // 
 import { useSessions } from '../stores/sessions';
 import { askEditorHostClose, clearEditorHost } from './editor-host'; // P3-G
 import type { PanelHostProps } from './host-slot';
-import { surfaceRefs, surfaceScope, surfaceSession, surfaceTabs } from './surface-model';
+import { groupForOpen, sideGroups, surfaceRefs, surfaceScope, surfaceSession, surfaceTabs, type SideGroupName } from './surface-model';
 import type { PanelTool, PanelToolInit } from './tool';
 
 type AnyTool = PanelTool<unknown, unknown>;
@@ -30,6 +30,9 @@ export interface AddToolOptions<P> {
   params?: P;
   pin?: boolean;
   activate?: boolean;
+  // UX wave U8b (M3, decision 3): the group the open comes from, while the column has two (a strip's "+"). Without it the
+  // tab goes where `groupForOpen` says: the group holding a tab of its tool, else the one holding the keyboard, else above.
+  group?: SideGroupName;
 }
 
 export interface Instance {
@@ -52,6 +55,7 @@ export interface PendingAdd {
   params: unknown;
   pin: boolean;
   activate: boolean;
+  group: SideGroupName | undefined;
   opens: QueuedOpen[]; // later single-instance calls that resolved to this reservation, in call order
 }
 
@@ -190,13 +194,30 @@ function setClosing(tabId: string, on: boolean): void {
 
 // Writes one list: the pins alone (`null`) or a session's effective list, `fn` mapping it (the pins ride through). It
 // maintains the refs only (UX wave U8b, M2): the store repairs every scope the write reaches, and nothing comes into
-// view by it; the selection passed along is the current one, which the store does not read as a request.
-function writeRefs(appSessionId: AppSessionId | null, fn: (refs: PanelTabRef[]) => PanelTabRef[]): void {
+// view by it; the selection passed along is the current one, which the store does not read as a request. M3: refs added
+// for the lower group are written through the store with that group, which the mounted host's `onChange` cannot carry.
+function writeRefs(appSessionId: AppSessionId | null, fn: (refs: PanelTabRef[]) => PanelTabRef[], group: SideGroupName = 'upper'): void {
   const l = layout();
   const activeTabId = selectionOf(appSessionId);
-  if (appSessionId === null) l.setPanelTabs(null, { tabs: fn(l.panelPinned), activeTabId });
-  else if (mounted && mounted.appSessionId === appSessionId && surfaceSession(layout()) === appSessionId) mounted.onChange({ tabs: fn(l.panelTabsOf(appSessionId)), activeTabId });
-  else l.updatePanelTabs(appSessionId, fn);
+  const below = group === 'lower' ? { group } : undefined;
+  if (appSessionId === null) l.setPanelTabs(null, { tabs: fn(l.panelPinned), activeTabId }, below);
+  else if (!below && mounted && mounted.appSessionId === appSessionId && surfaceSession(layout()) === appSessionId) mounted.onChange({ tabs: fn(l.panelTabsOf(appSessionId)), activeTabId });
+  else l.updatePanelTabs(appSessionId, fn, below);
+}
+
+// UX wave U8b (M3, decision 3): the group of the side column that holds the keyboard: a group's section, or a menu drawn
+// in a portal from a group's strip (marked `data-side-group-menu`), whose items open with focus inside it.
+function focusedGroup(): SideGroupName | null {
+  const at = typeof document === 'undefined' ? null : document.activeElement?.closest<HTMLElement>('section[data-side-group], [data-side-group-menu]');
+  const name = at?.dataset.sideGroup ?? at?.dataset.sideGroupMenu;
+  return name === 'upper' || name === 'lower' ? name : null;
+}
+
+// Where a new tab of `toolId` goes in its target's column: the opener's group, else `groupForOpen`'s answer, the keyboard
+// read only when the target's column is the one on screen.
+function groupFor(target: AppSessionId | null, toolId: string, origin: SideGroupName | undefined): SideGroupName {
+  const state = layout();
+  return groupForOpen(sideGroups(state, target), toolId, origin ?? null, surfaceSession(state) === target ? focusedGroup() : null);
 }
 
 // The writer for a change to the pins alone: the shown session's list when it has one, else the pins by themselves; no
@@ -266,6 +287,7 @@ interface Add {
   params: unknown;
   pin: boolean;
   activate: boolean;
+  group?: SideGroupName;
 }
 
 // Opens an existing single-instance tab: its state first when it has none, then `open`, then the call's activation.
@@ -290,8 +312,9 @@ function applyAdd(add: Add, id?: string, restored?: ReadonlySet<string>): string
   createInstance(ref, tool, { appSessionId: target, session: sessionRecord(target), instanceId: tabId, params });
   // The tab is written (and, activated, in view) before its session is shown, so a synchronous reaction to that switch
   // which adds the same single-instance tool finds this tab rather than making a second one. Without `activate` the tab
-  // joins the strip and replaces nothing (a plugin roster's passive add; UX wave U8b, M2, decision 2).
-  writeRefs(target, (refs) => [...refs, ref]);
+  // joins the strip and replaces nothing (a plugin roster's passive add; UX wave U8b, M2, decision 2). With two groups
+  // it joins the one `groupFor` names (M3).
+  writeRefs(target, (refs) => [...refs, ref], groupFor(target, tool.id, add.group));
   if (activate) activateIn(target, tabId);
   return tabId;
 }
@@ -324,10 +347,10 @@ function addTool<P>(toolId: string, opts: AddToolOptions<P>): string {
       }
     }
     const id = mintTabId(toolId);
-    pending.push({ id, toolId, appSessionId: target, params: opts.params, pin, activate, opens: [] });
+    pending.push({ id, toolId, appSessionId: target, params: opts.params, pin, activate, group: opts.group, opens: [] });
     return id;
   }
-  return applyAdd({ tool, target, params: opts.params, pin, activate });
+  return applyAdd({ tool, target, params: opts.params, pin, activate, group: opts.group });
 }
 
 // ---- the barrier -------------------------------------------------------------------------------------------------------
@@ -344,7 +367,7 @@ function passBarrier(): void {
     if (entry.appSessionId !== null && !known(entry.appSessionId)) continue;
     const tool = usePanelHost.getState().tools.get(entry.toolId);
     if (!tool) continue; // unregistered while it waited
-    const tabId = applyAdd({ tool, target: entry.appSessionId, params: entry.params, pin: entry.pin, activate: entry.activate }, entry.id, restored);
+    const tabId = applyAdd({ tool, target: entry.appSessionId, params: entry.params, pin: entry.pin, activate: entry.activate, group: entry.group }, entry.id, restored);
     if (tabId !== entry.id) aliases.set(entry.id, tabId);
     for (const queued of entry.opens) {
       if (queued.appSessionId !== null && !known(queued.appSessionId)) continue;

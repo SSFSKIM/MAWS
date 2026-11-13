@@ -29,6 +29,7 @@ export interface ResizerProps {
   expandThreshold?: number | null; // P3-G
   onExpand?(restore: number): void; // P3-G: as `onCollapse`, past the maximum
   onReset?(): void; // UX wave U8b: Enter and a double-click call this in place of restoring `defaultValue`, when given
+  percentOf?: number; // UX wave U8b (M3): a splitter of a share, whose ARIA values are percents of this extent
   className?: string;
 }
 
@@ -50,11 +51,13 @@ export function Resizer({
   expandThreshold = null,
   onExpand,
   onReset,
+  percentOf,
   className = '',
 }: ResizerProps) {
   const drag = useRef<{ pointerId: number; from: number; start: number; restore: number } | null>(null);
   const vertical = orientation === 'vertical';
   const coordinate = (event: PointerEvent) => (vertical ? event.clientX : event.clientY);
+  const aria = (px: number) => (percentOf ? Math.round((px / percentOf) * 100) : px);
 
   const set = (next: number) => {
     const clamped = clamp(Math.round(next), min, max);
@@ -92,9 +95,9 @@ export function Resizer({
       aria-label={label}
       aria-orientation={orientation}
       aria-controls={controls}
-      aria-valuenow={value}
-      aria-valuemin={min}
-      aria-valuemax={max}
+      aria-valuenow={aria(value)}
+      aria-valuemin={aria(min)}
+      aria-valuemax={aria(max)}
       onKeyDown={onKeyDown}
       onDoubleClick={() => (onReset ? onReset() : set(defaultValue))}
       onPointerDown={(event) => {

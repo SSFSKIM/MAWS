@@ -13,6 +13,10 @@ export const COPY = {
   hideColumn: 'Hide side column',
   openSurface: 'Open surface',
   hideSurface: 'Hide surface',
+  // M3: a tab's menu, and the bar between the two groups
+  moveBelow: 'Move below',
+  moveAbove: 'Move above',
+  resizeGroups: 'Resize groups',
 } as const;
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;

@@ -27,7 +27,7 @@ const register = (...tools: PanelTool<ProbeState, unknown>[]) => tools.forEach((
 function Strip({ group = 'upper' }: { group?: 'upper' | 'lower' }) {
   const groups = sideGroups(useLayout(), A);
   const shown = group === 'upper' ? groups.upper : groups.lower;
-  return shown && <TabStrip appSessionId={A} tabs={shown.tabs} activeTabId={shown.shown?.id ?? null} bodyId={`body-${group}`} />;
+  return shown && <TabStrip appSessionId={A} group={group} tabs={shown.tabs} activeTabId={shown.shown?.id ?? null} bodyId={`body-${group}`} />;
 }
 const tabNames = (root: HTMLElement = document.body) => within(root).queryAllByRole('tab').map((tab) => [tab.getAttribute('aria-label') ?? tab.textContent, tab.getAttribute('aria-selected') === 'true']);
 
