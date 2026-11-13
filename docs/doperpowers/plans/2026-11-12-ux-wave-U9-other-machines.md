@@ -22,7 +22,7 @@ Sibling children code against what this landing exposes: U7 mounts on the listed
   - [x] (2026-11-13) M1's first step: the listing test, run on the merged base before any change of this landing. For each of its two halves, a pass means the listing rule is not built and the case stays as the pin; a failure makes it the rule's failing-first test (M1, "The listing rule opens with its test").
 - [x] (2026-11-13) M2 — Fork over the link, and the sheet's words: `38ac6a398`..`740df5e4b`, reviewed clean
 - [x] (2026-11-13) M3 — The link's phases and the pane that stays: `89e9ed067`..`7e18e9184`, reviewed clean after two fix rounds (one guard for every Stop; the registry row and the location card by phase; a ready that overtakes a retry's failure; A4's scenes widened)
-- [ ] M4 — The session acts in the window
+- [x] (2026-11-13) M4 — The session acts in the window: `251a93adc`..`dceedb019`, reviewed clean after one fix round; `e2e:remote` green on the Mac at `dceedb019` (run 43418845727). The last-session Unarchive gap the review found is ruled into M5 (way (A))
 - [ ] M5 — A link's return, the live row, the chooser and the measurement
 - [ ] The whole unit suite on the build VM (M5's executor). Then, none of them an executor's: class 1a on GitHub Actions (the architect); the `doperpowers:review-code` xhigh panel on the whole branch (the session that keeps master, on the range the architect hands it once class 1a is green); the architect's runs T2 to T7 and, after the landing, the look T1; the pull request.
 
