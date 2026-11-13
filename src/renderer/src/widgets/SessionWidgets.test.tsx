@@ -15,8 +15,8 @@ import { createWidgetBackend, WidgetBackendError, type WidgetBackend } from '../
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { remoteRow } from '../../../../test/support/builders';
 import { addressOf } from '@shared/machine/address';
-import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
 import { registerSessionAction } from '../app/session-actions';
+import { ACTS_UNTIL_M4 } from '../lane-b/remote-unavailable';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { RenameWidget } from './RenameWidget';
@@ -102,7 +102,7 @@ describe('rename widget', () => {
       mount(RenameWidget, remote, 'Over there');
       mount(RenameWidget, remote);
       expect(dialog).not.toHaveBeenCalled();
-      const words = REMOTE_UNAVAILABLE['session.rename']!;
+      const words = ACTS_UNTIL_M4['session.rename']!;
       expect(screen.getAllByRole('status').map((s) => s.textContent)).toEqual([words, words]);
       const rename = screen.getByRole('button', { name: 'Rename' });
       expect(rename).toHaveProperty('disabled', true);

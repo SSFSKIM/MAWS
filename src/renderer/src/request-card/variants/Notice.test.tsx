@@ -9,7 +9,7 @@ import { fakeClient, type FakeClient } from '../../../../../test/support/fake-cl
 import { item, remoteRow } from '../../../../../test/support/builders';
 import { at, OTHER_MACHINE } from '../../../../../test/support/machine';
 import { addressOf } from '@shared/machine/address';
-import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
+import { ACTS_UNTIL_M4 } from '../../lane-b/remote-unavailable';
 import { useSessions } from '../../stores/sessions';
 import { NoticeBody } from './Notice';
 import { REL } from '../../test-support/relative-time';
@@ -53,7 +53,7 @@ describe('an error notice', () => {
       render(<NoticeBody item={error({ appSessionId: remote as never, id: addressOf(OTHER_MACHINE, `${APP}:error:e1`) as never })} seenHere />);
       const dismiss = screen.getByRole('button', { name: 'Dismiss' });
       expect(dismiss).toHaveProperty('disabled', true);
-      expect(dismiss.title).toBe(REMOTE_UNAVAILABLE['attention.acknowledge']);
+      expect(dismiss.title).toBe(ACTS_UNTIL_M4['attention.acknowledge']);
       await act(async () => fireEvent.click(dismiss));
       expect(acknowledged()).toEqual([]);
     } finally {

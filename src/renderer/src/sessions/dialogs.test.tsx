@@ -19,6 +19,7 @@ import { Sheet, SheetForm } from './Sheet';
 import { cleanupTargetOf, confirmLabel } from './CleanupDialog';
 import { SessionDialogs, DeletionNotice } from './SessionDialogs';
 import { useSetup } from './store';
+import { ACTS_UNTIL_M4 } from '../lane-b/remote-unavailable';
 import { currentSet } from '../stores/layout-model';
 
 const WT = `${REPO}/.claude/worktrees/accept-one`;
@@ -398,7 +399,7 @@ describe('dialogs', () => {
       const row = await within(await screen.findByRole('dialog', { name: `Archived sessions · ${OTHER_MACHINE}` })).findByRole('listitem', { name: 'In tmp' });
       const unarchive = within(row).getByRole('button', { name: 'Unarchive' });
       expect(unarchive).toHaveProperty('disabled', true);
-      expect(unarchive.title).toBe(REMOTE_UNAVAILABLE['session.update']);
+      expect(unarchive.title).toBe(ACTS_UNTIL_M4['session.update']);
       const del = within(row).getByRole('button', { name: 'Delete…' });
       expect(del).toHaveProperty('disabled', true);
       expect(del.title).toBe(REMOTE_UNAVAILABLE['session.delete']);
