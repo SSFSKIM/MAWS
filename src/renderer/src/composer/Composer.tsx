@@ -500,7 +500,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
         load: (doc) => (promptState.current.docked ? false : (handle.current?.load(doc) ?? false)), // a card holds the box
         replace: (doc) => handle.current?.replaceDoc(doc),
         hold: setHolding,
-        settleLater: (replaces) => handle.current?.settleWith(replaces),
+        settleLater: (replaces, taken) => handle.current?.settleWith(replaces, taken),
+        settled: () => handle.current?.clearSettle(),
       }),
     [appSessionId],
   );

@@ -241,22 +241,26 @@ const handedAfter = (appSessionId: AppSessionId, ticket: number): boolean => (or
 
 /**
  * One save of a take-back (the claim, or the settling save), with the `replaces` given, after the session's saves handed
- * before it and before those handed after it; sent once, its answer the caller's. A draft this machine's link would cut
- * is not sent (`withheld`): a stage must hold every byte.
+ * before it and before those handed after it; sent once, its answer the caller's. A stage this machine's link would cut
+ * is not sent (`withheld`): a stage must hold every byte. A settling save is an ordinary draft, fitted as any save is.
  */
 export async function saveRemoteDraftOnce(client: MawsBridge, appSessionId: AppSessionId, draft: Draft | null, replaces: string): Promise<CommandResult<'session.drafts.set'> | { withheld: true }> {
-  if (draft !== null && fitDraft(draft).withheld.length > 0) return { withheld: true };
+  if (draft !== null && isStage(draft) && fitDraft(draft).withheld.length > 0) return { withheld: true };
   return inOrder(appSessionId, async () => {
-    const result = await client.invoke('session.drafts.set', { appSessionId, draft, replaces });
+    const fitted = draft === null ? { draft: null, withheld: [] } : fitDraft(nameWithheld(draft, leftThere.get(appSessionId) ?? []));
+    const sent = fitted.draft === null || fitted.withheld.length === 0 ? fitted.draft : nameWithheld(fitted.draft, [...(leftThere.get(appSessionId) ?? []), ...fitted.withheld]);
+    const result = await client.invoke('session.drafts.set', { appSessionId, draft: sent, replaces });
     heardReaderRows(appSessionId, result);
     if (result.ok) {
       if (draft === null) bases.delete(appSessionId); // the machine stamped the clear: read before the next save
       else bases.set(appSessionId, draft.updatedAt);
-      wholeHere.delete(appSessionId);
+      if (draft !== null && fitted.withheld.length > 0) wholeHere.set(appSessionId, draft); // the rest stays in this run
+      else wholeHere.delete(appSessionId);
     } else bases.delete(appSessionId); // what is kept there is read again before the next ordinary save
     return result;
   });
 }
+const isStage = (draft: Draft): boolean => typeof (draft.doc as { attrs?: { takeBack?: unknown } } | null)?.attrs?.takeBack === 'object';
 
 /** What is kept for the member there, as the take-back reads it (null: none, or cleared). */
 export async function readRemoteDraft(client: MawsBridge, appSessionId: AppSessionId): Promise<CommandResult<'session.drafts.get'>> {

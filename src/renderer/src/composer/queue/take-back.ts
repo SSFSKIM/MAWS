@@ -17,6 +17,7 @@ import type { SendContent } from '@shared/engine/session-state-store';
 import type { PromptHistoryEvent } from '@shared/graph/events';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
+import type { DaemonStatus } from '@shared/ipc/schema/daemon';
 import { DRAFT_CLAIM, DRAFT_KEPT_WORDS, settles, STAGED_DRAFT_WORDS, STALE_DRAFT_WORDS, type Draft, type TakeBackMark } from '@shared/ipc/schema/session';
 import { isAddress, machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
@@ -26,6 +27,7 @@ import { readRemoteDraft, saveRemoteDraftOnce } from '../../lane-b/remote-drafts
 import { isRemoteLaneB } from '../../lane-b/remote-session';
 import type { QueueControls } from '../../session/controls/types';
 import { showStackNotice } from '../../stores/composer';
+import { useHosts } from '../../stores/hosts';
 import { useMachines } from '../../stores/machines';
 import { machineName } from '../../stores/org-projects';
 import { useQueueStore, type SessionQueue } from '../../stores/queue';
@@ -49,16 +51,21 @@ export const TAKE_BACK_WORDS = {
 export const WITHDRAW_WAIT_MS = 5_000;
 /** How many times the take-back withdraws under a new name the record gave before it says the record cannot tell. */
 const ROUNDS = 4;
-/** A settling save that fails (not stale) goes again this many times, this long apart, before the writer carries it. */
+/**
+ * A settling save that fails is asked again, first this long after, the wait doubling to a bound; after this many tries
+ * the box's writer names its form too. Neither ends the hold: an acknowledged save or a read of what is kept does.
+ */
 const SETTLE_TRIES = 3;
 export const SETTLE_RETRY_MS = 1_000;
+const SETTLE_RETRY_MAX_MS = 30_000;
 
 /** The session's box while a composer mounts it: what the take-back loads into and holds. */
 export interface TakeBackBox {
   load(doc: ComposerDoc): boolean; // EditorHandle.load: false while the box holds text, a card holds it or a submission is in flight
   replace(doc: ComposerDoc | null): void; // after a stale settle: what is kept, in place of this mount's copy
   hold(on: boolean): void; // read-only, "Taking the message back…"
-  settleLater(replaces: string): void; // the writer names it at each save until one is acknowledged
+  settleLater(replaces: string, taken: () => void): void; // the writer names it at each save until one is acknowledged (`taken`)
+  settled(): void; // the settle is done: the writer names the form no more
 }
 
 export interface TakeBackDeps {
@@ -104,39 +111,47 @@ export function retryTakeBackLoad(appSessionId: AppSessionId): void {
 const LOCAL = 'local' as const;
 type StoreKey = MachineRef | typeof LOCAL;
 type Machines = ReturnType<typeof useMachines.getState>['machines'];
-// the machine's link generation when its store refused a claim: the refusal holds until its link opens again
-const useRefusedStores = create<{ refused: ReadonlyMap<StoreKey, number> }>()(() => ({ refused: new Map() }));
+type Daemon = DaemonStatus | null;
+// Which run of that machine's services refused a claim: there, its link's generation (the refusal holds until the link
+// opens again); here, the services' daemon by pid and start (until they restart). Services this app runs itself (no
+// daemon) are this build's and never answer so: nothing to remember.
+const useRefusedStores = create<{ refused: ReadonlyMap<StoreKey, string> }>()(() => ({ refused: new Map() }));
 const machineKeyOf = (appSessionId: AppSessionId): StoreKey => (isAddress(appSessionId) && machineOf(appSessionId) !== ipc.localMachine ? machineOf(appSessionId) : LOCAL);
-const generationOf = (machines: Machines, key: StoreKey): number => (key === LOCAL ? machines.get(ipc.localMachine)?.generation : machines.get(key)?.generation) ?? 0;
+const servicesRun = (key: StoreKey, machines: Machines, daemon: Daemon): string | null =>
+  key === LOCAL ? (daemon === null ? null : `daemon ${daemon.pid} ${daemon.startedAt}`) : `link ${machines.get(key)?.generation ?? 0}`;
 const sentenceFor = (key: StoreKey, machines: Machines): string => (key === LOCAL ? TAKE_BACK_WORDS.needsServices : TAKE_BACK_WORDS.needsNewer(machineName(machines, key, ipc.localMachine)));
+const daemonNow = (): Daemon => useHosts.getState().supervisor?.daemon ?? null;
 
-function refusalIn(appSessionId: AppSessionId, refused: ReadonlyMap<StoreKey, number>, machines: Machines): string | null {
+function refusalIn(appSessionId: AppSessionId, refused: ReadonlyMap<StoreKey, string>, machines: Machines, daemon: Daemon): string | null {
   const key = machineKeyOf(appSessionId);
-  const at = refused.get(key);
-  return at !== undefined && at === generationOf(machines, key) ? sentenceFor(key, machines) : null;
+  const run = refused.get(key);
+  return run !== undefined && run === servicesRun(key, machines, daemon) ? sentenceFor(key, machines) : null;
 }
 
-/** The sentence once that session's machine has answered a claim as stale (until its link opens again); null otherwise. */
+/** The sentence while the run of that session's machine's services that answered a claim as stale serves; null otherwise. */
 export function storeRefusesStage(appSessionId: AppSessionId): string | null {
-  return refusalIn(appSessionId, useRefusedStores.getState().refused, useMachines.getState().machines);
+  return refusalIn(appSessionId, useRefusedStores.getState().refused, useMachines.getState().machines, daemonNow());
 }
 
 /** The same, followed in a render. */
 export function useStoreRefusesStage(appSessionId: AppSessionId): string | null {
   const refused = useRefusedStores((s) => s.refused);
   const machines = useMachines((s) => s.machines);
-  return refusalIn(appSessionId, refused, machines);
+  const daemon = useHosts((s) => s.supervisor?.daemon ?? null);
+  return refusalIn(appSessionId, refused, machines, daemon);
 }
 
 function rememberRefusal(appSessionId: AppSessionId): string {
   const key = machineKeyOf(appSessionId);
   const { machines } = useMachines.getState();
-  useRefusedStores.setState((s) => ({ refused: new Map(s.refused).set(key, generationOf(machines, key)) }));
+  const run = servicesRun(key, machines, daemonNow());
+  if (run !== null) useRefusedStores.setState((s) => ({ refused: new Map(s.refused).set(key, run) }));
   return sentenceFor(key, machines);
 }
 
 /** Tests: a fresh window. */
 export function resetTakeBack(): void {
+  epoch += 1; // a settle still asking ends
   boxes.clear();
   inHand.clear();
   waitingForBox.clear();
@@ -344,21 +359,45 @@ async function clear(appSessionId: AppSessionId, stage: Draft, deps: TakeBackDep
   await settle(appSessionId, stage, deps, null);
 }
 
+let epoch = 0; // a fresh window (`resetTakeBack`) ends what this one has in hand
+
+// Settles the stage as the box's draft (`draft`, or null where the agent has the message). Only an acknowledged settling
+// save, or a read of what is kept after a stale answer, ends it; until then the box stays held and the save is asked
+// again, and after a few tries the box's writer names the form too, whose acknowledgement ends it as well.
 async function settle(appSessionId: AppSessionId, stage: Draft, deps: TakeBackDeps, draft: Draft | null): Promise<void> {
   const replaces = settles(stage.updatedAt);
-  for (let attempt = 0; attempt < SETTLE_TRIES; attempt++) {
+  const loadedInto = boxes.get(appSessionId);
+  const started = epoch;
+  let byWriter = false;
+  for (let attempt = 0; ; attempt++) {
     const result = await setDraft(deps.client, appSessionId, draft, replaces);
-    if (!('withheld' in result) && result.ok) return;
+    if (epoch !== started) return;
+    if (byWriter || ('withheld' in result ? true : result.ok)) return settledAs(appSessionId, loadedInto, draft); // withheld: that machine keeps no drafts, so none is staged there
     if (failedWith(result, STALE_DRAFT_WORDS)) {
       // no stage is kept at that revision any more: another mount settled first, or this one's earlier save landed and
       // its answer was lost. What is kept is taken as a mount takes it: loaded in place of this copy, or carried forward.
       const kept = await readDraft(deps.client, appSessionId);
-      if (kept === undefined) return;
-      if (stageMark(kept) !== null && kept!.updatedAt !== stage.updatedAt) return forward(appSessionId, kept!, deps);
-      return boxes.get(appSessionId)?.replace(kept === null || kept.doc === null ? null : (kept.doc as ComposerDoc));
+      if (epoch !== started) return;
+      if (kept !== undefined && !(stageMark(kept) !== null && kept!.updatedAt === stage.updatedAt)) return reconcile(appSessionId, stage, deps, kept);
+      // a read that failed (or still finds this stage) says nothing: the hold stays and the settle is asked again
     }
-    if ('withheld' in result) break;
-    await new Promise((resolve) => setTimeout(resolve, SETTLE_RETRY_MS));
+    if (attempt + 1 === SETTLE_TRIES) boxes.get(appSessionId)?.settleLater(replaces, () => void (byWriter = true));
+    await new Promise((resolve) => setTimeout(resolve, Math.min(SETTLE_RETRY_MS * 2 ** attempt, SETTLE_RETRY_MAX_MS)));
+    if (epoch !== started) return;
+    if (byWriter) return settledAs(appSessionId, loadedInto, draft);
   }
-  boxes.get(appSessionId)?.settleLater(replaces); // the writer names it at each save until one is acknowledged
+}
+
+// The settle was taken: a box mounted since the load (the composer remounted meanwhile) shows what is kept.
+function settledAs(appSessionId: AppSessionId, loadedInto: TakeBackBox | undefined, draft: Draft | null): void {
+  const box = boxes.get(appSessionId);
+  box?.settled();
+  if (box !== undefined && box !== loadedInto) box.replace(draft === null ? null : (draft.doc as ComposerDoc));
+}
+
+// The settle was answered stale and what is kept was read: a stage another wrote goes forward; otherwise the box takes it.
+function reconcile(appSessionId: AppSessionId, stage: Draft, deps: TakeBackDeps, kept: Draft | null): Promise<void> | void {
+  boxes.get(appSessionId)?.settled();
+  if (kept !== null && stageMark(kept) !== null && kept.updatedAt !== stage.updatedAt) return forward(appSessionId, kept, deps);
+  boxes.get(appSessionId)?.replace(kept === null || kept.doc === null ? null : (kept.doc as ComposerDoc));
 }

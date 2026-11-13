@@ -76,7 +76,8 @@ export interface EditorHandle {
   // when the box holds text or a submission is in flight (the composer refuses it while a card holds the box)
   load(doc: ComposerDoc): boolean;
   replaceDoc(doc: ComposerDoc | null): void; // after a take-back's settle answered stale: what is kept, in place of this copy
-  settleWith(replaces: string): void; // a take-back's settle form, which the writer names until a save is acknowledged
+  settleWith(replaces: string, taken: () => void): void; // a take-back's settle form, which the writer names until a save of it is acknowledged (`taken`)
+  clearSettle(): void; // the take-back settled otherwise: the writer names the form no more
   // E9: a dictation's words at the caret (Design §7); null while busy or disabled. `onEnded` fires once when the editor
   // ends the sink itself (an edit inside the words, a submission, a replaced document, disabled, unmounted, or
   // `settleDictation`); the sink's own `final` and `cancel` do not fire it.
@@ -202,7 +203,7 @@ export class EditorController {
   // UX wave U4a M3 (decision 14): what the last fresh Escape answered; its auto-repeats answer the same and reach no one
   private escapeTaken = false;
   // UX wave U4a M3 (decision 13, step 4): a take-back's settle form, named at each save until one is acknowledged
-  private settleForm: string | null = null;
+  private settleForm: { replaces: string; taken: () => void } | null = null;
 
   constructor(
     private readonly client: MawsBridge,
@@ -216,19 +217,21 @@ export class EditorController {
 
   // Every save of this mount's draft: one that a take-back left to settle names its settle form until acknowledged.
   private saveDraft(draft: Draft | null): void {
-    const replaces = this.settleForm;
-    if (replaces === null) {
+    const form = this.settleForm;
+    if (form === null) {
       void this.drafts.save(draft);
       return;
     }
-    void this.drafts.save(draft, replaces).then((taken) => {
-      if (taken && this.settleForm === replaces) this.settleForm = null;
+    void this.drafts.save(draft, form.replaces).then((taken) => {
+      if (!taken || this.settleForm !== form) return;
+      this.settleForm = null;
+      form.taken();
     });
   }
 
   /** UX wave U4a M3: a take-back could not have its settling save acknowledged: this writer names it from now on. */
-  settleWith(replaces: string): void {
-    this.settleForm = replaces;
+  settleWith(replaces: string, taken: () => void): void {
+    this.settleForm = { replaces, taken };
   }
 
   /** UX wave U4a M3: what is kept, in place of this mount's copy, after a take-back's settle was answered stale. */
@@ -874,7 +877,8 @@ export class EditorController {
         return true;
       },
       replaceDoc: (doc) => this.replaceDoc(doc),
-      settleWith: (replaces) => this.settleWith(replaces),
+      settleWith: (replaces, taken) => this.settleWith(replaces, taken),
+      clearSettle: () => void (this.settleForm = null),
       beginDictation: (onEnded) => this.beginDictation(onEnded), // E9
       settleDictation: () => this.endDictation('keep'), // E9
     };

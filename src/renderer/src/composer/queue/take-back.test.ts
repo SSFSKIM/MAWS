@@ -156,7 +156,7 @@ CREATE TABLE drafts (app_session_id TEXT PRIMARY KEY REFERENCES sessions(app_id)
 }
 
 const entry = (queueId: string) => ({ queueId, appSessionId: APP, content: TEXT, createdAt: SINCE, state: 'queued' as const, messageUuid: null, submittedAt: null, uncertain: false, steer: false });
-const settleAll = () => new Promise((resolve) => setTimeout(resolve, 0));
+const settleAll = () => new Promise((resolve) => setImmediate(resolve)); // not a timer: the settle's own may be faked
 
 // ---- the box ----------------------------------------------------------------------------------------------------------
 
