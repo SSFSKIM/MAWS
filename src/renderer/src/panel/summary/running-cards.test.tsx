@@ -7,16 +7,19 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import type { Job } from 'desk-hub/protocol';
 import { dateFormats } from '@shared/app/date-format';
+import { LaunchSpecSchema } from '@shared/engine/launch-spec';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SessionEvent } from '@shared/graph/events';
-import type { AgentId, AppSessionId, RequestId } from '@shared/graph/ids';
+import type { AgentId, AppSessionId, RequestId, TaskId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { GitStatus } from '@shared/ipc/schema/git';
 import { addressOf, bareOf } from '@shared/machine/address';
 import { item, record, remoteRow, status, T0 } from '../../../../../test/support/builders';
 import { event } from '../../../../../test/support/agents-events';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
+import { loadP5Journal } from '../../../../../test/support/fixtures';
 import { OTHER_MACHINE } from '../../../../../test/support/machine';
+import { SessionStatusTracker } from '../../../../engine-host/session-status';
 import { queryClient } from '../../ipc/query';
 import { laneAState } from '../../lane-a/test-support/lane-a-state';
 import { resetLaneAWatches } from '../../lane-a/watches';
@@ -338,5 +341,48 @@ describe('the Background tasks card', () => {
     act(() => noteLaneAJobs(REMOTE, [{ taskId: 'bremote1', kind: 'shell', toolUseId: 'toolu_bremote1', startedAt: T, description: 'run the suites', outputFile: null, status: 'running' }]));
     expect(cardNames()).toEqual(['Subagents', 'Background tasks']);
     expect(taskRows()).toEqual(['bremote1']);
+  });
+});
+
+// UX wave U8b (M9; Decision Log 10): a task's type in both vocabularies, the listing's task types and the labels the
+// engine's Stop callback writes, read through `kindOf` on the path the cards read: the status's list applied to the
+// session's graph. Moved here from `panel/summary/derive.test.ts` with `backgroundCounts`, the old card's reader.
+describe('a task named by its type or by the Stop’s label', () => {
+  const drawn = () => ({ cards: cardNames(), subagents: headingOf('Subagents'), background: headingOf('Background tasks'), agents: tree(), tasks: taskRows(), marks: Array.from(card('Background tasks')!.querySelectorAll<HTMLElement>('[data-kind-mark]')).map((el) => el.dataset.kindMark) });
+  async function mountListing(backgroundTasks: EngineSessionStatus['backgroundTasks']) {
+    seed(live({ backgroundTasks }));
+    render(column());
+    await act(async () => {
+      await fake.answer('events', { events: [], lastSeq: 0, complete: true });
+      await fake.answer('subagents', []);
+      await fake.answer('workflows', []);
+    });
+  }
+  const listed = (pairs: [string, string][]): EngineSessionStatus['backgroundTasks'] => pairs.map(([taskId, taskType]) => ({ taskId: taskId as TaskId, taskType, description: `Task ${taskId}`, ambient: false }));
+  const ALIKE = { cards: ['Environment', 'Context', 'Connectors', 'Subagents', 'Background tasks'], subagents: 'Subagents 1 running', background: 'Background tasks 4 running', agents: ['a1'], tasks: ['b1', 'w1', 'm1', 'x1'], marks: ['shell', 'workflow', 'monitor', 'other'] };
+
+  it.each([
+    ['the task types', [['b1', 'local_bash'], ['w1', 'local_workflow'], ['m1', 'monitor_mcp'], ['x1', 'mcp_task'], ['a1', 'local_agent']]],
+    ['the Stop’s labels', [['b1', 'shell'], ['w1', 'workflow'], ['m1', 'monitor'], ['x1', 'MCP task'], ['a1', 'subagent']]],
+  ] as [string, [string, string][]][])('a list in %s gives the same two cards: the agent a Subagents row, each task its kind’s row and mark', async (_, pairs) => {
+    await mountListing(listed(pairs));
+    expect(drawn()).toEqual(ALIKE);
+  });
+
+  // The same two tasks, listed at p5/p5-o16-holder-main seq 145 and named by the Stop at seq 162, as the status holds them.
+  it.each(['listing', 'stop'] as const)('a status from the recorded %s draws one agent and one shell', async (which) => {
+    const rows = loadP5Journal('p5-o16-holder-main');
+    const frameAt = (seq: number) => rows.find((row) => row.seq === seq)!.frame as Record<string, unknown>;
+    const spec = LaunchSpecSchema.parse({
+      appSessionId: 'app-labels', cwd: '/tmp/r', additionalDirectories: [], model: null, effort: null, permissionMode: null, gateway: 'gateway', subagentModel: null,
+      resume: null, sessionId: null, trust: null, mcpConfig: null, extraSettings: null, maxBudgetUsd: null, inheritGrantsFrom: null, replay: null,
+    });
+    const tracker = which === 'listing' ? new SessionStatusTracker(spec, () => {}) : new SessionStatusTracker(spec, () => {}, { launchKind: 'adopted' });
+    if (which === 'listing') tracker.observe(frameAt(145), '2026-10-31T00:00:00.000Z');
+    else tracker.stopped((frameAt(162).request as { input: Record<string, unknown> }).input);
+    const tasks = tracker.snapshot().backgroundTasks;
+    expect(tasks.map((t) => t.taskType)).toEqual(which === 'listing' ? ['local_bash', 'local_agent'] : ['shell', 'subagent']); // the status keeps the engine's words
+    await mountListing(tasks);
+    expect(drawn()).toMatchObject({ subagents: 'Subagents 1 running', background: 'Background tasks 1 running', agents: ['a75a34c79539c9b3c'], tasks: ['bzgk2epjt'], marks: ['shell'] });
   });
 });

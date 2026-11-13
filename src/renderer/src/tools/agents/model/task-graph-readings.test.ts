@@ -125,7 +125,7 @@ describe('the graph’s readings', () => {
 
     // A status whose list a Stop wrote carries the Stop's labels, as build F's does; the same two tasks, listed at
     // p5/p5-o16-holder-main seq 145 and named by the Stop at seq 162, read alike.
-    it('a status from a recorded Stop’s list gives the readings the listing of the same tasks gives (the card counts: panel/summary/derive.test.ts)', () => {
+    it('a status from a recorded Stop’s list gives the readings the listing of the same tasks gives (the cards: panel/summary/running-cards.test.tsx)', () => {
       const rows = loadP5Journal('p5-o16-holder-main');
       const frameAt = (seq: number) => rows.find((row) => row.seq === seq)!.frame as Record<string, unknown>;
       const spec = LaunchSpecSchema.parse({
