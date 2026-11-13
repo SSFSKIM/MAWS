@@ -146,7 +146,8 @@ export function useCommentForm({ anchor, parent, gone, onSent, reveal, onSending
   const threadRemote = useRemoteUnavailable(parent, 'side.thread.open'); // P5 O7 M8: not on another machine yet
   const machine = useMachines((s) => (isAddress(parent) ? machineName(s.machines, machineOf(parent), ipc.localMachine) : ''));
   const sendable = controls ? controls.capability('send') : { available: false as const, reason: heldWords(parent) };
-  // archived refuses main too, whatever the port allows a ready process: the composer's own answer (decision 6)
+  // archived, as availability reads it (a ready process answers first), refuses main as the composer does, whatever the
+  // port's own answer (decision 6)
   const mainRefusal = availability === 'archived' ? ARCHIVED : sendable.available ? null : sendable.reason;
   const threadRefusal = threadRemote !== null ? COPY.threadRemote(machine) : availability === 'archived' ? ARCHIVED : forkable ? null : COPY.noConversation;
   const refusalOf = (to: CommentDestination) => (to === 'main' ? mainRefusal : threadRefusal);

@@ -15,6 +15,7 @@ import { fakeClient, type FakeClient } from '../../../../../test/support/fake-cl
 import { at } from '../../../../../test/support/machine';
 import { useNotices } from '../../stores/notices';
 import { useSessions } from '../../stores/sessions';
+import { availabilityIn } from '../../sessions/availability';
 import { resetShellStores } from '../../test-support/shell-stores';
 import { openCommentComposer, registerCommentComposer, type CommentPlacement } from '../../tools/code/anchor/anchor';
 import { CommentComposerHost, useCommentComposer } from '../CommentComposer';
@@ -523,9 +524,11 @@ describe('the checkbox and the one send path', () => {
     expect(titleOf(box())).toBe('A side thread is not available on Studio yet');
   });
 
-  // the composer's answer for an archived session (decision 6), even with its process ready, which the port allows
-  it.each(['thread', 'main'] as const)('an archived session with a ready process, opened to %s: both states are off, Send is off, and the reason is a line under the field', async (destination) => {
-    withParent('ready');
+  // decision 6, the composer's answer: an archived session refuses both states. A ready process answers before the digest
+  // (availabilityIn: the status may arrive before the digest that follows it, as after an unarchive's relaunch), so an
+  // archived digest beside a ready status reads usable, for the composer and the card alike
+  it.each(['thread', 'main'] as const)('an archived session, opened to %s: both states are off, Send is off, and the reason is a line under the field', async (destination) => {
+    withParent('exited');
     act(() => useSessions.setState({ digests: new Map([[PARENT, digest(PARENT, { availability: 'archived' })]]) }));
     mount();
     act(() => openCommentComposer(ANCHOR, { appSessionId: PARENT, placement: cardPlacement(), destination }));
@@ -535,6 +538,16 @@ describe('the checkbox and the one send path', () => {
     expect(titleOf(box())).toBe('Archived · unarchive it to continue');
     expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true);
     expect(card()!.querySelector('[data-comment-unsendable]')!.textContent).toBe('Archived · unarchive it to continue');
+  });
+
+  it('an archived digest beside a ready process reads as the composer reads it: usable', () => {
+    withParent('ready');
+    act(() => useSessions.setState({ digests: new Map([[PARENT, digest(PARENT, { availability: 'archived' })]]) }));
+    expect(availabilityIn(useSessions.getState(), PARENT)).toBe('usable');
+    mount();
+    pick();
+    expect(box().disabled).toBe(false);
+    expect(card()!.querySelector('[data-comment-unsendable]')).toBeNull();
   });
 
   it('names the receiving session only when it is not the one the main area shows', () => {
