@@ -42,9 +42,10 @@
 // The third test is UX wave U9's A5 (docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, M5; #565), on the
 // wake case's scene and its stall and restore, on the direct carrier: A's left pane holds B's live session and its right
 // pane B's second session, cold (its engine stopped on B after its first turn), so only the live one has a stream to
-// resume. B logs no whole-launch read of any session (`session.events <app> after start: from the journal`) between the
-// restore and its `subbed` of the live session's stream: the cold pane decides at main's settled word, which follows
-// that answer (test/support/remote-wake.ts, historyReadsBeside). No bound is timed, so no load is read.
+// resume. A asks B for no session's history (main's `lane B: timing history … asked`, said at each read's start whatever
+// B answers it from) between the restore and its `subbed` of the live session's stream, and B logs no whole-launch read
+// (`session.events <app> after start: from the journal`) before its own: the cold pane decides at main's settled word,
+// which follows that answer (test/support/remote-wake.ts, historyReadsBeside). No bound is timed, so no load is read.
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { loadavg, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -668,6 +669,9 @@ test('a wake after a silent cut: every subscription answered within 1 s of the r
 // stall to the inject, INJECT_AFTER_STALL_MS (158 s; the live session's turns written inside it); the drawn wait, at most
 // 3 s; three bounded reads after the restore (B's subbed, the panes, the reading); the cleanup; a margin of 2 min.
 const BESIDE_TIMEOUT_MS = 2 * 60_000 + WAKE_LAUNCH_MS + INJECT_AFTER_STALL_MS + WAKE_CASE.restoreAfterMs.max + 3 * READ_WITHIN_MS + WAKE_CLEANUP_MS + 2 * 60_000;
+// the settled word's backstop (SETTLE_BACKSTOP_MS, 2 s, src/renderer/src/lane-b/remote-session.ts) and a margin: a tab
+// beside the live one reads by then whatever main says
+const PAST_BACKSTOP_MS = 3_000;
 const BESIDE_TURNS = 3; // the live session's turns unseen through the stall, so its resume replays something
 
 test('U9 A5: beside a live session’s resume, a cold session’s pane reads nothing on the other machine until that resume is answered', async () => {
@@ -738,10 +742,15 @@ test('U9 A5: beside a live session’s resume, a cold session’s pane reads not
       await expect.poll(async () => (await paneText(page, i)).includes(last), { timeout: READ_WITHIN_MS, message: `A's pane ${i} shows B's session ${s.app} to its last turn (${last}) after the return` }).toBe(true);
     }
 
-    // 6. B's logs: no whole-launch read of either session between the restore and B's subbed of the live stream
-    const reads = historyReadsBeside({ carrier: 'direct', live: live.app, endpoint: endpointLog(), host: readLogLines(hostLog), restoredAt });
-    console.log(`[remote-beside] restore at +${restoredAt - stalledAt} ms after the stall; ${reads.length === 0 ? 'no whole-launch read beside the resume' : reads.join('; ')}`);
-    expect(reads, 'no whole-launch read on B between the restore and its subbed of the live session').toEqual([]);
+    // 6. The logs: no history read A asked of B between the restore and its subbed of the live stream, and no whole-launch
+    //    read on B before B's; read once every read since the restore has ended (A's start and end lines pair) and past
+    //    the settled word's backstop after that subbed, so no read that would have started is still to come
+    const heardAt = Date.now();
+    const besideOf = () => historyReadsBeside({ carrier: 'direct', ref: b.ref, live: live.app, main: mainLog(), endpoint: endpointLog(), host: readLogLines(hostLog), restoredAt });
+    const final = await within(besideOf, (r) => r.inFlight.length === 0 && Date.now() >= heardAt + PAST_BACKSTOP_MS, READ_WITHIN_MS);
+    const reads = final.last === null ? [`A's main.log or B's logs could not be read: ${final.error ?? 'no answer'}`] : [...final.last.failures, ...final.last.inFlight.map((r) => `a history read still in flight after ${READ_WITHIN_MS} ms: ${r}`)];
+    console.log(`[remote-beside] restore at +${restoredAt - stalledAt} ms after the stall; ${reads.length === 0 ? 'no history read beside the resume' : reads.join('; ')}`);
+    expect(reads, 'no history read asked or made between the restore and the live session’s subbed, and none left in flight').toEqual([]);
   } finally {
     await cleanupAll([() => a?.cleanup(), () => scene?.stop(), () => rmSync(aUserData, { recursive: true, force: true }), () => rmSync(root, { recursive: true, force: true })]);
   }

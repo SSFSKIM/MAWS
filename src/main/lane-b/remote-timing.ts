@@ -1,13 +1,17 @@
 // The three lines the O-39 sitting reads (the UX wave, U9, M5, "The three lines share one prefix"; A15;
 // docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md): how long a remote history read, a remote tab's open
 // and New chat's project chooser take, through the adapter's `log` into `<profile>/logs/main.log`, each found by one
-// search for `lane B: timing`. Session ids are ids; no title and no path is logged.
+// search for `lane B: timing`. Session ids are ids; no title and no path is logged. A history read also says its start
+// (`asked`), which A5's scene reads (test/support/remote-wake.ts): a read B answers from its ring or from disk leaves
+// no journal line there, and one still in flight has no end line yet.
 
 export const TIMING = 'lane B: timing';
 
 /** Which of remote-history.ts's reads answered: one call, the launch in pages, a budgeted transcript window, a budgeted launch. */
 export type HistoryPath = 'whole' | 'paged' | 'budgeted window' | 'budgeted launch';
 
+/** A remote history read's start, said before its first page goes out, so a read in flight is in the log too. */
+export const historyAskedLine = (machine: string, app: string): string => `${TIMING} history ${machine}/${app}: asked`;
 export const historyLine = (machine: string, app: string, path: HistoryPath, pages: number, bytes: number, ms: number): string =>
   `${TIMING} history ${machine}/${app}: ${path}, ${pages} pages, ${bytes} bytes, ${ms} ms`;
 

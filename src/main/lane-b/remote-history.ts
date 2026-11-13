@@ -54,7 +54,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import { peerLists } from '../machines/remote/capabilities';
 import { dispatchOverLink } from '../machines/remote/dispatch';
 import type { RemoteLink } from '../machines/remote/link';
-import { historyLine, type HistoryPath } from './remote-timing';
+import { historyAskedLine, historyLine, type HistoryPath } from './remote-timing';
 
 /** One-row pages refused with no page crossing between them, at most, before a read ends with the bar (a disk item). */
 export const LEFT_OUT_IN_A_ROW = 3;
@@ -108,6 +108,7 @@ async function pageOver(link: RemoteLink, count: Count, fields: Record<string, u
 export async function readEventsInPages(link: RemoteLink, input: Record<string, unknown>, deps: HistoryDeps): Promise<Result> {
   const startedAt = Date.now();
   const count: Count = { path: 'whole', pages: 0, bytes: 0 };
+  deps.log(historyAskedLine(link.name, String(input.appSessionId)));
   let answer: Result | null = null;
   if (deps.budget === true && input.agentId === undefined) answer = await readWithinBudget(link, input, deps, count);
   answer ??= await readWhole(link, input, deps, count);
