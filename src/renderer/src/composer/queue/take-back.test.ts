@@ -12,7 +12,14 @@ import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
 import { DRAFT_CLAIM, settles, STAGED_DRAFT_WORDS, STALE_DRAFT_WORDS, type Draft } from '@shared/ipc/schema/session';
 import { Db } from '../../../../services/index/db';
 import { DraftStore } from '../../../../services/index/drafts';
-import { TEST_MACHINE } from '../../../../../test/support/machine';
+import { addressOf } from '@shared/machine/address';
+import { remoteRow } from '../../../../../test/support/builders';
+import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
+import { heardReaderRows, readerRowsOf, resetReaderRows } from '../../lane-b/reader-rows';
+import { resetRemoteLaneBStore } from '../../lane-b/remote-session';
+import { useMachines } from '../../stores/machines';
+import { useSessions } from '../../stores/sessions';
+import { resetRemoteDrafts } from '../editor/drafts';
 import { fakeClient } from '../../../../../test/support/fake-client';
 import type { QueueControls } from '../../session/controls/types';
 import { resetComposerStore, useComposerStore } from '../../stores/composer';
@@ -60,7 +67,7 @@ CREATE TABLE drafts (app_session_id TEXT PRIMARY KEY REFERENCES sessions(app_id)
   let holdWithdrawals = false; // a withdrawal's answer never comes
   let claimAnswer: string | null = null; // the claim answered with these words instead of by the store
   let settlesFailing = 0; // the next settling saves fail (the services do not answer)
-  let readsFailing = false; // a read of what is kept fails
+  let readsFailing: false | 'timeout' | 'not-offered' = false; // a read of what is kept fails, or is not offered
 
   const invoke = async (name: string, input: Record<string, unknown>) => {
     if (name === 'session.drafts.set') {
@@ -86,6 +93,7 @@ CREATE TABLE drafts (app_session_id TEXT PRIMARY KEY REFERENCES sessions(app_id)
     }
     if (name === 'session.drafts.get') {
       log.push('read');
+      if (readsFailing === 'not-offered') return { ok: false, error: { code: 'internal', message: 'refused', issues: { refusal: 'not-offered' } } };
       return readsFailing ? { ok: false, error: { code: 'timeout', message: 'the services did not answer' } } : { ok: true, value: store.get(APP) };
     }
     if (name === 'session.promptHistory') {
@@ -144,7 +152,7 @@ CREATE TABLE drafts (app_session_id TEXT PRIMARY KEY REFERENCES sessions(app_id)
     holdWithdrawals: (on: boolean) => void (holdWithdrawals = on),
     answerClaim: (words: string | null) => void (claimAnswer = words),
     failSettles: (count: number) => void (settlesFailing = count),
-    failReads: (on: boolean) => void (readsFailing = on),
+    failReads: (on: boolean | 'not-offered') => void (readsFailing = on === true ? 'timeout' : on),
     /** The engine host's queue as the window's store lists it. */
     listed(queue: Partial<SessionQueue> = {}) {
       const steersNow = [...steers].map((messageUuid) => ({ messageUuid, content: TEXT, createdAt: SINCE }));
@@ -743,5 +751,51 @@ describe('(j) an entry released while its write is held open, the write then fai
     expect(b.state.loaded).toEqual([]);
     w.row('revert', 'q-1', null); // the write then fails: the row is listed again
     expect(w.entries.has('q-1')).toBe(true);
+  });
+});
+
+// M3's re-review, finding 1: a settle the route no longer takes (the machine's reader rows heard refused) is no settle; the
+// box waits until a save is acknowledged or a read says what is kept
+describe('the settle of a session on another machine whose route turns refused', () => {
+  const R = addressOf(OTHER_MACHINE, 'app-take' as AppSessionId);
+  beforeEach(() => {
+    resetReaderRows();
+    resetRemoteDrafts();
+    resetRemoteLaneBStore();
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-11-13T10:00:00.000Z', generation: 1, carrier: 'relay' }]);
+    useSessions.setState({ listed: new Map([[R, { ...remoteRow(OTHER_MACHINE, 'app-take'), appId: R }]]), listedMachines: new Set([OTHER_MACHINE]) });
+  });
+  afterEach(() => {
+    useSessions.setState({ listed: new Map(), listedMachines: new Set() });
+    resetReaderRows();
+    resetRemoteDrafts();
+  });
+
+  it('holds the box while neither a save nor a read is taken, and settles once the stored state can be read and written', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    const w = world();
+    w.steers.add(U1);
+    const b = box();
+    attachTakeBackBox(R, b.api);
+    const real = w.real.cancelSteer;
+    w.controls.cancelSteer.mockImplementationOnce(async (args) => {
+      const answer = await real(args);
+      heardReaderRows(R, { ok: false, error: { code: 'internal', message: 'refused', issues: { refusal: 'not-offered' } } }); // the route turns refused
+      return answer;
+    });
+    w.failReads('not-offered');
+    const run = takeBack(R, next(U1), w.deps);
+    await vi.advanceTimersByTimeAsync(SETTLE_RETRY_MS * 16);
+    expect(readerRowsOf(R)).toBe('refused');
+    expect(b.state.loaded.map(textOf)).toEqual([TEXT]);
+    expect(stageMark(w.store.get(APP))).not.toBeNull(); // the stage is still what is kept
+    expect(b.state.held.at(-1)).toBe(true); // and the box waits
+    expect(takingBack(R)).toBe(true);
+    w.failReads(false); // the machine answers again
+    await vi.advanceTimersByTimeAsync(SETTLE_RETRY_MS * 64);
+    await run;
+    expect(stageMark(w.store.get(APP))).toBeNull();
+    expect(textOf(w.store.get(APP)!.doc as ComposerDoc)).toBe(TEXT);
+    expect(b.state.held.at(-1)).toBe(false);
   });
 });

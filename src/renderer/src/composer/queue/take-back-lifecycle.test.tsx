@@ -52,6 +52,7 @@ const deferred = () => {
   return { promise, resolve };
 };
 let settleGate: { promise: Promise<void>; resolve: () => void } | null = null; // the next settling save waits here
+let readGate: { promise: Promise<void>; resolve: () => void } | null = null; // the next read of what is kept waits here
 
 // main's side: the session's commands answered by the test, its drafts by the store itself
 function bridge() {
@@ -72,7 +73,14 @@ CREATE TABLE drafts (app_session_id TEXT PRIMARY KEY REFERENCES sessions(app_id)
   });
   const answer = fake.client.invoke.bind(fake.client);
   (fake.client as { invoke: unknown }).invoke = async (name: string, input: Record<string, unknown>, opts?: unknown) => {
-    if (name === 'session.drafts.get') return { ok: true, value: store.get(input.appSessionId as AppSessionId) };
+    if (name === 'session.drafts.get') {
+      if (readGate !== null) {
+        const gate = readGate;
+        readGate = null;
+        await gate.promise;
+      }
+      return { ok: true, value: store.get(input.appSessionId as AppSessionId) };
+    }
     if (name === 'session.drafts.set') {
       const { draft, replaces } = input as { draft: Draft | null; replaces?: string | null };
       drafted.push({ draft, replaces: replaces ?? null });
@@ -104,6 +112,7 @@ beforeEach(() => {
   useHosts.setState({ supervisor: hostStatus() });
   drafted = [];
   settleGate = null;
+  readGate = null;
   bridge();
   window.maws = preloadOf(fake);
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -253,5 +262,107 @@ describe('(d) a second window settles and sends while this one’s settle is hel
     expect(fake.invoked('session.send')).toHaveLength(1);
     expect((fake.invoked('session.send')[0] as { content: unknown }).content).toBe(TEXT);
     holder.remove();
+  });
+});
+
+// M3's re-review, finding 2: a box answered stale while another window has staged a newer message holds a copy the other
+// window already sent; it is put away before the newer stage is carried forward, so it never becomes editable
+describe('a held settle that meets another window’s newer stage', () => {
+  async function windowB() {
+    vi.resetModules();
+    const { Editor } = await import('../editor/Editor');
+    const takeBackB = await import('./take-back');
+    const { ipc: ipcB } = await import('../../ipc/client');
+    const handleB = { current: null as import('../editor/Editor').EditorHandle | null };
+    const queueB = { remove: (args: { queueId: string }) => ipcB.invoke('session.queue.remove', { appSessionId: A, ...args }) } as unknown as import('../../session/controls/types').QueueControls;
+    const depsB = { client: ipcB, controls: () => queueB };
+    const holder = document.createElement('div');
+    document.body.append(holder);
+    render(
+      <section aria-label="window B">
+        <Editor appSessionId={A} cwd="/work/app-a" sessionId="s" client={ipcB} handle={handleB} onStage={(stage) => void takeBackB.carryForward(A, stage, depsB)} />
+      </section>,
+      { container: holder },
+    );
+    await waitFor(() => expect(handleB.current).not.toBeNull());
+    takeBackB.attachTakeBackBox(A, {
+      load: (doc) => handleB.current!.load(doc),
+      replace: (doc) => handleB.current!.replaceDoc(doc),
+      hold: () => {},
+      settleLater: (replaces, taken) => handleB.current!.settleWith(replaces, taken),
+      settled: () => handleB.current!.clearSettle(),
+    });
+    const editor = () => within(screen.getByRole('region', { name: 'window B' })).getByRole('textbox', { name: 'Message', hidden: true }) as TiptapElement;
+    return { takeBackB, depsB, editor, holder };
+  }
+
+  // A takes message 1 back and its settle is held; B carries it forward, settles, sends it, and stages message 2
+  async function sentByBThenStaged() {
+    busy();
+    mountComposer();
+    await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
+    listed([entry('q-1', TEXT), entry('q-2', 'the second message')]);
+    act(() => editorOf().focus());
+    settleGate = deferred();
+    const heldSettle = settleGate;
+    // ↑ takes the newest: make message 1 the only one waiting until A has it
+    listed([entry('q-1', TEXT)]);
+    await key(editorOf(), { key: 'ArrowUp' });
+    await waitFor(() => expect(fake.pending('session.queue.remove')).toBe(1));
+    await act(() => fake.reply('session.queue.remove', undefined));
+    await waitFor(() => expect(editorOf().editor.getText()).toContain(TEXT));
+    await waitFor(() => expect(drafted.some((d) => d.replaces?.startsWith(settles('')))).toBe(true));
+    const B = await windowB();
+    await waitFor(() => expect(fake.pending('session.queue.remove')).toBe(1));
+    await act(() => fake.fail('session.queue.remove', 'no queued entry q-1', 'invalid_input'));
+    await waitFor(() => expect(fake.pending('session.promptHistory')).toBe(1));
+    await act(() => fake.reply('session.promptHistory', { events: [removed('q-1')], complete: true }));
+    await waitFor(() => expect(B.editor().editor.getText()).toContain(TEXT));
+    await waitFor(() => expect(stageKept()).toBe(false));
+    act(() => B.editor().focus());
+    await key(B.editor(), { key: 'Enter' });
+    await waitFor(() => expect(store.get(A_ID)).toBeNull()); // B sent message 1
+    return { B, heldSettle };
+  }
+  const stageTwo = (B: Awaited<ReturnType<typeof windowB>>) =>
+    void B.takeBackB.takeBack(A, { kind: 'after', key: 'q-2', queueId: 'q-2', content: 'the second message', createdAt: '2026-09-29T10:00:02.000Z', answer: false }, B.depsB);
+
+  it('(a) stage 2 written between A’s stale answer and its read: A’s copy of message 1 is put away and message 2 comes in its place', async () => {
+    const { B, heldSettle } = await sentByBThenStaged();
+    readGate = deferred();
+    const heldRead = readGate;
+    await act(async () => heldSettle.resolve()); // A's settle lands: stale; its read waits
+    await waitFor(() => expect(readGate).toBeNull());
+    stageTwo(B); // B stages message 2; its withdrawal waits
+    await waitFor(() => expect(stageKept()).toBe(true));
+    await waitFor(() => expect(fake.pending('session.queue.remove')).toBe(1));
+    expect(editorOf().editor.getText()).toContain(TEXT); // still message 1, held
+    await act(async () => heldRead.resolve()); // A reads stage 2 and carries it forward
+    await waitFor(() => expect(fake.pending('session.queue.remove')).toBe(2));
+    await act(() => fake.reply('session.queue.remove', undefined, 1)); // A's own withdrawal of message 2
+    await waitFor(() => expect(editorOf().editor.getText()).toContain('the second message'));
+    expect(editorOf().editor.getText()).not.toContain(TEXT);
+    await waitFor(() => expect(stageKept()).toBe(false));
+    await waitFor(() => expect(screen.queryByText(TAKE_BACK_WORDS.taking)).toBeNull());
+    expect(fake.invoked('session.send')).toHaveLength(1);
+    B.takeBackB.resetTakeBack();
+    B.holder.remove();
+  });
+
+  it('(b) stage 2 already kept when A’s settle lands: refused as staged, A reads it, puts message 1 away and carries message 2 forward', async () => {
+    const { B, heldSettle } = await sentByBThenStaged();
+    stageTwo(B);
+    await waitFor(() => expect(stageKept()).toBe(true));
+    await waitFor(() => expect(fake.pending('session.queue.remove')).toBe(1));
+    await act(async () => heldSettle.resolve()); // refused: a stage is kept
+    await waitFor(() => expect(fake.pending('session.queue.remove')).toBe(2));
+    await act(() => fake.reply('session.queue.remove', undefined, 1));
+    await waitFor(() => expect(editorOf().editor.getText()).toContain('the second message'));
+    expect(editorOf().editor.getText()).not.toContain(TEXT);
+    await waitFor(() => expect(stageKept()).toBe(false));
+    await waitFor(() => expect(screen.queryByText(TAKE_BACK_WORDS.taking)).toBeNull());
+    expect(fake.invoked('session.send')).toHaveLength(1);
+    B.takeBackB.resetTakeBack();
+    B.holder.remove();
   });
 });
