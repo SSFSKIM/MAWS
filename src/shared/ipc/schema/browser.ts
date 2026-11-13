@@ -298,12 +298,12 @@ export const commands = {
     output: z.strictObject({ activities: z.array(BrowserAgentActivitySchema).max(BROWSER_ACTIVITIES_KEPT) }),
     owner: 'main',
   },
+  // E13 end
   // U12a (the UX wave's U12 execution document, Interfaces §C; ruling R2): a window about to open the Browser by itself
   // because the agent started acting asks main to bring the acting tab forward; main reads the session from the tab's own
   // record, selects the tab there unless the person uses the selected tab or a panel shows it, and answers whether the tab
   // is then the session's selected one. Named by tab, as `browser.tabs.zoom` is.
   'browser.agent.show': { input: TabOnly, output: z.strictObject({ selected: z.boolean() }), owner: 'main' },
-  // E13 end
   // cua #90 start: an imported profile's bookmarks (cua board #90's spec, Interfaces "IPC"). `tree` answers the rows the
   // index holds for the partition (empty roots when none, or when the index is read-only); `sync` re-reads the profile's
   // `Bookmarks` file now and answers what it wrote, or why it wrote nothing (`refused`: an import or a removal is
