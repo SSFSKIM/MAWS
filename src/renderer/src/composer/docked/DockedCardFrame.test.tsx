@@ -228,6 +228,82 @@ describe('the frame’s request keys', () => {
   });
 });
 
+// UX wave U1a (decision 17, the ruling of 2026-11-13 on the held-chord scene): the next prompt can dock a commit after
+// the answered one left (a replayed or real engine asks about its next call once the first is answered). The hand-over
+// mark then lives until the animation frame in which the editor's deferred focus has had its turn, and a frame of the
+// session mounting meanwhile takes the focus when it is on the body or inside its own pane.
+describe('the hand-over to a frame that mounts a commit later', () => {
+  const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  const microtasks = async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  };
+  function View({ shown, onAccept = () => {} }: { shown: string | null; onAccept?: () => void }) {
+    return (
+      <>
+        <button type="button">outside</button>
+        <Pane index={0}>
+          <input aria-label="editor" />
+          {shown !== null && (
+            <DockedCardFrame key={shown} appSessionId={A} title={`prompt ${shown}`} onAccept={onAccept} onDecline={null}>
+              <p>{shown}</p>
+            </DockedCardFrame>
+          )}
+        </Pane>
+      </>
+    );
+  }
+  const frameOf = (shown: string) => screen.getByRole('group', { name: `prompt ${shown}` });
+  const editorFocus = (focusEditor: () => void) => registerFocusTarget(A, { focusEditor, focusFrame: () => {}, insertText: () => {} });
+  // the first prompt docked and focused, then answered: it leaves, and its microtask has run
+  async function answered(focusEditor: () => void, accept?: () => void) {
+    editorFocus(focusEditor);
+    const view = render(<View shown="one" onAccept={accept} />);
+    act(() => frameOf('one').focus());
+    view.rerender(<View shown={null} onAccept={accept} />);
+    await microtasks();
+    return view;
+  }
+
+  it('(a) gives the focus to the next frame mounting before the editor’s deferred focus has had its turn, and a key held from the first answer does not answer it', async () => {
+    const accept = vi.fn();
+    const view = await answered(() => {}, accept); // the editor's focus is still outstanding (Tiptap defers it a frame)
+    view.rerender(<View shown="two" onAccept={accept} />);
+    expect(document.activeElement).toBe(frameOf('two'));
+    const press = (repeat: boolean) => frameOf('two').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', repeat, bubbles: true, cancelable: true }));
+    press(true);
+    press(true);
+    expect(accept).not.toHaveBeenCalled();
+    press(false);
+    expect(accept).toHaveBeenCalledTimes(1);
+  });
+
+  it('(b) gives it, in the other order, to a frame mounting after the editor took the focus, by its pane holding it', async () => {
+    const view = await answered(() => requestAnimationFrame(() => screen.getByLabelText('editor').focus()));
+    await nextFrame();
+    await nextFrame();
+    expect(document.activeElement).toBe(screen.getByLabelText('editor'));
+    view.rerender(<View shown="two" />);
+    expect(document.activeElement).toBe(frameOf('two'));
+  });
+
+  it('(c) takes nothing when the focus was moved outside the pane before the frame mounted', async () => {
+    const view = await answered(() => {});
+    act(() => screen.getByRole('button', { name: 'outside' }).focus());
+    view.rerender(<View shown="two" />);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'outside' }));
+  });
+
+  it('(d) takes nothing once the animation frame has passed with no frame mounted and the body focused', async () => {
+    const view = await answered(() => {});
+    await nextFrame();
+    await nextFrame();
+    expect(document.activeElement).toBe(document.body);
+    view.rerender(<View shown="two" />);
+    expect(document.activeElement).toBe(document.body);
+  });
+});
+
 describe('dockCard', () => {
   function Docked({ appSessionId }: { appSessionId: AppSessionId }) {
     const cards = useDockedCards(appSessionId);
