@@ -626,4 +626,47 @@ The pull request carries the dated amendments of the two rulings this landing re
 
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+**2026-11-13, at the end of M5** (the controller; the architect's branch review and runs follow and refresh this).
+
+**What landed.** One strip for every open tab, from every project and machine.
+- **Storing it.** It is stored as build F's own one-set value (version 3, `current` `none`, one set under `none`), so F reads whatever this build writes. F's per-project sets merge into the strip with no tab lost or repeated, and the upgrade's notice shows once. The architect's rehearsal on copies of two of the owner's layout files passed.
+- **The current project.** It is the row of the session in front, and New chat and Customize follow it. A click on a project row moves no tab.
+- **New chat.** It is one entry, `newChat`:
+  - an empty chat is reused;
+  - every other empty chat is closed, in one synchronous step before main is asked;
+  - a chat that arrives late is added unselected;
+  - after a relaunch, an empty chat does not come back (Q1, the owner's answer).
+- **The tabs and the chip.** In a strip that mixes places, each tab names its place, and the place gives way before the title. The tab menu has "Close tabs to the right". The title bar's chip names the current row and reveals it in the sidebar, and creates nothing.
+- **The proof and the record.** The e2e scenes, the UC-14 coverage, and the dated amendments of the rulings reversed (O-01, O-31, Q1) are in place. No key changed (A12: `src/shared/keymap/actions.ts` has no diff).
+
+**Against the plan.**
+- **Size.** About 6,460 lines changed over 80 files, against the estimate of about 4,900 over about 98 files. Of those, about 5,700 are in `src/`, `test/` and `e2e/`, over 75 files. Fewer files changed than estimated, but more lines per file: the store's rewrite, M3's relaunch sweep and M5's cross-build scenes all came out longer.
+- **Order.** The milestones held their order. Step 0 was not waited for: master was merged at each boundary, never rebased. The whole unit suite ran twice, at the end of M2 and at the end of M5; the wave's build rule of 2026-11-13 then limited it to once per landing.
+
+**What the reviews found that the document had not.** Each task review was independent and reproduced its bug on the VM before reporting it. Rounds per milestone: M1 two, M2 two, M3 three, M4 one, M5 three.
+- **M1.** A stored `current` naming an `Object.prototype` member crashed `stripOf`. The rehearsal passed a conversion that added a tab.
+- **M2.** `openTab(…, { activate: false })` moved the focus, so the background path that §C, §E and U7 rely on could change the tab in front.
+- **M3.** The relaunch sweep could discard a chat of this run that held typing, twice over:
+  - first, a chat made while the intent snapshot was out;
+  - then, a chat whose creation event reached the store before its create reply.
+
+  The fix is structural: no chat is created before the sweep has run.
+- **M5.** Three cross-build assertions could pass without proving their read:
+  - F's write of `main.tabs`;
+  - "no notice on a relaunch";
+  - a pin read through a disabled icon.
+
+  In addition, `#` followed by digits in a comment tripped the token guard.
+
+**Lessons.**
+- A startup step that changes stored state in the same window as a person's first act needs a stated order of the two, not only a predicate. The document stated what to discard, and not that creation must wait for it.
+- A scene that proves a read must look for something only the reading build could have produced. Equal values that both builds would write prove nothing.
+- Running the cross-build group early, before M5 was reviewed, surfaced two scene faults (a folded icon, a disabled icon) that reading the code had not.
+
+**What remains** (the architect's, "Proof that an executor does not run"):
+- the branch review at the xhigh panel;
+- the cross-build run of record with F (`--peer-exact f1852de3a`), its three scenes run, not skipped;
+- the e2e scenes alone, then the groups;
+- the owner's look at the mixed strip, the chip and the narrow-width screenshot;
+- class 1a on the head the pull request carries.
+
