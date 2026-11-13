@@ -260,9 +260,14 @@ fi
 # A relaunch (ci-gate-refusals.sh) checks the same pair: the peer as resolved, or none.
 relaunch_peer=$(printf '%s\n' "$peer_trailers" | sed -n 's/^Peer: //p')
 relaunch_peer=${relaunch_peer:-none}
-# An exact peer stays exact in a relaunch: --peer with its sha would map it to another commit.
+# An exact peer stays exact in a relaunch, named by its sha: --peer with that sha would map it to another commit, and
+# --peer none beside the call's own --peer-exact would be refused. So also when the run has no peer trailer (the exact
+# peer is the tested commit itself): the relaunch then resolves to no peer again, as this call did.
 relaunch_peer_flag=--peer
-[[ -n $peer_exact && $relaunch_peer != none ]] && relaunch_peer_flag=--peer-exact
+if [[ -n $peer_exact ]]; then
+  relaunch_peer_flag=--peer-exact
+  relaunch_peer=$(git -C "$git_dir" rev-parse --verify --quiet "$peer_exact^{commit}") || exit 2
+fi
 
 # --affected: the change's paths, from the merge base with origin/master to the tested commit, each as a line of
 # `git diff --name-status -M` (status, tab, path, and a rename's new path after another tab). A failed fetch goes ahead:
