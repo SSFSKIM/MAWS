@@ -1,14 +1,14 @@
 // UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, M4, X-216, Interfaces §G): the window
 // tells a tab's page that its comment card opened, with the open comment's css, whenever the card shows a composing
-// comment of that tab's pass or moves to another; and, from the dock's `onClosed`, that it closed, unless the window's
-// card still composes on that tab's page. A call that fails is ignored.
+// comment of that tab's pass or moves to another; and retires each opening it told with that tab's close, on the store's
+// transition, when that card is no longer the window's open card. A call that fails is ignored.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Anchor } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { fakeClient, type FakeClient } from '../../../../../../test/support/fake-client';
-import { closeCard, editComment, openCard, passKey, registerCardHost, setCommentText, useCommentCard } from '../../../side/card/store';
+import { closeCard, editComment, enterThread, openCard, passKey, registerCardHost, setCommentText, useCommentCard } from '../../../side/card/store';
 import { T1, T2 } from '../../../test-support/browser';
-import { tellPageCardClosed, watchPageCard } from './page-card';
+import { watchPageCard } from './page-card';
 
 const A = 'app-a' as AppSessionId;
 const element = (css: string): Anchor => ({ kind: 'browser-element', locator: css, label: `button “${css}”`, pageUrl: 'http://127.0.0.1:4000/comment.html', css, role: 'button', name: css });
@@ -56,12 +56,10 @@ describe('the card’s opening, told to its tab’s page', () => {
     ]);
   });
 
-  it('tells nothing when the card closes (the dock’s onClosed says that), nor for a card that is not a browser page’s', () => {
-    pick(FIRST);
-    closeCard();
+  it('tells nothing for a card that is not a browser page’s', () => {
     host('page-1', 'artifact-1', 'artifact-page');
     openCard({ kind: 'artifact-element', locator: '#e1', label: 'h1', pageUrl: 'maws-artifact://artifact-1/1/index.html' }, { appSessionId: A, placement: { kind: 'card', host: 'artifact-page', hostId: 'page-1' } });
-    expect(told()).toEqual([{ tabId: T1, open: { css: '#increment' } }]);
+    expect(told()).toEqual([]);
   });
 
   it('tells nothing for a browser comment with no css', () => {
@@ -76,41 +74,61 @@ describe('the card’s opening, told to its tab’s page', () => {
   });
 });
 
-describe('the card’s closing, from the dock’s onClosed', () => {
-  it('tells the page its card closed when no card composes on it', () => {
+describe('the card’s closing, retiring the opening told', () => {
+  it('tells the page its card closed when the card goes, once', () => {
     pick(FIRST);
     closeCard();
-    tellPageCardClosed(T1, fake.client);
-    expect(told().at(-1)).toEqual({ tabId: T1, open: null });
-  });
-
-  it('tells nothing while the window’s card still composes on that tab’s page (it moved to another comment)', () => {
-    pick(FIRST);
-    pick(SECOND); // the host lost the first card: its onClosed asks after the second opened
-    tellPageCardClosed(T1, fake.client);
+    closeCard();
     expect(told()).toEqual([
       { tabId: T1, open: { css: '#increment' } },
-      { tabId: T1, open: { css: '#decrement' } },
+      { tabId: T1, open: null },
     ]);
   });
 
-  it('tells the page its card closed when the card still open is no mounted host’s (the dock unmounted before its card left)', () => {
+  it('a move to another comment of the same tab is the new opening only; the last close retires it', () => {
     pick(FIRST);
-    offs.splice(0).forEach((off) => off());
-    tellPageCardClosed(T1, fake.client);
+    pick(SECOND);
+    closeCard();
+    expect(told()).toEqual([
+      { tabId: T1, open: { css: '#increment' } },
+      { tabId: T1, open: { css: '#decrement' } },
+      { tabId: T1, open: null },
+    ]);
+  });
+
+  it('a card replaced by another tab’s tells the first tab’s page its card closed, then the second its opening', () => {
+    host('dock-2', T2);
+    pick(FIRST);
+    pick(SECOND, 'dock-2');
+    closeCard();
+    expect(told()).toEqual([
+      { tabId: T1, open: { css: '#increment' } },
+      { tabId: T1, open: null },
+      { tabId: T2, open: { css: '#decrement' } },
+      { tabId: T2, open: null },
+    ]);
+  });
+
+  it('the card turning into its side thread is the same card, still open in the strip: the page is told its close when it goes', () => {
+    pick(FIRST);
+    enterThread(useCommentCard.getState().open!.serial, 'app-child' as AppSessionId, 'Make it bolder');
+    expect(told()).toEqual([{ tabId: T1, open: { css: '#increment' } }]);
+    closeCard();
     expect(told().at(-1)).toEqual({ tabId: T1, open: null });
   });
 
-  it('tells a tab’s page its card closed while the window’s card composes on another tab', () => {
-    host('dock-2', T2);
-    pick(FIRST, 'dock-2');
-    tellPageCardClosed(T1, fake.client);
+  it('a card replaced by one that is not a browser page’s retires the opening told', () => {
+    pick(FIRST);
+    host('page-1', 'artifact-1', 'artifact-page');
+    openCard({ kind: 'artifact-element', locator: '#e1', label: 'h1', pageUrl: 'maws-artifact://artifact-1/1/index.html' }, { appSessionId: A, placement: { kind: 'card', host: 'artifact-page', hostId: 'page-1' } });
     expect(told().at(-1)).toEqual({ tabId: T1, open: null });
   });
 
   it('ignores a call that fails (the tab closed)', async () => {
+    unwatch();
     const failing = fakeClient();
-    tellPageCardClosed(T1, failing.client);
+    unwatch = watchPageCard(failing.client);
+    pick(FIRST);
     await expect(failing.fail('browser.comment.card', 'unknown browser tab', 'invalid_input')).resolves.toBeUndefined();
   });
 });

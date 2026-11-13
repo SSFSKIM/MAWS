@@ -9,10 +9,10 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS, NO_PROJECT } from '@shared/ipc/schema/layout';
 import { useFloatingCard } from '../../shell/floating';
 import { useLayout } from '../../stores/layout';
-import { browserTab, T1 } from '../../test-support/browser';
+import { browserTab, T1, T2 } from '../../test-support/browser';
 import { installFakeMain, ok } from '../../test-support/code';
 import { mainShowing } from '../../test-support/panel';
-import { openCard, useCommentCard } from '../../side/card/store';
+import { closeCard, openCard, useCommentCard } from '../../side/card/store';
 import { dockOf } from './comment/dock';
 import { watchPageCard } from './comment/page-card'; // UX wave U5a
 import { BROWSER_COPY } from './copy';
@@ -255,8 +255,8 @@ describe('the comment card’s dock', () => {
   });
 
   // UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, M4, X-216, §G): the page is told when its
-  // docked card opens and closes; the close comes from the dock's onClosed, and a card moving to another comment of the
-  // tab is told as an opening, never as a close
+  // docked card opens and closes, each opening retired by its own close on the store's transition; a card moving to
+  // another comment of the tab is told as an opening, never as a close
   it('tells the tab’s page when its docked card opens, moves to another comment, and closes', async () => {
     const unwatch = watchPageCard();
     try {
@@ -274,6 +274,57 @@ describe('the comment card’s dock', () => {
         { tabId: T1, open: { css: '#increment' } },
         { tabId: T1, open: { css: '#decrement' } },
         { tabId: T1, open: null },
+      ]);
+    } finally {
+      unwatch();
+    }
+  });
+
+  // M4's review: nothing waits on a committed host, so a batch React draws once still leaves each page told its close
+  it('an opening and a close in one batch leave the page told its card closed', async () => {
+    const unwatch = watchPageCard();
+    try {
+      render(<BrowserPane tab={tab()} surface="panel" />);
+      await frames();
+      const hostId = dockOf(T1)!;
+      act(() => {
+        openCard(ANCHOR, { appSessionId: A, placement: { kind: 'card', host: 'browser', hostId } });
+        closeCard();
+      });
+      await frames();
+      expect(main.callsOf('browser.comment.card')).toEqual([
+        { tabId: T1, open: { css: '#increment' } },
+        { tabId: T1, open: null },
+      ]);
+    } finally {
+      unwatch();
+    }
+  });
+
+  it('a card replaced by another tab’s before it was drawn leaves the first tab’s page told its card closed', async () => {
+    const unwatch = watchPageCard();
+    try {
+      render(
+        <>
+          <BrowserPane tab={tab()} surface="panel" />
+          <BrowserPane tab={browserTab(T2, A)} surface="panel" />
+        </>,
+      );
+      await frames();
+      const [one, two] = [dockOf(T1)!, dockOf(T2)!];
+      expect(two).not.toBeNull();
+      act(() => {
+        openCard(ANCHOR, { appSessionId: A, placement: { kind: 'card', host: 'browser', hostId: one } });
+        openCard({ ...ANCHOR, locator: '#decrement', css: '#decrement' }, { appSessionId: A, placement: { kind: 'card', host: 'browser', hostId: two } });
+      });
+      await frames();
+      fireEvent.keyDown(screen.getByRole('textbox', { name: 'Comment' }), { key: 'Escape' });
+      await frames();
+      expect(main.callsOf('browser.comment.card')).toEqual([
+        { tabId: T1, open: { css: '#increment' } },
+        { tabId: T1, open: null },
+        { tabId: T2, open: { css: '#decrement' } },
+        { tabId: T2, open: null },
       ]);
     } finally {
       unwatch();
