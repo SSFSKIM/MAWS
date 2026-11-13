@@ -164,17 +164,21 @@ export function registerBrowserHandlers({ store, views, navigator, downloads, hi
   );
   // The chrome's Hand back: the page returns to idle from any state (E4c moves it everywhere else).
   register('browser.control.handBack', knownTabs(({ tabId }) => store.setControl(tabId, 'idle')));
-  // U12a (Interfaces §C; ruling R2): the window about to open the Browser by itself asks for the acting tab. The session
-  // is the tab's own (a side thread's acting tab is its parent's), and the tab is selected there when
-  // `agentTabComesForward` says so; the answer is whether it is then the session's selected tab. The only selection made
-  // for the agent: cua's acting command selects nothing (cua/connection.ts).
+  // U12a (Interfaces §C; ruling R2, and the branch review's rulings 5 and 7): the window about to open the Browser by
+  // itself asks for the acting tab. The session is the tab's own (a side thread's acting tab is its parent's), and the tab
+  // is selected there when `agentTabComesForward` says so; the answer is the session's selected tab then, whole, so the
+  // window lists that selection before its panel mounts (main's own notice follows on a later task). The only selection
+  // made for the agent: cua's acting command selects nothing (cua/connection.ts).
   register('browser.agent.show', knownTabs(({ tabId }) => {
     const acting = store.require(tabId);
     const { appSessionId } = acting.tab;
-    const selectedOf = () => store.list(appSessionId).selected[appSessionId] ?? null;
-    const selected = selectedOf();
-    if (agentTabComesForward(selected === null ? null : (store.entry(selected) ?? null), acting, now())) store.select(appSessionId, tabId);
-    return { selected: selectedOf() === tabId };
+    const selectedOf = () => {
+      const id = store.list(appSessionId).selected[appSessionId] ?? null;
+      return id === null ? null : (store.entry(id) ?? null);
+    };
+    const sessionTabs = store.all().filter((entry) => entry.tab.appSessionId === appSessionId);
+    if (agentTabComesForward(selectedOf(), acting, now(), sessionTabs)) store.select(appSessionId, tabId);
+    return { selected: selectedOf()?.tab ?? null };
   }));
   // cua #90 start: the bookmarks bar (bookmarks/bar.ts): a chip's click, a native menu on the sender's window, the icons
   register('browser.bookmarks.open', knownTabs(({ tabId, nodeId, how }) => bar.open(tabId, nodeId, how)));

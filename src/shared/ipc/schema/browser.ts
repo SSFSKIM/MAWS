@@ -300,11 +300,13 @@ export const commands = {
     owner: 'main',
   },
   // E13 end
-  // U12a (the UX wave's U12 execution document, Interfaces §C; ruling R2): a window about to open the Browser by itself
-  // because the agent started acting asks main to bring the acting tab forward; main reads the session from the tab's own
-  // record, selects the tab there unless the person uses the selected tab or a panel shows it, and answers whether the tab
-  // is then the session's selected one. Named by tab, as `browser.tabs.zoom` is.
-  'browser.agent.show': { input: TabOnly, output: z.strictObject({ selected: z.boolean() }), owner: 'main' },
+  // U12a (the UX wave's U12 execution document, Interfaces §C; ruling R2, and the branch review's ruling 7): a window
+  // about to open the Browser by itself because the agent started acting asks main to bring the acting tab forward; main
+  // reads the session from the tab's own record, selects the tab there unless the person uses the selected tab or a panel
+  // shows a tab of the session, and answers with the session's selected tab then (null: none), whole, so the window can
+  // list the selection before its panel mounts on it. Named by tab, as `browser.tabs.zoom` is. Between main and the
+  // windows only: not on the engine host's wire.
+  'browser.agent.show': { input: TabOnly, output: z.strictObject({ selected: BrowserTabSchema.nullable() }), owner: 'main' },
   // U12a (Interfaces §D, §K): the Browser options' Viewport, the tab's device size (null: Responsive), set by any window
   // by tab id as `browser.tabs.zoom` is and told back in the tab list; refused for an extension's options tab. Copy
   // screenshot: the view captured at device pixels and written to this Mac's clipboard whole, for the window the tab is

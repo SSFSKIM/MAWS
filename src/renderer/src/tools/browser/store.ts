@@ -122,6 +122,18 @@ export function tabOpened(tab: BrowserTab): void {
   setSessions(new Map([[appSessionId, { tabs: [...current.tabs, tab], selected: tab.tabId }]]));
 }
 
+// U12a (the branch review's ruling 7): main's answer to `browser.agent.show` that the agent's tab is its session's
+// selected one, listed so before main's own event says so (that event follows on a later task), so the Browser that opens
+// by itself mounts on that tab and never claims the previous one's placement first. A tab this window has not listed yet
+// is added; one it lists keeps what it has. Main's event is the newer word.
+export function agentTabSelected(tab: BrowserTab): void {
+  const appSessionId = tab.appSessionId as AppSessionId;
+  const current = sessionTabs(browser.getState(), appSessionId);
+  const listed = current.tabs.some((known) => known.tabId === tab.tabId);
+  if (listed && current.selected === tab.tabId) return;
+  setSessions(new Map([[appSessionId, { tabs: listed ? current.tabs : [...current.tabs, tab], selected: tab.tabId }]]));
+}
+
 // Lists every session (`appSessionId` absent) or one, applying the answer where nothing moved meanwhile.
 function list(client: MawsBridge, appSessionId?: AppSessionId): void {
   const asked = new Map(versions);

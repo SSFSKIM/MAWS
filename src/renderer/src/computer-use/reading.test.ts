@@ -268,7 +268,7 @@ describe('an interruption as the engine records it', () => {
   const cutBy = (events: readonly SessionEvent[]) => {
     const at = events.findIndex(isMarkerEvent);
     let start = at;
-    while (start > 0 && events[start - 1]!.kind === 'tool.result') start--;
+    while (start > 0 && events[start - 1].kind === 'tool.result') start--;
     return { at, results: events.slice(start, at).map((e) => (e.kind === 'tool.result' ? e.toolUseId : null)) };
   };
 

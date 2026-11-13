@@ -5,10 +5,18 @@
 // which the strip draws, and `js_reset` and `end_task`, read only as evidence that nothing runs any more.
 //
 // A call is in `flight` from its `tool.use` until its result or its turn's close; `waiting` instead while a waiting
-// permission request names it; `done` at an ordinary result (an error result included); `withdrawn` at a result whose
-// denial is `user-rejected`, at an error result the engine's interruption marker follows in the turn (a transcript
-// file's rows carry no denial), or at its turn's close with no result. A turn the store or the controls port says is not
-// running reads closed, since a terminal session's file can leave a turn open that nothing ends.
+// permission request names it; `done` at an ordinary result; `failed` at an error result the interruption did not write
+// (a cell that ran and threw, or the plugin's answer before it queued one: every such answer of the plugin's is an error
+// result, so only `done` shows that a cell ran); `withdrawn` at a result whose denial is `user-rejected`, at an error
+// result the engine's interruption marker cut, or at its turn's close with no result. A turn the store or the controls
+// port says is not running reads closed, since a terminal session's file can leave a turn open that nothing ends.
+//
+// What the marker cut (a transcript file's rows carry no denial): the engine writes an error result for each call the
+// interrupt withdrew and then its marker, with nothing between (the recorded `queue-and-interrupt` and
+// `pass3/p1-maws-ask-interrupt`), so a marker withdraws the error results that stand between it and the last event before
+// it that is not a tool result, and no earlier one: a call that ended with an error before an unrelated interrupt stays
+// `failed`. A subagent's list has no order against the turn's, so when the turn holds a marker it withdraws the list's
+// trailing error results alone, those no event of another kind in that list follows.
 import type { SessionEvent } from '@shared/graph/events';
 import type { ToolUseId } from '@shared/graph/ids';
 import { CUA_JS_TOOLS } from '../transcript/model/classify';
@@ -19,7 +27,7 @@ import { isInterruptionMarker } from '../transcript/model/user-text';
 export interface ComputerUseCall {
   toolUseId: ToolUseId;
   tool: 'js' | 'reset' | 'end'; // the plugin's js, js_reset and end_task, under either server name
-  state: 'flight' | 'waiting' | 'done' | 'withdrawn';
+  state: 'flight' | 'waiting' | 'done' | 'failed' | 'withdrawn';
 }
 
 export interface ComputerUseReading {
@@ -41,21 +49,30 @@ interface Seen {
   toolUseId: ToolUseId;
   tool: ComputerUseCall['tool'];
   startedAt: number;
-  outcome: 'none' | 'done' | 'withdrawn';
+  outcome: 'none' | 'done' | 'failed' | 'withdrawn';
 }
 
 const isMarker = (event: SessionEvent) => event.kind === 'user.message' && isInterruptionMarker(event.origin, event.content);
 
-// One list of events (the turn's own, or one child's): its calls, and whether each result is withdrawn. `markedAnyway`:
-// a child's error result counts as interrupted when the turn's own events hold the marker, since the two lists' order
-// against each other is not kept.
-function callsIn(events: readonly SessionEvent[], markedAnyway: boolean): Seen[] {
+// The indices of the results an interruption wrote in one list: those right before each marker, and, for a child's list
+// of a turn that holds one (`trailingCut`), those at the list's end.
+function cutResults(events: readonly SessionEvent[], trailingCut: boolean): ReadonlySet<number> {
+  const cut = new Set<number>();
+  const back = (from: number) => {
+    for (let i = from; i >= 0 && events[i].kind === 'tool.result'; i--) cut.add(i);
+  };
+  events.forEach((event, i) => {
+    if (isMarker(event)) back(i - 1);
+  });
+  if (trailingCut) back(events.length - 1);
+  return cut;
+}
+
+// One list of events (the turn's own, or one child's): its calls, and how each result reads.
+function callsIn(events: readonly SessionEvent[], trailingCut: boolean): Seen[] {
   const seen: Seen[] = [];
   const byId = new Map<ToolUseId, Seen>();
-  let lastMarker = -1;
-  events.forEach((event, i) => {
-    if (isMarker(event)) lastMarker = i;
-  });
+  const cut = cutResults(events, trailingCut);
   events.forEach((event, i) => {
     if (event.kind === 'tool.use') {
       const tool = TOOLS.get(event.toolName);
@@ -65,7 +82,7 @@ function callsIn(events: readonly SessionEvent[], markedAnyway: boolean): Seen[]
       byId.set(event.toolUseId, call);
     } else if (event.kind === 'tool.result') {
       const call = byId.get(event.toolUseId);
-      if (call) call.outcome = event.denial === 'user-rejected' || (event.isError && (markedAnyway || lastMarker > i)) ? 'withdrawn' : 'done';
+      if (call) call.outcome = event.denial === 'user-rejected' || (event.isError && cut.has(i)) ? 'withdrawn' : event.isError ? 'failed' : 'done';
     }
   });
   return seen;
