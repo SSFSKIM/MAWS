@@ -179,21 +179,21 @@
     "turnId": "turn:3c95b09d-2759-4093-96c8-2b28c1a981eb"
   },
   {
-    "at": "2026-10-06T10:54:30.261Z",
+    "at": "2026-10-06T10:54:30.258Z",
     "autoDenied": 0,
     "denied": 0,
     "endedAt": "2026-10-06T10:54:32.302Z",
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
-    "id": "divider:turn:ereplay:journal:104:1",
+    "id": "divider:turn:ereplay:journal:106:0",
     "kind": "divider",
     "opener": {
       "class": "peer",
       "line": "Message from @repo-h6xooi-51: Hello from A — received your probe message."
     },
     "origin": "peer",
-    "startedAt": "2026-10-06T10:54:30.261Z",
+    "startedAt": "2026-10-06T10:54:30.258Z",
     "state": "completed",
     "summary": {
       "autoDenied": 0,
@@ -227,13 +227,13 @@
       }
     },
     "toolCalls": 0,
-    "turnId": "turn:ereplay:journal:104:1"
+    "turnId": "turn:ereplay:journal:106:0"
   },
   {
     "at": "2026-10-06T10:54:30.258Z",
     "direction": "between",
     "from": null,
-    "id": "agentmsg:replay:journal:106:1",
+    "id": "agentmsg:replay:journal:106:2",
     "kind": "agent_message",
     "peer": {
       "body": "Hello from A — received your probe message.",
@@ -254,7 +254,7 @@
     },
     "text": "Message from @repo-h6xooi-51: Hello from A — received your probe message.",
     "to": null,
-    "turnId": "turn:ereplay:journal:104:1"
+    "turnId": "turn:ereplay:journal:106:0"
   },
   {
     "at": "2026-10-06T10:54:32.001Z",
@@ -266,24 +266,24 @@
     "messageUuid": "59f17bdb-8d68-462e-b19e-7e2b4c426e8c",
     "model": "claude-haiku-4-5-20251001",
     "phase": "answer",
-    "turnId": "turn:ereplay:journal:104:1"
+    "turnId": "turn:ereplay:journal:106:0"
   },
   {
-    "at": "2026-10-06T10:54:49.714Z",
+    "at": "2026-10-06T10:54:49.710Z",
     "autoDenied": 0,
     "denied": 0,
     "endedAt": "2026-10-06T10:54:51.876Z",
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
-    "id": "divider:turn:ereplay:journal:140:1",
+    "id": "divider:turn:ereplay:journal:142:0",
     "kind": "divider",
     "opener": {
       "class": "peer",
       "line": "Message from @repo-h6xooi-51: E7 probe: reply from A"
     },
     "origin": "peer",
-    "startedAt": "2026-10-06T10:54:49.714Z",
+    "startedAt": "2026-10-06T10:54:49.710Z",
     "state": "completed",
     "summary": {
       "autoDenied": 0,
@@ -317,13 +317,13 @@
       }
     },
     "toolCalls": 0,
-    "turnId": "turn:ereplay:journal:140:1"
+    "turnId": "turn:ereplay:journal:142:0"
   },
   {
     "at": "2026-10-06T10:54:49.710Z",
     "direction": "between",
     "from": null,
-    "id": "agentmsg:replay:journal:142:1",
+    "id": "agentmsg:replay:journal:142:2",
     "kind": "agent_message",
     "peer": {
       "body": "E7 probe: reply from A",
@@ -344,7 +344,7 @@
     },
     "text": "Message from @repo-h6xooi-51: E7 probe: reply from A",
     "to": null,
-    "turnId": "turn:ereplay:journal:140:1"
+    "turnId": "turn:ereplay:journal:142:0"
   },
   {
     "at": "2026-10-06T10:54:51.569Z",
@@ -356,7 +356,7 @@
     "messageUuid": "c043f6e1-a6a5-4fb2-ab49-d98183b422fe",
     "model": "claude-haiku-4-5-20251001",
     "phase": "answer",
-    "turnId": "turn:ereplay:journal:140:1"
+    "turnId": "turn:ereplay:journal:142:0"
   },
   {
     "at": "2026-10-06T10:55:08.877Z",

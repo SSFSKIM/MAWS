@@ -201,7 +201,9 @@ describe('normaliser: ids, turns and the human prompt bubble', () => {
       inRow({ type: 'user', uuid: 'm-2', session_id: 'sess-1', message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user for tool use]' }] } }),
     ]);
     expect(kinds(events)).toEqual(['user.message', 'user.message', 'user.message']);
-    expect(events[0]).toMatchObject({ messageUuid: 'l-1', origin: 'local-command', content: 'Set model to `haiku`', isReplay: true, bash: null });
+    // UX wave U3 (UC-2, class `command`; the U3a document, Interfaces C and Acceptance 6): the output keeps the engine's
+    // own tag, which says stdout or stderr
+    expect(events[0]).toMatchObject({ messageUuid: 'l-1', origin: 'local-command', content: '<local-command-stdout>Set model to `haiku`</local-command-stdout>', isReplay: true, bash: null });
     expect(events[1]).toMatchObject({ messageUuid: 'm-1', origin: 'interrupt-marker', content: [{ type: 'text', text: '[Request interrupted by user]' }], bash: null });
     expect(events[2]).toMatchObject({ messageUuid: 'm-2', origin: 'interrupt-marker' });
     expect(n.state.currentTurn).toBeNull();

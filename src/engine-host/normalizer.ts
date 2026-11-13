@@ -7,7 +7,8 @@
 // frame, the human turn opens at the engine's `started` lifecycle for it (a `started` while a turn is open joins that
 // turn), and `system/init` opens an engine-initiated turn only when no turn is open and no `!` echo awaits its receipt. This file holds the class and the frames that
 // touch turn, lane and correlation state; `normalizer-controls.ts` projects inbound requests and our answers,
-// `normalizer-system.ts` maps the other system subtypes and `normalizer-support.ts` holds the pure projections.
+// `normalizer-system.ts` maps the other system subtypes, `normalizer-support.ts` holds the pure projections, and
+// `normalizer-arrivals.ts` keeps a background task's end until the model is told (UX wave U3, the arrivals reader's live caller).
 import * as z from 'zod';
 import { ExitCauseSchema, PERMISSION_MODES, type PermissionMode } from '@shared/graph/enums';
 import type { EventPayload, SessionEvent } from '@shared/graph/events';
@@ -45,6 +46,12 @@ import { MAWS_SERVER_NAME } from '@shared/maws/tools'; // P2-C3
 import { TranscriptRecordSchema } from '@shared/wire/transcript'; // P5 O16 M3
 import { createBackfillContext, recordToEvents } from './fs/backfill'; // P5 O16 M3: a gap's reseed
 import { isHookMadeMessageId, isMadeUpFinalAnswer, isMessageTool, messageCallText } from '@shared/owner/message-call'; // P4-R7z
+import { carriedOf, readArrivals, type Arrival } from '@shared/engine/arrival'; // UX wave U3 (UC-2)
+import { notificationText, taskNotificationBlocks } from '@shared/engine/task-notification';
+import {
+  atEngineHead, carried, engineTurnOpened, headed, idle, keep, launchEnded, noLiveArrivals, output, personsTurnOpened, readFrame, resultReached, scheduleFire, userFrame,
+  type LiveArrivals,
+} from './normalizer-arrivals'; // UX wave U3 (the U3a document, M4 and Interfaces E)
 
 export interface NormalizerWarning {
   event: 'block_pairing' | 'unknown_denial_kind' | 'unmatched_response' | 'unknown_permission_mode';
@@ -96,6 +103,9 @@ export interface NormalizerState {
   // P5 O16 M3 fix wave 1: the API message ids of the records a reseed showed; a surviving stream event of the same
   // message (its start before the gap or after it) streams nothing again
   reseededMessages: Set<string>;
+  // UX wave U3 (UC-2; the U3a document, Interfaces E): what the main lane's frames carried from elsewhere, read in order,
+  // and the background tasks' ends kept until the model is told (`normalizer-arrivals.ts`)
+  arrivals: LiveArrivals;
 }
 
 // C10 start: the engine's trust line on stderr (fixture pass2/trust-no-attestation seq 5). It is printed at settings
@@ -138,6 +148,7 @@ export class Normalizer {
       lastMessage: { text: null, final: false }, // P4-R7z
       reseeded: new Set(), // P5 O16 M3
       reseededMessages: new Set(), // P5 O16 M3 fix wave 1
+      arrivals: noLiveArrivals(), // UX wave U3
     };
   }
 
@@ -184,11 +195,14 @@ export class Normalizer {
 
   private pushIn(row: JournalRow, out: Emitter): void {
     const frame = parseStdoutFrame(row.frame);
+    const lane = laneOf(frame);
+    // UX wave U3 (UC-2): the reader is given every main-lane frame in order, as the engine wrote it (rule 5); a child
+    // lane's frames map as today
+    const arrivals = lane === null ? readFrame(this.state.arrivals, row.frame) : [];
     const uuid = (frame as { uuid?: unknown }).uuid;
     if ((frame.type === 'assistant' || frame.type === 'user') && typeof uuid === 'string' && this.state.reseeded.has(uuid)) return; // P5 O16 M3: shown by its reseed
     const sessionId = (frame as { session_id?: unknown }).session_id;
     if (typeof sessionId === 'string' && sessionId.length > 0) this.state.sessionId = sessionId as SessionId;
-    const lane = laneOf(frame);
     const agentId = lane === null ? null : (this.state.toolUseToAgent.get(lane as unknown as ToolUseId) ?? null);
     const attribution = { parentToolUseId: lane, agentId };
 
@@ -201,6 +215,10 @@ export class Normalizer {
         else {
           const mapping = mapSystemFrame(system, this.tasks);
           for (const payload of mapping.payloads) out.emit(payload, { parentToolUseId: lane, agentId: agentId ?? mapping.agentId });
+          // UX wave U3 (Interfaces E): a background command's or monitor's end is kept until the model is told; the
+          // engine going idle gives up the ends no turn told
+          if (lane === null && system.subtype === 'task_notification' && typeof uuid === 'string') keep(this.state.arrivals, arrivals, uuid as MessageUuid, row.seq);
+          if (lane === null && system.subtype === 'session_state_changed' && (system as { state?: unknown }).state === 'idle') idle(this.state.arrivals);
         }
         return;
       }
@@ -208,10 +226,10 @@ export class Normalizer {
         this.streamEvent(frame as StreamEventFrame, out, attribution);
         return;
       case 'assistant':
-        this.assistant(frame as AssistantFrame, row, out, attribution);
+        this.assistant(frame as AssistantFrame, row, out, attribution, arrivals);
         return;
       case 'user':
-        this.userIn(frame as UserFrame, row, out, attribution);
+        this.userIn(frame as UserFrame, row, out, attribution, arrivals);
         return;
       case 'result':
         this.result(frame as ResultFrame, out, attribution);
@@ -219,7 +237,8 @@ export class Normalizer {
       case 'command_lifecycle': {
         const f = frame as CommandLifecycleFrame;
         out.emit({ kind: 'command.lifecycle', commandUuid: f.command_uuid as MessageUuid, state: f.state }, attribution);
-        this.promptLifecycle(f, out, attribution);
+        this.promptLifecycle(f, row, out, attribution);
+        if (lane === null) scheduleFire(this.state.arrivals, arrivals, f.command_uuid as MessageUuid); // UX wave U3: a scheduled fire's turn opens next
         return;
       }
       case 'tool_progress': {
@@ -271,6 +290,7 @@ export class Normalizer {
     if (this.state.pendingEcho === null && !this.state.currentTurn) {
       this.state.currentTurn = { origin: 'engine', userMessageUuids: [], startedAt: out.at, acceptedAt: out.at };
       out.emit({ kind: 'turn.started', userMessageUuid: null, origin: 'engine' }, attribution);
+      engineTurnOpened(this.state.arrivals, row.seq, out); // UX wave U3: a scheduled fire's line, or a kept end's, at its head
     }
     // R1: the plugins that failed to load or warned, inside the turn the init belongs to; every init repeats them, and
     // a child's init (returned above) carries its parent's
@@ -295,6 +315,7 @@ export class Normalizer {
         const toolName = type === 'tool_use' && typeof block?.name === 'string' ? block.name : null;
         current.started.push({ index: Number(event.index), type, toolUseId, toolName });
         this.state.streaming.set(lane, current);
+        if (lane === null) output(this.state.arrivals); // UX wave U3: the model answers; what arrives now is not at the turn's head
         // P5 O7 M10's follow-up: a thinking block starts here. On claude-opus-5-5 its text arrives in one burst just before
         // its end, seconds later (p4-tool-summaries-thinking-edits, seq 108 to 153), so its first delta is no start: the
         // block's start is told as an empty thinking delta, the shape a delta has, so a reader draws it from now and
@@ -348,11 +369,17 @@ export class Normalizer {
 
   // One frame per content block on the wire; the block index is the stream's (`content_block_start`) index paired
   // per message id in order, and content order per message id when the message was not streamed (children).
-  private assistant(frame: AssistantFrame, row: JournalRow, out: Emitter, attribution: Attribution): void {
+  private assistant(frame: AssistantFrame, row: JournalRow, out: Emitter, attribution: Attribution, arrivals: Arrival[]): void {
     // P4-R7z: the to-human plugin's answer after a final message said nothing (`@shared/owner/message-call`)
     if (isMadeUpFinalAnswer(frame)) {
       if (attribution.parentToolUseId === null) this.state.lastMessage.final = true;
       return;
+    }
+    // UX wave U3 (UC-2, class `command`): the frame the engine writes for a slash command's output, told by its
+    // `local_command_source`, is the command's output and never the model's answer
+    if (attribution.parentToolUseId === null) {
+      if (arrivals.some((arrival) => arrival.class === 'command')) return this.commandOutput((frame.uuid ?? null) as MessageUuid | null, arrivals, false, out, attribution);
+      output(this.state.arrivals);
     }
     // a response after it (a Stop hook that blocked the stop) is the turn's again: its result is its own
     if (attribution.parentToolUseId === null) this.state.lastMessage.final = false;
@@ -390,10 +417,12 @@ export class Normalizer {
     }
   }
 
-  private userIn(frame: UserFrame, row: JournalRow, out: Emitter, attribution: Attribution): void {
+  private userIn(frame: UserFrame, row: JournalRow, out: Emitter, attribution: Attribution, arrivals: Arrival[]): void {
     const content = frame.message.content;
     const results = typeof content === 'string' ? [] : content.filter((b) => b.type === 'tool_result');
+    const main = attribution.parentToolUseId === null;
     if (results.length > 0) {
+      if (main) output(this.state.arrivals); // UX wave U3
       const meta = frame.tool_result_meta ?? [];
       const launch = frame.tool_use_result as { agentId?: unknown } | null | undefined;
       for (const block of results) {
@@ -410,11 +439,13 @@ export class Normalizer {
       }
       return;
     }
+    if (main) userFrame(this.state.arrivals, arrivals, out); // UX wave U3 (Interfaces E): a placed line this frame tells, or whose turn it takes, is withdrawn first
     const uuid = (frame.uuid ?? null) as MessageUuid | null;
     if (uuid !== null && this.state.pendingHumanUuids.has(uuid)) {
       this.state.pendingHumanUuids.delete(uuid); // the engine's --replay-user-messages echo of our own frame
       return;
     }
+    if (main && this.arrivalIn(frame, uuid, arrivals, out, attribution)) return; // UX wave U3 (UC-2)
     const marker = frame.origin?.kind === 'human' ? null : engineUserMarkerOf(content);
     if (marker) {
       // engine-authored, never a human prompt: opens nothing and dedupes against no outgoing frame
@@ -422,9 +453,11 @@ export class Normalizer {
       return;
     }
     const bash = bashPartOf(content);
+    // UX wave U3 (decision 4): the engine's notification frame is never a prompt, whether or not it carries an arrival
+    const isSynthetic = (main && frame.origin?.kind === 'task-notification') || (frame.isSynthetic ?? false);
     out.emit({
       kind: 'user.message', messageUuid: uuid, content: bash === null ? content : bash.part === 'input' ? bash.command : bash.stdout,
-      isReplay: frame.isReplay ?? false, isSynthetic: frame.isSynthetic ?? false, origin: frame.origin?.kind ?? null, bash,
+      isReplay: frame.isReplay ?? false, isSynthetic, origin: frame.origin?.kind ?? null, bash,
     }, attribution);
     // E7 start: a message from another session (or an in-process agent's to this conversation) also yields its parsed
     // event, from the same parser the disk backfill uses (E7 execution document, Design §4)
@@ -434,6 +467,86 @@ export class Normalizer {
     }
     // E7 end
   }
+
+  // UX wave U3 start (UC-2; the U3a document, Interfaces C and M4). What a main-lane `user` frame carries from elsewhere
+  // becomes the events every caller makes of its class; false when it carries none of them (MAWS's own answer envelope
+  // and consent message are the person's, and map as today). An arrival at the head of a turn the engine opened opens
+  // the turn of its class when that turn is not the engine's: a peer's, or the person's for their own words.
+  private arrivalIn(frame: UserFrame, uuid: MessageUuid | null, arrivals: Arrival[], out: Emitter, attribution: Attribution): boolean {
+    const claimed = arrivals.filter((arrival) => arrival.class !== 'consent' && !(arrival.class === 'answer' && arrival.tool === 'maws'));
+    const [first] = claimed;
+    const live = this.state.arrivals;
+    const content = frame.message.content;
+    const isReplay = frame.isReplay ?? false;
+    if (first === undefined) return this.secondCarrier(frame);
+    switch (first.class) {
+      case 'peer':
+      case 'subagent': {
+        if (first.class === 'peer' && (this.state.currentTurn === null || atEngineHead(live))) {
+          // idle: a peer's turn, in the place of the engine's that held nothing (decision 6); the normaliser's own record
+          // keeps the engine's word, the status's (`EngineSessionStatus.turn.origin` is the person's or the engine's)
+          if (this.state.currentTurn === null) this.state.currentTurn = { origin: 'engine', userMessageUuids: [], startedAt: out.at, acceptedAt: out.at };
+          if (live.head === null) live.head = { engine: true, arrival: null, output: false };
+          out.emit({ kind: 'turn.started', userMessageUuid: null, origin: 'peer' }, attribution);
+        }
+        headed(live, first);
+        // decision 4: synthetic whatever the frame's own flag, so it never opens a turn of the person's beside its own
+        out.emit({ kind: 'user.message', messageUuid: uuid, content, isReplay, isSynthetic: true, origin: 'peer', bash: null }, attribution);
+        const companion = peerEventsOf(messageText(content), uuid, frame.origin);
+        if (companion) out.emit(companion, attribution);
+        return true;
+      }
+      case 'own': {
+        if (this.state.currentTurn === null || atEngineHead(live)) {
+          // idle: the person's turn, in the place of the engine's that held nothing (decision 6)
+          if (live.head === null) live.head = { engine: true, arrival: null, output: false };
+          headed(live, first);
+          this.state.currentTurn = { origin: 'human', userMessageUuids: uuid === null ? [] : [uuid], startedAt: out.at, acceptedAt: out.at };
+          out.emit({ kind: 'turn.started', userMessageUuid: uuid, origin: 'human' }, attribution);
+          out.emit({ kind: 'user.message', messageUuid: uuid, content: first.words, isReplay, isSynthetic: false, origin: 'human', bash: null }, attribution);
+          return true;
+        }
+        // into the running turn: a prompt taken into it
+        if (uuid !== null) this.state.currentTurn.userMessageUuids.push(uuid);
+        out.emit({ kind: 'user.message', messageUuid: uuid, content: first.words, isReplay, isSynthetic: false, origin: 'human', bash: null }, attribution);
+        if (uuid !== null) out.emit({ kind: 'command.lifecycle', commandUuid: uuid, state: 'started' }, attribution);
+        return true;
+      }
+      case 'command':
+        this.commandOutput(uuid, claimed, isReplay, out, attribution);
+        return true;
+      default:
+        headed(live, first);
+        out.emit({ ...carried(uuid, content, carriedOf(claimed)), isReplay }, attribution);
+        return true;
+    }
+  }
+
+  // Rule 5: the replayed notification of a task whose end an earlier carrier told (the hand-back that claimed it) is
+  // that end's second carrier and emits nothing; any other frame the reader claims nothing of maps as today.
+  private secondCarrier(frame: UserFrame): boolean {
+    const kind = frame.origin?.kind;
+    if (kind === 'human' || kind === 'peer' || kind === 'plugin') return false;
+    const content = frame.message.content;
+    const text = notificationText(typeof content === 'string' ? content : messageText(content), kind);
+    return text !== null && taskNotificationBlocks(text).length > 0;
+  }
+
+  // A slash command's output (class `command`): the engine's own tag around it, its escapes removed, in the turn that
+  // runs, which is its command's. The engine sends one output again under the same uuid (u3-commands-r1, seq 406 and
+  // 422): a uuid already mapped in this launch emits nothing.
+  private commandOutput(uuid: MessageUuid | null, arrivals: Arrival[], isReplay: boolean, out: Emitter, attribution: Attribution): void {
+    const outputs = this.state.arrivals.commandOutputs;
+    if (uuid !== null && outputs.has(uuid)) return;
+    if (uuid !== null) outputs.add(uuid);
+    const tagged = arrivals.flatMap((arrival) => {
+      if (arrival.class !== 'command') return [];
+      const stdout = arrival.stdout !== '' || arrival.stderr === '' ? [`<local-command-stdout>${arrival.stdout}</local-command-stdout>`] : [];
+      return arrival.stderr !== '' ? [...stdout, `<local-command-stderr>${arrival.stderr}</local-command-stderr>`] : stdout;
+    });
+    out.emit({ kind: 'user.message', messageUuid: uuid, content: tagged.join('\n'), isReplay, isSynthetic: false, origin: 'local-command', bash: null }, attribution);
+  }
+  // UX wave U3 end
 
   private result(frame: ResultFrame, out: Emitter, attribution: Attribution): void {
     const f = frame as ResultFrame & Record<string, unknown>;
@@ -450,12 +563,17 @@ export class Normalizer {
     const usage = tokenUsageOf(frame.usage);
     const origin = (f.origin as { kind?: unknown } | undefined)?.kind;
     if (attribution.parentToolUseId === null) {
+      // UX wave U3 (Interfaces E; pitfall 5): a placed line settles or is withdrawn before the turn's end, and the end
+      // carries the origin of the arrival at the head of the engine's turn (a hand-back's turn is the engine's, the
+      // owner's own send the person's), else the result's own word
+      const runId = (f.origin as { runId?: unknown } | undefined)?.runId;
+      const word = isEchoReceipt ? null : resultReached(this.state.arrivals, typeof runId === 'string' ? runId : null, out);
       const message = this.state.lastMessage; // P4-R7z: after a final message the reply is the message, not the made-up answer
       this.state.lastMessage = { text: null, final: false };
       out.emit({
         kind: 'turn.ended', result: frame.subtype, isError: frame.is_error, terminalReason, resultText: message.final ? message.text : stringOrNull(f.result), durationMs: frame.duration_ms, numTurns: frame.num_turns,
         costUsd: frame.total_cost_usd, usage, permissionDenials: denials, errors: Array.isArray(f.errors) ? f.errors.map(String) : [],
-        userMessageUuids: (Array.isArray(f.user_message_uuids) ? f.user_message_uuids : []) as MessageUuid[], origin: stringOrNull(origin),
+        userMessageUuids: (Array.isArray(f.user_message_uuids) ? f.user_message_uuids : []) as MessageUuid[], origin: word ?? stringOrNull(origin),
         resultIndex: typeof f.result_index === 'number' ? f.result_index : null, isEchoReceipt,
       }, attribution);
       if (isEchoReceipt) this.state.pendingEcho = null;
@@ -469,7 +587,7 @@ export class Normalizer {
   // querying prompt opens its turn, from this row; if a turn is already open (the engine drained two prompts into one
   // turn) the prompt joins it. A prompt cancelled, discarded or refused before it started has no turn to close: its
   // `command.lifecycle` event marks the dropped row (pass1/queue-and-interrupt seq 191), and it stops waiting.
-  private promptLifecycle(frame: CommandLifecycleFrame, out: Emitter, attribution: Attribution): void {
+  private promptLifecycle(frame: CommandLifecycleFrame, row: JournalRow, out: Emitter, attribution: Attribution): void {
     const uuid = frame.command_uuid as MessageUuid;
     if (!this.state.unstartedPrompts.has(uuid)) return;
     if (frame.state === 'cancelled' || frame.state === 'discarded' || frame.state === 'refused' || frame.state === 'completed') {
@@ -484,6 +602,7 @@ export class Normalizer {
     }
     this.state.currentTurn = { origin: 'human', userMessageUuids: [uuid], startedAt: out.at, acceptedAt: out.at };
     out.emit({ kind: 'turn.started', userMessageUuid: uuid, origin: 'human' }, attribution);
+    personsTurnOpened(this.state.arrivals, row.seq); // UX wave U3: no kept end is placed on it
   }
 
   // ---------------------------------------------------------------------------------------------------------------------
@@ -589,7 +708,10 @@ export class Normalizer {
     // no turn opens at the write: the engine's `started` for this uuid opens it (promptLifecycle)
     if (uuid !== null) this.state.unstartedPrompts.add(uuid);
     this.state.lastUserMessageUuid = uuid;
-    out.emit({ kind: 'user.message', messageUuid: uuid, content, isReplay: false, isSynthetic: false, origin: 'human', bash: null }, main);
+    // UX wave U3 (UC-2, class `consent`; decision 10): MAWS's own "Approve and retry" message is the person's prompt or
+    // steer and carries its arrival, which draws it as one line
+    const consent = readArrivals({ type: 'user', origin: { kind: 'human' }, message: frame.message }).filter((arrival) => arrival.class === 'consent');
+    out.emit({ kind: 'user.message', messageUuid: uuid, content, isReplay: false, isSynthetic: false, origin: 'human', bash: null, ...(consent.length > 0 && { arrival: consent }) }, main);
   }
 
   // ---------------------------------------------------------------------------------------------------------------------
@@ -601,6 +723,7 @@ export class Normalizer {
     switch (meta.event) {
       case 'exit': {
         this.postTrustNotice(out, main); // C10: exited before answering initialize: nothing recorded
+        launchEnded(this.state.arrivals, out); // UX wave U3 (decision 21): a line placed and not settled stands on no turn once its launch has ended
         const code = typeof meta.code === 'number' ? meta.code : null;
         const signal = stringOrNull(meta.signal);
         const reason = typeof meta.reason === 'string' ? (meta.reason as 'quit' | 'stop' | 'archive' | 'crash' | 'unknown' | 'budget' /* C12 */ | 'idle' /* E10 */) : code === 0 && signal === null ? 'unknown' : 'crash';

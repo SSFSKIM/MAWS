@@ -169,13 +169,23 @@ describe('one session in both event forms', () => {
     await expect(`${JSON.stringify(rowsOf(stateOf([...disk, ...live])).map((row) => [row.kind, row.id]), null, 1)}\n`).toMatchFileSnapshot(join(SNAPSHOT_DIR, 'both-forms-subagent.rows.json'));
   });
 
-  // Expected to fail until M4 (the U3a document, Decision Log, the architect's ruling of 2026-11-13): read live first,
-  // the file's turn for each agent's end holds the task's notice, which the live wire's message does not carry yet, so
-  // that turn is no turn of copies and draws its divider. M4 makes the live carrier bear the arrival, under the first
-  // carrier's rule the line then stands in the live turn, and the file's turn is copies again. M4 removes this mark.
-  it.fails('live first, the same (expected to fail until M4: the live message carries no arrival yet)', async () => {
+  // Live first (moved in M4, the U3a document, Acceptance 7: a line the live wire does not carry is drawn from the file
+  // alone). Pass 1's journal was recorded before MAWS launched the engine with --replay-user-messages, so no frame tells
+  // the model of either agent's end; the end reaches that wire only as `system/task_notification`, and an agent's frame
+  // is never a line (Interfaces E). The file's notice for each agent's end is the only one, so its turn holds a row of
+  // its own and draws its divider beside the live turn's; every row is still shown once.
+  it('live first: each row once; each agent’s end, which only the file carries for this journal, is its one line, its turn’s divider drawn beside the live turn’s', async () => {
     const { disk, live } = await forms();
-    shownOnce([...live, ...disk], rowsOf(stateOf(disk)));
+    const rows = rowsOf(stateOf([...live, ...disk]));
+    const ids = rows.map((row) => row.id);
+    expect(ids.filter((id, i) => ids.indexOf(id) !== i), 'no row id twice').toEqual([]);
+    const texts = ofKind(rows, 'assistant_text').map((row) => row.id);
+    expect(texts).toEqual([...new Set(texts)]);
+    const fileOnly = ofKind(rowsOf(stateOf(disk)), 'notice');
+    expect(fileOnly.map((row) => row.class)).toEqual(['task', 'task']);
+    expect(ofKind(rowsOf(stateOf(live)), 'notice')).toEqual([]); // the live wire carries neither
+    expect(ofKind(rows, 'notice').map((row) => row.id)).toEqual(fileOnly.map((row) => row.id));
+    expect(ofKind(rows, 'divider')).toHaveLength(ofKind(rowsOf(stateOf(live)), 'divider').length + fileOnly.length);
   });
 });
 
