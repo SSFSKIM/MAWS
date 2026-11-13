@@ -1140,9 +1140,10 @@ describe('the box’s helpers: the history line, its search and the paste', () =
     await waitFor(() => expect(bridge.invoke).toHaveBeenCalledWith('session.history.list', expect.anything()));
     await act(async () => handle.current?.restored());
     content.focus();
-    const press = (key: string, init: KeyboardEventInit = {}) => {
+    const press = async (key: string, init: KeyboardEventInit = {}) => {
       const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
-      return act(async () => void content.dispatchEvent(event)).then(() => event);
+      await act(async () => void content.dispatchEvent(event));
+      return event;
     };
     const type = async (text: string) => {
       for (const key of text) await press(key);

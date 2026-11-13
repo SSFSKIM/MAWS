@@ -138,7 +138,7 @@ describe('the keymap table', () => {
     const rows = groups.flatMap((g) => g.rows);
     for (const id of SAMPLE_IDS) expect(rows.find((r) => r.id === id)!.rebindable, id).toBe(false);
     for (const id of ACTION_IDS) expect(rows.find((r) => r.id === id)!.rebindable, id).toBe(isRebindable(id)); // today's rows keep their control; a row build F does not know takes none (U1a's two)
-    expect(ACTION_IDS.filter((id) => !isRebindable(id))).toEqual(['request.allowOnce', 'request.allowLasting', 'composer.submit', 'composer.newLine', 'composer.newLineOption', 'composer.queue', 'composer.takeBack', 'composer.sendNowOrStop', 'composer.modelMenu', 'composer.effortMenu', 'composer.modeMenu', 'composer.historySearch']); // U1a's two; U4a's four (M2), two (M3), three (M5) and one (M6)
+    expect(ACTION_IDS.filter((id) => !isRebindable(id))).toEqual(['request.allowOnce', 'request.allowLasting', 'composer.submit', 'composer.newLine', 'composer.newLineOption', 'composer.queue', 'composer.takeBack', 'composer.sendNowOrStop', 'composer.historySearch', 'composer.modelMenu', 'composer.effortMenu', 'composer.modeMenu']); // U1a's two; U4a's four (M2), two (M3), three (M5) and one (M6)
   });
 
   it('shows a row that yields its default to a stored rebinding as unbound, and an override it cannot take as no override', () => {
