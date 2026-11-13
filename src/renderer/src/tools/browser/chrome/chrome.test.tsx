@@ -706,14 +706,15 @@ describe('device sizes and Copy screenshot (U12a)', () => {
     setViewport = () => held.promise;
     const { rerender } = show({ tab: tab(), owns: true, room: ROOM });
     const mobile = (await options(user)).find((item) => item.getAttribute('data-viewport') === 'mobile')!;
-    await user.click(mobile);
+    fireEvent.click(mobile); // happy-dom lays out no submenu, so a pointer's way into it is not modelled: the item's own click
+    await wait(0);
     expect(calls('browser.tabs.setViewport')).toEqual([{ tabId: T1, viewport: MOBILE }]);
     expect(read(await options(user)).map((item) => item.checked)).toEqual(['true', 'false', 'false']); // unanswered: no change yet
     await act(async () => held.resolve(ok()));
     expect(read(screen.getAllByRole('menuitemradio')).map((item) => item.checked)).toEqual(['true', 'false', 'false']); // answered, but main has not listed it
     rerender(<Chrome appSessionId={A} surface="panel" tab={tab({ viewport: MOBILE })} tabs={[]} owns room={ROOM} />);
     expect(read(screen.getAllByRole('menuitemradio')).map((item) => item.checked)).toEqual(['false', 'true', 'false']);
-    await user.click(screen.getAllByRole('menuitemradio')[0]!);
+    fireEvent.click(screen.getAllByRole('menuitemradio')[0]!);
     expect(calls('browser.tabs.setViewport').at(-1)).toEqual({ tabId: T1, viewport: null });
   });
 
@@ -727,10 +728,10 @@ describe('device sizes and Copy screenshot (U12a)', () => {
       return names;
     };
     const { rerender } = show({ tab: tab(), owns: true, room: null });
-    expect(await disabled()).toEqual([BROWSER_COPY.menu.viewport]);
+    expect(await disabled()).toEqual([BROWSER_COPY.menu.resetZoom, BROWSER_COPY.menu.viewport]); // at 100%: nothing to reset
     const internal = { kind: 'extension' as const, extensionId: 'nenbjdahllkkbfanbpfmmdacjencdfpg', title: 'Probe · Options' };
     rerender(<Chrome appSessionId={A} surface="panel" tab={tab({ url: `chrome-extension://${internal.extensionId}/options.html`, internal })} tabs={[]} owns room={ROOM} />);
-    expect(await disabled()).toEqual([BROWSER_COPY.menu.openExternal, BROWSER_COPY.menu.viewport, BROWSER_COPY.menu.copyUrl]);
+    expect(await disabled()).toEqual([BROWSER_COPY.menu.openExternal, BROWSER_COPY.menu.resetZoom, BROWSER_COPY.menu.viewport, BROWSER_COPY.menu.copyUrl]);
   });
 
   it('the chip: absent in Responsive and without room; with a size, the page’s real size, before the options menu, opening the three choices', async () => {
