@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { GitStatus } from '@shared/ipc/schema/git';
+import type { SessionRecord } from '@shared/graph/session';
 import { addressOf, bareOf } from '@shared/machine/address';
 import { digest, item, project, record, remoteRow, status, T0 } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
@@ -12,6 +13,7 @@ import { registerSlot, resetSlots } from '../../app/slots';
 import { queryClient } from '../../ipc/query';
 import { useAttention } from '../../stores/attention';
 import { useComposerStore } from '../../stores/composer';
+import { useGit } from '../../stores/git';
 import { storedLayout, useLayout } from '../../stores/layout';
 import { useSessions } from '../../stores/sessions';
 import { useTranscriptStore } from '../../stores/transcript';
@@ -270,5 +272,76 @@ describe('floating session cards', () => {
     expect(screen.queryByRole('region', { name: 'Environment' })).toBeNull();
     expect(fake.invoked('git.watch')).toEqual([]);
     expect(fake.invoked('library.list')).toEqual([]);
+  });
+});
+
+// UX wave U8c-2 (M4, §H; the owner's answers, Decision Log 14): the card says where the agent is. The folder row shows the
+// agent's own folder (the selector's `cwd`), cut at its start when it does not fit, whole in its tooltip; while the
+// working folder is not the launch folder, one muted line "moved from <the launch folder's name>" sits directly under it.
+describe('the Environment card follows the agent', () => {
+  const REPO = '/repo';
+  const W1 = '/repo/.claude/worktrees/w1';
+  const put = (over: Partial<SessionRecord>) => act(() => useSessions.setState((s) => ({ records: new Map(s.records).set(A, record(A, { projectId: P, directory: REPO, ...over })) })));
+  const byCd: Partial<SessionRecord> = { agentFolder: { checkout: W1, cwd: `${W1}/src`, branch: 'w1', linked: true } };
+  const byTool: Partial<SessionRecord> = { directory: `${W1}/src`, worktree: { path: W1, branch: 'w1' }, launchFolder: REPO };
+  const env = () => region('Environment');
+  const folderRow = () => within(env()).getByTestId('card-folder');
+  const movedFrom = () => within(env()).queryByTestId('moved-from');
+  const header = () => within(env()).getByRole('button', { expanded: true }).textContent;
+
+  it.each([['a cd', byCd], ['the worktree tool', byTool]])('after a move by %s: the agent’s folder in the row, cut at its start, and "moved from" directly under it', async (_how, over) => {
+    put(over);
+    mount();
+    expect(await within(env()).findByText('⎇ main')).toBeTruthy();
+    expect(fake.invoked('git.watch')).toEqual([{ directory: W1 }]); // git at the working folder
+    expect(folderRow().textContent).toBe(`${W1}/src`);
+    expect(folderRow().title).toBe(`${W1}/src`);
+    expect(folderRow().getAttribute('dir')).toBe('rtl'); // the browser's ellipsis at the path's start; the text itself runs left to right
+    const line = movedFrom()!;
+    expect(line.textContent).toBe('moved from repo');
+    expect(line.title).toBe(REPO);
+    expect(line.previousElementSibling?.contains(folderRow())).toBe(true); // directly under the folder row
+    expect(line.nextElementSibling?.textContent).toBe('⎇ main'); // above the branch row
+  });
+
+  it('draws no "moved from" at the launch folder nor in a sub-folder of it, and a change of sub-folder changes the row in place', async () => {
+    put({});
+    mount();
+    await within(env()).findByText('⎇ main');
+    expect(folderRow().textContent).toBe(REPO);
+    expect(folderRow().getAttribute('dir')).toBe('rtl'); // every session's card, moved or not
+    expect(movedFrom()).toBeNull();
+    const row = folderRow();
+    put({ agentFolder: { checkout: REPO, cwd: `${REPO}/packages/app`, branch: 'main', linked: false } });
+    await waitFor(() => expect(folderRow().textContent).toBe(`${REPO}/packages/app`));
+    expect(folderRow()).toBe(row); // the same row, its text changed
+    expect(movedFrom()).toBeNull();
+    expect(within(env()).getByText('⎇ main')).toBeTruthy();
+    expect(fake.invoked('git.watch')).toEqual([{ directory: REPO }]); // a change of the agent's folder alone starts no watch
+  });
+
+  it('after a move, shows the new folder and the pending copy until git answers there; the old folder’s late answer changes nothing', async () => {
+    fake = fakeClient({
+      'git.diff': { patch: '', files: [{ path: 'a.ts', oldPath: null, insertions: 3, deletions: 1, binary: false }] }, 'git.unwatch': undefined,
+      'layout.get': { value: null }, 'layout.set': undefined,
+      'session.observedFacts': { version: 1, appSessionId: MAIN.A, engineSessionId: null, writtenAt: '2026-10-01T00:00:00Z', source: 'journal', launches: [], engineVersion: null, model: null, effort: null, mode: null, outputStyle: null, plugins: null, contextUsage: null, complete: true },
+    });
+    window.maws = preloadOf(fake);
+    useGit.setState({ entries: new Map() });
+    put({});
+    mount();
+    await waitFor(() => expect(fake.invoked('git.watch')).toEqual([{ directory: REPO }])); // unanswered
+    put(byCd);
+    await waitFor(() => expect(fake.invoked('git.watch')).toEqual([{ directory: REPO }, { directory: W1 }]));
+    expect(folderRow().textContent).toBe(`${W1}/src`);
+    await act(() => fake.reply('git.watch', { ...GIT, repoRoot: REPO }, 0)); // the launch folder's answer, late
+    expect(within(env()).queryByText('⎇ main')).toBeNull();
+    expect(within(env()).queryByTestId('change-line')).toBeNull();
+    expect(within(env()).getAllByText(SUMMARY_COPY.pending).length).toBeGreaterThan(0); // the one pending row
+    expect(header()).toContain(SUMMARY_COPY.pending);
+    await act(() => fake.reply('git.watch', { ...GIT, repoRoot: W1, branch: 'w1' }, 0));
+    expect(await within(env()).findByText('⎇ w1')).toBeTruthy();
+    expect(header()).toContain('w1');
+    expect(movedFrom()?.textContent).toBe('moved from repo');
   });
 });

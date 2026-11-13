@@ -559,6 +559,18 @@ describe("composer DOM under C5's dispatcher", () => {
     expect(invoked('engine.models')).toContainEqual({ refresh: false, gateway: 'gateway', cwd: '/work/app-a' });
   });
 
+  // UX wave U8c-2 (M4 decision 1): the composer's folder (its `@` list, its git watch, the catalogue it names models from)
+  // is the agent's folder the record says, ahead of the engine's status folder, which a session MAWS runs reports a turn late.
+  it('reads its folder from the record, not from the engine’s status folder', async () => {
+    const direct = { mode: 'direct' as const, baseUrl: null, verified: 'direct' as const, autoModeServer: 'unknown' as const, localLane: null };
+    const W1 = '/work/app-a/.claude/worktrees/w1';
+    live(A, { status: { cwd: '/work/app-a', gateway: direct }, record: { agentFolder: { checkout: W1, cwd: `${W1}/src`, branch: 'w1', linked: true } } });
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(invoked('engine.models')).toContainEqual({ refresh: false, gateway: 'direct', cwd: `${W1}/src` }));
+    expect(invoked('engine.models')).not.toContainEqual(expect.objectContaining({ cwd: '/work/app-a' }));
+    expect(invoked('git.watch')).toContainEqual({ directory: `${W1}/src` });
+  });
+
   // P2-F wave S (S-chip; the sitting's A1.6): after a set_model on a live session the chip names the model asked for,
   // marked as the selector marks its row, until an init frame reports running it
   it('the model chip names a model asked for and not yet reported, marked setting…, until the engine reports it', async () => {

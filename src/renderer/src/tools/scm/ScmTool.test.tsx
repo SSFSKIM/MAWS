@@ -91,3 +91,53 @@ describe('the source control tool’s registration', () => {
     expect(panelOf(at(A))!.tabs).toEqual([]);
   });
 });
+
+// UX wave U8c-2 (M4 decision 6, §I): the page starts over in the agent's new folder as it does for another session, the
+// commit message kept; while the session is away from its launch folder it draws its reads and none of its acts.
+describe('the agent away from the launch folder', () => {
+  const WT = `${DIR}/.claude/worktrees/w1`;
+  const moveTo = (checkout: string | null) =>
+    act(() => useSessions.setState((s) => ({ records: new Map(s.records).set(at(A), record(at(A), { directory: DIR, ...(checkout ? { agentFolder: { checkout, cwd: checkout, branch: 'w1', linked: true } } : {}) })) })));
+  const acts = () => document.querySelectorAll('[data-scm-action], [data-scm-remote-action="push"], [data-scm-remote-action="pr"], [data-scm-sheet]').length;
+  const unstaged = () => screen.getByRole('region', { name: 'Unstaged' });
+
+  it('draws the page’s reads and no act while the session is moved, and every act again at the launch folder, the commit message kept', async () => {
+    openScm();
+    render(<TestHost />);
+    await waitFor(() => expect(unstaged()).toBeTruthy());
+    fireEvent.change(draft(), { target: { value: 'Keep me' } });
+    expect(acts()).toBeGreaterThan(0);
+    moveTo(WT);
+    await waitFor(() => expect(main.callsOf('git.watch')).toContainEqual({ directory: WT }));
+    await waitFor(() => expect(unstaged()).toBeTruthy());
+    expect(document.querySelector('[data-scm-header]')?.textContent).toContain('main'); // the branch line
+    expect(acts()).toBe(0); // no Push or Open PR, no button on a row or a group, no sheet
+    expect(screen.queryByRole('textbox', { name: 'Commit message' })).toBeNull(); // no commit form
+    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-scm-row][data-path="src/app.ts"] [data-scm-select]')!);
+    await waitFor(() => expect(fileHeader()).toBe('src/app.ts · Modified')); // its diff is a read
+    moveTo(null);
+    await waitFor(() => expect(draft().value).toBe('Keep me'));
+    expect(acts()).toBeGreaterThan(0);
+  });
+
+  // Held open: a Discard sheet is open on the launch folder's page when the agent moves.
+  it('closes a sheet open at a move and clears the selection, leaving no control to confirm it', async () => {
+    openScm();
+    render(<TestHost />);
+    await waitFor(() => expect(unstaged()).toBeTruthy());
+    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-scm-row][data-path="src/app.ts"] [data-scm-select]')!);
+    expect(selectedRow()).toBe('src/app.ts');
+    fireEvent.click(screen.getByRole('button', { name: 'Discard changes to src/app.ts' }));
+    await waitFor(() => expect(document.querySelector('[data-scm-sheet="discard"]')).not.toBeNull());
+    moveTo(WT);
+    await waitFor(() => expect(main.callsOf('git.watch')).toContainEqual({ directory: WT }));
+    await waitFor(() => expect(unstaged()).toBeTruthy());
+    expect(document.querySelector('[data-scm-sheet]')).toBeNull();
+    expect(selectedRow()).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Discard/ })).toBeNull();
+    moveTo(null);
+    await waitFor(() => expect(draft()).toBeTruthy());
+    expect(document.querySelector('[data-scm-sheet]')).toBeNull(); // the sheet is not opened again on return
+    expect(selectedRow()).toBeNull();
+  });
+});

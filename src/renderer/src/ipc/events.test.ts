@@ -19,6 +19,8 @@ import { allTabs } from '../stores/layout-model';
 import { createMachinesStore, selectOffline } from '../stores/machines';
 import { createSessionsStore } from '../stores/sessions';
 import { connectShell, ONE_STRIP_NOTICE } from './events';
+import { queryClient } from './query';
+import { prStateKey, scmStatusKey } from '../tools/scm/queries';
 import { useNotices } from '../stores/notices';
 import { ownersLabel } from '../sidebar/owners'; // P5 O8 M5
 import { resetRemoteLaneBStore } from '../lane-b/remote-session'; // P5 O7 M2
@@ -112,6 +114,29 @@ describe('shell event subscription', () => {
     fake.event('session.changed', { record: record('a', { projectId: 'p2' as ProjectId }), cause: 'update', revision: 2 });
     expect(stores.layout.getState().main).toBe(before);
     expect(tabIds(stores)).toEqual([`session:${A}`]);
+  });
+
+  // UX wave U8c-2 (M4 decision 2): the card's pull-request row reads `scm.status` and `scm.pr.state` keyed by the session
+  // alone, so a change of the session's working folder asks both again; a change that leaves the folder asks neither.
+  it('asks the pull-request row’s two reads again when a record’s working folder changes, and for no other change', async () => {
+    const { fake } = setup();
+    await answerSnapshots(fake);
+    try {
+      for (const key of [prStateKey(A), scmStatusKey(A)]) queryClient.setQueryData(key, { kept: true });
+      const asked = () => [prStateKey(A), scmStatusKey(A)].map((key) => queryClient.getQueryState(key)?.isInvalidated ?? null);
+      const moved = { agentFolder: { checkout: '/work/a/.claude/worktrees/w1', cwd: '/work/a/.claude/worktrees/w1/src', branch: 'w1', linked: true } };
+      fake.event('session.changed', { record: record('a', { title: { text: 'renamed', source: 'user' } }), cause: 'update', revision: 2 });
+      expect(asked()).toEqual([false, false]);
+      fake.event('session.changed', { record: record('a', moved), cause: 'facts', revision: 3 });
+      expect(asked()).toEqual([true, true]);
+      for (const key of [prStateKey(A), scmStatusKey(A)]) queryClient.setQueryData(key, { kept: true });
+      fake.event('session.changed', { record: record('a', { agentFolder: { ...moved.agentFolder, cwd: '/work/a/.claude/worktrees/w1/lib' } }), cause: 'facts', revision: 4 });
+      expect(asked()).toEqual([false, false]); // the agent's folder alone: the checkout is the same
+      fake.event('session.changed', { record: record('a'), cause: 'facts', revision: 5 }); // back at the launch folder
+      expect(asked()).toEqual([true, true]);
+    } finally {
+      queryClient.clear();
+    }
   });
 
   // U13a (its plan's §G): a read that merged a stored value's sets into the one strip says so, once per such read.

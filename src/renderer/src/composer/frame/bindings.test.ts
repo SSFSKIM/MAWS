@@ -93,6 +93,19 @@ describe('the frame binds its chips to the setup intent or to the live session',
     expect(b.mode.value).toBe('auto');
   });
 
+  // UX wave U8c-2 (M4 decisions 1, 3 and 10): a live session's chip names the selector's working folder (the checkout, not
+  // the folder inside it) and the branch recorded for it, ahead of the engine's status folder, which counts only while the
+  // window holds no record.
+  it('names the working folder and its recorded branch from the record, the status folder only without one', () => {
+    const s = { ...status(APP), cwd: '/somewhere/else' };
+    const W1 = '/repo/.claude/worktrees/w1';
+    const moved = record(APP, { directory: '/repo', branch: 'main', agentFolder: { checkout: W1, cwd: `${W1}/src`, branch: 'w1', linked: true } });
+    expect(liveBindings(s, moved, {}).location).toMatchObject({ path: W1, branch: 'w1' });
+    const inside = record(APP, { directory: `${W1}/src`, branch: 'w1', worktree: { path: W1, branch: 'w1' } });
+    expect(liveBindings(s, inside, {}).location.path).toBe(W1); // a terminal session's chip names the same
+    expect(liveBindings(s, null, {}).location.path).toBe('/somewhere/else');
+  });
+
   // W9 (H2): the record's branch only until git has answered; git's answer after, the record never again
   it('names the branch by git once it has answered: its branch, "detached", or none for a folder that is no repository', () => {
     const s = { ...status(APP), cwd: '/tmp/not-a-repo' };

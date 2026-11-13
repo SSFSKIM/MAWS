@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { GitFileStatus } from '@shared/ipc/schema/git';
 import { A, B, DIR, statusOf } from '../../test-support/scm';
 import { groupsOf } from './groups';
-import { applyRequest, createScmUi, followSelection, forSession, relativeTarget, selectFile, selectionKey, toggleCollapsed } from './view-state';
+import { applyRequest, createScmUi, followSelection, forFolder, forSession, relativeTarget, selectFile, selectionKey, toggleCollapsed } from './view-state';
 
 const file = (path: string, index: string, worktree: string): GitFileStatus => ({ path, oldPath: null, index, worktree, untracked: false });
 const untracked = (path: string): GitFileStatus => ({ path, oldPath: null, index: '?', worktree: '?', untracked: true });
@@ -63,6 +63,40 @@ describe('source control view state', () => {
     expect(store.getState()).toMatchObject({ session: A, message: 'Fix the parser', noVerify: true });
     store.setState(forSession(store.getState(), B));
     expect(store.getState()).toMatchObject({ session: B, message: 'B’s draft', noVerify: false });
+  });
+
+  // UX wave U8c-2 (M4 decision 6): a change of the session's working folder starts the page over as another session does,
+  // and keeps the commit message and Skip hooks, which come back in the form when the session is at its launch folder.
+  it('starts over for the agent’s new folder, keeping the commit draft', () => {
+    const store = createScmUi({ session: A, directory: DIR });
+    store.setState({
+      message: 'Fix the parser',
+      noVerify: true,
+      selected: { group: 'unstaged', path: 'a.ts' },
+      hunk: 2,
+      scrollTop: 40,
+      mode: 'split',
+      sheet: { kind: 'discard', entries: [{ path: 'a.ts', group: 'unstaged' }] },
+      lastCommit: { sha: 'abc', subject: 'x' },
+      notice: { kind: 'git_failed', text: 'hook failed', output: 'nope' },
+      output: true,
+    });
+    store.setState(forFolder(store.getState(), '/wt'));
+    expect(store.getState()).toMatchObject({
+      session: A,
+      directory: '/wt',
+      message: 'Fix the parser',
+      noVerify: true,
+      selected: null,
+      hunk: 0,
+      scrollTop: 0,
+      sheet: null,
+      lastCommit: null,
+      notice: null,
+      output: false,
+      mode: 'split',
+    });
+    expect(forFolder(store.getState(), '/wt')).toEqual({});
   });
 
   it('answers no change for the session it already shows', () => {
