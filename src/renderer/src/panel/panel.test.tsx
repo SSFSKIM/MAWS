@@ -426,4 +426,20 @@ describe('the keyboard after a tab moves between groups', () => {
     expect(group('lower')).toBeNull();
     expect(document.activeElement).toBe(tabIn('upper', 'Review'));
   });
+
+  // The wave's task review: moving the upper group's last tab below joins both groups into the upper one, so the tab
+  // stays in the strip it was moved from, and the keyboard stays on it there.
+  it('a move that empties the upper group leaves the keyboard on the moved tab in the one strip left', async () => {
+    const user = userEvent.setup();
+    register(probeTool('review', { title: 'Review', multiInstance: false }).tool, probeTool('files', { title: 'Files' }).tool, probeTool('terminal', { title: 'Terminal' }).tool);
+    renderHost();
+    act(() => void panelHost.addTool('review', { appSessionId: A }));
+    act(() => void panelHost.addTool('files', { appSessionId: A }));
+    act(() => void panelHost.addTool('terminal', { appSessionId: A }));
+    await moveByKeyboard(user, 'upper', 'Files', 'Move below');
+    await moveByKeyboard(user, 'upper', 'Review', 'Move below'); // the upper group keeps Terminal alone
+    await moveByKeyboard(user, 'upper', 'Terminal', 'Move below');
+    expect(group('lower')).toBeNull();
+    expect(document.activeElement).toBe(tabIn('upper', 'Terminal'));
+  });
 });

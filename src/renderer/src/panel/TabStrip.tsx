@@ -40,11 +40,16 @@ export function TabStrip({ appSessionId, group, tabs, activeTabId, bodyId, trail
   // a group to join, above from the lower group.
   const moveTo: SideGroupName | null = group === 'lower' ? 'upper' : split || tabs.length > 1 ? 'lower' : null;
   // The tab comes into view in the other group's strip, where it mounts again; the keyboard goes to its button there, that
-  // strip's Tab stop (the branch review's finding 4: the strip decides where the keyboard lands after its own act).
-  const move = (tabId: string, to: SideGroupName) => {
+  // strip's Tab stop (the branch review's finding 4: the strip decides where the keyboard lands after its own act). Answers
+  // the group the tab ended up in: not the one asked for when the move was refused, or when it emptied the upper group,
+  // which joins both groups into the upper one (`groupsAfterMove`); then the hand-off is dropped and the tab keeps the
+  // keyboard in this strip.
+  const move = (tabId: string, to: SideGroupName): SideGroupName | null => {
     handKeyboardTo(tabId, to);
     useLayout.getState().moveSurfaceTab(appSessionId, tabId, to);
-    if (groupOf(sideGroups(useLayout.getState(), appSessionId), tabId) !== to) takesKeyboard(tabId, to); // refused: the hand-off is dropped
+    const landed = groupOf(sideGroups(useLayout.getState(), appSessionId), tabId);
+    if (landed !== to) takesKeyboard(tabId, to);
+    return landed;
   };
   // Arrow keys move focus along the tabs (the WAI-ARIA tabs pattern, manual activation).
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -156,7 +161,7 @@ interface TabProps {
   bodyId: string;
   onSelect(): void;
   moveTo: SideGroupName | null; // the group its menu offers to move it to
-  onMove(to: SideGroupName): void;
+  onMove(to: SideGroupName): SideGroupName | null; // answers the group the tab ended up in
 }
 
 function Tab({ tab, group, selected, shape, maxWidth, canPin, bodyId, onSelect, moveTo, onMove }: TabProps) {
@@ -236,7 +241,7 @@ function Tab({ tab, group, selected, shape, maxWidth, canPin, bodyId, onSelect, 
             <ContextMenu.Item
               onSelect={() => {
                 moved.current = true;
-                onMove(moveTo);
+                if (onMove(moveTo) === group) button.current?.focus(); // still in this strip: no remount takes the keyboard
               }}
               className={MENU_ITEM}
             >
