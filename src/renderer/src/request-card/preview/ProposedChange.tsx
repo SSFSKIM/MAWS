@@ -21,8 +21,12 @@ type PermissionEvent = Extract<SessionEvent, { kind: 'permission.requested' }>;
 const EditDiff = lazy(() => import('../../transcript/view/cells/EditDetail').then((module) => ({ default: module.EditDiff })));
 
 // Collapsed, the diff shows this many lines (`.transcript-diff-line` is 1.75 × --text-code tall, transcript.css) and
-// clips the rest; the borders around and between its hunks are a pixel each.
-const COLLAPSED_LINES = 12;
+// clips the rest; the borders around and between its hunks are a pixel each. The region below holds the bound, never
+// `.transcript-diff`'s own 240 px: transcript.css declares that outside any cascade layer, where it outranks every normal
+// (layered) utility, so the card lifts it with important utilities, scoped to this region; the transcript's own drawing
+// is untouched.
+export const COLLAPSED_LINES = 12;
+export const LIFTS_INNER_BOUND = '[&_.transcript-diff]:max-h-none! [&_.transcript-diff]:overflow-visible!';
 
 function Diff({ request, hunks, change }: { request: PermissionEvent; hunks: Hunk[]; change: 'create' | 'update' }) {
   const [whole, setWhole] = useState(false);
@@ -34,7 +38,7 @@ function Diff({ request, hunks, change }: { request: PermissionEvent; hunks: Hun
     <div className="flex flex-col gap-1">
       <div
         data-proposed-diff={whole ? 'whole' : 'collapsed'}
-        className={`[&_.transcript-diff]:max-h-none [&_.transcript-diff]:overflow-visible ${whole ? 'max-h-[60vh] overflow-auto' : 'overflow-x-auto overflow-y-hidden'}`}
+        className={`${LIFTS_INNER_BOUND} ${whole ? 'max-h-[60vh] overflow-auto' : 'overflow-x-auto overflow-y-hidden'}`}
         style={whole ? undefined : { maxHeight: `calc(${COLLAPSED_LINES} * 1.75 * var(--text-code) + ${hunks.length + 1}px)` }}
       >
         <Suspense fallback={<FileEdits request={request} />}>

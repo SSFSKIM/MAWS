@@ -13,7 +13,7 @@ import type { Hunk } from '../../transcript/model/rows';
 import { EditDiff } from '../../transcript/view/cells/EditDetail';
 import { permission, type PermissionEvent } from '../test-requests';
 import type { Proposed } from './proposed';
-import { ProposedChange } from './ProposedChange';
+import { COLLAPSED_LINES, LIFTS_INNER_BOUND, ProposedChange } from './ProposedChange';
 
 const APP = at('app-proposed' as AppSessionId);
 const BUDGET = 64 * 1024; // EditDiff's own bound on line text (TRUNCATE_OVER)
@@ -63,10 +63,30 @@ describe('the diff', () => {
     expect(showAll()).toBeNull();
   });
 
-  it('offers "Show all" once the change is taller than its capped height', async () => {
+  it('offers "Show all" once the change is taller than its capped height: twelve lines fit, thirteen do not', async () => {
+    expect(COLLAPSED_LINES).toBe(12);
+    draw(diff([added(Array.from({ length: 12 }, (_, i) => `line ${i + 1}`))], 'create'));
+    await screen.findByText('line 12');
+    expect(showAll()).toBeNull();
+    cleanup();
     draw(diff([added(Array.from({ length: 13 }, (_, i) => `line ${i + 1}`))], 'create'));
     await screen.findByText('line 13');
     expect(showAll()).not.toBeNull();
+  });
+
+  it('holds the bound in its own region, lifting the transcript’s 240 px with important utilities, collapsed and expanded', async () => {
+    // happy-dom computes no cascade: this pins the classes; the computed values are M7's Electron scene
+    expect(LIFTS_INNER_BOUND.split(' ')).toEqual(['[&_.transcript-diff]:max-h-none!', '[&_.transcript-diff]:overflow-visible!']);
+    draw(diff([added(Array.from({ length: 13 }, (_, i) => `line ${i + 1}`))], 'create'));
+    await screen.findByText('line 13');
+    const region = document.querySelector<HTMLElement>('[data-proposed-diff]')!;
+    expect(region.dataset.proposedDiff).toBe('collapsed');
+    expect(region.className.split(' ')).toEqual(expect.arrayContaining([...LIFTS_INNER_BOUND.split(' '), 'overflow-y-hidden']));
+    expect(region.style.maxHeight).toBe('calc(12 * 1.75 * var(--text-code) + 2px)');
+    await userEvent.setup().click(showAll()!);
+    expect(region.dataset.proposedDiff).toBe('whole');
+    expect(region.className.split(' ')).toEqual(expect.arrayContaining([...LIFTS_INNER_BOUND.split(' '), 'max-h-[60vh]', 'overflow-auto']));
+    expect(region.style.maxHeight).toBe('');
   });
 
   it('a change past EditDiff’s budget leaves lines out while collapsed, and holds every line after "Show all"', async () => {
