@@ -31,7 +31,7 @@ How to see it working: the unit tests named under each milestone fail before its
 - [x] (2026-11-12 03:55Z) M3 — one scrim, also where dialogs stack; the Channel's gutter and names (`ba1ffbf36`, `1478db973`, `22b9fa856`; the review's two fix waves, `744dec08e`, `66dc8ad00`, `f0845e1d9`, `2350849f1`), reviewed clean.
 - [x] (2026-11-12 03:55Z) Master `e71334239` merged (`b622bdc1a`): U6a's keymap is on the branch, so M5 is released.
 - [x] (2026-11-12 03:41Z) M4 — the Channel says it is offline, or refused (`d3c3fa456`, `e1d925148`, `0adbfd07c`; the review's fix, a refusal that stands through another tab's open, `3ffc6dd65`, `8a6a631c2`), reviewed clean. P4 waits for a Mac.
-- [ ] M5 — the Channel from the palette and the View menu.
+- [x] (2026-11-12 04:50Z) M5 — the Channel from the palette and the View menu (`7f1590056` to `139c6038b`; the review's fix, a listed-only lane A session, `f03ac349b`, `205a869ea`), reviewed clean. (`f0994be8c`, a debugging commit of the test, lacks the trailer; it is not amended, the branch is never force-pushed.)
 - [ ] M6 — the Connectors dialog.
 - [ ] M7 — Plugins, Connectors and Skills before the first message.
 - [x] (2026-11-12) P1's verdict: both kinds promote as designed (runs 43357272365, 43358963647); M8 is released, after M7 in the order.
@@ -1172,6 +1172,13 @@ Found while checking the sections against the code at `48619c824`, then by the a
 - Decision: the owner's three answers on the drawn Settings page (P5). (1) Settings begins with the everyday preferences, the engine last ("Preferences first"). (2) Org has no group heading of its own in the index ("No heading"). (3) The section that holds the supervisor and the memory budget is named "Supervisor". Each is the answer §G and M9 were written to, so nothing in §G changes.
   Rationale: the owner's call on the page the architect drew and measured (The owner's look).
   Date/Author: 2026-11-12, the owner (relayed by the wave's architect); folded by the controller.
+
+- Decision: M5's means. U6a's two settings-tab tests that held every row to a Change control now loop over build F's ids and also assert `channel.open` shows none (both files are this child's). The rule "has a channel" is held equal to both sidebar menus by a DOM test that opens each row's real menu (`channel/has-channel.test.tsx`). `channelOfRow` does not check that the row is listed while `channelProjects` lists listed rows only, so a hidden project gets no palette entry but a session in it can still use the menu action. Two rows of one project id make one entry; entries are in name order. Only session and Channel tabs give the front a project; a Channel tab in front keeps the action enabled. An unstarted tab's project is read with `ipc/events.ts`'s intent closure, without its "machine not loaded" gate. The palette hook and the opener live in `channel/open-action.ts`, so `project.ts` stays pure. Entry elements are marked `data-channel-name` and `data-channel-count`.
+  Rationale: each follows §F and keeps M5's edits in U6's files to the named insertions.
+  Date/Author: 2026-11-12, M5's executor; folded by the controller.
+- Decision (M5's review, ruled by the architect 2026-11-12): a session tab with no record but a listing takes its row from `rowOfListed(index, listing)`, the row the sidebar files the listing under, and from the listing's `orgKey` where every checkout of its project here is hidden (as `setKeyOfListed` does for lane B); every other session tab goes through `sessionSetKey`, which is not changed.
+  Rationale: a terminal session on another machine known only by its listing (lane A) is a session tab of a project with a channel, and `sessionSetKey` resolves a record-less listing only for lane B. Rejected: editing `stores/org-projects.ts`, outside M5's insertions (its other callers' gap is residue).
+  Date/Author: 2026-11-12, M5's executor on the task review; the wave's architect (the ruling).
 
 ## Outcomes & Retrospective
 
