@@ -51,7 +51,7 @@ Every check ran on the wave's VM through `vmcheck.sh`, against the pushed head o
 | renderer reruns of the non-known failures, on the branch and on master | `5f06bae5d` / master `5c9cfa0c5` | `ScmShell.test.tsx` and `viewer.test.tsx` fail on master the same way. `subagents`, `Library` and transcript `fixtures` pass on the rerun (load) |
 | `vitest run src/renderer/src/shell src/renderer/src/app src/renderer/src/panel src/renderer/src/stores src/shared/ipc/schema` | `d316535b0` | 106 files and 1701 tests passed, exit 0 |
 | eslint over the last test changes | `d316535b0` | exit 0 |
-| `pnpm test` (whole), final run | `d316535b0` | see "The final whole run" below |
+| `pnpm test` (whole), final run, on the new VM `dc-uxwave2-e584` (load under 1) | `29f5417bc` (the code of `d316535b0`, plus this report) | 2485 files passed, 6 failed; 35918 tests passed, 42 failed, 142 skipped. All 42 are the VM's known set: desk-hub `test/deploy/{hub-reads,production-scripts,staging-scripts}`, `services/machine/setup.test.ts`, `shared/machine/git-reads.test.ts`, `test/artifacts/portability.test.ts`. `ScmShell` and `viewer` pass here |
 
 What the first whole run's other failures are:
 
@@ -166,9 +166,10 @@ No stop was met. No contract of another child changed, and nothing the owner see
 ## Friction
 
 - **GitHub refused one branch push** (`remote rejected (failed)`) at `61f2efd5d`. An immediate retry went through, confirmed with `ls-remote`. The VM run chained after it tested the old head and was rerun. This is logged in the friction tracker (`MAWS/conditional/github-transient-rejection-of-ci-gate-scratch-ref-push.md`).
-- **The VM's ssh link dropped during long runs** (exit 255, or the output cut short). The workaround was to keep each run's output in a file on the VM and read it back afterwards. The final whole suite ran detached under `nohup`.
+- **The VM's ssh link dropped during long runs** (exit 255, or the output cut short). The workaround was to keep each run's output in a file on the VM and read it back afterwards; the whole suite runs detached under `nohup`, polled for its status file.
+- **The branch moved to the VM `dc-uxwave2-e584`** during the run, on the architect's word, because the first VM had reached load 31. My detached run there was stopped (its status was 143), and the final whole suite ran again on the new VM.
 
 ## Residue
 
 - **The `Shell.panel.test.tsx` case "an addTool before hydration writes nothing…".** It asserts that the 250 ms write-back has not fired yet, which the shared VM's load can break; it failed once and passed alone, as its whole file and on the rerun. A ticket could make it wait on fake timers.
-- **`ScmShell.test.tsx` ("draws the selected file's hunks…") and `viewer.test.tsx` ("a follow-the-file re-read…") fail on master on the VM.** They belong to no child of this landing and deserve a look from their owners.
+- **`ScmShell.test.tsx` ("draws the selected file's hunks…") and `viewer.test.tsx` ("a follow-the-file re-read…") failed on master on the loaded VM** (load 17 to 33) and passed in the final run on the unloaded one. They look load-bound (a `waitFor` and a 5 s time-out), as do the timing failures of the first whole run. Probably no ticket; at most a note for the wave's account of the VM's noise.

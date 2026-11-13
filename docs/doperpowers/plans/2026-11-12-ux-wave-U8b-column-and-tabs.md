@@ -18,7 +18,7 @@ How to see it working, on the wave's build: open a session with nothing running 
 - [x] (2026-11-12) The drawn example sent to the owner, with four choices (Proof that an executor does not run).
 - [x] (2026-11-12) Revised once on the review, the architect's eight rulings and the drawn example (Decision Log 2).
 - [ ] Step 0 (U6a, U8a) is on master and the branch has merged it (Constraints 9). (2026-11-12) U8a is: master `7e5f2016c` merged at `25ce07b97`. U6a is not yet. M1 was built ahead of it on the architect's word (Decision Log 3).
-- [ ] M1 — what is stored, its readers, the side column's acts, and the two widths. (2026-11-12) Built; its proof is green on the VM (the checks are in the report file). Waiting for the boundary review.
+- [ ] M1 — what is stored, its readers, the side column's acts, and the two widths. (2026-11-12) Built at `d316535b0`. Its proof is green on the VM: M1's suites, the whole typecheck, and the whole unit suite at `29f5417bc` with only the VM's known failures (the report file has the runs). Waiting for the boundary review.
 - [ ] M2 — one strip, one tab in view
 - [ ] M3 — the second group
 - [ ] M4 — the card column
