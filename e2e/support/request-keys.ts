@@ -57,19 +57,24 @@ export async function pastGrace(page: Page, card: Locator): Promise<void> {
 }
 
 // A chord dispatched by the page itself at the frame `frame` (a selector), `after` ms after that frame first holds a keyed
-// button: the one way a scene can be sure a key lands inside a prompt's first 400 ms on a loaded machine. Armed before
-// the prompt is drawn; `earlyPress` then answers how long after the drawing the key went (the scene asserts it was
-// inside the 400 ms, so a slow page fails the scene rather than passing it).
+// button: the one way a scene can be sure a key lands inside a prompt's first 400 ms on a loaded machine. The frame is
+// focused first, as a real press would find it: the keymap's dispatcher gives a key to a binding only when both the
+// event's target and the focused element are inside it, so a key sent at an unfocused frame would answer nothing for a
+// reason other than the 400 ms. Armed before the prompt is drawn; `earlyPress` then answers how long after the drawing
+// the key went and whether the frame held the focus when it did (the scene asserts both, so a slow page or a lost focus
+// fails the scene rather than passing it).
 export async function armEarlyPress(page: Page, opts: { frame: string; key: string; meta?: boolean; shift?: boolean; after: number }): Promise<void> {
   await page.evaluate(({ frame, key, meta, shift, after }) => {
-    (window as unknown as { __u1aEarly?: Promise<number> }).__u1aEarly = new Promise<number>((resolve) => {
+    (window as unknown as { __u1aEarly?: Promise<EarlyPress> }).__u1aEarly = new Promise<EarlyPress>((resolve) => {
       const look = (): boolean => {
         const target = document.querySelector(frame);
         if (target === null || target.querySelector('[aria-keyshortcuts]') === null) return false;
         const at = performance.now();
         setTimeout(() => {
-          target.dispatchEvent(new KeyboardEvent('keydown', { key, code: key, metaKey: meta, shiftKey: shift, bubbles: true, cancelable: true }));
-          resolve(performance.now() - at);
+          (target as HTMLElement).focus();
+          const focused = document.activeElement !== null && target.contains(document.activeElement);
+          if (focused) target.dispatchEvent(new KeyboardEvent('keydown', { key, code: key, metaKey: meta, shiftKey: shift, bubbles: true, cancelable: true }));
+          resolve({ after: performance.now() - at, focused });
         }, after);
         return true;
       };
@@ -82,7 +87,8 @@ export async function armEarlyPress(page: Page, opts: { frame: string; key: stri
   }, { frame: opts.frame, key: opts.key, meta: opts.meta ?? false, shift: opts.shift ?? false, after: opts.after });
 }
 
-export const earlyPress = (page: Page): Promise<number> => page.evaluate(() => (window as unknown as { __u1aEarly: Promise<number> }).__u1aEarly);
+type EarlyPress = { after: number; focused: boolean };
+export const earlyPress = (page: Page): Promise<EarlyPress> => page.evaluate(() => (window as unknown as { __u1aEarly: Promise<EarlyPress> }).__u1aEarly);
 
 // The session scope on a permission prompt (§D): its own button, the third, or, beside a project rule ("Always allow in
 // <project>"), the one entry of the menu on Allow once; Allow once where the prompt offers no lasting scope (an ask rule).

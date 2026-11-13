@@ -841,7 +841,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     // Reply naming it
     const request = card.locator('[data-request-card]');
     await expect(request).toBeVisible({ timeout: 20_000 });
-    await expect(request).toContainText('Approval needed');
+    await expect(request.getByRole('heading', { name: 'Run a command' }), 'the loaded card says what is asked (U1a §D)').toBeVisible({ timeout: 20_000 });
     await expect(request).toContainText('echo first-step');
     const strip = card.locator('[data-needs-you]');
     await expect(strip).toContainText('Waiting for your permission');
@@ -955,7 +955,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     // the thread reads the page (allowed by a rule) and asks to publish over it: C7's request card inside the card and the
     // strip, then Allow there
     const request = card.locator('[data-request-card]');
-    await expect(request).toContainText('Approval needed', { timeout: 20_000 });
+    await expect(request.getByRole('button', { name: 'Allow once', exact: true }), 'the loaded permission card').toBeVisible({ timeout: 20_000 });
     await expect(card.locator('[data-needs-you]')).toContainText('Waiting for your permission');
     // P3-F (a diagnostic, not a fix): the request's identity and the public pending state are read before the two clicks
     // (so they follow each other as before), and again, collected alongside the poll and never awaited before it, from the

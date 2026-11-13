@@ -343,7 +343,7 @@ async function drive(live: Live, scope: Locator, id: string, what: string, until
     const resolved = new Set(ofKind(all, 'permission.resolved').map((e) => e.requestId));
     const open = ofKind(all, 'permission.requested').filter((e) => !resolved.has(e.requestId));
     if (open.length > 0) {
-      const frame = scope.getByRole('group', { name: 'Approval needed' }).or(scope.locator('[data-request-card]').filter({ hasText: 'Approval needed' })).first(); // P2-E1
+      const frame = scope.getByRole('group', { name: 'Approval needed' }).or(scope.locator('[data-request-card]').filter({ has: live.page.getByRole('button', { name: 'Allow once', exact: true }) })).first(); // P2-E1
       const allow = frame.getByRole('button', { name: 'Allow once', exact: true });
       if ((await allow.isVisible().catch(() => false)) && (await allow.isEnabled().catch(() => false))) {
         await allow.click();

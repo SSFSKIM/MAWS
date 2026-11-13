@@ -281,7 +281,9 @@ test('the three keys on their buttons; ⌘Enter inside the first 400 ms answers 
     await expect(button).toHaveAttribute('aria-keyshortcuts', keys);
     await expect(button.locator('kbd')).toHaveText(hint);
   }
-  expect(await earlyPress(page), 'the early ⌘Enter went inside the prompt’s first 400 ms').toBeLessThan(400);
+  const early = await earlyPress(page);
+  expect(early.focused, 'the early ⌘Enter went to the frame holding the focus').toBe(true);
+  expect(early.after, 'the early ⌘Enter went inside the prompt’s first 400 ms').toBeLessThan(400);
   await page.waitForTimeout(300);
   expect(await resolved(page, 'c7-keys', 'permission.resolved'), 'a key inside the first 400 ms answers nothing').toEqual([]);
   await answerByKey(page, { focus: frame, control: lasting, key: ALLOW_LASTING_KEY, answered: async () => (await resolved(page, 'c7-keys', 'permission.resolved')).length > 0, what: 'c7-keys' });
@@ -693,6 +695,19 @@ test('a replayed plan: Implement names the mode before Plan, and its menu implem
   await expect(page.getByRole('menuitem')).toHaveText(['Implement · Manual', 'Implement · Accept edits']); // PLAN_NEXT_MODES, never Plan or the button's own
   await page.getByRole('menuitem', { name: 'Implement · Accept edits' }).click();
   await expect.poll(async () => (await resolved(page, 'c7-plan', 'plan.resolved')).map((e) => e.outcome)).toEqual(['implement']);
+  // The replay matches an answer by its request and behaviour alone, so the mode is read where the host wrote it: the
+  // session's journal holds the allow as sent, with the terminal's own setMode update naming the mode picked
+  const { journalPath } = value(await invoke(page, 'session.status', { appSessionId: 'c7-plan' }));
+  const sent = () =>
+    readFileSync(journalPath, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { direction: string; frame: { type: string; response?: { request_id?: string; response?: Record<string, unknown> } } })
+      .filter((row) => row.direction === 'out' && row.frame.type === 'control_response' && row.frame.response?.request_id === 'req-plan-next-mode-1')
+      .map((row) => row.frame.response!.response);
+  await expect
+    .poll(sent, { message: 'the plan answer as written' })
+    .toEqual([expect.objectContaining({ behavior: 'allow', updatedPermissions: [{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }] })]);
   expect(cards.consoleErrors()).toEqual([]);
 });
 
