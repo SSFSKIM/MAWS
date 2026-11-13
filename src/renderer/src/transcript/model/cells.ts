@@ -284,14 +284,15 @@ const TITLE_GIVING = new Set<string>([
 
 // What a run of events' results named: each id and handle a result gave a title to, the latest result's title kept.
 // Read leniently (any result of a tool that names artifacts, by the keys its JSON carries), so a result written by an
-// older build still names what it named.
+// older build still names what it named. A screenshot's and a delivery's result carry the artifact's id as
+// `deliverableId` and may carry its handle as `id`.
 export function artifactTitlesOf(events: readonly SessionEvent[]): Map<string, string> {
   const titles = new Map<string, string>();
   const tools = new Map<ToolUseId, string>();
   const named = (value: unknown) => {
     const item = record(value);
     if (typeof item.title !== 'string' || item.title === '') return;
-    for (const key of [item.artifactId, item.id, item.handle]) if (typeof key === 'string' && key !== '') titles.set(key, item.title);
+    for (const key of [item.artifactId, item.deliverableId, item.id, item.handle]) if (typeof key === 'string' && key !== '') titles.set(key, item.title);
   };
   for (const event of events) {
     if (event.kind === 'tool.use') tools.set(event.toolUseId, event.toolName);
