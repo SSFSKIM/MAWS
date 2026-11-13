@@ -60,6 +60,7 @@ import { SPAWN_WORDS, spawnOnMachine, spawnTargetOf, takeFirstSend, useSpawning,
 import { openDialog } from '../sessions/dialogs'; // P5 O7 M9: the machine's trust card
 import { useEffectiveEffort } from './effective-effort'; // W3
 import { autoFallbackNotice } from '@shared/sessions/models'; // W3
+import { workingFolder } from '@shared/sessions/working-folder';
 import { ResubmitLine } from './InlineEdit'; // W3 (B6)
 import { endedBindings, intentBindings, workspaceDirectoriesOf, type FrameBindings } from './frame/bindings';
 import { ContextRing } from './frame/ContextRing';
@@ -178,7 +179,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
 
   // ---- what the frame binds to ------------------------------------------------------------------------------------
   const location = setup?.intent.location ?? null; // New chat: null until a project is chosen
-  const cwd = setup ? (location === null ? '' : locationPath(location)) : (status?.cwd ?? record?.worktree?.path ?? record?.directory ?? ''); // M4c fix wave 1: an idle worktree session runs in its worktree
+  const cwd = setup ? (location === null ? '' : locationPath(location)) : (status?.cwd ?? (record ? workingFolder(record).cwd : '')); // M4c fix wave 1: an idle worktree session runs in its worktree
   const repo = useGitWatch(appSessionId, setup ? null : cwd || null, client);
   const [opened, setOpened] = useState({ models: false, rules: false });
   const ready = status?.process === 'ready';
