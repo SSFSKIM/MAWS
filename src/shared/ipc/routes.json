@@ -131,6 +131,7 @@
   "connectors.observe",
   "connectors.resolve",
   "connectors.signIn",
+  "connectors.signInDynamicServer",
   "connectors.signInServer",
   "connectors.start",
   "daemon.e2eBrowserView",
