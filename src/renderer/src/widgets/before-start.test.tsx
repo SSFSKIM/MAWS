@@ -281,6 +281,62 @@ describe('held open', () => {
   });
 });
 
+// The fix wave of M7's review: a change the plugin CLI made (`plugins.changed`, which the runner sends after every
+// operation) marks the folder's inventory stale whether or not any reader of it is mounted or may fetch, so a reader
+// opened again inside the stale time reads the new answer.
+describe('a plugin change while no reader of the inventory is fetching', () => {
+  let changed: () => void;
+  beforeEach(() => {
+    const base = backend.bridge();
+    const listeners = new Set<(payload: unknown) => void>();
+    window.maws = {
+      ...base,
+      on(name, listener) {
+        if (name !== 'plugins.changed') return base.on(name, listener);
+        const entry = listener as (payload: unknown) => void;
+        listeners.add(entry);
+        return () => void listeners.delete(entry);
+      },
+    };
+    changed = () => listeners.forEach((listener) => listener({}));
+  });
+  const withSkill = (name: string): CustomizationInventory => ({ ...ATLAS_INVENTORY, skills: [skill(name, 'project')], servers: [{ name, scope: 'project', path: `${ATLAS}/.mcp.json`, transport: 'http' }] });
+
+  it('reads again when the "+" menu opens after a change made while it was closed', async () => {
+    const user = userEvent.setup();
+    render(<QueryClientProvider client={client()}><PlusMenu appSessionId={ID} cwd={ATLAS} editor={{ current: null }} /></QueryClientProvider>);
+    const openConnectors = async () => {
+      await user.click(screen.getByRole('button', { name: 'Add files, photos or commands' }));
+      act(() => screen.getByRole('menuitem', { name: 'Connectors' }).focus());
+      await user.keyboard('{ArrowRight}');
+    };
+    await openConnectors();
+    await waitFor(() => expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toContain('notionuser scope'));
+    await user.keyboard('{Escape}{Escape}');
+    await waitFor(() => expect(screen.queryByRole('menuitem', { name: 'Connectors' })).toBeNull());
+    inventories.set(ATLAS, withSkill('linear'));
+    act(() => changed());
+    expect(invoked('customization.inventory')).toEqual([{ cwd: ATLAS }]); // a closed menu starts no read
+    await openConnectors();
+    await waitFor(() => expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toContain('linearproject scope'));
+    expect(invoked('customization.inventory')).toEqual([{ cwd: ATLAS }, { cwd: ATLAS }]);
+  });
+
+  it('reads again when /skills opens after a change made while no dialog was open', async () => {
+    const shared = client();
+    const open = () => render(<QueryClientProvider client={shared}><SkillsWidget appSessionId={ID} args="" close={() => {}} /></QueryClientProvider>);
+    const first = open();
+    await screen.findByRole('region', { name: 'In this project' });
+    expect(document.querySelector('[data-skill-row="review"]')).toBeTruthy();
+    first.unmount();
+    inventories.set(ATLAS, withSkill('linear'));
+    act(() => changed());
+    open();
+    await waitFor(() => expect(document.querySelector('[data-skill-row="linear"]')).toBeTruthy());
+    expect(document.querySelector('[data-skill-row="review"]')).toBeNull();
+  });
+});
+
 describe('the "+" › Connectors submenu', () => {
   const openConnectors = async () => {
     const user = userEvent.setup();
