@@ -30,8 +30,22 @@ And looking at a document writes nothing to it. Opening it, scrolling, clicking 
 - [x] (2026-11-13 01:20Z) The architect's two rulings and the adversarial review (four findings, ten points): revision 2. The entry under a final chart read in the pinned packages and measured through the real store before it was chosen (Decision Log).
 - [x] (2026-11-13 02:37Z) M1 — No document MAWS builds writes after an apply. Commits `565b14d86`..`17dad697f`, review fixes `6919e36be`, `0761fa590`; reviewed clean. On the VM the directory run of Concrete Steps 3 (M1) gave `Tests 1 failed | 19117 passed`, the one failure being `test/artifacts/portability.test.ts` "refuses an import of node:sqlite", which the build brief lists as failing on master there (to be read the same way in M3's whole suite); tsc node and web projects exit 0; eslint over the changed files and over `src` exits 0; maws-app-scan 8 of 8.
 - [x] (2026-11-13 04:15Z) M2 — A repair answers only the person's change to the content, and a caret after a final block. Commits `f8927abe2`..`46aad5d42`, decision 12a `f796607f6`, `a6a11036e`, review fix `37847be3e`; reviewed clean. On the VM: the touched suites 233/233, M2's directories 2450/2450, 12a's directories 921/921, the store suite 6/6 and `src/main/artifacts` 80/80; tsc for the web and node projects and eslint on the changed files exit 0. Master merged after it at `919bb65f8`.
-- [ ] M3 — The e2e scenes, the record, and the acceptance run.
-- [ ] The proof an executor does not run: the branch review, the e2e scenes and groups on a Mac, the cross-build run with F, class 1a on the final head.
+- [x] (2026-11-13) M3 — The e2e scenes, the record, and the acceptance run. Commit `1611649c3`, review fixes `a63161a1d`; reviewed clean.
+  - **The scenes.** Decision 13 reworks `dashboard-provisional.spec.ts`'s first scene. Decision 14 adds one scene to `document-presence.spec.ts`, and decision 15 adds one to `document-provisional.spec.ts`; both are in `e2e:document-app`. Decision 16 adds three tests to `dashboard.spec.ts` (`e2e:dashboard`), one per case: "the gap caret: a paragraph, then a chart: …", "the gap caret: a chart alone: …" and "the gap caret: two charts: …". The first attaches the screenshot "the gap caret under a final chart".
+  - **The harness.** The dashboard group's declared count for `dashboard.spec.ts` goes from 4 to 7, in `e2e/support/dashboard-acceptance.ts`, and the two literal counts in `test/support/final-{invocation,bundle}.test.ts` change with it. The document specs share one `blocksIn`, exported from `e2e/support/document-scale.ts`.
+  - **The tracker.** Decision 18's three rows are added. The row of 2026-10-22 is left in place, for closing at landing.
+  - **The acceptance run** on the VM at `1611649c3`:
+    - `pnpm typecheck` exits 0, `e2e/` included, and `pnpm lint` exits 0.
+    - `pnpm test`: `Test Files 7 failed | 2488 passed | 26 skipped (2521)`, `Tests 43 failed | 36057 passed | 142 skipped (36242)`. Six of the failed files are the build brief's known ones: desk-hub `test/deploy/{hub-reads,production-scripts,staging-scripts}`, `src/services/machine/setup.test.ts`, `src/shared/machine/git-reads.test.ts` and `test/artifacts/portability.test.ts`. The seventh is a 5 s timeout in `src/main/org/rows.test.ts`, a file the branch does not touch. Run alone with the default timeout, that file passes on master (`d7ca414ae`, 36/36) and on the branch (`a63161a1d`, 36/36).
+    - At `a63161a1d`, the e2e project's tsc and eslint on the changed files exit 0.
+    - The Acceptance section's two `git` commands and the A9 diff print nothing.
+- [ ] The proof an executor does not run, all of it the architect's:
+  - the new and reworked scenes alone on a Mac: `e2e:dashboard` for `dashboard.spec.ts`, with its three gap-caret cases by name, and for `dashboard-provisional.spec.ts`; `e2e:document-app` for `document-presence.spec.ts` and `document-provisional.spec.ts`;
+  - the owner's look at the screenshot "the gap caret under a final chart";
+  - the e2e groups this change reaches;
+  - the cross-build run with F (`--peer f1852de3a`);
+  - the branch review (the xhigh panel);
+  - class 1a on the final head.
 - [ ] Pull request opened on the architect's word.
 
 ## The landing's edge
@@ -577,6 +591,34 @@ Found while M2 was built (2026-11-13, M2's executor; measured on the VM).
   - Decision (M2's review, finding 1; fix `37847be3e`): the store suite gains a case beside case 1 that runs S2 in its order through SQLite with the second replica, reading `(seq, actor)` from disk after each step: the session's write leaves a chart last, then a redraw, a text selection, composed input, compositionend, the first plain change, and a redraw after it. Case 1 stays, for the open of a document that already ends with a chart. The new case was red on the base's product code: the redraw wrote the person's row.
     Date/Author: 2026-11-13, M2's executor and the architect; folded by the controller.
 
+- **2026-11-13 · M3 as built** (the executor's decisions, folded by the controller).
+  - Decision: decision 16's three cases are three tests, so each gets a verdict by name. The dashboard group's declared count for `dashboard.spec.ts` moves from 4 to 7 (`e2e/support/dashboard-acceptance.ts`), and the literal counts in `test/support/final-invocation.test.ts` and `final-bundle.test.ts` move with it. These three files are outside M3's "What it touches", and this edit is what the harness requires of a spec that gains tests. Any other landing that adds cases to `dashboard.spec.ts` meets this count at merge.
+  - Decision: "the revision has moved by one" is checked at the first key typed, the one that makes the paragraph, because every keystroke is its own row. In the two-charts case the caret reaches the gap by ArrowDown from the first chart, not by a click. Blocks are read from the editor's state, not the DOM text, because presence cursors draw inside blocks.
+  - Decision: decision 14's document is built in one batch: the list and the table are inserted before the empty paragraph, which is then deleted. The agent's second edit is a `replace_block` of the table. The creation revision is read before either editor opens the document, so the check that the two opens wrote nothing really holds (M3's review).
+  - Decision: decision 15's scene waits until the composition's input is durable and reads the revision while the composition is still open. After the composition ends it holds that revision through the observation window, and the plain keystroke must then give exactly one more (M3's review).
+  - Decision: the screenshot is taken with `animations: 'disabled'`, so that the blinking caret is visible in it.
+    Date/Author: 2026-11-13, M3's executor; folded by the controller.
+
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+**2026-11-13, at the hand-back to the architect, before the branch review.** M1, M2 and M3 are built, and each is reviewed clean at its boundary. Beyond what the plan named:
+- `view-carry.ts` joined M2 on the architect's ruling (decision 12a).
+- Lint now holds every `*.fixture` module out of product code (M1's review).
+- The real-store suite runs S2 in its order, composition included (M2's review).
+- The e2e scenes hold their "no write" checkpoints against a revision read before the act (M3's review).
+
+**What the unit proof establishes:**
+- An agent's re-cut of a bold run lands as one row of the agent's, and the next edit from that revision lands.
+- An accept, a restore and a duplicate each write one row of the person's.
+- A replica that only receives writes nothing.
+- A reload holds what the store's rows hold.
+- Two writers who bold and delete one word land as two rows, in either order.
+- Opening, redrawing, focusing and selecting in a document whose last block is not a paragraph write nothing. The person's first change carries the trailing paragraph, and a composition defers it.
+- The gap caret gives the place to type after a final block that holds no text, writing nothing until a key is typed.
+
+**What is not yet established.** The e2e scenes, the owner's look at the caret, the cross-build guard with F, the branch review and class 1a all belong to the architect and have not run.
+
+**Lessons:**
+- A setup through the real store can pass on master by being refused. A test whose subject is a write must assert the rows that landed before it measures anything.
+- Each review round turned up a test that held a checkpoint against a baseline read after the act it was meant to catch. In a sequence test, read the baseline before the act.
+
