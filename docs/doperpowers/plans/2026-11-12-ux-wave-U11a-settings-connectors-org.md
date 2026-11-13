@@ -27,7 +27,7 @@ How to see it working: the unit tests named under each milestone fail before its
 - [x] (2026-11-12 01:40Z) M1 — the sign-in probe's two questions written (`bf946d2bc`), reviewed clean; handed to the architect for the gate job on the mini.
 - [x] (2026-11-12 02:10Z) M1's follow-up at the architect's request: a refused custom callback or reconnect is followed by a sign-in through the engine's own listener, reported as `fallback` (`2aac33196`), reviewed clean. P1 runs at `2aac33196`.
 - [x] (2026-11-12) P2 and P3 answered by the architect's probes (branch `ux-wave/probe3-u11` at `7f3f6c692`); the rulings are written into §C's `<place>`, §D's Skills, §H and the Decision Log, and M6 and M7 are built to them.
-- [x] (2026-11-12 03:05Z) M2 — Org sheets: refusals that name a next step; the grant sheet's read; the paused live query (`18bf9a01b`, `dd6626fd5`), reviewed clean.
+- [x] (2026-11-12 02:08Z) M2 — Org sheets: refusals that name a next step; the grant sheet's read; the paused live query (`18bf9a01b`, `dd6626fd5`), reviewed clean.
 - [ ] M3 — one scrim, also where dialogs stack; the Channel's gutter and names.
 - [ ] M4 — the Channel says it is offline, or refused.
 - [ ] M5 — the Channel from the palette and the View menu.
@@ -1118,6 +1118,16 @@ Found while checking the sections against the code at `48619c824`, then by the a
 - Decision: M2's sheets hide main's detail by a list of the reasons whose detail repeats the line, so a reason main gives no detail today (grant `signed-out`, `damaged`, `cancelled`) shows one if main ever adds it; one small `ReadState` component draws "reading, or the read's line with Retry" for the nobody state, the picker branch and the re-grant sheet; A8's machine-row lines are proved through the drawn rows in `MachinesGroup.test.tsx`.
   Rationale: §B's details table says "a reason main gains later shows its detail until the table says otherwise", and a list of hidden reasons keeps that true for a reason that gains a detail. Rejected: a list of shown reasons.
   Date/Author: 2026-11-12, M2's executor; folded by the controller.
+
+- Decision: M3's backdrop is `sessions/scrim.tsx`: beside `useScrim` it exports a `Backdrop` element that each overlay renders through Radix's `asChild`, so a backdrop counts as a layer exactly while it is mounted; in another child's file each edit is an import and that element.
+  Rationale: a hook called where those overlays' components sit would count a closed dialog as a layer. `useScrim`'s name and answer are §E's and unchanged.
+  Date/Author: 2026-11-12, M3's executor; folded by the controller.
+- Decision: names give way by grow weights a thousand apart (alias, then chip, then labels, then title), each part starting at its minimum, in place of §E's shrink weights; `Party` becomes `display: contents` so one order runs across the row; the chip's 24-character cap sits on the chip; recipients keep their 12-character floor; host rows and an opened exchange's lines use the same name row.
+  Rationale: §E's own pitfall: with `flex-wrap`, shrink weights wrap the row before any name shrinks. The order and the minimums are §E's; only the means change. The 420 px e2e scene is the proof.
+  Date/Author: 2026-11-12, M3's executor; folded by the controller.
+- Decision: in the Channel, 8 px of the stream's foot padding moves to the clipping footer so the composer frame's ring and near shadow are not cut; a compact session pane (no transcript above its composer) takes no composer gutter.
+  Rationale: `.scroll-gutter-under` clips (§E), which would cut the frame's ring at its edge.
+  Date/Author: 2026-11-12, M3's executor; folded by the controller.
 
 ## Outcomes & Retrospective
 
