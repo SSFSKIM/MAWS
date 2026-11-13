@@ -27,7 +27,10 @@ export function folderColumns(summary: TranscriptSummary, home: Location, stamp:
   const filed = home.worktreePath ?? home.realpath;
   const directory = home.realpath;
   const launch = relocated !== null && relocated !== first ? launchOf(first, directory) ?? filed : filed;
-  const at = newest === null ? null : checkoutIn(launch, newest);
+  // Where the newest row names no checkout of the launch folder's repository (null, gone, elsewhere), the agent is taken
+  // to be in the filed folder's checkout (Decision Log 12): the filed folder itself, but for a home the engine's `/cd` moved
+  // into a plain sub-folder of a checkout, whose checkout is that checkout's root, never the sub-folder
+  const at = (newest === null ? null : checkoutIn(launch, newest)) ?? checkoutIn(launch, directory);
   const agent =
     at === null || (at.checkout === filed && at.cwd === directory)
       ? null

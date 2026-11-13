@@ -11,6 +11,7 @@ import type { TranscriptSummary } from '@shared/wire/store';
 import { runGit } from '../../../test/support/git-fixture';
 import { gitCheckout, gitWorktree, sessionIdFor, summary, tempDir } from '../../../test/support/index-fixture';
 import { Index } from './index';
+import { MIGRATIONS } from './migrations';
 import { locate, repositoryAt } from './projects';
 
 describe("the record's two facts", () => {
@@ -134,6 +135,23 @@ describe("the record's two facts", () => {
       expect(workingFolder(record)).toEqual({ path: w1(), cwd: w1(), launch: at('repo'), moved: true });
     });
 
+    // Decision Log 12: the engine's `/cd` re-homes the session into a plain sub-folder of its launch checkout, and the
+    // newest row names no checkout of the repository. The agent never left the launch checkout: not moved.
+    it.each([
+      ['null', null],
+      ['gone', 'gone'],
+      ['in another repository', 'other'],
+      ['in no repository', 'plain'],
+    ])('keeps a session re-homed into a sub-folder of its launch checkout in that checkout, its newest folder %s', (_, newest) => {
+      const record = upsert({ directory: at('repo'), relocatedCwd: at('repo/src'), newestCwd: newest === null ? null : at(newest), gitBranch: 'main' });
+      expect({ directory: record.directory, worktree: record.worktree, branch: record.branch }).toEqual({ directory: at('repo/src'), worktree: null, branch: 'main' }); // build F's
+      expect(record.launchFolder).toBe(at('repo'));
+      expect(record.agentFolder).toEqual({ checkout: at('repo'), cwd: at('repo/src'), branch: 'main', linked: false });
+      expect(workingFolder(record)).toEqual({ path: at('repo'), cwd: at('repo/src'), launch: at('repo'), moved: false });
+      expect(workingWorktree(record)).toBeNull();
+      expect(workingBranch(record)).toBe('main');
+    });
+
     it('clears both columns when a later summary drops the facts', () => {
       const sessionId = sessionIdFor(++n);
       const moved = index.sessions.upsertFromSummary(summary({ sessionId, directory: at('repo'), relocatedCwd: w1(), newestCwd: at('side') })).record;
@@ -211,11 +229,10 @@ describe("the record's two facts", () => {
                   const record = index.sessions.upsertFromSummary(summary({ sessionId, directory: H, relocatedCwd: R, newestCwd: C, gitBranch: 'main' })).record;
                   const folder = workingFolder(record);
                   expect(folder.moved, label).toBe(folder.path !== folder.launch);
-                  // the working folder is the launch folder, or a folder of the launch folder's repository; one taken from
-                  // the agent's row is a work tree of it
+                  // the working folder is the launch folder, or a work tree of the launch folder's repository
                   if (folder.path !== folder.launch) {
                     expect(sameRepository(folder.path, folder.launch), label).toBe(true);
-                    if (record.agentFolder !== undefined) expect(repositoryAt(folder.path)?.workTree, label).toBe(folder.path);
+                    expect(repositoryAt(folder.path)?.workTree, label).toBe(folder.path);
                   }
                   // the launch folder does not change while the home stays in the first row's repository
                   if (sameRepository(H, home)) {
@@ -247,16 +264,31 @@ describe("the record's two facts", () => {
     }
   });
 
+  // §C: a database build F made has neither column; the opener adds both, null, and leaves its version where it was
   it('adds the two columns to an index, nullable, without moving its user_version', () => {
-    const raw = new DatabaseSync(join(dir.path, 'index.sqlite'), { readOnly: true });
+    const path = join(dir.path, 'build-f.sqlite');
+    new Index(path).close();
+    const raw = () => new DatabaseSync(path);
+    const before = raw();
+    let version: unknown;
     try {
-      const added = (raw.prepare('PRAGMA table_info(sessions)').all() as { name: string; notnull: number; type: string }[]).filter((c) => c.name === 'launch_folder' || c.name === 'agent_folder');
+      before.exec('ALTER TABLE sessions DROP COLUMN launch_folder; ALTER TABLE sessions DROP COLUMN agent_folder');
+      version = before.prepare('PRAGMA user_version').get();
+    } finally {
+      before.close();
+    }
+    expect(version).toEqual({ user_version: MIGRATIONS.at(-1)!.version });
+    new Index(path).close();
+    const after = raw();
+    try {
+      expect(after.prepare('PRAGMA user_version').get()).toEqual(version);
+      const added = (after.prepare('PRAGMA table_info(sessions)').all() as { name: string; notnull: number; type: string }[]).filter((c) => c.name === 'launch_folder' || c.name === 'agent_folder');
       expect(added.map((c) => [c.name, c.type, c.notnull]).sort()).toEqual([
         ['agent_folder', 'TEXT', 0],
         ['launch_folder', 'TEXT', 0],
       ]);
     } finally {
-      raw.close();
+      after.close();
     }
   });
 });
