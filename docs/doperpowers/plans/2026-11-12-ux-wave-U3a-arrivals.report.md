@@ -118,3 +118,25 @@ Each was fixed in the document with a dated entry; none needed a contract change
 - `src/main/org/rows.test.ts` and `src/pty-host/detached.test.ts` failed under the whole suite's load on the VM and passed alone: candidates for the VM's flaky list.
 - The covering runs' stderr noise from untouched tests (`session.ui.press` warnings, `invalid output of engine.configure`, `engine.policy.set` and others) is assumed to be baseline, not compared with it: test-hygiene debt.
 - `head.test.ts`'s guard excludes every `user` row from work, so a steer misclassified as quiet would go undetected (a minor gap noted at review).
+
+## The fix wave after the whole-branch review (2026-11-13)
+
+Range `063edff97`..`c5d6efa3d`, on top of `07bdf5234`. No chain merge was made in the wave.
+- The six P2 findings of panel `wf_158d73c2-f3e` and the desk web app's two paging scenes are fixed.
+- The wave went through three boundary reviews; the last approved it.
+- The architect's rulings on finding 3 and their amendment are recorded in the Decision Log: `task.notification`'s `arrivals` mark, and one line per completion across producers.
+- Fix C sorted the recorded events fixtures: both stop fixtures are generated and were regenerated, so no fixture gains a line.
+
+On the VM at `c5d6efa3d`:
+
+| check | result |
+|---|---|
+| `pnpm typecheck` | exit 0 |
+| the gate's script tests | 556 pass |
+| `pnpm test:probes` | 346 pass, 1 skipped |
+| `pnpm wire:manifest` | no diff |
+| `pnpm test` | 2526 of 2559 files passed |
+
+The whole suite's six failed files are all on the VM's known list.
+
+Two tracker rows were added: an end carrier with no uuid (handover-only, deferred by the closing rule), and the reload race of M3. The IPC store's not rebuilding on a host change got no row: no fault of its own was found.
