@@ -49,8 +49,8 @@ export interface LibraryFilesDeps {
   env: NodeJS.ProcessEnv;
   local?: MachineRef; // P5 O7 M5a: this Mac; a Save As for another machine reads through `remote`
   remote?(machine: MachineRef): RemoteLibraryFiles | null; // P5 O7 M5a: remote lane B's, null while no link reaches it
-  layout?: Pick<LayoutStore, 'get' | 'set'>; // UX wave U5: where the last export's folder is kept; without it, nowhere
-  sessionFolder?(appSessionId: AppSessionId): string | null; // UX wave U5: a session's working folder, null when this Mac knows none
+  layout: Pick<LayoutStore, 'get' | 'set'>; // UX wave U5: where the last export's folder is kept (main's layout store)
+  sessionFolder(appSessionId: AppSessionId): string | null; // UX wave U5: a session's working folder, null when this Mac knows none
 }
 
 /** P5 O7 M5a: what Save As reads of an artifact on another machine, over its link; a refusal throws `CommandFailure`. */
@@ -84,14 +84,14 @@ export function createLibraryFiles(deps: LibraryFilesDeps) {
   };
 
   // UX wave U5: the folder the dialog opens in (above); `here` is the artifact when it is this Mac's, else null.
-  const storedFolder = (): string | null => ExportFolderSchema.safeParse(deps.layout?.get(EXPORT_FOLDER_KEY)).data?.path ?? null;
+  const storedFolder = (): string | null => ExportFolderSchema.safeParse(deps.layout.get(EXPORT_FOLDER_KEY)).data?.path ?? null;
   const spaceFolder = async ({ spaceId }: ArtifactRow): Promise<string | null> => {
     if (spaceId === undefined) return null;
     const listed = await deps.call('spaces.list', undefined);
     if (!listed.ok) return null;
     return listed.value.spaces.find((space) => space.id === spaceId)?.linkedDir ?? null;
   };
-  const makerFolder = ({ createdBy }: ArtifactRow): string | null => (deps.sessionFolder && createdBy.kind === 'session' ? deps.sessionFolder(createdBy.appSessionId) : null);
+  const makerFolder = ({ createdBy }: ArtifactRow): string | null => (createdBy.kind === 'session' ? deps.sessionFolder(createdBy.appSessionId) : null);
   const startFolder = async (here: ArtifactRow | null): Promise<string> => {
     const candidates = [storedFolder, ...(here === null ? [] : [() => spaceFolder(here), () => makerFolder(here)])];
     for (const candidate of candidates) {
@@ -102,7 +102,7 @@ export function createLibraryFiles(deps: LibraryFilesDeps) {
   };
   const remember = (folder: string): void => {
     try {
-      deps.layout?.set(EXPORT_FOLDER_KEY, { path: folder } satisfies ExportFolder);
+      deps.layout.set(EXPORT_FOLDER_KEY, { path: folder } satisfies ExportFolder);
     } catch (error) {
       console.error(`[library] cannot keep the export folder (${EXPORT_FOLDER_KEY}): ${error instanceof Error ? error.message : String(error)}`);
     }

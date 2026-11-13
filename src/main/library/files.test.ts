@@ -102,6 +102,7 @@ function deps(stored: Stored, over: Partial<Omit<LibraryFilesDeps, 'port'> & Os>
     confirmReplaceFolder: vi.fn(async () => false),
     env: {},
     layout: memoryLayout(),
+    sessionFolder: () => null, // a Mac whose index knows no session
     ...over,
   };
   const port: LibraryFilesDeps['port'] = {
@@ -474,7 +475,7 @@ describe('library files', () => {
     await expect(files.saveAs({ artifactId: ID, source: { content: {} } }, null)).resolves.toEqual({ saved: true, path: join(into, 'budget.csv') });
     expect(readFileSync(join(into, 'budget.csv'), 'utf8')).toBe('month,amount\n');
     expect(seamed.showSaveDialog).not.toHaveBeenCalled();
-    expect(seamed.layout!.get('library.exportFolder')).toEqual({ path: into }); // UX wave U5: the seam's save records its folder too
+    expect(seamed.layout.get('library.exportFolder')).toEqual({ path: into }); // UX wave U5: the seam's save records its folder too
   });
 });
 
@@ -554,7 +555,7 @@ describe('where the Save dialog opens', () => {
     const sessionFolder = sessions({ [MAKER]: work });
     const there = deps({ kind: 'document', title: 'Plan', files: {}, spaceDir: space, createdBy: made }, { call, sessionFolder, local: LOCAL, remote: () => remote });
     expect(await opensAt(there, OTHER)).toBe(join(dir, 'Downloads', 'Plan.pdf'));
-    there.layout!.set('library.exportFolder', { path: work });
+    there.layout.set('library.exportFolder', { path: work });
     expect(await opensAt(there, OTHER)).toBe(join(work, 'Plan.pdf'));
     expect(call).not.toHaveBeenCalled();
     expect(sessionFolder).not.toHaveBeenCalled();

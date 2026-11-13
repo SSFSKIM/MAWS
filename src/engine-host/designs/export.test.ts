@@ -137,6 +137,8 @@ function libraryFiles(dialog: () => Promise<string>) {
       confirm: async () => ({ confirmed: false }),
     },
     env: {},
+    layout: { get: () => null, set: () => {} }, // UX wave U5: no export folder kept
+    sessionFolder: () => null,
   });
 }
 const MANAGED = /\/exports\/\d+-png-[0-9a-f-]{36}\.png$/;
