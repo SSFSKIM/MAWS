@@ -279,6 +279,38 @@ describe('a reseed reads on from what the live wire told', () => {
   });
 });
 
+// The wave review's finding on the fix above: separate reseeds share the reader's state, which each one writes back to the
+// live reader, and a frame the live wire still delivers for a carrier a reseed read is not read again
+describe('reseeds and the live reader read each carrier once', () => {
+  const transcriptRow = (line: number) => JSON.parse(readFileSync(join(FIXTURE_DIR, 'uxwave', 'u3-tasks-r1.transcript.jsonl'), 'utf8').split('\n')[line - 1]!) as Record<string, unknown>;
+  const reseed = (seq: number, ...lines: number[]): JournalRow => ({ seq, direction: 'meta', at: '2026-11-12T14:53:00.000Z', frame: { event: 'transcript_reseed', rows: lines.map(transcriptRow) } });
+
+  it('u3-tasks-r1 through seq 331, then the hand-back (transcript line 104) and its completion (line 114) by two reseeds: one report, no turn and no completion notice', () => {
+    const n = normalizer();
+    const before = r1.filter((row) => row.seq <= 331).flatMap((row) => n.push(row));
+    const handback = n.push(reseed(332, 104));
+    expect(handback.filter((event) => event.kind === 'subagent.message')).toHaveLength(1);
+    const completion = n.push(reseed(333, 114));
+    expect(completion.map((event) => event.kind).filter((kind) => kind !== 'session.started')).toEqual(['task.notification']);
+    const rows = drawn(stateOf([...before, ...handback, ...completion]));
+    expect(rows.filter((row) => row.kind === 'agent_message' && row.text.startsWith('Report from uxw agent'))).toHaveLength(1);
+    expect(notices(rows).filter((line) => line.includes('Agent "uxw agent" finished'))).toEqual([]);
+  });
+
+  it('a frame the live wire still delivers for a carrier a reseed read (seq 337, transcript line 104) is not read again, and the session draws as it does with no gap', () => {
+    const n = normalizer();
+    const events = r1.filter((row) => row.seq <= 331).flatMap((row) => n.push(row));
+    events.push(...n.push(reseed(331.5, 104)));
+    events.push(...r1.filter((row) => row.seq > 331 && row.seq < 337).flatMap((row) => n.push(row)));
+    const read = n.state.arrivals.open;
+    events.push(...n.push(r1.find((row) => row.seq === 337)!));
+    expect(n.state.arrivals.open).toBe(read); // the reader read the carrier once, from the reseed
+    events.push(...r1.filter((row) => row.seq > 337).flatMap((row) => n.push(row)));
+    const lines = (list: Row[]) => list.flatMap((row) => (row.kind === 'agent_message' || row.kind === 'notice' ? [row.text] : []));
+    expect(lines(drawn(stateOf(events)))).toEqual(lines(drawn(stateOf(r1Events))));
+  });
+});
+
 describe('a second arrival at the head of the engine’s turn joins the turn the first opened', () => {
   const journal = loadUxwaveJournal('u3-sminos-r1-maws');
   const withSecond = (seq: number, from: string, to: string, uuid: string): JournalRow[] => {
