@@ -1328,10 +1328,10 @@ function agentNamed(known: KnownAgents[], key: string): SubagentRef | null {
 const peerNamed = (known: KnownAgents[], address: string): string | null => known.find(({ peers }) => peers.has(address))?.peers.get(address) ?? null;
 
 
-// UX wave U3 (O-28, the fold table of the U3a document's Interfaces D): a task's end that reports an outcome and a
-// scheduled fire stay in view when their turn folds; a notice with no outcome, an answer's and the wake's fold with it.
+// UX wave U3 (O-28, the fold table of the U3a document's Interfaces D): a task's end that reports an outcome, a
+// scheduled fire and, until U1b fills the question's row with it, an answer stay in view when their turn folds (the
+// architect's ruling of 2026-11-13; U1b removes the answer's term); a notice with no outcome and the wake's fold with it.
 function isPersistentNotice(row: Row): boolean {
-  // an answer stays until U1b fills the question's row with it (the architect's ruling of 2026-11-13; U1b removes it)
   return row.kind === 'notice' && (row.class === 'schedule' || row.class === 'answer' || (row.class === 'task' && row.outcome !== null));
 }
 
