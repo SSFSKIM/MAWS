@@ -26,7 +26,7 @@ export function RunningCard({ title, running, more, finished, onOpen, onFinished
     <section aria-label={title} className="shrink-0 overflow-hidden rounded-md border border-border bg-bg-raised text-ui text-fg shadow-strip">
       <h3>
         <button type="button" onClick={onOpen} className="flex h-10 w-full min-w-0 items-center gap-1.5 rounded-md px-3 text-left outline-accent hover:bg-bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2">
-          <span className="shrink-0 font-medium">{title}</span>
+          <span className="shrink-0 font-medium">{title}</span>{' '}
           <span className="ml-auto min-w-0 truncate text-ui-sm font-normal text-fg-muted tabular-nums">{SUMMARY_COPY.running(running)}</span>
         </button>
       </h3>

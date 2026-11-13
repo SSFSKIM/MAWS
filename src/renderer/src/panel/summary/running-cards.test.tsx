@@ -30,7 +30,7 @@ import { fakeAgentWorkClient, type FakeAgentWorkClient } from '../../tools/agent
 import { applyTaskEvents, emptyGraph } from '../../tools/agents/model/task-graph';
 import { useOpenAgents } from '../../tools/agents/open-agents';
 import { registerRemoteTaskFeed, useTaskGraph } from '../../tools/agents/store';
-import { subagentsTool, type SubagentsHandle } from '../../tools/agents/subagents/SubagentsTool';
+import { subagentsTool, type SubagentsHandle, type SubagentsParams } from '../../tools/agents/subagents/SubagentsTool';
 import type { PanelToolContext } from '../tool';
 import { panelHost } from '../host';
 import { Summary } from './Summary';
@@ -136,7 +136,7 @@ describe('the Subagents card', () => {
   it('lists the running first-level agents, (+1) and its arrow on the one with an agent under it, and the child beneath it once that control is pressed', async () => {
     await mount([started('p', 1), started('q', 2), ...nested('p', 'c', 3)]);
     expect(cardNames()).toEqual(['Environment', 'Context', 'Connectors', 'Subagents']);
-    expect(headingOf('Subagents')).toBe('Subagents3 running');
+    expect(headingOf('Subagents')).toBe('Subagents 3 running');
     expect(tree()).toEqual(['p (+1)▸', 'q']);
     expect(disclosure('p')!.getAttribute('aria-label')).toBe('1 agent running under Agent p');
     toggleUnder('p');
@@ -231,9 +231,9 @@ describe('the Subagents card', () => {
 
   it('N finished is the panel’s Done count and opens it with Done unfolded; an ended agent its shell keeps is in neither until the shell ends', async () => {
     await mount([started('r', 1), started('f1', 2), finished('f1', 3), started('f2', 4), finished('f2', 5), started('f3', 6), finished('f3', 7), started('k', 8), shellOf('sk', 'k', 9), finished('k', 10)]);
-    expect(headingOf('Subagents')).toBe('Subagents1 running');
+    expect(headingOf('Subagents')).toBe('Subagents 1 running');
     expect(button('Subagents', '3 finished')).toBeTruthy();
-    const handle: SubagentsHandle = subagentsTool.createState({ appSessionId: A, session: useSessions.getState().records.get(A) ?? null, instanceId: 'subagents:test', params: undefined });
+    const handle: SubagentsHandle = subagentsTool.createState({ appSessionId: A, session: useSessions.getState().records.get(A) ?? null, instanceId: 'subagents:test', params: undefined as unknown as SubagentsParams });
     offs.push(() => subagentsTool.dispose(handle));
     const ctx: PanelToolContext = { appSessionId: A, session: useSessions.getState().records.get(A) ?? null, status: useSessions.getState().engine.get(A) ?? null, pinned: false, visible: true, focusRequest: 0, setTitle: () => {}, close: () => {}, openTool: () => 'x', editorHost: { surface: 'panel', tabId: 'subagents:test' } };
     const Body = subagentsTool.render;
@@ -267,7 +267,7 @@ describe('the Background tasks card', () => {
   it('stands last while a shell runs, one row with its mark, description and coarse time; a press opens the panel at it; its end removes the card', async () => {
     await mount([shellOf('s1', null, 1)]);
     expect(cardNames()).toEqual(['Environment', 'Context', 'Connectors', 'Background tasks']);
-    expect(headingOf('Background tasks')).toBe('Background tasks1 running');
+    expect(headingOf('Background tasks')).toBe('Background tasks 1 running');
     expect(taskRows()).toEqual(['s1']);
     const row = card('Background tasks')!.querySelector<HTMLElement>('[data-task-id="s1"]')!;
     expect(row.querySelector('[data-kind-mark="shell"]')).toBeTruthy();
