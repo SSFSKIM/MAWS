@@ -1916,6 +1916,25 @@ test('unsigned packaged needs explicit admission regardless of Lane, and stays s
   ]) assert.equal(plan({ ...base, ...env }).outputs.packaged_runner, undefined);
 });
 
+test('unit:darwin takes a direct hosted Mac only when HOSTED_MAC_JOBS admits it, whatever the Lane', () => {
+  const unlisted = { HEAD_MESSAGE: 'Gates: unit:darwin\nRunner: macos', HOSTED_MAC_ROUTE: 'direct', HOSTED_MAC_JOBS: 'packaged' };
+  assert.equal(plan(unlisted).outputs.unit_darwin_runner, '["self-hosted","macOS","ARM64"]');
+  assert.equal(plan({ ...unlisted, HEAD_MESSAGE: `${unlisted.HEAD_MESSAGE}\nLane: hosted` }).outputs.unit_darwin_runner, '["self-hosted","macOS","ARM64"]');
+  const base = { ...unlisted, HOSTED_MAC_JOBS: 'packaged unit:darwin' };
+  const { outputs, summary } = plan(base);
+  assert.equal(outputs.unit_darwin_runner, '"macos-26"');
+  assert.equal(JSON.parse(outputs.timeouts).unit_darwin, 45);
+  assert.equal(outputs.pool, 'false');
+  assert.match(summary, / Hosted Mac \(direct, macos-26\): unit:darwin\./);
+  for (const lane of ['no-hosted', 'vm']) assert.equal(plan({ ...base, HEAD_MESSAGE: `${base.HEAD_MESSAGE}\nLane: ${lane}` }).outputs.unit_darwin_runner, '"macos-26"', lane);
+  for (const env of [
+    { HOSTED_MAC_ROUTE: 'mirror' },
+    ...FINAL_LABELS.map((label) => ({ GITHUB_REF_NAME: `ci/${label}-test` })),
+  ]) assert.notEqual(plan({ ...base, ...env }).outputs.unit_darwin_runner, '"macos-26"', JSON.stringify(env));
+  // Unlisted, the summary names no hosted unit:darwin.
+  assert.doesNotMatch(plan(unlisted).summary, /unit:darwin\./);
+});
+
 test('packaged shards only on direct hosted Macs; every self-hosted route builds once', () => {
   const base = { HEAD_MESSAGE: 'Gates: packaged\nRunner: macos', HOSTED_MAC_ROUTE: 'direct', HOSTED_MAC_JOBS: 'packaged' };
   assert.deepEqual(JSON.parse(plan(base).outputs.packaged_shards), [
