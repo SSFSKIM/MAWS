@@ -25,7 +25,7 @@ The build on the owner's machines today, build F (commit `f1852de3a`), reads the
 - [x] (2026-11-13) The rehearsal (Concrete Steps 4), run by the architect at `fcbe6e448` over copies of two of the owner's layout files, both `main.tabs` version 3: both lines end `pass`, with missing 0, added 0 and twice 0, and the sessions held equal in every machine view (one file has three). M1 accepted.
 - [x] (2026-11-13 04:20Z) M2 — One strip in the store, and the current project. Commits `67c8ba4bf..4cf52c4dc`, review fix `0041b10cc..1d744f9cd`; task review clean on its second round.
 - [x] (2026-11-13) Q1 answered by the owner (2026-11-12): "No, only chats with content": an empty New chat does not come back after a relaunch. M3 builds §E's last paragraph; M5 records the amendment (Decision Log, 2026-11-13).
-- [ ] M3 — New chat.
+- [x] (2026-11-13 05:36Z) M3 — New chat, with Q1's relaunch discard. Commits `fd5f60831..275685451`, review fixes `7e00e152b..c9e5b9d25` and `97adaff64..9cecb61bc`; task review clean on its third round.
 - [ ] M4 — What the tabs and the title bar show.
 - [ ] M5 — The e2e scenes, the record, and the acceptance run.
 - [ ] The proof an executor does not run: the branch review, the rehearsal, the cross-build run with F, the e2e groups, the owner's look, class 1a on the final head.
@@ -597,6 +597,8 @@ The pull request carries the dated amendments of the two rulings this landing re
   - Decision: `createUnstartedSession` waits for the relaunch sweep to finish (or for the sweep to be known not to run: launch mode `scenario`, or a page where `connectSessions` is not wired) before it sends `session.create`. So when the sweep takes its candidates, no chat of this run exists in main or in the store, and its candidates are exactly what an earlier run left; the synchronous no-tab check before each discard stays.
     Rationale: marking this run's chats on the create reply leaves a window: main emits `session.intent.changed` for a new intent before it answers `session.create`, so the event can put the intent in the store first, and a snapshot answering then made it a candidate; the reviewer reproduced the discard. Taking candidates from the raw snapshot answer would not close it either, since main can list an intent it created a moment before. Rejected: comparing `createdAt` with the page's start (clocks of other machines). Cost: a New chat pressed during startup waits for the intent snapshot and the launch mode, which it needs from the same machine anyway.
     Date/Author: 2026-11-13, the controller, on M3's second review.
+- **2026-11-13 · M3: the arrival rule reads the tab in front at the press.** The startup wait (creation waits for the relaunch sweep) is part of what the person waits through, so a tab they turn to meanwhile keeps the front (#497: "the press records the tab in front"). A New chat pressed before the layout has hydrated can therefore arrive unselected, since the restore puts a tab in front; reading at creation start would not avoid it, as hydration ends after the sweep. `madeThisRun` is gone with the wait.
+    Date/Author: 2026-11-13, the M3 executor, approved by the task review; folded by the controller.
 
 ## Outcomes & Retrospective
 
