@@ -23,6 +23,7 @@
   {
     "at": "2026-09-29T01:50:03.155Z",
     "autoDenied": 0,
+    "cause": "message",
     "denied": 0,
     "endedAt": "2026-09-29T01:50:07.826Z",
     "expanded": true,
