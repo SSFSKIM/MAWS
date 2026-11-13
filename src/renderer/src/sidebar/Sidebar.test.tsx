@@ -166,6 +166,23 @@ describe('sidebar action stability', () => {
     await waitFor(() => expect(sessionRows(row('alpha'))).toEqual(['second', 'first']));
   });
 
+  // The review's finding (round 3): the Hidden list's order, by newest activity, is held like every other row's
+  it('holds the order of an open Hidden list while a row’s activity changes, then applies it on leaving', async () => {
+    const hiddenAt = '2026-10-24T11:00:00Z';
+    window.maws = fakeClient({ 'layout.get': { value: { version: 1, hidden: { [first.appId]: { at: hiddenAt, armedAt: null }, [second.appId]: { at: hiddenAt, armedAt: null } } } }, 'layout.set': undefined }).client as unknown as PreloadBridge;
+    await act(() => useHidden.getState().load());
+    start();
+    const tree = screen.getByTestId('sidebar-tree');
+    fireEvent.pointerEnter(tree);
+    fireEvent.click(within(row('alpha')).getByRole('treeitem', { name: /^Hidden, / }));
+    expect(sessionRows(row('alpha'))).toEqual(['first', 'second']);
+    working(second.appId);
+    expect(sessionRows(row('alpha'))).toEqual(['first', 'second']);
+    fireEvent.pointerLeave(tree);
+    act(() => screen.getByRole('button', { name: 'Outside' }).focus());
+    expect(sessionRows(row('alpha'))).toEqual(['second', 'first']);
+  });
+
   it('keeps ranks held when the pointer leaves for the project context menu', async () => {
     start();
     const tree = screen.getByTestId('sidebar-tree');
@@ -1033,6 +1050,63 @@ describe('hiding a session', () => {
     await user.click(within(row('Studio build')).getByRole('button', { name: 'Hide' }));
     expect(screen.queryByRole('treeitem', { name: 'Studio build' })).toBeNull();
     expect(useHidden.getState().hidden.has(studio('b1'))).toBe(true);
+  });
+
+  // The review's finding (round 3): a return draws its row anew in the project's list; the keyboard it held goes with it
+  describe('where the keyboard goes when a hidden session returns', () => {
+    const returns = (title: string, dropped = false) =>
+      act(() => {
+        const hidden = new Map(useHidden.getState().hidden);
+        hidden.delete(idOf(title));
+        if (dropped) {
+          const records = new Map(useSessions.getState().records);
+          records.delete(idOf(title));
+          useSessions.setState({ records });
+        }
+        useHidden.setState({ hidden });
+      });
+
+    it('a row that returns while it holds the keyboard keeps it', async () => {
+      await storedHidden('Charter + research', 'Workstation north star');
+      expand('proj-maws');
+      render(<Sidebar />);
+      fireEvent.click(hiddenRow(row('MAWS')));
+      act(() => row('Charter + research').focus());
+      returns('Charter + research');
+      expect(row('Charter + research').dataset.indented).toBeUndefined();
+      expect(document.activeElement).toBe(row('Charter + research'));
+    });
+
+    it('the Hidden row that goes while it holds the keyboard hands it to the row that returned', async () => {
+      await storedHidden('Charter + research');
+      expand('proj-maws');
+      render(<Sidebar />);
+      act(() => hiddenRow(row('MAWS')).focus());
+      returns('Charter + research');
+      expect(within(row('MAWS')).queryByRole('treeitem', { name: /^Hidden, / })).toBeNull();
+      expect(document.activeElement).toBe(row('Charter + research'));
+    });
+
+    it('with no row returned (its session gone), to the project’s row', async () => {
+      await storedHidden('Charter + research');
+      expand('proj-maws');
+      render(<Sidebar />);
+      act(() => hiddenRow(row('MAWS')).focus());
+      returns('Charter + research', true);
+      expect(within(row('MAWS')).queryByRole('treeitem', { name: /^Hidden, / })).toBeNull();
+      expect(document.activeElement).toBe(row('MAWS'));
+    });
+
+    it('takes no focus when the sidebar did not hold it', async () => {
+      await storedHidden('Charter + research');
+      expand('proj-maws');
+      render(<><Sidebar /><button>Outside</button></>);
+      fireEvent.click(hiddenRow(row('MAWS')));
+      const outside = screen.getByRole('button', { name: 'Outside' });
+      act(() => outside.focus());
+      returns('Charter + research');
+      expect(document.activeElement).toBe(outside);
+    });
   });
 
   it('a project whose sessions are all hidden keeps its row, open on its Hidden row alone', async () => {

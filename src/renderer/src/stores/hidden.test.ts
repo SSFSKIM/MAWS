@@ -353,6 +353,26 @@ describe('hidden store: the connection', () => {
     }
   });
 
+  // The review's finding (round 3): a lead's quiet deadline is a deadline, whether or not a hidden entry has one
+  it('a lead read by its transcript ends once QUIET_MS has passed after its newest record, with nothing else changing', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      setRecords(record(A, { holder: { kind: 'terminal', pid: 7 } }));
+      setDigests(digest(A, { phase: 'foreign', lastTurnEndedAt: iso(T0 - 30_000) }));
+      const fake = fakeClient({ 'layout.get': { value: { version: 1, hidden: { [A]: { at: iso(T0 - 10_000), armedAt: null } } } }, 'layout.set': undefined });
+      const store = createHiddenStore(fake.client, { writeDelayMs: DELAY, now });
+      offs.push(connectHidden(store));
+      await store.getState().load();
+      store.getState().unhide(A); // the last hidden session: no entry's deadline is left
+      expect([...store.getState().leading]).toEqual([A]);
+      clock = T0 - 30_000 + QUIET_MS + 1;
+      vi.advanceTimersByTime(QUIET_MS);
+      expect([...store.getState().leading]).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('a listing: hidden at rest, it returns when its listing says busy', async () => {
     setListed(listing('b1', 'idle'));
     const { store } = await connected();
@@ -362,6 +382,54 @@ describe('hidden store: the connection', () => {
     expect(store.getState().hidden.has(studio('b1'))).toBe(true);
     setListed(listing('b1', 'busy'));
     expect(store.getState().hidden.has(studio('b1'))).toBe(false);
+  });
+
+  // The review's finding (round 3): only the write of the unread stored set waits for the read; the looks do not
+  it('looks at the hides of this run while the read is pending, and carries what it saw into the stored set when the read answers', async () => {
+    const b1 = studio('b1');
+    setListed(listing('b1', 'busy'));
+    const fake = fakeClient({ 'layout.set': undefined });
+    const store = createHiddenStore(fake.client, { writeDelayMs: DELAY, now });
+    offs.push(connectHidden(store));
+    store.getState().hide(b1);
+    expect(store.getState().hidden.get(b1)).toEqual({ at: iso(T0), armedAt: null });
+    clock = T0 + MIN;
+    setListed(listing('b1', 'idle'));
+    expect(store.getState().hidden.get(b1)).toEqual({ at: iso(T0), armedAt: iso(T0 + MIN) });
+    clock = T0 + 2 * MIN;
+    setListed(listing('b1', 'busy'));
+    expect(store.getState().hidden.has(b1)).toBe(false);
+    setListed(listing('b1', 'idle'));
+    await fake.reply('layout.get', { value: { version: 1, hidden: { [b1]: { at: iso(T0 - 10 * MIN), armedAt: iso(T0 - 10 * MIN) }, [B]: { at: iso(T0 - MIN), armedAt: null } } } });
+    expect([...store.getState().hidden.keys()]).toEqual([B]); // its return stands over the entry an earlier run stored
+    await wait();
+    expect(written(fake)).toEqual({ [B]: { at: iso(T0 - MIN), armedAt: null } });
+  });
+
+  it('carries what it saw into the stored set at the read asked again after a refused one', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const b1 = studio('b1');
+    const C = at('app-c' as AppSessionId);
+    setListed(listing('b1', 'busy'));
+    const fake = fakeClient({ 'layout.set': undefined });
+    const store = createHiddenStore(fake.client, { writeDelayMs: DELAY, now });
+    offs.push(connectHidden(store));
+    store.getState().hide(b1);
+    await fake.fail('layout.get');
+    clock = T0 + MIN;
+    setListed(listing('b1', 'idle'));
+    expect(store.getState().hidden.get(b1)).toEqual({ at: iso(T0), armedAt: iso(T0 + MIN) });
+    clock = T0 + 2 * MIN;
+    setListed(listing('b1', 'busy'));
+    expect(store.getState().hidden.has(b1)).toBe(false);
+    setListed(listing('b1', 'idle'));
+    store.getState().hide(B); // the next act reads again
+    await fake.reply('layout.get', { value: { version: 1, hidden: { [b1]: { at: iso(T0 - 10 * MIN), armedAt: iso(T0 - 10 * MIN) }, [C]: { at: iso(T0 - MIN), armedAt: null } } } });
+    expect([...store.getState().hidden.keys()].sort()).toEqual([B, C].sort());
+    await wait();
+    expect(written(fake)).toEqual({ [C]: { at: iso(T0 - MIN), armedAt: null }, [B]: { at: iso(T0 + 2 * MIN), armedAt: null } });
+    expect(error).toHaveBeenCalledTimes(1);
+    error.mockRestore();
   });
 
   it('an address with neither digest nor listing is left as it is', async () => {
