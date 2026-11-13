@@ -232,7 +232,8 @@ const sessionOf = (v: unknown): string | null => (isObject(v) && isText(v.appSes
  * P5 O7 M5a: `ask`, the input the machine is asked for; `keep` is told whether the caller owns the machine (the `artifact`
  * rule's short cut, which holds every row for them), and what they asked.
  * The UX wave (U9): `grade`, the rank the cut holds the caller to when it is not the command's own declared grade (the
- * archived sessions' read, `session.list`, admitted and declared at `list`, keeps only the records they hold `manage` on).
+ * archived sessions' read, `session.list`, admitted and declared at `list`, keeps only the archived records they hold
+ * `manage` on).
  */
 type EachSession = {
   grade?: SessionRank;
@@ -256,18 +257,20 @@ function keptByKind(output: Fields, input: unknown): Fields {
   return { ...output, rows: kind === undefined ? rows : rows.filter((row) => row.kind === kind), counts };
 }
 
+/** The archived records of a `session.list` answer, each naming its app session. */
+const archivedOf = (output: unknown): Array<Fields & { appId: string }> =>
+  isObject(output) && Array.isArray(output.sessions) ? output.sessions.filter((record): record is Fields & { appId: string } => isObject(record) && isText(record.appId, 512) && record.archived === true) : [];
+
 const EACH_SESSION: Record<string, EachSession> = {
   // The UX wave (U9, UC-7.4): the archived sessions' read behind Unarchive, each record kept for a caller who may manage
   // it, as its owners alone may unarchive it; the machine answers it under the caller's reader, so each kept record
-  // carries their own reading.
+  // carries their own reading. The read exists for Unarchive alone, so only archived records are kept: an unarchived one
+  // never leaves the machine through it, and a machine's unarchived records (a remote spawn's carries its signed action)
+  // never push the archived ones past the channel's ceiling (the whole-branch review's fix).
   'session.list': {
     grade: 'manage',
-    sessions: (output) => (isObject(output) && Array.isArray(output.sessions) ? output.sessions.flatMap((record) => (isObject(record) && isText(record.appId, 512) ? [record.appId] : [])) : []),
-    keep: (output, kept) => {
-      if (!isObject(output)) return output;
-      const sessions = Array.isArray(output.sessions) ? output.sessions : [];
-      return { ...output, sessions: sessions.filter((record) => isObject(record) && isText(record.appId, 512) && kept(record.appId)) };
-    },
+    sessions: (output) => archivedOf(output).map((record) => record.appId),
+    keep: (output, kept) => (isObject(output) ? { ...output, sessions: archivedOf(output).filter((record) => kept(record.appId)) } : output),
   },
   'attention.list': {
     sessions: (output) => (Array.isArray(output) ? output.map(sessionOf).filter((id) => id !== null) : []),
