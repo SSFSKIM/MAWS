@@ -9,6 +9,7 @@ import { launchMaws, type MawsLaunch } from './launch';
 import { CHARTER } from './panel-support';
 import { sidebarOf, sidebarRow } from './sidebar';
 import { mainTabById, openSurface, surface } from './shell';
+import { storedMain, stripOf, type LayoutMain, type Strip, type TabRef } from '../../src/shared/ipc/schema/layout';
 
 // ---- themes: C5's smoke's scan, with the `--code-*` tokens in the palette -------------------------------------------------
 
@@ -221,26 +222,20 @@ export function numstat(scratch: CodeScratch): { files: number; added: number; r
 }
 
 // A tab written into layout.json's focused pane beside the session's, then the window reloaded (C5's restore path).
-// UX wave U13a: `main.tabs` holds the one strip as version 3 with the one set `none` (`storedMain`), and is written back
-// in that form.
-export async function restoreWithTab(p: Product, tabs: Record<string, unknown>[]): Promise<void> {
-  type Set = { panes: { tabs: { id: string }[]; activeTabId: string }[]; focusedPane: number; splitRatio: number };
-  type Stored = { version: 3; current: string; sets: Record<string, Set>; closedTabs: unknown[] };
-  const main = await p.page.evaluate(async () => {
+// UX wave U13a: `main.tabs` is the one strip, read with `stripOf` and written back through `storedMain`, the store's own.
+export async function restoreWithTab(p: Product, tabs: TabRef[]): Promise<void> {
+  const stored = await p.page.evaluate(async () => {
     const result = await window.maws.invoke('layout.get', { key: 'main.tabs' });
-    return result.ok ? (result.value.value as Stored | null) : null;
+    return result.ok ? (result.value.value as LayoutMain | null) : null;
   });
-  expect(main, 'the session tab reached layout.json').not.toBeNull();
-  expect(main!.version, 'the strip as U13a stores it').toBe(3);
-  const strip = main!.sets[main!.current];
-  expect(strip, 'the set `current` names').toBeDefined();
+  expect(stored, 'the session tab reached layout.json').not.toBeNull();
+  const { strip, canonical } = stripOf(stored!);
+  expect(canonical, 'the strip as U13a stores it').toBe(true);
   const pane = strip.panes[strip.focusedPane];
-  pane.tabs.push(...(tabs as never[]));
-  pane.activeTabId = String(tabs.at(-1)!.id);
-  const value: Stored = { version: 3, current: 'none', sets: { none: strip }, closedTabs: main!.closedTabs };
+  const next: Strip = { ...strip, panes: strip.panes.map((each) => (each === pane ? { tabs: [...each.tabs, ...tabs], activeTabId: tabs.at(-1)!.id } : each)) };
   await p.page.evaluate(async (value) => {
-    const result = await window.maws.invoke('layout.set', { key: 'main.tabs', value: value as never });
+    const result = await window.maws.invoke('layout.set', { key: 'main.tabs', value });
     if (!result.ok) throw new Error(result.error.message);
-  }, value);
+  }, storedMain(next));
   await p.page.reload();
 }
