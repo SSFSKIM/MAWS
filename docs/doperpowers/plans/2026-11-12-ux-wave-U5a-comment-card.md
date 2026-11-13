@@ -3,7 +3,7 @@
 > **Parent:** `docs/doperpowers/specs/2026-11-12-ux-wave-design.md` (the UX wave, a composite), child **U5**, first pull request (**U5a** in the root's "Ordering and dependency map"). **Parent pin:** `e0df32e3f` (branch `ux-wave-spec`). A further batch of corrections was staged on that branch while this document was written; it writes the owner's three answers of 2026-11-12 into the child's file (comments are collected; the export folder is remembered; no button asks the agent to commit, push or open a pull request). This document is written at those answers.
 > **The design** is the child's file, `docs/doperpowers/specs/2026-11-12-ux-wave/U5-review-comments-source-control.md`: Contracts → "UC-5 · One comment card (owned)", acceptance A1 to A5, A17 and A18, and the items O-45, l6-artifacts-05, l6-artifacts-19, l6-artifacts-20 (with X-105), l9-browser-delivery-05, X-218 and X-216. Where that file and a contract's statement in the root differ, the root binds. This document carries the constraints and the milestones, and of the design only what the child's file leaves open.
 > **Binding on this landing:** UC-5 (owned), UC-3 (the transcript's model has one writer at a time), UC-7 (an act works on another machine or says why not), UC-8 (who owns which files), UC-10, UC-11, UC-14 (what is stored, build F can still read), UC-15 (the `maws` tool texts); laws 1, 3, 4, 5, 6 and 7.
-> **Branch:** `ux-wave/U5a`, from master `7e5f2016c` (which holds U8a). **Board:** #589. **Written against** that commit; build F is `f1852de3a`.
+> **Branch:** `ux-wave/U5a`, from master `7e5f2016c` (which holds U8a). **Board:** #589. **Written against** that commit; master moved to `6e8c72738` (the probes' pull request) while this was written, which touches none of the files named here. Build F is `f1852de3a`.
 
 ## Purpose
 
@@ -567,7 +567,7 @@ The cross-build coverage table (U13a's M5 holds it) gains one row, `library.expo
 
 ## Probes
 
-**P1 · several images in one message.** Done 2026-11-12 (`spikes/protocol-probe/findings-uxwave-u5-images.txt`, branch `ux-wave/probes`): engine 2.1.322 kept three images and a text whole and in order idle, as a steer at `next` and at `now`, and as a fork's first message. Nothing is left to settle; decision 9 follows from it. Two things it saw that this landing relies on or leaves alone: a steer's text is placed before its images by the engine, and a steer with images is stored as a queued-command attachment, which the transcript already reads.
+**P1 · several images in one message.** Done 2026-11-12 (`spikes/protocol-probe/findings-uxwave-u5-images.txt`, on master since the probes' pull request #602, which the first merge of Concrete Steps 1 brings in): engine 2.1.322 kept three images and a text whole and in order idle, as a steer at `next` and at `now`, and as a fork's first message. Nothing is left to settle; decision 9 follows from it. Two things it saw that this landing relies on or leaves alone: a steer's text is placed before its images by the engine, and a steer with images is stored as a queued-command attachment, which the transcript already reads.
 
 **P7 · a terminal session takes the comment text.** The question: does `laneA.send` deliver a text of several lines, with blank lines and a `<maws_anchor …/>` line, intact, and how long may it be?
 
