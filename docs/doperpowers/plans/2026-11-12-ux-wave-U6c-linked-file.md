@@ -21,7 +21,7 @@ How to see it working: in a session whose transcript holds a link to a text file
 - [x] (2026-11-13 09:35Z) Document written against master `c0e7b2ae8` and parent pin `6b58dd653`: the click's path grounded in the code at that head and in build F (`f1852de3a`); the siblings' documents read on their branches. Committed as `d1f19fc70`.
 - [x] (2026-11-13) The adversarial review of the document (four findings: two P1, two P2), and the architect's rulings on them and on the reported points.
 - [x] (2026-11-13 10:28Z) Revision 2: the rulings folded in (Decision Log 4 to 10); the click sources enumerated from the renderer's code at master and checked on U3a's and U13a's branches ("The click sources"); the document checked against parent pin `4d13880be`; eight points reported at the revision.
-- [ ] M1 — The rule, the search and its queue, and the measurement.
+- [x] (2026-11-13) M1 — The rule, the search and its queue, and the measurement. Commits `02db45d5d..06fe6d32b`, fix round `eb03e9e87..46fbc17d5` (the URL step, Decision Log 12; the waiting results bounded, Decision Log 13); task review clean after one fix round. Measurement within both bounds (Surprises & Discoveries).
 - [ ] M2 — The admission: the request's key, the service, the daemon's wiring, the wire.
 - [ ] M3 — The window, the e2e scene, the record, and the acceptance run.
 
