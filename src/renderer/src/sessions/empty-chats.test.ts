@@ -146,14 +146,24 @@ describe('an empty chat, with what waits outside its intent', () => {
     expect(isEmptyChat(A), 'the intent holds it').toBe(false);
   });
 
-  it('is empty again once a write of nothing is answered or refused', async () => {
+  it.each(['answered', 'refused'] as const)('is empty again once a write of nothing is %s', async (how) => {
     fake = fakeClient();
     window.maws = preloadOf(fake);
     put();
     const writing = patchIntent(A, { model: 'haiku' });
     expect(isEmptyChat(A)).toBe(false);
-    await fake.fail('session.intent.patch', 'the intent is busy');
-    await writing;
+    if (how === 'answered') await fake.reply('session.intent.patch', intent({ model: 'haiku', updatedAt: T1 }));
+    else await fake.fail('session.intent.patch', 'the intent is busy');
+    await expect(writing).resolves.toEqual(how === 'answered' ? { ok: true } : { ok: false, error: 'the intent is busy' });
+    expect(isEmptyChat(A)).toBe(true);
+  });
+
+  it('is empty again once a write whose invoke rejects has settled', async () => {
+    window.maws = { ...preloadOf(fakeClient()), invoke: () => Promise.reject(new Error('the bridge went away')) };
+    put();
+    const writing = patchIntent(A, { model: 'haiku' });
+    expect(isEmptyChat(A)).toBe(false);
+    await expect(writing).rejects.toThrow('the bridge went away');
     expect(isEmptyChat(A)).toBe(true);
   });
 

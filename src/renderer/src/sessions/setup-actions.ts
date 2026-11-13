@@ -81,6 +81,7 @@ async function start(appSessionId: AppSessionId, message: FirstMessage | null, o
 // U13a (the branch review): the intent writes this page has sent and main has not answered, per session, counted as the
 // write leaves; until its answer reaches the setup store a chat may hold a draft its intent does not show yet.
 const writing = new Map<AppSessionId, number>();
+export const resetIntentWrites = (): void => writing.clear(); // for suites: a write a failed test left unanswered
 
 export async function patchIntent(appSessionId: AppSessionId, patch: SetupIntentPatch): Promise<HookResult> {
   writing.set(appSessionId, (writing.get(appSessionId) ?? 0) + 1);

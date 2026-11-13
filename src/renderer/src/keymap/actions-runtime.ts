@@ -392,8 +392,6 @@ function rowOf(appSessionId: AppSessionId, state: RowState, loaded: ReadonlySet<
   });
 }
 
-/** The row a session sits under (rule 5): its project's, a machine's own, or the project chosen in an unstarted chat.
-    null: an unstarted chat with no project. undefined: its machine has not answered in this run, or it is not known. */
 // What `sessionRow` reads, for a reader outside React that must hear its answer change (the branch review: a drag's
 // targets): the sessions, the machines' loads and the unstarted titles.
 export function subscribeSessionRows(listener: () => void): () => void {
@@ -401,6 +399,8 @@ export function subscribeSessionRows(listener: () => void): () => void {
   return () => offs.forEach((off) => off());
 }
 
+/** The row a session sits under (rule 5): its project's, a machine's own, or the project chosen in an unstarted chat.
+    null: an unstarted chat with no project. undefined: its machine has not answered in this run, or it is not known. */
 export const sessionRow = (appSessionId: AppSessionId): RowKey | null | undefined =>
   rowOf(appSessionId, useSessions.getState(), useMachines.getState().loaded, useTitleRevision.getState().n);
 
