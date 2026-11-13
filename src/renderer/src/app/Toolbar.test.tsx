@@ -105,4 +105,3 @@ describe('the title bar’s project chip', () => {
     expect(useSessions.getState().unstarted.size).toBe(0);
   });
 });
-});
