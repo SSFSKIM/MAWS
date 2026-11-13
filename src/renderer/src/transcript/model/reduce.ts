@@ -918,9 +918,11 @@ function recordAskSteer(batch: Batch, event: Event<'user.message'>): void {
 
 // UX wave U3 start (UC-2; the U3a document, Interfaces B and D). A synthetic message that carries `arrival` draws a row
 // (derive.ts), so, unlike any other synthetic message, it bumps the turn it joins. Two under one `messageUuid` are one
-// arrival (decision 8): the later takes the earlier out of its turn and stands where it arrives, and one whose list is
-// empty stands for nothing. A list that holds only entries of classes this build does not know does neither (decision
-// 20): it is kept as any synthetic message is, drawing nothing and taking nothing out.
+// arrival (decision 8, as revised by the architect's ruling of 2026-11-13): the first carrier stands, and a later one
+// with a list is another form of it (the file's and the live wire's, when a session is read in both), which changes
+// nothing; one whose list is empty withdraws it, and the next carrier with a list then places it anew. A list that
+// holds only entries of classes this build does not know does neither (decision 20): it is kept as any synthetic
+// message is, drawing nothing and taking nothing out.
 function placeArrival(batch: Batch, event: Event<'user.message'>): void {
   const arrival = event.arrival ?? [];
   const known = carriedOf(arrival).length > 0;
@@ -929,12 +931,19 @@ function placeArrival(batch: Batch, event: Event<'user.message'>): void {
     if (turn) batch.push(turn, event, false);
     return;
   }
+  if (known && event.messageUuid !== null && stands(batch.state, event.messageUuid)) return;
   if (event.messageUuid !== null) batch.takeOutArrival(event.messageUuid);
   if (!known) return; // an empty list: the withdrawal
   const turn = batch.current();
   if (!turn) return;
   batch.push(turn, event);
   if (event.messageUuid !== null) batch.state.index.arrivals.set(event.messageUuid, { turn: turn.id, event: event.id });
+}
+
+// Whether an arrival placed under the uuid still stands: its turn kept (a turn removed for holding nothing takes it along).
+function stands(state: TranscriptState, messageUuid: MessageUuid): boolean {
+  const placed = state.index.arrivals.get(messageUuid);
+  return placed !== undefined && (state.turns.get(placed.turn)?.events.some((event) => event.id === placed.event) ?? false);
 }
 
 // A message the engine host made itself (a task's end it kept until the model was told, a scheduled fire): no frame or

@@ -69,9 +69,11 @@ export interface BackfillContext {
   // UX wave U3 (UC-2; the U3a document, M3): what the arrivals reader left open after the records mapped so far, which
   // it reads in order (rule 5); a terminal's scheduled fire, held for the meta row after it, which opens the turn it
   // stands in; whether the last record was a delivery the bridge appended, whose mirror line then draws nothing; and the
-  // last record when it was a command's `user` row, whose `system` copy under it is no second command
+  // last record when it was a command's `user` row, whose `system` copy under it is no second command; and the fire
+  // whose turn the end of the rows opened (endOfRows), which the meta row after it, read later, continues
   arrivals: OpenArrivals;
   heldFire: SessionEvent | null;
+  firedAlone: MessageUuid | null;
   appendedLast: boolean;
   commandLast: MessageUuid | null;
 }
@@ -107,6 +109,7 @@ export function createBackfillContext(init: {
     localCaveat: null,
     arrivals: nothingOpen,
     heldFire: null,
+    firedAlone: null,
     appendedLast: false,
     commandLast: null,
   };
@@ -152,17 +155,21 @@ export function recordToEvents(record: TranscriptRecord, ctx: BackfillContext): 
   }
 
   // A terminal's fire row waits for the meta row after it, whose turn it stands in; any other row next places it where
-  // it stood (UX wave U3, the U3a document, M3).
+  // it stood (UX wave U3, the U3a document, M3). A meta row read after the rows ended at its fire continues the turn the
+  // end opened for the fire (endOfRows), and makes nothing of its own.
   const fire = ctx.heldFire;
   ctx.heldFire = null;
   const tiedFire = fire !== null && arrivals.length === 0 && isScheduledPrompt(record) ? fire : null;
-  if (fire !== null && tiedFire === null) events.push(fire);
+  if (fire !== null && tiedFire === null) aloneFire(fire, ctx, events);
+  const alone = ctx.firedAlone;
+  ctx.firedAlone = null;
+  const continuesFire = alone !== null && arrivals.length === 0 && isScheduledPrompt(record) && (record.scheduledFireId === undefined || record.scheduledFireId === alone);
 
   switch (record.type) {
     case 'user':
       if (arrivals.length === 0) noteBridgeRow(record, uuid, ctx);
       if (tiedFire !== null) firedTurn(uuid, tiedFire, ctx, base, events);
-      else userEvents(record, uuid, arrivals, ctx, base, events);
+      else if (!continuesFire) userEvents(record, uuid, arrivals, ctx, base, events);
       break;
     case 'assistant':
       assistantEvents(record, uuid, ctx, base, events);
@@ -298,9 +305,10 @@ function isPeerPrompt(record: TranscriptRecord): boolean {
 // (the boundary the rewind rules read) and a peer message, which opens its own (E7). A peer record inside a tool loop
 // opens none, but the turn it joins was already open, so the rule's answer is the same. UX wave U3: a scheduled fire's
 // meta row opens the engine's turn too, and so does a command a terminal wrote as a `system` row (whose turn ends where
-// it starts). The bridge's wake and its answer prompt are `startsTurn`'s already.
+// it starts), and a terminal's fire row, whose own turn the end of the rows opens when its meta row is not there yet
+// (endOfRows). The bridge's wake and its answer prompt are `startsTurn`'s already.
 export function opensTurn(record: TranscriptRecord): boolean {
-  return startsTurn(record) || (isPeerPrompt(record) && !isInterruptMarker(record)) || isScheduledPrompt(record) || (record.type === 'system' && localCommandKind(record) === 'echo');
+  return startsTurn(record) || (isPeerPrompt(record) && !isInterruptMarker(record)) || isScheduledPrompt(record) || (record.type === 'system' && (localCommandKind(record) === 'echo' || record.subtype === 'scheduled_task_fire'));
 }
 
 function peerQueuedMessage(record: TranscriptRecord, uuid: MessageUuid, arrivals: Arrival[], ctx: BackfillContext, base: Base, events: SessionEvent[]): boolean {
@@ -546,6 +554,34 @@ function openTurn(uuid: MessageUuid, origin: string | null, ctx: BackfillContext
 function firedTurn(uuid: MessageUuid, fire: SessionEvent, ctx: BackfillContext, base: Base, events: SessionEvent[]): void {
   openTurn(uuid, 'task-notification', ctx, base, events);
   events.push(fire);
+}
+
+// A fire with no meta row after it, placed where it stood: in the running turn, else in the engine's turn it opens, as
+// its meta row would have (a line is placed only on a turn, Interfaces D).
+function aloneFire(fire: SessionEvent, ctx: BackfillContext, events: SessionEvent[]): boolean {
+  if (fire.kind !== 'user.message' || fire.messageUuid === null) return false;
+  const opens = !ctx.running;
+  if (opens) {
+    openTurn(fire.messageUuid, 'task-notification', ctx, () => eventBase(ctx, `${fire.messageUuid as string}#alone`), events);
+    ctx.running = true;
+    ctx.idle = false;
+    ctx.unanswered = true;
+  }
+  events.push(fire);
+  return opens;
+}
+
+/**
+ * What the mapping holds when its rows end, a file's or a snapshot's: a terminal's fire with no meta row after it yet,
+ * placed where it stood (aloneFire). A meta row read later, as a file is written on, continues the turn it opened.
+ */
+export function endOfRows(ctx: BackfillContext): SessionEvent[] {
+  const fire = ctx.heldFire;
+  ctx.heldFire = null;
+  if (fire === null || fire.kind !== 'user.message') return [];
+  const events: SessionEvent[] = [];
+  if (aloneFire(fire, ctx, events)) ctx.firedAlone = fire.messageUuid;
+  return events;
 }
 
 const isScheduledPrompt = (record: TranscriptRecord) => record.type === 'user' && record.turnOrigin === 'scheduled';

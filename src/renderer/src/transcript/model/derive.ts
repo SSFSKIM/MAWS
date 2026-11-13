@@ -132,14 +132,14 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
 // API diagnostics (transient retries remain work), and the `maws` server's capsule, delivery row and artifact row (E1,
 // E2: what the agent asked, delivered and registered stays in view, as an answered question does), and a message tool's
 // message (P4-R7: always addressed to the human, whatever the owner lane says, as a `<message>` span is, which the
-// presenter draws and so keeps with the lane off), and a task's end that reports an outcome and a scheduled fire (UX wave
-// U3: one short fact each, which a failed task would otherwise show nowhere; every message between agents and sessions
-// folds, O-12). The divider folds everything else, so a turn of a local command
+// presenter draws and so keeps with the lane off), and a task's end that reports an outcome, a scheduled fire and an
+// answer's notice (UX wave U3: one short fact each, which a failed task would otherwise show nowhere, and the answer
+// until U1b puts it on its question's row; every message between agents and sessions folds, O-12). The divider folds everything else, so a turn of a local command
 // alone (`/compact`: its boundary and its output) has no work and no "Worked for 0s" divider. A question still counts as
 // work for where the answer starts (WORK_ROWS).
 export const isPersistentRow = (row: Row): boolean =>
   (row.kind === 'assistant_text' && row.cut === true) /* P5 O9: a reply an interrupt cut off, no work of the turn */ || row.kind === 'to_human' /* P4-R7 */ || row.kind === 'ask' || row.kind === 'delivery' /* E1 */ || row.kind === 'side_thread' /* E3 */ || row.kind === 'artifact' /* E2 */ || row.kind === 'browser_action' /* E4c */ || row.kind === 'browser_activity' /* E13: never derived here; placed by the view */ || row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')))
-  || isPersistentNotice(row) // UX wave U3 (O-12, O-28): a message folds with its turn; a task's end with an outcome and a scheduled fire stay
+  || isPersistentNotice(row) // UX wave U3 (O-12, O-28): a message folds with its turn; a task's end with an outcome, a scheduled fire and, until U1b, an answer stay
   || row.kind === 'owner_record' // P2-C (2026-10-09): placed by the report projection, never a work row
   || row.kind === 'gap'; // P5 O7 M8: events here were not delivered; a closed turn's fold never hides that
 
@@ -1331,7 +1331,8 @@ const peerNamed = (known: KnownAgents[], address: string): string | null => know
 // UX wave U3 (O-28, the fold table of the U3a document's Interfaces D): a task's end that reports an outcome and a
 // scheduled fire stay in view when their turn folds; a notice with no outcome, an answer's and the wake's fold with it.
 function isPersistentNotice(row: Row): boolean {
-  return row.kind === 'notice' && (row.class === 'schedule' || (row.class === 'task' && row.outcome !== null));
+  // an answer stays until U1b fills the question's row with it (the architect's ruling of 2026-11-13; U1b removes it)
+  return row.kind === 'notice' && (row.class === 'schedule' || row.class === 'answer' || (row.class === 'task' && row.outcome !== null));
 }
 
 // Whether a peer user.message is drawn by its companion event (E7): an envelope (peer.message, subagent.message), or, UX

@@ -81,7 +81,7 @@ import type { AgentId, EventId, SessionId } from '@shared/graph/ids';
 import { AgentMetaSchema, TranscriptRecordSchema } from '@shared/wire/transcript';
 import type { Job, JsonObject, McpServer, SessionBodies, StatusRead, SubagentMeta, Usage } from 'desk-hub/protocol';
 import { createStore, type StoreApi } from 'zustand/vanilla';
-import { createBackfillContext, recordToEvents, type BackfillContext, type SubagentLookup } from '../../../engine-host/fs/backfill';
+import { createBackfillContext, endOfRows, recordToEvents, type BackfillContext, type SubagentLookup } from '../../../engine-host/fs/backfill';
 import type { createTranscriptStore } from '../stores/transcript';
 import { emptyGraph, type TaskGraph } from '../tools/agents/model/task-graph';
 import type { TranscriptSource } from '../transcript/source/types';
@@ -268,7 +268,7 @@ export function freshSource(rows: readonly JsonObject[], session: string, subage
     snapshot: async () => {
       const ctx = contextFor({ machine: '', session, agentId }, subagents);
       const drawing = drawingOf(rows, off);
-      return rows.flatMap((row) => drawnEvents(row, drawing, ctx));
+      return [...rows.flatMap((row) => drawnEvents(row, drawing, ctx)), ...endOfRows(ctx)];
     },
   };
 }
@@ -303,7 +303,9 @@ class RowsSource implements TranscriptSource {
   async snapshot(): Promise<SessionEvent[]> {
     await this.owner.whenSnapshotted();
     const ctx = this.owner.newContext();
-    const events = this.owner.heldRows().flatMap((row) => this.owner.mapRow(row, ctx));
+    // what the mapping holds at the held rows' end (a terminal's fire whose meta row is not in yet) is placed with them;
+    // the meta row, arriving live, continues its turn
+    const events = [...this.owner.heldRows().flatMap((row) => this.owner.mapRow(row, ctx)), ...endOfRows(ctx)];
     this.ctx = ctx;
     return events;
   }

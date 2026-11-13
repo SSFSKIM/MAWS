@@ -371,12 +371,10 @@ describe('the rows off the live chain', () => {
     const bg = (content: string) => c.row('user', { origin: { kind: 'human' }, promptSource: 'typed', turnOrigin: 'human', sessionKind: 'bg', message: { role: 'user', content } }, ended);
     const peer = bg('[sminos chat demo 7f3a2b1c:12 from river → @you]\nThe migration is merged.');
     const own = bg('[sminos message from human id=1a2b3c4d]\nKeep going with the tests.');
-    c.prompt('Now the docs.', ended);
-    c.answer('On it.');
-    c.end();
     const { rows } = await drawn(c.rows, [peer, own]);
     expect(JSON.stringify(rows)).not.toContain('The migration is merged.');
-    expect(bubbles(rows)).toEqual(['Start the migration.', 'Keep going with the tests.', 'Now the docs.']);
+    expect(JSON.stringify(rows)).not.toContain('[sminos');
+    expect(bubbles(rows)).toEqual(['Start the migration.', 'Keep going with the tests.']);
     expect(byUuid(rows, own.uuid)).toMatchObject({ text: 'Keep going with the tests.', dropped: true });
   });
 

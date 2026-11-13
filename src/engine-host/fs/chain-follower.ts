@@ -14,7 +14,7 @@ import type { AgentId, EventId, MessageUuid, ParentToolUseId, SessionId } from '
 import { branchName } from '@shared/sessions/branch';
 import type { TranscriptSummary } from '@shared/wire/store';
 import { TranscriptRecordSchema, type TranscriptRecord } from '@shared/wire/transcript';
-import { createBackfillContext, eventBase, recordToEvents, isTaskNotification, isHumanPrompt, isNoResponseMarker, localCommandKind, opensTurn, singleText, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
+import { createBackfillContext, endOfRows, eventBase, recordToEvents, isTaskNotification, isHumanPrompt, isNoResponseMarker, localCommandKind, opensTurn, singleText, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
 
 export interface Skeleton {
   uuid: MessageUuid;
@@ -699,6 +699,9 @@ export class ChainFollower {
   private endBackfill(): void {
     if (this.backfillEnded || this.stopped) return;
     this.backfillEnded = true;
+    // UX wave U3 (the U3a document, M3): what the mapping still holds at the file's end, a terminal's fire whose meta row
+    // is not written yet, placed where it stands; the meta row, if it comes, continues its turn
+    this.deliver(endOfRows(this.core.ctx).map((event) => ({ source: null, group: 0, event })));
     if (this.agent !== null || (this.options.holders?.() ?? 0) > 0) return;
     const exit = this.core.unendedTurnExit();
     if (exit !== null) this.deliver([{ source: null, group: 0, event: exit }]);
