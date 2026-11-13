@@ -358,9 +358,10 @@ describe('session records in the index', () => {
         return Math.round(Math.min(...times) * 10) / 10;
       };
       const share = (pick: (i: number) => boolean) => leastOf(summaries.filter((_, i) => pick(i)));
-      console.log(`[latency] the same 4,000 upserts without the newest row's folder, CPU ms: ${leastOf(withoutNewest(summaries))}`);
-      console.log(`[latency] 4,000 upserts by share, CPU ms: one folder ${share((i) => i % 20 > 2 || i % 20 === 0)}, home in a worktree ${share((i) => i % 20 === 1)}, cd into a worktree ${share((i) => i % 20 === 2)}`);
       const least = Math.round(Math.min(...runs.map((r) => r.ms)) * 10) / 10;
+      const withoutNewestLeast = leastOf(withoutNewest(summaries));
+      console.log(`[latency] 4,000 upserts, CPU ms: ${least}; the same without the newest row's folder: ${withoutNewestLeast}`);
+      console.log(`[latency] 4,000 upserts by share, CPU ms: one folder ${share((i) => i % 20 > 2 || i % 20 === 0)}, home in a worktree ${share((i) => i % 20 === 1)}, cd into a worktree ${share((i) => i % 20 === 2)}`);
       const { ceiling, reason } = budgetVerdict('4,000 upserts, CPU time', least, 500, machine, at);
       if (reason !== null) console.log(`[latency] ${reason}`);
       expect(least).toBeLessThan(ceiling);
