@@ -19,7 +19,7 @@ import { CHARTER, otherThemeColours, panelScenario, scratchRepository, SIDEBAR_D
 import type { AppSessionId } from '@shared/graph/ids'; // P4-B3
 import { closeScene, launchScene, scratchProject, show, type Scene } from './support/maws-tools'; // P4-B3: the split's float
 import { seedTranscript, transcript } from './support/side-replay'; // P4-B3
-import { closeSurface, mainTabs, openSurface, sessionCards, showSessionCards, surface, surfaceRow, unfoldSessionCard } from './support/shell';
+import { hideSurface, mainTabs, openSurface, sessionCards, showSessionCards, surface, surfaceRow, unfoldSessionCard } from './support/shell';
 
 const DIR_A = '/tmp/maws-harness/a'; // session A's directory in the harness scenario
 const SCENARIO = 'stub:test/fixtures/panel/harness-sessions.json';
@@ -1149,7 +1149,7 @@ test.describe('the floating session card (P3-G)', () => {
 
       await test.step('acceptance 7: over a DOM tool the card floats 16 px from the panel’s right and bottom edges', async () => {
         await openSurface(page, 'Session info');
-        await closeSurface(page, 'Files'); // Keep one tool for this floating-card contract, not the separate stacking case.
+        await hideSurface(page, 'Files'); // Keep one tool for this floating-card contract, not the separate stacking case.
         await expect(panel.locator(`[data-session-info="${usageId}"]`)).toBeVisible();
         await expect(card).toBeVisible();
         // P4-B3 (parent Decision Log 15.7): the card sits at the panel body's bottom right (it sat at the bottom left)
@@ -1160,7 +1160,7 @@ test.describe('the floating session card (P3-G)', () => {
         // The region's 1 px border is on its left, outside the card's side
         expect(await near()).toEqual({ right: 16, bottom: 16 });
         await openSurface(page, 'Files');
-        await closeSurface(page, 'Session info');
+        await hideSurface(page, 'Session info');
         await expect(surface(page, 'files').getByRole('tree')).toBeVisible();
         await expect(surface(page, 'files').getByRole('treeitem').first(), 'the real scratch root renders behind the card').toBeVisible();
         expect(await near()).toEqual({ right: 16, bottom: 16 });
@@ -1482,7 +1482,7 @@ test.describe('the panel header and X32 (P3-G)', () => {
     });
 
     const editor = await panel.call('addTool', 'harness-editor');
-    await closeSurface(panel.page, 'Stub'); // Keep the editor primary while testing its region controls.
+    await hideSurface(panel.page, 'Stub'); // Keep the editor primary while testing its region controls.
     await test.step('acceptance 9: the registration’s breadcrumb, saved state, count, actions and Export, each invoking its handler', async () => {
       await panel.call('maximize', true); // room for the whole left side
       await expect(title).toHaveText('Q3 brief');
@@ -1535,7 +1535,7 @@ test.describe('the panel header and X32 (P3-G)', () => {
       await expect(title).toHaveText('Q3 brief');
       // Switched away, the editor's body unmounts; its registration stays with the tab, and its guard still vetoes.
       await openSurface(panel.page, 'Stub');
-      await closeSurface(panel.page, 'Editor'); // Close surface hides, rather than discarding the guarded editor ref.
+      await hideSurface(panel.page, 'Editor'); // Close surface hides, rather than discarding the guarded editor ref.
       await expect(stubHeader.getByRole('tab', { name: 'Stub', exact: true, selected: true })).toBeVisible();
       await expect(surface(panel.page, 'harness-editor')).toHaveCount(0);
       expect(await panel.call('closeTab', editor), 'the inactive ref’s guard vetoes').toBe(false);

@@ -142,7 +142,7 @@ import { installUnitDaemon, type UnitDaemon } from './support/unit-daemon';
 import { REPO_ROOT } from './support/launch';
 import { addressed } from './support/address'; // U13a
 import { menu } from './support/menu'; // U13a: Settings and the split
-import { activeMainTab, closeSurface, mainTabById, mainTabs, openSurface, surfaceRow } from './support/shell'; // U13a
+import { activeMainTab, hideSurface, mainTabById, mainTabs, openSurface, surfaceRow } from './support/shell'; // U13a
 import { sidebarRow } from './support/sidebar'; // U13a
 import { answerOf, fitTo, refusedSample, sampleOf, samplesFor, type ProbeAnswer } from './support/cross-build-samples';
 import { endProfileProcesses, isAlive } from './support/processes';
@@ -1722,7 +1722,7 @@ test('(layout, from the peer) a layout the peer filed under two tab sets opens w
     await expect.poll(async () => (front = (await activeMainTab(old.page).getAttribute('data-tab-id')) ?? ''), { timeout: 20_000, message: `${peer.label} shows the session’s tab` }).toMatch(/^session:/);
     await pinTab(old.page, front);
     await pinToToolbar(old.page, PINNED_TOOL, true);
-    await closeSurface(old.page, PINNED_TOOL);
+    await hideSurface(old.page, PINNED_TOOL);
     let theirs: StoredSets | null = null;
     await expect
       .poll(async () => {
@@ -1812,7 +1812,7 @@ test('(layout, to the peer) a split strip this build stored, with a pin, a side 
     await expect.poll(() => run.page.getByRole('tablist', { name: 'Right pane tabs' }).getByRole('tab').evaluateAll((t) => t.map((e) => e.getAttribute('data-tab-id'))), { message: 'the split' }).toEqual([session]);
     await openSurface(run.page, 'Files');
     await pinToToolbar(run.page, PINNED_TOOL, true);
-    await closeSurface(run.page, PINNED_TOOL);
+    await hideSurface(run.page, PINNED_TOOL);
     await mainTabById(run.page, 'artifacts').click();
     await expect(activeMainTab(run.page)).toHaveAttribute('data-tab-id', 'artifacts');
     const resizer = run.page.locator('[data-region="sidebar"]').getByRole('separator', { name: 'Resize sidebar' });

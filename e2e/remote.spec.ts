@@ -87,7 +87,7 @@ import { startRemoteScene, B_NAME, type RemoteScene } from './support/remote-sce
 import type { PlaneRow } from './support/fake-sminos'; // 2026-11-06
 import { answered, BUTTON, FIELD, startPages } from './support/headless-browser'; // P5 O17 M10
 import { connectorControl, writeCuaEngine, type ConnectorControl } from '../test/support/cua-engine'; // P5 O17 M10
-import { closeSurface, mainTabById, openSurface, surface } from './support/shell';
+import { hideSurface, mainTabById, openSurface, surface } from './support/shell';
 import { seedTranscript, SIDE_QUESTION, SideJournal, slugOf, transcript } from './support/side-replay';
 import { newChatIn, openProject, projectLine, projectRow, showProjectList, sidebarOf } from './support/sidebar';
 import { clickRevealed } from './support/hover'; // P5 O7 M8
@@ -1690,7 +1690,7 @@ test('O17 M10: the agent’s tab on B, which runs no app, seen and driven from A
 
     await test.step('the Browser tool hidden closes its view, not B’s tab; shown again it opens a new view of the tab', async () => {
       const before = (await canvas.getAttribute('data-remote-view'))!;
-      await closeSurface(page, 'Browser'); // the panel's surfaces sit side by side: another opened beside it hides nothing
+      await hideSurface(page, 'Browser'); // the panel's surfaces sit side by side: another opened beside it hides nothing
       await expect(canvas).toHaveCount(0);
       expect((await b.request<Render>('daemon.status')).render?.browserTabs, 'B’s tab goes on').toBe(2);
       const tabs = await cua.call<{ id: number }[]>('tabs.query');

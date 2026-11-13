@@ -12,7 +12,7 @@ import { addressed, localRef } from './support/address';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { menu } from './support/menu';
 import { sidebarRow } from './support/sidebar';
-import { closeSurface, openSurface, unfoldSessionCard } from './support/shell';
+import { hideSurface, openSurface, unfoldSessionCard } from './support/shell';
 
 const SIZES = [{ width: 1280, height: 820 }, { width: 1512, height: 982 }] as const;
 const ENV = {
@@ -587,7 +587,7 @@ test('Acceptance: overflowing tabs remain reachable and F6 visits cards and surf
   await composer.focus();
   await menu(maws.app, 'region.focusNext');
   await expect.poll(() => page.evaluate(() => document.activeElement?.closest('[data-panel-content]') !== null)).toBe(true);
-  await closeSurface(page, 'Files');
+  await hideSurface(page, 'Files');
 
   for (let i = 0; i < 20; i++) await menu(maws.app, 'session.new');
   await expect(page.locator('[data-chrome-tabs]').getByRole('tab')).toHaveCount(21);

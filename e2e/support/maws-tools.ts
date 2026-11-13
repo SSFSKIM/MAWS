@@ -359,7 +359,7 @@ export async function openArtifacts(s: Scene): Promise<void> {
   let retained = await surface(s.page, 'artifacts').count() > 0 || await surfaceRow(s.page).getByRole('button', { name: 'Artifacts', exact: true }).count() > 0;
   if (!retained) {
     await surfaceRow(s.page).getByRole('button', { name: 'More surfaces', exact: true }).click();
-    retained = await s.page.getByRole('menuitem', { name: 'Open saved artifact', exact: true }).or(s.page.getByRole('menuitem', { name: 'Artifacts', exact: true })).count() > 0;
+    retained = await s.page.getByRole('menuitem', { name: 'Artifacts', exact: true }).count() > 0;
     await s.page.keyboard.press('Escape');
   }
   if (retained) {

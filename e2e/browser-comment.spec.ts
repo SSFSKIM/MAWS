@@ -36,7 +36,7 @@ import { clearToasts, closeScene, scratchProject, show, type Scratch } from './s
 import { REPO_ROOT } from './support/launch';
 import { latencyBudgets } from './support/latency';
 import { seedTranscript, SideJournal, solidPng, transcript } from './support/side-replay';
-import { closeSurface } from './support/shell';
+import { hideSurface } from './support/shell';
 
 test.describe.configure({ timeout: 180_000 });
 
@@ -806,7 +806,7 @@ test('2c. with the Browser surface closed, the Side pane offers Reopen in browse
       await expect(card).toHaveCount(0);
       const pane = s.panel.locator('[data-side-thread-view]');
       await expect(pane, 'the Side pane draws the thread').toBeVisible();
-      await closeSurface(s.page, 'Browser');
+      await hideSurface(s.page, 'Browser');
       await expect(t.panel, 'the Browser surface is closed').toHaveCount(0);
       const header = pane.locator('header');
       await expect(header.getByRole('button', { name: 'Show in browser' }), 'no pane holds the page').toHaveCount(0);

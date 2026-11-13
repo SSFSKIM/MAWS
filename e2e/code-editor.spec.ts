@@ -13,7 +13,7 @@ import { CONFLICT_BLOCK, MERGE_LINES } from './support/code-scratch';
 import { clickRevealed } from './support/hover';
 import { REPO_ROOT, test } from './support/launch';
 import { MEASURED_WAIT_MS } from './support/latency';
-import { closeSurface, openSurface } from './support/shell';
+import { hideSurface, openSurface } from './support/shell';
 
 const APP = 'src/app.ts';
 const MERGE = 'conflicts/merge.ts';
@@ -226,7 +226,7 @@ test.describe('the editor in stub mode over a scratch repository', () => {
       const resize = (next: number) => p.maws.app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows()[0].setSize(w, h), [next, height] as const);
       // Files otherwise consumes a responsive share of the window (and becomes a sheet below 700 px).
       // Close it through its chrome; at 600 px the sidebar yields and the real viewer fills main.
-      await closeSurface(p.page, 'Files');
+      await hideSurface(p.page, 'Files');
       await resize(600);
       await expect.poll(async () => Math.abs((await viewer.boundingBox())!.width - 600), { message: 'the viewer about 600 px wide' }).toBeLessThan(40);
       const name = viewer.locator('[data-path-name]');

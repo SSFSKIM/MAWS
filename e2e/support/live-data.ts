@@ -12,7 +12,7 @@ import { DATASET_STATES, utcTime } from '../../src/artifacts/dashboard/states';
 import { invoke, SERVER, TOOL, value, wait, type ConnectorScene, type FixtureRow, type LiveEngine, type Run } from './connector-scene';
 import { AgentSeam, ok, openInMain, revisionOf, refusalOf, tipsOf, type AgentCall } from './dashboards';
 import { boundsProblems, type BlockMeasure } from './live-data-bounds';
-import { closeSurface, mainTab as shellMainTab, openSurface } from './shell';
+import { hideSurface, mainTab as shellMainTab, openSurface } from './shell';
 
 export const BOARD = 'Signups board';
 export const DATASET = 'signups';
@@ -230,7 +230,7 @@ export async function readDataset(agent: AgentSeam, session: string, artifactId:
 /** The dashboard's Artifacts surface shown or hidden by its icon, retaining the record for the next opening. */
 export async function setPanel(page: Page, shown: boolean): Promise<void> {
   if (shown) await openSurface(page, 'Artifacts');
-  else await closeSurface(page, 'Artifacts');
+  else await hideSurface(page, 'Artifacts');
 }
 
 /** The window as it actually is: its native frame and content size, its minimum, and the renderer's CSS viewport and

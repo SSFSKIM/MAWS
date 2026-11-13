@@ -28,7 +28,7 @@ import { seedTranscript, SIDE_FOLLOW_UP, SIDE_FOLLOW_UP_ROWS, SIDE_QUESTION, SID
 import type { AppSessionId } from '@shared/graph/ids'; // P2-E1
 import { frameAt, headerAction, importSeeded, mcpCalls, mcpResultOf, metaEvents, ofKind, pageUrlOf, resultText, seedArtifact } from './support/maws-tools'; // P2-E1; P3-L M6b; P3-F (case 12's evidence)
 import { newChatIn, openProject, sidebarOf, sidebarRow } from './support/sidebar';
-import { closeSurface, hideSurfaces, mainTabById, openArtifactInPanel, openSurface, surface } from './support/shell';
+import { hideSurface, hideSurfaces, mainTabById, openArtifactInPanel, openSurface, surface } from './support/shell';
 
 // E3's evidence screenshots, written only under MAWS_E3_SHOTS=1 (E11 W-E: a gate run leaves them alone); the cases'
 // both-themes token scans run either way.
@@ -243,7 +243,7 @@ async function openThreadFromGutter(c: Case & { parent: string }): Promise<{ chi
   const child = await sideThreadOf(page, c.parent, 'comment');
   const pane = panelRegion(page).locator(`[data-side-thread-view="${await addressed(page, child)}"]`);
   await expect(pane, 'the Side pane opens on the new thread').toBeVisible();
-  await closeSurface(page, 'Files');
+  await hideSurface(page, 'Files');
   await expect(pane.getByText(CHILD_REPLY)).toBeVisible({ timeout: 20_000 });
   return { child, pane, viewer };
 }
@@ -907,7 +907,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     // Show in artifact: the parent's Artifacts tool on the artifact, the card back on the same thread under the heading
     await pane.getByRole('button', { name: 'Show in artifact' }).click();
     await expect(surface(page, 'artifacts')).toBeVisible();
-    await closeSurface(page, 'Side');
+    await hideSurface(page, 'Side');
     const viewer = panelRegion(page).locator('[data-artifact-viewer]');
     const redocked = viewer.locator('[data-comment-card]');
     await expect(redocked).toHaveAttribute('data-card-phase', 'thread');

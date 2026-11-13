@@ -15,7 +15,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { localRef } from './support/address';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
-import { mainTab as chromeTab, mainTabById, mainTabs, moveMainArtifactToPanel, openSurface, closeSurface, pinSurfaceForSessions, surface } from './support/shell';
+import { mainTab as chromeTab, mainTabById, mainTabs, moveMainArtifactToPanel, openSurface, hideSurface, pinSurfaceForSessions, surface } from './support/shell';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 
@@ -462,7 +462,7 @@ for (const [width, height] of [[1280, 820], [1512, 982]] as const) test(`the doc
   readings.a = alone;
 
   // (d) the panel closed
-  await closeSurface(page, 'Artifacts');
+  await hideSurface(page, 'Artifacts');
   await expect.poll(async () => (await widths()).panel).toBeLessThanOrEqual(0);
   await expect.poll(async () => (await marginOf(inMain(page, id))).scrollBox).toBeGreaterThan(alone.scrollBox);
   const closed = await settled(async () => ({ ...(await widths()), ...(await marginOf(inMain(page, id))) }), '(d) settled');

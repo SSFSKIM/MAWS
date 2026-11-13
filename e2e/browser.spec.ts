@@ -9,7 +9,7 @@
 // themes (shots under MAWS_E4A_SHOTS=1).
 // Runs under `pnpm e2e:browser` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list); each launch passes
 // MAWS_HARNESS=0, so the window is the product app.
-import { closeSurface, openSurface, surfaceRow, usagePill } from './support/shell';
+import { hideSurface, openSurface, surfaceRow, usagePill } from './support/shell';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -168,7 +168,7 @@ test('show_pane opens one tab for two windows’ worth of one request; links and
       await expect(paneIn(main).locator('[data-browser-page="elsewhere"]')).toBeVisible();
     }
     // Closing the optional Browser surface unmounts its pane; the main tab takes the view back.
-    await closeSurface(s.page, 'Browser');
+    await hideSurface(s.page, 'Browser');
     await expectOnPane(s, a, paneIn(main), 'main');
     expect((await viewOf(s, a))?.owner?.surface).toBe('main');
 
