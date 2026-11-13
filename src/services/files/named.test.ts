@@ -545,12 +545,12 @@ describe('the results waiting for their calls', () => {
   it('many results whose calls are never found cost one pass per line, not one search per waiting id', async () => {
     const n = 1000;
     await writeTranscript(unresolved(n, 'never'));
-    const searches = vi.spyOn(Buffer.prototype, 'indexOf');
+    const searches = [vi.spyOn(Buffer.prototype, 'indexOf'), vi.spyOn(Buffer.prototype, 'includes')]; // every byte search of a line
     try {
       expect(await paths({ bounds: { pending: n } }).names(S, P)).toBe(false);
-      expect(searches.mock.calls.length).toBeLessThan(10 * n);
+      expect(searches.reduce((sum, spy) => sum + spy.mock.calls.length, 0)).toBeLessThan(10 * n);
     } finally {
-      searches.mockRestore();
+      for (const spy of searches) spy.mockRestore();
     }
   });
 
