@@ -113,7 +113,7 @@
   {
     "at": "2026-09-01T08:45:00.667Z",
     "autoDenied": 0,
-    "caption": "Edited a file, fetched 3 pages, updated todos and 7 more actions",
+    "caption": "Edited a file, fetched 3 pages, updated todos, and 7 more actions",
     "counts": {
       "added": 5,
       "removed": 2
@@ -463,7 +463,7 @@
     "id": "group:cell:toolu_2_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Fetched a page, updated todos, ran a command and 3 more actions",
+    "summary": "Fetched a page, updated todos, ran a command, and 3 more actions",
     "turnId": "turn:u2"
   },
   {
@@ -743,7 +743,7 @@
     "id": "group:cell:toolu_2_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, fetched 2 pages, edited app.ts and 3 more actions",
+    "summary": "Updated todos, fetched 2 pages, edited app.ts, and 3 more actions",
     "turnId": "turn:u2"
   },
   {
@@ -912,7 +912,7 @@
   {
     "at": "2026-09-01T09:08:39.507Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, searched the web, ran a command and 2 more actions",
+    "caption": "Edited 2 files, searched the web, ran a command, and 2 more actions",
     "counts": {
       "added": 15,
       "removed": 3
@@ -1629,7 +1629,7 @@
   {
     "at": "2026-09-01T09:36:03.440Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, searched code, updated todos and 10 more actions",
+    "caption": "Edited 2 files, searched code, updated todos, and 10 more actions",
     "counts": {
       "added": 13,
       "removed": 7
@@ -2133,7 +2133,7 @@
     "id": "group:cell:toolu_6_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, read 2 files, searched the web and 3 more actions",
+    "summary": "Updated todos, read 2 files, searched the web, and 3 more actions",
     "turnId": "turn:u6"
   },
   {
@@ -2394,7 +2394,7 @@
     "id": "group:cell:toolu_6_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited a file, searched the web, ran 2 commands and 2 more actions",
+    "summary": "Edited a file, searched the web, ran 2 commands, and 2 more actions",
     "turnId": "turn:u6"
   },
   {
@@ -2426,7 +2426,7 @@
   {
     "at": "2026-09-01T09:40:37.867Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, ran a command, searched code and 3 more actions",
+    "caption": "Edited 2 files, ran a command, searched code, and 3 more actions",
     "counts": {
       "added": 14,
       "removed": 7
@@ -2908,7 +2908,7 @@
   {
     "at": "2026-09-01T20:03:24.594Z",
     "autoDenied": 0,
-    "caption": "Created a file, edited a file, searched the web 2 times and 8 more actions",
+    "caption": "Created a file, edited a file, searched the web 2 times, and 8 more actions",
     "counts": {
       "added": 20,
       "removed": 11
@@ -3203,7 +3203,7 @@
     "id": "group:cell:toolu_8_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched the web, searched for files, created a file and 2 more actions",
+    "summary": "Searched the web, searched for files, created a file, and 2 more actions",
     "turnId": "turn:u8"
   },
   {
@@ -3567,7 +3567,7 @@
   {
     "at": "2026-09-01T20:16:01.079Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, created a file, ran 4 commands and 5 more actions",
+    "caption": "Edited 2 files, created a file, ran 4 commands, and 5 more actions",
     "counts": {
       "added": 18,
       "removed": 15
@@ -3996,7 +3996,7 @@
     "id": "group:cell:toolu_9_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran 2 commands, fetched 2 pages, edited 2 files and 2 more actions",
+    "summary": "Ran 2 commands, fetched 2 pages, edited 2 files, and 2 more actions",
     "turnId": "turn:u9"
   },
   {
@@ -4221,7 +4221,7 @@
   {
     "at": "2026-09-01T20:26:34.499Z",
     "autoDenied": 0,
-    "caption": "Edited README.md, ran 2 agents, ran 2 commands and 3 more actions",
+    "caption": "Edited README.md, ran 2 agents, ran 2 commands, and 3 more actions",
     "counts": {
       "added": 10,
       "removed": 3
@@ -4553,7 +4553,7 @@
     "id": "group:cell:toolu_10_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited README.md, ran 2 commands, searched the web and 2 more actions",
+    "summary": "Edited README.md, ran 2 commands, searched the web, and 2 more actions",
     "turnId": "turn:u10"
   },
   {
@@ -4704,7 +4704,7 @@
   {
     "at": "2026-09-01T20:43:16.768Z",
     "autoDenied": 0,
-    "caption": "Edited a file, ran a command, read 3 files and 5 more actions",
+    "caption": "Edited a file, ran a command, read 3 files, and 5 more actions",
     "counts": {
       "added": 2,
       "removed": 1
@@ -5105,7 +5105,7 @@
     "id": "group:cell:toolu_12_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran a command, edited a file, read 2 files and 4 more actions",
+    "summary": "Ran a command, edited a file, read 2 files, and 4 more actions",
     "turnId": "turn:u12"
   },
   {
@@ -5282,7 +5282,7 @@
   {
     "at": "2026-09-01T20:49:09.976Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, searched for files, updated todos and 3 more actions",
+    "caption": "Edited 2 files, searched for files, updated todos, and 3 more actions",
     "counts": {
       "added": 14,
       "removed": 3
@@ -5666,7 +5666,7 @@
     "id": "group:cell:toolu_13_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched for files, edited 2 files, updated todos and 3 more actions",
+    "summary": "Searched for files, edited 2 files, updated todos, and 3 more actions",
     "turnId": "turn:u13"
   },
   {
@@ -6060,7 +6060,7 @@
   {
     "at": "2026-09-02T10:12:27.967Z",
     "autoDenied": 0,
-    "caption": "Edited derive.ts, updated todos, ran a command and 3 more actions",
+    "caption": "Edited derive.ts, updated todos, ran a command, and 3 more actions",
     "counts": {
       "added": 11,
       "removed": 4
@@ -6396,7 +6396,7 @@
     "id": "group:cell:toolu_15_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited derive.ts, updated todos, ran a command and 3 more actions",
+    "summary": "Edited derive.ts, updated todos, ran a command, and 3 more actions",
     "turnId": "turn:u15"
   },
   {
@@ -6428,7 +6428,7 @@
   {
     "at": "2026-09-02T10:23:39.206Z",
     "autoDenied": 0,
-    "caption": "Edited store.ts, searched the web 3 times, ran 2 commands and 6 more actions",
+    "caption": "Edited store.ts, searched the web 3 times, ran 2 commands, and 6 more actions",
     "counts": {
       "added": 11,
       "removed": 2
@@ -7016,7 +7016,7 @@
   {
     "at": "2026-09-02T10:32:59.342Z",
     "autoDenied": 0,
-    "caption": "Created 2 files, edited a file, ran a command and 16 more actions",
+    "caption": "Created 2 files, edited a file, ran a command, and 16 more actions",
     "counts": {
       "added": 29,
       "removed": 14
@@ -7455,7 +7455,7 @@
     "id": "group:cell:toolu_17_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran a command, created a file, edited a file and 5 more actions",
+    "summary": "Ran a command, created a file, edited a file, and 5 more actions",
     "turnId": "turn:u17"
   },
   {
@@ -7956,7 +7956,7 @@
     "id": "group:cell:toolu_17_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, searched the web, fetched a page and 4 more actions",
+    "summary": "Updated todos, searched the web, fetched a page, and 4 more actions",
     "turnId": "turn:u17"
   },
   {
@@ -7988,7 +7988,7 @@
   {
     "at": "2026-09-02T10:47:53.610Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, searched for files, read a file and 3 more actions",
+    "caption": "Edited 2 files, searched for files, read a file, and 3 more actions",
     "counts": {
       "added": 11,
       "removed": 6
@@ -8456,7 +8456,7 @@
   {
     "at": "2026-09-02T10:54:41.698Z",
     "autoDenied": 0,
-    "caption": "Read 2 files, searched code, updated todos and 3 more actions",
+    "caption": "Read 2 files, searched code, updated todos, and 3 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -8825,7 +8825,7 @@
     "id": "group:cell:toolu_19_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Read 2 files, searched code, updated todos and 3 more actions",
+    "summary": "Read 2 files, searched code, updated todos, and 3 more actions",
     "turnId": "turn:u19"
   },
   {
@@ -8857,7 +8857,7 @@
   {
     "at": "2026-09-02T11:02:16.801Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, ran 2 agents, fetched a page and 2 more actions",
+    "caption": "Edited 2 files, ran 2 agents, fetched a page, and 2 more actions",
     "counts": {
       "added": 9,
       "removed": 2
@@ -9495,7 +9495,7 @@
   {
     "at": "2026-09-02T15:45:49.231Z",
     "autoDenied": 0,
-    "caption": "Edited a file, searched code, read 2 files and 10 more actions",
+    "caption": "Edited a file, searched code, read 2 files, and 10 more actions",
     "counts": {
       "added": 12,
       "removed": 1
@@ -9954,7 +9954,7 @@
     "id": "group:cell:toolu_24_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Read 2 files, edited a file, searched for files and 3 more actions",
+    "summary": "Read 2 files, edited a file, searched for files, and 3 more actions",
     "turnId": "turn:u24"
   },
   {
@@ -10188,7 +10188,7 @@
   {
     "at": "2026-09-02T15:52:39.384Z",
     "autoDenied": 0,
-    "caption": "Edited 4 files, searched for files, read 2 files and 5 more actions",
+    "caption": "Edited 4 files, searched for files, read 2 files, and 5 more actions",
     "counts": {
       "added": 28,
       "removed": 12
@@ -10590,7 +10590,7 @@
     "id": "group:cell:toolu_25_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited 2 files, searched for files, read 2 files and 2 more actions",
+    "summary": "Edited 2 files, searched for files, read 2 files, and 2 more actions",
     "turnId": "turn:u25"
   },
   {
@@ -10866,7 +10866,7 @@
   {
     "at": "2026-09-02T15:55:41.236Z",
     "autoDenied": 0,
-    "caption": "Read derive.ts, searched for files, ran 2 commands and 5 more actions",
+    "caption": "Read derive.ts, searched for files, ran 2 commands, and 5 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -11141,7 +11141,7 @@
     "id": "group:cell:toolu_26_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Read derive.ts, searched for files, ran a command and 2 more actions",
+    "summary": "Read derive.ts, searched for files, ran a command, and 2 more actions",
     "turnId": "turn:u26"
   },
   {
@@ -11335,7 +11335,7 @@
   {
     "at": "2026-09-02T16:05:18.696Z",
     "autoDenied": 0,
-    "caption": "Updated todos, fetched 2 pages, ran a command and 6 more actions",
+    "caption": "Updated todos, fetched 2 pages, ran a command, and 6 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -12045,7 +12045,7 @@
   {
     "at": "2026-09-02T16:15:50.925Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, updated todos, ran a command and 6 more actions",
+    "caption": "Edited 2 files, updated todos, ran a command, and 5 more actions",
     "counts": {
       "added": 16,
       "removed": 2
@@ -12755,7 +12755,7 @@
   {
     "at": "2026-09-02T16:20:23.731Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, ran 2 agents, fetched a page and 3 more actions",
+    "caption": "Edited 2 files, ran 2 agents, fetched a page, and 3 more actions",
     "counts": {
       "added": 5,
       "removed": 5
@@ -13163,7 +13163,7 @@
   {
     "at": "2026-09-02T16:30:13.438Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, fetched 3 pages, searched the web 2 times and 13 more actions",
+    "caption": "Edited 2 files, fetched 3 pages, searched the web 2 times, and 13 more actions",
     "counts": {
       "added": 16,
       "removed": 2
@@ -13474,7 +13474,7 @@
     "id": "group:cell:toolu_31_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Fetched 2 pages, searched the web, updated todos and 2 more actions",
+    "summary": "Fetched 2 pages, searched the web, updated todos, and 2 more actions",
     "turnId": "turn:u31"
   },
   {
@@ -13724,7 +13724,7 @@
     "id": "group:cell:toolu_31_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran a command, edited derive.ts, fetched a page and 3 more actions",
+    "summary": "Ran a command, edited derive.ts, fetched a page, and 3 more actions",
     "turnId": "turn:u31"
   },
   {
@@ -14053,7 +14053,7 @@
     "id": "group:cell:toolu_31_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited app.ts, ran 2 commands, searched the web and 4 more actions",
+    "summary": "Edited app.ts, ran 2 commands, searched the web, and 4 more actions",
     "turnId": "turn:u31"
   },
   {
@@ -14175,7 +14175,7 @@
   {
     "at": "2026-09-02T16:52:48.734Z",
     "autoDenied": 0,
-    "caption": "Searched code, ran a command, searched the web and 4 more actions",
+    "caption": "Searched code, ran a command, searched the web, and 4 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -14505,7 +14505,7 @@
     "id": "group:cell:toolu_33_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched code, ran a command, searched the web and 4 more actions",
+    "summary": "Searched code, ran a command, searched the web, and 4 more actions",
     "turnId": "turn:u33"
   },
   {
@@ -15298,7 +15298,7 @@
   {
     "at": "2026-09-02T17:30:41.367Z",
     "autoDenied": 0,
-    "caption": "Edited a file, fetched 2 pages, searched code and 10 more actions",
+    "caption": "Edited a file, fetched 2 pages, searched code, and 10 more actions",
     "counts": {
       "added": 3,
       "removed": 0
@@ -15604,7 +15604,7 @@
     "id": "group:cell:toolu_37_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Fetched 2 pages, searched code, updated todos and 2 more actions",
+    "summary": "Fetched 2 pages, searched code, updated todos, and 2 more actions",
     "turnId": "turn:u37"
   },
   {
@@ -15929,7 +15929,7 @@
     "id": "group:cell:toolu_37_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited a file, read a file, updated todos and 4 more actions",
+    "summary": "Edited a file, read a file, updated todos, and 4 more actions",
     "turnId": "turn:u37"
   },
   {
@@ -16188,7 +16188,7 @@
   {
     "at": "2026-09-02T17:43:07.079Z",
     "autoDenied": 0,
-    "caption": "Edited a file, ran 2 agents, ran 4 commands and 10 more actions",
+    "caption": "Edited a file, ran 2 agents, ran 4 commands, and 9 more actions",
     "counts": {
       "added": 8,
       "removed": 4
@@ -16936,7 +16936,7 @@
     "id": "group:cell:toolu_40_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Fetched a page, ran 2 commands, updated todos and 3 more actions",
+    "summary": "Fetched a page, ran 2 commands, updated todos, and 3 more actions",
     "turnId": "turn:u40"
   },
   {
@@ -16997,7 +16997,7 @@
   {
     "at": "2026-09-02T17:49:27.627Z",
     "autoDenied": 0,
-    "caption": "Edited 3 files, created a file, updated todos and 7 more actions",
+    "caption": "Edited 3 files, created a file, updated todos, and 7 more actions",
     "counts": {
       "added": 35,
       "removed": 9
@@ -17346,7 +17346,7 @@
     "id": "group:cell:toolu_41_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, ran a command, searched the web and 3 more actions",
+    "summary": "Updated todos, ran a command, searched the web, and 3 more actions",
     "turnId": "turn:u41"
   },
   {
@@ -17634,7 +17634,7 @@
     "id": "group:cell:toolu_41_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched the web, searched for files, edited 2 files and 2 more actions",
+    "summary": "Searched the web, searched for files, edited 2 files, and 2 more actions",
     "turnId": "turn:u41"
   },
   {
@@ -17666,7 +17666,7 @@
   {
     "at": "2026-09-02T18:04:41.485Z",
     "autoDenied": 0,
-    "caption": "Created package.json, ran a command, searched code and 12 more actions",
+    "caption": "Created package.json, ran a command, searched code, and 12 more actions",
     "counts": {
       "added": 2,
       "removed": 7
@@ -18762,7 +18762,7 @@
   {
     "at": "2026-09-02T18:20:57.527Z",
     "autoDenied": 0,
-    "caption": "Edited a file, created a file, searched code and 3 more actions",
+    "caption": "Edited a file, created a file, searched code, and 3 more actions",
     "counts": {
       "added": 15,
       "removed": 0
@@ -19476,7 +19476,7 @@
   {
     "at": "2026-09-03T06:25:39.409Z",
     "autoDenied": 0,
-    "caption": "Edited 3 files, created a file, fetched a page and 5 more actions",
+    "caption": "Edited 3 files, created a file, fetched a page, and 5 more actions",
     "counts": {
       "added": 36,
       "removed": 16
@@ -20157,7 +20157,7 @@
   {
     "at": "2026-09-03T06:34:36.983Z",
     "autoDenied": 0,
-    "caption": "Fetched 2 pages, updated todos, read 2 files and 5 more actions",
+    "caption": "Fetched 2 pages, updated todos, read 2 files, and 5 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -20654,7 +20654,7 @@
     "id": "group:cell:toolu_48_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, read 2 files, fetched a page and 3 more actions",
+    "summary": "Updated todos, read 2 files, fetched a page, and 3 more actions",
     "turnId": "turn:u48"
   },
   {
@@ -20686,7 +20686,7 @@
   {
     "at": "2026-09-03T06:48:19.726Z",
     "autoDenied": 0,
-    "caption": "Edited 3 files, fetched a page, updated todos and 2 more actions",
+    "caption": "Edited 3 files, fetched a page, updated todos, and 2 more actions",
     "counts": {
       "added": 11,
       "removed": 13
@@ -21196,7 +21196,7 @@
   {
     "at": "2026-09-03T06:49:53.622Z",
     "autoDenied": 0,
-    "caption": "Edited a file, ran 2 agents, searched the web and 8 more actions",
+    "caption": "Edited a file, ran 2 agents, searched the web, and 8 more actions",
     "counts": {
       "added": 12,
       "removed": 0
@@ -21972,7 +21972,7 @@
   {
     "at": "2026-09-03T07:18:05.946Z",
     "autoDenied": 0,
-    "caption": "Edited 4 files, created a file, ran 2 commands and 13 more actions",
+    "caption": "Edited 4 files, created a file, ran 2 commands, and 13 more actions",
     "counts": {
       "added": 47,
       "removed": 18
@@ -22324,7 +22324,7 @@
     "id": "group:cell:toolu_53_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran a command, edited and read app.ts, searched for files and 2 more actions",
+    "summary": "Ran a command, edited and read app.ts, searched for files, and 2 more actions",
     "turnId": "turn:u53"
   },
   {
@@ -22693,7 +22693,7 @@
     "id": "group:cell:toolu_53_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited 3 files, created a file, updated todos and 2 more actions",
+    "summary": "Edited 3 files, created a file, updated todos, and 2 more actions",
     "turnId": "turn:u53"
   },
   {
@@ -22964,7 +22964,7 @@
     "id": "group:cell:toolu_53_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Read store.ts, searched the web, updated todos and 4 more actions",
+    "summary": "Read store.ts, searched the web, updated todos, and 4 more actions",
     "turnId": "turn:u53"
   },
   {
@@ -22996,7 +22996,7 @@
   {
     "at": "2026-09-03T07:25:28.727Z",
     "autoDenied": 0,
-    "caption": "Edited a file, read a file, searched the web and 10 more actions",
+    "caption": "Edited a file, read a file, searched the web, and 10 more actions",
     "counts": {
       "added": 8,
       "removed": 5
@@ -23296,7 +23296,7 @@
     "id": "group:cell:toolu_54_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Read a file, edited a file, searched the web and 2 more actions",
+    "summary": "Read a file, edited a file, searched the web, and 2 more actions",
     "turnId": "turn:u54"
   },
   {
@@ -23609,7 +23609,7 @@
     "id": "group:cell:toolu_54_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran 2 commands, updated todos, ran /test-driven-development and 4 more actions",
+    "summary": "Ran 2 commands, updated todos, ran /test-driven-development, and 4 more actions",
     "turnId": "turn:u54"
   },
   {
@@ -23641,7 +23641,7 @@
   {
     "at": "2026-09-03T07:40:40.775Z",
     "autoDenied": 0,
-    "caption": "Created 2 files, searched for files, searched code and 3 more actions",
+    "caption": "Created 2 files, searched for files, searched code, and 3 more actions",
     "counts": {
       "added": 17,
       "removed": 9
@@ -24053,7 +24053,7 @@
     "id": "group:cell:toolu_55_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Created 2 files, searched for files, searched code and 3 more actions",
+    "summary": "Created 2 files, searched for files, searched code, and 3 more actions",
     "turnId": "turn:u55"
   },
   {
@@ -24085,7 +24085,7 @@
   {
     "at": "2026-09-03T07:49:09.833Z",
     "autoDenied": 0,
-    "caption": "Created 2 files, edited 2 files, fetched 2 pages and 10 more actions",
+    "caption": "Created 2 files, edited 2 files, fetched 2 pages, and 10 more actions",
     "counts": {
       "added": 23,
       "removed": 15
@@ -24483,7 +24483,7 @@
     "id": "group:cell:toolu_56_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Created a file, fetched a page, searched the web and 4 more actions",
+    "summary": "Created a file, fetched a page, searched the web, and 4 more actions",
     "turnId": "turn:u56"
   },
   {
@@ -24818,7 +24818,7 @@
     "id": "group:cell:toolu_56_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, edited a file, ran a command and 5 more actions",
+    "summary": "Updated todos, edited a file, ran a command, and 5 more actions",
     "turnId": "turn:u56"
   },
   {
@@ -24899,7 +24899,7 @@
   {
     "at": "2026-09-03T07:53:13.093Z",
     "autoDenied": 0,
-    "caption": "Ran a command, updated todos, searched code and 3 more actions",
+    "caption": "Ran a command, updated todos, searched code, and 3 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -25200,7 +25200,7 @@
     "id": "group:cell:toolu_57_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran a command, updated todos, searched code and 3 more actions",
+    "summary": "Ran a command, updated todos, searched code, and 3 more actions",
     "turnId": "turn:u57"
   },
   {
@@ -25232,7 +25232,7 @@
   {
     "at": "2026-09-03T07:58:32.080Z",
     "autoDenied": 0,
-    "caption": "Created a file, edited 3 files, searched the web 2 times and 8 more actions",
+    "caption": "Created a file, edited 3 files, searched the web 2 times, and 8 more actions",
     "counts": {
       "added": 29,
       "removed": 12
@@ -27436,7 +27436,7 @@
   {
     "at": "2026-09-03T20:37:53.423Z",
     "autoDenied": 0,
-    "caption": "Read and edited README.md, updated todos, searched code and 2 more actions",
+    "caption": "Read and edited README.md, updated todos, searched code, and 2 more actions",
     "counts": {
       "added": 4,
       "removed": 0
@@ -27762,7 +27762,7 @@
     "id": "group:cell:toolu_67_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, searched code, read and edited README.md and 2 more actions",
+    "summary": "Updated todos, searched code, read and edited README.md, and 2 more actions",
     "turnId": "turn:u67"
   },
   {
@@ -27794,7 +27794,7 @@
   {
     "at": "2026-09-03T20:44:38.381Z",
     "autoDenied": 0,
-    "caption": "Edited 4 files, searched the web, updated todos and 3 more actions",
+    "caption": "Edited 4 files, searched the web, updated todos, and 3 more actions",
     "counts": {
       "added": 30,
       "removed": 18
@@ -29562,7 +29562,7 @@
   {
     "at": "2026-09-04T10:43:03.583Z",
     "autoDenied": 0,
-    "caption": "Edited a file, read 2 files, fetched 3 pages and 10 more actions",
+    "caption": "Edited a file, read 2 files, fetched 3 pages, and 10 more actions",
     "counts": {
       "added": 1,
       "removed": 4
@@ -30199,7 +30199,7 @@
     "id": "group:cell:toolu_74_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran 3 commands, read app.ts, fetched a page and 3 more actions",
+    "summary": "Ran 3 commands, read app.ts, fetched a page, and 3 more actions",
     "turnId": "turn:u74"
   },
   {
@@ -31349,7 +31349,7 @@
   {
     "at": "2026-09-04T11:20:19.373Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, ran 2 agents, searched code and 13 more actions",
+    "caption": "Edited 2 files, ran 2 agents, searched code, and 13 more actions",
     "counts": {
       "added": 15,
       "removed": 1
@@ -32313,7 +32313,7 @@
   {
     "at": "2026-09-04T11:30:24.305Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, ran a command, searched the web and 2 more actions",
+    "caption": "Edited 2 files, ran a command, searched the web, and 2 more actions",
     "counts": {
       "added": 15,
       "removed": 1
@@ -32665,7 +32665,7 @@
     "id": "group:cell:toolu_81_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran a command, edited 2 files, searched the web and 2 more actions",
+    "summary": "Ran a command, edited 2 files, searched the web, and 2 more actions",
     "turnId": "turn:u81"
   },
   {
@@ -32697,7 +32697,7 @@
   {
     "at": "2026-09-04T11:44:02.379Z",
     "autoDenied": 0,
-    "caption": "Created a file, edited 2 files, updated todos and 9 more actions",
+    "caption": "Created a file, edited 2 files, updated todos, and 9 more actions",
     "counts": {
       "added": 11,
       "removed": 3
@@ -33077,7 +33077,7 @@
     "id": "group:cell:toolu_82_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Created a file, updated todos, searched the web and 3 more actions",
+    "summary": "Created a file, updated todos, searched the web, and 3 more actions",
     "turnId": "turn:u82"
   },
   {
@@ -33422,7 +33422,7 @@
     "id": "group:cell:toolu_82_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran 2 commands, updated todos, edited 2 files and 3 more actions",
+    "summary": "Ran 2 commands, updated todos, edited 2 files, and 3 more actions",
     "turnId": "turn:u82"
   },
   {
@@ -33454,7 +33454,7 @@
   {
     "at": "2026-09-04T11:56:12.708Z",
     "autoDenied": 0,
-    "caption": "Edited a file, created a file, ran a command and 10 more actions",
+    "caption": "Edited a file, created a file, ran a command, and 10 more actions",
     "counts": {
       "added": 4,
       "removed": 12
@@ -34125,7 +34125,7 @@
   {
     "at": "2026-09-04T11:58:45.789Z",
     "autoDenied": 0,
-    "caption": "Created a file, edited a file, read a file and 6 more actions",
+    "caption": "Created a file, edited a file, read a file, and 6 more actions",
     "counts": {
       "added": 14,
       "removed": 8
@@ -34501,7 +34501,7 @@
     "id": "group:cell:toolu_84_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Read and created time.ts, updated todos, ran 2 commands and 2 more actions",
+    "summary": "Read and created time.ts, updated todos, ran 2 commands, and 2 more actions",
     "turnId": "turn:u84"
   },
   {
@@ -34650,7 +34650,7 @@
   {
     "at": "2026-09-04T12:07:25.180Z",
     "autoDenied": 0,
-    "caption": "Edited 4 files, searched for files, read a file and 9 more actions",
+    "caption": "Edited 4 files, searched for files, read a file, and 9 more actions",
     "counts": {
       "added": 22,
       "removed": 7
@@ -35460,7 +35460,7 @@
   {
     "at": "2026-09-04T12:14:21.885Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, created a file, searched the web and 9 more actions",
+    "caption": "Edited 2 files, created a file, searched the web, and 9 more actions",
     "counts": {
       "added": 22,
       "removed": 15
@@ -36183,7 +36183,7 @@
     "id": "group:cell:toolu_86_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched for files, updated todos, ran 2 commands and 2 more actions",
+    "summary": "Searched for files, updated todos, ran 2 commands, and 2 more actions",
     "turnId": "turn:u86"
   },
   {
@@ -36215,7 +36215,7 @@
   {
     "at": "2026-09-04T12:28:41.507Z",
     "autoDenied": 0,
-    "caption": "Edited 3 files, created a file, fetched 2 pages and 11 more actions",
+    "caption": "Edited 3 files, created a file, fetched 2 pages, and 11 more actions",
     "counts": {
       "added": 33,
       "removed": 11
@@ -36924,7 +36924,7 @@
     "id": "group:cell:toolu_87_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Fetched a page, edited 2 files, ran 2 commands and 2 more actions",
+    "summary": "Fetched a page, edited 2 files, ran 2 commands, and 2 more actions",
     "turnId": "turn:u87"
   },
   {
@@ -37485,7 +37485,7 @@
   {
     "at": "2026-09-04T12:43:30.401Z",
     "autoDenied": 0,
-    "caption": "Updated todos, searched the web, ran a command and 4 more actions",
+    "caption": "Updated todos, searched the web, ran a command, and 4 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -37821,7 +37821,7 @@
     "id": "group:cell:toolu_89_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, searched the web, ran a command and 4 more actions",
+    "summary": "Updated todos, searched the web, ran a command, and 4 more actions",
     "turnId": "turn:u89"
   },
   {
@@ -37853,7 +37853,7 @@
   {
     "at": "2026-09-04T12:55:13.165Z",
     "autoDenied": 0,
-    "caption": "Edited a file, ran 2 agents, read a file and 3 more actions",
+    "caption": "Edited a file, ran 2 agents, read a file, and 3 more actions",
     "counts": {
       "added": 3,
       "removed": 2
@@ -38215,7 +38215,7 @@
   {
     "at": "2026-09-04T13:01:28.726Z",
     "autoDenied": 0,
-    "caption": "Edited a file, ran 2 commands, updated todos and 9 more actions",
+    "caption": "Edited a file, ran 2 commands, updated todos, and 9 more actions",
     "counts": {
       "added": 11,
       "removed": 5
@@ -38830,7 +38830,7 @@
     "id": "group:cell:toolu_91_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited and read derive.test.ts, fetched a page, searched the web and 4 more actions",
+    "summary": "Edited and read derive.test.ts, fetched a page, searched the web, and 4 more actions",
     "turnId": "turn:u91"
   },
   {
@@ -39356,7 +39356,7 @@
   {
     "at": "2026-09-04T13:38:02.287Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, ran 2 commands, updated todos and 9 more actions",
+    "caption": "Edited 2 files, ran 2 commands, updated todos, and 9 more actions",
     "counts": {
       "added": 12,
       "removed": 4
@@ -40115,7 +40115,7 @@
     "id": "group:cell:toolu_95_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Fetched 2 pages, read package.json, searched code and 3 more actions",
+    "summary": "Fetched 2 pages, read package.json, searched code, and 3 more actions",
     "turnId": "turn:u95"
   },
   {
@@ -40147,7 +40147,7 @@
   {
     "at": "2026-09-04T13:51:54.141Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, created a file, ran 3 commands and 6 more actions",
+    "caption": "Edited 2 files, created a file, ran 3 commands, and 6 more actions",
     "counts": {
       "added": 16,
       "removed": 7
@@ -40546,7 +40546,7 @@
     "id": "group:cell:toolu_96_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited a file, created a file, ran 3 commands and 2 more actions",
+    "summary": "Edited a file, created a file, ran 3 commands, and 2 more actions",
     "turnId": "turn:u96"
   },
   {
@@ -40791,7 +40791,7 @@
   {
     "at": "2026-09-04T14:01:58.131Z",
     "autoDenied": 0,
-    "caption": "Created derive.ts, updated todos, searched the web and 3 more actions",
+    "caption": "Created derive.ts, updated todos, searched the web, and 3 more actions",
     "counts": {
       "added": 12,
       "removed": 2
@@ -41174,7 +41174,7 @@
     "id": "group:cell:toolu_97_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Created derive.ts, searched the web, updated todos and 3 more actions",
+    "summary": "Created derive.ts, searched the web, updated todos, and 3 more actions",
     "turnId": "turn:u97"
   },
   {
@@ -41206,7 +41206,7 @@
   {
     "at": "2026-09-04T14:06:52.769Z",
     "autoDenied": 0,
-    "caption": "Edited a file, created a file, searched for files and 8 more actions",
+    "caption": "Edited a file, created a file, searched for files, and 8 more actions",
     "counts": {
       "added": 10,
       "removed": 5
@@ -41508,7 +41508,7 @@
     "id": "group:cell:toolu_98_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched for files, searched code, updated todos and 2 more actions",
+    "summary": "Searched for files, searched code, updated todos, and 2 more actions",
     "turnId": "turn:u98"
   },
   {
@@ -41794,7 +41794,7 @@
     "id": "group:cell:toolu_98_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Created time.ts, updated todos, ran 2 commands and 3 more actions",
+    "summary": "Created time.ts, updated todos, ran 2 commands, and 3 more actions",
     "turnId": "turn:u98"
   },
   {
@@ -41826,7 +41826,7 @@
   {
     "at": "2026-09-04T14:14:00.840Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, ran 3 commands, updated todos and 9 more actions",
+    "caption": "Edited 2 files, ran 3 commands, updated todos, and 9 more actions",
     "counts": {
       "added": 9,
       "removed": 6
@@ -42538,7 +42538,7 @@
     "id": "group:cell:toolu_99_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran 2 commands, updated todos, fetched a page and 2 more actions",
+    "summary": "Ran 2 commands, updated todos, fetched a page, and 2 more actions",
     "turnId": "turn:u99"
   },
   {
@@ -42577,7 +42577,7 @@
   {
     "at": "2026-09-04T23:02:50.815Z",
     "autoDenied": 0,
-    "caption": "Created app.ts, ran 2 agents, updated todos and 4 more actions",
+    "caption": "Created app.ts, ran 2 agents, updated todos, and 4 more actions",
     "counts": {
       "added": 1,
       "removed": 0
@@ -42935,7 +42935,7 @@
     "id": "group:cell:toolu_100_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Created app.ts, updated todos, searched the web and 3 more actions",
+    "summary": "Created app.ts, updated todos, searched the web, and 3 more actions",
     "turnId": "turn:u100"
   },
   {
@@ -43590,7 +43590,7 @@
   {
     "at": "2026-09-04T23:21:12.392Z",
     "autoDenied": 0,
-    "caption": "Searched the web, read time.ts, updated todos and 3 more actions",
+    "caption": "Searched the web, read time.ts, updated todos, and 3 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -44167,7 +44167,7 @@
   {
     "at": "2026-09-04T23:41:59.374Z",
     "autoDenied": 0,
-    "caption": "Updated todos, searched the web, fetched a page and 4 more actions",
+    "caption": "Updated todos, searched the web, fetched a page, and 4 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -44556,7 +44556,7 @@
     "id": "group:cell:toolu_106_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched the web, updated todos, fetched a page and 3 more actions",
+    "summary": "Searched the web, updated todos, fetched a page, and 3 more actions",
     "turnId": "turn:u106"
   },
   {
@@ -45065,7 +45065,7 @@
   {
     "at": "2026-09-05T00:03:12.733Z",
     "autoDenied": 0,
-    "caption": "Created 2 files, ran 2 agents, fetched a page and 8 more actions",
+    "caption": "Created 2 files, ran 2 agents, fetched a page, and 8 more actions",
     "counts": {
       "added": 22,
       "removed": 9
@@ -45622,7 +45622,7 @@
     "id": "group:cell:toolu_110_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched the web 2 times, updated todos, created List.tsx and 3 more actions",
+    "summary": "Searched the web 2 times, updated todos, created List.tsx, and 3 more actions",
     "turnId": "turn:u110"
   },
   {
@@ -45683,7 +45683,7 @@
   {
     "at": "2026-09-05T00:13:00.412Z",
     "autoDenied": 0,
-    "caption": "Edited a file, updated todos, ran a command and 8 more actions",
+    "caption": "Edited a file, updated todos, ran a command, and 8 more actions",
     "counts": {
       "added": 7,
       "removed": 1
@@ -46348,7 +46348,7 @@
     "id": "group:cell:toolu_111_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Read store.ts, fetched a page, searched the web and 2 more actions",
+    "summary": "Read store.ts, fetched a page, searched the web, and 2 more actions",
     "turnId": "turn:u111"
   },
   {
@@ -46470,7 +46470,7 @@
   {
     "at": "2026-09-05T00:35:04.958Z",
     "autoDenied": 0,
-    "caption": "Edited app.ts, searched the web 2 times, updated todos and 3 more actions",
+    "caption": "Edited app.ts, searched the web 2 times, updated todos, and 3 more actions",
     "counts": {
       "added": 6,
       "removed": 5
@@ -46830,7 +46830,7 @@
     "id": "group:cell:toolu_113_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched the web 2 times, updated todos, edited app.ts and 3 more actions",
+    "summary": "Searched the web 2 times, updated todos, edited app.ts, and 3 more actions",
     "turnId": "turn:u113"
   },
   {
@@ -46862,7 +46862,7 @@
   {
     "at": "2026-09-05T00:41:06.650Z",
     "autoDenied": 0,
-    "caption": "Edited app.ts, searched the web, ran a command and 2 more actions",
+    "caption": "Edited app.ts, searched the web, ran a command, and 2 more actions",
     "counts": {
       "added": 1,
       "removed": 2
@@ -47144,7 +47144,7 @@
     "id": "group:cell:toolu_114_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched the web, ran a command, edited app.ts and 2 more actions",
+    "summary": "Searched the web, ran a command, edited app.ts, and 2 more actions",
     "turnId": "turn:u114"
   },
   {
@@ -47176,7 +47176,7 @@
   {
     "at": "2026-09-05T00:43:59.158Z",
     "autoDenied": 0,
-    "caption": "Edited store.ts, searched the web 2 times, fetched a page and 8 more actions",
+    "caption": "Edited store.ts, searched the web 2 times, fetched a page, and 8 more actions",
     "counts": {
       "added": 12,
       "removed": 1
@@ -47747,7 +47747,7 @@
     "id": "group:cell:toolu_115_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched the web, fetched a page, ran a command and 3 more actions",
+    "summary": "Searched the web, fetched a page, ran a command, and 3 more actions",
     "turnId": "turn:u115"
   },
   {
@@ -48178,7 +48178,7 @@
   {
     "at": "2026-09-05T09:24:13.422Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, searched the web, read 2 files and 5 more actions",
+    "caption": "Edited 2 files, searched the web, read 2 files, and 5 more actions",
     "counts": {
       "added": 33,
       "removed": 5
@@ -48801,7 +48801,7 @@
   {
     "at": "2026-09-06T02:45:01.758Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, fetched a page, ran 3 commands and 7 more actions",
+    "caption": "Edited 2 files, fetched a page, ran 3 commands, and 7 more actions",
     "counts": {
       "added": 12,
       "removed": 8
@@ -50578,7 +50578,7 @@
   {
     "at": "2026-09-06T03:09:12.206Z",
     "autoDenied": 0,
-    "caption": "Edited List.tsx, updated todos, fetched 2 pages and 4 more actions",
+    "caption": "Edited List.tsx, updated todos, fetched 2 pages, and 4 more actions",
     "counts": {
       "added": 8,
       "removed": 2
@@ -50968,7 +50968,7 @@
     "id": "group:cell:toolu_124_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, fetched 2 pages, ran 2 commands and 3 more actions",
+    "summary": "Updated todos, fetched 2 pages, ran 2 commands, and 3 more actions",
     "turnId": "turn:u124"
   },
   {
@@ -51320,7 +51320,7 @@
   {
     "at": "2026-09-06T03:20:13.768Z",
     "autoDenied": 0,
-    "caption": "Edited package.json, ran 2 commands, updated todos and 7 more actions",
+    "caption": "Edited package.json, ran 2 commands, updated todos, and 7 more actions",
     "counts": {
       "added": 6,
       "removed": 6
@@ -51937,7 +51937,7 @@
     "id": "group:cell:toolu_126_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited package.json, updated todos, searched for files and 4 more actions",
+    "summary": "Edited package.json, updated todos, searched for files, and 4 more actions",
     "turnId": "turn:u126"
   },
   {
@@ -52337,7 +52337,7 @@
   {
     "at": "2026-09-06T03:34:45.149Z",
     "autoDenied": 0,
-    "caption": "Edited a file, created a file, fetched 2 pages and 4 more actions",
+    "caption": "Edited a file, created a file, fetched 2 pages, and 4 more actions",
     "counts": {
       "added": 18,
       "removed": 4
@@ -52760,7 +52760,7 @@
     "id": "group:cell:toolu_128_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited a file, fetched 2 pages, updated todos and 4 more actions",
+    "summary": "Edited a file, fetched 2 pages, updated todos, and 4 more actions",
     "turnId": "turn:u128"
   },
   {
@@ -52792,7 +52792,7 @@
   {
     "at": "2026-09-06T03:46:23.469Z",
     "autoDenied": 0,
-    "caption": "Edited a file, ran 3 commands, updated todos and 5 more actions",
+    "caption": "Edited a file, ran 3 commands, updated todos, and 4 more actions",
     "counts": {
       "added": 5,
       "removed": 6
@@ -53295,7 +53295,7 @@
     "id": "group:cell:toolu_129_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran a command, searched the web, edited a file and 4 more actions",
+    "summary": "Ran a command, searched the web, edited a file, and 3 more actions",
     "turnId": "turn:u129"
   },
   {
@@ -53327,7 +53327,7 @@
   {
     "at": "2026-09-06T03:55:04.573Z",
     "autoDenied": 0,
-    "caption": "Created a file, edited a file, ran 2 agents and 6 more actions",
+    "caption": "Created a file, edited a file, ran 2 agents, and 6 more actions",
     "counts": {
       "added": 15,
       "removed": 4
@@ -53746,7 +53746,7 @@
     "id": "group:cell:toolu_130_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Created a file, updated todos, ran a command and 5 more actions",
+    "summary": "Created a file, updated todos, ran a command, and 5 more actions",
     "turnId": "turn:u130"
   },
   {
@@ -53807,7 +53807,7 @@
   {
     "at": "2026-09-06T04:02:09.441Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, fetched a page, ran 2 commands and 7 more actions",
+    "caption": "Edited 2 files, fetched a page, ran 2 commands, and 7 more actions",
     "counts": {
       "added": 24,
       "removed": 12
@@ -54501,7 +54501,7 @@
     "id": "group:cell:toolu_131_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited a file, read a file, updated todos and 2 more actions",
+    "summary": "Edited a file, read a file, updated todos, and 2 more actions",
     "turnId": "turn:u131"
   },
   {
@@ -54533,7 +54533,7 @@
   {
     "at": "2026-09-06T04:06:44.166Z",
     "autoDenied": 0,
-    "caption": "Edited 3 files, searched code, fetched a page and 9 more actions",
+    "caption": "Edited 3 files, searched code, fetched a page, and 9 more actions",
     "counts": {
       "added": 18,
       "removed": 11
@@ -55373,7 +55373,7 @@
   {
     "at": "2026-09-06T04:23:01.768Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, updated todos, searched the web and 3 more actions",
+    "caption": "Edited 2 files, updated todos, searched the web, and 3 more actions",
     "counts": {
       "added": 16,
       "removed": 6
@@ -55824,7 +55824,7 @@
   {
     "at": "2026-09-06T04:30:14.009Z",
     "autoDenied": 0,
-    "caption": "Edited a file, read a file, updated todos and 2 more actions",
+    "caption": "Edited a file, read a file, updated todos, and 2 more actions",
     "counts": {
       "added": 14,
       "removed": 10
@@ -56183,7 +56183,7 @@
     "id": "group:cell:toolu_135_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited a file, read a file, updated todos and 2 more actions",
+    "summary": "Edited a file, read a file, updated todos, and 2 more actions",
     "turnId": "turn:u135"
   },
   {
@@ -56460,7 +56460,7 @@
   {
     "at": "2026-09-06T06:49:47.115Z",
     "autoDenied": 0,
-    "caption": "Read and edited app.ts, searched code, ran a command and 2 more actions",
+    "caption": "Read and edited app.ts, searched code, ran a command, and 2 more actions",
     "counts": {
       "added": 2,
       "removed": 4
@@ -57047,7 +57047,7 @@
   {
     "at": "2026-09-06T23:27:16.221Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, ran 2 agents, ran 2 commands and 3 more actions",
+    "caption": "Edited 2 files, ran 2 agents, ran 2 commands, and 3 more actions",
     "counts": {
       "added": 18,
       "removed": 5
@@ -57462,7 +57462,7 @@
     "id": "group:cell:toolu_140_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited a file, ran 2 commands, read a file and 2 more actions",
+    "summary": "Edited a file, ran 2 commands, read a file, and 2 more actions",
     "turnId": "turn:u140"
   },
   {
@@ -57957,7 +57957,7 @@
   {
     "at": "2026-09-06T23:46:03.652Z",
     "autoDenied": 0,
-    "caption": "Edited a file, updated todos, searched the web and 3 more actions",
+    "caption": "Edited a file, updated todos, searched the web, and 3 more actions",
     "counts": {
       "added": 10,
       "removed": 2
@@ -58306,7 +58306,7 @@
     "id": "group:cell:toolu_142_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched the web, read a file, edited a file and 2 more actions",
+    "summary": "Searched the web, read a file, edited a file, and 2 more actions",
     "turnId": "turn:u142"
   },
   {
@@ -58479,7 +58479,7 @@
   {
     "at": "2026-09-06T23:56:50.556Z",
     "autoDenied": 0,
-    "caption": "Updated todos, ran a command, searched code and 4 more actions",
+    "caption": "Updated todos, ran a command, searched code, and 4 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -58919,7 +58919,7 @@
     "id": "group:cell:toolu_144_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran a command, searched code, updated todos and 4 more actions",
+    "summary": "Ran a command, searched code, updated todos, and 4 more actions",
     "turnId": "turn:u144"
   },
   {
@@ -59392,7 +59392,7 @@
   {
     "at": "2026-09-07T00:12:40.435Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, updated todos, searched the web and 5 more actions",
+    "caption": "Edited 2 files, updated todos, searched the web, and 5 more actions",
     "counts": {
       "added": 15,
       "removed": 6
@@ -59979,7 +59979,7 @@
     "id": "group:cell:toolu_147_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran 3 commands, edited derive.test.ts, updated todos and 2 more actions",
+    "summary": "Ran 3 commands, edited derive.test.ts, updated todos, and 2 more actions",
     "turnId": "turn:u147"
   },
   {
@@ -60400,7 +60400,7 @@
   {
     "at": "2026-09-07T06:50:39.757Z",
     "autoDenied": 0,
-    "caption": "Edited a file, ran 2 agents, read a file and 5 more actions",
+    "caption": "Edited a file, ran 2 agents, read a file, and 5 more actions",
     "counts": {
       "added": 10,
       "removed": 1
@@ -60775,7 +60775,7 @@
     "id": "group:cell:toolu_150_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited a file, read a file, updated todos and 4 more actions",
+    "summary": "Edited a file, read a file, updated todos, and 4 more actions",
     "turnId": "turn:u150"
   },
   {
@@ -61597,7 +61597,7 @@
   {
     "at": "2026-09-08T10:01:14.020Z",
     "autoDenied": 0,
-    "caption": "Edited a file, created a file, ran 3 commands and 8 more actions",
+    "caption": "Edited a file, created a file, ran 3 commands, and 8 more actions",
     "counts": {
       "added": 11,
       "removed": 10
@@ -62293,7 +62293,7 @@
   {
     "at": "2026-09-08T10:14:19.636Z",
     "autoDenied": 0,
-    "caption": "Edited 3 files, read 2 files, searched the web 2 times and 13 more actions",
+    "caption": "Edited 3 files, read 2 files, searched the web 2 times, and 13 more actions",
     "counts": {
       "added": 23,
       "removed": 6
@@ -62735,7 +62735,7 @@
     "id": "group:cell:toolu_156_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Read a file, searched the web, updated todos and 4 more actions",
+    "summary": "Read a file, searched the web, updated todos, and 4 more actions",
     "turnId": "turn:u156"
   },
   {
@@ -63728,7 +63728,7 @@
   {
     "at": "2026-09-08T10:38:36.461Z",
     "autoDenied": 0,
-    "caption": "Edited a file, created a file, updated todos and 9 more actions",
+    "caption": "Edited a file, created a file, updated todos, and 9 more actions",
     "counts": {
       "added": 13,
       "removed": 7
@@ -64122,7 +64122,7 @@
     "id": "group:cell:toolu_159_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, edited List.tsx, fetched a page and 4 more actions",
+    "summary": "Updated todos, edited List.tsx, fetched a page, and 4 more actions",
     "turnId": "turn:u159"
   },
   {
@@ -64445,7 +64445,7 @@
   {
     "at": "2026-09-08T10:43:03.137Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, created a file, ran 2 agents and 10 more actions",
+    "caption": "Edited 2 files, created a file, ran 2 agents, and 10 more actions",
     "counts": {
       "added": 23,
       "removed": 12
@@ -64958,7 +64958,7 @@
     "id": "group:cell:toolu_160_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, ran a command, edited and read package.json and 2 more actions",
+    "summary": "Updated todos, ran a command, edited and read package.json, and 2 more actions",
     "turnId": "turn:u160"
   },
   {
@@ -65423,7 +65423,7 @@
   {
     "at": "2026-09-08T11:07:41.743Z",
     "autoDenied": 0,
-    "caption": "Edited a file, updated todos, read a file and 4 more actions",
+    "caption": "Edited a file, updated todos, read a file, and 4 more actions",
     "counts": {
       "added": 23,
       "removed": 4
@@ -65917,7 +65917,7 @@
     "id": "group:cell:toolu_163_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched for files, ran a command, edited derive.ts and 2 more actions",
+    "summary": "Searched for files, ran a command, edited derive.ts, and 2 more actions",
     "turnId": "turn:u163"
   },
   {
@@ -66909,7 +66909,7 @@
   {
     "at": "2026-09-09T12:32:34.398Z",
     "autoDenied": 0,
-    "caption": "Edited 3 files, ran 2 commands, updated todos and 8 more actions",
+    "caption": "Edited 3 files, ran 2 commands, updated todos, and 8 more actions",
     "counts": {
       "added": 25,
       "removed": 13
@@ -67275,7 +67275,7 @@
     "id": "group:cell:toolu_168_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran a command, updated todos, searched for files and 4 more actions",
+    "summary": "Ran a command, updated todos, searched for files, and 4 more actions",
     "turnId": "turn:u168"
   },
   {
@@ -67652,7 +67652,7 @@
     "id": "group:cell:toolu_168_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited 3 files, read a file, ran a command and 3 more actions",
+    "summary": "Edited 3 files, read a file, ran a command, and 3 more actions",
     "turnId": "turn:u168"
   },
   {
@@ -67684,7 +67684,7 @@
   {
     "at": "2026-09-09T12:36:34.244Z",
     "autoDenied": 0,
-    "caption": "Edited 3 files, ran a command, used docs · search and 2 more actions",
+    "caption": "Edited 3 files, ran a command, used docs · search, and 2 more actions",
     "counts": {
       "added": 16,
       "removed": 5
@@ -68093,7 +68093,7 @@
     "id": "group:cell:toolu_169_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited 3 files, ran a command, used docs · search and 2 more actions",
+    "summary": "Edited 3 files, ran a command, used docs · search, and 2 more actions",
     "turnId": "turn:u169"
   },
   {
@@ -68125,7 +68125,7 @@
   {
     "at": "2026-09-09T12:46:48.403Z",
     "autoDenied": 0,
-    "caption": "Edited store.ts, ran 2 agents, searched the web and 5 more actions",
+    "caption": "Edited store.ts, ran 2 agents, searched the web, and 5 more actions",
     "counts": {
       "added": 8,
       "removed": 4
@@ -68488,7 +68488,7 @@
     "id": "group:cell:toolu_170_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited store.ts, searched the web, ran 2 commands and 3 more actions",
+    "summary": "Edited store.ts, searched the web, ran 2 commands, and 3 more actions",
     "turnId": "turn:u170"
   },
   {
@@ -68782,7 +68782,7 @@
   {
     "at": "2026-09-09T12:56:18.730Z",
     "autoDenied": 0,
-    "caption": "Edited a file, searched for files, searched the web and 11 more actions",
+    "caption": "Edited a file, searched for files, searched the web, and 10 more actions",
     "counts": {
       "added": 12,
       "removed": 5
@@ -69293,7 +69293,7 @@
     "id": "group:cell:toolu_172_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, searched for files, searched code and 4 more actions",
+    "summary": "Updated todos, searched for files, searched code, and 4 more actions",
     "turnId": "turn:u172"
   },
   {
@@ -69968,7 +69968,7 @@
   {
     "at": "2026-09-09T13:15:05.725Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, ran 2 commands, updated todos and 3 more actions",
+    "caption": "Edited 2 files, ran 2 commands, updated todos, and 3 more actions",
     "counts": {
       "added": 6,
       "removed": 9
@@ -70392,7 +70392,7 @@
     "id": "group:cell:toolu_175_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited 2 files, ran 2 commands, updated todos and 3 more actions",
+    "summary": "Edited 2 files, ran 2 commands, updated todos, and 3 more actions",
     "turnId": "turn:u175"
   },
   {
@@ -70514,7 +70514,7 @@
   {
     "at": "2026-09-09T13:35:13.581Z",
     "autoDenied": 0,
-    "caption": "Edited 3 files, created a file, updated todos and 10 more actions",
+    "caption": "Edited 3 files, created a file, updated todos, and 10 more actions",
     "counts": {
       "added": 17,
       "removed": 10
@@ -70913,7 +70913,7 @@
     "id": "group:cell:toolu_177_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited a file, updated todos, searched the web 2 times and 2 more actions",
+    "summary": "Edited a file, updated todos, searched the web 2 times, and 2 more actions",
     "turnId": "turn:u177"
   },
   {
@@ -71253,7 +71253,7 @@
     "id": "group:cell:toolu_177_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited 2 files, read a file, ran a command and 4 more actions",
+    "summary": "Edited 2 files, read a file, ran a command, and 4 more actions",
     "turnId": "turn:u177"
   },
   {
@@ -71476,7 +71476,7 @@
   {
     "at": "2026-09-09T13:40:47.654Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, updated todos, ran 2 commands and 9 more actions",
+    "caption": "Edited 2 files, updated todos, ran 2 commands, and 9 more actions",
     "counts": {
       "added": 11,
       "removed": 8
@@ -71845,7 +71845,7 @@
     "id": "group:cell:toolu_179_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, edited app.ts, loaded 1 tool and 4 more actions",
+    "summary": "Updated todos, edited app.ts, loaded 1 tool, and 4 more actions",
     "turnId": "turn:u179"
   },
   {
@@ -72194,7 +72194,7 @@
     "id": "group:cell:toolu_179_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran a command, updated todos, edited package.json and 4 more actions",
+    "summary": "Ran a command, updated todos, edited package.json, and 4 more actions",
     "turnId": "turn:u179"
   },
   {
@@ -72226,7 +72226,7 @@
   {
     "at": "2026-09-09T13:55:19.345Z",
     "autoDenied": 0,
-    "caption": "Created a file, ran 2 agents, searched the web 2 times and 14 more actions",
+    "caption": "Created a file, ran 2 agents, searched the web 2 times, and 14 more actions",
     "counts": {
       "added": 12,
       "removed": 3
@@ -72857,7 +72857,7 @@
     "id": "group:cell:toolu_180_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Read app.ts, ran a command, updated todos and 4 more actions",
+    "summary": "Read app.ts, ran a command, updated todos, and 4 more actions",
     "turnId": "turn:u180"
   },
   {
@@ -73596,7 +73596,7 @@
   {
     "at": "2026-09-10T18:00:06.248Z",
     "autoDenied": 0,
-    "caption": "Ran a command, updated todos, read time.ts and 5 more actions",
+    "caption": "Ran a command, updated todos, read time.ts, and 5 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -74774,7 +74774,7 @@
   {
     "at": "2026-09-10T18:54:22.648Z",
     "autoDenied": 0,
-    "caption": "Edited a file, read 2 files, ran 2 commands and 4 more actions",
+    "caption": "Edited a file, read 2 files, ran 2 commands, and 4 more actions",
     "counts": {
       "added": 2,
       "removed": 1
@@ -75213,7 +75213,7 @@
     "id": "group:cell:toolu_189_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran 2 commands, read a file, searched the web and 4 more actions",
+    "summary": "Ran 2 commands, read a file, searched the web, and 4 more actions",
     "turnId": "turn:u189"
   },
   {
@@ -75252,7 +75252,7 @@
   {
     "at": "2026-09-11T16:21:53.880Z",
     "autoDenied": 0,
-    "caption": "Edited README.md, ran 2 agents, fetched a page and 6 more actions",
+    "caption": "Edited README.md, ran 2 agents, fetched a page, and 6 more actions",
     "counts": {
       "added": 7,
       "removed": 0
@@ -75763,7 +75763,7 @@
   {
     "at": "2026-09-11T16:25:59.982Z",
     "autoDenied": 0,
-    "caption": "Edited a file, created a file, updated todos and 2 more actions",
+    "caption": "Edited a file, created a file, updated todos, and 2 more actions",
     "counts": {
       "added": 11,
       "removed": 6
@@ -76158,7 +76158,7 @@
     "id": "group:cell:toolu_191_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, fetched a page, edited a file and 2 more actions",
+    "summary": "Updated todos, fetched a page, edited a file, and 2 more actions",
     "turnId": "turn:u191"
   },
   {
@@ -76280,7 +76280,7 @@
   {
     "at": "2026-09-11T16:45:13.119Z",
     "autoDenied": 0,
-    "caption": "Read store.ts, searched code, ran 5 commands and 5 more actions",
+    "caption": "Read store.ts, searched code, ran 5 commands, and 5 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -76926,7 +76926,7 @@
   {
     "at": "2026-09-12T15:52:03.685Z",
     "autoDenied": 0,
-    "caption": "Created a file, searched the web 3 times, updated todos and 6 more actions",
+    "caption": "Created a file, searched the web 3 times, updated todos, and 6 more actions",
     "counts": {
       "added": 2,
       "removed": 0
@@ -77323,7 +77323,7 @@
     "id": "group:cell:toolu_194_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched the web 2 times, updated todos, created a file and 3 more actions",
+    "summary": "Searched the web 2 times, updated todos, created a file, and 3 more actions",
     "turnId": "turn:u194"
   },
   {
@@ -77975,7 +77975,7 @@
   {
     "at": "2026-09-13T15:08:31.258Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, created a file, searched for files and 10 more actions",
+    "caption": "Edited 2 files, created a file, searched for files, and 10 more actions",
     "counts": {
       "added": 14,
       "removed": 11
@@ -78323,7 +78323,7 @@
     "id": "group:cell:toolu_197_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched for files, edited time.ts, ran a command and 3 more actions",
+    "summary": "Searched for files, edited time.ts, ran a command, and 3 more actions",
     "turnId": "turn:u197"
   },
   {
@@ -78654,7 +78654,7 @@
     "id": "group:cell:toolu_197_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched code, ran 3 commands, edited a file and 3 more actions",
+    "summary": "Searched code, ran 3 commands, edited a file, and 3 more actions",
     "turnId": "turn:u197"
   },
   {
@@ -78776,7 +78776,7 @@
   {
     "at": "2026-09-13T15:20:29.295Z",
     "autoDenied": 0,
-    "caption": "Searched the web, updated todos, ran a command and 2 more actions",
+    "caption": "Searched the web, updated todos, ran a command, and 2 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -79107,7 +79107,7 @@
   {
     "at": "2026-09-13T15:26:19.551Z",
     "autoDenied": 0,
-    "caption": "Created derive.test.ts, ran 2 agents, updated todos and 10 more actions",
+    "caption": "Created derive.test.ts, ran 2 agents, updated todos, and 10 more actions",
     "counts": {
       "added": 3,
       "removed": 1
@@ -79693,7 +79693,7 @@
     "id": "group:cell:toolu_200_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran a command, updated todos, fetched a page and 4 more actions",
+    "summary": "Ran a command, updated todos, fetched a page, and 4 more actions",
     "turnId": "turn:u200"
   },
   {
@@ -79896,7 +79896,7 @@
   {
     "at": "2026-09-13T15:41:27.699Z",
     "autoDenied": 0,
-    "caption": "Searched for files, read 3 files, searched the web and 13 more actions",
+    "caption": "Searched for files, read 3 files, searched the web, and 13 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -80157,7 +80157,7 @@
     "id": "group:cell:toolu_201_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched for files, read time.ts, searched the web and 2 more actions",
+    "summary": "Searched for files, read time.ts, searched the web, and 2 more actions",
     "turnId": "turn:u201"
   },
   {
@@ -80679,7 +80679,7 @@
     "id": "group:cell:toolu_201_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran 2 commands, fetched a page, updated todos and 2 more actions",
+    "summary": "Ran 2 commands, fetched a page, updated todos, and 2 more actions",
     "turnId": "turn:u201"
   },
   {
@@ -80711,7 +80711,7 @@
   {
     "at": "2026-09-13T15:43:11.452Z",
     "autoDenied": 0,
-    "caption": "Read app.ts, ran a command, searched the web and 6 more actions",
+    "caption": "Read app.ts, ran a command, searched the web, and 6 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -81503,7 +81503,7 @@
   {
     "at": "2026-09-13T22:02:11.907Z",
     "autoDenied": 0,
-    "caption": "Edited store.ts, searched for files, updated todos and 6 more actions",
+    "caption": "Edited store.ts, searched for files, updated todos, and 6 more actions",
     "counts": {
       "added": 4,
       "removed": 1
@@ -82032,7 +82032,7 @@
     "id": "group:cell:toolu_204_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran 3 commands, fetched a page, updated todos and 2 more actions",
+    "summary": "Ran 3 commands, fetched a page, updated todos, and 2 more actions",
     "turnId": "turn:u204"
   },
   {
@@ -82338,7 +82338,7 @@
   {
     "at": "2026-09-13T22:21:38.932Z",
     "autoDenied": 0,
-    "caption": "Edited derive.ts, searched the web 2 times, updated todos and 2 more actions",
+    "caption": "Edited derive.ts, searched the web 2 times, updated todos, and 2 more actions",
     "counts": {
       "added": 4,
       "removed": 2
@@ -82687,7 +82687,7 @@
     "id": "group:cell:toolu_206_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched the web 2 times, updated todos, edited derive.ts and 2 more actions",
+    "summary": "Searched the web 2 times, updated todos, edited derive.ts, and 2 more actions",
     "turnId": "turn:u206"
   },
   {
@@ -82719,7 +82719,7 @@
   {
     "at": "2026-09-13T22:23:23.073Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, searched the web 5 times, updated todos and 15 more actions",
+    "caption": "Edited 2 files, searched the web 5 times, updated todos, and 15 more actions",
     "counts": {
       "added": 7,
       "removed": 7
@@ -83072,7 +83072,7 @@
     "id": "group:cell:toolu_207_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched the web 2 times, updated todos, ran 2 commands and 2 more actions",
+    "summary": "Searched the web 2 times, updated todos, ran 2 commands, and 2 more actions",
     "turnId": "turn:u207"
   },
   {
@@ -83392,7 +83392,7 @@
     "id": "group:cell:toolu_207_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched the web 2 times, ran a command, edited a file and 4 more actions",
+    "summary": "Searched the web 2 times, ran a command, edited a file, and 4 more actions",
     "turnId": "turn:u207"
   },
   {
@@ -83701,7 +83701,7 @@
     "id": "group:cell:toolu_207_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched code, edited store.ts, searched the web and 5 more actions",
+    "summary": "Searched code, edited store.ts, searched the web, and 5 more actions",
     "turnId": "turn:u207"
   },
   {
@@ -83733,7 +83733,7 @@
   {
     "at": "2026-09-13T22:32:42.356Z",
     "autoDenied": 0,
-    "caption": "Ran 2 commands, updated todos, searched the web and 3 more actions",
+    "caption": "Ran 2 commands, updated todos, searched the web, and 3 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -84177,7 +84177,7 @@
     "id": "group:cell:toolu_208_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran a command, searched the web, updated todos and 3 more actions",
+    "summary": "Ran a command, searched the web, updated todos, and 3 more actions",
     "turnId": "turn:u208"
   },
   {
@@ -84216,7 +84216,7 @@
   {
     "at": "2026-09-14T05:11:19.141Z",
     "autoDenied": 0,
-    "caption": "Read and edited derive.ts, searched the web, fetched a page and 5 more actions",
+    "caption": "Read and edited derive.ts, searched the web, fetched a page, and 5 more actions",
     "counts": {
       "added": 10,
       "removed": 6
@@ -85270,7 +85270,7 @@
   {
     "at": "2026-09-14T05:35:20.465Z",
     "autoDenied": 0,
-    "caption": "Created a file, edited a file, read 2 files and 7 more actions",
+    "caption": "Created a file, edited a file, read 2 files, and 7 more actions",
     "counts": {
       "added": 16,
       "removed": 5
@@ -85841,7 +85841,7 @@
     "id": "group:cell:toolu_212_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, read a file, searched code and 3 more actions",
+    "summary": "Updated todos, read a file, searched code, and 3 more actions",
     "turnId": "turn:u212"
   },
   {
@@ -85873,7 +85873,7 @@
   {
     "at": "2026-09-14T05:50:06.290Z",
     "autoDenied": 0,
-    "caption": "Updated todos, searched the web 3 times, searched code and 12 more actions",
+    "caption": "Updated todos, searched the web 3 times, searched code, and 12 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -86416,7 +86416,7 @@
     "id": "group:cell:toolu_213_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched code, searched the web, ran 2 commands and 2 more actions",
+    "summary": "Searched code, searched the web, ran 2 commands, and 2 more actions",
     "turnId": "turn:u213"
   },
   {
@@ -86725,7 +86725,7 @@
     "id": "group:cell:toolu_213_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Fetched a page, updated todos, searched the web and 5 more actions",
+    "summary": "Fetched a page, updated todos, searched the web, and 5 more actions",
     "turnId": "turn:u213"
   },
   {
@@ -86757,7 +86757,7 @@
   {
     "at": "2026-09-14T05:56:01.445Z",
     "autoDenied": 0,
-    "caption": "Edited derive.test.ts, searched code, fetched a page and 11 more actions",
+    "caption": "Edited derive.test.ts, searched code, fetched a page, and 11 more actions",
     "counts": {
       "added": 7,
       "removed": 4
@@ -87116,7 +87116,7 @@
     "id": "group:cell:toolu_214_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited derive.test.ts, searched code, fetched a page and 4 more actions",
+    "summary": "Edited derive.test.ts, searched code, fetched a page, and 4 more actions",
     "turnId": "turn:u214"
   },
   {
@@ -87461,7 +87461,7 @@
   {
     "at": "2026-09-14T06:10:15.335Z",
     "autoDenied": 0,
-    "caption": "Edited a file, read a file, updated todos and 12 more actions",
+    "caption": "Edited a file, read a file, updated todos, and 12 more actions",
     "counts": {
       "added": 8,
       "removed": 0
@@ -87988,7 +87988,7 @@
     "id": "group:cell:toolu_215_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Read package.json, updated todos, fetched a page and 5 more actions",
+    "summary": "Read package.json, updated todos, fetched a page, and 5 more actions",
     "turnId": "turn:u215"
   },
   {
@@ -88182,7 +88182,7 @@
   {
     "at": "2026-09-14T06:16:11.875Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, created 2 files, fetched 2 pages and 9 more actions",
+    "caption": "Edited 2 files, created 2 files, fetched 2 pages, and 9 more actions",
     "counts": {
       "added": 26,
       "removed": 9
@@ -88775,7 +88775,7 @@
     "id": "group:cell:toolu_216_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched code, fetched a page, read app.ts and 4 more actions",
+    "summary": "Searched code, fetched a page, read app.ts, and 4 more actions",
     "turnId": "turn:u216"
   },
   {
@@ -89327,7 +89327,7 @@
   {
     "at": "2026-09-14T06:40:17.732Z",
     "autoDenied": 0,
-    "caption": "Created 2 files, fetched a page, read a file and 4 more actions",
+    "caption": "Created 2 files, fetched a page, read a file, and 4 more actions",
     "counts": {
       "added": 7,
       "removed": 5
@@ -89761,7 +89761,7 @@
     "id": "group:cell:toolu_219_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Fetched a page, read a file, ran 2 commands and 3 more actions",
+    "summary": "Fetched a page, read a file, ran 2 commands, and 3 more actions",
     "turnId": "turn:u219"
   },
   {
@@ -90100,7 +90100,7 @@
   {
     "at": "2026-09-14T07:06:44.152Z",
     "autoDenied": 0,
-    "caption": "Edited List.tsx, ran 4 commands, updated todos and 9 more actions",
+    "caption": "Edited List.tsx, ran 4 commands, updated todos, and 9 more actions",
     "counts": {
       "added": 1,
       "removed": 0
@@ -90863,7 +90863,7 @@
     "id": "group:cell:toolu_221_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched the web, fetched a page, edited List.tsx and 3 more actions",
+    "summary": "Searched the web, fetched a page, edited List.tsx, and 3 more actions",
     "turnId": "turn:u221"
   },
   {
@@ -90895,7 +90895,7 @@
   {
     "at": "2026-09-14T07:11:44.365Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, fetched a page, searched the web 2 times and 3 more actions",
+    "caption": "Edited 2 files, fetched a page, searched the web 2 times, and 3 more actions",
     "counts": {
       "added": 14,
       "removed": 4
@@ -91304,7 +91304,7 @@
     "id": "group:cell:toolu_222_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Fetched a page, searched the web 2 times, ran 2 commands and 3 more actions",
+    "summary": "Fetched a page, searched the web 2 times, ran 2 commands, and 3 more actions",
     "turnId": "turn:u222"
   },
   {
@@ -91336,7 +91336,7 @@
   {
     "at": "2026-09-14T07:13:48.076Z",
     "autoDenied": 0,
-    "caption": "Edited a file, created 2 files, searched the web 2 times and 8 more actions",
+    "caption": "Edited a file, created 2 files, searched the web 2 times, and 8 more actions",
     "counts": {
       "added": 15,
       "removed": 7
@@ -92038,7 +92038,7 @@
   {
     "at": "2026-09-14T07:19:24.232Z",
     "autoDenied": 0,
-    "caption": "Updated todos, read README.md, ran /test-driven-development and 3 more actions",
+    "caption": "Updated todos, read README.md, ran /test-driven-development, and 3 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -92953,7 +92953,7 @@
   {
     "at": "2026-09-14T07:33:18.787Z",
     "autoDenied": 0,
-    "caption": "Edited a file, searched code, ran 2 commands and 4 more actions",
+    "caption": "Edited a file, searched code, ran 2 commands, and 4 more actions",
     "counts": {
       "added": 5,
       "removed": 0
@@ -93349,7 +93349,7 @@
     "id": "group:cell:toolu_227_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched code, ran 2 commands, read a file and 4 more actions",
+    "summary": "Searched code, ran 2 commands, read a file, and 4 more actions",
     "turnId": "turn:u227"
   },
   {
@@ -93381,7 +93381,7 @@
   {
     "at": "2026-09-14T07:37:47.479Z",
     "autoDenied": 0,
-    "caption": "Edited and read derive.test.ts, searched the web, ran a command and 2 more actions",
+    "caption": "Edited and read derive.test.ts, searched the web, ran a command, and 2 more actions",
     "counts": {
       "added": 4,
       "removed": 3
@@ -93898,7 +93898,7 @@
   {
     "at": "2026-09-14T07:56:18.358Z",
     "autoDenied": 0,
-    "caption": "Edited a file, created a file, ran 2 agents and 11 more actions",
+    "caption": "Edited a file, created a file, ran 2 agents, and 11 more actions",
     "counts": {
       "added": 17,
       "removed": 6
@@ -94196,7 +94196,7 @@
     "id": "group:cell:toolu_230_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited README.md, searched code, fetched a page and 2 more actions",
+    "summary": "Edited README.md, searched code, fetched a page, and 2 more actions",
     "turnId": "turn:u230"
   },
   {
@@ -94718,7 +94718,7 @@
   {
     "at": "2026-09-15T08:49:09.097Z",
     "autoDenied": 0,
-    "caption": "Created a file, edited a file, ran 4 commands and 10 more actions",
+    "caption": "Created a file, edited a file, ran 4 commands, and 10 more actions",
     "counts": {
       "added": 12,
       "removed": 5
@@ -95251,7 +95251,7 @@
     "id": "group:cell:toolu_232_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Created List.tsx, updated todos, fetched a page and 4 more actions",
+    "summary": "Created List.tsx, updated todos, fetched a page, and 4 more actions",
     "turnId": "turn:u232"
   },
   {
@@ -95782,7 +95782,7 @@
   {
     "at": "2026-09-15T09:13:09.078Z",
     "autoDenied": 0,
-    "caption": "Created a file, ran a command, read a file and 2 more actions",
+    "caption": "Created a file, ran a command, read a file, and 2 more actions",
     "counts": {
       "added": 11,
       "removed": 2
@@ -96083,7 +96083,7 @@
     "id": "group:cell:toolu_235_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Created a file, ran a command, read a file and 2 more actions",
+    "summary": "Created a file, ran a command, read a file, and 2 more actions",
     "turnId": "turn:u235"
   },
   {
@@ -96115,7 +96115,7 @@
   {
     "at": "2026-09-15T09:19:55.038Z",
     "autoDenied": 0,
-    "caption": "Edited derive.test.ts, searched the web, updated todos and 2 more actions",
+    "caption": "Edited derive.test.ts, searched the web, updated todos, and 2 more actions",
     "counts": {
       "added": 4,
       "removed": 3
@@ -96469,7 +96469,7 @@
   {
     "at": "2026-09-15T09:29:33.911Z",
     "autoDenied": 0,
-    "caption": "Updated todos, fetched 2 pages, searched the web 2 times and 7 more actions",
+    "caption": "Updated todos, fetched 2 pages, searched the web 2 times, and 7 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -96807,7 +96807,7 @@
     "id": "group:cell:toolu_237_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, fetched a page, searched the web and 4 more actions",
+    "summary": "Updated todos, fetched a page, searched the web, and 4 more actions",
     "turnId": "turn:u237"
   },
   {
@@ -97111,7 +97111,7 @@
     "id": "group:cell:toolu_237_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, fetched a page, searched for files and 3 more actions",
+    "summary": "Updated todos, fetched a page, searched for files, and 3 more actions",
     "turnId": "turn:u237"
   },
   {
@@ -97337,7 +97337,7 @@
   {
     "at": "2026-09-15T09:37:18.282Z",
     "autoDenied": 0,
-    "caption": "Edited a file, ran 2 commands, updated todos and 7 more actions",
+    "caption": "Edited a file, ran 2 commands, updated todos, and 7 more actions",
     "counts": {
       "added": 7,
       "removed": 2
@@ -97939,7 +97939,7 @@
   {
     "at": "2026-09-15T09:39:19.510Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, created a file, ran 2 agents and 7 more actions",
+    "caption": "Edited 2 files, created a file, ran 2 agents, and 7 more actions",
     "counts": {
       "added": 18,
       "removed": 12
@@ -98982,7 +98982,7 @@
   {
     "at": "2026-09-15T09:56:42.954Z",
     "autoDenied": 0,
-    "caption": "Ran 2 commands, updated todos, read 2 files and 7 more actions",
+    "caption": "Ran 2 commands, updated todos, read 2 files, and 7 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -99362,7 +99362,7 @@
     "id": "group:cell:toolu_242_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran 2 commands, updated todos, read derive.ts and 4 more actions",
+    "summary": "Ran 2 commands, updated todos, read derive.ts, and 4 more actions",
     "turnId": "turn:u242"
   },
   {
@@ -99661,7 +99661,7 @@
   {
     "at": "2026-09-15T12:28:55.314Z",
     "autoDenied": 0,
-    "caption": "Edited a file, updated todos, read 3 files and 3 more actions",
+    "caption": "Edited a file, updated todos, read 3 files, and 3 more actions",
     "counts": {
       "added": 5,
       "removed": 4
@@ -100169,7 +100169,7 @@
     "id": "group:cell:toolu_244_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Read 2 files, updated todos, edited a file and 2 more actions",
+    "summary": "Read 2 files, updated todos, edited a file, and 2 more actions",
     "turnId": "turn:u244"
   },
   {
@@ -100201,7 +100201,7 @@
   {
     "at": "2026-09-15T12:42:03.986Z",
     "autoDenied": 0,
-    "caption": "Edited and read derive.ts, ran a command, searched the web and 4 more actions",
+    "caption": "Edited and read derive.ts, ran a command, searched the web, and 4 more actions",
     "counts": {
       "added": 3,
       "removed": 4
@@ -100617,7 +100617,7 @@
     "id": "group:cell:toolu_245_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched the web, searched for files, fetched a page and 2 more actions",
+    "summary": "Searched the web, searched for files, fetched a page, and 2 more actions",
     "turnId": "turn:u245"
   },
   {
@@ -101439,7 +101439,7 @@
   {
     "at": "2026-09-16T05:17:05.403Z",
     "autoDenied": 0,
-    "caption": "Edited a file, created a file, searched the web 2 times and 4 more actions",
+    "caption": "Edited a file, created a file, searched the web 2 times, and 4 more actions",
     "counts": {
       "added": 16,
       "removed": 2
@@ -101852,7 +101852,7 @@
     "id": "group:cell:toolu_249_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched the web 2 times, edited a file, read a file and 4 more actions",
+    "summary": "Searched the web 2 times, edited a file, read a file, and 4 more actions",
     "turnId": "turn:u249"
   },
   {
@@ -102177,7 +102177,7 @@
   {
     "at": "2026-09-17T10:12:55.787Z",
     "autoDenied": 0,
-    "caption": "Ran a command, updated todos, loaded 1 tool and 2 more actions",
+    "caption": "Ran a command, updated todos, loaded 1 tool, and 2 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -102450,7 +102450,7 @@
     "id": "group:cell:toolu_252_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran a command, updated todos, loaded 1 tool and 2 more actions",
+    "summary": "Ran a command, updated todos, loaded 1 tool, and 2 more actions",
     "turnId": "turn:u252"
   },
   {
@@ -102482,7 +102482,7 @@
   {
     "at": "2026-09-17T10:15:44.752Z",
     "autoDenied": 0,
-    "caption": "Edited 3 files, created 2 files, updated todos and 10 more actions",
+    "caption": "Edited 3 files, created 2 files, updated todos, and 10 more actions",
     "counts": {
       "added": 40,
       "removed": 20
@@ -102931,7 +102931,7 @@
     "id": "group:cell:toolu_253_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited a file, updated todos, fetched a page and 3 more actions",
+    "summary": "Edited a file, updated todos, fetched a page, and 3 more actions",
     "turnId": "turn:u253"
   },
   {
@@ -103476,7 +103476,7 @@
     "id": "group:cell:toolu_253_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran a command, created a file, edited a file and 3 more actions",
+    "summary": "Ran a command, created a file, edited a file, and 3 more actions",
     "turnId": "turn:u253"
   },
   {
@@ -103508,7 +103508,7 @@
   {
     "at": "2026-09-17T10:30:16.310Z",
     "autoDenied": 0,
-    "caption": "Edited a file, read 2 files, updated todos and 2 more actions",
+    "caption": "Edited a file, read 2 files, updated todos, and 2 more actions",
     "counts": {
       "added": 7,
       "removed": 4
@@ -103842,7 +103842,7 @@
     "id": "group:cell:toolu_254_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Read 2 files, updated todos, edited a file and 2 more actions",
+    "summary": "Read 2 files, updated todos, edited a file, and 2 more actions",
     "turnId": "turn:u254"
   },
   {
@@ -104227,7 +104227,7 @@
   {
     "at": "2026-09-17T10:43:40.123Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, read a file, fetched 2 pages and 3 more actions",
+    "caption": "Edited 2 files, read a file, fetched 2 pages, and 3 more actions",
     "counts": {
       "added": 15,
       "removed": 4
@@ -104731,7 +104731,7 @@
   {
     "at": "2026-09-17T10:54:04.274Z",
     "autoDenied": 0,
-    "caption": "Updated todos, fetched a page, ran 2 commands and 2 more actions",
+    "caption": "Updated todos, fetched a page, ran 2 commands, and 2 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -105034,7 +105034,7 @@
     "id": "group:cell:toolu_257_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, fetched a page, ran 2 commands and 2 more actions",
+    "summary": "Updated todos, fetched a page, ran 2 commands, and 2 more actions",
     "turnId": "turn:u257"
   },
   {
@@ -105066,7 +105066,7 @@
   {
     "at": "2026-09-17T10:57:00.753Z",
     "autoDenied": 0,
-    "caption": "Created 2 files, edited a file, ran 2 commands and 6 more actions",
+    "caption": "Created 2 files, edited a file, ran 2 commands, and 6 more actions",
     "counts": {
       "added": 31,
       "removed": 12
@@ -105988,7 +105988,7 @@
   {
     "at": "2026-09-17T11:13:43.835Z",
     "autoDenied": 0,
-    "caption": "Created and read derive.test.ts, ran 2 agents, updated todos and 3 more actions",
+    "caption": "Created and read derive.test.ts, ran 2 agents, updated todos, and 3 more actions",
     "counts": {
       "added": 4,
       "removed": 1
@@ -106579,7 +106579,7 @@
   {
     "at": "2026-09-17T11:22:27.525Z",
     "autoDenied": 0,
-    "caption": "Created a file, searched for files, ran a command and 9 more actions",
+    "caption": "Created a file, searched for files, ran a command, and 8 more actions",
     "counts": {
       "added": 1,
       "removed": 6
@@ -107179,7 +107179,7 @@
     "id": "group:cell:toolu_262_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, read derive.test.ts, fetched a page and 4 more actions",
+    "summary": "Updated todos, read derive.test.ts, fetched a page, and 4 more actions",
     "turnId": "turn:u262"
   },
   {
@@ -107211,7 +107211,7 @@
   {
     "at": "2026-09-17T11:30:30.208Z",
     "autoDenied": 0,
-    "caption": "Edited and read README.md, updated todos, fetched a page and 4 more actions",
+    "caption": "Edited and read README.md, updated todos, fetched a page, and 4 more actions",
     "counts": {
       "added": 12,
       "removed": 3
@@ -107616,7 +107616,7 @@
     "id": "group:cell:toolu_263_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited and read README.md, updated todos, fetched a page and 4 more actions",
+    "summary": "Edited and read README.md, updated todos, fetched a page, and 4 more actions",
     "turnId": "turn:u263"
   },
   {
@@ -107648,7 +107648,7 @@
   {
     "at": "2026-09-17T11:39:07.726Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, read 2 files, ran 2 commands and 7 more actions",
+    "caption": "Edited 2 files, read 2 files, ran 2 commands, and 7 more actions",
     "counts": {
       "added": 16,
       "removed": 5
@@ -108011,7 +108011,7 @@
     "id": "group:cell:toolu_264_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Read package.json, ran a command, updated todos and 2 more actions",
+    "summary": "Read package.json, ran a command, updated todos, and 2 more actions",
     "turnId": "turn:u264"
   },
   {
@@ -108687,7 +108687,7 @@
   {
     "at": "2026-09-18T03:58:10.164Z",
     "autoDenied": 0,
-    "caption": "Created 2 files, edited 2 files, updated todos and 8 more actions",
+    "caption": "Created 2 files, edited 2 files, updated todos, and 8 more actions",
     "counts": {
       "added": 26,
       "removed": 14
@@ -109650,7 +109650,7 @@
   {
     "at": "2026-09-18T06:28:26.120Z",
     "autoDenied": 0,
-    "caption": "Ran 2 commands, fetched a page, updated todos and 5 more actions",
+    "caption": "Ran 2 commands, fetched a page, updated todos, and 5 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -110061,7 +110061,7 @@
     "id": "group:cell:toolu_269_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Fetched a page, updated todos, searched the web 2 times and 4 more actions",
+    "summary": "Fetched a page, updated todos, searched the web 2 times, and 4 more actions",
     "turnId": "turn:u269"
   },
   {
@@ -111339,7 +111339,7 @@
   {
     "at": "2026-09-20T00:57:18.037Z",
     "autoDenied": 0,
-    "caption": "Edited a file, read 2 files, ran 2 commands and 4 more actions",
+    "caption": "Edited a file, read 2 files, ran 2 commands, and 4 more actions",
     "counts": {
       "added": 10,
       "removed": 4
@@ -111747,7 +111747,7 @@
     "id": "group:cell:toolu_274_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Read 2 files, ran 2 commands, edited a file and 3 more actions",
+    "summary": "Read 2 files, ran 2 commands, edited a file, and 3 more actions",
     "turnId": "turn:u274"
   },
   {
@@ -113137,7 +113137,7 @@
   {
     "at": "2026-09-20T01:46:44.924Z",
     "autoDenied": 0,
-    "caption": "Edited a file, read 2 files, ran a command and 5 more actions",
+    "caption": "Edited a file, read 2 files, ran a command, and 5 more actions",
     "counts": {
       "added": 16,
       "removed": 7
@@ -113663,7 +113663,7 @@
     "id": "group:cell:toolu_279_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched code, edited a file, updated todos and 4 more actions",
+    "summary": "Searched code, edited a file, updated todos, and 4 more actions",
     "turnId": "turn:u279"
   },
   {
@@ -113702,7 +113702,7 @@
   {
     "at": "2026-09-20T19:05:37.888Z",
     "autoDenied": 0,
-    "caption": "Edited README.md, ran 2 agents, searched for files and 5 more actions",
+    "caption": "Edited README.md, ran 2 agents, searched for files, and 5 more actions",
     "counts": {
       "added": 12,
       "removed": 3
@@ -114181,7 +114181,7 @@
   {
     "at": "2026-09-20T19:09:21.450Z",
     "autoDenied": 0,
-    "caption": "Created a file, fetched 2 pages, ran 4 commands and 9 more actions",
+    "caption": "Created a file, fetched 2 pages, ran 4 commands, and 9 more actions",
     "counts": {
       "added": 12,
       "removed": 0
@@ -114904,7 +114904,7 @@
     "id": "group:cell:toolu_281_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Read 2 files, fetched a page, ran a command and 2 more actions",
+    "summary": "Read 2 files, fetched a page, ran a command, and 2 more actions",
     "turnId": "turn:u281"
   },
   {
@@ -115079,7 +115079,7 @@
   {
     "at": "2026-09-20T19:28:42.515Z",
     "autoDenied": 0,
-    "caption": "Searched the web 2 times, searched code, read derive.ts and 6 more actions",
+    "caption": "Searched the web 2 times, searched code, read derive.ts, and 6 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -115527,7 +115527,7 @@
     "id": "group:cell:toolu_283_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched code, read derive.ts, fetched a page and 5 more actions",
+    "summary": "Searched code, read derive.ts, fetched a page, and 5 more actions",
     "turnId": "turn:u283"
   },
   {
@@ -116587,7 +116587,7 @@
   {
     "at": "2026-09-20T19:54:48.391Z",
     "autoDenied": 0,
-    "caption": "Edited 4 files, created a file, ran 3 commands and 5 more actions",
+    "caption": "Edited 4 files, created a file, ran 3 commands, and 5 more actions",
     "counts": {
       "added": 22,
       "removed": 13
@@ -117020,7 +117020,7 @@
     "id": "group:cell:toolu_288_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited a file, ran 3 commands, created a file and 3 more actions",
+    "summary": "Edited a file, ran 3 commands, created a file, and 3 more actions",
     "turnId": "turn:u288"
   },
   {
@@ -117331,7 +117331,7 @@
   {
     "at": "2026-09-20T19:55:57.259Z",
     "autoDenied": 0,
-    "caption": "Edited a file, ran a command, read a file and 4 more actions",
+    "caption": "Edited a file, ran a command, read a file, and 4 more actions",
     "counts": {
       "added": 11,
       "removed": 3
@@ -118204,7 +118204,7 @@
   {
     "at": "2026-09-20T20:09:58.280Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, updated todos, searched for files and 4 more actions",
+    "caption": "Edited 2 files, updated todos, searched for files, and 4 more actions",
     "counts": {
       "added": 11,
       "removed": 6
@@ -118632,7 +118632,7 @@
     "id": "group:cell:toolu_291_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, edited 2 files, searched for files and 4 more actions",
+    "summary": "Updated todos, edited 2 files, searched for files, and 4 more actions",
     "turnId": "turn:u291"
   },
   {
@@ -118664,7 +118664,7 @@
   {
     "at": "2026-09-20T20:15:47.503Z",
     "autoDenied": 0,
-    "caption": "Edited a file, searched the web 3 times, read a file and 16 more actions",
+    "caption": "Edited a file, searched the web 3 times, read a file, and 16 more actions",
     "counts": {
       "added": 2,
       "removed": 0
@@ -119018,7 +119018,7 @@
     "id": "group:cell:toolu_292_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited a file, searched the web, read a file and 4 more actions",
+    "summary": "Edited a file, searched the web, read a file, and 4 more actions",
     "turnId": "turn:u292"
   },
   {
@@ -119313,7 +119313,7 @@
     "id": "group:cell:toolu_292_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran a command, searched the web, searched for files and 5 more actions",
+    "summary": "Ran a command, searched the web, searched for files, and 5 more actions",
     "turnId": "turn:u292"
   },
   {
@@ -119546,7 +119546,7 @@
     "id": "group:cell:toolu_292_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran 2 commands, fetched a page, searched the web and 2 more actions",
+    "summary": "Ran 2 commands, fetched a page, searched the web, and 2 more actions",
     "turnId": "turn:u292"
   },
   {
@@ -119668,7 +119668,7 @@
   {
     "at": "2026-09-20T20:31:22.304Z",
     "autoDenied": 0,
-    "caption": "Edited and read derive.ts, updated todos, fetched a page and 8 more actions",
+    "caption": "Edited and read derive.ts, updated todos, fetched a page, and 8 more actions",
     "counts": {
       "added": 2,
       "removed": 6
@@ -120048,7 +120048,7 @@
     "id": "group:cell:toolu_294_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, fetched a page, ran 2 commands and 3 more actions",
+    "summary": "Updated todos, fetched a page, ran 2 commands, and 3 more actions",
     "turnId": "turn:u294"
   },
   {
@@ -120635,7 +120635,7 @@
   {
     "at": "2026-09-20T20:54:25.220Z",
     "autoDenied": 0,
-    "caption": "Edited a file, read a file, updated todos and 5 more actions",
+    "caption": "Edited a file, read a file, updated todos, and 5 more actions",
     "counts": {
       "added": 1,
       "removed": 1
@@ -121098,7 +121098,7 @@
     "id": "group:cell:toolu_296_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, searched for files, edited app.ts and 2 more actions",
+    "summary": "Updated todos, searched for files, edited app.ts, and 2 more actions",
     "turnId": "turn:u296"
   },
   {
@@ -121130,7 +121130,7 @@
   {
     "at": "2026-09-20T20:58:32.662Z",
     "autoDenied": 0,
-    "caption": "Edited app.ts, updated todos, ran a command and 4 more actions",
+    "caption": "Edited app.ts, updated todos, ran a command, and 4 more actions",
     "counts": {
       "added": 11,
       "removed": 1
@@ -121531,7 +121531,7 @@
     "id": "group:cell:toolu_297_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, ran a command, searched the web and 2 more actions",
+    "summary": "Updated todos, ran a command, searched the web, and 2 more actions",
     "turnId": "turn:u297"
   },
   {
@@ -121662,7 +121662,7 @@
   {
     "at": "2026-09-20T23:35:44.753Z",
     "autoDenied": 0,
-    "caption": "Edited a file, created a file, fetched a page and 4 more actions",
+    "caption": "Edited a file, created a file, fetched a page, and 4 more actions",
     "counts": {
       "added": 10,
       "removed": 4
@@ -122040,7 +122040,7 @@
     "id": "group:cell:toolu_298_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited a file, fetched a page, created a file and 4 more actions",
+    "summary": "Edited a file, fetched a page, created a file, and 4 more actions",
     "turnId": "turn:u298"
   },
   {
@@ -122072,7 +122072,7 @@
   {
     "at": "2026-09-20T23:39:32.887Z",
     "autoDenied": 0,
-    "caption": "Edited 4 files, searched code, updated todos and 7 more actions",
+    "caption": "Edited 4 files, searched code, updated todos, and 7 more actions",
     "counts": {
       "added": 27,
       "removed": 16
@@ -122429,7 +122429,7 @@
     "id": "group:cell:toolu_299_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited and read List.tsx, searched code, updated todos and 2 more actions",
+    "summary": "Edited and read List.tsx, searched code, updated todos, and 2 more actions",
     "turnId": "turn:u299"
   },
   {
@@ -122844,7 +122844,7 @@
     "id": "group:cell:toolu_299_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran 2 commands, searched the web, edited 2 files and 3 more actions",
+    "summary": "Ran 2 commands, searched the web, edited 2 files, and 3 more actions",
     "turnId": "turn:u299"
   },
   {
@@ -123163,7 +123163,7 @@
   {
     "at": "2026-09-22T00:04:19.653Z",
     "autoDenied": 0,
-    "caption": "Created a file, edited a file, fetched a page and 8 more actions",
+    "caption": "Created a file, edited a file, fetched a page, and 8 more actions",
     "counts": {
       "added": 12,
       "removed": 7
@@ -123735,7 +123735,7 @@
     "id": "group:cell:toolu_301_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched the web 2 times, read a file, edited a file and 3 more actions",
+    "summary": "Searched the web 2 times, read a file, edited a file, and 3 more actions",
     "turnId": "turn:u301"
   },
   {
@@ -123767,7 +123767,7 @@
   {
     "at": "2026-09-22T00:07:15.202Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, read a file, ran a command and 3 more actions",
+    "caption": "Edited 2 files, read a file, ran a command, and 3 more actions",
     "counts": {
       "added": 14,
       "removed": 6
@@ -124220,7 +124220,7 @@
   {
     "at": "2026-09-22T00:21:41.599Z",
     "autoDenied": 0,
-    "caption": "Created 2 files, edited 2 files, ran 2 commands and 9 more actions",
+    "caption": "Created 2 files, edited 2 files, ran 2 commands, and 9 more actions",
     "counts": {
       "added": 23,
       "removed": 8
@@ -124842,7 +124842,7 @@
     "id": "group:cell:toolu_303_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched code, searched the web 2 times, created a file and 3 more actions",
+    "summary": "Searched code, searched the web 2 times, created a file, and 3 more actions",
     "turnId": "turn:u303"
   },
   {
@@ -125012,7 +125012,7 @@
   {
     "at": "2026-09-22T00:23:49.130Z",
     "autoDenied": 0,
-    "caption": "Edited app.ts, updated todos, ran 2 commands and 2 more actions",
+    "caption": "Edited app.ts, updated todos, ran 2 commands, and 2 more actions",
     "counts": {
       "added": 4,
       "removed": 4
@@ -125347,7 +125347,7 @@
     "id": "group:cell:toolu_304_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, ran 2 commands, edited app.ts and 2 more actions",
+    "summary": "Updated todos, ran 2 commands, edited app.ts, and 2 more actions",
     "turnId": "turn:u304"
   },
   {
@@ -125829,7 +125829,7 @@
   {
     "at": "2026-09-22T00:45:35.265Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, created a file, updated todos and 11 more actions",
+    "caption": "Edited 2 files, created a file, updated todos, and 11 more actions",
     "counts": {
       "added": 30,
       "removed": 13
@@ -126294,7 +126294,7 @@
     "id": "group:cell:toolu_306_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited 2 files, updated todos, created a file and 4 more actions",
+    "summary": "Edited 2 files, updated todos, created a file, and 4 more actions",
     "turnId": "turn:u306"
   },
   {
@@ -126700,7 +126700,7 @@
   {
     "at": "2026-09-22T00:59:52.733Z",
     "autoDenied": 0,
-    "caption": "Edited a file, ran a command, fetched a page and 4 more actions",
+    "caption": "Edited a file, ran a command, fetched a page, and 4 more actions",
     "counts": {
       "added": 2,
       "removed": 3
@@ -127058,7 +127058,7 @@
     "id": "group:cell:toolu_307_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited a file, ran a command, fetched a page and 4 more actions",
+    "summary": "Edited a file, ran a command, fetched a page, and 4 more actions",
     "turnId": "turn:u307"
   },
   {
@@ -127090,7 +127090,7 @@
   {
     "at": "2026-09-22T01:02:48.286Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, created a file, ran 2 commands and 5 more actions",
+    "caption": "Edited 2 files, created a file, ran 2 commands, and 5 more actions",
     "counts": {
       "added": 12,
       "removed": 5
@@ -127627,7 +127627,7 @@
     "id": "group:cell:toolu_308_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran 2 commands, updated todos, edited a file and 3 more actions",
+    "summary": "Ran 2 commands, updated todos, edited a file, and 3 more actions",
     "turnId": "turn:u308"
   },
   {
@@ -127659,7 +127659,7 @@
   {
     "at": "2026-09-22T01:07:20.384Z",
     "autoDenied": 0,
-    "caption": "Created package.json, updated todos, searched for files and 3 more actions",
+    "caption": "Created package.json, updated todos, searched for files, and 3 more actions",
     "counts": {
       "added": 11,
       "removed": 4
@@ -128089,7 +128089,7 @@
   {
     "at": "2026-09-22T01:11:53.670Z",
     "autoDenied": 0,
-    "caption": "Edited package.json, ran 2 agents, updated todos and 6 more actions",
+    "caption": "Edited package.json, ran 2 agents, updated todos, and 6 more actions",
     "counts": {
       "added": 9,
       "removed": 1
@@ -128776,7 +128776,7 @@
   {
     "at": "2026-09-22T01:13:15.056Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, ran 2 commands, searched for files and 7 more actions",
+    "caption": "Edited 2 files, ran 2 commands, searched for files, and 7 more actions",
     "counts": {
       "added": 8,
       "removed": 4
@@ -129384,7 +129384,7 @@
     "id": "group:cell:toolu_311_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited time.ts, searched the web, searched code and 2 more actions",
+    "summary": "Edited time.ts, searched the web, searched code, and 2 more actions",
     "turnId": "turn:u311"
   },
   {
@@ -129718,7 +129718,7 @@
   {
     "at": "2026-09-23T05:02:44.937Z",
     "autoDenied": 0,
-    "caption": "Searched for files, fetched a page, searched the web and 4 more actions",
+    "caption": "Searched for files, fetched a page, searched the web, and 4 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -130042,7 +130042,7 @@
     "id": "group:cell:toolu_313_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched for files, fetched a page, searched the web and 4 more actions",
+    "summary": "Searched for files, fetched a page, searched the web, and 4 more actions",
     "turnId": "turn:u313"
   },
   {
@@ -130074,7 +130074,7 @@
   {
     "at": "2026-09-23T05:10:04.662Z",
     "autoDenied": 0,
-    "caption": "Read List.tsx, searched code, fetched 2 pages and 4 more actions",
+    "caption": "Read List.tsx, searched code, fetched 2 pages, and 4 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -130454,7 +130454,7 @@
     "id": "group:cell:toolu_314_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched code, fetched 2 pages, updated todos and 3 more actions",
+    "summary": "Searched code, fetched 2 pages, updated todos, and 3 more actions",
     "turnId": "turn:u314"
   },
   {
@@ -131016,7 +131016,7 @@
   {
     "at": "2026-09-24T11:16:57.287Z",
     "autoDenied": 0,
-    "caption": "Read List.tsx, fetched a page, updated todos and 3 more actions",
+    "caption": "Read List.tsx, fetched a page, updated todos, and 3 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -131470,7 +131470,7 @@
   {
     "at": "2026-09-24T11:22:37.661Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, created a file, read a file and 15 more actions",
+    "caption": "Edited 2 files, created a file, read a file, and 15 more actions",
     "counts": {
       "added": 34,
       "removed": 12
@@ -131777,7 +131777,7 @@
     "id": "group:cell:toolu_319_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Read a file, updated todos, edited a file and 2 more actions",
+    "summary": "Read a file, updated todos, edited a file, and 2 more actions",
     "turnId": "turn:u319"
   },
   {
@@ -132092,7 +132092,7 @@
     "id": "group:cell:toolu_319_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited a file, searched the web, updated todos and 4 more actions",
+    "summary": "Edited a file, searched the web, updated todos, and 4 more actions",
     "turnId": "turn:u319"
   },
   {
@@ -132424,7 +132424,7 @@
     "id": "group:cell:toolu_319_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Fetched a page, edited time.ts, updated todos and 3 more actions",
+    "summary": "Fetched a page, edited time.ts, updated todos, and 3 more actions",
     "turnId": "turn:u319"
   },
   {
@@ -132456,7 +132456,7 @@
   {
     "at": "2026-09-24T11:36:31.745Z",
     "autoDenied": 0,
-    "caption": "Edited store.ts, ran 2 agents, ran a command and 3 more actions",
+    "caption": "Edited store.ts, ran 2 agents, ran a command, and 3 more actions",
     "counts": {
       "added": 5,
       "removed": 1
@@ -132874,7 +132874,7 @@
   {
     "at": "2026-09-24T11:46:04.152Z",
     "autoDenied": 0,
-    "caption": "Updated todos, searched for files, searched the web and 2 more actions",
+    "caption": "Updated todos, searched for files, searched the web, and 2 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -133237,7 +133237,7 @@
   {
     "at": "2026-09-24T11:56:47.946Z",
     "autoDenied": 0,
-    "caption": "Created a file, searched code, searched the web 4 times and 4 more actions",
+    "caption": "Created a file, searched code, searched the web 4 times, and 4 more actions",
     "counts": {
       "added": 9,
       "removed": 6
@@ -133746,7 +133746,7 @@
     "id": "group:cell:toolu_322_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Created derive.ts, searched the web 3 times, fetched a page and 2 more actions",
+    "summary": "Created derive.ts, searched the web 3 times, fetched a page, and 2 more actions",
     "turnId": "turn:u322"
   },
   {
@@ -134392,7 +134392,7 @@
   {
     "at": "2026-09-25T13:10:52.950Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, fetched a page, updated todos and 2 more actions",
+    "caption": "Edited 2 files, fetched a page, updated todos, and 2 more actions",
     "counts": {
       "added": 14,
       "removed": 3
@@ -134842,7 +134842,7 @@
   {
     "at": "2026-09-25T13:19:10.778Z",
     "autoDenied": 0,
-    "caption": "Created README.md, fetched a page, updated todos and 4 more actions",
+    "caption": "Created README.md, fetched a page, updated todos, and 4 more actions",
     "counts": {
       "added": 8,
       "removed": 0
@@ -135509,7 +135509,7 @@
   {
     "at": "2026-09-25T13:38:51.522Z",
     "autoDenied": 0,
-    "caption": "Edited a file, ran 4 commands, searched code and 4 more actions",
+    "caption": "Edited a file, ran 4 commands, searched code, and 4 more actions",
     "counts": {
       "added": 3,
       "removed": 0
@@ -136001,7 +136001,7 @@
     "id": "group:cell:toolu_329_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Read a file, ran 3 commands, edited a file and 2 more actions",
+    "summary": "Read a file, ran 3 commands, edited a file, and 2 more actions",
     "turnId": "turn:u329"
   },
   {
@@ -136033,7 +136033,7 @@
   {
     "at": "2026-09-25T13:40:42.743Z",
     "autoDenied": 0,
-    "caption": "Edited derive.ts, ran 2 agents, fetched a page and 2 more actions",
+    "caption": "Edited derive.ts, ran 2 agents, fetched a page, and 2 more actions",
     "counts": {
       "added": 7,
       "removed": 2
@@ -136345,7 +136345,7 @@
   {
     "at": "2026-09-25T13:42:14.971Z",
     "autoDenied": 0,
-    "caption": "Ran 4 commands, searched the web, updated todos and 6 more actions",
+    "caption": "Ran 4 commands, searched the web, updated todos, and 6 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -137039,7 +137039,7 @@
   {
     "at": "2026-09-26T17:47:46.820Z",
     "autoDenied": 0,
-    "caption": "Edited 4 files, created a file, fetched 3 pages and 12 more actions",
+    "caption": "Edited 4 files, created a file, fetched 3 pages, and 12 more actions",
     "counts": {
       "added": 48,
       "removed": 20
@@ -137470,7 +137470,7 @@
     "id": "group:cell:toolu_333_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Fetched 2 pages, searched the web 2 times, edited a file and 3 more actions",
+    "summary": "Fetched 2 pages, searched the web 2 times, edited a file, and 3 more actions",
     "turnId": "turn:u333"
   },
   {
@@ -138058,7 +138058,7 @@
     "id": "group:cell:toolu_333_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited derive.ts, ran a command, updated todos and 4 more actions",
+    "summary": "Edited derive.ts, ran a command, updated todos, and 4 more actions",
     "turnId": "turn:u333"
   },
   {
@@ -138474,7 +138474,7 @@
   {
     "at": "2026-09-26T18:22:26.869Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, ran a command, updated todos and 2 more actions",
+    "caption": "Edited 2 files, ran a command, updated todos, and 2 more actions",
     "counts": {
       "added": 14,
       "removed": 8
@@ -139018,7 +139018,7 @@
   {
     "at": "2026-09-26T18:32:29.816Z",
     "autoDenied": 0,
-    "caption": "Edited store.ts, updated todos, searched the web 3 times and 10 more actions",
+    "caption": "Edited store.ts, updated todos, searched the web 3 times, and 10 more actions",
     "counts": {
       "added": 9,
       "removed": 0
@@ -139597,7 +139597,7 @@
     "id": "group:cell:toolu_338_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, fetched a page, ran 2 commands and 3 more actions",
+    "summary": "Updated todos, fetched a page, ran 2 commands, and 3 more actions",
     "turnId": "turn:u338"
   },
   {
@@ -139774,7 +139774,7 @@
   {
     "at": "2026-09-26T18:34:02.081Z",
     "autoDenied": 0,
-    "caption": "Edited a file, read a file, updated todos and 3 more actions",
+    "caption": "Edited a file, read a file, updated todos, and 3 more actions",
     "counts": {
       "added": 8,
       "removed": 4
@@ -140107,7 +140107,7 @@
     "id": "group:cell:toolu_339_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Read a file, edited a file, updated todos and 3 more actions",
+    "summary": "Read a file, edited a file, updated todos, and 3 more actions",
     "turnId": "turn:u339"
   },
   {
@@ -140333,7 +140333,7 @@
   {
     "at": "2026-09-26T18:52:37.085Z",
     "autoDenied": 0,
-    "caption": "Created a file, edited 3 files, ran a command and 7 more actions",
+    "caption": "Created a file, edited 3 files, ran a command, and 7 more actions",
     "counts": {
       "added": 23,
       "removed": 9
@@ -140725,7 +140725,7 @@
     "id": "group:cell:toolu_341_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran a command, created and edited store.ts, fetched a page and 3 more actions",
+    "summary": "Ran a command, created and edited store.ts, fetched a page, and 3 more actions",
     "turnId": "turn:u341"
   },
   {
@@ -141094,7 +141094,7 @@
   {
     "at": "2026-09-26T19:11:46.130Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, created a file, updated todos and 5 more actions",
+    "caption": "Edited 2 files, created a file, updated todos, and 5 more actions",
     "counts": {
       "added": 13,
       "removed": 6
@@ -141594,7 +141594,7 @@
     "id": "group:cell:toolu_343_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited 2 files, updated todos, searched the web 2 times and 2 more actions",
+    "summary": "Edited 2 files, updated todos, searched the web 2 times, and 2 more actions",
     "turnId": "turn:u343"
   },
   {
@@ -141964,7 +141964,7 @@
   {
     "at": "2026-09-27T15:27:38.113Z",
     "autoDenied": 0,
-    "caption": "Fetched a page, ran a command, searched for files and 2 more actions",
+    "caption": "Fetched a page, ran a command, searched for files, and 2 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -142429,7 +142429,7 @@
   {
     "at": "2026-09-27T15:50:48.376Z",
     "autoDenied": 0,
-    "caption": "Edited 3 files, ran 2 commands, read 3 files and 5 more actions",
+    "caption": "Edited 3 files, ran 2 commands, read 3 files, and 5 more actions",
     "counts": {
       "added": 20,
       "removed": 12
@@ -142823,7 +142823,7 @@
     "id": "group:cell:toolu_348_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran a command, edited 2 files, read 2 files and 2 more actions",
+    "summary": "Ran a command, edited 2 files, read 2 files, and 2 more actions",
     "turnId": "turn:u348"
   },
   {
@@ -143096,7 +143096,7 @@
     "id": "group:cell:toolu_348_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran a command, read a file, updated todos and 3 more actions",
+    "summary": "Ran a command, read a file, updated todos, and 3 more actions",
     "turnId": "turn:u348"
   },
   {
@@ -143128,7 +143128,7 @@
   {
     "at": "2026-09-27T15:52:20.852Z",
     "autoDenied": 0,
-    "caption": "Edited 4 files, updated todos, ran 4 commands and 4 more actions",
+    "caption": "Edited 4 files, updated todos, ran 4 commands, and 4 more actions",
     "counts": {
       "added": 26,
       "removed": 11
@@ -143995,7 +143995,7 @@
     "id": "group:cell:toolu_349_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited 2 files, updated todos, read a file and 3 more actions",
+    "summary": "Edited 2 files, updated todos, read a file, and 3 more actions",
     "turnId": "turn:u349"
   },
   {
@@ -144027,7 +144027,7 @@
   {
     "at": "2026-09-27T15:57:16.801Z",
     "autoDenied": 0,
-    "caption": "Edited 4 files, created a file, ran 2 agents and 12 more actions",
+    "caption": "Edited 4 files, created a file, ran 2 agents, and 12 more actions",
     "counts": {
       "added": 34,
       "removed": 16
@@ -144477,7 +144477,7 @@
     "id": "group:cell:toolu_350_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited 3 files, fetched a page, created a file and 2 more actions",
+    "summary": "Edited 3 files, fetched a page, created a file, and 2 more actions",
     "turnId": "turn:u350"
   },
   {
@@ -144730,7 +144730,7 @@
     "id": "group:cell:toolu_350_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran a command, edited List.tsx, updated todos and 3 more actions",
+    "summary": "Ran a command, edited List.tsx, updated todos, and 3 more actions",
     "turnId": "turn:u350"
   },
   {
@@ -145573,7 +145573,7 @@
   {
     "at": "2026-09-29T20:49:07.718Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, updated todos, searched the web and 3 more actions",
+    "caption": "Edited 2 files, updated todos, searched the web, and 3 more actions",
     "counts": {
       "added": 23,
       "removed": 6
@@ -146086,7 +146086,7 @@
     "id": "group:cell:toolu_355_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, edited store.ts, ran a command and 2 more actions",
+    "summary": "Updated todos, edited store.ts, ran a command, and 2 more actions",
     "turnId": "turn:u355"
   },
   {
@@ -146118,7 +146118,7 @@
   {
     "at": "2026-09-29T20:53:25.450Z",
     "autoDenied": 0,
-    "caption": "Ran 4 commands, searched for files, updated todos and 9 more actions",
+    "caption": "Ran 4 commands, searched for files, updated todos, and 8 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -146655,7 +146655,7 @@
     "id": "group:cell:toolu_356_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, searched code, read time.ts and 3 more actions",
+    "summary": "Updated todos, searched code, read time.ts, and 3 more actions",
     "turnId": "turn:u356"
   },
   {
@@ -147294,7 +147294,7 @@
   {
     "at": "2026-09-29T21:06:10.807Z",
     "autoDenied": 0,
-    "caption": "Edited a file, updated todos, fetched a page and 8 more actions",
+    "caption": "Edited a file, updated todos, fetched a page, and 8 more actions",
     "counts": {
       "added": 4,
       "removed": 4
@@ -147778,7 +147778,7 @@
     "id": "group:cell:toolu_358_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran a command, searched the web 2 times, edited List.tsx and 2 more actions",
+    "summary": "Ran a command, searched the web 2 times, edited List.tsx, and 2 more actions",
     "turnId": "turn:u358"
   },
   {
@@ -147861,7 +147861,7 @@
   {
     "at": "2026-09-29T21:13:30.637Z",
     "autoDenied": 0,
-    "caption": "Ran 4 commands, updated todos, fetched a page and 7 more actions",
+    "caption": "Ran 4 commands, updated todos, fetched a page, and 7 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -148524,7 +148524,7 @@
   {
     "at": "2026-09-29T21:15:38.464Z",
     "autoDenied": 0,
-    "caption": "Edited 3 files, ran 2 agents, fetched a page and 5 more actions",
+    "caption": "Edited 3 files, ran 2 agents, fetched a page, and 5 more actions",
     "counts": {
       "added": 27,
       "removed": 9
@@ -148930,7 +148930,7 @@
     "id": "group:cell:toolu_360_0_2",
     "kind": "group",
     "state": "completed",
-    "summary": "Fetched a page, edited store.ts, updated todos and 2 more actions",
+    "summary": "Fetched a page, edited store.ts, updated todos, and 2 more actions",
     "turnId": "turn:u360"
   },
   {
@@ -149147,7 +149147,7 @@
   {
     "at": "2026-09-29T21:23:52.975Z",
     "autoDenied": 0,
-    "caption": "Edited a file, read a file, updated todos and 2 more actions",
+    "caption": "Edited a file, read a file, updated todos, and 2 more actions",
     "counts": {
       "added": 5,
       "removed": 4
@@ -149445,7 +149445,7 @@
     "id": "group:cell:toolu_361_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Read a file, updated todos, edited a file and 2 more actions",
+    "summary": "Read a file, updated todos, edited a file, and 2 more actions",
     "turnId": "turn:u361"
   },
   {
@@ -149538,7 +149538,7 @@
   {
     "at": "2026-10-01T00:49:14.384Z",
     "autoDenied": 0,
-    "caption": "Edited app.ts, fetched a page, ran 2 commands and 6 more actions",
+    "caption": "Edited app.ts, fetched a page, ran 2 commands, and 6 more actions",
     "counts": {
       "added": 3,
       "removed": 6
@@ -149973,7 +149973,7 @@
     "id": "group:cell:toolu_362_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran 2 commands, searched code, edited app.ts and 4 more actions",
+    "summary": "Ran 2 commands, searched code, edited app.ts, and 4 more actions",
     "turnId": "turn:u362"
   },
   {
@@ -150880,7 +150880,7 @@
   {
     "at": "2026-10-02T01:00:10.875Z",
     "autoDenied": 0,
-    "caption": "Read README.md, searched the web, updated todos and 4 more actions",
+    "caption": "Read README.md, searched the web, updated todos, and 4 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -151179,7 +151179,7 @@
     "id": "group:cell:toolu_366_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Read README.md, searched the web, used docs · search 2 times and 2 more actions",
+    "summary": "Read README.md, searched the web, used docs · search 2 times, and 2 more actions",
     "turnId": "turn:u366"
   },
   {
@@ -151870,7 +151870,7 @@
   {
     "at": "2026-10-02T09:22:21.027Z",
     "autoDenied": 0,
-    "caption": "Created a file, searched code, searched the web and 4 more actions",
+    "caption": "Created a file, searched code, searched the web, and 4 more actions",
     "counts": {
       "added": 9,
       "removed": 3
@@ -152240,7 +152240,7 @@
     "id": "group:cell:toolu_369_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched code, searched the web, created a file and 4 more actions",
+    "summary": "Searched code, searched the web, created a file, and 4 more actions",
     "turnId": "turn:u369"
   },
   {
@@ -153066,7 +153066,7 @@
   {
     "at": "2026-10-02T09:42:51.328Z",
     "autoDenied": 0,
-    "caption": "Edited a file, fetched 2 pages, ran 2 commands and 11 more actions",
+    "caption": "Edited a file, fetched 2 pages, ran 2 commands, and 9 more actions",
     "counts": {
       "added": 8,
       "removed": 0
@@ -153482,7 +153482,7 @@
     "id": "group:cell:toolu_373_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran 2 commands, searched the web 2 times, searched code and 3 more actions",
+    "summary": "Ran 2 commands, searched the web 2 times, searched code, and 3 more actions",
     "turnId": "turn:u373"
   },
   {
@@ -153809,7 +153809,7 @@
   {
     "at": "2026-10-03T05:43:15.789Z",
     "autoDenied": 0,
-    "caption": "Created 2 files, searched code, searched the web 2 times and 4 more actions",
+    "caption": "Created 2 files, searched code, searched the web 2 times, and 4 more actions",
     "counts": {
       "added": 17,
       "removed": 2
@@ -154210,7 +154210,7 @@
     "id": "group:cell:toolu_374_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched code, created a file, searched the web 2 times and 2 more actions",
+    "summary": "Searched code, created a file, searched the web 2 times, and 2 more actions",
     "turnId": "turn:u374"
   },
   {
@@ -154571,7 +154571,7 @@
   {
     "at": "2026-10-04T00:39:17.792Z",
     "autoDenied": 0,
-    "caption": "Updated todos, read package.json, ran 2 commands and 2 more actions",
+    "caption": "Updated todos, read package.json, ran 2 commands, and 2 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -155102,7 +155102,7 @@
   {
     "at": "2026-10-04T00:53:11.451Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, ran 5 commands, searched for files and 8 more actions",
+    "caption": "Edited 2 files, ran 5 commands, searched for files, and 8 more actions",
     "counts": {
       "added": 11,
       "removed": 5
@@ -155987,7 +155987,7 @@
   {
     "at": "2026-10-04T01:02:30.120Z",
     "autoDenied": 0,
-    "caption": "Created a file, ran 3 commands, searched for files and 9 more actions",
+    "caption": "Created a file, ran 3 commands, searched for files, and 9 more actions",
     "counts": {
       "added": 10,
       "removed": 6
@@ -156362,7 +156362,7 @@
     "id": "group:cell:toolu_379_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Created app.ts, ran a command, searched for files and 4 more actions",
+    "summary": "Created app.ts, ran a command, searched for files, and 4 more actions",
     "turnId": "turn:u379"
   },
   {
@@ -156652,7 +156652,7 @@
     "id": "group:cell:toolu_379_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched the web, updated todos, ran 2 commands and 2 more actions",
+    "summary": "Searched the web, updated todos, ran 2 commands, and 2 more actions",
     "turnId": "turn:u379"
   },
   {
@@ -157111,7 +157111,7 @@
   {
     "at": "2026-10-04T01:16:46.952Z",
     "autoDenied": 0,
-    "caption": "Searched the web, searched for files, fetched a page and 10 more actions",
+    "caption": "Searched the web, searched for files, fetched a page, and 10 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -157363,7 +157363,7 @@
     "id": "group:cell:toolu_381_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched the web, searched for files, fetched a page and 2 more actions",
+    "summary": "Searched the web, searched for files, fetched a page, and 2 more actions",
     "turnId": "turn:u381"
   },
   {
@@ -157837,7 +157837,7 @@
   {
     "at": "2026-10-04T01:29:41.254Z",
     "autoDenied": 0,
-    "caption": "Edited package.json, fetched a page, searched code and 3 more actions",
+    "caption": "Edited package.json, fetched a page, searched code, and 3 more actions",
     "counts": {
       "added": 6,
       "removed": 2
@@ -158164,7 +158164,7 @@
     "id": "group:cell:toolu_383_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Fetched a page, searched code, edited package.json and 3 more actions",
+    "summary": "Fetched a page, searched code, edited package.json, and 3 more actions",
     "turnId": "turn:u383"
   },
   {
@@ -158196,7 +158196,7 @@
   {
     "at": "2026-10-04T01:32:42.527Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, updated todos, read a file and 4 more actions",
+    "caption": "Edited 2 files, updated todos, read a file, and 4 more actions",
     "counts": {
       "added": 11,
       "removed": 7
@@ -159125,7 +159125,7 @@
   {
     "at": "2026-10-04T01:48:07.177Z",
     "autoDenied": 0,
-    "caption": "Edited a file, searched the web 2 times, read a file and 4 more actions",
+    "caption": "Edited a file, searched the web 2 times, read a file, and 4 more actions",
     "counts": {
       "added": 10,
       "removed": 2
@@ -159521,7 +159521,7 @@
     "id": "group:cell:toolu_386_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched the web 2 times, edited a file, read a file and 4 more actions",
+    "summary": "Searched the web 2 times, edited a file, read a file, and 4 more actions",
     "turnId": "turn:u386"
   },
   {
@@ -159560,7 +159560,7 @@
   {
     "at": "2026-10-04T21:44:19.454Z",
     "autoDenied": 0,
-    "caption": "Edited time.ts, updated todos, fetched 2 pages and 5 more actions",
+    "caption": "Edited time.ts, updated todos, fetched 2 pages, and 5 more actions",
     "counts": {
       "added": 11,
       "removed": 2
@@ -160175,7 +160175,7 @@
     "id": "group:cell:toolu_387_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, fetched 2 pages, ran a command and 2 more actions",
+    "summary": "Updated todos, fetched 2 pages, ran a command, and 2 more actions",
     "turnId": "turn:u387"
   },
   {
@@ -160207,7 +160207,7 @@
   {
     "at": "2026-10-04T21:55:15.615Z",
     "autoDenied": 0,
-    "caption": "Updated todos, searched for files, searched code and 4 more actions",
+    "caption": "Updated todos, searched for files, searched code, and 4 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -160575,7 +160575,7 @@
     "id": "group:cell:toolu_388_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, searched for files, searched code and 4 more actions",
+    "summary": "Updated todos, searched for files, searched code, and 4 more actions",
     "turnId": "turn:u388"
   },
   {
@@ -160607,7 +160607,7 @@
   {
     "at": "2026-10-04T22:08:09.422Z",
     "autoDenied": 0,
-    "caption": "Ran 3 commands, searched for files, searched the web and 4 more actions",
+    "caption": "Ran 3 commands, searched for files, searched the web, and 4 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -161114,7 +161114,7 @@
   {
     "at": "2026-10-04T22:15:46.390Z",
     "autoDenied": 0,
-    "caption": "Created a file, edited 2 files, ran 2 agents and 2 more actions",
+    "caption": "Created a file, edited 2 files, ran 2 agents, and 2 more actions",
     "counts": {
       "added": 17,
       "removed": 11
@@ -161531,7 +161531,7 @@
   {
     "at": "2026-10-04T22:21:34.626Z",
     "autoDenied": 0,
-    "caption": "Updated todos, ran a command, fetched 2 pages and 4 more actions",
+    "caption": "Updated todos, ran a command, fetched 2 pages, and 4 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -161836,7 +161836,7 @@
     "id": "group:cell:toolu_391_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, ran a command, fetched a page and 3 more actions",
+    "summary": "Updated todos, ran a command, fetched a page, and 3 more actions",
     "turnId": "turn:u391"
   },
   {
@@ -161962,7 +161962,7 @@
   {
     "at": "2026-10-04T22:36:43.628Z",
     "autoDenied": 0,
-    "caption": "Created a file, edited 2 files, searched the web 2 times and 3 more actions",
+    "caption": "Created a file, edited 2 files, searched the web 2 times, and 3 more actions",
     "counts": {
       "added": 15,
       "removed": 7
@@ -162310,7 +162310,7 @@
     "id": "group:cell:toolu_392_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Created and edited List.tsx, searched the web, ran a command and 2 more actions",
+    "summary": "Created and edited List.tsx, searched the web, ran a command, and 2 more actions",
     "turnId": "turn:u392"
   },
   {
@@ -163165,7 +163165,7 @@
   {
     "at": "2026-10-05T16:19:51.047Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, searched the web 2 times, ran 2 commands and 4 more actions",
+    "caption": "Edited 2 files, searched the web 2 times, ran 2 commands, and 4 more actions",
     "counts": {
       "added": 19,
       "removed": 4
@@ -163685,7 +163685,7 @@
     "id": "group:cell:toolu_397_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, edited 2 files, ran a command and 3 more actions",
+    "summary": "Updated todos, edited 2 files, ran a command, and 3 more actions",
     "turnId": "turn:u397"
   },
   {
@@ -163717,7 +163717,7 @@
   {
     "at": "2026-10-05T16:25:33.505Z",
     "autoDenied": 0,
-    "caption": "Edited README.md, searched code, ran a command and 4 more actions",
+    "caption": "Edited README.md, searched code, ran a command, and 4 more actions",
     "counts": {
       "added": 12,
       "removed": 2
@@ -164114,7 +164114,7 @@
     "id": "group:cell:toolu_398_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched code, edited README.md, ran a command and 4 more actions",
+    "summary": "Searched code, edited README.md, ran a command, and 4 more actions",
     "turnId": "turn:u398"
   },
   {
@@ -164864,7 +164864,7 @@
   {
     "at": "2026-10-07T06:42:48.600Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, ran a command, updated todos and 4 more actions",
+    "caption": "Edited 2 files, ran a command, updated todos, and 4 more actions",
     "counts": {
       "added": 24,
       "removed": 7
@@ -165711,7 +165711,7 @@
   {
     "at": "2026-10-07T06:58:37.115Z",
     "autoDenied": 0,
-    "caption": "Created and edited time.ts, ran a command, fetched a page and 6 more actions",
+    "caption": "Created and edited time.ts, ran a command, fetched a page, and 6 more actions",
     "counts": {
       "added": 14,
       "removed": 5
@@ -166258,7 +166258,7 @@
   {
     "at": "2026-10-07T07:02:07.037Z",
     "autoDenied": 0,
-    "caption": "Fetched a page, searched code, ran a command and 4 more actions",
+    "caption": "Fetched a page, searched code, ran a command, and 4 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -166583,7 +166583,7 @@
     "id": "group:cell:toolu_406_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Fetched a page, searched code, ran a command and 4 more actions",
+    "summary": "Fetched a page, searched code, ran a command, and 4 more actions",
     "turnId": "turn:u406"
   },
   {
@@ -166615,7 +166615,7 @@
   {
     "at": "2026-10-07T07:06:25.394Z",
     "autoDenied": 0,
-    "caption": "Edited a file, searched the web 2 times, fetched a page and 7 more actions",
+    "caption": "Edited a file, searched the web 2 times, fetched a page, and 7 more actions",
     "counts": {
       "added": 7,
       "removed": 2
@@ -166949,7 +166949,7 @@
     "id": "group:cell:toolu_407_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched the web, fetched a page, updated todos and 4 more actions",
+    "summary": "Searched the web, fetched a page, updated todos, and 4 more actions",
     "turnId": "turn:u407"
   },
   {
@@ -167192,7 +167192,7 @@
   {
     "at": "2026-10-07T07:16:31.821Z",
     "autoDenied": 0,
-    "caption": "Searched for files, updated todos, read README.md and 2 more actions",
+    "caption": "Searched for files, updated todos, read README.md, and 2 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -167547,7 +167547,7 @@
     "id": "group:cell:toolu_408_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched for files, updated todos, read README.md and 2 more actions",
+    "summary": "Searched for files, updated todos, read README.md, and 2 more actions",
     "turnId": "turn:u408"
   },
   {
@@ -167579,7 +167579,7 @@
   {
     "at": "2026-10-07T07:31:09.299Z",
     "autoDenied": 0,
-    "caption": "Updated todos, ran a command, searched the web and 2 more actions",
+    "caption": "Updated todos, ran a command, searched the web, and 2 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -167848,7 +167848,7 @@
     "id": "group:cell:toolu_409_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, ran a command, searched the web and 2 more actions",
+    "summary": "Updated todos, ran a command, searched the web, and 2 more actions",
     "turnId": "turn:u409"
   },
   {
@@ -167880,7 +167880,7 @@
   {
     "at": "2026-10-07T07:31:53.814Z",
     "autoDenied": 0,
-    "caption": "Edited derive.test.ts, ran 2 agents, ran a command and 2 more actions",
+    "caption": "Edited derive.test.ts, ran 2 agents, ran a command, and 2 more actions",
     "counts": {
       "added": 12,
       "removed": 8
@@ -169186,7 +169186,7 @@
   {
     "at": "2026-10-07T16:18:26.720Z",
     "autoDenied": 0,
-    "caption": "Created 2 files, edited a file, updated todos and 7 more actions",
+    "caption": "Created 2 files, edited a file, updated todos, and 7 more actions",
     "counts": {
       "added": 11,
       "removed": 11
@@ -169842,7 +169842,7 @@
     "id": "group:cell:toolu_416_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Read a file, searched the web, edited a file and 5 more actions",
+    "summary": "Read a file, searched the web, edited a file, and 5 more actions",
     "turnId": "turn:u416"
   },
   {
@@ -170352,7 +170352,7 @@
   {
     "at": "2026-10-07T16:37:01.189Z",
     "autoDenied": 0,
-    "caption": "Edited derive.ts, searched the web 2 times, ran a command and 8 more actions",
+    "caption": "Edited derive.ts, searched the web 2 times, ran a command, and 8 more actions",
     "counts": {
       "added": 12,
       "removed": 1
@@ -170668,7 +170668,7 @@
     "id": "group:cell:toolu_418_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched the web, ran a command, updated todos and 2 more actions",
+    "summary": "Searched the web, ran a command, updated todos, and 2 more actions",
     "turnId": "turn:u418"
   },
   {
@@ -170920,7 +170920,7 @@
     "id": "group:cell:toolu_418_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched the web, fetched a page, edited derive.ts and 3 more actions",
+    "summary": "Searched the web, fetched a page, edited derive.ts, and 3 more actions",
     "turnId": "turn:u418"
   },
   {
@@ -170952,7 +170952,7 @@
   {
     "at": "2026-10-07T16:39:49.435Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, ran 4 commands, searched for files and 11 more actions",
+    "caption": "Edited 2 files, ran 4 commands, searched for files, and 11 more actions",
     "counts": {
       "added": 9,
       "removed": 10
@@ -171597,7 +171597,7 @@
     "id": "group:cell:toolu_419_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited 2 files, ran a command, fetched a page and 4 more actions",
+    "summary": "Edited 2 files, ran a command, fetched a page, and 4 more actions",
     "turnId": "turn:u419"
   },
   {
@@ -172409,7 +172409,7 @@
   {
     "at": "2026-10-07T16:58:42.257Z",
     "autoDenied": 0,
-    "caption": "Edited time.ts, ran a command, searched the web and 3 more actions",
+    "caption": "Edited time.ts, ran a command, searched the web, and 3 more actions",
     "counts": {
       "added": 4,
       "removed": 6
@@ -173069,7 +173069,7 @@
   {
     "at": "2026-10-07T17:09:07.816Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, updated todos, fetched a page and 9 more actions",
+    "caption": "Edited 2 files, updated todos, fetched a page, and 9 more actions",
     "counts": {
       "added": 7,
       "removed": 6
@@ -173414,7 +173414,7 @@
     "id": "group:cell:toolu_424_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited 2 files, updated todos, fetched a page and 2 more actions",
+    "summary": "Edited 2 files, updated todos, fetched a page, and 2 more actions",
     "turnId": "turn:u424"
   },
   {
@@ -173729,7 +173729,7 @@
     "id": "group:cell:toolu_424_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran 3 commands, updated todos, used docs · search 2 times and 2 more actions",
+    "summary": "Ran 3 commands, updated todos, used docs · search 2 times, and 2 more actions",
     "turnId": "turn:u424"
   },
   {
@@ -174535,7 +174535,7 @@
   {
     "at": "2026-10-07T18:08:13.916Z",
     "autoDenied": 0,
-    "caption": "Created a file, edited 3 files, ran 2 agents and 12 more actions",
+    "caption": "Created a file, edited 3 files, ran 2 agents, and 12 more actions",
     "counts": {
       "added": 34,
       "removed": 22
@@ -175366,7 +175366,7 @@
     "id": "group:cell:toolu_430_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched the web 2 times, edited 2 files, updated todos and 2 more actions",
+    "summary": "Searched the web 2 times, edited 2 files, updated todos, and 2 more actions",
     "turnId": "turn:u430"
   },
   {
@@ -175434,7 +175434,7 @@
   {
     "at": "2026-10-07T23:26:57.195Z",
     "autoDenied": 0,
-    "caption": "Edited 3 files, fetched 3 pages, ran 2 commands and 11 more actions",
+    "caption": "Edited 3 files, fetched 3 pages, ran 2 commands, and 11 more actions",
     "counts": {
       "added": 23,
       "removed": 9
@@ -175802,7 +175802,7 @@
     "id": "group:cell:toolu_431_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Fetched a page, ran a command, edited 2 files and 2 more actions",
+    "summary": "Fetched a page, ran a command, edited 2 files, and 2 more actions",
     "turnId": "turn:u431"
   },
   {
@@ -176099,7 +176099,7 @@
     "id": "group:cell:toolu_431_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Read a file, updated todos, fetched a page and 2 more actions",
+    "summary": "Read a file, updated todos, fetched a page, and 2 more actions",
     "turnId": "turn:u431"
   },
   {
@@ -176336,7 +176336,7 @@
     "id": "group:cell:toolu_431_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Fetched a page, updated todos, ran a command and 3 more actions",
+    "summary": "Fetched a page, updated todos, ran a command, and 3 more actions",
     "turnId": "turn:u431"
   },
   {
@@ -176368,7 +176368,7 @@
   {
     "at": "2026-10-07T23:29:31.259Z",
     "autoDenied": 0,
-    "caption": "Created a file, read a file, ran 2 commands and 2 more actions",
+    "caption": "Created a file, read a file, ran 2 commands, and 2 more actions",
     "counts": {
       "added": 10,
       "removed": 6
@@ -176942,7 +176942,7 @@
   {
     "at": "2026-10-09T04:31:35.563Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, updated todos, searched the web and 10 more actions",
+    "caption": "Edited 2 files, updated todos, searched the web, and 10 more actions",
     "counts": {
       "added": 10,
       "removed": 10
@@ -177540,7 +177540,7 @@
     "id": "group:cell:toolu_435_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched code, updated todos, read 2 files and 2 more actions",
+    "summary": "Searched code, updated todos, read 2 files, and 2 more actions",
     "turnId": "turn:u435"
   },
   {
@@ -177706,7 +177706,7 @@
   {
     "at": "2026-10-09T04:44:24.086Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, fetched 3 pages, updated todos and 4 more actions",
+    "caption": "Edited 2 files, fetched 3 pages, updated todos, and 4 more actions",
     "counts": {
       "added": 15,
       "removed": 2
@@ -178269,7 +178269,7 @@
     "id": "group:cell:toolu_436_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, fetched 2 pages, read store.ts and 2 more actions",
+    "summary": "Updated todos, fetched 2 pages, read store.ts, and 2 more actions",
     "turnId": "turn:u436"
   },
   {
@@ -178587,7 +178587,7 @@
   {
     "at": "2026-10-09T05:00:17.924Z",
     "autoDenied": 0,
-    "caption": "Ran a command, read app.ts, searched for files and 7 more actions",
+    "caption": "Ran a command, read app.ts, searched for files, and 7 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -179126,7 +179126,7 @@
   {
     "at": "2026-10-09T05:12:58.171Z",
     "autoDenied": 0,
-    "caption": "Edited a file, created a file, searched the web 2 times and 7 more actions",
+    "caption": "Edited a file, created a file, searched the web 2 times, and 7 more actions",
     "counts": {
       "added": 9,
       "removed": 2
@@ -179622,7 +179622,7 @@
     "id": "group:cell:toolu_439_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited a file, searched the web, created a file and 5 more actions",
+    "summary": "Edited a file, searched the web, created a file, and 5 more actions",
     "turnId": "turn:u439"
   },
   {
@@ -180181,7 +180181,7 @@
   {
     "at": "2026-10-09T05:39:53.221Z",
     "autoDenied": 0,
-    "caption": "Edited derive.test.ts, ran 2 commands, fetched a page and 2 more actions",
+    "caption": "Edited derive.test.ts, ran 2 commands, fetched a page, and 2 more actions",
     "counts": {
       "added": 10,
       "removed": 0
@@ -180502,7 +180502,7 @@
     "id": "group:cell:toolu_442_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited derive.test.ts, ran 2 commands, fetched a page and 2 more actions",
+    "summary": "Edited derive.test.ts, ran 2 commands, fetched a page, and 2 more actions",
     "turnId": "turn:u442"
   },
   {
@@ -180889,7 +180889,7 @@
   {
     "at": "2026-10-09T10:49:17.736Z",
     "autoDenied": 0,
-    "caption": "Created a file, read a file, ran a command and 7 more actions",
+    "caption": "Created a file, read a file, ran a command, and 7 more actions",
     "counts": {
       "added": 10,
       "removed": 4
@@ -181291,7 +181291,7 @@
     "id": "group:cell:toolu_444_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Created a file, read a file, ran a command and 5 more actions",
+    "summary": "Created a file, read a file, ran a command, and 5 more actions",
     "turnId": "turn:u444"
   },
   {
@@ -181419,7 +181419,7 @@
   {
     "at": "2026-10-09T14:23:25.415Z",
     "autoDenied": 0,
-    "caption": "Edited 4 files, created a file, searched code and 12 more actions",
+    "caption": "Edited 4 files, created a file, searched code, and 12 more actions",
     "counts": {
       "added": 34,
       "removed": 30
@@ -182436,7 +182436,7 @@
     "id": "group:cell:toolu_445_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched the web 2 times, searched code, ran 2 commands and 3 more actions",
+    "summary": "Searched the web 2 times, searched code, ran 2 commands, and 3 more actions",
     "turnId": "turn:u445"
   },
   {
@@ -182787,7 +182787,7 @@
   {
     "at": "2026-10-10T17:13:09.451Z",
     "autoDenied": 0,
-    "caption": "Edited derive.ts, updated todos, ran 2 commands and 4 more actions",
+    "caption": "Edited derive.ts, updated todos, ran 2 commands, and 4 more actions",
     "counts": {
       "added": 7,
       "removed": 6
@@ -183309,7 +183309,7 @@
     "id": "group:cell:toolu_448_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran 2 commands, updated todos, edited derive.ts and 3 more actions",
+    "summary": "Ran 2 commands, updated todos, edited derive.ts, and 3 more actions",
     "turnId": "turn:u448"
   },
   {
@@ -184137,7 +184137,7 @@
   {
     "at": "2026-10-10T17:48:14.705Z",
     "autoDenied": 0,
-    "caption": "Created package.json, searched code, updated todos and 2 more actions",
+    "caption": "Created package.json, searched code, updated todos, and 2 more actions",
     "counts": {
       "added": 4,
       "removed": 5
@@ -184432,7 +184432,7 @@
     "id": "group:cell:toolu_452_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched code, created package.json, updated todos and 2 more actions",
+    "summary": "Searched code, created package.json, updated todos, and 2 more actions",
     "turnId": "turn:u452"
   },
   {
@@ -184735,7 +184735,7 @@
   {
     "at": "2026-10-11T07:04:46.921Z",
     "autoDenied": 0,
-    "caption": "Edited 3 files, updated todos, ran 2 commands and 13 more actions",
+    "caption": "Edited 3 files, updated todos, ran 2 commands, and 13 more actions",
     "counts": {
       "added": 31,
       "removed": 11
@@ -185123,7 +185123,7 @@
     "id": "group:cell:toolu_454_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, ran a command, edited a file and 4 more actions",
+    "summary": "Updated todos, ran a command, edited a file, and 4 more actions",
     "turnId": "turn:u454"
   },
   {
@@ -185401,7 +185401,7 @@
     "id": "group:cell:toolu_454_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched the web 2 times, edited derive.test.ts, used docs · search 2 times and 2 more actions",
+    "summary": "Searched the web 2 times, edited derive.test.ts, used docs · search 2 times, and 2 more actions",
     "turnId": "turn:u454"
   },
   {
@@ -185720,7 +185720,7 @@
     "id": "group:cell:toolu_454_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited 2 files, ran a command, updated todos and 3 more actions",
+    "summary": "Edited 2 files, ran a command, updated todos, and 3 more actions",
     "turnId": "turn:u454"
   },
   {
@@ -186163,7 +186163,7 @@
   {
     "at": "2026-10-12T04:14:57.464Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, created a file, searched code and 9 more actions",
+    "caption": "Edited 2 files, created a file, searched code, and 9 more actions",
     "counts": {
       "added": 13,
       "removed": 13
@@ -186796,7 +186796,7 @@
     "id": "group:cell:toolu_457_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran a command, fetched a page, searched the web and 4 more actions",
+    "summary": "Ran a command, fetched a page, searched the web, and 4 more actions",
     "turnId": "turn:u457"
   },
   {
@@ -186835,7 +186835,7 @@
   {
     "at": "2026-10-12T19:28:55.176Z",
     "autoDenied": 0,
-    "caption": "Edited 4 files, ran 2 commands, updated todos and 11 more actions",
+    "caption": "Edited 4 files, ran 2 commands, updated todos, and 11 more actions",
     "counts": {
       "added": 25,
       "removed": 10
@@ -187267,7 +187267,7 @@
     "id": "group:cell:toolu_458_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran a command, updated todos, edited and read time.ts and 4 more actions",
+    "summary": "Ran a command, updated todos, edited and read time.ts, and 4 more actions",
     "turnId": "turn:u458"
   },
   {
@@ -187747,7 +187747,7 @@
   {
     "at": "2026-10-12T19:41:42.779Z",
     "autoDenied": 0,
-    "caption": "Searched code, fetched a page, updated todos and 3 more actions",
+    "caption": "Searched code, fetched a page, updated todos, and 3 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -188102,7 +188102,7 @@
   {
     "at": "2026-10-12T19:48:13.201Z",
     "autoDenied": 0,
-    "caption": "Created app.ts, ran 2 agents, ran 2 commands and 6 more actions",
+    "caption": "Created app.ts, ran 2 agents, ran 2 commands, and 6 more actions",
     "counts": {
       "added": 11,
       "removed": 6
@@ -188522,7 +188522,7 @@
     "id": "group:cell:toolu_460_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran 2 commands, updated todos, searched for files and 3 more actions",
+    "summary": "Ran 2 commands, updated todos, searched for files, and 3 more actions",
     "turnId": "turn:u460"
   },
   {
@@ -188965,7 +188965,7 @@
   {
     "at": "2026-10-12T20:05:55.143Z",
     "autoDenied": 0,
-    "caption": "Edited a file, searched code, updated todos and 4 more actions",
+    "caption": "Edited a file, searched code, updated todos, and 4 more actions",
     "counts": {
       "added": 6,
       "removed": 2
@@ -189331,7 +189331,7 @@
     "id": "group:cell:toolu_462_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched code, edited a file, updated todos and 4 more actions",
+    "summary": "Searched code, edited a file, updated todos, and 4 more actions",
     "turnId": "turn:u462"
   },
   {
@@ -189711,7 +189711,7 @@
   {
     "at": "2026-10-12T20:28:24.707Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, created a file, fetched 3 pages and 2 more actions",
+    "caption": "Edited 2 files, created a file, fetched 3 pages, and 2 more actions",
     "counts": {
       "added": 20,
       "removed": 14
@@ -190140,7 +190140,7 @@
     "id": "group:cell:toolu_465_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited 2 files, created a file, fetched 3 pages and 2 more actions",
+    "summary": "Edited 2 files, created a file, fetched 3 pages, and 2 more actions",
     "turnId": "turn:u465"
   },
   {
@@ -190262,7 +190262,7 @@
   {
     "at": "2026-10-12T20:42:32.733Z",
     "autoDenied": 0,
-    "caption": "Ran 2 commands, searched for files, updated todos and 5 more actions",
+    "caption": "Ran 2 commands, searched for files, updated todos, and 5 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -190638,7 +190638,7 @@
     "id": "group:cell:toolu_467_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran a command, searched for files, updated todos and 5 more actions",
+    "summary": "Ran a command, searched for files, updated todos, and 5 more actions",
     "turnId": "turn:u467"
   },
   {
@@ -191059,7 +191059,7 @@
   {
     "at": "2026-10-13T23:30:42.326Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, created a file, read a file and 17 more actions",
+    "caption": "Edited 2 files, created a file, read a file, and 17 more actions",
     "counts": {
       "added": 23,
       "removed": 9
@@ -191437,7 +191437,7 @@
     "id": "group:cell:toolu_469_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Read a file, updated todos, ran a command and 4 more actions",
+    "summary": "Read a file, updated todos, ran a command, and 4 more actions",
     "turnId": "turn:u469"
   },
   {
@@ -191707,7 +191707,7 @@
     "id": "group:cell:toolu_469_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched for files, updated todos, edited derive.ts and 3 more actions",
+    "summary": "Searched for files, updated todos, edited derive.ts, and 3 more actions",
     "turnId": "turn:u469"
   },
   {
@@ -192036,7 +192036,7 @@
     "id": "group:cell:toolu_469_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched for files, created List.tsx, ran 3 commands and 3 more actions",
+    "summary": "Searched for files, created List.tsx, ran 3 commands, and 3 more actions",
     "turnId": "turn:u469"
   },
   {
@@ -192657,7 +192657,7 @@
   {
     "at": "2026-10-14T18:11:16.353Z",
     "autoDenied": 0,
-    "caption": "Created derive.test.ts, searched for files, fetched a page and 7 more actions",
+    "caption": "Created derive.test.ts, searched for files, fetched a page, and 7 more actions",
     "counts": {
       "added": 11,
       "removed": 0
@@ -193519,7 +193519,7 @@
   {
     "at": "2026-10-15T00:16:55.222Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, searched the web, ran a command and 4 more actions",
+    "caption": "Edited 2 files, searched the web, ran a command, and 4 more actions",
     "counts": {
       "added": 14,
       "removed": 0
@@ -193927,7 +193927,7 @@
     "id": "group:cell:toolu_475_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited 2 files, searched the web, ran a command and 4 more actions",
+    "summary": "Edited 2 files, searched the web, ran a command, and 4 more actions",
     "turnId": "turn:u475"
   },
   {
@@ -193966,7 +193966,7 @@
   {
     "at": "2026-10-15T19:27:26.545Z",
     "autoDenied": 0,
-    "caption": "Edited a file, searched for files, updated todos and 7 more actions",
+    "caption": "Edited a file, searched for files, updated todos, and 7 more actions",
     "counts": {
       "added": 7,
       "removed": 4
@@ -194550,7 +194550,7 @@
     "id": "group:cell:toolu_476_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited a file, read 2 files, updated todos and 2 more actions",
+    "summary": "Edited a file, read 2 files, updated todos, and 2 more actions",
     "turnId": "turn:u476"
   },
   {
@@ -194582,7 +194582,7 @@
   {
     "at": "2026-10-15T19:30:45.088Z",
     "autoDenied": 0,
-    "caption": "Updated todos, read README.md, searched the web and 4 more actions",
+    "caption": "Updated todos, read README.md, searched the web, and 4 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -195001,7 +195001,7 @@
   {
     "at": "2026-10-15T19:45:43.445Z",
     "autoDenied": 0,
-    "caption": "Created a file, edited a file, searched the web and 4 more actions",
+    "caption": "Created a file, edited a file, searched the web, and 4 more actions",
     "counts": {
       "added": 9,
       "removed": 0
@@ -195382,7 +195382,7 @@
     "id": "group:cell:toolu_478_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched the web, created a file, updated todos and 4 more actions",
+    "summary": "Searched the web, created a file, updated todos, and 4 more actions",
     "turnId": "turn:u478"
   },
   {
@@ -195414,7 +195414,7 @@
   {
     "at": "2026-10-15T19:57:09.287Z",
     "autoDenied": 0,
-    "caption": "Edited 3 files, searched the web, ran a command and 4 more actions",
+    "caption": "Edited 3 files, searched the web, ran a command, and 4 more actions",
     "counts": {
       "added": 16,
       "removed": 9
@@ -196805,7 +196805,7 @@
   {
     "at": "2026-10-15T20:37:38.614Z",
     "autoDenied": 0,
-    "caption": "Created 3 files, searched code, updated todos and 8 more actions",
+    "caption": "Created 3 files, searched code, updated todos, and 8 more actions",
     "counts": {
       "added": 24,
       "removed": 9
@@ -197245,7 +197245,7 @@
     "id": "group:cell:toolu_485_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Created 2 files, searched code, updated todos and 3 more actions",
+    "summary": "Created 2 files, searched code, updated todos, and 3 more actions",
     "turnId": "turn:u485"
   },
   {
@@ -197629,7 +197629,7 @@
   {
     "at": "2026-10-15T23:07:19.940Z",
     "autoDenied": 0,
-    "caption": "Edited a file, created 2 files, updated todos and 4 more actions",
+    "caption": "Edited a file, created 2 files, updated todos, and 4 more actions",
     "counts": {
       "added": 19,
       "removed": 11
@@ -198649,7 +198649,7 @@
   {
     "at": "2026-10-15T23:14:45.772Z",
     "autoDenied": 0,
-    "caption": "Created app.ts, updated todos, searched for files and 8 more actions",
+    "caption": "Created app.ts, updated todos, searched for files, and 8 more actions",
     "counts": {
       "added": 10,
       "removed": 6
@@ -198946,7 +198946,7 @@
     "id": "group:cell:toolu_489_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, searched for files, created app.ts and 2 more actions",
+    "summary": "Updated todos, searched for files, created app.ts, and 2 more actions",
     "turnId": "turn:u489"
   },
   {
@@ -199219,7 +199219,7 @@
     "id": "group:cell:toolu_489_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Fetched a page, ran a command, updated todos and 4 more actions",
+    "summary": "Fetched a page, ran a command, updated todos, and 4 more actions",
     "turnId": "turn:u489"
   },
   {
@@ -199251,7 +199251,7 @@
   {
     "at": "2026-10-15T23:24:32.575Z",
     "autoDenied": 0,
-    "caption": "Edited 3 files, ran 2 agents, read a file and 13 more actions",
+    "caption": "Edited 3 files, ran 2 agents, read a file, and 13 more actions",
     "counts": {
       "added": 15,
       "removed": 5
@@ -199771,7 +199771,7 @@
     "id": "group:cell:toolu_490_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched for files, ran a command, updated todos and 3 more actions",
+    "summary": "Searched for files, ran a command, updated todos, and 3 more actions",
     "turnId": "turn:u490"
   },
   {
@@ -200071,7 +200071,7 @@
     "id": "group:cell:toolu_490_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched for files, ran 2 commands, updated todos and 2 more actions",
+    "summary": "Searched for files, ran 2 commands, updated todos, and 2 more actions",
     "turnId": "turn:u490"
   },
   {
@@ -200132,7 +200132,7 @@
   {
     "at": "2026-10-15T23:33:46.054Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, updated todos, searched the web and 2 more actions",
+    "caption": "Edited 2 files, updated todos, searched the web, and 2 more actions",
     "counts": {
       "added": 15,
       "removed": 3
@@ -200515,7 +200515,7 @@
     "id": "group:cell:toolu_491_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, searched the web, edited 2 files and 2 more actions",
+    "summary": "Updated todos, searched the web, edited 2 files, and 2 more actions",
     "turnId": "turn:u491"
   },
   {
@@ -201032,7 +201032,7 @@
   {
     "at": "2026-10-16T03:05:24.354Z",
     "autoDenied": 0,
-    "caption": "Edited app.ts, searched the web, fetched a page and 8 more actions",
+    "caption": "Edited app.ts, searched the web, fetched a page, and 8 more actions",
     "counts": {
       "added": 2,
       "removed": 0
@@ -201593,7 +201593,7 @@
   {
     "at": "2026-10-17T07:16:23.326Z",
     "autoDenied": 0,
-    "caption": "Edited 3 files, updated todos, searched for files and 10 more actions",
+    "caption": "Edited 3 files, updated todos, searched for files, and 10 more actions",
     "counts": {
       "added": 37,
       "removed": 11
@@ -202335,7 +202335,7 @@
     "id": "group:cell:toolu_495_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Updated todos, edited 2 files, searched for files and 2 more actions",
+    "summary": "Updated todos, edited 2 files, searched for files, and 2 more actions",
     "turnId": "turn:u495"
   },
   {
@@ -202692,7 +202692,7 @@
   {
     "at": "2026-10-18T12:31:13.287Z",
     "autoDenied": 0,
-    "caption": "Searched for files, ran a command, updated todos and 6 more actions",
+    "caption": "Searched for files, ran a command, updated todos, and 6 more actions",
     "counts": {
       "added": 0,
       "removed": 0
@@ -203343,7 +203343,7 @@
   {
     "at": "2026-10-18T12:43:52.189Z",
     "autoDenied": 0,
-    "caption": "Created 2 files, edited a file, updated todos and 16 more actions",
+    "caption": "Created 2 files, edited a file, updated todos, and 16 more actions",
     "counts": {
       "added": 14,
       "removed": 9
@@ -203730,7 +203730,7 @@
     "id": "group:cell:toolu_498_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Created a file, updated todos, searched code and 4 more actions",
+    "summary": "Created a file, updated todos, searched code, and 4 more actions",
     "turnId": "turn:u498"
   },
   {
@@ -204044,7 +204044,7 @@
     "id": "group:cell:toolu_498_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Searched for files, ran a command, updated todos and 5 more actions",
+    "summary": "Searched for files, ran a command, updated todos, and 5 more actions",
     "turnId": "turn:u498"
   },
   {
@@ -204373,7 +204373,7 @@
   {
     "at": "2026-10-19T12:35:54.007Z",
     "autoDenied": 0,
-    "caption": "Edited 2 files, updated todos, ran 3 commands and 8 more actions",
+    "caption": "Edited 2 files, updated todos, ran 3 commands, and 8 more actions",
     "counts": {
       "added": 14,
       "removed": 4
@@ -204882,7 +204882,7 @@
     "id": "group:cell:toolu_499_1_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran a command, updated todos, read List.tsx and 3 more actions",
+    "summary": "Ran a command, updated todos, read List.tsx, and 3 more actions",
     "turnId": "turn:u499"
   },
   {
@@ -205106,7 +205106,7 @@
     "id": "group:cell:toolu_499_2_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Ran a command, edited time.ts, fetched a page and 2 more actions",
+    "summary": "Ran a command, edited time.ts, fetched a page, and 2 more actions",
     "turnId": "turn:u499"
   },
   {
@@ -205145,7 +205145,7 @@
   {
     "at": "2026-10-20T02:29:50.683Z",
     "autoDenied": 0,
-    "caption": "Edited a file, ran 2 agents, read a file and 3 more actions",
+    "caption": "Edited a file, ran 2 agents, read a file, and 3 more actions",
     "counts": {
       "added": 1,
       "removed": 6
@@ -205431,7 +205431,7 @@
     "id": "group:cell:toolu_500_0_0",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited a file, read a file, searched the web and 2 more actions",
+    "summary": "Edited a file, read a file, searched the web, and 2 more actions",
     "turnId": "turn:u500"
   },
   {
