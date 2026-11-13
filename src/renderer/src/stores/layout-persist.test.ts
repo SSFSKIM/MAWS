@@ -703,7 +703,8 @@ describe('the side column’s first read of a profile', () => {
   const multiInstance = (toolId: string) => (toolId === 'plugin-pane' ? undefined : toolId === 'terminal');
   const fixed = { regions: LAYOUT_DEFAULTS.regions, 'main.tabs': LAYOUT_DEFAULTS.main, 'panel.pinned': [] };
 
-  // A launch over `file`, each key of `failing` failing its `layout.get`; `after()` is layout.json as its writes left it.
+  // A launch over `file`, each key of `failing` failing its `layout.get` (and `layout.list` its listing); `after()` is
+  // layout.json as its writes left it.
   async function launch(file: Record<string, unknown>, failing: readonly string[] = []) {
     const fake = fakeClient({
       'layout.list': { keys: Object.keys(file) },
@@ -711,7 +712,7 @@ describe('the side column’s first read of a profile', () => {
       'layout.set': undefined,
     });
     const invoke = fake.client.invoke as unknown as (name: string, input: { key?: string }, ...rest: unknown[]) => Promise<unknown>;
-    const client = { ...fake.client, invoke: (name: string, input: { key?: string }, ...rest: unknown[]) => (name === 'layout.get' && failing.includes(input.key!) ? Promise.resolve({ ok: false, error: { code: 'internal', message: 'x' } }) : invoke(name, input, ...rest)) } as unknown as typeof fake.client;
+    const client = { ...fake.client, invoke: (name: string, input: { key?: string }, ...rest: unknown[]) => ((name === 'layout.get' ? failing.includes(input.key!) : failing.includes(name)) ? Promise.resolve({ ok: false, error: { code: 'internal', message: 'x' } }) : invoke(name, input, ...rest)) } as unknown as typeof fake.client;
     const store = createLayoutStore();
     const stop = persistLayout(client, store);
     running.push(stop);
@@ -748,20 +749,25 @@ describe('the side column’s first read of a profile', () => {
 
   // The first read prunes and marks the profile for good, so it waits for a launch at which every read answered (Decision
   // Log 3): a failed read's fallback would make a scope look as if it held less than it does.
+  // A profile F wrote: Files above and Review below in A, a tab F never closed (Session info), a width, params, and A's
+  // session shown in main (so hydration learns a surface context, a reason to write `panelTools.surfaces`).
+  const own = { tabs: [files, info, review, t1], activeTabId: review.id };
+  const shown = { id: `session:${A}`, kind: 'session', appSessionId: A, pinned: false };
+  const profile = {
+    ...fixed,
+    regions: { ...LAYOUT_DEFAULTS.regions, panel: { ...LAYOUT_DEFAULTS.regions.panel, width: 512 } },
+    'main.tabs': { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [shown], activeTabId: shown.id }] } } },
+    'panel.pinned': [pin],
+    [`panel.${A}`]: own,
+    'panelTools.surfaces': { version: 2, stacks: { [A]: [files.id, review.id] }, pinnedTools: [], contexts: {} },
+    'panelTools.params': { version: 1, params: { [info.id]: { kept: 'invented' }, [files.id]: { root: 'invented' } } },
+  };
+  const keys = (sets: { key: string }[]) => sets.map((write) => write.key);
+  const quiet = () => vi.spyOn(console, 'error').mockImplementation(() => {});
+
   it.each(['panelTools.surfaces', 'panel.pinned', `panel.${A}`, 'panelTools.params', 'regions'])('waits while the read of %s fails: nothing pruned, nothing marked; the next launch reads it first', async (key) => {
-    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const own = { tabs: [files, info, review, t1], activeTabId: review.id };
-    const shown = { id: `session:${A}`, kind: 'session', appSessionId: A, pinned: false }; // so hydration learns a context
-    const f = {
-      ...fixed,
-      regions: { ...LAYOUT_DEFAULTS.regions, panel: { ...LAYOUT_DEFAULTS.regions.panel, width: 512 } },
-      'main.tabs': { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [shown], activeTabId: shown.id }] } } },
-      'panel.pinned': [pin],
-      [`panel.${A}`]: own,
-      'panelTools.surfaces': { version: 2, stacks: { [A]: [files.id, review.id] }, pinnedTools: [], contexts: {} },
-      'panelTools.params': { version: 1, params: { [info.id]: { kept: 'invented' }, [files.id]: { root: 'invented' } } },
-    };
-    const failed = await launch(f, [key]);
+    const error = quiet();
+    const failed = await launch(profile, [key]);
     expect(error).toHaveBeenCalledWith(`[layout] layout.get ${key} failed`, expect.anything());
     error.mockRestore();
     if (key !== `panel.${A}`) expect(failed.store.getState().panelBySession.get(A)?.tabs).toEqual([files, info, review, t1]);
@@ -771,11 +777,58 @@ describe('the side column’s first read of a profile', () => {
     expect(failed.sets().map((write) => write.key)).not.toContain('panelTools.params');
     expect(failed.sets().map((write) => write.key)).not.toContain('panelTools.widths');
     expect(failed.sets().map((write) => write.key)).not.toContain(key); // hydration writes no default over a value it could not read
-    expect(failed.after()).toMatchObject({ [`panel.${A}`]: own, 'panelTools.params': f['panelTools.params'] });
+    expect(failed.after()).toMatchObject({ [`panel.${A}`]: own, 'panelTools.params': profile['panelTools.params'] });
     const next = await launch(failed.after());
     expect(next.store.getState().effectivePanelTabs(A)).toEqual([pin, files, review, t1]);
     expect(sideGroups(next.store.getState(), A)).toMatchObject({ upper: { shown: files }, lower: { tabs: [review], shown: review }, hidden: false });
     expect(next.after()).toMatchObject({ 'panelTools.groups': { version: 1, lower: {} }, 'panelTools.widths': { version: 1, wide: 512, narrow: null } });
+  });
+
+  it('waits while the listing fails, writing nothing over the keys it could not read; the next launch reads it first', async () => {
+    const error = quiet();
+    const failed = await launch(profile, ['layout.list']);
+    error.mockRestore();
+    await vi.advanceTimersByTimeAsync(LAYOUT_WRITE_DELAY_MS);
+    for (const key of ['panelTools.surfaces', 'panelTools.groups', 'panelTools.params', 'panelTools.widths', 'cards.open', `panel.${A}`]) expect(keys(failed.sets())).not.toContain(key);
+    expect(failed.after()).toMatchObject({ 'panelTools.surfaces': profile['panelTools.surfaces'], [`panel.${A}`]: own });
+    const next = await launch(failed.after());
+    expect(next.store.getState().effectivePanelTabs(A)).toEqual([pin, files, review, t1]);
+    expect(sideGroups(next.store.getState(), A)).toMatchObject({ upper: { shown: files }, lower: { tabs: [review], shown: review }, hidden: false });
+  });
+
+  // After a deferred first read, this build's first write of the side column's state marks the profile (Decision Log 3):
+  // from then on it may hold tabs this build showed, which no later prune may take.
+  const extra = { id: 'browser:ffff0008', toolId: 'browser', pinned: false };
+  it.each([
+    ['one group', 'panelTools.surfaces'],
+    ['two groups', 'panelTools.params'],
+  ])('a deferred first read, then a tab opened, shown and left, keeps every tab at the next launch: %s', async (_, failing) => {
+    const error = quiet();
+    const failed = await launch(profile, [failing]);
+    error.mockRestore();
+    const store = failed.store;
+    expect(sideGroups(store.getState(), A).lower !== null).toBe(failing === 'panelTools.params');
+    const before = sideGroups(store.getState(), A).upper.shown!;
+    store.getState().updatePanelTabs(A, (refs) => [...refs, extra]); // added without being brought into view
+    store.getState().showSurfaceTab(A, extra.id);
+    store.getState().showSurfaceTab(A, before.id);
+    window.dispatchEvent(new Event('beforeunload'));
+    expect(failed.after()).toMatchObject({ 'panelTools.groups': { version: 1 } });
+    const next = await launch(failed.after());
+    expect(next.store.getState().panelBySession.get(A)?.tabs).toEqual([files, info, review, t1, extra]);
+    expect(keys(next.sets())).not.toContain(`panel.${A}`);
+  });
+
+  it('a deferred first read, then a pin, prunes nothing at the next launch', async () => {
+    const error = quiet();
+    const failed = await launch(profile, ['panelTools.surfaces']);
+    error.mockRestore();
+    failed.store.getState().setPanelTabPinned(A, files.id, true);
+    window.dispatchEvent(new Event('beforeunload'));
+    expect(failed.after()).toMatchObject({ 'panelTools.groups': { version: 1 } });
+    const next = await launch(failed.after());
+    expect(next.store.getState().effectivePanelTabs(A)).toEqual(expect.arrayContaining([info, review, t1]));
+    expect(next.store.getState().panelPinned.map((tab) => tab.id)).toContain(files.id);
   });
 
   it('writes back the params without the tabs the first read dropped', async () => {
