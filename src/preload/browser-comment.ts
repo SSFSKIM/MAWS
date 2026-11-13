@@ -319,7 +319,7 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
       page.requestAnimationFrame(() => {
         if (mine !== generation) return; // disarmed or re-armed meanwhile: main would drop it
         const rect = kept === null ? remeasured() : { ...kept, x: kept.x - page.scrollX, y: kept.y - page.scrollY };
-        picked(element, kept === null ? null : rect);
+        keepPick(element, kept === null ? null : rect);
         sendPicked(report, described, rect);
       }),
     );
@@ -478,7 +478,7 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
     if (grace !== null) clearTimeout(grace);
     grace = null;
   };
-  const picked = (element: PageElement, area: PickRect | null) => {
+  const keepPick = (element: PageElement, area: PickRect | null) => {
     keep(element, area);
     stopGrace();
     grace = setTimeout(() => {
@@ -546,7 +546,7 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
     const element = hit(x, y);
     const described = describeOrRefuse(element, at, requestId);
     if (described === null || element === null) return;
-    picked(element, null);
+    keepPick(element, null);
     sendPicked({ epoch: at, requestId, mode: 'click' }, described, rectOf(element.getBoundingClientRect()));
   };
 
