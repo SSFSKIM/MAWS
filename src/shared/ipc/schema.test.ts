@@ -1343,6 +1343,7 @@ describe('ipc schema validates both directions', () => {
         'browser.view.cover', 'browser.control.handBack', 'browser.history.suggest', 'browser.profiles.list',
         'browser.comment.set' /* E4d */,
         'browser.agent.activities.list' /* E13 */,
+        'browser.agent.show' /* U12a */,
       ]);
       for (const spec of Object.values(browser.commands)) expect(spec.owner).toBe('main');
       expect(ownKeys(browser.events).filter((name) => !name.startsWith('browser.import.') && !name.startsWith('browser.bookmarks.') && !name.startsWith('browser.extensions.')) /* E4b, cua #90 */).toEqual([
@@ -1496,7 +1497,7 @@ describe('ipc schema validates both directions', () => {
         'browser.import.profiles', 'browser.import.chooseUserData', 'browser.import.inspect', 'browser.import.discard', 'browser.import.start',
         'browser.import.cancel', 'browser.import.list', 'browser.import.remove', 'browser.import.setExtension',
       ]);
-      expect(ownKeys(browser.commands).filter((name) => name !== 'browser.agent.activities.list' /* E13, appended after E4b */ && !name.startsWith('browser.bookmarks.') && !name.startsWith('browser.extensions.') /* cua #90 */ && name !== 'browser.view.capture' /* P3-G */).slice(-added.length)).toEqual(added); // nothing of E4a's reordered
+      expect(ownKeys(browser.commands).filter((name) => name !== 'browser.agent.activities.list' /* E13, appended after E4b */ && name !== 'browser.agent.show' /* U12a */ && !name.startsWith('browser.bookmarks.') && !name.startsWith('browser.extensions.') /* cua #90 */ && name !== 'browser.view.capture' /* P3-G */).slice(-added.length)).toEqual(added); // nothing of E4a's reordered
       for (const name of added) expect(commands[name as keyof typeof commands].owner, name).toBe('main');
       const events = importNames(Object.keys(browser.events));
       expect(events).toEqual(['browser.import.progress', 'browser.import.finished', 'browser.import.changed']);
@@ -1727,6 +1728,15 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('browser.agent.activities.list', { appSessionId: 'a' }).ok).toBe(true);
       expect(validateCommandOutput('browser.agent.activities.list', { activities: [kept] }).ok).toBe(true);
       expect(validateCommandOutput('browser.agent.activities.list', { activities: Array(501).fill(kept) }).ok).toBe(false);
+    });
+
+    it("U12a: validates the window's ask for the agent's tab: a tab alone, answered whether it is selected", () => {
+      expect(commands['browser.agent.show'].owner).toBe('main');
+      expect(validateCommandInput('browser.agent.show', { tabId: TAB_ID }).ok).toBe(true);
+      expect(validateCommandInput('browser.agent.show', { tabId: 'nope' }).ok).toBe(false);
+      expect(validateCommandInput('browser.agent.show', { tabId: TAB_ID, appSessionId: 'a' }).ok).toBe(false); // the tab's record names the session
+      expect(validateCommandOutput('browser.agent.show', { selected: false }).ok).toBe(true);
+      expect(validateCommandOutput('browser.agent.show', {}).ok).toBe(false);
     });
 
     it('adds the notice for a page dialog MAWS answered on a tab nobody had placed (A-42): its type and a short plain excerpt', () => {

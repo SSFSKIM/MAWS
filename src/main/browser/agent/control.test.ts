@@ -5,7 +5,7 @@ import { BROWSER_AGENT_IDLE_MS, BROWSER_HANDBACK_IDLE_MS, BROWSER_LOADED_TABS_MA
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { TabInputSeam } from '../input';
 import { TabStore, type TabEntry } from '../tabs';
-import { personHolds, personUses, TabControls } from './control';
+import { agentTabComesForward, personHolds, personUses, TabControls } from './control';
 
 // Design §8's table, row by row, over E4a's real TabStore and input seam with vitest's fake clock: who drives the page,
 // the two timers, a held command's wait (`whenReleased`), background throttling while the agent acts, and what a closed
@@ -321,6 +321,53 @@ describe('personUses: the tab reads "You have the page", or personHolds', () => 
     expect(personUses(entry, Date.now() + 10_000)).toBe(false);
     h.store.setControl(entry.tab.tabId, 'idle');
     expect(personUses(entry, Date.now() + 10_000)).toBe(false);
+  });
+});
+
+// U12a (M2; Interfaces §C, ruling R2): whether the Browser's opening by itself selects the agent's tab in its session
+describe("agentTabComesForward: the agent's tab, unless the person uses the selected one or a panel shows it", () => {
+  function tabs() {
+    const h = harness();
+    const theirs = h.open(); // the person's tab, selected
+    const agents = h.store.entry(h.store.open({ appSessionId: A, url: 'https://b.test/', select: false }).tab.tabId)!;
+    return { h, theirs, agents };
+  }
+
+  it('comes forward when the session has no selected tab', () => {
+    const { agents } = tabs();
+    expect(agentTabComesForward(null, agents, Date.now())).toBe(true);
+  });
+
+  it('does not when the agent’s tab is the selected one already', () => {
+    const { agents } = tabs();
+    expect(agentTabComesForward(agents, agents, Date.now())).toBe(false);
+  });
+
+  it('comes forward over a selected tab that is idle and on show nowhere', () => {
+    const { theirs, agents } = tabs();
+    expect(agentTabComesForward(theirs, agents, Date.now())).toBe(true);
+  });
+
+  it('does not while the person’s input in the selected tab is under three seconds old, and does after', () => {
+    const { h, theirs, agents } = tabs();
+    h.human(theirs);
+    expect(agentTabComesForward(theirs, agents, Date.now() + BROWSER_HANDBACK_IDLE_MS - 1)).toBe(false);
+    expect(agentTabComesForward(theirs, agents, Date.now() + BROWSER_HANDBACK_IDLE_MS)).toBe(true);
+  });
+
+  it('does not while the selected tab reads "You have the page", its input older than the grace', () => {
+    const { h, theirs, agents } = tabs();
+    h.human(theirs);
+    h.store.setControl(theirs.tab.tabId, 'human');
+    expect(agentTabComesForward(theirs, agents, Date.now() + 60_000)).toBe(false);
+  });
+
+  it('does not while a panel shows the selected tab; a main tab showing it holds nothing back', () => {
+    const { h, theirs, agents } = tabs();
+    h.store.update(theirs.tab.tabId, { placedIn: { paneId: 'pane-panel', surface: 'panel' } });
+    expect(agentTabComesForward(theirs, agents, Date.now())).toBe(false);
+    h.store.update(theirs.tab.tabId, { placedIn: { paneId: 'pane-main', surface: 'main' } });
+    expect(agentTabComesForward(theirs, agents, Date.now())).toBe(true);
   });
 });
 

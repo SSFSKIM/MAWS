@@ -79,8 +79,52 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
       'browser.history.suggest',
       'browser.profiles.list', 'browser.view.place', 'browser.view.cover', 'browser.view.capture', // P3-G
       'browser.control.handBack',
+      'browser.agent.show', // U12a
       'browser.bookmarks.open', 'browser.bookmarks.menu', 'browser.bookmarks.favicons', // cua #90
     ]);
+  });
+
+  // U12a (M2; Interfaces §C, ruling R2): the window about to open the Browser by itself asks main for the agent's tab
+  describe('browser.agent.show', () => {
+    const THREAD = 'App-Thread' as AppSessionId; // a side thread of A, acting in A's tab
+    const opened = (call: (name: CommandName, input: unknown) => unknown, appSessionId: AppSessionId, url: string, select: boolean) =>
+      (call('browser.tabs.open', { appSessionId, url, select }) as { tab: { tabId: string } }).tab.tabId;
+    const selectedOf = (call: (name: CommandName, input: unknown) => unknown, appSessionId: AppSessionId) =>
+      (call('browser.tabs.list', { appSessionId }) as { selected: Record<string, string | null> }).selected[appSessionId];
+
+    it("selects the agent's tab in the session that owns it and answers that it is the selected one", () => {
+      const { call } = setup();
+      const theirs = opened(call, A, 'https://a.test/', true);
+      const agents = opened(call, A, 'https://b.test/', false);
+      expect(selectedOf(call, A)).toBe(theirs);
+      expect(call('browser.agent.show', { tabId: agents })).toEqual({ selected: true });
+      expect(selectedOf(call, A)).toBe(agents);
+      expect(call('browser.agent.show', { tabId: agents })).toEqual({ selected: true }); // already selected: still the one
+    });
+
+    it('leaves the selection while the person uses the selected tab, and answers that the agent’s tab is not selected', () => {
+      const { call, store } = setup();
+      const theirs = opened(call, A, 'https://a.test/', true);
+      const agents = opened(call, A, 'https://b.test/', false);
+      store.require(theirs).input.emit({ kind: 'key', source: 'human', at: Date.now() });
+      expect(call('browser.agent.show', { tabId: agents })).toEqual({ selected: false });
+      expect(selectedOf(call, A)).toBe(theirs);
+    });
+
+    it("a side thread's acting tab, which is its parent's, is selected in the parent's session", () => {
+      const { call } = setup();
+      const threads = opened(call, THREAD, 'https://t.test/', true);
+      opened(call, A, 'https://a.test/', true);
+      const agents = opened(call, A, 'https://b.test/', false);
+      expect(call('browser.agent.show', { tabId: agents })).toEqual({ selected: true });
+      expect(selectedOf(call, A)).toBe(agents);
+      expect(selectedOf(call, THREAD)).toBe(threads);
+    });
+
+    it('refuses an unknown tab as invalid_input ("unknown browser tab")', () => {
+      const { call } = setup();
+      expect(failure(() => call('browser.agent.show', { tabId: 'b_ffffffffffff' }))?.error).toMatchObject({ code: 'invalid_input', message: 'unknown browser tab' });
+    });
   });
 
   // cua #90 start
