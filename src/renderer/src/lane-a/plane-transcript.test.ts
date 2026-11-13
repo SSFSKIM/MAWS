@@ -5,6 +5,7 @@
 import type { JsonObject, SessionBodies, SubagentMeta } from 'desk-hub/protocol';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTranscriptStore } from '../stores/transcript';
+import { rowsOf, withAllExpanded } from '../transcript/model/derive';
 import type { Row } from '../transcript/model/rows';
 import { FakePlane, mount, settle } from './test-support/fake-plane';
 import { readRecording, rowsBefore, scriptOf, snapshotAt, STRAY, type LiveItem } from './test-support/session-stream';
@@ -623,11 +624,13 @@ describe('the main transcript through the session plane', () => {
     plane.snapshot(script, rowAt(4)); // the first prompt in the snapshot, the second and the plain one live
     await settle();
     await step(script.slice(rowAt(4)));
-    const drawn = store.getState().entries[controller.key].rows;
-    const lines = drawn.flatMap((row) => (row.kind === 'agent_message' ? [row.text] : []));
+    const entry = store.getState().entries[controller.key];
+    // a closed turn folds its work, the message line among it, which its divider then names: read it unfolded
+    const unfolded = rowsOf(withAllExpanded(entry.state));
+    const lines = unfolded.flatMap((row) => (row.kind === 'agent_message' ? [row.text] : []));
     expect(lines.filter((text) => text === 'Message from @river: The migration is merged.')).toHaveLength(2);
-    expect(drawn.filter((row) => row.kind === 'user' && row.text === framed)).toHaveLength(1); // the one without the kind
-    expect(drawn).toEqual(await freshRows(rows));
+    expect(unfolded.filter((row) => row.kind === 'user' && row.text === framed)).toHaveLength(1); // the one without the kind
+    expect(entry.rows).toEqual(await freshRows(rows));
   });
 
   it('closes its subscription when closed', () => {
