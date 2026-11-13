@@ -4,6 +4,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { BROWSER_HANDBACK_IDLE_MS, BROWSER_LOADED_TABS_MAX, BrowserTabSchema, DEFAULT_PARTITION, type BrowserTab } from '@shared/browser/tab';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { TabDebugger } from './debugger';
+import { PersistedTabSchema } from './persist'; // U12a
 import { TabStore, UnknownTabError, type TabEntry } from './tabs';
 
 const A = 'App-A' as AppSessionId;
@@ -560,6 +561,60 @@ describe('TabStore: restore (G4) and the view hooks', () => {
       tabs: [{ tabId: t.tabId, appSessionId: A, partition: DEFAULT_PARTITION, url: 'https://a.test/', title: 'A', favicon: null, zoom: 2, createdAt: t.createdAt, lastShownAt: t.lastShownAt }],
       selected: { [A]: t.tabId },
     });
+  });
+});
+
+// U12a (the UX wave's U12, l9-browser-delivery-06; Interfaces §D): the tab's device size, main's and never persisted
+describe('TabStore: the device size (U12a)', () => {
+  const MOBILE = { width: 375, height: 812 };
+
+  it('a new tab is Responsive; setViewport sets the record and tells the windows in the next list', () => {
+    const h = harness();
+    const t = open(h, 'https://a.test/').tab;
+    expect(t.viewport).toBeNull();
+    h.flush();
+    h.emitted.length = 0;
+    expect(h.store.setViewport(t.tabId, MOBILE)).toBe(true);
+    expect(h.entry(t.tabId).tab.viewport).toEqual(MOBILE);
+    h.flush();
+    expect(h.changed()).toEqual([expect.objectContaining({ appSessionId: A, tabs: [expect.objectContaining({ tabId: t.tabId, viewport: MOBILE })] })]);
+    expect(h.store.setViewport(t.tabId, null)).toBe(true);
+    expect(h.entry(t.tabId).tab.viewport).toBeNull();
+    for (const tab of h.store.list(A).tabs) expect(BrowserTabSchema.safeParse(tab).success).toBe(true);
+  });
+
+  it('refuses an unknown tab, and an extension’s options tab, whose page has no device size', () => {
+    const h = harness();
+    expect(() => h.store.setViewport('b_ffffffffffff', MOBILE)).toThrow(UnknownTabError);
+    const PROBE = 'nenbjdahllkkbfanbpfmmdacjencdfpg';
+    const options = h.store.open({
+      appSessionId: A, url: `chrome-extension://${PROBE}/options.html`, select: true, partition: 'persist:maws-chrome-Default',
+      internal: { kind: 'extension', extensionId: PROBE, title: 'MAWS probe · Options' },
+    }).tab;
+    expect(h.store.setViewport(options.tabId, MOBILE)).toBe(false);
+    expect(h.entry(options.tabId).tab.viewport).toBeNull();
+  });
+
+  it('a suspended tab keeps its choice; a restored tab has none', () => {
+    const h = harness();
+    const t = open(h, 'https://a.test/').tab;
+    h.store.setViewport(t.tabId, MOBILE);
+    h.store.suspend(t.tabId);
+    expect(h.entry(t.tabId).tab).toMatchObject({ suspended: true, viewport: MOBILE });
+    const restored = harness({ restored: h.store.snapshot() });
+    expect(restored.store.list(A).tabs.map((tab) => [tab.tabId, tab.viewport])).toEqual([[t.tabId, null]]);
+  });
+
+  it('the file written with a Mobile tab has exactly the keys build F’s reader knows', () => {
+    // build F (`f1852de3a`) reads tabs.json strictly, with these ten keys (`forward` only for a forwarded port's tab)
+    const KNOWN = ['tabId', 'appSessionId', 'partition', 'url', 'title', 'favicon', 'zoom', 'createdAt', 'lastShownAt', 'forward'];
+    expect(Object.keys(PersistedTabSchema.shape)).toEqual(KNOWN);
+    const h = harness();
+    const t = open(h, 'https://a.test/').tab;
+    h.store.setViewport(t.tabId, MOBILE);
+    const [kept] = h.store.snapshot().tabs;
+    expect(Object.keys(kept!)).toEqual(KNOWN.filter((key) => key !== 'forward'));
+    expect(PersistedTabSchema.safeParse(kept).success).toBe(true);
   });
 });
 

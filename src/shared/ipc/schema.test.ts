@@ -1308,7 +1308,7 @@ describe('ipc schema validates both directions', () => {
       tabId: TAB_ID, appSessionId: 'a', partition: 'persist:maws-browser', url: 'https://example.com/', title: 'Example', favicon: null,
       loading: false, canGoBack: false, canGoForward: false, zoom: 1, control: 'idle', controlSince: 't', suspended: true,
       loadError: null, crashed: null, failed: null, unresponsive: false, blockedPopups: 0, find: null, denied: [], download: null,
-      memoryKiB: null, placedIn: null, covered: false, createdAt: 't', lastShownAt: 't', agentBadge: null /* E13 */, internal: null /* cua #90 */,
+      memoryKiB: null, placedIn: null, covered: false, createdAt: 't', lastShownAt: 't', agentBadge: null /* E13 */, internal: null /* cua #90 */, viewport: null /* U12a */,
     };
 
     // P5 O17 M9b: the remote view's names are appended last and pinned in their own case (below); the blocks before are read without them
@@ -1344,6 +1344,7 @@ describe('ipc schema validates both directions', () => {
         'browser.comment.set' /* E4d */,
         'browser.agent.activities.list' /* E13 */,
         'browser.agent.show' /* U12a */,
+        'browser.tabs.setViewport', 'browser.view.copyScreenshot' /* U12a */,
       ]);
       for (const spec of Object.values(browser.commands)) expect(spec.owner).toBe('main');
       expect(ownKeys(browser.events).filter((name) => !name.startsWith('browser.import.') && !name.startsWith('browser.bookmarks.') && !name.startsWith('browser.extensions.')) /* E4b, cua #90 */).toEqual([
@@ -1379,6 +1380,20 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('browser.tabs.navigate', { tabId: TAB_ID, to: { url: 'file:///x' } }).ok).toBe(false);
       expect(validateCommandInput('browser.tabs.navigate', { tabId: TAB_ID, to: 'home' }).ok).toBe(false);
       expect(validateCommandOutput('browser.tabs.navigate', { accepted: true }).ok).toBe(true);
+    });
+
+    it("U12a: validates a tab's device size (null: Responsive) and Copy screenshot's answer", () => {
+      for (const name of ['browser.tabs.setViewport', 'browser.view.copyScreenshot'] as const) expect(commands[name].owner).toBe('main');
+      expect(validateCommandInput('browser.tabs.setViewport', { tabId: TAB_ID, viewport: { width: 375, height: 812 } }).ok).toBe(true);
+      expect(validateCommandInput('browser.tabs.setViewport', { tabId: TAB_ID, viewport: null }).ok).toBe(true);
+      expect(validateCommandInput('browser.tabs.setViewport', { tabId: TAB_ID }).ok).toBe(false);
+      expect(validateCommandInput('browser.tabs.setViewport', { tabId: TAB_ID, viewport: { width: 0, height: 812 } }).ok).toBe(false);
+      expect(validateCommandInput('browser.tabs.setViewport', { tabId: 'nope', viewport: null }).ok).toBe(false);
+      expect(validateCommandInput('browser.view.copyScreenshot', { tabId: TAB_ID }).ok).toBe(true);
+      expect(validateCommandInput('browser.view.copyScreenshot', { tabId: TAB_ID, rect: null }).ok).toBe(false);
+      expect(validateCommandOutput('browser.view.copyScreenshot', { copied: true }).ok).toBe(true);
+      expect(validateCommandOutput('browser.view.copyScreenshot', {}).ok).toBe(false);
+      expect(validateEventPayload('browser.tabs.changed', { appSessionId: 'a', tabs: [{ ...tab, viewport: { width: 768, height: 1024 } }], selected: TAB_ID }).ok).toBe(true);
     });
 
     it('validates the list, the chrome commands and the history and profile reads', () => {
@@ -1497,7 +1512,7 @@ describe('ipc schema validates both directions', () => {
         'browser.import.profiles', 'browser.import.chooseUserData', 'browser.import.inspect', 'browser.import.discard', 'browser.import.start',
         'browser.import.cancel', 'browser.import.list', 'browser.import.remove', 'browser.import.setExtension',
       ]);
-      expect(ownKeys(browser.commands).filter((name) => name !== 'browser.agent.activities.list' /* E13, appended after E4b */ && name !== 'browser.agent.show' /* U12a */ && !name.startsWith('browser.bookmarks.') && !name.startsWith('browser.extensions.') /* cua #90 */ && name !== 'browser.view.capture' /* P3-G */).slice(-added.length)).toEqual(added); // nothing of E4a's reordered
+      expect(ownKeys(browser.commands).filter((name) => name !== 'browser.agent.activities.list' /* E13, appended after E4b */ && name !== 'browser.agent.show' && name !== 'browser.tabs.setViewport' && name !== 'browser.view.copyScreenshot' /* U12a */ && !name.startsWith('browser.bookmarks.') && !name.startsWith('browser.extensions.') /* cua #90 */ && name !== 'browser.view.capture' /* P3-G */).slice(-added.length)).toEqual(added); // nothing of E4a's reordered
       for (const name of added) expect(commands[name as keyof typeof commands].owner, name).toBe('main');
       const events = importNames(Object.keys(browser.events));
       expect(events).toEqual(['browser.import.progress', 'browser.import.finished', 'browser.import.changed']);
