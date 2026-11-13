@@ -792,7 +792,8 @@ test.describe('E7: the orchestration views', () => {
 
     // UX wave U3 (O-12): the message from another session folds with its turn, as the listing and the agent's own send do
     await test.step('closed turns fold the message from another session with the listing and the agent’s own send; opened, it has Reply', async () => {
-      await expect.poll(peerRows).toEqual([]);
+      await expect.poll(async () => (await h.agents('columnTexts')).length, 'the closed turns drawn').toBeGreaterThan(0);
+      await expect.poll(peerRows, 'folded: no message line in view').toEqual([]);
       await expandAll();
       await expect.poll(async () => (await peerRows()).length, 'the folded rows shown').toBe(3);
       const rows = await peerRows();
