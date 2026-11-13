@@ -108,6 +108,7 @@
   },
   {
     "at": "2026-09-28T10:20:01.250Z",
+    "body": "Skip node_modules entirely.",
     "direction": "to_child",
     "from": null,
     "id": "agentmsg:replay:journal:57:1",

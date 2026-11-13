@@ -211,6 +211,7 @@
   },
   {
     "at": "2026-09-29T15:47:32.278Z",
+    "body": "Say PING in your next inbox line",
     "direction": "to_child",
     "from": null,
     "id": "agentmsg:replay:journal:196:1",
@@ -355,6 +356,7 @@
   },
   {
     "at": "2026-09-29T15:48:27.124Z",
+    "body": "Say PONG in your next inbox line",
     "direction": "to_child",
     "from": null,
     "id": "agentmsg:replay:journal:315:1",
@@ -488,6 +490,7 @@
   },
   {
     "at": "2026-09-29T15:49:21.212Z",
+    "body": "Say PANG in your next inbox line",
     "direction": "to_child",
     "from": null,
     "id": "agentmsg:replay:journal:543:1",
