@@ -227,10 +227,9 @@ describe('the reader, on deliveries written by hand', () => {
       { class: 'peer', via: 'bridge', sender: { name: 'session:5b2c9e10', address: '', session: null, owners: null }, body: 'Could you rerun the lint?', frame: PEER_FRAME, midTurn: false, lineage: 'peer', replyTo: null },
     ]);
     const text = `${CHAT_FRAME}\nThe fixtures are ready.`;
-    let { arrivals, open } = readNext(appended(text), nothingOpen);
+    const { arrivals, open } = readNext(appended(text), nothingOpen);
     expect(arrivals.map(said)).toEqual(['peer by bridge, mid-turn: sky-lab › The fixtures are ready.']);
-    ({ arrivals, open } = readNext(mirror(text), open));
-    expect(arrivals).toEqual([]);
+    expect(readNext(mirror(text), open).arrivals).toEqual([]);
   });
 
   it('the owner’s steer by `sminos steer`’s inbox fallback is the owner’s (X-032); the frame line decides when the origin names no one', () => {

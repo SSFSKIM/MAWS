@@ -182,27 +182,27 @@ function peerMessage(text: string, origin: Json | null, queuedPrompt: string | n
     const arrival: Arrival = { class: 'subagent', agentId: parsed.fromAgentId, body: parsed.body, report, taskId };
     return { arrivals: [arrival], open: report !== null && taskId !== null ? { ...open, handbacks: added(open.handbacks, taskId) } : open };
   }
-  if (parsed.kind === 'teammate') return { arrivals: [inboxPeer(text, origin, 'team')], open };
+  if (parsed.kind === 'teammate') return { arrivals: inboxPeer(text, origin, parsed.frame, 'team'), open };
   if (parsed.frame !== null) {
     const sender = sminosFrameSender(parsed.frame);
-    return { arrivals: [sender === 'human' ? own('chat', parsed.frame, parsed.body) : inboxPeer(text, origin, 'inbox')], open };
+    return { arrivals: sender === 'human' ? [own('chat', parsed.frame, parsed.body)] : inboxPeer(text, origin, parsed.frame, 'inbox'), open };
   }
   const first = firstLine(parsed.body);
   if (first === STEER_LINE && parsed.body.length > STEER_LINE.length) return { arrivals: [own('steer', STEER_LINE, parsed.body.slice(STEER_LINE.length + 1))], open }; // X-032: `sminos steer`'s inbox fallback
   if (first === BRIDGE_WAKE_LINE) return { arrivals: [{ class: 'wake' }], open };
-  return { arrivals: [inboxPeer(text, origin, 'inbox')], open };
+  return { arrivals: inboxPeer(text, origin, null, 'inbox'), open };
 }
 
-/** A peer's message by the engine's inbox (or a teammate's), as the companion event reads it (`peerEventsOf`). */
-function inboxPeer(text: string, origin: Json | null, via: 'inbox' | 'team'): Peer {
+/** A peer's message by the engine's inbox (or a teammate's), as its companion event reads it (`peerEventsOf`). */
+function inboxPeer(text: string, origin: Json | null, frame: string | null, via: 'inbox' | 'team'): Peer[] {
   const payload = peerEventsOf(text, null, origin);
-  const parsed = parsePeerMessage(text);
-  const frame = parsed !== null && parsed.kind !== 'agent' ? parsed.frame : null;
-  if (payload === null || payload.kind !== 'peer.message') throw new Error('an envelope that parsed as a peer message has a peer message event');
-  return {
-    class: 'peer', via, sender: { name: payload.fromName, address: payload.from, session: payload.fromSession, owners: frame === null ? null : (sminosFrameOwners(frame)?.owners ?? null) },
-    body: payload.text, frame, midTurn: payload.midTurn, lineage: payload.lineage, replyTo: payload.replyable ? payload.from : null,
-  };
+  if (payload?.kind !== 'peer.message') return [];
+  return [
+    {
+      class: 'peer', via, sender: { name: payload.fromName, address: payload.from, session: payload.fromSession, owners: frame === null ? null : (sminosFrameOwners(frame)?.owners ?? null) },
+      body: payload.text, frame, midTurn: payload.midTurn, lineage: payload.lineage, replyTo: payload.replyable ? payload.from : null,
+    },
+  ];
 }
 
 /** A row of the bridge's plugin: its answer prompt, its wake, or a delivery it submitted as the user or appended into the running turn. */
@@ -231,9 +231,8 @@ function framedDelivery(text: string, via: 'bridge' | 'prompt' | 'inbox', midTur
   if (frame === null) return null;
   const sender = sminosFrameSender(frame)!;
   if (sender === 'human') return own('chat', frame, body);
-  const owners = sminosFrameOwners(frame);
   return {
-    class: 'peer', via, sender: { name: owners?.alias ?? sminosFrameAlias(frame), address: '', session: null, owners: owners?.owners ?? null },
+    class: 'peer', via, sender: { name: sminosFrameAlias(frame), address: '', session: null, owners: sminosFrameOwners(frame)?.owners ?? null },
     body, frame, midTurn, lineage: 'peer', replyTo: null,
   };
 }
