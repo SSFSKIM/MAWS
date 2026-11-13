@@ -629,7 +629,7 @@ describe('drill-in', () => {
     const lists = document.querySelector<HTMLElement>('[data-view="lists"]')!;
     lists.scrollTop = 120;
     fireEvent.scroll(lists);
-    fireEvent.click(row('a2'));
+    openRow('a2');
     expect(document.querySelector('[data-view="lists"]')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '‹ Subagents' }));
     expect(handle.snapshot().view).toEqual({ kind: 'lists' });

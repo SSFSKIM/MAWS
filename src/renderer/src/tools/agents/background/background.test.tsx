@@ -210,11 +210,13 @@ describe('background work', () => {
     expect(summaryLine('wayue3on6')).toBe('Echo · 0/2 agents');
     expect(wf.querySelector('table, [data-phase]')).toBeNull(); // the per-phase tables live in the widget (Decision Log 1)
     push(upTo(workflow, 93).filter((e) => (e.seq ?? 0) > 82));
-    expect(section('running')).toBeNull(); // it ended: under the folded Done
+    expect(summaryLine('wayue3on6')).toBe('Done');
+    expect(card('wayue3on6').querySelector('[data-part="line"]')?.textContent).toMatch(/ · 17\.7k tokens$/); // alpha's 8,861 + beta's 8,857
+    push(workflow.filter((e) => (e.seq ?? 0) > 93)); // the run's notification (seq 96): it ended, under the folded Done
+    expect(section('running')).toBeNull();
     expect(heading('done')).toBe('Done 1 · 1 workflow');
     toggleSection('done');
     expect(summaryLine('wayue3on6')).toBe('Done');
-    expect(card('wayue3on6').querySelector('[data-part="line"]')?.textContent).toMatch(/ · 17\.7k tokens$/); // alpha's 8,861 + beta's 8,857
   });
 
   // E7 (Design §2, G1): the widget.
@@ -238,10 +240,9 @@ describe('background work', () => {
       ['done', '1s', '8.9k'],
     ]);
     expect(tableRows().map((cells) => cells[0])).toEqual([expect.stringMatching(/alpha$/), expect.stringMatching(/beta$/)]);
-    // Back returns to the list, the card still selected (under Done, the run having ended)
+    // Back returns to the list, the card still selected
     fireEvent.click(within(widget()!).getByRole('button', { name: '‹ Background tasks' }));
     expect(widget()).toBeNull();
-    toggleSection('done');
     expect(card('wayue3on6').dataset.selected).toBe('true');
     openWidget('wayue3on6');
     expect(widget()).not.toBeNull();
@@ -292,6 +293,7 @@ describe('background work', () => {
         event('task.notification', { taskId: 'wf1', status: 'stopped' }, { seq: 3 }),
       ],
     });
+    toggleSection('done');
     openWidget('wf1');
     expect(tableRows()).toEqual([['slow', '', 'running', '', '']]);
     expect(widget()!.querySelector('.animate-spin')).toBeNull();
@@ -333,6 +335,7 @@ describe('background work', () => {
       snapshot: { ...run.snapshot!, workflowProgress: run.snapshot!.workflowProgress!.map((row) => ({ ...(row as Record<string, unknown>), agentId: undefined })) },
     };
     await mount({ status: null, sidecars: sidecarsOf('pass2/workflow-disk', run.runId), runs: [stripped] });
+    toggleSection('done');
     openWidget(run.snapshot!.taskId!);
     expect(within(widget()!).queryByRole('button', { name: 'Stop workflow' })).toBeNull();
     expect(widget()!.querySelector('[data-part="status"]')?.textContent).toBe('completed');
@@ -723,8 +726,7 @@ describe('background work', () => {
 
   it('Back keeps the list’s scroll; a pinned tab following another session leaves the widget', async () => {
     const { handle } = await mount({ events: upTo(workflow, 93) });
-    toggleSection('done');
-    const scroller = () => document.querySelector<HTMLElement>('[data-section="done"]')!.parentElement!;
+    const scroller = () => document.querySelector<HTMLElement>('[data-section="running"]')!.parentElement!;
     scroller().scrollTop = 40;
     fireEvent.scroll(scroller());
     openWidget('wayue3on6');
@@ -741,7 +743,7 @@ describe('background work', () => {
     const later = (seconds: number) => new Date(Date.parse(T) + seconds * 1000).toISOString();
     const startedTask = (taskId: string, taskType: string, description: string, seq: number, over: Record<string, unknown> = {}) =>
       event('task.started', { taskId, toolUseId: `toolu_${taskId}`, taskType, description, isBackground: true, workflowName: taskType === 'local_workflow' ? 'demo' : null, ...over }, { seq, at: later(seq) });
-    const ends = (taskId: string, status: string, seq: number) => event('task.notification', { taskId, status }, { seq, at: later(100 + seq) });
+    const ends = (taskId: string, status: string, n: number) => event('task.notification', { taskId, status }, { seq: 50 + n, at: later(100 + n) });
     const ids = (name: string) => Array.from(section(name)?.querySelectorAll<HTMLElement>('[data-task-id]') ?? []).map((el) => el.dataset.taskId);
     const marks = (name: string) => Array.from(section(name)?.querySelectorAll<HTMLElement>('[data-kind-mark]') ?? []).map((el) => el.dataset.kindMark);
 
