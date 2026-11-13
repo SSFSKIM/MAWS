@@ -4,12 +4,12 @@
 // (`@shared/files/named`), calls resolved. The transcript is read from its end backwards through a read-only handle, as
 // `readRestoredCost` reads one; a line is parsed only when its bytes hold every needle of the path (or the id of a call
 // a result waits for), and never when it is one of the engine's request records. One job runs at a time for the whole
-// daemon, and it gives the event loop back after every read and every parsed line, so a search of the whole bound does
-// not hold the daemon's other work. It never throws, puts no path in a message, and writes nothing.
+// daemon, and it gives the event loop back after every read, every parsed line and every few steps of the rule on a
+// line, so a search of the whole bound does not hold the daemon's other work. It never throws, puts no path in a message, and writes nothing.
 import { createHash } from 'node:crypto';
 import { open as openFile, type FileHandle } from 'node:fs/promises';
 import { setImmediate as nextTurn } from 'node:timers/promises';
-import { callClass, needlesOf, rowClaim, type PendingCall } from '@shared/files/named';
+import { callClass, needlesOf, rowClaimSteps, type PendingCall, type RowClaim } from '@shared/files/named';
 import type { OpenFile } from '@shared/fs/read-tail';
 import type { AppSessionId } from '@shared/graph/ids';
 
@@ -21,6 +21,7 @@ export const NAMED_WAITING_MAX = 8; // distinct jobs waiting behind the running 
 export const NAMED_WAIT_MS = 8_000; // a waiter's patience, inside a host request's ten seconds
 export const NAMED_FINGERPRINT_BYTES = 4096; // as the engine host's search (`fingerprint`, src/engine-host/fs/search-text.ts)
 export const NAMED_PENDING_MAX = 256; // results waiting for their calls in one search; an older one past it is not waited for
+export const NAMED_CLAIM_STEPS = 64; // steps of the rule on one row between two turns of the event loop (the branch review's finding 2)
 
 export interface NamedPathsOptions {
   transcript: (appSessionId: AppSessionId) => Promise<string | null>; // decision 13; null: the session has no transcript
@@ -82,6 +83,18 @@ async function parse(line: Buffer): Promise<unknown> {
   return value;
 }
 
+// The rule on one parsed row, given the event loop back every NAMED_CLAIM_STEPS of its steps (each a string looked at,
+// a link read through the URL step, or 64 KiB of text scanned): a row under the row bound may hold a great many links.
+// It stops at the first that names the path.
+async function claimOf(row: unknown, path: string): Promise<RowClaim> {
+  const steps = rowClaimSteps(row, path);
+  for (let n = 1; ; n += 1) {
+    const step = steps.next();
+    if (step.done) return step.value;
+    if (n % NAMED_CLAIM_STEPS === 0) await nextTurn();
+  }
+}
+
 // The digest of the first and the last `span` bytes before `offset`, as the engine host's search takes one.
 async function fingerprint(read: Read, offset: number, span: number): Promise<string> {
   const hash = createHash('sha1');
@@ -127,7 +140,7 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
 
   // A remembered or just-found name, read again from its record (and its call's): does it still name the path?
   async function proves(read: Read, found: Found, path: string): Promise<boolean> {
-    const claim = rowClaim(await lineAt(read, found.record), path);
+    const claim = await claimOf(await lineAt(read, found.record), path);
     if (claim.names) return true;
     const { call } = found;
     if (call === null || !claim.pending.some((pending) => pending.toolUseId === call.toolUseId && pending.when === call.when)) return false;
@@ -164,7 +177,7 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
       const row = await parse(line);
       const span = { offset: base + start, length };
       if (candidate) {
-        const claim = rowClaim(row, path);
+        const claim = await claimOf(row, path);
         if (claim.names) {
           state.found = { record: span, call: null };
           return;

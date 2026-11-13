@@ -256,10 +256,24 @@ function definitionEnd(text: string, colon: number): number | typeof UNKNOWN {
 // blocks around, so a link in a code fence or in inline code is found too (ruled).
 export function linkPaths(text: string): string[] {
   const out: string[] = [];
+  for (const path of linkSteps(text)) if (path !== null) out.push(path);
+  return out;
+}
+
+// What `linkPaths` reads, one bounded step at a time (the branch review's finding 2): each link or definition met
+// yields its click path, or null when it names none, and the scan yields null after every `SCAN_STEP_CHARS` of text, so a
+// caller can stop at the first path it wants and give the event loop back between steps.
+const SCAN_STEP_CHARS = 64 * 1024;
+function* linkSteps(text: string): Generator<string | null, void, void> {
+  let pause = SCAN_STEP_CHARS;
   const opens: { at: number; leads: boolean }[] = []; // each unescaped `[` not yet closed, and whether it leads its line
   let lineHasContent = false;
   let prefixOnly = true; // nothing but a line prefix so far on this line
   for (let i = 0; i < text.length; i += 1) {
+    if (i >= pause) {
+      pause = i + SCAN_STEP_CHARS;
+      yield null;
+    }
     const code = text.charCodeAt(i);
     if (code === 10) {
       if (!lineHasContent) opens.length = 0; // a blank line: nothing before it closes after it
@@ -283,18 +297,17 @@ export function linkPaths(text: string): string[] {
         else {
           end = resource.end;
           const image = opener.at > 0 && text.charCodeAt(opener.at - 1) === 33 && !isEscaped(text, opener.at - 1);
-          const path = image ? null : clickPath(resource.destination);
-          if (path !== null) out.push(path);
+          yield image ? null : clickPath(resource.destination);
         }
       } else if (after === 58 && opener.leads && text.charCodeAt(opener.at + 1) !== 94) {
         const definition = definitionEnd(text, i + 1);
         if (definition !== UNKNOWN && definition < 0) continue;
         end = definition === UNKNOWN ? blankLineAfter(text, i + 2) - 1 : definition;
+        yield null;
       } else continue;
       i = end; // what the resource or the definition holds is not read again
     }
   }
-  return out;
 }
 
 export const READ_TOOLS: ReadonlySet<string> = new Set(['Read', 'NotebookRead', 'LS']); // click source 2 (cells/ReadDetail.tsx)
@@ -324,18 +337,35 @@ export interface PendingCall {
 export type RowClaim = { names: true } | { names: false; pending: PendingCall[] };
 
 const NOTHING: RowClaim = { names: false, pending: [] };
+const NAMES: RowClaim = { names: true };
 const blocks = (value: unknown): Record<string, unknown>[] => (Array.isArray(value) ? value.map(record) : []);
 const textsOf = (content: unknown): string[] => (typeof content === 'string' ? [content] : blocks(content).flatMap((block) => (block.type === 'text' && typeof block.text === 'string' ? [block.text] : [])));
-const linksTo = (texts: readonly string[], path: string) => texts.some((text) => text.includes('](') && linkPaths(text).includes(path));
 const isThePath = (value: unknown, path: string) => typeof value === 'string' && normalizeLexically(value) === path;
 
-// Whether any string of a value, at any depth (a tool's input), passes `test`; walked without recursion.
-function anyString(value: unknown, test: (text: string) => boolean): boolean {
+// The rule's work on one record, as steps: one per string looked at and one per step of `linkSteps`, each bounded, and
+// the answer at the end. `rowClaim` runs them at once; the daemon's search gives the event loop back between them.
+type Steps<T> = Generator<void, T, void>;
+
+// Whether one of the texts links the path; it stops at the first that does.
+function* linksTo(texts: readonly string[], path: string): Steps<boolean> {
+  for (const text of texts) {
+    yield;
+    if (!text.includes('](')) continue;
+    for (const found of linkSteps(text)) {
+      if (found === path) return true;
+      yield;
+    }
+  }
+  return false;
+}
+
+// Whether any string of a value, at any depth (a tool's input), links the path; walked without recursion.
+function* anyStringLinks(value: unknown, path: string): Steps<boolean> {
   const stack = [value];
   while (stack.length > 0) {
     const next = stack.pop();
     if (typeof next === 'string') {
-      if (test(next)) return true;
+      if (yield* linksTo([next], path)) return true;
     } else if (next !== null && typeof next === 'object') for (const child of Object.values(next)) stack.push(child);
   }
   return false;
@@ -343,31 +373,41 @@ function anyString(value: unknown, test: (text: string) => boolean): boolean {
 
 // A person's message names the path by a link in its text, or by its anchored comment's tag; the window joins the text
 // blocks this way before it reads the tag (`userTextOf`, model/user-text.ts).
-function personNames(content: unknown, path: string): boolean {
+function* personNames(content: unknown, path: string): Steps<boolean> {
   const texts = textsOf(content);
-  return linksTo(texts, path) || isThePath(anchorPath(texts.join('\n\n')), path);
+  return (yield* linksTo(texts, path)) || isThePath(anchorPath(texts.join('\n\n')), path);
 }
 
 // Whether a record names `path` (Interfaces §A, the table of `rowClaim`), or which calls a result form of it waits for.
 export function rowClaim(row: unknown, path: string): RowClaim {
+  const steps = rowClaimSteps(row, path);
+  for (;;) {
+    const step = steps.next();
+    if (step.done) return step.value;
+  }
+}
+
+// `rowClaim` one bounded step at a time, stopping at the first string that names the path (the branch review's
+// finding 2: one row under the row bound can hold a great many links).
+export function* rowClaimSteps(row: unknown, path: string): Steps<RowClaim> {
   const fields = record(row);
   switch (fields.type) {
     case 'assistant': {
       for (const block of blocks(record(fields.message).content)) {
-        if (block.type === 'text' && linksTo([str(block.text)], path)) return { names: true };
-        if (block.type === 'tool_use' && (isThePath(chipPath(str(block.name), block.input), path) || anyString(block.input, (text) => linksTo([text], path)))) return { names: true };
+        if (block.type === 'text' && (yield* linksTo([str(block.text)], path))) return NAMES;
+        if (block.type === 'tool_use' && (isThePath(chipPath(str(block.name), block.input), path) || (yield* anyStringLinks(block.input, path)))) return NAMES;
       }
       return NOTHING;
     }
     case 'user': {
       if (fields.isMeta === true || fields.isCompactSummary === true) return NOTHING; // the window draws no bubble for these
       const content = record(fields.message).content;
-      if (personNames(content, path)) return { names: true };
+      if (yield* personNames(content, path)) return NAMES;
       const edited = isThePath(record(fields.toolUseResult).filePath, path);
       const pending: PendingCall[] = [];
       for (const block of blocks(content)) {
         if (block.type !== 'tool_result' || typeof block.tool_use_id !== 'string') continue;
-        if (linksTo(textsOf(block.content), path)) pending.push({ toolUseId: block.tool_use_id, when: 'mcp' });
+        if (yield* linksTo(textsOf(block.content), path)) pending.push({ toolUseId: block.tool_use_id, when: 'mcp' });
         if (edited) pending.push({ toolUseId: block.tool_use_id, when: 'edit' });
       }
       return pending.length > 0 ? { names: false, pending } : NOTHING;
@@ -377,7 +417,7 @@ export function rowClaim(row: unknown, path: string): RowClaim {
       const attachment = record(fields.attachment);
       const human = attachment.type === 'queued_command' && record(attachment.origin).kind === 'human' && attachment.commandMode === 'prompt' && attachment.isMeta !== true;
       if (!human || typeof attachment.source_uuid !== 'string' || attachment.source_uuid === '') return NOTHING;
-      return personNames(attachment.prompt, path) ? { names: true } : NOTHING;
+      return (yield* personNames(attachment.prompt, path)) ? NAMES : NOTHING;
     }
     default:
       return NOTHING;

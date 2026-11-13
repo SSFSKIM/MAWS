@@ -10,7 +10,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { OpenFile } from '@shared/fs/read-tail';
 import { callClass, rowClaim } from '@shared/files/named';
 import { StoreFixture } from '../../../test/support/store-fixture';
-import { createNamedPaths, NAMED_CHUNK_BYTES, NAMED_FINGERPRINT_BYTES, NAMED_ROW_BYTES, NAMED_SCAN_BYTES, NAMED_WAIT_MS, NAMED_WAITING_MAX, NAMED_CACHE_ENTRIES, NAMED_PENDING_MAX, type NamedPathsOptions } from './named';
+import { createNamedPaths, NAMED_CHUNK_BYTES, NAMED_FINGERPRINT_BYTES, NAMED_ROW_BYTES, NAMED_SCAN_BYTES, NAMED_WAIT_MS, NAMED_WAITING_MAX, NAMED_CACHE_ENTRIES, NAMED_PENDING_MAX, NAMED_CLAIM_STEPS, type NamedPathsOptions } from './named';
 
 const S = 'app-named' as AppSessionId;
 const P = '/work/out/report.md';
@@ -109,7 +109,7 @@ afterEach(async () => {
 
 describe('the bounds', () => {
   it('are the document’s', () => {
-    expect({ NAMED_SCAN_BYTES, NAMED_CHUNK_BYTES, NAMED_ROW_BYTES, NAMED_CACHE_ENTRIES, NAMED_WAITING_MAX, NAMED_WAIT_MS, NAMED_FINGERPRINT_BYTES, NAMED_PENDING_MAX }).toEqual({
+    expect({ NAMED_SCAN_BYTES, NAMED_CHUNK_BYTES, NAMED_ROW_BYTES, NAMED_CACHE_ENTRIES, NAMED_WAITING_MAX, NAMED_WAIT_MS, NAMED_FINGERPRINT_BYTES, NAMED_PENDING_MAX, NAMED_CLAIM_STEPS }).toEqual({
       NAMED_SCAN_BYTES: 1024 ** 3,
       NAMED_CHUNK_BYTES: 1024 * 1024,
       NAMED_ROW_BYTES: 4 * 1024 * 1024,
@@ -118,6 +118,7 @@ describe('the bounds', () => {
       NAMED_WAIT_MS: 8_000,
       NAMED_FINGERPRINT_BYTES: 4096,
       NAMED_PENDING_MAX: 256,
+      NAMED_CLAIM_STEPS: 64,
     });
   });
 });

@@ -3,8 +3,9 @@
 // invented records `NAMED_SCAN_BYTES` long into a scratch store, in the proportions a long transcript has (two thirds the
 // engine's request records and file snapshots, the rest conversation rows, tool calls and their results), with one row in
 // a hundred mentioning the path in prose and linking a sibling of it (`<path>.bak`): a line the search must parse, whose
-// link runs the whole of `clickPath`, the URL step included, and which names nothing. It starts a search for that
-// path, which finds nothing, and while it runs times fifty `files.list` calls, one after another, to a real files
+// link runs the whole of `clickPath`, the URL step included, and which names nothing. Its newest line, the first the
+// search meets, is one row just under the row bound holding 100,000 such links (the branch review's finding 2: the rule
+// works one row in bounded steps). It starts a search for that path, which finds nothing, and while it runs times fifty `files.list` calls, one after another, to a real files
 // service over a small scratch folder in the same process. Timing only, so it runs on request, on the build VM:
 // `MAWS_NAMED_MEASURE=1 pnpm exec vitest run src/services/files/named.measure.test.ts`. It writes about 1 GiB and
 // removes it.
@@ -15,12 +16,13 @@ import { performance } from 'node:perf_hooks';
 import { describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { StoreFixture } from '../../../test/support/store-fixture';
-import { createNamedPaths, NAMED_SCAN_BYTES } from './named';
+import { createNamedPaths, NAMED_ROW_BYTES, NAMED_SCAN_BYTES } from './named';
 import { createFilesService } from './service';
 
 const S = 'app-measured' as AppSessionId;
 const P = '/work/out/measured-report.md';
 const LISTS = 50;
+const DENSE_LINKS = 100_000;
 
 // One block of records, repeated to the bound's length.
 function block(): Buffer {
@@ -49,6 +51,9 @@ describe.skipIf(process.env.MAWS_NAMED_MEASURE !== '1')('the daemon is not held 
       const handle = await open(file, 'a');
       const bytes = block();
       for (let written = 0; written < NAMED_SCAN_BYTES; written += bytes.length) await handle.write(bytes);
+      const dense = JSON.stringify({ type: 'assistant', uuid: 'a-dense', message: { role: 'assistant', content: [{ type: 'text', text: `[b](${P}.bak) `.repeat(DENSE_LINKS) }] } });
+      expect(Buffer.byteLength(dense)).toBeLessThan(NAMED_ROW_BYTES); // a row the search parses, not one it passes over
+      await handle.write(`${dense}\n`);
       await handle.close();
 
       const root = join(fixture.configHome, 'listed');
