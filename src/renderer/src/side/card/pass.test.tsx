@@ -20,7 +20,7 @@ import { resetShellStores } from '../../test-support/shell-stores';
 import { openCommentComposer, registerCommentComposer, type CommentPlacement } from '../../tools/code/anchor/anchor';
 import { openComment } from '../register';
 import { CommentCardHost, type CardFrame } from './CardHost';
-import { dropSubject, passKey, resetPlaceNotes, useCommentCard } from './store';
+import { dropSubject, handCardTo, passKey, resetPlaceNotes, useCommentCard } from './store';
 
 const PARENT_ID = 'a1111111-1111-4111-8111-111111111111' as AppSessionId; // main is asked with the bare id
 const PARENT = at(PARENT_ID);
@@ -402,6 +402,29 @@ describe('onClosed, the checks of several mounts (M3’s re-review)', () => {
     fireEvent.click(within(card()!).getByRole('button', { name: 'Close' }));
     await settle();
     expect(closed).toEqual(['#e1']);
+  });
+});
+
+describe('onClosed across hosts (M3’s second re-review)', () => {
+  it('a card handed to another host is told lost by the first and, once it closes, by the second', async () => {
+    const lost: string[] = [];
+    const a: CardFrame = { ...FRAME, onClosed: () => lost.push('h1') };
+    const b: CardFrame = { ...FRAME, onClosed: () => lost.push('h2') };
+    render(
+      <>
+        <Host id="h1" frame={a} />
+        <Host id="h2" frame={b} />
+      </>,
+    );
+    pick(1);
+    type('Make it bolder');
+    act(() => handCardTo(useCommentCard.getState().open!.serial, 'h2'));
+    await settle();
+    expect(lost).toEqual(['h1']);
+    expect(card()).not.toBeNull();
+    fireEvent.click(within(card()!).getByRole('button', { name: 'Close' }));
+    await settle();
+    expect(lost).toEqual(['h1', 'h2']);
   });
 });
 

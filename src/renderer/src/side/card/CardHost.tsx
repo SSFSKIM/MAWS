@@ -155,9 +155,9 @@ export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, vi
     return () => {
       queueMicrotask(() => {
         const open = useCommentCard.getState().open;
-        if (reportedClosed.has(shownCard)) return; // another mount's check told it already
+        if (reportedClosed.get(hostId) === shownCard) return; // another mount of this host id told it already
         if (open?.serial === shownCard && open.hostId === hostId && hostOf(hostId)) return; // still this host's
-        reportedClosed.add(shownCard);
+        reportedClosed.set(hostId, shownCard);
         latest.current.onClosed?.(went);
       });
     };
@@ -225,9 +225,11 @@ export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, vi
 
 const hostOf = (hostId: string): boolean => cardHostEntry(hostId) !== null;
 
-// The cards whose going has been told (`onClosed`), by serial (one card per window, never reused): several mounts of a
-// host (StrictMode's replay, a remount under the same id) may each ask after the card went, and one card is told once.
-const reportedClosed = new Set<number>();
+// The last card each host id told it lost (`onClosed`), by its serial: several mounts of a host (StrictMode's replay, a
+// remount under the same id) may each ask after the card went, and one loss is told once. Kept per host id, since a card
+// handed to another host (`handCardTo`) keeps its serial and is that host's to lose next; a host draws one card at a
+// time, so this is one entry per host id.
+const reportedClosed = new Map<string, number>();
 
 // UX wave U5a (§C): the chip of a pass with no card open; a click opens the card on its newest comment.
 function UnsentChip({ count, onOpen, className, style }: { count: number; onOpen(): void; className: string; style?: CSSProperties }) {
