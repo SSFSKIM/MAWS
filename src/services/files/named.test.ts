@@ -562,21 +562,50 @@ describe('the queue (S14, S15)', () => {
 
   // the branch review's finding 2: one row under the row bound can hold a great many links, each read through the URL
   // step; the row is worked in bounded steps with the event loop given back between them, so the daemon's other work
-  // runs before the row is done
-  it('gives the event loop back while it works one row of many candidates', async () => {
+  // runs before the row is done, and the work stops at the first link that names the path. Each URL the rule builds
+  // records how many turns of the loop a ticker has had by then (a count of turns alone cannot tell: the loop also turns
+  // while a read waits).
+  describe('one row of many candidates', () => {
     const candidates = 20_000;
-    await writeTranscript([...filler(2), assistant(text(`[r](${P}.bak) `.repeat(candidates)))]);
-    const named = paths();
     let ticks = 0;
-    let done = false;
-    const tick = () => {
-      ticks += 1;
-      if (!done) setImmediate(tick);
-    };
-    setImmediate(tick);
-    expect(await named.names(S, P)).toBe(false);
-    done = true;
-    expect(ticks).toBeGreaterThanOrEqual(candidates / 256); // at least one turn of the loop per 256 candidates
+    let built: number[] = [];
+    async function searched(row: object): Promise<boolean> {
+      await writeTranscript([...filler(2), row]);
+      ticks = 0;
+      built = [];
+      let done = false;
+      const tick = () => {
+        ticks += 1;
+        if (!done) setImmediate(tick);
+      };
+      vi.stubGlobal(
+        'URL',
+        class extends URL {
+          constructor(...args: ConstructorParameters<typeof URL>) {
+            super(...args);
+            built.push(ticks);
+          }
+        },
+      );
+      try {
+        setImmediate(tick);
+        return await paths().names(S, P);
+      } finally {
+        done = true;
+        vi.unstubAllGlobals();
+      }
+    }
+
+    it('gives the event loop back before the row is done', async () => {
+      expect(await searched(assistant(text(`[r](${P}.bak) `.repeat(candidates))))).toBe(false);
+      expect(built.length).toBeGreaterThanOrEqual(candidates);
+      expect(built.at(-1)! - built[0]!).toBeGreaterThanOrEqual(candidates / 256); // at least one turn of the loop per 256 candidates
+    });
+
+    it('stops at the first link that names the path', async () => {
+      expect(await searched(assistant(text(`[r](${P}) ${`[r](${P}.bak) `.repeat(candidates)}`)))).toBe(true);
+      expect(built.length).toBeLessThan(candidates / 2); // the search's proof reads the row again, and stops at its first link too
+    });
   });
 });
 
