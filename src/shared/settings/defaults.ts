@@ -7,10 +7,9 @@
 // both. `migrateSettings` still takes a unified file of any version to the merged settings, which `splitSettings` cuts
 // into the two files; the engine host reads a unified file's machine half the same way while no split build has run.
 import * as z from 'zod';
-import { ACTION_IDS, RETIRED_ACTION_IDS } from '../keymap/actions';
+import { RETIRED_ACTION_IDS } from '../keymap/actions';
 import {
   BrowserSettingsSchema,
-  ChordSchema,
   CLIENT_SETTINGS_VERSION,
   ClientSettingsSchema,
   MACHINE_SETTINGS_VERSION,
@@ -51,7 +50,7 @@ const SettingsV1Schema = z.strictObject({ version: z.literal(1), theme: ThemeSet
 const SettingsV2Schema = z.strictObject({
   version: z.literal(2),
   theme: ThemeSettingSchema,
-  keymap: z.partialRecord(z.enum(ACTION_IDS), ChordSchema.nullable()),
+  keymap: SettingsSchema.shape.keymap, // U6a (UC-14): the one definition, keyed by the ids build F knows
   notifications: z.strictObject({ enabled: z.boolean(), sound: z.boolean() }),
 });
 

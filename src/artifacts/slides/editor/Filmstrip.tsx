@@ -171,7 +171,7 @@ function Thumbnail(props: {
     if (event.key === 'Delete' || event.key === 'Backspace') {
       event.preventDefault();
       remove();
-    } else if (event.key === 'd' && (event.metaKey || event.ctrlKey)) {
+    } else if (event.key === 'd' && (event.metaKey || event.ctrlKey) && !event.shiftKey) { // U6a: ⇧⌘D is View ▸ Review's
       event.preventDefault();
       duplicate();
     }

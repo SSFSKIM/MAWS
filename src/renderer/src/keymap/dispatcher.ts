@@ -4,9 +4,10 @@
 // listener on the window (`connectKeys`) against the effective keymap, and reach only a binding whose element owns the
 // key (`useKeyChord`): the dispatcher refuses outright when the key belongs to something else (see `refused`). E9: a hold
 // action (`ActionSpec.hold`) is also told when its hold ends, through capture-phase `keyup`, `blur` and
-// `visibilitychange` listeners (see "Hold semantics" below).
+// `visibilitychange` listeners (see "Hold semantics" below). U6a: a `fixed` row (a key its own editor handles) is never
+// dispatched and never counted as bound; the table is an argument so a test can extend it with a later child's rows.
 import type { MawsBridge } from '@shared/ipc/schema';
-import { ACTIONS, ACTION_IDS, effectiveChord, type ActionId, type ActionSpec, type KeymapOverrides } from '@shared/keymap/actions';
+import { ACTIONS, effectiveChord, heldChords, idsOf, type ActionId, type ActionSpec, type ActionTable, type KeymapOverrides } from '@shared/keymap/actions';
 import { matchesChord, parseChord, type Chord } from '@shared/keymap/chord';
 import { ipc } from '../ipc/client';
 import { useSettings } from '../stores/settings';
@@ -40,7 +41,9 @@ export function connectActions(client: MawsBridge = ipc): () => void {
 
 // ---- renderer-sink keys ---------------------------------------------------------------------------------------------
 
-const RENDERER_ACTIONS = ACTION_IDS.filter((id) => ACTIONS[id].sink === 'renderer');
+// The rows the dispatcher tries, in table order (which is the priority between two rows on one chord).
+const dispatched = (table: ActionTable) => idsOf(table).filter((id) => table[id].sink === 'renderer' && !table[id].fixed);
+const RENDERER_ACTIONS = dispatched(ACTIONS);
 // Inputs that take a keypress as a click, not as text: they are buttons, refused as buttons are.
 export const BUTTON_LIKE_INPUTS: ReadonlySet<string> = new Set(['button', 'submit', 'reset', 'checkbox', 'radio', 'range', 'color', 'file', 'image']);
 // A Radix menu, dialog or popover while open (their content carries the role and `data-state="open"`). A sidebar row's
@@ -58,7 +61,7 @@ const isButtonOrLink = (element: Element) =>
   element.closest('button, a[href], [role="button"], [role="link"]') !== null || (element instanceof HTMLInputElement && BUTTON_LIKE_INPUTS.has(element.type));
 
 // Why a key may not reach a binding of this scope at all, before any binding is looked at.
-function refused(event: KeyboardEvent, scope: (typeof ACTIONS)[ActionId]['scope'], target: Element): boolean {
+function refused(event: KeyboardEvent, scope: ActionSpec['scope'], target: Element): boolean {
   if (event.isComposing) return true;
   // Old persisted overrides must not turn ordinary typing into an app-wide action either.
   if (scope === 'app') return !event.metaKey && !event.ctrlKey && !event.altKey && event.key.length === 1;
@@ -70,8 +73,8 @@ function refused(event: KeyboardEvent, scope: (typeof ACTIONS)[ActionId]['scope'
 
 // Among the bindings whose element contains both the target and the focused element, the innermost; of two on one
 // element, the later registration. Elements containing a common node are nested, so "innermost" is well defined.
-function owner(id: ActionId, target: Element): ChordBinding | null {
-  const scope = ACTIONS[id].scope;
+function owner(id: ActionId, target: Element, table: ActionTable): ChordBinding | null {
+  const scope = table[id].scope;
   const focused = document.activeElement;
   let best: ChordBinding | null = null;
   for (const binding of bindingsOf(id)) {
@@ -133,7 +136,7 @@ onUnbind((binding) => {
 // E9 end
 
 // Runs the binding a keydown belongs to and takes the key's default away; a key nobody owns is left untouched.
-export function dispatchKey(event: KeyboardEvent, keymap: KeymapOverrides): boolean {
+export function dispatchKey(event: KeyboardEvent, keymap: KeymapOverrides, table: ActionTable = ACTIONS): boolean {
   if (!(event.target instanceof Element)) return false;
   // E9: the held key's repeats, with or without the chord's modifiers still down, are swallowed until its own keyup. A
   // fresh press of it means the hold ended unseen (Chromium omits a letter's keyup while ⌘ is held): it ends the hold and
@@ -150,17 +153,17 @@ export function dispatchKey(event: KeyboardEvent, keymap: KeymapOverrides): bool
   // C11 start: the Settings tab's chord capture is recording this key (settings-tab/KeymapSection.tsx): it runs nothing
   if (target.closest('[data-chord-capture]') !== null) return false;
   // C11 end
-  for (const id of RENDERER_ACTIONS) {
-    const accelerator = effectiveChord(id, keymap);
+  for (const id of table === ACTIONS ? RENDERER_ACTIONS : dispatched(table)) {
+    const accelerator = effectiveChord(id, keymap, table);
     if (accelerator === null) continue;
     const chord = parseChord(accelerator);
     if (!matchesChord(event, chord)) continue;
-    if (refused(event, ACTIONS[id].scope, target)) continue;
-    const binding = owner(id, target);
+    if (refused(event, table[id].scope, target)) continue;
+    const binding = owner(id, target, table);
     if (!binding) continue;
     event.preventDefault();
     // E9: a hold action latches before it runs, so a release its handler causes finds the latch
-    if ((ACTIONS[id] as ActionSpec).hold) {
+    if (table[id].hold) {
       releaseHold('lost');
       latch = { binding, code: event.code, chord, released: false };
     }
@@ -179,12 +182,11 @@ export function dispatchKey(event: KeyboardEvent, keymap: KeymapOverrides): bool
  * event carries, to an action of either sink (the menu's nine tab items as the menu numbers them), so a surface's own
  * key (the deck and design editors' F6) steps aside for it.
  */
-export function keymapBinds(event: KeyboardEvent, keymap: KeymapOverrides = useSettings.getState().state?.settings.keymap ?? {}): boolean {
-  return ACTION_IDS.some((id) => {
-    const chord = effectiveChord(id, keymap);
-    if (chord === null) return false;
-    const chords = id === 'tab.select' && chord.endsWith('1') ? Array.from({ length: 9 }, (_, i) => `${chord.slice(0, -1)}${i + 1}`) : [chord];
-    return chords.some((c) => matchesChord(event, parseChord(c)));
+export function keymapBinds(event: KeyboardEvent, keymap: KeymapOverrides = useSettings.getState().state?.settings.keymap ?? {}, table: ActionTable = ACTIONS): boolean {
+  return idsOf(table).some((id) => {
+    if (table[id].fixed) return false; // U6a: an editor's own key binds nothing of the app's
+    const chord = effectiveChord(id, keymap, table);
+    return chord !== null && heldChords(id, chord).some((c) => matchesChord(event, parseChord(c)));
   });
 }
 

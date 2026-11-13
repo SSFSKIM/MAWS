@@ -12,8 +12,8 @@ import { engineNormalizer } from './replay/normalizer';
 import { FsService } from './service';
 
 // W7: `ownPids` names MAWS's own live engine processes (C3's process table), whose registry records are never holders.
-export function registerFs(on: HostOn, emit: HostEmit, env: NodeJS.ProcessEnv = process.env, options: { ownPids?: () => ReadonlySet<number> } = {}): FsService {
-  const service = new FsService({ paths: resolveStorePaths(env), emit, holders: { ownPids: options.ownPids } });
+export function registerFs(on: HostOn, emit: HostEmit, env: NodeJS.ProcessEnv = process.env, options: { ownPids?: () => ReadonlySet<number>; activity?: () => void /* P5 Decision Log 273 */ } = {}): FsService {
+  const service = new FsService({ paths: resolveStorePaths(env), emit, holders: { ownPids: options.ownPids }, activity: options.activity });
   // The runtime hands a handler the schema's parsed value, typed as its input; the ids in it passed the branded
   // id schemas, which is what the brands stand for.
   on('fs.sessionText', async ({ sessionId, cursor, resume }) => service.searchText(sessionId as SessionId, cursor, resume));
