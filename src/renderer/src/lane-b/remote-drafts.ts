@@ -77,8 +77,7 @@ export function resetRemoteDraftSaves(): void {
   leftThere.clear();
   wholeHere.clear();
   said.clear();
-  onceOut.clear();
-  waitingForDrain.clear();
+  order.clear();
 }
 
 /** The newest draft of the session the machine doesn't hold whole: a save not yet taken, or one that left attachments out. */
@@ -133,7 +132,7 @@ export function saveRemoteDraft(client: MawsBridge, appSessionId: AppSessionId, 
   queue.waiting = true;
   queue.refused = refused;
   queue.resent = 0;
-  if (!queue.out) void pump(client, appSessionId, queue);
+  if (!queue.out) startPump(client, appSessionId, queue);
 }
 
 /** One draft saved on top of what is kept there: read first when that isn't known, and again after a stale refusal. */
@@ -169,21 +168,28 @@ async function saveOnce(client: MawsBridge, appSessionId: AppSessionId, draft: D
   }
 }
 
-async function pump(client: MawsBridge, appSessionId: AppSessionId, queue: Saves): Promise<void> {
+// The session's queue takes its place in the session's order; a save handed meanwhile joins it (`waiting`).
+function startPump(client: MawsBridge, appSessionId: AppSessionId, queue: Saves): void {
   queue.out = true;
-  // UX wave U4a: a take-back's save already out goes first (with none, the save goes in this tick, as before)
-  const before = onceOut.get(appSessionId);
-  if (before !== undefined) await before.catch(() => undefined);
+  void inOrder(appSessionId, (ticket) => pump(client, appSessionId, queue, ticket));
+}
+
+async function pump(client: MawsBridge, appSessionId: AppSessionId, queue: Saves, ticket: number): Promise<void> {
   if (queue.resend !== null) clearTimeout(queue.resend);
   queue.resend = null;
   let taken = false;
   let timedOut = false;
+  let sentOne = false;
   const current = () => saves.get(appSessionId) === queue; // else dropped (a newer save went to the fallback) or reset
   while (queue.waiting && current()) {
+    // UX wave U4a: a take-back's save handed since this queue's turn began goes before the newer drafts it holds
+    if (sentOne && handedAfter(appSessionId, ticket)) return void inOrder(appSessionId, (next) => pump(client, appSessionId, queue, next));
     queue.waiting = false;
+    sentOne = true;
     const result = await saveOnce(client, appSessionId, queue.latest, current);
-    if (result === null) return;
+    if (result === null) return void (queue.out = false);
     if (isNotOffered(result)) {
+      queue.out = false;
       saves.delete(appSessionId);
       return queue.refused(queue.latest);
     }
@@ -192,7 +198,6 @@ async function pump(client: MawsBridge, appSessionId: AppSessionId, queue: Saves
     if (!result.ok) console.warn('[composer] the draft was not kept on its machine', result.error.message);
   }
   queue.out = false;
-  drained(appSessionId);
   if (!current()) return;
   if (taken) return void saves.delete(appSessionId);
   // A save past main's bound may land later, after a newer one it then makes stale there: nobody would send the newest
@@ -203,35 +208,45 @@ async function pump(client: MawsBridge, appSessionId: AppSessionId, queue: Saves
       queue.resend = null;
       if (!current() || queue.out) return;
       queue.waiting = true;
-      void pump(client, appSessionId, queue);
+      startPump(client, appSessionId, queue);
     }, REMOTE_DRAFT_RETRY_MS);
   }
 }
 
+// ---- UX wave U4a: the session's order ----------------------------------------------------------------------------------
+
+// Each session's sends go one at a time, in the order they were handed: a run of its ordinary queue, or a take-back's
+// one save. Each takes its predecessor when it is handed, so none ever waits on one handed after it; one handed with
+// nothing before it starts in that same tick, as a save always has. A run ends however it ends, and the next goes.
+const order = new Map<AppSessionId, { tail: Promise<void>; last: number }>();
+let tickets = 0;
+function inOrder<T>(appSessionId: AppSessionId, run: (ticket: number) => Promise<T>): Promise<T> {
+  const ticket = ++tickets;
+  const before = order.get(appSessionId);
+  const result = before === undefined ? run(ticket) : before.tail.then(() => run(ticket));
+  const tail = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  order.set(appSessionId, { tail, last: ticket });
+  void tail.then(() => {
+    if (order.get(appSessionId)?.tail === tail) order.delete(appSessionId);
+  });
+  return result;
+}
+/** Whether something of the session was handed after the run holding `ticket`. */
+const handedAfter = (appSessionId: AppSessionId, ticket: number): boolean => (order.get(appSessionId)?.last ?? ticket) > ticket;
+
 // ---- UX wave U4a: a take-back's save, sent once in the session's order ------------------------------------------------
 
-const onceOut = new Map<AppSessionId, Promise<unknown>>();
-const waitingForDrain = new Map<AppSessionId, (() => void)[]>();
-function drained(appSessionId: AppSessionId): void {
-  const waiting = waitingForDrain.get(appSessionId) ?? [];
-  waitingForDrain.delete(appSessionId);
-  waiting.forEach((resolve) => resolve());
-}
-/** Resolves once no ordinary save of the session is out. */
-const ordinarySavesOut = (appSessionId: AppSessionId): Promise<void> =>
-  saves.get(appSessionId)?.out ? new Promise((resolve) => waitingForDrain.set(appSessionId, [...(waitingForDrain.get(appSessionId) ?? []), resolve])) : Promise.resolve();
-
 /**
- * One save of a take-back (the claim, or the settling save), with the `replaces` given, after the session's saves out
- * and before those handed later; sent once, its answer the caller's. A draft this machine's link would cut is not sent
- * (`withheld`): a stage must hold every byte.
+ * One save of a take-back (the claim, or the settling save), with the `replaces` given, after the session's saves handed
+ * before it and before those handed after it; sent once, its answer the caller's. A draft this machine's link would cut
+ * is not sent (`withheld`): a stage must hold every byte.
  */
 export async function saveRemoteDraftOnce(client: MawsBridge, appSessionId: AppSessionId, draft: Draft | null, replaces: string): Promise<CommandResult<'session.drafts.set'> | { withheld: true }> {
   if (draft !== null && fitDraft(draft).withheld.length > 0) return { withheld: true };
-  const before = onceOut.get(appSessionId);
-  const sent = (async () => {
-    await before?.catch(() => undefined); // its failure is its caller's
-    await ordinarySavesOut(appSessionId);
+  return inOrder(appSessionId, async () => {
     const result = await client.invoke('session.drafts.set', { appSessionId, draft, replaces });
     heardReaderRows(appSessionId, result);
     if (result.ok) {
@@ -240,13 +255,7 @@ export async function saveRemoteDraftOnce(client: MawsBridge, appSessionId: AppS
       wholeHere.delete(appSessionId);
     } else bases.delete(appSessionId); // what is kept there is read again before the next ordinary save
     return result;
-  })();
-  onceOut.set(appSessionId, sent);
-  try {
-    return await sent;
-  } finally {
-    if (onceOut.get(appSessionId) === sent) onceOut.delete(appSessionId);
-  }
+  });
 }
 
 /** What is kept for the member there, as the take-back reads it (null: none, or cleared). */
