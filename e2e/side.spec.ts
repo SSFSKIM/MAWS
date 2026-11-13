@@ -43,6 +43,8 @@ const CARD_CHILD = 'e3e30000-0000-4000-8000-000000000004'; // P2-E1 (M5): case 8
 const APP = 'src/app.ts';
 const APP_TEXT = Array.from({ length: 12 }, (_, i) => (i === 2 ? 'export const total = items.reduce((sum, item) => sum + item.price, 0);' : `export const v${i + 1} = ${i + 1};`)).join('\n') + '\n';
 const FIRST_PROMPT = 'Remember the word ZEBRA, then tell me what src/app.ts does.';
+// UX wave U7 (S-11): a session with no title is named by its first prompt's first six words, so a fork's caption names its original so
+const FIRST_PROMPT_TITLE = 'Remember the word ZEBRA, then tell';
 const FIRST_REPLY = 'Noted: ZEBRA. src/app.ts exports a running total and a few constants.';
 const COMMENT = 'Why is the total recomputed here instead of cached?';
 const CHILD_REPLY = 'The total is recomputed because items can change between calls. Caching it would need an invalidation hook.';
@@ -622,7 +624,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
       await forkRow.hover();
       await expect(page.getByTestId('hover-lineage')).toBeVisible({ timeout: 2_000 });
     }).toPass({ timeout: 10_000 });
-    await expect(page.getByTestId('hover-lineage')).toHaveText(`Fork of ${FIRST_PROMPT}`);
+    await expect(page.getByTestId('hover-lineage')).toHaveText(`Fork of ${FIRST_PROMPT_TITLE}`);
     await page.mouse.move(700, 450);
 
     // A, opened from the sidebar: the steered comment drawn from disk with its chip and image
