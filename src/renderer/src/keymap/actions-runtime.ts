@@ -193,9 +193,13 @@ export function closeEmptyChat(appSessionId: AppSessionId): void {
   const port = emptyChats;
   const tab = sessionTab(appSessionId);
   const layout = useLayout.getState();
-  if (port === null || locateTab(layout.main, tabId(tab)) === null || !port.isEmpty(appSessionId) || frontOf(layout) === tabId(tab)) return;
+  const open = findTab(layout.main, tabId(tab));
+  if (port === null || open === null || !port.isEmpty(appSessionId) || frontOf(layout) === tabId(tab)) return;
   layout.dropSession(appSessionId); // as an unstarted chat's close, it leaves no reopen entry
-  const putBack = () => useLayout.getState().openTab(tab, { activate: false });
+  const putBack = () => {
+    useLayout.getState().openTab(tab, { activate: false });
+    if (open.pinned) useLayout.getState().togglePinned(open.id); // a new ref is unpinned
+  };
   port.discard(appSessionId).then(
     (discarded) => (discarded ? useSessions.getState().dropUnstarted(appSessionId) : putBack()),
     (error: unknown) => {

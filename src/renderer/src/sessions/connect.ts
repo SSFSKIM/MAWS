@@ -9,6 +9,7 @@
 // before the layout hydrates.
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { CommandOutput, MawsBridge } from '@shared/ipc/schema';
+import { tabId } from '@shared/ipc/schema/layout';
 import type { Location } from '@shared/sessions/intent';
 import { onLaunchMode } from '../app/launch-mode';
 import { registerSlot } from '../app/slots';
@@ -16,6 +17,8 @@ import { registerResubmitProvider } from '../composer/resubmit-seam';
 import { ipc } from '../ipc/client';
 import { NEW_CHAT, registerCloseGuard, registerEmptyChats, registerReplaceVerdict, registerSessionCreator, registerTabRetention, registerUnstartedTitle, unstartedTitlesChanged, type UnstartedTitleAnswer } from '../keymap/actions-runtime';
 import { prefillComposer } from '../stores/composer';
+import { useLayout } from '../stores/layout';
+import { isOpen } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { registerSessionActions } from './actions';
 import { heldToast } from './attach';
@@ -67,6 +70,9 @@ function watchUnstartedTitles(): () => void {
 // C5's retention: a tab is kept while its id has a persisted intent, a failed one included.
 export const retainsTab = (appSessionId: string): boolean => useSetup.getState().intents.has(appSessionId as AppSessionId);
 
+// The chats this page made (U13a's relaunch sweep leaves them alone: they are this run's, not an earlier run's).
+const madeThisRun = new Set<AppSessionId>();
+
 // "+" and ⌘N: an app session id with a setup intent; C5 opens its tab.
 export async function createUnstartedSession(projectId: ProjectId | null, client: MawsBridge = ipc, location: Location | null = null): Promise<AppSessionId | null> {
   // P5 O6 M4: the project's machine; with none, this machine's (the setup intent's, until O7's machine picker)
@@ -75,6 +81,7 @@ export async function createUnstartedSession(projectId: ProjectId | null, client
     console.error('[sessions] session.create failed', result.error);
     return null;
   }
+  madeThisRun.add(result.value.appSessionId as AppSessionId); // before its intent is in the store
   useSetup.getState().setIntent(result.value.intent);
   return result.value.appSessionId as AppSessionId;
 }
@@ -82,11 +89,15 @@ export async function createUnstartedSession(projectId: ProjectId | null, client
 // UX wave U13a (its plan's Interfaces §E; the owner, 2026-11-12: "No, only chats with content"): a New chat with nothing
 // in it does not come back after a relaunch. Its intent is discarded once the snapshot holds the intents, before the
 // retention lets the layout hydrate, so hydration finds no intent and drops its tab without a word; one main refuses
-// stays, and its tab comes back as before.
-async function discardEmptyIntents(client: MawsBridge): Promise<void> {
-  const empty = [...useSetup.getState().intents.values()].filter(isEmptyIntent);
+// stays, and its tab comes back as before. A relaunch's cleanup: only the chats an earlier run left (the snapshot's,
+// less this run's, which can be in the strip and typed into before the snapshot answers), and none whose tab is open.
+const leftByEarlierRun = (): AppSessionId[] => [...useSetup.getState().intents.keys()].filter((id) => !madeThisRun.has(id));
+
+async function discardEmptyIntents(client: MawsBridge, candidates: readonly AppSessionId[]): Promise<void> {
   await Promise.all(
-    empty.map(async ({ appSessionId }) => {
+    candidates.map(async (appSessionId) => {
+      const intent = useSetup.getState().intents.get(appSessionId);
+      if (intent === undefined || !isEmptyIntent(intent) || isOpen(useLayout.getState().main, tabId({ kind: 'session', appSessionId }))) return;
       const result = await client.invoke('session.intent.discard', { appSessionId }).catch((error: unknown) => ({ ok: false as const, error }));
       if (result.ok) useSetup.getState().applyIntentChanged({ appSessionId, intent: null });
       else console.warn('[sessions] an empty New chat could not be discarded; its tab comes back', result.error);
@@ -103,7 +114,12 @@ export function connectSessions(client: MawsBridge = ipc): () => void {
   const mode = new Promise<LaunchMode>((resolve) => (modeOf = resolve));
   // U13a: in launch mode `index` only (mode `scenario`'s stub sessions are not New chats); `known` waits for it too, so a
   // snapshot held only after a failed first read also lets the local machine settle without the empty chats
-  const emptied = setup.known.then(() => mode).then((m) => (live && m === 'index' ? discardEmptyIntents(client) : undefined));
+  // the candidates are taken as the snapshot lands (it is applied just before `known` resolves), the discards once the
+  // mode is known
+  const emptied = setup.known.then(() => {
+    const candidates = leftByEarlierRun();
+    return mode.then((m) => (live && m === 'index' ? discardEmptyIntents(client, candidates) : undefined));
+  });
   const ready = setup.ready.then((held) => (held ? emptied.then(() => held) : held));
   const offs: (() => void)[] = [registerTabRetention({ ready, known: emptied, retains: retainsTab })];
   // 2026-10-31: asked until main answers, so an upgrade's mawsd restart no longer leaves New chat disabled (launch-mode.ts)
