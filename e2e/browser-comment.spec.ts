@@ -620,12 +620,13 @@ test('2. a pick sent to main writes [image, anchored text] whose tag round-trips
       await expect(card).toBeVisible();
       await expect(card.locator('[data-comment-screenshot]')).toBeVisible();
       // UX wave U5a (A1, A2): the "Send to main" checkbox ticked; once the delivery is confirmed the card's place in the
-      // dock says where it went
+      // dock says where it went, by the name the session had when Send was pressed (the send may rename it after)
       await card.getByRole('checkbox', { name: 'Send to main' }).check();
       await card.getByRole('textbox', { name: 'Comment' }).fill(MAIN_COMMENT);
+      const title = await sessionTitle(s, parent);
       await card.getByRole('button', { name: 'Send' }).click();
       await expect(card).toHaveCount(0);
-      await expect(t.panel.locator('[data-card-dock] [data-sent-note]')).toHaveText(`Sent to ${await sessionTitle(s, parent)}`);
+      await expect(t.panel.locator('[data-card-dock] [data-sent-note]')).toHaveText(`Sent to ${title}`);
       await expect.poll(() => writtenUsers(s, parent).length, { timeout: 20_000 }).toBe(1);
       const [image, text] = contentOf(writtenUsers(s, parent)[0]!);
       expect(image?.type, 'the image block first').toBe('image');
