@@ -180,8 +180,8 @@ function destinationAt(text: string, at: number, limit: number): Scan<{ destinat
       depth -= 1;
     } else if (code === 32 || isControl(code)) break;
   }
-  if (i >= limit) return pastBound(text, limit);
-  return depth === 0 ? { destination: text.slice(at, i), next: i } : null;
+  if (i >= limit && limit < text.length) return UNKNOWN;
+  return depth === 0 ? { destination: text.slice(at, i), next: i } : null; // the text's end also ends a run (a definition's)
 }
 
 // A title at `at` (its opening marker): `"…"`, `'…'` or `(…)`, with no blank line inside. The index after it.
