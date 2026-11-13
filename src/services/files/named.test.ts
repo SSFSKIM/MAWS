@@ -522,6 +522,25 @@ describe('the queue (S14, S15)', () => {
     done = true;
     expect(ticks).toBeGreaterThanOrEqual(stats.reads);
   });
+
+  // the branch review's finding 2: one row under the row bound can hold a great many links, each read through the URL
+  // step; the row is worked in bounded steps with the event loop given back between them, so the daemon's other work
+  // runs before the row is done
+  it('gives the event loop back while it works one row of many candidates', async () => {
+    const candidates = 20_000;
+    await writeTranscript([...filler(2), assistant(text(`[r](${P}.bak) `.repeat(candidates)))]);
+    const named = paths();
+    let ticks = 0;
+    let done = false;
+    const tick = () => {
+      ticks += 1;
+      if (!done) setImmediate(tick);
+    };
+    setImmediate(tick);
+    expect(await named.names(S, P)).toBe(false);
+    done = true;
+    expect(ticks).toBeGreaterThanOrEqual(candidates / 256); // at least one turn of the loop per 256 candidates
+  });
 });
 
 // The results waiting for their calls (Decision Log 13): a line is checked against them in one pass, however many wait,
