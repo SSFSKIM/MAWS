@@ -262,10 +262,16 @@ test('one strip: a project or machine row changes no tab, ⌘1 counts over the p
           tabs.map((tab) => {
             const place = tab.querySelector<HTMLElement>('[data-tab-place]');
             const title = place?.previousElementSibling as HTMLElement | null;
-            // the architect's ruling of 2026-11-13: a place shows on the box's one line or is wrapped out of sight below
-            // it; one that shows is its whole text or at least its first four characters and the ellipsis
-            const box = place?.parentElement?.getBoundingClientRect();
-            const shown = place !== null && box !== undefined && place.getBoundingClientRect().top < box.bottom - 1 && place.getBoundingClientRect().width > 0;
+            // the architect's ruling of 2026-11-13: a place is drawn on the box's first line, the title's, inside the box's
+            // visible rect, or it is wrapped out of sight below a box that clips; one that is drawn is its whole text or at
+            // least its first four characters and the ellipsis
+            const boxElement = place?.parentElement ?? null;
+            const box = boxElement?.getBoundingClientRect();
+            const at = place?.getBoundingClientRect();
+            const line = title?.getBoundingClientRect();
+            const shown = at !== undefined && box !== undefined && line !== undefined && at.width > 0 && at.top < line.bottom - 1
+              && at.top >= box.top - 1 && at.top < box.bottom - 1 && at.left >= box.left - 1 && at.right <= box.right + 1;
+            const outOfSight = at !== undefined && box !== undefined && boxElement !== null && at.top >= box.bottom - 1 && getComputedStyle(boxElement).overflowY !== 'visible';
             let readable = 0;
             if (place !== null) {
               const text = Array.from(place.textContent ?? '');
@@ -283,29 +289,36 @@ test('one strip: a project or machine row changes no tab, ⌘1 counts over the p
               place: place === null ? null : shown ? Math.round(place.getBoundingClientRect().width) : 0,
               placeCut: place !== null && shown && place.scrollWidth > place.clientWidth + 1,
               placeReadable: place === null || !shown || place.getBoundingClientRect().width + 1 >= readable,
+              placeDrawnOrHidden: place === null || shown || outOfSight,
             };
           }),
         );
     type Squeezed = Awaited<ReturnType<typeof measure>>;
     const givesWay = (tabs: Squeezed) => tabs.some((t) => t.place !== null && (t.placeCut || t.place === 0));
+    // every width step is visited, down to the 600 px minimum, where the ruling bites; the first step at which a place
+    // gives way is the one the give-way assertion and the narrow screenshot are taken for
     let squeezed: Squeezed = [];
-    const visited: Squeezed[] = [];
     let width = 0;
+    const visited: Squeezed[] = [];
     const tried: string[] = [];
-    for (width of [900, 800, 700, 600]) {
-      await app.evaluate(({ BrowserWindow }, width) => BrowserWindow.getAllWindows()[0].setBounds({ x: 72, y: 48, width, height: 700 }), width);
-      await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBounds().width)).toBe(width);
+    for (const step of [900, 800, 700, 600]) {
+      await app.evaluate(({ BrowserWindow }, width) => BrowserWindow.getAllWindows()[0].setBounds({ x: 72, y: 48, width, height: 700 }), step);
+      await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBounds().width)).toBe(step);
       await page.waitForTimeout(300); // the strip lays out at the new width
-      squeezed = await measure();
-      visited.push(squeezed);
-      tried.push(`${width}px ${JSON.stringify(squeezed)}`);
-      if (givesWay(squeezed)) break;
+      const measured = await measure();
+      visited.push(measured);
+      tried.push(`${step}px ${JSON.stringify(measured)}`);
+      if (width === 0 && givesWay(measured)) {
+        [squeezed, width] = [measured, step];
+        await test.info().attach('one-strip-narrow-title-bar', { body: await banner.screenshot(), contentType: 'image/png' });
+      }
     }
     test.info().annotations.push({ type: 'one-strip narrow', description: tried.join('\n') });
-    await test.info().attach('one-strip-narrow-title-bar', { body: await banner.screenshot(), contentType: 'image/png' });
+    expect(width, 'a place gave way by 600 px').toBeGreaterThan(0);
     expect(givesWay(squeezed), `a place gave way by ${width} px`).toBe(true);
     expect(squeezed.map((t) => t.place !== null), 'every session tab still has its place').toEqual([true, true, true, true]);
-    // at every width visited: no title is cut while its place shows, and a place that shows is readable
+    // at every width step: each place is drawn readable or not drawn, and no title is cut while its place is drawn
+    expect(visited.flat().filter((t) => !t.placeDrawnOrHidden), 'a place is drawn on the first line or wrapped out of sight').toEqual([]);
     expect(visited.flat().filter((t) => t.titleCut && (t.place ?? 0) > 0), 'no title is cut while its place still shows').toEqual([]);
     expect(visited.flat().filter((t) => !t.placeReadable), 'a place that shows is whole, or four characters and the ellipsis').toEqual([]);
 
