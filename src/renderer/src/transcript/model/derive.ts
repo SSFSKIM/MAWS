@@ -466,8 +466,11 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const questionsOf: CallQuestions = (call) => callQuestions(turn, state, call as ToolUseId);
   // The whole-branch review's finding 3: the tasks of this turn that ran in the background, whose ends an older engine
   // host tells only as `task.notification` (reduce.ts, olderHostTaskEnds)
+  // and the lines drawn of them, which are no work of the turn's: the wire said the task ended, mostly after the turn's
+  // answer, which stays its answer
   const backgroundTasks = new Set<TaskId>();
   const olderHost = state !== null && olderHostTaskEnds(state);
+  const olderHostEnds = new Set<RowId>();
 
   const blockRow = (block: LiveBlock, at: string): Item | null => {
     const live = !block.completed;
@@ -700,7 +703,11 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
           break;
         }
         for (const rec of tools.values()) if (rec.backgroundTaskId === event.taskId) rec.backgroundDone = true;
-        if (olderHost && event.kind === 'task.notification' && backgroundTasks.has(event.taskId)) items.push({ kind: 'row', row: olderHostNotice(event, turn.id) });
+        if (olderHost && event.kind === 'task.notification' && backgroundTasks.has(event.taskId)) {
+          const row = olderHostNotice(event, turn.id);
+          olderHostEnds.add(row.id);
+          items.push({ kind: 'row', row });
+        }
         break;
       }
       case 'task.updated':
@@ -918,7 +925,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   // P4-R7: a message tool's call is a call too, so a text before it is the turn's commentary, as before any call
   // UX wave U3: a notice that arrived among the work counts as an inbound message does
   const WORK_ROWS = new Set<Row['kind']>(['subagent', 'agent_message', 'notice', 'question', 'plan', 'request_slot', 'error', 'ask', 'delivery' /* E1: calls, as a question is */, 'agent_list' /* E7 */, 'artifact' /* E2 */, 'browser_action' /* E4c */, 'to_human' /* P4-R7 */]);
-  const isWork = (item: (typeof resolved)[number]) => item.kind === 'cell' || (item.kind === 'row' && WORK_ROWS.has(item.row.kind) && !(item.row.kind === 'error' && (item.row.severity === 'notice' || item.row.scope === 'plugin')));
+  const isWork = (item: (typeof resolved)[number]) => item.kind === 'cell' || (item.kind === 'row' && WORK_ROWS.has(item.row.kind) && !(item.row.kind === 'error' && (item.row.severity === 'notice' || item.row.scope === 'plugin')) && !olderHostEnds.has(item.row.id));
   const lastWork = stream.map(isWork).lastIndexOf(true);
   // W1: one stream in event order. The rows that stay in view when the work area folds (isPersistentRow: a prompt the
   // engine took into this turn, at its delivery position; a hook that got in the way; the answer; a boundary; a slash

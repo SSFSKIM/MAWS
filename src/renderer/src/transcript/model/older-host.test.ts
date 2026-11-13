@@ -39,6 +39,14 @@ describe('a background task’s end told by an older engine host', () => {
     expect(olderHostTaskEnds(state)).toBe(true);
   });
 
+  it('a line drawn after its task’s turn answered leaves that answer the turn’s answer, in view through the fold', () => {
+    const withLines = reduce(older);
+    const withoutLines = reduce(older.filter((event) => event.kind !== 'task.notification'));
+    const answers = (state: TranscriptState) => rowsOf(state).flatMap((row) => (row.kind === 'assistant_text' && row.phase === 'answer' ? [row.id] : []));
+    expect(answers(withLines)).toEqual(answers(withoutLines));
+    expect(answers(withLines).length).toBeGreaterThan(0);
+  });
+
   it('the same session from a host that sends arrivals: each failure is still one line, never a second from its task.notification', () => {
     const rows = rowsOf(withAllExpanded(reduce(journalToEvents(loadUxwaveJournal('u3-tasks-r1')))));
     for (const failed of ['failed: Background command "uxw fail" failed with exit code 1', 'failed: Background command "uxw busy fail" failed with exit code 1']) {
