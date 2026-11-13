@@ -152,7 +152,9 @@ describe('metadata before an arrival', () => {
 });
 
 describe('what stays through a fold (Interfaces D)', () => {
-  it('a task’s end with an outcome and a scheduled fire stay; a notice with no outcome, an answer, the wake and every message fold', () => {
+  // an answer stays until U1b fills the question's row with it (the architect's ruling of 2026-11-13): the to-human
+  // report never shows a question without its answer
+  it('a task’s end with an outcome, a scheduled fire and an answer stay; a notice with no outcome, the wake and every message fold', () => {
     const b = builder();
     engineTurn(b);
     carry(b, 'n1', [task()]);
@@ -168,9 +170,9 @@ describe('what stays through a fold (Interfaces D)', () => {
     b.text('m1', 0, 'Done.');
     endEngine(b);
     const folded = shown(rowsOf(reduce(b.events)));
-    expect(folded.map((row) => (row.kind === 'notice' ? `notice:${row.class}:${row.outcome}` : row.kind))).toEqual(['notice:task:completed', 'divider', 'notice:task:failed', 'notice:schedule:null', 'assistant_text']);
+    expect(folded.map((row) => (row.kind === 'notice' ? `notice:${row.class}:${row.outcome}` : row.kind))).toEqual(['notice:task:completed', 'divider', 'notice:task:failed', 'notice:schedule:null', 'notice:answer:null', 'assistant_text']);
     const all = shown(expanded(b.events));
-    expect(all.filter((row) => !isPersistentRow(row)).map((row) => (row.kind === 'notice' ? `notice:${row.class}` : row.kind))).toEqual(['divider', 'cell', 'notice:task', 'notice:answer', 'notice:wake', 'agent_message', 'agent_message']);
+    expect(all.filter((row) => !isPersistentRow(row)).map((row) => (row.kind === 'notice' ? `notice:${row.class}` : row.kind))).toEqual(['divider', 'cell', 'notice:task', 'notice:wake', 'agent_message', 'agent_message']);
   });
 
   it('leaves a subagent’s started and finished rows as they were (l2-transcript-14)', () => {
@@ -270,11 +272,54 @@ describe('one arrival per uuid (decision 8)', () => {
     expect(step(() => carry(b, 'n1', [task({ runId: null })], ''))).toEqual([OK]);
     expect(step(() => carry(b, 'n2', [task({ runId: null, summary: FAILED, outcome: 'failed' })], ''))).toEqual([OK, FAILED]);
     expect(step(() => carry(b, 'n1', [{ class: 'command', run: null }], ''))).toEqual([OK, FAILED]); // decision 20: nothing
-    expect(step(() => carry(b, 'n1', [task({ runId: null, summary: STOPPED, outcome: 'stopped' })], ''))).toEqual([FAILED, STOPPED]); // replaced, where it arrives
-    expect(step(() => carry(b, 'n2', [], ''))).toEqual([STOPPED]);
-    expect(step(() => carry(b, 'n2', [{ class: 'command', run: null }], ''))).toEqual([STOPPED]);
+    // the first carrier stands (decision 8, as revised by the architect's ruling of 2026-11-13): another form changes nothing
+    expect(step(() => carry(b, 'n1', [task({ runId: null, summary: STOPPED, outcome: 'stopped' })], ''))).toEqual([OK, FAILED]);
+    expect(step(() => carry(b, 'n2', [], ''))).toEqual([OK]);
+    expect(step(() => carry(b, 'n2', [{ class: 'command', run: null }], ''))).toEqual([OK]);
     expect(step(() => carry(b, 'n1', [], ''))).toEqual([]);
     expect(step(() => carry(b, 'n2', [], ''))).toEqual([]); // nothing left to take out
+  });
+});
+
+// The architect's ruling of 2026-11-13 (decision 8, as revised; Interfaces B and E): under one uuid the first carrier
+// stands, so one arrival read in two event forms (the file's and the live wire's) keeps one line, where it was placed.
+describe('the first carrier stands (decision 8, as revised)', () => {
+  it('a second non-empty carrier under a standing uuid changes nothing: not its line, not its turn, not another line', () => {
+    const b = builder();
+    engineTurn(b);
+    const first = turnId.ofEvent(b.events[0]!.id);
+    carry(b, 'n1', [task()], '');
+    b.text('m1', 0, 'Counted.');
+    endEngine(b);
+    engineTurn(b);
+    let state = reduce(b.events);
+    const before = rowsOf(state);
+    const from = b.events.length;
+    carry(b, 'n1', [task({ summary: FAILED, outcome: 'failed' })], ''); // the same arrival in another form, in a later turn
+    state = applyEvents(state, b.events.slice(from));
+    expect(of(rowsOf(state), 'notice').map((row) => [row.text, row.turnId])).toEqual([[OK, first]]);
+    expect(of(turnRows(state, state.order.at(-1)!)!, 'notice')).toEqual([]);
+    expect(of(rowsOf(state), 'notice')).toEqual(of(before, 'notice'));
+  });
+
+  it('withdraw before placing again: a line moves only through a withdrawal, which the next carrier then places anew', () => {
+    const b = builder();
+    engineTurn(b);
+    const first = turnId.ofEvent(b.events[0]!.id);
+    carry(b, 'n1', [task()], '');
+    endEngine(b);
+    engineTurn(b);
+    const second = turnId.ofEvent(b.events.at(-1)!.id);
+    let state = reduce(b.events);
+    const step = (emit: () => void) => {
+      const from = b.events.length;
+      emit();
+      state = applyEvents(state, b.events.slice(from));
+      return of(rowsOf(withAllExpanded(state)), 'notice').map((row) => [row.text, row.turnId === first ? 1 : row.turnId === second ? 2 : 0]);
+    };
+    expect(step(() => carry(b, 'n1', [task({ summary: STOPPED, outcome: 'stopped' })], ''))).toEqual([[OK, 1]]); // placed again, no withdrawal: stays
+    expect(step(() => carry(b, 'n1', [], ''))).toEqual([]);
+    expect(step(() => carry(b, 'n1', [task({ summary: STOPPED, outcome: 'stopped' })], ''))).toEqual([[STOPPED, 2]]); // after one: anew
   });
 });
 

@@ -361,6 +361,25 @@ describe('the rows off the live chain', () => {
     expect(user(rows, 'also check the tests')).toMatchObject({ steer: true, dropped: false, messageUuid: steer.uuid });
   });
 
+  // UX wave U3 (decision 19; M3's fix round, review finding 2): who sent a background session's prompt is the arrivals
+  // reader's here too: undone, a peer's is no owner input, and the owner's draws their words without the frame line
+  it('a background session’s prompt undone: one with a peer’s frame is no owner input; one with the owner’s draws their words, not read', async () => {
+    const c = new Chain();
+    c.prompt('Start the migration.');
+    c.answer('Started.');
+    const ended = c.end();
+    const bg = (content: string) => c.row('user', { origin: { kind: 'human' }, promptSource: 'typed', turnOrigin: 'human', sessionKind: 'bg', message: { role: 'user', content } }, ended);
+    const peer = bg('[sminos chat demo 7f3a2b1c:12 from river → @you]\nThe migration is merged.');
+    const own = bg('[sminos message from human id=1a2b3c4d]\nKeep going with the tests.');
+    c.prompt('Now the docs.', ended);
+    c.answer('On it.');
+    c.end();
+    const { rows } = await drawn(c.rows, [peer, own]);
+    expect(JSON.stringify(rows)).not.toContain('The migration is merged.');
+    expect(bubbles(rows)).toEqual(['Start the migration.', 'Keep going with the tests.', 'Now the docs.']);
+    expect(byUuid(rows, own.uuid)).toMatchObject({ text: 'Keep going with the tests.', dropped: true });
+  });
+
   it('of undone inputs with the same words, the last is drawn', async () => {
     const c = new Chain();
     const ended = c.end();

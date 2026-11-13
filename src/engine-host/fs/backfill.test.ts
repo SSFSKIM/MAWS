@@ -7,7 +7,7 @@ import { AgentMetaSchema, currentChain, parseTranscriptRecord, type TranscriptRe
 import { FIXTURE_DIR, loadEngineJournal, loadJournal, loadSyntheticTranscript, loadTranscript, loadTranscriptFixture } from '../../../test/support/fixtures';
 import { Normalizer } from '../normalizer'; // E7
 import { recordedReceiptRecord } from '../../../test/support/agents-events';
-import { createBackfillContext, recordToEvents, SPILL_MARKER, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
+import { createBackfillContext, endOfRows, recordToEvents, SPILL_MARKER, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
 import { mapSystemFrame } from '../normalizer-system';
 
 const SESSION = 'S' as SessionId;
@@ -226,8 +226,29 @@ describe('transcript records map to X1 events', () => {
     expect(fired.map((e) => [e.kind, e.id])).toEqual([['turn.started', 'm1'], ['user.message', 'f1']]);
     expect(fired[0]).toMatchObject({ userMessageUuid: 'm1', origin: 'task-notification' });
     expect(fired[1]).toMatchObject({ messageUuid: 'f1', isSynthetic: true, origin: 'task-notification', arrival: [{ class: 'schedule', prompt: 'Check the queue.' }] });
+    // placed where it stood: a line stands only on a turn, so with none running it opens the engine's, as its meta row
+    // would have (M3's fix round, review finding 1)
     const alone = mapAll([fire, rec({ type: 'system', subtype: 'turn_duration', uuid: 'd1', parentUuid: 'f1', timestamp: at(3), durationMs: 10 })]);
-    expect(alone.map((e) => [e.kind, e.id])).toEqual([['user.message', 'f1'], ['turn.ended', 'd1']]);
+    expect(alone.map((e) => [e.kind, e.id])).toEqual([['turn.started', 'f1#alone'], ['user.message', 'f1'], ['turn.ended', 'd1']]);
+    expect(alone[0]).toMatchObject({ userMessageUuid: 'f1', origin: 'task-notification' });
+  });
+
+  it('places a fire the rows end at (endOfRows), and the meta row read after it continues that turn, making nothing twice', () => {
+    const fire = rec({ type: 'system', subtype: 'scheduled_task_fire', uuid: 'f1', parentUuid: 'u1', timestamp: at(1), content: 'Running scheduled task (Nov 12 9:00am)', prompt: 'Check the queue.', isMeta: false });
+    const meta = rec({ type: 'user', uuid: 'm1', parentUuid: 'f1', timestamp: at(2), isMeta: true, promptSource: 'system', turnOrigin: 'scheduled', scheduledFireId: 'f1', message: { role: 'user', content: 'Check the queue.' } });
+    const ctx = createBackfillContext({ sessionId: SESSION, agent: null });
+    expect(mapAll([fire], ctx)).toEqual([]);
+    const ended = endOfRows(ctx);
+    expect(ended.map((e) => [e.kind, e.id])).toEqual([['turn.started', 'f1#alone'], ['user.message', 'f1']]);
+    expect(endOfRows(ctx)).toEqual([]); // once
+    const later = mapAll([meta, rec({ type: 'assistant', uuid: 'a1', parentUuid: 'm1', timestamp: at(3), message: { id: 'msg_a1', model: 'x', content: [{ type: 'text', text: 'Queue is empty.' }] } }), rec({ type: 'system', subtype: 'turn_duration', uuid: 'd1', parentUuid: 'a1', timestamp: at(4), durationMs: 900 })], ctx);
+    expect(kinds(later)).toEqual(['assistant.block.complete', 'turn.ended']);
+    expect(only(later, 'turn.ended')[0].userMessageUuids).toEqual(['f1']);
+    // a meta row of another fire is no continuation
+    const other = createBackfillContext({ sessionId: SESSION, agent: null });
+    mapAll([fire], other);
+    endOfRows(other);
+    expect(kinds(mapAll([{ ...meta, scheduledFireId: 'f9' }], other))).not.toEqual([]);
   });
 
   // C6's second whole-branch-review ask: the marker the engine writes after an interrupt is an ordinary `user` record on

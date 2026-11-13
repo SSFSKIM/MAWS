@@ -1,16 +1,17 @@
 // A delivered send's frame line, as the session view draws its row (DC9 M6, the owner's review of M4): the first line
 // sminos writes for a delivery names its event, which the session read and the tail matched; the owner's own send drops
-// it from view (its bubble already says who wrote it). A peer's is the peer's message line, which MAWS's backfill draws
-// from the arrivals reader (UX wave U3, UC-2; O-41: the "From <name>" label is gone), so this module leaves its row as
-// it is. The owner's send queued into a running turn, or appended into it by the bridge (doperpowers PR 233), is drawn
-// as MAWS draws a prompt queued there, under the message's own identity. The text the session read is unchanged
-// otherwise, and a row that marks no delivery's provenance is never touched.
+// it from view (its bubble already says who wrote it). A peer's is the peer's message line. Both are the arrivals
+// reader's (UX wave U3, UC-2; O-41: the "From <name>" label is gone), which MAWS's backfill and the undone-input drawing
+// (`ownerInput`) ask. The owner's send queued into a running turn, or appended into it by the bridge (doperpowers PR
+// 233), is a bubble in that turn under the message's own identity, and a row that marks no delivery's provenance is
+// never read as one.
 import type { JsonObject } from 'desk-hub/protocol';
 import { describe, expect, it } from 'vitest';
 import { createTranscriptStore } from '../../stores/transcript';
 import type { Row } from '../../transcript/model/rows';
 import { freshSource, subagentLookupOf } from '../plane-transcript';
-import { deliveredLines, deliveryAsDrawn, deliveryFrame, isBridgeRow, supersededDeliveries } from './delivery-frame';
+import { ownerInput } from '../source/off-chain';
+import { deliveredLines, deliveryFrame, isBridgeRow, supersededDeliveries } from './delivery-frame';
 
 const SESSION = 'sess-1';
 const BRIDGE = { kind: 'plugin', name: 'doperpowers', asUser: true };
@@ -51,7 +52,6 @@ const TRAILER = "This came from another Claude session — not typed by your use
 const inboxRow = (body: string): JsonObject => row(`Another Claude session sent a message:\n${envelope(body)}\n\n${TRAILER}`, INBOX, { isMeta: true, promptSource: 'system', turnOrigin: 'peer' });
 /** Busy: a queued command whose prompt is the bare envelope. */
 const inboxQueued = (body: string, extra: JsonObject = {}): JsonObject => queued(envelope(body), 'peer', { origin: INBOX, isMeta: true, ...extra });
-const text = (r: JsonObject): unknown => (r.message as JsonObject | undefined)?.content ?? (r.attachment as JsonObject).prompt;
 
 async function drawn(rows: JsonObject[]): Promise<Row[]> {
   const store = createTranscriptStore();
@@ -98,47 +98,26 @@ describe('a delivered send’s frame line', () => {
       const r = appended(`${OWN}\nRun the suites.`, { kind: 'plugin', name });
       expect(isBridgeRow(r), name).toBe(true);
       expect(deliveryFrame(r), name).toEqual({ from: 'human', own: true });
-      expect(deliveryAsDrawn(r).attachment, name).toMatchObject({ prompt: [{ type: 'text', text: 'Run the suites.' }], source_uuid: r.uuid });
+      expect(ownerInput(r)?.words, name).toBe('Run the suites.');
     }
     expect(isBridgeRow(appended(`${OWN}\nRun the suites.`, { kind: 'plugin', name: 'another' }))).toBe(false);
   });
 
-  it("is drawn as nothing for the owner's own send, the rest of what the session read unchanged; a peer's row is left as it is", () => {
-    expect(text(deliveryAsDrawn(row(`${OWN}\nRun the suites.\n\nThen tell me.`, BRIDGE)))).toBe('Run the suites.\n\nThen tell me.');
-    const peer = row([{ type: 'text', text: `${PEER}\nI read it.` }, { type: 'text', text: 'More.' }], BRIDGE);
-    expect(deliveryAsDrawn(peer)).toBe(peer); // O-41: the peer's line is the arrivals reader's, no label of this module's
-  });
-
-  it("is drawn, queued into a running turn, as a prompt queued there: MAWS's shape for it, under the queued message's own uuid", () => {
-    // The shape engines through 2.1.289 wrote for a send through the inbox, still in transcripts: the frame raw.
-    const peer = queued(`${PEER}\nI read it.`, 'peer', { source_uuid: 'src-peer', isMeta: true });
-    expect(deliveryAsDrawn(peer)).toBe(peer); // a peer's, as it is (O-41)
-    // With no `source_uuid`, the row's own uuid stands for the message.
-    const own = queued(`${MESSAGE}\nRe-run the suites.`, 'plugin');
-    expect(deliveryAsDrawn(own).attachment).toMatchObject({ prompt: 'Re-run the suites.', origin: { kind: 'human' }, source_uuid: own.uuid });
-  });
-
-  it("draws the owner's send through the inbox as the owner's own prompt, idle or queued, without its frame; a peer's as the peer message it is", () => {
-    const idle = inboxRow(`${OWN}\nRun the suites.\n\nThen tell me.`);
-    const drawnIdle = deliveryAsDrawn(idle);
-    expect(drawnIdle.message).toEqual({ role: 'user', content: 'Run the suites.\n\nThen tell me.' });
-    expect(drawnIdle.origin).toBeUndefined();
-    expect(drawnIdle.isMeta).toBeUndefined();
-    const busy = inboxQueued(`${MESSAGE}\nRe-run the suites.`, { source_uuid: 'src-own' });
-    expect(deliveryAsDrawn(busy).attachment).toEqual({ type: 'queued_command', prompt: 'Re-run the suites.', commandMode: 'prompt', origin: { kind: 'human' }, source_uuid: 'src-own' });
-    for (const r of [inboxRow(`${PEER}\nI read it.\n${REPLY}`), inboxQueued(`${PEER}\nI read it.\n${REPLY}`)]) expect(deliveryAsDrawn(r)).toBe(r);
-    expect(idle.origin).toEqual(INBOX); // the held row is untouched
-  });
-
-  it('is drawn, appended into a running turn by the bridge, as a prompt queued there: under the appended row’s own uuid', () => {
-    const own = appended(`${OWN}\nRun the suites.\n\nThen tell me.`);
-    expect(deliveryAsDrawn(own)).toEqual({
-      uuid: own.uuid, parentUuid: null, timestamp: own.timestamp, sessionId: SESSION, isSidechain: false, type: 'attachment',
-      attachment: { type: 'queued_command', prompt: [{ type: 'text', text: 'Run the suites.\n\nThen tell me.' }], commandMode: 'prompt', origin: { kind: 'human' }, source_uuid: own.uuid },
-    });
-    expect(own.message).toEqual({ role: 'user', content: [{ type: 'text', text: `${OWN}\nRun the suites.\n\nThen tell me.` }] }); // the held row is untouched
-    const peer = appended(`${PEER}\nI read it.`);
-    expect(deliveryAsDrawn(peer)).toBe(peer); // a peer's, as it is (O-41)
+  // An undone send's words, as the desk draws it (`off-chain.ts`, `ownerInput`), are the arrivals reader's (UX wave U3,
+  // UC-2; M3's fix round): the owner's without the frame line, through every carrier; a peer's is no owner input.
+  it("the owner's send undone is their words without the frame line, as the user, appended, queued or through the inbox; a peer's is no owner input", () => {
+    expect(ownerInput(row(`${OWN}\nRun the suites.\n\nThen tell me.`, BRIDGE))?.words).toBe('Run the suites.\n\nThen tell me.');
+    expect(ownerInput(appended(`${OWN}\nRun the suites.\n\nThen tell me.`))?.words).toBe('Run the suites.\n\nThen tell me.');
+    expect(ownerInput(queued(`${MESSAGE}\nRe-run the suites.`, 'plugin'))?.words).toBe('Re-run the suites.');
+    expect(ownerInput(inboxRow(`${OWN}\nRun the suites.\n\nThen tell me.`))?.words).toBe('Run the suites.\n\nThen tell me.');
+    expect(ownerInput(inboxQueued(`${MESSAGE}\nRe-run the suites.`, { source_uuid: 'src-own' }))?.words).toBe('Re-run the suites.');
+    for (const r of [
+      row([{ type: 'text', text: `${PEER}\nI read it.` }, { type: 'text', text: 'More.' }], BRIDGE),
+      appended(`${PEER}\nI read it.`),
+      queued(`${PEER}\nI read it.`, 'peer', { source_uuid: 'src-peer', isMeta: true }),
+      inboxRow(`${PEER}\nI read it.\n${REPLY}`),
+      inboxQueued(`${PEER}\nI read it.\n${REPLY}`),
+    ]) expect(ownerInput(r), JSON.stringify(r)).toBeNull();
   });
 
   it('is never read off a row that marks no delivery: typed, origin-less, another plugin’s meta row, a queued prompt typed at the terminal', () => {
@@ -151,7 +130,6 @@ describe('a delivered send’s frame line', () => {
       queued(`${PEER}\nI read it.`, 'task-notification'),
     ]) {
       expect(deliveryFrame(r)).toBeNull();
-      expect(deliveryAsDrawn(r)).toBe(r);
     }
   });
 
@@ -165,14 +143,8 @@ describe('a delivered send’s frame line', () => {
     ]) {
       const r = row(content, BRIDGE);
       expect(deliveryFrame(r)).toBeNull();
-      expect(deliveryAsDrawn(r)).toBe(r);
-      for (const q of [inboxRow(content), inboxQueued(content)]) {
-        expect(deliveryFrame(q)).toBeNull();
-        expect(deliveryAsDrawn(q)).toBe(q);
-      }
-      const a = appended(content);
-      expect(deliveryFrame(a)).toBeNull();
-      expect(deliveryAsDrawn(a)).toBe(a);
+      for (const q of [inboxRow(content), inboxQueued(content)]) expect(deliveryFrame(q)).toBeNull();
+      expect(deliveryFrame(appended(content))).toBeNull();
     }
   });
 
@@ -187,7 +159,6 @@ describe('a delivered send’s frame line', () => {
     ]) {
       const a = appended(text);
       expect(deliveryFrame(a), text).toBeNull();
-      expect(deliveryAsDrawn(a), text).toBe(a);
     }
   });
 
@@ -253,7 +224,7 @@ describe('a delivered send’s frame line', () => {
 
   it("keeps the frame on the owner's send whose words are the engine's interrupt marker: a bubble, never a stop", async () => {
     for (const marker of ['[Request interrupted by user]', '[Request interrupted by user for tool use]']) {
-      expect(text(deliveryAsDrawn(row(`${OWN}\n${marker}`, BRIDGE))), marker).toBe(`${OWN}\n${marker}`);
+      expect(ownerInput(row(`${OWN}\n${marker}`, BRIDGE))?.words, marker).toBe(`${OWN}\n${marker}`);
       const id = `toolu_${String(++n).padStart(6, '0')}`;
       const prompt = row('List the files.', { kind: 'human' }, { promptId: 'p1' });
       const call = { uuid: uuid(), parentUuid: prompt.uuid, timestamp: '2026-10-17T10:00:01.000Z', sessionId: SESSION, isSidechain: false, type: 'assistant', message: { id: `msg_${n}a`, role: 'assistant', model: 'claude-opus-5-5', type: 'message', content: [{ type: 'tool_use', id, name: 'Bash', input: { command: 'ls' } }], stop_reason: null, usage: { input_tokens: 1, output_tokens: 1 } } };
@@ -319,6 +290,6 @@ describe('a delivered send’s frame line', () => {
       }
     }
     // Words that only begin with a marker are a prompt: drawn without the frame.
-    expect(text(deliveryAsDrawn(inboxRow(`${OWN}\n[Request interrupted by user] then carry on`)))).toBe('[Request interrupted by user] then carry on');
+    expect(ownerInput(inboxRow(`${OWN}\n[Request interrupted by user] then carry on`))?.words).toBe('[Request interrupted by user] then carry on');
   });
 });

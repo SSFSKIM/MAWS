@@ -8,7 +8,8 @@ import type { JsonObject } from 'desk-hub/protocol';
 import { describe, expect, it } from 'vitest';
 import { createTranscriptStore } from '../../stores/transcript';
 import type { Row } from '../../transcript/model/rows';
-import { deliveredLines, deliveryAsDrawn, deliveryFrame, isBridgeWake } from '../conversation/delivery-frame';
+import { deliveredLines, deliveryFrame, isBridgeWake } from '../conversation/delivery-frame';
+import { ownerInput } from './off-chain';
 import { NOTICE } from '../../transcript/model/copy';
 import { freshSource, subagentLookupOf } from '../plane-transcript';
 
@@ -56,10 +57,10 @@ describe("the bridge's wake", () => {
   it('is known by its first line, as the user, or through the inbox idle or queued into a running turn', () => {
     for (const row of [asUser(STEER_WAKE, 0), asUser(STEER_WAKE, 0, 'blocks'), inboxIdle(DELIVERY_WAKE, 0), inboxIdle(STEER_WAKE, 0), inboxQueued(DELIVERY_WAKE, 0)]) {
       expect(isBridgeWake(row), JSON.stringify(row)).toBe(true);
-      // No delivery: no frame, no line the tail matches a send by, drawn by MAWS's backfill as it is.
+      // No delivery: no frame, no line the tail matches a send by, and no owner input to draw undone.
       expect(deliveryFrame(row)).toBeNull();
       expect(deliveredLines(row)).toEqual([]);
-      expect(deliveryAsDrawn(row)).toBe(row);
+      expect(ownerInput(row)).toBeNull();
     }
   });
 

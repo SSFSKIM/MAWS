@@ -152,20 +152,30 @@ describe('a subagent transcript’s notifications from disk', () => {
 // DOM, rows stacked over each other), and the copied turns added empty dividers. Pinned here over the same recorded
 // session in both forms: pass 1's `subagent` journal and its disk transcript (`subagent-parent`).
 describe('one session in both event forms', () => {
+  const SESSION = '9a1d4262-0b43-46ad-acb9-5982f31d209c';
+  const forms = async () => ({ disk: await backfillFixture('subagent-parent', SESSION, sidecars(SESSION)), live: journalToEvents(loadJournal('pass1', 'subagent')) });
+  const shownOnce = (events: SessionEvent[], alone: Row[]) => {
+    const rows = rowsOf(stateOf(events));
+    const ids = rows.map((row) => row.id);
+    expect(ids.filter((id, i) => ids.indexOf(id) !== i), 'no row id twice').toEqual([]);
+    const texts = ofKind(rows, 'assistant_text').map((row) => row.id);
+    expect(texts).toEqual([...new Set(texts)]);
+    expect(ofKind(rows, 'divider')).toHaveLength(ofKind(alone, 'divider').length); // no divider of a copied turn
+  };
+
   it('shows each row once: a copy of a row already shown is dropped, and a turn made only of copies shows nothing', async () => {
-    const SESSION = '9a1d4262-0b43-46ad-acb9-5982f31d209c';
-    const disk = await backfillFixture('subagent-parent', SESSION, sidecars(SESSION));
-    const live = journalToEvents(loadJournal('pass1', 'subagent'));
-    const alone = rowsOf(stateOf(disk));
-    for (const events of [[...disk, ...live], [...live, ...disk]]) {
-      const rows = rowsOf(stateOf(events));
-      const ids = rows.map((row) => row.id);
-      expect(ids.filter((id, i) => ids.indexOf(id) !== i), 'no row id twice').toEqual([]);
-      const texts = ofKind(rows, 'assistant_text').map((row) => row.id);
-      expect(texts).toEqual([...new Set(texts)]);
-      expect(ofKind(rows, 'divider')).toHaveLength(ofKind(alone, 'divider').length); // no divider of a copied turn
-    }
+    const { disk, live } = await forms();
+    shownOnce([...disk, ...live], rowsOf(stateOf(disk)));
     await expect(`${JSON.stringify(rowsOf(stateOf([...disk, ...live])).map((row) => [row.kind, row.id]), null, 1)}\n`).toMatchFileSnapshot(join(SNAPSHOT_DIR, 'both-forms-subagent.rows.json'));
+  });
+
+  // Expected to fail until M4 (the U3a document, Decision Log, the architect's ruling of 2026-11-13): read live first,
+  // the file's turn for each agent's end holds the task's notice, which the live wire's message does not carry yet, so
+  // that turn is no turn of copies and draws its divider. M4 makes the live carrier bear the arrival, under the first
+  // carrier's rule the line then stands in the live turn, and the file's turn is copies again. M4 removes this mark.
+  it.fails('live first, the same (expected to fail until M4: the live message carries no arrival yet)', async () => {
+    const { disk, live } = await forms();
+    shownOnce([...live, ...disk], rowsOf(stateOf(disk)));
   });
 });
 
