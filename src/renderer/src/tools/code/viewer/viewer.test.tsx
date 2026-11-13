@@ -21,7 +21,7 @@ import { useFiles } from '../files/store';
 import { codeTranscriptActions, normalizeLexically, openFile, sessionOfTurn } from '../open-file';
 import { FLASH_CLASS } from './CodeView';
 import { FileBody, FileViewer } from './FileViewer';
-import { installDisk, OUTSIDE_REFUSAL } from '../../../test-support/code-disk';
+import { fakeHash, installDisk, OUTSIDE_REFUSAL } from '../../../test-support/code-disk';
 import { installResizeObserver } from '../../../test-support/resize';
 import { CODE_CAP, dataUrl, externalKindOf, IMAGE_CAP, jumpTarget, kindOf, MARKDOWN_RENDER_CAP } from './kinds';
 import { existingViewState, readOnlyReason, useViewer, VIEWER_ENTRIES_MAX } from './viewer-store';
@@ -767,6 +767,27 @@ describe('a file the transcript names (U6c)', () => {
     await waitFor(() => expect(shown('/r/app.ts')).toMatchObject({ named: false, editable: true }));
     expect(shown('/r/app.ts')!.updated).toBe(0); // neither read changed the bytes
     offs.forEach((off) => off());
+  });
+
+  // The branch review's finding 3: admission is any chunk's answer, not the first one's alone. A text past its first
+  // chunk read first inside the folders and then, the same file by its hash, admitted by the transcript is named.
+  it('a continuation read that answers named makes the entry named and read-only', async () => {
+    const big = 'a'.repeat(MiB + 1);
+    installFakeMain(async (name, input) => {
+      if (name === 'files.watch' || name === 'files.unwatch') return ok();
+      if (name !== 'files.read') return fail(`unexpected ${name}`);
+      const offset = (input.offset as number | undefined) ?? 0;
+      const end = Math.min(big.length, offset + ((input.length as number | undefined) ?? FILES_READ_DEFAULT_LENGTH));
+      const hashed = input.hash === true;
+      return ok({
+        encoding: 'utf8', content: big.slice(offset, end), bytes: big.length, offset, length: end - offset, truncated: end < big.length, mime: 'text/plain',
+        hash: hashed ? fakeHash(big) : null, utf8: hashed ? true : null, ...(offset > 0 ? { named: true } : {}),
+      });
+    });
+    show('/r/big.txt');
+    await waitFor(() => expect(shown('/r/big.txt')?.loads).toBe(1));
+    expect(shown('/r/big.txt')).toMatchObject({ status: 'ready', complete: true, named: true, editable: false });
+    expect(readOnlyReason(shown('/r/big.txt')!)).toBe('outside');
   });
 
   it('W1: a read in flight when its tab closes lands nowhere', async () => {
