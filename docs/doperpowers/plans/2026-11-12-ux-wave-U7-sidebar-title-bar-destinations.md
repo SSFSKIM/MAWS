@@ -864,10 +864,10 @@ A drawn example was warranted, and it is made: six frames and one frame per ques
 6. A project in the sidebar with "Hidden · 2" closed and its chevron, then open with its rows indented; a row's menu with Hide directly after Pin; a hidden row's menu with Unhide.
 
 **Questions only the owner can settle,** each with the answer recommended to the owner. The document is written so that each answer changes one place.
-1. *Hide: only in a row's menu, or also a button on the row?* Recommended: also a button on the row, by the owner's own words, "hide a session with one click". Every row under the pointer then shows a Hide button beside the three dots, and the title gives it 27 px while it shows. The other answer leaves a row as it looks today. Place: M3, decision 9, which is built on the answer; the menu item is built either way.
-2. *The ring alone, or with the limit's name and percent beside it?* Recommended: the ring alone, as Claude Desktop draws it; the percent is in the tooltip and in the popover. The other answer keeps today's words beside the ring and takes 79 px of the title bar from the tabs, as measured on the drawing: at the default window with eight tabs the last no longer fits. Place: M7, decision 2.
-3. *After a relaunch, is Settings open again?* Recommended: no; the app opens on what was behind it. The other answer restores the dialog over the tabs. Place: §F, the dialog's state, and "At hydration".
-4. *⌘J, ⇧⌘D or ⇧⌘F pressed while a page is open:* the page is left and the surface shows (recommended), or nothing happens until the person is back on the tabs. Place: M6, decision 6.
+1. *Hide: only in a row's menu, or also a button on the row?* Recommended: also a button on the row, by the owner's own words, "hide a session with one click". Every row under the pointer then shows a Hide button beside the three dots, and the title gives it 27 px while it shows. The other answer leaves a row as it looks today. Place: M3, decision 9, which is built on the answer; the menu item is built either way. **Answered (2026-11-12): "Button on the row (Recommended)"**: M3 builds the button.
+2. *The ring alone, or with the limit's name and percent beside it?* Recommended: the ring alone, as Claude Desktop draws it; the percent is in the tooltip and in the popover. The other answer keeps today's words beside the ring and takes 79 px of the title bar from the tabs, as measured on the drawing: at the default window with eight tabs the last no longer fits. Place: M7, decision 2. **Answered (2026-11-12): "Ring alone (Recommended)".**
+3. *After a relaunch, is Settings open again?* Recommended: no; the app opens on what was behind it. The other answer restores the dialog over the tabs. Place: §F, the dialog's state, and "At hydration". **Answered (2026-11-12): "No (Recommended)".**
+4. *⌘J, ⇧⌘D or ⇧⌘F pressed while a page is open:* the page is left and the surface shows (recommended), or nothing happens until the person is back on the tabs. Place: M6, decision 6. **Answered (2026-11-12): "Leave the page (Recommended)".**
 
 ## The pull requests
 
@@ -948,6 +948,9 @@ U7a's pull request carries the dated amendment of the ruling S-11 reverses; U7b'
   `SectionHeading` takes an optional `status` prop that keeps one `role="status"` element mounted (empty while there is nothing to say), so the word is announced when it appears; only the Projects heading passes it. `setReconnecting` writes only on a change, and `test-support/shell-stores.ts`' `resetShellStores` resets it. A mention's file name is its path's last non-empty segment, as Claude Desktop takes it (`@src/` gives `src`).
   Rationale: each is the smallest means of M1's decisions 2 to 4 that the code allows.
   Date/Author: 2026-11-13, M1's executor; folded by the controller.
+
+- Decision (the owner's answers to the four questions of "What the owner should look at", 2026-11-12, the owner's local day, relayed by the architect). Question 1: "Button on the row (Recommended)", so M3 builds decision 9's button (22 px, left of the three dots, shown while the pointer is over the row or focus is inside it, "Unhide" in the Hidden list, never on a row that cannot be hidden), with its step in M4's "hide and unhide" and the changed measure in `e2e/ux1-sidebar.spec.ts`; the menu item is built as well. Question 2: "Ring alone (Recommended)". Question 3: "No (Recommended)": Settings is not open again after a relaunch. Question 4: "Leave the page (Recommended)". Each is the answer the document was written to; nothing of M5 to M8 changes.
+  Date/Author: 2026-11-12, the owner, through the architect; recorded by the controller.
 
 ## Outcomes & Retrospective
 
