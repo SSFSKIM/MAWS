@@ -92,6 +92,19 @@ describe('session pane', () => {
     expect(screen.queryByText('request')).toBeNull();
   });
 
+  // UX wave U4a (decision 12): where the pane mounts the composer, which draws a waiting message in its stack, the
+  // transcript is told so; in place of the holder notice it is not, and draws its held bubbles as before.
+  it('tells the transcript slot there is a stack where it mounts the composer, and not where the holder notice stands', () => {
+    registerSlot('transcript', ({ waiting }) => <p>transcript waiting {waiting ?? 'none'}</p>);
+    const { unmount } = render(<SessionPane appSessionId={idOf('Charter + research')} paneIndex={0} />);
+    expect(screen.getByText('Composer unavailable')).toBeTruthy();
+    expect(screen.getByText('transcript waiting stacked')).toBeTruthy();
+    unmount();
+    render(<SessionPane appSessionId={idOf('Somersault terminal run')} paneIndex={0} />);
+    expect(screen.getByText('Live in Terminal · pid 7135 · read-only')).toBeTruthy();
+    expect(screen.getByText('transcript waiting none')).toBeTruthy();
+  });
+
   // C10 (M5): the notice's actions are C10's HolderActions, pinned in `sessions/HolderActions.test.tsx`
   it('a background-job holder with a known id offers "Attach in a terminal tab"; one without an id only "Fork a copy"', () => {
     useSessions.setState({ records: new Map([[A, record(A, { holder: { kind: 'background_job', pid: 42, jobId: 'e6dcd828' } })]]) });
