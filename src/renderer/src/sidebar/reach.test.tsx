@@ -124,7 +124,8 @@ describe('the reach mark', () => {
 });
 
 describe('Share on a row', () => {
-  it('gives a listed row you own in a hub project a menu holding Share, which opens the sheet; any other listed row has no menu', async () => {
+  // The UX wave, U9 (Interfaces §6): every lane B listed row has the session menu now, its acts over the link before Share
+  it('gives a listed row you own in a hub project a menu holding Share after its acts, which opens the sheet; one in no hub project its acts alone', async () => {
     fill([mine('m', { title: 'Mine' }), mine('n', { title: 'No project', project: null, orgKey: null })]);
     render(
       <>
@@ -133,9 +134,12 @@ describe('Share on a row', () => {
       </>,
     );
     expect(row('Mine').getAttribute('data-menu')).toBe(`session:${studio('m')}`);
-    expect(row('No project').getAttribute('data-menu')).toBe('none');
+    expect(row('No project').getAttribute('data-menu')).toBe(`session:${studio('n')}`);
+    const none = await menuOf('No project');
+    expect(within(none).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Rename…', 'Fork', 'Archive']);
+    await userEvent.keyboard('{Escape}');
     const menu = await menuOf('Mine');
-    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual([SHARE.menuItem, OWNER.menuItem]);
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Rename…', 'Fork', 'Archive', SHARE.menuItem, OWNER.menuItem]);
     fireEvent.click(within(menu).getByRole('menuitem', { name: SHARE.menuItem }));
     expect(await screen.findByRole('dialog', { name: SHARE.title })).toBeTruthy();
   });
@@ -207,11 +211,15 @@ describe('Add owner beside Share', () => {
     expect(await itemsOf('Here')).toEqual([]);
   });
 
+  // The UX wave, U9: another member's lane B listed row has the session menu, Fork alone
   it("is not on another member's listed row", async () => {
     fill([mine('t', { title: 'Theirs', owners: ['member-ana'], mine: false })]);
     act(() => usePeople.setState({ on: new Set([ORG]) }));
     render(<Sidebar />);
-    expect(row('Theirs').getAttribute('data-menu')).toBe('none');
+    expect(row('Theirs').getAttribute('data-menu')).toBe(`session:${studio('t')}`);
+    expect(await itemsOf('Theirs')).toEqual([]);
+    expect(within(await menuOf('Theirs')).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Fork']);
+    await userEvent.keyboard('{Escape}');
   });
 });
 
