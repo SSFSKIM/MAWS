@@ -11,7 +11,7 @@
 //   machine is `up`. A tab that has only shown the phase's words (restored at launch, opened while offline) holds nothing,
 //   and its pane hydrates at `up` as before.
 // - A held key not whole at the return (its hydration failed, or was still out at the loss and fails) is read again,
-//   as a remount used to. The UX wave, U9 (M5, #565): decided at the return's settled word, main's `remote.settled` for
+//   as a remount used to. The UX wave, U9 (M5, the ticket on history read after a link's return): decided at the return's settled word, main's `remote.settled` for
 //   the roster's generation after the loss, or SETTLE_BACKSTOP_MS after that `up` (./remote-session.ts'
 //   `whenHistoryReads`), whether or not anything resubscribes; never beside the live sessions' resumes, and never
 //   before the machine is back. A hydration still out waits first.
@@ -43,14 +43,15 @@ export function holdRemoteTranscript(appSessionId: AppSessionId): () => void {
   const phase = () => transcripts().entries[key]?.phase;
   let held = false;
   let ended = false;
-  let losses = 0; // each loss heard while held
+  let losses = 0; // each loss of the pane's key heard, held or not yet
   let returning = false; // a loss whose return has not yet been met
   // At the stream's return: a hydration still out settles first (its successor too, should one replace it); then a
   // failed key hydrates again, once. A later loss, or the hold's end, stops it there.
   const readAgainIfNotWhole = async (loss: number) => {
     const current = () => !ended && loss === losses && up();
     let waited: Promise<void> | null = null;
-    while (current() && phase() === 'hydrating') {
+    // a key with no attachment left answers a new settled promise at each ask: nothing hydrates it, so nothing to wait on
+    while (current() && phase() === 'hydrating' && transcripts().attached(key)) {
       const settled = transcripts().retry(key); // a key still hydrating answers its hydration's settlement
       if (settled === waited) return;
       waited = settled;
@@ -65,18 +66,19 @@ export function holdRemoteTranscript(appSessionId: AppSessionId): () => void {
     const link = said()?.link.state ?? null;
     const lost = link === 'down' && linkWas === 'up';
     linkWas = link;
+    // a loss of the pane's key counts whether or not the hold has acquired it: the store counts a pane's attachment
+    // after it publishes `hydrating`, and main says the roster's `down` before the session's, so a hold mounted before
+    // its pane may hear neither word of the loss with the roster up and acquire only at the return
+    if (lost && !returning && (held || transcripts().attached(key))) {
+      losses += 1;
+      lostIn = generation();
+      returning = true;
+    }
     if (!held) {
       if (!up() || !transcripts().attached(key)) return;
       held = true;
       offTranscripts();
       void transcripts().attach(key, source); // the same source: the pane's attachment, counted once more
-      // and on: the store counts a pane's attachment after it publishes `hydrating`, so the call that acquires may be
-      // main's word of the loss itself (said before the roster's), which must arm
-    }
-    if (lost && !returning) {
-      losses += 1;
-      lostIn = generation();
-      returning = true;
     }
     if (returning && !settling && up() && generation() > lostIn) {
       settling = true;
