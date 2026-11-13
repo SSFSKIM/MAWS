@@ -1296,7 +1296,10 @@ interface CopiedImage {
   decoded: { width: number; height: number } | null;
   pasteboardPng: boolean | string;
 }
-const SCREENSHOT_SCENE_MARK = 'u12a-copy-screenshot-scene'; // written last, so the case's clipboard is written back
+// Put on the pasteboard once the case is done with the image it copied, so `withNativeClipboard` writes back what the
+// pasteboard held before; written only while the pasteboard still holds that image's bytes, a copy by anything else
+// since being left alone.
+const SCREENSHOT_SCENE_MARK = 'u12a-copy-screenshot-scene';
 
 test('U12a (copy screenshot, A4): Copy screenshot puts the page the pane shows on the clipboard as a PNG image at the view’s device pixels, and the chrome says so', async () => {
   await browserScene(['U12a: copy screenshot'], async (s) => {
@@ -1314,30 +1317,44 @@ test('U12a (copy screenshot, A4): Copy screenshot puts the page the pane shows o
 
     await withNativeClipboard(s.maws.app, [SCREENSHOT_SCENE_MARK], async () => {
       await overflow(s, panel, 'Copy screenshot');
-      await expect(noticesIn(panel).filter({ hasText: 'Screenshot copied to clipboard' })).toBeVisible();
-      const copied: CopiedImage = await s.maws.app.evaluate(async ({ clipboard, nativeImage }) => {
-        const items = await clipboard.read();
-        const types = items.flatMap((item) => item.types);
-        const item = items.find((candidate) => candidate.types.includes('image/png'));
-        const pasteboardPng = await clipboard.has('electron application/osclipboard;format="public.png"').catch((error: unknown) => String(error));
-        if (!item) return { types, png: null, decoded: null, pasteboardPng };
-        const bytes = Buffer.from(await ((await item.getType('image/png')) as Blob).arrayBuffer());
-        const image = nativeImage.createFromBuffer(bytes);
-        return {
-          types,
-          png: { signature: bytes.subarray(0, 8).toString('hex'), width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) },
-          decoded: image.isEmpty() ? null : image.getSize(),
-          pasteboardPng,
-        };
-      });
-      test.info().annotations.push({ type: 'the pasteboard after Copy screenshot', description: JSON.stringify(copied) });
-      expect(copied.types).toContain('image/png');
-      expect(copied.png?.signature, 'a PNG').toBe('89504e470d0a1a0a');
-      expect(copied.decoded, 'Electron reads the item back as an image').not.toBeNull();
-      for (const read of [copied.png!, copied.decoded!]) {
-        expect(near(read.width, expected.width) && near(read.height, expected.height), `${JSON.stringify(read)} is the view at device pixels, ${JSON.stringify(expected)}`).toBe(true);
+      try {
+        await expect(noticesIn(panel).filter({ hasText: 'Screenshot copied to clipboard' })).toBeVisible();
+        const copied: CopiedImage = await s.maws.app.evaluate(async ({ clipboard, nativeImage }) => {
+          const items = await clipboard.read();
+          const types = items.flatMap((item) => item.types);
+          const item = items.find((candidate) => candidate.types.includes('image/png'));
+          const pasteboardPng = await clipboard.has('electron application/osclipboard;format="public.png"').catch((error: unknown) => String(error));
+          if (!item) return { types, png: null, decoded: null, pasteboardPng };
+          const bytes = Buffer.from(await ((await item.getType('image/png')) as Blob).arrayBuffer());
+          (globalThis as { __u12aCopiedPng?: Buffer }).__u12aCopiedPng = bytes; // what the case wrote, for the finally below
+          const image = nativeImage.createFromBuffer(bytes);
+          return {
+            types,
+            png: { signature: bytes.subarray(0, 8).toString('hex'), width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) },
+            decoded: image.isEmpty() ? null : image.getSize(),
+            pasteboardPng,
+          };
+        });
+        test.info().annotations.push({ type: 'the pasteboard after Copy screenshot', description: JSON.stringify(copied) });
+        expect(copied.types).toContain('image/png');
+        expect(copied.png?.signature, 'a PNG').toBe('89504e470d0a1a0a');
+        expect(copied.decoded, 'Electron reads the item back as an image').not.toBeNull();
+        for (const read of [copied.png!, copied.decoded!]) {
+          expect(near(read.width, expected.width) && near(read.height, expected.height), `${JSON.stringify(read)} is the view at device pixels, ${JSON.stringify(expected)}`).toBe(true);
+        }
+      } finally {
+        // Checked and written in one call into main, so nothing else's copy lands between the two.
+        await s.maws.app.evaluate(async ({ clipboard }, mark) => {
+          const store = globalThis as { __u12aCopiedPng?: Buffer };
+          const wrote = store.__u12aCopiedPng;
+          delete store.__u12aCopiedPng;
+          if (!wrote) return;
+          const item = (await clipboard.read()).find((candidate) => candidate.types.includes('image/png'));
+          const blob = item ? await Promise.resolve(item.getType('image/png')).catch(() => null) : null; // unreadable: not ours to vouch for
+          const now = blob ? Buffer.from(await (blob as Blob).arrayBuffer()) : null;
+          if (now?.equals(wrote)) await clipboard.writeText(mark);
+        }, SCREENSHOT_SCENE_MARK);
       }
-      await s.maws.app.evaluate(({ clipboard }, mark) => clipboard.writeText(mark), SCREENSHOT_SCENE_MARK);
     });
   });
 });
