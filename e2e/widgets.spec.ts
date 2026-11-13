@@ -204,6 +204,14 @@ async function settledLog(maws: BackendLaunch): Promise<string> {
 // P2-B M3: My items draws one row per plugin, at its representative installation's scope (`data-plugin-scope`); "Disabled"
 // when the CLI lists it not enabled here; its changes in the row's overflow (Turn on or off, Update, Uninstall…).
 const installedRow = (w: Locator, id: string, scope = 'user') => w.locator(`[data-plugins-section="my-items"] [data-plugin-row="${id}"][data-plugin-scope="${scope}"]`);
+// A dialog layer that has just opened takes Esc and an outside press once its mount effects have run (the focus is
+// inside it) and the timer turn after them has passed: Radix's dismissable layer arms its outside-press listener on a
+// zero-delay timer from that effect, so a press dispatched before that turn reaches no listener and is lost (the board
+// 523 scene's press on Mac run 43405665313). A zero-delay timer set after the focus is seen runs after the layer's.
+async function layerTakesInput(layer: Locator): Promise<void> {
+  await expect.poll(() => layer.evaluate((node) => node.contains(document.activeElement)), { message: 'the layer holds the focus' }).toBe(true);
+  await layer.page().evaluate(() => new Promise<void>((done) => setTimeout(done, 0)));
+}
 async function expectListed(w: Locator, id: string, scope = 'user', enabled = true): Promise<void> {
   const row = installedRow(w, id, scope);
   await expect(row).toBeVisible();
@@ -1113,6 +1121,7 @@ test.describe('plugin management (E8)', () => {
     expect(apart(stacked, alone), `the window reads ${stacked} under both layers, ${alone} under the dialog alone`).toBeLessThanOrEqual(2);
     await test.info().attach('stacked-plugins-uninstall', { body: await page.screenshot(), contentType: 'image/png' });
 
+    await layerTakesInput(sheet);
     await page.keyboard.press('Escape');
     await expect(sheet).toBeHidden();
     await expect(w).toBeVisible();
@@ -1126,6 +1135,7 @@ test.describe('plugin management (E8)', () => {
     await rowAction(installedRow(w, 'e8-tools@e8-scratch'), 'Uninstall…');
     await expect(sheet).toBeVisible();
     await expect(backdrops).toHaveCount(2);
+    await layerTakesInput(sheet);
     await page.mouse.click(point.x, point.y);
     await expect(sheet).toBeHidden();
     await expect(w).toBeVisible();
