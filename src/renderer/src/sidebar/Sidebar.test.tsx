@@ -1599,6 +1599,30 @@ describe('the footer gear', () => {
 });
 // C11 end
 
+// UX wave U7b (M5): under a page its row is current and no session row is selected, the session behind it not being on
+// screen; Back gives both back.
+describe('the sidebar under a page', () => {
+  beforeEach(() => fillStores(nine));
+
+  it('marks the open page’s row current and selects no session row, until Back', () => {
+    expand('proj-maws');
+    act(() => useLayout.getState().openSession(idOf('Fix sidebar drag')));
+    render(<Sidebar />);
+    const current = (name: string) => screen.getByRole('button', { name }).getAttribute('aria-current');
+    expect(row('Fix sidebar drag').getAttribute('aria-selected')).toBe('true');
+    act(() => useLayout.getState().openDestination({ kind: 'projects' }));
+    expect(row('Fix sidebar drag').getAttribute('aria-selected')).not.toBe('true');
+    expect(current('Projects')).toBe('page');
+    expect(current('Customize')).toBeNull();
+    act(() => useLayout.getState().openDestination({ kind: 'library' }));
+    expect(current('Artifacts')).toBe('page');
+    expect(current('Projects')).toBeNull();
+    act(() => useLayout.getState().closeDestination());
+    expect(row('Fix sidebar drag').getAttribute('aria-selected')).toBe('true');
+    expect(current('Artifacts')).toBeNull();
+  });
+});
+
 // C12 start: the memory budget's released mark (C12 execution document, Interfaces "Surfaces of the budget"): one muted
 // word on an idle row, with the release's time and budget in its title; no glyph or unread change.
 describe('a released session’s row', () => {
