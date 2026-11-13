@@ -191,8 +191,73 @@ No executor runs e2e. The scenes to run alone first, the groups, and the cross-b
 ### Not verified
 
 - A whole unit suite with no failure outside the known set. The VM's runs were noisy under load, and every other failure passes rerun alone. Class 1a is the record.
-- Not every e2e scene has been seen green on a real build yet. The groups at `4206f9520` passed `code`, `default`, `machines`, `panel` and `remote`; `layout` failed. `layout` and `default` are being rerun at `6b6cb77fa`.
+- Not every e2e scene has been seen green on a real build yet. The groups at `4206f9520` passed `code`, `default`, `machines`, `panel` and `remote`; `layout` failed. At `6b6cb77fa` (run 43389400800) `default` passed and `layout` passed 15 of 16; the one failure was `ux2-shell.spec.ts:612`, fixed at `11da6c82a` (below). Nothing after `6b6cb77fa` has been run as an e2e group yet.
+
+## After the hand-over: the place, the ux2-shell scene and the branch review (2026-11-13)
+
+### The ux2-shell scene (`11da6c82a`)
+
+`e2e/ux2-shell.spec.ts:612`, the compact file-tab scene, is a scene this branch never edited. It broke on M4's markup: the title now sits inside a box it shares with the place. The fix is scene-only. The title selector is now `:scope > span > span.truncate`. The product code is unchanged.
+
+### A tab's place, readable or not drawn (`0b0144484`)
+
+The architect looked at the narrow-width screenshots and found the places squeezed to "c." and "c…". The ruling: a place is drawn only while a readable part of it fits, meaning its whole text or at least its first four characters before the ellipsis; otherwise it is not drawn. The fix is pure CSS on tokens, with no measuring in JavaScript:
+
+- The title and the place share a one-line box that wraps and clips what wraps (`flex h-[1lh] min-w-0 flex-wrap overflow-hidden`).
+- The title does not shrink.
+- The place asks for its whole text or 5em (`max-w-max min-w-0 grow basis-[5em] truncate`). When that does not fit beside the title, the place wraps onto the clipped second line and is not seen.
+
+A unit test pins the classes. The one-strip scene checks, at every width step, that each place is either whole or at least four characters before its ellipsis, or else not drawn.
+
+### The branch review's five findings (`8b3d4a147` red, `84745874b`)
+
+The architect ran an xhigh panel over `c0e7b2ae8..a45780aad`. Its verdict was "incorrect", with five findings, each confirmed by its verifier. The architect's rulings are in the execution document's Decision Log ("The branch review …"). One executor, the M3 executor, fixed all five:
+
+1. **(P1)** A chat with a write of its draft still in flight looked empty and could be discarded. `patchIntent` now counts unanswered intent writes per session, and `isEmptyChat` is false while that count is above zero. There is no wire or IPC change.
+2. **(P2)** `isEmptyChat` is now the one definition of empty, read by every caller: the reuse, the close of the other empty chats, and the relaunch sweep. It also counts a queued prefill and a queued attachment as content.
+3. **(P2)** `closeEmptyChat` takes the tab out in the same synchronous run. What the session holds beside it (`dropSession`) is dropped only after main answers yes. A refusal or an error restores the tab and its pin.
+4. **(P2)** `rowOf` resolves a listed session with no record, in either lane, to its listing's row.
+5. **(P2)** `subscribeTransfer` now also subscribes to what `sessionRow` reads, through the new `subscribeSessionRows`.
+
+The executor's checks on the VM:
+
+- at `8b3d4a147` (red): 19 failures, each for the expected reason;
+- at `84745874b`: web tsc 0, eslint on the 8 changed files 0, and the touched directories plus `tokens-guard`: 274 files and 3896 tests passed.
+
+The execution document's Outcomes now carries the lesson's third instance: "empty" must be decided by one function that reads every place content can wait, in-flight writes included.
+
+**Build F.** None of the five fixes, and neither the place fix nor the scene fix, touches what build F reads from a stored layout or the settings files. `e2e/cross-build.spec.ts` is unchanged since `a45780aad`. The round trip of record (run 43389572773) therefore stands, and no rerun is needed.
+
+### The wave's task review
+
+The task review of `cff5750f3..84745874b` approved the wave. It found no Critical or Important issues. The reviewer traced the editor's cleanup path: the count rises in the same tick that the live draft disappears, and `session.intent.patch` has one caller. It also confirmed that the `finally` covers every exit, so the count cannot leak.
+
+It found seven Minor issues:
+
+- **Fixed now:**
+  - (1) The one-strip scene stopped at the first width where a place gives way, so the readable-or-not-drawn check never saw 700 and 600 px. It now visits every width, and a place counts as drawn only on the box's first line. That fix went to the M4 executor.
+  - (3) A doc comment was misplaced above `subscribeSessionRows`.
+  - (5) The `writing` count had no test reset, and the answered and rejected paths had no test. Fixes 3 and 5 went to the M3 executor.
+- **Left for the branch reviewer** (also under "Unresolved review findings" below):
+  - (2) `basis-[5em]` holds four characters plus the ellipsis for Latin and full-width CJK. It does not for colour emoji, which are wider than 1em. This is an edge case of names; the remedy would be about `5.5em`.
+  - (4) In `rowOf`, `rowOfListed ?? orgKey ?? machineKey` copies the private `setKeyOfListed` in `stores/org-projects.ts`, a file outside this landing. Exporting that function is one line, for whoever next owns that file.
+  - (6) The put-back on a refusal follows §E (`openTab(..., { activate: false })`): an unpinned chat comes back at the end of the strip, not where it was. A tab the person reopens from the sidebar during the pending window is closed by `dropSession` when main says yes; before this wave the same sequence left a tab whose intent had been discarded. Whether the chat should get its position back is a spec question.
+  - (7) In the directory runs, files this wave did not touch print stderr: `Composer.test.tsx` and `Editor.test.tsx` act and flushSync warnings, `PushState.test.tsx` "no tool registered", plus `Tab.test.tsx`, `resource.test.tsx` and `useSetupIntent.test.tsx`. This looks like existing debt and was not checked against the base.
+
+Fix commits: `9b97f3749` (the comment and the count's reset, plus answered and rejected cases), and `125a3ff36` (the scene, now at every width).
+- At `9b97f3749` the M3 executor ran, on the VM: web tsc 0, eslint 0 on its 4 files, and vitest on `empty-chats.test.ts`, the 21 files that import `setup-actions` or `test-support/setup-intents`, and `keymap/`: 49 files and 1200 tests passed.
+- At `125a3ff36` the M4 executor ran the e2e project's tsc and eslint on `e2e/shell.spec.ts`; both passed. No e2e was run.
+- I read both diffs against the findings and did not dispatch another task review for them: each is a few lines, and each does what its finding asked.
+
+The head is `125a3ff36`, plus this record. Master has not moved since `f8f8fda67`. `git diff --quiet a45780aad HEAD -- e2e/cross-build.spec.ts` exits 0, and no schema, settings or layout file changed after `a45780aad`.
+
+### Unresolved review findings (for the branch reviewer)
+
+- **The place and emoji** (`src/renderer/src/main/Tab.tsx:198`). `basis-[5em]` holds four glyphs and the ellipsis only while a glyph is at most 1em wide. Four colour emoji would show as three and the ellipsis. This is an edge case of names. The remedy is about `5.5em`.
+- **A duplicated formula** (`src/renderer/src/keymap/actions-runtime.ts:387`). `rowOfListed ?? orgKey ?? machineKey` copies the private `setKeyOfListed` (`stores/org-projects.ts:162`). Exporting that is a one-line change, but in a file outside this landing.
+- **Where a refused discard puts the chat back** (`actions-runtime.ts:202-215`). An unpinned chat returns at the strip's end, because §E's put-back is `openTab(..., { activate: false })`. A tab reopened from the sidebar during the pending window is closed by `dropSession` on yes, which is no worse than before the wave. Whether the chat gets its position back is a spec question.
+- **stderr noise from untouched files.** `Composer.test.tsx` and `Editor.test.tsx` print act and flushSync warnings, and `PushState.test.tsx` prints "no tool registered". `Tab.test.tsx`, `resource.test.tsx` and `useSetupIntent.test.tsx` also print. This looks like existing debt; nobody checked it against the base.
 
 ## Residue
 
-- **A pinned tool cannot be pinned or unpinned while a tab that is not a session's is in front.** In `src/renderer/src/panel/SurfaceRow.tsx`, the session tools' icons are `disabled={!session && !tab}`, and their folded items under "More surfaces" are disabled the same way. With the library, a page or Diagnostics in front, a person has no way to reach the tool's "Unpin from toolbar". Found while the cross-build scene was being fixed, and not for this landing to change. It needs a tracker row.
+- **A pinned tool cannot be pinned or unpinned while a tab that is not a session's is in front.** In `src/renderer/src/panel/SurfaceRow.tsx`, the session tools' icons are `disabled={!session && !tab}`, and their folded items under "More surfaces" are disabled the same way. With the library, a page or Diagnostics in front, a person has no way to reach the tool's "Unpin from toolbar". Found while the cross-build scene was being fixed, and not for this landing to change. The architect registered it as board ticket 620.

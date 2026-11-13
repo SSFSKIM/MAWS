@@ -30,6 +30,7 @@ The build on the owner's machines today, build F (commit `f1852de3a`), reads the
 - [x] (2026-11-13 07:46Z) M5 — The e2e scenes, the record, and the acceptance run; review fixes `dca21b066`, `5003003a0`, `9dce99e62`, task review clean on its third round. Built at `4a31bd4d8..4206f9520` (master merged at `3958e7df4`); the acceptance run at `8be4eb94f`: `pnpm typecheck` exit 0, `pnpm lint` exit 0, `pnpm test` with the known set, three load-bound files that pass rerun alone, and `test/support/tokens-guard.test.ts` (fixed in M5's fix round).
 - Hand-over for the runs an executor does not start (2026-11-13). Alone first, on a Mac under the load rule: in `e2e/shell.spec.ts` "one strip: …", "shell: sidebar, overview, …" and "a layout from before O6 comes back …"; in `e2e/sessions.spec.ts` the four "new chat from … reuses an empty chat …" scenes, "New chat from each control, with three sessions open, …", "a relaunch brings the strip back: …", and "New chat from the project list …", "Overview New chat on an empty board …", "⌘N (File › New chat) from an open session …". Then the groups `layout`, `default`, `panel`, `code`, `machines`, `remote`. The cross-build run of record: `scripts/ci-gate.sh "$PWD" --gates e2e:cross-build --peer-exact f1852de3a --label u13a-xb`, its three U13a scenes run and not skipped. Index-mode scenes checked for a second New chat over an empty one and found unaffected: `remote.spec.ts`, `c12-prerun.spec.ts`, `side.spec.ts`, `to-human-live.spec.ts`.
 - [x] (2026-11-13) The round trip with build F, the run of record: run 43389572773 at `a45780aad`, `--peer-exact f1852de3a`, 6 passed and 7 skipped (the daemon-shape scenes that do not apply to this pair), none failed; `(layout, from the peer)`, `(layout, to the peer)` and `(settings, both ways)` ran and passed. The rehearsal over both copies passes again at `a45780aad` (the architect). Groups at `4206f9520`: `code`, `default`, `machines`, `panel`, `remote` passed, `layout` failed (its scene named by the architect); `layout` and `default` rerun at `6b6cb77fa`.
+- [x] (2026-11-13) The branch review's five findings and the place ruling fixed: `0b0144484`, `11da6c82a`, `8b3d4a147` (red), `84745874b`; the wave's task review approved it with seven Minors, three fixed (`9b97f3749`, `125a3ff36`) and four left for the branch reviewer (Decision Log, "The wave's task review").
 - [ ] The proof an executor does not run: the branch review, the rehearsal, the cross-build run with F, the e2e groups, the owner's look, class 1a on the final head.
 - [ ] Pull request opened on the architect's word.
 
@@ -638,6 +639,17 @@ The pull request carries the dated amendments of the two rulings this landing re
   - Decision (P2, `subscribeTransfer`): it also subscribes to what `sessionRow` reads, through a new `subscribeSessionRows` in `keymap/actions-runtime.ts` (sessions, machine loads, unstarted titles). Test: the cover goes from refused to accepted when the machine's load arrives during a drag.
   - Observation: none of the five touches what build F reads (`main.tabs`, `panelTools.surfaces`, `regions`, the settings files) or `e2e/cross-build.spec.ts`; during a pending discard the chat's `panel.<id>` key is kept rather than deleted early, a value F already reads.
     Date/Author: 2026-11-13, the branch review, the architect's rulings; the M3 executor's fixes; recorded by the controller.
+- **2026-11-13 · The wave's task review: approved, seven Minors.**
+  - Fixed:
+    - The one-strip scene now visits every width step, not only the first that gives way, and a place counts as drawn only on the box's first line, inside its visible rect; otherwise it must be wrapped below a box that clips (`125a3ff36`).
+    - `subscribeSessionRows` moved off `sessionRow`'s doc comment.
+    - The intent-write count is cleared by `resetSetupStore()`, and its answered and rejected paths are tested (`9b97f3749`).
+  - Left for the branch reviewer, with the reason:
+    - `basis-[5em]` does not hold four colour emoji and the ellipsis, an edge case of names.
+    - `rowOf` repeats the private `setKeyOfListed` of `stores/org-projects.ts`, a file outside this landing.
+    - A refused discard puts an unpinned chat back at the strip's end, as §E's `openTab(..., { activate: false })` does; whether it should get its position back is a spec question.
+    - Files this wave did not touch print stderr in the directory runs, which is existing debt.
+    Date/Author: 2026-11-13, the task reviewer; recorded by the controller.
 
 ## Outcomes & Retrospective
 
