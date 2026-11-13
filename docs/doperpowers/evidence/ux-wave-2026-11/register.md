@@ -2,7 +2,7 @@
 
 Every item the wave considered, one row each: where it came from, its state, and the line it was given when the cut was put to the owner (so "you" in a line is the owner). Kept beside `docs/doperpowers/specs/2026-11-12-ux-wave-design.md`, which cites the items by these ids. Generated from the wave's cut on 2026-11-12; the architect regenerates it when a state changes.
 
-240 items: 143 to build (135 of them in children now), 11 questions to the owner, 2 for a design round, 7 hands-on checks, 25 already built, 23 keep, 13 the same ask as another item, 4 not MAWS's to fix, 3 handed to the visual renewal, 9 later.
+240 items: 143 to build (135 of them in children now), 11 that were questions to the owner at the cut (five of the questions to the owner are still open: "Questions still open" below), 2 for a design round, 7 hands-on checks, 25 already built, 23 keep, 13 the same ask as another item, 4 not MAWS's to fix, 3 handed to the visual renewal, 9 later.
 
 Ids: `l<n>-…` a mark on the comparison of 2026-10-23, `O-nn` an observation, `#nnn` a board ticket, `S-nn` a finding from P5's sittings, `X-nnn` a tracker row that rides with an item.
 
@@ -391,7 +391,7 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 | l9-browser-delivery-06 | mark | build | Device sizes and a page screenshot. No site-permission prompt: nobody asked for one, and Claude Desktop's only such prompt is for local-network access. |
 | #435 | ticket | build | A pane the agent opens from a remote session appears on the device that sent the turn. |
 | l9-browser-delivery-07 | mark | build | MAWS shows "computer use running · Stop" while a cua call is in flight. The wire cannot say which app is driven; I file a cua ticket for that. The on-screen cursor gets the session's name. |
-| l9-browser-delivery-09 | mark | later | Deferred on 11-12 by your word: "defer drive work for now. we won't use gws, but will rather later use real MCP connectors through Drive MCP and GWS MCPs". Send to Drive stays as it is; Drive delivery through MCP connectors is ticket #603, designed when taken. |
+| l9-browser-delivery-09 | mark | later | Deferred on 11-12 by your word: "defer drive work for now. we won't use gws, but will rather later use real MCP connectors through Drive MCP and GWS MCPs". Send to Drive stays as it is; Drive delivery through MCP connectors is ticket #400, designed when taken. |
 | #400 | ticket | later | Drive through a connector instead of gws: its own design. Note that gws sign-in expires weekly while its Google client is in testing mode. |
 | l9-browser-delivery-04 | mark | keep | Kept. |
 | l9-browser-delivery-11 | mark | keep | Kept. |

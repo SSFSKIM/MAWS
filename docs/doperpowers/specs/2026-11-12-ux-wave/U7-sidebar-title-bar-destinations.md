@@ -91,12 +91,12 @@
   - **The state.** A page is a *destination*: a place in the app that is not a tab. The layout store holds at most one open destination, beside the tabs and independent of them, and, separately, whether the Settings dialog is open:
     ```ts
     type Destination =
-      | { kind: 'customize'; section: 'plugins' | 'skills' | 'mcp' }
+      | { kind: 'customize'; view: 'mine' | 'discover'; show: 'all' | 'plugins' | 'skills' | 'connectors' }   // the owner's answer on Customize's structure (O-14; U11's file)
       | { kind: 'library' }                                        // the Artifacts library
       | { kind: 'projects' };
 
     destination: Destination | null;              // null: the main area shows the tabs
-    openDestination(target: Destination): void;   // replaces an open one; the same kind again only changes its section; closes the Settings dialog
+    openDestination(target: Destination): void;   // replaces an open one; the same kind again only changes its fields (Customize's view and filter); closes the Settings dialog
     closeDestination(): void;                     // back to the tabs, exactly as they were
 
     settings: { section: SettingsSection | null } | null;   // the Settings dialog; U11's sections, plus 'usage' (O-47); null: closed
