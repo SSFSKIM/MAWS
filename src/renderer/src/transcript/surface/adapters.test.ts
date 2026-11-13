@@ -138,17 +138,18 @@ describe('transcript surface adapters', () => {
   });
 
   it.each([
-    { isRunning: true, isErrored: false, isInterrupted: false, status: 'running', label: 'Running Bash', exitCode: null },
-    { isRunning: false, isErrored: true, isInterrupted: false, status: 'error', label: 'Failed Bash', exitCode: null },
-    // UX wave U2 (decision 23, R2; the revision's point 13): the stopped form goes by the status, so by a drawn one too
-    { isRunning: false, isErrored: false, isInterrupted: true, status: 'stopped', label: 'Stopped: shown', exitCode: null },
+    { isRunning: true, isErrored: false, isInterrupted: false, status: 'running', label: 'Running make shown', exitCode: null },
+    { isRunning: false, isErrored: true, isInterrupted: false, status: 'error', label: 'Failed make shown old', exitCode: null },
+    // UX wave U2 (decision 23, R2; the revision's point 13): the stopped form goes by the status, so by a drawn one too; M3: the
+    // row reads the rewritten command's short form, and a failed call's reason after it
+    { isRunning: false, isErrored: false, isInterrupted: true, status: 'stopped', label: 'Stopped: make shown', exitCode: null },
   ])('derives the native label and detail from rewritten $status, not the recorded completion', (flags) => {
     const b = builder(); b.turn('u'); b.toolUse('t', 'Bash', { command: 'original' }); b.result('t', 'old'); b.end(['u']);
     const { rows, turn } = setup(b); const row = find(rows, 'cell'); const input = toolInputs(row, turn)[0];
-    const props = parseTranscriptProps('ToolUse', { ...input.props, input: { command: 'shown' }, isRunning: flags.isRunning, isErrored: flags.isErrored, isInterrupted: flags.isInterrupted }, input.props)!;
+    const props = parseTranscriptProps('ToolUse', { ...input.props, input: { command: 'make shown' }, isRunning: flags.isRunning, isErrored: flags.isErrored, isInterrupted: flags.isInterrupted }, input.props)!;
     expect(props).not.toBeNull();
     const drawn = withToolProps(input, props);
-    expect(drawn).toMatchObject({ status: flags.status, detail: { command: 'shown', stdout: 'old', exitCode: flags.exitCode } });
+    expect(drawn).toMatchObject({ status: flags.status, detail: { command: 'make shown', stdout: 'old', exitCode: flags.exitCode } });
     const { container } = renderRow({ ...row, ...drawn, id: row.id, expanded: true });
     expect(container.querySelector('[data-cell-id]')?.getAttribute('data-status')).toBe(flags.status);
     expect(container.querySelector('.transcript-cell-label')?.textContent).toBe(flags.label);
@@ -243,7 +244,7 @@ describe('transcript surface adapters', () => {
     const loaded = withAllExpanded(withReaderState(state, { spills: new Map([['/spilled-output', { state: loadState, content: loadState === 'loaded' ? 'complete loaded output' : null, error: null }]]) }));
     const row = find(rowsOf(loaded), 'cell'); const input = toolInputs(row, turn)[0];
     const wireProps = JSON.parse(JSON.stringify(Object.fromEntries(Object.entries(input.props).reverse())));
-    const props = rewrite === 'input' ? { ...wireProps, input: { command: 'shown' }, isInterrupted: true }
+    const props = rewrite === 'input' ? { ...wireProps, input: { command: 'make shown' }, isInterrupted: true }
       : rewrite === 'output' ? { ...wireProps, output: 'replacement' } : wireProps;
     const drawn = withToolProps(input, props);
     const { container, queryByRole } = renderRow({ ...row, ...drawn, id: row.id, expanded: true });
@@ -255,7 +256,7 @@ describe('transcript surface adapters', () => {
       expect(drawn.detail).toMatchObject({ spill: { state: loadState } });
       if (loadState === 'loaded') expect(container.querySelector('pre')?.textContent).toBe('complete loaded output');
       else expect(queryByRole('status')).not.toBeNull();
-      if (rewrite === 'input') expect(container.querySelector('.transcript-cell-label')?.textContent).toMatch(/^Stopped: shown/); // UX wave U2 (R2): the stopped form
+      if (rewrite === 'input') expect(container.querySelector('.transcript-cell-label')?.textContent).toMatch(/^Stopped: make shown/); // UX wave U2 (R2): the stopped form
       else expect(drawn).toBe(row);
     }
     expect(row.detail).toMatchObject({ spill: { state: loadState } });
