@@ -203,6 +203,9 @@ function readOne(text: string): { comments: MessageComment[]; destination: Desti
 // exactly N blocks, each ending at the next line that is an exact tag; each block's first non-blank line its own tag's
 // lead; no line of a comment a bare `<maws_anchor` (the writer escapes every such line); nothing but blank lines after the
 // last tag. Anything else is no framed message, and the one-comment rule reads it.
+// Its work, bounded by count (Decision Log 54): one pass over the lines, and the schema consulted at most once for each
+// tag it accepts and once for the line that ends the reading, at most 21 times a message (MESSAGE_COMMENTS_MAX tags,
+// and one more past them or one that fails); the one-comment rule's fallback then reads the last line's tag once.
 function readFramed(text: string): { comments: MessageComment[]; destination: Destination } | null {
   const lines = text.split('\n');
   const framing = FRAMING_LINE.exec(lines[0]!);
@@ -214,6 +217,9 @@ function readFramed(text: string): { comments: MessageComment[]; destination: De
   for (const line of lines.slice(1)) {
     const anchor = parseTag(line);
     if (anchor === null) {
+      // a bare `<maws_anchor` line that is no exact tag is refused below whatever follows (a block's lead it is not, a
+      // comment's words never hold one, nothing may follow the last tag), so the reading ends here
+      if (line.startsWith('<maws_anchor')) return null;
       body.push(line);
       continue;
     }
