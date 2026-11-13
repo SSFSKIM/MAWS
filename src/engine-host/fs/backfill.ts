@@ -152,7 +152,7 @@ export function recordToEvents(record: TranscriptRecord, ctx: BackfillContext): 
 
   // The meta row of a terminal's fire, the arrival's second carrier, which the reader tied to the fire row before it
   // (UX wave U3, the U3a document, M3): it makes no message of its own (firesMeta)
-  const firesMeta = openFire !== null && read.open.fire === null && arrivals.length === 0 && isScheduledPrompt(record) ? openFire.uuid : null;
+  const firesMeta = openFire !== null && read.open.fire === null && arrivals.length === 0 && isScheduledPrompt(record) ? (openFire.uuid as MessageUuid) : null;
 
   switch (record.type) {
     case 'user':
