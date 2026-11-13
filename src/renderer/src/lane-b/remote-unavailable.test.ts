@@ -13,7 +13,7 @@ import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machin
 import { forgetOffers, heardRefusal, REMOTE_SURFACE_WORDS, resetRemoteSurfaces } from '../artifacts/remote-surfaces';
 import { useMachines } from '../stores/machines';
 import { useSessions } from '../stores/sessions';
-import { remoteUnavailableOf, useRemoteUnavailable } from './remote-unavailable';
+import { ACTS_UNTIL_M4, remoteUnavailableOf, useRemoteUnavailable } from './remote-unavailable';
 import { resetRemoteLaneBStore } from './remote-session';
 
 const R = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
@@ -32,8 +32,20 @@ afterEach(() => {
   delete (window as { maws?: unknown }).maws;
 });
 
-// The UX wave (U9, M1) offers `session.rename` now: the declared example is one that stays declared, `session.delete`.
+// The UX wave (U9, M1) offers `session.rename` now: the declared example is one that stays declared, `session.delete`;
+// the acts M1 offers stay greyed here, in the words they were declared with, until M4 (`ACTS_UNTIL_M4`).
 describe('remoteUnavailableOf', () => {
+  it('until M4, greys the six acts M1 offers for a session on another machine in the words they were declared with', () => {
+    expect(Object.keys(ACTS_UNTIL_M4).sort()).toEqual(['attention.acknowledge', 'maws.pane.answer', 'session.archive', 'session.rename', 'session.steer.cancel', 'session.update']);
+    for (const [command, words] of Object.entries(ACTS_UNTIL_M4) as Array<[keyof typeof ACTS_UNTIL_M4, string]>) {
+      expect(REMOTE_UNAVAILABLE[command], command).toBeUndefined();
+      expect(words, command).toMatch(/^Not on another machine yet: /);
+      expect(remoteUnavailableOf(R, command), command).toBe(words);
+      expect(remoteUnavailableOf(L, command), command).toBeNull();
+    }
+    expect(remoteUnavailableOf(R, 'session.rename')).toBe('Not on another machine yet: renaming a session');
+  });
+
   it('greys a declared command for a session on another machine with the declared words, and nothing of this Mac’s', () => {
     expect(remoteUnavailableOf(R, 'session.delete')).toBe(REMOTE_UNAVAILABLE['session.delete']);
     expect(remoteUnavailableOf(L, 'session.delete')).toBeNull();

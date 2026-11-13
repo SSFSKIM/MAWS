@@ -22,6 +22,22 @@ import { useMachines } from '../stores/machines';
 import { machineName } from '../stores/org-projects';
 import { isOverRl2, useIsOverRl2 } from './remote-session';
 
+/**
+ * UX wave U9, M1's bridge (docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, Decision Log: "M1's bridge in
+ * the window's helper, a seam M4 removes"). M1 offers these six acts at the other machine's endpoint and takes them out of
+ * `REMOTE_UNAVAILABLE`, before any control of the window guards them; until M4 mounts those guards, a session reached over
+ * RL2 keeps them greyed here with the words the declared set gave them. M4 deletes this list, its answer read from the
+ * offers instead.
+ */
+export const ACTS_UNTIL_M4: Readonly<Partial<Record<CommandName, string>>> = {
+  'session.archive': 'Not on another machine yet: archiving a session',
+  'session.update': 'Not on another machine yet: archiving a session or changing its title',
+  'session.rename': 'Not on another machine yet: renaming a session',
+  'attention.acknowledge': 'Not on another machine yet: dismissing an error from here',
+  'session.steer.cancel': 'Not on another machine yet: taking back a message the agent hasn’t started',
+  'maws.pane.answer': 'Not on another machine yet: mod surfaces',
+};
+
 interface Facts {
   remote: boolean; // a session on another machine, reached over RL2
   machine: MachineRef | null; // its machine (null: an id that names none)
@@ -32,7 +48,7 @@ interface Facts {
 function unavailableIn({ remote, machine, name, refused }: Facts, commands: readonly CommandName[]): string | null {
   if (!remote || machine === null) return null;
   for (const command of commands) {
-    const words = REMOTE_UNAVAILABLE[command];
+    const words = REMOTE_UNAVAILABLE[command] ?? ACTS_UNTIL_M4[command];
     if (words !== undefined) return words;
   }
   return commands.some((command) => heardNotOffered(refused, machine, command)) ? REMOTE_SURFACE_WORDS.notOffered(name) : null;
