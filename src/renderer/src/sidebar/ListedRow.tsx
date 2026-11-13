@@ -3,9 +3,11 @@
 // and the age of its listing, in a session row's slots. A click calls its lane's opener (`remote-openers.ts`); with none,
 // the row is selected and its hover card shows. No drag, pin or unread: those act on a record. P5 O8 M5: its owners after
 // the title when they aren't you alone. P5 O8 M6b: its reach mark, and a menu holding Share for a session you own (the
-// listing-capable session menu, menus.tsx); any other listed row has no menu.
+// listing-capable session menu, menus.tsx); any other listed row has no menu. The UX wave, U9: a row whose menu has an
+// item names its session, which is every lane B row (Fork, and Rename… and Archive for one you own).
 import { useState } from 'react';
 import { MachineChip } from '../app/MachineChip';
+import { remoteSessionActions } from '../app/session-actions'; // the UX wave, U9
 import { greyWords, useMachineMark } from '../app/machine-mark';
 import { useNow } from '../app/use-now';
 import { GlyphMark } from '../attention/GlyphMark';
@@ -30,6 +32,7 @@ export function ListedRow({ listed, level }: { listed: ListedSession; level: num
   const title = listedTitle(listed);
   const owners = useOwnersLabel(id);
   const shareable = useCanShare(id); // P5 O8 M6b
+  const acts = remoteSessionActions({ lane: listed.lane, record: false, mine: listed.mine, remoteReading: false }).length > 0; // the UX wave, U9
   const pending = useAttention((s) => selectPendingOf(s, id)); // P5 O7 M6: its machine's attention feed
   const glyph = listedGlyph(listed.state, pending);
   const issued = Date.parse(listed.issued);
@@ -51,7 +54,7 @@ export function ListedRow({ listed, level }: { listed: ListedSession; level: num
         tabIndex={tree.tabStop === nodeId ? 0 : -1}
         data-tree-id={nodeId}
         data-kind="listed"
-        data-menu={shareable ? `session:${id}` : 'none'} // P5 O8 M6b: Share for a session you own; else no menu, not the project row's either
+        data-menu={shareable || acts ? `session:${id}` : 'none'} // P5 O8 M6b: Share for a session you own; the UX wave, U9: its acts; else no menu, not the project row's either
         onFocus={(event) => event.target === event.currentTarget && tree.onFocusItem(nodeId)}
         onClick={activate}
         onKeyDown={(event) => {

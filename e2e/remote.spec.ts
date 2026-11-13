@@ -2879,8 +2879,11 @@ async function readWhileDown(page: Page, electron: ElectronApplication, before: 
   return (await placeIn(page))!;
 }
 
-/** B's lane B session on `journal`, its first turn over and listed; A launched over the relay, the session open in A. */
-async function laneBOpened(opts: { root: string; aUserData: string; journal: SideJournal; first: string; firstReply: string; title: string }, held: TerminalHeld) {
+/**
+ * B's lane B session on `journal`, its first turn over and listed; A launched over the relay, the session open in A (with
+ * `open: false`, left as A's listed row, no tab of it opened: the UX wave, U9, M4's acts scene).
+ */
+async function laneBOpened(opts: { root: string; aUserData: string; journal: SideJournal; first: string; firstReply: string; title: string; open?: boolean }, held: TerminalHeld) {
   const checkout = join(opts.root, 'b-checkout');
   const journals = join(opts.root, 'journals');
   for (const dir of [checkout, journals]) mkdirSync(dir);
@@ -2923,9 +2926,11 @@ async function laneBOpened(opts: { root: string; aUserData: string; journal: Sid
   await expandMachine(page, b.ref);
   const row = sessionRow(page, addressOf(b.ref, app));
   await expect(row, `B's row in A's sidebar\n${mainSaid(page)}`).toBeVisible({ timeout: 30_000 });
-  await row.click();
-  await quoting(expect(main(page).getByText(opts.firstReply).first(), 'B’s history in A’s pane').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
-  return { scene, b, page, electron: a.app, turnOver, sendOnB };
+  if (opts.open !== false) {
+    await row.click();
+    await quoting(expect(main(page).getByText(opts.firstReply).first(), 'B’s history in A’s pane').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
+  }
+  return { scene, b, page, electron: a.app, turnOver, sendOnB, app };
 }
 
 test('U9 A4, a session MAWS runs on B: its tab keeps its pane through the link’s drop under one status line, and the reader keeps their place, their draft and no error', async () => {
@@ -3136,6 +3141,106 @@ test('U9 A11, a Stop pressed once the line says B reconnects: it reads “Stoppi
     await quoting(expect(toastsOf(page), 'the notice once the hold gives up').toContainText(`Not stopped: ${B_NAME} is offline`, { timeout: REMOTE_ACT_PENDING_MS + 30_000 }), () => mainSaid(page));
     await expect(primaryOf(page), 'Stopping… no more').not.toHaveText('Stopping…');
     expect(await turnOver(), 'nothing reached B: its turn still runs').toBe(false);
+  } finally {
+    await held.a?.cleanup();
+    await held.scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// The UX wave, U9 (docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, M4; A8, A9, A10): the session acts on
+// B's session from A's window, over RL2, under the harness's accepting confirmation. Rename… on its listed row (A holds no
+// record of it) renames it on B and the row says the new title; Fork from its row's menu, its tab open, opens the fork in
+// a new tab on B's address, a session B's index holds as the source's fork; Archive from its menu closes its tab and its
+// row leaves A's sidebar; "Archived sessions…" on B's machine row lists it, and Unarchive brings its row back.
+const ACTS_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000d7';
+const ACTS_TITLE = 'B’s session to act on';
+const ACTS_REPLY = 'B is ready to be acted on.';
+const RENAMED_ON_A = 'Renamed from A';
+
+// The session tabs of A's strip, by address.
+async function sessionTabsOf(page: Page): Promise<string[]> {
+  type Pane = { tabs: { kind: string; appSessionId?: string }[] };
+  const main = await invoke<{ value: { current: string; sets: Record<string, { panes: Pane[] }> } | null }>(page, 'layout.get', { key: 'main.tabs' });
+  const set = main.value === null ? undefined : main.value.sets[main.value.current];
+  return (set?.panes ?? []).flatMap((pane) => pane.tabs.flatMap((tab) => (tab.kind === 'session' && tab.appSessionId !== undefined ? [tab.appSessionId] : [])));
+}
+async function menuItemOfRow(page: Page, row: ReturnType<typeof sessionRow>, name: string) {
+  await row.click({ button: 'right' });
+  const item = page.getByRole('menu').getByRole('menuitem', { name, exact: true });
+  await expect(item, `the row's menu offers ${name}, enabled`).toBeVisible({ timeout: 10_000 });
+  await expect(item).not.toHaveAttribute('data-disabled', /.*/);
+  return item;
+}
+
+test('U9 A8, A9, A10: from A, Rename… on B’s listed row renames it on B; Fork from its row opens a fork there in a new tab; Archive closes its tab and row; Unarchive brings it back', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-acts-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-acts-'));
+  const held: TerminalHeld = { scene: null, a: null };
+  try {
+    const journal = new SideJournal(ACTS_SESSION, join(root, 'b-checkout'));
+    journal.turn(ACTS_REPLY);
+    const { b, page, app } = await laneBOpened({ root, aUserData, journal, first: 'Get ready to be acted on.', firstReply: ACTS_REPLY, title: ACTS_TITLE, open: false }, held);
+    const address = addressOf(b.ref, app);
+    const row = sessionRow(page, address);
+    type Record = { title: { text: string }; archived: boolean; lineage: { parentAppSessionId: string } | null };
+    const onB = (id: string) => b.request<Record | null>('session.get', { appSessionId: id }).catch(() => null);
+    await expect.poll(async () => (await machineOf(page, b.ref))?.capabilities ?? [], { message: `B lists the session acts\n${mainSaid(page)}` }).toContain('rl2.session-acts');
+
+    await test.step('Rename… on the listed row: B’s record takes the title, and A’s row says it', async () => {
+      await expect(row, 'a listed row: A holds no record of the session').toHaveAttribute('data-kind', 'listed');
+      await (await menuItemOfRow(page, row, 'Rename…')).click();
+      const sheet = page.getByRole('dialog', { name: 'Rename' });
+      await expect(sheet.getByRole('textbox', { name: 'Title' })).toHaveValue(ACTS_TITLE);
+      await sheet.getByRole('textbox', { name: 'Title' }).fill(RENAMED_ON_A);
+      await sheet.getByRole('textbox', { name: 'Title' }).press('Enter');
+      await expect(sheet).toBeHidden({ timeout: 30_000 });
+      await quoting(expect(row, 'A’s row says the new title').toHaveAttribute('aria-label', RENAMED_ON_A, { timeout: 10_000 }), () => mainSaid(page));
+      await expect.poll(async () => (await onB(app))?.title.text ?? null, { timeout: 30_000, message: 'B’s record has the title' }).toBe(RENAMED_ON_A);
+    });
+
+    await test.step('Fork from the row’s menu, its tab open: the fork opens in a new tab on B’s address, a fork of the session on B', async () => {
+      await row.click();
+      await quoting(expect(main(page).getByText(ACTS_REPLY).first(), 'B’s history in A’s pane').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
+      const before = await sessionTabsOf(page);
+      await (await menuItemOfRow(page, row, 'Fork')).click();
+      let fork: string | undefined;
+      await quoting(
+        expect.poll(async () => (fork = (await sessionTabsOf(page)).find((id) => !before.includes(id))), { timeout: 60_000, message: 'a new session tab opens' }).toBeDefined(),
+        () => mainSaid(page),
+      );
+      expect(fork!.startsWith(`${b.ref}/`), `the fork's tab is on B's address (${fork})`).toBe(true);
+      const bare = bareOf(fork!);
+      await expect.poll(async () => (await onB(bare))?.lineage?.parentAppSessionId ?? null, { timeout: 30_000, message: 'B holds the fork, of the session' }).toBe(app);
+      expect(await sessionTabsOf(page), 'the source’s tab stays').toContain(address);
+    });
+
+    await test.step('Archive from the row’s menu: its tab closes, its row leaves A’s sidebar, and B’s record is archived', async () => {
+      await (await menuItemOfRow(page, row, 'Archive')).click();
+      const sheet = page.getByRole('dialog', { name: `Archive “${RENAMED_ON_A}”?` });
+      await expect(sheet).toContainText(`Ends its engine process on ${B_NAME} and hides it`);
+      await sheet.getByRole('button', { name: 'Archive' }).click();
+      await expect(sheet).toBeHidden({ timeout: 60_000 });
+      await expect(row, 'the row leaves at once').toHaveCount(0, { timeout: 5_000 });
+      expect(await sessionTabsOf(page), 'the session’s tab is closed').not.toContain(address);
+      await expect.poll(async () => (await onB(app))?.archived ?? null, { timeout: 30_000, message: 'B’s record is archived' }).toBe(true);
+      await page.waitForTimeout(5_000); // the hub's listing has had its time: the row stays gone
+      await expect(row).toHaveCount(0);
+    });
+
+    await test.step('“Archived sessions…” on B’s machine row lists it, and Unarchive brings its row back', async () => {
+      await machineRow(page, b.ref).locator('[data-project-line]').click({ button: 'right' });
+      await page.getByRole('menu').getByRole('menuitem', { name: 'Archived sessions…' }).click();
+      const dialog = page.getByRole('dialog', { name: `Archived sessions · ${B_NAME}` });
+      const listed = dialog.getByRole('listitem', { name: RENAMED_ON_A });
+      await quoting(expect(listed, 'B answers the archived read').toBeVisible({ timeout: 30_000 }), () => mainSaid(page));
+      await listed.getByRole('button', { name: 'Unarchive' }).click();
+      await expect(listed).toBeHidden({ timeout: 30_000 });
+      await page.keyboard.press('Escape');
+      await expect.poll(async () => (await onB(app))?.archived ?? null, { timeout: 30_000, message: 'B’s record is unarchived' }).toBe(false);
+      await quoting(expect(row, 'its row is back in A’s sidebar').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
+    });
   } finally {
     await held.a?.cleanup();
     await held.scene?.stop();

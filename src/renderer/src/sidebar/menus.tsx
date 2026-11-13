@@ -9,12 +9,14 @@
 // session's owners (sessions/share/target.ts' `useCanAddOwner`). The project registry (docs/doperpowers/plans/
 // 2026-11-10-project-registry.md, Interfaces §J): a registry project's row offers Add location… (Add project with the
 // project filled) and, unless a `.smns` names it, Rename…; Channel for a hub project only; and a row of a project you see
-// only through its sessions (`registry:<id>`) offers Channel alone.
+// only through its sessions (`registry:<id>`) offers Channel alone. The UX wave, U9 (Interfaces §6): a session on another
+// machine offers its acts over the link (`remoteSessionActions`), from its listing alone where this Mac holds no record,
+// before Share and Add owner; an item is drawn disabled with the window's helper's sentence as its title.
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import type { ReactNode } from 'react';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import { runSessionAction, SESSION_ACTIONS, sessionActionsFor, useSessionActionEnabled, type SessionActionId } from '../app/session-actions';
+import { remoteSessionActions, runSessionAction, SESSION_ACTIONS, sessionActionsFor, useSessionActionEnabled, type SessionActionId } from '../app/session-actions';
 import { machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../ipc/client';
@@ -37,6 +39,7 @@ import { KEEP_RUNNING } from './copy'; // P5 O2 M2
 import { isRemoteLaneB } from '../lane-b/remote-session'; // P5 O7 M2
 import { setRemoteReading } from '../lane-b/remote-reading'; // P5 O8 M6a
 import { useReaderRowsOf } from '../lane-b/reader-rows'; // P5 O8 M6a
+import { useSessionActionUnavailable } from '../lane-b/remote-unavailable'; // the UX wave, U9
 import { openAddOwner, openShare, useCanAddOwner, useCanShare } from '../sessions/share/target'; // P5 O8 M6b, M5b
 import { OWNER, SHARE } from '../sessions/share/copy'; // P5 O8 M6b, M5b
 
@@ -63,10 +66,11 @@ export function menuTargetOf(element: Element | null): MenuTarget | null {
 const ITEM =
   'flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover';
 
-function Item({ enabled, onSelect, children, dropdown = false }: { dropdown?: boolean; enabled: boolean; onSelect(): void; children: ReactNode }) {
+// `why`: the sentence a disabled item is drawn with, in place of the unregistered words (the UX wave, U9).
+function Item({ enabled, onSelect, children, dropdown = false, why = null }: { dropdown?: boolean; enabled: boolean; onSelect(): void; children: ReactNode; why?: string | null }) {
   const Component = dropdown ? DropdownMenu.Item : ContextMenu.Item;
   return (
-    <Component disabled={!enabled} onSelect={onSelect} title={enabled ? undefined : 'Not available here'} className={ITEM}>
+    <Component disabled={!enabled} onSelect={onSelect} title={enabled ? undefined : (why ?? 'Not available here')} className={ITEM}>
       {children}
     </Component>
   );
@@ -93,9 +97,10 @@ export function SidebarMenuContent({ target }: { target: MenuTarget | null }) {
 }
 
 // P5 O8 M6b: the listing-capable session menu. A record's actions, then Share for a session you own (sessions/share/
-// target.ts); another machine's listed session with no record here offers Share alone.
+// target.ts). The UX wave, U9: another machine's listed session with no record here offers its acts from the listing.
 function SessionItems({ appSessionId, dropdown = false }: { appSessionId: AppSessionId; dropdown?: boolean }) {
   const record = useSessions((s) => s.records.get(appSessionId));
+  const listing = useSessions((s) => s.listed.get(appSessionId)); // the UX wave, U9: `mine`, and a listed row's lane
   const bridged = useLaneAState(appSessionId)?.bridge === 'live'; // P5 O9 M5
   const kept = useSessions((s) => s.engine.get(appSessionId)?.kept); // P5 O2 M2: undefined while no status reports it
   const remoteReading = useReaderRowsOf(appSessionId) !== 'refused'; // P5 O8 M6a
@@ -107,11 +112,20 @@ function SessionItems({ appSessionId, dropdown = false }: { appSessionId: AppSes
       {ownable && <AddOwnerItem appSessionId={appSessionId} dropdown={dropdown} />}
     </>
   );
-  if (!record) return shareable ? reach : null;
+  const mine = listing?.mine ?? false;
+  if (!record) {
+    const ids = listing === undefined ? [] : remoteSessionActions({ lane: listing.lane, record: false, mine, remoteReading });
+    return ids.length > 0 || shareable ? (
+      <>
+        {ids.map((id) => <SessionItem key={id} id={id} appSessionId={appSessionId} label={SESSION_ACTIONS[id]} dropdown={dropdown} />)}
+        {reach}
+      </>
+    ) : null;
+  }
   const foreign = record.holder.kind === 'terminal' || record.holder.kind === 'background_job'; // D-12: the opens only
   return (
     <>
-      {sessionActionsFor(record, { bridged, remote: isRemoteLaneB(appSessionId) /* P5 O7 M2 */, remoteReading }).map((id) => <SessionItem key={id} id={id} record={record} dropdown={dropdown} />)}
+      {sessionActionsFor(record, { bridged, remote: isRemoteLaneB(appSessionId) /* P5 O7 M2 */, remoteReading, mine }).map((id) => <SessionItem key={id} id={id} appSessionId={appSessionId} label={id === 'pin' && record.pinned ? 'Unpin' : SESSION_ACTIONS[id]} dropdown={dropdown} />)}
       {kept !== undefined && !foreign && <KeepItem appSessionId={appSessionId} kept={kept} dropdown={dropdown} />}
       {reach}
     </>
@@ -149,11 +163,12 @@ function KeepItem({ appSessionId, kept, dropdown }: { appSessionId: AppSessionId
   );
 }
 
-function SessionItem({ id, record, dropdown }: { id: SessionActionId; record: SessionRecord; dropdown?: boolean }) {
-  const enabled = useSessionActionEnabled(id);
-  const label = id === 'pin' && record.pinned ? 'Unpin' : SESSION_ACTIONS[id];
+// The UX wave, U9: disabled with the window's helper's sentence where the act can't work on the session's machine.
+function SessionItem({ id, appSessionId, label, dropdown }: { id: SessionActionId; appSessionId: AppSessionId; label: string; dropdown?: boolean }) {
+  const why = useSessionActionUnavailable(id, appSessionId);
+  const enabled = useSessionActionEnabled(id) && why === null;
   return (
-    <Item dropdown={dropdown} enabled={enabled} onSelect={() => runSessionAction(id, record.appId)}>
+    <Item dropdown={dropdown} enabled={enabled} why={why} onSelect={() => runSessionAction(id, appSessionId)}>
       {label}
     </Item>
   );

@@ -12,6 +12,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
 import { availabilityRefusal, useAvailability } from '../sessions/availability'; // P2-A
+import { useForkUnavailable } from '../lane-b/remote-unavailable'; // the UX wave, U9
 import { inlineEditOf, resubmitRecordOf, setInlineText, useComposerStore, type InlineEdit, type Resubmit } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
 import type { UserRow } from './edit-prefill';
@@ -75,6 +76,7 @@ function InlineEditor({ appSessionId, edit, client }: { appSessionId: AppSession
   // P2-A end
   const empty = edit.text.trim() === '' && edit.images.length === 0;
   const fork = edit.kind === 'edit' && resubmitProvider() !== null;
+  const forkUnavailable = useForkUnavailable(appSessionId); // the UX wave, U9: a fork on another machine that can't work there
   const line = lineCopy(resubmit, !ready);
   const send = () => !locked && why === null && !empty && void sendInlineEdit(client, appSessionId);
 
@@ -133,7 +135,7 @@ function InlineEditor({ appSessionId, edit, client }: { appSessionId: AppSession
               Cancel
             </button>
             {fork && (
-              <button type="button" className={BUTTON} title="Send this in a forked session; this one stays as it is" disabled={locked || status?.process !== 'ready' || empty} onClick={() => void forkInlineEdit(client, appSessionId)}>
+              <button type="button" className={BUTTON} title={forkUnavailable ?? 'Send this in a forked session; this one stays as it is'} disabled={locked || status?.process !== 'ready' || empty || forkUnavailable !== null} onClick={() => void forkInlineEdit(client, appSessionId)}>
                 Fork
               </button>
             )}
