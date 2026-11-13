@@ -3,7 +3,7 @@
 // transcript here is made of invented records, written into a scratch store.
 import { execFileSync } from 'node:child_process';
 import { closeSync, constants, openSync, readdirSync, readFileSync } from 'node:fs';
-import { open as fsOpen, rename, writeFile, mkdir, stat } from 'node:fs/promises';
+import { open as fsOpen, readFile, rename, writeFile, mkdir, stat, type FileHandle } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -94,6 +94,35 @@ function holdAt(point: 'opened' | 'searched', during?: () => Promise<void>) {
 const turns = async (n = 20) => {
   for (let i = 0; i < n; i += 1) await new Promise((resolve) => setImmediate(resolve));
 };
+// An open whose reads answer at once from the file's bytes as they were at the open, with no wait on the file system,
+// each read noting `onRead` first: the loop then turns only where the search gives it back (fix round 1, item 4).
+function instant(onRead: () => void = () => {}): NonNullable<NamedPathsOptions['open']> {
+  return async (path) => {
+    const bytes = await readFile(path);
+    const status = await stat(path, { bigint: true });
+    return {
+      stat: async () => status,
+      read: (buffer: Buffer, offset: number, length: number, position: number) => {
+        onRead();
+        const n = Math.max(0, Math.min(length, bytes.length - position));
+        bytes.copy(buffer, offset, position, position + n);
+        return Promise.resolve({ bytesRead: n, buffer });
+      },
+      close: async () => {},
+    } as unknown as FileHandle;
+  };
+}
+// A ticker on the loop's check phase: `ticks()` is how many turns it has had since `start`.
+function ticker() {
+  let count = 0;
+  let done = false;
+  const tick = () => {
+    count += 1;
+    if (!done) setImmediate(tick);
+  };
+  setImmediate(tick);
+  return { ticks: () => count, stop: () => void (done = true) };
+}
 
 beforeEach(async () => {
   fixture = await StoreFixture.create();
@@ -547,19 +576,63 @@ describe('the queue (S14, S15)', () => {
     expect(stats.opens).toBe(1); // the second job never opened its transcript
   });
 
-  it('gives the event loop back as it reads', async () => {
+  // fix round 1, item 4: with reads that answer at once, the loop turns between two reads only if the search gives it
+  // back there (a count of turns over real reads also counts the loop turning while a read waits)
+  it('gives the event loop back after every read', async () => {
     await writeTranscript([linkTo(P), ...filler(400)]);
-    const named = paths({ bounds: { chunk: 2048 } });
-    let ticks = 0;
-    let done = false;
-    const tick = () => {
-      ticks += 1;
-      if (!done) setImmediate(tick);
-    };
-    setImmediate(tick);
-    expect(await named.names(S, P)).toBe(true);
-    done = true;
-    expect(ticks).toBeGreaterThanOrEqual(stats.reads);
+    const loop = ticker();
+    const at: number[] = []; // the loop's turns at each read
+    try {
+      expect(await paths({ open: instant(() => at.push(loop.ticks())), bounds: { chunk: 2048 } }).names(S, P)).toBe(true);
+    } finally {
+      loop.stop();
+    }
+    expect(at.length).toBeGreaterThan(20);
+    for (let i = 1; i < at.length; i += 1) expect(at[i], `read ${i}`).toBeGreaterThan(at[i - 1]!);
+  });
+
+  // fix round 1, item 5: the walk of a tool input counts every value it visits, containers too, as a step
+  it('gives the event loop back while it walks a tool input of a million empty objects', async () => {
+    const empties = 1_000_000;
+    await writeTranscript([call('t1', 'ExitPlanMode', { items: Array.from({ length: empties }, () => ({})), note: `[r](${P}.bak)` })]);
+    const loop = ticker();
+    try {
+      expect(await paths({ open: instant() }).names(S, P)).toBe(false);
+    } finally {
+      loop.stop();
+    }
+    expect(loop.ticks()).toBeGreaterThanOrEqual(empties / 256); // at least one turn of the loop per 256 values
+  });
+
+  // fix round 1, item 3: a request's patience and its signal run from the moment it is made, the locator's wait
+  // included; the queue has only what is left; a locator that answers after the request ended queues nothing
+  it('a held locator: the request answers not named on time, or at once when its signal ends, and queues nothing', async () => {
+    await writeTranscript([linkTo(P)]);
+    const located = deferred();
+    const named = paths({ transcript: () => located.promise.then(() => file), bounds: { waitMs: 20 } });
+    const late = Symbol('still pending');
+    const within = (answer: Promise<boolean>, ms: number) => Promise.race([answer, new Promise<typeof late>((done) => setTimeout(() => done(late), ms))]);
+    expect(await within(named.names(S, P), 500)).toBe(false);
+    const controller = new AbortController();
+    const aborted = named.names(S, P, controller.signal);
+    controller.abort();
+    expect(await within(aborted, 10)).toBe(false);
+    located.resolve();
+    await turns();
+    expect(stats.opens).toBe(0); // neither request queued a job once the locator answered
+  });
+
+  it('the patience left after the locator answers is all the request waits in the queue', async () => {
+    await writeTranscript([linkTo(P)]);
+    const named = paths({ transcript: () => new Promise((done) => setTimeout(() => done(file), 300)), bounds: { waitMs: 400 } });
+    const held = holdAt('opened');
+    const asked = named.names('app-held' as AppSessionId, P); // holds the one job slot
+    await held.reached;
+    const started = performance.now();
+    expect(await named.names(S, P)).toBe(false); // its own locator answers at 300 ms, the queue then has 100 ms
+    expect(performance.now() - started).toBeLessThan(550); // not 300 ms and then 400 more
+    held.release();
+    expect(await asked).toBe(false); // its patience ran out while held
   });
 
   // the branch review's finding 2: one row under the row bound can hold a great many links, each read through the URL
