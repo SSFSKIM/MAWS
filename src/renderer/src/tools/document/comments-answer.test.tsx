@@ -167,6 +167,24 @@ describe('the floating card at the answer (A17)', () => {
     expect(m.reach.discard).not.toHaveBeenCalled();
   });
 
+  // M7's review: the turn's end folds the card, and that turn's edit reaching the document afterwards is the same answer
+  it('closes at the turn’s end, and the same turn’s edit arriving after it asks nothing more', () => {
+    const m = mount();
+    threadCard();
+    keyboardElsewhere();
+    turnRuns(S);
+    turnEnds(S, S + 5_000);
+    expect(m.flashed()).toEqual([T]);
+    expect(useCommentCard.getState().open, 'folded at the turn’s end').toBeNull();
+    agentSays(m.doc, 'agent-1', S + 1_000); // written in that turn, read after the card went
+    expect(m.flashed()).toEqual([T]);
+    m.rerender({ slot: 'b' });
+    agentSays(m.doc, 'agent-2', S + 2_000); // and after the overlay remounted
+    expect(m.flashed()).toEqual([T]);
+    agentSays(m.doc, 'agent-3', S + 9_000); // after that turn: a later answer
+    expect(m.flashed()).toEqual([T, T]);
+  });
+
   it('stays with the keyboard in it, in a wider body, and in the margin', () => {
     const narrow = mount();
     threadCard();
