@@ -26,11 +26,12 @@ import type { LiveBlock, TranscriptState, TranscriptUi, TurnState, TurnWork } fr
 import { isEngineOrigin, originOf, runningTurn, type ReceiptUndo } from './reduce';
 import { closedByUnseenExit } from './reduce'; // DC9
 import { TOOL_CATEGORIES, type Cell, type ChangedFile, type Row, type RowId, type SubagentRef, type SubagentStatus, type ToolCategory, type TurnId, type TurnSummary } from './rows';
-import { previewHidesBody } from './rows'; // E7
+import { firstLineOf, previewHidesBody, previewOf } from './rows'; // E7; UX wave U3
 import { needsSeparator, separatorLabel } from './time';
 import { confirmsSettingChange, isInterruptionMarker, isLocalCommand, localCommandOutput, slashCommandLine, userTextOf, type UserText } from './user-text';
 import { handbackReport, messageText, parsePeerMessage, peerLabel, sendMessageOutcome, sminosFrameOwners } from '@shared/engine/peer-envelope'; // E7; P5 O15 M2b: sminosFrameOwners
 import { carriedOf, type Arrival, type CarriedArrival } from '@shared/engine/arrival-schema'; // UX wave U3
+import { headRole } from './head'; // UX wave U3
 import { NOTICE } from './copy'; // UX wave U3
 import { answeredWords } from './answered'; // UX wave U3
 import { INTERRUPT_CUT, parseInterruptCut } from '@shared/lane-a/interrupt-cut'; // P5 O9
@@ -451,11 +452,15 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       ...consentOf(event), // UX wave U3 (decision 10)
     };
   };
-  // UX wave U3 (UC-2, "Where a row sits"; the U3a document, decision 5): the items an arrival made, by its class, so the
-  // resolution pass can tell which stand at the turn's head
+  // UX wave U3 (UC-2, "Where a row sits"; the U3a document, decision 5): the items an arrival made, by its class, and
+  // those that came before any of the turn's work (head.ts, the reducer's reading too), so the resolution pass can place
+  // them
   const arrivals = new Map<Item, Arrival['class']>();
+  const atHead = new Set<Item>();
+  let headOpen = true;
   const arrive = (item: Item, of: Arrival['class']) => {
     arrivals.set(item, of);
+    if (headOpen) atHead.add(item);
     items.push(item);
   };
   const questionsOf: CallQuestions = (call) => callQuestions(turn, state, call as ToolUseId);
@@ -497,6 +502,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   let position = 0; // the event's place in `turn.events`, for `agentsEndedAt`
   for (const [at, event] of turn.events.entries()) {
     position = at;
+    if (headOpen && headRole(event, turn.id) === 'work') headOpen = false;
     switch (event.kind) {
       case 'user.message': {
         if (event.isSynthetic && event.arrival !== undefined) { // UX wave U3: what the engine told the agent, one notice per arrival
@@ -700,7 +706,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         }
         const name = event.direction === 'to_child' ? event.toAgentId : event.fromAgentId;
         const preview = previewOf(event.text); // UX wave U3 (O-12): one line, the whole message opened under it
-        items.push({ kind: 'row', row: { id: rowId.agentMessage(event.id), turnId: turn.id, at: event.at, kind: 'agent_message', direction: event.direction, from: null, to: null, text: agentMessageCopy(event.direction, name, preview), ...(previewHidesBody(event.text, preview) && { body: event.text }) } });
+        items.push({ kind: 'row', row: { id: rowId.agentMessage(event.id), turnId: turn.id, at: event.at, kind: 'agent_message', direction: event.direction, from: null, to: null, text: agentMessageCopy(event.direction, name, preview), body: event.text } });
         break;
       }
       case 'permission.requested':
@@ -824,15 +830,11 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   // rows, subagent rows. The retry row updates in place: the last api.retry event's text at the first one's position.
   const retryRow = retry;
   const resolved: (WorkItem | Extract<Item, { kind: 'steer' }> | { kind: 'notice'; row: RowOf<'error'> })[] = [];
-  // UX wave U3 (decision 5): the rows of the arrivals that came before any of the turn's work, by class. A hook, a notice
-  // and what a plugin said are not the model's work (as for where the answer starts, below); anything else ends the head.
+  // UX wave U3 (decision 5): the rows of the arrivals that came before any of the turn's work, by class
   const heads = new Map<(typeof resolved)[number], Arrival['class']>();
-  const quiet = (item: Item) => item.kind === 'hook' || (item.kind === 'row' && item.row.kind === 'error' && (item.row.severity === 'notice' || item.row.scope === 'plugin'));
-  let atHead = true;
   for (const item of items) {
     const from = resolved.length;
     const arrivalClass = arrivals.get(item);
-    if (arrivalClass === undefined && !quiet(item)) atHead = false;
     switch (item.kind) {
       case 'tool': {
         const rec = tools.get(item.toolUseId)!;
@@ -892,7 +894,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       default:
         resolved.push(item);
     }
-    if (arrivalClass !== undefined && atHead) for (const entry of resolved.slice(from)) heads.set(entry, arrivalClass);
+    if (arrivalClass !== undefined && atHead.has(item)) for (const entry of resolved.slice(from)) heads.set(entry, arrivalClass);
   }
   // A task's end with an outcome and a scheduled fire that came before the turn's work stand above its divider, where a
   // prompt stands (above the prompt, in a turn the person's prompt opened); every other arrival there is the first row
@@ -1325,19 +1327,6 @@ function agentNamed(known: KnownAgents[], key: string): SubagentRef | null {
 
 const peerNamed = (known: KnownAgents[], address: string): string | null => known.find(({ peers }) => peers.has(address))?.peers.get(address) ?? null;
 
-// A text's first line cut to 120 columns, as the TUI previews a message (the line's ellipsis at the column's edge is the
-// view's). UX wave U3 (O-12): a message's preview leaves out a leading `@address` token, which names whom it was sent to;
-// the opened message keeps it.
-const PREVIEW_COLUMNS = 120;
-function firstLineOf(text: string): string {
-  const line = text.trimStart().split('\n')[0]!.trimEnd();
-  return line.length > PREVIEW_COLUMNS ? `${line.slice(0, PREVIEW_COLUMNS - 1)}…` : line;
-}
-const LEADING_ADDRESS = /^@\S+\s+/;
-function previewOf(body: string): string {
-  const rest = body.trimStart().replace(LEADING_ADDRESS, '');
-  return firstLineOf(rest.trim() === '' ? body : rest);
-}
 
 // UX wave U3 (O-28, the fold table of the U3a document's Interfaces D): a task's end that reports an outcome and a
 // scheduled fire stay in view when their turn folds; a notice with no outcome, an answer's and the wake's fold with it.
@@ -1381,7 +1370,7 @@ function sendMessageRow(use: Event<'tool.use'>, result: Event<'tool.result'> | u
   const message = str(input.message, str(input.content));
   const base = { id: rowId.agentMessage(use.id), turnId, at: use.at, kind: 'agent_message' as const, from: null };
   const preview = previewOf(message); // UX wave U3 (O-12): every send is one line, the whole message opened under it
-  const body = previewHidesBody(message, preview) ? { body: message } : {};
+  const body = { body: message }; // the whole message, which the line opens to
   if (to === 'parent' || to === 'main') return { ...base, direction: 'from_child', to: null, text: agentMessageCopy('from_child', to, preview), ...body };
   const agent = to === '' ? null : agentOf(to);
   if (agent !== null || to === '') return { ...base, direction: 'to_child', to: agent, text: agentMessageCopy('to_child', agent?.name ?? (to || null), preview), ...body };
@@ -1398,7 +1387,7 @@ function sendMessageRow(use: Event<'tool.use'>, result: Event<'tool.result'> | u
 }
 
 // An in-process agent's message to the main conversation (`<agent-message>`), the agent by its title and the message
-// by its first line, the whole of it kept as `body` when that line leaves some out; its hand-back reads as its report
+// by its first line, the whole of it kept as `body`, which the line opens to; its hand-back reads as its report
 // (Decision Log 28's interim row replaced).
 function agentMessageRow(event: Event<'subagent.message'>, turnId: TurnId, agentOf: (key: string) => SubagentRef | null): RowOf<'agent_message'> {
   const agent = event.fromAgentId === null ? null : agentOf(event.fromAgentId);
@@ -1407,7 +1396,7 @@ function agentMessageRow(event: Event<'subagent.message'>, turnId: TurnId, agent
   const base = { id: rowId.agentMessage(event.id), turnId, at: event.at, kind: 'agent_message' as const, direction: 'from_child' as const, from: agent, to: null };
   if (report !== null) return { ...base, text: peerMessageCopy.report(title, previewOf(report)), report }; // UX wave U3: the report's first line on the line
   const preview = previewOf(event.text);
-  return { ...base, text: agentMessageCopy('from_child', title, preview), ...(previewHidesBody(event.text, preview) && { body: event.text }) };
+  return { ...base, text: agentMessageCopy('from_child', title, preview), body: event.text };
 }
 
 // UX wave U3 (UC-2, "The rows"; the U3a document, Interfaces D): one arrival a synthetic message carries, as its notice. A

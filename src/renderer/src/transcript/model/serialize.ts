@@ -4,7 +4,7 @@
 import { bashFooter, bashHeader, dividerCopy, LOCAL_COMMAND_HEADER, NOT_SENT, planBadge, plural, QUESTION, requestSlotPlaceholder } from './copy';
 import { ASK, askAnswerCopy, askStateCopy, deliveryHeading } from './copy'; // E1
 import { agentListCopy } from './copy'; // E7
-import { previewHidesBody } from './rows'; // E7
+import { messageMore } from './rows'; // E7; UX wave U3
 import { artifactHeading } from './copy'; // E2
 import { BROWSER_ACTION, browserActionError, browserActionHeading, took } from './copy'; // E4c
 import { browserActivityLine } from './copy'; // E13
@@ -71,7 +71,7 @@ function partOf(row: Row): string | null {
 // E7 start: a message's line, then its whole body (a message whose line shows only its first line) or a hand-back's
 // report, quoted; a listing as its counts, a pending one as such, one the parser did not read as its notes
 function messagePart(row: Extract<Row, { kind: 'agent_message' }>): string {
-  const more = row.report ?? row.body ?? (row.peer && previewHidesBody(row.peer.body, row.peer.preview) ? row.peer.body : null);
+  const more = messageMore(row);
   return more === null ? `- ${row.text}` : `- ${row.text}\n${indent(more, '  > ')}`;
 }
 

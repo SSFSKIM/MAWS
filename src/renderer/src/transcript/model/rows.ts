@@ -79,7 +79,7 @@ export type Row = RowBase &
     | {
         kind: 'agent_message'; direction: 'to_child' | 'from_child' | 'between'; from: SubagentRef | null; to: SubagentRef | null; text: string;
         peer?: PeerMessage; report?: string; // E7: a message between sessions (`between`); an in-process agent's hand-back report
-        body?: string; // E7: an in-process agent's whole message, when the text shows only its preview; U3: a message to or from a subagent alike
+        body?: string; // E7: an in-process agent's whole message; U3 (O-12): of every message to or from a subagent, which its line opens to
       }
     | { kind: 'thinking'; messageUuid: MessageUuid | null; text: string; live: boolean; durationMs: number | null; clock?: 'wall' } // clock (P5 O7 M10): a terminal session's streamed block (lane A's overlay), its `at` this window's time when first drawn, not an event's
     | { kind: 'plan'; toolUseId: ToolUseId; plan: string; outcome: (typeof PLAN_OUTCOMES)[number] | null; feedback: string | null }
@@ -196,6 +196,27 @@ export interface PeerMessage {
 // Whether a message's preview leaves some of its body out (more lines, or a cut first line): then the row offers the
 // whole of it and the markdown copy quotes it. Surrounding whitespace hides nothing.
 export const previewHidesBody = (body: string, preview: string): boolean => body.trim() !== preview;
+// A text's first line cut to 120 columns, as the TUI previews a message (the line's ellipsis at the column's edge is the
+// view's). UX wave U3 (O-12): a message's preview leaves out a leading `@address` token, which names whom it was sent to;
+// the opened message keeps it.
+const PREVIEW_COLUMNS = 120;
+export function firstLineOf(text: string): string {
+  const line = text.trimStart().split('\n')[0]!.trimEnd();
+  return line.length > PREVIEW_COLUMNS ? `${line.slice(0, PREVIEW_COLUMNS - 1)}…` : line;
+}
+const LEADING_ADDRESS = /^@\S+\s+/;
+export function previewOf(body: string): string {
+  const rest = body.trimStart().replace(LEADING_ADDRESS, '');
+  return firstLineOf(rest.trim() === '' ? body : rest);
+}
+
+// UX wave U3 (O-12): what a message's line leaves out, for the markdown copy: a hand-back's report, or the whole message
+// when its line shows only part of it; null when the line holds it all. Opened, the line always shows the whole message.
+export function messageMore(row: Extract<Row, { kind: 'agent_message' }>): string | null {
+  if (row.report !== undefined) return row.report;
+  const body = row.peer?.body ?? row.body;
+  return body !== undefined && previewHidesBody(body, row.peer?.preview ?? previewOf(body)) ? body : null;
+}
 // E7 end
 
 export type RowKind = Row['kind'];

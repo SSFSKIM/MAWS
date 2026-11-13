@@ -17,6 +17,7 @@ import { INTERRUPT_CUT } from '@shared/lane-a/interrupt-cut'; // P5 O9
 import { presentationOf } from './classify'; // P5 O9
 import { isUnseenTurnEnd } from './gap'; // P5 O7 M8
 import { carriedOf } from '@shared/engine/arrival-schema'; // UX wave U3
+import { headRole } from './head'; // UX wave U3
 
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
 
@@ -171,9 +172,9 @@ export interface TranscriptState {
   placement: Map<EventId, TurnId | null>;
   // `pluginIssues` (R1): the load issues already retained, by plugin, level and message, so an issue every init repeats
   // makes one notice per session.
-  // `arrivals` (UX wave U3, decision 8): the turn holding each arrival-bearing synthetic message, by its uuid, so a later
-  // one under the same uuid takes it out (one arrival per uuid)
-  index: { toolUses: Map<ToolUseId, TurnId>; tasks: Map<TaskId, TurnId>; requests: Map<RequestId, TurnId>; hooks: Map<string, TurnId>; messages: Map<MessageUuid, TurnId>; pluginIssues: Set<string>; arrivals: Map<MessageUuid, TurnId> };
+  // `arrivals` (UX wave U3, decision 8): the arrival-bearing synthetic message placed under each uuid (the one whose
+  // line is drawn) and the turn holding it, so a later one under the same uuid takes that one out (one arrival per uuid)
+  index: { toolUses: Map<ToolUseId, TurnId>; tasks: Map<TaskId, TurnId>; requests: Map<RequestId, TurnId>; hooks: Map<string, TurnId>; messages: Map<MessageUuid, TurnId>; pluginIssues: Set<string>; arrivals: Map<MessageUuid, { turn: TurnId; event: EventId }> };
   memo: Map<TurnId, MemoEntry>;
   lineage: { latest: TranscriptState | null };
   // E3 start: where each side thread's row lives (Design §5): the turn its first event landed in, or, for one that
@@ -415,15 +416,16 @@ class Batch {
     if (this.state.current === id) this.state.current = this.state.order.slice(Math.max(at, 0)).find((next) => this.state.turns.get(next)!.state === 'open' && this.state.turns.get(next)!.accepted) ?? null;
   }
 
-  // UX wave U3 (decision 8): the arrival-bearing synthetic message under `uuid` leaves the turn holding it, which derives
-  // again; a count of the turn's events taken at the process's exit keeps its meaning.
+  // UX wave U3 (decision 8): the arrival-bearing synthetic message placed under `uuid` leaves the turn holding it, which
+  // derives again; one kept under the same uuid that drew nothing (decision 20) stays. A count of the turn's events
+  // taken at the process's exit keeps its meaning.
   takeOutArrival(uuid: MessageUuid): void {
-    const holder = this.state.index.arrivals.get(uuid);
+    const placed = this.state.index.arrivals.get(uuid);
     this.state.index.arrivals.delete(uuid);
-    if (holder === undefined || !this.state.turns.has(holder)) return;
-    const at = this.state.turns.get(holder)!.events.findIndex((event) => event.kind === 'user.message' && event.messageUuid === uuid && event.arrival !== undefined);
+    if (placed === undefined || !this.state.turns.has(placed.turn)) return;
+    const at = this.state.turns.get(placed.turn)!.events.findIndex((event) => event.id === placed.event);
     if (at < 0) return;
-    const turn = this.touch(holder);
+    const turn = this.touch(placed.turn);
     turn.events.splice(at, 1);
     if (turn.agentsEndedAt !== undefined && at < turn.agentsEndedAt) turn.agentsEndedAt -= 1;
     turn.version += 1;
@@ -431,18 +433,18 @@ class Batch {
 
   // UX wave U3 (decision 21): a turn closed without a turn.ended of its own (by the process's exit or a later turn's
   // start) loses the task lines the host placed at its head: placed when the turn opened, they were provisional until its
-  // result, which will not come. A line a frame or a row made stays.
+  // result, which will not come. A line a frame or a row made stays. The head ends where the derivation's does (head.ts).
   dropProvisional(turn: TurnState): void {
     const drop: number[] = [];
     for (const [at, event] of turn.events.entries()) {
-      if (event.kind === 'turn.started') continue;
-      if (event.kind !== 'user.message' || !event.isSynthetic || event.arrival === undefined) break;
-      if (isHostMade(event) && carriedOf(event.arrival).some((entry) => entry.class === 'task')) drop.push(at);
+      const role = headRole(event, turn.id);
+      if (role === 'work') break;
+      if (role === 'arrival' && event.kind === 'user.message' && isHostMade(event) && carriedOf(event.arrival).some((entry) => entry.class === 'task')) drop.push(at);
     }
     if (drop.length === 0) return;
     for (const at of drop.reverse()) {
       const [event] = turn.events.splice(at, 1);
-      if (event?.kind === 'user.message' && event.messageUuid !== null && this.state.index.arrivals.get(event.messageUuid) === turn.id) this.state.index.arrivals.delete(event.messageUuid);
+      if (event?.kind === 'user.message' && event.messageUuid !== null && this.state.index.arrivals.get(event.messageUuid)?.event === event.id) this.state.index.arrivals.delete(event.messageUuid);
       if (turn.agentsEndedAt !== undefined && at < turn.agentsEndedAt) turn.agentsEndedAt -= 1;
     }
     turn.version += 1;
@@ -932,7 +934,7 @@ function placeArrival(batch: Batch, event: Event<'user.message'>): void {
   const turn = batch.current();
   if (!turn) return;
   batch.push(turn, event);
-  if (event.messageUuid !== null) batch.state.index.arrivals.set(event.messageUuid, turn.id);
+  if (event.messageUuid !== null) batch.state.index.arrivals.set(event.messageUuid, { turn: turn.id, event: event.id });
 }
 
 // A message the engine host made itself (a task's end it kept until the model was told, a scheduled fire): no frame or
@@ -940,10 +942,10 @@ function placeArrival(batch: Batch, event: Event<'user.message'>): void {
 const isHostMade = (event: Event<'user.message'>) => (typeof event.content === 'string' ? event.content === '' : event.content.length === 0);
 
 // Decision 6: a turn the engine opened that holds no event that draws a row and no model output (in the recorded cases,
-// its own turn.started alone): only its start, and synthetic messages that carry no arrival this build draws.
+// its own turn.started alone, or with hooks that ran and let things go on): every event of it draws nothing (head.ts).
 function heldNothing(turn: TurnState): boolean {
   return turn.origin === 'engine' && turn.state === 'open' && turn.accepted && turn.live.size === 0 && turn.children.size === 0 &&
-    turn.events.every((event) => event.kind === 'turn.started' || (event.kind === 'user.message' && event.isSynthetic && event.bash === null && carriedOf(event.arrival).length === 0));
+    turn.events.every((event) => headRole(event, turn.id) === 'silent');
 }
 // UX wave U3 end
 
