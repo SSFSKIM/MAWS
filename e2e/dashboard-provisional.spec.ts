@@ -55,7 +55,7 @@ test('a dataset call labels every chart bound to it while it streams, the agent 
   const tab = await openFromLibrary(page, TITLE, id, '.ds-doc .ProseMirror[data-editor="live"]');
   const editor = page.locator(EDITOR(id));
   await editor.click();
-  await page.keyboard.type('Revenue by region.');
+  await page.keyboard.type('Revenue by region'); // its full stop typed after the agent's insert (U10a, below)
   await durable(tab);
 
   // the agent reads the dashboard and adds three charts after the paragraph: two over `sales`, one over `costs`
@@ -66,13 +66,26 @@ test('a dataset call labels every chart bound to it while it streams, the agent 
   await expect(figures(tab)).toHaveCount(3, { timeout: 15_000 });
   // the insert's presence (its hold after the answer) clears before the dataset's call, so the outline judged is the call's
   await expect(editor.locator('[data-agent-editing]')).toHaveCount(0, { timeout: 20_000 });
-  // the insert left a chart last, so the owner's editor writes its trailing paragraph (Tiptap's TrailingNode, guarded
-  // against the binding's own write, runs on the editor's next transaction, here Presence's redraw): revision 24 in the
-  // Mac run 39733208468, one after the insert's. The baseline is the revision once that has landed and nothing moves
+  // U10a (docs/doperpowers/plans/2026-11-12-ux-wave-U10a-unmade-writes.md, decision 13): a repair answers only a change
+  // of the person's to the content, so while the owner only looks (the insert's write arriving, its presence coming and
+  // going) the editor writes nothing: the revision is still the one the insert answered and the chart is the last block
   const trailing = () => editor.evaluate((root) => root.lastElementChild?.localName === 'p' && (root.lastElementChild.textContent ?? '') === '');
-  await expect.poll(trailing, { timeout: 10_000, message: 'the editor’s trailing paragraph after the charts' }).toBe(true);
+  const lastIsChart = () => editor.evaluate((root) => root.lastElementChild?.classList.contains('doc-chart') ?? false);
+  await durable(tab);
+  for (const until = Date.now() + 2_000; Date.now() < until; ) {
+    expect(await revisionOf(page, id), 'nothing written while the owner only looks').toBe(inserted.result!.revision);
+    expect(await lastIsChart(), 'the editor’s last element is still the chart’s').toBe(true);
+    await page.waitForTimeout(250);
+  }
+  // then the owner types one more character at the end of the first paragraph: that change carries the editor's
+  // trailing paragraph after the charts, in the same write
+  await editor.locator('p', { hasText: 'Revenue by region' }).click();
+  await page.keyboard.press('End');
+  await page.keyboard.type('.');
+  await expect.poll(trailing, { timeout: 10_000, message: 'the editor’s trailing paragraph after the charts, with the owner’s keystroke' }).toBe(true);
   await durable(tab);
   let settled = await revisionOf(page, id);
+  expect(settled, 'the keystroke and the paragraph it carried are one revision').toBe(inserted.result!.revision + 1);
   await expect
     .poll(async () => {
       const now = await revisionOf(page, id);
@@ -84,7 +97,7 @@ test('a dataset call labels every chart bound to it while it streams, the agent 
   const seen = await recordDrawing(page, EDITOR(id));
 
   // 1: `sales` bound from a CSV: streamed, then called; the agent's base stays its own last write (the insert), the
-  // owner's trailing paragraph since merging as any unrelated change does
+  // owner's keystroke since (and the trailing paragraph it carried) merging as any unrelated change does
   const csv = join(app.dir, 'sales.csv');
   writeFileSync(csv, SALES_CSV);
   const toolUseId = 'toolu_dashboard_provisional_1';

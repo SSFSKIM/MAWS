@@ -18,9 +18,11 @@ import { openArtifactReplicaInPanel } from './support/shell';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type CDPSession, type Locator, type Page } from '@playwright/test';
 import { GDP_CSV, PENGUINS_CSV } from '../src/artifacts/dashboard/fixtures/datasets';
 import { DatasetError, parseDataset } from '../src/artifacts/dashboard/parse';
+import { imeStep } from './support/document-scale'; // U10a: the gap caret's composition, as e2e/document-provisional.spec.ts drives it
+import { keystrokes } from './support/hangul';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
 import { bindCsv, commentSelectedChart, durable, openInMain, openInPanel, selectPanelSession, railOf, refusalOf, reply, revisionOf, selectChart, startApp, toggleDatasets, watchSelection, type DashboardApp } from './support/dashboards'; // M6
@@ -674,5 +676,193 @@ test('every dataset state draws in place from a fixture: a missing column, an un
   await expect(label(6)).toHaveText('no dataset "nothing"');
   for (let k = 0; k < STATES.length; k++) await expect(views.nth(k).locator('.dash-caption')).toHaveText(String(STATES[k]![1].title));
   await main.screenshot({ path: `${PROOF}/states.png` });
+  expect(launch.consoleErrors(), 'the console stays free of errors').toEqual([]);
+});
+
+// ---- U10a (docs/doperpowers/plans/2026-11-12-ux-wave-U10a-unmade-writes.md, decision 16): the gap caret --------------------
+// The place to type after a block that holds no text, now that no paragraph is written under a final chart at the open:
+// ProseMirror's gap cursor, set by a click in the room under the block or an arrow key from it, in a transaction that
+// writes nothing. What the owner types or composes there makes a paragraph at that place, the chart kept. On boards the
+// agent wrote and the owner has not changed; the proof of decisions 9 to 11, which needs a layout.
+
+const LIVE = '.ds-doc .ProseMirror[data-editor="live"]';
+const salesChart = (title: string, block: string) => chartFence('sales', { view: 'bar', x: 'region', y: 'total', title }, block);
+
+interface Board {
+  id: string;
+  revision: number; // the agent's last write
+  tab: Locator;
+  editor: Locator;
+}
+/** A board the agent writes from `content`, with `sales` bound by the agent too, opened in a main tab, every chart drawn. */
+async function agentBoard(app: DashboardApp, title: string, content: string): Promise<Board> {
+  const { artifactId: id, revision } = await app.agent.ok<Created>('A', 'artifact_create', { kind: 'dashboard', title, content });
+  const bound = await app.agent.ok<Bound>('A', 'artifact_dataset', { artifact: id, baseRevision: revision, id: 'sales', title: 'Sales', path: await app.agent.write('A', 'sales.csv', AGENT_CSV) });
+  const tab = await openInMain(app.page, id);
+  const charts = (content.match(/^:::chart/gm) ?? []).length;
+  await expect(figures(tab)).toHaveCount(charts, { timeout: 15_000 });
+  for (let k = 0; k < charts; k++) await expect.poll(() => tipsOf(figures(tab).nth(k)), { timeout: 15_000 }).toEqual(AGENT_TIPS);
+  expect(await revisionOf(app.page, id), 'the open wrote nothing').toBe(bound.revision);
+  return { id, revision: bound.revision, tab, editor: tab.locator(LIVE) };
+}
+
+/** The editor's top-level blocks as its state holds them, `type:text`. */
+const blocksIn = (editor: Locator): Promise<string[]> =>
+  editor.evaluate((el) => {
+    const blocks: string[] = [];
+    type Top = { type: { name: string }; textContent: string };
+    (el as HTMLElement & { editor: { state: { doc: { forEach(fn: (node: Top) => void): void } } } }).editor.state.doc.forEach((node) => blocks.push(`${node.type.name}:${node.textContent}`));
+    return blocks;
+  });
+
+/**
+ * The editor's caret: its selection's kind (`text`, `node`, `gapcursor`), how many top-level blocks stand before it, and
+ * whether the gap caret's bar is drawn (shown, the editor having the keyboard) below the block before it.
+ */
+const caretOf = (editor: Locator) =>
+  editor.evaluate((el) => {
+    type State = { selection: { head: number; toJSON(): { type: string } }; doc: { resolve(pos: number): { index(depth: number): number } } };
+    const { state } = (el as HTMLElement & { editor: { state: State } }).editor;
+    const bar = el.querySelector<HTMLElement>(':scope > .ProseMirror-gapcursor');
+    const above = bar?.previousElementSibling;
+    const drawn = !!bar && !!above && getComputedStyle(bar).display !== 'none' && bar.getBoundingClientRect().top >= above.getBoundingClientRect().bottom - 1;
+    return { kind: state.selection.toJSON().type, before: state.doc.resolve(state.selection.head).index(0), drawn };
+  });
+const gapAfter = (before: number) => ({ kind: 'gapcursor', before, drawn: true });
+
+/** The revision stays the board's for `ms`: a write the editor made would have landed inside it. */
+async function holds(page: Page, board: Board, message: string, ms = 1_500): Promise<void> {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    expect(await revisionOf(page, board.id), message).toBe(board.revision);
+    await page.waitForTimeout(250);
+  }
+}
+
+/** The owner's click in the room under the editor's last block (the live page's line of padding), on the editor itself. */
+async function clickUnderLast(page: Page, editor: Locator): Promise<void> {
+  await editor.evaluate((el) => el.scrollIntoView({ block: 'end' }));
+  const at = await editor.evaluate((el) => {
+    const root = el.getBoundingClientRect();
+    const last = Array.from(el.children).filter((child) => !child.classList.contains('ProseMirror-gapcursor')).at(-1)!;
+    const point = { x: root.left + Math.min(80, root.width / 4), y: (last.getBoundingClientRect().bottom + root.bottom) / 2 };
+    return { ...point, hit: el.ownerDocument.elementFromPoint(point.x, point.y) === el };
+  });
+  expect(at.hit, 'the point under the last block is the editor’s own room').toBe(true);
+  await page.mouse.click(at.x, at.y);
+}
+
+/** The owner composes `syllable` through the debugger's input-method calls (as e2e/document-provisional.spec.ts does), then ends it. */
+async function compose(page: Page, syllable: string): Promise<void> {
+  const cdp: CDPSession = await page.context().newCDPSession(page);
+  const steps = keystrokes(syllable);
+  try {
+    for (const step of steps.filter((s) => s.kind !== 'commit')) await imeStep(cdp, step, steps);
+    await cdp.send('Input.insertText', { text: syllable });
+  } finally {
+    await cdp.detach();
+  }
+}
+
+/** The owner types `word` at the caret: its first key makes the paragraph, one revision of the owner's; then the rest. */
+async function typeWord(page: Page, board: Board, word: string): Promise<void> {
+  await page.keyboard.type(word[0]!);
+  await durable(board.tab);
+  expect(await revisionOf(page, board.id), 'the first key and the paragraph it makes are one revision').toBe(board.revision + 1);
+  await page.keyboard.type(word.slice(1));
+  await durable(board.tab);
+}
+
+const INTRO = 'Revenue by region this quarter. ^p1';
+
+test('the gap caret: a paragraph, then a chart: a click under the chart shows the caret and writes nothing, also when it leaves the selection as it was; a word typed there or a syllable composed there lands in a paragraph after the chart, kept', async () => {
+  test.setTimeout(150_000);
+  agentApp = await startApp(PROOF);
+  const { page, launch } = agentApp;
+  const board = await agentBoard(agentApp, 'Gap after a chart', [INTRO, '', ...salesChart('Sales by region', 'c1')].join('\n'));
+  expect(await blocksIn(board.editor)).toEqual(['paragraph:Revenue by region this quarter.', 'chart:']);
+
+  await test.step('a click under the chart: the gap caret is drawn there, nothing written', async () => {
+    await clickUnderLast(page, board.editor);
+    await expect.poll(() => caretOf(board.editor)).toEqual(gapAfter(2));
+    await holds(page, board, 'the click wrote nothing');
+    const shot = `${PROOF}/gap-caret-under-chart.png`;
+    await board.tab.screenshot({ path: shot, animations: 'disabled' }); // the bar drawn, not caught in its blink
+    await test.info().attach('the gap caret under a final chart', { path: shot, contentType: 'image/png' });
+  });
+  await test.step('a second click there leaves the selection as it was: the caret stays, nothing written', async () => {
+    await clickUnderLast(page, board.editor);
+    await expect.poll(() => caretOf(board.editor)).toEqual(gapAfter(2));
+    await holds(page, board, 'the second click wrote nothing');
+  });
+  await test.step('a word typed at the caret: the chart still drawn, the word in a paragraph after it', async () => {
+    await typeWord(page, board, 'Notes');
+    expect(await blocksIn(board.editor)).toEqual(['paragraph:Revenue by region this quarter.', 'chart:', 'paragraph:Notes']);
+    await expect(figures(board.tab)).toHaveCount(1);
+    expect(await tipsOf(figures(board.tab).first())).toEqual(AGENT_TIPS);
+  });
+
+  const composed = await agentBoard(agentApp, 'Gap after a chart, composed', [INTRO, '', ...salesChart('Sales by region', 'c1')].join('\n'));
+  await test.step('on a second such board, a syllable composed under the chart: the chart still drawn, the syllable whole in a paragraph after it', async () => {
+    await clickUnderLast(page, composed.editor);
+    await expect.poll(() => caretOf(composed.editor)).toEqual(gapAfter(2));
+    await holds(page, composed, 'the click wrote nothing');
+    await compose(page, '한');
+    await expect.poll(() => blocksIn(composed.editor), { timeout: 10_000 }).toEqual(['paragraph:Revenue by region this quarter.', 'chart:', 'paragraph:한']);
+    await durable(composed.tab);
+    await expect(figures(composed.tab)).toHaveCount(1);
+    expect(await tipsOf(figures(composed.tab).first())).toEqual(AGENT_TIPS);
+  });
+  expect(launch.consoleErrors(), 'the console stays free of errors').toEqual([]);
+});
+
+test('the gap caret: a chart alone: the board opens with the chart selected; a click under it shows the caret and a syllable composed there lands after the chart; from its caption, ArrowDown and a word typed do the same', async () => {
+  test.setTimeout(150_000);
+  agentApp = await startApp(PROOF);
+  const { page, launch } = agentApp;
+  const board = await agentBoard(agentApp, 'A chart alone', salesChart('Sales by region', 'c1').join('\n'));
+  expect(await blocksIn(board.editor)).toEqual(['chart:']);
+  expect((await caretOf(board.editor)).kind, 'the board opens with the chart selected').toBe('node');
+
+  await test.step('a click under the chart: the gap caret, nothing written; a syllable composed there lands in a paragraph after the chart', async () => {
+    await clickUnderLast(page, board.editor);
+    await expect.poll(() => caretOf(board.editor)).toEqual(gapAfter(1));
+    await holds(page, board, 'the click wrote nothing');
+    await compose(page, '한');
+    await expect.poll(() => blocksIn(board.editor), { timeout: 10_000 }).toEqual(['chart:', 'paragraph:한']);
+    await durable(board.tab);
+    expect(await tipsOf(figures(board.tab).first())).toEqual(AGENT_TIPS);
+  });
+
+  const arrowed = await agentBoard(agentApp, 'A chart alone, by keyboard', salesChart('Sales by region', 'c1').join('\n'));
+  await test.step('on a second such board, the chart’s caption clicked, ArrowDown: the gap caret; a word typed lands in a paragraph after the chart', async () => {
+    await selectChart(arrowed.tab);
+    await page.keyboard.press('ArrowDown');
+    await expect.poll(() => caretOf(arrowed.editor)).toEqual(gapAfter(1));
+    await holds(page, arrowed, 'the selection moved, nothing written');
+    await typeWord(page, arrowed, 'Notes');
+    expect(await blocksIn(arrowed.editor)).toEqual(['chart:', 'paragraph:Notes']);
+    expect(await tipsOf(figures(arrowed.tab).first())).toEqual(AGENT_TIPS);
+  });
+  expect(launch.consoleErrors(), 'the console stays free of errors').toEqual([]);
+});
+
+test('the gap caret: two charts: ArrowDown from the first chart selected puts the caret between them; a syllable composed there is whole in a paragraph between them, both charts kept, and one empty paragraph is under the second', async () => {
+  test.setTimeout(150_000);
+  agentApp = await startApp(PROOF);
+  const { page, launch } = agentApp;
+  const board = await agentBoard(agentApp, 'Two charts', [...salesChart('Sales by region', 'c1'), ...salesChart('Sales again', 'c2')].join('\n'));
+  expect(await blocksIn(board.editor)).toEqual(['chart:', 'chart:']);
+
+  await selectChart(board.tab); // the first chart's caption
+  await page.keyboard.press('ArrowDown');
+  await expect.poll(() => caretOf(board.editor)).toEqual(gapAfter(1));
+  await holds(page, board, 'the selection moved, nothing written');
+  await compose(page, '한');
+  // the gap cursor's own paragraph is not a composition's change, so the trailing paragraph comes with it (decision 12)
+  await expect.poll(() => blocksIn(board.editor), { timeout: 10_000 }).toEqual(['chart:', 'paragraph:한', 'chart:', 'paragraph:']);
+  await durable(board.tab);
+  await expect(figures(board.tab)).toHaveCount(2);
+  for (let k = 0; k < 2; k++) expect(await tipsOf(figures(board.tab).nth(k))).toEqual(AGENT_TIPS);
   expect(launch.consoleErrors(), 'the console stays free of errors').toEqual([]);
 });

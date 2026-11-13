@@ -244,3 +244,166 @@ test('the agent’s cursor and the blocks its batch edits are drawn in a main ta
   }
   expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
 });
+
+// ---- U10a (docs/doperpowers/plans/2026-11-12-ux-wave-U10a-unmade-writes.md, decision 14; the UX wave's U10, A1 and A2) ----
+// An agent's document that the owner only looks at gains no revision: the agent's re-cut of a bold run lands at the first
+// call, its next edit from the revision that call returned lands, the agent's presence comes and goes, and the owner's
+// click and drag write nothing. The owner's first keystroke is one revision, which carries the paragraph under the table.
+
+const LIVE = '.ds-doc .ProseMirror[data-editor="live"]';
+const revisionOf = async (page: Page, artifactId: string): Promise<number> => (await ok<{ artifact: { revision: number } }>(page, 'artifacts.get', { artifactId })).artifact.revision;
+
+/** The revision stays `revision` for `ms`: a write either editor made would have landed inside it. */
+async function holds(page: Page, artifactId: string, revision: number, message: string, ms = 2_000): Promise<void> {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    expect(await revisionOf(page, artifactId), message).toBe(revision);
+    await page.waitForTimeout(250);
+  }
+}
+
+/** The editor's top-level blocks as its state holds them: what it shows, apart from the widgets drawn over it. */
+const blocksIn = (editor: Locator): Promise<{ type: string; text: string }[]> =>
+  editor.evaluate((el) => {
+    const blocks: { type: string; text: string }[] = [];
+    type Top = { type: { name: string }; textContent: string };
+    (el as HTMLElement & { editor: { state: { doc: { forEach(fn: (node: Top) => void): void } } } }).editor.state.doc.forEach((node) => blocks.push({ type: node.type.name, text: node.textContent }));
+    return blocks;
+  });
+const typesIn = async (editor: Locator) => (await blocksIn(editor)).map((block) => block.type);
+
+/** Each list item's text and the runs of it in bold, as the editor's state holds them. */
+const itemsIn = (editor: Locator): Promise<{ text: string; bold: string[] }[]> =>
+  editor.evaluate((el) => {
+    type PMNode = { type: { name: string }; textContent: string; isText: boolean; text?: string; marks: { type: { name: string } }[]; descendants(fn: (node: PMNode) => boolean | void): void };
+    const items: { text: string; bold: string[] }[] = [];
+    (el as HTMLElement & { editor: { state: { doc: PMNode } } }).editor.state.doc.descendants((node) => {
+      if (!node.type.name.startsWith('listItem')) return true;
+      const bold: string[] = [];
+      node.descendants((inner) => {
+        if (inner.isText && inner.marks.some((mark) => mark.type.name === 'bold')) bold.push(inner.text ?? '');
+      });
+      items.push({ text: node.textContent, bold });
+      return false;
+    });
+    return items;
+  });
+
+const CHECKLIST = '- **Vendor contract** signed\n- **Venue** booked\n- **Catering** confirmed';
+const OWNERS = (venue: string) => `| Task | Owner |\n| --- | --- |\n| Contract | Dana |\n| Venue | ${venue} |`;
+
+test('an agent’s document the owner only looks at gains no revision: the re-cut of a bold run lands at the first call and the next edit from its revision lands, presence comes and goes, a click and a drag write nothing; the owner’s first keystroke is one revision with the paragraph under the table', async () => {
+  test.setTimeout(150_000);
+  const page = await start();
+  const seam = new PerfSeam(join(userData!, 'document-perf'));
+  await expect.poll(() => existsSync(join(seam.dir, 'in')), { message: 'the host seam is up' }).toBe(true);
+  await selectPanelSession(page);
+  // a new document, open in a main tab and in the panel; nobody types in it
+  const { id, main } = await openInMain(page, 'Launch checklist');
+  const record = await openInPanel(page, id);
+  const editors = [main.locator(LIVE), record.locator(LIVE)] as const;
+  const created = await revisionOf(page, id);
+
+  // the agent writes into it: list items that begin with bold text, then a table, which is the last block
+  const agent = 'document-unmade-writes-agent';
+  const first = await seam.call<ReadResult>(agent, 'artifact_read', { artifact: id });
+  expect(first.isError, first.text).toBe(false);
+  const empty = /\^([0-9a-z]+)/.exec(first.result!.markdown)?.[1];
+  expect(empty, `the new document's one empty paragraph: ${first.result!.markdown}`).toBeDefined();
+  const inserted = await seam.call<{ revision: number }>(agent, 'artifact_edit', {
+    artifact: id,
+    baseRevision: first.result!.revision,
+    ops: [
+      { op: 'insert', before: empty, markdown: CHECKLIST },
+      { op: 'insert', before: empty, markdown: OWNERS('Sam') },
+      { op: 'delete', id: empty },
+    ],
+  });
+  expect(inserted.isError, inserted.text).toBe(false);
+  expect(inserted.result!.revision, 'the open of a new document wrote nothing').toBe(created + 1);
+  await test.step('both editors show the list and the table, the revision is the insert’s, and neither shows a paragraph under the table', async () => {
+    for (const editor of editors) {
+      await expect.poll(() => typesIn(editor), { timeout: 10_000 }).toEqual(['bulletList', 'table']);
+      expect(await itemsIn(editor)).toEqual([
+        { text: 'Vendor contract signed', bold: ['Vendor contract'] },
+        { text: 'Venue booked', bold: ['Venue'] },
+        { text: 'Catering confirmed', bold: ['Catering'] },
+      ]);
+    }
+    expect(await revisionOf(page, id)).toBe(inserted.result!.revision);
+  });
+
+  // the agent reads it, then keeps part of the first item's bold run without the bold (A1's trigger)
+  const read = await seam.call<ReadResult>(agent, 'artifact_read', { artifact: id });
+  expect(read.isError, read.text).toBe(false);
+  expect(read.result!.revision).toBe(inserted.result!.revision);
+  const table = /^\^([0-9a-z]+)$/m.exec(read.result!.markdown)?.[1]; // a table's marker stands on a line of its own
+  expect(table, `the table's id: ${read.result!.markdown}`).toBeDefined();
+  const recut = await seam.call<{ revision: number }>(agent, 'artifact_edit', { artifact: id, baseRevision: read.result!.revision, ops: [{ op: 'replace_text', old: '**Vendor contract** signed', new: 'contract signed' }] });
+  expect(recut.isError, `the re-cut lands at the first call: ${recut.text}`).toBe(false);
+  expect(recut.result!.revision, 'one revision, the agent’s').toBe(inserted.result!.revision + 1);
+  await test.step('both editors show the re-cut item without the bold, and the revision is the one the call answered', async () => {
+    for (const editor of editors) {
+      await expect.poll(async () => (await itemsIn(editor))[0], { timeout: 10_000 }).toEqual({ text: 'contract signed', bold: [] });
+      await expect(editor.locator('li').first().locator('strong')).toHaveCount(0);
+    }
+    expect(await revisionOf(page, id)).toBe(recut.result!.revision);
+  });
+
+  // from the revision the re-cut returned, the agent edits a block the re-cut left alone
+  const next = await seam.call<{ revision: number }>(agent, 'artifact_edit', { artifact: id, baseRevision: recut.result!.revision, ops: [{ op: 'replace_block', id: table, markdown: OWNERS('Ana') }] });
+  expect(next.isError, `the next edit from the returned revision lands: ${next.text}`).toBe(false);
+  expect(next.result!.revision, 'one revision, the agent’s').toBe(recut.result!.revision + 1);
+
+  await test.step('as the agent’s presence goes, nothing more is written: the revision is the agent’s last, its read since then reports no change, and no paragraph is under the table', async () => {
+    for (const editor of editors) {
+      await expect.poll(async () => (await blocksIn(editor)).at(-1), { timeout: 10_000 }).toEqual({ type: 'table', text: 'TaskOwnerContractDanaVenueAna' });
+      await expect(editor.locator(`[data-agent-editing="${AGENT_NAME}"]`)).toHaveCount(0, { timeout: 20_000 });
+      await expect(editor.locator('.ProseMirror-yjs-cursor', { hasText: AGENT_NAME })).toHaveCount(0);
+    }
+    await durable(main);
+    await durable(record);
+    await holds(page, id, next.result!.revision, 'the revision moves only by the agent’s writes');
+    for (const editor of editors) expect(await typesIn(editor)).toEqual(['bulletList', 'table']);
+    const since = await seam.call<ReadResult & { changed?: string[]; deleted?: string[]; complete?: true }>(agent, 'artifact_read', { artifact: id, sinceRevision: next.result!.revision });
+    expect(since.isError, since.text).toBe(false);
+    expect({ revision: since.result!.revision, changed: since.result!.changed, deleted: since.result!.deleted, complete: since.result!.complete }).toEqual({ revision: next.result!.revision, changed: [], deleted: [], complete: undefined });
+  });
+
+  const [mainText] = editors;
+  await test.step('the owner clicks into a list item’s text and drags a selection over its words: nothing is written', async () => {
+    const words = await mainText.locator('li', { hasText: 'Venue booked' }).locator('p').evaluate((p) => {
+      const range = p.ownerDocument.createRange();
+      range.selectNodeContents(p);
+      const box = range.getBoundingClientRect();
+      return { left: box.left, right: box.right, y: box.top + box.height / 2 };
+    });
+    await page.mouse.click(words.left + 2, words.y);
+    await expect(mainText).toBeFocused();
+    await page.mouse.move(words.left + 1, words.y);
+    await page.mouse.down();
+    await page.mouse.move(words.right - 1, words.y, { steps: 8 });
+    await page.mouse.up();
+    await expect.poll(() => mainText.evaluate((el) => el.ownerDocument.getSelection()?.toString() ?? '')).toMatch(/^Venue/);
+    await durable(main);
+    await holds(page, id, next.result!.revision, 'a click and a drag write nothing');
+    for (const editor of editors) expect(await typesIn(editor)).toEqual(['bulletList', 'table']);
+  });
+
+  await test.step('the owner types one character there: one revision, and both editors show an empty paragraph under the table', async () => {
+    await page.keyboard.press('End');
+    await page.keyboard.type('.');
+    await durable(main);
+    await expect.poll(() => revisionOf(page, id), { timeout: 10_000 }).toBe(next.result!.revision + 1);
+    await holds(page, id, next.result!.revision + 1, 'the keystroke and the paragraph it carries are one revision');
+    for (const editor of editors) {
+      await expect.poll(async () => (await blocksIn(editor)).slice(-2), { timeout: 10_000 }).toEqual([
+        { type: 'table', text: 'TaskOwnerContractDanaVenueAna' },
+        { type: 'paragraph', text: '' },
+      ]);
+      expect((await itemsIn(editor))[1]).toEqual({ text: 'Venue booked.', bold: ['Venue'] });
+    }
+    await durable(record);
+  });
+  expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
+});
