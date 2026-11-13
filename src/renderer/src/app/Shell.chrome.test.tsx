@@ -27,7 +27,7 @@ const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() 
 beforeEach(() => {
   setWidth(1440);
   resetPanelStores();
-  useShellView.setState({ sidebarOverlay: false, cardsOverlay: false, pageOpen: false });
+  useShellView.setState({ sidebarOverlay: false, cardsOverlay: false });
   for (const id of ['terminal', 'review', 'browser', 'files', 'scm']) offs.push(registerPanelTool(probeTool(id, { title: id }).tool));
   registerSlot('panelHost', PanelHost);
 });
@@ -186,6 +186,36 @@ it.each([
   expect(inertAtFocus).toEqual([false]);
   expect(document.activeElement).toBe(target);
   expect(target.closest('[inert]')).toBeNull();
+});
+
+// UX wave U7b (Interfaces §H, row 11): under a page the sheet's Esc listener is not mounted, so the press reaches the
+// page, which closes, and no side column is folded.
+it('in a window 620 px wide with a side surface drawn as a sheet, Esc on a page closes the page and folds no side column', async () => {
+  setWidth(620);
+  { useLayout.getState().setPanelTabs(A, { tabs: [ref('review:aaaaaaaa')], activeTabId: 'review:aaaaaaaa' }); useLayout.getState().showSurfaceTab(A, 'review:aaaaaaaa'); }
+  renderShell();
+  expect(screen.getByRole('button', { name: 'Close surface sheet' })).toBeTruthy();
+  act(() => useLayout.getState().openDestination({ kind: 'projects' }));
+  expect(screen.queryByRole('button', { name: 'Close surface sheet' })).toBeNull();
+  const collapsed = useLayout.getState().regions.panel.collapsed;
+  await userEvent.keyboard('{Escape}');
+  expect(useLayout.getState().destination).toBeNull();
+  expect(useLayout.getState().regions.panel.collapsed).toBe(collapsed);
+  expect(screen.getByRole('button', { name: 'Close surface sheet' }), 'the sheet is drawn again as it was').toBeTruthy();
+});
+
+// UX wave U7b (Interfaces §H, row 10): the sidebar drawn over the window keeps its own Esc, which the page does not see.
+it('with a page open and the keyboard in the sidebar drawn over the window, Esc closes that overlay and the page stays', async () => {
+  setWidth(620);
+  renderShell();
+  act(() => useLayout.getState().openDestination({ kind: 'projects' }));
+  act(() => useShellView.setState({ sidebarOverlay: true }));
+  const sidebar = document.getElementById('region-sidebar')!;
+  const control = sidebar.querySelector<HTMLElement>('button, input')!;
+  act(() => control.focus());
+  await userEvent.keyboard('{Escape}');
+  expect(useShellView.getState().sidebarOverlay).toBe(false);
+  expect(useLayout.getState().destination).toEqual({ kind: 'projects' });
 });
 
 it('leaves composing Escape and keyboard focus in a narrow sheet field', async () => {

@@ -92,4 +92,12 @@ describe('the surface’s requests, answered by this window (R2)', () => {
       { appSessionId: shown, requestId: 'fill-2', answer: { ask: 'prompt_fill', filled: false } },
     ]);
   });
+
+  // UX wave U7b (§N): behind a page the session is not shown here, so its prompt request is not this window's to answer.
+  it('a prompt request of the session behind a page is left to the host', async () => {
+    useLayout.getState().openDestination({ kind: 'projects' });
+    fake.event('session.eventBatch', { appSessionId: shown, events: [ask(41, { requestId: 'read-4', ask: 'prompt_read' })] });
+    await settle();
+    expect(fake.invoked('session.ui.answer')).toEqual([]);
+  });
 });

@@ -47,6 +47,9 @@ function regionStops(): FocusStop[] {
     if (next) result.push(next);
   };
   add(sidebar);
+  // UX wave U7b (M5, decision 8): an open page is the stop after the sidebar. The main area and the side column it covers
+  // are inert and invisible, so the stops below pass over them as over any such region.
+  add(document.getElementById('region-page'));
   if (main) {
     // The tab strip and pane body are distinct destinations. The chrome's portaled strips live outside region-main;
     // pair them with their pane, without treating tabs inside a tool's content as shell destinations.

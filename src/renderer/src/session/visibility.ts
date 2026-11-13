@@ -6,13 +6,15 @@
 // tab is selected), or the thread's unread mark would never clear. P2-E1: so is the thread a comment card draws while
 // its host is on screen (the card publishes it only then). P3-G (§D1.3): a floating panel covers the main region as a
 // maximized one does, and the floating card draws the shown session on screen while it is open (not as its pill).
-// P4-B3: likewise the main split's card, whose pane is not on screen while it floats.
+// P4-B3: likewise the main split's card, whose pane is not on screen while it floats. UX wave U7b (its execution
+// document, §N): behind a page nothing is on screen, of the main area, the side column or a card; behind the Settings
+// dialog everything is, as under any dialog.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
 import { surfaceSession, surfaceTabs } from '../panel/surface-model';
-import { useLayout, type LayoutState } from '../stores/layout';
+import { pageOpen, useLayout, type LayoutState } from '../stores/layout';
 import { SIDE_TOOL_ID } from '../side/actions';
 import { currentSet, floatingPane } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
@@ -30,7 +32,7 @@ export function visibleSessions(
   sideChildren: ReadonlyMap<AppSessionId, AppSessionId> = new Map(), // E3: parent → the child its Side pane draws
 ): Set<AppSessionId> {
   const visible = new Set<AppSessionId>();
-  if (!windowActive) return visible;
+  if (!windowActive || pageOpen(layout)) return visible;
   const { main, regions } = layout;
   const context = surfaceSession(layout);
   const surfaces = surfaceTabs(layout, context);
@@ -96,7 +98,7 @@ export function connectVisibility(client: MawsBridge = ipc, stores = { layout: u
   };
 
   const offLayout = stores.layout.subscribe((state, before) => {
-    if (state.main !== before.main || state.regions !== before.regions || state.panelPinned !== before.panelPinned || state.panelBySession !== before.panelBySession || state.panelActiveNoSession !== before.panelActiveNoSession || state.panelSurfaces !== before.panelSurfaces || state.knownSession !== before.knownSession) update();
+    if (state.main !== before.main || state.regions !== before.regions || state.panelPinned !== before.panelPinned || state.panelBySession !== before.panelBySession || state.panelActiveNoSession !== before.panelActiveNoSession || state.panelSurfaces !== before.panelSurfaces || state.knownSession !== before.knownSession || state.destination !== before.destination) update();
   });
   const offSessions = stores.sessions.subscribe((state, before) => state.records !== before.records && update());
   const offSide = stores.side.subscribe((state, before) => state.panes !== before.panes && update()); // E3

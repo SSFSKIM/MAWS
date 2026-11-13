@@ -13,8 +13,8 @@ import { LANE_A_WORDS } from '../session/controls/lane-a';
 import { resetLaneAStore } from '../stores/lane-a';
 import { registerCloseGuard, registerAction, runAction } from '../keymap/actions-runtime';
 import type { PanelHostProps } from '../panel/host-slot';
-import { useLayout } from '../stores/layout';
-import { cardColumnNow, useCardColumnShown, useShellView } from './shell-view';
+import { persistLayout, useLayout } from '../stores/layout';
+import { cardColumnNow, useCardColumnShown } from './shell-view';
 import { useSessions } from '../stores/sessions';
 import { useSettings } from '../stores/settings';
 import { registerShellActions } from './shell-actions';
@@ -311,7 +311,8 @@ describe('toolbar', () => {
   });
 
   // UX wave U8b (UC-9, §C.2): the column, the icon and useCardColumnShown read one source, so a page that hides the
-  // column turns all three off in one render. The column's absence is not pinned: U7 decides how it hides under a page.
+  // column turns all three off in one render. UX wave U7b (M5, decision 4): the page is the layout store's, and the
+  // column keeps its place while it is not drawn: the same node, invisible and inert.
   it('a page open in the one source turns the cards off for the icon and useCardColumnShown in one render', () => {
     useSessions.setState({ records: new Map([[A, record(A)]]) });
     useLayout.setState({ main: withActive(sessionTab(A)) });
@@ -323,11 +324,15 @@ describe('toolbar', () => {
     }
     render(<QueryClientProvider client={queryClient}><Shell /><Reader /></QueryClientProvider>);
     const cards = within(screen.getByRole('banner')).getByRole('button', { name: 'Session cards' });
+    const column = region('cards');
     expect([cards.getAttribute('aria-pressed'), seen.at(-1), cardColumnNow(useLayout.getState(), window.innerWidth).shown]).toEqual(['true', true, true]);
-    act(() => useShellView.setState({ pageOpen: true }));
-    expect([cards.getAttribute('aria-pressed'), seen.at(-1), cardColumnNow(useLayout.getState(), window.innerWidth).shown]).toEqual(['false', false, false]);
-    act(() => useShellView.setState({ pageOpen: false }));
-    expect([cards.getAttribute('aria-pressed'), seen.at(-1)]).toEqual(['true', true]);
+    act(() => useLayout.getState().openDestination({ kind: 'projects' }));
+    expect([seen.at(-1), cardColumnNow(useLayout.getState(), window.innerWidth)]).toEqual([false, expect.objectContaining({ placed: true, shown: false })]);
+    expect(region('cards')).toBe(column);
+    expect([column.classList.contains('invisible'), column.hasAttribute('inert')]).toEqual([true, true]);
+    act(() => useLayout.getState().closeDestination());
+    expect([within(screen.getByRole('banner')).getByRole('button', { name: 'Session cards' }).getAttribute('aria-pressed'), seen.at(-1)]).toEqual(['true', true]);
+    expect([region('cards'), column.classList.contains('invisible'), column.hasAttribute('inert')]).toEqual([column, false, false]);
   });
 
   it('shows a rebound chord in the tooltip', () => {
@@ -803,4 +808,114 @@ it.each([true, false])('context-menu Close restores pane focus when the closing 
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   });
   expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'menu-survivor.ts' }));
+});
+
+// UX wave U7b (docs/doperpowers/plans/2026-11-12-ux-wave-U7-sidebar-title-bar-destinations.md, M5 decisions 2, 3 and 5):
+// a page takes everything right of the sidebar. What it covers stays mounted at its box, invisible and inert, and nothing
+// of the side column is written; Back shows it all again without a remount.
+describe('a page beside the sidebar', () => {
+  const PAGE = { kind: 'projects' } as const;
+  const mainArea = () => document.querySelector<HTMLElement>('[data-main-area]')!;
+  const hiddenNow = (element: HTMLElement) => [element.classList.contains('invisible'), element.hasAttribute('inert')];
+  const header = () => screen.getByRole('banner');
+
+  it('with the card column drawn: the main area and the column keep their nodes, the grid and the padding, hidden; Back shows them', () => {
+    useSessions.setState({ records: new Map([[A, record(A)]]) });
+    useLayout.setState({ main: withActive(sessionTab(A)) });
+    renderShell();
+    const [area, cards, columns] = [mainArea(), region('cards'), grid().style.gridTemplateColumns];
+    const padding = area.parentElement!.style.paddingRight;
+    expect(padding).toBe('304px');
+    act(() => useLayout.getState().openDestination(PAGE));
+    expect([mainArea(), region('cards')]).toEqual([area, cards]);
+    expect([hiddenNow(area), hiddenNow(cards)]).toEqual([[true, true], [true, true]]);
+    expect([grid().style.gridTemplateColumns, area.parentElement!.style.paddingRight]).toEqual([columns, padding]);
+    expect(region('main').hasAttribute('inert'), 'the main region holds the Overview, which is drawn over the page').toBe(false);
+    expect(header().className).toContain('col-span-3');
+    act(() => useLayout.getState().closeDestination());
+    expect([mainArea(), region('cards')]).toEqual([area, cards]);
+    expect([hiddenNow(area), hiddenNow(cards)]).toEqual([[false, false], [false, false]]);
+    expect(header().className).toContain('col-span-2');
+  });
+
+  it('with a side surface open: the side column is not drawn and nothing of it is written; Back restores it as it was', () => {
+    openSurface();
+    renderShell();
+    const fake = fakeClient({ 'layout.set': undefined });
+    offs.push(persistLayout(fake.client, useLayout)); // from here, what the visit writes
+    const panel = region('panel');
+    const columns = grid().style.gridTemplateColumns;
+    const before = { regions: useLayout.getState().regions, surfaces: useLayout.getState().panelSurfaces, tabs: useLayout.getState().panelBySession.get(A)!.tabs };
+    act(() => useLayout.getState().openDestination(PAGE));
+    expect(region('panel')).toBe(panel);
+    expect(hiddenNow(panel)).toEqual([true, true]);
+    expect(grid().style.gridTemplateColumns).toBe(columns);
+    expect(header().className, 'the title bar spans to the window’s right edge').toContain('col-span-3');
+    act(() => useLayout.getState().closeDestination());
+    window.dispatchEvent(new Event('beforeunload'));
+    const after = { regions: useLayout.getState().regions, surfaces: useLayout.getState().panelSurfaces, tabs: useLayout.getState().panelBySession.get(A)!.tabs };
+    expect([after.regions === before.regions, after.surfaces === before.surfaces, after.tabs === before.tabs]).toEqual([true, true, true]);
+    expect((fake.invoked('layout.set') as { key: string }[]).map((write) => write.key).filter((key) => key !== 'destination')).toEqual([]);
+    expect(region('panel')).toBe(panel);
+    expect(hiddenNow(panel)).toEqual([false, false]);
+  });
+
+  it('draws the page over the second and third columns of the third row, named by the title bar’s Back and heading', async () => {
+    const user = userEvent.setup();
+    useSessions.setState({ records: new Map([[A, record(A)]]) });
+    useLayout.setState({ main: withActive(sessionTab(A)) });
+    renderShell();
+    act(() => useLayout.getState().openDestination(PAGE));
+    const page = screen.getByRole('region', { name: 'Projects' });
+    expect(page.className).toContain('col-[2/-1]');
+    expect(page.className).toContain('row-start-3');
+    expect(within(header()).getByRole('heading', { level: 1, name: 'Projects' })).toBeTruthy();
+    expect(within(header()).queryByRole('button', { name: 'Session cards' }), 'the surface icons are not drawn').toBeNull();
+    expect(within(header()).queryByRole('button', { name: /in sidebar$/ }), 'nor the project chip').toBeNull();
+    expect(hiddenNow(chromeTabs()), 'the strips stay mounted, hidden').toEqual([true, true]);
+    expect(within(header()).getByRole('button', { name: 'Back' }).getAttribute('title')).toBe('Back · Esc');
+    await user.click(within(header()).getByRole('button', { name: 'Back' }));
+    expect(useLayout.getState().destination).toBeNull();
+    expect(hiddenNow(chromeTabs())).toEqual([false, false]);
+  });
+
+  it('the Overview opened over a page is inside no inert element, and the page stays', () => {
+    useSessions.setState({ records: new Map([[A, record(A)]]) });
+    useLayout.setState({ main: withActive(sessionTab(A)) });
+    renderShell();
+    act(() => useLayout.getState().openDestination(PAGE));
+    act(() => useLayout.getState().setOverviewOpen(true));
+    const overview = document.querySelector<HTMLElement>('[data-overview-panel]')!;
+    expect(overview).not.toBeNull();
+    expect(overview.closest('[inert]')).toBeNull();
+    expect(useLayout.getState().destination).toEqual(PAGE);
+  });
+
+  it('⌘W closes the Settings dialog, then the page, and only then the tab in front', () => {
+    offs.push(registerShellActions(fakeClient({}).client));
+    useSessions.setState({ records: new Map([[A, record(A)]]) });
+    useLayout.setState({ main: withActive(sessionTab(A)) });
+    renderShell();
+    act(() => useLayout.getState().openDestination(PAGE));
+    act(() => useLayout.getState().openSettings());
+    act(() => runAction('tab.close'));
+    expect([useLayout.getState().settings, useLayout.getState().destination]).toEqual([null, PAGE]);
+    act(() => runAction('tab.close'));
+    expect(useLayout.getState().destination).toBeNull();
+    expect(useLayout.getState().main.panes[0].tabs.map((tab) => tab.id)).toEqual([`session:${A}`]);
+  });
+
+  // §N, the second table: an act of the person's that shows nothing finds no tab in front behind a page.
+  it('⌥⌘U marks nothing unread behind a page, and marks the session once the page is left', () => {
+    const fake = fakeClient({ 'session.update': undefined });
+    offs.push(registerShellActions(fake.client));
+    useSessions.setState({ records: new Map([[A, record(A)]]) });
+    useLayout.setState({ main: withActive(sessionTab(A)) });
+    useLayout.getState().openDestination(PAGE);
+    runAction('session.markUnread');
+    expect(fake.invoked('session.update')).toEqual([]);
+    useLayout.getState().closeDestination();
+    runAction('session.markUnread');
+    expect(fake.invoked('session.update')).toEqual([{ appSessionId: A, patch: { unread: true } }]);
+  });
 });

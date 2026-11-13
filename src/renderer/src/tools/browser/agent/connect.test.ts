@@ -139,6 +139,17 @@ describe('the Browser tool follows the agent', () => {
     expect(browserTabs(B)).toHaveLength(1);
   });
 
+  // UX wave U7b (§N): behind a page the session is not on screen, as one that is not in front.
+  it('behind a page the shown session’s action asks and opens nothing, and does not use up the turn’s open', async () => {
+    useLayout.getState().openDestination({ kind: 'projects' });
+    await acted(A);
+    expect(shows()).toEqual([]);
+    expect(browserTabs(A)).toHaveLength(0);
+    useLayout.getState().closeDestination();
+    await acted(A);
+    expect(browserTabs(A)).toHaveLength(1);
+  });
+
   it("a side thread acting in its shown parent's tab opens the parent's tool once per the thread's turn; a close holds until it ends", async () => {
     busy(A, false); // the parent is idle; its thread is in a turn
     busy(THREAD, true);
@@ -237,6 +248,14 @@ describe("the window's sequence while main's answer is awaited", () => {
     await fake.reply('browser.agent.show', answer(T1));
     expect(browserTabs(A)).toHaveLength(0);
     expect(browserTabs(B)).toHaveLength(0);
+  });
+
+  it('a page opened during the wait opens nothing when the answer comes (asked again after the wait)', async () => {
+    acting(A);
+    useLayout.getState().openDestination({ kind: 'library' });
+    await fake.reply('browser.agent.show', answer(T1));
+    expect(browserTabs(A)).toHaveLength(0);
+    expect(useLayout.getState().destination).toEqual({ kind: 'library' });
   });
 
   it('the person opening the Browser and closing it again during the wait drops the opening', async () => {

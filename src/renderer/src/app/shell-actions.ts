@@ -8,7 +8,7 @@ import { announceReplace, discardForReplace, isUnstarted, registerAction, replac
 import { focusPaneElement } from '../main/pane-dom';
 import { focusOverview } from '../overview/OverviewPanel';
 import { togglePalette } from '../palette/CommandPalette';
-import { registerReplaceGuard, useLayout } from '../stores/layout';
+import { registerReplaceGuard, tabOnScreen, useLayout } from '../stores/layout';
 import { activeTab, currentSet, floatingPane } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { useSettings } from '../stores/settings';
@@ -47,7 +47,9 @@ export function registerShellActions(client: MawsBridge = ipc): () => void {
     registerAction('theme.system', () => useSettings.getState().setTheme('system')),
 
     // Tab changes made before the persisted tabs are read are replayed over them by the layout store itself.
+    // UX wave U7b (Interfaces §H): ⌘W closes the Settings dialog, else the page, and only then the tab in front.
     registerAction('tab.close', () => {
+      if (layout().closeFront()) return;
       const tab = activeTab(layout().main);
       if (tab) void requestCloseTab(tab.id);
     }),
@@ -57,7 +59,7 @@ export function registerShellActions(client: MawsBridge = ipc): () => void {
       if (next !== null) layout().openSession(next);
     })),
     registerAction('session.markUnread', async () => {
-      const tab = activeTab(layout().main);
+      const tab = tabOnScreen(layout()); // UX wave U7b (§N): nothing behind a page
       if (tab?.kind === 'session') await setSessionUnread(tab.appSessionId, true, client);
     }),
     registerAction('tab.reopen', () => layout().reopenClosed()),

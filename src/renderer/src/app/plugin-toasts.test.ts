@@ -40,6 +40,13 @@ describe('a plugin toast (R1)', () => {
     expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['mods-probe: once']);
   });
 
+  // UX wave U7b (§N): a session behind a page is shown by no pane of this window.
+  it('shows nothing for the session in front while a page covers it', () => {
+    useLayout.getState().openDestination({ kind: 'projects' });
+    fake.event('session.eventBatch', { appSessionId: shown, events: [toastOf(5, 'behind')] });
+    expect(useNotices.getState().notices).toEqual([]);
+  });
+
   it('stops listening once disconnected', () => {
     disconnect();
     fake.event('session.eventBatch', { appSessionId: shown, events: [toastOf(4, 'late')] });

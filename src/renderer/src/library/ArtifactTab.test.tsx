@@ -183,6 +183,22 @@ describe('an artifact in a main tab', () => {
     expect(screen.getByText('shown editor').dataset.visible).toBe('false');
   });
 
+  // UX wave U7b (§N): behind a page the tab is not on screen (a live dashboard's queries stop on it), and is again at Back.
+  it('tells the editor its tab is not on screen while a page covers it, and is again at Back', async () => {
+    registerArtifactEditor('document', {
+      Panel: ({ visible }: ArtifactEditorProps) => <p data-visible={String(visible)}>shown editor</p>,
+    });
+    render(<Shell />);
+    act(() => openArtifactTab(A));
+    const editor = await screen.findByText('shown editor');
+    expect(editor.dataset.visible).toBe('true');
+    act(() => useLayout.getState().openDestination({ kind: 'library' }));
+    expect(editor.dataset.visible).toBe('false');
+    act(() => useLayout.getState().closeDestination());
+    expect(screen.getByText('shown editor')).toBe(editor);
+    expect(editor.dataset.visible).toBe('true');
+  });
+
   it('a kind registered with Panel alone mounts Panel in the main tab', async () => {
     const { Panel } = testEditor();
     registerArtifactEditor('document', { Panel });

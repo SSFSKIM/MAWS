@@ -302,6 +302,45 @@ describe('a late chat (ticket 497, A4)', () => {
     expect(focusFrame).toHaveBeenCalledTimes(1);
   });
 
+  // UX wave U7b (M5, decision 11): the arrival rule compares what the person looks at (`placeOf`), a page and the
+  // Settings dialog among it.
+  it('a page opened during the wait stays, and the chat arrives unselected behind it', async () => {
+    const creator = heldCreator();
+    disposers.push(creator.off);
+    open(IN_P);
+    const press = createSession(P);
+    useLayout.getState().openDestination({ kind: 'projects' });
+    await creator.answer(NEW);
+    await press;
+    expect(useLayout.getState().destination).toEqual({ kind: 'projects' });
+    expect(front()).toBe(sessionTab(IN_P));
+    expect(panes()).toEqual([[IN_P, NEW].map(sessionTab)]);
+  });
+
+  it('the Settings dialog opened during the wait stays, and the chat arrives unselected', async () => {
+    const creator = heldCreator();
+    disposers.push(creator.off);
+    open(IN_P);
+    const press = createSession(P);
+    useLayout.getState().openSettings();
+    await creator.answer(NEW);
+    await press;
+    expect(useLayout.getState().settings).toEqual({ section: null });
+    expect(front()).toBe(sessionTab(IN_P));
+  });
+
+  it('a chat asked for from a page that is still open when it arrives is selected and closes the page', async () => {
+    const creator = heldCreator();
+    disposers.push(creator.off);
+    open(IN_P);
+    useLayout.getState().openDestination({ kind: 'library' });
+    const press = createSession(P);
+    await creator.answer(NEW);
+    await press;
+    expect(front()).toBe(sessionTab(NEW));
+    expect(useLayout.getState().destination).toBeNull();
+  });
+
   it('closes no empty chat that is in front when it arrives, and none the person typed into meanwhile', async () => {
     const creator = heldCreator();
     disposers.push(creator.off);

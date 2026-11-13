@@ -145,6 +145,21 @@ describe('plugin panes as panel tabs (R2)', () => {
     expect(fake.invoked('session.ui.paneFocus')).toContainEqual({ appSessionId: A, id: 'two' });
   });
 
+  // UX wave U7b (§N): behind a page the session is not on screen: the pane the engine shows gets its tab unselected, and
+  // a focus request is answered as for a session this window does not show.
+  it('behind a page, the shown pane’s tab is added unselected and a focus request is refused', async () => {
+    connect({ 'session.ui.panes': roster([pane('one', 'One'), pane('two', 'Two')], 'one'), 'session.ui.render': PANE_ANSWER });
+    render(<TestHost />);
+    act(() => useLayout.getState().openDestination({ kind: 'projects' }));
+    attach();
+    await waitFor(() => expect(paneTabs()).toHaveLength(2));
+    expect(panelOf(A)?.activeTabId ?? null).toBeNull();
+    push(fake, roster([pane('one', 'One'), pane('two', 'Two')], 'one', { focusRequestedId: 'two' }));
+    await waitFor(() => expect(fake.invoked('session.ui.paneFocus')).toEqual([{ appSessionId: A, id: null }]));
+    expect(panelOf(A)?.activeTabId ?? null).toBeNull();
+    expect(useLayout.getState().destination).toEqual({ kind: 'projects' });
+  });
+
   it('a change of the engine’s shown pane selects its existing tab; an unchanged roster leaves the person’s choice', async () => {
     connect({ 'session.ui.panes': roster([pane('one', 'One'), pane('two', 'Two')], 'one'), 'session.ui.render': PANE_ANSWER });
     render(<TestHost />);

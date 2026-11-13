@@ -448,6 +448,44 @@ describe('the split’s card', () => {
     expect(notices()).toEqual([EXPAND_COPY.noSession]);
   });
 
+  // UX wave U7b (A10; its execution document, M5): with a split and a page open, each act that brings a pane to the front
+  // closes the page in the write that lands it, and the other pane's tab is in front.
+  describe('under a page (A10)', () => {
+    const PAGE = { kind: 'projects' } as const;
+    const front = () => activeTab(set());
+
+    it('pane.focusOther closes the page and leaves the other pane’s tab in front', () => {
+      layout().openDestination(PAGE);
+      runAction('pane.focusOther');
+      expect(layout().destination).toBeNull();
+      expect([set().focusedPane, front()]).toEqual([0, S]);
+    });
+
+    it('panel.float, when it docks the split’s card, closes the page and leaves the other pane’s tab in front', () => {
+      floatSplit(S.id);
+      layout().focusPane(1);
+      layout().openDestination(PAGE);
+      runAction('panel.float');
+      expect(set().floating).toBeUndefined();
+      expect(layout().destination).toBeNull();
+      expect([set().focusedPane, front()]).toEqual([0, S]);
+    });
+
+    it('main.expandArtifactPane closes the page and leaves the other pane’s tab in front', () => {
+      layout().openDestination(PAGE);
+      runAction('main.expandArtifactPane'); // Diagnostics is focused, the session beside it
+      expect(set().floating?.sessionTabId).toBe(S.id);
+      expect(layout().destination).toBeNull();
+      expect(front()).toEqual(S);
+    });
+
+    it('focus that only follows where the keyboard already is closes nothing', () => {
+      layout().openDestination(PAGE);
+      layout().focusPane(0);
+      expect(layout().destination).toEqual(PAGE);
+    });
+  });
+
   // P4-B3x (P4 Decision Log 40): Expand also folds the right panel, so an expanded document has the width its margin's
   // cards need; leaving Expand brings back what Expand changed and nothing the owner changed meanwhile.
   describe('Expand folds the right panel', () => {

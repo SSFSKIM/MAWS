@@ -149,7 +149,7 @@ export function spyLayout() {
 }
 
 export function resetPanelStores(opts: { hydrated?: boolean } = {}): void {
-  useShellView.setState({ sidebarOverlay: false, cardsOverlay: false, pageOpen: false });
+  useShellView.setState({ sidebarOverlay: false, cardsOverlay: false });
   resetPanelHost();
   resetEditorHosts(); // P3-G
   resetArtifactMachines(); // P5 O7 M5a: the page's artifact table
@@ -169,6 +169,8 @@ export function resetPanelStores(opts: { hydrated?: boolean } = {}): void {
     knownSession: () => true,
     dragging: null, // P4-B3
     hydrated: opts.hydrated ?? true,
+    destination: null, // UX wave U7b: no page, no Settings dialog
+    settings: null,
   });
   useSessions.setState({
     records: new Map([A, B, C].map((id) => [id, record(id)])),

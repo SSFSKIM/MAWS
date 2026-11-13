@@ -9,9 +9,8 @@
 // opens the comment composer for that tab's cursor line, likewise.
 import type { TabRef } from '@shared/ipc/schema/layout';
 import { registerAction, registerCloseGuard, registerReplaceVerdict } from '../../../keymap/actions-runtime';
-import { useLayout, type ReplaceVerdict } from '../../../stores/layout';
+import { tabOnScreen, useLayout, type ReplaceVerdict } from '../../../stores/layout';
 import { commentOnCursorLine } from '../anchor/anchor'; // E11
-import { activeTab } from '../../../stores/layout-model';
 import { useViewer } from '../viewer/viewer-store';
 import { askClose } from './EditorDialogs';
 
@@ -31,13 +30,14 @@ async function guardFileClose(ref: TabRef): Promise<boolean> {
   return !useViewer.getState().entries.get(ref.id)?.dirty;
 }
 
+// UX wave U7b (§N, the second table): a file behind a page is not the focused one.
 function saveFocusedFile(): void {
-  const tab = activeTab(useLayout.getState().main);
+  const tab = tabOnScreen(useLayout.getState());
   if (tab?.kind === 'file') void useViewer.getState().save(tab.id);
 }
 
 function commentOnFocusedLine(): void {
-  const tab = activeTab(useLayout.getState().main);
+  const tab = tabOnScreen(useLayout.getState());
   if (tab?.kind === 'file') commentOnCursorLine(tab.id);
 }
 

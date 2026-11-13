@@ -11,7 +11,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PanelTabRef } from '@shared/ipc/schema/layout';
 import { runAction } from '../keymap/actions-runtime';
-import { panelWidthClass, useLayout } from '../stores/layout';
+import { pageOpen, panelWidthClass, useLayout } from '../stores/layout';
 import { surfaceSession } from './surface-model';
 import { shellGeometryOf, useShellGeometry } from '../app/shell-view';
 import { focusPaneElement } from '../main/pane-dom';
@@ -44,15 +44,18 @@ export function PanelRegion() {
   const body = useRef<HTMLDivElement>(null); // P3-G: the floating card's layer starts at the host's tool body
   const shown = useShownPanel(); // P3-G: the header and the host read one selection
   const cover = useCoverState('panel'); // P4-B3 (Z3): the panel is one target for an artifact main tab
+  // UX wave U7b (its execution document, M5 decision 2): under a page the column is not drawn and nothing of it changes:
+  // invisible and inert at its box, and a sheet's Esc listener not mounted, so Esc reaches the page and folds nothing.
+  const page = useLayout(pageOpen);
 
   return (<>
-    {geometry.sheet && <SurfaceSheetDismissal />}
+    {geometry.sheet && !page && <SurfaceSheetDismissal />}
     <section
       id={PANEL_REGION_ID}
       data-region="panel"
       aria-label="Panel"
-      inert={collapsed}
-      className={`col-start-3 ${geometry.mainHidden ? 'row-start-3' : 'row-span-3 row-start-1'} flex min-h-0 min-w-0 ${geometry.sheet ? 'absolute inset-y-0 top-(--toolbar-h) right-0 z-30 shadow-float' : 'relative'} ${collapsed ? 'overflow-hidden' : 'py-1.5 pr-1.5 pl-1'}`}
+      inert={collapsed || page}
+      className={`col-start-3 ${geometry.mainHidden ? 'row-start-3' : 'row-span-3 row-start-1'} flex min-h-0 min-w-0 ${geometry.sheet ? 'absolute inset-y-0 top-(--toolbar-h) right-0 z-30 shadow-float' : 'relative'} ${collapsed ? 'overflow-hidden' : 'py-1.5 pr-1.5 pl-1'} ${page ? 'invisible' : ''}`}
       style={geometry.sheet ? { width } : undefined}
     >
       {!collapsed && !maximized && !floating && !geometry.sheet && (

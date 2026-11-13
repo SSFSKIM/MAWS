@@ -11,7 +11,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
 import { remoteUnavailableOf } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { instanceOf, panelHost, registerPanelTool, setTitle, shownSession } from '../panel/host';
-import { useLayout } from '../stores/layout';
+import { pageOpen, useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { panesClient, setPanesClient, usePaneRosters } from './pane-roster';
 import { markGone, PLUGIN_PANE_TOOL, pluginPaneTool, type PluginPaneState } from './PaneTool';
@@ -56,7 +56,7 @@ function reconcile(appSessionId: AppSessionId): void {
     void panelHost.closeTab(tab.id);
   }
   if (!roster) return;
-  const shown = shownSession() === appSessionId;
+  const shown = shownSession() === appSessionId && !pageOpen(useLayout.getState()); // UX wave U7b (§N): not behind a page
   for (const pane of roster.panes) {
     if (kept.has(pane.id)) continue;
     const tab = panelHost.addTool(PLUGIN_PANE_TOOL, { appSessionId, params: { paneId: pane.id }, activate: false });

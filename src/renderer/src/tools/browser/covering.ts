@@ -14,7 +14,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { panelInMain } from '../../app/regions';
 import { shellGeometryOf } from '../../app/shell-view';
 import { ipc } from '../../ipc/client';
-import { useLayout, type LayoutState } from '../../stores/layout';
+import { pageOpen, useLayout, type LayoutState } from '../../stores/layout';
 import { useNotices } from '../../stores/notices';
 import { watchCoverLayers, type CoverWatch, type PaneRect } from './cover';
 
@@ -106,6 +106,7 @@ export function coverPane(rectOf: RectOf, appSessionId: AppSessionId | null = nu
 // P4 W2-C (tracker 2026-10-07): the sessions whose browser pane is on screen (it owns its view, so an app toast over it
 // would cover the window), in the order the panes mounted: where a line about the browser goes instead of a toast.
 export function sessionsOnScreen(): AppSessionId[] {
+  if (pageOpen(useLayout.getState())) return []; // UX wave U7b (§N): behind a page none is
   return [...panes].flatMap(([rectOf, appSessionId]) => (appSessionId !== null && rectOf() !== null ? [appSessionId] : []));
 }
 

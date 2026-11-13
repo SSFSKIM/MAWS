@@ -16,6 +16,7 @@ import { library, resetLibrary, rowKey } from '../library/store';
 import { instanceIds, instanceOf, panelHost, registerPanelTool, usePanelHost } from '../panel/host';
 import { useLayout } from '../stores/layout';
 import { useMachines } from '../stores/machines';
+import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { project, record } from '../../../../test/support/builders';
 import { activeTab, allTabs, currentSet } from '../stores/layout-model';
@@ -26,7 +27,7 @@ import { TRANSFER_COPY } from '../tools/artifacts/copy';
 import { requestArtifactOpen, resetOpenRequests, useOpenRequest } from '../tools/artifacts/viewers/requests'; // P4-B4 renamed the version request the open request
 import { recordTranscriptScroll, takeTranscriptCarry } from '../transcript/view/scroll-carry'; // P4-B3 M5
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
-import { dragAccepted, moveArtifactToPanel, moveArtifactToTab, transferRefusal, useCoverState, useTransferRefusal } from './transfer';
+import { dragAccepted, moveArtifactToPanel, moveArtifactToTab, moveFocusedArtifactToPanel, transferRefusal, useCoverState, useTransferRefusal } from './transfer';
 
 const DOC = 'doc-1';
 const OTHER = 'doc-2';
@@ -370,6 +371,17 @@ describe('main → panel', () => {
     expect(await move(() => moveArtifactToPanel(DOC_TAB.id))).toBe(false);
     expect(surfaces()).toEqual(before);
     expect(viewsOf(DOC)).toBe(1);
+  });
+
+  // UX wave U7b (§N, the second table): behind a page there is no tab in front, so the menu's move finds none.
+  it('Move to side surface behind a page refuses with the notice for a tab that is not an artifact’s, and moves nothing', () => {
+    useLayout.setState({ main: panes([sessionTab(A), DOC_TAB]) });
+    useNotices.setState({ notices: [] });
+    useLayout.getState().openDestination({ kind: 'projects' });
+    const before = surfaces();
+    moveFocusedArtifactToPanel();
+    expect(useNotices.getState().notices.map((notice) => notice.text)).toEqual([TRANSFER_COPY.notArtifact]);
+    expect(surfaces()).toEqual(before);
   });
 
   it('a target Artifacts tab that is closing refuses the move', async () => {

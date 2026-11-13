@@ -23,7 +23,7 @@ import {
   TestHost,
 } from '../test-support/panel';
 import type { PanelTool } from './tool';
-import { connectPanelHost, panelHost, pendingAdds, registerPanelTool, restoredLogIds, togglePinned, usePanelHost } from './host';
+import { connectPanelHost, instanceOf, panelHost, pendingAdds, registerPanelTool, restoredLogIds, togglePinned, usePanelHost } from './host';
 import { TEST_MACHINE } from '../../../../test/support/machine';
 import { editorHostOf, registerEditorHost } from './editor-host'; // P3-G
 
@@ -230,6 +230,21 @@ describe('panel host registry and instances', () => {
     expect(useLayout.getState().regions.panel.collapsed).toBe(false);
     expect(screen.getByTestId(`body:${first}`).textContent).toMatch(/visible · focus [23]$/);
     keyboard.remove();
+  });
+
+  // UX wave U7b (§N): behind a page the side column is not on screen; its tools are told so, and stay the same instances.
+  it('a tool’s visible goes false when a page opens and true at Back, its instance the same object', () => {
+    register(probeTool('t').tool);
+    render(<TestHost />);
+    let id = '';
+    act(() => void (id = panelHost.addTool('t', { appSessionId: A })));
+    const instance = instanceOf(id);
+    expect(screen.getByTestId(`body:${id}`).textContent).toMatch(/ · visible · /);
+    act(() => useLayout.getState().openDestination({ kind: 'library' }));
+    expect(screen.getByTestId(`body:${id}`).textContent).toMatch(/ · hidden · /);
+    act(() => useLayout.getState().closeDestination());
+    expect(screen.getByTestId(`body:${id}`).textContent).toMatch(/ · visible · /);
+    expect(instanceOf(id)).toBe(instance);
   });
 
   // W4: the receipt's Review changes added an invisible tab while the panel was hidden (⌘⇧B).

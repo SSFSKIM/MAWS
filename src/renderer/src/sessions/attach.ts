@@ -21,7 +21,7 @@ import { storedAttachTabsSchema, type AttachTab } from '@shared/ipc/schema/layou
 import { attachCommand } from '@shared/sessions/attach';
 import { ipc } from '../ipc/client';
 import { panelHost, shownSession } from '../panel/host';
-import { useLayout } from '../stores/layout';
+import { pageOpen, tabOnScreen, useLayout } from '../stores/layout';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { terminals, type TerminalId } from '../terminal/registry';
@@ -173,10 +173,16 @@ function showPanel(): void {
   if (layout.regions.panel.collapsed) layout.setPanel({ collapsed: false });
 }
 
+// The session in the main area, opened unless it is already the one on screen. UX wave U7b (§N): behind a page it is
+// not, so Attach opens it, which leaves the page.
+function bringForward(appSessionId: AppSessionId): void {
+  if (tabOnScreen(useLayout.getState()) === null || shownSession() !== appSessionId) useLayout.getState().openSession(appSessionId);
+}
+
 // The remembered tab on screen, as a new tab would be: the session in the main area, the panel open, the tab selected.
 function showTab(appSessionId: AppSessionId, tabId: string): void {
   showPanel();
-  if (shownSession() !== appSessionId) useLayout.getState().openSession(appSessionId);
+  bringForward(appSessionId);
   panelHost.selectTab(tabId);
 }
 
@@ -207,6 +213,8 @@ async function attach(appSessionId: AppSessionId, known: KnownJob | null): Promi
   const command = await commandFor(job.jobId, known, machineOf(appSessionId));
   if (typeof command !== 'string') return { ok: false, error: command.error };
   showPanel();
+  // The host opens the session of a terminal it adds unless it is shown; behind a page it is not on screen though shown.
+  if (pageOpen(useLayout.getState())) useLayout.getState().openSession(appSessionId);
   const tabId = openTerminal({ appSessionId, cwd: job.cwd, command });
   await remember({ tabId, appSessionId, jobId: job.jobId });
   return { ok: true, tabId, how: 'opened' };

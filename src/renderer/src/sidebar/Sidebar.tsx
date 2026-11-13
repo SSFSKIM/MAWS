@@ -33,7 +33,7 @@ import { issuedAt, lastActivity, seenActivity, type SidebarSort } from '../overv
 import { useNowEvery } from '../app/use-now';
 import { selectGreyedNeedsYou, selectNeedsYou, useAttention } from '../stores/attention';
 import { useSpawnedHere } from '../sessions/spawned-here'; // P5 O7 M8
-import { useLayout } from '../stores/layout';
+import { tabOnScreen, useLayout, type LayoutState } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
 import { openArtifacts } from '../main/artifacts'; // P3-G
 import { selectHiddenProjects, selectProjectOrder, useSessions } from '../stores/sessions';
@@ -42,6 +42,7 @@ import { useHidden } from '../stores/hidden'; // UX wave U7, O-16
 import { openDialog } from '../sessions/dialogs';
 import { filterProjectList, isListedRow, listedMatcher, nestItems, projectItems, projectList, projectSessions, PROJECTS_FIRST, sessionMatcher, shownTrees, sidebarSessionId, splitHidden, type ProjectEntry, type ProjectKey, type SidebarSession, type SidebarTreeRow } from './derive';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { Destination, TabRef } from '@shared/ipc/schema/layout';
 import { menuTargetOf, SidebarMenuContent, type MenuTarget } from './menus';
 import { ProjectRow, ShowMoreRow, type HiddenRows } from './ProjectRow';
 import { ResumeChooserHost } from '../resume/host'; // P2-D
@@ -118,8 +119,9 @@ function SidebarBody() {
   const local = ipc.localMachine;
   const index = useSessions((s) => selectOrgIndex(s, local));
   const sidebar = useLayout((s) => s.regions.sidebar);
+  // UX wave U7b: under a page no session row is selected (the tab behind it is not on screen).
   const selectedTab = useLayout((s) => {
-    const tab = activeTab(s.main);
+    const tab = tabOnScreen(s);
     return tab?.kind === 'session' ? tab.appSessionId : null;
   });
   // P5 O8 M2: a listed row clicked with no opener for its lane is the selection until the shown tab changes or another
@@ -599,8 +601,11 @@ function SidebarDestinations({ children }: { children: ReactNode }) {
   </nav>;
 }
 
+// UX wave U7b: a row is current while its page is open, else (until the four tab kinds retire) while its tab is in front.
+const isCurrent = (state: LayoutState, page: Destination['kind'], tab: TabRef['kind']): boolean => (state.destination !== null ? state.destination.kind === page : activeTab(state.main)?.kind === tab);
+
 function DestinationRow({ kind }: { kind: 'projects' | 'customize' }) {
-  const current = useLayout((s) => activeTab(s.main)?.kind === kind);
+  const current = useLayout((s) => isCurrent(s, kind, kind));
   const label = { projects: 'Projects', customize: 'Customize' }[kind];
   const open = () => { if (kind === 'projects') openProjects(); else openCustomize(); };
   return <button type="button" aria-current={current ? 'page' : undefined} onClick={open}
@@ -644,7 +649,7 @@ const NewChatIcon = ({ className }: { className?: string }) => (
 // `artifacts.open` does the same from the palette and the View menu); it reads as the current page while that tab is
 // the one shown.
 function ArtifactsRow() {
-  const current = useLayout((s) => activeTab(s.main)?.kind === 'artifacts');
+  const current = useLayout((s) => isCurrent(s, 'library', 'artifacts'));
   return (
     <button
       type="button"
