@@ -1,12 +1,12 @@
-// The toolbar's model with effort (C7 execution document, "Composer frame" Model · effort; UX wave U4, l3-input-14): the
-// chip reads the model's name, then "Fast" and the effort muted ("Opus 5.5 Fast High", the binding's `name` from
-// `modelName`, @shared/sessions/model-label.ts), its tooltip the whole display name and the alias, and opens Codex's selector, one
-// 254px menu anchored above the chip in a portal, which C11 registers as the `effort`, `model` and `fast` widgets with
-// the `modelChip` placement. The chip opens it on its effort view; `/effort`, `/model` and `/fast` from the palette or
-// typed open it here too (the editor puts the ask in the composer store). Esc or a choice that closes it hands the
-// keyboard back to the editor. With nothing registered (a harness without C11) the chip only names the model. A model
-// asked for and not yet reported running (the binding's `requested`) is marked with the selector's own word for its
-// checked row, "setting…" (P2-F wave S, the sitting's A1.6).
+// The toolbar's model with effort (C7 execution document, "Composer frame" Model · effort; UX wave U4, l3-input-14):
+// the chip reads the model's name, then "Fast" and the effort muted ("Opus 5.5 Fast High", the binding's `name` from
+// `modelName`, @shared/sessions/model-label.ts), its tooltip the whole display name and the alias, and opens Codex's
+// selector, one 254px menu anchored above the chip in a portal, which C11 registers as the `effort`, `model` and `fast`
+// widgets with the `modelChip` placement. The chip opens it on its effort view; `/effort`, `/model` and `/fast` from
+// the palette or typed open it here too (the editor puts the ask in the composer store). Esc or a choice that closes it
+// hands the keyboard back to the editor. With nothing registered (a harness without C11) the chip only names the model.
+// A model asked for and not yet reported running (the binding's `requested`) is marked with the selector's own word for
+// its checked row, "setting…" (P2-F wave S, the sitting's A1.6).
 import { Popover } from 'radix-ui';
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
