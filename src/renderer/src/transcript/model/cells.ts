@@ -342,9 +342,8 @@ function artifactLabel(rec: ToolRecord, status: 'running' | 'done' | 'error', ti
 }
 
 // A failed call's reason (decision 13): the first line of its error with the engine's tags stripped (its refusal's, and
-// the one it closes an aborted command's output with), and for an artifact call the host's own `<tool>: ` before it. The pane-opening call keeps its reason in its words (M3 does not
-// touch it).
-// The engine's shell result closes a command it aborted with its own tagged line (`cli.pretty.js:505894` of 2.1.322)
+// the line it closes an aborted command's output with, `cli.pretty.js:505894` of 2.1.322), and for an artifact call the
+// host's own `<tool>: ` before it. The pane-opening call keeps its reason in its own words, which M3 does not touch.
 const ENGINE_ERROR_LINE = /^<error>([\s\S]*)<\/error>$/;
 function errorOf(rec: ToolRecord): string | undefined {
   if (rec.result === null || rec.use.toolName === MAWS_TOOL_USE.show_pane) return undefined;
