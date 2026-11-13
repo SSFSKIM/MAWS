@@ -2,7 +2,8 @@
 // `DatabaseSync` behind a small wrapper, so a swap to another driver is this file. Statements are cached by SQL text;
 // `transaction` is `BEGIN IMMEDIATE` … `COMMIT` (a nested call joins the outer one); work deferred with `defer` runs once
 // per key after the outermost commit and is dropped on rollback, which is how the stores notify only what committed;
-// `firstInTransaction` answers once per key per transaction, for work whose answer stands until it ends.
+// `firstInTransaction` answers once per key per transaction, for work whose answer stands until it ends; `scoped` keeps
+// one value per key for the open transaction and drops it at its end (a fresh one each call outside one).
 import { existsSync, renameSync } from 'node:fs';
 import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlite';
 import type { AddedColumn, AddedTable, Migration, Repair } from './migrations';
@@ -15,6 +16,7 @@ export class Db {
   private readonly statements = new Map<string, StatementSync>();
   private deferred: Map<string, () => void> | null = null; // non-null exactly while a transaction is open
   private seen: Set<string> | null = null; // the keys `firstInTransaction` took in the open transaction
+  private kept: Map<string, unknown> | null = null; // the values `scoped` made in the open transaction
 
   constructor(
     private readonly db: DatabaseSync,
@@ -72,6 +74,7 @@ export class Db {
     this.db.exec('BEGIN IMMEDIATE');
     this.deferred = deferred;
     this.seen = new Set();
+    this.kept = new Map();
     let result: T;
     try {
       result = fn();
@@ -79,11 +82,13 @@ export class Db {
     } catch (error) {
       this.deferred = null;
       this.seen = null;
+      this.kept = null;
       if (this.db.isTransaction) this.db.exec('ROLLBACK');
       throw error;
     }
     this.deferred = null;
     this.seen = null;
+    this.kept = null;
     for (const [key, run] of deferred) {
       try {
         run();
@@ -107,6 +112,13 @@ export class Db {
     if (this.seen.has(key)) return false;
     this.seen.add(key);
     return true;
+  }
+
+  // The value `make` gave `key` first in the open transaction, kept until it ends; `make()` every time outside one.
+  scoped<T>(key: string, make: () => T): T {
+    if (!this.kept) return make();
+    if (!this.kept.has(key)) this.kept.set(key, make());
+    return this.kept.get(key) as T;
   }
 
   private usable(): void {

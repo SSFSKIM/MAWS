@@ -24,7 +24,7 @@ import { ObservedRouteSchema, RouteSchema, type Route } from '@shared/engine/rou
 import { countLines } from '@shared/composer/pasted-framing';
 import { PASTED_BLOCK, pastedPlaceholder } from '@shared/composer/pasted-content';
 import { locate, type ProjectStore } from './projects';
-import { factsOf, folderColumns } from './folder-facts'; // UX wave U8c-2
+import { FolderReads, factsOf, folderColumns } from './folder-facts'; // UX wave U8c-2
 
 // The home directory as `locate` answers it (realpathed), which discovery never makes a project of; read once.
 let home: string | null | undefined;
@@ -354,7 +354,7 @@ export class SessionStore {
         transcript_birthtime_ms: summary.birthtimeMs ?? null, // E3
         // UX wave U8c-2 (§B): beside the columns above, which keep build F's rule, where the session was launched and
         // where its agent is, stamped with the size and mtime this write stores
-        ...folderColumns(summary, location, stored),
+        ...folderColumns(summary, location, stored, this.db.scoped('folder-reads', () => new FolderReads())),
       };
 
       if (!existing) {
