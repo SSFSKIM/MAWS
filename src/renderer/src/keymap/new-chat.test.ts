@@ -372,6 +372,20 @@ describe('closing an empty chat for the person', () => {
     error.mockRestore();
   });
 
+  it.each([['refuses', false], ['throws', new Error('main went away')]] as const)('puts a pinned chat back pinned when main %s', async (_how, answer) => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    hold();
+    setUp();
+    useLayout.getState().togglePinned(sessionTab(E));
+    closeEmptyChat(E);
+    expect(panes()).toEqual([[sessionTab(IN_P)]]);
+    release(answer);
+    await settle();
+    expect(useLayout.getState().main.panes[0].tabs).toEqual([expect.objectContaining({ id: sessionTab(E), pinned: true }), expect.objectContaining({ id: sessionTab(IN_P), pinned: false })]);
+    expect(front()).toBe(sessionTab(IN_P));
+    error.mockRestore();
+  });
+
   it('does nothing for a chat in front, a chat no longer empty, or a chat with no tab', () => {
     const asked = vi.fn(async () => true);
     discard = asked;

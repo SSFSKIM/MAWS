@@ -12,8 +12,8 @@ import { fakeClient, type FakeClient } from '../../../../test/support/fake-clien
 import { at } from '../../../../test/support/machine';
 import { registerLiveDraft } from '../composer/editor/drafts';
 import { ipc } from '../ipc/client';
-import { currentTabRetention } from '../keymap/actions-runtime';
-import { createLayoutStore } from '../stores/layout';
+import { currentTabRetention, newChat } from '../keymap/actions-runtime';
+import { createLayoutStore, useLayout } from '../stores/layout';
 import { allTabs } from '../stores/layout-model';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
@@ -203,5 +203,48 @@ describe('an empty New chat at a relaunch', () => {
     } finally {
       act(() => disconnect());
     }
+  });
+});
+
+// M3's review: the sweep is a relaunch's cleanup, so it sees only chats an earlier run left; a chat this run made while
+// the snapshot was still out is the person's, typed into or not.
+describe('a New chat made while the relaunch snapshot is out', () => {
+  const MADE = '55555555-5555-4555-8555-555555555555' as AppSessionId;
+  const offs: (() => void)[] = [];
+  afterEach(() => offs.splice(0).forEach((off) => off()));
+
+  async function madeDuringTheSnapshot() {
+    fake = fakeClient({
+      'session.launchMode': { mode: 'index' },
+      'session.deletions.list': { manifests: [] },
+      'session.create': { appSessionId: MADE, intent: intent({ appSessionId: MADE }) },
+      'session.intent.discard': { leftover: null },
+    });
+    window.maws = preloadOf(fake);
+    let disconnect!: () => void;
+    await act(async () => {
+      disconnect = connectSessions(ipc);
+    });
+    offs.push(() => act(() => disconnect()));
+    expect(fake.pending('session.intent.list')).toBe(1);
+    await act(async () => expect(await newChat()).toBe(at(MADE)));
+    expect(allTabs(useLayout.getState().main).map((t) => t.id)).toEqual([tabId({ kind: 'session', appSessionId: at(MADE) })]);
+  }
+
+  it('is not discarded when it holds typing and the snapshot answers with none', async () => {
+    await madeDuringTheSnapshot();
+    offs.push(registerLiveDraft(at(MADE), () => text('keep this new prompt') as never));
+    await act(() => fake.reply('session.intent.list', { intents: [] }));
+    await expect(currentTabRetention()!.ready).resolves.toBe(true);
+    expect(fake.invoked('session.intent.discard')).toEqual([]);
+    expect(useSetup.getState().intents.has(at(MADE))).toBe(true);
+  });
+
+  it('is not discarded with nothing typed either, the snapshot listing it: it is this run’s, not a relaunch’s', async () => {
+    await madeDuringTheSnapshot();
+    await act(() => fake.reply('session.intent.list', { intents: [intent({ appSessionId: MADE })] }));
+    await expect(currentTabRetention()!.ready).resolves.toBe(true);
+    expect(fake.invoked('session.intent.discard')).toEqual([]);
+    expect(useSetup.getState().intents.has(at(MADE))).toBe(true);
   });
 });
