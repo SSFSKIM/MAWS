@@ -111,6 +111,18 @@ describe('shortCommand: a token of a known service', () => {
   it('a long mixed run of letters and digits is cut too, whatever service it is', () => {
     expect(shortCommand(`git show ${'a1'.repeat(12)}`)).toBe('git show…');
   });
+
+  it('is cut when glued into a word behind a digit or an underscore', () => {
+    const glued = [
+      ['sk', 'ant', ''].join('-') + 'a'.repeat(24),
+      ['xo', 'xb-'].join('') + 'b'.repeat(12),
+      ['gh', 'p_'].join('') + 'c'.repeat(24),
+    ];
+    for (const token of glued) {
+      expect(shortCommand(`git show 1${token}`)).toBe('git show…');
+      expect(shortCommand(`git show x_${token}`)).toBe('git show…');
+    }
+  });
 });
 
 describe('shortCommand: PowerShell', () => {
