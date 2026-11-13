@@ -346,52 +346,61 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
     });
   }
 
-  // An ask, once its session's transcript is known: it joins the job of the same session, transcript and path, running
-  // or waiting, or waits as a new one.
-  function ask(appSessionId: AppSessionId, located: string, path: string, signal: AbortSignal | undefined): Promise<boolean> {
-    if (signal?.aborted) return Promise.resolve(false);
+  // The job a request joins once its session's transcript is known: the job of the same session, transcript and path,
+  // running or waiting, or a new waiting one; null when the queue is full.
+  function jobFor(appSessionId: AppSessionId, located: string, path: string): Job | null {
     const key = `${appSessionId}\u0000${located}\u0000${path}`;
-    let job = running !== null && running.key === key && running.waiters.size > 0 ? running : waiting.get(key);
-    if (job === undefined) {
-      if (waiting.size >= waitingMax) return Promise.resolve(false); // the queue is full: the refusal at once
-      job = { key, entry: `${appSessionId}\u0000${path}`, appSessionId, transcript: located, path, waiters: new Set() };
-      waiting.set(key, job);
-    }
-    const joined = job;
-    const answer = new Promise<boolean>((resolve) => {
-      const waiter: Waiter = {
-        answer(value) {
-          if (!joined.waiters.delete(waiter)) return;
-          clearTimeout(timer);
-          signal?.removeEventListener('abort', leave);
-          resolve(value);
-        },
-      };
-      // A waiter that leaves (its client ended, or its patience ran out) is answered not named; a waiting job left with
-      // no waiter is dropped, and a running one stops at its next read.
-      const leave = () => {
-        waiter.answer(false);
-        if (joined.waiters.size === 0 && waiting.get(joined.key) === joined) waiting.delete(joined.key);
-      };
-      const timer = setTimeout(leave, waitMs);
-      signal?.addEventListener('abort', leave, { once: true });
-      joined.waiters.add(waiter);
-    });
-    pump();
-    return answer;
+    const job = running !== null && running.key === key && running.waiters.size > 0 ? running : waiting.get(key);
+    if (job !== undefined) return job;
+    if (waiting.size >= waitingMax) return null; // the queue is full: the refusal at once
+    const created: Job = { key, entry: `${appSessionId}\u0000${path}`, appSessionId, transcript: located, path, waiters: new Set() };
+    waiting.set(key, created);
+    return created;
   }
 
   return {
-    // Each request finds its session's transcript itself, before it looks for a job (decision 13; the branch review's
-    // finding 5): `/clear` keeps the app session id and binds it to a new transcript, and a request never joins a job
-    // that reads another transcript than the one its session is bound to when it is made. No transcript, or a locator
-    // that throws: not named.
+    // A request's patience and its client's signal run from the moment it is made, the locator's wait included (fix
+    // round 1, item 3): it finds its session's transcript itself, before it looks for a job (decision 13; the branch
+    // review's finding 5: `/clear` keeps the app session id and binds it to a new transcript, and a request never joins
+    // a job that reads another transcript than the one its session is bound to when it is made), and then waits in the
+    // queue only for what is left of its patience. A request that ended while the locator was asked queues nothing. No
+    // transcript, a locator that throws, a full queue, a waiter that leaves: not named.
     names(appSessionId, path, signal) {
       if (signal?.aborted) return Promise.resolve(false);
-      return transcript(appSessionId).then(
-        (located) => (located === null ? false : ask(appSessionId, located, path, signal)),
-        () => false,
-      );
+      return new Promise<boolean>((resolve) => {
+        let joined: Job | null = null;
+        let answered = false;
+        const waiter: Waiter = {
+          answer(value) {
+            if (answered) return;
+            answered = true;
+            joined?.waiters.delete(waiter);
+            clearTimeout(timer);
+            signal?.removeEventListener('abort', leave);
+            resolve(value);
+          },
+        };
+        // A waiter that leaves (its client ended, or its patience ran out) is answered not named; a waiting job left with
+        // no waiter is dropped, and a running one stops at its next read.
+        const leave = () => {
+          const job = joined;
+          waiter.answer(false);
+          if (job !== null && job.waiters.size === 0 && waiting.get(job.key) === job) waiting.delete(job.key);
+        };
+        const timer = setTimeout(leave, waitMs);
+        signal?.addEventListener('abort', leave, { once: true });
+        transcript(appSessionId).then(
+          (located) => {
+            if (answered) return; // it ended while the locator was asked
+            const job = located === null ? null : jobFor(appSessionId, located, path);
+            if (job === null) return waiter.answer(false);
+            joined = job;
+            job.waiters.add(waiter);
+            pump();
+          },
+          () => waiter.answer(false),
+        );
+      });
     },
   };
 }
