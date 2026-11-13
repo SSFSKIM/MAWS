@@ -22,6 +22,13 @@ export interface ListedTranscript {
 
 export const SUMMARY_CONCURRENCY = 16;
 
+// U8c-1 (M1 decision 8): a test-only hook that holds an interleaving open, awaited at a named point with what the point is
+// about: before a scan's listing reads a project folder (its name), before a transcript is summarised (its path), and
+// after a look has read the project folders and before it decides for a session (its id). Undefined in the product.
+export interface StoreHooks {
+  at?(point: 'listing' | 'summary' | 'look', detail: string): Promise<void>;
+}
+
 // `<slug>/<sessionId>/custom-title.json` (SPEC 35.10: `{"customTitle": string}`).
 const CustomTitleSchema = z.looseObject({ customTitle: z.string() });
 
@@ -29,7 +36,10 @@ export class Discovery {
   // The last title each `custom-title.json` read whole, by sidecar path: what a torn rewrite falls back to.
   private readonly sidecarTitles = new Map<string, string>();
 
-  constructor(private readonly paths: StorePaths) {}
+  constructor(
+    private readonly paths: StorePaths,
+    private readonly hooks?: StoreHooks,
+  ) {}
 
   // Every `<uuid>.jsonl` directly under a slug directory, stat'ed. A root or slug that vanishes mid-listing is simply
   // not listed: the next change event or scan sees the store as it then is.
@@ -38,6 +48,7 @@ export class Discovery {
     const perSlug = await Promise.all(
       slugs.filter((entry) => entry.isDirectory()).map(async ({ name: slug }) => {
         const dir = join(this.paths.projects, slug);
+        if (this.hooks?.at) await this.hooks.at('listing', slug);
         const entries = await readdirOrEmpty(dir).catch((error: unknown) => {
           console.error(`[fs] cannot list ${dir}:`, error instanceof Error ? error.message : error);
           return [];

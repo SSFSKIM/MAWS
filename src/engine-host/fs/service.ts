@@ -34,7 +34,7 @@ import { SearchTextReader } from './search-text';
 import { readSpill } from './artifacts';
 import { Bindings } from './bindings';
 import type { FileReader } from './chain-follower';
-import { Discovery, mapConcurrent, matchesKnown, SUMMARY_CONCURRENCY, type ListedTranscript } from './discovery';
+import { Discovery, mapConcurrent, matchesKnown, SUMMARY_CONCURRENCY, type ListedTranscript, type StoreHooks } from './discovery';
 import { Follow, FsFileReader, SNAPSHOT_WAIT_MS, type HistoryPage, type HistoryRequest } from './follow';
 import { HolderRegistry, type HolderDeps } from './holders';
 import { isMissing } from './sidecars';
@@ -90,6 +90,7 @@ export interface FsServiceOptions {
   agentRetryMs?: number; // AGENT_RETRY_MS
   log?: (line: string) => void; // P5 O7 M8: the follows' holds and drops (stderr, the host's log, by default)
   activity?: () => void; // P5 Decision Log 273: each change the watcher hears, the reads it starts being the host's work
+  hooks?: StoreHooks; // U8c-1: tests hold an interleaving open; undefined in the product
 }
 
 /**
@@ -206,12 +207,14 @@ export class FsService {
   private readonly contests = new Map<SessionId, Contest>(); // W7
   private readonly foreignLeftAt = new Map<SessionId, number>(); // W7: when each session's last foreign holder went
   private readonly activity: () => void; // P5 Decision Log 273
+  private readonly hooks: StoreHooks | undefined; // U8c-1 (M1 decision 8)
 
   constructor(options: FsServiceOptions) {
     this.paths = options.paths;
     this.emit = options.emit;
     this.log = options.log ?? ((line) => console.error(line));
     this.activity = options.activity ?? (() => {});
+    this.hooks = options.hooks;
     this.openReader = options.openReader ?? ((locate) => new FsFileReader(locate));
     this.reconcileMs = options.reconcileMs ?? RECONCILE_MS;
     this.window = options.window;
@@ -219,7 +222,7 @@ export class FsService {
     this.agentRetryMs = options.agentRetryMs ?? AGENT_RETRY_MS;
     this.startScanFallbackMs = options.startScanFallbackMs ?? START_SCAN_FALLBACK_MS;
     this.taskReader = new TaskReader(options.paths);
-    this.discovery = new Discovery(options.paths);
+    this.discovery = new Discovery(options.paths, options.hooks);
     this.watcher = new StoreWatcher(options.paths, (change) => this.onChange(change), { watch: options.watch });
     this.holders = new HolderRegistry(
       options.paths,
@@ -977,6 +980,7 @@ export class FsService {
     const previous = this.perPath.get(path) ?? Promise.resolve();
     const run = previous.then(async () => {
       if (this.stopped) return;
+      if (this.hooks?.at) await this.hooks.at('summary', path);
       let summary: TranscriptSummary | null;
       try {
         summary = await this.discovery.summarizeOne(path);
