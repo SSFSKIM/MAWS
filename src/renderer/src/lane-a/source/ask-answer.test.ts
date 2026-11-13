@@ -85,10 +85,14 @@ describe("the ask mod's answer", () => {
     expect(lines(expanded)).toEqual([NOTICE.answered('Color → Blue · Season → Summer')]);
     // The turn the answer opened reads as one the session continued ("Continued for …").
     expect(dividers(rows)).toEqual(['engine']);
-    expect(rows.find((r) => r.kind === 'divider')?.turnId).toBe(expanded.find((r) => r.kind === 'notice')?.turnId);
+    // the line heads the turn it opened, which its divider names (UX wave U3, the U3a document's head rule)
+    expect(rows.find((r) => r.kind === 'divider')).toMatchObject({ turnId: expanded.find((r) => r.kind === 'notice')?.turnId, opener: { class: 'answer', line: NOTICE.answered('Color → Blue · Season → Summer') } });
     expect([...bubbles(rows), ...lines(expanded)].some((text) => HARNESS.test(text))).toBe(false);
-    // The report folds the answered turn's work and keeps the line, the persistent row it is.
-    expect(lines(report)).toEqual([NOTICE.answered('Color → Blue · Season → Summer')]);
+    // The report folds the answered turn's work, the answer's notice and the divider that names it among it (UX wave U3,
+    // M2: an answer's notice is no row that stays in view; U1b fills the question's row with the answer, Interfaces G),
+    // and keeps the question's row.
+    expect(lines(report)).toEqual([]);
+    expect(report.filter((r) => r.kind === 'question')).toHaveLength(1);
     expect(bubbles(report)).toEqual(['Pick my colors, then write the palette.']);
   });
 

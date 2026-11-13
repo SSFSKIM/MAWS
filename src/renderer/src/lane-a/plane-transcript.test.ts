@@ -5,7 +5,7 @@
 import type { JsonObject, SessionBodies, SubagentMeta } from 'desk-hub/protocol';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTranscriptStore } from '../stores/transcript';
-import { rowsOf, withAllExpanded } from '../transcript/model/derive';
+import { rowsOf as drawnRows, withAllExpanded } from '../transcript/model/derive';
 import type { Row } from '../transcript/model/rows';
 import { FakePlane, mount, settle } from './test-support/fake-plane';
 import { readRecording, rowsBefore, scriptOf, snapshotAt, STRAY, type LiveItem } from './test-support/session-stream';
@@ -626,7 +626,7 @@ describe('the main transcript through the session plane', () => {
     await step(script.slice(rowAt(4)));
     const entry = store.getState().entries[controller.key];
     // a closed turn folds its work, the message line among it, which its divider then names: read it unfolded
-    const unfolded = rowsOf(withAllExpanded(entry.state));
+    const unfolded = drawnRows(withAllExpanded(entry.state));
     const lines = unfolded.flatMap((row) => (row.kind === 'agent_message' ? [row.text] : []));
     expect(lines.filter((text) => text === 'Message from @river: The migration is merged.')).toHaveLength(2);
     expect(unfolded.filter((row) => row.kind === 'user' && row.text === framed)).toHaveLength(1); // the one without the kind
