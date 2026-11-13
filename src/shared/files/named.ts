@@ -541,6 +541,7 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>): Gen
 const isTableHeader = (text: string, line: Line, below: Line) =>
   below.quote === line.quote && !below.opens && below.indent < 4 && isDelimiterRow(text, below.content, below.end) && cellsOf(text, below.content, below.end).length === cellsOf(text, line.content, line.end).length;
 
+// eslint-disable-next-line no-control-regex -- an autolink's URI holds no control character, as CommonMark's
 const AUTOLINK = /<(?:[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\x00-\x20<>]*|[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*)>/y;
 const LITERAL_URL = /https?:\/\/|www\./iy; // GFM's literal autolinks
 const isAlphanumeric = (code: number) => asciiAlphanumeric(code);
