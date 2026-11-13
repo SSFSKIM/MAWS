@@ -625,6 +625,7 @@ export const SKILLS_LIBRARY = {
   useInChat: 'Use in chat',
   // U11a (the branch panel's finding 1): why Use in chat is greyed for a skill of a plugin the launch profile turns off
   pluginOff: 'Off in the sessions MAWS runs: Settings › Sessions › Plugins in sessions',
+  pluginsUnread: 'Reading Settings › Sessions › Plugins in sessions…',
   firstTitle: 'Add your first skills',
   firstBody: 'Skills teach Claude how you work. Plugins bring them: Customize › Skills › Discover lists the plugins that carry skills.',
   failed: "Couldn't load your skills.",

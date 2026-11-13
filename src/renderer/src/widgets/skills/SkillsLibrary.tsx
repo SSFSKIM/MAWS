@@ -5,7 +5,7 @@
 // edge), and a small detail in place of the list (Back and ⌘[ return to it with its search and scroll). The badge is plain
 // text: in MAWS it would open another widget. "Use in chat" closes the dialog and puts `/<name> ` at the composer's caret,
 // sending nothing (§5.10; Desktop's local Code library has no such action, §11).
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Icon, SortIcon } from '../../app/IconButton';
 import { LIBRARY as L, PLUGIN_MANAGEMENT, SKILLS_LIBRARY as S } from '../copy';
 import { BackButton, backOnChord } from '../plugins/PluginDetail';
@@ -129,28 +129,38 @@ function SkillDetail({ row, onBack, onUse }: { row: SkillRow; onBack(): void; on
   );
 }
 
+// A row's identity across answers: its file, else its name (the list's own key).
+const rowKey = (row: SkillRow): string => row.path ?? row.name;
+
 // The list pane and, in place of it, a row's detail. The list stays mounted beneath the detail so Back returns to it as
-// it was; its scroll is restored by hand (an element under `display:none` loses its scrollTop).
+// it was; its scroll is restored by hand (an element under `display:none` loses its scrollTop). The detail is the
+// selected row as `groups` has it now, so what it offers follows a new answer or a changed launch profile (the task
+// review of the branch panel's fix); a row a new answer no longer lists leaves the detail for the list.
 export function SkillsLibrary({ groups, shown, onUse, onDetail }: { groups: readonly SkillGroup[]; shown: readonly SkillGroup[]; onUse?(name: string): void; onDetail(open: boolean): void }) {
-  const [selected, setSelected] = useState<SkillRow | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const selected = useMemo(() => (selectedKey === null ? null : (groups.flatMap((g) => g.rows).find((row) => rowKey(row) === selectedKey) ?? null)), [groups, selectedKey]);
   const pane = useRef<HTMLDivElement>(null);
   const left = useRef<{ name: string; scrollTop: number } | null>(null);
   const open = (row: SkillRow) => {
     left.current = { name: row.name, scrollTop: pane.current?.scrollTop ?? 0 };
-    setSelected(row);
+    setSelectedKey(rowKey(row));
     onDetail(true);
   };
-  const back = () => {
-    setSelected(null);
+  const back = useCallback(() => {
+    setSelectedKey(null);
     onDetail(false);
-  };
+  }, [onDetail]);
+  const gone = selectedKey !== null && selected === null;
+  useLayoutEffect(() => {
+    if (gone) back();
+  }, [gone, back]);
   useLayoutEffect(() => {
     const from = left.current;
-    if (selected !== null || from === null || pane.current === null) return;
+    if (selectedKey !== null || from === null || pane.current === null) return;
     left.current = null;
     pane.current.scrollTop = from.scrollTop;
     pane.current.querySelector<HTMLElement>(`[data-skill-row="${CSS.escape(from.name)}"] [data-row-open]`)?.focus();
-  }, [selected]);
+  }, [selectedKey]);
 
   const total = groups.reduce((n, g) => n + g.rows.length, 0);
   let body: ReactNode;

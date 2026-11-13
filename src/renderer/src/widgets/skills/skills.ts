@@ -96,7 +96,16 @@ export function skillGroups(dialog: GetSkillsDialogResponse, catalog: SessionCat
 // `pluginsOff` (the branch panel's finding 1): the installed plugins the chat will start without, the launch profile's
 // `plugins.off` (src/shared/engine/launch-profile.ts, which the launch writes as `enabledPlugins[id] = false`). Their
 // skills stay listed; their Use in chat is greyed with the reason, since the engine that starts loads none of them.
-export function diskSkillGroups(skills: readonly CustomizationSkill[], { invocable, pluginsOff }: { invocable: boolean; pluginsOff?: ReadonlySet<string> }): SkillGroup[] {
+// Null while the settings are unread (the task review): a plugin's skill is greyed until they are, since whether the
+// chat loads it is not known yet; the other skills do not depend on the profile.
+export type DiskSkillUse = { invocable: false } | { invocable: true; pluginsOff: ReadonlySet<string> | null };
+export function diskSkillGroups(skills: readonly CustomizationSkill[], use: DiskSkillUse): SkillGroup[] {
+  const { invocable } = use;
+  const unavailableOf = (skill: CustomizationSkill): string | null => {
+    if (!use.invocable || skill.plugin === null) return null;
+    if (use.pluginsOff === null) return SKILLS_LIBRARY.pluginsUnread;
+    return use.pluginsOff.has(skill.plugin) ? SKILLS_LIBRARY.pluginOff : null;
+  };
   const invocationOfDisk = (skill: CustomizationSkill): string | null => {
     if (!invocable) return null;
     if (skill.source !== 'plugin') return skill.name;
@@ -105,8 +114,8 @@ export function diskSkillGroups(skills: readonly CustomizationSkill[], { invocab
   const result: SkillGroup[] = [];
   for (const [source, group] of [['project', 'here'], ['user', 'yours'], ['plugin', 'added']] as const) {
     const rows = skills.filter((skill) => skill.source === source).map((skill): SkillRow => {
-      const off = invocable && skill.plugin !== null && pluginsOff?.has(skill.plugin) === true;
-      return { name: skill.name, invocation: invocationOfDisk(skill), description: skill.description, source, plugin: skill.plugin, path: skill.path, ...(off && { unavailable: SKILLS_LIBRARY.pluginOff }) };
+      const unavailable = unavailableOf(skill);
+      return { name: skill.name, invocation: invocationOfDisk(skill), description: skill.description, source, plugin: skill.plugin, path: skill.path, ...(unavailable !== null && { unavailable }) };
     });
     if (rows.length) result.push({ group, rows });
   }

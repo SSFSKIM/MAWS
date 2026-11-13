@@ -58,10 +58,10 @@ export function SkillsWidget(props: { appSessionId: AppSessionId; args: string; 
 // engine runs (`diskSkillGroups`), a plugin skill whose manifest name is unknown is listed without it; no Reload.
 function SkillsOnDisk({ appSessionId, folder, place, close }: { appSessionId: AppSessionId; folder: string | null; place: string; close(): void }) {
   const inventory = useCustomizationInventory(folder);
-  // the launch's own source of which plugins a chat started here goes without (the branch panel's finding 1); none
-  // until the settings are read, which the window does before it draws
+  // the launch's own source of which plugins a chat started here goes without (the branch panel's finding 1); not known
+  // until the settings are read (App connects them in an effect), and a plugin's skill waits for them (the task review)
   const off = useSettings((s) => s.state?.settings.engine.launchProfile.plugins.off);
-  const pluginsOff = useMemo(() => new Set(off ?? []), [off]);
+  const pluginsOff = useMemo(() => (off === undefined ? null : new Set(off)), [off]);
   const groups = useMemo(() => (inventory.data ? diskSkillGroups(inventory.data.skills, { invocable: true, pluginsOff }) : null), [inventory.data, pluginsOff]);
   const view = useLibraryStore((s) => s.skills);
   const plugin = groups !== null && hasPluginSkills(groups);

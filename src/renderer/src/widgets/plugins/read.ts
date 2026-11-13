@@ -1,17 +1,18 @@
 // The plugin CLI's reads (E8 execution document, M2): `plugins.list`, `marketplaces.list` and `plugins.available` are
 // not session reads (the CLI needs no engine process), so they are keyed by the directory the CLI runs in and issued
 // whether or not the session runs; `plugins.changed` (emitted when any mutation's CLI ends) reads them again (after a
-// listing already in flight, whose answer may predate the change). Each runs
+// listing already in flight, whose answer may predate the change: ./after-change.ts). Each runs
 // the engine's CLI, which refreshes its own catalogue cache (D-12), so none refetches on focus, and a harness mounting
 // widgets passively (`WidgetReadPolicyContext`) issues none.
-import { hashKey, useQuery, useQueryClient, type QueryClient, type QueryKey } from '@tanstack/react-query';
-import { useCallback, useContext, useEffect, useRef } from 'react';
+import { useQuery, type QueryClient } from '@tanstack/react-query';
+import { useCallback, useContext } from 'react';
 import type { CommandOutput } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../../ipc/client';
 import { IpcCommandError, machineKey } from '../../ipc/query';
 import { FRAME } from '../copy';
 import { errorWords, READ_STALE_MS, WidgetReadPolicyContext } from '../read';
+import { useReadAgainAfterPluginsChange } from './after-change';
 
 export type PluginsRead = 'plugins.list' | 'marketplaces.list' | 'plugins.available';
 
@@ -43,37 +44,13 @@ export const pluginsReadKey = (command: PluginsRead, cwd: string | null, machine
 export const readInstalledNow = (client: QueryClient, cwd: string, machine?: MachineRef) =>
   client.fetchQuery({ queryKey: pluginsReadKey('plugins.list', cwd, machine), queryFn: () => invokeRead('plugins.list', { cwd }, machine), staleTime: 0 });
 
-// The one rule for a read that a plugin change can make stale (`plugins.changed`, sent when any CLI change ends): the
-// read is asked again after the change. A change during a read in flight is owed a read after that one, not joined to
-// it: the read in flight may have read the state before the change, and TanStack Query lets an invalidation of a query
-// with no answer yet join its first flight, whose success then clears it (M2 review; U11a's branch panel, finding 3).
-// Changes meanwhile coalesce into that one read. `on` false listens to nothing; `shown` false owes the read until shown.
-// Read by `usePluginsRead` and by Customize's inventory (customize/inventory.ts).
-export function useReadAfterPluginsChange({ queryKey, on, shown = true, isFetching, refetch }: { queryKey: QueryKey; on: boolean; shown?: boolean; isFetching: boolean; refetch(): Promise<unknown> }): void {
-  const client = useQueryClient();
-  const owed = useRef(false);
-  const key = hashKey(queryKey); // the query's own hash: its read in flight, not another key's
-  useEffect(() => {
-    if (!on) return;
-    return ipc.on('plugins.changed', () => {
-      if (!shown || client.isFetching({ predicate: (query) => query.queryHash === key }) > 0) owed.current = true;
-      else void refetch();
-    });
-  }, [on, shown, client, key, refetch]);
-  useEffect(() => {
-    if (isFetching || !owed.current || !on || !shown) return;
-    owed.current = false;
-    void refetch();
-  }, [isFetching, on, shown, refetch]);
-}
-
-// `enabled: false` holds the read (Browse until its first click). `shown: false` keeps the last answer without
-// rereading it on a change (Browse's catalogue while My items shows, P2-B §5.8): a change meanwhile is read once it shows.
-// `retry` reads again through this observer: the client's `refetchQueries` may run another observer's options for the
-// key (the manifests' `skipToken` follower of `marketplaces.list`), which is no read.
-export function usePluginsRead<N extends PluginsRead>(command: N, cwd: string | null, enabled = true, shown = true, machine?: MachineRef): PluginsReadResult<CommandOutput<N>> & { retry(): void } {
+// `enabled: false` holds the read (Browse until its first click). A plugin change reads it again by the one rule
+// (./after-change.ts). `retry` reads again through this observer: the client's `refetchQueries` may run another
+// observer's options for the key (the manifests' `skipToken` follower of `marketplaces.list`), which is no read.
+export function usePluginsRead<N extends PluginsRead>(command: N, cwd: string | null, enabled = true, machine?: MachineRef): PluginsReadResult<CommandOutput<N>> & { retry(): void } {
   const active = useContext(WidgetReadPolicyContext).mode === 'active';
   const on = active && enabled && cwd !== null;
+  useReadAgainAfterPluginsChange(command);
   const query = useQuery<CommandOutput<N>, IpcCommandError>({
     queryKey: pluginsReadKey(command, cwd, machine),
     queryFn: () => invokeRead(command, { cwd: cwd! } as never, machine),
@@ -81,8 +58,7 @@ export function usePluginsRead<N extends PluginsRead>(command: N, cwd: string | 
     staleTime: READ_STALE_MS,
     refetchOnWindowFocus: false,
   });
-  const { refetch, isFetching } = query;
-  useReadAfterPluginsChange({ queryKey: pluginsReadKey(command, cwd, machine), on, shown, isFetching, refetch });
+  const { refetch } = query;
   const retry = useCallback(() => void refetch(), [refetch]);
   return { ...resultOf(query.data, query.error, query.isError), retry };
 }
