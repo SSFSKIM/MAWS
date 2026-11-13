@@ -151,10 +151,20 @@ describe('a terminal session’s plan and question cards', () => {
     await waitFor(() => expect(answers()).toEqual([{ kind: 'plan', outcome: 'implement', feedback: null }]));
   });
 
-  it('never declines an async question: Esc sends nothing and a Skip that would leave it unanswered is closed', async () => {
-    live({ pending: [raised({ tool: 'mcp__plugin_sminos_ask__ask', async: true, input: { questions: [{ question: 'Ship it?', header: 'Ship', options: [{ label: 'Yes' }] }] } })] });
-    const questions = [{ question: 'Ship it?', header: 'Ship', options: [{ label: 'Yes', description: null, preview: null }], multiSelect: false }];
-    mount({ id: 'e' as never, sessionId: 's' as never, at: '2026-10-28T10:00:00.000Z', seq: null, agentId: null, parentToolUseId: null, kind: 'question.requested', requestId: REQ, toolUseId: REQ as never, questions });
+  // U1a (A5, A18; §G): an asynchronous question is never declined by Esc, and its Dismiss sends the bridge's dismissal
+  // where the bridge declares it; a state without the key is the plugin as installed before sminos 1.47.0
+  const asyncRaised = raised({ tool: 'mcp__plugin_sminos_ask__ask', async: true, input: { questions: [{ question: 'Ship it?', header: 'Ship', options: [{ label: 'Yes' }] }] } });
+  const asyncQuestion: SessionEvent = {
+    id: 'e' as never, sessionId: 's' as never, at: '2026-10-28T10:00:00.000Z', seq: null, agentId: null, parentToolUseId: null, kind: 'question.requested', requestId: REQ, toolUseId: REQ as never,
+    questions: [{ question: 'Ship it?', header: 'Ship', options: [{ label: 'Yes', description: null, preview: null }], multiSelect: false }],
+  };
+  const mountAsync = () => mount(asyncQuestion as Extract<SessionEvent, { kind: 'question.requested' }>, { kind: 'async_input' });
+  const dismissButton = () => screen.getByRole('button', { name: 'Dismiss' }) as HTMLButtonElement;
+  const withDismiss = (control: { available: boolean; reason?: string }) => ({ ...laneAState(APP).controls, 'decide.dismiss': control });
+
+  it('never declines an async question by Esc, and a Skip that would leave it unanswered is closed', async () => {
+    live({ pending: [asyncRaised], controls: withDismiss({ available: true }) });
+    mountAsync();
     const skip = screen.getByRole('button', { name: 'Skip' });
     expect(skip.hasAttribute('disabled')).toBe(true);
     expect(skip.getAttribute('title')).toBe('An async question needs an answer');
@@ -164,6 +174,53 @@ describe('a terminal session’s plan and question cards', () => {
     await userEvent.setup().click(within(screen.getByRole('radiogroup', { name: 'Ship it?' })).getByRole('radio', { name: 'Yes' }));
     await userEvent.setup().click(screen.getByRole('button', { name: 'Submit' }));
     await waitFor(() => expect(answers()).toEqual([{ kind: 'question', answers: { 'Ship it?': 'Yes' } }]));
+  });
+
+  it('dismisses an async question through the bridge where it declares decide.dismiss: one laneA.answer of the plain deny', async () => {
+    live({ pending: [asyncRaised], controls: withDismiss({ available: true }) });
+    mountAsync();
+    expect(dismissButton().disabled).toBe(false);
+    await userEvent.setup().click(dismissButton());
+    await waitFor(() => expect(answers()).toEqual([{ kind: 'permission', decision: 'deny' }]));
+    expect(fake.invoked('laneA.answer')).toHaveLength(1);
+  });
+
+  it('draws Dismiss disabled with why where the bridge declares no dismissal, or declares it unavailable', async () => {
+    live({ pending: [asyncRaised] });
+    mountAsync();
+    expect(dismissButton().disabled).toBe(true);
+    expect(dismissButton().title).toBe('Dismiss it in the terminal');
+    await userEvent.setup().click(dismissButton());
+    expect(answers()).toEqual([]);
+    cleanup();
+    live({ pending: [asyncRaised], controls: withDismiss({ available: false, reason: 'MAWS controls this session' }) });
+    mountAsync();
+    expect(dismissButton().disabled).toBe(true);
+    expect(dismissButton().title).toBe('MAWS controls this session');
+    expect(screen.getByRole('button', { name: 'Skip' }).hasAttribute('disabled')).toBe(true);
+  });
+
+  it('returns to its controls with Retry when the bridge refuses the dismissal, the question still waiting', async () => {
+    live({ pending: [asyncRaised], controls: withDismiss({ available: true }) });
+    fake = fakeClient({ 'laneA.answer': { outcome: 'refused', code: 'bad-args', message: 'behavior is allow or deny' }, 'laneA.catalog': null });
+    window.maws = fake.client as unknown as PreloadBridge;
+    mountAsync();
+    await userEvent.setup().click(dismissButton());
+    expect(await screen.findByText("Couldn't deliver the answer")).toBeTruthy();
+    expect(screen.getByText("Couldn't deliver the answer").getAttribute('title')).toBe('behavior is allow or deny');
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+    expect(dismissButton().disabled).toBe(false);
+  });
+
+  it.each([
+    ['terminal', 'Dismissed in the terminal'],
+    ['cli', 'Dismissed elsewhere'],
+    ['bridge', 'No longer asked'],
+  ])('settles a withdrawn async question by %s in place as “%s”', (by, words) => {
+    live({ pending: [asyncRaised] });
+    mountAsync();
+    act(() => live({ pending: [], settled: [{ request: REQ, session: 'eng-1', winner: by === 'terminal' ? 'terminal' : 'other', outcome: 'withdrawn', by }] }));
+    expect(screen.getByRole('status').textContent).toBe(words);
   });
 });
 

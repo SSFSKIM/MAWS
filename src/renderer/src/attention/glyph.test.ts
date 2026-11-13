@@ -3,6 +3,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { digest, item, record, remoteRow } from '../../../../test/support/builders';
 import { OTHER_MACHINE } from '../../../../test/support/machine';
 import type { ListedSession } from '../stores/sessions';
+import { laneAEntryOf } from '@shared/lane-a/attention-entry';
 import { glyphFor, listedGlyph } from './glyph';
 
 const at = '2026-09-28T10:00:00Z';
@@ -36,6 +37,13 @@ describe('session glyphs', () => {
       [[r, null, []], { char: '○', tone: 'faint', label: 'Idle', pulse: false }],
     ];
     for (const [args, glyph] of cases) expect(glyphFor(...args), glyph.label).toEqual(glyph);
+  });
+
+  // U1a (A5): a terminal session's asynchronous question, as its lane A list makes it, reads in the calm tone
+  it('reads a terminal session’s asynchronous question as Question waiting, calm, while its turn runs', () => {
+    const { item: asked } = laneAEntryOf('s' as AppSessionId, { request: 'toolu_q', session: 'eng-1', tool: 'mcp__plugin_sminos_ask__ask', async: true, input: { questions: [{ question: 'Ship it?', header: 'Ship', options: [] }] } }, at);
+    const bridged = record('s', { holder: { kind: 'terminal', pid: 7135 } });
+    expect(glyphFor(bridged, digest('s', { phase: 'working' }), [asked])).toEqual({ char: '?', tone: 'info', label: 'Question waiting', pulse: false });
   });
 
   // P5 O9 M6 (the owner's Q1): a terminal session MAWS drives through its bridge reads like any MAWS session; its open

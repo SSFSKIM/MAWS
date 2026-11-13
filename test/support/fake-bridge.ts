@@ -43,7 +43,7 @@ export interface FakeBridge {
   readonly commands: { op: string; body: Record<string, unknown> }[]; // every POST /command, in order
   readonly decisions: { request: string; body: Record<string, unknown> }[]; // every decision taken
   readonly requestReads: string[]; // every GET /requests/<id>
-  answer(op: string, reply: (body: Record<string, unknown>) => FakeReply | Promise<FakeReply>): void;
+  answer(op: string, reply: (body: Record<string, unknown>) => FakeReply | Promise<FakeReply>): void; // an op, `decision`, or `request` (GET /requests/<id>), each optionally `:<request>`
   emit(event: Record<string, unknown>): void;
   raise(raised: FakeRaised): void;
   settle(request: string, winner: 'terminal' | 'web' | 'other', outcome?: string, by?: string): void;
@@ -275,7 +275,13 @@ export async function startFakeBridge(options: FakeBridgeOptions): Promise<FakeB
       if (s) return json(res, 409, { error: 'already settled', settled: s });
       return json(res, 404, { error: `no request ${request} is pending in this session` });
     }
-    if (body === null || typeof body !== 'object' || (body.behavior !== 'allow' && body.behavior !== 'deny')) return json(res, 400, { error: 'behavior is allow or deny' });
+    // UX wave U1a §G: a bridge of sminos 1.47.0 (its status declaring `decide.dismiss`) also takes an async question's
+    // dismissal; one before it answers 400 before it records anything
+    const dismissing = capabilities?.controls?.['decide.dismiss']?.available === true;
+    if (body === null || typeof body !== 'object' || (body.behavior !== 'allow' && body.behavior !== 'deny' && !(dismissing && body.behavior === 'dismiss'))) {
+      return json(res, 400, { error: dismissing ? 'behavior is allow, deny or dismiss' : 'behavior is allow or deny' });
+    }
+    if (body.behavior === 'dismiss' && raised.async !== true) return json(res, 400, { error: 'only an async question is dismissed' });
     if (typeof body.by !== 'string' || body.by === 'terminal' || body.by === 'bridge') return json(res, 400, { error: 'by names who decided' });
     const script = scripts.get(`decision:${request}`) ?? scripts.get('decision');
     if (script) {
@@ -341,6 +347,12 @@ export async function startFakeBridge(options: FakeBridgeOptions): Promise<FakeB
       if (req.method === 'GET' && parts.length === 3 && parts[1] === 'requests') {
         const id = decodeURIComponent(parts[2]!);
         requestReads.push(id);
+        const script = scripts.get(`request:${id}`) ?? scripts.get('request'); // a read a test holds open or answers itself
+        if (script) {
+          const reply = await script({});
+          if ('drop' in reply) return void req.socket.destroy();
+          return json(res, reply.status, reply.body);
+        }
         const p = pending.get(id);
         if (p) return json(res, 200, { ...p, session });
         const s = settled.get(id);

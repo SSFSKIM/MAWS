@@ -265,6 +265,75 @@ describe('Submit', () => {
   });
 });
 
+// UX wave U1a (Interfaces §E; A18, A10): Dismiss in the form's foot sends one answer with every question skipped,
+// whatever the drafts hold; a double-click on a single-choice option picks it, and submits when the form is then complete
+describe('Dismiss and the double-click', () => {
+  const ONE_CHOICE: PendingAsk = { ...ASK, questions: [QUESTIONS[0]!] };
+  const allSkipped = QUESTIONS.map((question) => ({ id: question.id, question: question.question, status: 'skipped' }));
+
+  it('Dismiss sends one answer with every question skipped, a half-typed Other and the picks ignored', async () => {
+    await mountWithAsk();
+    fireEvent.click(within(section('q1')).getByRole('radio', { name: 'Red' }));
+    fireEvent.click(within(section('q2')).getByRole('checkbox', { name: 'Other…' })); // half answered: Submit waits
+    expect((submitButton() as HTMLButtonElement).disabled).toBe(true);
+    const dismiss = screen.getByRole('button', { name: 'Dismiss' }) as HTMLButtonElement;
+    expect(dismiss.disabled).toBe(false);
+    fireEvent.click(dismiss);
+    expect(fake.invoked('maws.ask.answer')).toEqual([{ appSessionId: A, askId: 'toolu_a', answers: allSkipped }]);
+    expect(dismiss.disabled).toBe(true); // one answer in flight
+    fireEvent.click(dismiss);
+    expect(fake.invoked('maws.ask.answer')).toHaveLength(1);
+    await fake.reply('maws.ask.answer', { outcome: 'delivered' });
+    expect(await screen.findByText('No open questions')).toBeTruthy();
+  });
+
+  it('the in-place form has the same Dismiss', async () => {
+    render(<HoverAsk appSessionId={A} askId={ASK.askId} />);
+    await fake.reply('maws.asks.list', { asks: [ASK] });
+    fireEvent.change(within(section('q3')).getByRole('textbox'), { target: { value: 'Half a title' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(fake.invoked('maws.ask.answer')).toEqual([{ appSessionId: A, askId: 'toolu_a', answers: allSkipped }]);
+  });
+
+  it('a double-click that completes the form submits it once', async () => {
+    await mountWithAsk([ONE_CHOICE]);
+    await userEvent.setup().dblClick(within(section('q1')).getByRole('radio', { name: 'Green' }));
+    expect(fake.invoked('maws.ask.answer')).toEqual([{ appSessionId: A, askId: 'toolu_a', answers: [{ id: 'q1', question: 'Which colour?', status: 'answered', value: ['Green'] }] }]);
+  });
+
+  it('a double-click in the in-place form that completes it submits it once', async () => {
+    render(<HoverAsk appSessionId={A} askId={ONE_CHOICE.askId} />);
+    await fake.reply('maws.asks.list', { asks: [ONE_CHOICE] });
+    await userEvent.setup().dblClick(within(section('q1')).getByRole('radio', { name: 'Blue' }));
+    expect(fake.invoked('maws.ask.answer')).toEqual([{ appSessionId: A, askId: 'toolu_a', answers: [{ id: 'q1', question: 'Which colour?', status: 'answered', value: ['Blue'] }] }]);
+  });
+
+  it('a double-click that leaves another question empty only picks; one beside skipped or decided questions submits', async () => {
+    await mountWithAsk();
+    const user = userEvent.setup();
+    await user.dblClick(within(section('q1')).getByRole('radio', { name: 'Blue' }));
+    expect(within(section('q1')).getByRole('radio', { name: 'Blue' }).getAttribute('aria-checked')).toBe('true');
+    expect(fake.invoked('maws.ask.answer')).toEqual([]);
+    for (const id of ['q2', 'q3', 'q4']) fireEvent.click(within(section(id)).getByRole('button', { name: 'Skip' }));
+    fireEvent.click(within(section('q5')).getByRole('button', { name: 'Decide for me' }));
+    await user.dblClick(within(section('q1')).getByRole('radio', { name: 'Red' }));
+    expect(fake.invoked('maws.ask.answer')).toHaveLength(1);
+    expect((fake.invoked('maws.ask.answer')[0] as { answers: AskAnswer[] }).answers[0]).toEqual({ id: 'q1', question: 'Which colour?', status: 'answered', value: ['Red'] });
+  });
+
+  it('a double-click on a multi-choice option or on Other… never submits', async () => {
+    await mountWithAsk([{ ...ASK, questions: [QUESTIONS[1]!] }]);
+    const user = userEvent.setup();
+    await user.dblClick(within(section('q2')).getByRole('checkbox', { name: 'Mon' }));
+    expect(fake.invoked('maws.ask.answer')).toEqual([]);
+    cleanup();
+    resetAskSheets();
+    await mountWithAsk([ONE_CHOICE]);
+    await user.dblClick(within(section('q1')).getByRole('radio', { name: 'Other…' }));
+    expect(fake.invoked('maws.ask.answer')).toEqual([]);
+  });
+});
+
 describe('the asks a session holds', () => {
   it('a restored tab (no params) reads the host’s table and shows the pending ask: the reload path', async () => {
     mount(undefined);
@@ -487,6 +556,9 @@ describe('a session on a machine that doesn’t offer the answer', () => {
       act(() => heardRefusal('maws.ask.answer', { issues: { refusal: 'not-offered' } }, OTHER_MACHINE, TEST_MACHINE));
       expect(submitButton()).toHaveProperty('disabled', true);
       expect(submitButton().title).toBe('mini doesn’t offer this');
+      // U1a: Dismiss is gated as Submit is
+      expect(screen.getByRole('button', { name: 'Dismiss' })).toHaveProperty('disabled', true);
+      expect(screen.getByRole('button', { name: 'Dismiss' }).title).toBe('mini doesn’t offer this');
     } finally {
       resetRemoteSurfaces();
       useSessions.setState({ listed: new Map(), listedMachines: new Set() });

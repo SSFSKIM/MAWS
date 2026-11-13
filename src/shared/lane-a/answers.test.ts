@@ -38,11 +38,24 @@ describe('lane A answer intents', () => {
   it('refuses what lane A can’t carry', () => {
     expect(intent(permission, { kind: 'permission', decision: 'deny_and_stop' })).toEqual({ ok: false, code: 'unsupported', message: 'deny-and-interrupt is answered in the terminal' });
     expect(intent(asyncQ, { kind: 'question', answers: {} })).toMatchObject({ ok: false, code: 'unsupported', message: 'an async question needs an answer' });
-    expect(intent(asyncQ, { kind: 'permission', decision: 'deny' })).toMatchObject({ ok: false, code: 'unsupported' });
     expect(intent(plan, { kind: 'plan', outcome: 'clear_and_implement' } as RequestAnswer)).toMatchObject({ ok: false, message: '/clear runs in the terminal' });
     expect(intent({ ...permission, suggestions: [rule, rule] }, { kind: 'permission', decision: 'allow', scope: 'session' })).toMatchObject({ ok: false, code: 'unsupported' });
     expect(intent(permission, { kind: 'permission', decision: 'allow', scope: 'session' }, { ...controls, 'decide.scope': { available: false, reason: 'no scope here' } })).toEqual({ ok: false, code: 'unsupported', message: 'no scope here' });
     expect(intent(native, { kind: 'permission', decision: 'allow', scope: 'once' })).toMatchObject({ ok: false, code: 'bad-args' });
+  });
+
+  // U1a §G: a plain deny of an asynchronous question is the bridge's dismissal, where the bridge declares it
+  it('reads a deny of an asynchronous question as the dismissal by the bridge’s decide.dismiss, row by row', () => {
+    const deny = { kind: 'permission', decision: 'deny' } as const;
+    expect(intent(asyncQ, deny, { ...controls, 'decide.dismiss': { available: true } })).toEqual({ ok: true, intent: { kind: 'dismiss' } });
+    expect(intent(asyncQ, deny)).toEqual({ ok: false, code: 'unsupported', message: 'dismiss it in the terminal' });
+    expect(intent(asyncQ, deny, { ...controls, 'decide.dismiss': { available: false, reason: 'MAWS controls this session' } })).toEqual({ ok: false, code: 'unsupported', message: 'MAWS controls this session' });
+    for (const given of [controls, { ...controls, 'decide.dismiss': { available: true } }]) {
+      expect(intent(asyncQ, { kind: 'question', answers: {} }, given)).toEqual({ ok: false, code: 'unsupported', message: 'an async question needs an answer' });
+    }
+    // a dismissal carries no message (the bridge refuses one), and a blocking question's deny stays the deny
+    expect(intent(asyncQ, { kind: 'permission', decision: 'deny', message: 'later' }, { ...controls, 'decide.dismiss': { available: true } })).toMatchObject({ ok: false, code: 'bad-args' });
+    expect(intent(native, deny, { ...controls, 'decide.dismiss': { available: true } })).toEqual({ ok: true, intent: { kind: 'deny' } });
   });
 
   it('hashes a suggestion as DX6 does: the SHA-256 of its canonical JSON', async () => {

@@ -78,6 +78,24 @@ describe('the docked swap takes the oldest answerable request, once it is read',
     expect(swapOf([asked], new Map<AttentionId, SessionEvent | null>([[asked.id, ask]]))).toMatchObject({ item: null, notice: { id: asked.id }, waiting: 0 });
   });
 
+  // U1a (Reported 1, §C's last rows): a terminal session's asynchronous question keeps the dock until U1b gives it its
+  // row: an `async_input` item with a request id and no anchor, once its request reads as a question. An owner-channel
+  // question (its anchor) and MAWS's non-blocking ask (read as `maws.ask.opened`) dock nothing and are no notice.
+  it('docks a terminal session’s asynchronous question once its request reads as a question, and no other async_input', () => {
+    const question = { ...permission(), kind: 'question.requested', requestId: 'toolu_q', toolUseId: 'toolu_q', questions: [] } as unknown as SessionEvent;
+    const asked = item(A, 'async_input', '2026-09-29T09:00:00.000Z', { id: 'lane-a:eng-1:toolu_q' as AttentionId, request: { requestId: 'toolu_q' as never, toolUseId: 'toolu_q' as never, taskId: null, agentId: null } });
+    expect(swapOf([asked], new Map())).toMatchObject({ item: null, notice: null, unread: [{ id: asked.id }] }); // read first
+    expect(swapOf([asked], new Map([[asked.id, question]]))).toMatchObject({ item: { id: asked.id }, notice: null, waiting: 0, unread: [] });
+    expect(swapOf([asked], new Map([[asked.id, null]]))).toMatchObject({ item: null, notice: null, unread: [] }); // no longer held: nothing to answer
+
+    const owner = item(A, 'async_input', '2026-09-29T08:00:00.000Z', { anchor: { messageUuid: 'm-1' as never, blockIndex: 0, span: 0 } });
+    expect(swapOf([owner], new Map())).toMatchObject({ item: null, notice: null, unread: [] }); // never read: its card is in the transcript
+    const ask = askOpened({ blocking: false, at: '2026-09-29T08:00:00.000Z' });
+    const nonBlocking = askItemFor(ask, A, { kind: 'async_input' });
+    expect(swapOf([nonBlocking], new Map<AttentionId, SessionEvent | null>([[nonBlocking.id, ask]]))).toMatchObject({ item: null, notice: null, unread: [] });
+    expect(swapOf([asked, nonBlocking, owner], new Map<AttentionId, SessionEvent | null>([[asked.id, question], [nonBlocking.id, ask]])).item?.id).toBe(asked.id);
+  });
+
   // The owner's ruling (2026-10-30; it withdraws E11 F2b's kept notice): an error seen or dismissed is no notice, only an
   // unseen one is
   it('shows an open error as the notice and none once it is seen or dismissed', () => {

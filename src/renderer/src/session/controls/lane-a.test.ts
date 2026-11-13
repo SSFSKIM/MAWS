@@ -298,11 +298,29 @@ describe('answers', () => {
     const ask = raised({ tool: 'AskUserQuestion' });
     expect(can(ask, { kind: 'question', answers: {} })).toEqual({ available: true }); // a native question declined
     expect(can(raised({ tool: 'ask', async: true }), { kind: 'question', answers: {} })).toEqual({ available: false, reason: 'An async question needs an answer' });
-    expect(can(raised({ tool: 'ask', async: true }), { kind: 'permission', decision: 'deny' })).toEqual({ available: false, reason: 'An async question is answered, never declined' });
+    expect(can(raised({ tool: 'ask', async: true }), { kind: 'permission', decision: 'deny' })).toEqual({ available: false, reason: LANE_A_WORDS.dismiss }); // no decide.dismiss
     const plan = raised({ tool: 'ExitPlanMode' });
     expect(can(plan, { kind: 'plan', outcome: 'implement', feedback: null })).toEqual({ available: true });
     expect(can(plan, { kind: 'plan', outcome: 'clear_and_implement', feedback: null })).toEqual({ available: false, reason: '/clear runs in the terminal' });
     expect(can(raised(), { kind: 'elicitation', action: 'accept' })).toEqual({ available: false, reason: LANE_A_WORDS.elicitation });
+  });
+
+  // U1a §G: the dismissal of an asynchronous question, by what the bridge declares, and never on another machine
+  it('opens an asynchronous question’s dismissal by the bridge’s decide.dismiss, and closes it otherwise with why', () => {
+    const asked = raised({ tool: 'mcp__plugin_sminos_ask__ask', async: true });
+    const dismiss: RequestAnswer = { kind: 'permission', decision: 'deny' };
+    expect(laneAAnswerCapability(asked, dismiss, { ...controls, 'decide.dismiss': { available: true } })).toEqual({ available: true });
+    expect(laneAAnswerCapability(asked, dismiss, controls)).toEqual({ available: false, reason: 'Dismiss it in the terminal' });
+    expect(laneAAnswerCapability(asked, dismiss, { ...controls, 'decide.dismiss': { available: false, reason: 'MAWS controls this session' } })).toEqual({ available: false, reason: 'MAWS controls this session' });
+    expect(laneAAnswerCapability(asked, dismiss, { ...controls, 'decide.dismiss': { available: false, reason: 'the mod is too old to dismiss' } })).toEqual({ available: false, reason: 'The mod is too old to dismiss' });
+    expect(laneAAnswerCapability(asked, { kind: 'question', answers: {} }, { ...controls, 'decide.dismiss': { available: true } })).toEqual({ available: false, reason: 'An async question needs an answer' });
+    expect(laneAAnswerCapability(raised({ tool: 'AskUserQuestion' }), dismiss, controls)).toEqual({ available: true }); // a blocking question's deny
+    const there = item(APP, 'async_input', T0, { request: { requestId: 'req-1' as RequestId, toolUseId: null, taskId: null, agentId: null } });
+    for (const given of [controls, { ...controls, 'decide.dismiss': { available: true } }]) {
+      const { controls: c } = remotePort({ pending: [asked], controls: given });
+      expect(c.answerCapability(there, dismiss)).toEqual({ available: false, reason: 'Dismiss it in the terminal on mini' });
+      expect(c.answerCapability(there, { kind: 'question', answers: { 'Which?': 'A' } })).toEqual({ available: true });
+    }
   });
 
   it('answers through laneA.answer with the item’s request', async () => {

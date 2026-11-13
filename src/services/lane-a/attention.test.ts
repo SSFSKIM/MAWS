@@ -32,7 +32,7 @@ afterEach(() => vi.useRealTimers());
 const start = () => laneAAttention({ set: (appId, entries) => sets.push({ appId, entries }) });
 
 describe('lane A attention items', () => {
-  it('makes one item per pending request, of the kind the bridge’s own rule names', () => {
+  it('makes one item per pending request, of the kind the bridge’s own rule names, an asynchronous question its own', () => {
     const a = start();
     a.update(APP, view([
       raised('toolu_bash'),
@@ -46,7 +46,7 @@ describe('lane A attention items', () => {
     expect(items.map((i) => [i.id, i.kind, i.summary])).toEqual([
       [`lane-a:${ENGINE}:toolu_bash`, 'permission', 'Bash: rm -rf build'],
       [`lane-a:${ENGINE}:toolu_ask`, 'question', 'Which colour?'],
-      [`lane-a:${ENGINE}:toolu_plugin_q`, 'question', 'Ship it?'],
+      [`lane-a:${ENGINE}:toolu_plugin_q`, 'async_input', 'Ship it?'], // U1a (A5): a question that does not block the agent
       [`lane-a:${ENGINE}:toolu_plan`, 'plan', 'Plan ready for review'],
     ]);
     expect(items[0]).toEqual({
@@ -120,6 +120,16 @@ describe('lane A attention items', () => {
     });
     expect(ask).toMatchObject({ kind: 'question.requested', requestId: 'toolu_ask', questions: [{ question: 'Which colour?', header: 'Colour', options: [{ label: 'Red', description: 'warm', preview: null }, { label: 'Blue', description: null, preview: null }], multiSelect: true }] });
     expect(plan).toMatchObject({ kind: 'plan.requested', requestId: 'toolu_plan', plan: '1. do it', input: { plan: '1. do it' } });
+  });
+
+  // U1a (A5): the item of an asynchronous question is `async_input`, its request the question the card's stepper reads
+  it('answers an asynchronous question’s request as a question, under an async_input item', () => {
+    const a = start();
+    a.update(APP, view([raised('toolu_plugin_q', { tool: 'mcp__plugin_sminos_ask__ask', async: true, input: { questions: [{ question: 'Ship it?', header: 'Ship', options: [{ label: 'Yes' }] }] } })]));
+    const [entry] = last();
+    expect(entry!.item).toMatchObject({ kind: 'async_input', summary: 'Ship it?', request: { requestId: 'toolu_plugin_q' } });
+    expect(entry!.item.anchor).toBeUndefined();
+    expect(SessionEventSchema.parse(entry!.request)).toMatchObject({ kind: 'question.requested', requestId: 'toolu_plugin_q', questions: [{ question: 'Ship it?', header: 'Ship', options: [{ label: 'Yes', description: null, preview: null }], multiSelect: false }] });
   });
 
   it('stops its timers', () => {

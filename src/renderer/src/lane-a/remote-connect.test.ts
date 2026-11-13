@@ -51,6 +51,15 @@ describe('connectRemoteLaneA', () => {
     expect(useAttention.getState().bySession.get(REMOTE)).toEqual([]);
   });
 
+  // U1a (A5): another machine's terminal session's asynchronous question is mirrored as it is listed there, `async_input`
+  it('mirrors an asynchronous question as an async_input item with its question view', () => {
+    const question = { ...raised, request: 'toolu_q', tool: 'mcp__plugin_sminos_ask__ask', async: true as const, input: { questions: [{ question: 'Ship it?', header: 'Ship', options: [{ label: 'Yes' }] }] } };
+    applyLaneAState(REMOTE, laneAState(REMOTE, { engineSessionId: 'eng-r', link: LINK, acts: [], pending: [question] }));
+    const [mirrored] = useAttention.getState().bySession.get(REMOTE)!;
+    expect(mirrored).toMatchObject({ kind: 'async_input', summary: 'Ship it?' });
+    expect(useAttention.getState().requests.get(mirrored!.id)).toMatchObject({ kind: 'question.requested', questions: [{ question: 'Ship it?' }] });
+  });
+
   // OX2: an attention id is machine-bound, so the mirror lifts it to the session's machine as main's ids are lifted at
   // the IPC boundary; the request view and a question's draft are keyed by it, and two machines' requests stay apart.
   it('addresses each item to its machine, so one engine session and request id on two machines are two cards', () => {

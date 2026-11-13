@@ -318,6 +318,23 @@ describe('remote lane A over a real link', { timeout: 30_000 }, () => {
     expect(l.plane.rpcs).toHaveLength(sent);
   });
 
+  // U1a §G (correction 5): the daemon's `decide` takes allow or deny, so a dismissal of an asynchronous question is not
+  // carried to another machine, whatever that machine's bridge declares; refused before any act is built
+  it.each([
+    ['declares the dismissal', { ...CAPABILITIES, controls: { ...CAPABILITIES.controls, 'decide.dismiss': { available: true } } }],
+    ['declares none', CAPABILITIES],
+  ])('refuses an asynchronous question’s dismissal before any act when the bridge %s', async (_says, capabilities) => {
+    const l = await lab();
+    l.plane.presence.set('la-1', { ...l.plane.presenceOf('la-1'), capabilities });
+    await watched(l);
+    l.plane.raise({ request: 'toolu_aq', tool: 'mcp__plugin_sminos_ask__ask', input: { questions: [{ question: 'Ship it?' }] }, async: true });
+    await until(() => stateNow(l)?.pending.some((x) => x.request === 'toolu_aq'), 'the asynchronous question');
+    const sent = l.plane.rpcs.length;
+    expect(await l.cmd('laneA.answer', { appSessionId: 'la-1', request: 'toolu_aq', answer: { kind: 'permission', decision: 'deny' } })).toEqual({ outcome: 'refused', code: 'unsupported', message: 'dismiss it in the terminal on mini' });
+    expect(l.plane.rpcs).toHaveLength(sent);
+    expect(stateNow(l)?.acts ?? []).toEqual([]);
+  });
+
   // UC-1 (U1a's Interfaces §B, "A window on another machine", the ruling on Reported 8): the session's machine said `done`
   // to this device's own answer, so main names the request in the state every window of this device reads, until a word
   // of the machine's (the bridge's settlement, a reset, a bridge no longer live) says otherwise; no timer
