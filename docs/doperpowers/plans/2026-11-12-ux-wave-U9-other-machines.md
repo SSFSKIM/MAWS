@@ -17,7 +17,7 @@ Sibling children code against what this landing exposes: U7 mounts on the listed
 ## Progress
 
 - [x] (2026-11-13) `p5-idle-margin` is on master: merge `4109f5e25`. Master `be663d261` also holds U6a (pull request #604) and U8a, and `ef0e009e4` is an ancestor of it.
-- [ ] Before M1 (the executor): the branch takes master in by a merge and checks the base, as Concrete Steps opens. M1 does not start before this.
+- [x] (2026-11-13) Before M1 (the executor): the branch takes master in by a merge and checks the base, as Concrete Steps opens. Merge `f00c74e9b` of master `e71334239`; `ef0e009e4` is an ancestor; `ActionSpec.fixed` and `src/shared/sessions/working-folder.ts` are present (U6a, U8a). U1a and U3a are not on master: section 11's fallbacks apply (`selectPendingOf`; `Transcript.tsx` as on master).
 - [ ] M1 — The offers at both ends
   - [ ] M1's first step: the listing test, run on the merged base before any change of this landing. For each of its two halves, a pass means the listing rule is not built and the case stays as the pin; a failure makes it the rule's failing-first test (M1, "The listing rule opens with its test").
 - [ ] M2 — Fork over the link, and the sheet's words
