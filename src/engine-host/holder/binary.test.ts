@@ -501,8 +501,10 @@ describe.skipIf(!HAVE_BINARY)('the session host binary', () => {
     expect(JSON.parse(readFileSync(host.paths.roster, 'utf8'))).toMatchObject({ socket: host.paths.socket });
   });
 
-  // macOS: the darwin prebuild links the system library alone (Interfaces §H), what `otool` reads.
-  it.skipIf(process.platform !== 'darwin')('links libSystem and libresolv alone on macOS', () => {
+  // macOS: the darwin prebuild links the system library alone (Interfaces §H), what `otool` reads. /usr/bin/otool is an
+  // xcrun shim: its first call on a fresh Mac resolves the developer directory, 6.3 s on a hosted macos-26 runner (run
+  // 43461845303), past vitest's 5 s default for a case that asserts names, not time.
+  it.skipIf(process.platform !== 'darwin')('links libSystem and libresolv alone on macOS', { timeout: LONG }, () => {
     const libraries = execFileSync('/usr/bin/otool', ['-L', BINARY], { encoding: 'utf8' })
       .split('\n')
       .slice(1)
