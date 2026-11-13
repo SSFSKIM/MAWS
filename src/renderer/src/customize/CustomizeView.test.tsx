@@ -13,6 +13,7 @@ import { createWidgetBackend, type WidgetBackend } from '../../../../test/suppor
 import { project, record, status } from '../../../../test/support/builders';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { useLayout } from '../stores/layout';
+import { useMachines } from '../stores/machines';
 import { useSessions } from '../stores/sessions';
 import { useLibraryStore } from '../widgets/plugins/library-store';
 import { CustomizeView } from './CustomizeView';
@@ -29,6 +30,7 @@ import { forgetKeptOperations } from '../widgets/plugins/operation';
 // `window.maws`, stands for main and is asked, answers and emits with the bare ids (`bareOf`).
 const P = at('project-one' as ProjectId);
 const Q = at('project-two' as ProjectId);
+const IN_FRONT = at('session-in-front' as AppSessionId);
 const addressing = addressingOf(REGISTRY);
 const lifted = (main: EngineSessionStatus) => addressing.output('engine.sessions').lift([main], TEST_MACHINE)[0]!;
 const pageStatus = (bare: string) => lifted(status(bare));
@@ -42,8 +44,11 @@ beforeEach(() => {
   }); });
   backend.script('plugins.env', () => ({ binary: null, binaryError: 'Unavailable', configHome: '/config', globalConfig: '/config/.claude.json' }));
   window.maws = backend.bridge();
-  useSessions.setState({ projects: new Map([[P, project(P, 0, { name: 'One', directory: '/one' })], [Q, project(Q, 1, { name: 'Two', directory: '/two' })]]), records: new Map(), engine: new Map() });
-  useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, current: P, sets: { [P]: LAYOUT_DEFAULTS.main.sets.none } } });
+  // U13a: the page's project is the current project, the row of the session in front (a session of P's)
+  useSessions.setState({ projects: new Map([[P, project(P, 0, { name: 'One', directory: '/one' })], [Q, project(Q, 1, { name: 'Two', directory: '/two' })]]), records: new Map([[IN_FRONT, record(IN_FRONT, { projectId: P })]]), engine: new Map() });
+  useMachines.setState({ loaded: new Set([TEST_MACHINE]) });
+  useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+  useLayout.getState().openTab({ kind: 'session', appSessionId: IN_FRONT });
 });
 afterEach(() => {
   cleanup();
@@ -52,6 +57,7 @@ afterEach(() => {
   useReadLoads.setState({ loads: new Map() });
   useSessions.setState({ projects: new Map(), records: new Map(), engine: new Map() });
   useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+  useMachines.setState({ loaded: new Set() });
   useLibraryStore.setState(useLibraryStore.getInitialState());
   useCustomizeProject.setState({ projectId: undefined });
   delete (window as { maws?: PreloadBridge }).maws;
@@ -63,7 +69,7 @@ it('keeps the plugin session picker with its library controls and reloads the se
   const second = { ...pageStatus('live-b'), cwd: '/one', pluginsObservedAt: '2026-10-24T12:00:00.000Z' };
   useSessions.setState({
     engine: new Map([[first.appSessionId, first], [second.appSessionId, second]]),
-    records: new Map([[first.appSessionId, pageRecord(first.appSessionId, { title: { text: 'Review notes', source: 'user' } })], [second.appSessionId, pageRecord(second.appSessionId, { title: { text: 'Prepare release', source: 'user' } })]]),
+    records: new Map([...useSessions.getState().records, [first.appSessionId, pageRecord(first.appSessionId, { title: { text: 'Review notes', source: 'user' } })], [second.appSessionId, pageRecord(second.appSessionId, { title: { text: 'Prepare release', source: 'user' } })]]),
   });
   backend.script('plugins.list', () => ({ plugins: [] }));
   backend.script('marketplaces.list', () => ({ marketplaces: [] }));

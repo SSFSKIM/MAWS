@@ -18,7 +18,7 @@ import { runSessionAction, SESSION_ACTIONS, sessionActionsFor, useSessionActionE
 import { machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../ipc/client';
-import { createSession, useSessionCreatorRegistered } from '../keymap/actions-runtime';
+import { newChat, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { openDialog } from '../sessions/dialogs';
 import { idKey, machineKey } from '@shared/machine/org-key';
 import { selectOrgIndex, sessionsOfRow, type RowKey } from '../stores/org-projects';
@@ -30,7 +30,7 @@ import { useSessions } from '../stores/sessions';
 import { useMachines } from '../stores/machines'; // the project registry
 import { locationAddress, type OrgProjectLocation } from '../stores/registry'; // the project registry
 import { REGISTRY } from './registry-copy'; // the project registry
-import { newChatElsewhere, registrySpawnTarget } from './registry-new-chat'; // the project registry
+import { registrySpawnTarget } from './registry-new-chat'; // the project registry
 import { PROJECT_ACTION_IDS, PROJECT_ACTIONS, runProjectAction, useProjectActionEnabled, type ProjectActionId } from './project-actions';
 import { openResumeChooser } from '../resume/host'; // P2-D
 import { KEEP_RUNNING } from './copy'; // P5 O2 M2
@@ -186,7 +186,7 @@ function ProjectItems({ projectId, people }: { projectId: ProjectId; people: boo
   const canCreate = creator && (here || elsewhere !== null);
   return (
     <>
-      <Item enabled={canCreate} onSelect={() => void (elsewhere !== null ? newChatElsewhere(elsewhere) : createSession(projectId))}>
+      <Item enabled={canCreate} onSelect={() => void newChat({ row: rowKey ?? projectId })}>
         New chat
       </Item>
       {/* W11 (I7): the project's Resume… picker, as the row's search icon opens it */}

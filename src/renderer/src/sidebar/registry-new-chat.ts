@@ -26,10 +26,11 @@ export function registrySpawnTarget(project: RegistryProject, machines: Readonly
 
 /**
  * Opens a New chat tab with no project here, in the registry project (the tab's context: its machine menu offers that
- * project's other locations), its machine and place there chosen; null when no tab opened.
+ * project's other locations), its machine and place there chosen; null when no tab opened. Reached through `newChat`
+ * (UX wave U13a), which asks for the pane.
  */
-export async function newChatElsewhere(target: SpawnTarget & { registry: string }): Promise<AppSessionId | null> {
-  const tab = await createSession(null, { registry: target.registry }); // its tab in the registry project's set (panel sweep#3)
+export async function newChatElsewhere(target: SpawnTarget & { registry: string }, opts: { pane?: 0 | 1 } = {}): Promise<AppSessionId | null> {
+  const tab = await createSession(null, { registry: target.registry, ...opts }); // its tab named by the registry project's row (panel sweep#3)
   if (tab === null) return null;
   useRemoteSpawn.getState().choose(tab, target);
   return tab;
