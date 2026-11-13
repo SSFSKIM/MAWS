@@ -4,10 +4,19 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PreloadBridge } from '@shared/ipc/schema';
+import { ACTION_IDS, ACTIONS, isRebindable, type KeymapOverrides } from '@shared/keymap/actions';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { useSettings } from '../stores/settings';
 import { settingsBridge, type SettingsBridge } from '../test-support/settings-bridge';
 import { KeymapSection } from './KeymapSection';
+
+// U6a (decision 12): the section lists the table extended with sample rows shaped as the siblings' will be: a fixed key
+// and rows build F does not know, none of which takes a rebinding
+vi.mock('./keymap', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./keymap')>();
+  const { EXTENDED_TABLE } = await import('@shared/keymap/sample-rows');
+  return { ...actual, keymapGroups: (overrides: KeymapOverrides) => actual.keymapGroups(overrides, EXTENDED_TABLE) };
+});
 
 let b: SettingsBridge;
 function Live() {
@@ -105,9 +114,20 @@ describe('keymap capture records, refuses conflicts and unbinds', () => {
     await vi.waitFor(() => expect(captures().slice(6)).toEqual([{ active: true }, { active: false }]));
   });
 
+  // U6a (UC-6 "Stored rebindings"; decisions 7 and 11)
+  it('draws no Change control on a row that takes no rebinding, a fixed key or a row build F does not know; every row of the table keeps its control', () => {
+    renderSection();
+    for (const title of ['Sample fixed key', 'Sample menu row', 'Sample shared chord']) expect(within(row(title)).queryByRole('button'), title).toBeNull();
+    expect(chordOf('Sample fixed key')).toBe('⇧↩');
+    for (const id of ACTION_IDS.filter((id) => isRebindable(id))) expect(within(row(ACTIONS[id].title)).getByRole('button', { name: `Change ${ACTIONS[id].title}` }), id).toBeTruthy();
+    for (const title of ['Allow once', 'Allow with the lasting scope the prompt names']) expect(within(row(title)).queryByRole('button'), title).toBeNull(); // U1a's rows: not rebindable while build F may run
+  });
+
   it('every action is a row, the docked request keys included', () => {
     renderSection();
-    for (const title of ['Approve / answer the docked request', 'Decline the docked request', 'Settings…', 'Select tab 1–9', 'Open ClaudeUsage']) expect(row(title)).toBeTruthy();
+    for (const title of ['Next or Submit on a question; Implement on a plan', 'Deny a prompt, or decline a question', 'Allow once', 'Allow with the lasting scope the prompt names', 'Settings…', 'Select tab 1–9', 'Open ClaudeUsage']) expect(row(title)).toBeTruthy();
+    expect(chordOf('Allow once')).toBe('⌘↩');
+    expect(chordOf('Allow with the lasting scope the prompt names')).toBe('⌘⇧↩');
     expect(chordOf('Select tab 1–9')).toBe('⌘1…9');
   });
 });

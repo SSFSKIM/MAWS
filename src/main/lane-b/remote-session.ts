@@ -61,6 +61,7 @@
 import { readTolerant } from '@shared/ipc/tolerant';
 import { SESSION_OPERATIONS_MAX, type OperationCommand, type OperationEvent, type OperationOutcome } from '@shared/engine/operations';
 import { AttentionItemSchema, type AttentionItem } from '@shared/graph/attention';
+import { waits } from '@shared/attention/kinds';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import { sanitiseListId } from '@shared/engine/task-list';
 import type { SessionRecord } from '@shared/graph/session';
@@ -141,8 +142,6 @@ export interface RemoteSessionDeps {
 const events = codecOf(REGISTRY);
 const link = codecOf(LINK_REGISTRY);
 const isObject = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
-/** Broker items still waiting on a person, as main's local attention service keeps them. */
-const WAITING = new Set(['pending', 'delivered']);
 /** Call errors that say nothing about the session: the link or the machine's index couldn't answer now. */
 const TRANSIENT = new Set(['offline', 'timeout', 'unavailable']);
 /** P5 O7 M8: the words of an operation the machine says it doesn't know (`session.operations`' `unknown`). */
@@ -534,7 +533,7 @@ export class RemoteSession {
       const items: AttentionItem[] = [];
       for (const raw of value.pendingItems) {
         const read = readTolerant(AttentionItemSchema, raw);
-        if (read.ok && WAITING.has(read.value.state)) items.push(read.value);
+        if (read.ok && waits(read.value)) items.push(read.value); // UC-1: a machine on an older build still sends delivered items
       }
       this.#lastParts.items = items;
       if (this.#deps.attentionFed?.() !== true) this.#emit('attention.changed', { appSessionId: app, items });

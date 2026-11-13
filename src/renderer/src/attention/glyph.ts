@@ -9,7 +9,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import type { SessionDigest } from '@shared/ipc/schema';
 import { listedStateOf } from '../sessions/listed-state'; // P5 O7 M10
 import type { ListedSession } from '../stores/sessions';
-import { isActionable, isOpen } from './derive';
+import { isActionable, waits } from '@shared/attention/kinds';
 
 export type Glyph = { char: string; tone: 'accent' | 'warning' | 'info' | 'danger' | 'faint'; label: string; pulse: boolean };
 
@@ -27,7 +27,7 @@ const TROUBLE: Partial<Record<AttentionItem['kind'], string>> = {
 // open items first and an unread idle one "Idle, unread"; `listed` is the listing the sessions store holds at its address.
 export function glyphFor(record: SessionRecord, digest: SessionDigest | null, pending: AttentionItem[], listed?: ListedSession): Glyph {
   const { holder } = record;
-  const open = pending.filter((i) => isOpen(i) && isActionable(i));
+  const open = pending.filter((i) => waits(i) && isActionable(i));
   const unbridged = open.length === 0 && (digest === null || digest.phase === 'foreign'); // P5 O9 M6
   if (holder.kind === 'terminal' && unbridged) return glyph('⌁', 'info', 'Live in terminal');
   if (holder.kind === 'background_job' && unbridged) return glyph('⌁', 'info', 'Live as background job');
@@ -71,7 +71,7 @@ function waitingGlyph(open: AttentionItem[]): Glyph | null {
 // read these live glyphs. P5 O7 M6: its machine's attention feed, when it holds open items for it, says what it waits for
 // (the record's rows above), whatever the listing's word.
 export function listedGlyph(state: string, pending: AttentionItem[] = []): Glyph {
-  return waitingGlyph(pending.filter((i) => isOpen(i) && isActionable(i))) ?? wordGlyph(state) ?? glyph('○', 'faint', 'Idle');
+  return waitingGlyph(pending.filter((i) => waits(i) && isActionable(i))) ?? wordGlyph(state) ?? glyph('○', 'faint', 'Idle');
 }
 
 // A listing's word as the glyph table draws it; null for idle and any word it doesn't know (the caller's idle glyph).

@@ -4,6 +4,7 @@
 import * as Y from '@y/y';
 import { describe, expect, it } from 'vitest';
 import { checkUpdate, hasPending } from './check';
+import { newDoc, newSuggestionDoc } from './doc';
 import { insertedBy } from './attribution';
 import { clientAbove, planAccept, planReject, SuggestionError, type SuggestionPlan, type SuggestionRange } from './suggest';
 
@@ -20,7 +21,7 @@ const block = (node: Y.Node): SuggestionRange => ({ start: idOf(node._item), end
 // A main doc, its suggestion doc kept in step, an agent's replica of the suggestion doc, and a second replica of the main
 // doc standing for an editor; `land` does what the host does with a plan.
 function world({ agentClient }: { agentClient?: number } = {}) {
-  const main = new Y.Doc({ gc: true });
+  const main = newDoc();
   main.transact(() => {
     main.get('default').insert(0, [
       para('heading', { id: 'h1', level: 2 }, 'Draft'),
@@ -30,15 +31,15 @@ function world({ agentClient }: { agentClient?: number } = {}) {
     ]);
     main.get('files').setAttr('a.txt', 'A1');
   });
-  const suggestion = new Y.Doc({ gc: false, isSuggestionDoc: true });
+  const suggestion = newSuggestionDoc();
   Y.applyUpdate(suggestion, Y.encodeStateAsUpdate(main));
-  const editor = new Y.Doc();
+  const editor = newDoc();
   Y.applyUpdate(editor, Y.encodeStateAsUpdate(main));
   main.on('update', (u: Uint8Array) => {
     Y.applyUpdate(suggestion, u);
     Y.applyUpdate(editor, u);
   });
-  const agent = new Y.Doc({ gc: false, isSuggestionDoc: true });
+  const agent = newSuggestionDoc();
   Y.applyUpdate(agent, Y.encodeStateAsUpdate(suggestion));
   if (agentClient !== undefined) agent.clientID = agentClient; // after the load: v14 keeps a clientID no update carries
   const proposals: Uint8Array[] = [];
@@ -51,7 +52,7 @@ function world({ agentClient }: { agentClient?: number } = {}) {
   const land = (plan: SuggestionPlan) => {
     let pairs = null;
     if (plan.edit) {
-      const replica = new Y.Doc();
+      const replica = newDoc();
       Y.applyUpdateV2(replica, Y.encodeStateAsUpdateV2(main));
       replica.clientID = clientAbove([main, suggestion]);
       let update: Uint8Array | null = null;
@@ -218,7 +219,7 @@ describe('suggestions: fix wave 1', () => {
 // Fix wave 3: a main doc of paragraphs, its suggestion doc, and proposers each writing under clientIDs of their own;
 // the attributions name each write's actor, as the host's provenance does.
 function textWorld(paragraphs: Record<string, [string, Record<string, unknown>?][]>) {
-  const main = new Y.Doc({ gc: true });
+  const main = newDoc();
   main.transact(() =>
     main.get('default').insert(
       0,
@@ -233,12 +234,12 @@ function textWorld(paragraphs: Record<string, [string, Record<string, unknown>?]
       }),
     ),
   );
-  const suggestion = new Y.Doc({ gc: false, isSuggestionDoc: true });
+  const suggestion = newSuggestionDoc();
   Y.applyUpdate(suggestion, Y.encodeStateAsUpdate(main));
   main.on('update', (u: Uint8Array) => Y.applyUpdate(suggestion, u));
   const maps: Y.ContentMap[] = [];
   const propose = (actor: string, client: number, edit: (root: Y.Node) => void) => {
-    const replica = new Y.Doc({ gc: false, isSuggestionDoc: true });
+    const replica = newSuggestionDoc();
     Y.applyUpdate(replica, Y.encodeStateAsUpdate(suggestion));
     replica.clientID = client;
     replica.on('update', (u: Uint8Array) => {
@@ -250,7 +251,7 @@ function textWorld(paragraphs: Record<string, [string, Record<string, unknown>?]
   };
   const accept = (ranges: SuggestionRange[]) => {
     const plan = planAccept(main, suggestion, Y.mergeContentMaps(maps), ranges);
-    const replica = new Y.Doc();
+    const replica = newDoc();
     Y.applyUpdateV2(replica, Y.encodeStateAsUpdateV2(main));
     replica.clientID = clientAbove([main, suggestion]);
     let update: Uint8Array | null = null;

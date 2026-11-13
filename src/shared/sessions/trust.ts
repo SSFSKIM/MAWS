@@ -16,15 +16,6 @@ export const TrustStateSchema = z.strictObject({
 });
 export type TrustState = z.infer<typeof TrustStateSchema>;
 
-// The generic list, shown when `found` is empty (SPEC §3 15.5).
-export const TRUST_GATES = [
-  'Project permission rules (permissions.allow, additionalDirectories)',
-  'Hooks',
-  'Environment from settings',
-  'MCP servers from .mcp.json',
-  'Project plugins',
-] as const;
-
 // Paths as the engine compares them: NFC, no trailing separator (the root stays `/`).
 export function normalizePath(path: string): string {
   const nfc = path.normalize('NFC');

@@ -1,35 +1,107 @@
 import { describe, expect, it } from 'vitest';
-import { ACTION_IDS, ACTIONS, effectiveChord, type ActionSpec } from './actions';
+import { ACTION_IDS, ACTIONS, effectiveChord, heldChords, idsOf, isRebindable, type ActionId, type ActionSpec, type ActionTable, type KeymapOverrides } from './actions';
+import { BUILD_F_ACTION_IDS } from './build-f';
 import { parseChord } from './chord';
+import { MENU_ROLE_CHORDS } from './menu-roles';
+import { EXTENDED_TABLE, SAMPLE_IDS, SAMPLE_ROWS, sample } from './sample-rows';
 
 const specs = Object.entries(ACTIONS);
+const TABLES: [string, ActionTable][] = [['the table', ACTIONS], ['the table with the sample rows', EXTENDED_TABLE]];
+const normal = (chord: string) => JSON.stringify(parseChord(chord));
+const over = (id: ActionId, chord: string | null) => ({ [id]: chord }) as KeymapOverrides;
+const withRow = (id: ActionId, spec: ActionSpec, table: ActionTable = EXTENDED_TABLE) => ({ ...table, [id]: spec }) as ActionTable;
 
-describe('keymap: chords unique and single-sink', () => {
+// UC-6's table as the spec's files give it (the root's UC-6; U1, U3, U4, U6 and U11 under their "UC-6" entries; U6a's
+// execution document, Interfaces E). Checked for every id that is a row, so a child's row is held from the landing that
+// adds it with no edit here; a child whose execution settles another id or chord amends this list in its own change.
+const WAVE_DEFAULTS: Record<string, string | null> = {
+  // U6a
+  'surface.terminal': 'Cmd+J', 'surface.review': 'Cmd+Shift+D', 'surface.files': 'Cmd+Shift+F',
+  // U6b
+  'files.goToFile': 'Cmd+P', 'terminal.attachSelection': 'Cmd+Shift+L', 'go.back': 'Cmd+[', 'go.forward': 'Cmd+]',
+  'zoom.in': 'Cmd+=', 'zoom.out': 'Cmd+-', 'zoom.reset': null,
+  // U3
+  'transcript.find': 'Cmd+F', 'transcript.findNext': 'Cmd+G', 'transcript.findPrevious': 'Cmd+Shift+G',
+  'transcript.previousPrompt': 'Cmd+Alt+Up', 'transcript.nextPrompt': 'Cmd+Alt+Down',
+  // U4
+  'composer.queue': 'Cmd+Enter', 'composer.send': 'Cmd+Enter', 'composer.modelMenu': 'Cmd+Shift+I',
+  'composer.effortMenu': 'Cmd+Shift+E', 'composer.modeMenu': 'Cmd+Shift+M', 'composer.historySearch': 'Ctrl+R',
+  // U1
+  'request.allowOnce': 'Cmd+Enter', 'request.allowLasting': 'Cmd+Shift+Enter', 'request.decline': 'Escape', 'request.accept': 'Enter',
+  // U11
+  'channel.open': null,
+  // "Existing chords do not move"
+  'tab.overview': 'Cmd+0', 'palette.open': 'Cmd+K', 'composer.focus': 'Cmd+L', 'composer.stop': 'Cmd+.', 'attention.next': 'Cmd+Shift+J',
+  'shortcuts.open': 'Cmd+/', 'sidebar.toggle': 'Cmd+B', 'panel.toggle': 'Cmd+Shift+B', 'pane.split': 'Cmd+\\',
+};
+// The rows of landed children: each must exist (U6b adds its seven).
+const LANDED = ['surface.terminal', 'surface.review', 'surface.files'];
+
+// Decision 8 (A13 as amended): two dispatched rows share a default chord only if both are `renderer` rows and at most one
+// of them has scope `app`. Every chord a row holds counts, the nine of Select tab included.
+function sharingBroken(table: ActionTable): string[] {
+  const holders = new Map<string, ActionId[]>();
+  for (const id of idsOf(table)) {
+    const spec = table[id];
+    if (spec.fixed || spec.chord === null) continue;
+    for (const chord of heldChords(id, spec.chord)) holders.set(normal(chord), [...(holders.get(normal(chord)) ?? []), id]);
+  }
+  return [...holders.values()].flatMap((ids) => {
+    if (ids.length < 2) return [];
+    const allowed = ids.every((id) => table[id].sink === 'renderer') && ids.filter((id) => table[id].scope === 'app').length <= 1;
+    return allowed ? [] : [ids.join(' and ')];
+  });
+}
+
+describe('keymap: the table', () => {
   it('lists every action id once', () => {
     expect(ACTION_IDS).toEqual(Object.keys(ACTIONS));
     expect(new Set(ACTION_IDS).size).toBe(ACTION_IDS.length);
+    expect(idsOf(EXTENDED_TABLE)).toEqual([...ACTION_IDS, ...SAMPLE_IDS]);
   });
 
-  it('parses every default chord', () => {
-    for (const [id, spec] of specs) if (spec.chord) expect(() => parseChord(spec.chord), id).not.toThrow();
+  // A13
+  it.each(TABLES)('holds UC-6’s defaults for every id of the wave that is a row, and the rows of landed children exist (%s)', (_name, table) => {
+    for (const [id, chord] of Object.entries(WAVE_DEFAULTS)) if (id in table) expect(table[id as ActionId].chord, id).toBe(chord);
+    for (const id of LANDED) expect(id in table, id).toBe(true);
   });
 
-  it('binds no chord twice, so none is in both sinks', () => {
-    const seen = new Map<string, string>();
-    for (const [id, spec] of specs) {
-      if (!spec.chord) continue;
-      const normal = JSON.stringify(parseChord(spec.chord));
-      expect(seen.get(normal), `${id} repeats ${seen.get(normal)}'s chord ${spec.chord}`).toBeUndefined();
-      seen.set(normal, id);
+  it.each(TABLES)('two dispatched rows share a default chord only as decision 8 lets them (%s)', (_name, table) => {
+    expect(sharingBroken(table)).toEqual([]);
+  });
+
+  it('the sharing rule refuses what the dispatcher could not honour', () => {
+    const shared = sample('sample.shared'); // a composer row on ⌘Enter, as composer.send is
+    const other = (spec: Partial<ActionSpec>) => withRow(sample('sample.menu'), { title: 'Other', chord: 'Cmd+Enter', sink: 'renderer', menu: null, scope: 'pane', ...spec });
+    expect(sharingBroken(other({}))).toEqual([]); // composer and pane rows: the focus tells them apart
+    expect(sharingBroken(other({ sink: 'menu', menu: 'edit', scope: 'app' }))).not.toEqual([]); // a menu chord is held window-wide
+    expect(sharingBroken(withRow(shared, { ...SAMPLE_ROWS['sample.shared'], scope: 'app' }, other({ scope: 'app' })))).not.toEqual([]); // two rows reached from anywhere
+    expect(sharingBroken(other({ scope: 'app' }))).toEqual([]); // one app row beside composer rows
+    expect(sharingBroken(other({ sink: 'menu', menu: 'edit', scope: 'app', chord: 'Cmd+5' }))).not.toEqual([]); // the nine of Select tab count
+  });
+
+  it.each(TABLES)('binds no default to a chord of a menu role (%s)', (_name, table) => {
+    const roles = new Set(MENU_ROLE_CHORDS.map((role) => normal(role.chord)));
+    for (const id of idsOf(table)) {
+      const chord = table[id].chord;
+      if (chord !== null) for (const held of heldChords(id, chord)) expect(roles.has(normal(held)), `${id} holds ${held}`).toBe(false);
     }
   });
 
-  it('gives every menu-sink action a menu placement', () => {
-    for (const [id, spec] of specs) if (spec.sink === 'menu') expect(spec.menu, id).not.toBeNull();
+  it.each(TABLES)('keeps the row rules (%s)', (_name, table) => {
+    for (const id of idsOf(table)) {
+      const spec = table[id];
+      if (spec.chord) expect(() => parseChord(spec.chord!), id).not.toThrow();
+      if (spec.sink === 'menu') expect(spec.menu, id).not.toBeNull(); // a menu-sink row has a placement
+      if (spec.scope !== 'app') expect(spec.sink, id).toBe('renderer'); // the menu cannot see DOM focus
+      if (spec.submenu !== undefined) expect(spec.menu, id).not.toBeNull(); // a submenu sits in a menu
+      if (spec.fixed) expect({ sink: spec.sink, menu: spec.menu, bound: spec.chord !== null, hold: spec.hold }, id).toEqual({ sink: 'renderer', menu: null, bound: true, hold: undefined });
+    }
   });
 
-  it('keeps pane- and composer-scoped actions out of the menu sink (the menu cannot see DOM focus)', () => {
-    for (const [id, spec] of specs) if (spec.scope !== 'app') expect(spec.sink, id).toBe('renderer');
+  it('the sample menu row’s chord is no chord of the wave’s table, so a sibling’s row never collides with it', () => {
+    const wave = Object.values(WAVE_DEFAULTS).flatMap((chord) => (chord === null ? [] : [normal(chord)]));
+    expect(wave).not.toContain(normal(SAMPLE_ROWS['sample.menu'].chord));
   });
 
   it('carries the §5.8 defaults the acceptance names', () => {
@@ -40,17 +112,16 @@ describe('keymap: chords unique and single-sink', () => {
     expect(ACTIONS['panel.toggle'].chord).toBe('Cmd+Shift+B');
   });
 
-  it('resolves overrides: absent is the default, a chord replaces it, null unbinds', () => {
-    expect(effectiveChord('attention.next', {})).toBe('Cmd+Shift+J');
-    expect(effectiveChord('attention.next', { 'attention.next': 'Cmd+Alt+J' })).toBe('Cmd+Alt+J');
-    expect(effectiveChord('tab.close', { 'tab.close': null })).toBeNull();
-    expect(effectiveChord('panel.maximize', {})).toBeNull();
+  it('titles the surface rows by the surface’s name alone (l7-shell-07)', () => {
+    const surfaces = ACTION_IDS.filter((id) => id.startsWith('surface.')).map((id) => ACTIONS[id].title);
+    expect(surfaces).toEqual(['Terminal', 'Review', 'Files', 'Browser', 'Source control', 'Subagents', 'Background work', 'Session info', 'Questions']);
   });
 
   // C7 start: the composer's actions (C7 execution document, Keymap additions; W10: no ⌥Enter)
   it('carries the composer actions: stop and focus app-scoped, none in the menu, and no ⌥Enter hold (W10)', () => {
     expect('composer.steer' in ACTIONS).toBe(false);
-    expect(Object.values(ACTIONS).map((a) => a.chord)).not.toContain('Alt+Enter');
+    // among dispatched rows: an editor's own key (a fixed row) may be ⌥Enter
+    expect(Object.values(ACTIONS as ActionTable).filter((spec) => !spec.fixed).map((spec) => spec.chord)).not.toContain('Alt+Enter');
     expect(ACTIONS['composer.stop']).toMatchObject({ chord: 'Cmd+.', sink: 'renderer', menu: null, scope: 'app' });
     expect(ACTIONS['composer.focus']).toMatchObject({ chord: 'Cmd+L', sink: 'renderer', menu: null, scope: 'app' });
   });
@@ -77,4 +148,85 @@ describe('keymap: chords unique and single-sink', () => {
     expect(ACTIONS['file.save']).toEqual({ title: 'Save file', chord: 'Cmd+S', sink: 'menu', menu: 'file', scope: 'app' });
   });
   // E5 end
+});
+
+describe('keymap: the effective chord', () => {
+  it('resolves overrides: absent is the default, a chord replaces it, null unbinds', () => {
+    expect(effectiveChord('attention.next', {})).toBe('Cmd+Shift+J');
+    expect(effectiveChord('attention.next', { 'attention.next': 'Cmd+Alt+J' })).toBe('Cmd+Alt+J');
+    expect(effectiveChord('tab.close', { 'tab.close': null })).toBeNull();
+    expect(effectiveChord('panel.maximize', {})).toBeNull();
+  });
+
+  it('a fixed row answers its default always: it takes no override and yields to none', () => {
+    const fixed = sample('sample.fixed');
+    expect(effectiveChord(fixed, {}, EXTENDED_TABLE)).toBe('Shift+Enter');
+    expect(effectiveChord(fixed, over(fixed, 'Cmd+Y'), EXTENDED_TABLE)).toBe('Shift+Enter');
+    expect(effectiveChord(fixed, over(fixed, null), EXTENDED_TABLE)).toBe('Shift+Enter');
+    expect(effectiveChord(fixed, { 'composer.send': 'Shift+Enter' }, EXTENDED_TABLE)).toBe('Shift+Enter');
+  });
+
+  it('an override of a row that is not rebindable is not read', () => {
+    expect(effectiveChord(sample('sample.shared'), over(sample('sample.shared'), 'Cmd+Y'), EXTENDED_TABLE)).toBe('Cmd+Enter');
+    expect(effectiveChord(sample('sample.menu'), over(sample('sample.menu'), null), EXTENDED_TABLE)).toBe('Ctrl+Alt+Shift+F12');
+  });
+
+  it('a stored rebinding wins over a default added later, which returns once the rebinding goes (decision 10)', () => {
+    const later = sample('sample.menu');
+    const keymap: KeymapOverrides = { 'palette.open': 'Ctrl+Alt+Shift+F12' };
+    expect(effectiveChord(later, keymap, EXTENDED_TABLE)).toBeNull(); // a row that is not rebindable yields too
+    expect(effectiveChord('palette.open', keymap, EXTENDED_TABLE)).toBe('Ctrl+Alt+Shift+F12');
+    expect(effectiveChord(later, {}, EXTENDED_TABLE)).toBe('Ctrl+Alt+Shift+F12');
+    expect(effectiveChord(later, { 'palette.open': null }, EXTENDED_TABLE)).toBe('Ctrl+Alt+Shift+F12'); // null holds nothing
+    // a rebindable row yields its default the same way, and its own override comes first
+    expect(effectiveChord('palette.open', { 'attention.next': 'Cmd+K' })).toBeNull();
+    expect(effectiveChord('palette.open', { 'attention.next': 'Cmd+K', 'palette.open': 'Cmd+Alt+K' })).toBe('Cmd+Alt+K');
+    expect(effectiveChord('palette.open', { 'attention.next': 'Cmd+Shift+K' })).toBe('Cmd+K');
+    // only a rebindable row's override holds a chord: a stored value of another row is never read, so it takes nothing
+    expect(effectiveChord('palette.open', over(sample('sample.shared'), 'Cmd+K'), EXTENDED_TABLE)).toBe('Cmd+K');
+  });
+
+  it('counts the nine chords of Select tab on either side', () => {
+    expect(effectiveChord('tab.select', { 'attention.next': 'Cmd+5' })).toBeNull();
+    const table = withRow(sample('sample.shared'), { ...SAMPLE_ROWS['sample.shared'], chord: 'Cmd+Shift+5' });
+    expect(effectiveChord(sample('sample.shared'), { 'tab.select': 'Cmd+Shift+1' }, table)).toBeNull();
+    expect(effectiveChord(sample('sample.shared'), { 'tab.select': 'Cmd+Alt+1' }, table)).toBe('Cmd+Shift+5');
+  });
+});
+
+// The panel's finding of 2026-11-12, "tab-chord expansion past F24": only a chord whose key is the digit 1 numbers
+// Select tab through nine; F11 and F21 are one chord each, and F21 must not expand into F22 … F29, past the vocabulary.
+describe('keymap: the chords Select tab numbers through nine', () => {
+  it('numbers a chord whose key is the digit 1, with or without modifiers, and no other', () => {
+    expect(heldChords('tab.select', 'Cmd+1')).toEqual(['Cmd+1', 'Cmd+2', 'Cmd+3', 'Cmd+4', 'Cmd+5', 'Cmd+6', 'Cmd+7', 'Cmd+8', 'Cmd+9']);
+    expect(heldChords('tab.select', 'Cmd+Alt+1')).toHaveLength(9);
+    expect(heldChords('tab.select', 'Cmd+Alt+1').at(-1)).toBe('Cmd+Alt+9');
+    expect(heldChords('tab.select', 'F11')).toEqual(['F11']);
+    expect(heldChords('tab.select', 'F21')).toEqual(['F21']);
+  });
+
+  it('resolves every chord with a stored Select tab of F21 or F11, without throwing', () => {
+    for (const chord of ['F21', 'F11']) {
+      expect(effectiveChord('session.new', { 'tab.select': chord }), chord).toBe('Cmd+N');
+      expect(effectiveChord('tab.select', { 'tab.select': chord }), chord).toBe(chord);
+    }
+    expect(effectiveChord('region.focusNext', { 'tab.select': 'F16' })).toBe('F6'); // F16 is not F6 … F9's expansion either
+  });
+});
+
+// UC-14 (decision 11): build F refuses a settings file whose keymap names an action it does not know.
+describe('keymap: what may be rebound while build F may run', () => {
+  it('knows build F’s 58 ids, each once and each a row', () => {
+    expect(BUILD_F_ACTION_IDS).toHaveLength(58);
+    expect(new Set(BUILD_F_ACTION_IDS).size).toBe(58);
+    for (const id of BUILD_F_ACTION_IDS) expect(id in ACTIONS, id).toBe(true);
+  });
+
+  it('a row is rebindable when it is not fixed and build F knows its id', () => {
+    for (const id of BUILD_F_ACTION_IDS) expect(isRebindable(id), id).toBe(true); // today's rows all stay rebindable
+    for (const id of SAMPLE_IDS) expect(isRebindable(id, EXTENDED_TABLE), id).toBe(false);
+    const fixedKnown = withRow('request.accept', { ...ACTIONS['request.accept'], fixed: true }, ACTIONS);
+    expect(isRebindable('request.accept', fixedKnown)).toBe(false);
+    expect(effectiveChord('request.accept', { 'request.accept': 'Y' }, fixedKnown)).toBe('Enter');
+  });
 });

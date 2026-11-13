@@ -59,6 +59,7 @@ export interface RelayOptions {
   drain?: { start(drained: () => void): void; boundMs?: number }; // the upstream's draining close (the engine relay)
   holdMs?: number;
   between?(): void; // `between()` may have changed
+  work?(): () => void; // P5 Decision Log 273: each request taken, from its receipt to its answer's settling, whether or not the app is still there
 }
 
 // What the daemon's intercepts are told of the app a request came from (P5 O3-D M5).
@@ -235,10 +236,11 @@ export class Relay implements ServedRuntime {
     if (record?.t !== 'req' || typeof record.id !== 'string' || typeof record.name !== 'string') return;
     if (app.leaving) return; // the departure: no more of its requests
     const request: RelayRequest = { id: record.id, name: record.name, input: record.input, ...(typeof record.client === 'string' && { client: record.client }) };
+    const end = this.options.work?.();
     const answer = this.options.intercept?.(request, app) ?? this.options.hosts.forward(this.options.owner, { name: request.name, input: request.input, client: request.client });
     void answer.then((response) => {
       if (!app.gone) app.port.postMessage({ ...response, id: request.id });
-    });
+    }).finally(() => end?.());
   }
 
   private depart(app: App): void {

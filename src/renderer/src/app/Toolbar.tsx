@@ -4,19 +4,20 @@
 // the session actions menu and the panel toggle.
 // Every control is `no-drag`, so clicks reach it rather than moving the window.
 import { preserveSubmenuPointer } from '@artifacts/ui/menu-pointer';
-import { useRef, type ReactNode } from 'react';
-import { ContextMenu, DropdownMenu } from 'radix-ui';
+import { type ReactNode } from 'react';
+import { DropdownMenu } from 'radix-ui';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import { NO_PROJECT, type TabRef } from '@shared/ipc/schema/layout';
-import { createSession, runAction, useSessionCreatorRegistered } from '../keymap/actions-runtime';
-import { revealProject } from '../sidebar/reveal';
+import type { TabRef } from '@shared/ipc/schema/layout';
+import { runAction, useCurrentRow } from '../keymap/actions-runtime';
+import { revealRow, sidebarListsRow } from '../sidebar/reveal';
 import { selectNeedsYou, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { activeTab, currentSet } from '../stores/layout-model';
 import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { useSessions, type ListedSession } from '../stores/sessions';
-import { localProjectOfSet } from '../stores/org-projects'; // P5 O6 M5
+import { machineName, rowName, selectOrgIndex } from '../stores/org-projects'; // P5 O6 M5
+import { useMachines } from '../stores/machines';
 import { ipc } from '../ipc/client';
 import { FolderIcon, Icon, IconButton, SidebarIcon } from './IconButton';
 import { useShellGeometry, useShellView } from './shell-view';
@@ -130,7 +131,8 @@ export function Toolbar() {
           </IconButton>
         </div>
       </div>
-      {projectChip && <div className="max-w-24 min-w-0 shrink"><ProjectChip /></div>}
+      {/* UX wave U7, O-03: the wrapper owns the chip's 96 px and clips; the button fills it and truncates, its focus ring inset */}
+      {projectChip && <div className="max-w-24 min-w-0 shrink overflow-hidden"><ProjectChip /></div>}
       <div ref={mountChromeTabs} data-chrome-tabs className="flex h-full min-w-0 flex-1 items-stretch">
         <div data-chrome-slot="0" className="contents" />
         <div data-chrome-slot="1" className="contents" />
@@ -145,66 +147,35 @@ export function Toolbar() {
 }
 
 // P3-F wave S (F17, the owner's obs 8; W12's label, which named the set at the strip's left edge until the owner moved it
-// out of the crowded strip): the project whose tab set the strips show, left of the title, so a strip that changed with
-// a project is never a surprise. A click is the sidebar's "+" (a New chat in that project: a new unstarted session tab
-// in its set); the context menu reveals the project in the sidebar, the one way a hidden project's row comes back. The
-// no-project set (and a project the index no longer lists) shows none.
+// out of the crowded strip), left of the title. UX wave U13a (O-31): it names the current project's row (`useCurrentRow`:
+// the row of the session in front), a project's or a machine's own, and none with no session in front or for a chat with
+// no project. A click, Enter or Space reveals that row in the sidebar (`revealRow`, a hidden project's restored first);
+// it creates nothing, and has no menu.
 export const PROJECT_CHIP_COPY = {
-  newChat: (name: string) => `New chat in ${name}`,
-  reveal: 'Reveal in sidebar',
-  show: 'Show in sidebar', // a hidden project's: restored first
+  reveal: (name: string) => `Reveal ${name} in sidebar`,
+  show: (name: string) => `Show ${name} in sidebar`, // a row the sidebar does not list: restored first
 } as const;
 
 function ProjectChip() {
-  const current = useLayout((s) => s.main.current);
-  const project = useSessions((s) => (current === NO_PROJECT ? undefined : localProjectOfSet(s, current, ipc.localMachine))); // P5 O6 M5: the set's checkout here
-  const canCreate = useSessionCreatorRegistered();
-  const revealing = useRef(false); // the reveal focuses the project's row: the closing menu gives the chip no focus back
-  if (!project) return null;
+  const current = useCurrentRow(); // U13a: the current project's row
+  const local = ipc.localMachine;
+  const index = useSessions((s) => selectOrgIndex(s, local));
+  const machines = useMachines((s) => s.machines);
+  const name = current === null ? null : rowName(index, current, (m) => machineName(machines, m, local));
+  if (current === null || name === null) return null;
+  const label = sidebarListsRow(index, current) ? PROJECT_CHIP_COPY.reveal(name) : PROJECT_CHIP_COPY.show(name);
   return (
-    <ContextMenu.Root modal={false}>
-      <ContextMenu.Trigger asChild>
-        <button
-          type="button"
-          data-toolbar-project={project.id}
-          aria-label={PROJECT_CHIP_COPY.newChat(project.name)}
-          title={canCreate ? PROJECT_CHIP_COPY.newChat(project.name) : 'Not available here'}
-          onClick={() => void createSession(project.id)}
-          onKeyDown={(event) => {
-            // the menu key (as the library's rows take it): a Mac keyboard sends no contextmenu, so the menu opens under
-            // the chip as a right-click there would, and Radix gives its first item the keyboard
-            if (event.key !== 'F10' || !event.shiftKey) return;
-            event.preventDefault();
-            const box = event.currentTarget.getBoundingClientRect();
-            event.currentTarget.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: box.left, clientY: box.bottom }));
-          }}
-          className="flex h-6 max-w-48 min-w-0 items-center gap-1.5 rounded-sm px-1.5 text-ui-sm text-fg-muted outline-accent [-webkit-app-region:no-drag] hover:bg-bg-hover hover:text-fg focus-visible:outline-2"
-        >
-          <FolderIcon className="size-[12px] shrink-0" />
-          <span className="truncate">{project.name}</span>
-        </button>
-      </ContextMenu.Trigger>
-      <ContextMenu.Portal>
-        <ContextMenu.Content
-          onCloseAutoFocus={(event) => {
-            if (!revealing.current) return;
-            revealing.current = false;
-            event.preventDefault();
-          }}
-          className="z-50 min-w-44 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg"
-        >
-          <ContextMenu.Item
-            onSelect={() => {
-              revealing.current = true;
-              revealProject(project.id);
-            }}
-            className="flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-highlighted:bg-bg-hover"
-          >
-            {project.hidden ? PROJECT_CHIP_COPY.show : PROJECT_CHIP_COPY.reveal}
-          </ContextMenu.Item>
-        </ContextMenu.Content>
-      </ContextMenu.Portal>
-    </ContextMenu.Root>
+    <button
+      type="button"
+      data-toolbar-project={current}
+      aria-label={label}
+      title={label}
+      onClick={() => revealRow(current)}
+      className="flex h-6 max-w-full min-w-0 items-center gap-1.5 rounded-sm px-1.5 text-ui-sm text-fg-muted outline-accent [-webkit-app-region:no-drag] hover:bg-bg-hover hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-2"
+    >
+      <FolderIcon className="size-[12px] shrink-0" />
+      <span className="truncate">{name}</span>
+    </button>
   );
 }
 

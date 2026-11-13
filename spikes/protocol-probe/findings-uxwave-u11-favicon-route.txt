@@ -1,5 +1,5 @@
 UX wave, child U11, O-14: what Google's favicon address answers, against the draft's route and caps
-(the U11 draft, ~/.local/share/maws-ux-wave/spec/drafts/U11-answered.md, O-14 "The fetch" and "The shapes this adds",
+(the draft of the spec's U11 section as it stood then, kept outside the repository; the section is `docs/doperpowers/specs/2026-11-12-ux-wave/U11-settings-connectors-org.md`: O-14 "The fetch" and "The shapes this adds",
 and its "Probes and checks", the first item; 2026-11-12/13, VM dc-uxwave2-e584, branch ux-wave/probe2-text-defaults)
 
 Question. In the one request form the draft fixes, `GET https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&

@@ -173,7 +173,7 @@ export const GATEWAY = {
 };
 
 export const KEYBOARD = {
-  hint: 'all bindings editable · ⇧Tab cycles permission mode as in the terminal',
+  hint: '⇧Tab cycles permission mode as in the terminal',
   change: 'Change',
   recording: 'Press keys… esc cancels',
   was: (display: string) => `Was ${display}`,

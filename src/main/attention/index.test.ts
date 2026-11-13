@@ -88,7 +88,7 @@ describe('attention startup', () => {
     const win = { isMinimized: () => false, show: vi.fn(), focus: vi.fn() };
     const openWindow = vi.fn(() => win as never);
     const stop = startAttention(spine, { settings: () => SETTINGS_DEFAULTS_V21, port: electronClientPort({ env: {}, openWindow }),
-      actions: { reply: vi.fn().mockRejectedValue(new Error('Host unavailable')), canAllow: vi.fn(), allow: vi.fn() } });
+      actions: { reply: vi.fn().mockRejectedValue(new Error('Host unavailable')), offer: vi.fn(), allow: vi.fn(), deny: vi.fn() } });
     try {
       spine.putDigest(digest(id, { phase: 'working' }));
       spine.putDigest(digest(id, { lastTurnEndedAt: '2026-10-23T00:00:00Z' }));

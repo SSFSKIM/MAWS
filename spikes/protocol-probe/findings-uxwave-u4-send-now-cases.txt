@@ -213,3 +213,134 @@ Not provoked. A foreground Agent call under MAWS's environment (four tries; see 
 it has started (the MCP tool, the candidate, is movable; the hook case holds a call before it starts). A Stop written
 between the cut turn's result and the message's start (the gap is 2 to 5 ms). The direct route (it does not
 authenticate on this VM, VM.md). Model spend: about US$0.13 over the 57 runs (haiku; the largest total_cost_usd of each run).
+
+
+UX wave U4 P3, third pass (recorded 2026-11-12): two cases the second pass did not record, on engine 2.1.322, on MAWS's
+own wire and environment (U4a's execution document, decision 32 and "Reported to the architect" 23 and 25)
+
+Question. (1) A turn ends by itself, with no Send now and no Stop, while two (then three) messages wait at the next
+step: how does the engine take them (a `started` each? one replayed user message, under which uuid, holding which
+text? the same joined form as u4p2-two-*?), what does the request to the model carry, and what does the transcript
+file hold for them? (2) One message waits at the next step and one waits after the turn; Send now is asked for the
+after-the-turn one (MAWS writes it as queue.ts promote() does: a `now` user frame of the row's content under a fresh
+uuid; the engine never held that row). What is answered, which messages go in which order, each one's `started`, the
+replayed user message, whether the running call is moved, what stays queued; and the mirror (Send now on the next-step
+message while the after-the-turn row waits in the app's queue).
+
+Verdict, per case (the document's expectation in brackets, then whether the engine did that).
+1. A turn's ordinary end joins every message waiting at the next step, exactly as a Send now does (end2 3/3, end3
+   1/1). The turn ends `success` / `completed` (end_turn) and the prompt reads `completed`; then each member reads
+   `started` at consecutive seqs in the order sent, the request names all of them (`status requesting` with every
+   uuid), and one user message holds all the texts, joined by a newline, under the last one's uuid: the last member's
+   replay carries the joined text, every earlier member's replay its own text only. The transcript file has one user
+   line for the batch, under the last uuid, and none under the others (an `enqueue` and a `dequeue` queue-operation per
+   member). The same form as u4p2-two-*, the cut turn's `aborted_tools` end and the prompt's `cancelled` aside. No
+   state frame falls between the turn's result and the batch's starts; the first `idle` is at the batch's own end.
+   [Reported 23, by the engine's text: the ordinary end takes the same path. Holds; decision 32's rule serves it as
+   written.]
+2. Send now on an after-the-turn row (a `now` frame) while a next-step message waits: the `now` message goes alone,
+   never joined with the waiting one (6/6), and whether the running command is moved depends on when the frame is
+   written.
+   - Written once the shell call has become a task (its `task_started`, 2.7 to 3.0 s into the call; promote-late 3/3):
+     moved 5 to 9 ms after the write, the cut turn ends `success` / `aborted_tools` about 1 s after it, the prompt
+     `cancelled`, the `now` message `started` and replayed alone (its own text, its own uuid). The next-step message
+     stays queued; it was read at the first tool boundary of the new turn (its own replay with its own text, its own
+     `started`, then the request names both uuids), and one result completes both. In the file it is a queue `remove`
+     and a `queued_command` attachment, with no user line under its uuid.
+   - Written earlier, before the call is a task (2.0 s into the call; promote 3/3): not moved. The command runs to its
+     own end (about 28 s more); its own output is the tool result; then the turn is cut at that boundary (`success` /
+     `aborted_tools`, the prompt `cancelled`), the `now` message starts and runs as a turn of its own, and the
+     next-step message starts only when that turn has ended, as a turn of its own. Two user lines in the file, each
+     under its own uuid.
+   No answer frame exists for a `now` frame; its `queued` lifecycle comes 4 to 14 ms after the write.
+   [Reported 25: "by decision 32's path the engine may start them together". Differs: never together. The rule "each
+   row leaves at its own `started`" draws the right stack in both timings, and the Send now names one message, as the
+   document's title has it. M1's claim that a `now` frame does what the request does holds only for the later write.]
+   Mirror (mirror 1/1): Send now on the next-step message (the request) answers `{still_queued: [<it>], send_now:
+   "delivering"}`, and the command is moved 1.03 s later, though the request was written at the same early moment as
+   promote's; the cut turn ends `aborted_tools`, the message starts and runs to its end. The after-the-turn row, written
+   by the probe as MAWS's queue releases it (a plain user frame at the first main-lane result with no prompt unstarted),
+   goes 20 ms after that result and starts as a turn of its own. Nothing is joined. [Interfaces A and the release rule
+   (line 636): the head goes when the sent message's own turn ends. Holds.]
+
+Method. Scenario scenarios/pass3/uxwave-u4-send-now-3.mjs, beside the second pass's and on its launch exactly (launch
+module uxwave-common-send-permission.mjs, MAWS's flags, setting sources user,project,local, mode auto, the five
+environment keys of launch.ts buildEnvironment, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1 among them), one case per
+process (`-e UXW_CASE=<case> -e UXW_RUN=<n>`), each launched by vm-run.sh on devcloud VM dc-uxwave2-e584 (Linux);
+vm-check.mjs's claims held before the first probe (2.1.322, routed, built-in plugins only, no MCP server, Monitor, 27
+tools, only the control CLAUDE.md, no desk member before or after). Every system/init reads claude_code_version
+"2.1.322"; model haiku (claude-haiku-5-5) through the gateway (spawn row routed: true), seeded feature cache.
+- end2, end3: the prompt "write a story of about 900 words, without tools" as a `now` frame; 0.8 s after the first
+  text delta, two (three) messages at `next` ("Reply with the single word PINEAPPLE / MANGO / KIWI, then carry on
+  ..."), each `queued` lifecycle awaited; then nothing until the end. The uxw_messages_written row confirms no result
+  and no `started` before the messages were all queued.
+- promote: the shell prompt of the second pass (node wait.cjs <tag> 30, in the foreground); 1.5 s after the waiter's pid
+  file, PINEAPPLE at `next` (queued awaited), 0.5 s later MANGO as a `now` user frame (origin human, a fresh uuid: what
+  promote() writes). promote-late: the same, timed from the engine's `task_started` for the call instead of the pid
+  file. mirror: PINEAPPLE at `next`, 0.5 s later `interrupt {send_now: true, message_uuid}` for it; MANGO stands for the
+  app queue's after-the-turn row and is written as queue.ts write() writes a release (no priority) at the first
+  main-lane result after which every prompt the probe wrote has a lifecycle past `queued` and no `started` follows the
+  result (session.ts turnOpen); the probe checks every 20 ms.
+- Each run ends when every message has started, the command has ended, and the wire has been quiet 12 s (at most 90 s);
+  the uxw_final row lists the results, lifecycles, `requesting` frames and string replays; the uxw_transcript row
+  reduces the engine's transcript file as the second pass does.
+Fixtures: fixtures/uxwave/u4p3-<case>-<n>.jsonl, seq numbers below are theirs. Runs: end2 3; end3 1; promote 3;
+promote-late 3; mirror 1. promote-late-1's process was stopped by the harness's end while an engine-own turn (the
+moved command's completion) had started a new shell call (exit 143); nothing before seq 276 is affected.
+
+Observations (the seqs of each run).
+1. u4p3-end2-1: PINEAPPLE and MANGO queued (512, 515); result success / completed (677); prompt completed (678);
+   PINEAPPLE's replay with its own text (679), started (680), MANGO started (681); requesting [both] (683); MANGO's
+   replay with both texts (685); one reply "PINEAPPLE / MANGO"; result (741), both completed (742-743), STATE idle
+   (744). end2-2: 168, 171; 664, 665; 666; 667-668; 670; 672; 722, idle 725. end2-3: 64, 67; 614, 615; 616; 617-618;
+   620; 622; 674, idle 677. u4p3-end3-1: queued 119, 122, 125; result (507); prompt completed (508); replays of the
+   first two with their own texts (509, 510); started 511, 512, 513; requesting [all three] (515); the third's replay
+   with all three texts (517); one result (565), all completed (566-568), idle (569).
+   Files (uxw_transcript): end2-*: one user line under MANGO's uuid holding both texts; end3-1: one under KIWI's uuid
+   holding the three. The earlier members' uuids appear nowhere in the file.
+2. u4p3-promote-late-1: task_started (37); PINEAPPLE queued (41); MANGO written `now` (42); task_updated is_backgrounded
+   (46, +5 ms); MANGO queued (47); "Command was moved to the background ..." (48); result success / aborted_tools (49);
+   prompt cancelled (50); MANGO started (51), requesting [MANGO] (53), replay (54); in MANGO's turn the model reads the
+   moved command's output (115-119), then PINEAPPLE's replay (120), started (121), requesting [MANGO, PINEAPPLE] (122);
+   PINEAPPLE completed (222), result (223), MANGO completed (224). -2: 46, 49, 50, 51, 54; 155, 156, 157; 287. -3: 46,
+   49, 50, 51, 54; 123, 124, 125; 207.
+   u4p3-promote-1: PINEAPPLE queued (38); MANGO written (39), queued (42); task_started (43, 0.76 s after the write),
+   never moved; task_notification completed (44, 27.8 s after the write); the command's own output as the tool result (45);
+   result success / aborted_tools (46); prompt cancelled (47); MANGO started (48), requesting [MANGO] (50), replay (51),
+   result (96), completed (97); PINEAPPLE started (98), requesting (100), replay (102), result (110). -2: 40/43, 44, 47,
+   48, 49, 52; 103; 105, 109; 141. -3: 39/42, 43, 46, 47, 48, 51; 90; 92, 96; 146.
+   u4p3-mirror-1: PINEAPPLE queued (39); the request (41) answered delivering (42); moved (45, +1029 ms); result success
+   / aborted_tools (47); prompt cancelled (48); PINEAPPLE started (49), replay (52), result (167), STATE idle (169);
+   MANGO released (170), queued (172), STATE running (174), started (175), replay (179), result (250); the moved
+   command's completion then starts an engine-own turn (253-291).
+   Files: promote-*: two user lines, MANGO's then PINEAPPLE's, each under its own uuid and promptId. promote-late-*:
+   MANGO's user line; PINEAPPLE as a queue `remove` and a `queued_command` attachment (no user line under its uuid).
+   mirror-1: a user line each.
+
+Where the engine differs from the document.
+1. Reported 25: a `now` frame does not join or carry the message waiting at the next step (promote-*, promote-late-*);
+   the request does (u4p2-two-*). Inference, from cli.pretty.js:600799-600812 (takeBeforeEnqueue): a `now` message
+   that arrives while another waits calls `moveHolders()` once and stays a `now`, where a lone `now` becomes a pressed
+   send-now; the press path (pressWaiting, 600834-600852) is the one that marks every waiting message.
+2. Line 577 / M1 ("a `now` frame does what the request does"): not when another message waits and the frame comes
+   before the shell call is a task (promote-* 3/3): nothing is moved, the `now` waits for the call to finish and only
+   then cuts the turn. Inference: that one `moveHolders()` finds no registered task to move and nothing retries, while
+   the request (mirror-1, and the second pass's a-* at the same 2.0 s) waits for the task and moves it about 1 s later.
+   The window is the first 2.7 to 3.0 s of a shell call; the case's frames are those of an ordinary tool boundary with
+   a `now` waiting (the command's own output, no "moved" text, no backgroundedToDeliverMessage).
+
+Bearing on other parts of the spec.
+- Decision 32 holds in both cases: every member leaves at its own `started` (both always come), and the joined
+  replay is the last member's, with the joined text, after all the `started` frames; the earlier members' replays are
+  echoes of their own text and come before their `started`. Its (b) and (c) are exercised by the ordinary end, not only
+  by Send now; nothing is joined in case 2.
+- Interfaces B's cut-turn reading in the early promote: the turn ends `aborted_tools` with no move, about 28 s after
+  Send now, so a row "Sending ..." from the promote's answer lasts the whole call; the call reads as ended normally.
+- A message read at a tool boundary (promote-late's PINEAPPLE) has no user line in the file, only an attachment, so a
+  reload draws it differently from the live replay (an echo the normaliser drops); this is the first pass's tool-boundary
+  path, met here inside a sent-now turn.
+
+Not run. The early promote at a later moment within the window (only the 2.0 s timing and the post-registration
+timing were run), and with a tool other than a shell call. A turn's ordinary end with the members of two kinds (a
+slash command beside prompts). The direct route (it does not authenticate on this VM, VM.md). Model spend: about
+US$0.03 over the 11 runs (haiku; the largest total_cost_usd of each run).

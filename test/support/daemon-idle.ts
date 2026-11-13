@@ -21,8 +21,9 @@
 // of a footprint is the runtime's, and enters no bound. Each record is written by a recording commit touching only this
 // file (and, at O2's landing, its test, which since derives from the records).
 import { execFileSync } from 'node:child_process';
-import { cpus } from 'node:os';
-import { basename } from 'node:path';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { cpus, tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
 import type { SpineFixtureCounts } from './spine-fixture';
 
 // The window, and its load rule (the architect's Rule B at 4.7). A window is void on load when its 1-minute
@@ -279,6 +280,111 @@ export function activityLine(run: { pressureLevels: readonly (number | null)[]; 
 
 export function readVmPaging(): VmPaging {
   return vmPaging(execFileSync('vm_stat', { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } }));
+}
+
+// P5 Decision Log 273 (recorded only): each measured process's memory by category, read at the window's two edges outside
+// its sampled CPU (before its first sample, after its last), so a run can say where a footprint outside the V8 heap
+// went. `footprint` (macOS's own, unprivileged for the user's own processes) gives each category's dirty, swapped and
+// clean KiB: the dirty of all of them sums to the phys_footprint the window reads, and the swapped is the part of a
+// category's dirty that is compressed or swapped out, a breakdown never added to it; a pid it cannot read
+// keeps `vmmap --summary`'s region and malloc zone tables as printed; a pid neither reads keeps what each said.
+export interface CategoryKiB {
+  dirtyKiB: number;
+  swappedKiB: number;
+  cleanKiB: number;
+  regions: number;
+}
+export type MemoryByCategory = { pid: number; argv0: string } & (
+  | { tool: 'footprint'; footprintKiB: number; categories: Record<string, CategoryKiB> }
+  | { tool: 'vmmap'; summary: string }
+  | { tool: null; errors: string[] }
+);
+
+// `footprint --json`'s file (`-f bytes`) by pid: its footprint and each category that holds a byte, largest dirty first
+// (what it holds of the footprint);
+// a pid it holds no process for is absent, and the file's own errors come back beside them.
+export function footprintCategories(json: string): { processes: Map<number, { footprintKiB: number; categories: Record<string, CategoryKiB> }>; errors: string[] } {
+  type Bytes = { dirty?: number; swapped?: number; clean?: number; regions?: number };
+  const file = JSON.parse(json) as { processes?: { pid: number; footprint: number; categories: Record<string, Bytes> }[]; errors?: unknown[] };
+  const kiB = (bytes: number | undefined) => Math.round((bytes ?? 0) / 1_024);
+  const processes = new Map(
+    (file.processes ?? []).map((p) => {
+      const held = Object.entries(p.categories)
+        .map(([name, b]): [string, CategoryKiB] => [name, { dirtyKiB: kiB(b.dirty), swappedKiB: kiB(b.swapped), cleanKiB: kiB(b.clean), regions: b.regions ?? 0 }])
+        .filter(([, c]) => c.dirtyKiB + c.swappedKiB + c.cleanKiB > 0)
+        .sort(([, a], [, b]) => b.dirtyKiB - a.dirtyKiB);
+      return [p.pid, { footprintKiB: kiB(p.footprint), categories: Object.fromEntries(held) }] as const;
+    }),
+  );
+  return { processes, errors: (file.errors ?? []).map((e) => (typeof e === 'string' ? e : JSON.stringify(e))) };
+}
+
+// `vmmap --summary`'s tables, from its summary of the libraries on: its header (the path, the parent, the times) left out.
+export function vmmapSummary(text: string): string {
+  const from = text.search(/^(ReadOnly portion of Libraries|REGION TYPE)/m);
+  if (from < 0) throw new Error(`vmmap printed no summary: ${JSON.stringify(text.slice(0, 400))}`);
+  return text.slice(from).trimEnd();
+}
+
+const failure = (tool: string, error: unknown) => {
+  const e = error as { stderr?: string | Buffer; message?: string };
+  return `${tool}: ${String(e.stderr ?? '').trim() || e.message || String(error)}`;
+};
+
+export function readMemoryCategories(procs: readonly { pid: number; argv0: string }[]): MemoryByCategory[] {
+  if (procs.length === 0) return [];
+  const dir = mkdtempSync(join(tmpdir(), 'maws-footprint-'));
+  const errors: string[] = [];
+  let read: ReturnType<typeof footprintCategories>['processes'] = new Map();
+  try {
+    const file = join(dir, 'footprint.json');
+    try {
+      execFileSync('footprint', ['--json', file, '-f', 'bytes', '--swapped', ...procs.map((p) => String(p.pid))], { stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env, LC_ALL: 'C' } });
+    } catch (error) {
+      errors.push(failure('footprint', error)); // a pid it could not read may still leave the others in its file
+    }
+    try {
+      const parsed = footprintCategories(readFileSync(file, 'utf8'));
+      read = parsed.processes;
+      errors.push(...parsed.errors.map((e) => `footprint: ${e}`));
+    } catch (error) {
+      errors.push(failure('footprint --json', error));
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  return procs.map(({ pid, argv0 }): MemoryByCategory => {
+    const own = read.get(pid);
+    if (own) return { pid, argv0, tool: 'footprint', ...own };
+    try {
+      return { pid, argv0, tool: 'vmmap', summary: vmmapSummary(execFileSync('vmmap', ['--summary', String(pid)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LC_ALL: 'C' }, maxBuffer: 16 * 1_024 * 1_024 })) };
+    } catch (error) {
+      return { pid, argv0, tool: null, errors: [...errors, `footprint: no reading for pid ${pid}`, failure('vmmap --summary', error)] };
+    }
+  });
+}
+
+// The two captures' line: each process's footprint by `footprint` at both edges and the categories whose dirty (what
+// they hold of the footprint) moved most between them, with the swapped part's own move beside it when it moved (or,
+// read by vmmap or by neither, which). Recorded only.
+export function categoriesLine(first: readonly MemoryByCategory[], last: readonly MemoryByCategory[]): string {
+  const each = first.map((a) => {
+    const b = last.find((p) => p.pid === a.pid);
+    if (a.tool !== 'footprint' || b?.tool !== 'footprint') return `${a.argv0} by ${a.tool ?? 'no reader'} then ${b === undefined ? 'gone' : (b.tool ?? 'no reader')}`;
+    const names = new Set([...Object.keys(a.categories), ...Object.keys(b.categories)]);
+    const zero: CategoryKiB = { dirtyKiB: 0, swappedKiB: 0, cleanKiB: 0, regions: 0 };
+    const moved = [...names]
+      .map((name) => {
+        const [before, after] = [a.categories[name] ?? zero, b.categories[name] ?? zero];
+        return { name, dirty: after.dirtyKiB - before.dirtyKiB, swapped: after.swappedKiB - before.swappedKiB };
+      })
+      .filter((m) => m.dirty !== 0 || m.swapped !== 0)
+      .sort((x, y) => Math.abs(y.dirty) - Math.abs(x.dirty) || Math.abs(y.swapped) - Math.abs(x.swapped))
+      .slice(0, 3)
+      .map((m) => `${m.name} ${signed(m.dirty)}${m.swapped !== 0 ? ` (swapped ${signed(m.swapped)})` : ''}`);
+    return `${a.argv0} ${a.footprintKiB} to ${b.footprintKiB} KiB${moved.length > 0 ? ` (${moved.join(', ')})` : ''}`;
+  });
+  return `[daemon-idle] memory by category at the window's edges (recorded only) · ${each.join('; ')}`;
 }
 
 // The second, independent reader: top's MEM column, which top(1) documents as the physical memory footprint. It prints

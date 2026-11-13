@@ -3,6 +3,7 @@
 // previous retained version's state; a retained version's state is its keyframe merged with the deltas after it. The
 // host compresses the bytes (zstd); this module only computes them.
 import * as Y from '@y/y';
+import { newDoc } from './doc';
 
 const arr = (u: Uint8Array) => u as Uint8Array<ArrayBuffer>;
 
@@ -22,7 +23,7 @@ export const mergeV2 = (updates: Uint8Array[]): Uint8Array => Y.mergeUpdatesV2(u
 // A V2 update re-encoded as the state of a doc it loads into: one canonical form, so two encodings of the same state
 // compare equal byte for byte (a keyframe promoted from a merge is stored in this form).
 export function canonicalV2(update: Uint8Array): Uint8Array {
-  const doc = new Y.Doc({ gc: true });
+  const doc = newDoc();
   try {
     Y.applyUpdateV2(doc, update);
     return Y.encodeStateAsUpdateV2(doc);

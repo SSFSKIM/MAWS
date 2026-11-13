@@ -1,8 +1,8 @@
 // Lane B's pending counts for `notify` (O10's follow-up to O13 M5's finding; P5 Surprises): sminos's pending sets hold
 // only what its bridges raised, so a lane B session's requests reach the Notifier from the engine host. A session's
-// count is its broker items that wait on an answer (`waitsOnAnswer` in src/shared/attention/kinds.ts: pending or
-// delivered, standing for a request), the cards a `cards` subscription would show; the engine host counts its read by
-// the same rule.
+// count is its broker items that wait on an answer (`waitsOnAnswer` in src/shared/attention/kinds.ts: pending, standing
+// for a request; UX wave U1's UC-1: an answer delivered waits nowhere), the cards a `cards` subscription would show; the
+// engine host counts its read by the same rule. The engine host still sends every live item, delivered ones included.
 //
 // Two sources, neither per session: every `session.brokerItems` the engine host publishes, for every session whether or
 // not a device is subscribed (the whole list on each change); and, at each link to the engine host `mawsd` reports

@@ -1,6 +1,6 @@
 // What the card hands each variant body: the request, the placement, whether an answer is in flight, `submit` (the
-// card's one delivery path) and `bindKeys`, through which the body gives the card its Enter and Esc actions. The card
-// owns the registration (or the docked frame does), so the keyboard rules exist once for every kind.
+// card's one delivery path) and `bindKeys`, through which the body gives the card its key actions. The card owns the
+// registration (or the docked frame does), so the keyboard rules exist once for every kind.
 import type { AttentionItem } from '@shared/graph/attention';
 import type { RequestAnswer } from '@shared/engine/answers';
 import type { SessionEvent } from '@shared/graph/events';
@@ -9,9 +9,13 @@ import type { Capability } from '../../session/controls/types';
 export type Placement = 'docked' | 'card' | 'hover' | 'inline';
 
 export interface CardKeys {
-  accept: (() => void) | null;
-  decline: (() => void) | null;
-  digit?: ((n: number) => void) | null; // 1–9 pressed on the card's focus owner (the permission's scope pick)
+  accept: (() => void) | null; // request.accept (Enter)
+  decline: (() => void) | null; // request.decline (Esc)
+  digit?: ((n: number) => void) | null; // 1–9 pressed on the card's focus owner (a question's option pick)
+  // UX wave U1a (§D): a permission prompt's request.allowOnce (⌘↩) and request.allowLasting (⇧⌘↩); a variant that has
+  // none leaves them unbound
+  allowOnce?: (() => void) | null;
+  allowLasting?: (() => void) | null;
 }
 
 export interface VariantProps<K extends SessionEvent['kind']> {
@@ -19,7 +23,8 @@ export interface VariantProps<K extends SessionEvent['kind']> {
   request: Extract<SessionEvent, { kind: K }>;
   placement: Placement;
   busy: boolean;
-  // `what` is the collapsed line's text once delivered (`Answered · <what>`); `delivered` runs after a delivered answer.
+  // `what` names the answer, for a body hosted outside the card; the card draws nothing of it (UX wave U1's UC-1: a sent
+  // card stands as it was, disabled, until its item leaves the list). `delivered` runs after a delivered answer.
   submit(answer: RequestAnswer, what: string, delivered?: () => void): void;
   bindKeys(keys: CardKeys): void;
   // P5 O9 M6: whether the session's controls port carries this answer (`answerCapability`), and why not; an option it

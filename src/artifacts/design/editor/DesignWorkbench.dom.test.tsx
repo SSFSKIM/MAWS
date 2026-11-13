@@ -239,6 +239,41 @@ describe('board frames', () => {
   });
 });
 
+// U6a (the UX wave's U6, collisions: ⇧⌘D is View ▸ Review): the world's and a board row's ⌘D duplicate the board; with
+// Shift down the key is left to the menu.
+describe('⌘D on a board', () => {
+  const pressed = (target: Element, init: Record<string, unknown>) => {
+    let kept = false;
+    act(() => void (kept = fireEvent.keyDown(target, init)));
+    return kept;
+  };
+  const passes = (target: Element) => {
+    const reached = vi.fn();
+    document.addEventListener('keydown', reached);
+    const kept = ['d', 'D'].map((key) => pressed(target, { key, metaKey: true, shiftKey: true }));
+    document.removeEventListener('keydown', reached);
+    return { kept, reached: reached.mock.calls.length };
+  };
+
+  it('in the world, with a frame selected: ⌘D duplicates it, ⇧⌘D does nothing and passes', () => {
+    const { container, doc, world } = mount();
+    fireEvent.click(title(container, 'b2'));
+    world.focus();
+    expect(passes(world)).toEqual({ kept: [true, true], reached: 2 });
+    expect(boardOrder(doc)).toHaveLength(3);
+    expect(pressed(world, { key: 'd', metaKey: true })).toBe(false);
+    expect(boardOrder(doc)).toHaveLength(4);
+  });
+
+  it('on a board’s row in the list: ⌘D duplicates it, ⇧⌘D does nothing and passes', () => {
+    const { doc } = mount();
+    expect(passes(rows()[0]!)).toEqual({ kept: [true, true], reached: 2 });
+    expect(boardOrder(doc)).toHaveLength(3);
+    expect(pressed(rows()[0]!, { key: 'd', metaKey: true })).toBe(false);
+    expect(boardOrder(doc)).toHaveLength(4);
+  });
+});
+
 describe('pointer arbitration (Decision Log 20)', () => {
   it('a press on an inactive board’s content activates it and selects the hit element; the press neither pans nor moves', () => {
     const { container, doc, session, view, world } = mount();
