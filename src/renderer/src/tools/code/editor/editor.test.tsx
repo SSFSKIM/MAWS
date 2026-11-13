@@ -414,7 +414,7 @@ describe('editor', () => {
       fireEvent.click(saveButton()!);
       await waitFor(() => expect(entry()).toMatchObject({ theirs: { text: 'const a = 2;\n', hash: fakeHash('const a = 2;\n'), view: 'merge' }, saving: false }));
       expect(disk.callsOf('files.read')).toHaveLength(reads + 1);
-      expect(disk.callsOf('files.read').at(-1)).toEqual({ appSessionId: MAIN_A, path: APP, offset: 0, length: FILES_READ_MAX_LENGTH, hash: true });
+      expect(disk.callsOf('files.read').at(-1)).toEqual({ appSessionId: MAIN_A, path: APP, offset: 0, length: FILES_READ_MAX_LENGTH, hash: true, named: true });
     });
 
     it('withdraws theirs when a save’s conflict read finds the disk back at the baseline; the next save lands', async () => {
@@ -617,7 +617,7 @@ describe('editor', () => {
       disk.files[APP] = 'const a = 3;\n'; // no event
       fireEvent.click(saveButton()!);
       await waitFor(() => expect(entry().theirs).toEqual({ text: 'const a = 3;\n', hash: fakeHash('const a = 3;\n'), view: 'merge' }));
-      expect(disk.callsOf('files.read').at(-1)).toEqual({ appSessionId: MAIN_A, path: APP, offset: 0, length: FILES_READ_MAX_LENGTH, hash: true });
+      expect(disk.callsOf('files.read').at(-1)).toEqual({ appSessionId: MAIN_A, path: APP, offset: 0, length: FILES_READ_MAX_LENGTH, hash: true, named: true });
       expect(entry().saving).toBe(false);
     });
 
