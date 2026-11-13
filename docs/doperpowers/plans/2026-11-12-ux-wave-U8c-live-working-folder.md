@@ -13,7 +13,7 @@ How to see it working, on the wave's build: in a session whose repository has a 
 
 ## Progress
 
-- [x] (2026-11-13) Document written against master `89e25cb20` and the branches named in the header: the open check read from the code (three findings, "What the code holds today" 1), the index's filing rule, the stored and sent fields against build F, the surfaces at the moment of a move, and the files other landings edit.
+- [x] (2026-11-13 07:26Z) Document written against master `89e25cb20` and the branches named in the header: the open check read from the code (three findings, "What the code holds today" 1), the index's filing rule, the stored and sent fields against build F, the surfaces at the moment of a move, and the files other landings edit.
 - [ ] Adversarial review of this document (the architect dispatches it), findings settled.
 - [ ] The author's second pass over "To check again", once U8b (and U3a) are on master, before an executor starts.
 - [ ] The architect's rulings on "Reported to the architect" (each changes one named place).
