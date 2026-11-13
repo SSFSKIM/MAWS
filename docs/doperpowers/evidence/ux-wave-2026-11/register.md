@@ -2,11 +2,11 @@
 
 Every item the wave considered, one row each: where it came from, its state, and the line it was given when the cut was put to the owner (so "you" in a line is the owner). Kept beside `docs/doperpowers/specs/2026-11-12-ux-wave-design.md`, which cites the items by these ids. Generated from the wave's cut on 2026-11-12; the architect regenerates it when a state changes.
 
-240 items: 148 to build (139 of them in children now), 3 that still wait for the owner to answer (five of the questions to the owner are still open: "Questions still open" below), 2 for a design round, 7 hands-on checks, 25 already built, 23 keep, 13 the same ask as another item, 4 not MAWS's to fix, 3 handed to the visual renewal, 12 later.
+240 items: 148 to build (140 of them in children now), 3 that still wait for the owner to answer (five of the questions to the owner are still open: "Questions still open" below), 2 for a design round, 7 hands-on checks, 25 already built, 23 keep, 13 the same ask as another item, 4 not MAWS's to fix, 3 handed to the visual renewal, 12 later.
 
 Ids: `l<n>-…` a mark on the comparison of 2026-10-23, `O-nn` an observation, `#nnn` a board ticket, `S-nn` a finding from P5's sittings, `X-nnn` a tracker row that rides with an item.
 
-## The owner's answers of 2026-11-12
+## The owner's answers of 2026-11-12 and 2026-11-13
 
 Verbatim, as chosen on the question cards; a note is the owner's own text.
 
@@ -53,6 +53,16 @@ Verbatim, as chosen on the question cards; a note is the owner's own text.
 | UX wave, comments (U5), before its plan is written: in Review and in the in-app Browser, when you open a second comment before sending the first, should the first stay unsent so that all of them are sent together as one message? | Yes, send together (Recommended) |  |
 | UX wave, documents (U5): on 10-23 you marked "keep" on the export dialog always starting in Downloads, and "fix" on the finding that asks it to remember the last folder. Which holds? | Remember the last folder (Recommended) |  |
 | UX wave, source control (U5): where should the buttons sit that ask the agent to commit, push and open a pull request? Each sends the session one sentence, and MAWS runs no git itself. (Claude Desktop has a single button whose meaning follows the state: Commit only where the folder has no GitHub repository, otherwise Create PR, whose prompt commits and pushes first.) | Neither: no such buttons | We don't need a button that asks agent to commit, push, or open pull request. We don't need them. I would say source control is almost mostly read-only. Like, agent will do everything anyway. For human side, rarely would human need to do anything. Anything big will be like closing or merging pull request. We don't need a button that asks agent to commit, push, or open pull request. Source control is enough for read only. For human to know what's happening. |
+| Drawn example of the composer, frame 3: which mark says "this message will wait"? | Arrow under a bar (Recommended) |  |
+| Drawn example of the composer, frames 1, 4 and 18: how are Stop and the queue mark filled? | Stop in black (Recommended) |  |
+| Drawn example of the composer, frames 15 and 16: where does the /btw card sit, and how wide is it? | Corner, then column foot (Recommended) |  |
+| Drawn example of the composer, frame 10: with nothing typed, which commands stand first in the "/" list? | MAWS's panels first (Recommended) |  |
+| Drawn example of the regrouped Settings: in which order do the sections stand? | Preferences first (Recommended) |  |
+| Drawn example of the regrouped Settings: does Org have a heading of its own? | No heading (Recommended) |  |
+| Drawn example of the regrouped Settings: what is the new section called that holds the supervisor and the memory budget? | Supervisor (Recommended) |  |
+| Drawn example of the Customize page: should a connector added by hand also get its site's icon from Google's favicon service? | No, directory only (Recommended) |  |
+| Drawn example of the Customize page, with the model menu and the mode menu: where should "Make … your default" live? | (no option selected) | for model picker, I won't even show 'default' -- The user may not know what the default model is, so just show models only without the default option. so just haiku, sonnet, opus, fable, no default. And as I know, Claude code automatically change the default every time the user change the model, right? Let's just keep it that way. If user want to have fixed default model, then setting or custom hook like we use are what they can do on their side.<br>for permission, just keep Claude Code's default, auto. Some user might want to make Bypass permission as default, and let that happen in settings. I don't think too busy composer is good. I'd make composer simple on where we can. |
+| Drawn example of the Customize page: under My items › All, should a row carry everything its kind's own list gives it, or be short and the same for every kind? | Full rows (Recommended) |  |
 
 ## Questions still open
 
@@ -91,9 +101,9 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 | U2 | O-30 | In the folded to-human view a running turn keeps its "Working for …" line in view until it ends, although a finished turn's line shows only with one of its records open; a finished turn's menu (Restore files, Review changes) is then reached by opening a record or in the full transcript. | No turn line at all while folded, a running turn's included. |
 | U6 | l7-shell-08 | Zoom is the whole window between 50% and 200%, with no control and no text-size setting. "Open in" remembers no editor. | A text-size setting. |
 | U6 | l7-shell-07 | While build F can still be gone back to, a key this wave adds cannot be rebound in Settings › Keyboard: F's reader of the settings fails on an action it does not know and would then show default settings. Keys that exist today stay rebindable, and a rebinding you stored wins over a default this wave gives another action. | Store such rebindings in a second file that F never opens (a second store now, a migration later). |
-| U7 | O-16 | Hide is one item in the row's three-dot menu with no confirmation; no button on the row. The hidden set is kept per device. A hidden session returns by itself when it starts a turn. | A hide button on the row; a set that follows you to other Macs. |
-| U7 | O-40 | An open page (Customize, Projects, the Library) hides the tab strip and shows Back and its name; Projects becomes a page too; Diagnostics and a Channel stay tabs. | The strip stays visible above the page. |
-| U7 | O-40 | Settings left open when MAWS quits is not open at the next start, although the Settings tab was: a relaunch shows what was behind the dialog. The dialog has the size of MAWS's library dialogs (960 by 800 px at most) and closes at Close, Esc, ⌘W or a click on the dimmed window; going to a tab or a page closes it. | Reopen the dialog at a relaunch. |
+| U7 | O-16 | Hide is one item in the row's three-dot menu with no confirmation; whether the row also carries a Hide button is with the owner (recommended: the button). The hidden set is kept per device. A hidden session returns by itself when it starts a turn; one hidden in the middle of a turn stays hidden through that turn. | A set that follows you to other Macs. |
+| U7 | O-40 | An open page (Customize, Projects, the Library) hides the tab strip, takes the side column's place and shows Back and its name; Projects becomes a page too; Diagnostics and a Channel stay tabs. | The strip stays visible above the page. |
+| U7 | O-40 | Settings left open when MAWS quits is not open at the next start, although the Settings tab was: a relaunch shows what was behind the dialog. The dialog is 960 px wide, at most 800 px tall and at most 85 percent of the window's height, and closes at Close, Esc, ⌘W or a click on the dimmed window; going to a tab or a page closes it. | Reopen the dialog at a relaunch. |
 | U7 | O-47 | The usage ring in the title bar shows no number; its popover lists every account's bars; the full panel is in Settings. | A percentage beside the ring. |
 | U8 | O-09 | Finished work leaves its card at once and shows no outcome there, even a failure; the panel lists it under Done with failures counted. Scheduled jobs do not hold the card. No Stop on a card's row. | A failed task stays on the card until seen. |
 | U8 | l5-code-14 | Review, Source control, Files and new terminals follow the agent into a worktree of the same repository, also after a cd if the engine records it; another repository is not followed. You asked for the live display only. | Display only; or follow any folder. |
@@ -101,7 +111,7 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 | U10 | l6-artifacts-15 | The agent may delete only an artifact its own session line created and no person wrote to, with an Undo in the transcript row. | Any artifact of the Space, with a confirmation. |
 | U10 | l8-settings-13 | A Space's instructions reach the agent two ways: as a chip in the draft of a chat started from the Space, which you see and can delete, and in the artifact tools' answers for a session started anywhere else (again after a compaction). Claude Desktop instead adds them, unseen, to the system prompt of every session that belongs to the Space. | As Claude Desktop: a chat started from a Space carries them in its system prompt, with no chip; the session then has to remember its Space. |
 | U10 | O-43 | The chat over an artifact has three states: card, bar and hidden; "Show chat" brings back the bar; a request that arrives while the chat is hidden leaves it hidden and marks "Show chat" (Claude Desktop shows a toast and leaves it hidden); with the bar showing it opens the card. | Two states. |
-| U11 | l8-settings-06 | Settings is regrouped into App, Sessions and engine, and Org, opening at Appearance; each row's note is one line with the rest behind More. | Keep today's order and add search only. |
+| U11 | l8-settings-06 | Settings is regrouped under two headings, App and Sessions & engine, with Org after them under no heading, opening at Appearance; the supervisor and the memory budget are a section named Supervisor; each row's note is one line with the rest behind More. | Keep today's order and add search only. |
 | U12 | l9-browser-delivery-06 | Device sizes are Mobile 375×812 and Tablet 768×1024 only, drawn at true size; the screenshot goes to the clipboard (Claude Desktop saves a file). | Save a file; more sizes. |
 | U12 | l9-browser-delivery-07 | While an agent uses computer use, a strip at the top of the session's pane reads "Computer use running · Stop"; Stop interrupts the turn. | A mark on the tool row only. |
 | U13 | O-01 | New chat closes every other empty unstarted chat in the strip. At the upgrade every per-project set is merged into one strip (on the MacBook 14 sets and 28 tabs arrive together), with a one-time notice and "Close tabs to the right". | New chat focuses the existing empty chat; the upgrade keeps only the set that was showing. |
@@ -360,6 +370,7 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 | id | from | state | the line |
 |---|---|---|---|
 | l8-settings-01 | mark | build | Sign in exists, but not for plugin-provided servers or the servers added in MAWS's own Settings. Both get it. |
+| X-184 | tracker | build | Plugin-provided connectors appear under My items, with Sign in. |
 | l8-settings-03 | mark | build | The libraries work before the first message. |
 | l8-settings-04 | mark | build | The MCP widget's rows are compact and called Connectors; its switch means "off in this chat". |
 | #455 | ticket | build | A security call: reading another machine's connectors asks for Touch ID each time the sheet opens. |
@@ -372,7 +383,6 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 | #456 | ticket | build | The LiveQuery sheet gets its missing line for a paused query. |
 | S-09 | sitting | build | The Channel tab says it is offline and retrying as soon as its read fails. |
 | S-10 | sitting | build | The Channel opens from the command palette (one entry per project that has one, with its waiting count) and from the View menu. No new button; the project row already shows its waiting count. |
-| X-184 | tracker | build, after an answer | Plugin-provided connectors appear under My items, with Sign in. |
 | l8-settings-05 | mark | build, after an answer | "Add custom connector…" moves to Customize and writes the Claude Code config with a scope. |
 | l8-settings-07 | mark | build, after an answer | A skill can be switched off (the engine now supports it), revealed in Finder and opened. "New skill…" starts a chat with the skill creator. |
 | #476 | ticket | hands-on check (U14) | The ticket names switches that do not exist in MAWS, and no engine setting is yet shown to drop a server's tools at launch. A probe first, then its own design. |
