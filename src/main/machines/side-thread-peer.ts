@@ -1,6 +1,6 @@
 // Which daemons serve a side thread of several comments (UX wave U5a, docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md,
 // Decision Log 52). The card sends a pass's later comments as `side.thread.open`'s `from.more`, which came at wire
-// minor 39 (src/shared/ipc/wire.ts). The command is the machine's, and mawsd reads its input with the tolerant reader
+// minor 43 (src/shared/ipc/wire.ts). The command is the machine's, and mawsd reads its input with the tolerant reader
 // (`codec.readCommandInput`, src/mawsd/front.ts), so a daemon that predates `more` passes it by as a field it does not
 // know and opens the thread from the first comment alone, and the card, told the send went, lets the whole pass go.
 // This Mac's daemon may be of another build (`watchDaemon` leaves another bundle's daemon running), so such a send is
@@ -13,7 +13,7 @@ import type { WirePeer } from '@shared/ipc/wire';
 import { THREAD_FROM_ONE_COMMENT } from '@shared/side/copy';
 
 /** The wire minor whose `side.thread.open` carries a comment's `more`; provisional with the minor, re-taken at the chain merge. */
-export const SIDE_THREAD_MORE_MINOR = 39;
+export const SIDE_THREAD_MORE_MINOR = 43;
 
 /** The commands the route's hook reads. */
 export const SIDE_THREAD_COMMANDS: readonly CommandName[] = ['side.thread.open'];
