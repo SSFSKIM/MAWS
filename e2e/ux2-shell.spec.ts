@@ -664,3 +664,35 @@ test('Acceptance: compact inactive file tabs contain their extension, pin, dirty
     for (const name of names) writeFileSync(scratch.path(name), 'export const value = 1;\n');
   });
 });
+
+// U6a (the UX wave's U6, first landing; A7 and A9): the side surfaces' chords are menu accelerators, View reads in groups
+// with five submenus, and the shortcut sheet groups its keys as the menus do. A key equivalent cannot be pressed through
+// Playwright (support/menu.ts), so the scene reads the installed menu and clicks its items by id. Free of how two surfaces
+// arrange: each surface is shown and hidden again before the next.
+test('U6a: ⌘J, ⇧⌘D and ⇧⌘F show and hide Terminal, Review and Files; View in groups; the sheet in the same groups', async ({ maws }) => {
+  const { page } = maws;
+  await size(maws, 1512, 982);
+  await openSession(page);
+  const installed = await maws.app.evaluate(({ Menu }) => {
+    const menu = Menu.getApplicationMenu()!;
+    const view = menu.items.find((item) => item.label === 'View')!.submenu!.items;
+    return {
+      chords: ['surface.terminal', 'surface.review', 'surface.files'].map((id) => menu.getMenuItemById(id)?.accelerator ?? null),
+      submenus: view.filter((item) => item.type === 'submenu').map((item) => item.label),
+    };
+  });
+  expect(installed).toEqual({ chords: ['Cmd+J', 'Cmd+Shift+D', 'Cmd+Shift+F'], submenus: ['Tabs', 'More surfaces', 'Comments', 'Appearance', 'Developer'] });
+  for (const id of ['terminal', 'review', 'files']) {
+    await menu(maws.app, `surface.${id}`);
+    await expect.poll(() => stack(page), { message: `View ▸ ${id} shows it` }).toContain(id);
+    await menu(maws.app, `surface.${id}`);
+    await expect.poll(() => stack(page), { message: `View ▸ ${id} again hides it` }).not.toContain(id);
+  }
+  await menu(maws.app, 'shortcuts.open');
+  const sheet = page.getByRole('dialog', { name: 'Keyboard shortcuts' });
+  await expect(sheet.getByRole('table', { name: 'View › Tabs' })).toBeVisible();
+  await expect(sheet.getByRole('table', { name: 'View', exact: true }).getByRole('row', { name: /Terminal/ })).toContainText('⌘J');
+  await page.keyboard.press('Escape');
+  await expect(sheet).toHaveCount(0);
+  expect(maws.consoleErrors()).toEqual([]);
+});

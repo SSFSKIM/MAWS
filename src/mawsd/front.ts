@@ -192,6 +192,7 @@ export interface FrontOptions {
   capabilities?(appSessionId: AppSessionId): SessionCapabilities; // P5 O5 M5: session.capabilities, cold (none: no entry)
   browserChanged?(): void; // P5 O5 M5: the attached app's browser socket may have changed
   browser?: FrontBrowser; // P5 O17 M3: none, a front that takes no browser work (NO_BROWSER)
+  work?(): () => void; // P5 Decision Log 273: each client's request, from its receipt to its answer's settling
 }
 
 export interface ServicesFront {
@@ -542,9 +543,10 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
         const { id, name, input, client } = request.value;
         const ref = refs.refFor(client);
         owners.set(ref, { client: this, id: client ?? null });
+        const end = options.work?.(); // P5 Decision Log 273: until the answer settles, the connection gone or not
         void answer(name, input, { client: ref }, false, this).then((result) => {
           if (this.port === port) port.postMessage({ t: 'res', id, ...result });
-        });
+        }).finally(() => end?.());
       });
       port.start();
     }

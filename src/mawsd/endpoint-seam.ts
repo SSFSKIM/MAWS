@@ -59,7 +59,10 @@ export interface DaemonServices {
     onClosed(listener: (channel: number, reason: 'host' | 'reset' | 'upstream') => void): () => void; // the host's documents.closed, or the link's end
   };
   onUpstream(listener: (link: { connected: boolean; generation: number }) => void): () => void; // the engine-host link; every channel's 'upstream' close comes before connected: false
-  hold(reason: string): () => void; // a private mawsd's idle exit waits while one is out; the returned function releases it
+  // a private mawsd's idle exit waits while one is out; the returned function releases it. P5 Decision Log 273: `standing`,
+  // a connection's (an open remote channel's), which is no operation in flight to the idle collection
+  hold(reason: string, standing?: boolean): () => void;
+  activity?(): void; // P5 Decision Log 273: work the endpoint carries that no other hook names (a tcp forward's chunk)
   interest: { report(viewer: string, sessions: readonly AppSessionId[]): void; drop(viewer: string): void }; // a remote viewer's subscriptions join the union (OX5)
   // P5 O5 M2 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §C): a `maws-artifact:` URL's answer as
   // artifacts.sock serves it (the status, the scheme's headers, the bytes), its handler loaded at the first use; for

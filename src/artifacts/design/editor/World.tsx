@@ -420,7 +420,7 @@ export function World(props: WorldProps) {
         return done();
       }
       if (!writable(framed, ro) || !session.writable()) return;
-      if (mod && e.key.toLowerCase() === 'd') {
+      if (mod && !e.shiftKey && e.key.toLowerCase() === 'd') { // U6a: ⇧⌘D is View ▸ Review's
         duplicateBoard(framed.id);
         return done();
       }
