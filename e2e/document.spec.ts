@@ -539,7 +539,8 @@ const passageAt = (text: Locator, index: number, quote: string) =>
 // replaces; the gate's foreground run pasted over the copy's selection while the page's caret was here.
 // The placement is the case's precondition, not what it tests: one that does not hold is made again (twice on the
 // guest lane, last in run 43471601277, after a Comments toggle reflowed the document; the cause is not captured), and
-// one that never holds names where the caret was and whether the window had focus.
+// each miss is written to the report (a `caret-retry` annotation and a log line) with where the caret was and whether
+// the window had focus.
 async function caretAtEndOf(page: Page, text: Locator, index: number): Promise<void> {
   const paragraph = text.locator('p').nth(index);
   const read = () =>
@@ -571,10 +572,18 @@ async function caretAtEndOf(page: Page, text: Locator, index: number): Promise<v
     });
     await paragraph.click({ position: lastLine }); // P3-D
     await page.keyboard.press('End');
-    await expect(text).toBeFocused({ timeout: 2_000 });
-    await expect
-      .poll(read, { message: 'the caret at the paragraph’s end, on the page and in the editor', timeout: 2_000 })
-      .toMatchObject({ page: true, editor: true });
+    try {
+      await expect(text).toBeFocused({ timeout: 2_000 });
+      await expect
+        .poll(read, { message: 'the caret at the paragraph’s end, on the page and in the editor', timeout: 2_000 })
+        .toMatchObject({ page: true, editor: true });
+    } catch (error) {
+      // A missed placement stays in the report even when a later one holds: the retry must not hide its cause.
+      const seen = JSON.stringify((await read().catch((failure: unknown) => ({ seen: String(failure) }))).seen);
+      test.info().annotations.push({ type: 'caret-retry', description: `paragraph ${index}: ${seen}` });
+      console.log(`caret-retry: paragraph ${index}: ${seen}`);
+      throw error;
+    }
   }).toPass({ timeout: 10_000 });
 }
 
