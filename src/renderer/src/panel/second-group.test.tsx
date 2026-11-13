@@ -163,6 +163,23 @@ describe('where a tab that is opened goes with two groups (decision 3)', () => {
     expect(stripOf('lower')).toEqual([['Files', false], ['Session info', false], ['Notes', true]]);
   });
 
+  it('an open chosen in the lower strip’s “+” menu goes below though the upper group holds its tool, its opener naming no group', async () => {
+    // a plugin pane's item: `openPaneTab` adds every pane under the one pane tool and passes no group
+    const user = userEvent.setup();
+    register(probeTool('files', { title: 'Files' }).tool, probeTool('pane', { title: 'Pane' }).tool, probeTool('terminal', { title: 'Terminal' }).tool);
+    renderHost();
+    act(() => void panelHost.addTool('pane', { appSessionId: A }));
+    act(() => void panelHost.addTool('files', { appSessionId: A }));
+    act(() => void panelHost.addTool('terminal', { appSessionId: A }));
+    await moveFromMenu('upper', 'Terminal', 'Move below');
+    await user.click(within(group('lower')!).getByRole('button', { name: 'Add a tool' }));
+    act(() => screen.getAllByRole('menuitem')[0].focus());
+    act(() => void panelHost.addTool('pane', { appSessionId: A }));
+    expect(stripOf('upper')).toEqual([['Pane', false], ['Files', true]]);
+    expect(stripOf('lower')).toEqual([['Terminal', false], ['Pane', true]]);
+    await user.keyboard('{Escape}');
+  });
+
   it('an icon’s tool opened with the keyboard outside the column goes above', async () => {
     const user = userEvent.setup();
     register(probeTool('review', { title: 'Review', multiInstance: false }).tool, probeTool('files', { title: 'Files' }).tool, probeTool('terminal', { title: 'Terminal' }).tool);
@@ -237,6 +254,18 @@ describe('the bar between the groups (decision 2)', () => {
     expect(group('lower')!.style.height).toBe('80px');
     observer.resize(stack, { width: 360, height: 106 });
     expect(group('lower')!.style.height).toBe('36px'); // its strip
+  });
+
+  it('a reset gives the share back 0.5 in a column too short for the bar to move', async () => {
+    const user = userEvent.setup();
+    const bar = await splitColumn(206); // 200 px: both bounds and the drawn lower group are 80 px
+    act(() => useLayout.getState().setGroupShare(A, 0.8));
+    act(() => bar.focus());
+    await user.keyboard('{Enter}');
+    expect(share()).toBe(0.5);
+    act(() => useLayout.getState().setGroupShare(A, 0.8));
+    await user.dblClick(bar);
+    expect(share()).toBe(0.5);
   });
 });
 
