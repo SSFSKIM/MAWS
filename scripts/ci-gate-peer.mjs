@@ -9,8 +9,12 @@
 // What it decided is said on stderr. Exits 2 when an asked-for peer cannot be used, and when the merge base cannot be
 // found (a shallow checkout, or one with no merge base with origin/master), or a requested peer is outside master
 // ancestry, naming --peer; else 0.
+// `--peer-exact <ref>` names the peer as one commit and no other: it is not mapped. A build that machines run can be a
+// master ancestor off master's first-parent chain (it came in as a merge's second parent), and the merge that contains
+// it is a different tree. The commit must hold a manifest and be an ancestor of origin/master (exit 2 otherwise, naming
+// --peer-exact), it cannot be given beside --peer (exit 2), and stderr says it was taken exactly, with its full sha.
 // Explicit --gates peer groups require different minors within one major, including when --peer is none.
-// Usage: node scripts/ci-gate-peer.mjs --git-dir <dir> --sha <commit> [--peer <ref>|none] [--gates <list>]
+// Usage: node scripts/ci-gate-peer.mjs --git-dir <dir> --sha <commit> [--peer <ref>|none | --peer-exact <ref>] [--gates <list>]
 import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import process from 'node:process';
@@ -34,9 +38,17 @@ export function wireAt(git, rev) {
 }
 
 // { trailers, notes, status }: the trailer lines, the lines for stderr, and the exit status.
-export function resolvePeer({ git, sha, peer, gates = '' }) {
+export function resolvePeer({ git, sha, peer, peerExact = '', gates = '' }) {
   const notes = [];
   const say = (line) => notes.push(`ci-gate: ${line}`);
+  if (peer && peerExact) {
+    say('--peer and --peer-exact cannot both be given: --peer maps a commit to the first master state that contains it, --peer-exact takes it as given');
+    return { trailers: [], notes, status: 2 };
+  }
+  // The asked-for peer and the flag that named it; an exact one skips the mapping below.
+  const exact = Boolean(peerExact);
+  const flag = exact ? '--peer-exact' : '--peer';
+  if (exact) peer = peerExact;
   // `all` remains the plan's default set, not an explicit request for any one peer group.
   const asked = gates.split(/[\s,]+/).filter((gate) => gate.startsWith('e2e:'));
   let groups = [];
@@ -54,13 +66,15 @@ export function resolvePeer({ git, sha, peer, gates = '' }) {
     say(`${groups.join(', ')} cannot check ${pair}; pass --peer <ref> naming a master commit a minor apart within the same major, or leave ${groups.join(', ')} out of --gates`);
     return { trailers: [], notes, status: 2 };
   };
-  if (peer === 'none' && groups.length === 0) return { trailers: [], notes, status: 0 };
+  // `none` is --peer's word for no peer; after --peer-exact it is a ref like any other, and names no commit.
+  const none = !exact && peer === 'none';
+  if (none && groups.length === 0) return { trailers: [], notes, status: 0 };
   const wire = wireAt(git, sha);
-  if (peer === 'none') return refuseGroups(`peer none (--peer none), wire unavailable; this tree's wire ${wire ?? 'unavailable (no manifest)'}`);
+  if (none) return refuseGroups(`peer none (--peer none), wire unavailable; this tree's wire ${wire ?? 'unavailable (no manifest)'}`);
   if (wire === null) {
     if (groups.length > 0) return refuseGroups("this tree's wire unavailable (no manifest)");
     if (!peer) return { trailers: [], notes, status: 0 };
-    say(`--peer ${peer}: the tested tree has no ${MANIFEST}, so no wire to check against another build`);
+    say(`${flag} ${peer}: the tested tree has no ${MANIFEST}, so no wire to check against another build`);
     return { trailers: [], notes, status: 2 };
   }
   let base;
@@ -73,17 +87,17 @@ export function resolvePeer({ git, sha, peer, gates = '' }) {
   // A peer can be reachable through a merge while its earlier first-parent master states are truncated.
   // Neither explicit refs nor merge bases can establish the first containing state in a shallow checkout.
   if (git('rev-parse', '--is-shallow-repository') === 'true') {
-    say(`${peer ? `--peer ${peer}: ` : ''}this checkout is shallow, so the peer's first-parent master state cannot be established; fetch complete history or pass --peer none`);
+    say(`${peer ? `${flag} ${peer}: ` : ''}this checkout is shallow, so the peer's ${exact ? 'ancestry' : 'first-parent master state'} cannot be established; fetch complete history or pass --peer none`);
     return { trailers: [], notes, status: 2 };
   }
   if (peer) {
     try {
       base = git('rev-parse', '--verify', '--quiet', `${peer}^{commit}`);
     } catch {
-      say(`--peer ${peer}: no such commit`);
+      say(`${flag} ${peer}: no such commit`);
       return { trailers: [], notes, status: 2 };
     }
-    how = `--peer ${peer}`;
+    how = `${flag} ${peer}`;
     // An explicit ref without a manifest remains an error even if a later containing master commit has one.
     if (wireAt(git, base) === null) {
       say(`the peer ${base.slice(0, 8)} (${how}) has no ${MANIFEST}`);
@@ -107,12 +121,13 @@ export function resolvePeer({ git, sha, peer, gates = '' }) {
   try {
     git('merge-base', '--is-ancestor', base, 'origin/master');
   } catch {
-    say(`--peer ${peer || base}: ${base.slice(0, 8)} is not an ancestor of origin/master (or its ancestry is unavailable)`);
+    say(`${flag} ${peer || base}: ${base.slice(0, 8)} is not an ancestor of origin/master (or its ancestry is unavailable)`);
     return { trailers: [], notes, status: 2 };
   }
   // Two graph walks, not one ancestry subprocess per master commit. Keep them separate: --first-parent with
   // --ancestry-path can prune an off-chain candidate before finding its containing merge and return nothing.
-  const masterStates = git('rev-list', '--first-parent', 'origin/master').split('\n');
+  // An exact peer is that commit: no walk, and no other tree in its place.
+  const masterStates = exact ? [base] : git('rev-list', '--first-parent', 'origin/master').split('\n');
   if (!masterStates.includes(base)) {
     const candidate = base;
     const descendants = new Set(git('rev-list', '--ancestry-path', `${candidate}..origin/master`).split('\n'));
@@ -133,18 +148,19 @@ export function resolvePeer({ git, sha, peer, gates = '' }) {
   const [peerMajor, peerMinor] = peerWire.split('.');
   const apart = major === peerMajor && minor !== peerMinor ? ', a minor apart' : '';
   if (groups.length > 0 && !apart) return refuseGroups(`peer ${base.slice(0, 8)}, wire ${peerWire}; this tree's wire ${wire}`);
-  say(`peer ${base.slice(0, 8)} (${how}), wire ${peerWire}; this tree's ${wire}${apart}`);
+  if (exact) say(`peer ${base} taken exactly (${how}), not mapped to a first-parent master state: wire ${peerWire}; this tree's ${wire}${apart}`);
+  else say(`peer ${base.slice(0, 8)} (${how}), wire ${peerWire}; this tree's ${wire}${apart}`);
   return { trailers: [`Peer: ${base}`, `Peer-Wire: ${peerWire}`, `Wire: ${wire}`], notes, status: 0 };
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const { values } = parseArgs({ options: { 'git-dir': { type: 'string' }, sha: { type: 'string' }, peer: { type: 'string', default: '' }, gates: { type: 'string', default: '' } } });
+  const { values } = parseArgs({ options: { 'git-dir': { type: 'string' }, sha: { type: 'string' }, peer: { type: 'string', default: '' }, 'peer-exact': { type: 'string', default: '' }, gates: { type: 'string', default: '' } } });
   if (!values['git-dir'] || !values.sha) {
     process.stderr.write('ci-gate-peer: --git-dir and --sha are required\n');
     process.exit(2);
   }
   const git = (...args) => execFileSync('git', ['-C', values['git-dir'], ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 }).trim();
-  const { trailers, notes, status } = resolvePeer({ git, sha: values.sha, peer: values.peer, gates: values.gates });
+  const { trailers, notes, status } = resolvePeer({ git, sha: values.sha, peer: values.peer, peerExact: values['peer-exact'], gates: values.gates });
   for (const line of notes) process.stderr.write(`${line}\n`);
   for (const line of trailers) process.stdout.write(`${line}\n`);
   process.exit(status);
