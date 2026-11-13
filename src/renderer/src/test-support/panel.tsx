@@ -148,7 +148,7 @@ export function spyLayout() {
 }
 
 export function resetPanelStores(opts: { hydrated?: boolean } = {}): void {
-  useShellView.setState({ sidebarOverlay: false, cardsOverlay: false });
+  useShellView.setState({ sidebarOverlay: false, cardsOverlay: false, pageOpen: false });
   resetPanelHost();
   resetEditorHosts(); // P3-G
   resetArtifactMachines(); // P5 O7 M5a: the page's artifact table

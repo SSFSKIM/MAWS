@@ -27,7 +27,7 @@ const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() 
 beforeEach(() => {
   setWidth(1440);
   resetPanelStores();
-  useShellView.setState({ sidebarOverlay: false, cardsOverlay: false });
+  useShellView.setState({ sidebarOverlay: false, cardsOverlay: false, pageOpen: false });
   for (const id of ['terminal', 'review', 'browser', 'files', 'scm']) offs.push(registerPanelTool(probeTool(id, { title: id }).tool));
   registerSlot('panelHost', PanelHost);
 });

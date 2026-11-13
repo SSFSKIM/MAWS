@@ -25,3 +25,12 @@ export function shellGeometry(regions: LayoutRegions, width: number, hasSurface:
   const chrome = sheet || mainHidden ? width : width - panel;
   return { sidebar, sidebarAside, sheet, mainHidden, panel, panelMax, columns, chrome };
 }
+
+// UX wave U8b (UC-9; its execution document, Interfaces §C.2): whether the card column is shown. Pure, a function of the
+// facts it is given; `cardColumnNow` in `shell-view.ts` gathers them, and every reader asks through it. `sessionTab`:
+// the tab in front is a session's the column can speak of; `tabsInView`: the side column's; `room`: right of the
+// sidebar; `opened`: the person opened the cards in too little room; `pageOpen`: a page hides the column (U7).
+export const CARD_COLUMN_ROOM = 960;
+export function cardColumnShown(input: { sessionTab: boolean; tabsInView: number; collapsed: boolean; room: number; opened: boolean; pageOpen: boolean }): boolean {
+  return input.sessionTab && input.tabsInView === 0 && !input.collapsed && !input.pageOpen && (input.room >= CARD_COLUMN_ROOM || input.opened);
+}

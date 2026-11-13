@@ -4,18 +4,13 @@ import { preserveSubmenuPointer } from '@artifacts/ui/menu-pointer';
 import type { ReactElement, ReactNode } from 'react';
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import type { ActionId } from '@shared/keymap/actions';
-import type { PanelTabRef } from '@shared/ipc/schema/layout';
 import { Icon, IconButton } from '../app/IconButton';
 import { useLayout } from '../stores/layout';
-import { activeTab, sessionOfTab } from '../stores/layout-model';
 import { usePanes, openPaneTab } from '../engine-surface/panes';
 import { lastInViewOf, panelHost, usePanelHost } from './host';
 import { COPY } from './copy';
 import { sideGroups, surfaceRefs, surfaceSession, surfaceTabs } from './surface-model';
-import { useShellGeometry, useShellView } from '../app/shell-view';
-import { useWindowWidth } from '../app/regions';
-import { shellGeometry } from '../app/shell-geometry';
-import { useSessions } from '../stores/sessions';
+import { cardColumnNow, useCardColumn, useShellView } from '../app/shell-view';
 
 const PRIMARY = ['terminal', 'review', 'browser', 'files'];
 const ITEM = 'flex h-8 cursor-default items-center gap-2 rounded-sm px-2 text-ui outline-none data-highlighted:bg-bg-hover data-disabled:text-fg-faint';
@@ -42,14 +37,12 @@ export function toggleSurface(toolId: string) {
   state.setPanel({ collapsed: false });
 }
 
+// The Session cards icon and its menu row: off when the column is shown, else shown (UX wave U8b: read from its one source).
 export function toggleSessionCards() {
   const state = useLayout.getState();
-  const session = sessionOfTab(activeTab(state.main));
-  if (session === null || !useSessions.getState().records.has(session)) return;
-  const visible = surfaceTabs(state, surfaceSession(state));
-  const geometry = shellGeometry(state.regions, window.innerWidth, visible.length > 0, false, state.panelWidths);
-  const cards = !state.regions.panel.collapsed && visible.length === 0 && (window.innerWidth - geometry.sidebar >= 960 || useShellView.getState().cardsOverlay);
-  if (cards) state.setPanel({ collapsed: true });
+  const { session, sessionTab, shown } = cardColumnNow(state, window.innerWidth);
+  if (session === null || !sessionTab) return;
+  if (shown) state.setPanel({ collapsed: true });
   else { state.hideSurfaces(session); state.setPanel({ collapsed: false, maximized: false, floating: false }); useShellView.setState({ cardsOverlay: true }); }
 }
 
@@ -69,14 +62,8 @@ export function SurfaceRow({ maxIcons = Infinity, overflowControls }: { maxIcons
   const candidates = [...new Set([...PRIMARY, ...state.panelSurfaces.pinnedTools, ...visible.map((tab) => tab.toolId)])].filter((id) => tools.has(id));
   const ids = candidates.slice(0, maxIcons);
   const cardsIcon = maxIcons > ids.length;
-  // Artifacts is the project Library card now; a saved artifact editor remains reachable until explicitly closed.
-  const overflow = [...new Set([...candidates.filter((id) => !ids.includes(id)), ...[...tools.values()].filter((tool) => tool.menu !== false && tool.id !== 'artifacts' && !ids.includes(tool.id)).map((tool) => tool.id)])].map((id) => tools.get(id)!);
-  const activeSession = sessionOfTab(activeTab(state.main));
-  const hasSessionTab = useSessions((s) => activeSession !== null && s.records.has(activeSession));
-  const geometry = useShellGeometry();
-  const width = useWindowWidth();
-  const forcedCards = useShellView((s) => s.cardsOverlay);
-  const cards = !state.regions.panel.collapsed && visible.length === 0 && hasSessionTab && (width - geometry.sidebar >= 960 || forcedCards);
+  const overflow = [...new Set([...candidates.filter((id) => !ids.includes(id)), ...[...tools.values()].filter((tool) => tool.menu !== false && !ids.includes(tool.id)).map((tool) => tool.id)])].map((id) => tools.get(id)!);
+  const { sessionTab: hasSessionTab, shown: cards } = useCardColumn();
   return (
     <div data-surface-row role="toolbar" aria-label="Session surfaces" className="flex shrink-0 items-center gap-0.5 [-webkit-app-region:no-drag]">
       {cardsIcon && <IconButton label="Session cards" action="panel.toggle" pressed={cards} disabled={!hasSessionTab} onClick={toggleSessionCards}><Icon><rect x="2.5" y="2.5" width="11" height="11" rx="2" /><path d="M5 6h6M5 9h6" /></Icon></IconButton>}
@@ -95,7 +82,6 @@ export function SurfaceRow({ maxIcons = Infinity, overflowControls }: { maxIcons
           {overflow.map((tool) => <SurfaceContext key={tool.id} toolId={tool.id}><DropdownMenu.Item disabled={!session && !held.some((tab) => tab.toolId === tool.id)} className={ITEM} onSelect={() => toggleSurface(tool.id)}><tool.icon className="size-4 text-fg-muted" />{tool.title}</DropdownMenu.Item></SurfaceContext>)}
           {!cardsIcon && <DropdownMenu.Item disabled={!hasSessionTab} className={ITEM} onSelect={toggleSessionCards}>Session cards</DropdownMenu.Item>}
           {overflowControls}
-          {held.filter((tab) => tab.toolId === 'artifacts' && !candidates.includes(tab.toolId)).map((tab: PanelTabRef) => <SurfaceContext key={tab.id} toolId={tab.toolId}><DropdownMenu.Item className={ITEM} onSelect={() => toggleSurface(tab.toolId)}>Open saved artifact</DropdownMenu.Item></SurfaceContext>)}
           {held.filter((tab) => !tools.has(tab.toolId)).map((tab) => <DropdownMenu.Sub key={tab.id}>
             <DropdownMenu.SubTrigger onPointerLeave={preserveSubmenuPointer} className={ITEM}>{tab.toolId} (unavailable)</DropdownMenu.SubTrigger>
             <DropdownMenu.Portal><DropdownMenu.SubContent className={MENU}>

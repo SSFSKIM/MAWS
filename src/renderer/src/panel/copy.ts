@@ -37,9 +37,8 @@ export const SUMMARY_COPY = {
   binary: (n: number) => ` · ${n} binary`,
   changeUnavailable: 'Change unavailable',
   modelUnknown: 'model unknown', // W9 (H4): the row names the model by its alias (`<alias> <effort>`, the composer chip's words)
-  review: 'Review',
   sessionInfo: 'Session info',
-  engineVersion: (version: string) => `Claude Code ${version}`, // W13: the version the session last ran on
+  openChanges: 'Open changes', // UX wave U8b (l5-code-16): the change line's accessible name; its counts are its description
   // Push state
   notPushed: 'Not pushed',
   ahead: (n: number, upstream: string) => `${n} ahead of ${upstream}`,
