@@ -771,6 +771,8 @@ The pull request carries the dated lines of the two records this landing amends,
   Evidence: M1's executor, 2026-11-13; `src/engine-host/session-maws.test.ts` reads it so.
 - Observation: Electron 44's `clipboard` has no `writeImage`; it writes through the W3C-shaped `write(ClipboardItem[])`, and its documentation does not say that an `image/png` item reaches the macOS pasteboard as an image another app's paste reads.
   Evidence: `node_modules/electron/electron.d.ts` of `electron@44.4.5` on the VM (`write(data: ClipboardItem[]): Promise<void>`, `class ClipboardItem`). M3's executor, 2026-11-13. The *(copy screenshot)* scene of M5 and the owner's paste into a composer are what show it.
+- Observation: a replay journal's `system/init` must list the plugin's server as connected, or a withdrawn call's lingering line resolves at once: the session status's MCP server list is set only from `system/init`'s `mcp_servers`, and the recorded inits list none.
+  Evidence: `src/engine-host/session-status.ts` (the `mcp_servers` read at init); `pass2/auto-routed` seq 9 (`mcp_servers: []`). M5's executor, 2026-11-13; `e2e/support/computer-use-replay.ts` sets `[{ name: 'plugin:cua:cua_repl', status: 'connected' }]`. In a real session this is §E's evidence rule working as designed.
 
 ## Decision Log
 
@@ -864,6 +866,13 @@ The pull request carries the dated lines of the two records this landing amends,
   - When several calls the strip showed are withdrawn, the latest is the unresolved one and the earlier count as resolved; a call withdrawn while the strip is `absent` never makes the line linger. An accepted limit: a withdrawal and a new turn's start in one event batch leave no lingering line.
   - "Used computer use" is written in `transcript/model/copy.ts` itself, so the transcript model imports nothing from `computer-use/`.
   - The cursor label drops control characters, trims, and is cut at 64 code points. The launch tests not about the label (E13's socket case, P4-A2's profile block) now resume an untitled record and keep their meaning; the label has its own block.
+
+- **2026-11-13 · M5's executor decisions** (folded by the controller).
+  - A replay journal that plays a computer-use call lists `plugin:cua:cua_repl` as a connected server in its `system/init` (Surprises): without it the status lists no connected computer-use server, which is §E's evidence that the cell is over, and the lingering line resolves the moment it would show. Any later scene or fixture that needs the lingering line carries the same init.
+  - The record's dates are the commit's day in UTC, 2026-11-13, as this document's times are; the reversal's fixed sentence keeps "Reversed 2026-11-12", the day of the owner's answer.
+  - The *(reload)* scene reads main's outcome by a second `browser.tabs.open` under the same request id after the window's own call has visibly landed, which answers the remembered `page` and does nothing else (what a second window does). A transcript link is stood in for by the request `BrowserHandle.open` sends for a target (no `reload`), since the app has no seam that opens a panel tool with a target; `BrowserTool.test.tsx` pins that the handle sends none. "Kept" is made visible by selecting another tab before `show_pane`, so the selection's return proves main handled the request, with the three-second window checked explicitly.
+  - The *(copy screenshot)* scene asserts what `clipboard.read()` gives back (an `image/png` kind, a PNG signature, a decode, the size at device pixels within a pixel); whether macOS reports `public.png` is attached as an annotation, not asserted.
+  - The computer-use journals have their own builder, `e2e/support/computer-use-replay.ts`, rather than an extension of `SideJournal`, whose writer is shared by the side, library and remote specs. It records no `get_status` after a result, since a recorded one the host did not send would hold the replay. Each of the three scenes launches once.
 
 ## Outcomes & Retrospective
 
