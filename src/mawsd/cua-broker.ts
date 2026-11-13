@@ -58,6 +58,7 @@ export interface CuaBrokerOptions {
   place(appSessionId: AppSessionId): (() => void) | null; // a place in cua-socket.ts's PENDING_BUDGET, its release; null past it
   log(line: string): void;
   limits?: Partial<CuaBrokerLimits>; // the tests' smaller bounds
+  activity?(): void; // P5 Decision Log 273: each chunk a connection carries, served cold or piped
 }
 
 export interface CuaBrokerInspection {
@@ -338,6 +339,7 @@ export function createCuaBroker(options: CuaBrokerOptions): CuaBroker {
       if (rest.length > 0) connection.socket.write(rest);
       connection.socket.pipe(engine);
       engine.pipe(connection.socket);
+      if (options.activity) for (const side of [connection.socket, engine]) side.on('data', options.activity); // after the pipes: already flowing
     };
     engine.on('data', onHello);
     let error: string | null = null;
@@ -379,6 +381,7 @@ export function createCuaBroker(options: CuaBrokerOptions): CuaBroker {
         timer: null,
         target: null,
         onData: (chunk) => {
+          options.activity?.();
           connection.input = connection.input.length > 0 ? Buffer.concat([connection.input, chunk]) : chunk;
           if (connection.phase === 'cold') serve(connection);
           if (socket.destroyed || connection.phase === 'spliced' || !withinBounds(connection)) return;

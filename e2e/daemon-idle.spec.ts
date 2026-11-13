@@ -17,7 +17,10 @@
 // O17 footprint fix adds more, recorded only: from the footprint reader's same call, the machine's memory pressure level
 // and each process's cumulative CPU ticks, idle and interrupt wakeups and pageins at every sample, and vm_stat's
 // swapouts and pageouts from the window's first sample to its last, which the JSON keeps and one line per window
-// prints (`window activity`). The measured processes are those of the profile whose argv0 is `mawsd`,
+// prints (`window activity`). P5 Decision Log 273 adds each process's memory by category (`footprint`, or `vmmap
+// --summary` for a pid it cannot read; test/support/daemon-idle.ts's readMemoryCategories), read once before the window's
+// CPU is first read and once after its last sample, so outside the window, which the JSON keeps as `categories` and one
+// line prints (`memory by category`): where a footprint outside the V8 heap sits. The measured processes are those of the profile whose argv0 is `mawsd`,
 // `maws-supervisor` or `maws-pty-host`; the replay has no `claude` child, and a real one is the session's cost, not the
 // daemon's.
 //
@@ -101,7 +104,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import { daemonPaths } from '@shared/daemon/files';
 import { machineSettingsDefaults } from '@shared/settings/defaults';
-import { activityDelta, activityLine, mawsdSpineLine, boundMisses, busyShare, cpuSeconds, cpuTimes, DAEMON_IDLE_BOUND, ENROLLED_INCREMENT_BUDGET_KIB, enrolledLine, floorLine, IDLE_RUN, idleLine, invalidReasons, loadPair, mawsdLine, measured, median, readerMismatches, readFootprints, readProcessTable, readTopMem, readVmPaging, SESSION_HOST_BOUND_KIB, SESSION_HOST_RUN, sessionHostLine, sessionHostMisses, sessionHosts, SPINE_RELEASED_RUN, spineLine, topOutside, type CpuTimes, type MeasuredProcess, type ProcessActivity, type ProcessRow, type ReaderMachine, type ShapeReading, type SpineWindow, type TopMem, type TopProcess, type VmPaging } from '../test/support/daemon-idle';
+import { activityDelta, activityLine, categoriesLine, mawsdSpineLine, boundMisses, busyShare, cpuSeconds, cpuTimes, DAEMON_IDLE_BOUND, ENROLLED_INCREMENT_BUDGET_KIB, enrolledLine, floorLine, IDLE_RUN, idleLine, invalidReasons, loadPair, mawsdLine, measured, median, readerMismatches, readFootprints, readMemoryCategories, readProcessTable, readTopMem, readVmPaging, SESSION_HOST_BOUND_KIB, SESSION_HOST_RUN, sessionHostLine, sessionHostMisses, sessionHosts, SPINE_RELEASED_RUN, spineLine, topOutside, type CpuTimes, type MeasuredProcess, type ProcessActivity, type ProcessRow, type ReaderMachine, type ShapeReading, type SpineWindow, type TopMem, type TopProcess, type VmPaging } from '../test/support/daemon-idle';
 import { writeSpineFixture } from '../test/support/spine-fixture';
 import { reachMachine } from '../src/mawsd/machine-client';
 import { invoke, launchReady, value } from './support/c7-replay';
@@ -889,6 +892,7 @@ function electronBinary(): string {
 // process table (`ps -axo`) tells which measured processes are still the ones it started with and, with the cores' CPU
 // times read beside the load, gives the sample's diagnostics.
 async function measureWindow(procs: readonly MeasuredProcess[], run: IdleRun = IDLE_RUN, onSample?: () => void /* P5 O17 M8: a scene's own watch at each sample */) {
+  const categoriesFirst = readMemoryCategories(procs); // P5 Decision Log 273: before the window's CPU is read, so outside it
   const started = new Map(procs.map((p) => [p.pid, ps(p.pid, 'lstart')]));
   const cpuAtStart = new Map(procs.map((p) => [p.pid, cpuSeconds(ps(p.pid, 'time'))]));
   const cpuAtEnd = new Map<number, number>();
@@ -936,6 +940,8 @@ async function measureWindow(procs: readonly MeasuredProcess[], run: IdleRun = I
     samples.push({ atS, load: loadavg()[0]!, footprintKiB, rssKiB, cpuTimesMs, busyShare: lastTimes === null ? null : busyShare(lastTimes, cpuTimesMs), topProcess, pressureLevel: reading.machine.pressureLevel, activity });
     lastTimes = cpuTimesMs;
   }
+  // P5 Decision Log 273: after the last sample, whose CPU reading closed the window; a process lost meanwhile is not read
+  const categoriesLast = readMemoryCategories(procs.filter((p) => !lost.some((l) => l.pid === p.pid)));
 
   const names = [...new Set(procs.map((p) => p.argv0))];
   const mismatches = readerMismatches(crossCheck?.readings ?? []);
@@ -959,9 +965,10 @@ async function measureWindow(procs: readonly MeasuredProcess[], run: IdleRun = I
     return readings.length === 0 || timebase === null ? [] : [{ argv0: p.argv0, pid: p.pid, ...activityDelta(readings[0]!, readings.at(-1)!, timebase) }];
   });
   console.log(activityLine({ pressureLevels: samples.map((s) => s.pressureLevel), paging: { pageouts: pagingDelta.pageouts, swapouts: pagingDelta.swapouts, seconds: last.atS - first.atS }, processes: activity }));
+  console.log(categoriesLine(categoriesFirst, categoriesLast));
   return {
     samples, lost, mismatches, names, whole: whole.length, footprintKiB, rssKiB, perProcess, cpuS, load, loadPair: pair,
-    record: { run, footprintKiB, rssKiB, perProcess, cpuS, load, loadPair: pair, processes, crossCheck, mismatches, lost, timebase, paging: pagingDelta, activity, samples },
+    record: { run, footprintKiB, rssKiB, perProcess, cpuS, load, loadPair: pair, processes, crossCheck, mismatches, lost, timebase, paging: pagingDelta, activity, categories: { first: categoriesFirst, last: categoriesLast }, samples },
   };
 }
 

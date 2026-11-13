@@ -1,0 +1,235 @@
+{
+ "provenance": {
+  "spec": "docs/doperpowers/specs/2026-11-12-ux-wave/U3-transcript-rows.md",
+  "section": "Probes and checks",
+  "contract": "UC-2 (docs/doperpowers/specs/2026-11-12-ux-wave-design.md)",
+  "probe": "U3 probe 2 (terminal)",
+  "engine": "/opt/maws-probe/engines/2.1.322",
+  "engineVersion": "2.1.322",
+  "launch": "interactive engine in tmux, as vm-run.sh term starts it",
+  "args": [
+   "--model",
+   "haiku"
+  ],
+  "route": "gateway (vm-run.sh loopback forward)"
+ },
+ "steps": [
+  {
+   "step": "ready",
+   "at": "2026-11-12T14:55:06.238Z",
+   "pane": "\n ▐▛███▛█   Claude Code v2.1.322\n▝▜██████▀  Haiku 5.5 · API Usage Billing\n ▝▝   ▝▝   /tmp/py-vYyGCJ/work\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n                                                                                                                                            ◐ medium · /effort\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ Try \"how does <filepath> work?\"\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents\n",
+   "file": []
+  },
+  {
+   "step": "setup",
+   "at": "2026-11-12T14:56:02.538Z",
+   "pane": "\n ▐▛███▛█   Claude Code v2.1.322\n▝▜██████▀  Haiku 5.5 · API Usage Billing\n ▝▝   ▝▝   /tmp/py-vYyGCJ/work\n\n\n❯ Use CronCreate (find it with ToolSearch if it is not loaded) to schedule a recurring, session-only job with cron \"* * * * *\" and prompt \"UXW tick: reply with\n  only the word TOCK.\" Then reply with only the job id.\n\n● CronCreate(* * * * *: UXW tick: reply with only the word TOCK.)\n  ⎿  Scheduled c1b9e52c (Every minute, next run 6:56 AM)\n  ⎿  Allowed by auto mode\n\n● c1b9e52c\n\n✻ Crunched for 55s · done 6:56 AM\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏵⏵ auto mode on (shift+tab to cycle)\n",
+   "file": [
+    {
+     "line": 5,
+     "type": "user",
+     "uuid": "b71295cc-5584-4da3-8738-0c55af68a3c0",
+     "parentUuid": null,
+     "origin": {
+      "kind": "human"
+     },
+     "isSidechain": false,
+     "promptId": "3eb4228a-4666-4880-8ebd-3125b84357a8",
+     "promptSource": "typed",
+     "turnOrigin": "human",
+     "role": "user",
+     "text": "Use CronCreate (find it with ToolSearch if it is not loaded) to schedule a recurring, session-only job with cron \"* * * * *\" and prompt \"UXW tick: reply with only the word TOCK.\" Then reply with only the job id.",
+     "contentTypes": []
+    },
+    {
+     "line": 42,
+     "type": "attachment",
+     "uuid": "39685124-d831-47b3-805b-48f3cb191870",
+     "parentUuid": "0020107a-d80e-42bc-867a-716cffeb52cc",
+     "isSidechain": false,
+     "attachment": {
+      "type": "deferred_tools_record"
+     }
+    },
+    {
+     "line": 47,
+     "type": "system",
+     "subtype": "turn_duration",
+     "uuid": "0c2299c1-a326-4379-8e24-5f1b01543f8c",
+     "parentUuid": "a83494c7-3027-4fc4-be21-ec1aba8edb97",
+     "isMeta": false,
+     "isSidechain": false
+    }
+   ]
+  },
+  {
+   "step": "fire-1",
+   "at": "2026-11-12T14:56:39.728Z",
+   "fireSeen": true,
+   "pane": "\n ▐▛███▛█   Claude Code v2.1.322\n▝▜██████▀  Haiku 5.5 · API Usage Billing\n ▝▝   ▝▝   /tmp/py-vYyGCJ/work\n\n\n❯ Use CronCreate (find it with ToolSearch if it is not loaded) to schedule a recurring, session-only job with cron \"* * * * *\" and prompt \"UXW tick: reply with\n  only the word TOCK.\" Then reply with only the job id.\n\n● CronCreate(* * * * *: UXW tick: reply with only the word TOCK.)\n  ⎿  Scheduled c1b9e52c (Every minute, next run 6:56 AM)\n  ⎿  Allowed by auto mode\n\n● c1b9e52c\n\n✻ Crunched for 55s · done 6:56 AM\n\n✻ Running scheduled task (Nov 12 6:56am)\n\n● TOCK\n\n✻ Worked for 14s · done 6:56 AM\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏵⏵ auto mode on (shift+tab to cycle)\n",
+   "file": [
+    {
+     "line": 50,
+     "type": "system",
+     "subtype": "scheduled_task_fire",
+     "uuid": "50fd110f-cb64-47f1-a481-e5867176daba",
+     "parentUuid": "0c2299c1-a326-4379-8e24-5f1b01543f8c",
+     "isMeta": false,
+     "isSidechain": false,
+     "content": "Running scheduled task (Nov 12 6:56am)"
+    },
+    {
+     "line": 51,
+     "type": "user",
+     "uuid": "502606ee-fdb5-48fc-bfce-bc23a0d8daa3",
+     "parentUuid": "50fd110f-cb64-47f1-a481-e5867176daba",
+     "isMeta": true,
+     "isSidechain": false,
+     "promptId": "789aba9b-208e-4015-8c7e-fc0e35c5de7a",
+     "promptSource": "system",
+     "turnOrigin": "scheduled",
+     "queueSkipAttachments": true,
+     "role": "user",
+     "text": "UXW tick: reply with only the word TOCK.",
+     "contentTypes": []
+    },
+    {
+     "line": 54,
+     "type": "system",
+     "subtype": "turn_duration",
+     "uuid": "1fabd36e-569a-40b4-81c6-03c76ee0520d",
+     "parentUuid": "e3bd5e5a-bd63-4faa-8932-167795e106ab",
+     "isMeta": false,
+     "isSidechain": false
+    }
+   ]
+  },
+  {
+   "step": "fire-2",
+   "at": "2026-11-12T14:57:33.535Z",
+   "fireSeen": true,
+   "pane": "\n ▐▛███▛█   Claude Code v2.1.322\n▝▜██████▀  Haiku 5.5 · API Usage Billing\n ▝▝   ▝▝   /tmp/py-vYyGCJ/work\n\n\n❯ Use CronCreate (find it with ToolSearch if it is not loaded) to schedule a recurring, session-only job with cron \"* * * * *\" and prompt \"UXW tick: reply with\n  only the word TOCK.\" Then reply with only the job id.\n\n● CronCreate(* * * * *: UXW tick: reply with only the word TOCK.)\n  ⎿  Scheduled c1b9e52c (Every minute, next run 6:56 AM)\n  ⎿  Allowed by auto mode\n\n● c1b9e52c\n\n✻ Crunched for 55s · done 6:56 AM\n\n✻ Running scheduled task (Nov 12 6:56am)\n\n● TOCK\n\n✻ Worked for 14s · done 6:56 AM\n\n✻ Running scheduled task (Nov 12 6:57am)\n\n● TOCK\n\n✻ Cooked for 8s · done 6:57 AM\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏵⏵ auto mode on (shift+tab to cycle)\n",
+   "file": [
+    {
+     "line": 57,
+     "type": "system",
+     "subtype": "scheduled_task_fire",
+     "uuid": "cbe6ba95-3282-4adc-bbf6-b08472851482",
+     "parentUuid": "1fabd36e-569a-40b4-81c6-03c76ee0520d",
+     "isMeta": false,
+     "isSidechain": false,
+     "content": "Running scheduled task (Nov 12 6:57am)"
+    },
+    {
+     "line": 58,
+     "type": "user",
+     "uuid": "ec257ac8-7cad-43b4-a8b4-853a64fc2611",
+     "parentUuid": "cbe6ba95-3282-4adc-bbf6-b08472851482",
+     "isMeta": true,
+     "isSidechain": false,
+     "promptId": "f8d22fc3-1076-448a-accc-5b7036e3d60b",
+     "promptSource": "system",
+     "turnOrigin": "scheduled",
+     "queueSkipAttachments": true,
+     "role": "user",
+     "text": "UXW tick: reply with only the word TOCK.",
+     "contentTypes": []
+    },
+    {
+     "line": 61,
+     "type": "system",
+     "subtype": "turn_duration",
+     "uuid": "20cf7f73-ca0b-4e1f-b4fb-5f44d3181f8d",
+     "parentUuid": "ae8e5485-11a0-4fa4-be02-7379212fe754",
+     "isMeta": false,
+     "isSidechain": false
+    }
+   ]
+  },
+  {
+   "step": "fire-3",
+   "at": "2026-11-12T14:58:30.824Z",
+   "fireSeen": true,
+   "pane": "\n ▐▛███▛█   Claude Code v2.1.322\n▝▜██████▀  Haiku 5.5 · API Usage Billing\n ▝▝   ▝▝   /tmp/py-vYyGCJ/work\n\n\n❯ Use CronCreate (find it with ToolSearch if it is not loaded) to schedule a recurring, session-only job with cron \"* * * * *\" and prompt \"UXW tick: reply with\n  only the word TOCK.\" Then reply with only the job id.\n\n● CronCreate(* * * * *: UXW tick: reply with only the word TOCK.)\n  ⎿  Scheduled c1b9e52c (Every minute, next run 6:56 AM)\n  ⎿  Allowed by auto mode\n\n● c1b9e52c\n\n✻ Crunched for 55s · done 6:56 AM\n\n✻ Running scheduled task (Nov 12 6:56am)\n\n● TOCK\n\n✻ Worked for 14s · done 6:56 AM\n\n✻ Running scheduled task (Nov 12 6:57am)\n\n● TOCK\n\n✻ Cooked for 8s · done 6:57 AM\n\n✻ Running scheduled task (Nov 12 6:58am)\n\n● TOCK\n\n✻ Brewed for 5s · done 6:58 AM\n\n\n\n\n\n\n\n\n\n\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏵⏵ auto mode on (shift+tab to cycle)\n",
+   "file": [
+    {
+     "line": 64,
+     "type": "system",
+     "subtype": "scheduled_task_fire",
+     "uuid": "ae735c68-abf4-4636-9b09-929ac03415ac",
+     "parentUuid": "20cf7f73-ca0b-4e1f-b4fb-5f44d3181f8d",
+     "isMeta": false,
+     "isSidechain": false,
+     "content": "Running scheduled task (Nov 12 6:58am)"
+    },
+    {
+     "line": 65,
+     "type": "user",
+     "uuid": "377745b7-167c-42e0-9a55-5795c9394509",
+     "parentUuid": "ae735c68-abf4-4636-9b09-929ac03415ac",
+     "isMeta": true,
+     "isSidechain": false,
+     "promptId": "baa73058-2fcc-43cf-a9a2-3d8870800c74",
+     "promptSource": "system",
+     "turnOrigin": "scheduled",
+     "queueSkipAttachments": true,
+     "role": "user",
+     "text": "UXW tick: reply with only the word TOCK.",
+     "contentTypes": []
+    },
+    {
+     "line": 68,
+     "type": "system",
+     "subtype": "turn_duration",
+     "uuid": "454f8dcb-96c6-4b00-874d-eab720f56125",
+     "parentUuid": "990a80f6-9e8d-476c-be60-1ac58caef16b",
+     "isMeta": false,
+     "isSidechain": false
+    }
+   ]
+  },
+  {
+   "step": "delete",
+   "at": "2026-11-12T14:58:56.902Z",
+   "pane": "\n ▐▛███▛█   Claude Code v2.1.322\n▝▜██████▀  Haiku 5.5 · API Usage Billing\n ▝▝   ▝▝   /tmp/py-vYyGCJ/work\n\n\n❯ Use CronCreate (find it with ToolSearch if it is not loaded) to schedule a recurring, session-only job with cron \"* * * * *\" and prompt \"UXW tick: reply with\n  only the word TOCK.\" Then reply with only the job id.\n\n● CronCreate(* * * * *: UXW tick: reply with only the word TOCK.)\n  ⎿  Scheduled c1b9e52c (Every minute, next run 6:56 AM)\n  ⎿  Allowed by auto mode\n\n● c1b9e52c\n\n✻ Crunched for 55s · done 6:56 AM\n\n✻ Running scheduled task (Nov 12 6:56am)\n\n● TOCK\n\n✻ Worked for 14s · done 6:56 AM\n\n✻ Running scheduled task (Nov 12 6:57am)\n\n● TOCK\n\n✻ Cooked for 8s · done 6:57 AM\n\n✻ Running scheduled task (Nov 12 6:58am)\n\n● TOCK\n\n✻ Brewed for 5s · done 6:58 AM\n\n❯ Use CronDelete to delete every job you created (CronList first if you need the ids). Then reply with only the word DELETED.\n\n● CronDelete(c1b9e52c)\n  ⎿  Cancelled c1b9e52c\n\n● DELETED\n\n✻ Cooked for 24s · done 6:58 AM\n\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏵⏵ auto mode on (shift+tab to cycle)\n",
+   "file": [
+    {
+     "line": 70,
+     "type": "user",
+     "uuid": "bd0361ea-4f19-411b-bedc-db33b59e63bc",
+     "parentUuid": "454f8dcb-96c6-4b00-874d-eab720f56125",
+     "origin": {
+      "kind": "human"
+     },
+     "isSidechain": false,
+     "promptId": "8e7aba63-bb7a-42f2-bd84-4d51efb4e5b6",
+     "promptSource": "typed",
+     "turnOrigin": "human",
+     "role": "user",
+     "text": "Use CronDelete to delete every job you created (CronList first if you need the ids). Then reply with only the word DELETED.",
+     "contentTypes": []
+    },
+    {
+     "line": 84,
+     "type": "attachment",
+     "uuid": "2fdfdd3e-5d98-4fbf-889f-f3f2cae78253",
+     "parentUuid": "b99ee62c-ddd4-4574-bcf3-1425b6b53c36",
+     "isSidechain": false,
+     "attachment": {
+      "type": "deferred_tools_record"
+     }
+    },
+    {
+     "line": 91,
+     "type": "system",
+     "subtype": "turn_duration",
+     "uuid": "a6aed9f6-60f0-4d05-a3a9-37bf1cc20619",
+     "parentUuid": "20712e30-bd7c-45fc-8bd2-a2e6278dda69",
+     "isMeta": false,
+     "isSidechain": false
+    }
+   ]
+  }
+ ],
+ "transcript": "fixtures/uxwave/u3-terminal-cron-r1.transcript.jsonl"
+}

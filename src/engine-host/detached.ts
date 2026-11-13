@@ -64,6 +64,7 @@ export interface DetachedOptions {
   // leave (the live hosts' rows) and take (the dead hosts' live children)
   adopt?(): { liveHolders: ReadonlySet<string>; deadHostChildren: readonly LiveRow[] };
   env?: NodeJS.ProcessEnv; // P5 O16 M3c: the e2e seam's reading (e2eWithoutHolder); process.env when absent
+  activity?(): void; // P5 Decision Log 273: each line and document frame of the socket's client (the idle collection's quiet entry)
 }
 
 // P5 O16 M3c (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M3): the e2e's stand-in for an engine host from before
@@ -121,6 +122,7 @@ export async function startSupervisor(hostVersion: string, register: HostRegiste
       modulePath: opts.modulePath,
       register,
       badToken: 'refuse', // E10's `refuse token` (P5 Decision Log 29)
+      onActivity: opts.activity, // P5 Decision Log 273
       capabilities: unlisted(PEER_CAPABILITIES.engineHost), // P5 O3-D: with `host.attachment`, which it serves from M3
       counts: () => opts.counts(),
       // (2) every live row stopped (grace 3 s) and the plugin runner with it; P5 O16 M3b: a hosted row detached instead,

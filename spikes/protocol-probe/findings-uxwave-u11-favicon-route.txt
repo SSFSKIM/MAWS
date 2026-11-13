@@ -1,0 +1,56 @@
+UX wave, child U11, O-14: what Google's favicon address answers, against the draft's route and caps
+(the draft of the spec's U11 section as it stood then, kept outside the repository; the section is `docs/doperpowers/specs/2026-11-12-ux-wave/U11-settings-connectors-org.md`: O-14 "The fetch" and "The shapes this adds",
+and its "Probes and checks", the first item; 2026-11-12/13, VM dc-uxwave2-e584, branch ux-wave/probe2-text-defaults)
+
+Question. In the one request form the draft fixes, `GET https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&
+fallback_opts=TYPE,SIZE,URL&url=https://<site>&size=128`, no cookie, redirects refused: for well-known public sites
+and for names that do not exist, the status, the content type, the image's pixel and byte size, any redirect, what a
+site without an icon gets, and the cache headers. Do the draft's route pattern, `contentTypes: ['image/png']` and
+`maxBytes: 128 * 1024` hold?
+
+Verdict. The route holds as written: the spec's outcome "all PNG under the cap, the route is as written".
+  - Every answer of the request form was `image/png`, with no redirect (40 of 40 answers over two runs, 20 each: 18 names at size=128 and two at size=64): 15 known sites
+    answered 200 and three invented names answered 404 (and example.com, see below).
+  - The largest image was 9,182 bytes (reddit.com); every other was 252 to 4,055 bytes. The 128 KiB cap is about
+    14 times the largest seen, so the spec's rule for raising it does not fire.
+  - A site with no icon gets a 404 that still carries a PNG: 16 x 16 pixels, 726 bytes, the same bytes for every such
+    name (sha256 prefix 59bfe9bc385ad69f), and no cache header at all (only `date`). So the draft's expectation is the
+    first of its two: a 404, not a default image under 200. The status alone tells it from a real icon; the bytes
+    being the same image for every miss confirm it.
+  - A 200's cache headers: `cache-control: public, max-age=604800` (7 days), `expires` 7 days on, `last-modified`; no
+    `set-cookie` on any answer.
+
+Observed, beyond the question, that the design should know (inference marked):
+  1. `size=128` is a ceiling, not the size answered. 11 of 15 known sites answered 128 x 128; github.com 32 x 32,
+     slack.com 35 x 34, iana.org 48 x 48, apple.com 64 x 64. github.com answered the same 32 x 32 bytes at size=64.
+     The component must scale the image to its box; the draft's miss rule "an image 24 pixels wide or less" would not
+     have misread any of these 15, but (inference) a site whose only icon is 16 px would come back 200 at 16 x 16 and
+     be taken for a miss by that rule. The status is the sharper test: a 404 is a miss, a 200 is an icon.
+  2. A 404 here is Google's answer that it has no icon, not a failure on the way. The fetch table's three outcomes
+     depend on main reading it so (a miss, not asked again for 7 days) rather than as "a request that failed"
+     (retried after 5 minutes); a guarded fetch that rejects any non-2xx as an error would put every iconless site on
+     the 5-minute path. That is a reading of the table, not of code: the egress guard's handling of a 404 body was not
+     checked here.
+  3. Google's own cache lifetime is 7 days; the draft keeps a fetched icon 30 days. That is the design's choice (fewer
+     requests), not a conflict; a miss has no lifetime from Google at all, and the draft's 7 days for it is its own.
+  4. example.com, a reserved name with a real site and no favicon, answered exactly as an invented name does (404,
+     the 16 x 16 default), as did the three invented names: a registered site without an icon and a name that does not
+     exist are not told apart, and need not be.
+  5. The older address, `https://www.google.com/s2/favicons?domain=<site>&sz=128`, answered 301 (`text/html`,
+     `cache-control: public, max-age=1800`) to `https://t2.gstatic.com/…` or `t3.gstatic.com/…` (not t0), with
+     `url=http://<site>` (not https). Asked directly, `url=http://` and `url=https://` gave the same bytes (github.com,
+     wikipedia.org), so the draft's https-only pattern loses nothing.
+  6. Whether t1 to t3 must be admitted: no. t0 answered every request; the t2/t3 hosts appear only in the older
+     address's redirect, which MAWS does not follow.
+
+Method. No engine. `uxwave-u11-favicon.py` (beside this file), run on the VM with `python3 -I`: one `curl -sS
+--max-redirs 0` per request, headers `user-agent: favicon-check/1.0` (a generic client name, not MAWS's) and `accept:
+image/*`, no cookie jar. Pixel size from the PNG's IHDR. Sites, all public and neutral: google.com, wikipedia.org,
+github.com, mozilla.org, python.org, apple.com, microsoft.com, stackoverflow.com, reddit.com, nytimes.com, bbc.com,
+slack.com, notion.so, example.com, iana.org; invented: no-such-site-p7k2q9.com, unregistered-zx81-0000.org,
+nonexistent-icon-test-31415.net. Plus github.com and one invented name at size=64 and through the older address. Every
+site's name fits the draft's pattern (two labels, the last at least two letters: notion.so included).
+Runs: two, a minute apart, the same 22 answers (status and bytes) in both.
+Fixtures: fixtures/uxwave/u11-favicon-r1.ndjson and -r2.ndjson, one JSON object per answer (site, size or the older
+address, status, redirect, content type, bytes, png, pixels, a sha256 prefix of the body, the cache headers,
+set-cookie present or not).

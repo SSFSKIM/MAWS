@@ -1,0 +1,81 @@
+UX wave, child U3, probe 2: a scheduled prompt firing, headless and in a terminal session, on engine 2.1.322
+(docs/doperpowers/specs/2026-11-12-ux-wave/U3-transcript-rows.md, "Probes and checks" 2; it serves the `schedule` class
+of UC-2 in docs/doperpowers/specs/2026-11-12-ux-wave-design.md; 2026-11-12, VM dc-uxprobe-dc94, branch
+ux-wave/probe-arrivals)
+
+Question. What the wire and the file carry at a fire. The only earlier fixture (pass3/e7-cron.jsonl, 2.1.291) shows no
+`user` frame at a fire; the spec read in the 2.1.322 source that the prompt is stamped with origin `{kind:
+'task-notification', subkind: 'scheduled-trigger'}` and that a terminal writes a `system` row `scheduled_task_fire`.
+
+Verdict. Neither outcome the spec names occurred as written; the result is closest to its second outcome ("only the
+terminal's system row"), with one live mark the spec does not name.
+  - Live wire (a session MAWS runs): no `user` frame carries the prompt, with MAWS's flags (--replay-user-messages
+    included). A fire is visible as a `command_lifecycle` frame `{state: "started", wakeup_source: "schedule_wakeup",
+    command_uuid: <the prompt row's uuid>}` followed by a `system/init` with no `user_message_uuids` and a `result`
+    with NO `origin` key. The prompt's text is not on the wire. 4 of 4 fires.
+  - File, headless: a `user` row holding the prompt, isMeta true, promptSource "system", turnOrigin "scheduled",
+    wakeupSource "schedule_wakeup", and NO `origin` object (so no subkind). 4 of 4.
+  - File, terminal: a `system` row `scheduled_task_fire` ("Running scheduled task (<date time>)", with taskId, cron and
+    prompt), then the same meta `user` row, which there also names scheduledTaskId and scheduledFireId (= the system
+    row's uuid). No origin object either. 3 of 3.
+  So the `schedule` class cannot be read from an origin object on any route (UC-2 rule 1 names it as the mark). It can
+  be read from the file's `turnOrigin: "scheduled"` (both kinds of session) and the terminal's `scheduled_task_fire`
+  row. On the live route the turn can be told apart by the lifecycle frame's `wakeup_source`, but the prompt cannot be
+  drawn from the wire alone.
+
+Method.
+  Engine 2.1.322 (/opt/maws-probe/engines/2.1.322), model haiku (claude-haiku-5-5), route: the gateway through
+  vm-run.sh's loopback forward (spikes/protocol-probe/VM.md).
+  Headless: scenarios/pass3/uxwave-u3-cron.mjs, launched as MAWS launches (scenarios/pass3/uxwave-common.mjs: the flags
+  of src/engine-host/launch.ts, `--forward-subagent-text --replay-user-messages --include-hook-events`, setting
+  sources user,project,local, --permission-mode auto, --await-initialize, --session-id, the maws server's allow and
+  disallow pair, --settings {"dialogExpiry":"never"}, MAWS's environment constants, MAWS's initialize, then
+  ui_attach, ui_panes and set_max_thinking_tokens {null, summarized}; --max-budget-usd 1.50 is the probe's guard).
+  One prompt has the model call CronCreate for a session-only recurring job `* * * * *` with prompt "UXW tick: reply
+  with only the word TOCK."; the scenario records three fires with the model idle, then one that falls due while a
+  75 s foreground command runs, then has the model delete the job. Fixture u3-cron-r1.jsonl (+ .transcript.jsonl).
+  Terminal: scenarios/pass3/uxwave-u3-terminal.mjs (UXW_TERM=cron): the interactive engine in tmux (--model haiku,
+  auto mode, as `vm-run.sh term` starts it), the same prompt typed, three fires, then deletion.
+  u3-terminal-cron-r1.terminal.json (pane and new file rows per step) and .transcript.jsonl.
+  Fires: 4 headless (3 idle, 1 after a running turn), 3 terminal. A first headless attempt whose busy case did not
+  run (the engine refused a standalone `sleep 75`) showed the same idle form for its 3 fires; it was not kept.
+
+Observed: the live wire (u3-cron-r1.jsonl).
+  idle fire 1: command_lifecycle started, command_uuid 9e5f7027…, wakeup_source "schedule_wakeup" (seq 70); system/init
+    without user_message_uuids (71); the answer (76); result with no `origin` key, result "TOCK" (80); lifecycle
+    completed (81). No `user` frame between 70 and 81.
+  idle fires 2 and 3: the same (85/86/95, 100/101/110).
+  the busy fire: the job fell due while the 75 s foreground command ran (turn seq 118 to result 150, origin human); it
+    was not taken into that turn: it fired as a turn of its own after it (lifecycle 154, init 155 without
+    user_message_uuids, result 164 without origin).
+  The probe's own turns, for contrast: init with user_message_uuids naming the prompt, the prompt replayed (isReplay
+    true, origin human), result origin {kind: "human"} (26/28/65, 118/120/150).
+Observed: the file.
+  headless (u3-cron-r1.transcript.jsonl line 47, and lines 54, 61, 85): `user`, isMeta true, content the job's prompt,
+    promptSource "system", turnOrigin "scheduled", wakeupSource "schedule_wakeup", queueSkipAttachments true,
+    queueSkipSlashCommands true; no `origin`, no scheduledTaskId. Its uuid is the lifecycle frame's command_uuid
+    (line 47 = seq 70, 9e5f7027…), which pairs the live mark with the file row. No `system` row at the fire.
+  terminal (u3-terminal-cron-r1.transcript.jsonl lines 50-51, 57-58, 64-65): `system` scheduled_task_fire, content
+    "Running scheduled task (Nov 12 6:56am)" (the VM's local time), taskId "c1b9e52c", cron "* * * * *", prompt; then
+    the meta `user` row as headless, plus scheduledTaskId "c1b9e52c", scheduledFireId = the system row's uuid,
+    queuePriority "later"; no `origin`. The pane draws "✻ Running scheduled task (Nov 12 6:56am)" and the answer.
+
+Inference, in the spec's terms.
+  - The spec's first outcome ("a user frame or row with the subkind") does not hold on 2.1.322 for a CronCreate job:
+    no row or frame carries `{kind: 'task-notification', subkind: 'scheduled-trigger'}`. The subkind exists in the
+    source (cli.pretty.js:367654-367690); which path stamps it was not traced. This job's prompt was queued as a meta
+    prompt with `turnOrigin: "scheduled"` and no origin.
+  - File and remote routes: read the class from `turnOrigin: "scheduled"` on the meta `user` row (both session kinds),
+    and in a terminal session from `scheduled_task_fire` (which also gives the job's id and cron). The row's own
+    text is the prompt, so `{class: 'schedule', prompt}` is complete from the file.
+  - Live route: as the spec's second outcome says, the prompt is not on the wire, so a session MAWS runs cannot draw
+    "Running scheduled task · <prompt>" when it fires. It can tell the turn is a scheduled wakeup from the lifecycle
+    frame (wakeup_source "schedule_wakeup"), which is more than "Continued for …" needs; whether `schedule_wakeup` is
+    also what a ScheduleWakeup (/loop) tick carries was not probed, so the line could not yet name it a cron job.
+    The result frame of such a turn has no `origin`, which a reader keyed on the result's origin (UC-2 pitfall 5)
+    must treat as "not the person's".
+  - Placement: a job that falls due during a turn waits for it and opens its own turn (1 of 1), so its row is always
+    a turn's first row.
+
+Not probed. A durable job (`durable: true`), a one-shot job, a /loop tick (ScheduleWakeup), and a fire in a session
+  resumed from disk; a fire with the bare launch.

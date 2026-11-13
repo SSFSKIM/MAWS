@@ -23,6 +23,7 @@ import { machineKey } from '@shared/machine/org-key';
 import { machineProjectId } from '@shared/machine/project-ids';
 import { lockStartedAt, SPINE_REEXECUTE_DEFAULT } from './daemon';
 import { MawsdScene, RawApp, sleep, until, type StandIn } from '../../test/support/mawsd-scene';
+import { GROWTH_BYTES } from '@shared/host/idle-collect';
 import { fetchOverSocket } from '../services/artifacts/scheme/http'; // P5 O5 M2
 
 let scene: MawsdScene;
@@ -53,6 +54,60 @@ describe('the idle collection (P5 Decision Log 124)', () => {
     await app.request('daemon.status');
     await sleep(20);
     expect(scene.collect).toHaveBeenCalledOnce();
+  });
+
+  it('collects once a quiet period passes with a client still connected, and not again with no activity after it (P5 Decision Log 273)', async () => {
+    let grown = 0; // each reading grown, so the guard never decides
+    await scene.start({ idleQuiet: { quietMs: 150, heap: () => ({ used: (grown += 2) * GROWTH_BYTES, physical: grown * GROWTH_BYTES }) } });
+    await until(() => scene.collect.mock.calls.length === 1, 5_000, 'the start’s collection');
+    const app = await scene.app('machine');
+    await app.request('daemon.status');
+    await until(() => scene.collect.mock.calls.length === 2, 5_000, 'the quiet period’s collection');
+    expect(scene.logs.filter((line) => /^idle: collected in \d+ ms, heap .*, after \d+ s with no activity$/.test(line))).toHaveLength(1);
+    await sleep(600); // four periods' worth with the client connected and silent
+    expect(scene.collect).toHaveBeenCalledTimes(2);
+    await app.request('daemon.status'); // activity arms the next period
+    await until(() => scene.collect.mock.calls.length === 3, 5_000, 'the next quiet period’s collection');
+  });
+
+  it('collects under a remote viewer’s standing hold, never under an operation’s (P5 Decision Log 273)', async () => {
+    let services: DaemonServices | null = null;
+    const endpoint: EndpointModule = { start: async (started) => void (services = started), stop: async () => {}, status: () => null, enrollment: () => null, cli: async () => ({ code: 0, out: '' }) };
+    let grown = 0;
+    await scene.start({ endpoint, idleQuiet: { quietMs: 150, heap: () => ({ used: (grown += 2) * GROWTH_BYTES, physical: grown * GROWTH_BYTES }) } });
+    await until(() => scene.collect.mock.calls.length === 1, 5_000, 'the start’s collection');
+    await scene.app('machine'); // a client connected: the idle entry never comes
+    const channel = services!.hold('channel', true); // an idle remote channel, open for good
+    await until(() => scene.collect.mock.calls.length === 2, 5_000, 'the quiet period’s collection under the channel');
+    const op = services!.hold('op'); // an operation begins: activity, and no collection while it runs
+    await sleep(600);
+    expect(scene.collect).toHaveBeenCalledTimes(2);
+    op();
+    await until(() => scene.collect.mock.calls.length === 3, 5_000, 'the quiet period after the operation');
+    channel();
+  });
+
+  it('collects over no loaded spine’s work in flight, and the work’s settling arms the next quiet period (P5 Decision Log 273)', async () => {
+    const root = { busy: false, settle: () => {} };
+    const load = async (): Promise<SpineEntry> => ({
+      takeSpineLock,
+      openSpineData: async (_profile, { lock }) => ({ lock: lock!, refused: lock!.refused, machineSettings: null as never, paths: { client: '', machine: '' } }),
+      startSpine: (started) => {
+        started.bus.register('session.launchMode', () => ({ mode: 'index' }));
+        return { view: { engineStatuses: () => [], on: () => () => {} } as never, settled: () => (root.busy ? new Promise<void>((resolve) => (root.settle = resolve)) : Promise.resolve()), busy: () => root.busy, stop: () => {} };
+      },
+    });
+    let grown = 0;
+    await scene.start({ claimSpine: true, permanentClient: true, spine: { load }, idleQuiet: { quietMs: 150, heap: () => ({ used: (grown += 2) * GROWTH_BYTES, physical: grown * GROWTH_BYTES }) } });
+    await until(() => scene.collect.mock.calls.length === 1, 5_000, 'the start’s collection');
+    const app = await scene.app('machine');
+    root.busy = true; // the command loads the spine, whose sweep then runs on
+    await app.request('session.launchMode');
+    await sleep(600);
+    expect(scene.collect).toHaveBeenCalledOnce();
+    root.busy = false;
+    root.settle();
+    await until(() => scene.collect.mock.calls.length === 2, 5_000, 'the quiet period after the spine settled');
   });
 
   it('collects nothing once its exit began, a collection already queued included', async () => {

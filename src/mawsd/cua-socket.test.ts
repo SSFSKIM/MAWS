@@ -363,6 +363,25 @@ describe('the relay', () => {
     await until(() => appClosed);
   });
 
+  it('tells activity at the chunks a relayed pair carries, either way, and none once it is quiet (P5 Decision Log 273)', async () => {
+    let activity = 0;
+    const { sockets, appDir } = stand({ addon: fakeAddon(), activity: () => void (activity += 1) });
+    const app = appSocket(appDir, A);
+    await app.listening;
+    sockets.target(appDir);
+    sockets.engineProcess(A, ENGINE);
+    const client = engineClient(sockets.ensure(A)!, Buffer.from('to the app'));
+    await until(() => app.heard().length === 10);
+    const toApp = activity;
+    expect(toApp).toBeGreaterThan(0);
+    app.peers[0]!.write('to the engine');
+    await until(() => client.heard().length === 13);
+    expect(activity).toBeGreaterThan(toApp);
+    const quiet = activity;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(activity).toBe(quiet); // a pair that carries nothing tells nothing
+  });
+
   it('waits a bounded while for the app\'s socket to listen, then relays', async () => {
     const addon = fakeAddon();
     const { sockets, appDir } = stand({ addon, relayConnectWaitMs: 2000 });

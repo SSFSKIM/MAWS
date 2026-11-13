@@ -1,0 +1,344 @@
+[
+ {
+  "step": "s0-start",
+  "fixture": "uxwave-folder-headless.jsonl",
+  "transcriptFolder": "-tmp-pz-JszPRS-work",
+  "rows": 26,
+  "summary": {
+   "directory": "/tmp/pz-JszPRS/work",
+   "relocatedCwd": null,
+   "gitBranch": "master"
+  },
+  "record": {
+   "directory": "/tmp/pz-JszPRS/work",
+   "worktree": null,
+   "branch": "master",
+   "projectId": "5a479252-98ba-498b-85b8-73e9174739a4"
+  },
+  "newestMainRow": {
+   "cwd": "/tmp/pz-JszPRS/work",
+   "gitBranch": "master"
+  }
+ },
+ {
+  "step": "s1-enter-worktree",
+  "fixture": "uxwave-folder-headless.jsonl",
+  "transcriptFolder": "-tmp-pz-JszPRS-work--claude-worktrees-pz-alpha",
+  "rows": 54,
+  "summary": {
+   "directory": "/tmp/pz-JszPRS/work",
+   "relocatedCwd": "/tmp/pz-JszPRS/work/.claude/worktrees/pz-alpha",
+   "gitBranch": "worktree-pz-alpha"
+  },
+  "record": {
+   "directory": "/tmp/pz-JszPRS/work/.claude/worktrees/pz-alpha",
+   "worktree": {
+    "path": "/tmp/pz-JszPRS/work/.claude/worktrees/pz-alpha",
+    "branch": "worktree-pz-alpha"
+   },
+   "branch": "worktree-pz-alpha",
+   "projectId": "5a479252-98ba-498b-85b8-73e9174739a4"
+  },
+  "newestMainRow": {
+   "cwd": "/tmp/pz-JszPRS/work/.claude/worktrees/pz-alpha",
+   "gitBranch": "worktree-pz-alpha"
+  }
+ },
+ {
+  "step": "s2-run-there",
+  "fixture": "uxwave-folder-headless.jsonl",
+  "transcriptFolder": "-tmp-pz-JszPRS-work--claude-worktrees-pz-alpha",
+  "rows": 64,
+  "summary": {
+   "directory": "/tmp/pz-JszPRS/work",
+   "relocatedCwd": "/tmp/pz-JszPRS/work/.claude/worktrees/pz-alpha",
+   "gitBranch": "worktree-pz-alpha"
+  },
+  "record": {
+   "directory": "/tmp/pz-JszPRS/work/.claude/worktrees/pz-alpha",
+   "worktree": {
+    "path": "/tmp/pz-JszPRS/work/.claude/worktrees/pz-alpha",
+    "branch": "worktree-pz-alpha"
+   },
+   "branch": "worktree-pz-alpha",
+   "projectId": "5a479252-98ba-498b-85b8-73e9174739a4"
+  },
+  "newestMainRow": {
+   "cwd": "/tmp/pz-JszPRS/work/.claude/worktrees/pz-alpha",
+   "gitBranch": "worktree-pz-alpha"
+  }
+ },
+ {
+  "step": "s3-exit-keep",
+  "fixture": "uxwave-folder-headless.jsonl",
+  "transcriptFolder": "-tmp-pz-JszPRS-work",
+  "rows": 98,
+  "summary": {
+   "directory": "/tmp/pz-JszPRS/work",
+   "relocatedCwd": "/tmp/pz-JszPRS/work",
+   "gitBranch": "master"
+  },
+  "record": {
+   "directory": "/tmp/pz-JszPRS/work",
+   "worktree": null,
+   "branch": "master",
+   "projectId": "5a479252-98ba-498b-85b8-73e9174739a4"
+  },
+  "newestMainRow": {
+   "cwd": "/tmp/pz-JszPRS/work",
+   "gitBranch": "master"
+  }
+ },
+ {
+  "step": "s3b-run-after-exit",
+  "fixture": "uxwave-folder-headless.jsonl",
+  "transcriptFolder": "-tmp-pz-JszPRS-work",
+  "rows": 107,
+  "summary": {
+   "directory": "/tmp/pz-JszPRS/work",
+   "relocatedCwd": "/tmp/pz-JszPRS/work",
+   "gitBranch": "master"
+  },
+  "record": {
+   "directory": "/tmp/pz-JszPRS/work",
+   "worktree": null,
+   "branch": "master",
+   "projectId": "5a479252-98ba-498b-85b8-73e9174739a4"
+  },
+  "newestMainRow": {
+   "cwd": "/tmp/pz-JszPRS/work",
+   "gitBranch": "master"
+  }
+ },
+ {
+  "step": "s4-cd-second-worktree",
+  "fixture": "uxwave-folder-headless.jsonl",
+  "transcriptFolder": "-tmp-pz-JszPRS-work",
+  "rows": 118,
+  "summary": {
+   "directory": "/tmp/pz-JszPRS/work",
+   "relocatedCwd": "/tmp/pz-JszPRS/work",
+   "gitBranch": "master"
+  },
+  "record": {
+   "directory": "/tmp/pz-JszPRS/work",
+   "worktree": null,
+   "branch": "master",
+   "projectId": "5a479252-98ba-498b-85b8-73e9174739a4"
+  },
+  "newestMainRow": {
+   "cwd": "/tmp/pz-JszPRS/work/.claude/worktrees/pz-beta",
+   "gitBranch": "master"
+  }
+ },
+ {
+  "step": "s4b-run-after-cd",
+  "fixture": "uxwave-folder-headless.jsonl",
+  "transcriptFolder": "-tmp-pz-JszPRS-work",
+  "rows": 127,
+  "summary": {
+   "directory": "/tmp/pz-JszPRS/work",
+   "relocatedCwd": "/tmp/pz-JszPRS/work",
+   "gitBranch": "master"
+  },
+  "record": {
+   "directory": "/tmp/pz-JszPRS/work",
+   "worktree": null,
+   "branch": "master",
+   "projectId": "5a479252-98ba-498b-85b8-73e9174739a4"
+  },
+  "newestMainRow": {
+   "cwd": "/tmp/pz-JszPRS/work/.claude/worktrees/pz-beta",
+   "gitBranch": "master"
+  }
+ },
+ {
+  "step": "s5-cd-subfolder",
+  "fixture": "uxwave-folder-headless.jsonl",
+  "transcriptFolder": "-tmp-pz-JszPRS-work",
+  "rows": 144,
+  "summary": {
+   "directory": "/tmp/pz-JszPRS/work",
+   "relocatedCwd": "/tmp/pz-JszPRS/work",
+   "gitBranch": "master"
+  },
+  "record": {
+   "directory": "/tmp/pz-JszPRS/work",
+   "worktree": null,
+   "branch": "master",
+   "projectId": "5a479252-98ba-498b-85b8-73e9174739a4"
+  },
+  "newestMainRow": {
+   "cwd": "/tmp/pz-JszPRS/work/.claude/worktrees/pz-beta/sub",
+   "gitBranch": "master"
+  }
+ },
+ {
+  "step": "s5b-run-after-subfolder",
+  "fixture": "uxwave-folder-headless.jsonl",
+  "transcriptFolder": "-tmp-pz-JszPRS-work",
+  "rows": 153,
+  "summary": {
+   "directory": "/tmp/pz-JszPRS/work",
+   "relocatedCwd": "/tmp/pz-JszPRS/work",
+   "gitBranch": "master"
+  },
+  "record": {
+   "directory": "/tmp/pz-JszPRS/work",
+   "worktree": null,
+   "branch": "master",
+   "projectId": "5a479252-98ba-498b-85b8-73e9174739a4"
+  },
+  "newestMainRow": {
+   "cwd": "/tmp/pz-JszPRS/work/.claude/worktrees/pz-beta/sub",
+   "gitBranch": "master"
+  }
+ },
+ {
+  "step": "s6-cd-sibling-outside",
+  "fixture": "uxwave-folder-headless.jsonl",
+  "transcriptFolder": "-tmp-pz-JszPRS-work",
+  "rows": 164,
+  "summary": {
+   "directory": "/tmp/pz-JszPRS/work",
+   "relocatedCwd": "/tmp/pz-JszPRS/work",
+   "gitBranch": "master"
+  },
+  "record": {
+   "directory": "/tmp/pz-JszPRS/work",
+   "worktree": null,
+   "branch": "master",
+   "projectId": "5a479252-98ba-498b-85b8-73e9174739a4"
+  },
+  "newestMainRow": {
+   "cwd": "/tmp/pz-JszPRS/work",
+   "gitBranch": "master"
+  }
+ },
+ {
+  "step": "s6b-run-after-sibling",
+  "fixture": "uxwave-folder-headless.jsonl",
+  "transcriptFolder": "-tmp-pz-JszPRS-work",
+  "rows": 173,
+  "summary": {
+   "directory": "/tmp/pz-JszPRS/work",
+   "relocatedCwd": "/tmp/pz-JszPRS/work",
+   "gitBranch": "master"
+  },
+  "record": {
+   "directory": "/tmp/pz-JszPRS/work",
+   "worktree": null,
+   "branch": "master",
+   "projectId": "5a479252-98ba-498b-85b8-73e9174739a4"
+  },
+  "newestMainRow": {
+   "cwd": "/tmp/pz-JszPRS/work",
+   "gitBranch": "master"
+  }
+ },
+ {
+  "step": "s7-subagent-enters-worktree",
+  "fixture": "uxwave-folder-headless.jsonl",
+  "transcriptFolder": "-tmp-pz-JszPRS-work",
+  "rows": 188,
+  "summary": {
+   "directory": "/tmp/pz-JszPRS/work",
+   "relocatedCwd": "/tmp/pz-JszPRS/work",
+   "gitBranch": "master"
+  },
+  "record": {
+   "directory": "/tmp/pz-JszPRS/work",
+   "worktree": null,
+   "branch": "master",
+   "projectId": "5a479252-98ba-498b-85b8-73e9174739a4"
+  },
+  "newestMainRow": {
+   "cwd": "/tmp/pz-JszPRS/work",
+   "gitBranch": "master"
+  }
+ },
+ {
+  "step": "s7b-main-after-subagent",
+  "fixture": "uxwave-folder-headless.jsonl",
+  "transcriptFolder": "-tmp-pz-JszPRS-work",
+  "rows": 197,
+  "summary": {
+   "directory": "/tmp/pz-JszPRS/work",
+   "relocatedCwd": "/tmp/pz-JszPRS/work",
+   "gitBranch": "master"
+  },
+  "record": {
+   "directory": "/tmp/pz-JszPRS/work",
+   "worktree": null,
+   "branch": "master",
+   "projectId": "5a479252-98ba-498b-85b8-73e9174739a4"
+  },
+  "newestMainRow": {
+   "cwd": "/tmp/pz-JszPRS/work",
+   "gitBranch": "master"
+  }
+ },
+ {
+  "step": "s8-subagent-isolation",
+  "fixture": "uxwave-folder-headless.jsonl",
+  "transcriptFolder": "-tmp-pz-JszPRS-work",
+  "rows": 216,
+  "summary": {
+   "directory": "/tmp/pz-JszPRS/work",
+   "relocatedCwd": "/tmp/pz-JszPRS/work",
+   "gitBranch": "master"
+  },
+  "record": {
+   "directory": "/tmp/pz-JszPRS/work",
+   "worktree": null,
+   "branch": "master",
+   "projectId": "5a479252-98ba-498b-85b8-73e9174739a4"
+  },
+  "newestMainRow": {
+   "cwd": "/tmp/pz-JszPRS/work",
+   "gitBranch": "master"
+  }
+ },
+ {
+  "step": "s8b-main-after-isolated",
+  "fixture": "uxwave-folder-headless.jsonl",
+  "transcriptFolder": "-tmp-pz-JszPRS-work",
+  "rows": 229,
+  "summary": {
+   "directory": "/tmp/pz-JszPRS/work",
+   "relocatedCwd": "/tmp/pz-JszPRS/work",
+   "gitBranch": "master"
+  },
+  "record": {
+   "directory": "/tmp/pz-JszPRS/work",
+   "worktree": null,
+   "branch": "master",
+   "projectId": "5a479252-98ba-498b-85b8-73e9174739a4"
+  },
+  "newestMainRow": {
+   "cwd": "/tmp/pz-JszPRS/work",
+   "gitBranch": "master"
+  }
+ },
+ {
+  "step": "s9-after-resume",
+  "fixture": "uxwave-folder-headless-resume.jsonl",
+  "transcriptFolder": "-tmp-pz-JszPRS-work",
+  "rows": 241,
+  "summary": {
+   "directory": "/tmp/pz-JszPRS/work",
+   "relocatedCwd": "/tmp/pz-JszPRS/work",
+   "gitBranch": "master"
+  },
+  "record": {
+   "directory": "/tmp/pz-JszPRS/work",
+   "worktree": null,
+   "branch": "master",
+   "projectId": "5a479252-98ba-498b-85b8-73e9174739a4"
+  },
+  "newestMainRow": {
+   "cwd": "/tmp/pz-JszPRS/work",
+   "gitBranch": "master"
+  }
+ }
+]

@@ -67,6 +67,22 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
   // milliseconds is only caught by the settle rescan (watcher.ts), so their clocks start once that has run.
   const settled = () => new Promise((resolve) => setTimeout(resolve, SETTLE_MS + DEBOUNCE_MS + 50));
 
+  // P5 Decision Log 273: a change the watcher hears starts the host's work (its reads and scans), so it is activity to the
+  // idle collection's quiet entry
+  it('tells activity at each change its watcher hears', async () => {
+    const listeners = new Map<string, (event: string, filename: string | null) => void>();
+    const watch: WatchFn = (path, _options, listener) => {
+      listeners.set(path, listener);
+      return Object.assign(new EventEmitter(), { close: vi.fn() });
+    };
+    let activity = 0;
+    service = new FsService({ paths: fixture.paths, emit: () => true, watch, activity: () => void (activity += 1) });
+    await service.start();
+    const before = activity;
+    listeners.get(fixture.paths.projects)!('rename', null);
+    await expect.poll(() => activity, { timeout: 2_000 }).toBeGreaterThan(before);
+  });
+
   it.each(['rescan', 'timer'] as const)('reconciles missed agent and workflow sidecars on %s, including removed workflows', async (trigger) => {
     await fixture.addTranscript('/work/a', S1, [user('u1', null, '/work/a', 'first')]);
     const listeners = new Map<string, (event: string, filename: string | null) => void>();

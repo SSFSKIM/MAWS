@@ -1,0 +1,49 @@
+{
+ "skills": [
+  {
+   "name": "p3u-person-label",
+   "source": "user",
+   "plugin": null,
+   "path": "<home>/.claude/skills/p3u-person-dir/SKILL.md"
+  },
+  {
+   "name": "p3u-person-same",
+   "source": "user",
+   "plugin": null,
+   "path": "<home>/.claude/skills/p3u-person-same/SKILL.md"
+  },
+  {
+   "name": "p3u-project-label",
+   "source": "project",
+   "plugin": null,
+   "path": "<repo>/.claude/skills/p3u-project-dir/SKILL.md"
+  },
+  {
+   "name": "p3u-project-same",
+   "source": "project",
+   "plugin": null,
+   "path": "<repo>/.claude/skills/p3u-project-same/SKILL.md"
+  },
+  {
+   "name": "p3u-mani-skill",
+   "source": "plugin",
+   "plugin": "p3u-entry@p3u-market",
+   "path": "<home>/.claude/plugins/cache/p3u-market/p3u-entry/0.0.1/skills/p3u-mani-skill/SKILL.md"
+  },
+  {
+   "name": "p3u-plug-label",
+   "source": "plugin",
+   "plugin": "p3u-plugin@p3u-market",
+   "path": "<home>/.claude/plugins/cache/p3u-market/p3u-plugin/0.0.1/skills/p3u-plug-dir/SKILL.md"
+  },
+  {
+   "name": "p3u-plug-same",
+   "source": "plugin",
+   "plugin": "p3u-plugin@p3u-market",
+   "path": "<home>/.claude/plugins/cache/p3u-market/p3u-plugin/0.0.1/skills/p3u-plug-same/SKILL.md"
+  }
+ ],
+ "warnings": [
+  "Plugin MCP servers and marketplace-only skill declarations are not inventoried; see Plugins."
+ ]
+}
