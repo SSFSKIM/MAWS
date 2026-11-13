@@ -86,17 +86,17 @@ describe("request renderer registers through C6's seam", () => {
     act(() => {
       disposeRenderer = connectRequestCard();
     });
-    await waitFor(() => expect(slot('r1')?.querySelector('h3')?.textContent).toBe('Bash'));
-    expect(slot('r2')?.querySelector('h3')?.textContent).toBe('Read');
+    await waitFor(() => expect(slot('r1')?.querySelector('h3')?.textContent).toBe('◐Run a command'));
+    expect(slot('r2')?.querySelector('h3')?.textContent).toBe('◐Read a file');
 
     let undock = () => {};
     act(() => {
       undock = markDocked(APP, 'r1' as RequestId); // a docked placement of this session shows r1
     });
     expect(slot('r1')?.textContent).toBe('◐Waiting for you · Bash · answer below ↓');
-    expect(slot('r2')?.querySelector('h3')?.textContent).toBe('Read'); // a different pending request keeps its full card
+    expect(slot('r2')?.querySelector('h3')?.textContent).toBe('◐Read a file'); // a different pending request keeps its full card
     act(() => undock());
-    expect(slot('r1')?.querySelector('h3')?.textContent).toBe('Bash');
+    expect(slot('r1')?.querySelector('h3')?.textContent).toBe('◐Run a command');
 
     act(() => useAttention.getState().applyChanged({ appSessionId: APP, items: [itemFor(read, APP)] }, TEST_MACHINE)); // r1 retired
     expect(slot('r1')?.textContent).toBe('');
