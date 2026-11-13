@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SendContent } from '@shared/engine/session-state-store';
 import type { PromptHistoryEvent } from '@shared/graph/events';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
 import { DRAFT_CLAIM, settles, STAGED_DRAFT_WORDS, STALE_DRAFT_WORDS, type Draft } from '@shared/ipc/schema/session';
 import { Db } from '../../../../services/index/db';
 import { DraftStore } from '../../../../services/index/drafts';
@@ -87,28 +87,32 @@ CREATE TABLE drafts (app_session_id TEXT PRIMARY KEY REFERENCES sessions(app_id)
   const client = { ...fake.client, localMachine: TEST_MACHINE, invoke: vi.fn(invoke) } as unknown as MawsBridge;
 
   const never = new Promise<never>(() => {});
-  const controls: QueueControls = {
-    cancelSteer: vi.fn(async ({ messageUuid }) => {
+  const real = {
+    cancelSteer: async ({ messageUuid }: { messageUuid: MessageUuid }): Promise<CommandResult<'session.steer.cancel'>> => {
       log.push('cancel');
       if (holdWithdrawals) return never;
-      if (!steers.delete(messageUuid)) return { ok: true, value: { outcome: 'already_started' as const } };
+      if (!steers.delete(messageUuid)) return { ok: true, value: { outcome: 'already_started' } };
       row('cancel', null, messageUuid);
-      return { ok: true, value: { outcome: 'cancelled' as const } };
-    }),
-    remove: vi.fn(async ({ queueId }) => {
+      return { ok: true, value: { outcome: 'cancelled' } };
+    },
+    remove: async ({ queueId }: { queueId: string }): Promise<CommandResult<'session.queue.remove'>> => {
       log.push('remove');
       if (holdWithdrawals) return never;
-      if (!entries.delete(queueId)) return { ok: false, error: { code: 'invalid_input' as const, message: `no queued entry ${queueId}` } };
+      if (!entries.delete(queueId)) return { ok: false, error: { code: 'invalid_input', message: `no queued entry ${queueId}` } };
       row('remove', queueId, null);
       return { ok: true, value: undefined };
-    }),
+    },
+  };
+  const controls = {
+    cancelSteer: vi.fn(real.cancelSteer),
+    remove: vi.fn(real.remove),
     promote: vi.fn(),
     hold: vi.fn(),
     edit: vi.fn(),
     setPaused: vi.fn(),
     sendNow: vi.fn(),
-  } as unknown as QueueControls;
-  const deps: TakeBackDeps = { client, controls: () => controls };
+  };
+  const deps: TakeBackDeps = { client, controls: () => controls as unknown as QueueControls };
 
   return {
     store,
@@ -117,6 +121,7 @@ CREATE TABLE drafts (app_session_id TEXT PRIMARY KEY REFERENCES sessions(app_id)
     row,
     deps,
     controls,
+    real,
     steers,
     entries,
     holdNextSets: (count = 1) => void (holdSets += count),
@@ -154,9 +159,9 @@ function box(free = true) {
 }
 
 const textOf = (doc: ComposerDoc | null | undefined): string => JSON.stringify(doc ?? null).match(/"text":"([^"]*)"/)?.[1] ?? '';
-const next = (messageUuid: MessageUuid, content: SendContent = TEXT) => ({ kind: 'next' as const, key: messageUuid, messageUuid, content, createdAt: SINCE });
-const after = (queueId: string, content: SendContent = TEXT) => ({ kind: 'after' as const, key: queueId, queueId, content, createdAt: SINCE });
-const held = (queueId: string) => ({ kind: 'held' as const, key: queueId, queueId, content: TEXT, createdAt: SINCE });
+const next = (messageUuid: MessageUuid, content: SendContent = TEXT) => ({ kind: 'next' as const, key: messageUuid, messageUuid, content, createdAt: SINCE, answer: false });
+const after = (queueId: string, content: SendContent = TEXT) => ({ kind: 'after' as const, key: queueId, queueId, content, createdAt: SINCE, answer: false });
+const held = (queueId: string) => ({ kind: 'held' as const, key: queueId, queueId, content: TEXT, createdAt: SINCE, answer: false });
 const stageOf = (ref: MessageUuid, at = '2026-09-29T10:01:00.000Z') =>
   draftOf({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: TEXT }] }], attrs: { takeBack: { ref, kind: 'steer', since: SINCE } } }, at, { whole: true })!;
 const notice = () => useComposerStore.getState().stackNotices.get(APP)?.text ?? null;
@@ -445,11 +450,9 @@ describe('(d) two windows carrying one stage', () => {
     const a = box();
     attachTakeBackBox(APP, a.api);
     const gate = deferred();
-    const cancel = w.controls.cancelSteer as unknown as ReturnType<typeof vi.fn>;
-    const real = cancel.getMockImplementation()!;
-    cancel.mockImplementationOnce(async (args: { messageUuid: MessageUuid }) => {
+    w.controls.cancelSteer.mockImplementationOnce(async (args) => {
       await gate.promise; // A's withdrawal is on its way
-      return real(args);
+      return w.real.cancelSteer(args);
     });
     const runA = takeBack(APP, next(U1), w.deps);
     await settleAll();
@@ -476,10 +479,8 @@ describe('(d) two windows carrying one stage', () => {
     const a = box();
     const detachA = attachTakeBackBox(APP, a.api);
     const gate = deferred();
-    const cancel = w.controls.cancelSteer as unknown as ReturnType<typeof vi.fn>;
-    const real = cancel.getMockImplementation()!;
-    cancel.mockImplementationOnce(async (args: { messageUuid: MessageUuid }) => {
-      const answer = await real(args); // A's withdrawal is taken; its window goes before the answer
+    w.controls.cancelSteer.mockImplementationOnce(async (args) => {
+      const answer = await w.real.cancelSteer(args); // A's withdrawal is taken; its window goes before the answer
       await gate.promise;
       return answer;
     });
@@ -541,10 +542,8 @@ describe('(g) a message with an attachment past the draft’s budget', () => {
     w.entries.add('q-1');
     const unmounted = box();
     const detach = attachTakeBackBox(APP, unmounted.api);
-    const cancel = w.controls.remove as unknown as ReturnType<typeof vi.fn>;
-    const real = cancel.getMockImplementation()!;
-    cancel.mockImplementationOnce(async (args: { queueId: string }) => {
-      const answer = await real(args);
+    w.controls.remove.mockImplementationOnce(async (args) => {
+      const answer = await w.real.remove(args);
       detach(); // the composer unmounts between the withdrawal and the load
       return answer;
     });
