@@ -650,9 +650,9 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>, m: M
   };
   for (let start = 0; start < text.length; ) {
     if (m.work >= m.pause) yield pauseAt(m);
-    const line = ahead !== null && ahead.start === start ? ahead : yield* lineFrom(start);
+    const line: Line = ahead !== null && ahead.start === start ? ahead : yield* lineFrom(start);
     ahead = null;
-    const next = line.end + 1;
+    const next: number = line.end + 1;
     const blank = blankFrom(text, line.content, line.end, m);
     if (line.footnote) footnote = true;
     else if (footnote && !blank && afterBlank && line.indent < 4) footnote = false;
@@ -767,12 +767,13 @@ function* runsOf(text: string, from: number, end: number, m: Meter): Generator<t
 function firstFrom(sorted: readonly number[], at: number, m: Meter): number {
   let low = 0;
   let high = sorted.length;
-  while (low < high) {
+  let steps = 1;
+  for (; low < high; steps += 1) {
     const middle = (low + high) >>> 1;
     if (sorted[middle]! < at) low = middle + 1;
     else high = middle;
   }
-  charge(m, 32);
+  charge(m, steps);
   return low;
 }
 
