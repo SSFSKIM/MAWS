@@ -843,6 +843,23 @@ describe('background work', () => {
       expect(ids('done')).toEqual([]);
     });
 
+    // M9 (M7's deferred Minor): navigation that supersedes a pending placement cancels it, so a later listing of the
+    // task it named unfolds nothing.
+    it.each([
+      ['a run opened', (handle: BackgroundHandle) => handle.openRun('wf-other')],
+      ['the list opened again', (handle: BackgroundHandle) => backgroundTool.open!(handle, {})],
+      ['a run opened by its id', (handle: BackgroundHandle) => backgroundTool.open!(handle, { taskId: 'wf-other', view: 'run' })],
+    ])('a placement superseded by %s does not unfold Done when its task loads ended', async (_, supersede) => {
+      const { handle } = await mount({ events: [] });
+      act(() => backgroundTool.open!(handle, { taskId: 'sh1' }));
+      act(() => supersede(handle));
+      expect(handle.snapshot().placing).toBeNull();
+      act(() => handle.back());
+      push([startedTask('sh1', 'local_bash', 'Build the site', 1), ends('sh1', 'completed', 1)]);
+      expect(handle.snapshot().expanded.has('done')).toBe(false);
+      expect(ids('done')).toEqual([]);
+    });
+
     it('a narrow row cuts a shell’s description, never its state and time', async () => {
       await mount({ events: [startedTask('sh1', 'local_bash', 'Build the site and then publish every page of it to the staging host', 1)] });
       const line = document.querySelector<HTMLElement>('[data-shell="sh1"] [data-part="line"]')!;
