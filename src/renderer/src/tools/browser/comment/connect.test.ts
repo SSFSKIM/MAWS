@@ -186,6 +186,25 @@ describe('connectBrowserComment', () => {
   });
 });
 
+// UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, M4, §G): connected once for the window,
+// the comment code tells a tab's page whenever its card opens on a comment (`page-card.ts` holds the cases).
+describe('the page is told its card opened', () => {
+  it('tells a tab’s page when a card opens on its comment, until disconnected', () => {
+    const off = registerCardHost('pane-1', { kind: 'browser', subject: T1, holds: 'many' });
+    try {
+      openCard(ANCHOR, { appSessionId: A, placement: { kind: 'card', host: 'browser', hostId: 'pane-1' } });
+      expect(fake.invoked('browser.comment.card')).toEqual([{ tabId: T1, open: { css: '#increment' } }]);
+      useCommentCard.setState({ open: null });
+      disconnect();
+      openCard(ANCHOR, { appSessionId: A, placement: { kind: 'card', host: 'browser', hostId: 'pane-1' } });
+      expect(fake.invoked('browser.comment.card')).toHaveLength(1);
+    } finally {
+      off();
+      useCommentCard.setState({ open: null, passes: new Map() });
+    }
+  });
+});
+
 // UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, decision 22): a tab's unsent comments end
 // with the tab, read from this window's mirror of main's tabs while no pane is mounted, for a change and a full list.
 describe('the end of a tab ends its pass', () => {

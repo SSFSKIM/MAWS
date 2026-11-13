@@ -1362,6 +1362,7 @@ describe('ipc schema validates both directions', () => {
         'browser.tabs.find', 'browser.tabs.dismiss', 'browser.tabs.devtools', 'browser.tabs.revealDownload', 'browser.view.place',
         'browser.view.cover', 'browser.control.handBack', 'browser.history.suggest', 'browser.profiles.list',
         'browser.comment.set' /* E4d */,
+        'browser.comment.card' /* UX wave U5a */,
         'browser.agent.activities.list' /* E13 */,
       ]);
       for (const spec of Object.values(browser.commands)) expect(spec.owner).toBe('main');
@@ -1459,9 +1460,10 @@ describe('ipc schema validates both directions', () => {
     const TAB_ID = 'b_0123456789ab';
     const anchor = { kind: 'browser-element', locator: '#increment', label: 'button “Increment”', pageUrl: 'http://127.0.0.1:4321/comment.html', css: '#increment', role: 'button', name: 'Increment', a11y: 'main > button “Increment”', box: { x: 1, y: 2, width: 3, height: 4 } };
 
-    it('appends one command and two events to the browser namespace, main-owned, every name bridged', () => {
-      expect(Object.keys(browser.commands).filter((name) => name.startsWith('browser.comment.'))).toEqual(['browser.comment.set']);
+    it('appends two commands (UX wave U5a: the card’s) and two events to the browser namespace, main-owned, every name bridged', () => {
+      expect(Object.keys(browser.commands).filter((name) => name.startsWith('browser.comment.'))).toEqual(['browser.comment.set', 'browser.comment.card' /* UX wave U5a */]);
       expect(browser.commands['browser.comment.set'].owner).toBe('main');
+      expect(browser.commands['browser.comment.card'].owner).toBe('main');
       expect(Object.keys(browser.events).filter((name) => name.startsWith('browser.comment.'))).toEqual(['browser.comment.changed', 'browser.comment.picked']);
       expect(NAMES.browser.commands).toContain('browser.comment.set');
       expect(NAMES.browser.events).toEqual(expect.arrayContaining(['browser.comment.changed', 'browser.comment.picked']));
@@ -1474,6 +1476,18 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('browser.comment.set', { tabId: TAB_ID, on: true, mode: 'area' }).ok).toBe(false);
       for (const reason of ['ok', 'unknownTab', 'suspended', 'notPlaced', 'noPage', 'agent', 'arming']) expect(validateCommandOutput('browser.comment.set', { on: reason === 'ok', reason }).ok, reason).toBe(true);
       expect(validateCommandOutput('browser.comment.set', { on: false, reason: 'busy' }).ok).toBe(false);
+    });
+
+    // UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, M4, Interfaces §B.4)
+    it('validates the card’s opening, with the open comment’s css, and its closing', () => {
+      expect(validateCommandInput('browser.comment.card', { tabId: TAB_ID, open: { css: '#increment' } }).ok).toBe(true);
+      expect(validateCommandInput('browser.comment.card', { tabId: TAB_ID, open: null }).ok).toBe(true);
+      expect(validateCommandInput('browser.comment.card', { tabId: TAB_ID, open: { css: 'x'.repeat(2000) } }).ok).toBe(true);
+      for (const open of [{ css: '' }, { css: 'x'.repeat(2001) }, { css: '#a', mode: 'area' }, {}, true, undefined])
+        expect(validateCommandInput('browser.comment.card', { tabId: TAB_ID, open }).ok, JSON.stringify(open)).toBe(false);
+      expect(validateCommandInput('browser.comment.card', { tabId: 'tab-1', open: null }).ok).toBe(false);
+      expect(validateCommandInput('browser.comment.card', { tabId: TAB_ID, open: null, at: 1 }).ok).toBe(false);
+      expect(validateCommandOutput('browser.comment.card', undefined).ok).toBe(true);
     });
 
     it('validates the mode’s change and the pick', () => {

@@ -9,6 +9,7 @@
   "browser.bookmarks.open",
   "browser.bookmarks.sync",
   "browser.bookmarks.tree",
+  "browser.comment.card",
   "browser.comment.set",
   "browser.control.handBack",
   "browser.extensions.action.click",
