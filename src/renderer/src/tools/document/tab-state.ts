@@ -39,7 +39,8 @@ import { ownFileFor } from '../../library/export'; // P5 O7 M5a
 import { toast } from '../../stores/notices'; // P3-F (F7)
 import { VIEWERS_COPY } from '../artifacts/viewers/copy'; // P3-F (F7): the deck's words
 import type { DocumentExportFormat, ExportStatus } from './header';
-import { commentDraftEntry } from './comment-drafts'; // P4-B1; P4-B3: the entry, for its host
+import { commentDraftOf } from './comment-drafts'; // P4-B1; UX wave U5a: the pass's
+import { artifactViews } from '../../artifacts/registry'; // UX wave U5a
 import { createHistoryApi } from './history-api';
 import { documentMentions } from './mentions';
 
@@ -322,12 +323,12 @@ export class DocumentTabState {
   /**
    * X32's close guard: closing loses nothing once the host has every edit; edits in flight are waited for, then asked about.
    * P4-B1 (C8; X36's draft rule): an unsent comment typed in the document's compose card is asked about first.
-   * P4-B3 (its Decision Log 39): only this tab's card's: a comment on another view's card host is not this close's to
-   * lose, nor this tab's own when a move closes it (`moving`), since its card goes to the view the move keeps.
+   * P4-B3 (its Decision Log 39): not when a move closes it (`moving`), since its card goes to the view the move keeps.
+   * UX wave U5a: the comment is the artifact's pass's, which ends with its last view, so only the last view's close asks.
    */
   closeGuard = async (ask?: CloseAsk): Promise<boolean> => {
-    const draft = ask?.moving ? null : commentDraftEntry(this.artifactId); // P4-B3
-    if (draft?.hostId === this.commentHostId && draft.text.trim() && !this.deps.confirm('Discard your unsent comment?')) return false; // P4-B1
+    const draft = ask?.moving || artifactViews(this.artifactId) > 1 ? null : commentDraftOf(this.artifactId); // P4-B3; UX wave U5a
+    if (draft && !this.deps.confirm('Discard your unsent comment?')) return false; // P4-B1
     const handle = this.current.handle;
     if (!handle || handle.state().readOnly || handle.state().unsaved === 0) return true;
     const saved = await new Promise<boolean>((resolve) => {

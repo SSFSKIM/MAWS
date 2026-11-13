@@ -68,7 +68,7 @@ const frameOf = (key: string, locate?: CardFrame['locate']): CardFrame => ({ sca
 function Host({ frame }: { frame: CardFrame }) {
   return (
     <div className="relative">
-      <CommentCardHost hostId="h1" host="artifact-page" mode="panel" layout="anchored" accepts={() => true} frame={frame} visible />
+      <CommentCardHost subject="subject-1" hostId="h1" host="artifact-page" mode="panel" layout="anchored" accepts={() => true} frame={frame} visible />
     </div>
   );
 }
@@ -283,7 +283,7 @@ describe('the browser re-dock', () => {
   const ELEMENT: Anchor = { kind: 'browser-element', locator: '#increment', label: 'button “Increment”', pageUrl: PAGE, css: '#increment' };
   const Strip = ({ url }: { url: string }) => (
     <div data-column="">
-      <CommentCardHost hostId="pane-1" host="browser" mode="tab" layout="docked" accepts={(c) => c.target?.kind === 'browser' && c.target.pageUrl === url} frame={frameOf('k1')} visible />
+      <CommentCardHost subject="subject-1" hostId="pane-1" host="browser" mode="tab" layout="docked" accepts={(c) => c.target?.kind === 'browser' && c.target.pageUrl === url} frame={frameOf('k1')} visible />
     </div>
   );
   beforeEach(() => useSessions.setState({ records: new Map() }));
@@ -307,7 +307,7 @@ describe('the docked strip', () => {
   function Column() {
     return (
       <div data-column="">
-        <CommentCardHost hostId="h1" host="artifact-page" mode="panel" layout="docked" accepts={() => true} frame={frameOf('k1')} visible />
+        <CommentCardHost subject="subject-1" hostId="h1" host="artifact-page" mode="panel" layout="docked" accepts={() => true} frame={frameOf('k1')} visible />
       </div>
     );
   }
@@ -346,7 +346,7 @@ describe('the margin layout', () => {
     return (
       <div className="ds-doc">
         <div data-margin-entry="t1">
-          <CommentCardHost hostId="h1" host="artifact-page" mode="panel" layout="margin" accepts={() => true} frame={frameOf('k1', locate)} visible />
+          <CommentCardHost subject="subject-1" hostId="h1" host="artifact-page" mode="panel" layout="margin" accepts={() => true} frame={frameOf('k1', locate)} visible />
         </div>
       </div>
     );
@@ -400,7 +400,7 @@ describe('the place’s note', () => {
   it('docked, the line is in the strip, one line in flow; an open card is drawn in its stead', () => {
     render(
       <div data-column="">
-        <CommentCardHost hostId="h1" host="browser" mode="tab" layout="docked" accepts={() => true} frame={frameOf('k1')} visible />
+        <CommentCardHost subject="subject-1" hostId="h1" host="browser" mode="tab" layout="docked" accepts={() => true} frame={frameOf('k1')} visible />
       </div>,
     );
     act(() => notePlace('h1', { kind: 'sent', text: 'Sent to Q3 plan', at: Date.now() }));
@@ -429,7 +429,7 @@ describe('the place’s note', () => {
   it('anchored over a document, the line is where the card was', async () => {
     render(
       <div className="relative">
-        <CommentCardHost hostId="h1" host="artifact" mode="panel" layout="anchored" accepts={() => true} frame={frameOf('k1')} visible />
+        <CommentCardHost subject="subject-1" hostId="h1" host="artifact" mode="panel" layout="anchored" accepts={() => true} frame={frameOf('k1')} visible />
       </div>,
     );
     act(() => openCard(ANCHOR, { appSessionId: PARENT, placement: { kind: 'card', host: 'artifact', hostId: 'h1', rect: HERO } }));

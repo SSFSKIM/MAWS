@@ -91,7 +91,7 @@ function mount(layout: 'anchored' | 'docked' = 'anchored', frame: CardFrame = FR
     <>
       <CommentComposerHost />
       <div className="relative">
-        <CommentCardHost hostId="h1" host="artifact-page" mode="panel" layout={layout} accepts={() => true} frame={frame} visible restoreFocus={restoreFocus} />
+        <CommentCardHost subject="subject-1" hostId="h1" host="artifact-page" mode="panel" layout={layout} accepts={() => true} frame={frame} visible restoreFocus={restoreFocus} />
       </div>
     </>,
   );
@@ -334,7 +334,7 @@ describe('dismissal', () => {
   describe('a remount while a send is on its way', () => {
     const hostAs = (slot: string) => (
       <div key={slot} className="relative">
-        <CommentCardHost hostId="h1" host="artifact-page" mode="panel" layout="anchored" accepts={() => true} frame={FRAME} visible restoreFocus={restoreFocus} />
+        <CommentCardHost subject="subject-1" hostId="h1" host="artifact-page" mode="panel" layout="anchored" accepts={() => true} frame={FRAME} visible restoreFocus={restoreFocus} />
       </div>
     );
     async function sentThenRemounted() {
@@ -386,7 +386,7 @@ describe('dismissal', () => {
     pick(); // open before the host mounts, so the replay's cleanup meets it
     const { unmount } = render(
       <StrictMode>
-        <CommentCardHost hostId="h1" host="artifact-page" mode="panel" layout="anchored" accepts={() => true} frame={FRAME} visible />
+        <CommentCardHost subject="subject-1" hostId="h1" host="artifact-page" mode="panel" layout="anchored" accepts={() => true} frame={FRAME} visible />
       </StrictMode>,
     );
     await act(async () => {});

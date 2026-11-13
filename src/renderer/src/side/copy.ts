@@ -22,6 +22,7 @@ export const SIDE_COPY = {
     notConfirmed: 'The session did not confirm the message', // an unconfirmed hand-off that names no pending send
     notSent: 'The comment was not sent', // a refusal the port gave no words for
     send: 'Send',
+    sendMany: (count: number) => `Send ${count} comments`, // UX wave U5a (§E): a pass with more than one comment that has text
     starting: 'Starting…',
     sending: 'Sending…',
     retry: 'Retry',
@@ -48,6 +49,9 @@ export const SIDE_COPY = {
     title: (label: string) => `Comment on ${label}`, // the dialog's accessible name, the sheet's own
     parent: (title: string) => `Session: ${title}`, // P3-F1: the session a card with no chat beside it goes to
     close: 'Close',
+    // UX wave U5a (§E): the pass's other comments in the card, and the chip of a pass with no card open
+    removeComment: 'Remove comment',
+    unsent: (count: number) => (count === 1 ? '1 unsent comment' : `${count} unsent comments`),
     // the thread phase
     replyField: 'Reply',
     replyPlaceholder: 'Reply to this thread',

@@ -18,6 +18,7 @@ import { sessionSetKey } from '../stores/org-projects';
 import { TEST_FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { loadScenario, type Scenario } from '../../../../test/support/scenario';
 import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { resetPlaceNotes } from '../side/card/store'; // UX wave U5a
 
 export function scenarioFile(name: 'nine-sessions' | 'empty' | 'many-sessions'): Scenario {
   return loadScenario(join(TEST_FIXTURE_DIR, `shell/${name}.json`));
@@ -90,6 +91,7 @@ export function resetShellStores(): void {
     overviewOpen: false,
     projectOf: NO_PROJECT_OF,
   });
+  resetPlaceNotes(); // UX wave U5a: the comment card's passes and place lines are window state a suite must not inherit
 }
 
 // W12: the layout files each session's tabs under its record's project's row, as the shell's hydration has it do (P5 O6

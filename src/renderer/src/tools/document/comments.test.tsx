@@ -19,7 +19,7 @@ import { fakeClient, type FakeClient } from '../../../../../test/support/fake-cl
 import { at } from '../../../../../test/support/machine';
 import type { sendHumanPrompt } from '../../composer/submit/send-human-prompt'; // P3-F (L154)
 import { sendComments } from '../../side/actions';
-import { useCommentCard } from '../../side/card/store';
+import { dropSubject, resetPlaceNotes, useCommentCard } from '../../side/card/store';
 import { openComment } from '../../side/register';
 import { useNotices } from '../../stores/notices';
 import { useSessions } from '../../stores/sessions';
@@ -65,6 +65,7 @@ afterEach(() => {
   cleanup();
   offComposer();
   useCommentCard.setState({ open: null });
+  resetPlaceNotes(); // UX wave U5a: and every pass
   delete (window as { maws?: unknown }).maws;
 });
 
@@ -193,9 +194,9 @@ describe('the card on a document', () => {
 // and its draft is the artifact's one draft, which the editor's next Comment refocuses.
 describe('the compose card in the margin and the draft rule', () => {
   // `slot`: where the overlay is drawn; a new slot remounts it under the same surface (the margin moving it, a tab switch)
-  // `draftRule`: the document's opt-in (DocumentPanel); a deck or a design leaves it out
-  function MarginEditor({ reach, onSurface, slot = 'a', draftRule = true }: { reach: CommentOverlayProps; onSurface(surface: DocumentComments): void; slot?: string; draftRule?: boolean }) {
-    const comments = useDocumentComments({ artifactId: ARTIFACT, appSessionId: PARENT, title: 'Q3 plan', ...(draftRule && { draftRule }) });
+  // UX wave U5a: the draft rule is every card host's (no opt-in)
+  function MarginEditor({ reach, onSurface, slot = 'a' }: { reach: CommentOverlayProps; onSurface(surface: DocumentComments): void; slot?: string }) {
+    const comments = useDocumentComments({ artifactId: ARTIFACT, appSessionId: PARENT, title: 'Q3 plan' });
     onSurface(comments);
     return (
       <div className="ds-doc">
@@ -206,19 +207,19 @@ describe('the compose card in the margin and the draft rule', () => {
       </div>
     );
   }
-  function mountMargin({ placement = 'margin', draftRule = true }: { placement?: 'margin' | null; draftRule?: boolean } = {}) {
+  function mountMargin({ placement = 'margin' }: { placement?: 'margin' | null } = {}) {
     const doc = newDoc();
     addThread(doc, { threadId: passage.threadId, tabId: 'tab1', blockId: 'p1', quote: passage.quote, anchor: { start: null, end: null, block: null }, by: { kind: 'human' }, at: 1 });
     const reach: CommentOverlayProps = { ...editorReach(doc), hosting: vi.fn(), ...(placement && { placement }) };
     let surface: DocumentComments | null = null;
-    const view = render(<MarginEditor reach={reach} onSurface={(s) => (surface = s)} draftRule={draftRule} />);
+    const view = render(<MarginEditor reach={reach} onSurface={(s) => (surface = s)} />);
     return {
       reach,
       view,
       surface: () => surface!,
       comment: () => act(() => surface!.opened(passage)),
       // the overlay drawn again elsewhere (a tab switch; the margin's cards giving way to the panel): a new host, the same card
-      remount: (slot = 'b') => view.rerender(<MarginEditor reach={reach} onSurface={(s) => (surface = s)} slot={slot} draftRule={draftRule} />),
+      remount: (slot = 'b') => view.rerender(<MarginEditor reach={reach} onSurface={(s) => (surface = s)} slot={slot} />),
     };
   }
   const opened = async (m: ReturnType<typeof mountMargin>) => {
@@ -293,7 +294,7 @@ describe('the compose card in the margin and the draft rule', () => {
     const reach: CommentOverlayProps = { ...editorReach(doc), hosting: vi.fn(), placement: 'margin' };
     let surface: DocumentComments | null = null;
     function Body({ hostId, onSurface }: { hostId?: string; onSurface(surface: DocumentComments): void }) {
-      const comments = useDocumentComments({ artifactId: ARTIFACT, appSessionId: PARENT, title: 'Q3 plan', draftRule: true, ...(hostId !== undefined && { hostId }) });
+      const comments = useDocumentComments({ artifactId: ARTIFACT, appSessionId: PARENT, title: 'Q3 plan', ...(hostId !== undefined && { hostId }) });
       onSurface(comments);
       return (
         <div className="ds-doc">
@@ -452,30 +453,19 @@ describe('the compose card in the margin and the draft rule', () => {
     expect(document.activeElement).toBe(field());
   });
 
-  // Review finding 1: the draft rule is the document's opt-in; a deck's or a design's card (no draft() asked, no close
-  // guard reading it) keeps today's Escape and blur, and records nothing
-  it('without the opt-in (a deck, a design): Escape discards a typed comment, a blur keeps an empty one, nothing is recorded', async () => {
-    const m = mountMargin({ draftRule: false });
-    expect(m.surface().draft).toBeUndefined();
-    expect(m.surface().focusDraft).toBeUndefined();
-    await opened(m);
-    act(() => screen.getByRole('button', { name: 'Elsewhere' }).focus());
-    expect(card()).not.toBeNull(); // no blur rule
-    act(() => field().focus());
-    await userEvent.type(field(), 'Monthly?');
-    expect(commentDraftOf(ARTIFACT)).toBeNull();
-    fireEvent.keyDown(field(), { key: 'Escape' });
-    expect(card()).toBeNull();
-    expect(m.reach.discard).toHaveBeenCalledWith(passage.threadId);
-  });
-
-  it('the editor going drops its draft', async () => {
+  // UX wave U5a (decision 17): a host that unmounts because its surface was hidden keeps the comment and its thread; the
+  // artifact's end (its last view closed) takes both
+  it('the editor going keeps its typed comment and thread; the artifact’s end withdraws them', async () => {
     const m = mountMargin();
     await opened(m);
     await userEvent.type(field(), 'Monthly?');
     m.view.unmount();
     await act(async () => {});
+    expect(commentDraftOf(ARTIFACT)).toEqual({ threadId: passage.threadId, text: 'Monthly?' });
+    expect(m.reach.discard).not.toHaveBeenCalled();
+    act(() => dropSubject('artifact', ARTIFACT));
     expect(commentDraftOf(ARTIFACT)).toBeNull();
+    expect(m.reach.discard).toHaveBeenCalledWith(passage.threadId);
   });
 });
 

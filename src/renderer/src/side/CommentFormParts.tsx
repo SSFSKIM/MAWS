@@ -77,18 +77,19 @@ export function CommentFormLines({ form }: { form: CommentForm }) {
 }
 
 // A refused send, under the form: its reason, Retry (disabled once its destination cannot send) and, for a side thread
-// while a tick can send, Send to main instead.
-export function CommentRefusal({ form }: { form: CommentForm }) {
+// while a tick can send, Send to main instead. `onSend`: the presentation's own send (the card's), else the form's.
+export function CommentRefusal({ form, onSend }: { form: CommentForm; onSend?(to: 'thread' | 'main'): void }) {
   const { phase } = form;
   if (phase.kind !== 'refused') return null;
+  const send = onSend ?? ((to: 'thread' | 'main') => void form.send(to));
   return (
     <div role="alert" className="flex flex-wrap items-center gap-2 rounded-sm border border-danger px-2.5 py-1.5 text-ui-sm text-danger">
       <span className="min-w-0 flex-1 break-words">{phase.error}</span>
-      <button type="button" className={SECONDARY} disabled={!form.canSend(phase.destination)} onClick={() => void form.send(phase.destination)}>
+      <button type="button" className={SECONDARY} disabled={!form.canSend(phase.destination)} onClick={() => send(phase.destination)}>
         {COPY.retry}
       </button>
       {phase.destination === 'thread' && form.mainEnabled && ( /* P2-A: mainEnabled */
-        <button type="button" className={SECONDARY} onClick={() => void form.send('main')}>
+        <button type="button" className={SECONDARY} onClick={() => send('main')}>
           {COPY.mainInstead}
         </button>
       )}
