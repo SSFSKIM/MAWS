@@ -13,6 +13,7 @@ import type { ReviewParams } from './review-model';
 import { ReviewShell } from './ReviewShell';
 import { ReviewSummary } from './ReviewSummary';
 import { applyRequest, createReviewUi, forSession, type ReviewUi } from './view-state';
+import { workingFolder } from '@shared/sessions/working-folder';
 
 export const REVIEW_TOOL_ID = 'review';
 
@@ -59,7 +60,7 @@ function ReviewBody({ state, ctx }: { state: ReviewState; ctx: PanelToolContext 
     return <p className="flex h-full items-center justify-center p-4 text-center text-ui text-fg-muted">{REVIEW_COPY.noSession}</p>;
   }
   if (!synced) return null;
-  const directory = ctx.session.worktree?.path ?? ctx.session.directory;
+  const directory = workingFolder(ctx.session).path;
   return <ReviewShell key={`${shown}\0${directory}`} appSessionId={shown} directory={directory} ui={ui} chips focusRequest={ctx.focusRequest} visible={ctx.visible} />;
 }
 

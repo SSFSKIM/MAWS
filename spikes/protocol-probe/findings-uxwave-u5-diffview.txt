@@ -1,0 +1,87 @@
+UX wave U5, P2: the diff library in a stack (docs/doperpowers/specs/2026-11-12-ux-wave/U5-review-comments-source-control.md,
+Probes and checks, P2; it serves l5-code-01 and l5-code-05, Review's line comments and the stacked Review, and UC-5's one
+comment card in the root spec; 2026-11-12)
+
+Question. In @git-diff-view/react 0.1.7: does a widget row hold the card (focus, an input method's composition) in
+unified and split mode; do extendData rows survive a refresh of the diff; what does drawing a section cost when it
+re-enters the two-screen band? The spec's branch: if a widget row cannot keep the keyboard through a refresh, the card
+docks under the file's header instead of under the line.
+
+Verdict.
+  - A widget row keeps the card (same DOM node, focus, typed text, caret, a held composition) only while DiffView is
+    given the same `data` object. Any new `data` object, even one with byte-identical hunks, closes the widget and
+    unmounts the card, in unified and split mode alike; a composition in progress is cut with no compositionend. So the
+    widget row cannot keep the keyboard through a refresh that changes the commented file's diff, and the spec's
+    branch applies for that refresh: the card docks under the file's header (or is re-opened without the keyboard).
+  - A refresh that leaves this file's diff text unchanged keeps the card, but only if the app keeps the `data` object's
+    identity when the text is equal. Today's Review does not: every re-read (250 ms after any git change in the scope)
+    builds new file objects, so as wired today any change anywhere in the scope would close an open card.
+  - extendData rows: their content survives every refresh (the rows are drawn from the prop, which the app passes each
+    render); their DOM is remounted with every new `data`. They are keyed by line number only, so when lines shift
+    the rows stay at the old numbers: re-keying them is the app's (as the spec's advice already says: keyed by path,
+    side and line in the store).
+  - Drawing cost on re-entering the two-screen band: not measured (needs the app's own layout, below).
+Confidence: high for the first three (source read and observed agree, 3/3 runs each, both modes); the composition
+result rests on a synthetic composition (below), not on an input method.
+
+Where it ran and how. A harness page, spikes/protocol-probe/uxwave-u5-diffview/ (harness.tsx bundled by esbuild with the
+repository's React 19 and @git-diff-view/react 0.1.7, its diff-view.css; index.html; main.cjs; run.mjs drives it;
+summarize.py reads its output), in Electron 44.4.5 (Chromium 152.0.7977.130), the app's pinned Electron, here the copy
+mawsd's render runtime unpacks on the VM, launched by Playwright 1.63's _electron under xvfb on devcloud VM
+dc-uxprobe-dc94. A real browser engine, not a simulated DOM, for every answer below. No engine, no model.
+The diff: one 40-line TypeScript file, one hunk with two lines removed and three added at line 10. The card is
+renderWidgetLine's component: an uncontrolled textarea marked with a mount counter. Three extendData rows (old 11, new 12,
+new 30) drawn by renderExtendLine, marked the same way. For each case: mount, open the widget on new line 12
+(onCreateUseWidgetHook's setWidget, the call the library's own + button makes), click into the textarea, type "draft",
+move the caret one left, then refresh, then read: card present, same node, focused, value, caret; widget state; extend
+rows and their nodes.
+Refreshes: rerender (the parent re-renders with the same data object); identical (a new data object, same hunks: what
+today's Review hands DiffView after every re-read); elsewhere (this file's diff changes away from the card's line);
+shifted (lines inserted above the card's line). App variants: data (the app passes what it has, as ReviewView.tsx does);
+memo (the app keeps the previous data object when the hunks' text is equal); reopen (after a refresh the app re-opens the
+widget at the line it remembers, through the widget hook). Fixture: fixtures/uxwave/u5-p2-diffview.jsonl (3 runs; one
+JSON line per case; summarize.py prints the table below).
+
+Observed (each 3/3, unified and split the same).
+  variant  refresh     card                                          widget       extend rows
+  data     rerender    same node, focused, "draft", caret kept        open         same nodes
+  data     identical   gone                                          closed       3, remounted
+  data     elsewhere   gone                                          closed       3, remounted
+  data     shifted     gone                                          closed       3, remounted (old numbers)
+  memo     rerender    same node, focused, "draft", caret kept        open         same nodes
+  memo     identical   same node, focused, "draft", caret kept        open         same nodes
+  memo     elsewhere   gone                                          closed       3, remounted
+  memo     shifted     gone                                          closed       3, remounted
+  reopen   identical   a new node: empty, not focused                open again   3, remounted
+  reopen   elsewhere   a new node: empty, not focused                open again   3, remounted
+  reopen   shifted     a new node at the remembered (now wrong) line open again   3, remounted
+Composition (synthetic): with the card focused, CDP Input.imeSetComposition("한") holds a composition (compositionstart
+fired, the value shows it); then a refresh. rerender, and memo with identical: the composition completes in the same node
+(compositionend "한", value "a한b", focus kept). data with identical: the card unmounts mid-composition (compositionstart,
+then unmount, no compositionend). reopen with identical: unmount, a new empty card, not focused. 3/3 each, both modes.
+Also: opening a second widget closes the first (one open widget row per diff, as the spec reads it); the library's own
++ appears on hovering a line and its click opens the card under that line, in both modes, and the card keeps the keyboard
+through a rerender.
+
+Why, from the source (dist/esm/index.mjs of @git-diff-view/react 0.1.7). DiffView builds a new DiffFile whenever `data`
+changes identity (useMemo on [data]); a DiffFile's id is random (core's initId, Math.random); the inner view is keyed by
+that id (`jsx(MemoedInternalDiffView, {...}, diffFile.getId())`), so the whole subtree remounts, and the split and
+unified views also call setWidget({}) on every new diffFile. extendData is copied into the remounted view's store from
+the prop, which is why the rows come back.
+
+Inference for the design. Three things follow. (1) Review must keep each file's `data` object while its hunks' text is
+unchanged (memo by text, per file), or the card closes whenever anything in the scope changes. (2) Even so, a change to
+the commented file's own diff remounts the row; the card then either docks under the file's header (the spec's branch)
+or is re-opened by the app at the line it re-finds, with the draft restored from the store, focus put back, and any
+composition lost. (3) The draft and the unsent rows must live in the app's store, as the spec's advice already has it;
+the library holds neither across a refresh.
+
+Differs from the spec's reading. The spec says 0.1.7 "gives one open widget row per diff and `extendData` rows per line;
+that is enough for a one-line comment ... and it is why a comment on a range is not included". 0.1.7 also exports
+DiffViewWithMultiSelect (index.d.ts: onMultiSelectComplete, a renderWidgetLine with fromLineNumber, preselected lines);
+it renders in the harness. Its range selection was not exercised here. The library's limit is therefore not the reason
+a range comment is excluded in 0.1.7; it would have to be scope.
+
+Not established here (needs the running app). An input method's real composition (the Korean IME on macOS; the CDP
+composition above is Chromium's own path, not an IME); the drawing cost of a section re-entering the two-screen band in
+the app's own layout (the stack's virtualisation, the app's CSS and fonts, a real repository's diffs).

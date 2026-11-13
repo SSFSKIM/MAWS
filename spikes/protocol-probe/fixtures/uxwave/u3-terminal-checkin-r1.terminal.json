@@ -1,0 +1,134 @@
+{
+ "provenance": {
+  "spec": "docs/doperpowers/specs/2026-11-12-ux-wave/U3-transcript-rows.md",
+  "section": "Probes and checks",
+  "contract": "UC-2 (docs/doperpowers/specs/2026-11-12-ux-wave-design.md)",
+  "probe": "U3 probe 1 (terminal, check-in, tengu_silent_heron 10000)",
+  "engine": "/opt/maws-probe/engines/2.1.322",
+  "engineVersion": "2.1.322",
+  "launch": "interactive engine in tmux, as vm-run.sh term starts it",
+  "args": [
+   "--model",
+   "haiku"
+  ],
+  "route": "gateway (vm-run.sh loopback forward)"
+ },
+ "steps": [
+  {
+   "step": "ready",
+   "at": "2026-11-12T15:13:03.977Z",
+   "pane": "\n ▐▛███▛█   Claude Code v2.1.322\n▝▜██████▀  Haiku 5.5 · API Usage Billing\n ▝▝   ▝▝   /tmp/py-3wLIwx/work\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n                                                                                                                                            ◐ medium · /effort\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ Try \"edit <filepath> to...\"\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents\n",
+   "file": []
+  },
+  {
+   "step": "started",
+   "at": "2026-11-12T15:13:12.426Z",
+   "pane": "\n ▐▛███▛█   Claude Code v2.1.322\n▝▜██████▀  Haiku 5.5 · API Usage Billing\n ▝▝   ▝▝   /tmp/py-3wLIwx/work\n\n\n❯ Run exactly sleep 300 with the Bash tool, run_in_background true, description \"uxw quiet\". Then reply with only the word STARTED. If you are later told it is\n  quiet, reply with only the word NOTED and do nothing else.\n\n  Ran 1 shell command\n\n● STARTED\n\n✻ Worked for 4s · done 7:13 AM · 1 shell still running\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n                                                             tmux detected · scroll with PgUp/PgDn · or add 'set -g mouse on' to ~/.tmux.conf for wheel scroll\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏵⏵ auto mode on · 1 shell · ↓ to manage\n",
+   "file": [
+    {
+     "line": 5,
+     "type": "user",
+     "uuid": "c6142e95-52ee-4b76-9894-ec91b5ca586f",
+     "parentUuid": null,
+     "origin": {
+      "kind": "human"
+     },
+     "isSidechain": false,
+     "promptId": "a9def8ea-9532-4127-990a-11cddec84e10",
+     "promptSource": "typed",
+     "turnOrigin": "human",
+     "role": "user",
+     "text": "Run exactly `sleep 300` with the Bash tool, run_in_background true, description \"uxw quiet\". Then reply with only the word STARTED. If you are later told it is quiet, reply with only the word NOTED and do nothing else.",
+     "contentTypes": []
+    },
+    {
+     "line": 35,
+     "type": "system",
+     "subtype": "turn_duration",
+     "uuid": "ce747c02-b789-4506-8da9-3570d3af7706",
+     "parentUuid": "2d94545f-e9cb-4d21-8c0a-5c4dc48092e5",
+     "isMeta": false,
+     "isSidechain": false
+    }
+   ]
+  },
+  {
+   "step": "checkin",
+   "at": "2026-11-12T15:13:26.529Z",
+   "checkinSeen": true,
+   "pane": "\n ▐▛███▛█   Claude Code v2.1.322\n▝▜██████▀  Haiku 5.5 · API Usage Billing\n ▝▝   ▝▝   /tmp/py-3wLIwx/work\n\n\n❯ Run exactly sleep 300 with the Bash tool, run_in_background true, description \"uxw quiet\". Then reply with only the word STARTED. If you are later told it is\n  quiet, reply with only the word NOTED and do nothing else.\n\n  Ran 1 shell command\n\n● STARTED\n\n✻ Worked for 4s · done 7:13 AM · 1 shell still running\n\n● Background command \"uxw quiet\" is still running after 10s, with no new output for 10s\n\n● NOTED\n\n✻ Crunched for 6s · done 7:13 AM · 1 shell still running\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n                                                          tmux focus-events off · add 'set -g focus-events on' to ~/.tmux.conf and reattach for focus tracking\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏵⏵ auto mode on · 1 shell · ↓ to manage\n",
+   "file": [
+    {
+     "line": 38,
+     "type": "user",
+     "uuid": "a423dbb9-4acf-4911-9e26-647d93f9f864",
+     "parentUuid": "ce747c02-b789-4506-8da9-3570d3af7706",
+     "origin": {
+      "kind": "task-notification",
+      "producer": "session-task"
+     },
+     "isSidechain": false,
+     "promptId": "f127a23e-6a9f-4a25-97ea-75b71c9e91c9",
+     "promptSource": "system",
+     "turnOrigin": "task_notification",
+     "queueSkipAttachments": true,
+     "role": "user",
+     "text": "<task-notification>\n<task-id>bnk6olds6</task-id>\n<tool-use-id>toolu_01HpRCkdGnkX78Evp8tAaybt</tool-use-id>\n<output-file>/tmp/claude-501/-tmp-py-3wLIwx-work/1551baee-d8df-42c1-9455-0e8de647ccfb/tasks/bnk6olds6.output</output-file>\n<summary>Background command \"uxw quiet\" is still running after 10s, with no new output for 10s</summary>\n</task-notification>\nThis is a check-in, not a completion. The command may be working quietly, or it may be hung: waiting on a lock, on input, or on a process that will never exit. Find out which before you wait any longer: read its output file and look at its processes. If it is stuck, stop this task and get the work done another way. If it is making progress, or is meant to keep running (a server, a watcher), leave it and end your turn. The next check-in comes after another 20s of silence.",
+     "contentTypes": []
+    },
+    {
+     "line": 43,
+     "type": "system",
+     "subtype": "turn_duration",
+     "uuid": "34107a62-841d-4300-9fe1-69c33c00be1c",
+     "parentUuid": "c99017b8-fa8b-446e-867f-fa6d96671177",
+     "isMeta": false,
+     "isSidechain": false
+    }
+   ]
+  },
+  {
+   "step": "stopped",
+   "at": "2026-11-12T15:13:40.013Z",
+   "pane": "\n ▐▛███▛█   Claude Code v2.1.322\n▝▜██████▀  Haiku 5.5 · API Usage Billing\n ▝▝   ▝▝   /tmp/py-3wLIwx/work\n\n\n❯ Run exactly sleep 300 with the Bash tool, run_in_background true, description \"uxw quiet\". Then reply with only the word STARTED. If you are later told it is\n  quiet, reply with only the word NOTED and do nothing else.\n\n  Ran 1 shell command\n\n● STARTED\n\n✻ Worked for 4s · done 7:13 AM\n\n● Background command \"uxw quiet\" is still running after 10s, with no new output for 10s\n\n● NOTED\n\n✻ Crunched for 6s · done 7:13 AM\n\n❯ Stop the background task \"uxw quiet\" with TaskStop. Then reply with only the word STOPPED.\n\n● Stop Task\n  ⎿  sleep 300 · stopped\n\n● STOPPED\n\n✻ Sautéed for 11s · done 7:13 AM\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏵⏵ auto mode on (shift+tab to cycle)\n",
+   "file": [
+    {
+     "line": 45,
+     "type": "user",
+     "uuid": "b49ed610-4deb-46c2-8f59-20a657c8aec0",
+     "parentUuid": "34107a62-841d-4300-9fe1-69c33c00be1c",
+     "origin": {
+      "kind": "human"
+     },
+     "isSidechain": false,
+     "promptId": "06c77c19-ab7d-4263-8975-acbb54deca1e",
+     "promptSource": "typed",
+     "turnOrigin": "human",
+     "role": "user",
+     "text": "Stop the background task \"uxw quiet\" with TaskStop. Then reply with only the word STOPPED.",
+     "contentTypes": []
+    },
+    {
+     "line": 60,
+     "type": "attachment",
+     "uuid": "66c090f1-5e34-43f7-b728-1dc870382142",
+     "parentUuid": "beda6f76-3221-478a-9114-5bb35934691e",
+     "isSidechain": false,
+     "attachment": {
+      "type": "deferred_tools_record"
+     }
+    },
+    {
+     "line": 65,
+     "type": "system",
+     "subtype": "turn_duration",
+     "uuid": "974b9a25-79bb-4194-bd0a-3e8d4f3eb5c2",
+     "parentUuid": "b9905290-fbcc-4f6d-a22a-bb5d893fc8f6",
+     "isMeta": false,
+     "isSidechain": false
+    }
+   ]
+  }
+ ],
+ "transcript": "fixtures/uxwave/u3-terminal-checkin-r1.transcript.jsonl"
+}
