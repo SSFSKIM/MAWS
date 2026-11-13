@@ -264,7 +264,8 @@ describe('the editor mounts over its draft, takes prefills and submits through t
     const press = (init: KeyboardEventInit) => act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...init })));
     await press({ shiftKey: true });
     await press({ altKey: true });
-    expect(handle.current?.serialize().display.split('\n')).toHaveLength(5); // two line breaks added, in the one paragraph
+    const breaks = () => (handle.current?.doc().content?.[0]?.content ?? []).filter((node) => node.type === 'hardBreak').length;
+    expect(breaks()).toBe(4); // two line breaks added, in the one paragraph
     expect(handle.current?.doc().content).toHaveLength(1);
     await press({ isComposing: true });
     await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 20))));

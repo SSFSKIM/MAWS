@@ -855,6 +855,8 @@ describe('sending from the box', () => {
     await waitFor(() => expect(isStarting(useComposerStore.getState(), A)).toBe(false));
     await cmdEnter();
     await waitFor(() => expect(stub.start).toHaveBeenCalledTimes(2));
+    await stub.answer({ ok: false, error: 'refused for the test' }); // settled: no submission of A outlives the test
+    await waitFor(() => expect(isStarting(useComposerStore.getState(), A)).toBe(false));
   });
 
   describe('a terminal session', () => {
