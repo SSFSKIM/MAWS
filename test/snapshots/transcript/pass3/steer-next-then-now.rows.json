@@ -103,6 +103,7 @@
       "truncated": null
     },
     "endedAt": "2026-10-01T09:21:32.064Z",
+    "error": "Command was aborted before completion",
     "expanded": true,
     "id": "cell:toolu_019hqrGKb63xtMsjPwxFE7F6",
     "kind": "cell",

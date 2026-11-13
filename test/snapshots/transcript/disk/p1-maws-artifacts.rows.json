@@ -300,6 +300,7 @@
           "removed": 3
         },
         "endedAt": "2026-10-06T12:53:18.650Z",
+        "error": "String to replace not found in file.",
         "expanded": true,
         "id": "cell:toolu_01Trfn7ugsMF9Yv4PnL5DaGr",
         "label": "Edited /private/tmp/maws-e2-repo-5uEyLu/dashboard.html +3 −3",

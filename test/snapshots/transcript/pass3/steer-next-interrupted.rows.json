@@ -119,7 +119,7 @@
     "expanded": true,
     "id": "cell:toolu_018A2pQ8opsSUGLt6bscFJ4R",
     "kind": "cell",
-    "label": "Stopped: `sleep 6 && echo 1`",
+    "label": "Stopped a command",
     "paths": [],
     "startedAt": "2026-10-01T09:18:38.874Z",
     "status": "stopped",
