@@ -769,6 +769,8 @@ The pull request carries the dated lines of the two records this landing amends,
   Evidence: M1's executor, 2026-11-13; it reset the two files over `devcloud vm ssh`. The recipe now ends with a `git checkout` of the two files.
 - Observation: the `maws` server writes a tool's result as indented JSON (`toolText`, `JSON.stringify(value, null, 2)`); the key order `status`, `pane`, `opened`, `page`, `note` holds in it.
   Evidence: M1's executor, 2026-11-13; `src/engine-host/session-maws.test.ts` reads it so.
+- Observation: Electron 44's `clipboard` has no `writeImage`; it writes through the W3C-shaped `write(ClipboardItem[])`, and its documentation does not say that an `image/png` item reaches the macOS pasteboard as an image another app's paste reads.
+  Evidence: `node_modules/electron/electron.d.ts` of `electron@44.4.5` on the VM (`write(data: ClipboardItem[]): Promise<void>`, `class ClipboardItem`). M3's executor, 2026-11-13. The *(copy screenshot)* scene of M5 and the owner's paste into a composer are what show it.
 
 ## Decision Log
 
@@ -843,6 +845,16 @@ The pull request carries the dated lines of the two records this landing amends,
   - An ask that rejects outright is treated as a refusal: the tool opens as before, so the opening cannot stay stuck. After the wait the window also checks it is still connected; a disconnect during the wait opens nothing.
   - The command's schema entry sits after `browser.agent.activities.list`, outside E13's block markers.
   - Until M5 reworks it, the e2e scene "the Browser panel follows the agent: … and the agent's tab is not selected" asserts what M2 reverses.
+
+- **2026-11-13 · M3's executor decisions** (folded by the controller).
+  - `[data-browser-page-box]` is always present, as §D's DOM block draws it; two assertions of `Pane.test.tsx` that read the column's first child now read the box with the page element inside, with their meaning kept.
+  - The room is the page box's `getBoundingClientRect`, rounded down to whole points. The placement is reported again whenever the room or the size changes, because a centred element can move without resizing.
+  - A device size applies while a pane is claiming or holds the view, never while it draws "Shown in another pane".
+  - An extension's options tab is refused twice: `TabStore.setViewport` answers false and the handler turns that into `invalid_input`.
+  - Viewport is the last item of the zoom group and Copy screenshot follows Copy URL; the two commands sit after `browser.agent.show`.
+  - The chip is drawn whenever a size is on and this mount has room. One `ViewportChoices` component serves the menu and the chip; choosing the size already marked sends nothing.
+  - Copy screenshot writes one `image/png` `ClipboardItem` from `toPNG()` (Electron 44 has no `writeImage`; Surprises); `writeImage` is a required dependency of the handler.
+  - The surround of a sized page is the `bg-bg-active` token.
 
 ## Outcomes & Retrospective
 
