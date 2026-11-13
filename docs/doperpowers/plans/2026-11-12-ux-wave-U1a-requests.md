@@ -29,7 +29,7 @@ How to see it working: the unit suite (each reader of "what waits" handed one an
 - [x] (2026-11-13) M1 — One predicate, the publisher and every reader. Reviewed clean (one fix wave `5efc03b94..10d61e2b8`: a draft kept through a feed snapshot; the held-back settlement proved through the composed spine; the `unknown` outcome exercised). Built `4753fb642..faf75c3ca`. A17's red run (2026-11-13): the tests commit `4753fb642`, alone on the VM, `pnpm exec vitest run` over the 23 touched test files: 56 failing, each by assertion or a missing export (the tree test `test/one-predicate.test.ts`, every row of §A's reader table, the holder, the tellers, the endpoint, the mirror, main's `accepted`); four new tests passed there by design, each a rule today's code already keeps.
 - [x] (2026-11-13) M2 — Questions: the terminal's asynchronous question, Dismiss, double-click. Reviewed clean (one fix wave `3c2ec96b2..ff10fd1a4`: a refused Dismiss on MAWS's ask is retried as a Dismiss, never as a Submit). Built `2cc43cc8a..6f6045a23` (red at the tests commit: 56 failing over 14 files).
 - [x] (2026-11-13) M3 — The permission card: three buttons, the hints and the keys. Reviewed clean (one fix wave `1577c0469`: the call's "Why" drawn after the preview for every tool class, where only a command's showed it). Built `e4790393c..4c55c614d` (red at the tests commit: 67 failing over 9 files).
-- [ ] M4 — A file change as a diff.
+- [ ] M4 — A file change as a diff. Built `8cbf1f785..c4c846169` (red at the tests commit: 34 failing, two new modules failing at import).
 - [ ] M5 — The plan's next mode; the trust card.
 - [ ] M6 — From outside: one rule for the notification and the hover card.
 - [ ] M7 — The e2e edits, the record, and the acceptance run.
@@ -965,6 +965,11 @@ Row 6's sentence is not the child's: the child's says "a skip of every question 
 - Observation: in the reason box, ⇧⌘↩ also sends the deny with its reason.
   Evidence: `CardTextarea` submits on any `metaKey` with Enter; today's behaviour, left as it is.
 
+- Observation: a missing file read over the machine link comes back as `{code: 'internal', message: 'not found: <that machine's path>'}`, cut at 512 characters, so "Create" holds on a session another machine runs too.
+  Evidence: `test/endpoint/checkout-rows.test.ts`, passing on the VM at M4.
+- Observation: no unit test checks the Edit fixture's path under `data-testid="request-input"`, as M4's entry supposed; the fixture `test/fixtures/requests/edit-permission.json` is read only by `e2e/c7-shots.spec.ts` and `scope.test.ts`.
+  Evidence: a search of the tests at M4.
+
 ## Decision Log
 
 - Decision: verification for this landing. This document gets an adversarial review before an executor starts, dispatched by the architect. The branch gets `doperpowers:review-code` at the xhigh panel. Class 1a on GitHub Actions is the gate of record, run once on the head the pull request carries.
@@ -1003,6 +1008,8 @@ Row 6's sentence is not the child's: the child's says "a skip of every question 
 
 - Decision (M3, 2026-11-13): three edits outside §N, in other children's files, taken as defaults, recorded in §N and reported to the architect: two gestures in U4's `Composer.test.tsx`, one heading in U8's `subagents.test.tsx`, two entries of the palette's `UNAVAILABLE` map. Each follows from §D and changes nothing else in its file.
 - Decision (M3): the Esc hint is drawn "⎋": UC-6 makes a hint the row's chord in the keymap's own formatting (`formatChord`, U6's), and §D's drawing "Esc" yields to that rule (reported to the architect). "Deny… with a reason" keeps today's label, because l4-approvals-03 is a keep and A16 lets only the Allow control's selector change. The 400 ms lives in the permission body, armed from its mount (the body remounts per item, so an Overview card's next prompt starts its own); a key in that time is taken by its binding and answers nothing. A hint is printed only where its key is bound (none on a default-to-no prompt's allow buttons, on a button the port closes, or on a row with no chord). The first line is `askedLine` in `tools.ts`, an `h3` naming the file's base name ("a file" when the call names none); M3 says "Write" or "Edit", M4 makes "Create". `ScopeOption.detail` becomes `rule` and `LOCAL_SETTINGS_DETAIL` goes. `CardKeys`' two new keys and the frame's two new props are optional, so the other variants and `SetupCard` are untouched. A taken repeat returns at once, so no later row on the same chord is tried. The settings tests' Change-control loops iterate the rebindable rows.
+
+- Decision (M4, 2026-11-13): `EditDiff` is loaded lazily, the input-alone drawing its Suspense fallback, because a static import would pull the transcript's Markdown module into the app's entry chunk, which `transcript/lazy.tsx` keeps out. The card reads the file once per mounted card and hands the result to `PermissionBody` as an optional `proposed` prop, which the first line and the preview both follow; once the card has answered a late read is dropped, so what was approved stays drawn as it was. The path is relative in the fallback too, so it does not move when the read lands; `ToolPreview` gains a `FileEdits` export and keeps its props. The line diff is a Myers of the module's own (no dependency), capped at 1000 changed lines, past which the changed region is drawn removed then added, so a huge rewrite cannot hang the window. A read is made only for Edit, MultiEdit or Write naming one file. An empty `old_string` counts as not found; a diff with no hunks draws one muted line ("An empty file", "The file’s text stays as it is"). Collapsed, the diff shows 12 lines, and "Show all" is decided from the hunks, not measured. Modules: `proposed.ts`, `line-diff.ts`, `use-proposed-file.ts`, `ProposedChange.tsx` under `request-card/preview/`.
 
 ## Outcomes & Retrospective
 
