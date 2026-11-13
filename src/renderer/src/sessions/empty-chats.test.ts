@@ -20,7 +20,7 @@ import { useSessions } from '../stores/sessions';
 import { preloadOf } from '../test-support/preload-of';
 import { ID, intent, MESSAGE, putIntent, REPO, resetSetupStore, resources, trustState } from '../test-support/setup-intents';
 import { resetShellStores } from '../test-support/shell-stores';
-import { connectSessions } from './connect';
+import { connectSessions, createUnstartedSession } from './connect';
 import { discardEmptyChat, isEmptyChat, isEmptyIntent } from './setup-actions';
 import { useSetup } from './store';
 
@@ -206,19 +206,22 @@ describe('an empty New chat at a relaunch', () => {
   });
 });
 
-// M3's review: the sweep is a relaunch's cleanup, so it sees only chats an earlier run left; a chat this run made while
-// the snapshot was still out is the person's, typed into or not.
-describe('a New chat made while the relaunch snapshot is out', () => {
+// M3's reviews (the plan's Decision Log, 2026-11-13): the sweep is a relaunch's cleanup, so no chat of this run may be
+// among its candidates. A New chat pressed during startup is created only once the sweep has run (or is known not to
+// run), so no intent of this run is in main or in the store when the sweep takes them.
+describe('a New chat pressed while the relaunch snapshot is out', () => {
   const MADE = '55555555-5555-4555-8555-555555555555' as AppSessionId;
   const offs: (() => void)[] = [];
   afterEach(() => offs.splice(0).forEach((off) => off()));
+  const flush = () => act(() => new Promise((resolve) => setTimeout(resolve, 0)));
 
-  async function madeDuringTheSnapshot() {
+  // `create`: main answers `session.create` at once; otherwise the test answers it
+  async function startup(mode: 'index' | 'scenario', { create = true } = {}) {
     fake = fakeClient({
-      'session.launchMode': { mode: 'index' },
+      'session.launchMode': { mode },
       'session.deletions.list': { manifests: [] },
-      'session.create': { appSessionId: MADE, intent: intent({ appSessionId: MADE }) },
       'session.intent.discard': { leftover: null },
+      ...(create && { 'session.create': { appSessionId: MADE, intent: intent({ appSessionId: MADE }) } }),
     });
     window.maws = preloadOf(fake);
     let disconnect!: () => void;
@@ -227,24 +230,51 @@ describe('a New chat made while the relaunch snapshot is out', () => {
     });
     offs.push(() => act(() => disconnect()));
     expect(fake.pending('session.intent.list')).toBe(1);
-    await act(async () => expect(await newChat()).toBe(at(MADE)));
-    expect(allTabs(useLayout.getState().main).map((t) => t.id)).toEqual([tabId({ kind: 'session', appSessionId: at(MADE) })]);
   }
 
-  it('is not discarded when it holds typing and the snapshot answers with none', async () => {
-    await madeDuringTheSnapshot();
-    offs.push(registerLiveDraft(at(MADE), () => text('keep this new prompt') as never));
+  it('is created only after the sweep has run, and two presses meanwhile make one chat', async () => {
+    await startup('index');
+    const first = newChat();
+    const second = newChat();
+    expect(second).toBe(first);
+    await flush();
+    expect(fake.invoked('session.create'), 'held while the snapshot is out').toEqual([]);
+    await act(() => fake.reply('session.intent.list', { intents: [intent()] })); // an earlier run's empty chat
+    await act(async () => expect(await first).toBe(at(MADE)));
+    expect(fake.invoked('session.intent.discard')).toEqual([{ appSessionId: ID }]);
+    expect(fake.invoked('session.create')).toHaveLength(1);
+    expect(fake.calls.indexOf('invoke session.create')).toBeGreaterThan(fake.calls.indexOf('invoke session.intent.discard'));
+    expect(allTabs(useLayout.getState().main).map((t) => t.id)).toEqual([tabId({ kind: 'session', appSessionId: at(MADE) })]);
+    expect(useSetup.getState().intents.has(at(MADE))).toBe(true);
+  });
+
+  // the reviewer's ordering: main announces the new intent before it answers the create
+  it('is not discarded when its creation event comes before the create’s answer and the snapshot answers with none', async () => {
+    await startup('index', { create: false });
+    const press = newChat();
+    await flush();
+    expect(fake.pending('session.create')).toBe(0);
     await act(() => fake.reply('session.intent.list', { intents: [] }));
     await expect(currentTabRetention()!.ready).resolves.toBe(true);
+    await flush();
+    expect(fake.pending('session.create')).toBe(1);
+    act(() => fake.event('session.intent.changed', { appSessionId: MADE, intent: intent({ appSessionId: MADE }) }));
+    offs.push(registerLiveDraft(at(MADE), () => text('keep this new prompt') as never));
+    await act(() => fake.reply('session.create', { appSessionId: MADE, intent: intent({ appSessionId: MADE }) }));
+    await act(async () => expect(await press).toBe(at(MADE)));
     expect(fake.invoked('session.intent.discard')).toEqual([]);
     expect(useSetup.getState().intents.has(at(MADE))).toBe(true);
   });
 
-  it('is not discarded with nothing typed either, the snapshot listing it: it is this run’s, not a relaunch’s', async () => {
-    await madeDuringTheSnapshot();
-    await act(() => fake.reply('session.intent.list', { intents: [intent({ appSessionId: MADE })] }));
-    await expect(currentTabRetention()!.ready).resolves.toBe(true);
-    expect(fake.invoked('session.intent.discard')).toEqual([]);
-    expect(useSetup.getState().intents.has(at(MADE))).toBe(true);
+  it('is not held in launch mode scenario, where no sweep runs', async () => {
+    await startup('scenario');
+    await act(async () => expect(await createUnstartedSession(null, ipc)).toBe(at(MADE)));
+    expect(fake.pending('session.intent.list'), 'the snapshot is still out').toBe(1);
+  });
+
+  it('is not held where connectSessions is not wired', async () => {
+    fake = fakeClient({ 'session.create': { appSessionId: MADE, intent: intent({ appSessionId: MADE }) } });
+    window.maws = preloadOf(fake);
+    await act(async () => expect(await createUnstartedSession(null, ipc)).toBe(at(MADE)));
   });
 });
