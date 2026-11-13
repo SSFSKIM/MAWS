@@ -320,6 +320,13 @@ export const ADDED_COLUMNS: readonly AddedColumn[] = [
   // that decided, so a row under a stored statement, its own or one above, is known as stated across a restart
   { table: 'projects', column: 'org_by', definition: 'TEXT' },
   { table: 'projects', column: 'org_at', definition: 'TEXT' },
+  // UX wave U8c-2 (docs/doperpowers/plans/2026-11-12-ux-wave-U8c-live-working-folder.md, §C): the record's two facts
+  // beside the columns build F knows, which keep F's rule. Where the session was launched (JSON `{folder, size,
+  // mtimeMs}`) and where its agent is (JSON `{checkout, cwd, branch, linked, size, mtimeMs}`), each null where it does
+  // not differ from what those columns say, and each believed only while its size and mtime are the row's: build F never
+  // writes either, and moves the size and mtime when it files a newer transcript.
+  { table: 'sessions', column: 'launch_folder', definition: 'TEXT' },
+  { table: 'sessions', column: 'agent_folder', definition: 'TEXT' },
 ];
 
 // A table added without moving `user_version` (P5 O8 M7b; the spec's Decision Log, the architect's rulings on M7b Task

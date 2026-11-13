@@ -49,6 +49,7 @@ export function summarize(
     slug,
     directory: firstString(headRecords, 'cwd'),
     relocatedCwd: lastString(tailReversed, 'relocated', 'relocatedCwd'),
+    newestCwd: newestCwd(tailReversed), // UX wave U8c-2 (§A): the tail only; a head's newest folder in a long file is old
     size: stat.size,
     mtimeMs: stat.mtimeMs,
     firstRecordAt: stringField(firstUuid, 'timestamp'),
@@ -72,18 +73,28 @@ export function summarize(
   };
 }
 
+// UX wave U8c-2 (§A): where the agent is, the folder of the newest main-loop row among `records` (given newest first):
+// a sidechain row's is an agent's, and bookkeeping rows carry none. A shell `cd` moves no transcript and writes no
+// `relocated` row, so the rows' own `cwd` is the one signal of it (spikes/protocol-probe/findings-uxwave-U8-working-folder.txt).
+function newestCwd(records: TranscriptRecord[]): string | null {
+  for (const record of records) if (record.isSidechain !== true && typeof record.cwd === 'string') return record.cwd;
+  return null;
+}
+
 // Whole lines in the window parse as records. A line cut by the window's edge that begins at a record's start (the
 // head window's last line when the file goes on past it; a torn last line of the tail window) still yields its
 // top-level string fields by a bounded, structure-aware scan: it walks the fragment tracking JSON string state and
 // nesting depth and captures `"<key>":"…"` pairs at depth 1 only, so a long first prompt does not lose the session's
 // directory while a `uuid` or `gitBranch` inside a tool input never masquerades as the record's. A fragment that
-// begins mid-record (the tail window's cut-off first line) has no establishable depth and contributes nothing.
+// begins mid-record (the tail window's cut-off first line) has no establishable depth and contributes nothing. Of the
+// non-string values, `"isSidechain": true` at depth 1 is kept too (U8c-2), so a torn agent's row lends no folder.
 const FRAGMENT_KEYS: ReadonlySet<string> = new Set(['type', 'uuid', 'cwd', 'version', 'gitBranch', 'entrypoint', 'timestamp', 'sessionId']);
 
 function scanRecordStart(fragment: string): TranscriptRecord | null {
   const text = fragment.replace(/^\0+/, '');
   if (!text.startsWith('{')) return null;
   const fields: Record<string, string> = {};
+  let sidechain = false;
   let depth = 0;
   let key: string | null = null; // a depth-1 key whose value is next
   let i = 0;
@@ -121,11 +132,13 @@ function scanRecordStart(fragment: string): TranscriptRecord | null {
       depth -= 1;
     } else if (c === ',' && depth === 1) {
       key = null; // a non-string value ended
+    } else if (key === 'isSidechain' && depth === 1 && text.startsWith('true', i)) {
+      sidechain = true;
     }
     i += 1;
   }
   if (Object.keys(fields).length === 0) return null;
-  return { ...fields, type: fields.type ?? 'fragment' };
+  return { ...fields, type: fields.type ?? 'fragment', ...(sidechain && { isSidechain: true }) };
 }
 
 // The index of the quote closing the string that opens at `start`, honouring backslash escapes; -1 when unterminated.

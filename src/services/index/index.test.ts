@@ -209,7 +209,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     });
     const db = new DatabaseSync(path, { readOnly: true });
     try {
-      expect(columnsOf(db)).toEqual([...v1Columns, 'lineage', 'lineage_source', 'root_uuid', 'transcript_birthtime_ms', 'launched_by', 'gateway_route', 'gateway_observed'].sort()); // v4 adds four; P5 O7 M4 adds launched_by at any version (ADDED_COLUMNS), P5 O7 M9 the gateway's route and observed
+      expect(columnsOf(db)).toEqual([...v1Columns, 'lineage', 'lineage_source', 'root_uuid', 'transcript_birthtime_ms', 'launched_by', 'gateway_route', 'gateway_observed', 'launch_folder', 'agent_folder'].sort()); // v4 adds four; P5 O7 M4 adds launched_by at any version (ADDED_COLUMNS), P5 O7 M9 the gateway's route and observed, UX wave U8c-2 the record's two facts
       const indexes = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'sessions'").all() as { name: string }[]).map((i) => i.name);
       expect(indexes).toContain('sessions_project');
     } finally {
