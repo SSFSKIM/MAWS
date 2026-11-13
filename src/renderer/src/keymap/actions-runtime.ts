@@ -4,7 +4,9 @@
 // handler renders disabled everywhere: in the page through `useActionEnabled`, in the application menu through the
 // enabled set the dispatcher reports to main.
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
-import { NO_PROJECT, type LayoutMain, type TabRef, type TabTarget } from '@shared/ipc/schema/layout';
+import type { Strip, TabRef, TabTarget } from '@shared/ipc/schema/layout';
+import { machineOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
 import type { ActionId } from '@shared/keymap/actions';
 import type { Location } from '@shared/sessions/intent';
 import { askEditorHostClose } from '../panel/editor-host'; // P3-G
@@ -13,9 +15,11 @@ import { useLayout, type ReplaceVerdict } from '../stores/layout';
 import { toast } from '../stores/notices';
 import { NEW_CHAT } from '../sessions/title';
 import { allTabs, currentSet } from '../stores/layout-model';
+import { surfaceSession } from '../panel/surface-model';
 import { focusPaneElement, paneDomId } from '../main/pane-dom';
-import { useSessions } from '../stores/sessions';
-import { localProjectOfSet } from '../stores/org-projects'; // P5 O6 M5
+import { useMachines } from '../stores/machines';
+import { useSessions, type SessionsState } from '../stores/sessions';
+import { localProjectOfSet, sessionSetKey, type RowKey } from '../stores/org-projects'; // P5 O6 M5
 import { ipc } from '../ipc/client';
 import { create } from 'zustand';
 import { createHandlerRegistry } from './registry';
@@ -83,7 +87,7 @@ const closeGuards = createHandlerRegistry<TabRef['kind'], [TabRef]>('close guard
 
 export const registerCloseGuard = (kind: TabRef['kind'], guard: CloseGuard): (() => void) => closeGuards.register(kind, guard);
 
-const findTab = (main: LayoutMain, id: string): TabRef | null => allTabs(main).find((t) => t.id === id) ?? null;
+const findTab = (main: Strip, id: string): TabRef | null => allTabs(main).find((t) => t.id === id) ?? null;
 
 async function guardAllows(ref: TabRef): Promise<boolean> {
   // P3-G (§D2.3): an editor registered in the tab (X32) is asked first; its veto stops before the kind's guard.
@@ -128,9 +132,7 @@ export async function requestCloseTab(id: string): Promise<void> {
     // places the focus the close let fall: focus that another surface took within that frame (the Overview opened at
     // once, a dialog, a click elsewhere) stays there (P3-F, tracker rows 200 and 264).
     requestAnimationFrame(() => {
-      const main = useLayout.getState().main;
-      if (main.current !== before.current) return;
-      const target = currentSet(main).panes.length === 1 ? 0 : pane as 0 | 1;
+      const target = currentSet(useLayout.getState().main).panes.length === 1 ? 0 : pane as 0 | 1;
       if (!focusLeftTo(pane as 0 | 1, target)) return;
       focusPaneElement(target);
     });
@@ -221,20 +223,61 @@ export function useUnstartedTitle(appSessionId: AppSessionId): UnstartedTitleAns
   return answerOf(appSessionId, registered, { projectId, project }, revision);
 }
 
-// W12: the project an unstarted session's tab belongs with until its record exists (the shell's `projectOf` for the
-// layout): C10's registered answer, else C5's own.
+// The project an unstarted session sits under until its record exists (`sessionRow`): C10's registered answer, else
+// C5's own.
 export const unstartedProjectOf = (appSessionId: AppSessionId): ProjectId | null => unstartedTitleOf(appSessionId).projectId;
 
-// ---- New chat's preselection (2026-10-01) -------------------------------------------------------------------------------
-// The project a New chat starts in when a project is focused, so the common case is one step: the project whose tab set
-// the strip shows (W12; every session tab in it is that project's, and a click or Enter on a project row in the sidebar
-// switches to it), unless it is gone or hidden from the sidebar (W11). None from the no-project set: the chat then
-// starts with "Choose a project". P5 O6 M5: the set is an org project's, and the chat starts in its checkout on this
-// machine; a machine's row, or an org project with no checkout here, starts with "Choose a project" (a session starts
-// on another machine from O7's picker).
+// ---- the current project (UX wave U13a; its section's rules 4 and 5, the plan's Interfaces §D) --------------------------
+// The session in front is the one whose card column and side surfaces the window shows (`surfaceSession`), and the
+// current project is the sidebar row it sits under. It decides the title bar's chip, where New chat starts and the
+// project Customize is opened for. A page or a dialog changes neither.
+
+type RowState = Pick<SessionsState, 'projects' | 'registry' | 'records' | 'listed' | 'unstarted'>;
+
+// The row a session sits under (rule 5), what the shell filed a session's tabs by before U13a, unchanged: its record's
+// project's row (a hidden project's included, so that the chip can bring it back), a machine's own row for a session in
+// no listed project, else the project chosen in its unstarted chat. `revision` is an input so that a memoizing compiler
+// asks again when the unstarted titles change.
+function rowOf(appSessionId: AppSessionId, state: RowState, loaded: ReadonlySet<MachineRef>, revision: number): RowKey | null | undefined {
+  void revision;
+  if (!loaded.has(machineOf(appSessionId))) return undefined;
+  return sessionSetKey(state, ipc.localMachine, appSessionId, () => {
+    const retention = currentTabRetention();
+    const unstarted = retention ? retention.retains(appSessionId) : state.unstarted.has(appSessionId);
+    return unstarted ? unstartedProjectOf(appSessionId) : undefined;
+  });
+}
+
+/** The row a session sits under (rule 5): its project's, a machine's own, or the project chosen in an unstarted chat.
+    null: an unstarted chat with no project. undefined: its machine has not answered in this run, or it is not known. */
+export const sessionRow = (appSessionId: AppSessionId): RowKey | null | undefined =>
+  rowOf(appSessionId, useSessions.getState(), useMachines.getState().loaded, useTitleRevision.getState().n);
+
+const rowOrNone = (row: RowKey | null | undefined): RowKey | null => row ?? null;
+
+export function currentRow(): RowKey | null {
+  const session = surfaceSession(useLayout.getState());
+  return session === null ? null : rowOrNone(sessionRow(session));
+}
+
+export function useCurrentRow(): RowKey | null {
+  const session = useLayout(surfaceSession);
+  const loaded = useMachines((s) => s.loaded);
+  const projects = useSessions((s) => s.projects);
+  const registry = useSessions((s) => s.registry);
+  const records = useSessions((s) => s.records);
+  const listed = useSessions((s) => s.listed);
+  const unstarted = useSessions((s) => s.unstarted);
+  const revision = useTitleRevision((s) => s.n);
+  return session === null ? null : rowOrNone(rowOf(session, { projects, registry, records, listed, unstarted }, loaded, revision));
+}
+
+// New chat's preselection (2026-10-01): the current project's folder on this Mac, unless it is hidden from the sidebar
+// (W11). None for a machine's row, a project with no folder here or no current project: the chat then starts with
+// "Choose a project" (a session starts on another machine from O7's picker).
 export function focusedProject(): ProjectId | null {
-  const { current } = useLayout.getState().main;
-  const project = current === NO_PROJECT ? undefined : localProjectOfSet(useSessions.getState(), current, ipc.localMachine);
+  const row = currentRow();
+  const project = row === null ? undefined : localProjectOfSet(useSessions.getState(), row, ipc.localMachine);
   return project && !project.hidden ? project.id : null;
 }
 

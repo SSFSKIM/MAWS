@@ -138,16 +138,14 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
     const appSessionId = event.dataTransfer.getData(SESSION_DRAG_TYPE) as AppSessionId;
     if (!appSessionId) return;
     const id = `session:${appSessionId}`;
-    const shown = layout.main.current;
     if (currentSet(layout.main).panes.some((p) => p.tabs.some((t) => t.id === id))) {
       dropTab(id, pane, index);
       return;
     }
     // Opened after the active tab, then moved to the drop point; the index stays right because the new tab was not in
-    // the strip the pointer saw. W12: a session of another project opens in its own project's set, which the strips
-    // then show, so the drop point no longer applies.
+    // the strip the pointer saw.
     layout.openTab({ kind: 'session', appSessionId }, { pane });
-    if (useLayout.getState().main.current === shown) useLayout.getState().moveTab(id, pane, index);
+    useLayout.getState().moveTab(id, pane, index);
   };
 
   const label = split ? (pane === 0 ? 'Left pane tabs' : 'Right pane tabs') : 'Open tabs';

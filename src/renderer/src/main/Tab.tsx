@@ -18,9 +18,7 @@ import { useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { machineOf } from '@shared/machine/address';
-import { ipc } from '../ipc/client';
 import { selectOffline, useMachines } from '../stores/machines';
-import { sessionSetKey } from '../stores/org-projects';
 import { displayTitle } from '../sessions/title';
 // E5 start
 import { EDITOR_COPY } from '../tools/code/copy';
@@ -67,8 +65,7 @@ function useProjectName(appSessionId: AppSessionId | null): string | null {
 // A session tab's label: the record's title, project and glyph; with no record, its listed row's title (P5 O9 M9: another
 // machine's terminal session, which has its row alone), the title the tab last knew (P5 O6 M2: a
 // session of a machine not loaded in this run), else an unstarted session's, titled through `registerUnstartedTitle`,
-// without a glyph. The project is named when the session's set is not the strip's (P5 O6 M5: sets are keyed by org
-// project, `sessionSetKey`).
+// without a glyph. The project is named on every tab of a session with a record (U13a, until its tabs name their place).
 function useSessionLabel(appSessionId: AppSessionId, lastKnown?: string): TabLabel {
   const record = useSessions((s) => s.records.get(appSessionId));
   const listedTitle = useSessions((s) => s.listed.get(appSessionId)?.title.trim() || null); // P5 O9 M9
@@ -77,10 +74,8 @@ function useSessionLabel(appSessionId: AppSessionId, lastKnown?: string): TabLab
   const pending = useAttention((s) => selectPendingOf(s, appSessionId));
   const project = useProjectName(appSessionId);
   const unstarted = useUnstartedTitle(appSessionId);
-  const current = useLayout((s) => s.main.current);
-  const set = useSessions((s) => (s.records.has(appSessionId) ? sessionSetKey(s, ipc.localMachine, appSessionId, () => undefined) : undefined));
   if (!record) return { title: listedTitle ?? lastKnown ?? unstarted.title, secondary: null, glyph: null, fileType: null };
-  return { title: displayTitle(record), secondary: set === current ? null : project, glyph: glyphFor(record, digest ?? null, pending, listing), fileType: null };
+  return { title: displayTitle(record), secondary: project, glyph: glyphFor(record, digest ?? null, pending, listing), fileType: null };
 }
 
 export function useTabLabel(tab: TabRef): TabLabel {

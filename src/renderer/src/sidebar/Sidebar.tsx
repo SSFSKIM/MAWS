@@ -262,10 +262,9 @@ function SidebarBody() {
     [],
   );
 
-  // A project's activation, one path for a click on its row and its keys (Enter, Space, ArrowRight, ArrowLeft): the strip
-  // shows the row's tab set (W12; P5 O6 M5: a machine's row has its own), and the row opens or closes.
+  // A project's activation, one path for a click on its row and its keys (Enter, Space, ArrowRight, ArrowLeft): the row
+  // opens or closes, and nothing else (UX wave U13a: the strip is one and no row changes it).
   const toggleProject = (key: ProjectKey) => {
-    useLayout.getState().setCurrentProject(key);
     if (searching) return; // a search shows its matches open without changing what is expanded
     const open = sidebar.expandedProjects.includes(key);
     if (open && more.has(key)) {
@@ -452,7 +451,7 @@ function SortMenu({ sort }: { sort: SidebarSort }) {
 
 // New chat (M2): directly under the sidebar wordmark, above the search and tree, as Codex's first nav row sits above its
 // projects (readable/chatgpt-26.928.40906/renderer/app/app-initial-27bc4044d9e8.js:519957-519987, 520284-520293). It
-// starts in the project whose tab set the strip shows (`focusedProject`), else in none ("Choose a project").
+// starts in the current project's folder here (`focusedProject`), else in none ("Choose a project").
 function SidebarDestinations({ children }: { children: ReactNode }) {
   return <nav aria-label="App destinations" className="shrink-0 px-2.5 pt-2.5 pb-1">
     {children}

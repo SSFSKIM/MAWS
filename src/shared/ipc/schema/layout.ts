@@ -505,8 +505,9 @@ export function stripOf(stored: LayoutMain | LayoutMainV1): { strip: Strip; merg
 }
 // ---- end UX wave U13a ----------------------------------------------------------------------------------------------
 
-// Widths are the X7 tokens `--sidebar-w` and `--panel-w`.
-export const LAYOUT_DEFAULTS: { regions: LayoutRegions; main: LayoutMain; panelPinned: PanelTabRef[] } = {
+// Widths are the X7 tokens `--sidebar-w` and `--panel-w`. UX wave U13a: `main` is the layout store's empty strip, not a
+// stored value (what `main.tabs` holds is `storedMain` of a strip).
+export const LAYOUT_DEFAULTS: { regions: LayoutRegions; main: Strip; panelPinned: PanelTabRef[] } = {
   regions: {
     version: 5,
     sidebar: { width: 240, collapsed: false, sort: 'priority', expandedProjects: [] },
@@ -514,7 +515,7 @@ export const LAYOUT_DEFAULTS: { regions: LayoutRegions; main: LayoutMain; panelP
     overview: null,
     floatingCard: {},
   },
-  main: { version: 3, current: NO_PROJECT, sets: { [NO_PROJECT]: EMPTY_TAB_SET }, closedTabs: [] },
+  main: EMPTY_STRIP,
   panelPinned: [],
 };
 

@@ -8,8 +8,8 @@ import { useRef, type ReactNode } from 'react';
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import { NO_PROJECT, type TabRef } from '@shared/ipc/schema/layout';
-import { createSession, runAction, useSessionCreatorRegistered } from '../keymap/actions-runtime';
+import type { TabRef } from '@shared/ipc/schema/layout';
+import { createSession, runAction, useCurrentRow, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { revealProject } from '../sidebar/reveal';
 import { selectNeedsYou, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
@@ -148,7 +148,8 @@ export function Toolbar() {
 // out of the crowded strip): the project whose tab set the strips show, left of the title, so a strip that changed with
 // a project is never a surprise. A click is the sidebar's "+" (a New chat in that project: a new unstarted session tab
 // in its set); the context menu reveals the project in the sidebar, the one way a hidden project's row comes back. The
-// no-project set (and a project the index no longer lists) shows none.
+// no-project set (and a project the index no longer lists) shows none. UX wave U13a: the project is the current
+// project's folder here (`useCurrentRow`), until the chip names and reveals the row itself.
 export const PROJECT_CHIP_COPY = {
   newChat: (name: string) => `New chat in ${name}`,
   reveal: 'Reveal in sidebar',
@@ -156,8 +157,8 @@ export const PROJECT_CHIP_COPY = {
 } as const;
 
 function ProjectChip() {
-  const current = useLayout((s) => s.main.current);
-  const project = useSessions((s) => (current === NO_PROJECT ? undefined : localProjectOfSet(s, current, ipc.localMachine))); // P5 O6 M5: the set's checkout here
+  const current = useCurrentRow(); // U13a: the current project's row
+  const project = useSessions((s) => (current === null ? undefined : localProjectOfSet(s, current, ipc.localMachine))); // P5 O6 M5: the row's checkout here
   const canCreate = useSessionCreatorRegistered();
   const revealing = useRef(false); // the reveal focuses the project's row: the closing menu gives the chip no focus back
   if (!project) return null;
