@@ -313,7 +313,7 @@ describe('Connectors', () => {
   // main's posture for each configured server, by the record its endpoint matches; unscripted, it is unknown
   // with its configuration's fingerprint (`print`, read at each answer: an endpoint replaced under the same name changes it)
   let print = 'print-1';
-  const posture = (_client: QueryClient, name: string, authPosture: 'auth_required' | 'no_auth', scope = 'user', path = '/config/.claude.json') => backend.script('catalog.postures', () => ({ servers: [{ name, scope, path, authPosture, fingerprint: print }] }));
+  const posture = (_client: QueryClient, name: string, authPosture: 'auth_required' | 'no_auth', scope = 'user', path = '/config/.claude.json') => backend.script('catalog.postures', () => ({ servers: [{ name, scope, path, authPosture, fingerprint: print, revision: null }] }));
   const mountWith = (client: QueryClient) => render(<QueryClientProvider client={client}><CustomizeView section="mcp" /></QueryClientProvider>);
   const fresh = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
   afterEach(() => {
@@ -388,7 +388,7 @@ describe('Connectors', () => {
 
   it('a name configured in two scopes: the entry the engine uses offers Sign in, the other says it is shadowed and offers none', async () => {
     const client = fresh();
-    backend.script('catalog.postures', () => ({ servers: [{ name: 'notion', scope: 'user', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-user' }, { name: 'notion', scope: 'local', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-local' }] }));
+    backend.script('catalog.postures', () => ({ servers: [{ name: 'notion', scope: 'user', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-user', revision: null }, { name: 'notion', scope: 'local', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-local', revision: null }] }));
     backend.script('customization.inventory', () => ({ skills: [], servers: [{ name: 'notion', scope: 'user', path: '/config/.claude.json', transport: 'http' }, { name: 'notion', scope: 'local', path: '/config/.claude.json', transport: 'http' }], warnings: [], serversRead: true }));
     const here = { ...pageStatus('here'), cwd: '/one' };
     useSessions.setState({ engine: new Map([[here.appSessionId, here]]) });
@@ -418,8 +418,8 @@ describe('Connectors', () => {
     const innerFile = '/one/.mcp.json';
     let innerPrint = 'print-inner';
     backend.script('catalog.postures', () => ({ servers: [
-      { name: 'notion', scope: 'project', path: outerFile, authPosture: 'no_auth', fingerprint: 'print-outer' },
-      { name: 'notion', scope: 'project', path: innerFile, authPosture: 'auth_required', fingerprint: innerPrint },
+      { name: 'notion', scope: 'project', path: outerFile, authPosture: 'no_auth', fingerprint: 'print-outer', revision: null },
+      { name: 'notion', scope: 'project', path: innerFile, authPosture: 'auth_required', fingerprint: innerPrint, revision: null },
     ] }));
     backend.script('customization.inventory', () => ({ skills: [], servers: [{ name: 'notion', scope: 'project', path: outerFile, transport: 'http' }, { name: 'notion', scope: 'project', path: innerFile, transport: 'http' }], warnings: [], serversRead: true }));
     backend.script('connectors.signIn', () => ({ opId: 'op-inner' }));

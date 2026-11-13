@@ -135,8 +135,9 @@ describe('which session signs in a server of MAWS’s own list', () => {
   it('else the first ready session that lists it, the page’s directory first, then by id', () => {
     expect(ownSignInSessionOf('fx-own', ready, 'z', '/p')).toBe('a'); // the attached one does not list it
     expect(ownSignInSessionOf('fx-own', ready, 'gone', '/p')).toBe('a'); // the attached one is not ready
-    expect(ownSignInSessionOf('fx-own', ready, null, '/q')).toBe('b');
-    expect(ownSignInSessionOf('fx-own', ready, null, null)).toBe('b');
+    expect(ownSignInSessionOf('fx-own', ready, null, '/elsewhere')).toBe('b');
+    expect(ownSignInSessionOf('fx-own', ready, null, '/q')).toBe('a');
+    expect(ownSignInSessionOf('fx-own', ready, null, null)).toBe('a');
   });
   it('none when no ready session lists it (Open a session, then sign in)', () => {
     expect(ownSignInSessionOf('fx-missing', ready, 'a', '/p')).toBeNull();

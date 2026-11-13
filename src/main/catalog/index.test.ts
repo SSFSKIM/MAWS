@@ -247,8 +247,8 @@ describe('the catalog service', () => {
 
   it('answers each configured server’s posture from the directory record its endpoint matches, from the copy held', async () => {
     endpoints = [
-      { name: 'work-tracker', scope: 'user', path: '/x/.claude.json', transport: 'http', url: 'https://mcp.linear.app/mcp' },
-      { name: 'linear', scope: 'project', path: `${PROJECT_A}/.mcp.json`, transport: 'http', url: 'https://linear.internal.example/mcp' },
+      { name: 'work-tracker', scope: 'user', path: '/x/.claude.json', transport: 'http', url: 'https://mcp.linear.app/mcp', revision: 'rev-tracker' }, // U11a M8: the engine host's
+      { name: 'linear', scope: 'project', path: `${PROJECT_A}/.mcp.json`, transport: 'http', url: 'https://linear.internal.example/mcp' }, // an earlier host's: none
     ];
     const engine = host(() => recordedEngine(PROJECT_A));
     const { invoke } = service(engine.call);
@@ -264,8 +264,8 @@ describe('the catalog service', () => {
     expect(JSON.stringify(before)).not.toMatch(/linear\.app|internal\.example/);
     await invoke('catalog.home', { tab: 'connectors', cwd: PROJECT_A }); // the directory read once
     expect(await invoke('catalog.postures', { cwd: PROJECT_A })).toEqual({ servers: [
-      { name: 'work-tracker', scope: 'user', path: '/x/.claude.json', authPosture: 'auth_required', fingerprint: tracker },
-      { name: 'linear', scope: 'project', path: `${PROJECT_A}/.mcp.json`, authPosture: null, fingerprint: project }, // Linear's name, not its endpoint
+      { name: 'work-tracker', scope: 'user', path: '/x/.claude.json', authPosture: 'auth_required', fingerprint: tracker, revision: 'rev-tracker' },
+      { name: 'linear', scope: 'project', path: `${PROJECT_A}/.mcp.json`, authPosture: null, fingerprint: project, revision: null }, // Linear's name, not its endpoint
     ] });
     // each postures call asked, and the view's read asked once beside it (the baseline an MCP change is compared with)
     expect(engine.asked.filter((a) => a.name === 'customization.serverEndpoints').map((a) => a.input)).toEqual([{ cwd: PROJECT_A }, { cwd: PROJECT_A }, { cwd: PROJECT_A }]);
