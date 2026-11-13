@@ -348,6 +348,18 @@ describe('the installed menu', () => {
     expect(electron.setApplicationMenu).toHaveBeenCalledTimes(calls);
   });
 
+  // The panel's finding of 2026-11-12, "tab-chord expansion past F24": a valid stored Select tab chord whose key is not
+  // the digit 1 is the first tab's alone, and the menu installs with it
+  it('installs with a stored Select tab of F21: Select Tab 1 holds it and tabs 2 to 9 none; Cmd+Alt+1 still numbers', () => {
+    const menu = startMenu({ settings: () => ({ ...SETTINGS, keymap: { 'tab.select': 'F21' } }), emit: vi.fn() });
+    expect(electron.setApplicationMenu).toHaveBeenCalledTimes(1);
+    const tabs = Array.from({ length: 9 }, (_, i) => byId(installed(), `tab.select:${i + 1}`)?.accelerator ?? null);
+    expect(tabs).toEqual(['F21', null, null, null, null, null, null, null, null]);
+    menu.stop();
+    const numbered = menuTemplate(ACTIONS, { 'tab.select': 'Cmd+Alt+1' }, ALL, vi.fn());
+    expect(Array.from({ length: 9 }, (_, i) => byId(numbered, `tab.select:${i + 1}`)?.accelerator)).toEqual(Array.from({ length: 9 }, (_, i) => `Cmd+Alt+${i + 1}`));
+  });
+
   it('does not rebuild for an unchanged enabled set', () => {
     const menu = startMenu({ settings: () => SETTINGS, emit: vi.fn() });
     menu.setEnabled(['panel.toggle', 'sidebar.toggle']);

@@ -194,6 +194,26 @@ describe('keymap: the effective chord', () => {
   });
 });
 
+// The panel's finding of 2026-11-12, "tab-chord expansion past F24": only a chord whose key is the digit 1 numbers
+// Select tab through nine; F11 and F21 are one chord each, and F21 must not expand into F22 … F29, past the vocabulary.
+describe('keymap: the chords Select tab numbers through nine', () => {
+  it('numbers a chord whose key is the digit 1, with or without modifiers, and no other', () => {
+    expect(heldChords('tab.select', 'Cmd+1')).toEqual(['Cmd+1', 'Cmd+2', 'Cmd+3', 'Cmd+4', 'Cmd+5', 'Cmd+6', 'Cmd+7', 'Cmd+8', 'Cmd+9']);
+    expect(heldChords('tab.select', 'Cmd+Alt+1')).toHaveLength(9);
+    expect(heldChords('tab.select', 'Cmd+Alt+1').at(-1)).toBe('Cmd+Alt+9');
+    expect(heldChords('tab.select', 'F11')).toEqual(['F11']);
+    expect(heldChords('tab.select', 'F21')).toEqual(['F21']);
+  });
+
+  it('resolves every chord with a stored Select tab of F21 or F11, without throwing', () => {
+    for (const chord of ['F21', 'F11']) {
+      expect(effectiveChord('session.new', { 'tab.select': chord }), chord).toBe('Cmd+N');
+      expect(effectiveChord('tab.select', { 'tab.select': chord }), chord).toBe(chord);
+    }
+    expect(effectiveChord('region.focusNext', { 'tab.select': 'F16' })).toBe('F6'); // F16 is not F6 … F9's expansion either
+  });
+});
+
 // UC-14 (decision 11): build F refuses a settings file whose keymap names an action it does not know.
 describe('keymap: what may be rebound while build F may run', () => {
   it('knows build F’s 58 ids, each once and each a row', () => {

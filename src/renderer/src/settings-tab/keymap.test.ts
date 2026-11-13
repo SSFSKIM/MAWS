@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { ACTIONS, ACTION_IDS, idsOf, type ActionTable, type KeymapOverrides } from '@shared/keymap/actions';
 import type { KeyEventLike } from '@shared/keymap/chord';
 import { EXTENDED_TABLE, SAMPLE_IDS, SAMPLE_ROWS, sample } from '@shared/keymap/sample-rows'; // U6a
-import { acceleratorOf, captureChord, keymapGroups } from './keymap';
+import { acceleratorOf, captureChord, displayChord, keymapGroups } from './keymap';
 
 const key = (code: string, keyValue: string, mods: Partial<Pick<KeyEventLike, 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>> = {}): KeyEventLike => ({
   metaKey: false,
@@ -181,3 +181,11 @@ it('reads Space by its code, and refuses a bare Space for the app-wide hold to d
   expect(captureChord(key('Space', '\u00a0', { altKey: true }), 'composer.dictate', {})).toEqual({ kind: 'chord', chord: 'Alt+Space' });
 });
 // E9 end
+
+// The panel's finding of 2026-11-12 ("tab-chord expansion past F24"): only a chord whose key is the digit 1 reads as nine
+it('shows Select tab numbered through nine only for a chord whose key is the digit 1', () => {
+  expect(displayChord('tab.select', 'Cmd+1')).toBe('⌘1…9');
+  expect(displayChord('tab.select', 'F21')).toBe('F21');
+  expect(displayChord('tab.select', 'F11')).toBe('F11');
+  expect(keymapGroups({ 'tab.select': 'F21' }).flatMap((g) => g.rows).find((r) => r.id === 'tab.select')).toMatchObject({ chord: 'F21', display: 'F21' });
+});

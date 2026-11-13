@@ -35,6 +35,12 @@ describe('terminal key filter', () => {
     expect(terminalKeyFilter(key({ key: 'c', code: 'KeyC', metaKey: true }), { 'sidebar.focus': 'Cmd+C' })).toBe('pty');
   });
 
+  // the panel's finding of 2026-11-12 ("tab-chord expansion past F24"): F21 is one chord, never F22 … F29
+  it('reads a stored Select tab of F21 as that one key, without throwing', () => {
+    expect(terminalKeyFilter(key({ key: 'F21', code: 'F21' }), { 'tab.select': 'F21' })).toBe('app');
+    expect(terminalKeyFilter(key({ key: 'F22', code: 'F22' }), { 'tab.select': 'F21' })).toBe('pty');
+  });
+
   it('keeps the tab cycle: ⌃Tab is tab.next and ⌃⇧Tab is tab.previous', () => {
     expect(terminalKeyFilter(key({ key: 'Tab', code: 'Tab', ctrlKey: true }))).toBe('tab.next');
     expect(terminalKeyFilter(key({ key: 'Tab', code: 'Tab', ctrlKey: true, shiftKey: true }))).toBe('tab.previous');
