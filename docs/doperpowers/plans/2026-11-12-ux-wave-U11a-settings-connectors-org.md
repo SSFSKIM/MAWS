@@ -483,7 +483,7 @@ From the worktree of branch `ux-wave/U11a`. `vmcheck` below stands for `~/.local
 
 3. **M1** adds no test. `vmcheck 'node --check spikes/p4-aggregator/m4-signin-spike.mjs'` prints nothing, and the e2e project typechecks. Then stop on M1 and hand the architect P1.
 
-4. **M7 and M8, the wire.** M7 takes the landing's minor for `pluginName`; M8 adds its command and `revision` to the same minor (it moves the number only if a merge of master took it meanwhile). After the schemas, names and grades are edited, take the next `WIRE_MINOR` on the master last merged (merge again first if master has moved: `git fetch origin master && git merge origin/master`), then make the generated files again on the VM and bring the result back:
+4. **M7 and M8, the wire.** M7 takes the landing's minor for `pluginName`; M8 adds its command and `revision` to the same minor (it moves the number only if a merge of master took it meanwhile). The manifest gate refuses an additive change at the committed minor, so a later milestone of the landing that adds to the same minor regenerates with master's manifest (master's minor) restored in the VM's checkout first, as M8 did. After the schemas, names and grades are edited, take the next `WIRE_MINOR` on the master last merged (merge again first if master has moved: `git fetch origin master && git merge origin/master`), then make the generated files again on the VM and bring the result back:
 
        G='src/shared/ipc/wire-manifest.json src/shared/ipc/wire-fingerprint.json src/shared/ipc/routes.json src/shared/machine/address-paths.json'
        vmcheck "pnpm wire:manifest >/dev/null; MAWS_ROUTES_WRITE=1 pnpm exec vitest run src/shared/ipc/routes.test.ts >/dev/null; MAWS_ADDRESS_PATHS_WRITE=1 pnpm exec vitest run src/shared/machine/coverage.test.ts >/dev/null; git diff -- $G; git checkout -- $G" > /tmp/u11a-wire.patch
@@ -1197,6 +1197,10 @@ Found while checking the sections against the code at `48619c824`, then by the a
 - Decision (M7's review, fixed): one `plugins.changed` listener per query client invalidates the inventory's key, registered the first time any reader renders, so a cached answer is marked stale whether or not a reader is mounted or may fetch; a disabled reader starts no read until it is enabled again.
   Rationale: with the listener tied to an enabled reader, a plugin installed from the unstarted Plugins dialog left the closed "+" menu's or Skills' cached inventory fresh for up to 30 s, so a removed skill could still offer "Use in chat".
   Date/Author: 2026-11-12, M7's executor on the task review; folded by the controller.
+
+- Decision: M8's means. The services read `customization.serverEndpoints` with `{ cwd: null }`, and only for a press that names an entry; `dynamicRefusal` keeps only `scope === 'app'` entries of that answer, so a file entry of the same revision does not count. The revision's key is 32 random bytes made when the engine host's module loads (`configurationRevision(key)`, the form of main's fingerprint). Customize's own-list row with no revision draws neither Sign in nor "Open a session, then sign in". The dialog greys a dynamic row through `connectors.signInDynamicServer` and a file-scope row through `connectors.signInServer`. One bound, `signsInDynamic` (128 characters), serves the dialog and Customize. The mini's scene is its own `dynamic:` case in `e2e/discover-connectors.spec.ts`, with a second fixture for the plugin and a second own-list server (`fx-own-2`) signed in from Customize. The minor stays 37 (Concrete Steps 4).
+  Rationale: §A's check reads MAWS's own entries now, once, where the act runs; a plugin's server and an own-list server are both scope `dynamic` (P1), so the entry comparison is limited to the own list.
+  Date/Author: 2026-11-12, M8's executor; folded by the controller.
 
 ## Outcomes & Retrospective
 
