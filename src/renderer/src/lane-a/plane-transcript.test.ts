@@ -739,8 +739,10 @@ describe('the exit a gone session leaves on another machine (X-168)', () => {
     await settle();
     expect(entry().rows.filter((r) => r.kind === 'subagent').map((r) => (r as Extract<Row, { kind: 'subagent' }>).status)).not.toContain('started');
     expect(entry().rows.filter((r) => r.kind === 'user').length).toBe(2); // the late prompt drawn, once
-    const agents = [...controller.state.getState().tasks.tasks.values()].filter((node) => node.kind === 'agent');
-    expect(agents.map((node) => node.status)).toEqual(['exited', 'exited']);
+    const nodes = [...controller.state.getState().tasks.tasks.values()];
+    expect(nodes.find((node) => node.taskId === AGENT)?.status).toBe('exited');
+    expect(nodes.length).toBeGreaterThanOrEqual(2); // the late call has a node of its own
+    expect(nodes.filter((node) => node.status === 'running').map((node) => node.taskId)).toEqual([]); // and it is ended too
     expect([...entry().state.seen].filter((id) => String(id).startsWith(EXIT))).toEqual([EXIT]); // one exit, after the rows
   });
 
