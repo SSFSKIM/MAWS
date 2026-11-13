@@ -74,18 +74,26 @@ export async function admittedFolder(record: AllowlistRecord, which: 'launch' | 
 
 const realpathOrNull = (path: string): Promise<string | null> => fs.promises.realpath(path).catch(() => null);
 
+// Nothing there (ENOENT; ENOTDIR, a path through a file) is an absence, which the reader answers null; any other failure
+// (EACCES, EIO, ELOOP, …) is thrown, so the admission refuses where git itself would stop (§G: a read that fails refuses).
+const absent = (error: unknown): null => {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  if (code === 'ENOENT' || code === 'ENOTDIR') return null;
+  throw error;
+};
+
 // Git's files as they are, for `admittedFolder`: plain reads with no home walk (the files service reads the session's own
 // folders, which it was given). A read is of a regular file only, never a FIFO's open, which would block.
 const PLAIN_FILES: GitFiles = {
-  real: realpathOrNull,
+  real: (path) => fs.promises.realpath(path).catch(absent),
   async entry(path) {
-    const stat = await fs.promises.lstat(path).catch(() => null);
+    const stat = await fs.promises.lstat(path).catch(absent);
     return stat === null ? null : stat.isSymbolicLink() ? 'link' : stat.isFile() ? 'file' : stat.isDirectory() ? 'directory' : 'other';
   },
   async read(path, max) {
-    const at = await realpathOrNull(path);
-    if (at === null || (await fs.promises.lstat(at).catch(() => null))?.isFile() !== true) return null;
-    const handle = await fs.promises.open(at, 'r').catch(() => null);
+    const at = await PLAIN_FILES.real(path);
+    if (at === null || (await fs.promises.lstat(at).catch(absent))?.isFile() !== true) return null;
+    const handle = await fs.promises.open(at, 'r').catch(absent);
     if (handle === null) return null;
     try {
       const { size } = await handle.stat();
@@ -97,13 +105,13 @@ const PLAIN_FILES: GitFiles = {
       await handle.close();
     }
   },
-  list: (path) => fs.promises.readdir(path).catch(() => null),
+  list: (path) => fs.promises.readdir(path).catch(absent),
   async fileSize(path) {
-    const stat = await fs.promises.lstat(path).catch(() => null);
+    const stat = await fs.promises.lstat(path).catch(absent);
     return stat?.isFile() === true ? stat.size : null;
   },
   async device(path) {
-    return (await fs.promises.stat(path).catch(() => null))?.dev ?? null;
+    return (await fs.promises.stat(path).catch(absent))?.dev ?? null;
   },
 };
 
