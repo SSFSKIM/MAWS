@@ -828,6 +828,12 @@ Found while writing this document, against master `48619c824`, and reported to t
    - Decision: the harness's agents surface follows (`harness/agents/api.ts`, `agentsProbes.ts`): `subagents().agents` reads Running, `tree()`'s sections are `running` and `done`, a row view carries `under`, `background()` carries `others`, and `toggleUnder(agentId)` and `toggleSection(tool, section)` are new; `clickRow` presses the row's own control.
    Date/Author: 2026-11-13, the executor of M7.
 
+15. **2026-11-13 (UTC; the architect, ruling in the owner's place, on M7's decision 2): a waiting request is said once on a row.** The architect confirms Decision Log 14's decision 2. A row says a waiting request of its own once: "Approval needed", in the warning colour, as its one line of state. This holds in the panel (M7) and on the card (M8) alike, and the title's `waiting` badge, which today's panel draws, is not drawn.
+   - Why: §F gives a row one line of state with three values (its activity, `Working`, `Approval needed`) and no second mark. The card has no badge in the design file. The owner's standing position is that a fact is not drawn twice.
+   - Rejected: keeping the badge in the panel's title only. Panel and card would then say the same state differently.
+   - The architect tells the owner.
+   Date/Author: 2026-11-13, the architect's ruling; written by the controller.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
