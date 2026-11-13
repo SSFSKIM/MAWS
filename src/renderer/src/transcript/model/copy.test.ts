@@ -119,6 +119,10 @@ describe('cell lines', () => {
 
   it('other cells', () => {
     expect(cellLabel({ kind: 'generic', toolName: 'mcp__docs__search', category: 'mcp' as ToolCategory })).toBe('Used docs · search');
+    // UX wave U12a: the computer-use plugin's call reads as what it is, under both names the engine gives its tool
+    expect(cellLabel({ kind: 'generic', toolName: 'mcp__plugin_cua_cua_repl__js', category: 'mcp' as ToolCategory })).toBe('Used computer use');
+    expect(cellLabel({ kind: 'generic', toolName: 'mcp__cua_repl__js', category: 'mcp' as ToolCategory })).toBe('Used computer use');
+    expect(cellLabel({ kind: 'generic', toolName: 'mcp__plugin_cua_cua_repl__js_reset', category: 'mcp' as ToolCategory })).toBe('Used plugin_cua_cua_repl · js_reset');
     expect(cellLabel({ kind: 'generic', toolName: 'Skill', category: 'skills', detail: 'tdd' })).toBe('Loaded tdd skill');
     expect(cellLabel({ kind: 'generic', toolName: 'ToolSearch', category: 'skills', detail: '2' })).toBe('Loaded 2 tools');
     expect(cellLabel({ kind: 'generic', toolName: 'Grep', category: 'exploration', detail: 'TODO', scope: 'src' })).toBe('Searched for `TODO` in src');

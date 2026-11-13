@@ -22,7 +22,7 @@ const tab = (appSessionId: string) => ({
   loading: false, canGoBack: false, canGoForward: false, zoom: 1, control: 'idle', controlSince: '2026-11-01T00:00:00.000Z',
   suspended: false, loadError: null, crashed: null, failed: null, unresponsive: false, blockedPopups: 0, find: null, denied: [],
   download: null, memoryKiB: null, placedIn: null, covered: false, createdAt: '2026-11-01T00:00:00.000Z', lastShownAt: '2026-11-01T00:00:00.000Z',
-  agentBadge: null, internal: null, forward: { machine: OTHER, port: 5173, localPort: 49152 },
+  agentBadge: null, internal: null, viewport: null /* U12a */, forward: { machine: OTHER, port: 5173, localPort: 49152 },
 });
 
 /** Each browser event naming a session, with payloads holding `key` wherever the event names one. */
