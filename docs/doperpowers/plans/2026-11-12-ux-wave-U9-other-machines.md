@@ -21,7 +21,7 @@ Sibling children code against what this landing exposes: U7 mounts on the listed
 - [x] (2026-11-13) M1 — The offers at both ends: `48c0d06e2`..`5f2186319`, reviewed clean after three fix rounds (the bridge until M4; a pane answer's route through a drain)
   - [x] (2026-11-13) M1's first step: the listing test, run on the merged base before any change of this landing. For each of its two halves, a pass means the listing rule is not built and the case stays as the pin; a failure makes it the rule's failing-first test (M1, "The listing rule opens with its test").
 - [x] (2026-11-13) M2 — Fork over the link, and the sheet's words: `38ac6a398`..`740df5e4b`, reviewed clean
-- [ ] M3 — The link's phases and the pane that stays
+- [x] (2026-11-13) M3 — The link's phases and the pane that stays: `89e9ed067`..`7e18e9184`, reviewed clean after two fix rounds (one guard for every Stop; the registry row and the location card by phase; a ready that overtakes a retry's failure; A4's scenes widened)
 - [ ] M4 — The session acts in the window
 - [ ] M5 — A link's return, the live row, the chooser and the measurement
 - [ ] The whole unit suite on the build VM (M5's executor). Then, none of them an executor's: class 1a on GitHub Actions (the architect); the `doperpowers:review-code` xhigh panel on the whole branch (the session that keeps master, on the range the architect hands it once class 1a is green); the architect's runs T2 to T7 and, after the landing, the look T1; the pull request.
@@ -627,6 +627,9 @@ At landing the architect updates the register's rows and closes the tickets and 
 - Decision: A4's "searched" is U3's to prove, and the location card follows the phase (the architect's ruling, 2026-11-13 (UTC)). The session pane has no find yet: it is U3's ("With focus in the transcript or the composer, ⌘F opens a find bar over the transcript"), in U3's second pull request, whose document takes the case "find works on a mounted pane while its machine's link is down" from here; this landing's scenes assert scroll, select, copy and no error text, and the pull request's residue names the case. A2's "'Offline' shows only for a machine whose first attempt failed or whose link has been down for a minute" is said of the machine wherever it is drawn, so `locationState` in `sidebar/locations.ts` (the location card's "offline since …") reads the same phase answer as the rows: one more line of the accepted insertion in U7's file.
   Rationale: a check belongs to the landing that builds what it checks; A2 is about the machine, not about one surface.
   Date/Author: 2026-11-13 (UTC), the plan's executor, on the architect's ruling.
+- Decision: M3's review fixes (2026-11-13). (1) The button, Esc and ⌘. pass a thunk through one decision in `lane-b/stop-act.ts`, taken before any interrupt is built: nothing goes while the session's machine is offline or while a Stop for it has not settled, so at most one interrupt is in flight per session (the 300 ms is the label's delay, not a window for a second act). (2) `sidebar/location-view.ts` answers a display `offline` beside the physical `up`; the registry row's machines line (`machinesWords`) and the location card (`locationState`, `sidebar/locations.ts` line 53) word by it, and suggestions and location actions stay gated by `up`. (3) O-11b's retry listens to both the host and the transcript stores and, once the key enters `failed`, takes a ready already newer than the consumed revision, once.
+  Rationale: a disabled act must not be reachable by a shortcut; A2 is said of the machine wherever it is drawn; a ready that overtook a failure is M3's own decision, applied to every retry.
+  Date/Author: 2026-11-13 (UTC), M3's executor, folded by the plan's executor.
 
 ## Outcomes & Retrospective
 
