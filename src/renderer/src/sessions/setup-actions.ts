@@ -11,7 +11,7 @@ import { appendHistory } from '../composer/editor/submit'; // P2-F (L118)
 import { sendToSession } from '../session/controls/controls-for'; // P2-A; P5 O9 M4: through the session's controls port
 import { pickDirectModel } from '../gateway/direct-model'; // debt wave 4: the direct route's model refusal
 import { ipc } from '../ipc/client';
-import { clearComposer } from '../stores/composer'; // P2-A
+import { clearComposer, useComposerStore } from '../stores/composer'; // P2-A; U13a: what waits for a composer
 import type { ReplaceVerdict } from '../stores/layout';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
@@ -21,7 +21,7 @@ import { cleanupTargetAt, confirm, removeWorktreeAction } from './dialogs';
 import { holderWords } from './holder-words';
 import { returnMessage } from './message-return';
 import { markSpawnedHere } from './spawned-here'; // P5 O7 M8
-import { isStarting, startNoticeId, useSetup, type HeldMessage } from './store'; // P2-A: startNoticeId; P2-F: HeldMessage
+import { failureOf, isStarting, startNoticeId, useSetup, type HeldMessage } from './store'; // P2-A: startNoticeId; P2-F: HeldMessage; U13a: failureOf
 import { machineOf } from '@shared/machine/address';
 
 export type HookResult = { ok: true } | { ok: false; error: string };
@@ -78,11 +78,23 @@ async function start(appSessionId: AppSessionId, message: FirstMessage | null, o
 
 // ---- the hook's commands -----------------------------------------------------------------------------------------
 
+// U13a (the branch review): the intent writes this page has sent and main has not answered, per session, counted as the
+// write leaves; until its answer reaches the setup store a chat may hold a draft its intent does not show yet.
+const writing = new Map<AppSessionId, number>();
+export const resetIntentWrites = (): void => writing.clear(); // for suites: a write a failed test left unanswered
+
 export async function patchIntent(appSessionId: AppSessionId, patch: SetupIntentPatch): Promise<HookResult> {
-  const result = await ipc.invoke('session.intent.patch', { appSessionId, patch });
-  if (!result.ok) return { ok: false, error: result.error.message };
-  useSetup.getState().setIntent(result.value);
-  return { ok: true };
+  writing.set(appSessionId, (writing.get(appSessionId) ?? 0) + 1);
+  try {
+    const result = await ipc.invoke('session.intent.patch', { appSessionId, patch });
+    if (!result.ok) return { ok: false, error: result.error.message };
+    useSetup.getState().setIntent(result.value);
+    return { ok: true };
+  } finally {
+    const left = (writing.get(appSessionId) ?? 1) - 1;
+    if (left > 0) writing.set(appSessionId, left);
+    else writing.delete(appSessionId);
+  }
 }
 
 // Send on an unstarted session: `starting`, `needs_trust` and `relay_unreachable` are `{ ok: true }` (the message is
@@ -301,13 +313,64 @@ export async function beforeCloseUnstarted(appSessionId: AppSessionId): Promise<
     const discard = await confirm({ title: 'Discard this unstarted session?', body: 'Its draft will be lost.', confirmLabel: 'Discard', destructive: true });
     if (!discard) return 'kept';
   }
-  const result = await ipc.invoke('session.intent.discard', { appSessionId });
+  return (await discardIntent(intent)) ? 'closed' : 'kept';
+}
+
+// The intent's discard, asking nothing: false when main refused, which the person is told.
+async function discardIntent(intent: SetupIntent): Promise<boolean> {
+  const result = await ipc.invoke('session.intent.discard', { appSessionId: intent.appSessionId });
   if (!result.ok) {
     toast({ level: 'danger', text: result.error.message, actions: [], dismissible: true });
-    return 'kept';
+    return false;
   }
   // no record names this checkout, so the notice is its way into the cleanup
   const leftover = result.value.leftover?.worktree;
   if (leftover) toast({ level: 'info', text: `Worktree ${leftover.path} was kept`, actions: [removeWorktreeAction(cleanupTargetAt(machineOf(intent.appSessionId), leftover, repositoryOf(intent)))], dismissible: true });
-  return 'closed';
+  return true;
+}
+
+// ---- an empty chat (UX wave U13a; its plan's Interfaces §E) ---------------------------------------------------------
+// What New chat brings back instead of making a second, and closes for the person, and what does not come back after
+// a relaunch (connect.ts): nothing typed or attached, no first message held, no attempt to start. A fork, a side thread,
+// a remote spawn's intent, a worktree location and a checkout kept from a failed attempt are not empty: bringing one
+// forward would start the owner where they did not ask, and closing it would leave a worktree behind a notice. Choices
+// that are not typed (a model, a mode, a directory added) leave a chat empty, as they do for a replace's verdict.
+
+export function isEmptyIntent(intent: SetupIntent): boolean {
+  const { progress } = intent;
+  return (
+    intent.kind === 'create' &&
+    intent.lineage === undefined &&
+    intent.launchedBy === undefined &&
+    (intent.location === null || intent.location.kind === 'directory') &&
+    intent.message === null &&
+    isEmptyDraft(intent.draft) &&
+    progress.worktree === null &&
+    progress.lastFailure === null &&
+    progress.bootstrap === null &&
+    progress.launch === null &&
+    progress.send === null
+  );
+}
+
+// The one definition of an empty chat (the branch review), which New chat's reuse, its close of the other empty chats
+// and the relaunch sweep all read: an unstarted chat whose intent is empty, with no start under way, no card or failure
+// to show, and nothing on its way to it: no write of its intent unanswered, no prompt or attachment waiting for its
+// composer to mount, and an empty editor where one is mounted (read before its draft reaches the intent).
+export function isEmptyChat(appSessionId: AppSessionId): boolean {
+  const setup = useSetup.getState();
+  const intent = setup.intents.get(appSessionId);
+  if (intent === undefined || useSessions.getState().records.has(appSessionId) || !isEmptyIntent(intent)) return false;
+  if (isStarting(setup, appSessionId) || setup.cards.has(appSessionId) || failureOf(setup, appSessionId) !== null) return false;
+  const composer = useComposerStore.getState();
+  if (writing.has(appSessionId) || composer.prefills.has(appSessionId) || (composer.attachmentQueue.get(appSessionId)?.length ?? 0) > 0) return false;
+  const liveDoc = liveDraftDoc(appSessionId);
+  return liveDoc === undefined || isEmptyDoc(liveDoc);
+}
+
+// New chat's discard of an empty chat it closes: as the ordinary close's, asking nothing (an intent already gone is
+// discarded).
+export async function discardEmptyChat(appSessionId: AppSessionId): Promise<boolean> {
+  const intent = useSetup.getState().intents.get(appSessionId);
+  return intent === undefined || discardIntent(intent);
 }

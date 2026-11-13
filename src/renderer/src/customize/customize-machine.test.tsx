@@ -4,12 +4,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
-import { addressOf } from '@shared/machine/address';
+import { addressOf, machineOf } from '@shared/machine/address';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
-import { project, status } from '../../../../test/support/builders';
+import { project, record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { at, OTHER_MACHINE } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { useLayout } from '../stores/layout';
+import { useMachines } from '../stores/machines';
 import { useSessions } from '../stores/sessions';
 import { preloadOf } from '../test-support/preload-of';
 import { forgetKeptOperations } from '../widgets/plugins/operation';
@@ -29,13 +30,21 @@ afterEach(() => {
   forgetKeptOperations();
   useSessions.setState({ projects: new Map(), records: new Map(), engine: new Map() });
   useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+  useMachines.setState({ loaded: new Set() });
   useCustomizeProject.setState({ projectId: undefined }, true);
 });
+// U13a: the page's project is the current project, the row of the session in front
+const front = (projectId: ProjectId) => {
+  const id = addressOf(machineOf(projectId), 'session-in-front' as AppSessionId);
+  useSessions.setState((s) => ({ records: new Map([...s.records, [id, record(id, { projectId })]]) }));
+  useMachines.setState({ loaded: new Set([TEST_MACHINE, OTHER_MACHINE]) });
+  useLayout.getState().openTab({ kind: 'session', appSessionId: id });
+};
 const mount = () => render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><CustomizeView section="skills" /></QueryClientProvider>);
 const inventoryCwds = () => fake.invoked('customization.inventory').map((input) => (input as { cwd: string | null }).cwd);
 
 it('offers only this machine’s projects, and shows the user configuration when the focused project is another machine’s', async () => {
-  useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, current: R, sets: { [R]: LAYOUT_DEFAULTS.main.sets.none } } });
+  front(R);
   mount();
   await waitFor(() => expect(inventoryCwds()).toEqual([null]));
   const options = [...(screen.getByRole('combobox', { name: 'Project' }) as HTMLSelectElement).options].map((o) => o.value);
@@ -43,7 +52,7 @@ it('offers only this machine’s projects, and shows the user configuration when
 });
 
 it('attaches only this machine’s live sessions in the page’s directory', async () => {
-  useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, current: P, sets: { [P]: LAYOUT_DEFAULTS.main.sets.none } } });
+  front(P);
   const here = { ...status('live-here'), appSessionId: at('live-here' as AppSessionId), cwd: '/one' };
   const there = { ...status('live-there'), appSessionId: addressOf(OTHER_MACHINE, 'live-there' as AppSessionId), cwd: '/one' };
   useSessions.setState({ engine: new Map([[here.appSessionId, here], [there.appSessionId, there]]) });

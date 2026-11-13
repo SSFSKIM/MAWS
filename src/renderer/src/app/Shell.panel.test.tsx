@@ -7,7 +7,7 @@ import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PanelSessionState, PanelTabRef } from '@shared/ipc/schema/layout';
-import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
+import { LAYOUT_DEFAULTS, storedMain } from '@shared/ipc/schema/layout';
 import { TEST_MACHINE } from '../../../../test/support/machine';
 import { queryClient } from '../ipc/query';
 import { connectPanelHost, instanceIds, panelHost, pendingAdds, registerPanelTool, resetPanelHost } from '../panel/host';
@@ -182,7 +182,7 @@ describe('shell renders the panel host in the region', () => {
     beforeEach(() => resetPanelStores({ hydrated: false }));
 
     it('an addTool before hydration writes nothing, lands after it, is persisted, and a relaunch from the writes shows the tab', async () => {
-      const bridge = heldBridge(persisted({ 'main.tabs': mainShowing(B) }));
+      const bridge = heldBridge(persisted({ 'main.tabs': storedMain(mainShowing(B)) }));
       const stopPersistence = persistLayout(bridge.client);
       connect();
       const terminal = probeTool('terminal');
@@ -224,7 +224,7 @@ describe('shell renders the panel host in the region', () => {
     });
 
     it('a pending add for a session removed before the barrier lands nothing under either activation or as a pin; a sessionless pin lands', async () => {
-      const bridge = heldBridge(persisted({ 'main.tabs': mainShowing(B) }));
+      const bridge = heldBridge(persisted({ 'main.tabs': storedMain(mainShowing(B)) }));
       const stopPersistence = persistLayout(bridge.client);
       connect();
       const terminal = probeTool('terminal');
@@ -276,7 +276,7 @@ describe('shell renders the panel host in the region', () => {
     it('a pending singleton replacing a restored pinned ref carries A’s, B’s and the no-session selection to the new id, opening nothing', async () => {
       const bridge = heldBridge(
         persisted({
-          'main.tabs': LAYOUT_DEFAULTS.main, // the Overview: no session shown
+          'main.tabs': storedMain(LAYOUT_DEFAULTS.main), // the Overview: no session shown
           'panel.pinned': [ref('session-info:restored', true), ref('t:pin00000', true)],
           [`panel.${A}`]: { tabs: [], activeTabId: 'session-info:restored' },
           [`panel.${B}`]: { tabs: [ref('t:bbbbbbbb')], activeTabId: 'session-info:restored' },

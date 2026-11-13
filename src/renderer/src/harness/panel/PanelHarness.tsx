@@ -11,6 +11,7 @@
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
+import { EMPTY_STRIP } from '@shared/ipc/schema/layout';
 import { useWindowWidth } from '../../app/regions';
 import { useShellGeometry, useShellView } from '../../app/shell-view';
 import { SurfaceRow } from '../../panel/SurfaceRow';
@@ -113,9 +114,7 @@ function bootstrap(): () => void {
     seedFakeSessions();
     // C9: the host's ptys are re-adopted before the layout hydrates, so a restored Terminal tab finds its shell.
     const adopted = await adoptTerminals((appSessionId) => FAKE_RECORDS.has(appSessionId as AppSessionId));
-    await useLayout.getState().hydrate(ipc, (id) => useSessions.getState().records.has(id), {
-      projectOf: (id) => useSessions.getState().records.get(id)?.projectId ?? null,
-    });
+    await useLayout.getState().hydrate(ipc, (id) => useSessions.getState().records.has(id));
     // A first launch shows A; a relaunch shows what the profile's main.tabs held.
     const layout = useLayout.getState();
     if (!allTabs(layout.main).some((t) => t.kind === 'session')) layout.openSession(fakeId('A'));
@@ -136,9 +135,9 @@ function tabTitle(tabId: string, toolId: string): string {
 const api: PanelHarnessApi = {
   switchSession(id) {
     if (id === null) {
-      // Sessions are filed in their project’s set. The no-project set is genuinely session-free, unlike a
+      // A strip of no session's tabs (U13a: the one strip, where the no-project set was one), unlike a
       // document/Diagnostics tab beside a session, which correctly keeps that session’s surface context.
-      useLayout.getState().setCurrentProject(null);
+      useLayout.setState((s) => ({ main: { ...EMPTY_STRIP, closedTabs: s.main.closedTabs } }));
       useLayout.getState().openTab({ kind: 'diagnostics' });
     } else useLayout.getState().openSession(fakeId(id));
   },

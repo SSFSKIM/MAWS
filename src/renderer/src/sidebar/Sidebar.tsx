@@ -19,7 +19,7 @@ import { FolderIcon, GearIcon, IconButton, SortIcon } from '../app/IconButton';
 import { openCustomize, openProjects } from '../customize/open';
 import { useChordHint } from '../app/IconButton'; // C11
 import { useSlot } from '../app/slots';
-import { createSession, focusedProject, NEW_CHAT, useSessionCreatorRegistered } from '../keymap/actions-runtime';
+import { NEW_CHAT, newChat, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { runAction, useActionEnabled } from '../keymap/actions-runtime'; // C11: the footer's gear opens Settings
 import { ipc } from '../ipc/client';
 import { useMachines } from '../stores/machines';
@@ -262,10 +262,9 @@ function SidebarBody() {
     [],
   );
 
-  // A project's activation, one path for a click on its row and its keys (Enter, Space, ArrowRight, ArrowLeft): the strip
-  // shows the row's tab set (W12; P5 O6 M5: a machine's row has its own), and the row opens or closes.
+  // A project's activation, one path for a click on its row and its keys (Enter, Space, ArrowRight, ArrowLeft): the row
+  // opens or closes, and nothing else (UX wave U13a: the strip is one and no row changes it).
   const toggleProject = (key: ProjectKey) => {
-    useLayout.getState().setCurrentProject(key);
     if (searching) return; // a search shows its matches open without changing what is expanded
     const open = sidebar.expandedProjects.includes(key);
     if (open && more.has(key)) {
@@ -452,7 +451,7 @@ function SortMenu({ sort }: { sort: SidebarSort }) {
 
 // New chat (M2): directly under the sidebar wordmark, above the search and tree, as Codex's first nav row sits above its
 // projects (readable/chatgpt-26.928.40906/renderer/app/app-initial-27bc4044d9e8.js:519957-519987, 520284-520293). It
-// starts in the project whose tab set the strip shows (`focusedProject`), else in none ("Choose a project").
+// is `newChat` (U13a): in the current project, else in none ("Choose a project").
 function SidebarDestinations({ children }: { children: ReactNode }) {
   return <nav aria-label="App destinations" className="shrink-0 px-2.5 pt-2.5 pb-1">
     {children}
@@ -486,7 +485,7 @@ function NewChatRow() {
       aria-label={NEW_CHAT}
       disabled={!canCreate}
       title={canCreate ? (chord ? `${NEW_CHAT} · ${chord}` : NEW_CHAT) : 'Not available here'}
-      onClick={() => void createSession(focusedProject())}
+      onClick={() => void newChat()}
       className="group/new flex h-(--row-h) w-full cursor-default items-center gap-[7px] rounded-sm pr-1 pl-[9px] text-ui text-fg outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent"
     >
       <NewChatIcon className="size-[13px]" />

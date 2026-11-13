@@ -23,7 +23,7 @@ import type { MachineState } from '@shared/ipc/schema/machines';
 import type { OrgProjects, OrgRows } from '@shared/ipc/schema/org';
 import { isAddress, machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
-import { currentTabRetention, unstartedProjectOf } from '../keymap/actions-runtime';
+import { currentTabRetention } from '../keymap/actions-runtime';
 import { useAttention } from '../stores/attention';
 import { createFreshness, type Freshness } from '../stores/freshness';
 import { useLayout } from '../stores/layout';
@@ -31,10 +31,11 @@ import { usePanelHost } from '../panel/host'; // UX wave U8b
 import { useMachines } from '../stores/machines';
 import { useSessions } from '../stores/sessions';
 import { applyRemoteSession, holdsRemoteStatus, keepsRemoteStatus } from '../lane-b/remote-session'; // P5 O7 M2
-import { machineOfRow, selectOrgIndex, sessionSetKey, setKeyOfProject, successorOf, type RowKey } from '../stores/org-projects'; // P5 O6 M5; the project registry: successorOf
+import { machineOfRow, selectOrgIndex, setKeyOfProject, successorOf, type RowKey } from '../stores/org-projects'; // P5 O6 M5; the project registry: successorOf
 import { displayTitle } from '../sessions/title'; // P5 O6 M2: a session tab's last-known title
 import type { RekeyOf } from '../stores/layout-model';
-import { NO_PROJECT, type TabSetKey } from '@shared/ipc/schema/layout';
+import { NO_PROJECT } from '@shared/ipc/schema/layout';
+import { toast } from '../stores/notices';
 import { ipc } from './client';
 import { checkoutKey } from './machine';
 import { askUntilAnswered } from './until-answered';
@@ -71,6 +72,9 @@ export interface ShellStores {
 // before it captures the early changes it replays, so its tab check sees every event received and the removals the
 // drain makes are replayed with the rest.
 export const SHELL_BATCH_MS = 16;
+
+// UX wave U13a (its plan's §G): the notice of a read that merged a stored value's sets into the one strip.
+export const ONE_STRIP_NOTICE = 'Tabs from every project are now in one strip';
 
 // P5 O6 M4: each queued event keeps the machine it came from, whose partition it is applied to.
 type Queued = { m: MachineRef } & (
@@ -372,24 +376,11 @@ export function connectShell(
     } else if (rosterLive()) takeRoster(result.value.machines);
   });
 
-  // W12: a session's tabs live in its project's set: the record's project, else its unstarted intent's; a record whose
-  // project changes (a refold) moves its tabs (the layout ignores this until it has hydrated). A session with neither
-  // (a removal on its way to closing its tabs, a draft whose intent was just discarded) is not known: its tabs stay put.
-  // P5 O6 M5: the set is the session's row's (`stores/org-projects.ts`): its org project's, or its machine's own when no
-  // checkout lists its directory; so a change of any machine's projects can move tabs too. A session of a machine whose
-  // snapshot has not completed this run is not known yet: its records may have landed before its projects, and filing
-  // it then would move its tabs out of their restored set (the branch review), so nothing of it moves until it loads.
-  const projectOf = (id: AppSessionId): TabSetKey | null | undefined =>
-    !stores.machines.getState().loaded.has(machineOf(id)) ? undefined : sessionSetKey(sessions(), local, id, () => {
-      const retention = currentTabRetention();
-      const unstarted = retention ? retention.retains(id) : sessions().unstarted.has(id);
-      return unstarted ? unstartedProjectOf(id) : undefined;
-    });
-  // P5 O6 M5 ("Migrating project-keyed state"): a layout key that is a project's address is from before M5. It becomes
-  // the set that project's sessions file under once its machine has loaded and has derived the project's key; a project
-  // its loaded machine no longer lists is gone; anything else waits for that machine's next projects. A project not
-  // derived yet whose sessions file under its address meanwhile (a listed checkout's, `setKeyOfProject`) answers that
-  // address: its set is already where it belongs, and its tabs refile as any set's do.
+  // P5 O6 M5 ("Migrating project-keyed state"): a layout key that is a project's address is from before M5 (U13a: the
+  // sidebar's expanded rows hold such keys; the tabs no longer do). It becomes the row that project's sessions sit under
+  // once its machine has loaded and has derived the project's key; a project its loaded machine no longer lists is gone;
+  // anything else waits for that machine's next projects. A project not derived yet whose sessions sit under its address
+  // meanwhile (a listed checkout's, `setKeyOfProject`) answers that address.
   // The project registry (§J.2): any other key that is no row's now (a label whose project took a key of the table, an
   // `id:` key whose project's locations were linked into another) moves to its successor; until this Mac's own projects
   // are in, nothing moves, since every key reads as no row's then.
@@ -412,13 +403,10 @@ export function connectShell(
   };
   const offRefile = stores.sessions.subscribe((state, previous) => {
     if (state.projects !== previous.projects) stores.layout.getState().rekeyProjects();
-    if (state.records !== previous.records || state.projects !== previous.projects) stores.layout.getState().refileTabs();
     if (state.records !== previous.records) stores.layout.getState().refreshTabTitles();
   });
   const offRekey = stores.machines.subscribe((state, previous) => {
-    if (state.loaded === previous.loaded) return;
-    stores.layout.getState().rekeyProjects();
-    stores.layout.getState().refileTabs(); // what waited for the machine's whole snapshot files now
+    if (state.loaded !== previous.loaded) stores.layout.getState().rekeyProjects();
   });
 
   // P5 O6 M4 ("The layout across machines"): a tab is kept when its session is held or retained; a tab of another
@@ -451,7 +439,9 @@ export function connectShell(
     // UX wave U8b (its M1, decision 1): the first read of a profile asks which tools take several tabs. Every built-in
     // tool registers in App's effects, which run in the same commit as this connection's, before any read answers.
     const multiInstance = (toolId: string) => usePanelHost.getState().tools.get(toolId)?.multiInstance;
-    await stores.layout.getState().hydrate(client, knownTab, { settle: flushNow, projectOf, rekeyOf, titleOf, multiInstance });
+    const { merged } = await stores.layout.getState().hydrate(client, knownTab, { settle: flushNow, rekeyOf, titleOf, multiInstance });
+    // U13a (its plan's §G): a stored value whose sets were merged into the one strip; said at each such read
+    if (merged && connected) toast({ level: 'info', text: ONE_STRIP_NOTICE, actions: [], dismissible: true });
   });
 
   return () => {
