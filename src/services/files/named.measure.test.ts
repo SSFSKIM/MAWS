@@ -2,7 +2,8 @@
 // docs/doperpowers/plans/2026-11-12-ux-wave-U6c-linked-file.md, M1 decision 8; acceptance A9). It writes a transcript of
 // invented records `NAMED_SCAN_BYTES` long into a scratch store, in the proportions a long transcript has (two thirds the
 // engine's request records and file snapshots, the rest conversation rows, tool calls and their results), with one row in
-// a hundred mentioning the path in prose: a line the search must parse, which names nothing. It starts a search for that
+// a hundred mentioning the path in prose and linking a sibling of it (`<path>.bak`): a line the search must parse, whose
+// link runs the whole of `clickPath`, the URL step included, and which names nothing. It starts a search for that
 // path, which finds nothing, and while it runs times fifty `files.list` calls, one after another, to a real files
 // service over a small scratch folder in the same process. Timing only, so it runs on request, on the build VM:
 // `MAWS_NAMED_MEASURE=1 pnpm exec vitest run src/services/files/named.measure.test.ts`. It writes about 1 GiB and
@@ -25,7 +26,7 @@ const LISTS = 50;
 function block(): Buffer {
   const lines: string[] = [];
   let rows = 0; // the conversation rows and tool results so far: one in a hundred mentions the path
-  const prose = () => (rows++ % 100 === 0 ? `The draft is at ${P} for now.` : 'Nothing to report on this step.');
+  const prose = () => (rows++ % 100 === 0 ? `The draft is at ${P} for now; the old one is [the backup](${P}.bak).` : 'Nothing to report on this step.');
   for (let i = 0; i < 3000; i += 1) {
     const turn = `${'lorem ipsum dolor sit amet '.repeat(20)}${i % 3 === 2 ? prose() : 'Nothing to report on this step.'}`;
     if (i % 3 !== 2) {
