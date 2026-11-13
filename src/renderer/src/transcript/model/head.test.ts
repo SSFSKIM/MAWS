@@ -1,7 +1,8 @@
 // UX wave U3, first landing, M2 (docs/doperpowers/plans/2026-11-12-ux-wave-U3a-arrivals.md, decisions 5, 6 and 21):
 // head.ts's reading of each event against what the derivation draws for it. Over every recorded fixture, an event the
-// reading calls silent adds no row to its turn, and one it calls quiet adds no row of the model's work; so the head the
-// reducer reads (decision 21) and the empty turn it removes (decision 6) cannot drift from the rows the person sees.
+// reading calls silent adds no row to its turn, one it calls quiet adds no row of the model's work, and one it calls
+// work draws a row unless its kind draws only in context; so the head the reducer reads (decision 21) and the empty
+// turn it removes (decision 6) cannot drift from the rows the person sees.
 import type { SessionEvent } from '@shared/graph/events';
 import { describe, expect, it } from 'vitest';
 import { FIXTURE_PASSES, listEventFixtures, listJournals, listSyntheticJournals, loadEventFixture, loadJournal, loadSyntheticJournal } from '../../../../../test/support/fixtures';
@@ -11,6 +12,11 @@ import { headRole } from './head';
 import { applyEvents, createState, type TranscriptState } from './reduce';
 import type { Row, TurnId } from './rows';
 
+// The work kinds that draw a row only where their context gives one, so may add none (derive.ts): a block with no text
+// yet, or one whose row its first delta made; a call joining a subagent row already drawn; a request already answered;
+// a retry after the first, which updates its row; a side thread's later event; a turn's end that leaves every call
+// with its result. Any other work event that draws nothing is a misreading of head.ts's table.
+const CONTEXTUAL = new Set<SessionEvent['kind']>(['assistant.block.delta', 'assistant.block.complete', 'tool.use', 'subagent.started', 'task.started', 'permission.requested', 'question.requested', 'plan.requested', 'dialog.requested', 'elicitation.requested', 'api.retry', 'side.thread.opened', 'side.thread.summarised', 'turn.ended']);
 const QUIET_ROW = (row: Row) => row.kind === 'user' || (row.kind === 'error' && (row.severity === 'notice' || row.scope === 'plugin' || row.scope === 'hook'));
 
 // Each event, one at a time, with the rows its turn gained: [event, role, added rows] for every event placed in a turn.
@@ -38,7 +44,7 @@ const sources: [string, () => SessionEvent[]][] = [
 describe('head.ts against the rows the derivation draws', () => {
   it.each(sources)('%s: a silent event adds no row to its turn, a quiet one no row of work', (_, load) => {
     const wrong = walk(load())
-      .filter(({ role, added }) => (role === 'silent' && added.length > 0) || (role === 'quiet' && added.some((row) => !QUIET_ROW(row))))
+      .filter(({ event, role, added }) => (role === 'silent' && added.length > 0) || (role === 'quiet' && added.some((row) => !QUIET_ROW(row))) || (role === 'work' && added.length === 0 && !CONTEXTUAL.has(event.kind)))
       .map(({ event, role, added }) => `${event.kind} (${role}) added ${added.map((row) => row.kind).join(', ')}`);
     expect(wrong).toEqual([]);
   });
