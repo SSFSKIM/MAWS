@@ -37,7 +37,7 @@ import type { CommandName, CommandResult, IpcError, MawsBridge } from '@shared/i
 import { ipcError } from '@shared/ipc/errors';
 import { AGENT_SCOPE_CAPABILITY, type ControlResult, type LaneAAct, type LaneARaised, type LaneAState } from '@shared/ipc/schema/lane-a';
 import { aliasOf, chipLabel } from '@shared/sessions/model-label';
-import { workingFolder } from '@shared/sessions/working-folder';
+import { workingBranch, workingFolder } from '@shared/sessions/working-folder';
 import type { HookResult, ModelInfo } from '../../composer/setup-intent';
 import type { FrameBindings } from '../../composer/frame/bindings';
 import type { HumanPromptResult } from '../../composer/submit/send-human-prompt';
@@ -46,7 +46,7 @@ import { commandRoute, slashItems } from '../../lane-a/conversation/catalog';
 import { announceCommand } from '../../lane-a/outcomes';
 import { followUpload } from '../../lane-a/uploads';
 import { watchLaneA } from '../../lane-a/watches';
-import { branchLabel, recordBranch } from '../../sessions/branch-label';
+import { branchLabel } from '../../sessions/branch-label';
 import { canTakeOver } from '../../sessions/holder-words'; // not record-ops: its imports reach the terminal stack
 import type { SessionCatalog } from '../../stores/catalog';
 import { holdPendingSend, noteLaneASettlement, useLaneA } from '../../stores/lane-a';
@@ -316,7 +316,7 @@ export function laneAControls(state: LaneAState, record: SessionRecord | null, {
     const modelClosed = capability('model');
     const refusedWith = (reason: string) => async (): Promise<HookResult> => ({ ok: false, error: reason });
     return {
-      location: { path: record ? workingFolder(record).path : '', branch: branchLabel(recordBranch(record), null), note: LANE_A_WORDS.location },
+      location: { path: record ? workingFolder(record).path : '', branch: branchLabel(record ? workingBranch(record) : null, null), note: LANE_A_WORDS.location }, // UX wave U8c-2: the working folder's branch
       project: null,
       model: {
         value: { model: override?.model ?? null, effort: (override?.effort ?? null) as BridgeEffort | null },

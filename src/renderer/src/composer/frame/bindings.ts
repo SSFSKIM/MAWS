@@ -17,7 +17,8 @@ import type { SessionRecord } from '@shared/graph/session';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { ListModelsResponse } from '@shared/wire/control';
 import { ipc } from '../../ipc/client';
-import { branchLabel, recordBranch, type GitBranchAnswer } from '../../sessions/branch-label'; // W9 (H2)
+import { branchLabel, type GitBranchAnswer } from '../../sessions/branch-label'; // W9 (H2)
+import { workingBranch, workingFolder } from '@shared/sessions/working-folder'; // UX wave U8c-2
 import { liveModeBinding, MODE_OPTIONS, MODE_REFUSAL_WORDS, type ModeBinding } from '../../statusline';
 import type { Availability } from '@shared/ipc/schema/session'; // P2-A
 import { acquireSession, refusalWords } from '../../sessions/acquire'; // P2-A
@@ -186,8 +187,10 @@ export function liveBindings(status: EngineSessionStatus | null, record: Session
   const shownEffort = reads.effort !== undefined ? reads.effort : status ? status.effort : (EffortSchema.safeParse(record?.effort).data ?? null);
   const directories = [...(reads.directories ?? record?.additionalDirectories ?? [])];
   return {
-    // W9 (H2): the record's branch only until git has answered; then git's, "detached", or none for a non-repository
-    location: { path: status?.cwd ?? record?.directory ?? '', branch: branchLabel(recordBranch(record), reads.git ?? null), note: LOCATION_FIXED },
+    // W9 (H2): the recorded branch only until git has answered; then git's, "detached", or none for a non-repository.
+    // UX wave U8c-2 (M4 decisions 1, 3 and 10): the checkout the agent works in and the branch recorded for it, from the
+    // record; the engine's status folder only while the window holds no record
+    location: { path: record ? workingFolder(record).path : (status?.cwd ?? ''), branch: branchLabel(record ? workingBranch(record) : null, reads.git ?? null), note: LOCATION_FIXED },
     project: null,
     model: {
       value: current,

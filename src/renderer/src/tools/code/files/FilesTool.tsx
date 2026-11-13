@@ -10,11 +10,12 @@ import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
+import { workingFolder } from '@shared/sessions/working-folder';
 import type { PanelTool, PanelToolContext, PanelToolInit } from '../../../panel/tool';
 import { FILES_COPY, REFUSAL } from '../copy';
 import { normalizeLexically, openFile } from '../open-file';
 import { listingKey, useFiles } from './store';
-import { dirname, expandTo, roleOf, rootsFor, rowsOf, type RootRole, type TreeRow } from './tree';
+import { dirname, expandTo, firstRoot, roleOf, rootsFor, rowsOf, workingRoot, type RootRole, type TreeRow } from './tree';
 import { useSetup } from '../../../sessions/store'; // E11
 import type { SetupIntent } from '@shared/sessions/intent'; // E11
 
@@ -104,7 +105,17 @@ function SessionTree({ ui, appSessionId, session }: { ui: StoreApi<FilesUi>; app
   const listings = useFiles((s) => s.listings);
   const roots = listings.get(listingKey(appSessionId, null));
 
-  const rootEntries = useMemo(() => (roots?.status === 'ok' ? roots.value.entries : []), [roots]);
+  const folder = session ? workingFolder(session) : null;
+  const moved = folder?.moved ?? false;
+  const workingPath = folder?.path ?? null;
+  const listed = useMemo(() => (roots?.status === 'ok' ? roots.value.entries : []), [roots]);
+  // UX wave U8c-2 (M4 decision 4): while the session is moved, the working folder's root is listed first; the order of the
+  // roots is the only thing that changes, and a root the listing does not hold is never put first.
+  const rootEntries = useMemo(() => {
+    if (!moved || workingPath === null) return listed;
+    const first = workingRoot(listed.map((root) => root.path), workingPath);
+    return first === null ? listed : [...listed.filter((root) => root.path === first), ...listed.filter((root) => root.path !== first)];
+  }, [listed, moved, workingPath]);
   const roles = useMemo(() => {
     const candidates = session ? rootsFor(session) : [];
     return new Map(rootEntries.flatMap((root): [string, RootRole][] => {
@@ -118,8 +129,9 @@ function SessionTree({ ui, appSessionId, session }: { ui: StoreApi<FilesUi>; app
   );
 
   // Open the working root once so Files starts with useful content. A deliberate collapse survives refresh/remount;
-  // a newly created worktree gets its own first expansion when it replaces the original directory.
-  const defaultRoot = rootEntries.find((root) => roles.get(root.path) === 'worktree')?.path ?? rootEntries[0]?.path ?? null;
+  // a newly created worktree gets its own first expansion when it replaces the original directory, and so does the
+  // working folder an agent moved into (UX wave U8c-2), nothing else being collapsed.
+  const defaultRoot = firstRoot(rootEntries.map((root) => root.path), roles, folder);
   useEffect(() => {
     if (defaultRoot === null || view.defaultRoot === defaultRoot) return;
     patchView(ui, appSessionId, (current) => ({ defaultRoot, expanded: new Set([...current.expanded, defaultRoot]) }));
@@ -129,7 +141,7 @@ function SessionTree({ ui, appSessionId, session }: { ui: StoreApi<FilesUi>; app
   // setup intent's location, which main lists until the record exists (E11), so a project chosen after the pane opened
   // is listed then.
   const unstarted = useSetup((s) => (session ? '' : unstartedRootsKey(s.intents.get(appSessionId))));
-  const declared = session ? rootsFor(session).map((c) => c.path).join('\0') : unstarted;
+  const declared = session ? [...rootsFor(session).map((c) => c.path), folder?.launch, folder?.path].join('\0') : unstarted; // U8c-2: and when the launch or the working folder changes
   useEffect(() => useFiles.getState().list(appSessionId, null), [appSessionId, declared]);
   // Watches follow the expanded directories that are shown: one under a collapsed parent keeps its expansion in memory
   // but is not watched (nor listed) while hidden. Declared before the listing effect, so a first listing waits for its

@@ -18,6 +18,7 @@
 // `org.projects.changed`, each the whole value, into the sessions store (`applyRegistry`), and a layout key that is no
 // row's any more moves whole to its successor (§J.2, `successorOf`), once this Mac's own projects are in.
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import type { SessionRecord } from '@shared/graph/session';
 import type { EventPayload, MawsBridge, SessionDigest } from '@shared/ipc/schema';
 import type { MachineState } from '@shared/ipc/schema/machines';
 import type { OrgProjects, OrgRows } from '@shared/ipc/schema/org';
@@ -135,6 +136,20 @@ export function connectShell(
     }
   };
 
+  // UX wave U8c-2 (M4 decision 2): the card's pull-request row and Source control read `scm.status` and `scm.pr.state` by
+  // the session alone, so a session whose working folder the store now holds differently has both asked again; a change
+  // that leaves the folder (a title, the agent's folder inside the same checkout) asks neither.
+  const askAgainWhereMoved = (events: EventPayload<'session.changed'>[], before: ReadonlyMap<AppSessionId, SessionRecord>) => {
+    const after = sessions().records;
+    const moved = new Set<AppSessionId>();
+    for (const { record } of events) {
+      const was = before.get(record.appId);
+      const now = after.get(record.appId);
+      if (was && now && workingFolder(was).path !== workingFolder(now).path) moved.add(record.appId);
+    }
+    if (moved.size > 0) invalidateScmQueries((appSessionId) => moved.has(appSessionId));
+  };
+
   // In arrival order; consecutive changes and consecutive digests of one machine go to the store as one call each.
   const apply = (queue: Queued[]) => {
     for (let i = 0; i < queue.length; ) {
@@ -149,6 +164,7 @@ export function connectShell(
           const before = sessions().records;
           sessions().applyChangedMany(events, m);
           closeArchived(events, before);
+          askAgainWhereMoved(events, before);
         } else sessions().applyDigests(run.map((q) => (q as Extract<Queued, { t: 'digest' }>).d), m);
         i = j;
         continue;

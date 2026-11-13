@@ -29,7 +29,8 @@ import { BRIDGED_LINE, holderLine, waitingItem } from '../attention/derive';
 import { GlyphMark } from '../attention/GlyphMark';
 import { glyphFor, listedGlyph } from '../attention/glyph';
 import { ipc } from '../ipc/client';
-import { branchLabel, recordBranch } from '../sessions/branch-label';
+import { branchLabel } from '../sessions/branch-label';
+import { workingBranch, workingWorktree } from '@shared/sessions/working-folder'; // UX wave U8c-2
 import { selectPendingOf, useAttention } from '../stores/attention';
 import { selectSeenAt, useSessions } from '../stores/sessions';
 import { listedTitle, rowBranch, sessionAge } from './derive';
@@ -150,13 +151,15 @@ export function SessionHoverCard({ record, children }: { record: SessionRecord; 
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
 
 // Where the session runs: its branch, and the worktree's folder when it is in one (the full path as the title). W9 (H2):
-// a branch the record does not name is left out, never guessed as "detached" (only git can say a checkout is).
+// a branch the record does not name is left out, never guessed as "detached" (only git can say a checkout is). UX wave
+// U8c-2 (M4 decision 11): the linked worktree and the branch of the agent's working folder, whichever way it got there.
 function placeOf(record: SessionRecord): { text: string; title: string | null } | null {
-  if (record.worktree !== null) {
+  const worktree = workingWorktree(record);
+  if (worktree !== null) {
     const branch = rowBranch(record);
-    return { text: `${branch ? `⎇ ${branch} · ` : ''}worktree ${basename(record.worktree.path)}`, title: record.worktree.path };
+    return { text: `${branch ? `⎇ ${branch} · ` : ''}worktree ${basename(worktree.path)}`, title: worktree.path };
   }
-  const branch = branchLabel(recordBranch(record));
+  const branch = branchLabel(workingBranch(record));
   return branch ? { text: `⎇ ${branch}`, title: null } : null;
 }
 
