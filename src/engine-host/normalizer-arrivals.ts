@@ -105,9 +105,16 @@ export function output(state: LiveArrivals): void {
 /** Whether an arrival now stands at the head of a turn the engine opened. */
 export const atEngineHead = (state: LiveArrivals): boolean => state.head !== null && state.head.engine && !state.head.output;
 
+/**
+ * Whether an arrival at the head opens the turn of its class in the place of the engine's: only while that turn holds
+ * no arrival yet (decision 6 replaces a turn that held nothing). A second arrival at the head joins the turn the first
+ * one opened: one engine init, reply and result is one turn.
+ */
+export const opensAtHead = (state: LiveArrivals): boolean => atEngineHead(state) && state.head!.arrival === null;
+
 /** Records the arrival at the head of the engine's turn, the first one only. */
 export function headed(state: LiveArrivals, arrival: Arrival): void {
-  if (atEngineHead(state) && state.head!.arrival === null) state.head!.arrival = arrival;
+  if (opensAtHead(state)) state.head!.arrival = arrival;
 }
 
 /**

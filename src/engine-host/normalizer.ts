@@ -50,7 +50,7 @@ import { carriedOf, readArrivals, type Arrival } from '@shared/engine/arrival'; 
 import { localCommandText } from '@shared/engine/engine-markers';
 import { notificationText, taskNotificationBlocks } from '@shared/engine/task-notification';
 import {
-  arrivalTurnOpened, atEngineHead, carried, engineTurnOpened, headed, idle, keep, launchEnded, noLiveArrivals, output, personsTurnOpened, readFrame, resultReached, scheduleFire, userFrame,
+  arrivalTurnOpened, carried, engineTurnOpened, headed, idle, keep, launchEnded, noLiveArrivals, opensAtHead, output, personsTurnOpened, readFrame, resultReached, scheduleFire, userFrame,
   type LiveArrivals,
 } from './normalizer-arrivals'; // UX wave U3 (the U3a document, M4 and Interfaces E)
 
@@ -472,7 +472,8 @@ export class Normalizer {
   // UX wave U3 start (UC-2; the U3a document, Interfaces C and M4). What a main-lane `user` frame carries from elsewhere
   // becomes the events every caller makes of its class; false when it carries none of them (MAWS's own answer envelope
   // and consent message are the person's, and map as today). An arrival at the head of a turn the engine opened opens
-  // the turn of its class when that turn is not the engine's: a peer's, or the person's for their own words.
+  // the turn of its class when that turn is not the engine's: a peer's, or the person's for their own words; a second
+  // one at the head joins the turn the first opened (`opensAtHead`).
   private arrivalIn(frame: UserFrame, seq: number, uuid: MessageUuid | null, arrivals: Arrival[], out: Emitter, attribution: Attribution): boolean {
     const claimed = arrivals.filter((arrival) => arrival.class !== 'consent' && !(arrival.class === 'answer' && arrival.tool === 'maws'));
     const [first] = claimed;
@@ -483,7 +484,7 @@ export class Normalizer {
     switch (first.class) {
       case 'peer':
       case 'subagent': {
-        if (first.class === 'peer' && (this.state.currentTurn === null || atEngineHead(live))) {
+        if (first.class === 'peer' && (this.state.currentTurn === null || opensAtHead(live))) {
           // idle: a peer's turn, in the place of the engine's that held nothing (decision 6); the normaliser's own record
           // keeps the engine's word, the status's (`EngineSessionStatus.turn.origin` is the person's or the engine's)
           if (this.state.currentTurn === null) this.state.currentTurn = { origin: 'engine', userMessageUuids: [], startedAt: out.at, acceptedAt: out.at };
@@ -498,7 +499,7 @@ export class Normalizer {
         return true;
       }
       case 'own': {
-        if (this.state.currentTurn === null || atEngineHead(live)) {
+        if (this.state.currentTurn === null || opensAtHead(live)) {
           // idle: the person's turn, in the place of the engine's that held nothing (decision 6)
           arrivalTurnOpened(live, seq);
           headed(live, first);
