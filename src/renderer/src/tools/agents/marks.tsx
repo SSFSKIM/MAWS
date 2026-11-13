@@ -30,11 +30,10 @@ export function BackgroundIcon({ className }: { className?: string }) {
 const TERMINAL_TOOL_ID = 'terminal';
 
 export function KindMark({ kind, className = 'size-3.5' }: { kind: TaskKind; className?: string }) {
-  const terminalIcon = usePanelHost((s) => s.tools.get(TERMINAL_TOOL_ID)?.icon);
-  const Glyph = kind === 'shell' ? terminalIcon : kind === 'workflow' ? SubagentsIcon : BackgroundIcon;
+  const terminal = usePanelHost((s) => s.tools.get(TERMINAL_TOOL_ID));
   return (
     <span data-kind-mark={kind} aria-hidden className="flex shrink-0 text-fg-muted">
-      {Glyph && <Glyph className={className} />}
+      {kind === 'shell' ? terminal && <terminal.icon className={className} /> : kind === 'workflow' ? <SubagentsIcon className={className} /> : <BackgroundIcon className={className} />}
     </span>
   );
 }
