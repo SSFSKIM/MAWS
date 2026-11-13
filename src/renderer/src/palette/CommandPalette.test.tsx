@@ -294,11 +294,12 @@ describe('the Channel entries', () => {
 
   beforeEach(withChannels);
 
-  it('lists an entry per project that has a channel, with an empty query, in a group after Projects', async () => {
+  it('lists an entry per project that has a channel, with an empty query, in a group after Projects and before Actions', async () => {
     await openAndType('');
     expect(channelOptions().map(labelOf)).toEqual(['claude-usage-menubar · channel', 'MAWS · channel']);
-    const groups = within(dialog()).getAllByRole('group').map((g) => g.querySelector('[cmdk-group-heading]')?.textContent);
-    expect(groups.indexOf('Channels')).toBe(groups.indexOf('Projects') + 1);
+    const before = (a: string, b: string) => Boolean(group(a)!.compareDocumentPosition(group(b)!) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(before('Projects', 'Channels')).toBe(true);
+    expect(before('Channels', 'Actions')).toBe(true);
   });
 
   it('says how many requests wait in the project, from its Channel’s waiting list, and no count at zero', async () => {

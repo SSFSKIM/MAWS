@@ -33,6 +33,7 @@ const QUIET = '5d6e7f80-91a2-4314-c5c6-d7e8f9a0b1c2';
 const here = (id: string) => addressOf(TEST_MACHINE, id);
 const checkout = (id: string, order: number, name: string, key: string, smnsId: string | null): ProjectRecord =>
   project(here(id), order, { name, org: { key: key as OrgKey, name, source: smnsId === null ? 'folder' : 'smns', smnsId } });
+// Five project rows, as many as the sidebar draws before its "Show more"; a folder with no project id is project.test.ts's.
 const PROJECTS = [
   checkout('p-north', 0, 'northwind', `smns:${NORTH}`, NORTH), // a .smns project the registry does not hold
   checkout('p-orchard', 1, 'Orchard', `smns:${HUB}`, HUB), // a hub project of the registry
@@ -79,19 +80,14 @@ async function menuAnswer(key: RowKey): Promise<string | null> {
   const row = [...document.querySelectorAll<HTMLElement>('[role="treeitem"]')].find((el) => el.dataset.treeId === `p:${key}`);
   if (row === undefined) throw new Error(`no row ${key}`);
   fireEvent.contextMenu(row);
-  const menu = await screen.findByRole('menu');
-  const item = within(menu).queryByRole('menuitem', { name: CHANNEL.menuItem });
-  if (item === null) {
-    cleanup();
-    return null;
-  }
-  const items = within(menu).getAllByRole('menuitem').map((i) => `${i.textContent}${i.getAttribute('data-disabled') !== null ? '(d)' : ''}`);
-  act(() => fireEvent.click(item));
-  const connected = item.isConnected;
-  const menuStill = screen.queryByRole('menu') !== null;
+  const item = within(await screen.findByRole('menu')).queryByRole('menuitem', { name: CHANNEL.menuItem });
+  if (item !== null) act(() => fireEvent.click(item));
   const tab = activeTab(useLayout.getState().main);
+  // the closed menu hands focus back in a timer of its own, which must not land in the next row's menu and dismiss it
+  await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
   cleanup();
-  return tab?.kind === 'channel' ? tab.project : `not a channel tab: ${tab?.kind ?? 'none'} items=${items.join('|')} connected=${connected} menu=${menuStill}`;
+  if (item === null) return null;
+  return tab?.kind === 'channel' ? tab.project : `not a channel tab: ${tab?.kind ?? 'none'}`;
 }
 
 describe('has a channel: one rule, the sidebar menus’ answer', () => {
