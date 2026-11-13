@@ -734,7 +734,7 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     });
     const fixCard = board.getByRole('article', { name: FIX });
     await expect(fixCard.getByTestId('request-input')).toHaveText('git log --oneline');
-    await expect(fixCard.getByRole('heading', { name: 'Bash' })).toBeVisible();
+    await expect(fixCard.getByRole('heading', { name: 'Run a command' })).toBeVisible(); // U1a §D: what is asked, in place of the tool's name
     const charterCard = board.getByRole('article', { name: 'Charter + research' });
     await expect(charterCard.getByTestId('card-activity')).toHaveText('Running bun test');
     await expect(charterCard).toContainText('ctx 41%');
@@ -750,12 +750,14 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     await expect(foreignCard.getByRole('button'), 'a foreign-live card holds no control').toHaveCount(0);
   });
 
-  await test.step('Item 3: the hover card on a Bash request answers nothing', async () => {
+  await test.step('Item 3 (U1a §H): the hover card on a shell command offers Allow once and Deny', async () => {
     const fixHover = await hoverRow(page, FIX);
     await expect(fixHover.getByTestId('request-input')).toHaveText('git log --oneline');
     await expect(fixHover).toContainText('/private/tmp/maws-probe-qqboLh');
     await expect(fixHover.getByRole('button', { name: 'Open session' })).toBeVisible();
-    await expect(fixHover.getByRole('button', { name: 'Approve' }), 'Bash is not read-only').toHaveCount(0);
+    // a shell command the hover card shows whole may be allowed once from it, and any permission denied; neither pressed here
+    await expect(fixHover.getByRole('button', { name: 'Allow once', exact: true }), 'a command shown whole').toBeVisible();
+    await expect(fixHover.getByRole('button', { name: 'Deny', exact: true })).toBeVisible();
     await unhover(page, fixHover);
   });
 
@@ -797,13 +799,13 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
 
   await test.step('Item 3: approve the read-only request from its hover card, by pointer only', async () => {
     // Keyboard first: arrowing onto the session's row opens its hover card (W5: every session row has one), and Enter
-    // on a focused Approve answers nothing (§5.1: approval from the hover card is an explicit click).
+    // on a focused Allow once answers nothing (§5.1: approval from the hover card is an explicit click).
     const charterDialog = page.getByRole('dialog', { name: 'Charter + research' });
     await (await sidebarRow(page, SIP)).focus();
     await page.keyboard.press('ArrowDown');
     await expect(await sidebarRow(page, 'Charter + research')).toBeFocused();
-    await expect(charterDialog.getByRole('button', { name: 'Approve' })).toBeVisible();
-    await charterDialog.getByRole('button', { name: 'Approve' }).focus();
+    await expect(charterDialog.getByRole('button', { name: 'Allow once', exact: true })).toBeVisible();
+    await charterDialog.getByRole('button', { name: 'Allow once', exact: true }).focus();
     await page.keyboard.press('Enter');
     await page.waitForTimeout(300);
     expect(await badge(), 'Enter answered nothing').toBe('4');
@@ -815,8 +817,8 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     await expect(charterHover.getByTestId('request-input')).toHaveText(/\/docs\/charter\.md$/);
     await expect(charterHover.getByRole('button', { name: 'Deny' })).toBeVisible();
     expect(await noLeftovers(page, tokens.light), 'no light colour in the dark theme (hover card)').toEqual([]);
-    await charterHover.getByRole('button', { name: 'Approve' }).click();
-    await expect(charterHover.getByRole('button', { name: 'Approve' })).toHaveCount(0);
+    await charterHover.getByRole('button', { name: 'Allow once', exact: true }).click();
+    await expect(charterHover.getByRole('button', { name: 'Allow once', exact: true })).toHaveCount(0);
     await closeProject(page, 'MAWS');
     await expect(projectRow(page, 'MAWS').getByLabel('2 waiting')).toBeVisible();
     await expect(board.getByRole('article', { name: 'Charter + research' }).getByTestId('card-activity')).toHaveText('Continuing');

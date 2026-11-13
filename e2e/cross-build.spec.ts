@@ -118,6 +118,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { expect, test, type Page } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -352,6 +353,12 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   const build = served.appBuildId;
   expect(build, 'two builds').not.toBe(kept.buildId);
   await expect(banner(second.page, 'MAWS was updated.')).toContainText('1 session is still running');
+  // UX wave U1a (§F): the signal that keeps a plan's mode away under an engine host of another build, as the window
+  // holds it: attached, the engine host's wire fingerprint is the kept build's and not this app's, wherever the two
+  // builds' registries differ; once the app has moved to a supervisor of its own build, the two are equal (below)
+  const registriesDiffer = !isDeepStrictEqual(keeper.manifest.entries, attacher.manifest.entries);
+  if (registriesDiffer) expect(served.supervisor!.wire, "attached: the kept engine host's wire fingerprint, not the app's").not.toBe(served.appWire);
+  said.push(`  plan-mode gate: supervisor.wire ${served.supervisor!.wire === served.appWire ? 'equals' : 'differs from'} appWire while attached${registriesDiffer ? '' : ' (the registries are equal)'}`);
   // the hello across the minor, as each end logged it; on the daemon shape the engine host's client is `mawsd`, which
   // says this build's engine-host build and wire, and the app's main reads the welcome `mawsd` reflects from upstream
   const attacherDaemon = shapes.attacher === 'daemon' ? served.daemon!.pid : null;
@@ -444,6 +451,7 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   // the move: once both sessions are idle they are released, the kept supervisor exits, and the app starts its own
   const moved = await s.ready(second.page, (st) => st.supervisor!.pid !== kept.pid && onShape(shapes.attacher)(st), idleMs + 45_000);
   expect(moved, `${attacher.label} on a supervisor of its own build`).toMatchObject({ matches: 'same', supervisor: { buildId: build, exitWhenIdle: false } });
+  expect(moved.supervisor!.wire, "moved (U1a §F): the engine host's wire fingerprint is the app's").toBe(moved.appWire);
   if (attacherDaemon !== null) expect(moved.daemon!.pid, 'the same mawsd serves the new engine host').toBe(attacherDaemon);
   await expect.poll(() => isAlive(kept.pid), { timeout: 10_000, message: 'the kept supervisor is gone' }).toBe(false);
   expect(s.lock(), 'the lock names the new supervisor').toMatchObject({ pid: moved.supervisor!.pid, buildId: build });

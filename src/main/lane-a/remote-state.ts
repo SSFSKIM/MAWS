@@ -23,6 +23,8 @@
 //   `at` on the read's clock). On the same `at`, the read's, which names the event it came in.
 // - `pending` is what the plane says now: a snapshot clears it and the endpoint restates the session's pending requests
 //   as `raised` right after it. `settled` keeps the last 100, across snapshots.
+// - `accepted` (UX wave U1a, UC-1): the requests main heard the session's machine say it took (`done` to this device's own
+//   answer), as the adapter holds them, of those the plane still lists while the bridge is live.
 import type { LaneAAct, LaneACatalog, LaneADelivery, LaneALink, LaneAMode, LaneARaised, LaneASettled, LaneAState, PlaneMessage } from '@shared/ipc/schema/lane-a';
 import type { AppSessionId } from '@shared/graph/ids';
 import { controlsMissingReason } from '@shared/lane-a/bridge';
@@ -169,17 +171,18 @@ export class RemoteFold {
     return this.#settled.get(request) ?? null;
   }
 
-  state({ appSessionId, status, deliveries, link, acts }: { appSessionId: string; status: StatusRead | null; deliveries: LaneADelivery[]; link?: LaneALink; acts?: LaneAAct[] }): LaneAState {
+  state({ appSessionId, status, deliveries, link, acts, accepted }: { appSessionId: string; status: StatusRead | null; deliveries: LaneADelivery[]; link?: LaneALink; acts?: LaneAAct[]; accepted?: readonly string[] }): LaneAState {
     const presence = this.#presence;
     const capabilities = record(presence?.capabilities);
     const controls = record(capabilities?.controls);
     const engineRecord = record(presence?.record);
     const status_ = engineRecord?.status;
     const sminos = typeof capabilities?.sminos === 'string' ? capabilities.sminos : null;
+    const bridge = this.#bridge();
     return {
       appSessionId: appSessionId as AppSessionId,
       engineSessionId: this.session,
-      ...this.#bridge(),
+      ...bridge,
       launch: this.launch(),
       sminos,
       ops: strings(capabilities?.ops),
@@ -196,6 +199,7 @@ export class RemoteFold {
       deliveries,
       ...(link !== undefined && { link }),
       ...(acts !== undefined && { acts }),
+      ...(accepted !== undefined && { accepted: bridge.bridge === 'live' ? accepted.filter((request) => this.#pending.has(request)) : [] }),
     };
   }
 

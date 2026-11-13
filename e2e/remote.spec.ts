@@ -624,8 +624,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     const card = main(page).getByRole('group', { name: 'Approval needed' });
     await expect(card, `the permission card in A's pane\n${mainSaid(page)}`).toBeVisible({ timeout: 60_000 });
     await expect(card).toContainText(`echo ${APPROVED}`);
-    await card.getByRole('radio', { name: 'Allow once' }).click();
-    await card.getByRole('button', { name: 'Allow', exact: true }).click();
+    await card.getByRole('button', { name: 'Allow once', exact: true }).click();
     await expect(card).toBeHidden({ timeout: 30_000 });
     await expect(main(page).getByText(THIRD_REPLY).first(), `the turn goes on on B\n${b.log().slice(-3000)}`).toBeVisible({ timeout: 60_000 });
     await expect.poll(turnOverOnB, { timeout: 30_000 }).toBe(true);
@@ -1406,8 +1405,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       const card = main(again).getByRole('group', { name: 'Approval needed' });
       await expect(card, 'the permission card in A’s pane').toBeVisible({ timeout: 60_000 });
       await expect(card).toContainText(`echo ${WAITING_FIRST}`);
-      await card.getByRole('radio', { name: 'Allow once' }).click();
-      await card.getByRole('button', { name: 'Allow', exact: true }).click();
+      await card.getByRole('button', { name: 'Allow once', exact: true }).click();
       await expect(card).toBeHidden({ timeout: 30_000 });
       await quoting(expect(main(again).getByText(WAITING_REPLY).first(), 'the turn goes on on B').toBeVisible({ timeout: 60_000 }), () => b.log().slice(-3000));
       await expect(row, 'answered: gone from Needs you').toHaveCount(0, { timeout: 30_000 });

@@ -1,13 +1,18 @@
 // X4, the request card (charter §13 X4, owned by C7; C7 execution document, Request card): one component for the five
 // request kinds and the notices, identical in every placement. It resolves the originating request (the prop, else
 // `attention.request` through the attention store's cache), answers through `session.answer` with payloads `toAnswer`
-// validated, reports the delivery (`answering`, `delivered` as one collapsed line until the item retires,
-// `not_pending` for two seconds, `write_failed` back to pending with Retry), and owns the keyboard: Enter and Esc
-// through C5's dispatcher, bound `within` the element that owns focus for the placement. Docked, that is the
-// `DockedCardFrame` around the card; in an Overview card, the nearest ancestor with a `tabindex` (C5's article), since
-// the article, not the card, holds focus there; hover and inline bind no key. Digits pick a permission's scope from
-// the same owner. E1 M4b: a blocking `maws` ask's item (originating in `maws.ask.opened`) renders compact
-// (`variants/Ask.tsx`), its one action opening the Question sheet; the card never answers it. P5 O8 M7a: a placement
+// validated, reports the delivery (`answering`; `delivered` standing as it was, its controls disabled, until its item
+// leaves the session's list, UX wave U1's UC-1 and U1a's §C; `not_pending` for two seconds; `write_failed` back to
+// pending with Retry), and owns the keyboard: Enter and Esc (and a permission prompt's ⌘↩ and ⇧⌘↩, UX wave U1a §D)
+// through C5's dispatcher, bound `within` the element that owns focus for the placement, each on a fresh press only.
+// Docked, that is the `DockedCardFrame` around the card; in an Overview card, the nearest ancestor with a `tabindex` (C5's
+// article), since the article, not the card, holds focus there; hover and inline bind no key. Digits pick a question's
+// option from the same owner. U1a §D: a permission prompt opens on one line saying what is asked (`askedLine`), where the
+// other kinds have their title; the hover placement keeps its heading, its "wants to" line and the folder line, and offers
+// Allow once and Deny as the one rule for answers from outside a pane admits (U1a §H, `outsideAnswers`). U1a §I: a
+// file change says "Create" or "Edit" as its diff against the file read on the session's machine says (`proposed`). E1 M4b: a
+// blocking `maws` ask's item (originating in `maws.ask.opened`) renders compact (`variants/Ask.tsx`), its one action
+// opening the Question sheet; the card never answers it. P5 O8 M7a: a placement
 // that asks for it (`askInPlace`: the project channel's waiting cards) draws the sheet's body inline instead, which
 // answers through `maws.ask.answer` as the sheet does; the sheet stays the session pane's.
 //
@@ -15,9 +20,11 @@
 // where the port can't carry it. A request its session's terminal asks too says so ("Also asked in the terminal: the first
 // answer wins", the owner's Q3), and settles in place as the race ended ("Answered in the terminal: Allowed"), a late
 // answer included; past a background request's window it reads "Answer this in the terminal" (`lane-a/race.ts`).
+// UX wave U1a (M2, §E): a question's stepper has Dismiss (the decline Esc sends; on a terminal's asynchronous question,
+// the bridge's dismissal, which no key sends) and a double-click that picks a single choice and goes on.
 //
 // The card imports the docked frame from its own module, never `composer/index.ts`, so no editor code reaches it.
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type MouseEvent, type PointerEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type MouseEvent, type PointerEvent } from 'react';
 import { ATTENTION_HEADINGS, type AttentionTone } from '@shared/attention/headings';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { RequestAnswer } from '@shared/engine/answers';
@@ -43,9 +50,10 @@ import { ASK_CARD } from './copy'; // E1 M4b
 import { AskBody } from './variants/Ask'; // E1 M4b
 import { CardButton, Controls, Muted } from './controls';
 import { HoverPreview } from './preview/HoverPreview';
-import { hoverApproval } from './quick-approval';
+import { proposedChange, proposedFilePath } from './preview/proposed';
+import { useProposedFile } from './preview/use-proposed-file';
 import { requesterName } from './requester';
-import { mcpParts, toolVerb } from './tools';
+import { askedLine, mcpParts, toolVerb } from './tools';
 import { DialogBody } from './variants/Dialog';
 import { dialogTitle, declaredDialog } from './variants/dialog-kinds';
 import { ElicitationBody } from './variants/Elicitation';
@@ -53,10 +61,11 @@ import { NoticeBody } from './variants/Notice';
 import { PermissionBody } from './variants/Permission';
 import { PlanBody } from './variants/Plan';
 import { QuestionBody } from './variants/Question';
-import type { CardKeys, Placement } from './variants/types';
+import { gated, type CardKeys, type Placement } from './variants/types';
 import { displayTitle } from '../sessions/title';
+import { waits } from '@shared/attention/kinds'; // UC-1
+import { outsideAnswers } from '@shared/attention/outside-answers'; // U1a §H
 // P2-C start (2026-10-10)
-import { isOpen } from '@shared/attention/kinds';
 import { bareOf } from '@shared/machine/address';
 import { markIdOf } from '@shared/owner/marks';
 import { openAnchor, ownerAnchorOf, type ItemAnchor } from '../attention/anchor';
@@ -79,21 +88,27 @@ export interface RequestCardProps {
 export const HEADINGS = ATTENTION_HEADINGS;
 const TONE: Record<AttentionTone, string> = { warning: 'text-warning', info: 'text-info', danger: 'text-danger', accent: 'text-accent' /* P2-C */ };
 const NOT_PENDING_MS = 2_000;
+const KEY_NAMES = ['accept', 'decline', 'allowOnce', 'allowLasting'] as const;
+const NO_KEYS: Record<(typeof KEY_NAMES)[number], boolean> = { accept: false, decline: false, allowOnce: false, allowLasting: false };
 const CARRIED: Capability = { available: true }; // no port: today's delivery path refuses it in the holder's words
+// U1a §H: the two answers the hover card may give, the once-only allow and the plain deny
+const ALLOW_ONCE = toAnswer({ kind: 'permission', decision: 'allow', scope: 'once' });
+const DENY = toAnswer({ kind: 'permission', decision: 'deny', message: '' });
 
-type Phase = 'pending' | 'answering' | 'delivered' | 'not_pending' | 'closed';
+// `sent`: the answer was delivered, and the card stands as it was, its controls disabled, until the session's list no
+// longer holds its item, which every route's holder says at once (UC-1, U1a's §C); the card never hides on its own word.
+type Phase = 'pending' | 'answering' | 'sent' | 'not_pending' | 'closed';
 type Outcome = 'delivered' | 'not_pending' | 'write_failed';
 
 // The one delivery path: the session's controls port (lane B: `session.answer`), its outcome, and a Retry that sends
 // the same answer again.
 function useDelivery(item: AttentionItem, onAnswered: RequestCardProps['onAnswered']) {
   const [phase, setPhase] = useState<Phase>('pending');
-  const [what, setWhat] = useState<string | null>(null);
   const [failed, setFailed] = useState<{ retry: () => void; detail: string | null } | null>(null);
   const inFlight = useRef(false);
 
   const submit = useCallback(
-    (answer: RequestAnswer, text: string, delivered?: () => void) => {
+    (answer: RequestAnswer, _what: string, delivered?: () => void) => { // the card draws no "Answered · <what>" (§C)
       const { requestId } = item.request;
       if (requestId === null) return;
       const send = async () => {
@@ -106,8 +121,7 @@ function useDelivery(item: AttentionItem, onAnswered: RequestCardProps['onAnswer
         const outcome: Outcome = result.ok ? result.value.outcome : 'write_failed';
         onAnswered?.(outcome);
         if (outcome === 'delivered') {
-          setWhat(text);
-          setPhase('delivered');
+          setPhase('sent');
           delivered?.();
         } else if (outcome === 'not_pending') {
           setPhase(terminalOnlyNow(item) ? 'pending' : 'not_pending'); // P5 O9 M6: the terminal's to answer, still pending
@@ -127,7 +141,7 @@ function useDelivery(item: AttentionItem, onAnswered: RequestCardProps['onAnswer
     return () => clearTimeout(timer);
   }, [phase]);
 
-  return { phase, what, failed, submit };
+  return { phase, failed, submit };
 }
 
 // Text entry, as C5's dispatcher defines it (`keymap/dispatcher.ts`, whose `BUTTON_LIKE_INPUTS` this reads): an input
@@ -183,10 +197,13 @@ const answerable = (request: SessionEvent | null): boolean =>
     request.kind === 'elicitation.requested' ||
     (request.kind === 'dialog.requested' && declaredDialog(request.dialogKind, request.payload).ok));
 
-// Keyed by the item: every piece of per-request state (the delivery phase, the answered line, a failure, the bound
+// Keyed by the item: every piece of per-request state (the delivery phase, its sent state, a failure, the bound
 // keys, a variant's picked scope or selections) belongs to one request, and a placement that renders the card unkeyed
 // (C5's Overview card and hover card pass the session's next request into the same slot) must never carry it over.
+// UC-1: an item that no longer waits (its answer delivered: only a machine on an older build still lists one) is drawn
+// by no placement and binds no key.
 export function RequestCard(props: RequestCardProps) {
+  if (!waits(props.item)) return null;
   return <RequestCardFor key={props.item.id} {...props} />;
 }
 
@@ -211,7 +228,7 @@ function RequestCardFor(props: RequestCardProps) {
       component="AskUserQuestion"
       instanceId={request.toolUseId}
       props={{ tool: 'AskUserQuestion', questions: engineQuestionsOf(request.questions) }}
-      enabled={item.state === 'pending'}
+      enabled={waits(item)}
     >
       {(rewritten, { concealed }) => native({ ...request, questions: nativeQuestionsOf(rewritten.questions)! }, concealed)}
     </SurfaceRow>
@@ -227,12 +244,17 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   const project = useSessions((s) => (record?.projectId ? (s.projects.get(record.projectId)?.name ?? null) : null));
   const rows = useTranscriptStore((s) => s.entries[item.appSessionId]?.rows);
   const now = useNow();
-  const { phase, what, failed, submit } = useDelivery(item, onAnswered);
+  const { phase, failed, submit } = useDelivery(item, onAnswered);
   const pointer = usePointerOnly();
   // P5 O9 M6: what the session's port carries, and how the race with its terminal stands
   const controls = useSessionControls(item.appSessionId);
   const capability = useCallback((answer: RequestAnswer): Capability => controls?.answerCapability(item, answer) ?? CARRIED, [controls, item]);
   const race = useRace(item);
+  // U1a §I: a file change's diff, against its file as read on the session's machine; the first line and the preview both
+  // follow it. The read's answer lands nowhere once the card has answered, so what was approved stays drawn as it was.
+  const fileRequest = request?.kind === 'permission.requested' && placement !== 'hover' ? request : null;
+  const file = useProposedFile(item.appSessionId, item.id, fileRequest && proposedFilePath(fileRequest.toolName, fileRequest.input), phase !== 'pending');
+  const proposed = useMemo(() => (fileRequest ? proposedChange(fileRequest.toolName, fileRequest.input, file) : null), [fileRequest, file]);
 
   // The requests a docked placement shows: the transcript's slot then renders a pointer to it. A notice with no request
   // read (unreadable, or no longer held) shows nothing to answer, so the transcript keeps its own card.
@@ -240,16 +262,19 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   const shown = request !== null;
   useEffect(() => (placement === 'docked' && requestId !== null && shown ? markDocked(item.appSessionId, requestId) : undefined), [placement, item.appSessionId, requestId, shown]);
 
-  // The variant's Enter, Esc and digit actions, and whether it has each (a key it lacks stays unbound).
+  // The variant's key actions, and whether it has each (a key it lacks stays unbound).
   const keys = useRef<CardKeys>({ accept: null, decline: null });
-  const [bound, setBound] = useState({ accept: false, decline: false });
+  const [bound, setBound] = useState(NO_KEYS);
   const bindKeys = useCallback((next: CardKeys) => {
     keys.current = next;
-    setBound((b) => (b.accept === (next.accept !== null) && b.decline === (next.decline !== null) ? b : { accept: next.accept !== null, decline: next.decline !== null }));
+    const has = { accept: next.accept != null, decline: next.decline != null, allowOnce: next.allowOnce != null, allowLasting: next.allowLasting != null };
+    setBound((b) => (KEY_NAMES.every((name) => b[name] === has[name]) ? b : has));
   }, []);
   const accept = useCallback(() => keys.current.accept?.(), []);
   const decline = useCallback(() => keys.current.decline?.(), []);
-  const live = phase === 'pending' && item.state === 'pending' && !concealed && race.settled === null; // M6: a settled race answers nothing
+  const allowOnce = useCallback(() => keys.current.allowOnce?.(), []);
+  const allowLasting = useCallback(() => keys.current.allowLasting?.(), []);
+  const live = phase === 'pending' && !concealed && race.settled === null; // M6: a settled race answers nothing
 
   // Card placement: the focus owner is C5's article (the nearest `tabindex` ancestor), the card root without one.
   const rootRef = useRef<HTMLDivElement>(null);
@@ -259,8 +284,10 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
     ownerRef.current = root ? (root.parentElement?.closest<HTMLElement>('[tabindex]') ?? root) : null;
   });
   const cardKeys = placement === 'card' && live;
-  useKeyChord('request.accept', accept, { within: ownerRef, enabled: cardKeys && bound.accept });
-  useKeyChord('request.decline', decline, { within: ownerRef, enabled: cardKeys && bound.decline });
+  useKeyChord('request.accept', accept, { within: ownerRef, enabled: cardKeys && bound.accept, fresh: true });
+  useKeyChord('request.decline', decline, { within: ownerRef, enabled: cardKeys && bound.decline, fresh: true });
+  useKeyChord('request.allowOnce', allowOnce, { within: ownerRef, enabled: cardKeys && bound.allowOnce, fresh: true });
+  useKeyChord('request.allowLasting', allowLasting, { within: ownerRef, enabled: cardKeys && bound.allowLasting, fresh: true });
 
   // Digits, from the element that owns the keys (the article, or the docked frame, which mounts once the request is
   // known to be answerable).
@@ -283,21 +310,29 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   if (phase === 'closed' && race.settled === null) return null; // M6: a settlement stays said while its placement shows it
 
   const heading = HEADINGS[item.kind];
-  const busy = phase === 'answering';
+  const sent = phase === 'sent';
+  const busy = phase === 'answering' || sent; // sent: disabled until the list lets the item go
   const requester = requesterName(rows ?? [], request?.agentId ?? item.request.agentId);
   const { title, subtitle } = titleOf(request, requester);
-  const collapsed = phase === 'delivered' || (phase === 'pending' && item.state === 'delivered' && failed === null);
   const hover = placement === 'hover';
-  // P5 O9 M6: by the session's port, which a session held elsewhere has only while its bridge drives it
-  const canAnswerHover = hover && hoverApproval(item, request) && controls !== null
-    && capability({ kind: 'permission', decision: 'allow', scope: 'once' }).available && capability({ kind: 'permission', decision: 'deny' }).available;
+  // U1a §D: a permission prompt's first line, outside the hover placement, in place of the kind line and the title
+  const asked = request?.kind === 'permission.requested' && !hover ? askedLine(request, proposed) : null;
+  const from = request?.agentId && requester !== 'Main session' ? requester : null;
+  // U1a §H: what the one rule for answers from outside a pane admits on the hover card, each button by the session's port
+  // on its own answer (P5 O9 M6: a session held elsewhere has a port only while its bridge drives it)
+  const outside = hover && waits(item) && controls !== null ? outsideAnswers(request, 'hover') : null;
+  const hoverAllow = outside?.allowOnce === true && capability(ALLOW_ONCE).available;
+  const hoverDeny = outside?.deny === true && capability(DENY).available;
   // P2-C start (2026-10-10; M6): a question an agent left or a must-read opens at its mark in the report, and a must-read
   // offers Mark read; neither is answered here (the card in the session answers a question)
   const anchor = ownerAnchorOf(item);
   const openSession = () => (anchor !== null ? openAnchor(item.appSessionId, anchor, (id) => useLayout.getState().openSession(id)) : useLayout.getState().openSession(item.appSessionId));
   // P2-C end
   const variant = { item, placement, busy: busy || concealed, submit, bindKeys, capability };
-  const settled = collapsed ? null : race.settled; // M6: our own delivered answer says itself
+  const settled = sent ? null : race.settled; // M6: a settlement after our own delivered answer is ours: nothing to say
+  // U1a §G: a dismissal this app made of an asynchronous question says nothing: its card leaves at once
+  const settledText = settled === null ? null : settledWords(settled, { asyncQuestion: item.kind === 'async_input' });
+  if (settled !== null && settledText === null) return null;
 
   let body: ReactNode;
   if (loading) {
@@ -309,19 +344,13 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   } else if (settled !== null) {
     body = (
       <p role="status" className="m-0 text-fg-muted">
-        {settledWords(settled)}
+        {settledText}
       </p>
     );
   } else if (phase === 'not_pending') {
     body = (
       <p role="status" className="m-0 text-fg-muted">
         Already answered elsewhere
-      </p>
-    );
-  } else if (collapsed) {
-    body = (
-      <p role="status" className="m-0 text-fg-muted">
-        Answered{what ? ` · ${what}` : ''}
       </p>
     );
   } else if (request?.kind === 'maws.ask.opened') {
@@ -331,11 +360,15 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   } else {
     switch (request?.kind) {
       case 'permission.requested':
-        body = <PermissionBody {...variant} request={request} />;
+        body = <PermissionBody {...variant} request={request} proposed={proposed ?? undefined} />;
         break;
-      case 'question.requested':
-        body = <QuestionBody {...variant} request={request} />;
+      case 'question.requested': {
+        // U1a §E: Dismiss sends the decline the form's Esc sends (an asynchronous question's: the bridge's dismissal),
+        // gated as that decline is; a double-click on a single-choice option picks it and goes on
+        const declining = toAnswer({ kind: 'permission', decision: 'deny', message: '' });
+        body = <QuestionBody {...variant} request={request} dismiss={{ ...gated(capability(declining)), run: () => submit(declining, 'Dismissed') }} doubleClick />;
         break;
+      }
       case 'plan.requested':
         body = <PlanBody {...variant} request={request} />;
         break;
@@ -357,18 +390,30 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   const questionCard = placement === 'inline' && request?.kind === 'question.requested' ? 'max-w-[480px] rounded-lg border border-border bg-bg-raised p-3' : '';
   const content = (
     <div ref={rootRef} data-request-card={item.id} aria-busy={busy} {...named} className={`flex flex-col gap-3 text-fg ${placement === 'docked' || placement === 'inline' ? 'text-ui' : 'text-ui-sm'} ${questionCard}`}>
-      {!framed && (
+      {asked !== null && (
+        <div className="flex flex-col gap-1">
+          <h3 className="m-0 flex items-baseline gap-1.5 text-ui font-semibold">
+            <span aria-hidden className={TONE[heading.tone]}>
+              {heading.char}
+            </span>
+            <span>{asked}</span>
+            {from !== null && <span className="font-normal text-fg-muted"> · from {from}</span>}
+          </h3>
+          {race.asked && settled === null && <Muted>{race.terminalOnly ? RACE.terminal : RACE.asked}</Muted>}
+        </div>
+      )}
+      {!framed && asked === null && (
         <div className={`flex items-center gap-1.5 ${TONE[heading.tone]}`}>
           <span aria-hidden>{heading.char}</span>
           <span>{heading.text}</span>
-          {request?.agentId && requester !== 'Main session' && <span className="text-fg-muted">from {requester}</span>}
+          {from !== null && <span className="text-fg-muted">from {from}</span>}
         </div>
       )}
-      {title !== null && (
+      {title !== null && asked === null && (
         <div className="flex flex-col gap-1">
           <h3 className="m-0 text-ui font-semibold">{title}</h3>
           {subtitle && <Muted>{subtitle}</Muted>}
-          {race.asked && settled === null && !collapsed && <Muted>{race.terminalOnly ? RACE.terminal : RACE.asked}</Muted>}
+          {race.asked && settled === null && <Muted>{race.terminalOnly ? RACE.terminal : RACE.asked}</Muted>}
           {hover && <Muted>{[project, record ? displayTitle(record) : null, itemAge(item, now)].filter(Boolean).join(' · ')}</Muted>}
         </div>
       )}
@@ -389,42 +434,37 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
           <CardButton onClick={() => void useAttention.getState().retryRequest(ipc, item)}>Retry</CardButton>
         </div>
       )}
-      {request?.kind === 'permission.requested' && record && !collapsed && (
+      {request?.kind === 'permission.requested' && hover && record && (
         <p className="m-0 truncate font-mono text-ui-sm text-fg-muted" title={record.directory}>
           {record.directory}
         </p>
       )}
-      {canAnswerHover && !collapsed && <Muted>Approve applies to this request only.</Muted>}
+      {hoverAllow && <Muted>Approve applies to this request only.</Muted>}
       {(hover || (placement === 'card' && !answerable(request))) && request?.kind !== 'maws.ask.opened' && (
         <Controls>
           <CardButton onClick={openSession} className="mr-auto">
             Open session
           </CardButton>
           {/* P2-C start (2026-10-10) */}
-          {item.kind === 'essential_unread' && anchor !== null && isOpen(item) && (
+          {item.kind === 'essential_unread' && anchor !== null && (
             <MarkRead appSessionId={item.appSessionId} anchor={anchor} />
           )}
           {/* P2-C end */}
-          {canAnswerHover && !collapsed && request?.kind === 'permission.requested' && (
-            <>
-              <CardButton
-                disabled={busy}
-                title="Click to deny"
-                onPointerDown={pointer.onPointerDown}
-                onClick={(event) => pointer.byPointer(event) && submit(toAnswer({ kind: 'permission', decision: 'deny', message: '' }), 'Denied')}
-              >
-                Deny
-              </CardButton>
-              <CardButton
-                tone="primary"
-                disabled={busy}
-                title="Click to approve"
-                onPointerDown={pointer.onPointerDown}
-                onClick={(event) => pointer.byPointer(event) && submit(toAnswer({ kind: 'permission', decision: 'allow', scope: 'once' }), 'Allowed once')}
-              >
-                Approve
-              </CardButton>
-            </>
+          {hoverDeny && (
+            <CardButton disabled={busy} title="Click to deny" onPointerDown={pointer.onPointerDown} onClick={(event) => pointer.byPointer(event) && submit(DENY, 'Denied')}>
+              Deny
+            </CardButton>
+          )}
+          {hoverAllow && (
+            <CardButton
+              tone="primary"
+              disabled={busy}
+              title="Click to allow once"
+              onPointerDown={pointer.onPointerDown}
+              onClick={(event) => pointer.byPointer(event) && submit(ALLOW_ONCE, 'Allowed once')}
+            >
+              Allow once
+            </CardButton>
           )}
         </Controls>
       )}
@@ -433,7 +473,14 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
 
   if (!framed) return content;
   return (
-    <DockedCardFrame appSessionId={item.appSessionId} title={heading.text} onAccept={live && bound.accept ? accept : null} onDecline={live && bound.decline ? decline : null}>
+    <DockedCardFrame
+      appSessionId={item.appSessionId}
+      title={heading.text}
+      onAccept={live && bound.accept ? accept : null}
+      onDecline={live && bound.decline ? decline : null}
+      onAllowOnce={live && bound.allowOnce ? allowOnce : null}
+      onAllowLasting={live && bound.allowLasting ? allowLasting : null}
+    >
       {content}
     </DockedCardFrame>
   );

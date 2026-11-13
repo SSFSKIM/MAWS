@@ -6,7 +6,7 @@
 import type { ReactNode } from 'react';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
-import { isOpen } from '../attention/derive';
+import { waits } from '@shared/attention/kinds';
 import { useAttention } from '../stores/attention';
 import { isDocked, useComposerStore } from '../stores/composer';
 import type { Row } from '../transcript';
@@ -16,14 +16,14 @@ import { RequestCard } from './RequestCard';
 type RequestSlot = Extract<Row, { kind: 'request_slot' }>;
 export type RequestRenderer = (slot: RequestSlot) => ReactNode;
 
-// The open item for a slot. The registered renderer is not told which session's Transcript renders the row (C6 hands
+// The waiting item for a slot (UC-1). The registered renderer is not told which session's Transcript renders the row (C6 hands
 // it the row alone, and the transcript's context is not public surface), so it searches every session. A request id is
 // the engine's `request_id`, a UUID per request live; two replays of one fixture, though, carry the same recorded ids
 // in two sessions (C3's replay maps only host-minted ids). The slot's tool use id narrows such a collision to the item
 // of the same tool use; an id shared by both stays ambiguous, and the first session's item wins.
 function findItem(bySession: ReadonlyMap<AppSessionId, AttentionItem[]>, slot: RequestSlot, appSessionId: AppSessionId | null): AttentionItem | null {
   const lists = appSessionId === null ? [...bySession.values()] : [bySession.get(appSessionId) ?? []];
-  const matches = lists.flatMap((items) => items.filter((item) => item.request.requestId === slot.requestId && isOpen(item)));
+  const matches = lists.flatMap((items) => items.filter((item) => item.request.requestId === slot.requestId && waits(item)));
   return matches.find((item) => slot.toolUseId !== null && item.request.toolUseId === slot.toolUseId) ?? matches[0] ?? null;
 }
 

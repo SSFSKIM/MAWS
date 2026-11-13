@@ -8,6 +8,11 @@
 //   request view and a question's draft, keyed by it, never meet another machine's same engine session and request. Needs you, the sidebar and the badge read only sessions with a record, so the card shows in
 //   the pane alone; attention across machines stays O7's.
 // - The agents tool reads its subagent tree and statuses from its plane (`remote-agents.ts`).
+// - UX wave U1a (UC-1, Interfaces §B): a pending request the session's machine said it took (main's `accepted` on the
+//   remote state, said once for every window of this device) is listed nowhere here, though the bridge still lists it.
+//   The mirror holds no mark of its own. And since the machine's attention feed never carries a terminal session's item
+//   while its snapshot replaces the machine's partition whole (`applyRemote`), the mirror writes its lists as mirrored
+//   (`applyMirrored`): a snapshot leaves them standing, a question's draft with them.
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, AttentionId } from '@shared/graph/ids';
 import type { LaneAState } from '@shared/ipc/schema/lane-a';
@@ -32,7 +37,8 @@ export function connectRemoteLaneA(): () => void {
   const firstSeen = new Map<string, string>(); // a request the bridge stamped no time to: when this page first saw it
 
   const mirror = (appSessionId: AppSessionId, state: LaneAState | null) => {
-    const pending = state === null || state.bridge !== 'live' ? [] : state.pending;
+    const taken = new Set(state?.accepted ?? []);
+    const pending = state === null || state.bridge !== 'live' ? [] : state.pending.filter((raised) => !taken.has(raised.request));
     const machine = machineOf(appSessionId);
     const entries = pending.map((raised) => {
       const key = `${appSessionId}\u0000${raised.request}`;
@@ -51,7 +57,7 @@ export function connectRemoteLaneA(): () => void {
       for (const { item, request } of entries) requests.set(item.id as AttentionId, request as SessionEvent);
       return { requests };
     });
-    useAttention.getState().applyChanged({ appSessionId, items: entries.map((e) => e.item) }, machine);
+    useAttention.getState().applyMirrored({ appSessionId, items: entries.map((e) => e.item) }, machine);
   };
 
   for (const [id, state] of useLaneA.getState().states) if (isRemote(state)) mirror(id, state);
