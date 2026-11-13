@@ -4,6 +4,7 @@ import type { RelayHealth } from '@shared/engine/relay-health';
 import type { SetupIntent } from '@shared/sessions/intent';
 import type { SetupResources } from '@shared/sessions/setup';
 import type { TrustState } from '@shared/sessions/trust';
+import { resetIntentWrites } from '../sessions/setup-actions';
 import { useSetup } from '../sessions/store';
 
 export const T0 = '2026-09-29T10:00:00.000Z';
@@ -60,6 +61,7 @@ export function resources(over: Partial<SetupResources> = {}): SetupResources {
 }
 
 export function resetSetupStore(): void {
+  resetIntentWrites(); // U13a: the intent writes a chat's emptiness waits for
   useSetup.setState({ loaded: true, intents: new Map(), phases: new Map(), cards: new Map(), invoking: new Set(), deletions: new Map(), dismissed: new Set(), removed: new Set(), resumes: new Map(), followed: new Set(), continuing: new Map() /* P2-A */ });
 }
 

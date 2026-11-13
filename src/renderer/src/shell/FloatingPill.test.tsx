@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import type { Editor } from '@tiptap/core';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { LAYOUT_DEFAULTS, NO_PROJECT, type TabRef } from '@shared/ipc/schema/layout';
+import { LAYOUT_DEFAULTS, type TabRef } from '@shared/ipc/schema/layout';
 import type { Draft } from '@shared/ipc/schema/session';
 import { humanTurn, record, status, T0 } from '../../../../test/support/builders';
 import { fakeClient } from '../../../../test/support/fake-client';
@@ -114,7 +114,7 @@ it('follows panel selection with a separate editor, draft persistence and submis
 
 it.each(['pointer', 'keyboard'] as const)('routes compact %s interaction to its pane without expanding; tab/sidebar selection still targets normally', async (interaction) => {
   const [a, b] = [tab(A), tab(B)];
-  useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { panes: [{ tabs: [a], activeTabId: a.id }, { tabs: [b], activeTabId: b.id }], focusedPane: 1, splitRatio: 0.5, floating: { sessionTabId: a.id } } } } });
+  useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [a], activeTabId: a.id }, { tabs: [b], activeTabId: b.id }], focusedPane: 1, splitRatio: 0.5, floating: { sessionTabId: a.id } } });
   useSessions.setState({ engine: new Map([[A, status(A, { engineState: 'running', turn: humanTurn })], [B, status(B, { engineState: 'running', turn: humanTurn })]]) });
   mount('split');
   await waitFor(() => expect(message()).toBeTruthy());

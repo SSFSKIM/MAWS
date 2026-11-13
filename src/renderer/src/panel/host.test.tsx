@@ -1,7 +1,7 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { LAYOUT_DEFAULTS, type PanelTabRef } from '@shared/ipc/schema/layout';
+import { LAYOUT_DEFAULTS, type PanelTabRef, storedMain } from '@shared/ipc/schema/layout';
 import { createLayoutStore, persistLayout, useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import {
@@ -198,8 +198,8 @@ describe('panel host registry and instances', () => {
     let id = '';
     act(() => void (id = panelHost.addTool('t', { appSessionId: A })));
     expect(screen.getByTestId(`body:${id}`).textContent).toMatch(/visible · focus 1$/);
-    const S = mainShowing(A).sets.none!.panes[0];
-    const split = { ...LAYOUT_DEFAULTS.main, sets: { none: { panes: [S, { tabs: [{ id: 'diagnostics', kind: 'diagnostics' as const, pinned: false }], activeTabId: 'diagnostics' }] as [typeof S, typeof S], focusedPane: 0 as const, splitRatio: 0.5 } } };
+    const S = mainShowing(A).panes[0];
+    const split = { ...LAYOUT_DEFAULTS.main, panes: [S, { tabs: [{ id: 'diagnostics', kind: 'diagnostics' as const, pinned: false }], activeTabId: 'diagnostics' }] as [typeof S, typeof S], focusedPane: 0 as const, splitRatio: 0.5 };
     act(() => useLayout.setState({ main: split }));
     const expand = () => act(() => useLayout.getState().floatSplit(S.activeTabId, { foldPanel: true }));
     expand();
@@ -499,7 +499,7 @@ describe('panel host transitions', () => {
     });
 
     it('with persistence subscribed before the host, a pending pinned add is written at the barrier and restores into a fresh store', async () => {
-      const bridge = heldBridge({ regions: LAYOUT_DEFAULTS.regions, 'main.tabs': LAYOUT_DEFAULTS.main }); // a first launch: no panel.pinned yet
+      const bridge = heldBridge({ regions: LAYOUT_DEFAULTS.regions, 'main.tabs': storedMain(LAYOUT_DEFAULTS.main) }); // a first launch: no panel.pinned yet
       const stopPersistence = persistLayout(bridge.client);
       connect();
       register(probeTool('terminal').tool);

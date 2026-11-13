@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge, PreloadBridge } from '@shared/ipc/schema';
-import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, type LayoutMain, type TabRef } from '@shared/ipc/schema/layout';
+import { LAYOUT_DEFAULTS, type Strip, type TabRef } from '@shared/ipc/schema/layout';
 import { record, remoteRow } from '../../../../test/support/builders';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { addressOf } from '@shared/machine/address';
@@ -44,7 +44,7 @@ vi.mock('./Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagno
 
 const A = at('app-a' as AppSessionId); // P5 O6 M2: the page's id
 const sessionTab = (id: string): TabRef => ({ id: `session:${id}`, kind: 'session', appSessionId: id as AppSessionId, pinned: false });
-const withActive = (tab: TabRef): LayoutMain => ({ ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [tab], activeTabId: tab.id }] } } });
+const withActive = (tab: TabRef): Strip => ({ ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [tab], activeTabId: tab.id }] });
 
 const region = (name: string) => document.querySelector<HTMLElement>(`[data-region="${name}"]`)!;
 const grid = () => region('main').parentElement!;
@@ -521,7 +521,7 @@ describe('right panel', () => {
 // singleton that a second open activates, showing P3-L's library as App.tsx registers it (the slot's fallback where no
 // host registers it).
 describe('the Artifacts entry', () => {
-  const artifactsTabs = () => useLayout.getState().main.sets[NO_PROJECT]!.panes.flatMap((pane) => pane.tabs.filter((tab) => tab.kind === 'artifacts'));
+  const artifactsTabs = () => useLayout.getState().main.panes.flatMap((pane) => pane.tabs.filter((tab) => tab.kind === 'artifacts'));
 
   it('the sidebar row opens the Artifacts tab once, titled and showing the library; a second click activates it', async () => {
     const user = userEvent.setup();
@@ -611,8 +611,8 @@ describe('the Artifacts entry', () => {
     useLayout.getState().openTab({ kind: 'diagnostics' });
     runAction('artifacts.open');
     expect(artifactsTabs()).toHaveLength(1);
-    expect(toolbarTitle(useLayout.getState().main.sets[NO_PROJECT]!.panes[0].tabs.find((tab) => tab.id === 'artifacts')!, new Map()).title).toBe('Artifacts');
-    expect(useLayout.getState().main.sets[NO_PROJECT]!.panes[0].activeTabId).toBe('artifacts');
+    expect(toolbarTitle(useLayout.getState().main.panes[0].tabs.find((tab) => tab.id === 'artifacts')!, new Map()).title).toBe('Artifacts');
+    expect(useLayout.getState().main.panes[0].activeTabId).toBe('artifacts');
   });
 });
 
