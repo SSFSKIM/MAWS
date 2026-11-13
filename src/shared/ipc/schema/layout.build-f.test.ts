@@ -35,7 +35,8 @@ const surfaces = (stacks: Record<string, string[]>) => ({ version: 2, stacks, pi
 
 describe('what this build writes under the keys build F reads (Interfaces §A, §G)', () => {
   it('the tabs in view as stacks: none while hidden, one, two groups, two tabs of one tool', () => {
-    for (const stacks of [{ [A]: [] }, { [A]: [review.id] }, { [A]: [review.id, files.id] }, { [A]: [t1.id, t2.id] }, { '@none': [pin.id] }]) {
+    const written: Record<string, string[]>[] = [{ [A]: [] }, { [A]: [review.id] }, { [A]: [review.id, files.id] }, { [A]: [t1.id, t2.id] }, { '@none': [pin.id] }];
+    for (const stacks of written) {
       expect(F_PanelSurfacesSchema.safeParse(surfaces(stacks)).success).toBe(true);
     }
   });

@@ -146,6 +146,30 @@ describe('the repair every change of refs runs, in every scope it reaches (M1, d
     expect(store.getState().panelSurfaces.stacks[A]).toEqual([files.id, P2.id]);
   });
 
+  // The rename rule reads one write that closes a tab and opens another of its tool at that position as a replacement
+  // (Interfaces §B): in every scope where the new tab is a tab, it takes the old one's place in its group and in view;
+  // nothing else carries over (whether it is a pin is the writer's ref; its params are its own).
+  it('a tab closed and another of its tool opened at its position in one write takes its place where it is a tab', () => {
+    const P3 = ref('terminal:aaaa0098', true);
+    const lowerPin = () => storeWith({
+      panelPinned: [P],
+      panelBySession: lists([[A, [files, t1], files.id], [B, [review], review.id]]),
+      panelSurfaces: stacked({ [A]: [files.id, P.id], [B]: [review.id] }),
+      panelGroups: lowered({ [A]: { tabs: [P.id, t1.id], share: 0.5 } }),
+    });
+    const pinned = lowerPin();
+    pinned.getState().setPanelTabs(B, { tabs: [P3, review], activeTabId: review.id });
+    expect(view(sideGroups(pinned.getState(), A))).toMatchObject({ lower: [P3.id, t1.id], lowerShown: P3.id });
+    // the new tab is B's own: not a tab of A, so A's lower group shows the neighbour
+    const own = lowerPin();
+    own.getState().setPanelTabs(B, { tabs: [{ ...P3, pinned: false }, review], activeTabId: review.id });
+    expect(view(sideGroups(own.getState(), A))).toMatchObject({ lower: [t1.id], lowerShown: t1.id });
+    // another tool at that position is no replacement
+    const other = lowerPin();
+    other.getState().setPanelTabs(B, { tabs: [{ ...Q }, review], activeTabId: review.id });
+    expect(view(sideGroups(other.getState(), A))).toMatchObject({ lower: [t1.id], lowerShown: t1.id });
+  });
+
   it('a session dropped takes its lower entry with it', () => {
     const store = storeWith({ panelBySession: lists([[B, [review, files], review.id]]), panelGroups: lowered({ [B]: { tabs: [files.id], share: 0.5 }, [A]: { tabs: ['x'], share: 0.5 } }) });
     store.getState().dropSession(B);
