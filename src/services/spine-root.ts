@@ -242,15 +242,16 @@ export function startSpine(deps: SpineDeps): SpineRoot {
     });
     registerLaneA(laneA, bus.register);
     settling.push(laneA.probes);
-    // M6: each bridged session's pending requests are attention items, and its digest reads its live phase from the
-    // bridge while the bridge is live (today's `foreign` otherwise). UX wave U1a (UC-1, Interfaces §B): the list is the
-    // one holder of an answer the bridge took and has not settled, told by the driver (its own answer, or this machine's
-    // endpoint's `laneA.accepted`); the digest counts what the list holds as waiting that stops the session, so neither
-    // an asynchronous question nor an accepted answer makes it read as waiting.
-    const views = new Map<AppSessionId, LaneAView>();
+    // M6: each bridged session's pending requests are attention items, and its digest reads its live state from the bridge
+    // while the bridge is live (today's `foreign` otherwise). UX wave U7 (finding 3) and U1a (UC-1): the digest's phase and
+    // tool come only from the session's last current view, so before a bridge's first snapshot the digest keeps its seed
+    // and inside a reconnect the last snapshot's; its waiting count is, at all times, what the attention list holds as
+    // waiting that stops the session (the list is the one holder of an answer the bridge took and has not settled).
+    const views = new Map<AppSessionId, LaneAView>(); // each session's last current view
     const bridged = (appId: AppSessionId) => {
       const view = views.get(appId);
-      indexSource.setBridged(appId, view?.state.bridge === 'live' ? { running: view.state.turn.running, pending: laneAItems.stopping(appId), tool: view.tool } : null);
+      if (view === undefined) return; // no current snapshot yet: the digest keeps what it had
+      indexSource.setBridged(appId, { running: view.state.turn.running, pending: laneAItems.stopping(appId), tool: view.tool });
     };
     const laneAItems = laneAAttention({
       set: (appId, entries) => {
@@ -259,10 +260,12 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       },
     });
     const offLaneAView = laneA.onChange((appId, view) => {
-      if (view === null) views.delete(appId);
-      else views.set(appId, view);
-      laneAItems.update(appId, view);
-      bridged(appId);
+      const live = view !== null && view.state.bridge === 'live';
+      if (!live) views.delete(appId);
+      else if (view.fresh) views.set(appId, view);
+      laneAItems.update(appId, view); // may call `set`, whose `bridged` reads what this view left stored
+      if (live) bridged(appId);
+      else indexSource.setBridged(appId, null);
     });
     const offLaneAAccepted = laneA.onAccepted((appId, request) => laneAItems.accepted(appId, request));
     parts.push(['lane A attention', () => {

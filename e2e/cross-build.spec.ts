@@ -113,6 +113,8 @@
 // with no banner and no wait for idle (handedOverCrossing). Where either does not (the merge-base peer at O16's landing),
 // O3-D's crossing above stands; the first landing after O16 that bumps WIRE_MINOR runs the handover's branch against
 // O16's merge as the peer.
+// UX wave U7a: (sidebar, both ways), a layout key one build stores and the other does not know, read across the two
+// builds in both directions; its block is at the end of this file, and its row is in U13a's UC-14 coverage table.
 // Run by `pnpm e2e:cross-build` (MAWS_CROSS_BUILD_E2E=1), which the gate adds to a run whose tree and peer differ in
 // WIRE_MINOR (.github/scripts/gate-plan.mjs).
 import { randomUUID } from 'node:crypto';
@@ -144,7 +146,7 @@ import { REPO_ROOT } from './support/launch';
 import { addressed } from './support/address'; // U13a
 import { menu } from './support/menu'; // U13a: Settings and the split
 import { activeMainTab, closeSurface, mainTabById, mainTabs, openSurface, surfaceRow } from './support/shell'; // U13a
-import { sidebarRow } from './support/sidebar'; // U13a
+import { sidebarOf, sidebarRow } from './support/sidebar'; // U13a; UX wave U7a: sidebarOf
 import { answerOf, fitTo, refusedSample, sampleOf, samplesFor, type ProbeAnswer } from './support/cross-build-samples';
 import { endProfileProcesses, isAlive } from './support/processes';
 import { spineFiles, spineFilesOpen } from '../test/support/spine-files';
@@ -1626,8 +1628,8 @@ test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd:
 //                            there and read back here, with no `[settings] invalid` or `cannot read` line on either side.
 // UC-14's coverage for U13a: for each stored thing this landing changes or relies on, the scene that asserts F reads what
 // this build wrote and writes it on, and the scene that asserts this build reads what F wrote. A later landing that
-// stores something new adds its row here and extends a scene (U8's `cards.open` and `panelTools.widths`, U7's
-// `sidebar.hidden`, `destination` and the retired tab kinds, U6's open files, any new tab kind, any field a landing adds
+// stores something new adds its row here and extends a scene (U8's `cards.open` and `panelTools.widths`, U7b's
+// `destination` and the retired tab kinds, U6's open files, any new tab kind, any field a landing adds
 // to a settings file).
 //   | stored                                        | F reads this build's value, and writes on             | this build reads F's value                         |
 //   |-----------------------------------------------|-------------------------------------------------------|----------------------------------------------------|
@@ -1641,6 +1643,9 @@ test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd:
 //   |                                               | written value keeps `none` beside its own entries     | `contexts` back to `none` alone                    |
 //   | `regions`                                     | (layout, to the peer): the width drawn; version 5 in  | the return of (layout, to the peer): the sidebar   |
 //   |                                               | what F writes                                         | folded                                             |
+//   | `sidebar.hidden` (U7a)                        | (sidebar, both ways): F draws the session it does not | the return of (sidebar, both ways): the row under  |
+//   |                                               | know to be hidden, and the key is in the file F wrote | Hidden. F never writes the key                     |
+//   |                                               | after its act                                         |                                                    |
 //   | `settings.json`, `machine-settings.json`      | (settings, both ways)                                 | (settings, both ways)                              |
 //   | `machine-route.json`                          | not covered: written only when the machine's default  | not covered                                        |
 //   |                                               | route is set, which neither this landing nor a scene   |                                                    |
@@ -1979,6 +1984,94 @@ test('(settings, both ways) a theme and an idle time changed through this build�
     expect(refusals(back, s), `${here.label} and its mawsd refused neither file`).toEqual([]);
     await s.quit(back);
     said.push(`  ${here.label} read both of the peer's values`);
+    record(said);
+  });
+});
+
+// ---- UX wave U7a: the sidebar's hidden sessions, a layout key the peer does not know ----------------------------------
+
+// UX wave U7a (docs/doperpowers/plans/2026-11-12-ux-wave-U7-sidebar-title-bar-destinations.md, M4 and Interfaces §G; the
+// wave's root, UC-14): a hidden session is stored under a layout key of its own, `sidebar.hidden`, which a build from
+// before U7a (build F on the owner's machines) never asks for: it is outside that build's LayoutKeySchema, and that
+// build's main keeps every top-level key of layout.json and writes the whole file back with each write of its own. Its
+// row is in UC-14's coverage table above (U13a's block).
+//   (sidebar, both ways) this build hides the seeded session from its row's menu and quits. The peer opens the profile:
+//                        it draws the session's row in its project, logs no "[layout] … is not a valid value", and folds
+//                        its sidebar, after which layout.json still holds `sidebar.hidden` with the same entry. This
+//                        build opens the profile again: the sidebar is folded as the peer left it, and the row stands
+//                        under its project's "Hidden · 1". Skipped for a peer whose layout schema names the key.
+const layoutSchemaNames = (build: Build, key: string) => readFileSync(join(build.root ?? REPO_ROOT, 'src/shared/ipc/schema/layout.ts'), 'utf8').includes(`'${key}'`);
+const storedLayout = (userData: string) => JSON.parse(readFileSync(join(userData, 'layout.json'), 'utf8')) as Record<string, unknown>;
+const sidebarFolded = (userData: string) => (storedLayout(userData).regions as { sidebar?: { collapsed?: boolean } } | undefined)?.sidebar?.collapsed ?? null;
+const WIDE = { x: 72, y: 48, width: 1360, height: 860 }; // wide enough that the sidebar folds in place, not as an overlay
+
+test('(sidebar, both ways) this build hides a session and quits; the peer, which knows no sidebar.hidden, draws the session, refuses no layout value, folds its sidebar and keeps the key; this build reads the session back hidden, the sidebar folded', async () => {
+  const { here, peer } = builds();
+  test.skip(layoutSchemaNames(peer, 'sidebar.hidden'), `the peer (wire ${wireOf(peer)}) names sidebar.hidden in its layout schema: a build from U7a on, not one that has never heard of the key`);
+  await withScratch('xb-sidebar', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) hides a session; ${peer.label} (wire ${wireOf(peer)}) opens the profile; ${here.label} opens it again`];
+    const wide = (run: Run) => run.maws.app.evaluate(({ BrowserWindow }, bounds) => BrowserWindow.getAllWindows()[0].setBounds(bounds), WIDE);
+
+    // this build: the seeded session hidden from its row's menu, and the key written
+    const ours = await s.launch();
+    await s.ready(ours.page, (st) => st.daemon !== null, 60_000);
+    const id = await s.record(ours.page);
+    const address = await addressed(ours.page, id);
+    await wide(ours);
+    const row = await sidebarRow(ours.page, { appSessionId: id });
+    await row.click({ button: 'right' });
+    await ours.page.getByRole('menuitem', { name: 'Hide', exact: true }).click();
+    await expect(row, 'the row leaves its project’s list').toHaveCount(0);
+    await expect(sidebarOf(ours.page).locator('[data-kind="hidden"]')).toHaveText('Hidden · 1');
+    type Hidden = { version: 1; hidden: Record<string, { at: string; armedAt: string | null }> };
+    let entry: Hidden['hidden'][string] | null = null;
+    await expect
+      .poll(async () => (entry = ((value(await invoke(ours.page, 'layout.get', { key: 'sidebar.hidden' })).value as Hidden | null)?.hidden[address] ?? null)), { message: 'this build stored the hide' })
+      .not.toBeNull();
+    expect(ours.maws.consoleErrors()).toEqual([]);
+    await s.quit(ours);
+    await endProfileProcesses(s.userData); // the peer's app starts a mawsd of its own build
+    const stored = storedLayout(s.userData)['sidebar.hidden'];
+    expect(stored, 'layout.json holds the hide as this build quit').toEqual({ version: 1, hidden: { [address]: entry } });
+    said.push(`  hidden: ${address}, stored ${JSON.stringify(entry)}`);
+
+    // the peer: the session drawn, no layout value refused, its fold written with the key kept
+    const theirs = await s.launch({}, peer.root);
+    const messages: string[] = [];
+    theirs.page.on('console', (message) => messages.push(message.text()));
+    messages.push(...(await theirs.page.consoleMessages({ filter: 'all' })).map((message) => message.text()));
+    await s.ready(theirs.page, () => true, 60_000);
+    await wide(theirs);
+    await expect(await sidebarRow(theirs.page, { appSessionId: id }), `${peer.label} draws the session in its project`).toBeVisible({ timeout: 20_000 });
+    expect(sidebarFolded(s.userData), 'the sidebar not folded before the peer folds it').not.toBe(true);
+    await menu(theirs.maws.app, 'sidebar.toggle');
+    await expect.poll(() => sidebarFolded(s.userData), { timeout: 10_000, message: `${peer.label} wrote its fold to layout.json` }).toBe(true);
+    expect(storedLayout(s.userData)['sidebar.hidden'], `the key is in the file ${peer.label} wrote after its act, its entry the same`).toEqual(stored);
+    expect(messages.filter((text) => INVALID_LAYOUT.test(text)), `${peer.label} refuses no stored layout value`).toEqual([]);
+    expect(theirs.maws.consoleErrors()).toEqual([]);
+    await s.quit(theirs);
+    await endProfileProcesses(s.userData);
+    expect(storedLayout(s.userData)['sidebar.hidden'], `the key as ${peer.label} quit`).toEqual(stored);
+    said.push(`  ${peer.label}: the row drawn, nothing refused, the sidebar folded, sidebar.hidden kept`);
+
+    // this build again: the fold the peer left, and the row under Hidden
+    const again = await s.launch();
+    await s.ready(again.page, (st) => st.daemon !== null, 60_000);
+    const sidebar = sidebarOf(again.page);
+    await expect(sidebar, 'the sidebar folded as the peer left it').toHaveJSProperty('inert', true, { timeout: 20_000 });
+    expect(((value(await invoke(again.page, 'layout.get', { key: 'regions' })).value) as { sidebar: { collapsed: boolean } }).sidebar.collapsed).toBe(true);
+    await wide(again);
+    await menu(again.maws.app, 'sidebar.toggle');
+    await expect(sidebar).toHaveJSProperty('inert', false);
+    const back = await sidebarRow(again.page, { appSessionId: id });
+    const hiddenRow = sidebar.locator('[data-kind="hidden"]');
+    await expect(hiddenRow, 'the session is still hidden: its project ends in Hidden · 1').toHaveText('Hidden · 1', { timeout: 20_000 });
+    await expect(back, 'out of its project’s list').toHaveCount(0);
+    await hiddenRow.click();
+    await expect(back, 'under the Hidden row').toHaveAttribute('data-indented', 'true');
+    expect(again.maws.consoleErrors()).toEqual([]);
+    await s.quit(again);
+    said.push(`  ${here.label} again: the sidebar folded, the row under Hidden · 1`);
     record(said);
   });
 });
