@@ -22,6 +22,7 @@ import { useSessions } from '../../stores/sessions';
 import { hostStatus, supervisorStatus } from '../../test-support/host-status';
 import { useSetup } from '../../sessions/store';
 import { laneBControls, PLAN_MODE_WORDS } from './lane-b';
+import { HOST_UPDATING } from '../../composer/queue/host-wire';
 import type { ControlKey } from './types';
 
 const APP = 'app-b' as AppSessionId;
@@ -152,6 +153,17 @@ describe('lane B’s queue is the host queue’s operations', () => {
     expect(fake.invoked('session.queue.remove')).toEqual([{ appSessionId: APP, queueId: 'q1' }]);
     expect(fake.invoked('session.queue.edit')).toEqual([{ appSessionId: APP, queueId: 'q1', content: 'edited' }]);
     expect(fake.invoked('session.queue.setPaused')).toEqual([{ appSessionId: APP, paused: false }]);
+  });
+
+  // UX wave U4a M3 (Interfaces D): the stack's two acts on a message at the next step
+  it('withdraws a pending steer and sends one now with the commands’ inputs', async () => {
+    useHosts.setState({ supervisor: hostStatus() });
+    const fake = fakeClient({ 'session.steer.cancel': { outcome: 'cancelled' }, 'session.steer.sendNow': { outcome: 'delivering' } });
+    const queue = laneBControls(null, { appSessionId: APP, client: fake.client }).queue()!;
+    expect(await queue.cancelSteer({ messageUuid: UUID })).toEqual({ ok: true, value: { outcome: 'cancelled' } });
+    expect(await queue.sendNow({ messageUuid: UUID })).toEqual({ ok: true, value: { outcome: 'delivering' } });
+    expect(fake.invoked('session.steer.cancel')).toEqual([{ appSessionId: APP, messageUuid: UUID }]);
+    expect(fake.invoked('session.steer.sendNow')).toEqual([{ appSessionId: APP, messageUuid: UUID }]);
   });
 });
 
@@ -434,5 +446,23 @@ describe('lane B’s gate on a plan’s named mode', () => {
       expect(fake.invoked('session.answer')).toEqual([]);
       expect(port.answerCapability(asked, plain)).toEqual({ available: true });
     }
+  });
+});
+
+// UX wave U4a M3 (decision 30): Send now on a next-step row goes only to an engine host of this build's wire; under
+// another build's host, or none connected, the port answers the sentence and invokes nothing
+describe('lane B’s sendNow under the serving host', () => {
+  beforeEach(() => useHosts.setState({ supervisor: null }));
+  it.each([
+    ['an engine host of another build', hostStatus({ supervisor: supervisorStatus({ wire: 'w-older' }), matches: 'wire' })],
+    ['no engine host connected', hostStatus({ state: 'starting', supervisor: null, matches: null })],
+    ['no status yet', null],
+  ])('under %s answers HOST_UPDATING without invoking the command', async (_name, supervisor) => {
+    useHosts.setState({ supervisor });
+    const fake = fakeClient({ 'session.steer.sendNow': { outcome: 'delivering' } });
+    const result = await laneBControls(null, { appSessionId: APP, client: fake.client }).queue()!.sendNow({ messageUuid: UUID });
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.error.message).toBe(HOST_UPDATING);
+    expect(fake.invoked('session.steer.sendNow')).toEqual([]);
   });
 });

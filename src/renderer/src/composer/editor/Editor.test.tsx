@@ -31,7 +31,7 @@ const client = {
 
 function drafts(initial: Draft | null) {
   const saved: (Draft | null)[] = [];
-  const port: DraftPort = { load: async () => initial, save: (d) => void saved.push(d) };
+  const port: DraftPort = { load: async () => initial, save: async (d) => (saved.push(d), true) };
   return { port, saved };
 }
 
@@ -574,7 +574,7 @@ describe('a registered widget named at Enter opens with its argument', () => {
 describe('draft and submission races', () => {
   it.each(['clear', 'send'])('does not restore an old draft after the user chose to %s while loading', async (action) => {
     let loaded!: (draft: Draft | null) => void;
-    const port: DraftPort = { load: () => new Promise((resolve) => { loaded = resolve; }), save: vi.fn() };
+    const port: DraftPort = { load: () => new Promise((resolve) => { loaded = resolve; }), save: vi.fn(async () => true) };
     const handle = createRef<EditorHandle>();
     render(<Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={client} handle={handle} onSubmit={async () => true} />);
     act(() => handle.current!.insertText('new thought'));
@@ -602,7 +602,7 @@ describe('draft and submission races', () => {
     let answer!: (accepted: boolean) => void;
     const onSubmit = vi.fn(() => new Promise<boolean>((resolve) => { answer = resolve; }));
     let stored: Draft | null = { doc: docOf([paragraph(textNode('send once'))]), attachments: [], updatedAt: '2026-10-02T00:00:00.000Z' };
-    const port: DraftPort = { load: async () => stored, save: (draft) => { stored = draft; } };
+    const port: DraftPort = { load: async () => stored, save: async (draft) => { stored = draft; return true; } };
     const handle = createRef<EditorHandle>();
     const view = () => <Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={client} handle={handle} onSubmit={onSubmit} />;
     const first = render(view());
@@ -671,7 +671,7 @@ describe('insertText separated', () => {
 describe('no-op Enter retains pending draft work', () => {
   it('restores a stored draft after empty Enter during loading', async () => {
     let loaded!: (draft: Draft | null) => void;
-    const port: DraftPort = { load: () => new Promise((resolve) => { loaded = resolve; }), save: vi.fn() };
+    const port: DraftPort = { load: () => new Promise((resolve) => { loaded = resolve; }), save: vi.fn(async () => true) };
     const handle = createRef<EditorHandle>();
     const onSubmit = vi.fn(async () => true);
     const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={client} handle={handle} onSubmit={onSubmit} />);
@@ -706,7 +706,7 @@ it.each([
   const onSubmit = vi.fn(() => new Promise<boolean>((resolve) => { answer = resolve; }));
   const onPrefill = vi.fn();
   let stored: Draft | null = null;
-  const port: DraftPort = { load: async () => stored, save: (draft) => { stored = draft; } };
+  const port: DraftPort = { load: async () => stored, save: async (draft) => { stored = draft; return true; } };
   const handle = createRef<EditorHandle>();
   const view = () => <Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={client} handle={handle} onSubmit={onSubmit} onPrefill={onPrefill} />;
   let mounted = render(view());
@@ -770,7 +770,7 @@ it.each(['replace', 'append', 'insert'] as const)('refuses a plugin %s during su
 
 it('treats a plugin fill to empty as an edit that invalidates pending restoration', async () => {
   let loaded!: (draft: Draft | null) => void;
-  const port: DraftPort = { load: () => new Promise((resolve) => { loaded = resolve; }), save: vi.fn() };
+  const port: DraftPort = { load: () => new Promise((resolve) => { loaded = resolve; }), save: vi.fn(async () => true) };
   const handle = createRef<EditorHandle>();
   render(<Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={client} handle={handle} />);
   act(() => handle.current!.fill('', 'replace'));
@@ -1033,5 +1033,88 @@ describe('a drop on a session on another machine', () => {
     expect(sent).toEqual([]); // waits for the read
     await act(async () => release());
     await waitFor(() => expect(sent).toEqual([{ text: '', files: ['notes.txt'] }]));
+  });
+});
+
+// UX wave U4a M3 (Interfaces F; decision 14): ↑ asks the composer to take a waiting message back before history walks,
+// Esc acts on a fresh press only, and `load` fills an empty box
+describe('the editor’s take-back, Esc and load', () => {
+  const history = [{ display: 'older prompt', at: '2026-09-29T09:00:00.000Z', source: 'maws', sessionId: null, pastedContents: {} }];
+  const recalling = {
+    ...client,
+    invoke: vi.fn(async (name: string) => (name === 'session.history.list' ? { ok: true, value: { entries: history } } : { ok: false, error: { code: 'internal', message: 'no session' } })),
+  } as unknown as MawsBridge;
+  const pressOn = (content: HTMLElement) => (key: string, init: KeyboardEventInit = {}) => act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init })));
+
+  it('asks onTakeBack on ↑ in an empty box, walks history when it answers false, and never asks with text or while recalling', async () => {
+    let takes = true;
+    const onTakeBack = vi.fn(() => takes);
+    const { port } = drafts(null);
+    const handle = createRef<EditorHandle>();
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={recalling} handle={handle} onTakeBack={onTakeBack} />);
+    const content = contentOf(container);
+    await waitFor(() => expect(recalling.invoke).toHaveBeenCalledWith('session.history.list', expect.anything()));
+    content.focus();
+    const press = pressOn(content);
+    await press('ArrowUp');
+    expect(onTakeBack).toHaveBeenCalledTimes(1);
+    expect(handle.current?.serialize().display).toBe(''); // the composer took the key
+    takes = false;
+    await press('ArrowUp');
+    expect(onTakeBack).toHaveBeenCalledTimes(2);
+    expect(handle.current?.serialize().display).toBe('older prompt'); // none waits: history
+    await press('ArrowUp'); // recalling: history's
+    expect(onTakeBack).toHaveBeenCalledTimes(2);
+    await press('ArrowDown');
+    act(() => handle.current?.insertText('typed'));
+    await press('ArrowUp');
+    expect(onTakeBack).toHaveBeenCalledTimes(2);
+  });
+
+  it('hands a fresh Esc to onEscape and answers its repeats as that press was answered, without asking again', async () => {
+    let answer = true;
+    const onEscape = vi.fn(() => answer);
+    const { port } = drafts(null);
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={client} onEscape={onEscape} />);
+    const content = contentOf(container);
+    content.focus();
+    const event = (repeat: boolean) => new KeyboardEvent('keydown', { key: 'Escape', repeat, bubbles: true, cancelable: true });
+    const first = event(false);
+    await act(async () => void content.dispatchEvent(first));
+    expect(first.defaultPrevented).toBe(true);
+    answer = false;
+    const repeat = event(true);
+    await act(async () => void content.dispatchEvent(repeat));
+    expect(onEscape).toHaveBeenCalledTimes(1);
+    expect(repeat.defaultPrevented).toBe(true); // consumed: the press was the composer's
+    const fresh = event(false);
+    await act(async () => void content.dispatchEvent(fresh));
+    expect(onEscape).toHaveBeenCalledTimes(2);
+    const unclaimed = event(true);
+    await act(async () => void content.dispatchEvent(unclaimed));
+    expect(onEscape).toHaveBeenCalledTimes(2);
+    expect(unclaimed.defaultPrevented).toBe(false); // left alone: that press was not the composer's
+  });
+
+  it('loads a document into an empty box with the caret at its end, and refuses one while the box holds text or a submission is in flight', async () => {
+    const { port } = drafts(null);
+    const handle = createRef<EditorHandle>();
+    let answer!: (accepted: boolean) => void;
+    const onSubmit = vi.fn(() => new Promise<boolean>((resolve) => (answer = resolve)));
+    render(<Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={client} handle={handle} onSubmit={onSubmit} />);
+    await act(async () => handle.current?.restored());
+    let loaded = false;
+    act(() => void (loaded = handle.current!.load(docOf([paragraph(textNode('taken back'))]))));
+    expect(loaded).toBe(true);
+    expect(handle.current?.serialize().display).toBe('taken back');
+    act(() => void (loaded = handle.current!.load(docOf([paragraph(textNode('another'))]))));
+    expect(loaded).toBe(false);
+    expect(handle.current?.serialize().display).toBe('taken back');
+    act(() => handle.current?.submit());
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    act(() => handle.current?.clear());
+    act(() => void (loaded = handle.current!.load(docOf([paragraph(textNode('while sending'))]))));
+    expect(loaded).toBe(false);
+    await act(async () => answer(true));
   });
 });

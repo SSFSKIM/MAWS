@@ -31,7 +31,7 @@ import { readerRowsOf, resetReaderRows } from '../lane-b/reader-rows'; // P5 O8 
 import { READER } from '../sessions/share/copy'; // board 525
 import { resetReader } from '../sessions/share/reader'; // board 525
 import { queueFirstSend, resetRemoteSpawn, restoreHeldAttempts, SPAWN_WORDS, takeFirstSend, useRemoteSpawn } from '../sessions/remote-spawn'; // P5 O7 M4
-import { HOME_CHECKOUT } from '@shared/ipc/schema/session';
+import { DRAFT_CLAIM, HOME_CHECKOUT } from '@shared/ipc/schema/session';
 import { useDialogs } from '../sessions/dialogs'; // P5 O7 M9
 import { connectKeys } from '../keymap/dispatcher';
 import { bindingsOf, useKeyChord } from '../keymap/useKeyChord';
@@ -39,6 +39,9 @@ import { itemFor, permission } from '../request-card/test-requests';
 import { useAttention } from '../stores/attention';
 import { insertComposerText, isStarting, prefillComposer, queueComposerAttachment, requestChipWidget, resetComposerStore, useComposerStore } from '../stores/composer';
 import type { Draft } from '@shared/ipc/schema/session'; // P3-G
+import { useHosts } from '../stores/hosts'; // UX wave U4a M3
+import { hostStatus, supervisorStatus } from '../test-support/host-status'; // UX wave U4a M3
+import { HOST_UPDATING } from './queue/host-wire'; // UX wave U4a M3
 import { addMarkupToChat, MARKUP_COPY, resetMarkup, startMarkup, useMarkup } from '../markup/session'; // P3-G
 import { registerMarkupSurface, resetMarkupSurfaces } from '../markup/surface'; // P3-G
 import { MarkupLayer } from '../markup/MarkupLayer'; // P3-G
@@ -95,6 +98,7 @@ beforeEach(() => {
   resetCatalogStore();
   resetDockedCards();
   useNotices.setState({ notices: [] });
+  useHosts.setState({ supervisor: hostStatus() }); // UX wave U4a M3: an engine host of this build serves (decision 30)
   fake = fakeClient({
     'session.queue.list': { entries: [], paused: false, pauseReason: null },
     'session.history.list': { entries: [] },
@@ -250,7 +254,9 @@ describe("composer DOM under C5's dispatcher", () => {
     await waitFor(() => expect(invoked('session.interrupt')).toEqual([{ appSessionId: A_ID, cancelEngineQueued: false, holdEngineQueued: true }]));
   });
 
-  it('Esc while a turn runs interrupts and sends the held head now, or stops when nothing is held; it leaves Esc alone when idle (W1)', async () => {
+  // UX wave U4a (decision 14; l3-input-01): Esc while a turn runs is Send now on the stack's first row, and the square's
+  // stop when nothing waits; idle it is not the composer's
+  it('Esc while a turn runs sends the first waiting message now, or stops holding what waits; it leaves Esc alone when idle', async () => {
     live(A);
     mount([{ index: 0, id: A }]);
     await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
@@ -259,13 +265,71 @@ describe("composer DOM under C5's dispatcher", () => {
     expect(invoked('session.interrupt')).toEqual([]); // idle: not the composer's
     busy(A);
     await key(editorOf(), { key: 'Escape' });
-    await waitFor(() => expect(invoked('session.interrupt')).toEqual([{ appSessionId: A_ID, cancelEngineQueued: false }])); // Esc holds nothing back: a waiting steer runs now
+    await waitFor(() => expect(invoked('session.interrupt')).toEqual([{ appSessionId: A_ID, cancelEngineQueued: false, holdEngineQueued: true }])); // nothing waits: the square's stop
     const uncertain: QueueEntry = { queueId: 'q-0', appSessionId: A_ID, content: 'maybe sent', createdAt: '2026-09-29T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: true, steer: false };
     const held: QueueEntry = { ...uncertain, queueId: 'q-1', content: 'later', uncertain: false };
     act(() => fake.event('session.queue', { appSessionId: A_ID, entries: [uncertain, held], paused: false, pauseReason: null }));
     await key(editorOf(), { key: 'Escape' });
     await waitFor(() => expect(invoked('session.queue.promote')).toEqual([{ appSessionId: A_ID, queueId: 'q-1', priority: 'now' }])); // the uncertain one waits for the human
+    const steer = { messageUuid: '44444444-4444-4444-8444-444444444444', content: 'look at b too', createdAt: '2026-09-29T09:59:00.000Z' };
+    act(() => fake.event('session.queue', { appSessionId: A_ID, entries: [held], paused: false, pauseReason: null, steers: [steer] }));
+    await key(editorOf(), { key: 'Escape' });
+    await waitFor(() => expect(invoked('session.steer.sendNow')).toEqual([{ appSessionId: A_ID, messageUuid: steer.messageUuid }])); // the next step's row comes first
+    await fake.reply('session.steer.sendNow', { outcome: 'delivering' });
     expect(invoked('session.interrupt')).toHaveLength(1);
+  });
+
+  // UX wave U4a (decision 14): one press held down acts once; its repeats, arriving as the row leaves and the message's
+  // turn starts, stop nothing; a fresh press with nothing waiting stops
+  it('acts on a fresh Esc only: a held one sends once and its repeats stop nothing', async () => {
+    busy(A);
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
+    act(() => editorOf().focus());
+    const steer = { messageUuid: '44444444-4444-4444-8444-444444444444', content: 'now', createdAt: '2026-09-29T09:59:00.000Z' };
+    act(() => fake.event('session.queue', { appSessionId: A_ID, entries: [], paused: false, pauseReason: null, steers: [steer] }));
+    await key(editorOf(), { key: 'Escape' });
+    await key(editorOf(), { key: 'Escape', repeat: true });
+    await fake.reply('session.steer.sendNow', { outcome: 'delivering' });
+    act(() => fake.event('session.queue', { appSessionId: A_ID, entries: [], paused: false, pauseReason: null, steers: [] })); // the row leaves
+    await key(editorOf(), { key: 'Escape', repeat: true });
+    busy(A); // the message's own turn
+    await key(editorOf(), { key: 'Escape', repeat: true });
+    expect(invoked('session.steer.sendNow')).toHaveLength(1);
+    expect(invoked('session.interrupt')).toEqual([]);
+    await key(editorOf(), { key: 'Escape' });
+    await waitFor(() => expect(invoked('session.interrupt')).toEqual([{ appSessionId: A_ID, cancelEngineQueued: false, holdEngineQueued: true }]));
+  });
+
+  // decision 30: under an engine host of another build Esc on a next-step first row says the line and stops nothing
+  it('says the updating sentence on Esc over a next-step row an engine host of another build cannot send now', async () => {
+    useHosts.setState({ supervisor: hostStatus({ supervisor: supervisorStatus({ wire: 'w-older' }), matches: 'wire' }) });
+    try {
+      busy(A);
+      mount([{ index: 0, id: A }]);
+      await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
+      act(() => editorOf().focus());
+      const steer = { messageUuid: '44444444-4444-4444-8444-444444444444', content: 'now', createdAt: '2026-09-29T09:59:00.000Z' };
+      act(() => fake.event('session.queue', { appSessionId: A_ID, entries: [], paused: false, pauseReason: null, steers: [steer] }));
+      await key(editorOf(), { key: 'Escape' });
+      expect(screen.getByRole('status', { name: 'Stack notice' }).textContent).toBe(HOST_UPDATING);
+      expect(invoked('session.steer.sendNow')).toEqual([]);
+      expect(invoked('session.interrupt')).toEqual([]);
+    } finally {
+      useHosts.setState({ supervisor: hostStatus() });
+    }
+  });
+
+  // UX wave U4a (l3-input-04): ↑ in an empty box takes back the newest waiting message; with none, it walks history
+  it('↑ in an empty box asks for the newest waiting message’s take-back, and walks history when none waits', async () => {
+    busy(A);
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
+    act(() => editorOf().focus());
+    const later: QueueEntry = { queueId: 'q-1', appSessionId: A_ID, content: 'later', createdAt: '2026-09-29T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false };
+    act(() => fake.event('session.queue', { appSessionId: A_ID, entries: [later], paused: false, pauseReason: null }));
+    await key(editorOf(), { key: 'ArrowUp' });
+    await waitFor(() => expect(invoked('session.drafts.set')).toEqual([expect.objectContaining({ appSessionId: A_ID, replaces: DRAFT_CLAIM })])); // the stage, under the claim
   });
 
   // W3 (B7, charter §5.4 as amended 2026-10-01): the terminal's Esc Esc, with no turn running, on an empty editor

@@ -41,6 +41,8 @@ const LANDED = [
   'surface.terminal', 'surface.review', 'surface.files',
   // U4a: M2's rows
   'composer.submit', 'composer.newLine', 'composer.newLineOption', 'composer.queue',
+  // U4a: M3's rows
+  'composer.takeBack', 'composer.sendNowOrStop',
 ];
 
 // Decision 8 (A13 as amended): two dispatched rows share a default chord only if both are `renderer` rows and at most one
@@ -146,6 +148,13 @@ describe('keymap: the table', () => {
     expect(ACTIONS['composer.send']).toEqual({ title: 'Send (reply fields)', chord: 'Cmd+Enter', sink: 'renderer', menu: null, scope: 'composer' });
     expect(ACTION_IDS.indexOf('composer.queue')).toBe(ACTION_IDS.indexOf('composer.send') - 1);
     for (const id of ['composer.submit', 'composer.newLine', 'composer.newLineOption', 'composer.queue'] as const) expect(isRebindable(id), id).toBe(false); // build F knows none
+  });
+
+  // UX wave U4a M3 (Interfaces H): ↑ and Esc are the editor's own keys in the composer, listed as fixed rows
+  it('carries ↑ and Esc as the composer’s fixed keys for the stack', () => {
+    expect(ACTIONS['composer.takeBack']).toEqual({ title: 'Take back the newest waiting message', chord: 'Up', sink: 'renderer', menu: null, scope: 'composer', fixed: true });
+    expect(ACTIONS['composer.sendNowOrStop']).toEqual({ title: 'Send the first waiting message now, or stop', chord: 'Escape', sink: 'renderer', menu: null, scope: 'composer', fixed: true });
+    for (const id of ['composer.takeBack', 'composer.sendNowOrStop'] as const) expect(isRebindable(id), id).toBe(false);
   });
   // C7 end
 
