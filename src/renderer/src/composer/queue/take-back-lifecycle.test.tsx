@@ -72,7 +72,7 @@ CREATE TABLE drafts (app_session_id TEXT PRIMARY KEY REFERENCES sessions(app_id)
   });
   const answer = fake.client.invoke.bind(fake.client);
   (fake.client as { invoke: unknown }).invoke = async (name: string, input: Record<string, unknown>, opts?: unknown) => {
-    if (name === 'session.drafts.get') return { ok: true, value: store.get(bareOf(input.appSessionId as AppSessionId)) };
+    if (name === 'session.drafts.get') return { ok: true, value: store.get(input.appSessionId as AppSessionId) };
     if (name === 'session.drafts.set') {
       const { draft, replaces } = input as { draft: Draft | null; replaces?: string | null };
       drafted.push({ draft, replaces: replaces ?? null });
@@ -82,7 +82,7 @@ CREATE TABLE drafts (app_session_id TEXT PRIMARY KEY REFERENCES sessions(app_id)
         await gate.promise;
       }
       try {
-        store.set(bareOf(input.appSessionId as AppSessionId), draft, 'owner', replaces ?? undefined);
+        store.set(input.appSessionId as AppSessionId, draft, 'owner', replaces ?? undefined);
         return { ok: true, value: undefined };
       } catch (error) {
         return { ok: false, error: { code: 'internal', message: (error as Error).message } };
