@@ -113,15 +113,16 @@ describe('l6-artifacts-07 (a): an agent edit that leaves a formatting marker for
     });
   }
 
-  it('control: the probe\'s own markdown, - **A** text with replace_text of **A** text by B text, lands, and the live doc runs no transaction but the agent\'s two', async () => {
+  it('control: the probe\'s own markdown, - **A** text with replace_text of **A** text by B text, lands, and every transaction the live doc runs is a row of the agent\'s', async () => {
     const doc = await created('- **A** text\n\nUntouched.');
     const seen = watch(doc.id);
     const edited = json<{ revision: number }>(await call('artifact_edit', { artifact: doc.id, baseRevision: doc.revision, ops: [{ op: 'replace_text', old: '**A** text', new: 'B text' }] }));
     json(await call('artifact_edit', { artifact: doc.id, baseRevision: edited.revision, ops: [{ op: 'replace_block', id: doc.ids[doc.ids.length - 1], markdown: 'Changed.' }] }));
-    expect(seen.map(({ origin, cleanup }) => ({ origin, cleanup }))).toEqual([
-      { origin: `session:${SELF}`, cleanup: false },
-      { origin: `session:${SELF}`, cleanup: false },
-    ]);
+    await world.service.whenCommitted();
+    const added = rows(doc.id).filter((row) => row.seq > doc.revision);
+    expect(added.map((row) => row.actor)).toEqual(added.map(() => `session:${SELF}`));
+    // one transaction per row (the two edits', and the rows the document kind writes after them), none a clean-up
+    expect(seen.map(({ origin, cleanup }) => ({ origin, cleanup }))).toEqual(added.map(() => ({ origin: `session:${SELF}`, cleanup: false })));
   });
 });
 
