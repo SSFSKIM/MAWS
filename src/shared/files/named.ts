@@ -284,6 +284,7 @@ interface Line {
   end: number;
   quote: number;
   opens: boolean;
+  footnote: boolean; // the line opens a footnote's definition (`[^label]:`)
   content: number; // the first character after the prefix and the indentation
   indent: number;
 }
@@ -305,6 +306,7 @@ function lineAt(text: string, start: number): Line {
   let i = start;
   let quote = 0;
   let opens = false;
+  let footnote = false;
   for (;;) {
     let j = i;
     let columns = 0;
@@ -332,6 +334,7 @@ function lineAt(text: string, start: number): Line {
     }
     if (marker < 0 || (marker < end && !isSpaceOrTab(text.charCodeAt(marker)) && text.charCodeAt(marker) !== 13)) break;
     opens = true;
+    if (code === 91) footnote = true;
     // one to four spaces after the marker belong to it; past four, one does, and the rest is the content's indentation
     let spaces = 0;
     while (marker + spaces < end && spaces < 5 && isSpaceOrTab(text.charCodeAt(marker + spaces))) spaces += 1;
@@ -343,7 +346,7 @@ function lineAt(text: string, start: number): Line {
     indent += text.charCodeAt(content) === 9 ? 4 : 1;
     content += 1;
   }
-  return { start, end, quote, opens, content, indent };
+  return { start, end, quote, opens, footnote, content, indent };
 }
 
 // A fence's opening at `at`: three or more backticks (whose info has none) or tildes, or two or more dollars (math).
@@ -411,12 +414,16 @@ interface Context {
 // cannot interrupt a paragraph, a table under a paragraph), it takes the side that reads fewer links.
 function* blocksOf(text: string, contexts: Context[], defined: Set<string>): Generator<null, void, void> {
   let fence: { marker: number; length: number; quote: number } | null = null;
-  let paragraph: { lines: number[]; quote: number; end: number } | null = null;
+  let paragraph: { lines: number[]; quote: number; end: number; dropped: boolean } | null = null;
   let table: { quote: number } | null = null;
+  // A footnote's definition, from its line to a line indented less than four columns after a blank one: the window
+  // draws it only where a call names it, so nothing in it is read as a link.
+  let footnote = false;
+  let afterBlank = false;
   let pause = SCAN_STEP_CHARS;
   const closeParagraph = () => {
     if (paragraph === null) return;
-    const { lines, end } = paragraph;
+    const { lines, end, dropped } = paragraph;
     paragraph = null;
     let at = lines[0]!;
     let k = 0;
@@ -428,10 +435,10 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>): Gen
       if (k >= lines.length) return;
       at = lines[k]!;
     }
-    contexts.push({ start: at, end });
+    if (!dropped) contexts.push({ start: at, end });
   };
   const row = (line: Line) => {
-    for (const [start, end] of cellsOf(text, line.content, line.end)) contexts.push({ start, end });
+    if (!footnote) for (const [start, end] of cellsOf(text, line.content, line.end)) contexts.push({ start, end });
   };
   for (let start = 0; start < text.length; ) {
     if (start >= pause) {
@@ -440,6 +447,10 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>): Gen
     }
     const line = lineAt(text, start);
     const next = line.end + 1;
+    const blank = skipBlank(text, line.content, line.end) >= line.end;
+    if (line.footnote) footnote = true;
+    else if (footnote && !blank && afterBlank && line.indent < 4) footnote = false;
+    afterBlank = blank;
     if (fence !== null && line.quote < fence.quote) fence = null; // its container closed
     if (fence !== null) {
       if (line.indent < 4 && closesFence(text, line.content, line.end, fence)) fence = null;
@@ -474,7 +485,7 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>): Gen
       fence = { ...opened, quote: line.quote };
     } else if (heading >= 0) {
       closeParagraph();
-      contexts.push({ start: heading, end: line.end });
+      if (!footnote) contexts.push({ start: heading, end: line.end });
     } else if (blockStarts || (paragraph !== null && !line.opens && isSetextUnderline(text, line.content, line.end))) {
       closeParagraph();
     } else if (next < text.length && isTableHeader(text, line, lineAt(text, next))) {
@@ -485,7 +496,7 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>): Gen
       continue;
     } else if (paragraph === null || line.opens || line.quote > paragraph.quote) {
       closeParagraph();
-      paragraph = { lines: [line.content], quote: line.quote, end: line.end };
+      paragraph = { lines: [line.content], quote: line.quote, end: line.end, dropped: footnote };
     } else {
       paragraph.lines.push(line.content);
       paragraph.end = line.end;

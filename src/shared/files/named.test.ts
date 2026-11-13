@@ -136,6 +136,7 @@ describe('the link form: linkPaths', () => {
     ['[a]: /work/a.md\n[ref]: </vault/[x](/secret).txt>', []], // after another definition
     ['[ref]: </vault/[x](/secret).txt>  \nnext', []], // only spaces after it on its line
     ['> [a\n>\n> b](/secret)', []], // a quote's blank line ends the paragraph: no link pairs across it (fix round 1, item 2)
+    ['[^1]: [b](/secret)', []], // a footnote's definition: the window draws it only where a call names it
     [`[r](</vault/${'a'.repeat(20_000)}[x](/secret).txt>)`, []], // past the bound a resource's end is not known: nothing in it is read
   ])('%j: nothing inside a resource or a definition is a link', (text, named) => {
     expect(linkPaths(text)).toEqual(named);
@@ -146,7 +147,6 @@ describe('the link form: linkPaths', () => {
     '![i](/work/i.png) [b](/secret)', // after an image
     '[ref]: /work/a.md\n[b](/secret)', // after a definition
     'Note [1]: [b](/secret)', // a label in the middle of a line is no definition
-    '[^1]: [b](/secret)', // a footnote's text is Markdown, not a destination
     '[a](<unclosed [b](/secret)', // no resource: what follows its `(` is text
     `[r](</vault/${'a'.repeat(20_000)}>)\n\n[b](/secret)`, // a resource past the bound ends before the next blank line
     `> [r](/outer "${'a'.repeat(20_000)}")\n>\n> [b](/secret)`, // … and before a quote's blank line (fix round 1, item 2)
