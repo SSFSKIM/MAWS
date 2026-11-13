@@ -655,7 +655,7 @@ describe('normaliser: meta rows, system subtypes and the unknown', () => {
     expect(events[16]).toMatchObject({ taskId: 'wf-1', workflowName: 'probe', progress: [{ type: 'workflow_phase', index: 1 }] });
     expect(events[17]).toMatchObject({ patch: { status: 'completed', endTime: 5 } });
     expect(events[18]).toMatchObject({ status: 'completed', summary: 'ONE', outputFile: '/o', reason: null });
-    expect(events[19]).toMatchObject({ status: 'stopped', outputFile: null, toolUseId: 'toolu_2' });
+    expect(events[19]).toMatchObject({ status: 'stopped', outputFile: null, toolUseId: 'toolu_2', arrivals: true }); // UX wave U3: its end is an arrival's
     expect(events[20]).toMatchObject({ tasks: [{ taskId: 'ag-1', taskType: 'local_agent', description: 'Read', ambient: false }] });
     expect(events[21]).toMatchObject({ frameType: 'system', subtype: 'turn_starting' });
     expect(events[23]).toMatchObject({ toolUseId: 'toolu_1', elapsedSeconds: 2.5, taskId: null, heartbeat: false });

@@ -515,7 +515,7 @@ describe('queued task notification turn boundaries', () => {
       ['p1', false, null], ['source-1', true, 'task-notification'],
     ]);
     expect(only(events, 'task.notification')).toEqual([
-      expect.objectContaining({ taskId: 'task-1', toolUseId: 't1', status: 'completed', summary: 'Task complete' }),
+      expect.objectContaining({ taskId: 'task-1', toolUseId: 't1', status: 'completed', summary: 'Task complete', arrivals: true }), // UX wave U3: its end is an arrival's
     ]);
     expect(only(events, 'turn.ended')[0]).toMatchObject({ userMessageUuids: ['p1'], durationMs: 1500 });
     // A standalone copy under the source UUID adds neither another turn nor another lifecycle event.

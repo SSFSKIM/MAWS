@@ -5,9 +5,10 @@
 import * as z from 'zod';
 import { describe, expect, it } from 'vitest';
 import { readTolerant } from '../ipc/tolerant';
+import { codecOf } from '../ipc/validate';
 import { carriedOf } from '../engine/arrival';
 import { ContentBlockSchema, EventBaseSchema, SessionEventSchema } from './events';
-import { MessageUuidSchema } from './ids';
+import { AppSessionIdSchema, MessageUuidSchema, TaskIdSchema, ToolUseIdSchema } from './ids';
 
 // `user.message` as build F (`f1852de3a`) has it, copied literally: `events.ts`, its base and ids, and `ipc/tolerant.ts`
 // are unchanged from F to this branch's base, so the copy is F's own schema.
@@ -60,5 +61,39 @@ describe('user.message’s arrival, between builds', () => {
     expect(SessionEventSchema.safeParse(message({ arrival: [{ class: 7 }] })).success).toBe(false);
     // Across the machine link, a later build's new field on a known class is dropped as any unknown key is.
     expect(readTolerant(SessionEventSchema, message({ arrival: [{ ...TASK, extra: 1 }] }))).toEqual({ ok: true, value: message({ arrival: [TASK] }), dropped: ['arrival.0.extra'] });
+  });
+});
+
+// `task.notification`'s `arrivals` mark (the whole-branch review's finding 3, the architect's ruling of 2026-11-13): the
+// modern normaliser's word that the task's end is told by an arrival, so the event draws no line of its own. A window
+// of an earlier minor receives a later build's events at main, through the tolerant codec (`codecOf(registry)`, OX1):
+// another machine's events cross its link there (`src/main/machines/socket-link.ts`, `readEventPayload` and, for a
+// `session.events` answer, `readCommandOutput`), and an engine host's reach main's supervisor the same way
+// (`src/shared/host/host-supervisor.ts`). Both read with `readTolerant`, so the mark is dropped as any unknown key is.
+describe('task.notification’s arrivals mark, between builds', () => {
+  // `task.notification` and `session.eventBatch` as build F (`f1852de3a`) has them, copied literally: unchanged from F to
+  // this branch's base. F's union is this build's with that one event in its own form.
+  const BUILD_F_TASK_NOTIFICATION = z.strictObject({
+    ...EventBaseSchema.shape,
+    kind: z.literal('task.notification'),
+    taskId: TaskIdSchema, toolUseId: ToolUseIdSchema.nullable(), status: z.enum(['completed', 'failed', 'stopped']), summary: z.string(), outputFile: z.string().nullable(), reason: z.string().nullable(),
+  });
+  const buildFEvents = SessionEventSchema.options.map((option) => (option.shape.kind.value === 'task.notification' ? BUILD_F_TASK_NOTIFICATION : option));
+  const BUILD_F_EVENT = z.discriminatedUnion('kind', buildFEvents as unknown as [typeof BUILD_F_TASK_NOTIFICATION]);
+  const buildFLink = codecOf({ commands: {}, events: { 'session.eventBatch': z.strictObject({ appSessionId: AppSessionIdSchema, events: z.array(BUILD_F_EVENT).max(500) }) } });
+  const notification = (fields: Record<string, unknown> = {}) => ({ ...base, kind: 'task.notification', taskId: 'b-1', toolUseId: 'toolu_a', status: 'failed', summary: 'Background command "build" failed with exit code 1', outputFile: '/tmp/demo/b-1.output', reason: null, ...fields });
+
+  it('a window of build F receives the marked event across the link without the mark, and it parses under F’s schema', () => {
+    const sent = { appSessionId: 'app-1', events: [notification({ arrivals: true })] };
+    expect(buildFLink.validateEventPayload('session.eventBatch', sent).ok).toBe(false); // strict: F refuses the field outright
+    const read = buildFLink.readEventPayload('session.eventBatch', sent);
+    expect(read).toEqual({ ok: true, value: { appSessionId: 'app-1', events: [notification()] }, dropped: ['events.0.arrivals'] });
+    expect(read.ok && BUILD_F_TASK_NOTIFICATION.parse(read.value.events[0])).toEqual(notification());
+  });
+
+  it('this build reads an older build’s event, which has no mark, and the mark only as true', () => {
+    expect(SessionEventSchema.parse(notification())).toEqual(notification());
+    expect(SessionEventSchema.parse(notification({ arrivals: true }))).toEqual(notification({ arrivals: true }));
+    expect(SessionEventSchema.safeParse(notification({ arrivals: false })).success).toBe(false);
   });
 });
