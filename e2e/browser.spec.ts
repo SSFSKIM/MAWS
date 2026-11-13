@@ -1278,7 +1278,7 @@ test('U12a (device sizes, A3 and probe 4): Viewport › Mobile draws the page 37
     const full = await rectOf(pane);
     const roomAfter = await rectOf(box);
     expect(near(full.width, roomAfter.width) && near(full.height, roomAfter.height), JSON.stringify({ full, roomAfter })).toBe(true);
-    await expect.poll(innerWidth).toBe(Math.round(roomAfter.width));
+    await expect.poll(async () => near(await innerWidth(), roomAfter.width), { message: `the page reads its room's width, ${roomAfter.width}` }).toBe(true);
   } finally {
     await closeScene(s);
     await server.close();
