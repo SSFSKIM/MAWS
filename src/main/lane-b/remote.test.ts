@@ -11,6 +11,7 @@ import { REMOTE_UPLOAD_REFUSED_WORDS } from '@shared/ipc/schema/remote';
 import { addressOf } from '@shared/machine/address';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MachineRef } from '@shared/machine/ref';
+import { REMOTE_ACT_PENDING_MS } from '@shared/machine/remote-pending';
 import { validateEventPayload } from '@shared/ipc/validate';
 import { BUILTIN_MODELS } from '@shared/sessions/models';
 import { project, record, status } from '../../../test/support/builders';
@@ -426,7 +427,7 @@ describe('the tabs and the links', () => {
     sub.sink.snapshot({ epoch: 'L1', seq: 0 }, { queue: { entries: [], paused: false, pauseReason: null }, pendingItems: [], catalog: { commands: [], agents: [], skills: [], terminalSlashCommands: [], revision: 1 } });
     const said = l.emitted.length;
     expect(await l.cmd('session.get', { appSessionId: APP })).toEqual({ ok: true, value: 'base' }); // the read itself is the manager's
-    expect(l.emitted.slice(said).map((e) => e.name)).toEqual(['session.changed', 'session.status', 'session.queue', 'session.catalogChanged', 'attention.changed', 'remote.session']);
+    expect(l.emitted.slice(said).map((e) => e.name)).toEqual(['session.changed', 'session.status', 'session.queue', 'session.catalogChanged', 'attention.changed', 'remote.session', 'remote.settled']); // U9 M5: the generation settled
     expect(l.emitted.at(-1)!.payload).toMatchObject({ address: APP, stream: 'live', reason: null });
     // Nothing for a session this app doesn't hold, or another machine's.
     const before = l.emitted.length;
@@ -861,6 +862,7 @@ describe('the attention feed beside a session’s stream', () => {
     feed.sink.ended('not-offered');
     sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([asked]));
     l.link.set('down', null);
+    vi.advanceTimersByTime(REMOTE_ACT_PENDING_MS); // U9 M5: greyed once the machine reads offline
     expect(l.of('remote.attention').at(-1)).toEqual({ machine: MINI, items: [asked], greyed: true });
     l.link.peers = ['rl2.executor.machine']; // the next channel's peer reads no feeds: the streams stay the machine's
     l.link.set('up');
@@ -1633,7 +1635,9 @@ describe('the timing lines', () => {
     const alone = l.cmd('machine.folders.list', {});
     await vi.advanceTimersByTimeAsync(1_000);
     await alone;
-    await l.cmd('machine.folders.list', { path: '/srv/a' }); // a folder of the sheet, not the chooser's first page
+    const sheet = Promise.all([l.cmd('session.projects.list', undefined), l.cmd('machine.folders.list', { path: '/srv/a' })]); // a folder of the sheet
+    await vi.advanceTimersByTimeAsync(30);
+    await sheet;
     expect(timing(l)).toHaveLength(1);
   });
 });

@@ -1606,7 +1606,9 @@ describe('attention and search across machines (P5 O7 M6)', { timeout: 30_000 },
     expect(attentionSaid(l.a)).toHaveLength(1);
   });
 
-  it('greys the items when the link is forced down, out of the badge; the next up’s snapshot restores them, raising only what came meanwhile', async () => {
+  // The UX wave, U9 (the architect's ruling of 2026-11-13): a machine's items grey by its phase, so a link forced down
+  // and back within the minute keeps them counted; the greying at the minute is src/main/lane-b/remote-attention.test.ts'
+  it('keeps the items counted while a link forced down reconnects, in the badge; the next up’s snapshot brings what came meanwhile, raising only that', async () => {
     const l = await lab({ link: { UP_GRACE_MS: 100 } });
     const service = machineAttention(l);
     l.host.add('app-1');
@@ -1619,14 +1621,15 @@ describe('attention and search across machines (P5 O7 M6)', { timeout: 30_000 },
 
     l.a.direct.dead = true;
     l.a.carriers.at(-1)!.carrier.close('dropped');
-    await until(() => attentionSaid(l.a).at(-1)?.greyed === true, 'the items greyed');
-    expect(requestsOf(attentionSaid(l.a).at(-1)!.items)).toEqual(['req-q']);
-    expect(seen.badge()).toBe(0);
+    await until(() => l.a.link.state() === 'down', 'the link down past its grace');
+    expect(attentionSaid(l.a).some((said) => said.greyed), 'reconnecting greys nothing').toBe(false);
+    expect(seen.badge()).toBe(1);
     service.raise('app-1', 'permission', 'req-p'); // raised on the machine while this Mac can't hear it
 
     l.a.direct.dead = false;
     l.a.link.probe('network');
-    await until(() => attentionSaid(l.a).at(-1)?.greyed === false, 'the next snapshot', 15_000);
+    await until(() => requestsOf(attentionSaid(l.a).at(-1)!.items).length === 2, 'the next snapshot', 15_000);
+    expect(attentionSaid(l.a).at(-1)!.greyed).toBe(false);
     expect(requestsOf(attentionSaid(l.a).at(-1)!.items)).toEqual(['req-q', 'req-p']);
     expect(seen.badge()).toBe(1);
     expect(seen.raised.map((n) => n.request.body)).toEqual(['question for app-1', 'permission for app-1']); // the first not again
