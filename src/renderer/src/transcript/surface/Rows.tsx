@@ -28,8 +28,8 @@ import { useDisclosure, useTranscriptContext } from '../view/context';
 import { useTranscriptSurface } from './context';
 
 export function SurfaceUserRow({ row }: { row: Extract<Row, { kind: 'user' }> }) {
-  const { appSessionId, turn } = useTranscriptSurface(row);
-  const input = userInput(row, turn);
+  const { appSessionId, state, turn } = useTranscriptSurface(row);
+  const input = userInput(row, turn, state?.ui.revealed);
   if (!input) return <UserRow row={row} />;
   return <SurfaceRow appSessionId={appSessionId} component="UserMessage" {...input} placeholder={<UserRow row={{ ...row, text: '…', attachments: [], placeholders: [] }} />}>
     {(props) => <UserRow row={props.text === row.text ? row : { ...row, text: props.text, placeholders: [], attachments: row.attachments.filter((a) => a.kind !== 'text') }} />}
@@ -67,7 +67,8 @@ function useAssistantInput(row: Extract<Row, { kind: 'assistant_text' }>) {
   const appSessionId = variant === 'session' && storeKey && !forcedLocal ? storeKey as AppSessionId : null;
   const turn = useTranscriptStore((s) => row.turnId === null ? undefined : s.entries[storeKey]?.state.turns.get(row.turnId));
   const live = useTranscriptStore((s) => liveBuffer(s.entries[storeKey], row));
-  const input = assistantInput({ ...row, markdown: live ?? row.markdown }, turn);
+  const revealed = useTranscriptStore((s) => s.entries[storeKey]?.state.ui.revealed); // UX wave U3
+  const input = assistantInput({ ...row, markdown: live ?? row.markdown }, turn, revealed);
   const attached = useSurfaceAttached(appSessionId);
   const text = live ?? row.markdown;
   const reportInk = useCallback((ink: boolean) => {
@@ -125,7 +126,7 @@ export function SurfaceAssistantRow({ row }: { row: Extract<Row, { kind: 'assist
 
 export function SurfaceCommandRow({ row }: { row: Extract<Row, { kind: 'local_command' }> }) {
   const { appSessionId, state } = useTranscriptSurface(row);
-  const input = commandInput(row, state);
+  const input = commandInput(row, state, state?.ui.revealed);
   if (!input) return <LocalCommandRow row={row} />;
   return <SurfaceRow appSessionId={appSessionId} component="CommandOutput" {...input} placeholder={<LocalCommandRow row={{ ...row, text: '…' }} />}>
     {(props) => <LocalCommandRow row={props.text === row.text ? row : { ...row, text: props.text }} />}
@@ -133,8 +134,10 @@ export function SurfaceCommandRow({ row }: { row: Extract<Row, { kind: 'local_co
 }
 
 export function SurfaceQuestionRow({ row }: { row: Extract<Row, { kind: 'question' }> }) {
-  const { appSessionId, turn } = useTranscriptSurface(row);
-  const { props } = questionInput(row, turn);
+  const { appSessionId, state, turn } = useTranscriptSurface(row);
+  const input = questionInput(row, turn, state?.ui.revealed);
+  if (!input) return <QuestionRow row={row} />;
+  const { props } = input;
   return <SurfaceRow appSessionId={appSessionId} component="AskUserQuestion" instanceId={row.toolUseId} props={props} placeholder={<span className="text-fg-faint">…</span>}>
     {(rewritten) => <QuestionRow row={rewritten === props ? row : { ...row, questions: nativeQuestionsOf(rewritten.questions) ?? row.questions }} />}
   </SurfaceRow>;

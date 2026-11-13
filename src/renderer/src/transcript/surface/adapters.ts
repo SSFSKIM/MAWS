@@ -15,8 +15,10 @@ export interface RowInput<C extends TranscriptSite> { instanceId: string; props:
 type RowOf<K extends Row['kind']> = Extract<Row, { kind: K }>;
 const object = (v: unknown): Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v) ? v as Record<string, unknown> : {};
 
-export function userInput(row: RowOf<'user'>, turn: TurnState | undefined): RowInput<'UserMessage'> | null {
-  if (!turn || row.pending || row.dropped || !row.text.trim()) return null;
+// UX wave U3 (the U3a document, Interfaces F): every ask takes the tab's revealed jump target, which asks nothing and is
+// drawn by MAWS, so the row the reader was sent to reads as MAWS draws it whatever a mod does to its neighbours.
+export function userInput(row: RowOf<'user'>, turn: TurnState | undefined, revealed?: RowId | CellId): RowInput<'UserMessage'> | null {
+  if (!turn || row.pending || row.dropped || !row.text.trim() || row.id === revealed) return null;
   const event = turn.events.find((e) => e.kind === 'user.message' && (row.messageUuid ? e.messageUuid === row.messageUuid : `user:${e.id}` === row.id));
   if (event?.kind !== 'user.message' || event.isSynthetic) return null;
   const origin = event.origin;
@@ -26,8 +28,8 @@ export function userInput(row: RowOf<'user'>, turn: TurnState | undefined): RowI
   return { instanceId: row.messageUuid ?? row.id, props: { text: row.text, origin: { kind }, isExpanded: true } };
 }
 
-export function assistantInput(row: RowOf<'assistant_text'>, turn: TurnState | undefined): RowInput<'AssistantMessage'> | null {
-  if (!row.markdown.trim()) return null;
+export function assistantInput(row: RowOf<'assistant_text'>, turn: TurnState | undefined, revealed?: RowId | CellId): RowInput<'AssistantMessage'> | null {
+  if (!row.markdown.trim() || row.id === revealed) return null;
   const identity = row.id.slice(row.id.indexOf(':') + 1);
   const api = identity.slice(0, identity.lastIndexOf(':'));
   const peers = [...(turn?.live.values() ?? [])].filter((b) => b.blockType === 'text' && b.apiMessageId === api);
@@ -65,8 +67,8 @@ function toolRecords(turn: TurnState): Map<ToolUseId, ToolRecord> {
 const turnContext = (turn: TurnState): TurnContext => ({ closed: turn.state === 'closed', terminalReason: turn.ended?.terminalReason ?? null, lastAt: turn.events.at(-1)?.at ?? turn.startedAt });
 
 export interface ToolInput extends RowInput<'ToolUse'> { cell: Cell; record: ToolRecord; context: TurnContext }
-export function toolInputs(cell: Cell, turn: TurnState | undefined): ToolInput[] {
-  if (!turn || cell.toolUseId === null) return [];
+export function toolInputs(cell: Cell, turn: TurnState | undefined, revealed?: RowId | CellId): ToolInput[] {
+  if (!turn || cell.toolUseId === null || cell.id === revealed) return [];
   const records = toolRecords(turn);
   const all = [...records.values()];
   const at = all.findIndex((r) => r.use.toolUseId === cell.toolUseId);
@@ -170,8 +172,8 @@ export function groupInput(row: RowOf<'group'>, turn: TurnState | undefined, pen
   return { instanceId: `group:${tools[0].instanceId}`, props: { calls, isActive: tools.some((tool) => tool.props.isRunning), isExpanded: false } };
 }
 
-export function commandInput(row: RowOf<'local_command'>, state: TranscriptState | undefined): RowInput<'CommandOutput'> | null {
-  if (!row.text.trim()) return null;
+export function commandInput(row: RowOf<'local_command'>, state: TranscriptState | undefined, revealed?: RowId | CellId): RowInput<'CommandOutput'> | null {
+  if (!row.text.trim() || row.id === revealed) return null;
   let command = ''; let args = '';
   if (state) {
     const events = [...state.turns.values()].flatMap((t) => t.events).concat(state.loose).sort((a, b) => a.at.localeCompare(b.at));
@@ -190,7 +192,8 @@ export function resultInput(input: ToolInput): RowInput<'ToolResult'> | null {
   return { instanceId: input.instanceId, props: { tool_use_id: input.props.tool_use_id, tool: input.props.tool, output: input.props.output, isErrored: input.props.isErrored } };
 }
 
-export function questionInput(row: RowOf<'question'>, turn: TurnState | undefined): RowInput<'AskUserQuestion'> {
+export function questionInput(row: RowOf<'question'>, turn: TurnState | undefined, revealed?: RowId | CellId): RowInput<'AskUserQuestion'> | null {
+  if (row.id === revealed) return null;
   const use = turn?.events.find((e) => e.kind === 'tool.use' && e.toolUseId === row.toolUseId);
   const metadata = object(object(use?.kind === 'tool.use' ? use.input : null).metadata);
   return { instanceId: row.toolUseId, props: { tool: 'AskUserQuestion', questions: engineQuestionsOf(row.questions), ...(typeof metadata.source === 'string' && { metadataSource: metadata.source }) } };
