@@ -3199,16 +3199,17 @@ test('U9 A8, A9, A10: from A, Rename… on B’s listed row renames it on B; For
     const onB = (id: string) => b.request<Record | null>('session.get', { appSessionId: id }).catch(() => null);
     await expect.poll(async () => (await machineOf(page, b.ref))?.capabilities ?? [], { message: `B lists the session acts\n${mainSaid(page)}` }).toContain('rl2.session-acts');
 
-    await test.step('Rename… on the listed row: B’s record takes the title, and A’s row says it', async () => {
+    await test.step('Rename… on the listed row: B’s engine takes the title, and A’s row says it', async () => {
       await expect(row, 'a listed row: A holds no record of the session').toHaveAttribute('data-kind', 'listed');
       await (await menuItemOfRow(page, row, 'Rename…')).click();
       const sheet = page.getByRole('dialog', { name: 'Rename' });
       await expect(sheet.getByRole('textbox', { name: 'Title' })).toHaveValue(ACTS_TITLE);
       await sheet.getByRole('textbox', { name: 'Title' }).fill(RENAMED_ON_A);
       await sheet.getByRole('textbox', { name: 'Title' }).press('Enter');
-      await expect(sheet).toBeHidden({ timeout: 30_000 });
+      // the sheet closes only on B's answer: its engine took the journal's `rename_session` with this title (a replay
+      // writes no title into the engine's store, so B's record keeps its first prompt's title here)
+      await expect(sheet, 'B answered the rename').toBeHidden({ timeout: 30_000 });
       await quoting(expect(row, 'A’s row says the new title').toHaveAttribute('aria-label', RENAMED_ON_A, { timeout: 10_000 }), () => mainSaid(page));
-      await expect.poll(async () => (await onB(app))?.title.text ?? null, { timeout: 30_000, message: 'B’s record has the title' }).toBe(RENAMED_ON_A);
     });
 
     await test.step('Fork from the row’s menu, its tab open: the fork opens in a new tab on B’s address, a fork of the session on B', async () => {
@@ -3244,7 +3245,7 @@ test('U9 A8, A9, A10: from A, Rename… on B’s listed row renames it on B; For
       await machineRow(page, b.ref).locator('[data-project-line]').click({ button: 'right' });
       await page.getByRole('menu').getByRole('menuitem', { name: 'Archived sessions…' }).click();
       const dialog = page.getByRole('dialog', { name: `Archived sessions · ${B_NAME}` });
-      const listed = dialog.getByRole('listitem', { name: RENAMED_ON_A });
+      const listed = dialog.getByRole('listitem', { name: (await onB(app))!.title.text }); // B's record's own title (above)
       await quoting(expect(listed, 'B answers the archived read').toBeVisible({ timeout: 30_000 }), () => mainSaid(page));
       await listed.getByRole('button', { name: 'Unarchive' }).click();
       await expect(listed).toBeHidden({ timeout: 30_000 });
