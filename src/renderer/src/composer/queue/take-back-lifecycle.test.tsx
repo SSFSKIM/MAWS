@@ -325,7 +325,7 @@ describe('a held settle that meets another window’s newer stage', () => {
     return { B, heldSettle };
   }
   const stageTwo = (B: Awaited<ReturnType<typeof windowB>>) =>
-    void B.takeBackB.takeBack(A, { kind: 'after', key: 'q-2', queueId: 'q-2', content: 'the second message', createdAt: '2026-09-29T10:00:02.000Z', answer: false }, B.depsB);
+    void B.takeBackB.takeBack(A, { kind: 'after', key: 'q-2', queueId: 'q-2', content: 'the second message', createdAt: '2026-09-29T10:00:02.000Z' }, B.depsB);
 
   it('(a) stage 2 written between A’s stale answer and its read: A’s copy of message 1 is put away and message 2 comes in its place', async () => {
     const { B, heldSettle } = await sentByBThenStaged();
