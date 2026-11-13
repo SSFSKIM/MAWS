@@ -8,13 +8,14 @@
 // with no record here included. P5 O8 M5b: Add owner… after Share, for the
 // session's owners (sessions/share/target.ts' `useCanAddOwner`). UX wave U7 (O-38, ticket 559): a listed row's menu opens with
 // Open and Open in new tab, through its lane's opener. UX wave U7 (O-16): Hide, or Unhide for a hidden session, in every
-// tree row's session menu, where `withHide` places it among a record's actions, and after a listing's opens; a Needs you
+// tree row's session menu, where `withHide` places it among a record's actions, and directly after a listing's opens; a Needs you
 // row's menu has none (the architect's ruling of 2026-11-13: that row stays where it is whatever is hidden). The project registry (docs/doperpowers/plans/
 // 2026-11-10-project-registry.md, Interfaces §J): a registry project's row offers Add location… (Add project with the
 // project filled) and, unless a `.smns` names it, Rename…; Channel for a hub project only; and a row of a project you see
 // only through its sessions (`registry:<id>`) offers Channel alone. The UX wave, U9 (Interfaces §6): a session on another
-// machine offers its acts over the link (`remoteSessionActions`), from its listing alone where this Mac holds no record,
-// before Share and Add owner; an item is drawn disabled with the window's helper's sentence as its title.
+// machine offers its acts over the link (`remoteSessionActions`), from its listing alone where this Mac holds no record:
+// there after the opens and Hide (U7's rule, the architect's ruling of 2026-11-13), before Share and Add owner; an item is
+// drawn disabled with the window's helper's sentence as its title.
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import type { ReactNode } from 'react';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
@@ -103,8 +104,9 @@ export function SidebarMenuContent({ target }: { target: MenuTarget | null }) {
 }
 
 // P5 O8 M6b: the listing-capable session menu. A record's actions, then Share for a session you own (sessions/share/
-// target.ts); another machine's listed session with no record here offers its two opens (UX wave U7), then the acts
-// that machine offers for it (the UX wave, U9), then Hide (UX wave U7), Share and Add owner.
+// target.ts); another machine's listed session with no record here offers its two opens and Hide (UX wave U7: Hide follows
+// the opening items, the architect's ruling of 2026-11-13), then the acts that machine offers for it in
+// `remoteSessionActions`' order (the UX wave, U9), then Share and Add owner.
 function SessionItems({ appSessionId, dropdown = false, hidable }: { appSessionId: AppSessionId; dropdown?: boolean; hidable: boolean }) {
   const record = useSessions((s) => s.records.get(appSessionId));
   const listing = useSessions((s) => s.listed.get(appSessionId)); // the UX wave, U9: `mine`, and a listed row's lane
@@ -126,8 +128,8 @@ function SessionItems({ appSessionId, dropdown = false, hidable }: { appSessionI
     return (
       <>
         <ListedOpenItems listed={listed} dropdown={dropdown} />
-        {acts.map((id) => <SessionItem key={id} id={id} appSessionId={appSessionId} label={SESSION_ACTIONS[id]} dropdown={dropdown} />)}
         {hidable && <HideItem appSessionId={appSessionId} dropdown={dropdown} />}
+        {acts.map((id) => <SessionItem key={id} id={id} appSessionId={appSessionId} label={SESSION_ACTIONS[id]} dropdown={dropdown} />)}
         {reach}
       </>
     );

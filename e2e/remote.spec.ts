@@ -93,6 +93,7 @@ import { newChatIn, openProject, projectLine, projectRow, showProjectList, sideb
 import { clickRevealed } from './support/hover'; // P5 O7 M8
 import { REMOTE_UNAVAILABLE } from '../src/shared/ipc/remote-unavailable'; // P5 O7 M8
 import { withNativeClipboard } from './support/clipboard'; // the UX wave, U9 (A4)
+import { remoteSessionActions, SESSION_ACTIONS } from '../src/renderer/src/app/session-actions'; // the UX wave, U9 (the architect's ruling of 2026-11-13)
 
 test.skip(process.env.MAWS_REMOTE_E2E !== '1', 'the remote scenes run under pnpm e2e:remote (MAWS_REMOTE_E2E=1)');
 test.setTimeout(900_000);
@@ -605,7 +606,9 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await expect(page.getByRole('menu')).toBeVisible();
       const items = await page.getByRole('menuitem').allTextContents();
       expect(items.slice(0, 3), 'a listed row’s menu: its two opens, then Hide').toEqual(['Open', 'Open in new tab', 'Hide']);
-      expect(items.slice(3).filter((item) => item !== 'Share…' && item !== 'Add owner…'), 'nothing after Hide but Share and Add owner').toEqual([]);
+      // after Hide, U9's acts over the link for a lane B listing that is yours, in their order, then Share and Add owner
+      const acts = remoteSessionActions({ lane: 'B', record: false, mine: true, remoteReading: true }).map((id) => SESSION_ACTIONS[id]);
+      expect(items.slice(3).filter((item) => item !== 'Share…' && item !== 'Add owner…'), 'after Hide, the acts over the link (U9) and nothing else but Share and Add owner').toEqual(acts);
       await page.keyboard.press('Escape');
       await expect(page.getByRole('menu')).toHaveCount(0);
 
