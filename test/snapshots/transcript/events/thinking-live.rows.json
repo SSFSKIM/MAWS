@@ -68,6 +68,7 @@
     "kind": "thinking",
     "live": true,
     "messageUuid": null,
+    "recordedMs": null,
     "text": "Weighing where the anchor should sit: the reader’s row keeps their place, the end keeps the stream in view.",
     "turnId": "turn:u-think-1"
   }

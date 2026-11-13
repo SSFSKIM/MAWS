@@ -74,6 +74,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "a-stream-1",
+    "recordedMs": null,
     "text": "The reader asked about anchoring. Keep it to three sentences.",
     "turnId": "turn:u-stream-1"
   },

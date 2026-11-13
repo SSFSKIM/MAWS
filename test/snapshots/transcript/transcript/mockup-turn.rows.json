@@ -116,6 +116,7 @@
         "detail": {
           "durationMs": 64,
           "kind": "thinking",
+          "recordedMs": null,
           "text": "Jitter on drag usually means the layout store writes before the pointer settles. Read the drag hook and search for the store write."
         },
         "endedAt": "2026-09-28T11:20:00.153Z",

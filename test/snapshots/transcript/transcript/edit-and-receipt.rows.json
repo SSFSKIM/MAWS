@@ -109,6 +109,7 @@
         "detail": {
           "durationMs": 56,
           "kind": "thinking",
+          "recordedMs": null,
           "text": "Two files reference measure. Read app.ts first to see the export, then edit both, add the helper, and run the tests."
         },
         "endedAt": "2026-09-28T10:00:00.153Z",

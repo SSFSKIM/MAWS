@@ -74,6 +74,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "1f2fe5a1-f531-498f-a3d2-9612c2096f6c",
+    "recordedMs": null,
     "text": "The user is asking me to reply with exactly \"OK\". This is a simple request that requires no tools or analysis. I should just respond with \"OK\".",
     "turnId": "turn:fa4d0234-8ffe-440f-b32b-3ec27cea7416"
   },
@@ -157,6 +158,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "6f8705f8-0528-4b2f-82a2-6790ab6ae475",
+    "recordedMs": null,
     "text": "The user wants me to:\n1. Use the Read tool to read a file called \"one.txt\"\n2. Reply with only the single word it contains\n\nLet me read the file first.",
     "turnId": "turn:66cfb780-b906-4f92-af32-02b7c17fec7b"
   },
@@ -206,6 +208,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "85514452-2e7d-42ea-a8f2-5df22a87dc04",
+    "recordedMs": null,
     "text": "The file contains the word \"ONE\" on line 1. The user asked me to reply with only the single word it contains. So I should reply with just \"ONE\".",
     "turnId": "turn:66cfb780-b906-4f92-af32-02b7c17fec7b"
   },

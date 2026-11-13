@@ -74,6 +74,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "a-disk-1",
+    "recordedMs": null,
     "text": "One agent, one file.",
     "turnId": "turn:u-disk-1"
   },

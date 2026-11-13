@@ -81,6 +81,7 @@
         "detail": {
           "durationMs": 463,
           "kind": "thinking",
+          "recordedMs": null,
           "text": "The user wants me to run `git log --oneline` and then say DONE. This is straightforward."
         },
         "endedAt": "2026-09-28T09:21:50.808Z",

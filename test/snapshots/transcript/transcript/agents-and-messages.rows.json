@@ -74,6 +74,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "a-agents-and-messages-013",
+    "recordedMs": null,
     "text": "Two independent surveys: run them in parallel.",
     "turnId": "turn:u-agents-and-messages-002"
   },

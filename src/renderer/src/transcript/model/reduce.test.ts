@@ -974,14 +974,16 @@ describe('requests', () => {
 });
 
 describe('denial disposition', () => {
-  it('pairs a user-rejected denial with an aborted turn as an interruption when the turn closes', () => {
+  // UX wave U2 (decision 23, the architect's ruling R1): a rejected call reads stopped from its result on, not only once
+  // its turn closes aborted; it was denied until the close before
+  it('a user-rejected denial reads as an interruption from its result on, and still when its turn closes aborted', () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('t1', 'Bash', { command: 'sleep 9' });
     b.result('t1', 'User rejected tool use', { isError: true, denial: 'user-rejected' });
     let state = reduce(b.events);
     let cell = find(rowsOf(withAllExpanded(state)), 'cell');
-    expect(cell.classification.denial).toMatchObject({ disposition: 'denied', interruption: false });
+    expect(cell.classification.denial).toMatchObject({ disposition: 'stopped', interruption: true });
     b.end(['u1'], { isError: true, result: 'error_during_execution', terminalReason: 'aborted_streaming' });
     state = applyEvents(state, [b.events.at(-1)!]);
     const list = rowsOf(withAllExpanded(state));

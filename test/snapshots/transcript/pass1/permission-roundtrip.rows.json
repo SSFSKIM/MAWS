@@ -74,6 +74,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "a65cb1eb-2501-4f2a-9151-b3bdaa5ed6d4",
+    "recordedMs": null,
     "text": "The user wants me to run `git log --oneline` and then say DONE. This is straightforward.",
     "turnId": "turn:6ffe2781-e332-43ac-b218-09fb29e670de"
   },
@@ -123,6 +124,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "0f962419-e6ed-40d4-8da4-8f2f83fcaff6",
+    "recordedMs": null,
     "text": "The command executed successfully and showed the git log. There's only one commit: \"2299dcc seed\". Now I should say DONE as requested.",
     "turnId": "turn:6ffe2781-e332-43ac-b218-09fb29e670de"
   },
@@ -213,6 +215,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "dd8b2c34-b54c-440c-8815-a3671e95769c",
+    "recordedMs": null,
     "text": "The user wants me to run `git branch --show-current` and if I'm denied permission, I should stop. Let me run this command.",
     "turnId": "turn:bfb5b35a-a854-4ee2-84e6-4da03b4d8442"
   },
@@ -267,6 +270,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "df44b42b-64ab-4d2d-9a40-14cc0d58c063",
+    "recordedMs": null,
     "text": "The command was denied with \"Probe denial: do not retry this command.\" The user said \"If denied, stop\" so I should stop here and not attempt anything else.",
     "turnId": "turn:bfb5b35a-a854-4ee2-84e6-4da03b4d8442"
   },
@@ -350,6 +354,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "70c3d51c-e8ac-49e1-ade0-54df88f8d4c2",
+    "recordedMs": null,
     "text": "The user wants me to run `git status --short` and then say DONE. Let me execute this command.",
     "turnId": "turn:7c9e7143-c066-41a4-bef7-e28aee59c6eb"
   },
@@ -399,6 +404,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "687c5952-dc43-4a65-a7c6-97eb86b431cb",
+    "recordedMs": null,
     "text": "The command ran successfully and produced no output, which means the working tree is clean (no changes). Now I should say DONE as requested.",
     "turnId": "turn:7c9e7143-c066-41a4-bef7-e28aee59c6eb"
   },

@@ -74,6 +74,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "34c33fc5-ad57-45c0-b931-f05bb75d8688",
+    "recordedMs": null,
     "text": "The user wants me to read a file at `/private/tmp/maws-probe3-outside-hdvwZL/outside.txt` and reply with only the single word it contains.\n\nLet me read that file.",
     "turnId": "turn:191267e2-427d-4767-b5df-22a246f51649"
   },
@@ -123,6 +124,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "e5bc2010-9930-495c-8045-fb5bb875f23d",
+    "recordedMs": null,
     "text": "The file contains \"PAPAYA\" as the single word. The user asked me to reply with only the single word it contains, so I should respond with just \"PAPAYA\".",
     "turnId": "turn:191267e2-427d-4767-b5df-22a246f51649"
   },

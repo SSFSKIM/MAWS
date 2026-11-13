@@ -87,6 +87,7 @@
         "detail": {
           "durationMs": 32,
           "kind": "thinking",
+          "recordedMs": null,
           "text": "Search first, then read what turns up."
         },
         "endedAt": "2026-09-28T10:30:00.153Z",

@@ -99,6 +99,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "d1ff2bcc-f663-412c-b022-b4624ed8d8a0",
+    "recordedMs": null,
     "text": "The user is asking me to count to 30 slowly, using separate Bash calls with `sleep 1; echo NUMBER` for each number. This means I need to make 30 Bash tool calls, each one sleeping for 1 second and echoing a number.\n\nSince these are independent calls, I can call them all in parallel in a single tool call block. This is actually interesting because even though they can run in parallel, the `sleep 1` will mean there's a 1-second delay between each echo. But I can make all 30 calls at once.\n\nLet me make 30 Bash calls, one for each number from 1 to 30.",
     "turnId": "turn:a5bf8381-f5c0-4394-88a8-4b04c12e4911"
   },
@@ -360,6 +361,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "7359f0c5-644d-4120-a06a-e255a0f5fa7d",
+    "recordedMs": null,
     "text": "The user is cancelling the counting request and asking me to reply with exactly \"RESUMED\".",
     "turnId": "turn:e88214f8-3ba3-4b4c-8e64-3be1595fcac0"
   },

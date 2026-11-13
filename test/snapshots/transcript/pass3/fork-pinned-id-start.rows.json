@@ -74,6 +74,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "e042328c-efc9-4ae3-bfc3-72a5df984982",
+    "recordedMs": null,
     "text": "The user is asking me to remember the word \"MANGO\" and reply \"OK\". This seems like a simple request to demonstrate that I can acknowledge something. Let me respond with \"OK\" as requested.",
     "turnId": "turn:85367590-802a-4310-aec5-6cba774d6c08"
   },

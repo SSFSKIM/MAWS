@@ -74,6 +74,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "f00041c9-0c99-4c22-aa40-fef4f03aec64",
+    "recordedMs": null,
     "text": "The user is asking me again what word they asked me to remember. I should check my memory to confirm. Looking at the memory I just saved, the word is ZEBRA. I should reply with just that word.",
     "turnId": "turn:1ac41aac-0ebe-496e-999e-b5cd2873aa65"
   },

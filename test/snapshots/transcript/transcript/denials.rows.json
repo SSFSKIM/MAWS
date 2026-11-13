@@ -93,6 +93,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "a-denials-013",
+    "recordedMs": null,
     "text": "Three risky commands; each may be refused.",
     "turnId": "turn:u-denials-002"
   },

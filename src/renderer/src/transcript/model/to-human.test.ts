@@ -89,7 +89,7 @@ describe('a message tool’s call', () => {
     expect(cellsOf((b) => {
       b.toolUse('m1', MAWS, { text: 'Stage 1 is done.' });
       b.result('m1', "The user doesn't want to proceed with this tool use.", { isError: true, denial: 'user-rejected' });
-    })).toEqual([['m1', MAWS, 'denied']]);
+    })).toEqual([['m1', MAWS, 'stopped']]); // UX wave U2 (decision 23): a rejected call nothing followed reads stopped
     expect(cellsOf((b) => b.toolUse('m1', MAWS, { text: '  \n' }))).toEqual([['m1', MAWS, 'running']]);
     expect(cellsOf((b) => {
       b.toolUse('m1', MAWS, {});

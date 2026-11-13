@@ -68,6 +68,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "a-group-1",
+    "recordedMs": null,
     "text": "Run the test first.",
     "turnId": "turn:u-think-2"
   },
@@ -117,6 +118,7 @@
     "kind": "thinking",
     "live": true,
     "messageUuid": null,
+    "recordedMs": null,
     "text": "It passes. Now, why the reader stays put: the virtualiser anchors to the end only while following.",
     "turnId": "turn:u-think-2"
   }

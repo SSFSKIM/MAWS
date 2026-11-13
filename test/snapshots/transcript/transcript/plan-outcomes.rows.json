@@ -74,6 +74,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "a-plan-outcomes-013",
+    "recordedMs": null,
     "text": "Plan mode: present the plan and wait.",
     "turnId": "turn:u-plan-outcomes-002"
   },
@@ -167,6 +168,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "a-plan-outcomes-046",
+    "recordedMs": null,
     "text": "Plan mode: present the plan and wait.",
     "turnId": "turn:u-plan-outcomes-035"
   },
@@ -259,6 +261,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "a-plan-outcomes-071",
+    "recordedMs": null,
     "text": "Plan mode: present the plan and wait.",
     "turnId": "turn:u-plan-outcomes-060"
   },

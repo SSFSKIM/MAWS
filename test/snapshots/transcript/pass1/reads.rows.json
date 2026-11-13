@@ -74,6 +74,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "4670369a-e2aa-4584-b9ad-e4473062f577",
+    "recordedMs": null,
     "text": "The user is asking me to reply with exactly \"OK\". This is a simple, straightforward request. I should respond with exactly that word and nothing else.",
     "turnId": "turn:d590837b-890f-44ff-887b-67f7cf0dc383"
   },

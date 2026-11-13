@@ -83,6 +83,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "a-attachments-and-images-013",
+    "recordedMs": null,
     "text": "Compare the attached image with the one on disk.",
     "turnId": "turn:u-attachments-and-images-002"
   },
