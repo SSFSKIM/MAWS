@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { LaunchSpecSchema } from '@shared/engine/launch-spec';
 import type { TaskId } from '@shared/graph/ids';
 import type { GitDiffFile, GitFileStatus, GitStatus } from '@shared/ipc/schema/git';
-import { loadSyntheticJournal } from '../../../../../test/support/fixtures';
+import { loadP5Journal, loadSyntheticJournal } from '../../../../../test/support/fixtures';
+import { SessionStatusTracker } from '../../../../engine-host/session-status';
 import { applyEvents, createState, turnActivity, type TurnActivity, type TurnId } from '../../transcript';
 import { journalToEvents } from '../../transcript/dev/journal';
 import { useTranscriptStore } from '../../stores/transcript';
@@ -84,6 +86,23 @@ describe('summary derivations', () => {
     it('reads the Stop callback’s labels as the task types they name', () => {
       const task = (taskType: string) => ({ taskId: taskType as TaskId, taskType, description: '', ambient: false });
       expect(backgroundCounts([task('shell'), task('subagent'), task('workflow'), task('monitor'), task('MCP task')])).toEqual({ shells: 1, workflows: 1, monitors: 1, other: 1 });
+    });
+
+    // The same two tasks, listed at p5/p5-o16-holder-main seq 145 and named by the Stop at seq 162, as the status holds them.
+    it('counts a status from a recorded Stop’s list as the listing of the same tasks', () => {
+      const rows = loadP5Journal('p5-o16-holder-main');
+      const frameAt = (seq: number) => rows.find((row) => row.seq === seq)!.frame as Record<string, unknown>;
+      const spec = LaunchSpecSchema.parse({
+        appSessionId: 'app-labels', cwd: '/tmp/r', additionalDirectories: [], model: null, effort: null, permissionMode: null, gateway: 'gateway', subagentModel: null,
+        resume: null, sessionId: null, trust: null, mcpConfig: null, extraSettings: null, maxBudgetUsd: null, inheritGrantsFrom: null, replay: null,
+      });
+      const listed = new SessionStatusTracker(spec, () => {});
+      listed.observe(frameAt(145), '2026-10-31T00:00:00.000Z');
+      const stopped = new SessionStatusTracker(spec, () => {}, { launchKind: 'adopted' });
+      stopped.stopped((frameAt(162).request as { input: Record<string, unknown> }).input);
+      expect(stopped.snapshot().backgroundTasks.map((t) => t.taskType)).toEqual(['shell', 'subagent']);
+      expect(backgroundCounts(stopped.snapshot().backgroundTasks)).toEqual(backgroundCounts(listed.snapshot().backgroundTasks));
+      expect(backgroundCounts(stopped.snapshot().backgroundTasks)).toEqual({ shells: 1, workflows: 0, monitors: 0, other: 0 });
     });
   });
 

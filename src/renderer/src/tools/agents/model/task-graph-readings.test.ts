@@ -8,7 +8,6 @@ import type { AgentId, TaskId } from '@shared/graph/ids';
 import { event, replayed, upTo } from '../../../../../../test/support/agents-events';
 import { loadP5Journal } from '../../../../../../test/support/fixtures';
 import { SessionStatusTracker } from '../../../../../engine-host/session-status';
-import { backgroundCounts } from '../../../panel/summary/derive';
 import {
   agentsRunningUnder,
   applySnapshot,
@@ -126,7 +125,7 @@ describe('the graph’s readings', () => {
 
     // A status whose list a Stop wrote carries the Stop's labels, as build F's does; the same two tasks, listed at
     // p5/p5-o16-holder-main seq 145 and named by the Stop at seq 162, read alike.
-    it('a status from a recorded Stop’s list gives the readings and the card counts the listing of the same tasks gives', () => {
+    it('a status from a recorded Stop’s list gives the readings the listing of the same tasks gives (the card counts: panel/summary/derive.test.ts)', () => {
       const rows = loadP5Journal('p5-o16-holder-main');
       const frameAt = (seq: number) => rows.find((row) => row.seq === seq)!.frame as Record<string, unknown>;
       const spec = LaunchSpecSchema.parse({
@@ -150,8 +149,6 @@ describe('the graph’s readings', () => {
       const stop = readings(applySnapshot(emptyGraph(), fromStop));
       expect(stop).toEqual(readings(applySnapshot(emptyGraph(), fromListing)));
       expect(stop).toMatchObject({ firstLevel: { running: ['a75a34c79539c9b3c'], done: [] }, runningAgents: 1, background: [['bzgk2epjt', 'shell']] });
-      expect(backgroundCounts(fromStop)).toEqual(backgroundCounts(fromListing));
-      expect(backgroundCounts(fromStop)).toEqual({ shells: 1, workflows: 0, monitors: 0, other: 0 });
     });
 
     it('a subagent listed by its label is an agent of the tree and no background task', () => {
