@@ -668,7 +668,7 @@ function planJournal(): string {
     ...handshake,
     { seq: ++seq, direction: 'in', at, frame: { type: 'system', subtype: 'status', status: null, permissionMode: 'plan', uuid: randomUUID() } },
     { seq: ++seq, direction: 'in', at, frame: { type: 'control_request', request_id: requestId, request: { subtype: 'can_use_tool', tool_name: 'ExitPlanMode', display_name: 'ExitPlanMode', input: { plan: '1. Add the release note.\n2. Bump the version.' }, tool_use_id: 'toolu_plan_next_mode_1' } } },
-    { seq: ++seq, direction: 'out', at, frame: { type: 'control_response', response: { subtype: 'success', request_id: requestId, response: { behavior: 'allow' } } } },
+    { seq: seq + 1, direction: 'out', at, frame: { type: 'control_response', response: { subtype: 'success', request_id: requestId, response: { behavior: 'allow' } } } },
   ];
   const path = join(scratch, `plan-next-mode-${Date.now()}.jsonl`);
   writeFileSync(path, rows.map((row) => JSON.stringify(row)).join('\n') + '\n');
