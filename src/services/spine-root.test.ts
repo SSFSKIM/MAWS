@@ -299,7 +299,8 @@ describe('the spine and the checkouts composed under plain Node', () => {
   // settles nothing here). The badge is main's count over these same items (`src/main/attention/notifier.ts`, whose test
   // holds that count to `waits`); at the spine, attention.list and attention.changed stand in for it.
   it.each([
-    ['this machine’s endpoint says it took (laneA.accepted)', (bus: FakeBus, _appSessionId: AppSessionId, engineSessionId: string) => bus.invoke('laneA.accepted', { session: engineSessionId, request: 'req-1' })],
+    // main-only: a window's invoke is refused it; the endpoint's dispatch reaches the front's table as `main` does here
+    ['this machine’s endpoint says it took (laneA.accepted)', (bus: FakeBus, _appSessionId: AppSessionId, engineSessionId: string) => bus.main('laneA.accepted', { session: engineSessionId, request: 'req-1' })],
     ['the driver’s own answer is taken (the bridge’s 200)', (bus: FakeBus, appSessionId: AppSessionId) => bus.invoke('laneA.answer', { appSessionId, request: 'req-1', answer: { kind: 'permission', decision: 'allow', scope: 'once' } })],
   ])('holds back a request %s: gone from attention and the digest while the bridge still lists it', async (_how, take) => {
     const engineSessionId = '0e5b1c0d-0000-4000-8000-0000000000a2';

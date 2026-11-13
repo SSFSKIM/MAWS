@@ -43,6 +43,10 @@ export interface AttentionState {
   // The snapshot nobody answered: the machine's buffer replays over what is held, and nothing is removed.
   cancelSnapshot(machine: MachineRef): void;
   applyChanged(change: EventPayload<'attention.changed'>, machine: MachineRef): void;
+  // UX wave U1a (Reported 9): a session's list that the machine's feed and lists never carry (lane A's mirror of a remote
+  // terminal session, `lane-a/remote-connect.ts`), written at once, never buffered, and left standing, its drafts with it,
+  // by the machine's snapshots until the mirror empties it.
+  applyMirrored(change: EventPayload<'attention.changed'>, machine: MachineRef): void;
   // P5 O7 M6: another machine's feed snapshot (`remote.attention`), its partition replaced whole and greyed or not.
   applyRemote(snapshot: EventPayload<'remote.attention'>): void;
   applyNotified(notified: EventPayload<'attention.notified'>): void;
@@ -80,6 +84,7 @@ function forgetClosedDrafts(drafts: Map<AttentionId, QuestionDraft>, bySession: 
 // its changes buffered while its snapshot is outstanding.
 interface Partition {
   sessions: Set<AppSessionId>;
+  mirrored: Set<AppSessionId>; // U1a: those of its sessions whose list the mirror writes (`applyMirrored`), which no snapshot replaces
   buffer: Map<AppSessionId, AttentionItem[]> | null;
   greyed: boolean; // P5 O7 M6: as main last said it in `remote.attention`
   // P5 O7 M6 (M6c fix wave 1): main's feed speaks for this machine (a first `remote.attention` came), for the page's life:
@@ -93,7 +98,7 @@ export function createAttentionStore() {
   const partitions = new Map<MachineRef, Partition>();
   const partition = (machine: MachineRef): Partition => {
     let p = partitions.get(machine);
-    if (!p) partitions.set(machine, (p = { sessions: new Set(), buffer: null, greyed: false, fed: false }));
+    if (!p) partitions.set(machine, (p = { sessions: new Set(), mirrored: new Set(), buffer: null, greyed: false, fed: false }));
     return p;
   };
   // Every outstanding snapshot's buffer, as the state shows them.
@@ -109,11 +114,12 @@ export function createAttentionStore() {
       if (p.greyed) for (const id of p.sessions) greyed.add(id);
       return greyed;
     };
-    // The partition's sessions replaced by `items`, grouped per session, into `bySession`.
+    // The partition's sessions replaced by `items`, grouped per session, into `bySession`; a mirrored session's list stands.
     const replace = (p: Partition, bySession: Map<AppSessionId, AttentionItem[]>, items: AttentionItem[]) => {
-      for (const id of p.sessions) bySession.delete(id);
-      p.sessions = new Set();
+      for (const id of p.sessions) if (!p.mirrored.has(id)) bySession.delete(id);
+      p.sessions = new Set(p.mirrored);
       for (const item of items) {
+        if (p.mirrored.has(item.appSessionId)) continue; // the feed carries no terminal session's item; the mirror's list is the session's
         bySession.set(item.appSessionId, [...(bySession.get(item.appSessionId) ?? []), item]);
         p.sessions.add(item.appSessionId);
       }
@@ -157,6 +163,15 @@ export function createAttentionStore() {
           set({ pendingReplacements: buffered() });
           return;
         }
+        p.sessions.add(appSessionId);
+        const bySession = new Map(get().bySession).set(appSessionId, items);
+        const greyed = p.greyed && !get().greyed.has(appSessionId) ? greyedAfter(p, []) : get().greyed;
+        set({ bySession, greyed, version: get().version + 1, ...forgetSettled(get(), bySession), ...forgetClosedDrafts(get().drafts, bySession) });
+      },
+      applyMirrored({ appSessionId, items }, machine) {
+        const p = partition(machine);
+        if (items.length === 0) p.mirrored.delete(appSessionId);
+        else p.mirrored.add(appSessionId);
         p.sessions.add(appSessionId);
         const bySession = new Map(get().bySession).set(appSessionId, items);
         const greyed = p.greyed && !get().greyed.has(appSessionId) ? greyedAfter(p, []) : get().greyed;
