@@ -108,17 +108,18 @@ const mawsDatesPlugin = { rules: { 'one-locale': builtinRules.get('no-restricted
 // UX wave U10a start (l6-artifacts-07 (a)): every Y.Doc MAWS makes comes from the constructors of
 // src/artifacts/yjs/doc.ts, which cancel Yjs's post-apply formatting clean-up, a write nobody made. Inside the binding
 // module, the only place `@y/y` is imported, a doc built elsewhere is refused; tests build Yjs's own for comparison, and
-// so does one fixture, format-cleanup.fixture.ts (a doc as build F builds one), which only tests and fixtures may import.
+// so does one fixture, format-cleanup.fixture.ts (a doc as build F builds one). A fixture is test material, so product
+// code under src/ imports none, so no fixture can carry another's names into the product: only tests and fixtures do.
 // The same core rules under names of their own, as the one-schema check, so they displace no block's options.
 const ONE_DOC_MESSAGE = 'A Y.Doc is made only by the constructors of src/artifacts/yjs/doc.ts (newDoc, newSuggestionDoc, newDocGcOff), so no doc writes after an apply (l6-artifacts-07 (a)).';
 const ONE_DOC = [
   { selector: "NewExpression[callee.object.name='Y'][callee.property.name='Doc']", message: ONE_DOC_MESSAGE },
   { selector: "NewExpression[callee.name='Doc']", message: ONE_DOC_MESSAGE },
 ];
-const F_DOC_FIXTURE_MESSAGE = 'src/artifacts/yjs/format-cleanup.fixture.ts builds docs with Yjs\'s defaults, which run the post-apply clean-up (l6-artifacts-07 (a)): only tests and fixtures import it.';
-const F_DOC_FIXTURE = '(?:^|/)format-cleanup\\.fixture(?:\\.ts)?$';
-const F_DOC_FIXTURE_IMPORTS = { patterns: [{ regex: F_DOC_FIXTURE, message: F_DOC_FIXTURE_MESSAGE }] };
-const F_DOC_FIXTURE_DYNAMIC = { selector: `ImportExpression[source.value=/${F_DOC_FIXTURE.replace(/\//g, '.')}/]`, message: F_DOC_FIXTURE_MESSAGE };
+const FIXTURE_ONLY_MESSAGE = 'A *.fixture module is test material (format-cleanup.fixture.ts builds docs that run the post-apply clean-up, l6-artifacts-07 (a)): only tests and fixtures import one.';
+const FIXTURE_MODULE = '\\.fixture(?:\\.tsx?)?$';
+const FIXTURE_ONLY_IMPORTS = { patterns: [{ regex: FIXTURE_MODULE, message: FIXTURE_ONLY_MESSAGE }] };
+const FIXTURE_ONLY_DYNAMIC = { selector: `ImportExpression[source.value=/${FIXTURE_MODULE}/]`, message: FIXTURE_ONLY_MESSAGE };
 const mawsDocsPlugin = {
   rules: { 'one-doc': builtinRules.get('no-restricted-syntax'), 'fixture-imports': builtinRules.get('no-restricted-imports'), 'fixture-dynamic-imports': builtinRules.get('no-restricted-syntax') },
 };
@@ -346,9 +347,9 @@ module.exports = defineConfig(
   },
   {
     files: ['src/**/*.{ts,tsx}'],
-    ignores: ['src/**/*.test.{ts,tsx}', 'src/**/*.fixture.ts'],
+    ignores: ['src/**/*.test.{ts,tsx}', 'src/**/*.fixture.{ts,tsx}'],
     plugins: { 'maws-docs': mawsDocsPlugin },
-    rules: { 'maws-docs/fixture-imports': ['error', F_DOC_FIXTURE_IMPORTS], 'maws-docs/fixture-dynamic-imports': ['error', F_DOC_FIXTURE_DYNAMIC] },
+    rules: { 'maws-docs/fixture-imports': ['error', FIXTURE_ONLY_IMPORTS], 'maws-docs/fixture-dynamic-imports': ['error', FIXTURE_ONLY_DYNAMIC] },
   },
   // UX wave U10a end
   // DC3 start: the desk hub's protocol module (apps/desk-hub/src/protocol/) is imported by the Worker, the web app, and
