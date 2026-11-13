@@ -608,21 +608,18 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await page.keyboard.press('Escape');
       await expect(page.getByRole('menu')).toHaveCount(0);
 
-      // First a tab a plain open would replace, in the set the session opens into (its row's: the row's own key): that set
-      // shown by a click on the project's row, and Diagnostics opened there, unpinned and in front. A plain open
-      // (`replaceActive`) would give Diagnostics' place to the session; only a tab of its own keeps both. On this fresh
-      // profile the set is otherwise empty, where the two opens could not be told apart.
+      // First a tab a plain open would replace: Diagnostics, unpinned and in front of the one strip (U13a). A plain open
+      // (`replaceActive`) would give its place to the session; only a tab of its own keeps both. On this fresh profile the
+      // strip is otherwise empty, where the two opens could not be told apart.
       type StoredMain = { current: string; sets: Record<string, { panes: { tabs: { id: string }[] }[] }> };
-      const storedMain = async () => (await invoke<{ value: StoredMain | null }>(page, 'layout.get', { key: 'main.tabs' })).value;
-      const tabsOfSet = async (key: string) => ((await storedMain())?.sets[key]?.panes ?? []).flatMap((pane) => pane.tabs.map((tab) => tab.id)).sort();
-      const projectOfRow = sidebarOf(page).locator(`[data-kind="project"][data-tree-id="p:${projectKey}"]`);
-      await projectLine(projectOfRow).click(); // its set shown, the row folded
-      await expandSidebarRow(page, projectOfRow); // and open again, its set still shown
-      await expect.poll(async () => (await storedMain())?.current, { message: 'the row’s set is the one shown' }).toBe(projectKey);
+      const storedTabs = async () => {
+        const stored = (await invoke<{ value: StoredMain | null }>(page, 'layout.get', { key: 'main.tabs' })).value;
+        return Object.values(stored?.sets ?? {}).flatMap((set) => set.panes.flatMap((pane) => pane.tabs.map((tab) => tab.id))).sort();
+      };
       await menu(applicationOf(page), 'diagnostics.open');
       await expect(activeMainTab(page), 'a replaceable tab in front: Diagnostics').toHaveAttribute('data-tab-id', 'diagnostics');
       await expect(mainTabById(page, 'diagnostics').getByRole('img', { name: 'Pinned' }), 'unpinned').toHaveCount(0);
-      await expect.poll(() => tabsOfSet(projectKey), { message: 'Diagnostics stored in the row’s set' }).toContain('diagnostics');
+      await expect.poll(storedTabs, { message: 'Diagnostics stored in the strip' }).toContain('diagnostics');
       await expect(row, 'still only listed').toHaveAttribute('data-kind', 'listed');
 
       const tabIds = () => mainTabs(page).locator('[role="tab"]').evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('data-tab-id')));
@@ -633,8 +630,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       expect(await tabIds(), 'and keeps every tab it found, Diagnostics among them').toEqual(expect.arrayContaining(before));
       const opened = await tabIds();
       await expect(activeMainTab(page), 'the new tab is in front').toHaveAttribute('data-tab-id', `session:${address}`);
-      await expect.poll(async () => [(await storedMain())?.current, await tabsOfSet(projectKey)], { message: 'both tabs in the row’s set, which is still the one shown' })
-        .toEqual([projectKey, expect.arrayContaining(['diagnostics', `session:${address}`])]);
+      await expect.poll(storedTabs, { message: 'both tabs stored in the strip' }).toEqual(expect.arrayContaining(['diagnostics', `session:${address}`]));
       await expect(main(page).getByText(FIRST_REPLY).first(), `B's history in the new tab\n${mainSaid(page)}`).toBeVisible({ timeout: 60_000 });
 
       await row.click({ button: 'right' });

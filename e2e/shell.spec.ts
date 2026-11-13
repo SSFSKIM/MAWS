@@ -547,8 +547,9 @@ test('a long project name stays inside the chip’s box', async () => {
       await (await sidebarRow(page, 'Trace stream reconnects')).click();
       await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'a session of the long-named project in front' }).toEqual(['Trace stream reconnects']);
       const chip = page.getByRole('banner').locator('[data-toolbar-project]');
-      await expect(chip).toHaveAccessibleName(`New chat in ${LONG}`);
-      await expect(chip, 'the tooltip holds the whole name').toHaveAttribute('title', `New chat in ${LONG}`);
+      // U13a's chip: it names the row of the session in front, and a click reveals that row
+      await expect(chip).toHaveAccessibleName(`Reveal ${LONG} in sidebar`);
+      await expect(chip, 'the tooltip holds the whole name').toHaveAttribute('title', `Reveal ${LONG} in sidebar`);
       const name = chip.locator('.truncate');
       await expect(name).toHaveText(LONG);
       const box = (await chip.boundingBox())!;
