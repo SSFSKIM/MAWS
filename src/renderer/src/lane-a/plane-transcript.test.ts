@@ -732,6 +732,9 @@ describe('the exit a gone session leaves on another machine (X-168)', () => {
       row({ type: 'assistant', uuid: 'g-a2', parentUuid: 'g-u2', timestamp: at(6), message: { id: 'g-m3', role: 'assistant', model: 'example-model', content: [{ type: 'tool_use', id: 'toolu-g2', name: 'Agent', input: { description: 'Check the links', prompt: 'Check the sample links', subagent_type: 'Explore', run_in_background: true } }] } }),
       row({ type: 'user', uuid: 'g-r2', parentUuid: 'g-a2', timestamp: at(7), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu-g2', content: 'Async agent launched successfully.' }] }, toolUseResult: { status: 'async_launched' } }),
     ];
+    // the machine names the late agent, still running by its last word, and its rows come after
+    const LATE = { agentId: 'a0de000000000002', meta: { agentType: 'Explore', description: 'Check the links', toolUseId: 'toolu-g2' }, status: 'running', evidence: 'bridge' } as unknown as SubagentMeta;
+    plane.send('subagents', { subagents: [RUNNING, LATE] } as unknown as SessionBodies['subagents']);
     for (const body of late) {
       plane.send('row', { row: body } as unknown as SessionBodies['row']);
       await settle();
@@ -741,8 +744,8 @@ describe('the exit a gone session leaves on another machine (X-168)', () => {
     expect(entry().rows.filter((r) => r.kind === 'user').length).toBe(2); // the late prompt drawn, once
     const nodes = [...controller.state.getState().tasks.tasks.values()];
     expect(nodes.find((node) => node.taskId === AGENT)?.status).toBe('exited');
-    expect(nodes.length).toBeGreaterThanOrEqual(2); // the late call has a node of its own
-    expect(nodes.filter((node) => node.status === 'running').map((node) => node.taskId)).toEqual([]); // and it is ended too
+    expect(nodes.find((node) => node.taskId === LATE.agentId)?.status).toBe('exited');
+    expect(nodes.filter((node) => node.status === 'running').map((node) => node.taskId)).toEqual([]);
     expect([...entry().state.seen].filter((id) => String(id).startsWith(EXIT))).toEqual([EXIT]); // one exit, after the rows
   });
 
