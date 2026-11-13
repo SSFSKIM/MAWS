@@ -471,6 +471,20 @@ describe('Connectors', () => {
       expect(within(row).getByText('Signed in · connected here')).toBeTruthy();
     });
 
+    // P7 run 43386195217: a session started with no message has had no init frame, so its status in the sessions store
+    // lists no server; its mcp_status, which the page reads for its attached session, lists it
+    it('offers Sign in through the attached session whose mcp_status lists the server, before its first turn', async () => {
+      const idle = holding('idle', '/one', []); // the page's attached session: no first turn, so the store lists nothing
+      useSessions.setState({ engine: new Map([[idle.appSessionId, idle]]) });
+      backend.script('session.mcpStatus', () => ({ mcpServers: [{ name: 'fx-own', status: 'needs-auth', scope: 'dynamic' }] }));
+      ownPosture('rev-1');
+      mountWith(fresh());
+      const row = await ownRow();
+      fireEvent.click(await within(row).findByRole('button', { name: 'Sign in to fx-own' }));
+      await waitFor(() => expect(backend.calls.filter((call) => call.command === 'connectors.signInDynamicServer').map((call) => call.input)).toEqual([{ name: 'fx-own', appSessionId: 'idle', entry: { revision: 'rev-1' } }]));
+      expect(row.querySelector('[data-sign-in-needs-session]')).toBeNull();
+    });
+
     it('offers no Sign in while the row has no revision', async () => {
       const holder = holding('holder', '/two', ['fx-own']);
       useSessions.setState({ engine: new Map([[holder.appSessionId, holder]]) });
