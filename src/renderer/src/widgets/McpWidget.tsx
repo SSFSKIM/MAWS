@@ -179,7 +179,8 @@ const SIGN_IN = 'shrink-0 rounded-sm px-1 text-ui-sm text-accent outline-accent 
 // Reconnect sits on the line of a row that needs a sign-in or failed, and in the opened part of any other (U11a).
 const RECONNECT_ON_LINE = new Set(['needs-auth', 'failed']);
 
-function McpServerRow({ server, appSessionId, ready, answer, refresh, cwd, readAt }: { server: McpServerView; appSessionId: AppSessionId; ready: boolean; answer: McpStatusResponse; refresh: EngineRead<McpStatusResponse>['refresh']; cwd: string | null; readAt: number | null }) {
+// `reachSaid`: the head says what the switch reaches; until it can, the switch waits (Reconnect reaches this session only)
+function McpServerRow({ server, appSessionId, ready, answer, refresh, cwd, readAt, reachSaid }: { server: McpServerView; appSessionId: AppSessionId; ready: boolean; answer: McpStatusResponse; refresh: EngineRead<McpStatusResponse>['refresh']; cwd: string | null; readAt: number | null; reachSaid: boolean }) {
   const [last, setLast] = useState<'reconnect' | 'toggle' | null>(null);
   // the toggle's view, from the read that followed its outcome (`basis`: the answer that read produced)
   const [toggled, setToggled] = useState<(ToggleView & { basis: McpStatusResponse | undefined }) | null>(null);
@@ -243,7 +244,7 @@ function McpServerRow({ server, appSessionId, ready, answer, refresh, cwd, readA
           aria-checked={checked}
           aria-label={MCP_ACTIONS.enabled(server.name)}
           data-state={position}
-          disabled={!ready || busy || toggle.unavailable !== null}
+          disabled={!ready || !reachSaid || busy || toggle.unavailable !== null}
           title={toggle.unavailable ?? undefined}
           onClick={() => void flip()}
           className={`${SWITCH} ${position === 'on' ? 'bg-accent' : 'bg-bg-active'}`}
@@ -283,7 +284,7 @@ function McpServerRow({ server, appSessionId, ready, answer, refresh, cwd, readA
 
 // The list of a session's connectors. With `actions`, each row is the dialog's (switch, Sign in, Reconnect); without,
 // the row has none and a disabled connector reads Off (Customize's live list).
-export function McpBody({ view, actions }: { view: { servers: McpServerView[] }; actions?: { appSessionId: AppSessionId; ready: boolean; answer: McpStatusResponse; refresh: EngineRead<McpStatusResponse>['refresh']; cwd: string | null; readAt: number | null } }) {
+export function McpBody({ view, actions }: { view: { servers: McpServerView[] }; actions?: { appSessionId: AppSessionId; ready: boolean; answer: McpStatusResponse; refresh: EngineRead<McpStatusResponse>['refresh']; cwd: string | null; readAt: number | null; reachSaid: boolean } }) {
   if (view.servers.length === 0) return <p className="m-0 text-ui-sm text-fg-muted">{MCP.none}</p>;
   return (
     <Rows label={MCP.list}>
@@ -300,7 +301,7 @@ export function McpBody({ view, actions }: { view: { servers: McpServerView[] };
 // alike, and outside any repository under the folder exactly. So: the project's name when the session's record names
 // one; else the main root of the repository holding the session's folder (`git.worktree.list`'s `repoRoot`, the parent
 // of its common dir), the home abbreviated; else, in no repository or where git answers nothing, the folder itself.
-// Null, and no sentence, while the main root is being read.
+// Null, and no sentence, while the main root is being read; the switch waits for the sentence (`reachSaid`).
 function useSwitchPlace(appSessionId: AppSessionId, folder: string | null): string | null {
   const project = useSessions((s) => {
     const id = s.records.get(appSessionId)?.projectId;
@@ -337,7 +338,7 @@ function McpEngine({ appSessionId, close }: { appSessionId: AppSessionId; args: 
       readAt={read.readAt}
       close={close}
     >
-      {read.data && <McpBody view={present(read.data)} actions={{ appSessionId, ready, answer: read.data, refresh: read.refresh, cwd, readAt: read.readAt }} />}
+      {read.data && <McpBody view={present(read.data)} actions={{ appSessionId, ready, answer: read.data, refresh: read.refresh, cwd, readAt: read.readAt, reachSaid: place !== null }} />}
     </WidgetFrame>
   );
 }
