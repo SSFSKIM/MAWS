@@ -1759,12 +1759,24 @@ test('(layout, from the peer) a layout the peer filed under two tab sets opens w
     said.push(`  ${here.label}: ${tabs.length} tabs in one strip, the pin and the tab in front kept, the notice shown; contexts ${JSON.stringify(Object.keys(surfaces.contexts))}`);
     await s.quit(run);
 
-    // a relaunch of this build reads the one set it wrote: no notice
+    // a relaunch of this build reads the one set it wrote: no notice. A notice lasts 6 s and the launch helper hands the
+    // page over only once the host is ready, by when hydration may be over, so the page's read is watched from its
+    // start: an init script on the app's context (it runs before the page's own scripts at each load) records every
+    // appearance of the notice, and the window is reloaded so that hydration reads the profile again under it
     const again = await s.launch();
     await s.ready(again.page);
+    await again.maws.app.context().addInitScript((text) => {
+      const seen: number[] = [];
+      (window as unknown as { __u13aNotices: number[] }).__u13aNotices = seen;
+      const look = () => {
+        if (document.querySelector('[data-toast-viewport]')?.textContent?.includes(text)) seen.push(Math.round(performance.now()));
+      };
+      new MutationObserver(look).observe(document, { subtree: true, childList: true, characterData: true });
+    }, ONE_STRIP_NOTICE);
+    await again.page.reload();
     await expect.poll(async () => (await stripIds(again.page)).sort(), { timeout: 20_000, message: 'the strip back' }).toEqual(tabs);
     await again.page.waitForTimeout(2_000); // past hydration, where the notice would show
-    await expect(notice(again.page), 'no notice: nothing was merged').toHaveCount(0);
+    expect(await again.page.evaluate(() => (window as unknown as { __u13aNotices?: number[] }).__u13aNotices ?? null), 'no notice from the page’s start: nothing was merged').toEqual([]);
     await s.quit(again);
     said.push('  a relaunch of this build: the same strip, no notice');
     record(said);
@@ -1836,9 +1848,12 @@ test('(layout, to the peer) a split strip this build stored, with a pin, a side 
         theirs = await layoutOf<StoredSets>(old.page, 'main.tabs');
         surfaces = await layoutOf<StoredSurfaces>(old.page, 'panelTools.surfaces');
         regions = await layoutOf<StoredRegions>(old.page, 'regions');
-        return [theirs?.version, tabIdsOf(theirs), pinnedIn(theirs), surfaces?.pinnedTools.includes(PINNED_TOOL_ID), surfaces?.contexts.none !== undefined, regions?.version, regions?.sidebar.collapsed];
-      }, { timeout: 20_000, message: `${peer.label} wrote every tab, the pin, the unpinned tool with none kept, and the folded sidebar` })
-      .toEqual([3, tabs, [artifact], false, true, 5, true]);
+        // F's own write first: the page's tab, which it selected, as the saved tab in front of the set it shows (this
+        // build left the library's tab there), so what follows is read from a value F wrote, not from this build's
+        const shown = theirs?.sets[theirs.current];
+        return [shown?.panes[shown.focusedPane]?.activeTabId, theirs?.version, tabIdsOf(theirs), pinnedIn(theirs), surfaces?.pinnedTools.includes(PINNED_TOOL_ID), surfaces?.contexts.none !== undefined, regions?.version, regions?.sidebar.collapsed];
+      }, { timeout: 20_000, message: `${peer.label} wrote its tab in front, every tab, the pin, the unpinned tool with none kept, and the folded sidebar` })
+      .toEqual([artifact, 3, tabs, [artifact], false, true, 5, true]);
     expect(old.maws.consoleErrors()).toEqual([]);
     said.push(`  ${peer.label}: drew the tab in front, the pin, the tool and the width; wrote ${Object.keys(theirs!.sets).length} sets, contexts ${JSON.stringify(Object.keys(surfaces!.contexts))}`);
     await s.quit(old);

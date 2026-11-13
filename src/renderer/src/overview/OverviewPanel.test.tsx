@@ -175,7 +175,7 @@ describe('the floating Overview', () => {
     expect(useLayout.getState().overviewOpen).toBe(false);
   });
 
-  // #497 (UX wave U13a, A4): a delayed New chat opens selected only when nothing else came to the front meanwhile.
+  // Ticket 497 (UX wave U13a, A4): a delayed New chat opens selected only when nothing else came to the front meanwhile.
   it('a delayed New chat closes the panel without restoring its opener, leaving the new composer with the keyboard', async () => {
     const user = userEvent.setup();
     fillStores(scenarioFile('empty'));

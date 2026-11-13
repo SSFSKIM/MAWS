@@ -57,7 +57,7 @@ export const useSessionCreatorRegistered = (): boolean => creators.useEnabled('c
 
 // C12: answers the new session's id (null when none was made), so the Worktrees… dialog can set its location. The project
 // registry: `registry`, the registry project a New chat with no project here is opened in (sidebar/registry-new-chat.ts),
-// the unstarted session's before its tab opens (panel sweep#3), so its tab names that project's row. #497 (UX wave U13a):
+// the unstarted session's before its tab opens (panel sweep#3), so its tab names that project's row. ticket 497 (UX wave U13a):
 // the tab in front is read at the call and again at the answer; a chat whose answer finds another tab in front is added
 // after that tab, unselected, and its composer takes the keyboard when the person selects it.
 export async function createSession(projectId: ProjectId | null, opts: { pane?: 0 | 1 | 'focused'; location?: Location; registry?: string } = {}): Promise<AppSessionId | null> {

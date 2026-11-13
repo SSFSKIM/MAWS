@@ -252,27 +252,40 @@ test('one strip: a project or machine row changes no tab, ⌘1 counts over the p
     expect(await tabLabels(page, 'Open tabs'), 'the chip created no tab').toEqual(four);
     await expect(chip).toHaveText('codex_somersault');
 
-    // a narrow window: each tab's place gives way before its title
-    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setBounds({ x: 72, y: 48, width: 900, height: 700 }));
-    await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBounds().width)).toBe(900);
-    await page.waitForTimeout(300); // the strip lays out at the new width
-    const squeezed = await page
-      .getByRole('tablist', { name: 'Open tabs' })
-      .locator('[role="tab"]')
-      .evaluateAll((tabs) =>
-        tabs.map((tab) => {
-          const place = tab.querySelector<HTMLElement>('[data-tab-place]');
-          const title = place?.previousElementSibling as HTMLElement | null;
-          return {
-            tab: Math.round(tab.getBoundingClientRect().width),
-            titleCut: title !== null && title.scrollWidth > title.clientWidth + 1,
-            place: place === null ? null : Math.round(place.getBoundingClientRect().width),
-            placeCut: place !== null && place.scrollWidth > place.clientWidth + 1,
-          };
-        }),
-      );
-    test.info().annotations.push({ type: 'one-strip narrow', description: JSON.stringify(squeezed) });
+    // a narrow window: each tab's place gives way before its title. The window steps down from 900 px (at most to its
+    // 600 px minimum) until a place is cut or gone, so the narrow screenshot shows the give-way it is taken for
+    const measure = () =>
+      page
+        .getByRole('tablist', { name: 'Open tabs' })
+        .locator('[role="tab"]')
+        .evaluateAll((tabs) =>
+          tabs.map((tab) => {
+            const place = tab.querySelector<HTMLElement>('[data-tab-place]');
+            const title = place?.previousElementSibling as HTMLElement | null;
+            return {
+              tab: Math.round(tab.getBoundingClientRect().width),
+              titleCut: title !== null && title.scrollWidth > title.clientWidth + 1,
+              place: place === null ? null : Math.round(place.getBoundingClientRect().width),
+              placeCut: place !== null && place.scrollWidth > place.clientWidth + 1,
+            };
+          }),
+        );
+    type Squeezed = Awaited<ReturnType<typeof measure>>;
+    const givesWay = (tabs: Squeezed) => tabs.some((t) => t.place !== null && (t.placeCut || t.place === 0));
+    let squeezed: Squeezed = [];
+    let width = 0;
+    const tried: string[] = [];
+    for (width of [900, 800, 700, 600]) {
+      await app.evaluate(({ BrowserWindow }, width) => BrowserWindow.getAllWindows()[0].setBounds({ x: 72, y: 48, width, height: 700 }), width);
+      await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBounds().width)).toBe(width);
+      await page.waitForTimeout(300); // the strip lays out at the new width
+      squeezed = await measure();
+      tried.push(`${width}px ${JSON.stringify(squeezed)}`);
+      if (givesWay(squeezed)) break;
+    }
+    test.info().annotations.push({ type: 'one-strip narrow', description: tried.join('\n') });
     await test.info().attach('one-strip-narrow-title-bar', { body: await banner.screenshot(), contentType: 'image/png' });
+    expect(givesWay(squeezed), `a place gave way by ${width} px`).toBe(true);
     expect(squeezed.map((t) => t.place !== null), 'every session tab still has its place').toEqual([true, true, true, true]);
     expect(squeezed.filter((t) => t.titleCut && (t.place ?? 0) > 0), 'no title is cut while its place still takes room').toEqual([]);
 

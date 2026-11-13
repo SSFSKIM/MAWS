@@ -1,4 +1,4 @@
-// New chat (UX wave U13a; its plan's Interfaces §E, the section's O-01 "New chat" and #497): one entry for every control,
+// New chat (UX wave U13a; its plan's Interfaces §E, the section's O-01 "New chat" and ticket 497): one entry for every control,
 // which adds one tab after the tab in front, brings an empty chat back instead of making a second, closes the other empty
 // chats without the ordinary close's wait, and lets a late chat arrive unselected.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -269,7 +269,7 @@ describe('where a press starts the chat', () => {
   });
 });
 
-describe('a late chat (#497, A4)', () => {
+describe('a late chat (ticket 497, A4)', () => {
   it('opens selected when nothing else came to the front meanwhile', async () => {
     const creator = heldCreator();
     disposers.push(creator.off);
