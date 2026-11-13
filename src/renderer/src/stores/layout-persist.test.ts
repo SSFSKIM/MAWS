@@ -999,6 +999,17 @@ describe('the page’s key', () => {
     expect(pages()).toEqual([null]);
   });
 
+  it('a failed read of main.tabs opens no stored page and writes nothing to destination, the key left in the file', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { store, pages } = await launch({ destination: stored(PAGE) }, { failing: ['main.tabs'] });
+    expect(store.getState().destination).toBeNull();
+    vi.advanceTimersByTime(LAYOUT_WRITE_DELAY_MS * 2);
+    window.dispatchEvent(new Event('beforeunload'));
+    expect(pages()).toEqual([]);
+    expect(error.mock.calls.filter(([line]) => String(line).includes('main.tabs'))).toHaveLength(1);
+    error.mockRestore();
+  });
+
   it('rule 5: a stored value that does not parse opens nothing, is warned once, and is left in the file', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { store, pages } = await launch({ destination: stored({ kind: 'settings' }) });

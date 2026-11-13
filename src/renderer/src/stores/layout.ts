@@ -749,6 +749,9 @@ export function createLayoutStore() {
         // UX wave U7b: `destination` is written, or deleted, where what hydration opened differs from the file; a stored
         // value that does not parse (warned once above) is left in the file until the next page is opened or closed.
         if (readAs.has('destination') ? !sameJson(storedValue('destination', destination), readAs.get('destination')) : destination !== null) unsaved.add('destination');
+        // A read of `main.tabs` that failed says nothing of the file (R9): no page opens by rule 4, and none is deleted,
+        // unless the person opened, closed or left one before the read (rules 1 and 2).
+        if (failed.includes('main.tabs') && !pageEarly && !shownEarly) unsaved.delete('destination');
         if (prunedPanels.length > 0 && Object.keys(panelParams).length !== Object.keys(storedParams.params).length) unsaved.add('panelTools.params');
         for (const key of failed) unsaved.delete(key); // UX wave U8b: hydration writes no default over a value it could not read
         const values: Partial<Record<LayoutKey, unknown>> = {
