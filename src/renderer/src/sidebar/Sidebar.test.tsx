@@ -1054,13 +1054,13 @@ describe('hiding a session', () => {
 
   // The review's finding (round 3): a return draws its row anew in the project's list; the keyboard it held goes with it
   describe('where the keyboard goes when a hidden session returns', () => {
-    const returns = (title: string, dropped = false) =>
+    const returns = (id: AppSessionId, dropped = false) =>
       act(() => {
         const hidden = new Map(useHidden.getState().hidden);
-        hidden.delete(idOf(title));
+        hidden.delete(id);
         if (dropped) {
           const records = new Map(useSessions.getState().records);
-          records.delete(idOf(title));
+          records.delete(id);
           useSessions.setState({ records });
         }
         useHidden.setState({ hidden });
@@ -1072,7 +1072,7 @@ describe('hiding a session', () => {
       render(<Sidebar />);
       fireEvent.click(hiddenRow(row('MAWS')));
       act(() => row('Charter + research').focus());
-      returns('Charter + research');
+      returns(idOf('Charter + research'));
       expect(row('Charter + research').dataset.indented).toBeUndefined();
       expect(document.activeElement).toBe(row('Charter + research'));
     });
@@ -1082,7 +1082,7 @@ describe('hiding a session', () => {
       expand('proj-maws');
       render(<Sidebar />);
       act(() => hiddenRow(row('MAWS')).focus());
-      returns('Charter + research');
+      returns(idOf('Charter + research'));
       expect(within(row('MAWS')).queryByRole('treeitem', { name: /^Hidden, / })).toBeNull();
       expect(document.activeElement).toBe(row('Charter + research'));
     });
@@ -1092,9 +1092,50 @@ describe('hiding a session', () => {
       expand('proj-maws');
       render(<Sidebar />);
       act(() => hiddenRow(row('MAWS')).focus());
-      returns('Charter + research', true);
+      returns(idOf('Charter + research'), true);
       expect(within(row('MAWS')).queryByRole('treeitem', { name: /^Hidden, / })).toBeNull();
       expect(document.activeElement).toBe(row('MAWS'));
+    });
+
+    // The task review's finding (round 3): a row the caps would leave out stays drawn while the keyboard is on it, at its
+    // own rank and with no lead
+    describe('past the cap: five pinned rows rank above the one that returns', () => {
+      const alpha = project('alpha', 0);
+      const pins = [1, 2, 3, 4, 5].map((n) => record(`pin-${n}`, { projectId: alpha.id, pinned: true, updatedAt: `2026-10-24T1${6 - n}:00:00Z` }));
+      const back = record('back', { projectId: alpha.id, updatedAt: '2026-10-24T09:00:00Z' });
+      const other = record('other', { projectId: alpha.id, updatedAt: '2026-10-24T08:00:00Z' });
+      const capped = async (...hidden: SessionRecord[]) => {
+        fillStores({ projects: [alpha], sessions: [...pins, back, other], digests: [], attention: [], engine: [], timeline: [] });
+        fake = fakeClient({ 'layout.get': { value: { version: 1, hidden: Object.fromEntries(hidden.map((r) => [at(r.appId), { at: T, armedAt: null }])) } }, 'layout.set': undefined });
+        window.maws = fake.client as unknown as PreloadBridge;
+        await act(() => useHidden.getState().load());
+        expand(alpha.id);
+        render(<><Sidebar /><button>Outside</button></>);
+      };
+      const pinned = pins.map((r) => r.appId as string);
+
+      it('a focused row that returns sixth keeps the keyboard and stays drawn, after the five, until the keyboard leaves it', async () => {
+        await capped(back, other);
+        fireEvent.click(hiddenRow(row('alpha')));
+        act(() => row('back').focus());
+        returns(at(back.appId));
+        expect(document.activeElement).toBe(row('back'));
+        expect(sessionRows(row('alpha'))).toEqual([...pinned, 'back', 'other']); // 'other' is still under Hidden
+        expect(useHidden.getState().leading.size).toBe(0);
+        act(() => row('pin-1').focus());
+        expect(sessionRows(row('alpha'))).toEqual([...pinned, 'other']);
+      });
+
+      it('the same return that removes the last Hidden row hands the keyboard to the row, drawn past the cap', async () => {
+        await capped(back);
+        act(() => hiddenRow(row('alpha')).focus());
+        returns(at(back.appId));
+        expect(within(row('alpha')).queryByRole('treeitem', { name: /^Hidden, / })).toBeNull();
+        expect(document.activeElement).toBe(row('back'));
+        expect(sessionRows(row('alpha'))).toEqual([...pinned, 'back']);
+        act(() => screen.getByRole('button', { name: 'Outside' }).focus());
+        expect(sessionRows(row('alpha'))).toEqual(pinned);
+      });
     });
 
     it('takes no focus when the sidebar did not hold it', async () => {
@@ -1104,7 +1145,7 @@ describe('hiding a session', () => {
       fireEvent.click(hiddenRow(row('MAWS')));
       const outside = screen.getByRole('button', { name: 'Outside' });
       act(() => outside.focus());
-      returns('Charter + research');
+      returns(idOf('Charter + research'));
       expect(document.activeElement).toBe(outside);
     });
   });
