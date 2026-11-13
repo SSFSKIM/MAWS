@@ -1296,9 +1296,10 @@ interface CopiedImage {
   decoded: { width: number; height: number } | null;
   pasteboardPng: boolean | string;
 }
-// Put on the pasteboard once the case is done with the image it copied, so `withNativeClipboard` writes back what the
-// pasteboard held before; written only while the pasteboard still holds that image's bytes, a copy by anything else
-// since being left alone.
+// On the pasteboard before the click, and again once the case is done with the image it copied, so `withNativeClipboard`
+// writes back what the pasteboard held before the scene whether or not the copy happened. Written the second time only
+// while the pasteboard still holds that image's bytes: a copy by anything else since is left alone, and so is an image
+// whose bytes cannot be read, which the case cannot tell from another's.
 const SCREENSHOT_SCENE_MARK = 'u12a-copy-screenshot-scene';
 
 test('U12a (copy screenshot, A4): Copy screenshot puts the page the pane shows on the clipboard as a PNG image at the view’s device pixels, and the chrome says so', async () => {
@@ -1316,8 +1317,20 @@ test('U12a (copy screenshot, A4): Copy screenshot puts the page the pane shows o
     const expected = { width: Math.round(bounds.width * dpr), height: Math.round(bounds.height * dpr) };
 
     await withNativeClipboard(s.maws.app, [SCREENSHOT_SCENE_MARK], async () => {
+      await s.maws.app.evaluate(({ clipboard }, mark) => clipboard.writeText(mark), SCREENSHOT_SCENE_MARK);
       await overflow(s, panel, 'Copy screenshot');
       try {
+        // The image is read off the pasteboard on its own, not after the notice, so a build that copies without saying so
+        // still leaves the case knowing which bytes are its own.
+        const arrived = () =>
+          s.maws.app.evaluate(async ({ clipboard }, mark) => {
+            if ((await clipboard.readText()) === mark) return 'waiting';
+            const item = (await clipboard.read()).find((candidate) => candidate.types.includes('image/png'));
+            if (!item) return 'no image';
+            (globalThis as { __u12aCopiedPng?: Buffer }).__u12aCopiedPng = Buffer.from(await ((await item.getType('image/png')) as Blob).arrayBuffer());
+            return 'image';
+          }, SCREENSHOT_SCENE_MARK);
+        await expect.poll(arrived, { message: 'Copy screenshot replaces the pasteboard with an image' }).toBe('image');
         await expect(noticesIn(panel).filter({ hasText: 'Screenshot copied to clipboard' })).toBeVisible();
         const copied: CopiedImage = await s.maws.app.evaluate(async ({ clipboard, nativeImage }) => {
           const items = await clipboard.read();
@@ -1326,7 +1339,6 @@ test('U12a (copy screenshot, A4): Copy screenshot puts the page the pane shows o
           const pasteboardPng = await clipboard.has('electron application/osclipboard;format="public.png"').catch((error: unknown) => String(error));
           if (!item) return { types, png: null, decoded: null, pasteboardPng };
           const bytes = Buffer.from(await ((await item.getType('image/png')) as Blob).arrayBuffer());
-          (globalThis as { __u12aCopiedPng?: Buffer }).__u12aCopiedPng = bytes; // what the case wrote, for the finally below
           const image = nativeImage.createFromBuffer(bytes);
           return {
             types,
@@ -1343,17 +1355,19 @@ test('U12a (copy screenshot, A4): Copy screenshot puts the page the pane shows o
           expect(near(read.width, expected.width) && near(read.height, expected.height), `${JSON.stringify(read)} is the view at device pixels, ${JSON.stringify(expected)}`).toBe(true);
         }
       } finally {
-        // Checked and written in one call into main, so nothing else's copy lands between the two.
-        await s.maws.app.evaluate(async ({ clipboard }, mark) => {
-          const store = globalThis as { __u12aCopiedPng?: Buffer };
-          const wrote = store.__u12aCopiedPng;
-          delete store.__u12aCopiedPng;
-          if (!wrote) return;
-          const item = (await clipboard.read()).find((candidate) => candidate.types.includes('image/png'));
-          const blob = item ? await Promise.resolve(item.getType('image/png')).catch(() => null) : null; // unreadable: not ours to vouch for
-          const now = blob ? Buffer.from(await (blob as Blob).arrayBuffer()) : null;
-          if (now?.equals(wrote)) await clipboard.writeText(mark);
-        }, SCREENSHOT_SCENE_MARK);
+        // Checked and written in one call into main, so nothing else's copy lands between the two. Best-effort: a failure
+        // here is reported on its own and leaves the case's first failure the one that stands.
+        await s.maws.app
+          .evaluate(async ({ clipboard }, mark) => {
+            const store = globalThis as { __u12aCopiedPng?: Buffer };
+            const wrote = store.__u12aCopiedPng;
+            delete store.__u12aCopiedPng;
+            if (!wrote) return;
+            const item = (await clipboard.read()).find((candidate) => candidate.types.includes('image/png'));
+            const now = item ? Buffer.from(await ((await item.getType('image/png')) as Blob).arrayBuffer()) : null;
+            if (now?.equals(wrote)) await clipboard.writeText(mark);
+          }, SCREENSHOT_SCENE_MARK)
+          .catch((error: unknown) => console.warn(`[e2e] could not tell whether the pasteboard still holds the copied screenshot; left as it is: ${String(error)}`));
       }
     });
   });
