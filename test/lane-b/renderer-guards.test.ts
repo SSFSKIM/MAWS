@@ -72,6 +72,11 @@ const GUARDED_ELSEWHERE: Readonly<Record<string, Entries>> = {
     guard: 'a mod’s drawn tree acts; engine-surface/registry.ts reads the helper and draws no tree for a session on another machine',
   },
   'app/supervisor-notices.ts': { commands: ['session.start', 'session.takeOver', 'session.launch'], guard: 'names commands to recognise their refusals; issues none' },
+  'tools/code/viewer/ExternalRow.tsx': {
+    commands: ['files.openExternal'],
+    guard: 'issued only when machineFor(appSessionId) is this Mac’s (the named open of UX wave U6c); a session on another machine opens through lane-b/open-copy.ts’ openSessionFile, under that module’s entry',
+  },
+  'test-support/code-disk.ts': { commands: ['files.openExternal'], guard: 'a test double of main’s files commands for component tests: answers the command, issues none (UX wave U6c)' },
   // reported: issued for a session on another machine with no guard
   'lane-b/open-copy.ts': {
     commands: ['files.openExternal'],
