@@ -702,7 +702,10 @@ function apply(batch: Batch, event: SessionEvent): void {
         apiMessageId, blockIndex: event.blockIndex, blockType: type, buffer: type === 'tool_use' ? piece : appendStripped('', piece), ...(type === 'text' && { sourceText: piece }), rowId: liveRowId(type, apiMessageId, event.blockIndex), completed: false,
         markerEventId: type === 'tool_use' ? null : event.id, completeEventId: null, completedAt: null, messageUuid: null, model: null,
       });
-      if (type !== 'tool_use') batch.push(turn, event); // the row appears now: a structural change
+      // the row appears now: a structural change. A call's block has no row until it completes, but its first delta is
+      // kept too (UX wave U2, decision 23): the model's next message opening with a call is work after a rejected call,
+      // from that delta on (`continuedAfter`); the call's later input deltas are not kept
+      batch.push(turn, event);
       return;
     }
     case 'assistant.block.complete': {
