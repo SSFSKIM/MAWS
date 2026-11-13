@@ -8,7 +8,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { loadavg } from 'node:os';
 import { join } from 'node:path';
-import type { CDPSession, Page } from '@playwright/test';
+import type { CDPSession, Locator, Page } from '@playwright/test';
 import type { Step } from './hangul';
 
 // ---- percentiles and rows -----------------------------------------------------------------------------------------
@@ -746,6 +746,18 @@ export const blockText = (page: Page, artifactId: string, blockId: string): Prom
     },
     [EDITOR_SELECTOR(artifactId), blockId] as const,
   );
+
+/**
+ * U10a: the editor's top-level blocks under `editor` (its ProseMirror root) as its state holds them, each its node type
+ * and text: what it shows, apart from the widgets drawn over it (a presence cursor's label sits inside a block).
+ */
+export const blocksIn = (editor: Locator): Promise<{ type: string; text: string }[]> =>
+  editor.evaluate((el) => {
+    const blocks: { type: string; text: string }[] = [];
+    type Top = { type: { name: string }; textContent: string };
+    (el as HTMLElement & { editor: { state: { doc: { forEach(fn: (node: Top) => void): void } } } }).editor.state.doc.forEach((node) => blocks.push({ type: node.type.name, text: node.textContent }));
+    return blocks;
+  });
 
 /** The replica's save state in the page (the editor's handle). */
 export const replicaState = (page: Page, artifactId: string) =>
