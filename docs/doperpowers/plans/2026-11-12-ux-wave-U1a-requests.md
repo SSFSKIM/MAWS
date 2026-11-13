@@ -26,7 +26,7 @@ How to see it working: the unit suite (each reader of "what waits" handed one an
 - [x] (2026-11-12) The architect's rulings on the seven points (every default stands) and the adversarial review's six findings and three smaller points folded in; two points found while verifying them reported for a ruling.
 - [x] (2026-11-13) The rulings on the two points reported at the revision (8 and 9) folded in.
 - [x] (2026-11-13) U6a is on master (`be663d261`, pull request #604) and U8a since `6e8c72738`; master merged into the branch at `64c13746a`; step 0's two files are present.
-- [ ] M1 — One predicate, the publisher and every reader.
+- [ ] M1 — One predicate, the publisher and every reader. Built `4753fb642..faf75c3ca`. A17's red run (2026-11-13): the tests commit `4753fb642`, alone on the VM, `pnpm exec vitest run` over the 23 touched test files: 56 failing, each by assertion or a missing export (the tree test `test/one-predicate.test.ts`, every row of §A's reader table, the holder, the tellers, the endpoint, the mirror, main's `accepted`); four new tests passed there by design, each a rule today's code already keeps.
 - [ ] M2 — Questions: the terminal's asynchronous question, Dismiss, double-click.
 - [ ] M3 — The permission card: three buttons, the hints and the keys.
 - [ ] M4 — A file change as a diff.
@@ -947,6 +947,11 @@ Row 6's sentence is not the child's: the child's says "a skip of every question 
 - Observation: the lane A spec's bridge double settles a request only when told, so the order of acceptance and settlement can be held open in a scene.
   Evidence: `bridge.settle` and `bridge.answer` in `e2e/lane-a.spec.ts`.
 
+- Observation: a new `laneA.*` command meets five registries beyond its schema, none named in §B.
+  Evidence: the zod-free names list `src/shared/ipc/names/lane-a.ts` (the bridged/main-only partition reads it), `routes.json`, `test/support/spine-lists.ts` (the spine's exact command list), `ANSWERED_IN_MAIN` (`src/main/machines/remote/answered-in-main.ts`, which the offer audit reads), and the main-only grading rule in `grades.test`; M1's first run of its touched set failed three of them.
+- Observation: the act's digest the endpoint reads for `laneA.accepted` is `{session, request, tool, input_sha256}`, carried on every remote `sminos.answer` and `sminos.decide`.
+  Evidence: `answer` in `src/main/lane-a/remote.ts`.
+
 ## Decision Log
 
 - Decision: verification for this landing. This document gets an adversarial review before an executor starts, dispatched by the architect. The branch gets `doperpowers:review-code` at the xhigh panel. Class 1a on GitHub Actions is the gate of record, run once on the head the pull request carries.
@@ -972,6 +977,11 @@ Row 6's sentence is not the child's: the child's says "a skip of every question 
 
 - 2026-11-13: refresh at execution. Master `be663d261` (U6a, U8a) merged at `64c13746a`. The interfaces this document consumes were read again there: U6a's `effectiveChord`, `isRebindable`, `BUILD_F_ACTION_IDS` (neither new id in it) and its test's `WAVE_DEFAULTS` (the four request chords present), `dispatchKey` and `owner` in `keymap/dispatcher.ts`, `useKeyChord`'s options (`within`, `enabled`, `onRelease`), and U8a's `useWorkingFolder` (`src/renderer/src/sessions/working-folder.ts`) all stand as §M names them. The parent is re-pinned from `06727e32a` to `5f1972a30` (branch `ux-wave-spec`): its changes since bring U1's file, UC-1, UC-4, UC-6 and UC-8 to this document and contradict nothing here; UC-8 now also lets U3 change one tool name in `request-card/tools.ts`.
   Date/Author: 2026-11-13, the executing controller.
+
+- Decision (M1, 2026-11-13): `laneA.accepted` is a main-only command graded `internal`, where §B wrote `approve`. The code's rule (`grades.test`) gives `internal` to exactly the commands no window sends, which this one is (the endpoint sends it inside the daemon, as it sends `machine.op`); `internal` is stricter, no caller holds it, and §B's purpose, that no caller on another machine can send it, holds the more. The remote lane A adapter refuses it as a declared `ANSWERED_IN_MAIN` entry, since `routeLaneA` takes every `laneA.*` name. §B's code block is read with this grade. Rejected: a bridged command graded `approve`, which a window could send.
+- Decision (M1): both tellers reach the holder through the driver (`onAccepted`, for its own 200 and for `laneA.accepted`), wired in `spine-root`; the driver alone checks it drives the session, the holder alone checks the request is listed. The holder keeps one mark per accepted request (when its grace ends) with its own timer, its rules pure (`marksAfter`, `waitingOf`, the clock passed in); a second acceptance restarts the grace; an acceptance while the stream is not fresh is honoured when the last state listed the request. The digest is refreshed from the holder's list as well as from the view, since an acceptance or a grace's end changes the list with no new view.
+- Decision (M1): main's `accepted` lives on the remote session in `src/main/lane-a/remote.ts`, pruned at every change to what the plane still lists while the bridge is live and cleared by the primary watch's snapshot; a remote state always carries it (empty), as it carries `acts`. The mirror's repair for Reported 9 is a subscription to the attention store that writes a mirrored session's list again when another write took it away.
+- Decision (M1): the card's sent state is a phase (`sent`), disabled through `busy`, and the `RequestCard` wrapper returns null for an item that does not wait. The tree test flags an import of `isOpen` and a comparison of a state with `'delivered'` (both orders, and the list `['pending', 'delivered']`) in non-test sources under `src/` outside `src/engine-host/`, with two named exceptions that compare another thing's state (`owner/report/QuestionCard.tsx`, an owner question's; `services/channel/lane-b.ts`, an owner mark's). The header of `schema/lane-a.ts`, which said its namespace moves no minor, is corrected: it is on the wire.
 
 ## Outcomes & Retrospective
 
