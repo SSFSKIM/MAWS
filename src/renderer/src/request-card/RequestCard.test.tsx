@@ -8,6 +8,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { addressOf, bareOf } from '@shared/machine/address';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
+import { commentsMessage } from '@shared/anchor/message'; // UX wave U5a
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { project, record, status } from '../../../../test/support/builders';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
@@ -258,6 +259,52 @@ describe('edit prompt restores the initiating prompt', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Edit prompt' }));
     await screen.findByText("Couldn't deliver the answer");
     expect(useComposerStore.getState().prefills.size).toBe(0);
+  });
+
+  // UX wave U5a (M5; Decision Log 49): a message of several comments is the prompt the refusal interrupted, and its text
+  // cannot be edited in place (one text cannot hold the comments' framing): the dialog offers Retry and Cancel only, and
+  // never answers edit_prompt for it, also when the transcript changed between the render and the click.
+  const SEVERAL = commentsMessage(
+    [
+      { anchor: { kind: 'browser-element', label: 'Save button', locator: 'form > button.save', pageUrl: 'https://example.com/signup' }, text: 'Make this primary.', screenshot: false },
+      { anchor: { kind: 'browser-element', label: 'Page title', locator: 'main > h1', pageUrl: 'https://example.com/signup' }, text: 'Shorter.', screenshot: false },
+    ],
+    'main',
+  );
+  const held = async () => {
+    await act(() => useTranscriptStore.getState().attach(APP, ipcSource(APP))); // a view mounted, then closed: the store keeps its entry
+    act(() => useTranscriptStore.getState().detach(APP));
+  };
+
+  it('a turn opened by a message of several comments: no Edit prompt, only Retry and Cancel', async () => {
+    const b = builder();
+    b.turn('u-1', 'an earlier prompt');
+    b.end(['u-1']);
+    b.turn('u-2', SEVERAL);
+    transcript(b.events);
+    await held();
+    mount(refusal, 'inline');
+    expect(screen.queryByRole('button', { name: 'Edit prompt' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Retry with claude-sonnet-5' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeTruthy();
+  });
+
+  it('a prompt that became a message of several comments between the render and the click: no edit_prompt, Retry and Cancel stay', async () => {
+    const b = builder();
+    b.turn('u-1', 'an earlier prompt');
+    b.end(['u-1']);
+    transcript([...b.events]);
+    await held();
+    mount(refusal, 'inline');
+    const edit = screen.getByRole('button', { name: 'Edit prompt' });
+    b.turn('u-2', SEVERAL);
+    transcript([...b.events]);
+    fireEvent.click(edit);
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Edit prompt' })).toBeNull());
+    await flush();
+    expect(answers()).toEqual([]);
+    expect(useComposerStore.getState().inlineEdits.get(APP)).toBeUndefined();
+    expect(screen.getByRole('button', { name: 'Retry with claude-sonnet-5' })).toBeTruthy();
   });
 
   it('with no human prompt in the transcript the answer is still delivered and says there is nothing to edit', async () => {
