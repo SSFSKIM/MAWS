@@ -158,11 +158,11 @@ describe('tab strip reorders, closes, reopens', () => {
 
   // E11 F2b (plan 2.5; owner decision 2): whatever the main tab shows, a click puts the session in its place; a pin, which
   // the tab shows as a pin saying what it does, keeps it.
-  it('a sidebar click replaces Settings too; a pinned tab shows its pin with its meaning and stays', async () => {
+  it('a sidebar click replaces a tab of no session too; a pinned tab shows its pin with its meaning and stays', async () => {
     const user = userEvent.setup();
     render(<Shell />);
-    act(() => useLayout.getState().openTab({ kind: 'settings', section: null }));
-    expect(tabNames()).toEqual(['Settings']);
+    act(() => useLayout.getState().openTab({ kind: 'diagnostics' }));
+    expect(tabNames()).toEqual(['Diagnostics']);
     await user.click(sidebarRow('Fix sidebar drag'));
     expect(tabNames()).toEqual(['Fix sidebar drag']);
     act(() => useLayout.getState().togglePinned('session:' + idOf('Fix sidebar drag')));
@@ -766,7 +766,7 @@ describe('the split’s float: the divider', () => {
     render(<Shell />);
     act(() => {
       useLayout.getState().openTab({ kind: 'diagnostics' });
-      useLayout.getState().openTab({ kind: 'settings', section: null }, { pane: 1 });
+      useLayout.getState().openTab({ kind: 'file', path: '/invented/notes.md', line: null, appSessionId: null, machine: TEST_MACHINE }, { pane: 1 });
     });
     resize(region(), { width: W, height: 800 });
     down(750);
@@ -1028,29 +1028,6 @@ describe('⌃Tab follows DOM focus', () => {
     act(() => screen.getByLabelText('terminal input').focus());
     act(() => runAction('tab.next'));
     expect(activeOf(0)).toBe(`session:${idOf('Charter + research')}`); // wraps from the last tab, once
-  });
-});
-
-describe('the settings tab (C11; W6: the Accounts tab retired into the usage popover)', () => {
-  it('renders its fallback until C11 registers, titled Settings, closable', async () => {
-    const user = userEvent.setup();
-    render(<Shell />);
-    act(() => useLayout.getState().openTab({ kind: 'diagnostics' }));
-    act(() => useLayout.getState().openTab({ kind: 'settings', section: null }));
-    expect(tabNames()).toEqual(['Diagnostics', 'Settings']);
-    expect(within(main()).getByText('Settings unavailable')).toBeTruthy();
-    await user.click(within(tab('Settings')).getByRole('button', { name: 'Close Settings', hidden: true }));
-    expect(tabNames()).toEqual(['Diagnostics']);
-  });
-
-  it('pass the settings section to the registered slot, following a second open', () => {
-    registerSlot('settingsTab', ({ section }) => <p>section {String(section)}</p>);
-    render(<Shell />);
-    act(() => useLayout.getState().openTab({ kind: 'settings', section: 'keyboard' }));
-    expect(within(main()).getByText('section keyboard')).toBeTruthy();
-    act(() => useLayout.getState().openTab({ kind: 'settings', section: 'notifications' }));
-    expect(within(main()).getByText('section notifications')).toBeTruthy();
-    expect(tabNames()).toEqual(['Settings']);
   });
 });
 

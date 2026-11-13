@@ -131,11 +131,15 @@ describe('a float with no session to draw', () => {
     expect(notices()).toEqual([]);
   });
 
-  it('a tab with no session coming to the front of a floating panel docks it', async () => {
+  it('a tab with no session coming to the front of a floating panel docks it; the Settings dialog over it does not', async () => {
     const session: TabRef = { id: tabId({ kind: 'session', appSessionId: A }), kind: 'session', appSessionId: A, pinned: false };
     useLayout.setState({ main: showing(ARTIFACT, session) });
     enter('floating, card open');
-    useLayout.getState().openTab({ kind: 'settings', section: null }); // ⌘, while the card is up
+    useLayout.getState().openSettings(); // UX wave U7b: ⌘, opens a dialog, and no tab comes to the front
+    await microtasks();
+    expect(state()).toBe('floating, card open');
+    useLayout.getState().closeSettings();
+    useLayout.getState().openTab({ kind: 'diagnostics' }); // Help › Diagnostics while the card is up
     await microtasks();
     expect(state()).toBe('docked');
     expect(useLayout.getState().regions.panel.width).toBe(444);
@@ -289,7 +293,7 @@ describe('the split’s card', () => {
   const B = at('app-b' as AppSessionId);
   const sessionTab = (id: AppSessionId): TabRef => ({ id: tabId({ kind: 'session', appSessionId: id }), kind: 'session', appSessionId: id, pinned: false });
   const DIAGNOSTICS: TabRef = { id: 'diagnostics', kind: 'diagnostics', pinned: false };
-  const SETTINGS: TabRef = { id: 'settings', kind: 'settings', section: null, pinned: false };
+  const NOTES: TabRef = { id: `file:${TEST_MACHINE}:/invented/notes.md`, kind: 'file', path: '/invented/notes.md', line: null, appSessionId: null, machine: TEST_MACHINE, pinned: false }; // a tab of no session
   const S = sessionTab(A);
   const splitOf = (left: TabRef = S, right: TabRef = DIAGNOSTICS): Strip => ({
     ...LAYOUT_DEFAULTS.main,
@@ -438,7 +442,7 @@ describe('the split’s card', () => {
     expect(set().floating).toBeUndefined();
     expect(set().focusedPane).toBe(0);
     expect(notices()).toEqual([]);
-    useLayout.setState({ main: splitOf(DIAGNOSTICS, SETTINGS) });
+    useLayout.setState({ main: splitOf(DIAGNOSTICS, NOTES) });
     runAction('main.expandArtifactPane');
     expect(set().floating).toBeUndefined();
     expect(notices()).toEqual([EXPAND_COPY.noSession]);
@@ -592,7 +596,7 @@ describe('the split’s card', () => {
 
     it('the fold rides its float through A’s own changes, and ends with the float', () => {
       expand();
-      useLayout.getState().openTab({ kind: 'settings', section: null }, { pane: 1 });
+      useLayout.getState().openTab({ kind: 'file', path: '/invented/notes.md', line: null, appSessionId: null, machine: TEST_MACHINE }, { pane: 1 });
       expect(set().floating, 'a tab opened beside the card').toEqual({ sessionTabId: S.id, foldedPanel: true });
       expect(panel()).toEqual({ ...OPEN, collapsed: true });
       expand();

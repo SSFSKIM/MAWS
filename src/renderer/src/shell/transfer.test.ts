@@ -128,7 +128,7 @@ describe('main → panel', () => {
     useLayout.setState({ main: LAYOUT_DEFAULTS.main });
     if (open) useLayout.getState().openSession(B, { how: 'tab' });
     useLayout.getState().openSession(A, { how: 'tab' }); // the chat in front is of another project
-    useLayout.getState().openTab({ kind: 'artifacts' });
+    useLayout.getState().openDestination({ kind: 'library' }); // UX wave U7b: the library is a page, which the artifact's tab leaves
     useLayout.getState().openTab({ kind: 'artifact', artifactId: DOC, machine: TEST_MACHINE });
     metadata(DOC, actual);
     const before = surfaces();
@@ -164,7 +164,7 @@ describe('main → panel', () => {
     useLayout.getState().openSession(A, { how: 'tab' });
     useLayout.getState().openSession(B, { how: 'tab' });
     useLayout.getState().activateTab(sessionTab(A).id); // most recently active, not the neighbour of Library
-    useLayout.getState().openTab({ kind: 'artifacts' });
+    useLayout.getState().openDestination({ kind: 'library' }); // UX wave U7b: the library is a page, which the artifact's tab leaves
     useLayout.getState().openTab({ kind: 'artifact', artifactId: DOC, machine: TEST_MACHINE });
     const dest = existing ? addArtifacts(A, DOC) : undefined;
     const held = mounted(mainScope());
@@ -173,7 +173,7 @@ describe('main → panel', () => {
     expect(transferRefusal({ to: 'panel', mainTabId: DOC_TAB.id })).toBeNull();
     expect(await move(() => moveArtifactToPanel(DOC_TAB.id))).toBe(true);
     expect(activeTab(useLayout.getState().main)?.id).toBe(sessionTab(A).id);
-    expect(allTabs(useLayout.getState().main).some((tab) => tab.kind === 'artifacts')).toBe(true);
+    expect(useLayout.getState().destination).toBeNull();
     expect(recordOf(artifactsTab(A))).toEqual({ kind: 'record', artifactId: DOC, machine: TEST_MACHINE });
     expect(panelOf(B)).toBeUndefined();
     expect(viewsOf(DOC)).toBe(1);
@@ -186,7 +186,7 @@ describe('main → panel', () => {
     sessionsIn({ [A]: otherProject, [B]: project });
     useLayout.setState({ main: LAYOUT_DEFAULTS.main });
     useLayout.getState().openSession(A, { how: 'tab' });
-    useLayout.getState().openTab({ kind: 'artifacts' });
+    useLayout.getState().openDestination({ kind: 'library' }); // UX wave U7b: the library is a page, which the artifact's tab leaves
     useLayout.getState().openTab({ kind: 'artifact', artifactId: DOC, machine: TEST_MACHINE });
     metadata(DOC, project);
     addArtifacts(null);

@@ -16,7 +16,7 @@ import { MCP_SERVERS, SECTIONS } from './copy';
 import { SEND_TO_COPY } from '../delivery/copy';
 import { waitingStatus } from '../test-support/host-status';
 import { useLayout } from '../stores/layout';
-import { LAYOUT_DEFAULTS, TabRefSchema } from '@shared/ipc/schema/layout';
+import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 // C12 start
 import type { AppSessionId } from '@shared/graph/ids';
 import { status } from '../../../../test/support/builders';
@@ -147,18 +147,6 @@ describe('settings tab writes one field per row', () => {
     expect(within(note).getAllByRole('button').map((x) => x.textContent)).toEqual(['Copy', 'More']);
     fireEvent.click(more(note));
     expect(note.textContent).toContain("MAWS never stores a token; ClaudeUsage holds the relay's accounts.");
-  });
-
-  // U11a M9 (ruled, point 12; UC-14): the stored tab keeps build F's ten sections; supervisor is reached in the page only
-  it('stores only the ten sections build F knows, each a section here; supervisor is never stored', () => {
-    const F_TEN = ['engine', 'gateway', 'keyboard', 'appearance', 'notifications', 'voice', 'browser', 'artifacts', 'sessions', 'org'];
-    const stored = (section: string) => TabRefSchema.safeParse({ id: 'settings', kind: 'settings', section, pinned: false }).success;
-    for (const section of F_TEN) {
-      expect(stored(section), section).toBe(true);
-      expect(SETTINGS_SECTIONS, section).toContain(section);
-    }
-    expect(SETTINGS_SECTIONS.filter((section) => !F_TEN.includes(section))).toEqual(['supervisor']);
-    expect(stored('supervisor')).toBe(false);
   });
 
   it('copy outside Settings names the MCP servers row where it now is', () => {

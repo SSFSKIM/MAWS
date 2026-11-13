@@ -8,7 +8,7 @@ import { runAction } from './actions-runtime';
 import { currentSet } from '../stores/layout-model';
 import { pageOpen, useLayout } from '../stores/layout';
 import { resetShellStores } from '../test-support/shell-stores';
-import { at } from '../../../../test/support/machine';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { TabStrip } from '../main/TabStrip';
 import { connectKeys } from './dispatcher';
 import { A, probeTool, resetPanelStores, TestHost } from '../test-support/panel';
@@ -160,7 +160,7 @@ describe('strip-order navigation', () => {
   it('steps the pane owning DOM focus instead of moving a different pane', () => {
     openTabs();
     useLayout.getState().splitWithActive();
-    useLayout.getState().openTab({ kind: 'settings', section: 'keyboard' });
+    useLayout.getState().openTab({ kind: 'file', path: '/invented/notes.md', line: null, appSessionId: null, machine: TEST_MACHINE }); // a tab of no session
     render(<Regions />);
     screen.getByLabelText('Pane 1 content').focus();
     // A store focus is not a substitute for the keyboard's actual owner.

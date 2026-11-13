@@ -22,6 +22,7 @@ import {
   PanelParamsSchema,
   PanelPinnedSchema,
   MAIN_CARD_PREFIX,
+  pageAtStart,
   PanelSessionStateSchema,
   StoredDestinationSchema,
   storedMain,
@@ -714,13 +715,14 @@ export function createLayoutStore() {
         const panelParams = Object.fromEntries(Object.entries(storedParams.params).filter(([id]) => live.has(id)));
         const firstReadPending = !complete && !held.has('panelTools.groups');
         // UX wave U7b ("At hydration"): the page to open is the first of these that applies. 1: what the person opened or
-        // closed before the read; 2: none after an act of theirs that showed a tab; 4: the stored page, when the stored
-        // tabs have the stored form's shape (`canonical`, a test of shape and not of who wrote them); 5: otherwise none.
-        // (Rule 3, a retired tab in front, comes with the retirement of the four tab kinds.)
-        // Rule 4 asks it of the stored value: a `main.tabs` that is absent or does not parse is not of that shape, though
-        // the default put in its place is.
+        // closed before the read; 2: none after an act of theirs that showed a tab; then `pageAtStart`, over the stored
+        // value as it was read, before its retired tabs were dropped: 3, a retired tab in front (a Customize, Projects or
+        // Artifacts tab opens its page, a Settings tab none); 4, the stored page, when the stored tabs have the stored
+        // form's shape (`canonical`, a test of shape and not of who wrote them); 5, otherwise none.
+        // Rules 3 and 4 ask it of the stored value: a `main.tabs` that is absent or does not parse is not of that shape,
+        // though the default put in its place is, and has no tab in front.
         const shaped = canonical && readAs.has('main.tabs');
-        const destination = pageEarly ? get().destination : shownEarly ? null : shaped ? (storedPage?.destination ?? null) : null;
+        const destination = pageEarly ? get().destination : shownEarly ? null : pageAtStart({ rawMain: readAs.get('main.tabs'), canonical: shaped, stored: storedPage?.destination ?? null });
         set({ regions, main: hydratedMain, ...hydratedPanels, panelParams, panelWidths, cardsOpen, firstReadPending, destination, hydrated: true });
         // A first launch writes the defaults of the keys it lacks, so layout.json always holds the renderer's three
         // fixed keys (acceptance item 6 lists them). Tabs replayed over the saved ones differ from what layout.json holds,

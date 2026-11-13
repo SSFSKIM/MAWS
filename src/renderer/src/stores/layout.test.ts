@@ -237,12 +237,13 @@ describe('layout store actions', () => {
   it('keeps the split card’s size per open main tab, and drops a closed tab’s', () => {
     const store = createLayoutStore();
     store.getState().openTab({ kind: 'diagnostics' });
-    store.getState().openTab({ kind: 'settings', section: null });
+    store.getState().openTab({ kind: 'file', path: '/invented/notes.md', line: null, appSessionId: null, machine: M });
+    const notes = `file:${M}:/invented/notes.md`;
     store.getState().setFloatingCardSize('main:diagnostics', { w: 400, h: 300 });
-    store.getState().setFloatingCardSize('main:settings', { w: 440, h: 320 });
+    store.getState().setFloatingCardSize(`main:${notes}`, { w: 440, h: 320 });
     store.getState().setFloatingCardSize('main:gone', { w: 500, h: 400 });
-    expect(Object.keys(store.getState().regions.floatingCard)).toEqual(['main:diagnostics', 'main:settings', 'main:gone']);
-    store.getState().closeTab('settings');
+    expect(Object.keys(store.getState().regions.floatingCard)).toEqual(['main:diagnostics', `main:${notes}`, 'main:gone']);
+    store.getState().closeTab(notes);
     store.getState().setFloatingCardSize('summary', { w: 420, h: 380 });
     expect(Object.keys(store.getState().regions.floatingCard)).toEqual(['main:diagnostics', 'summary']);
   });
@@ -401,10 +402,10 @@ describe('replacing a tab of any kind', () => {
     return { discard, announce, off };
   }
 
-  it('a clean file, Settings or Diagnostics gives its place, remembered for ⌘⇧T, and nothing is said', () => {
+  it('a clean file or Diagnostics gives its place, remembered for ⌘⇧T, and nothing is said', () => {
     const { announce, off } = guarded({});
     try {
-      for (const target of [FILE, { kind: 'settings', section: null } as const, { kind: 'diagnostics' } as const]) {
+      for (const target of [FILE, { kind: 'diagnostics' } as const]) {
         const store = createLayoutStore();
         store.getState().openSession(A);
         store.getState().openTab(target);

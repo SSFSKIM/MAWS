@@ -15,13 +15,17 @@ import { editorHostOf, registerEditorHost, resetEditorHosts, useEditorHost, useE
 import { useLayout } from '../stores/layout';
 import { allTabs } from '../stores/layout-model';
 import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
+import { TEST_MACHINE } from '../../../../test/support/machine';
 
 vi.mock('../app/Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
 
 const offs: (() => void)[] = [];
 const main = () => document.querySelector<HTMLElement>('[data-region="main"]')!;
 const mainHeader = () => main().querySelector<HTMLElement>('[data-editor-header]');
-const settingsOpen = () => allTabs(useLayout.getState().main).some((t) => t.kind === 'settings');
+// UX wave U7b: a file tab stands for a main tab whose body a later child registers (the Settings tab retired).
+const PREFS = { kind: 'file', path: '/invented/prefs.md', line: null, appSessionId: null, machine: TEST_MACHINE } as const;
+const PREFS_ID = `file:${TEST_MACHINE}:/invented/prefs.md`;
+const prefsOpen = () => allTabs(useLayout.getState().main).some((t) => t.id === PREFS_ID);
 const nine = scenarioFile('nine-sessions');
 const idOf = (title: string) => pageScenario(nine).sessions.find((r) => r.title.text === title)!.appId; // P5 O6 M2: the page's id
 
@@ -45,8 +49,8 @@ describe('X32 in a main tab', () => {
     let allow = false;
     let registers = true;
     const kindGuard = vi.fn(async () => true);
-    offs.push(registerCloseGuard('settings', kindGuard));
-    registerSlot('settingsTab', function SettingsEditor() {
+    offs.push(registerCloseGuard('file', kindGuard));
+    registerSlot('fileTab', function FileEditor() {
       scope = useEditorHostScope();
       return registers ? <Registered /> : <p>plain settings</p>;
     });
@@ -56,8 +60,8 @@ describe('X32 in a main tab', () => {
     }
 
     render(<Shell />);
-    act(() => useLayout.getState().openTab({ kind: 'settings', section: null }));
-    expect(scope).toEqual({ surface: 'main', tabId: 'settings' });
+    act(() => useLayout.getState().openTab(PREFS));
+    expect(scope).toEqual({ surface: 'main', tabId: PREFS_ID });
     const row = mainHeader()!;
     expect(row.querySelector('[data-header-title]')!.textContent).toBe('Preferences');
     expect(row.textContent).toContain('All changes saved');
@@ -67,16 +71,16 @@ describe('X32 in a main tab', () => {
     expect(panel.contains(row)).toBe(true);
     expect(row.compareDocumentPosition(screen.getByText('settings body')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
-    await act(() => requestCloseTab('settings'));
-    expect(settingsOpen(), 'the registration’s guard keeps the tab').toBe(true);
+    await act(() => requestCloseTab(PREFS_ID));
+    expect(prefsOpen(), 'the registration’s guard keeps the tab').toBe(true);
     expect(kindGuard).not.toHaveBeenCalled();
     allow = true;
-    await act(() => requestCloseTab('settings'));
+    await act(() => requestCloseTab(PREFS_ID));
     expect(kindGuard).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(settingsOpen()).toBe(false));
+    await waitFor(() => expect(prefsOpen()).toBe(false));
 
     registers = false;
-    act(() => useLayout.getState().openTab({ kind: 'settings', section: null }));
+    act(() => useLayout.getState().openTab(PREFS));
     expect(screen.getByText('plain settings')).toBeTruthy();
     expect(mainHeader(), 'an unregistered main tab draws no header').toBeNull();
   });
@@ -85,24 +89,24 @@ describe('X32 in a main tab', () => {
     const user = userEvent.setup();
     let allow = false;
     const kindGuard = vi.fn(async () => true);
-    offs.push(registerCloseGuard('settings', kindGuard));
-    registerSlot('settingsTab', function SettingsEditor() {
+    offs.push(registerCloseGuard('file', kindGuard));
+    registerSlot('fileTab', function FileEditor() {
       useEditorHost(useEditorHostScope(), { title: 'Preferences', closeGuard: async () => allow });
       return <p>settings body</p>;
     });
 
     render(<Shell />);
-    act(() => useLayout.getState().openTab({ kind: 'settings', section: null }));
+    act(() => useLayout.getState().openTab(PREFS));
     act(() => useLayout.getState().openSession(idOf('Charter + research'), { how: 'tab' }));
-    expect(screen.queryByText('settings body'), 'Settings is inactive: its body is unmounted').toBeNull();
-    within(document.querySelector<HTMLElement>('[data-chrome-tabs]')!).getByRole('tab', { name: /Settings/ }).focus();
+    expect(screen.queryByText('settings body'), 'the tab is inactive: its body is unmounted').toBeNull();
+    within(document.querySelector<HTMLElement>('[data-chrome-tabs]')!).getByRole('tab', { name: /prefs\.md/ }).focus();
     await user.keyboard('{Delete}');
-    expect(settingsOpen(), 'the inactive tab’s guard vetoes').toBe(true);
+    expect(prefsOpen(), 'the inactive tab’s guard vetoes').toBe(true);
     expect(kindGuard).not.toHaveBeenCalled();
     allow = true;
     await user.keyboard('{Delete}');
-    await waitFor(() => expect(settingsOpen()).toBe(false));
-    expect(editorHostOf({ surface: 'main', tabId: 'settings' }), 'closed, its registration goes').toBeNull();
+    await waitFor(() => expect(prefsOpen()).toBe(false));
+    expect(editorHostOf({ surface: 'main', tabId: PREFS_ID }), 'closed, its registration goes').toBeNull();
   });
 
   it('a tab closing or being replaced clears its registration, a direct registerEditorHost included', async () => {

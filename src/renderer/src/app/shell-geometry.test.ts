@@ -3,7 +3,6 @@ import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { cardColumnShown, shellGeometry } from './shell-geometry';
 import { shellGeometryOf } from './shell-view';
 import { useLayout } from '../stores/layout';
-import { openTab } from '../stores/layout-model';
 import { A, mainShowing, ref, resetPanelStores } from '../test-support/panel';
 
 const regions = { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, width: 240 } };
@@ -38,18 +37,17 @@ describe('the optional surface geometry', () => {
       expect(shellGeometryOf({ ...state, panelBySession: new Map([[A, { tabs: [ref(id)], activeTabId: id }]]) }, 1440).panel).toBe(720);
     }
   });
-  it('keeps Projects and Customize on the same optional narrow/wide surface rules as other tabs', () => {
-    for (const target of [{ kind: 'projects' }, { kind: 'customize', section: 'plugins' }] as const) {
+  // UX wave U7b (M5, decision 2): Projects, Customize and the library are pages, which decide no size: the geometry under
+  // a page is the geometry of the tabs behind it.
+  it('a page decides no size: the geometry is the one of the tabs behind it', () => {
+    for (const page of [{ kind: 'projects' }, { kind: 'customize', view: 'mine', show: 'plugins' }, { kind: 'library' }] as const) {
       resetPanelStores();
-      const main = openTab(mainShowing(A), target);
-      useLayout.setState({ main });
+      useLayout.setState({ main: mainShowing(A) });
       const state = useLayout.getState();
-      expect(shellGeometryOf(state, 1280)).toMatchObject({ sidebar: 240, panel: 0 });
-      for (const [tool, width] of [['background', 360], ['browser', 624]] as const) {
+      for (const tool of ['background', 'browser']) {
         const id = `${tool}:aaaaaaaa`;
         const withSurface = { ...state, panelBySession: new Map([[A, { tabs: [ref(id)], activeTabId: id }]]) };
-        expect(shellGeometryOf(withSurface, 1280).panel).toBe(width);
-        expect(shellGeometryOf(withSurface, 900)).toMatchObject({ sidebar: 0, sidebarAside: true });
+        for (const width of [1280, 900]) expect(shellGeometryOf({ ...withSurface, destination: page }, width)).toEqual(shellGeometryOf(withSurface, width));
       }
     }
   });

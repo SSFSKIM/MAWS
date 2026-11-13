@@ -4,17 +4,16 @@
 // runs the hand-off. (W6: the Accounts tab retired; its action, Usage, opens the top bar's usage popover and is
 // registered by `../usage`.)
 import type { ClaudeUsageOpenIntent, ClaudeUsageOpenResult, MawsBridge } from '@shared/ipc/schema';
-import type { TabTarget } from '@shared/ipc/schema/layout';
 import { ACCOUNTS, CLAUDE_USAGE_README_URL } from '../accounts/copy';
 import { ipc } from '../ipc/client';
 import { registerAction } from '../keymap/actions-runtime';
 import { useLayout } from '../stores/layout';
 import { toast } from '../stores/notices';
+import type { SettingsSection } from '../settings-tab/SettingsView'; // UX wave U7b: a type only, so no view loads with the action
 
-type SettingsSection = Extract<TabTarget, { kind: 'settings' }>['section'];
 // settings.open's numeric arg names a section by its place in this list, the Settings index's order when the numbers were
 // given (U11a M9: the index's order is SECTION_TABLE's now, and this list stays as callers know it).
-export const SETTINGS_SECTIONS = ['engine', 'gateway', 'keyboard', 'appearance', 'notifications'] as const satisfies readonly NonNullable<SettingsSection>[];
+export const SETTINGS_SECTIONS = ['engine', 'gateway', 'keyboard', 'appearance', 'notifications'] as const satisfies readonly SettingsSection[];
 
 // The instruction names a control in ClaudeUsage's panel, so it stays long enough to read and act on (M4 decisions).
 export const HAND_OFF_TOAST_MS = 8000;

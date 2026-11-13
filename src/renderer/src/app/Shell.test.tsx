@@ -638,11 +638,11 @@ describe('the Artifacts entry', () => {
     });
   });
 
-  it('draws the library a later child registers into the slot', () => {
+  it('draws the library a later child registers into the slot, on its page', () => {
     registerSlot('artifactsLibrary', () => <section aria-label="Library">library</section>);
-    useLayout.setState({ main: withActive({ id: 'artifacts', kind: 'artifacts', pinned: false }) });
+    useLayout.setState({ destination: { kind: 'library' } });
     renderShell();
-    expect(within(region('main')).getByRole('region', { name: 'Library' })).toBeTruthy();
+    expect(within(document.getElementById('region-page')!).getByRole('region', { name: 'Library' })).toBeTruthy();
     expect(screen.queryByText('Artifacts unavailable')).toBeNull();
   });
 

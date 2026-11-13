@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import type { ProjectId } from '@shared/graph/ids';
-import type { TabRef } from '@shared/ipc/schema/layout';
 import { focusedProject } from '../keymap/actions-runtime';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
@@ -8,7 +7,8 @@ import { machineOf } from '@shared/machine/address';
 import { ipc } from '../ipc/client';
 import { SHOW_OF_SECTION } from '../destination/customize';
 
-export type CustomizeSection = Extract<TabRef, { kind: 'customize' }>['section'];
+// Customize's sections (UX wave U7b: no longer a tab's; the page stores its `show`, `../destination/customize`).
+export type CustomizeSection = 'plugins' | 'skills' | 'mcp';
 // Undefined is a restored tab's focused project; null is an explicit choice of user scope. `directory` is a page no
 // project has as its directory (a session's worktree, a folder no project owns), shown as itself (Decision Log 10).
 export type CustomizePage = { projectId: ProjectId | null | undefined; directory?: string };

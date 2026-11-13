@@ -75,14 +75,6 @@ export function toolbarTitle(
       return { title: `Diff · ${tab.ref}`, branch: null };
     case 'diagnostics':
       return { title: 'Diagnostics', branch: null };
-    case 'settings':
-      return { title: 'Settings', branch: null };
-    case 'projects':
-      return { title: 'Projects', branch: null };
-    case 'customize':
-      return { title: 'Customize', branch: null };
-    case 'artifacts': // P3-G
-      return { title: 'Artifacts', branch: null };
     case 'artifact': // P3-L
       return { title: artifactTitle ?? LIBRARY_COPY.fallbackTitle, branch: null };
     case 'browser': // E4a
