@@ -9,7 +9,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import { SessionRecordSchema } from '@shared/graph/session';
 import { sessionIdFor, summary, tempDir } from '../../../test/support/index-fixture';
 import { Index } from './index';
-import { promptTitle } from './sessions';
+import { cutPrompt, promptTitle } from './sessions';
 
 const LAUNCH = {
   directory: '/nowhere/launch',
@@ -60,7 +60,7 @@ describe('session records in the index', () => {
       index.sessions.upsertFromSummary(s);
       expect(titleOf(record.appId)).toEqual({ text: 'Fix the drag handle', source: 'none' });
       index.sessions.upsertFromSummary({ ...s, firstPrompt: 'Fix the drag handle, as written to disk', size: 300 });
-      expect(titleOf(record.appId)).toEqual({ text: 'Fix the drag handle, as written to disk', source: 'none' });
+      expect(titleOf(record.appId)).toEqual({ text: 'Fix the drag handle, as written', source: 'none' }); // S-11: six words
       index.sessions.upsertFromSummary({ ...s, firstPrompt: 'Fix the drag handle, as written to disk', aiTitle: 'Drag handle fix', size: 400 });
       expect(titleOf(record.appId)).toEqual({ text: 'Drag handle fix', source: 'generated' });
     });
@@ -85,6 +85,53 @@ describe('session records in the index', () => {
       expect(promptTitle(`Review this\n\n<pasted_content id="ab12">\nline one\nline two, cut at the c`)).toBe('Review this [Pasted text #1]');
       const { record } = index.sessions.createForLaunch({ ...LAUNCH, firstPrompt: 'Review this [Pasted text #1 +3 lines]' });
       expect(record.title.text).toBe('Review this [Pasted text #1 +3 lines]');
+    });
+  });
+
+  // UX wave U7, S-11 (Interfaces §A): a session with no title is named by six words of its first prompt, cut as Claude
+  // Desktop cuts it; the stored prompt stays whole, so the conversation search still reads all of it.
+  describe('a prompt names its session by six words', () => {
+    const thirty = Array.from({ length: 30 }, (_, n) => `word${n + 1}`).join(' ');
+
+    it('keeps the first six words, at most 60 code points, never splitting a surrogate pair', () => {
+      expect(cutPrompt(thirty)).toBe('word1 word2 word3 word4 word5 word6');
+      const long = 'a'.repeat(80);
+      expect(cutPrompt(long)).toBe(`${'a'.repeat(59)}…`);
+      expect(Array.from(cutPrompt(long))).toHaveLength(60);
+      const paired = `${'b'.repeat(58)}😀😀 next`; // the second emoji is the 60th code point, past the 59 kept
+      expect(cutPrompt(paired)).toBe(`${'b'.repeat(58)}😀…`);
+      expect(cutPrompt(`${'c'.repeat(59)}😀`)).toBe(`${'c'.repeat(59)}😀`); // 60 code points (61 UTF-16 units): whole
+    });
+
+    it('takes the file mentions at its start off, in both forms, and is named by their files when they are all it has', () => {
+      expect(cutPrompt('@"my notes/plan.md" @src/app.ts, tidy the imports in both files please')).toBe('tidy the imports in both files');
+      expect(cutPrompt('@"my notes/plan.md" @src/app.ts')).toBe('plan.md, app.ts');
+      expect(cutPrompt('@src/ walk it')).toBe('walk it');
+      expect(cutPrompt('@src/')).toBe('src');
+      expect(cutPrompt('Look at @src/app.ts first')).toBe('Look at @src/app.ts first'); // a mention inside the prompt is a word
+      expect(cutPrompt('@agent-reviewer look at this')).toBe('@agent-reviewer look at this');
+      expect(cutPrompt('@src/app.ts @agent-reviewer look at this')).toBe('@agent-reviewer look at this');
+    });
+
+    it('counts a pasted block’s placeholder as one word', () => {
+      expect(cutPrompt('Review this [Pasted text #1 +3 lines] and the two files beside it now')).toBe('Review this [Pasted text #1 +3 lines] and the two');
+      expect(cutPrompt('[Image #1] [PDF #2] [Pasted text #3] one two three four')).toBe('[Image #1] [PDF #2] [Pasted text #3] one two three');
+    });
+
+    it('cuts only a prompt’s title: a rename, the engine’s title and a generated title are kept whole', () => {
+      const s = summary({ customTitle: null, aiTitle: thirty, firstPrompt: thirty });
+      const { record } = index.sessions.upsertFromSummary(s);
+      expect(titleOf(record.appId)).toEqual({ text: thirty, source: 'generated' });
+      index.sessions.upsertFromSummary({ ...s, customTitle: thirty, size: 300 });
+      expect(titleOf(record.appId)).toEqual({ text: thirty, source: 'user' });
+      index.sessions.update(record.appId, { title: { text: `${thirty} again`, source: 'user' } });
+      expect(titleOf(record.appId)).toEqual({ text: `${thirty} again`, source: 'user' });
+    });
+
+    it('names a session by six words while the conversation search still finds it by its thirtieth', () => {
+      const { record } = index.sessions.upsertFromSummary(summary({ customTitle: null, aiTitle: null, firstPrompt: thirty }));
+      expect(titleOf(record.appId)).toEqual({ text: 'word1 word2 word3 word4 word5 word6', source: 'none' });
+      expect(index.sessionSearch.search('word30').map((hit) => hit.appSessionId)).toEqual([record.appId]);
     });
   });
 

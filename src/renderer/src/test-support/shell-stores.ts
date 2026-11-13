@@ -71,7 +71,7 @@ export function resetShellStores(): void {
   useShellView.setState({ sidebarOverlay: false, cardsOverlay: false });
   projectReveal.setState({ pending: null });
   fillStores({ projects: [], sessions: [], digests: [], engine: [], attention: [], timeline: [] }, { loaded: false });
-  useSessions.setState({ indexing: null, listed: new Map(), listedMachines: new Set(), members: new Map(), member: null, turnsSeen: new Map() }); // P5 O8 M2, M5: no other machine's rows; P5 O7 M10: no turns seen
+  useSessions.setState({ indexing: null, reconnecting: false, listed: new Map(), listedMachines: new Set(), members: new Map(), member: null, turnsSeen: new Map() }); // P5 O8 M2, M5: no other machine's rows; P5 O7 M10: no turns seen; UX wave U7 (#407): no refused read
   useSessions.getState().applyRegistry(EMPTY_REGISTRY, TEST_MACHINE); // the project registry's M11: signed out, no registry record
   // P5 O6 M4: the store's per-machine reconciliation (revisions, tombstones) is no state `setState` reaches, and a
   // suite's earlier writes would refuse a later one's lower revisions.

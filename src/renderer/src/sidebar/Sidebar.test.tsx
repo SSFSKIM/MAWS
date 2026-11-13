@@ -1109,6 +1109,7 @@ describe('sidebar states', () => {
     const { rerender } = render(<Sidebar />);
     expect(screen.getByText('No projects yet')).toBeTruthy();
     expect(screen.queryByText('No projects match')).toBeNull();
+    expect(screen.queryByText('reconnecting')).toBeNull(); // #407: an ordinary empty workspace
     expect((screen.getByRole('button', { name: 'Add project' }) as HTMLButtonElement).disabled).toBe(false);
     const create = screen.getByRole('button', { name: 'New chat' }) as HTMLButtonElement;
     expect(create.disabled).toBe(true);
@@ -1118,6 +1119,27 @@ describe('sidebar states', () => {
     await userEvent.setup().click(create);
     expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: at('app-new-2') });
     expect(useSessions.getState().unstarted.get(at('app-new-2' as AppSessionId))?.projectId).toBeNull();
+  });
+
+  // UX wave U7, #407: while a read of this Mac's sessions is refused (its daemon restarting), the sidebar draws what events
+  // delivered and says so beside the Projects heading, instead of reading as an empty workspace.
+  it('says “reconnecting” beside the Projects heading while this Mac’s read is refused, drawing the rows it has and no “No projects yet”', () => {
+    fillStores(scenarioFile('empty'));
+    act(() => useSessions.getState().setReconnecting(true));
+    expand('other');
+    render(<Sidebar />);
+    expect(within(screen.getByRole('status')).getByText('reconnecting')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Projects' }).textContent).toBe('Projects');
+    expect(screen.queryByText('No projects yet')).toBeNull();
+    act(() => {
+      for (const [n, text] of ['Draft one', 'Draft two'].entries())
+        useSessions.getState().applyChanged({ record: recordOnPage(record(`delivered-${n}`, { title: { text, source: 'user' } })), cause: 'discovered', revision: n + 1 }, TEST_MACHINE);
+    });
+    expect(sessionRows(row('This Mac'))).toEqual(expect.arrayContaining(['Draft one', 'Draft two']));
+    expect(screen.getByText('reconnecting')).toBeTruthy();
+    act(() => useSessions.getState().setReconnecting(false));
+    expect(screen.queryByText('reconnecting')).toBeNull();
+    expect(sessionRows(row('This Mac'))).toEqual(expect.arrayContaining(['Draft one', 'Draft two']));
   });
 });
 

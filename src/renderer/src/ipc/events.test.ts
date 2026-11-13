@@ -482,6 +482,70 @@ describe('shell event subscription', () => {
     });
   });
 
+  // UX wave U7, #407 (Interfaces §B): from a refused read of this Mac's sessions until all three record reads apply, the
+  // sessions store says "reconnecting"; nothing else writes it.
+  describe('“reconnecting” while a read of this Mac’s sessions is refused', () => {
+    const restarting = (fake: FakeClient, name: 'session.list' | 'session.projects.list' | 'session.digests' | 'attention.list') =>
+      fake.fail(name, `machine is restarting; cannot answer ${name}`, 'host_unavailable');
+    const watch = (stores: ReturnType<typeof setup>['stores']) => {
+      const seen: boolean[] = [];
+      stores.sessions.subscribe((s) => {
+        if (s.reconnecting !== (seen.at(-1) ?? false)) seen.push(s.reconnecting);
+      });
+      return seen;
+    };
+
+    it('is true from the first refusal, through a refused retry, and false once a snapshot applied', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const { fake, stores } = setup();
+      expect(stores.sessions.getState().reconnecting).toBe(false);
+      const seen = watch(stores);
+      await restarting(fake, 'session.list');
+      expect(stores.sessions.getState().reconnecting).toBe(true);
+      await restarting(fake, 'session.projects.list');
+      await restarting(fake, 'session.digests');
+      await restarting(fake, 'attention.list');
+      await vi.waitFor(() => expect(stores.sessions.getState().loaded).toBe(true)); // the body draws meanwhile
+      fake.event('host.status', hostStatus());
+      await restarting(fake, 'session.list'); // the retry, refused again
+      await fake.reply('session.projects.list', { projects: [project('p1', 0)], revision: 1 });
+      await fake.reply('session.digests', { digests: [digest('a')] });
+      await fake.reply('attention.list', []);
+      expect(stores.sessions.getState().reconnecting).toBe(true);
+      fake.event('host.status', hostStatus());
+      await answerSnapshots(fake);
+      await vi.waitFor(() => expect(stores.sessions.getState().reconnecting).toBe(false));
+      expect(seen).toEqual([true, false]);
+      warn.mockRestore();
+    });
+
+    it('is never true on a start whose first reads answer, nor for another machine’s refused reads', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const { fake, stores } = setup(0, { machines: [LOCAL_ENTRY, other('up', 1)] });
+      const seen = watch(stores);
+      await answerSnapshots(fake);
+      await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
+      expect(fake.machines('session.list')).toEqual([TEST_MACHINE, OTHER_MACHINE]);
+      await restarting(fake, 'session.list');
+      await restarting(fake, 'session.projects.list');
+      await restarting(fake, 'session.digests');
+      await restarting(fake, 'attention.list');
+      expect(seen).toEqual([]);
+      warn.mockRestore();
+    });
+
+    it('takes nothing from a refusal that arrives after the connection went', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const { fake, stores, disconnect } = setup();
+      disconnect();
+      await restarting(fake, 'session.list');
+      await restarting(fake, 'session.projects.list');
+      await restarting(fake, 'session.digests');
+      expect(stores.sessions.getState().reconnecting).toBe(false);
+      warn.mockRestore();
+    });
+  });
+
   it('still loads when a snapshot command has no answerer, warning about it', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { fake, stores } = setup();
