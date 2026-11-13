@@ -82,7 +82,6 @@ const HOST_WORD = new RegExp( // :1359 `$r`
   'i',
 );
 const PERCENT_ESCAPE = /%[0-9A-F]{2}/i; // :1369 `ei`
-const USER_AND_PASSWORD = /(?:^|[\s/])[^\s/?#@:]+:[^\s@]+@[^\s@]/; // :1370 `ti`
 const SECRET_WORD = /^(?:tokens?|passwords?|passwd|secrets?|apikeys?|credentials?)$/i; // :1371 `ni`
 const KEY_FILE_EXTENSION = /^(?:pem|ppk|p12|pfx|jks)$/i; // :1372 `ri`
 const KEY_FILE = /^(?:id_(?:rsa|dsa|ecdsa|ed25519)|\.(?:env|netrc|pgpass|npmrc|pypirc|htpasswd))(?:[._-].*)?$/i; // :1373 `ii`
@@ -155,6 +154,7 @@ const BLANK_LOOKING = '\\u{2800}\\u{fffc}\\u{1d159}\\u{13441}\\u{13442}\\u{16910
 
 // A text with its unpaired surrogates and its control, format and separator characters removed, but for the two joiners
 // (shared-67-DjQzSlRg.js:18430 `wj`, imported as `Ge`; with `dT` :11420, `lT` :11393, `cT` :11379, `bj` and `xj` :18426-18427)
+// eslint-disable-next-line no-misleading-character-class -- Desktop's class as written: the joiners are each a code point of their own here
 const CONTROL_OR_FORMAT = once(() => new RegExp(`(?![\\u200c\\u200d])[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}\\u2060-\\u2069\\u115f\\u1160\\u3164\\uffa0${BLANK_LOOKING}\\u{e0000}-\\u{e007f}]`, 'gu'));
 function withoutLoneSurrogates(text: string): string {
   let out = '';
@@ -179,6 +179,7 @@ const STACKED_MARKS = /([0-9#*]\ufe0f\u20e3(?![\p{Mn}\p{Me}]))|[\p{Bidi_Control}
 const INVISIBLE = /(?!\ufe0f\u20e3)[\p{Default_Ignorable_Code_Point}\p{Cf}]/gu;
 const MAX_INVISIBLE = 16;
 const BLANK = `(?:[^\\P{Zs} ]|[${BLANK_LOOKING}])`;
+// eslint-disable-next-line no-misleading-character-class -- Desktop's class as written: marks and invisibles are each a code point of their own here
 const BLANK_RUN = once(() => RegExp(`${BLANK}(?:[\\t \\p{Default_Ignorable_Code_Point}\\p{Cf}\\p{Mn}\\p{Me}]*${BLANK}){2,}[\\p{Mn}\\p{Me}]*`, 'gu'));
 const VISIBLE = /[^\s\u2800\ufffc\u{1D159}\u{13441}\u{13442}\u{16910}\p{Default_Ignorable_Code_Point}\p{Cf}\p{Mn}\p{Me}]/u;
 const LINE = /[^\n\r\u0085\u2028\u2029]+/g;
