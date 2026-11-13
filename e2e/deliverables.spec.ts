@@ -35,6 +35,7 @@ import type { ArtifactConsole } from '@shared/ipc/schema/artifacts';
 import type { MawsArtifactCapture, MawsArtifactCapturedResult } from '@shared/ipc/schema/maws';
 import type { DeliverableRecord } from '../src/shared/maws/deliverable';
 import { commentsMessage, readAnchoredMessage } from '../src/shared/anchor/message'; // UX wave U5a
+import { linkedReadOf } from '../src/shared/maws/linked-read'; // UX wave U5a
 import { TOOL_ERRORS } from '../src/shared/maws/tools';
 import { invoke, launchReady, turnsJournal, value } from './support/c7-replay';
 import { FIRST_CREATED_REVISION } from './support/design-systems'; // Decision Log 67: fresh artifacts follow the seeded defaults.
@@ -1171,7 +1172,12 @@ test('a pass on an HTML page: Escape keeps the text in the card, a second pick l
     const written = () => s.journal(id).filter((r) => r.direction === 'out' && (r.frame as { type?: string }).type === 'user');
     await expect.poll(() => written().length, { timeout: 20_000 }).toBe(1);
     const content = (written()[0]!.frame as { message: { content: { type: string; text?: string }[] } }).message.content;
-    expect(content.map((block) => block.type), 'one text block: the page gives no screenshots').toEqual(['text']);
+    // the pass's one text block (the page gives no screenshots), then the page's own read: the engine host attaches the
+    // read of every artifact a prompt links (P4-A3, src/engine-host/linked-reads.ts), and each comment's anchor links this
+    // page by its `maws-artifact://` url; two comments on one page link it once, so one read
+    expect(content.map((block) => block.type), 'the pass’s text, then one linked read').toEqual(['text', 'text']);
+    expect(linkedReadOf(content[0]!.text!), 'the first block is the comments, not a read').toBeNull();
+    expect(linkedReadOf(content[1]!.text!)?.artifactId, 'the second block: the page’s read (P4-A3)').toBe(record.id);
     const sent = content[0]!.text!;
     expect(sent.startsWith('2 comments, in the order made:\n\n'), 'the framing line first').toBe(true);
     const read = readAnchoredMessage(sent);
