@@ -48,6 +48,7 @@ export interface FakeBridge {
   raise(raised: FakeRaised): void;
   settle(request: string, winner: 'terminal' | 'web' | 'other', outcome?: string, by?: string): void;
   setReady(ready: boolean): void;
+  holdStreams(hold: boolean): void; // while held, a new GET /events waits with no line (its snapshot unsent) though the bridge reads ready
   setStatus(patch: Partial<Pick<FakeBridgeOptions, 'launch' | 'capabilities' | 'lane'>>): void;
   setMode(mode: FakeMode | null): void; // the mode the session last reported; null: none yet (a new process)
   heartbeat(): void; // one heartbeat as the mod posts it every 5 s: the main loop's turn, and the mode while one is reported
@@ -114,6 +115,8 @@ export async function startFakeBridge(options: FakeBridgeOptions): Promise<FakeB
   let capabilities = options.capabilities === undefined ? FULL_CAPABILITIES : options.capabilities;
   let lane = options.lane;
   let ready = options.ready ?? true;
+  let held = false;
+  const heldStreams = new Set<() => void>();
   const readyWaitMs = options.readyWaitMs ?? 5000;
   const readyWaiters = new Set<() => void>();
 
@@ -316,6 +319,11 @@ export async function startFakeBridge(options: FakeBridgeOptions): Promise<FakeB
       subscribers.add(sub);
       req.on('close', () => subscribers.delete(sub));
     };
+    if (ready && held) {
+      heldStreams.add(start);
+      req.on('close', () => heldStreams.delete(start));
+      return;
+    }
     if (ready) return start();
     const timer = setTimeout(() => {
       readyWaiters.delete(go);
@@ -390,6 +398,12 @@ export async function startFakeBridge(options: FakeBridgeOptions): Promise<FakeB
       ready = next;
       if (ready) for (const go of [...readyWaiters]) go();
       readyWaiters.clear();
+    },
+    holdStreams(hold) {
+      held = hold;
+      if (held) return;
+      for (const go of [...heldStreams]) go();
+      heldStreams.clear();
     },
     setStatus(patch) {
       if (patch.launch !== undefined) launch = patch.launch;
