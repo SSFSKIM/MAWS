@@ -93,9 +93,9 @@ describe('shortCommand: what it refuses whole (null)', () => {
   });
 
   it('a control, bidirectional or invisible character, or whitespace other than a space', () => {
-    expect(shortCommand('git log‮')).toBeNull();
-    expect(shortCommand('git​log')).toBeNull();
-    expect(shortCommand('git log')).toBeNull();
+    expect(shortCommand('git log\u202e')).toBeNull();
+    expect(shortCommand('git\u200blog')).toBeNull();
+    expect(shortCommand('git\u00a0log')).toBeNull();
     expect(shortCommand('git log \u0007')).toBeNull();
   });
 });

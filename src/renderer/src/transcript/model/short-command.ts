@@ -147,7 +147,8 @@ const withTokensHidden = (text: string): string =>
 
 // Characters a line may not hold at all: controls, bidirectional and right-to-left scripts, invisible and format
 // characters (shared-192-w2LFB3Va.js:22521 `aH`, imported as `p`)
-const REFUSED_CHARACTER = /[\u0000-\u001f\u007f-\u009f  ֐-ࣿיִ-﷿ﹰ-﻿\u{10800}-\u{10fff}\u{1e800}-\u{1efff}]|\p{Default_Ignorable_Code_Point}|\p{Cf}/u;
+// eslint-disable-next-line no-control-regex -- the control characters are what is refused
+const REFUSED_CHARACTER = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufeff\u{10800}-\u{10fff}\u{1e800}-\u{1efff}]|\p{Default_Ignorable_Code_Point}|\p{Cf}/u;
 
 // The characters Desktop shows as blank (shared-0-Do3lTMSe.js:25523-25524, `B8` and `V8`)
 const BLANK_LOOKING = '\\u{2800}\\u{fffc}\\u{1d159}\\u{13441}\\u{13442}\\u{16910}\\u{16fe4}';
@@ -174,13 +175,13 @@ const withoutControls = (text: string): string => withoutLoneSurrogates(text).re
 // `uH` and `dH` :22537-22538, `fH` :22539, `pH` :22540, `mH` :22541, `hH` :22547, `gH` :22551, `_H` :22552, `vH` :22555,
 // `yH` :22562, `OH` :22608)
 const codePoints = (text: string): string => Array.from(text, (char) => `[U+${char.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}]`).join('');
-const STACKED_MARKS = /([0-9#*]️⃣(?![\p{Mn}\p{Me}]))|[\p{Bidi_Control}\u{E0000}-\u{E01EF}̴-̸⃐-⃿\p{Me}]|(?=[\p{Default_Ignorable_Code_Point}\p{Cf}])[֐-ࣿיִ-﷿ﹰ-﻾\u{10800}-\u{10fff}\u{1e800}-\u{1efff}]|[\p{Default_Ignorable_Code_Point}\p{Cf}]{3,}|[\p{Mn}\p{Me}]{4,}/gu;
-const INVISIBLE = /(?!️⃣)[\p{Default_Ignorable_Code_Point}\p{Cf}]/gu;
+const STACKED_MARKS = /([0-9#*]\ufe0f\u20e3(?![\p{Mn}\p{Me}]))|[\p{Bidi_Control}\u{E0000}-\u{E01EF}\u0334-\u0338\u20d0-\u20ff\p{Me}]|(?=[\p{Default_Ignorable_Code_Point}\p{Cf}])[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufefe\u{10800}-\u{10fff}\u{1e800}-\u{1efff}]|[\p{Default_Ignorable_Code_Point}\p{Cf}]{3,}|[\p{Mn}\p{Me}]{4,}/gu;
+const INVISIBLE = /(?!\ufe0f\u20e3)[\p{Default_Ignorable_Code_Point}\p{Cf}]/gu;
 const MAX_INVISIBLE = 16;
 const BLANK = `(?:[^\\P{Zs} ]|[${BLANK_LOOKING}])`;
 const BLANK_RUN = once(() => RegExp(`${BLANK}(?:[\\t \\p{Default_Ignorable_Code_Point}\\p{Cf}\\p{Mn}\\p{Me}]*${BLANK}){2,}[\\p{Mn}\\p{Me}]*`, 'gu'));
-const VISIBLE = /[^\s⠀￼\u{1D159}\u{13441}\u{13442}\u{16910}\p{Default_Ignorable_Code_Point}\p{Cf}\p{Mn}\p{Me}]/u;
-const LINE = /[^\n\r\u0085  ]+/g;
+const VISIBLE = /[^\s\u2800\ufffc\u{1D159}\u{13441}\u{13442}\u{16910}\p{Default_Ignorable_Code_Point}\p{Cf}\p{Mn}\p{Me}]/u;
+const LINE = /[^\n\r\u0085\u2028\u2029]+/g;
 function asDrawn(text: string): string {
   const marked = text.replace(STACKED_MARKS, (match, keycap: string | undefined) => keycap ?? codePoints(match));
   const invisible = (marked.match(INVISIBLE)?.length ?? 0) > MAX_INVISIBLE ? marked.replace(INVISIBLE, codePoints) : marked;
@@ -191,7 +192,7 @@ function asDrawn(text: string): string {
 // imported as `w`; its own two sanitisers are `rb` and `wj`, above)
 const MAX_SHOWN = 500;
 function shown(text: string): string {
-  const folded = withoutControls(withTokensHidden(text.replace(/[  ]/g, '\n')).replace(/\s+/g, ' ')).trim();
+  const folded = withoutControls(withTokensHidden(text.replace(/[\u2028\u2029]/g, '\n')).replace(/\s+/g, ' ')).trim();
   if (folded.length <= MAX_SHOWN) return folded;
   const cut = (folded.charCodeAt(MAX_SHOWN - 1) & 0xfc00) === 0xd800 ? MAX_SHOWN - 1 : MAX_SHOWN;
   return `${folded.slice(0, cut)}…`;
