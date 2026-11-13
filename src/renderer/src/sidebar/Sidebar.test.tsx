@@ -282,8 +282,9 @@ describe('sidebar recovery routes', () => {
     expect(useNotices.getState().notices.at(-1)).toMatchObject({ level: 'danger', text: 'Directory no longer exists' });
   });
 
-  // P3-F wave S (F17): the title bar's project chip, whose context menu is the reveal the strip's label was
-  it('the title bar chip’s Show in sidebar restores a hidden project before revealing and focusing its sidebar row', async () => {
+  // P3-F wave S (F17); UX wave U13a (O-31): the title bar's project chip reveals its row; a hidden project's is restored
+  // first, as the chip's menu item did before the click became the reveal
+  it('the title bar chip shows a hidden project: restored first, then its row revealed, expanded and focused', async () => {
     const project = nine.projects.find((p) => p.name === 'MAWS')!;
     fillStores({ ...nine, projects: nine.projects.map((p) => ({ ...p, hidden: p.id === project.id })) });
     useMachines.setState({ loaded: new Set([TEST_MACHINE]) }); // U13a: the chip's project is the session in front's
@@ -293,15 +294,10 @@ describe('sidebar recovery routes', () => {
     const fake = fakeClient();
     window.maws = fake.client as unknown as PreloadBridge;
     render(<><Sidebar /><Toolbar /></>);
-    const chip = document.querySelector<HTMLElement>('[data-toolbar-project]')!;
-    const menuItem = async () => {
-      fireEvent.contextMenu(chip);
-      return screen.findByRole('menuitem');
-    };
+    const chip = () => document.querySelector<HTMLElement>('[data-toolbar-project]')!;
     expect(screen.queryByRole('treeitem', { name: 'MAWS' })).toBeNull();
-    const show = await menuItem();
-    expect(show.textContent).toBe('Show in sidebar');
-    await userEvent.click(show);
+    expect(chip().getAttribute('aria-label')).toBe('Show MAWS in sidebar');
+    await userEvent.click(chip());
     expect(fake.invoked('session.projects.add')).toEqual([{ directory: project.directory }]);
     expect(useLayout.getState().regions.sidebar.collapsed).toBe(true);
     await act(() => fake.reply('session.projects.add', { ...project, hidden: false }));
@@ -310,10 +306,24 @@ describe('sidebar recovery routes', () => {
     await waitFor(() => expect(document.activeElement).toBe(row('MAWS')));
     expect(row('MAWS').getAttribute('aria-expanded')).toBe('true');
     expect(useLayout.getState().regions.sidebar.collapsed).toBe(false);
-    const reveal = await menuItem();
-    expect(reveal.textContent).toBe('Reveal in sidebar');
-    await userEvent.click(reveal);
+    expect(chip().getAttribute('aria-label')).toBe('Reveal MAWS in sidebar');
+    await userEvent.click(chip());
     expect(fake.invoked('session.projects.add')).toHaveLength(1);
+    expect(useSessions.getState().unstarted.size).toBe(0); // the chip created nothing
+  });
+
+  it('the title bar chip reveals a machine’s own row: the sidebar shown, the row expanded and focused', async () => {
+    useMachines.setState({ loaded: new Set([TEST_MACHINE]) });
+    offs.push(() => useMachines.setState({ loaded: new Set() }));
+    useLayout.getState().openSession(idOf('Terminal workflow notes'), { how: 'tab' }); // a session in no project
+    useLayout.getState().setSidebar({ collapsed: true, expandedProjects: [] });
+    render(<><Sidebar /><Toolbar /></>);
+    const chip = document.querySelector<HTMLElement>('[data-toolbar-project]')!;
+    expect(chip.getAttribute('aria-label')).toBe('Reveal This Mac in sidebar');
+    await userEvent.click(chip);
+    await waitFor(() => expect(document.activeElement).toBe(row('This Mac')));
+    expect(row('This Mac').getAttribute('aria-expanded')).toBe('true');
+    expect(useLayout.getState().regions.sidebar).toMatchObject({ collapsed: false, expandedProjects: [machineKey(TEST_MACHINE)] });
   });
 });
 

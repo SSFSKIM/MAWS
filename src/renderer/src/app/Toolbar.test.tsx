@@ -1,7 +1,7 @@
-// The title bar's project chip (P3-F wave S, F17; the owner's obs 8): the project of the session in front (U13a), named
-// left of the chrome’s tab strips, out of their crowded row. A click is the sidebar's "+" (a new unstarted session tab in that
-// project); its context menu reveals the project in the sidebar.
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+// The title bar's project chip (P3-F wave S, F17; the owner's obs 8): the row of the session in front (UX wave U13a, O-31),
+// named left of the chrome’s tab strips, out of their crowded row. A click, Enter or Space reveals that row in the sidebar
+// and creates nothing.
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
@@ -10,7 +10,9 @@ import { registerSessionCreator } from '../keymap/actions-runtime';
 import { projectReveal } from '../sidebar/reveal';
 import { useLayout } from '../stores/layout';
 import { useMachines } from '../stores/machines';
-import { activeTab } from '../stores/layout-model';
+import { allTabs } from '../stores/layout-model';
+import { useShellView } from './shell-view';
+import { machineKey } from '@shared/machine/org-key';
 import { useSessions } from '../stores/sessions';
 import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { at, TEST_MACHINE } from '../../../../test/support/machine';
@@ -53,44 +55,54 @@ describe('the title bar’s project chip', () => {
     expect(chip()).toBeNull();
   });
 
-  it('a click opens a new unstarted session tab in that project, as the sidebar’s "+" does', async () => {
+  it('names a machine’s row for a session in no listed project, and none for a chat with no project', () => {
+    const bare = at('app-bare' as AppSessionId);
+    useSessions.setState({ unstarted: new Map([[bare, { projectId: null, createdAt: '2026-11-12T10:00:00Z' }]]) });
+    render(<Toolbar />);
+    act(() => useLayout.getState().openSession(idOf('Terminal workflow notes'), { how: 'tab' }));
+    expect(chip()!.textContent).toBe('This Mac');
+    expect(chip()!.getAttribute('data-toolbar-project')).toBe(machineKey(TEST_MACHINE));
+    act(() => useLayout.getState().openSession(bare, { how: 'tab' }));
+    expect(chip()).toBeNull();
+  });
+
+  it('a click reveals the row in the sidebar, shown, opened and handed to the sidebar, and creates nothing', async () => {
     const user = userEvent.setup();
     const creator = vi.fn(async () => NEW);
     offs.push(registerSessionCreator(creator));
+    act(() => useLayout.getState().setSidebar({ collapsed: true, expandedProjects: [] }));
     render(<Toolbar />);
     act(() => useLayout.getState().openSession(idOf('Charter + research'), { how: 'tab' }));
-    const button = within(toolbar()).getByRole('button', { name: PROJECT_CHIP_COPY.newChat('MAWS') });
+    const before = allTabs(useLayout.getState().main).map((t) => t.id);
+    const button = within(toolbar()).getByRole('button', { name: PROJECT_CHIP_COPY.reveal('MAWS') });
     expect(button).toBe(chip());
+    expect(button.title).toBe('Reveal MAWS in sidebar');
+    expect(button.getAttribute('data-toolbar-project')).toBe(MAWS);
     await user.click(button);
-    expect(creator).toHaveBeenCalledWith(MAWS);
-    expect(useSessions.getState().unstarted.get(NEW)?.projectId).toBe(MAWS);
-    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: NEW });
-  });
-
-  it('its context menu reveals the project in the sidebar: the sidebar shown and the row expanded and focused', async () => {
-    const user = userEvent.setup();
-    act(() => useLayout.getState().setSidebar({ collapsed: true, expandedProjects: [] }));
-    render(<Toolbar />);
-    act(() => useLayout.getState().openSession(idOf('Charter + research'), { how: 'tab' }));
-    fireEvent.contextMenu(chip()!);
-    await user.click(await screen.findByRole('menuitem', { name: PROJECT_CHIP_COPY.reveal }));
     expect(useLayout.getState().regions.sidebar).toMatchObject({ collapsed: false, expandedProjects: [MAWS] });
+    expect(useShellView.getState().sidebarOverlay).toBe(true); // where the sidebar steps aside, it opens as the overlay
     expect(projectReveal.getState().pending).toBe(MAWS); // no sidebar mounted here: the reveal waits for its body
-    expect(useSessions.getState().unstarted.size).toBe(0); // the menu opened no tab
+    expect(creator).not.toHaveBeenCalled();
+    expect(useSessions.getState().unstarted.size).toBe(0);
+    expect(allTabs(useLayout.getState().main).map((t) => t.id)).toEqual(before);
   });
 
-  // P3-F wave S (F17 review 3): the keyboard reaches the reveal, as Enter on the strip's label did, by the menu key
-  it('Shift+F10 on the focused chip opens its menu, and Enter on Reveal in sidebar reveals the project', async () => {
+  it('Enter and Space on the focused chip reveal the row; it has no menu', async () => {
     const user = userEvent.setup();
-    act(() => useLayout.getState().setSidebar({ collapsed: true, expandedProjects: [] }));
     render(<Toolbar />);
-    act(() => useLayout.getState().openSession(idOf('Charter + research'), { how: 'tab' }));
+    act(() => useLayout.getState().openSession(idOf('Quota reset recovery'), { how: 'tab' }));
+    const somersault = at('proj-codex-somersault' as ProjectId);
     act(() => chip()!.focus());
-    await user.keyboard('{Shift>}{F10}{/Shift}');
-    const reveal = await screen.findByRole('menuitem', { name: PROJECT_CHIP_COPY.reveal });
-    await waitFor(() => expect(document.activeElement).toBe(reveal)); // opened from the keyboard: its item holds the keyboard
     await user.keyboard('{Enter}');
-    expect(useLayout.getState().regions.sidebar).toMatchObject({ collapsed: false, expandedProjects: [MAWS] });
-    expect(useSessions.getState().unstarted.size).toBe(0); // the key opened no tab
+    expect(projectReveal.getState().pending).toBe(somersault);
+    act(() => projectReveal.setState({ pending: null }));
+    act(() => useLayout.getState().setSidebar({ collapsed: true, expandedProjects: [] }));
+    await user.keyboard(' ');
+    expect(projectReveal.getState().pending).toBe(somersault);
+    expect(useLayout.getState().regions.sidebar).toMatchObject({ collapsed: false, expandedProjects: [somersault] });
+    fireEvent.contextMenu(chip()!);
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(useSessions.getState().unstarted.size).toBe(0);
   });
+});
 });
