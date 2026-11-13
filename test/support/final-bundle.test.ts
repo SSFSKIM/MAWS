@@ -420,7 +420,7 @@ describe('the reporter', () => {
     it('fails P3-F’s hand-back run short of a declared case or with one skipped', async () => {
       const g = gate({ label: 'p3f-final' });
       expect(await dashboard(g, { cases: cases.slice(1) })).toEqual({ status: 'failed' });
-      expect(said()).toContain('dashboard.spec.ts: 3 cases of the declared 4');
+      expect(said()).toContain('dashboard.spec.ts: 6 cases of the declared 7');
       expect(await dashboard(g, { statuses: cases.map((_, k) => (k === 5 ? 'skipped' : 'passed')) })).toEqual({ status: 'failed' });
       expect(said()).toContain('a skipped case');
       expect(noBundle(g)).toBe(true);

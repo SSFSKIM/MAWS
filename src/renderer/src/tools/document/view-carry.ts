@@ -10,11 +10,14 @@
 // - The view, on a move only (the registry's `captureView`, taken once by the target's first mount): the first visible
 //   block and how far into it the page was scrolled (the panel and a main tab differ in width, so the same offset would
 //   land elsewhere), the selection as Y relative positions (they survive the edits made meanwhile), and whether the page
-//   had the keyboard. Restored once the new editor has drawn its tab, focus first, then the scroll, then the selection;
+//   had the keyboard. A gap caret (U10a's decision 12a: the place to type after a block that holds no text) is carried
+//   as one and comes back as one where that is still a place. Restored once the new editor has drawn its tab, focus first, then the scroll, then the selection;
 //   the scroll is held on its block while the page settles (M6), until the owner's first input in it.
 //   The tab the document editor shows is its own state (`src/artifacts/document/editor/`), so a view captured on
 //   another of the document's tabs restores nothing.
 import type { Editor } from '@tiptap/core';
+import { GapCursor } from '@tiptap/pm/gapcursor';
+import type { ResolvedPos } from '@tiptap/pm/model';
 import { NodeSelection, TextSelection, type Selection } from '@tiptap/pm/state';
 import type { Node as YType } from '@artifacts/yjs';
 import type { UndoManager } from '@artifacts/yjs/document';
@@ -26,7 +29,8 @@ type RelativePosition = NonNullable<ReturnType<typeof resolvedPositionsToRelativ
 export interface DocumentView {
   /** The tab body the editor showed. */
   body: YType;
-  selection: { node: boolean; anchor: RelativePosition; head: RelativePosition } | null;
+  /** `gap`: a gap caret (U10a). The view lives in the renderer's memory for one move, never stored, so it is not optional. */
+  selection: { node: boolean; gap: boolean; anchor: RelativePosition; head: RelativePosition } | null;
   /** 'top': scrolled to its top; null: no laid-out page to read (hidden behind a version, say), so nothing restored. */
   scroll: { block: RelativePosition; fraction: number } | 'top' | null;
   focused: boolean;
@@ -71,7 +75,7 @@ export function captureDocumentView(editor: Editor, page: HTMLElement | null): D
   const [anchor, head] = resolvedPositionsToRelativePositions(view, [selection.$anchor, selection.$head]);
   return {
     body,
-    selection: anchor && head ? { node: selection instanceof NodeSelection, anchor, head } : null,
+    selection: anchor && head ? { node: selection instanceof NodeSelection, gap: selection instanceof GapCursor, anchor, head } : null,
     scroll: page ? scrollPlace(editor, page) : null,
     focused: view.hasFocus(),
     threads: { active: activeThread(state), pinned: pinnedThread(state) },
@@ -201,9 +205,13 @@ function holdWhileSettling(page: HTMLElement, content: Element, aim: () => void)
   return release;
 }
 
-function selectionAt(editor: Editor, { node, anchor, head }: NonNullable<DocumentView['selection']>): Selection | null {
+// `valid` is the gap cursor's own test of a place (prosemirror-gapcursor 1.4.1), left out of its typings; atom.ts asks it too
+const isGap = ($pos: ResolvedPos): boolean => (GapCursor as unknown as { valid($pos: ResolvedPos): boolean }).valid($pos);
+
+function selectionAt(editor: Editor, { node, gap, anchor, head }: NonNullable<DocumentView['selection']>): Selection | null {
   const [$anchor, $head] = relativePositionsToResolvedPositions(editor.view, [anchor, head]);
   if (!$anchor || !$head) return null;
   if (node && $anchor.nodeAfter) return NodeSelection.create(editor.state.doc, $anchor.pos);
+  if (gap && isGap($head)) return new GapCursor($head);
   return TextSelection.between($anchor, $head);
 }
