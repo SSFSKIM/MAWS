@@ -1350,6 +1350,9 @@ describe('files admission of named files', () => {
     const running = files.read({ appSessionId: A, path: out('notes.txt'), named: true });
     await opened;
     const waiting = files.read({ appSessionId: A, path: out('second.txt'), named: true });
+    // the second is queued before the third is made: each request resolves its path on the disk before it asks, and two
+    // such resolutions in flight may finish in either order
+    await vi.waitFor(() => expect(located).toHaveLength(2));
     await expect(within(files.read({ appSessionId: A, path: out('third.txt'), named: true }), 1000)).rejects.toThrow(OUT);
     release();
     expect(await running).toMatchObject({ content: 'outside notes\n', named: true });
