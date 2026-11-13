@@ -348,6 +348,7 @@ export class Endpoint implements EndpointModule {
         if (this.#services === null) return Promise.reject(new Error('the endpoint has not started'));
         return this.#services.dispatch(owner, name, input);
       },
+      hold: (reason) => this.#services?.hold(reason) ?? (() => {}), // U9: the listing rule's reads, an operation's hold
       behind: () => void this.#syncAfter(),
       // P5 O8 M7b: lane A's to-human entries, to the project channel's journal in the spine
       channel: { record: (entry) => this.#services?.channel.record(entry) },
@@ -603,6 +604,7 @@ export class Endpoint implements EndpointModule {
       records: recordSource,
       machineOwners: () => this.#machineOwners(),
       recordFor: (report) => this.listings.recordFor(report),
+      recordSays: (listingId) => this.rl10.members.recordSays(listingId), // U9: a lane B listing follows its record
       ranks: (member) => this.authorizer.ranks(member, this.deps.now()),
       sessionSafe,
       leases: this.leases, // P5 O7 M5c
@@ -719,6 +721,8 @@ export class Endpoint implements EndpointModule {
         this.planeB.event(owner, message);
         this.planeFeeds.event(owner, message);
         this.calls.event(owner, message); // P5 O7 M6: a record moved under an `each-session` call in flight
+        // U9: a lane B session's listing follows its record (archived, its title)
+        if (owner === 'machine' && message.name === 'session.changed') void this.rl10.members.recordChanged((message.payload as { record?: unknown } | null)?.record);
         this.sessionSafe?.event(owner, message); // P5 O7 M5a2: a record moved under an artifact answer being told
         this.laneB.event(owner, message);
         this.streams.event(owner, message);

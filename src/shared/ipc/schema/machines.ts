@@ -28,6 +28,11 @@ export const MachineStateSchema = z.strictObject({
   // while no daemon has welcomed.
   rights: z.array(z.enum(MACHINE_RIGHTS)).optional(),
   capabilities: z.array(z.string()).optional(),
+  // The UX wave (U9, docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, Interfaces §8): the signed-in member is
+  // one of this RL2 machine's owners, as main reads the org state it holds (`machineOwners`, `ownerMembers`); absent
+  // signed out, for a machine the state does not place, and for this Mac and a socket-linked machine. It decides how a
+  // control is drawn, never an authorisation (the machine decides every request again). Main-to-renderer only.
+  owner: z.boolean().optional(),
 });
 export type MachineState = z.infer<typeof MachineStateSchema>;
 export const MachinesSchema = z.strictObject({ machines: z.array(MachineStateSchema) }); // the whole list, the local machine first

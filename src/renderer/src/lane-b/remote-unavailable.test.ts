@@ -32,10 +32,11 @@ afterEach(() => {
   delete (window as { maws?: unknown }).maws;
 });
 
+// The UX wave (U9, M1) offers `session.rename` now: the declared example is one that stays declared, `session.delete`.
 describe('remoteUnavailableOf', () => {
   it('greys a declared command for a session on another machine with the declared words, and nothing of this Mac’s', () => {
-    expect(remoteUnavailableOf(R, 'session.rename')).toBe(REMOTE_UNAVAILABLE['session.rename']);
-    expect(remoteUnavailableOf(L, 'session.rename')).toBeNull();
+    expect(remoteUnavailableOf(R, 'session.delete')).toBe(REMOTE_UNAVAILABLE['session.delete']);
+    expect(remoteUnavailableOf(L, 'session.delete')).toBeNull();
     expect(remoteUnavailableOf(R, 'session.mcpReconnect')).toBeNull(); // offered there
   });
 
@@ -57,16 +58,16 @@ describe('remoteUnavailableOf', () => {
   it('greys a lane A session on an RL2 machine too: its adapter takes only laneA.*, the rest reach the machine as lane B’s', () => {
     const A = addressOf(OTHER_MACHINE, 'app-a' as AppSessionId);
     useSessions.setState({ listed: new Map([[A, { ...remoteRow(OTHER_MACHINE, 'app-a', { lane: 'A' }), appId: A }]]), listedMachines: new Set([OTHER_MACHINE]) });
-    expect(remoteUnavailableOf(A, 'session.rename')).toBe(REMOTE_UNAVAILABLE['session.rename']);
+    expect(remoteUnavailableOf(A, 'session.delete')).toBe(REMOTE_UNAVAILABLE['session.delete']);
     heardRefusal('session.mcpReconnect', NOT_OFFERED, OTHER_MACHINE, TEST_MACHINE);
     expect(remoteUnavailableOf(A, 'session.mcpReconnect')).toBe(REMOTE_SURFACE_WORDS.notOffered('mini'));
-    const { result } = renderHook(() => useRemoteUnavailable(A, 'session.rename'));
-    expect(result.current).toBe(REMOTE_UNAVAILABLE['session.rename']);
+    const { result } = renderHook(() => useRemoteUnavailable(A, 'session.delete'));
+    expect(result.current).toBe(REMOTE_UNAVAILABLE['session.delete']);
   });
 
   it('greys nothing for a session whose machine’s sessions take the manager’s path (no RL2 rows cover it)', () => {
     useSessions.setState({ listed: new Map(), listedMachines: new Set() });
-    expect(remoteUnavailableOf(R, 'session.rename')).toBeNull();
+    expect(remoteUnavailableOf(R, 'session.delete')).toBeNull();
   });
 });
 
@@ -79,7 +80,7 @@ describe('useRemoteUnavailable', () => {
   });
 
   it('greys nothing for no session', () => {
-    const { result } = renderHook(() => useRemoteUnavailable(null, 'session.rename'));
+    const { result } = renderHook(() => useRemoteUnavailable(null, 'session.delete'));
     expect(result.current).toBeNull();
   });
 });

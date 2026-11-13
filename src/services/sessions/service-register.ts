@@ -43,7 +43,7 @@ export function registerSessionServiceHandlers(service: SessionService, { regist
   register('session.takeOverPane', ({ pid }) => service.takeOverPane(pid));
   register('session.takeOver', ({ appSessionId, holder, paneId }) => service.takeOver(id(appSessionId), holder, paneId)); // W7
   register('session.delete', ({ appSessionId, stopIfLive }) => service.remove(id(appSessionId), stopIfLive));
-  register('session.rename', ({ appSessionId, title }) => service.rename(id(appSessionId), title));
+  register('session.rename', ({ appSessionId, title }, { reader }) => service.rename(id(appSessionId), title, reader)); // U9 (R9): a reader's answer is their own reading
   register('session.revealPath', ({ path }, { client }) => service.revealPath(path, client));
   register('session.deletions.list', async () => ({ manifests: await service.listDeletions() }));
   register('session.deletions.keep', ({ appSessionId }) => service.keepDeletion(id(appSessionId)));

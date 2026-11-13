@@ -22,7 +22,7 @@ import type { FirstMessage, ForkTarget, Location, SetupIntent, SetupIntentPatch 
 import type { SetupResources, StartOutcome } from '@shared/sessions/setup';
 import type { TrustState } from '@shared/sessions/trust';
 import { isNoClient, NO_CLIENT_REASON } from '@shared/client/port';
-import type { ClientRef } from '@shared/ipc/client';
+import type { ClientRef, Reader } from '@shared/ipc/client';
 import type { ArchiveOutcome, DeleteOutcome, StartOptions } from '@shared/ipc/schema/session';
 import { emptyProgress, HostError, hostCall, STOP_WAIT_MS, WATCHDOG_MS, type SessionServiceDeps } from './context';
 import { DeletionManifests, type DeletionManifest } from './delete-manifest';
@@ -1076,8 +1076,9 @@ export class SessionService {
   listDeletions = async (): Promise<DeletionManifest[]> => this.ready().then(() => this.manifests.list());
   keepDeletion = (appSessionId: AppSessionId): Promise<void> => this.serial(appSessionId, () => this.manifests.remove(appSessionId));
 
-  rename(appSessionId: AppSessionId, title: string): Promise<{ record: SessionRecord; via: 'engine' | 'override' }> {
-    return this.serial(appSessionId, async () => renameRecord(await this.ready(), appSessionId, title));
+  // U9 (R9): `reader`, a remote rename's (the endpoint's), whose own reading of the record is the answer
+  rename(appSessionId: AppSessionId, title: string, reader?: Reader): Promise<{ record: SessionRecord; via: 'engine' | 'override' }> {
+    return this.serial(appSessionId, async () => renameRecord(await this.ready(), appSessionId, title, reader));
   }
 
   async revealPath(path: string, client: ClientRef | null): Promise<void> {

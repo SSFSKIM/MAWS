@@ -63,6 +63,11 @@
 //   endpoint that lists `rl2.upload-blocks` (the act `requires` it, so a later channel's older peer refuses rather than
 //   misreads it); to any other the message goes with its `@` mention alone, as before. The machine's refusal of a send's
 //   uploads, `malformed` with no reason, is the attachment's words.
+// - The UX wave (U9, docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, Interfaces §1, §3): archive,
+//   unarchive (`session.update {patch: {archived: false}}`), rename and a dismissal are `machine` acts, taking back a
+//   waiting message and a pane's answer engine-host acts (the answer never resumes a session), and the archived sessions'
+//   read a call by name; each goes only to an endpoint that lists `rl2.session-acts` (REMOTE_NEEDS), and a refusal of an
+//   act with words says UC-7.5's sentence (./remote-outcomes.ts' `refusalResult`).
 import type { Socket } from 'node:net';
 import type { MessageChannelMain } from 'electron';
 import type { OpenAnswer } from '@shared/client/port';
@@ -71,6 +76,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import { ipcError, type IpcErrorCode } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandResult, EventName, EventPayload } from '@shared/ipc/schema';
 import { PROJECT_ACTS_CAPABILITY } from '@shared/ipc/schema/session';
+import { REMOTE_NEEDS } from '@shared/ipc/remote-unavailable';
 import { validateCommandOutput } from '@shared/ipc/validate';
 import type { MachineRef } from '@shared/machine/ref';
 import { REMOTE_ACT_PENDING_MS } from '@shared/machine/remote-pending';
@@ -97,7 +103,7 @@ import { createRemoteWindows } from './remote-windows';
 import { createRemoteCheckout, WATCH_COMMANDS, type RemoteCheckoutTiming } from './remote-checkout';
 import { readEventsInPages } from './remote-history';
 import { createRemoteInterest } from './remote-interest';
-import { outcomeAsResult, pendingResult } from './remote-outcomes';
+import { outcomeAsResult, pendingResult, refusalResult } from './remote-outcomes';
 import { RemoteSession, type RemoteSessionTiming } from './remote-session';
 import { createSpawnAttempts } from './remote-spawn';
 import { readFileInPages } from './remote-files-read';
@@ -226,6 +232,7 @@ export const ENGINE_HOST_ACTS: ReadonlySet<CommandName> = new Set<CommandName>([
   'session.stopTask', 'session.sideQuestion', 'session.mcpToggle', 'session.mcpReconnect',
   'session.rewind', 'session.rewindFiles', 'session.forget', 'session.setKeep', 'session.generateTitle',
   'maws.ask.answer', 'side.question.clear', 'session.reloadPlugins', // P5 O7 M8 (§U)
+  'session.steer.cancel', 'maws.pane.answer', // the UX wave (U9): behind `rl2.session-acts`; a pane's answer never resumes a session
 ]);
 /** The `machine` acts §L offers for lane B: placed by their args (or, a spawn, on the machine), neither a session nor a context. */
 export const MACHINE_ACTS: ReadonlySet<CommandName> = new Set<CommandName>([
@@ -243,6 +250,8 @@ export const MACHINE_ACTS: ReadonlySet<CommandName> = new Set<CommandName>([
   'session.projects.addFolder', // P5 O7 M9: the remote setup's registration (`machine-admin`, the machine's owners')
   'session.projects.link', 'session.projects.relocate', 'session.projects.update', 'session.projects.remove', // the project registry (M9, §I's acts): the machine's owners' (`machine-admin`)
   'session.drafts.set', // P5 O8 M6a: the caller's own draft, kept per member on the machine (`converse`)
+  // the UX wave (U9): behind `rl2.session-acts`; archive, unarchive and rename `manage`, a dismissal `converse`
+  'session.archive', 'session.update', 'session.rename', 'attention.acknowledge',
 ]);
 /**
  * The project registry (Interfaces §G, "Older peers"): what goes only to a machine whose RL2 handshake lists
@@ -253,6 +262,16 @@ export const MACHINE_ACTS: ReadonlySet<CommandName> = new Set<CommandName>([
  * on the next channel follows that channel's peer), and `resolve` goes `oneChannel`, on the channel it was checked on.
  */
 const PROJECT_CALLS: ReadonlySet<CommandName> = new Set<CommandName>(['session.projects.resolve']);
+/**
+ * The UX wave (U9; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, Interfaces §1): what `REMOTE_NEEDS`
+ * names goes only to a machine whose handshake lists it. A current channel's peer that lacks it is refused here,
+ * `not-offered`, nothing sent; with no channel current an act waits under the link's hold (no outbox, A4), carrying the
+ * capability as `requires` for the channel it goes on to judge. The archived sessions' read (`session.list`) is the
+ * adapter's to send for that reason, a call by name on the channel it was checked on.
+ */
+const SESSION_CALLS: ReadonlySet<CommandName> = new Set<CommandName>(['session.list']);
+/** The capability an act carries as `requires`: the project registry's, else the one REMOTE_NEEDS names. */
+const requiredBy = (name: CommandName, fields: Fields): string | undefined => (needsProjectActs(name, fields) ? PROJECT_ACTS_CAPABILITY : REMOTE_NEEDS[name]);
 // `needsProjectActs` (../machines/project-acts-peer.ts) names what needs the capability; this Mac's daemon is checked by it too
 /** Acts the endpoint always asks a step-up of, signed before the first copy goes (no round trip to be asked). */
 const STEPPED_UP: ReadonlySet<CommandName> = new Set<CommandName>(['session.projects.addFolder', 'session.projects.link', 'session.projects.relocate']);
@@ -537,7 +556,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       sendBy: deadline,
       ...(options.oneChannel === true ? { oneChannel: true as const } : {}),
       ...(STEPPED_UP.has(name) ? { stepUp: 'required' as const } : {}),
-      ...(needsProjectActs(name, fields) ? { requires: PROJECT_ACTS_CAPABILITY } : {}), // judged at each transmission
+      ...(requiredBy(name, fields) === undefined ? {} : { requires: requiredBy(name, fields) }), // judged at each transmission
     });
     options.onHandle?.(handle);
     const result = await settle(link, name, handle, deadline + (options.answerMs ?? 0), String(fields.appSessionId ?? fields.artifactId ?? ''));
@@ -589,6 +608,8 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     const app = lane.session.state.app;
     let context = lane.session.context();
     const resuming = context === null;
+    // U9: a pane's request died with the launch that asked it, so its answer resumes nothing and acquires nothing
+    if (context === null && name === 'maws.pane.answer') return failure('internal', `${name}: the pane’s request ended with its session’s launch on ${link.name}`, { refusal: 'not-live' });
     if (context === null) {
       // A launch already on its way is waited for; one that ended (its row kept, `exited`) or none is resumed first.
       const resume = lane.session.launching()
@@ -618,8 +639,9 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     const blocks = uploads && (link.peerCapabilities() === null || peerLists(link, 'rl2.upload-blocks'));
     if (uploads && !blocks) deps.log(`lane B: session.send on ${link.name}/${app}: its endpoint lists no rl2.upload-blocks; the uploads go as their mentions alone`);
     const since = lane.session.openings(); // the opening the act is made under: a receipt heard after a later one is asked of the machine
+    const needs = REMOTE_NEEDS[name]; // U9: judged at each transmission, as the uploads' capability is
     const make = (args: Fields, requires: boolean) =>
-      settle(link, name, link.act({ action: name, session: app, context: { lane: 'B', ...context }, args, executor: 'engine-host', sendBy: deadline, ...(requestDigest !== undefined && { requestDigest }), ...(requires && { requires: 'rl2.upload-blocks' }) }), deadline, app);
+      settle(link, name, link.act({ action: name, session: app, context: { lane: 'B', ...context }, args, executor: 'engine-host', sendBy: deadline, ...(requestDigest !== undefined && { requestDigest }), ...(requires ? { requires: 'rl2.upload-blocks' } : needs !== undefined ? { requires: needs } : {}) }), deadline, app);
     let result = await make(blocks || !uploads ? fields : withoutUploads(fields), blocks);
     const refusal = result.ok ? null : (result.error.issues as { refusal?: unknown } | undefined)?.refusal;
     // m8-3 review round 2: only when the channel it went on lists no `rl2.upload-blocks`; any other not-offered is the send's error
@@ -733,6 +755,12 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       // only on the channel checked: one that ends fails it `offline`, never carried to the next channel's peer unchecked
       if (PROJECT_CALLS.has(name)) return callOverLink(link, name, fields, { oneChannel: true });
     }
+    const needs = REMOTE_NEEDS[name];
+    if (needs !== undefined) {
+      const peers = link.peerCapabilities();
+      if (peers !== null && !peers.includes(needs)) return refusalResult(name, link.name, 'not-offered');
+      if (SESSION_CALLS.has(name)) return peers === null ? failure('host_unavailable', `${name}: machine ${link.name} is not reachable`) : callOverLink(link, name, fields, { oneChannel: true });
+    }
     if (artifacts.handles(name)) return artifacts.dispatch(link, name, fields, ctx.client); // P5 O7 M5a; M5b: the window a document opens in
     if (PTY_NAMES.has(name)) return ptys.dispatch(link, name, fields);
     if (WATCH_COMMANDS.has(name)) return checkout.dispatch(link, name, fields, ctx);
@@ -763,7 +791,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   }
 
   return {
-    handles: (name) => ENGINE_HOST_ACTS.has(name) || MACHINE_ACTS.has(name) || PROJECT_CALLS.has(name) || MACHINE_CALLS.has(name) || SUBSTITUTES.has(name) || PAGED_READS.has(name) || TARGETED_CALLS.has(name) || WATCH_COMMANDS.has(name) || PTY_NAMES.has(name) || artifacts.handles(name),
+    handles: (name) => ENGINE_HOST_ACTS.has(name) || MACHINE_ACTS.has(name) || PROJECT_CALLS.has(name) || SESSION_CALLS.has(name) || MACHINE_CALLS.has(name) || SUBSTITUTES.has(name) || PAGED_READS.has(name) || TARGETED_CALLS.has(name) || WATCH_COMMANDS.has(name) || PTY_NAMES.has(name) || artifacts.handles(name),
     async dispatch(link, name, input, ctx) {
       try {
         return await run(link, name, record(input) ?? {}, ctx);

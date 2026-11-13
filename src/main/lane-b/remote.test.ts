@@ -297,7 +297,7 @@ describe('sends', () => {
     await vi.advanceTimersByTimeAsync(59_999);
     expect(answered).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
-    expect(await sending).toEqual({ ok: false, error: { code: 'host_unavailable', message: 'Not sent: mini is offline' } });
+    expect(await sending).toEqual({ ok: false, error: { code: 'host_unavailable', message: 'Not sent: mini is offline', issues: { refusal: 'offline' } } });
   });
 
   it('keeps a resumed send inside the original bound: the resume’s time is not given back, and a send made at the bound is not made', async () => {
@@ -317,7 +317,7 @@ describe('sends', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(l.link.acts[1].request).toMatchObject({ action: 'session.send', sendBy: made + 1000 });
     await vi.advanceTimersByTimeAsync(100);
-    expect(await sending).toEqual({ ok: false, error: { code: 'host_unavailable', message: 'Not sent: mini is offline' } });
+    expect(await sending).toEqual({ ok: false, error: { code: 'host_unavailable', message: 'Not sent: mini is offline', issues: { refusal: 'offline' } } });
     expect(l.link.acts[1].settled).toEqual({ state: 'refused', reason: 'offline' });
 
     // A resume whose first status comes only at the bound: the send is not made at all.
