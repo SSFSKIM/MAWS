@@ -14,15 +14,17 @@ import { hasClosedMarks } from '../../owner/to-human/message-ink';
 import { expandedTurnRows, turnRows } from '../model/derive';
 import { liveBuffer, useTranscriptStore } from '../../stores/transcript';
 import type { Row } from '../model/rows';
+import { AgentMessageRow } from '../view/rows/AgentMessage'; // UX wave U3
 import { AssistantTextRow } from '../view/rows/AssistantText';
 import { GroupRow } from '../view/rows/Group';
 import { LocalCommandRow } from '../view/rows/LocalCommand';
+import { NoticeRow } from '../view/rows/Notice'; // UX wave U3
 import { QuestionRow } from '../view/rows/Question';
 import { UserRow } from '../view/rows/User';
-import { assistantInput, commandInput, groupInput, questionInput, userInput } from './adapters';
+import { arrivalInput, assistantInput, commandInput, groupInput, questionInput, sentInput, userInput } from './adapters';
 import { SurfaceCellLine } from './Tools';
 
-import { useTranscriptContext } from '../view/context';
+import { useDisclosure, useTranscriptContext } from '../view/context';
 import { useTranscriptSurface } from './context';
 
 export function SurfaceUserRow({ row }: { row: Extract<Row, { kind: 'user' }> }) {
@@ -32,6 +34,30 @@ export function SurfaceUserRow({ row }: { row: Extract<Row, { kind: 'user' }> })
   return <SurfaceRow appSessionId={appSessionId} component="UserMessage" {...input} placeholder={<UserRow row={{ ...row, text: '…', attachments: [], placeholders: [] }} />}>
     {(props) => <UserRow row={props.text === row.text ? row : { ...row, text: props.text, placeholders: [], attachments: row.attachments.filter((a) => a.kind !== 'text') }} />}
   </SurfaceRow>;
+}
+
+// UX wave U3 (UC-3; the U3a document, M5): a message line and a notice ask the engine's UserMessage site where the
+// engine's own transcript draws their carrier through it, and a message the agent sent asks ToolUse (adapters.ts says
+// which); MAWS's line is the native drawing, so no hook, or one that keeps the engine's drawing, leaves it, and a mod's
+// own drawing replaces it. The tab's revealed jump target asks nothing. The line's words are MAWS's reading of the
+// carrier and stay as they are under a rewrite of the site's text.
+export function SurfaceAgentMessageRow({ row }: { row: Extract<Row, { kind: 'agent_message' }> }) {
+  const { appSessionId, state, turn } = useTranscriptSurface(row);
+  const [expanded] = useDisclosure(`line:${row.id}`);
+  const revealed = state?.ui.revealed;
+  const sent = sentInput(row, turn, revealed);
+  if (sent) return <SurfaceRow appSessionId={appSessionId} component="ToolUse" {...sent} placeholder={<span className="text-fg-faint">…</span>}>{() => <AgentMessageRow row={row} />}</SurfaceRow>;
+  const input = arrivalInput(row, turn, { revealed, expanded });
+  if (!input) return <AgentMessageRow row={row} />;
+  return <SurfaceRow appSessionId={appSessionId} component="UserMessage" {...input} placeholder={<span className="text-fg-faint">…</span>}>{() => <AgentMessageRow row={row} />}</SurfaceRow>;
+}
+
+export function SurfaceNoticeRow({ row }: { row: Extract<Row, { kind: 'notice' }> }) {
+  const { appSessionId, state, turn } = useTranscriptSurface(row);
+  const [expanded] = useDisclosure(`line:${row.id}`);
+  const input = arrivalInput(row, turn, { revealed: state?.ui.revealed, expanded });
+  if (!input) return <NoticeRow row={row} />;
+  return <SurfaceRow appSessionId={appSessionId} component="UserMessage" {...input} placeholder={<span className="text-fg-faint">…</span>}>{() => <NoticeRow row={row} />}</SurfaceRow>;
 }
 
 function useAssistantInput(row: Extract<Row, { kind: 'assistant_text' }>) {

@@ -8,7 +8,7 @@ import type { AgentId, ApiMessageId, EventId, MessageUuid, RequestId, SessionId,
 import type { AppSessionId } from '@shared/graph/ids'; // E3
 import { toolUseOf } from '@shared/graph/ids';
 import { rowId, turnId as turnIdOf } from './keys';
-import type { CellDetail, Row, RowId, Spill, SubagentRef, SubagentStatus, ToolCategory, TurnId } from './rows';
+import type { CellDetail, CellId, Row, RowId, Spill, SubagentRef, SubagentStatus, ToolCategory, TurnId } from './rows';
 import { appendStripped, stripAnsi } from '@shared/wire/ansi';
 import { parseAskSteer } from '@shared/maws/ask'; // E1
 import type { AskAnswer } from '@shared/maws/tools'; // E1
@@ -100,6 +100,10 @@ export interface TranscriptUi {
   view?: 'report' | 'transcript';
   reportOpenTurns?: Set<TurnId>;
   // P2-C end
+  // UX wave U3 (UC-3; the U3a document, Interfaces F): the target of the tab's last jump (`jumpTo`, the cell jump,
+  // `jumpToMessage`), each replacing the last; absent before the first. Where a mod draws a fold MAWS cannot open, the
+  // row or cell it names asks no mod's site and MAWS draws it; U2 reads it for its own asks and may clear it by its rule.
+  revealed?: RowId | CellId;
 }
 
 // A receipt's undo state, driven by the view through the RewindInterface: the dry run's answer (asked once per
