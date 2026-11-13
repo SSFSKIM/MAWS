@@ -1,13 +1,19 @@
 // Browser-safe palette ranking shared by the renderer and desk. Each caller supplies its origins and owns its recents.
 import { fuzzyScore } from './fuzzy';
 export type SlashRankItem<Origin extends string> = { name: string; description: string; origin: Origin };
-function tier(query: string, item: SlashRankItem<string>): number | null {
+/** The tier of a name's own match for a lowercased query (exact, prefix, substring, subsequence), or null when the name does not match. */
+export function nameTier(query: string, itemName: string): number | null {
   if (query === '') return 0;
-  const name = item.name.toLowerCase();
+  const name = itemName.toLowerCase();
   if (name === query) return 0;
   if (name.startsWith(query)) return 1;
   if (name.includes(query)) return 2;
   if (fuzzyScore(query, name) !== null) return 3;
+  return null;
+}
+function tier(query: string, item: SlashRankItem<string>): number | null {
+  const byName = nameTier(query, item.name);
+  if (byName !== null) return byName;
   if (item.description.toLowerCase().split(/[^\p{L}\p{N}]+/u).some((word) => word.startsWith(query))) return 4;
   return null;
 }

@@ -16,7 +16,7 @@ import { useMachines } from '../../stores/machines';
 import { useSessions } from '../../stores/sessions';
 import type { PopupHandle, PopupItem } from './popup';
 import { resetChosen } from './rank';
-import { SlashPalette } from './SlashPalette';
+import { detailSide, detailTop, SlashPalette } from './SlashPalette';
 import { WIDGET_COMMANDS } from './widgets';
 
 const LOCAL = at('app-slash') as AppSessionId;
@@ -159,6 +159,30 @@ describe('the highlighted row’s popover', () => {
     } finally {
       useSessions.setState({ listed: new Map(), listedMachines: new Set() });
     }
+  });
+});
+
+// The popover's place against the window's edges (decision 17 g): never off the window, on either side.
+describe('the popover stays inside the window', () => {
+  it('opens to the right where 256px fit there, else to the left where they fit there', () => {
+    expect(detailSide({ left: 20, right: 300 }, 1200)).toEqual({ side: 'right', width: 256 });
+    expect(detailSide({ left: 700, right: 1100 }, 1200)).toEqual({ side: 'left', width: 256 });
+    expect(detailSide({ left: 270, right: 940 }, 1200)).toEqual({ side: 'left', width: 256 }); // right has 246, left 256
+  });
+
+  it('where neither side fits, takes the side with more room and narrows to it', () => {
+    // an 800px window, the list from 200 to 600: 186px on either side (the gap 6, the margin 8)
+    expect(detailSide({ left: 200, right: 600 }, 800)).toEqual({ side: 'right', width: 186 });
+    expect(detailSide({ left: 240, right: 640 }, 800)).toEqual({ side: 'left', width: 226 });
+    expect(detailSide({ left: 100, right: 560 }, 800)).toEqual({ side: 'right', width: 226 });
+    expect(detailSide({ left: 2, right: 798 }, 800)).toEqual({ side: 'right', width: 0 }); // no room at all: nothing past the edges
+  });
+
+  it('stands at the row’s height, kept inside the window’s height', () => {
+    expect(detailTop(300, 340, 100, 900)).toBe(40); // at the row
+    expect(detailTop(300, 840, 100, 900)).toBe(492); // its bottom 8px above the window's
+    expect(detailTop(300, 280, 400, 600)).toBe(-108); // too tall for the room below: lifted to fit
+    expect(detailTop(300, 280, 900, 600)).toBe(-292); // taller than the window: its top 8px below the window's
   });
 });
 

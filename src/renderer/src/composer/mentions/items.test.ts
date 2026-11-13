@@ -214,6 +214,19 @@ describe('the order with nothing typed', () => {
     expect(paletteRows('remote', items).map((r) => r.name)).not.toContain('__remote-workflow');
   });
 
+  it('never reveals a row that cannot run for a word of its description alone, where a row that can run still matches so', () => {
+    const items = slashItems(autoRouted(), new Set());
+    // the declared /fork, /rewind and /export (no panel registered) speak of "the conversation"; the engine's /compact too
+    const rows = paletteRows('conversation', items).map((r) => r.name);
+    expect(rows).toContain('compact');
+    for (const name of ['fork', 'rewind', 'export']) expect(rows, name).not.toContain(name);
+    // /fork refused on another machine, every other panel drawn: the same word lists /rewind and /export, not /fork
+    const far = paletteRows('conversation', slashItems(seeded(), everyPanel, { fork: 'Not on another machine yet: forking a session' })).map((r) => r.name);
+    expect(far).toEqual(expect.arrayContaining(['rewind', 'export']));
+    expect(far).not.toContain('fork');
+    expect(paletteRows('fo', slashItems(seeded(), everyPanel, { fork: 'Not on another machine yet: forking a session' })).map((r) => r.name)).toContain('fork'); // by its name
+  });
+
   it('keeps a name chosen earlier in this run first with nothing typed', () => {
     const items = slashItems(seeded(), everyPanel);
     rememberChosen('clear');

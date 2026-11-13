@@ -64,10 +64,27 @@ const fromOf = (item: SlashItem): string | null => (item.origin === 'widget' ? F
 const reasonOf = (item: SlashItem): string | null => (item.action.kind === 'unavailable' ? item.action.hint : null);
 const hasDetail = (item: SlashItem): boolean => item.description !== '' || item.argumentHint !== null || fromOf(item) !== null || reasonOf(item) !== null;
 
+const DETAIL_WIDTH = 256; // the popover's own width (w-64), given up only where neither side of the list has it
+
+// Which side of the list the popover opens on, and its width: the right where it fits, else the left where it fits, else
+// the side with more room, narrowed to that room. `list` is the overlay's box in the window; widths and offsets in px.
+export function detailSide(list: { left: number; right: number }, viewportWidth: number): { side: 'right' | 'left'; width: number } {
+  const right = viewportWidth - MARGIN - (list.right + GAP);
+  const left = list.left - GAP - MARGIN;
+  if (right >= DETAIL_WIDTH) return { side: 'right', width: DETAIL_WIDTH };
+  if (left >= DETAIL_WIDTH) return { side: 'left', width: DETAIL_WIDTH };
+  return right >= left ? { side: 'right', width: Math.max(0, right) } : { side: 'left', width: Math.max(0, left) };
+}
+
+// The popover's top in the overlay: at the row's height, kept inside the window's height.
+export function detailTop(listTop: number, rowTop: number, height: number, viewportHeight: number): number {
+  return Math.max(MARGIN - listTop, Math.min(rowTop - listTop, viewportHeight - MARGIN - height - listTop));
+}
+
 // The popover of the highlighted row, beside the list at that row's height (decision 17 g). It is a child of the popup's
 // own fixed overlay (popup.tsx), positioned absolutely in it, so it takes no place in any layout and moves with the list;
-// it opens to the list's right, or to its left where the window has no room, and stays inside the window. Placed again
-// when the list scrolls and once the overlay itself has been placed.
+// it opens on the side of the list that has room (`detailSide`) and stays inside the window. Placed again when the list
+// scrolls and once the overlay itself has been placed.
 function Detail({ item, rowId }: { item: SlashItem; rowId: string }) {
   const box = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -78,10 +95,11 @@ function Detail({ item, rowId }: { item: SlashItem; rowId: string }) {
     if (!detail || !row || !list || !overlay) return;
     const place = () => {
       const frame = overlay.getBoundingClientRect();
-      const at = row.getBoundingClientRect();
-      const toRight = frame.right + GAP + detail.offsetWidth <= window.innerWidth - MARGIN;
-      const top = Math.max(MARGIN - frame.top, Math.min(at.top - frame.top, window.innerHeight - MARGIN - detail.offsetHeight - frame.top));
-      Object.assign(detail.style, { top: `${top}px`, left: toRight ? `calc(100% + ${GAP}px)` : 'auto', right: toRight ? 'auto' : `calc(100% + ${GAP}px)` });
+      const { side, width } = detailSide(frame, window.innerWidth);
+      const beside = `calc(100% + ${GAP}px)`;
+      Object.assign(detail.style, { width: `${width}px`, left: side === 'right' ? beside : 'auto', right: side === 'left' ? beside : 'auto' });
+      // the height read once the width is set, since a narrower popover wraps to more lines
+      detail.style.top = `${detailTop(frame.top, row.getBoundingClientRect().top, detail.offsetHeight, window.innerHeight)}px`;
     };
     place();
     const placed = requestAnimationFrame(place);
@@ -98,7 +116,7 @@ function Detail({ item, rowId }: { item: SlashItem; rowId: string }) {
       id={DETAIL_ID}
       role="tooltip"
       onMouseDown={(event) => event.preventDefault()} // as the list: the focus stays in the editor
-      className="absolute w-64 rounded-md border border-border-strong bg-bg-overlay p-2 text-ui-sm text-fg"
+      className="absolute w-64 rounded-md break-words border border-border-strong bg-bg-overlay p-2 text-ui-sm text-fg"
     >
       {item.description !== '' && <p className="m-0 line-clamp-10 whitespace-pre-line">{item.description}</p>}
       {item.argumentHint !== null && <p className="m-0 mt-1 font-mono break-words text-fg-faint">{item.argumentHint}</p>}
