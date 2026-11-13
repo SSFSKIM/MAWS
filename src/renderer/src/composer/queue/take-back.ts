@@ -165,7 +165,7 @@ const failedWith = (result: SetResult, words: string): boolean => !('withheld' i
 
 async function setDraft(client: MawsBridge, appSessionId: AppSessionId, draft: Draft | null, replaces: string): Promise<SetResult> {
   if (!isRemoteLaneB(appSessionId)) return client.invoke('session.drafts.set', { appSessionId, draft, replaces });
-  if (readerRowsOf(appSessionId) === 'refused') return { withheld: true }; // that machine keeps no drafts of this member
+  if (readerRowsOf(appSessionId) === 'refused') return { withheld: true }; // the route was heard refused: nothing is sent
   return saveRemoteDraftOnce(client, appSessionId, draft, replaces);
 }
 
@@ -372,14 +372,15 @@ async function settle(appSessionId: AppSessionId, stage: Draft, deps: TakeBackDe
   for (let attempt = 0; ; attempt++) {
     const result = await setDraft(deps.client, appSessionId, draft, replaces);
     if (epoch !== started) return;
-    if (byWriter || ('withheld' in result ? true : result.ok)) return settledAs(appSessionId, loadedInto, draft); // withheld: that machine keeps no drafts, so none is staged there
-    if (failedWith(result, STALE_DRAFT_WORDS)) {
-      // no stage is kept at that revision any more: another mount settled first, or this one's earlier save landed and
-      // its answer was lost. What is kept is taken as a mount takes it: loaded in place of this copy, or carried forward.
+    if (byWriter || (!('withheld' in result) && result.ok)) return settledAs(appSessionId, loadedInto, draft);
+    // Refused as stale (no stage is kept at that revision: another mount settled first, or this one's earlier save landed
+    // and its answer was lost) or as staged (another stage is kept), or not sent (the route was heard refused, which says
+    // nothing of what is kept): what is kept is read, and taken as a mount takes it.
+    if ('withheld' in result || failedWith(result, STALE_DRAFT_WORDS) || failedWith(result, STAGED_DRAFT_WORDS)) {
       const kept = await readDraft(deps.client, appSessionId);
       if (epoch !== started) return;
       if (kept !== undefined && !(stageMark(kept) !== null && kept!.updatedAt === stage.updatedAt)) return reconcile(appSessionId, stage, deps, kept);
-      // a read that failed (or still finds this stage) says nothing: the hold stays and the settle is asked again
+      // a read that failed, or that still finds this stage, says nothing: the hold stays and the settle is asked again
     }
     if (attempt + 1 === SETTLE_TRIES) boxes.get(appSessionId)?.settleLater(replaces, () => void (byWriter = true));
     await new Promise((resolve) => setTimeout(resolve, Math.min(SETTLE_RETRY_MS * 2 ** attempt, SETTLE_RETRY_MAX_MS)));
@@ -395,9 +396,15 @@ function settledAs(appSessionId: AppSessionId, loadedInto: TakeBackBox | undefin
   if (box !== undefined && box !== loadedInto) box.replace(draft === null ? null : (draft.doc as ComposerDoc));
 }
 
-// The settle was answered stale and what is kept was read: a stage another wrote goes forward; otherwise the box takes it.
+// The settle was refused and what is kept was read: the box's copy is superseded either way. A stage another wrote goes
+// forward into the box, emptied first (it was held, so nothing of the person's is lost, and the copy, which the other
+// window may have sent, never becomes editable); otherwise the box takes what is kept.
 function reconcile(appSessionId: AppSessionId, stage: Draft, deps: TakeBackDeps, kept: Draft | null): Promise<void> | void {
-  boxes.get(appSessionId)?.settled();
-  if (kept !== null && stageMark(kept) !== null && kept.updatedAt !== stage.updatedAt) return forward(appSessionId, kept, deps);
-  boxes.get(appSessionId)?.replace(kept === null || kept.doc === null ? null : (kept.doc as ComposerDoc));
+  const box = boxes.get(appSessionId);
+  box?.settled();
+  if (kept !== null && stageMark(kept) !== null && kept.updatedAt !== stage.updatedAt) {
+    box?.replace(null);
+    return forward(appSessionId, kept, deps);
+  }
+  box?.replace(kept === null || kept.doc === null ? null : (kept.doc as ComposerDoc));
 }
