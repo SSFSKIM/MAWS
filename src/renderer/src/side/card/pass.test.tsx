@@ -21,7 +21,8 @@ import { openComment } from '../register';
 import { CommentCardHost, type CardFrame } from './CardHost';
 import { dropSubject, passKey, resetPlaceNotes, useCommentCard } from './store';
 
-const PARENT = at('a1111111-1111-4111-8111-111111111111' as AppSessionId);
+const PARENT_ID = 'a1111111-1111-4111-8111-111111111111' as AppSessionId; // main is asked with the bare id
+const PARENT = at(PARENT_ID);
 const RECORD = '00000000-0000-4000-8000-000000000001';
 const page = (n: number): Anchor => ({ kind: 'artifact-element', locator: `#e${n}`, label: `Dashboard v1 › h${n}`, pageUrl: artifactUrl(RECORD, 1, 'index.html') });
 const SHOT: AnchorScreenshot = { path: '/tmp/crop-1.png', width: 40, height: 20 };
@@ -203,7 +204,7 @@ describe('several comments in one pass', () => {
     pick(2);
     type('Align it left');
     fireEvent.click(sendButton());
-    expect(fake.invoked('side.thread.open')).toEqual([{ appSessionId: PARENT, from: { kind: 'comment', anchor: page(1), text: 'Make it bolder', screenshot: null, more: [{ anchor: page(2), text: 'Align it left', screenshot: null }] } }]);
+    expect(fake.invoked('side.thread.open')).toEqual([{ appSessionId: PARENT_ID, from: { kind: 'comment', anchor: page(1), text: 'Make it bolder', screenshot: null, more: [{ anchor: page(2), text: 'Align it left', screenshot: null }] } }]);
   });
 });
 
