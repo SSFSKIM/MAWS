@@ -46,9 +46,11 @@ export function promptWritten(state: SendNowState, uuid: MessageUuid, content: u
 }
 
 // A `command_lifecycle` naming a sent-now message: read in the same turn (`started` while a turn is open), withdrawn or
-// dropped, it no longer ends a turn.
+// dropped, it no longer ends a turn. A prompt withdrawn or dropped is never replayed, so its digest goes too.
 export function lifecycleSeen(state: SendNowState, uuid: MessageUuid, lifecycle: string, turnOpen: boolean): void {
-  if ((lifecycle === 'started' && turnOpen) || lifecycle === 'cancelled' || lifecycle === 'discarded' || lifecycle === 'refused') state.sentNow.delete(uuid);
+  const gone = lifecycle === 'cancelled' || lifecycle === 'discarded' || lifecycle === 'refused';
+  if ((lifecycle === 'started' && turnOpen) || gone) state.sentNow.delete(uuid);
+  if (gone) state.written.delete(uuid);
 }
 
 // A host-written prompt the engine started.
