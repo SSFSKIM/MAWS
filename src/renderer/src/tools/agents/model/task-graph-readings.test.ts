@@ -149,13 +149,15 @@ describe('the graph’s readings', () => {
       expect(nestedOf(graph, id('D'))).toEqual({ active: ids(['E']), done: [] });
     });
 
-    it('lists the members of a parent cycle flat rather than lose them', () => {
+    it('lists the members of a parent cycle rather than lose them, the rest under its first member as the tree does', () => {
       const base = graphOf([...agent('A'), ...agent('B')]);
       const a = base.tasks.get(id('A'))!;
       const b = base.tasks.get(id('B'))!;
       const cycle: TaskGraph = { ...base, tasks: new Map(base.tasks).set(id('A'), { ...a, agent: { ...a.agent!, parentAgentId: 'B' as AgentId } }).set(id('B'), { ...b, agent: { ...b.agent!, parentAgentId: 'A' as AgentId } }) };
-      expect(firstLevelAgents(cycle).running).toEqual(ids(['A', 'B']));
-      expect(agentsRunningUnder(cycle, id('A'))).toBe(0);
+      expect(firstLevelAgents(cycle).running).toEqual(ids(['A']));
+      expect(nestedOf(cycle, id('A')).active).toEqual(ids(['B']));
+      expect(agentsRunningUnder(cycle, id('A'))).toBe(1);
+      expect(agentsRunningUnder(cycle, id('B'))).toBe(0);
     });
   });
 
