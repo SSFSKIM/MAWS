@@ -66,11 +66,18 @@ describe('a background task’s end told by an older engine host', () => {
     expect(legacyLines(modern, rows)).toEqual([]);
   });
 
-  it('a modern window loaded from seq 359 draws no older host’s line (the turn at 500 that withheld a report included)', () => {
+  it('a modern window loaded from seq 359 draws no older host’s line at any step (the turn at 500 that withheld a report included)', () => {
     const window = modern.filter((event) => event.seq === null || event.seq >= 359);
-    const rows = rowsOf(withAllExpanded(reduce(window)));
-    expect(legacyLines(window, rows)).toEqual([]);
-    expect(notices(rows).filter((line) => line === FAILURES[1])).toHaveLength(1); // the arrival's, at 578
+    let state: TranscriptState = createState(null, null);
+    for (let at = 0; at < window.length; ) {
+      const seq = window[at]!.seq;
+      let end = at;
+      while (end < window.length && window[end]!.seq === seq) end += 1;
+      state = applyEvents(state, window.slice(at, end));
+      expect(legacyLines(window, rowsOf(withAllExpanded(state))), `at seq ${seq}`).toEqual([]);
+      at = end;
+    }
+    expect(notices(rowsOf(withAllExpanded(state))).filter((line) => line === FAILURES[1])).toHaveLength(1); // the arrival's, at 578
   });
 
   it('an older host’s history followed by one modern arrival keeps every line of that history', () => {
