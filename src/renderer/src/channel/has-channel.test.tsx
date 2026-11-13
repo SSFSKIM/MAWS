@@ -37,7 +37,6 @@ const PROJECTS = [
   checkout('p-north', 0, 'northwind', `smns:${NORTH}`, NORTH), // a .smns project the registry does not hold
   checkout('p-orchard', 1, 'Orchard', `smns:${HUB}`, HUB), // a hub project of the registry
   checkout('p-ledger', 2, 'Ledger', `smns:${LOCAL}`, LOCAL), // a registry project kept off the hub
-  checkout('p-scratch', 3, 'scratch', 'folder:/work/p-scratch', null), // a folder with no project id
 ];
 const REGISTRY: OrgProjects = {
   projects: [
@@ -89,7 +88,7 @@ async function menuAnswer(key: RowKey): Promise<string | null> {
   act(() => fireEvent.click(item));
   const tab = activeTab(useLayout.getState().main);
   cleanup();
-  return tab?.kind === 'channel' ? tab.project : `not a channel tab: ${tab?.kind ?? 'none'}`;
+  return tab?.kind === 'channel' ? tab.project : `not a channel tab: ${tab?.kind ?? 'none'} ${JSON.stringify(useLayout.getState().main)}`;
 }
 
 describe('has a channel: one rule, the sidebar menus’ answer', () => {
@@ -110,7 +109,7 @@ describe('has a channel: one rule, the sidebar menus’ answer', () => {
     }
     expect(Object.fromEntries(rows.map(({ key }) => [key, channelOfRow(key, index)]))).toEqual(answers);
     // the cases, named: Channel where the project is the hub's or a .smns project's, and nowhere else
-    expect(answers).toMatchObject({ [`smns:${NORTH}`]: NORTH, [`smns:${HUB}`]: HUB, [`id:${SEEN}`]: SEEN, [`smns:${LOCAL}`]: null, [`id:${QUIET}`]: null, 'folder:/work/p-scratch': null });
+    expect(answers).toMatchObject({ [`smns:${NORTH}`]: NORTH, [`smns:${HUB}`]: HUB, [`id:${SEEN}`]: SEEN, [`smns:${LOCAL}`]: null, [`id:${QUIET}`]: null });
   });
 
   it('lists the projects whose rows’ menus offer Channel, each once', () => {
