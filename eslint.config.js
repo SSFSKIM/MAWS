@@ -107,14 +107,21 @@ const mawsDatesPlugin = { rules: { 'one-locale': builtinRules.get('no-restricted
 // P4-W2L end
 // UX wave U10a start (l6-artifacts-07 (a)): every Y.Doc MAWS makes comes from the constructors of
 // src/artifacts/yjs/doc.ts, which cancel Yjs's post-apply formatting clean-up, a write nobody made. Inside the binding
-// module, the only place `@y/y` is imported, a doc built elsewhere is refused; tests and fixtures build Yjs's own for
-// comparison. The same core rule under its own name, as the one-schema check.
+// module, the only place `@y/y` is imported, a doc built elsewhere is refused; tests build Yjs's own for comparison, and
+// so does one fixture, format-cleanup.fixture.ts (a doc as build F builds one), which only tests and fixtures may import.
+// The same core rules under names of their own, as the one-schema check, so they displace no block's options.
 const ONE_DOC_MESSAGE = 'A Y.Doc is made only by the constructors of src/artifacts/yjs/doc.ts (newDoc, newSuggestionDoc, newDocGcOff), so no doc writes after an apply (l6-artifacts-07 (a)).';
 const ONE_DOC = [
   { selector: "NewExpression[callee.object.name='Y'][callee.property.name='Doc']", message: ONE_DOC_MESSAGE },
   { selector: "NewExpression[callee.name='Doc']", message: ONE_DOC_MESSAGE },
 ];
-const mawsDocsPlugin = { rules: { 'one-doc': builtinRules.get('no-restricted-syntax') } };
+const F_DOC_FIXTURE_MESSAGE = 'src/artifacts/yjs/format-cleanup.fixture.ts builds docs with Yjs\'s defaults, which run the post-apply clean-up (l6-artifacts-07 (a)): only tests and fixtures import it.';
+const F_DOC_FIXTURE = '(?:^|/)format-cleanup\\.fixture(?:\\.ts)?$';
+const F_DOC_FIXTURE_IMPORTS = { patterns: [{ regex: F_DOC_FIXTURE, message: F_DOC_FIXTURE_MESSAGE }] };
+const F_DOC_FIXTURE_DYNAMIC = { selector: `ImportExpression[source.value=/${F_DOC_FIXTURE.replace(/\//g, '.')}/]`, message: F_DOC_FIXTURE_MESSAGE };
+const mawsDocsPlugin = {
+  rules: { 'one-doc': builtinRules.get('no-restricted-syntax'), 'fixture-imports': builtinRules.get('no-restricted-imports'), 'fixture-dynamic-imports': builtinRules.get('no-restricted-syntax') },
+};
 // UX wave U10a end
 // The desk's web app writes its times through the same module, and its counts too (formatCount, formatCompactCount), so
 // there the rule also refuses every toLocaleString, a Date's or a number's, and every Intl.NumberFormat: in a browser
@@ -333,9 +340,15 @@ module.exports = defineConfig(
   // UX wave U10a start: the one-doc rule (above).
   {
     files: ['src/artifacts/yjs/**/*.{ts,tsx}'],
-    ignores: ['src/artifacts/yjs/doc.ts', 'src/**/*.test.{ts,tsx}', 'src/**/*.fixture.ts'],
+    ignores: ['src/artifacts/yjs/doc.ts', 'src/artifacts/yjs/format-cleanup.fixture.ts', 'src/**/*.test.{ts,tsx}'],
     plugins: { 'maws-docs': mawsDocsPlugin },
     rules: { 'maws-docs/one-doc': ['error', ...ONE_DOC] },
+  },
+  {
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/**/*.test.{ts,tsx}', 'src/**/*.fixture.ts'],
+    plugins: { 'maws-docs': mawsDocsPlugin },
+    rules: { 'maws-docs/fixture-imports': ['error', F_DOC_FIXTURE_IMPORTS], 'maws-docs/fixture-dynamic-imports': ['error', F_DOC_FIXTURE_DYNAMIC] },
   },
   // UX wave U10a end
   // DC3 start: the desk hub's protocol module (apps/desk-hub/src/protocol/) is imported by the Worker, the web app, and
