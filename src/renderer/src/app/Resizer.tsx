@@ -38,9 +38,19 @@ export interface ResizerProps {
 }
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
-// The document's mark of a drag in progress, read by the rule that keeps frames from taking the drag's events.
+// The document's mark of a drag in progress, read by the rule that keeps frames from taking the drag's events. One fact
+// of the page with as many owners as there are live drags (two pointers make two), so it is a count, kept here: a drag
+// adds one at its press and takes it off at its end or its separator's unmount, and the mark goes at zero (Addendum 8).
 export const RESIZING_ATTRIBUTE = 'data-resizing';
-const markResizing = (on: boolean) => document.documentElement.toggleAttribute(RESIZING_ATTRIBUTE, on);
+let liveDrags = 0;
+function dragStarted(): void {
+  liveDrags += 1;
+  document.documentElement.setAttribute(RESIZING_ATTRIBUTE, '');
+}
+function dragEnded(): void {
+  liveDrags -= 1;
+  if (liveDrags === 0) document.documentElement.removeAttribute(RESIZING_ATTRIBUTE);
+}
 
 export function Resizer({
   label,
@@ -62,9 +72,10 @@ export function Resizer({
   className = '',
 }: ResizerProps) {
   const drag = useRef<{ pointerId: number; from: number; start: number; restore: number } | null>(null);
-  // A separator removed mid-drag (its group closed) takes its mark with it.
+  // A separator removed mid-drag (its group closed) takes its drag off the count. `drag` is set exactly while this
+  // separator's one drag is counted, so it never takes off more than it added.
   useEffect(() => () => {
-    if (drag.current) markResizing(false);
+    if (drag.current) dragEnded();
   }, []);
   const vertical = orientation === 'vertical';
   const coordinate = (event: PointerEvent) => (vertical ? event.clientX : event.clientY);
@@ -96,7 +107,7 @@ export function Resizer({
   const end = (event: PointerEvent<HTMLDivElement>) => {
     if (drag.current?.pointerId !== event.pointerId) return;
     drag.current = null;
-    markResizing(false);
+    dragEnded();
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
 
@@ -116,8 +127,8 @@ export function Resizer({
         if (event.button !== 0) return;
         event.preventDefault(); // no text selection while dragging
         event.currentTarget.setPointerCapture?.(event.pointerId);
+        if (!drag.current) dragStarted(); // a second press during a drag takes the drag over, counted once
         drag.current = { pointerId: event.pointerId, from: coordinate(event), start: value, restore: restoreValue ?? value };
-        markResizing(true);
       }}
       onPointerMove={(event) => {
         const current = drag.current;

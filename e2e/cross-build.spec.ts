@@ -2153,7 +2153,8 @@ test('(side column, from the peer) two surfaces the peer stacked open as two gro
     await expect(sideGroup(run.page, 'upper'), 'the pin in view with no session shown').toHaveAttribute('aria-label', 'Terminal', { timeout: 20_000 });
     await expect(sideGroup(run.page, 'lower')).toHaveCount(0);
     await expect(sideTab(sideGroup(run.page, 'upper'), /^Terminal/), 'the pin selected').toHaveAttribute('aria-selected', 'true');
-    await expect(panelResizer(run.page), 'a width dragged under the peer is not the narrow one').toHaveAttribute('aria-valuenow', String(NARROW_AUTOMATIC_WIDTH));
+    // a terminal is wide (UX wave U8b, Addendum 6): the pin in view draws the peer's dragged width, read as the wide one
+    await expect(panelResizer(run.page), 'the pin, a terminal, at the wide width the peer dragged').toHaveAttribute('aria-valuenow', String(dragged));
     await expect
       .poll(() => {
         const { added } = sideOf(s, address);
@@ -2173,12 +2174,23 @@ test('(side column, from the peer) two surfaces the peer stacked open as two gro
     await openSurface(run.page, PINNED_TOOL);
     const holder = (await titlesIn(run.page, 'upper')).includes(PINNED_TOOL) ? 'upper' : 'lower';
     const other = holder === 'upper' ? 'Files' : 'Review';
+    // a width dragged under the peer is not the narrow one (Addendum 8): with narrow tools alone in view, Session info in
+    // one group and Background tasks brought into the other, the column is at the narrow automatic width; Background
+    // tasks then closed, which gives its group's tab back to view
+    const otherGroup = holder === 'upper' ? 'lower' : 'upper';
+    await sideGroup(run.page, otherGroup).getByRole('button', { name: 'Add a tool', exact: true }).click();
+    await run.page.getByRole('menuitem', { name: 'Background tasks', exact: true }).click();
+    await expect(sideGroup(run.page, otherGroup), 'Background tasks in the other group').toHaveAttribute('aria-label', 'Background tasks');
+    await expect(sideGroup(run.page, holder), `${PINNED_TOOL} in view`).toHaveAttribute('aria-label', PINNED_TOOL);
+    await expect(panelResizer(run.page), 'a width dragged under the peer is not the narrow one').toHaveAttribute('aria-valuenow', String(NARROW_AUTOMATIC_WIDTH));
+    await sideGroup(run.page, otherGroup).getByRole('button', { name: 'Close Background tasks', exact: true }).click();
+    await expect(sideTab(sideColumn(run.page), 'Background tasks'), 'Background tasks closed').toHaveCount(0);
     await sideTab(sideGroup(run.page, holder), other).click();
     await expect(sideGroup(run.page, holder)).toHaveAttribute('aria-label', other);
     await expect(sideTab(sideColumn(run.page), PINNED_TOOL), `${PINNED_TOOL} a tab`).toHaveCount(1);
     expect(run.maws.consoleErrors()).toEqual([]);
     await s.quit(run);
-    said.push(`  ${here.label}: the pin with no session; Files above, Review below, the terminal in the strip, no ${PINNED_TOOL}; wide ${dragged}; ${PINNED_TOOL} opened again`);
+    said.push(`  ${here.label}: the pin with no session, a terminal, drawn at the wide ${dragged}; Files above, Review below, the terminal in the strip, no ${PINNED_TOOL}; wide ${dragged}; ${PINNED_TOOL} opened again, and with Background tasks beside it the column drawn at the narrow ${NARROW_AUTOMATIC_WIDTH}, then Background tasks closed`);
 
     // one more launch: no first read again, so the tab not in view stands
     const again = await s.launch();
@@ -2338,8 +2350,9 @@ test('(side column, to the peer) two groups, a hidden column, a folded card and 
     expect(sideOf(s, address).added, `the three keys as ${here.label} left them, through ${peer.label}’s write`).toEqual(left);
     said.push(`  ${peer.label}: its cards, then Review at ${wide} and the artifact on its record; wrote its two surfaces; with no session shown, the two pins with the second selected; the three keys kept`);
 
-    // this build: the peer's two surfaces as two groups, the wide width automatic, the narrow one 380 as stored (the
-    // terminal brought into view above, beside the artifact below, keeps the column wide: Addendum 6)
+    // this build: the peer's two surfaces as two groups, the wide width automatic, the narrow one 380 as stored and as
+    // drawn (the terminal brought into view above, beside the artifact below, keeps the column wide: Addendum 6; a
+    // narrow tool brought into view above draws it at 380: Addendum 8)
     const back = await s.launch();
     await s.ready(back.page);
     await showSession(back.page, id, session);
@@ -2353,9 +2366,20 @@ test('(side column, to the peer) two groups, a hidden column, a folded card and 
     await expect(sideGroup(back.page, 'upper'), 'the terminal above').toHaveAttribute('aria-label', 'Terminal');
     await expect(panelResizer(back.page), 'a terminal in view keeps the column wide (UX wave U8b, Addendum 6)').toHaveAttribute('aria-valuenow', String(wide));
     expect(sideOf(s, address).added['panelTools.widths'], 'the narrow width still 380').toEqual({ version: 1, wide: null, narrow: F_AUTOMATIC_WIDTH });
+    // drawn, not only stored (Addendum 8): a narrow tool in view above, beside the artifact below, and the column is 380
+    await sideGroup(back.page, 'upper').getByRole('button', { name: 'Add a tool', exact: true }).click();
+    await back.page.getByRole('menuitem', { name: 'Background tasks', exact: true }).click();
+    await expect(sideGroup(back.page, 'upper'), 'Background tasks above').toHaveAttribute('aria-label', 'Background tasks');
+    await expect(panelResizer(back.page), 'the column drawn at the stored narrow width').toHaveAttribute('aria-valuenow', String(F_AUTOMATIC_WIDTH));
+    // the view put back: Background tasks closed, the terminal in view above and the column wide again
+    await sideGroup(back.page, 'upper').getByRole('button', { name: 'Close Background tasks', exact: true }).click();
+    await expect.poll(() => sortedTitlesIn(back.page, 'upper')).toEqual(['Review', 'Terminal', 'Terminal']);
+    await sideTab(sideGroup(back.page, 'upper'), /^Terminal/).first().click();
+    await expect(sideGroup(back.page, 'upper'), 'the terminal above again').toHaveAttribute('aria-label', 'Terminal');
+    await expect(panelResizer(back.page), 'wide again').toHaveAttribute('aria-valuenow', String(wide));
     expect(back.maws.consoleErrors()).toEqual([]);
     await s.quit(back);
-    said.push(`  ${here.label} again: Review above, the artifact below, wide automatic (${wide}), the terminal wide too, narrow 380 stored`);
+    said.push(`  ${here.label} again: Review above, the artifact below, wide automatic (${wide}), the terminal wide too; Background tasks above drawn at the stored narrow 380, then closed`);
     record(said);
   });
 });
