@@ -1,23 +1,22 @@
-// The usage popover's account actions (W6, E1; W6 route executor): ClaudeUsage's Route requests here, Add, Reconnect and
+// The usage panel's account actions (W6, E1; W6 route executor): ClaudeUsage's Route requests here, Add, Reconnect and
 // Remove (not Switch this Mac, which signs out running sessions), which main runs through ClaudeUsage's loopback control
 // API (`settings.usageControls`, `settings.usageAction`). MAWS never writes ClaudeUsage's files (its relay rewrites
 // pins.json from memory, r4-usage §4.3): an action is ClaudeUsage's to carry out, and C7's reader follows its files. The
-// popover renders whatever `useUsageControls` answers and does not change. While the API does not answer, every action
-// is unavailable under one hint, as before the API existed. Route and Remove ask in MAWS first, on the confirm sheet,
-// which takes the focus and so closes the popover; it opens again on either answer. Add and Reconnect open ClaudeUsage's
-// sign-in sheet and say so. A refusal's message is the popover's notice, shown in the hint's place while it is open; an
-// action that ends after its popover closed leaves none.
-// After a Route the popover shows the new routing account at once, from ClaudeUsage's answer, until the reader catches up
-// (the usage store holds it over the snapshots until then, `applyRoute`).
+// panel renders whatever `useUsageControls` answers and does not change. While the API does not answer, every action
+// is unavailable under one hint, as before the API existed. Route and Remove ask in MAWS first, on the confirm sheet.
+// UX wave U7b (O-47): the panel is Settings › Usage, and the sheet opens over the Settings dialog, which stays; nothing
+// reopens after either answer. Add and Reconnect open ClaudeUsage's sign-in sheet and say so. A refusal's message is the
+// panel's notice, shown in the hint's place while it is shown; an action that ends after its panel closed leaves none.
+// After a Route the panel and the ring show the new routing account at once, from ClaudeUsage's answer, until the reader
+// catches up (the usage store holds it over the snapshots until then, `applyRoute`).
 import { useEffect } from 'react';
 import { create } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 import type { UsageAction, UsageActionResult, UsageControlsAnswer } from '@shared/ipc/schema';
 import { USAGE } from '../accounts/copy';
 import { ipc } from '../ipc/client';
-import { confirm, type ConfirmRequest } from '../sessions/dialogs';
+import { confirm } from '../sessions/dialogs';
 import { useUsage } from '../stores/usage';
-import { useUsagePopover } from './popover';
 
 export interface UsageControl<A> {
   available(arg: A): boolean; // per account: ClaudeUsage's own `canRoute`, `canReconnect` and `canRemove`
@@ -47,10 +46,10 @@ export const useUsageControlState = create<ControlState>()(() => ({ answer: null
 
 const NOT_ANSWERED: UsageControlsAnswer = { available: false, reason: 'no_route', state: null };
 let asks = 0;
-let shown = 0; // which popover a notice belongs to: one more each time a popover closes
+let shown = 0; // which panel a notice belongs to: one more each time a panel closes
 
-// Main checks again (`settings.usageControls`) when the popover opens and on each usage change while it is open; the
-// latest ask wins.
+// Main checks again (`settings.usageControls`) when the panel is shown and on each usage change while it is; the latest
+// ask wins.
 export async function refreshUsageControls(): Promise<void> {
   const ask = ++asks;
   const result = await ipc.invoke('settings.usageControls', undefined);
@@ -58,8 +57,8 @@ export async function refreshUsageControls(): Promise<void> {
   if (ask === asks) useUsageControlState.setState({ answer: result.ok ? result.value : NOT_ANSWERED });
 }
 
-// `started`: what the action says while it runs and after it succeeds; a refusal's message replaces it, in the popover
-// the action started from only (a Route or Remove starts from the one its sheet's answer opened).
+// `started`: what the action says while it runs and after it succeeds; a refusal's message replaces it, in the panel the
+// action started from only (a Route or Remove starts once its sheet is answered).
 async function perform(action: UsageAction, started: string | null): Promise<UsageActionResult> {
   const from = shown;
   useUsageControlState.setState({ busy: true, notice: started });
@@ -71,22 +70,16 @@ async function perform(action: UsageAction, started: string | null): Promise<Usa
   return answer;
 }
 
-async function ask(request: ConfirmRequest): Promise<boolean> {
-  const yes = await confirm(request);
-  useUsagePopover.getState().setOpen(true);
-  return yes;
-}
-
 const emailOf = (uuid: string) => useUsage.getState().snapshot?.accounts.find((a) => a.uuid === uuid)?.email ?? uuid;
 
 async function route({ uuid }: { uuid: string }): Promise<void> {
-  if (!(await ask({ title: USAGE.routeConfirm.title(emailOf(uuid)), body: USAGE.routeConfirm.body, confirmLabel: USAGE.route, destructive: false }))) return;
+  if (!(await confirm({ title: USAGE.routeConfirm.title(emailOf(uuid)), body: USAGE.routeConfirm.body, confirmLabel: USAGE.route, destructive: false }))) return;
   const result = await perform({ action: 'route', uuid }, null);
   if (result.ok) useUsage.getState().applyRoute(result.drainTarget ?? uuid, result.drainTargetIsManual);
 }
 
 async function remove({ uuid, email }: { uuid: string; email: string }): Promise<void> {
-  if (!(await ask({ title: USAGE.removeConfirm.title(email), body: USAGE.removeConfirm.body, confirmLabel: USAGE.removeConfirm.label, destructive: true }))) return;
+  if (!(await confirm({ title: USAGE.removeConfirm.title(email), body: USAGE.removeConfirm.body, confirmLabel: USAGE.removeConfirm.label, destructive: true }))) return;
   await perform({ action: 'remove', uuid, confirm: true }, null);
 }
 
@@ -124,7 +117,7 @@ export function useUsageControls(): UsageControls {
     return () => {
       off();
       shown++;
-      useUsageControlState.setState({ notice: null }); // a notice lasts while the popover showing it is open
+      useUsageControlState.setState({ notice: null }); // a notice lasts while the panel showing it is shown
     };
   }, []);
   return controlsOf(state);

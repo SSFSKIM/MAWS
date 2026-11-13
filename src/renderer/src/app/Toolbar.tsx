@@ -1,7 +1,8 @@
 // The toolbar, which is also the window's title bar (`titleBarStyle: 'hiddenInset'`, §3; mockup 01): a drag region
 // with the traffic lights' 78 px clearance and sidebar/Overview toggles across the sidebar's width,
-// the project chip and the focused pane's active tab as the title (with the branch chip on a session), the usage slot,
-// the session actions menu and the panel toggle.
+// the project chip and the focused pane's active tab as the title (with the branch chip on a session), the session
+// actions menu and the panel toggle, then, at the title bar's own right end, the usage slot (UX wave U7b, O-47: the ring,
+// after the surface icons and outside their overflow; on a page too, where it stands at the window's right edge).
 // Every control is `no-drag`, so clicks reach it rather than moving the window.
 // UX wave U7b (docs/doperpowers/plans/2026-11-12-ux-wave-U7-sidebar-title-bar-destinations.md, M5 decision 5): while a
 // page is open the title bar spans to the window's right edge and holds, after the sidebar and Overview buttons, Back and
@@ -28,6 +29,7 @@ import { FolderIcon, Icon, IconButton, SidebarIcon } from './IconButton';
 import { DESTINATION } from '../destination/copy';
 import { PAGE_TITLE_ID } from '../destination/DestinationPage';
 import { useShellGeometry, useShellView } from './shell-view';
+import { useSlot } from './slots';
 import { mountChromeTabs } from '../main/chrome-tabs';
 import { SurfaceRow } from '../panel/SurfaceRow';
 import { runSessionAction, SESSION_ACTIONS, sessionActionsFor, useSessionActionEnabled, type SessionActionId } from './session-actions';
@@ -84,6 +86,9 @@ export function toolbarTitle(
   }
 }
 
+// The room the usage ring takes from the surface icons' count: its 28 px button (UX wave U7b, M7 decision 1).
+const USAGE_RING_ROOM = 28;
+
 export function Toolbar() {
   const sidebar = useLayout((s) => s.regions.sidebar);
   const geometry = useShellGeometry();
@@ -103,7 +108,8 @@ export function Toolbar() {
   const stripRoom = split ? 240 : 180;
   const projectChip = geometry.chrome >= leading + stripRoom + 322;
   const controlsRoom = geometry.chrome - leading - 16 - stripRoom - (projectChip ? 96 : 0);
-  const surfaceIcons = Math.max(0, Math.floor((controlsRoom - 28) / 30));
+  const surfaceIcons = Math.max(0, Math.floor((controlsRoom - 28 - USAGE_RING_ROOM) / 30));
+  const Usage = useSlot('topBarEnd');
 
   return (
     <header data-toolbar className={`${geometry.mainHidden || destination !== null ? 'col-span-3' : 'col-span-2'} row-start-1 flex h-(--toolbar-h) min-w-0 items-center border-b border-border bg-bg select-none [-webkit-app-region:drag]`}>
@@ -138,11 +144,13 @@ export function Toolbar() {
         <div data-chrome-slot="0" className="contents" />
         <div data-chrome-slot="1" className="contents" />
       </div>
-      {destination === null && <div className="ml-auto flex shrink-0 items-center gap-1 px-2">
-        <SurfaceRow maxIcons={surfaceIcons} overflowControls={<>
+      <div className="ml-auto flex shrink-0 items-center gap-1 px-2">
+        {destination === null && <SurfaceRow maxIcons={surfaceIcons} overflowControls={<>
           {appSessionId && <SessionMenuOverflow appSessionId={appSessionId} />}
-        </>} />
-      </div>}
+        </>} />}
+        {/* eslint-disable-next-line react-hooks/static-components -- the usage slot is registered once at composition */}
+        <Usage />
+      </div>
     </header>
   );
 }

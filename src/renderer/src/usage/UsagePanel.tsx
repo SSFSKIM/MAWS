@@ -1,11 +1,15 @@
-// The usage popover (W6, E1; charter §5.2 and D-17 as amended 2026-10-01): a copy of ClaudeUsage's panel
-// (PanelView.swift, top to bottom) over C7's one read of its files: the header with the newest reading's age, the note,
-// the one hint for the actions or their notice (`controls.ts`), every account in its grid (AccountCard, the Accounts
-// tab's view model) with its saved sessions, what it served in the relay's last ten minutes, its limit bars and resets
-// and its actions, the add row, the Codex accounts, and the footer: the routing toggle's state, the relay's line and
-// its health over the last ten minutes, Refresh and the hand-off to ClaudeUsage's own panel. The geometry is
-// ClaudeUsage's (PanelLayout.swift): 380 px and one column, 680 px and two at three or more accounts, at most 700 px
-// tall, one column again when the window leaves less room. Tokens only.
+// The usage panel (W6, E1; charter §5.2 and D-17 as amended 2026-10-01): a copy of ClaudeUsage's panel (PanelView.swift,
+// top to bottom) over C7's one read of its files: the header with the newest reading's age, the note, the one hint for
+// the actions or their notice (`controls.ts`), every account in its grid (AccountCard, the Accounts tab's view model)
+// with its saved sessions, what it served in the relay's last ten minutes, its limit bars and resets and its actions,
+// the add row, the Codex accounts, and the footer: the routing toggle's state, the relay's line and its health over the
+// last ten minutes, Refresh and the hand-off to ClaudeUsage's own panel. Tokens only.
+// UX wave U7b (O-47; docs/doperpowers/plans/2026-11-12-ux-wave-U7-sidebar-title-bar-destinations.md, M7 decision 4): the
+// panel is Settings › Usage's content (`settings-tab/UsageSection.tsx`), the title bar's ring opening only a compact
+// popover. It takes the section's measure: no width and no horizontal padding of its own, so it starts at the section's
+// label column; its title reads "Claude accounts" beside "Codex accounts", "Usage" being the section's name. Each grid has
+// two columns from two accounts on where the panel is at least 640 px wide, and one account is one column whose limit
+// rows keep their own width; the panel decides that itself and no longer reads the model's `columns`.
 import { useEffect, useId, type ReactNode } from 'react';
 import { AccountCard } from '../accounts/AccountCard';
 import { ACCOUNTS, CLAUDE_USAGE_README_URL, USAGE } from '../accounts/copy';
@@ -23,12 +27,13 @@ const ACTION =
 const BUTTON =
   'rounded-sm border border-border-strong bg-bg-hover px-2 py-1 text-ui-sm font-medium whitespace-nowrap outline-accent hover:bg-bg-active focus-visible:outline-2 disabled:border-border disabled:bg-transparent disabled:font-normal disabled:text-fg-faint';
 const LINK = 'rounded-sm px-1 text-ui-sm whitespace-nowrap text-fg outline-accent hover:underline focus-visible:outline-2';
-// ClaudeUsage's grid (AccountGridLayout.swift:6–49): two columns 16 px apart when the panel is at least 620 px inside,
-// rows as tall as their tallest cell, a divider above every row after the first.
+// ClaudeUsage's grid (AccountGridLayout.swift:6–49): two columns 16 px apart, rows as tall as their tallest cell, a divider
+// above every row after the first. UX wave U7b: two columns from two accounts on, where the panel is at least 640 px wide.
 const GRID_1 = 'grid grid-cols-1 gap-x-4 [&>*:nth-child(n+2)]:border-t [&>*:nth-child(n+2)]:border-border';
-const GRID_2 = `${GRID_1} @min-[620px]:grid-cols-2 @min-[620px]:[&>*:nth-child(2)]:border-t-0`;
+const GRID_2 = `${GRID_1} @min-[640px]:grid-cols-2 @min-[640px]:[&>*:nth-child(2)]:border-t-0`;
 
-function Grid({ columns, children }: { columns: 1 | 2; children: ReactNode }) {
+function Grid({ count, children }: { count: number; children: ReactNode }) {
+  const columns = count >= 2 ? 2 : 1;
   return (
     <div data-columns={columns} className={columns === 2 ? GRID_2 : GRID_1}>
       {children}
@@ -94,7 +99,7 @@ export function UsagePanel() {
   } else if (model!.rows.length === 0) accounts = <p className="m-0 py-3 text-ui-sm text-fg-muted">{ACCOUNTS.empty}</p>;
   else {
     accounts = (
-      <Grid columns={model!.columns}>
+      <Grid count={model!.rows.length}>
         {model!.rows.map((row) => (
           <AccountCard key={row.uuid} row={row} now={now} actions={actionsOf(row)} />
         ))}
@@ -103,12 +108,9 @@ export function UsagePanel() {
   }
 
   return (
-    <div
-      data-usage-panel
-      className={`@container p-4 text-ui text-fg ${model?.columns === 2 ? 'w-[min(680px,var(--radix-popover-content-available-width))]' : 'w-[min(380px,var(--radix-popover-content-available-width))]'}`}
-    >
+    <div data-usage-panel className="@container text-ui text-fg">
       <div className="flex items-baseline gap-2.5">
-        <h2 className="m-0 text-ui font-semibold">{USAGE.title}</h2>
+        <h4 className="m-0 text-ui font-semibold">{USAGE.claudeTitle}</h4>
         {waiting && (
           <span role="status" className="text-ui-sm text-fg-muted">
             {ACCOUNTS.waiting}
@@ -140,12 +142,12 @@ export function UsagePanel() {
 
       {model?.codex && (
         <section aria-label={USAGE.codexTitle} data-codex className="mt-3 border-t border-border pt-3">
-          <h3 className="m-0 text-ui font-semibold">{USAGE.codexTitle}</h3>
+          <h4 className="m-0 text-ui font-semibold">{USAGE.codexTitle}</h4>
           <p className="m-0 mt-0.5 text-ui-sm text-fg-muted">{USAGE.codexNote}</p>
           {model.codex.length === 0 ? (
             <p className="m-0 mt-2 text-ui-sm text-fg-muted">{USAGE.codexEmpty}</p>
           ) : (
-            <Grid columns={model.columns}>
+            <Grid count={model.codex.length}>
               {model.codex.map((row) => (
                 <AccountCard key={row.uuid} row={row} now={now} />
               ))}

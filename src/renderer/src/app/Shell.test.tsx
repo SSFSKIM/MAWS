@@ -149,15 +149,27 @@ describe('shell frame', () => {
     expect(region('main').inert).toBe(false);
   });
 
-  it('mounts the usage slot in the sidebar footer, not in the chrome row', () => {
+  // UX wave U7b (O-47; its execution document, M7 decision 1): the ring at the title bar's own right end, after the surface
+  // icons and outside their overflow; on a page, where the surface icons are not drawn, still at the end; the sidebar's
+  // foot holds the gear alone.
+  it('mounts the usage slot at the title bar’s right end, after the surface icons, with a page open too; the sidebar’s foot holds the gear alone', () => {
     registerSlot('topBarEnd', () => <button type="button">Usage</button>);
     renderShell();
     const toolbar = screen.getByRole('banner');
-    expect(within(toolbar).queryByRole('button', { name: 'Usage' })).toBeNull();
-    const usage = within(region('sidebar')).getByRole('button', { name: 'Usage' });
-    expect(usage.closest('footer')).toBeTruthy();
-    expect(usage.closest('[data-sidebar-usage]')!.nextElementSibling).toBe(within(region('sidebar')).getByRole('button', { name: 'Workspace settings' }));
-    expect(within(toolbar).getByRole('toolbar', { name: 'Session surfaces' })).toBeTruthy();
+    const usage = within(toolbar).getByRole('button', { name: 'Usage' });
+    const surfaces = within(toolbar).getByRole('toolbar', { name: 'Session surfaces' });
+    expect(surfaces.compareDocumentPosition(usage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(surfaces.contains(usage)).toBe(false);
+    const last = (el: Element): Element => (el.lastElementChild ? last(el.lastElementChild) : el);
+    expect(last(toolbar)).toBe(usage);
+    const foot = region('sidebar').querySelector('footer')!;
+    expect(within(foot).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Workspace settings']);
+    expect(within(region('sidebar')).queryByRole('button', { name: 'Usage' })).toBeNull();
+
+    act(() => useLayout.getState().openDestination({ kind: 'library' }));
+    expect(within(toolbar).queryByRole('toolbar', { name: 'Session surfaces' })).toBeNull();
+    expect(last(toolbar)).toBe(within(toolbar).getByRole('button', { name: 'Usage' }));
+    expect(within(toolbar).getByRole('button', { name: 'Usage' }).closest('[inert]')).toBeNull();
   });
 
   it('uses remembered widths only for open regions, leaving no empty panel column', () => {

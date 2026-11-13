@@ -28,11 +28,12 @@ import { VoiceSection } from './VoiceSection'; // E9
 import { BrowserSection } from './BrowserSection'; // E4a
 import { ArtifactsSection } from './ArtifactsSection'; // P3-D
 import { OrgSection } from './org/OrgSection'; // P5 O8 M1; M4a: the Org page, split by group
+import { UsageSection } from './UsageSection'; // UX wave U7b (O-47): the usage panel, after Gateway
 import { openCustomize } from '../customize/open';
 import type { SettingsResult } from './search';
 import { landingOf, MARK, RowMark, scrollTopToLand, SettingsSearch } from './SettingsSearch';
 
-export const SETTINGS_SECTIONS = ['appearance', 'notifications', 'keyboard', 'voice', 'browser', 'artifacts', 'sessions', 'gateway', 'engine', 'supervisor', 'org'] as const;
+export const SETTINGS_SECTIONS = ['appearance', 'notifications', 'keyboard', 'voice', 'browser', 'artifacts', 'sessions', 'gateway', 'usage', 'engine', 'supervisor', 'org'] as const; // UX wave U7b: 'usage'
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 type Group = 'app' | 'sessions';
 // the index's and the body's order
@@ -45,6 +46,7 @@ export const SECTION_TABLE: readonly { group: Group | null; section: SettingsSec
   { group: 'app', section: 'artifacts' },
   { group: 'sessions', section: 'sessions' },
   { group: 'sessions', section: 'gateway' },
+  { group: 'sessions', section: 'usage' }, // UX wave U7b (O-47)
   { group: 'sessions', section: 'engine' },
   { group: 'sessions', section: 'supervisor' },
   { group: null, section: 'org' },
@@ -212,6 +214,8 @@ function SectionBody({ section, settings, showKeyboard }: { section: SettingsSec
       return <SessionsSection settings={settings} />;
     case 'gateway':
       return <GatewaySection settings={settings} />;
+    case 'usage':
+      return <UsageSection />; // UX wave U7b (O-47): the usage panel, which the title bar's ring links to
     case 'engine':
       return <EngineSection settings={settings} />;
     case 'supervisor':

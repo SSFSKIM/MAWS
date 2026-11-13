@@ -3,7 +3,8 @@
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { join } from 'node:path';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PreloadBridge, Settings } from '@shared/ipc/schema';
 import { machineSettingsDefaults, SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { useGateway } from '../gateway/store';
@@ -24,6 +25,9 @@ import { resetBudgetStore, useBudget } from '../budget/store';
 import { useSessions } from '../stores/sessions';
 import { REL } from '../test-support/relative-time';
 // C12 end
+import type { UsageSnapshot } from '@shared/usage/types'; // UX wave U7b (O-47): Settings › Usage
+import { ClaudeUsageReader } from '../../../main/usage/claude-usage-reader';
+import { useUsage } from '../stores/usage';
 
 let b: SettingsBridge;
 
@@ -48,11 +52,18 @@ const more = (of: HTMLElement) => within(of).getByRole('button', { name: /^(More
 // the machine's settings answered (by a daemon before the machine route), so the Gateway section's read does not fail
 const ANSWERED = { 'machineSettings.get': () => ({ settings: machineSettingsDefaults(), version: 1 }) };
 
+let usageFixture: UsageSnapshot;
+beforeAll(async () => {
+  const reader = new ClaudeUsageReader({ dir: join(__dirname, '../../../../test/fixtures/claude-usage'), emit: () => {}, log: () => {}, now: () => Date.parse('2026-09-29T07:36:17Z') });
+  usageFixture = await reader.snapshot([]);
+  reader.stop();
+});
 beforeEach(() => {
   useGateway.setState({ relay: null, directLogin: new Map() });
 });
 afterEach(() => {
   cleanup();
+  useUsage.setState({ snapshot: null, routed: null });
   useSettings.setState({ state: null });
   useNotices.setState({ notices: [] });
   useAttention.setState({ notificationDelivery: null });
@@ -61,18 +72,19 @@ afterEach(() => {
 });
 
 describe('settings tab writes one field per row', () => {
-  // U11a M9 (l8-settings-06, A5): everyday preferences first, the engine last; Org under the rule with no heading of its own
-  const ORDER = ['Appearance', 'Notifications', 'Keyboard', 'Voice', 'Browser', 'Artifacts', 'Sessions', 'Gateway', 'Engine', 'Supervisor', 'Org'];
+  // U11a M9 (l8-settings-06, A5): everyday preferences first, the engine last; Org under the rule with no heading of its own.
+  // UX wave U7b (O-47): Usage after Gateway.
+  const ORDER = ['Appearance', 'Notifications', 'Keyboard', 'Voice', 'Browser', 'Artifacts', 'Sessions', 'Gateway', 'Usage', 'Engine', 'Supervisor', 'Org'];
   it('groups the index under App and Sessions & engine, Org and Customize after them, the footer kept; the body in the same order', () => {
     renderView(SETTINGS_DEFAULTS_V21, null, ANSWERED);
     expect(within(index()).getAllByRole('button').map((x) => x.textContent)).toEqual([...ORDER, 'Customize ›']);
     // the headings stand before their sections, and nothing heads Org
-    expect([...index().querySelectorAll('[data-settings-group], button')].map((el) => el.textContent)).toEqual(['App', ...ORDER.slice(0, 6), 'Sessions & engine', ...ORDER.slice(6, 10), 'Org', 'Customize ›']);
+    expect([...index().querySelectorAll('[data-settings-group], button')].map((el) => el.textContent)).toEqual(['App', ...ORDER.slice(0, 6), 'Sessions & engine', ...ORDER.slice(6, 11), 'Org', 'Customize ›']);
     expect(index().textContent).toContain("Stored in MAWS's own Application Support folder. Nothing here writes into ~/.claude.");
     const sections = [...document.querySelectorAll('[data-settings-body] section[aria-labelledby^="settings-"]')].map((s) => s.getAttribute('aria-labelledby'));
     expect(sections).toEqual(SECTION_TABLE.map(({ section }) => `settings-${section}`));
     expect(SECTION_TABLE.map(({ section }) => SECTIONS[section])).toEqual(ORDER);
-    expect(SECTION_TABLE.map(({ group }) => group)).toEqual(['app', 'app', 'app', 'app', 'app', 'app', 'sessions', 'sessions', 'sessions', 'sessions', null]);
+    expect(SECTION_TABLE.map(({ group }) => group)).toEqual(['app', 'app', 'app', 'app', 'app', 'app', 'sessions', 'sessions', 'sessions', 'sessions', 'sessions', null]);
     expect([...SETTINGS_SECTIONS]).toEqual(SECTION_TABLE.map(({ section }) => section));
   });
 
@@ -440,6 +452,26 @@ describe('settings tab writes one field per row', () => {
     fireEvent.change(font, { target: { value: 'MesloLGM Nerd Font Mono' } });
     fireEvent.keyDown(font, { key: 'Enter' });
     await vi.waitFor(() => expect(refusals).toBe(2));
+  });
+
+  // UX wave U7b (O-47; its execution document, M7 decisions 4 and 7): the whole usage panel as the section's content
+  it('Usage holds the grid with the account actions under the title “Claude accounts”, in the section’s measure', async () => {
+    useUsage.setState({ snapshot: usageFixture });
+    vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(() => {});
+    renderView(SETTINGS_DEFAULTS_V21, 'usage', ANSWERED);
+    expect(within(index()).getByRole('button', { name: 'Usage' }).getAttribute('aria-current')).toBe('true');
+    const usage = region('Usage');
+    expect(within(usage).getByRole('heading', { name: 'Usage' }).id).toBe('settings-usage');
+    expect(within(usage).getByRole('heading', { name: 'Claude accounts' })).toBeTruthy();
+    expect(within(usage).getByRole('heading', { name: 'Codex accounts' })).toBeTruthy();
+    const marked = usage.querySelector<HTMLElement>('[data-settings-row="usage.accounts"]')!;
+    expect(marked.getAttribute('data-settings-state')).toBe('default');
+    const panel = marked.querySelector<HTMLElement>('[data-usage-panel]')!;
+    expect(panel.className).not.toMatch(/(^|\s)(p|px|w)-/);
+    expect(panel.querySelector('[data-columns]')!.getAttribute('data-columns')).toBe('2');
+    expect(within(panel).getAllByRole('button', { name: 'Remove account…' })).toHaveLength(5);
+    expect(within(panel).getByRole('button', { name: 'Add account…' })).toBeTruthy();
+    await vi.waitFor(() => expect(b.calls.map((c) => c.name)).toContain('settings.usageControls'));
   });
 
   it('opens at the section it is given', () => {

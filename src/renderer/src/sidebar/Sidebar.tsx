@@ -22,7 +22,6 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useReducer,
 import { FolderIcon, GearIcon, IconButton, SortIcon } from '../app/IconButton';
 import { openCustomize, openProjects } from '../customize/open';
 import { useChordHint } from '../app/IconButton'; // C11
-import { useSlot } from '../app/slots';
 import { NEW_CHAT, newChat, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { runAction, useActionEnabled } from '../keymap/actions-runtime'; // C11: the footer's gear opens Settings
 import { ipc } from '../ipc/client';
@@ -694,16 +693,12 @@ function SidebarSkeleton() {
   );
 }
 
+// UX wave U7b (O-47): the gear alone; the usage reading is the title bar's ring.
 function Footer() {
-  const Usage = useSlot('topBarEnd');
   const settings = useActionEnabled('settings.open'); // C11
   const chord = useChordHint('settings.open'); // C11
   return (
     <footer className="flex min-h-[43px] items-center gap-2 border-t border-border px-4 py-[7px] text-ui-sm text-fg-muted">
-      <div data-sidebar-usage className="flex min-w-0 items-center">
-        {/* eslint-disable-next-line react-hooks/static-components -- the usage slot is registered once at composition */}
-        <Usage />
-      </div>
       {/* C11 start: the gear opens the Settings tab (settings.open) once C11's handler is registered */}
       <button
         type="button"

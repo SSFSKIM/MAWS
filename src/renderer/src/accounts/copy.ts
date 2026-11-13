@@ -1,6 +1,6 @@
 // The accounts' words (C11 execution document, Interfaces "Accounts tab"; mockup 06 vignette 01), shown since W6 in the
-// top bar's usage popover, the Accounts tab having retired into it. ClaudeUsage owns sign-in, reconnect and removal
-// (D-19).
+// top bar's usage popover, the Accounts tab having retired into it, and since UX wave U7b (O-47) in Settings › Usage, the
+// title bar's ring opening a compact popover. ClaudeUsage owns sign-in, reconnect and removal (D-19).
 
 export const ACCOUNTS = {
   openClaudeUsage: 'Open ClaudeUsage ↗',
@@ -48,6 +48,11 @@ export const USAGE = {
   pillNoReading: (account: string) => `Usage · no readings yet for ${account}`,
   pillNoData: 'Usage · ClaudeUsage has no data',
   title: 'Claude Usage',
+  // UX wave U7b (O-47): the title bar's ring opens a compact popover; the whole panel is Settings › Usage
+  popoverTitle: 'Usage', // the popover's heading and accessible name
+  codexMark: 'Codex', // at the right of a Codex account's name line in the popover
+  settingsLink: 'Usage settings',
+  claudeTitle: 'Claude accounts', // the panel's own title in Settings › Usage, beside `codexTitle`
   updated: (ago: string) => `updated ${ago}`,
   note: 'Usage includes all machines. Activity below is from this Mac.',
   controlsUnavailable: "Routing controls arrive when ClaudeUsage exposes its control route; use ClaudeUsage's own panel for now",
