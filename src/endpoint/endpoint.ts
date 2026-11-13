@@ -94,7 +94,7 @@ import { EndpointOrg, type OrgChange } from './org-sync';
 import { PlaneA } from './plane-a';
 import { PlaneB } from './plane-b';
 import { PlaneFeeds, type OwnersRead } from './plane-feeds';
-import { EndpointPolicy, MachineSetup, settingsDefaultMode } from './policy';
+import { aboveCeiling, EndpointPolicy, MachineSetup, settingsDefaultMode } from './policy';
 import { completeProvisioning, provisionInto, type DelegatedInput } from './provision';
 import { retireInto, type Retired } from './retire';
 import { owns } from './grades';
@@ -215,8 +215,17 @@ export class Endpoint implements EndpointModule {
   get registryRead(): RegistryRead {
     return this.registry;
   }
+  /**
+   * The UX wave (U9, M2): whether the machine's ceiling, as its policy stands now, refuses a session started from another
+   * machine in `mode`: what the services hold a fork from another machine to where they allocate it (mawsd hands it them).
+   */
+  aboveCeiling(mode: string): boolean {
+    return aboveCeiling(mode, this.policy.current(), this.#settingsMode);
+  }
   /** P5 O8 M6b: the local door, this machine's own app's record acts and policy read, served by `mawsd` (local-door.ts). */
   readonly local: LocalDoor;
+  /** The machine's `defaultMode`, which a `settings` ceiling reads (the user's settings, or a suite's). */
+  readonly #settingsMode: () => string;
   /** What `start` subscribed to on mawsd's seam, let go at `stop`. */
   readonly #unseam: Array<() => void> = [];
   readonly #options: EndpointOptions;
@@ -348,6 +357,7 @@ export class Endpoint implements EndpointModule {
         if (this.#services === null) return Promise.reject(new Error('the endpoint has not started'));
         return this.#services.dispatch(owner, name, input);
       },
+      hold: (reason) => this.#services?.hold(reason) ?? (() => {}), // U9: the listing rule's reads, an operation's hold
       behind: () => void this.#syncAfter(),
       // P5 O8 M7b: lane A's to-human entries, to the project channel's journal in the spine
       channel: { record: (entry) => this.#services?.channel.record(entry) },
@@ -404,6 +414,7 @@ export class Endpoint implements EndpointModule {
     this.checkouts = authorization.checkouts ?? (options.projects === undefined ? this.rl10.members : anyCheckout(this.rl10.members, options.projects));
     const setupHome = authorization.setup;
     const setup = new MachineSetup(setupHome === undefined ? undefined : () => setupHome); // P5 O7 M9: the authorizer's and the folder list's
+    this.#settingsMode = authorization.settingsMode ?? (() => settingsDefaultMode(homedir()));
     this.authorizer = new Authorizer({
       ref: () => this.#services?.machine.ref ?? null,
       org: () => {
@@ -412,7 +423,7 @@ export class Endpoint implements EndpointModule {
       },
       rights: (member) => this.#rights(member),
       policy: () => this.policy.current(),
-      settingsMode: authorization.settingsMode ?? (() => settingsDefaultMode(homedir())),
+      settingsMode: this.#settingsMode,
       records: authorization.records ?? this.rl10.members,
       checkouts: this.checkouts,
       checkoutBounds: this.checkoutBounds,
@@ -603,6 +614,7 @@ export class Endpoint implements EndpointModule {
       records: recordSource,
       machineOwners: () => this.#machineOwners(),
       recordFor: (report) => this.listings.recordFor(report),
+      recordSays: (listingId) => this.rl10.members.recordSays(listingId), // U9: a lane B listing follows its record
       ranks: (member) => this.authorizer.ranks(member, this.deps.now()),
       sessionSafe,
       leases: this.leases, // P5 O7 M5c
@@ -719,6 +731,8 @@ export class Endpoint implements EndpointModule {
         this.planeB.event(owner, message);
         this.planeFeeds.event(owner, message);
         this.calls.event(owner, message); // P5 O7 M6: a record moved under an `each-session` call in flight
+        // U9: a lane B session's listing follows its record (archived, its title)
+        if (owner === 'machine' && message.name === 'session.changed') void this.rl10.members.recordChanged((message.payload as { record?: unknown } | null)?.record);
         this.sessionSafe?.event(owner, message); // P5 O7 M5a2: a record moved under an artifact answer being told
         this.laneB.event(owner, message);
         this.streams.event(owner, message);

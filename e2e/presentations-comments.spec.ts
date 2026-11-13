@@ -113,8 +113,9 @@ test('comments on a deck’s elements: the card, the pin through a move, a resiz
   await expect(deck.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
   const toolbar = deck.getByRole('toolbar', { name: 'Deck' });
 
-  // UX2 surfaces are content-sized, so deliberately narrow this editor rather than assuming the default panel is small.
-  // Below the usable stage width the floating card overlays without reserving slide space.
+  // The editor's surface set to 600 px through the real divider rather than assuming the default width (the Artifacts
+  // tool opens at the narrow 360 px since UX wave U8b). Below the usable stage width the floating card overlays without
+  // reserving slide space.
   const editor = deck.locator('[data-deck-editor]');
   const divider = panel.getByRole('separator', { name: 'Resize right panel' });
   const narrowBy = Number(await divider.getAttribute('aria-valuenow')) - 600;

@@ -15,10 +15,18 @@ export interface WireRegistry {
   readonly mainOnly: ReadonlySet<string>; // commands only main sends; the rest are bridged to the renderer
 }
 
-// `satisfies` keeps the check against `WireRegistry`; the annotation names each piece by its own `typeof`, so `typeof REGISTRY`
-// keeps the production names without the compiler writing the whole registry's inferred type out (TS7056 once the UX wave's
-// landings together passed its length).
-export const REGISTRY: { readonly commands: typeof commands; readonly events: typeof events; readonly hostEvents: typeof HOST_EVENTS; readonly ptyHostEvents: typeof PTY_HOST_EVENTS; readonly machineEvents: typeof MACHINE_EVENTS; readonly mainOnly: ReadonlySet<string> } = { commands, events, hostEvents: HOST_EVENTS, ptyHostEvents: PTY_HOST_EVENTS, machineEvents: MACHINE_EVENTS, mainOnly: new Set<string>(MAIN_ONLY_COMMANDS) } satisfies WireRegistry;
+// `satisfies`, not `WireRegistry` as the annotation, so `typeof REGISTRY` keeps the production names. The annotation names
+// the schema's values by `typeof`: the inferred type spelled out grew past what the compiler will write into a declaration
+// (TS7056, at the merge of the UX wave's U11a over U1a and U12a), and the projects are composite.
+type ProductionRegistry = {
+  readonly commands: typeof commands;
+  readonly events: typeof events;
+  readonly hostEvents: typeof HOST_EVENTS;
+  readonly ptyHostEvents: typeof PTY_HOST_EVENTS;
+  readonly machineEvents: typeof MACHINE_EVENTS;
+  readonly mainOnly: ReadonlySet<string>;
+};
+export const REGISTRY: ProductionRegistry = { commands, events, hostEvents: HOST_EVENTS, ptyHostEvents: PTY_HOST_EVENTS, machineEvents: MACHINE_EVENTS, mainOnly: new Set<string>(MAIN_ONLY_COMMANDS) } satisfies WireRegistry;
 
 // Types over a registry R.
 export type NameOf<R extends WireRegistry> = keyof R['commands'] & string;

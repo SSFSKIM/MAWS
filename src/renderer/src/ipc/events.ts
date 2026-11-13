@@ -27,9 +27,11 @@ import { currentTabRetention } from '../keymap/actions-runtime';
 import { useAttention } from '../stores/attention';
 import { createFreshness, type Freshness } from '../stores/freshness';
 import { useLayout } from '../stores/layout';
+import { usePanelHost } from '../panel/host'; // UX wave U8b
 import { useMachines } from '../stores/machines';
 import { useSessions } from '../stores/sessions';
-import { applyRemoteSession, holdsRemoteStatus, keepsRemoteStatus } from '../lane-b/remote-session'; // P5 O7 M2
+import { startLiveWords } from '../lane-b/live-word'; // the UX wave, U9 (S-05)
+import { applyRemoteSession, applyRemoteSettled, holdsRemoteStatus, keepsRemoteStatus } from '../lane-b/remote-session'; // P5 O7 M2; U9 M5: the settled word
 import { machineOfRow, selectOrgIndex, setKeyOfProject, successorOf, type RowKey } from '../stores/org-projects'; // P5 O6 M5; the project registry: successorOf
 import { displayTitle } from '../sessions/title'; // P5 O6 M2: a session tab's last-known title
 import type { RekeyOf } from '../stores/layout-model';
@@ -226,6 +228,9 @@ export function connectShell(
       applyRemoteSession(state);
       if (!holdsRemoteStatus(state)) sessions().forgetStatuses(machineOf(state.address), (appSessionId) => appSessionId !== state.address);
     }),
+    // the UX wave, U9 (M5): main's word that a machine's generation settled, which a history read there waits for
+    on('remote.settled', applyRemoteSettled),
+    startLiveWords(), // the UX wave, U9 (S-05): a remote row's live word, from its open tab's held status
   ];
 
   // Replies apply only while this connection and the machine's link generation are live; the stores' own revisions
@@ -438,7 +443,10 @@ export function connectShell(
     const intents = retention ? await retention.ready : true;
     if (!connected) return;
     if (applied && intents) loadLocal();
-    const { merged } = await stores.layout.getState().hydrate(client, knownTab, { settle: flushNow, rekeyOf, titleOf });
+    // UX wave U8b (its M1, decision 1): the first read of a profile asks which tools take several tabs. Every built-in
+    // tool registers in App's effects, which run in the same commit as this connection's, before any read answers.
+    const multiInstance = (toolId: string) => usePanelHost.getState().tools.get(toolId)?.multiInstance;
+    const { merged } = await stores.layout.getState().hydrate(client, knownTab, { settle: flushNow, rekeyOf, titleOf, multiInstance });
     // U13a (its plan's §G): a stored value whose sets were merged into the one strip; said at each such read
     if (merged && connected) toast({ level: 'info', text: ONE_STRIP_NOTICE, actions: [], dismissible: true });
   });

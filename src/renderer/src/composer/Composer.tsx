@@ -52,6 +52,8 @@ import { isRemoteLaneB, useIsRemoteLaneB, useRemoteSending } from '../lane-b/rem
 import { useReaderClosed } from '../sessions/share/reader'; // board 525
 import { remoteUnavailableOf, useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { useMachineMark } from '../app/machine-mark'; // P5 O7 M2
+import { offlineActs, remoteStandingOf, useRemoteStanding } from '../lane-b/remote-standing'; // the UX wave, U9 (the ticket on a pane kept through a link's loss)
+import { followStop, useStopping } from '../lane-b/stop-act'; // the UX wave, U9 (S-01)
 import { Editor } from './editor/Editor';
 import { serializeDraft, type Serialized } from './editor/serialize';
 import { acquireBeforeMode, precheck, submitHumanSerialized, submitRemoteSerialized, submitSerialized, warn, type Dispatch } from './editor/submit'; // P2-0: X22 for human prompts; P2-A: acquireBeforeMode; P5 O7 M4: submitRemoteSerialized
@@ -224,6 +226,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // P5 O7 M8: why `!` and `#` are greyed for a session on another machine (the mode's command not offered there)
   const bashUnavailable = useRemoteUnavailable(appSessionId, 'session.bash');
   const memoryUnavailable = useRemoteUnavailable(appSessionId, 'session.memoryAppend');
+  const stopping = useStopping(appSessionId); // the UX wave, U9 (S-01): a Stop out for more than 300 ms
+  const linkOffline = offlineActs(useRemoteStanding(appSessionId)); // the UX wave, U9 (the ticket on a pane kept through a link's loss): Send and Stop closed offline
   const decision = submitState({
     status,
     // C10: the setup phase; 2026-11-06: on another machine, its place there (none chosen yet: Send waits)
@@ -235,6 +239,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     heldBy, // P2-A
     driven, // P5 O9 M5
     closed: readerClosed, // board 525
+    stopping, // the UX wave, U9 (S-01)
+    offline: linkOffline, // the UX wave, U9 (the ticket on a pane kept through a link's loss)
     remote: isRemoteLaneB(appSessionId), // P5 O16 M3b fix wave 2
     modeUnavailable: draft.mode === 'bash' ? bashUnavailable : draft.mode === 'memory' ? memoryUnavailable : null, // P5 O7 M8
     // P5 O7 M8 review: a remote send naming PDFs goes as `session.send`, after the running turn (editor/remote-uploads.ts)
@@ -381,6 +387,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     }
     // P2-0: the human seam owns steer-or-send, the acquisition (P2-A) and state refusals. The submit-state table above
     // still draws the button; `!` and `#` keep their existing mode gating and dispatch.
+    if (s.mode === 'send' && offlineActs(remoteStandingOf(appSessionId)) !== null) return false; // the UX wave, U9 (the ticket on a pane kept through a link's loss): Send is closed offline
     // P5 O7 M4: to a session on another machine, its files go up first and the message names their paths there
     if (s.mode === 'send' && controls !== null && isRemoteLaneB(appSessionId)) return submitRemoteSerialized(controls, client, appSessionId, s, attachmentsOf(handle.current?.doc() ?? emptyDoc()), cwd, retry);
     if (s.mode === 'send') return controls !== null && submitHumanSerialized(controls, client, appSessionId, s, retry);
@@ -394,16 +401,11 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     return submitSerialized(client, appSessionId, s, 'send', target, { retry });
   };
 
-  // The plain stop (the Stop button): nothing runs after it (W1)
-  const stop = () =>
-    void controls?.interrupt({ cancelEngineQueued: false, holdEngineQueued: true }).then((result) => {
-      if (!result.ok) console.warn('[composer] session.interrupt failed', result.error);
-    });
+  // The plain stop (the Stop button): nothing runs after it (W1). The UX wave, U9 (S-01): followed, so a failed one says so
+  // and one on its way past 300 ms reads "Stopping…"
+  const stop = () => followStop(appSessionId, () => controls?.interrupt({ cancelEngineQueued: false, holdEngineQueued: true }));
   // Esc's interrupt: a waiting `next` steer runs right after it (W1)
-  const interrupt = () =>
-    void controls?.interrupt({ cancelEngineQueued: false }).then((result) => {
-      if (!result.ok) console.warn('[composer] session.interrupt failed', result.error);
-    });
+  const interrupt = () => followStop(appSessionId, () => controls?.interrupt({ cancelEngineQueued: false }));
   // P5 O16 M3b fix wave 1: the re-attaching session's Stop ends the session (its ladder), as the slow notice says
   const end = () =>
     void client.invoke('session.stop', { appSessionId, reason: 'stop' }).then((result) => {

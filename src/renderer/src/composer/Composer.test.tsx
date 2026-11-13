@@ -10,6 +10,7 @@ import type { OrgKey } from '@shared/machine/org-key'; // P5 O7 M4
 import type { SessionRecord } from '@shared/graph/session';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { PreloadBridge } from '@shared/ipc/schema';
+import type { MachineState } from '@shared/ipc/schema/machines'; // the UX wave, U9 (M3)
 import { REGISTRY } from '@shared/ipc/registry';
 import { addressingOf, bareOf } from '@shared/machine/address';
 import type { TabSet } from '@shared/ipc/schema/layout'; // E9
@@ -49,6 +50,9 @@ import { resetShellStores } from '../test-support/shell-stores';
 import { resetCatalogStore } from '../stores/catalog';
 import { Composer, FILES_FOR_ANOTHER_MACHINE } from './Composer';
 import { ComposerAppKeys } from './ComposerAppKeys';
+import { resetStops } from '../lane-b/stop-act'; // the UX wave, U9 (S-01)
+import { applyLaneAState, resetLaneAStore } from '../stores/lane-a'; // the UX wave, U9 (S-01): a terminal session's Stop
+import { laneAState } from '../lane-a/test-support/lane-a-state';
 import { DockedCardFrame } from './docked/DockedCardFrame';
 import { dockCard, resetDockedCards } from './docked/registry';
 import { docOf, mentionNode, paragraph, textNode } from './editor/doc';
@@ -1455,16 +1459,39 @@ describe('a lane B session on another machine', () => {
     resetReader();
   });
 
-  // The overlay rule: a link down closes nothing (A4 holds the act), so a running turn keeps its Stop, and Stop reaches it
-  it('keeps Stop on a running turn while the machine’s link is down', async () => {
+  // The overlay rule: a link down closes nothing for a minute (A4 holds the act), so while the machine reconnects a running
+  // turn keeps its Stop, and Stop reaches main's hold. The UX wave (U9, M3; the ticket on a pane kept through a link's loss): once the machine is offline, Send and Stop
+  // are disabled with UC-7.5's sentence, and nothing is sent.
+  const runningWithLinkDown = (roster: Pick<MachineState, 'since' | 'generation'>) =>
     act(() => {
+      useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'down', ...roster }]);
       useSessions.setState({ engine: new Map(useSessions.getState().engine).set(R, addressing.output('engine.sessions').lift([status('app-r', { engineState: 'running', turn: humanTurn })], OTHER_MACHINE)[0]!) });
       applyRemoteSession(remoteSessionState(R, { stream: 'paused', link: { state: 'down', carrier: null, refusal: null, member: 'member-1', rights: [] } }));
     });
+  it('keeps Stop on a running turn while the machine reconnects', async () => {
+    runningWithLinkDown({ since: new Date().toISOString(), generation: 1 });
     mount([{ index: 0, id: R }]);
     await waitFor(() => expect(primary().textContent).toBe('Stop'));
+    expect(primary().disabled).toBe(false);
     await act(async () => primary().click());
     await waitFor(() => expect(remote.invoked('session.interrupt')).toHaveLength(1));
+  });
+
+  it('disables Stop and Send with UC-7.5’s sentence while the machine is offline, and Enter sends nothing', async () => {
+    runningWithLinkDown({ since: new Date(Date.now() - 5 * 60_000).toISOString(), generation: 1 });
+    mount([{ index: 0, id: R }]);
+    await waitFor(() => expect(primary().textContent).toBe('Stop'));
+    expect(primary().disabled).toBe(true);
+    expect(primary().title).toContain('Stop is unavailable while mini is offline.');
+    await type('kept for later');
+    await waitFor(() => expect(primary().textContent).toBe('Send'));
+    expect(primary().disabled).toBe(true);
+    expect(primary().title).toContain('Send is unavailable while mini is offline.');
+    await key(editorOf(), { key: 'Enter' });
+    expect(remote.invoked('session.send')).toEqual([]);
+    expect(remote.invoked('session.steer')).toEqual([]);
+    expect(remote.invoked('session.interrupt')).toEqual([]);
+    expect(editorOf().editor.getText(), 'the draft stays').toBe('kept for later');
   });
 
   it('closes the model and mode chips with the overlay’s reason', async () => {
@@ -2140,5 +2167,127 @@ describe('P3-G: a mark-up attached to the session’s draft', () => {
     expect(editorOf().editor.getText()).toBe('keep this thought');
     expect(useComposerStore.getState().attachmentQueue.has(A)).toBe(false);
     expect(useNotices.getState().notices.filter((n) => n.kind === 'toast')).toEqual([]);
+  });
+});
+
+// The UX wave, U9 (S-01; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, M3): a failed Stop, Esc or ⌘.
+// shows one notice, in words by route: on this Mac "Not stopped: " and the error; for a session on another machine
+// main's own sentence (UC-7.5), as it is. A Stop out for more than 300 ms reads "Stopping…" and is disabled until it settles.
+describe('a Stop that fails says so (S-01)', () => {
+  let stops: FakeClient;
+  const notices = () => useNotices.getState().notices.map((n) => n.text);
+  const focusOn = (id: AppSessionId) =>
+    useLayout.setState((s) => ({
+      main: { ...s.main, panes: [{ tabs: [{ id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false }], activeTabId: `session:${id}` }], focusedPane: 0, splitRatio: 0.5 }, // UX wave U13a: one strip
+    }));
+  beforeEach(() => {
+    resetStops();
+    // main's answers, but an interrupt waits for the test
+    stops = fakeClient({ 'session.queue.list': { entries: [], paused: false, pauseReason: null }, 'session.history.list': { entries: [] }, 'session.drafts.get': null, 'session.drafts.set': undefined, 'session.history.append': undefined });
+    window.maws = preloadOf(stops);
+  });
+
+  it('on this Mac, a refused Stop shows one notice: “Not stopped: ” and the error', async () => {
+    busy(A);
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(primary().textContent).toBe('Stop'));
+    await act(async () => primary().click());
+    await act(() => stops.fail('session.interrupt', 'engine-host exited before answering session.interrupt', 'host_unavailable'));
+    await waitFor(() => expect(notices()).toEqual(['Not stopped: engine-host exited before answering session.interrupt']));
+  });
+
+  it('Esc and ⌘. that fail say so the same way, in one notice', async () => {
+    busy(A);
+    focusOn(A);
+    mount([{ index: 0, id: A }], <ComposerAppKeys />);
+    await waitFor(() => expect(primary().textContent).toBe('Stop'));
+    act(() => editorOf().focus());
+    await key(editorOf(), { key: 'Escape' });
+    await act(() => stops.fail('session.interrupt', 'the engine did not answer', 'timeout'));
+    await waitFor(() => expect(notices()).toEqual(['Not stopped: the engine did not answer']));
+    await key(editorOf(), { key: '.', code: 'Period', metaKey: true });
+    await act(() => stops.fail('session.interrupt', 'the engine did not answer again', 'timeout'));
+    await waitFor(() => expect(notices(), 'the one notice, said again').toEqual(['Not stopped: the engine did not answer again']));
+  });
+
+  it('reads “Stopping…”, disabled, once the Stop has been out 300 ms, and Stop again once it settles', async () => {
+    busy(A);
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(primary().textContent).toBe('Stop'));
+    await act(async () => primary().click());
+    expect(primary().textContent, 'not before 300 ms: on this Mac the act normally settles first').toBe('Stop');
+    await waitFor(() => expect(primary().textContent).toBe('Stopping…'), { timeout: 2_000 });
+    expect(primary().disabled).toBe(true);
+    await act(() => stops.reply('session.interrupt', { stillQueued: [], cancelled: [] }));
+    await waitFor(() => expect(primary().textContent).toBe('Stop'));
+    expect(primary().disabled).toBe(false);
+    expect(notices(), 'a Stop that worked says nothing').toEqual([]);
+  });
+
+  it('for a terminal session on this Mac, a refused Stop shows the same notice: “Not stopped: ” and the bridge’s words', async () => {
+    live(A, { record: { holder: { kind: 'terminal', pid: 42 } } });
+    act(() => applyLaneAState(A, laneAState(A, { turn: { running: true, unknown: false } })));
+    try {
+      mount([{ index: 0, id: A }]);
+      await waitFor(() => expect(primary().textContent).toBe('Stop'));
+      await act(async () => primary().click());
+      await act(() => stops.reply('laneA.interrupt', { state: 'refused', code: 'busy', message: 'the terminal is busy' }));
+      await waitFor(() => expect(notices()).toEqual(['Not stopped: the terminal is busy']));
+    } finally {
+      resetLaneAStore();
+    }
+  });
+
+  it('sends no second interrupt from Esc or ⌘. while a Stop has been out past 300 ms', async () => {
+    busy(A);
+    focusOn(A);
+    mount([{ index: 0, id: A }], <ComposerAppKeys />);
+    await waitFor(() => expect(primary().textContent).toBe('Stop'));
+    await act(async () => primary().click());
+    await waitFor(() => expect(primary().textContent).toBe('Stopping…'), { timeout: 2_000 });
+    act(() => editorOf().focus());
+    await key(editorOf(), { key: 'Escape' });
+    await key(editorOf(), { key: '.', code: 'Period', metaKey: true });
+    expect(stops.calls.filter((c) => c === 'invoke session.interrupt'), 'the one Stop out').toHaveLength(1);
+  });
+
+  describe('on another machine', () => {
+    const R = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+    beforeEach(() => {
+      resetRemoteLaneBStore();
+      useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-11-13T09:00:00.000Z', generation: 1, carrier: 'relay' }]);
+      const s = useSessions.getState();
+      useSessions.setState({
+        listed: new Map([[R, { ...remoteRow(OTHER_MACHINE, 'app-r'), appId: R }]]),
+        listedMachines: new Set([OTHER_MACHINE]),
+        records: new Map(s.records).set(R, addressing.output('session.get').lift(record('app-r'), OTHER_MACHINE)!),
+        engine: new Map(s.engine).set(R, addressing.output('engine.sessions').lift([status('app-r', { engineState: 'running', turn: humanTurn })], OTHER_MACHINE)[0]!),
+        recordsVersion: s.recordsVersion + 1,
+      });
+      resetRemoteDrafts();
+      resetReaderRows();
+    });
+
+    it('shows main’s sentence as it is, for a refusal and for the pending sentence of a Stop whose outcome is not known', async () => {
+      mount([{ index: 0, id: R }]);
+      await waitFor(() => expect(primary().textContent).toBe('Stop'));
+      await act(async () => primary().click());
+      await act(() => stops.fail('session.interrupt', 'Not stopped: mini is offline', 'host_unavailable', { refusal: 'offline' }));
+      await waitFor(() => expect(notices()).toEqual(['Not stopped: mini is offline']));
+      await act(async () => primary().click());
+      await act(() => stops.fail('session.interrupt', 'mini took the request but hasn’t confirmed it', 'timeout'));
+      await waitFor(() => expect(notices()).toEqual(['mini took the request but hasn’t confirmed it']));
+    });
+
+    it('sends no interrupt from Esc or ⌘. in the machine’s offline phase, as the button sends none', async () => {
+      useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'down', since: '2026-11-13T09:00:00.000Z', generation: 0 }]);
+      focusOn(R);
+      mount([{ index: 0, id: R }], <ComposerAppKeys />);
+      await waitFor(() => expect(primary().title).toContain('Stop is unavailable while mini is offline.'));
+      act(() => editorOf().focus());
+      await key(editorOf(), { key: 'Escape' });
+      await key(editorOf(), { key: '.', code: 'Period', metaKey: true });
+      expect(stops.calls.filter((c) => c === 'invoke session.interrupt'), 'nothing sent to an offline machine').toEqual([]);
+    });
   });
 });

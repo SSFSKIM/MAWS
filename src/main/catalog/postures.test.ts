@@ -17,10 +17,10 @@ const NO_PRINT = () => null;
 describe('connector postures', () => {
   it('matches each configured server by its endpoint: URL, url_options or url_regex', () => {
     expect(posturesOf([at('my-linear', 'user', 'https://mcp.linear.app/mcp/'), at('data', 'project', 'https://open.example/mcp?key=k'), at('sf', 'local', 'https://acme.snowflakecomputing.com/api/mcp'), at('eu', 'user', 'https://eu.regional.example/mcp')], [LINEAR, OPEN, SNOWFLAKE, REGIONAL], NO_PRINT)).toEqual([
-      { name: 'my-linear', scope: 'user', path: '/cfg/.claude.json', authPosture: 'auth_required', fingerprint: null },
-      { name: 'data', scope: 'project', path: '/cfg/.claude.json', authPosture: 'no_auth', fingerprint: null },
-      { name: 'sf', scope: 'local', path: '/cfg/.claude.json', authPosture: 'auth_required', fingerprint: null },
-      { name: 'eu', scope: 'user', path: '/cfg/.claude.json', authPosture: 'auth_required', fingerprint: null },
+      { name: 'my-linear', scope: 'user', path: '/cfg/.claude.json', authPosture: 'auth_required', fingerprint: null, revision: null },
+      { name: 'data', scope: 'project', path: '/cfg/.claude.json', authPosture: 'no_auth', fingerprint: null, revision: null },
+      { name: 'sf', scope: 'local', path: '/cfg/.claude.json', authPosture: 'auth_required', fingerprint: null, revision: null },
+      { name: 'eu', scope: 'user', path: '/cfg/.claude.json', authPosture: 'auth_required', fingerprint: null, revision: null },
     ]);
   });
 
@@ -44,7 +44,7 @@ describe('connector postures', () => {
     expect(configurationFingerprint(Buffer.alloc(32, 8))({ transport: 'http', url: secret })).not.toBe(a); // keyed per run
     expect(print({ transport: 'stdio', url: null })).toBeNull();
     const [posture] = posturesOf([{ name: 'linear', scope: 'user', path: '/cfg/.claude.json', transport: 'http', url: secret }], [LINEAR], print);
-    expect(posture).toEqual({ name: 'linear', scope: 'user', path: '/cfg/.claude.json', authPosture: 'auth_required', fingerprint: a });
+    expect(posture).toEqual({ name: 'linear', scope: 'user', path: '/cfg/.claude.json', authPosture: 'auth_required', fingerprint: a, revision: null });
     expect(JSON.stringify(posture)).not.toMatch(/SECRET|linear\.app/);
   });
 
@@ -54,5 +54,15 @@ describe('connector postures', () => {
     expect(outer).toMatchObject({ path: '/p/.mcp.json', authPosture: 'no_auth' });
     expect(inner).toMatchObject({ path: '/p/app/.mcp.json', authPosture: 'auth_required' });
     expect(outer!.fingerprint).not.toBe(inner!.fingerprint);
+  });
+
+  // UX wave U11a M8 (§A): the engine host's revision of each configuration, handed to the row beside its posture; main's
+  // own fingerprint is not changed by it, and an engine host of an earlier build answers none
+  it('hands each endpoint’s revision to the row beside its posture, null where the engine host answered none', () => {
+    const print = configurationFingerprint(Buffer.alloc(32, 7));
+    const [stamped, older, none] = posturesOf([{ ...at('fx-own', 'app', 'https://own.example.test/mcp', '/maws/machine-settings.json'), revision: 'rev-1' }, at('linear', 'user', 'https://mcp.linear.app/mcp'), { ...at('process', 'user', null), revision: null }], [LINEAR], print);
+    expect(stamped).toMatchObject({ name: 'fx-own', scope: 'app', revision: 'rev-1', fingerprint: print({ transport: 'http', url: 'https://own.example.test/mcp' }) });
+    expect(older!.revision).toBeNull();
+    expect(none!.revision).toBeNull();
   });
 });

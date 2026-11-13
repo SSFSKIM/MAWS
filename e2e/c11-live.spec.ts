@@ -84,7 +84,7 @@ async function withApp(label: string, env: Record<string, string>, fn: (live: Li
     value(await invoke(page, 'settings.set', { engine: { subagentModel: 'sonnet' } }));
     await fn({ maws, page, main: page.locator('[data-region="main"]'), failures, observe, step });
     observe('consoleErrors', maws.consoleErrors());
-    observe('transcriptLoadFailures', await page.evaluate(() => (window as unknown as C11Window).__c11.seen.filter((t) => t.startsWith('Could not load this transcript'))));
+    observe('transcriptLoadFailures', await page.evaluate(() => (window as unknown as C11Window).__c11.seen.filter((t) => t.startsWith('Couldn’t load this conversation')))); // HYDRATION.failed (transcript/model/copy.ts)
   } finally {
     await page.screenshot({ path: join(scratch.root, `${label}.png`) }).catch(() => undefined);
     await maws.cleanup();
@@ -282,22 +282,27 @@ test('every widget opens with live engine data; controls take effect and are rea
       expect(diff).toContain('c11-live.txt');
     });
 
-    await step('MCP: Reconnect completes; the switch discloses ~/.claude.json and the engine writes the scratch home', async () => {
+    await step('MCP: Reconnect completes; the head says what the switch reaches and the engine writes the scratch home', async () => {
       const w = await openWidget(live, 'mcp');
-      await expect(w).toContainText(/c11probe\s*connected/);
+      // UX wave U11a (§C): one line per connector, its status in words; Reconnect of a connected row in its opened part
+      const row = w.locator('[data-mcp-server="c11probe"]');
+      const state = row.locator('[data-connector-state]');
+      await expect(state).toContainText('Connected');
       const project = () => scratch.claudeJson().projects?.[repo] ?? {};
       const before = { disabled: project().disabledMcpServers ?? null };
-      await w.getByRole('button', { name: 'Reconnect' }).click();
+      await row.locator('button[aria-expanded]').click();
+      await row.getByRole('button', { name: 'Reconnect' }).click();
       await expect(w.getByRole('status')).toHaveText('Reconnected', { timeout: 30_000 });
       const toggle = w.getByRole('switch', { name: 'Enabled: c11probe' });
-      await expect(w).toContainText('Recorded by the engine for this project in ~/.claude.json');
+      await expect(w.locator('[data-widget-note]')).toHaveText(/^Off here is off for every session in .+\.$/);
+      await expect(w.locator('[data-widget-note]')).toHaveAttribute('title', 'The engine records it in ~/.claude.json.');
       await toggle.click();
       await expect(toggle).toHaveAttribute('aria-checked', 'false', { timeout: 30_000 });
-      await expect(w).toContainText(/c11probe\s*disabled/);
+      await expect(row.locator('button[aria-expanded]')).not.toContainText('Connected'); // disabled: the switch says it
       const off = { disabled: project().disabledMcpServers ?? null };
       await toggle.click();
       await expect(toggle).toHaveAttribute('aria-checked', 'true', { timeout: 30_000 });
-      await expect(w).toContainText(/c11probe\s*connected/);
+      await expect(state).toContainText('Connected');
       const on = { disabled: project().disabledMcpServers ?? null };
       observe('mcp', { before, off, on, file: join(scratch.config, '.claude.json') });
       expect(off.disabled).toEqual(['c11probe']);

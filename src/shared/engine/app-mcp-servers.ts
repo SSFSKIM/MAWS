@@ -1,5 +1,5 @@
 // P4-R8 (docs/doperpowers/plans/2026-10-19-p4-smoothing.md, routed as P4-R8): the MCP servers MAWS passes to every
-// session it launches, and only to those: Settings › Engine › MCP servers (settings version 16, `engine.mcpServers`),
+// session it launches, and only to those: Settings › Sessions › MCP servers (settings version 16, `engine.mcpServers`),
 // handed to the engine as `--mcp-config` (X6's `mcpConfig`). An entry is an HTTP server by name and URL. Terminal
 // sessions never see the list: it lives in MAWS's own settings, never in ~/.claude.json.
 //

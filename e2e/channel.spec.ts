@@ -10,6 +10,15 @@
 // line that says so. The window, the stream's head and foot, its to-human entries and the opened exchange's head and foot
 // are attached as PNGs for the architect's look; the case asserts structure only: nothing in the tab is wider than its
 // box, and every action is drawn whole inside its entry. The open answer's weight in bytes of JSON is annotated.
+// UX wave U11a M3 (board 505): under classic scrollbars the footer and a stream row share both edges; in a 420 px column nothing
+// overflows and every row's names give way in one order (the title, the labels, the chip, then the alias, never under
+// twelve characters); and a live channel's composer lines up the same under classic and overlay scrollbars.
+// UX wave U11a M4 (S-09; Interfaces §F, "The footer"): while the org's hub status reads connected, a channel whose own
+// reach is unreachable says "Offline · retrying" after its "As of"; one the hub refused says the refusal with its button
+// and never "retrying"; one never read on this Mac says this Mac has no copy, its footer with no "As of".
+// UX wave U11a M5 (S-10; Interfaces §F, "The Channel's entries" and "The action"): ⌘K's "<project> · channel" with what
+// waits in the project opens the tab; View › Project channel, pressed by its id as an agent would, opens it from a session
+// of the project, bringing the open tab forward, and is greyed while a tab of no project is in front.
 //
 // The channel is seeded where no real log can hold it at once: under MAWS_E2E=1 a harness build's main answers
 // `org.status` and the project's `org.channel.open` from a file the `org.*` schemas admit (src/main/org/channel-fixture.ts),
@@ -21,7 +30,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { ChannelAnswer, ChannelEvent, ChannelHost, ChannelMachine, ChannelSession, OrgMember, OrgStatus } from '../src/shared/ipc/schema/org';
 import { readOrMintMachineRef } from '../src/shared/machine/identity-file';
 import type { MachineRef } from '../src/shared/machine/ref';
@@ -30,6 +39,7 @@ import { CHANNEL } from '../src/renderer/src/channel/copy';
 import { addressed } from './support/address';
 import { actionsNotWhole, addClippedProbes, probeFaults, type ActionEntry } from './support/actions-whole';
 import { launchMaws, REPO_ROOT } from './support/launch';
+import { menu } from './support/menu';
 
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now; a plain build's main lacks the seam.
 const HARNESS_BUILT = !process.env.MAWS_E2E_EXECUTABLE && existsSync(join(REPO_ROOT, 'out/renderer/harness.html'));
@@ -43,6 +53,7 @@ const S2 = 'f1be24ad-29cd-46ce-a59a-cf9764256091';
 const S3 = 'a2cf35be-3ade-46ce-a59a-df0875367102';
 const S4 = 'b3d046cf-4bef-47df-b6ab-e01986478213';
 const WAITING = ['app-3eb04b84', 'app-d095dc75']; // the scenario's permission and question sessions
+const TITLES = ['Approve the shard rerun on the clinical research operations cluster before the nightly window', 'Choose the colours for the migration dashboard']; // theirs, in that order
 const EXCHANGE = 40;
 
 /** Two other machines, as their refs are minted (22 base64url characters). */
@@ -187,7 +198,6 @@ function seededChannel(now: number, local: MachineRef): { status: Extract<OrgSta
 function scenario(): unknown {
   const shell = JSON.parse(readFileSync(join(REPO_ROOT, 'test/fixtures/shell/nine-sessions.json'), 'utf8')) as Record<string, Array<Record<string, unknown>>>;
   const ours = (entry: Record<string, unknown>) => WAITING.includes((entry.appId ?? entry.appSessionId) as string);
-  const titles = ['Approve the shard rerun on the clinical research operations cluster before the nightly window', 'Choose the colours for the migration dashboard'];
   return {
     version: 1,
     projects: [
@@ -200,7 +210,7 @@ function scenario(): unknown {
         org: { key: `smns:${PROJECT}`, name: PROJECT_NAME, source: 'smns', smnsId: PROJECT },
       },
     ],
-    sessions: shell.sessions.filter(ours).map((s, i) => ({ ...s, projectId: PROJECT_ID, title: { text: titles[i], source: 'user' } })),
+    sessions: shell.sessions.filter(ours).map((s, i) => ({ ...s, projectId: PROJECT_ID, title: { text: TITLES[i], source: 'user' } })),
     digests: shell.digests.filter(ours),
     engine: shell.engine.filter(ours),
     attention: shell.attention.filter(ours),
@@ -215,6 +225,89 @@ function overflowing(root: Element): string[] {
   return [root, ...Array.from(root.querySelectorAll('article, section, header, div, p, ol, ul, li, h2, button, [data-channel-party]'))]
     .filter((el) => el.scrollWidth > el.clientWidth)
     .map((el) => `${el.tagName.toLowerCase()}${el.hasAttribute('data-channel-entry') ? `[${el.getAttribute('data-channel-entry')}]` : ''} "${(el.textContent ?? '').slice(0, 60)}" ${el.scrollWidth} > ${el.clientWidth}`);
+}
+
+// board 505 (UX wave U11a M3; the execution document's Interfaces §E): a Channel row's names, measured in the page. A
+// part's whole width is its text's, under its own ceiling where it has one (the chip's 24 characters), so a chip cut at
+// that ceiling holds its whole width and has not given way; its least width is twelve characters for an alias (or its
+// whole, where less), the recipients' floor for a label, and nothing for the others. The rows §E's order governs are the
+// rows that name a session (say rows, exchange rows and their lines, host rows, to-human headers): each holds an alias.
+// A person's words (a `words` row) name a member, not a session: its header is no row of names, though its recipients
+// are drawn as the same label, so it is left out, and a row that names a session without its `Names` group is a fault.
+function measureNames(root: Element) {
+  const RANK: Record<string, number> = { title: 0, label: 1, chip: 2, alias: 3 };
+  const ROW = 'header, button, li > div';
+  const rows = new Set(Array.from(root.querySelectorAll('[data-name-part="alias"]')).map((part) => part.closest(ROW)).filter((row): row is Element => row !== null));
+  const people = Array.from(root.querySelectorAll('[data-channel-entry="words"] header')).filter((row) => row.querySelector('[data-name-part="label"]') !== null).length;
+  const text = (el: HTMLElement) => el.querySelector<HTMLElement>('[data-machine-chip]') ?? el;
+  const width = (el: Element) => el.getBoundingClientRect().width;
+  const ceiling = (el: HTMLElement) => {
+    const max = getComputedStyle(text(el)).maxWidth;
+    return max.endsWith('px') ? Number.parseFloat(max) : Infinity;
+  };
+  const whole = (el: HTMLElement) => Math.min(text(el).scrollWidth, ceiling(el));
+  const twelve = (el: HTMLElement) => {
+    const probe = document.createElement('span');
+    probe.style.cssText = 'position: absolute; visibility: hidden; display: block; width: 12ch';
+    el.append(probe);
+    const px = probe.getBoundingClientRect().width;
+    probe.remove();
+    return px;
+  };
+  const least = (el: HTMLElement) => {
+    const kind = el.getAttribute('data-name-part');
+    if (kind === 'alias') return Math.min(twelve(el), whole(el));
+    if (kind === 'label') return Math.min(Number.parseFloat(getComputedStyle(el).minWidth) || 0, whole(el));
+    return 0;
+  };
+  const gaveWay = (el: HTMLElement) => width(el) + 1 < whole(el);
+  /** Two boxes on one line of a row: their boxes overlap in height. */
+  const sameLine = (a: Element, b: Element) => {
+    const [x, y] = [a.getBoundingClientRect(), b.getBoundingClientRect()];
+    return x.top < y.bottom && y.top < x.bottom;
+  };
+  const order: string[] = [];
+  const lines: string[] = [];
+  const wrapped: string[] = [];
+  let cappedBesideTitle = 0;
+  for (const row of rows) {
+    const name = `${row.tagName.toLowerCase()} "${(row.textContent ?? '').slice(0, 40)}"`;
+    const parts = Array.from(row.querySelectorAll<HTMLElement>('[data-name-part]')).filter((part) => part.closest(ROW) === row);
+    for (const part of parts) {
+      const kind = part.getAttribute('data-name-part')!;
+      if (kind === 'alias' && width(part) + 1 < least(part)) order.push(`${name} alias: ${width(part)} px, under its ${least(part)}`);
+      if (!gaveWay(part)) continue;
+      for (const before of parts) {
+        if (RANK[before.getAttribute('data-name-part')!]! < RANK[kind]! && width(before) > least(before) + 1) order.push(`${name} ${kind} gave way while its ${before.getAttribute('data-name-part')} holds ${width(before)} px`);
+      }
+    }
+    const title = parts.find((part) => part.getAttribute('data-name-part') === 'title');
+    if (title !== undefined && width(title) > 1 && parts.some((part) => part.getAttribute('data-name-part') === 'chip' && text(part).scrollWidth > ceiling(part) && !gaveWay(part))) cappedBesideTitle++;
+    // The names never split between lines; whatever the row moves to another line is a fixed part, never a name.
+    const names = row.querySelector(':scope > [data-names]');
+    if (names === null) {
+      lines.push(`${name}: its names are not one group`);
+      continue;
+    }
+    const visible = parts.filter((part) => width(part) > 0);
+    for (const part of visible) if (!sameLine(part, visible[0]!)) lines.push(`${name}: its ${part.getAttribute('data-name-part')} is on another line than its ${visible[0]!.getAttribute('data-name-part')}`);
+    const moved = Array.from(row.children).filter((child) => child !== names && width(child) > 0 && !sameLine(child, names));
+    for (const child of moved) if (child.querySelector('[data-name-part]') !== null) lines.push(`${name}: a name is outside its group`);
+    if (moved.length > 0) wrapped.push(`${name}: ${moved.map((child) => `"${(child.textContent ?? '').trim().slice(0, 24)}" ${child.getBoundingClientRect().top < names.getBoundingClientRect().top ? 'above' : 'under'}`).join(', ')} the names`);
+  }
+  return { order, lines, wrapped, cappedBesideTitle, people };
+}
+
+/** A box's left and right edges, in CSS pixels. */
+const edgesOf = (locator: Locator) =>
+  locator.evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    return { left: box.left, right: box.right };
+  });
+/** Two boxes share both edges, to within half a pixel. */
+async function expectSameEdges(a: Locator, b: Locator, message: string): Promise<void> {
+  const [x, y] = [await edgesOf(a), await edgesOf(b)];
+  expect(Math.max(Math.abs(x.left - y.left), Math.abs(x.right - y.right)), `${message}: ${JSON.stringify(x)} against ${JSON.stringify(y)}`).toBeLessThan(0.5);
 }
 
 /** An action lies inside its entry, or its card. */
@@ -293,6 +386,9 @@ test('channel: a seeded project channel offline, its exchange of 40 opened, its 
       await expect(toHuman.and(page.locator(`[data-machine="${local}"]`))).toHaveCount(2);
 
       await expect.poll(() => log.evaluate((el) => (el as HTMLElement).offsetWidth - el.clientWidth), { message: "the stream's scrollbar takes width (classic scrollbars)" }).toBeGreaterThan(0);
+      // board 505: the footer reserves the stream's gutter too, so its column is the rows'.
+      await expectSameEdges(channel.locator('[data-channel-offline]'), channel.locator('[data-channel-entry="say"]').first(), "the offline footer and a stream row share both edges under classic scrollbars");
+      await test.info().attach('channel-footer-offline-classic', { body: await channel.locator('[data-channel-offline]').screenshot(), contentType: 'image/png' });
       await test.info().attach('channel-window', { body: await page.screenshot(), contentType: 'image/png' });
       await scrollLog(page, 'foot');
       await test.info().attach('channel-foot', { body: await channel.screenshot(), contentType: 'image/png' });
@@ -316,6 +412,11 @@ test('channel: a seeded project channel offline, its exchange of 40 opened, its 
       await test.info().attach('channel-exchange-foot', { body: await page.screenshot(), contentType: 'image/png' });
 
       expect(await channel.evaluate(overflowing), 'nothing in the Channel tab is wider than its box').toEqual([]);
+      const atDefault = await channel.evaluate(measureNames);
+      // a person's directed words (the seed's refused word to the second session) beside the agents' rows: not a row of names
+      expect(atDefault.people, "a person's directed words are in the stream beside the agents' rows").toBeGreaterThan(0);
+      expect(atDefault.order, "every row's names give way in §E's order").toEqual([]);
+      expect(atDefault.lines, "every row's names stay on one line").toEqual([]);
       expect(await channel.getByRole('button').count(), 'the seeded channel offers its actions').toBeGreaterThan(0);
       expect(await channel.evaluate(actionsNotWhole, ENTRY), 'every action is drawn whole inside its entry').toEqual([]);
       // ...and the check sees a clipped action when there is one
@@ -323,6 +424,192 @@ test('channel: a seeded project channel offline, its exchange of 40 opened, its 
       const probed = await channel.evaluate(actionsNotWhole, ENTRY);
       await channel.evaluate((root) => root.querySelectorAll('[data-probe]').forEach((probe) => probe.remove()));
       expect(probeFaults(probed), `the check names every clipped probe and not the mirror: ${probed.join('; ')}`).toEqual([]);
+
+      // board 505: a wide row, where a long machine name is cut at its chip's 24 characters while the title beside it still
+      // shows: the chip holds its whole width there and has given no way, so the order holds (the check's own case).
+      await channel.evaluate((el) => void ((el as HTMLElement).style.width = '1100px'));
+      await expect.poll(() => channel.evaluate((el) => Math.round(el.getBoundingClientRect().width))).toBe(1100);
+      const wide = await channel.evaluate(measureNames);
+      expect(wide.cappedBesideTitle, 'a row holds a chip cut at its 24 characters beside a title that shows').toBeGreaterThan(0);
+      expect(wide.order, "in a wide Channel every row's names give way in §E's order").toEqual([]);
+      expect(wide.lines, 'in a wide Channel every row is one line').toEqual([]);
+      expect(wide.wrapped, 'in a wide Channel no row wraps').toEqual([]);
+
+      // board 505: in a column about 420 px wide (a split pane's) no row overflows and the names give way in the one order:
+      // the long alias, title and machine of the seed's second session meet there, the exchange opened. A row too narrow
+      // for its names' minimums and its fixed parts moves the fixed parts after the names under them; the names never split.
+      await channel.evaluate((el) => void ((el as HTMLElement).style.width = '420px'));
+      await expect.poll(() => channel.evaluate((el) => Math.round(el.getBoundingClientRect().width))).toBe(420);
+      await scrollLog(page, 'top');
+      await test.info().attach('channel-420-head', { body: await channel.screenshot(), contentType: 'image/png' });
+      await exchange.evaluate((el) => el.scrollIntoView({ block: 'start', behavior: 'instant' }));
+      await test.info().attach('channel-420-exchange', { body: await channel.screenshot(), contentType: 'image/png' });
+      await toHuman.first().evaluate((el) => el.scrollIntoView({ block: 'start', behavior: 'instant' }));
+      await test.info().attach('channel-420-to-human', { body: await channel.screenshot(), contentType: 'image/png' });
+      expect(await channel.evaluate(overflowing), 'nothing in a 420 px Channel is wider than its box').toEqual([]);
+      const narrow = await channel.evaluate(measureNames);
+      expect(narrow.order, "in a 420 px Channel every row's names give way in §E's order").toEqual([]);
+      expect(narrow.lines, 'in a 420 px Channel no row splits its names, and only fixed parts leave the names’ line').toEqual([]);
+      expect(narrow.wrapped.filter((row) => / above the names/.test(row)), 'in a 420 px Channel a row moves its fixed parts under its names, none above them').toEqual([]);
+      test.info().annotations.push({ type: 'rows wrapped at 420 px', description: narrow.wrapped.join('\n') || 'none' });
+      await expectSameEdges(channel.locator('[data-channel-offline]'), channel.locator('[data-channel-entry="say"]').first(), 'the footer and a stream row share both edges in a 420 px Channel');
+    } finally {
+      await maws.cleanup();
+    }
+  } finally {
+    rmSync(userData, { recursive: true, force: true });
+  }
+});
+
+// UX wave U11a M4 (S-09; Interfaces §F): the footer reads the channel's own reach and refusal, not only the org's hub
+// status, which reads connected in each of these; each footer photographed.
+type FooterScene = { name: string; words: string; over: Partial<Extract<ChannelAnswer, { ok: true }>>; held: boolean };
+const FOOTERS: FooterScene[] = [
+  { name: 'unreachable', words: CHANNEL.offline.unreachable, over: { reach: 'unreachable' }, held: true },
+  { name: 'refused', words: CHANNEL.offline.expired, over: { reach: 'unreachable', refused: 'credentials' }, held: true },
+  { name: 'never-read', words: CHANNEL.offline.unreachable, over: { reach: 'unreachable', events: [], sessions: [], pending: [], unverified: 0, asOf: null, hosts: [], machines: [] }, held: false },
+];
+for (const scene of FOOTERS) {
+  test(`channel: the footer of a channel not live while the hub status reads connected (${scene.name}) says ${scene.words}`, async () => {
+    test.setTimeout(90_000);
+    const userData = realpathSync(mkdtempSync(join(tmpdir(), 'maws-channel-')));
+    try {
+      const local = readOrMintMachineRef(userData);
+      const { status, answer, asOf } = seededChannel(Date.now(), local);
+      const fixture = join(userData, 'channel.json');
+      writeFileSync(fixture, JSON.stringify({ status: { ...status, hubAccess: 'connected' }, project: PROJECT, answer: { ...answer, live: false, ...scene.over } }));
+      const stub = join(userData, 'channel-scenario.json');
+      writeFileSync(stub, JSON.stringify(scenario()));
+      const maws = await launchMaws({ userData, env: { [FIXTURE_ENV]: fixture, MAWS_SESSION_SOURCE: `stub:${stub}` }, appKitDefaults: { AppleShowScrollBars: 'Always' } });
+      try {
+        const { page } = maws;
+        const row = page.locator(`[data-menu="project:${await addressed(page, PROJECT_ID)}"]`).first();
+        await expect(row).toBeVisible({ timeout: 15_000 });
+        await row.click({ button: 'right' });
+        await page.getByRole('menuitem', { name: CHANNEL.menuItem, exact: true }).click();
+        const channel = page.locator(`[data-channel="${PROJECT}"]`);
+        const footer = channel.locator('[data-channel-offline]');
+        await expect(footer).toContainText(scene.words);
+        await expect(channel.locator('[data-channel-composer]')).toHaveCount(0);
+        if (scene.name === 'refused') {
+          await expect(footer).not.toContainText(CHANNEL.offline.unreachable); // a channel the hub refused retries nothing
+          await expect(footer.getByRole('button', { name: CHANNEL.signInAgain })).toBeVisible();
+        } else await expect(footer.getByRole('button', { name: CHANNEL.signInAgain })).toHaveCount(0);
+        if (scene.held) {
+          await expect(footer.locator(`[data-channel-as-of="${asOf}"]`)).toBeVisible();
+        } else {
+          await expect(footer.locator('[data-channel-as-of]')).toHaveCount(0);
+          await expect(footer).toHaveText(CHANNEL.offline.unreachable);
+          await expect(channel.getByRole('log')).toContainText(CHANNEL.noCopy);
+          await expect(channel.getByRole('log')).not.toContainText(CHANNEL.empty);
+        }
+        await test.info().attach(`channel-footer-${scene.name}`, { body: await footer.screenshot(), contentType: 'image/png' });
+      } finally {
+        await maws.cleanup();
+      }
+    } finally {
+      rmSync(userData, { recursive: true, force: true });
+    }
+  });
+}
+
+// board 505 (UX wave U11a M3): a live channel's footer, its composer, lines up with the stream under classic scrollbars and
+// under overlay ones (where nothing moves); each footer photographed for the frame's shadow, which the clipping footer
+// must keep (Interfaces §E).
+for (const scrollbars of ['Always', 'WhenScrolling'] as const) {
+  test(`channel: a live channel's composer and a stream row share both edges (AppleShowScrollBars ${scrollbars}); the footer photographed`, async () => {
+    test.setTimeout(90_000);
+    const userData = realpathSync(mkdtempSync(join(tmpdir(), 'maws-channel-')));
+    try {
+      const local = readOrMintMachineRef(userData);
+      const { status, answer } = seededChannel(Date.now(), local);
+      const fixture = join(userData, 'channel.json');
+      writeFileSync(fixture, JSON.stringify({ status, project: PROJECT, answer: { ...answer, live: true } }));
+      const stub = join(userData, 'channel-scenario.json');
+      writeFileSync(stub, JSON.stringify(scenario()));
+      const maws = await launchMaws({ userData, env: { [FIXTURE_ENV]: fixture, MAWS_SESSION_SOURCE: `stub:${stub}` }, appKitDefaults: { AppleShowScrollBars: scrollbars } });
+      try {
+        const { page } = maws;
+        const row = page.locator(`[data-menu="project:${await addressed(page, PROJECT_ID)}"]`).first();
+        await expect(row).toBeVisible({ timeout: 15_000 });
+        await row.click({ button: 'right' });
+        await page.getByRole('menuitem', { name: CHANNEL.menuItem, exact: true }).click();
+        const channel = page.locator(`[data-channel="${PROJECT}"]`);
+        const composer = channel.locator('[data-channel-composer]');
+        await expect(composer).toBeVisible();
+        const gutter = () => channel.getByRole('log').evaluate((el) => (el as HTMLElement).offsetWidth - el.clientWidth);
+        if (scrollbars === 'Always') await expect.poll(gutter, { message: "the stream's scrollbar takes width (classic scrollbars)" }).toBeGreaterThan(0);
+        else expect(await gutter(), 'overlay scrollbars take no width').toBe(0);
+        await scrollLog(page, 'foot');
+        await expectSameEdges(composer, channel.locator('[data-channel-entry="say"]').last(), `the composer and a stream row share both edges (${scrollbars})`);
+        const footer = composer.locator('xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " scroll-gutter-under ")][1]');
+        await expect(footer).toHaveCount(1);
+        await test.info().attach(`channel-footer-live-${scrollbars}`, { body: await footer.screenshot(), contentType: 'image/png' });
+        await test.info().attach(`channel-foot-live-${scrollbars}`, { body: await channel.screenshot(), contentType: 'image/png' });
+      } finally {
+        await maws.cleanup();
+      }
+    } finally {
+      rmSync(userData, { recursive: true, force: true });
+    }
+  });
+}
+
+// UX wave U11a M5 (S-10; Interfaces §F): the Channel reached from outside the sidebar. The palette's entry names the project
+// and the requests waiting in it (the scenario's permission and question); View › Project channel is pressed by its id in
+// main, as an agent drives the app in the background: greyed with Diagnostics in front, it opens the Channel from a
+// session of the project, the tab already open brought forward rather than a second one made.
+test('channel: ⌘K lists "<project> · channel" with what waits in it and opens the tab; View › Project channel opens it from a session of the project, and is greyed where no project is in front', async () => {
+  test.setTimeout(90_000);
+  const userData = realpathSync(mkdtempSync(join(tmpdir(), 'maws-channel-')));
+  try {
+    const local = readOrMintMachineRef(userData);
+    const { status, answer } = seededChannel(Date.now(), local);
+    const fixture = join(userData, 'channel.json');
+    writeFileSync(fixture, JSON.stringify({ status, project: PROJECT, answer: { ...answer, live: true } }));
+    const stub = join(userData, 'channel-scenario.json');
+    writeFileSync(stub, JSON.stringify(scenario()));
+    const maws = await launchMaws({ userData, env: { [FIXTURE_ENV]: fixture, MAWS_SESSION_SOURCE: `stub:${stub}` } });
+    try {
+      const { page, app } = maws;
+      await expect(page.locator(`[data-menu="project:${await addressed(page, PROJECT_ID)}"]`).first()).toBeVisible({ timeout: 15_000 });
+      const palette = page.getByRole('dialog', { name: 'Command palette' });
+      const search = async (query: string) => {
+        await menu(app, 'palette.open');
+        // Under load the first keystrokes can land before the input takes focus; type only once it holds it.
+        await expect(palette.getByPlaceholder('Search sessions, projects and actions')).toBeFocused();
+        await page.keyboard.type(query);
+      };
+      const enabled = () => app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('channel.open')?.enabled ?? null);
+      const channel = page.locator(`[data-channel="${PROJECT}"]`);
+      const channelTabs = page.locator(`[data-tab-id="channel:${PROJECT}"]`);
+
+      // A tab of no project in front: the item is there, greyed.
+      await menu(app, 'diagnostics.open');
+      await expect.poll(enabled, { message: 'View › Project channel is greyed with Diagnostics in front' }).toBe(false);
+
+      // ⌘K, "channel": the project's entry, with what waits in it; Enter opens the tab.
+      await search('channel');
+      const entry = palette.getByRole('group', { name: 'Channels' }).getByRole('option');
+      await expect(entry).toHaveCount(1);
+      await expect(entry.locator('[data-channel-name]')).toHaveText(CHANNEL.title(PROJECT_NAME));
+      await expect(entry.locator('[data-channel-count]')).toHaveText(CHANNEL.waitingCount(WAITING.length));
+      await test.info().attach('channel-palette-entry', { body: await palette.screenshot(), contentType: 'image/png' });
+      await page.keyboard.press('Enter');
+      await expect(palette).toHaveCount(0);
+      await expect(channel).toBeVisible();
+      await expect(channelTabs).toHaveCount(1);
+
+      // A session of the project in front, then View › Project channel by its id: the open tab comes forward.
+      await search(TITLES[1]);
+      await expect(palette.getByRole('group', { name: 'Sessions' }).getByRole('option')).toHaveCount(1);
+      await page.keyboard.press('Enter');
+      await expect(palette).toHaveCount(0);
+      await expect(channel).toBeHidden();
+      await expect.poll(enabled, { message: 'View › Project channel is enabled with a session of the project in front' }).toBe(true);
+      await menu(app, 'channel.open');
+      await expect(channel).toBeVisible();
+      await expect(channelTabs).toHaveCount(1);
     } finally {
       await maws.cleanup();
     }

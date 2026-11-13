@@ -540,38 +540,54 @@ const passageAt = (text: Locator, index: number, quote: string) =>
 // visual line and the governing system's type (D's scope, the P3 spec's Decision Log 61) wraps a paragraph in the panel.
 // P3-F (tracker row 199, the paste): the caret is there in the editor's own selection too, which is what a paste
 // replaces; the gate's foreground run pasted over the copy's selection while the page's caret was here.
+// The placement is the case's precondition, not what it tests: one that does not hold is made again (twice on the
+// guest lane, last in run 43471601277, after a Comments toggle reflowed the document; the cause is not captured), and
+// each miss is written to the report (a `caret-retry` annotation and a log line) with where the caret was and whether
+// the window had focus.
 async function caretAtEndOf(page: Page, text: Locator, index: number): Promise<void> {
   const paragraph = text.locator('p').nth(index);
-  const lastLine = await paragraph.evaluate((p) => {
-    const range = document.createRange();
-    range.selectNodeContents(p);
-    const lines = range.getClientRects();
-    const line = lines[lines.length - 1]!;
-    const box = p.getBoundingClientRect();
-    return { x: Math.max(1, Math.min(line.right - box.left - 2, box.width - 1)), y: line.top - box.top + line.height / 2 };
-  });
-  await paragraph.click({ position: lastLine }); // P3-D
-  await page.keyboard.press('End');
-  await expect(text).toBeFocused();
-  await expect
-    .poll(
-      () =>
-        text.evaluate((root, at) => {
-          const selection = getSelection()!;
-          const p = root.querySelectorAll('p')[at]!;
-          const pageAtEnd = selection.isCollapsed && p.contains(selection.focusNode) && selection.focusOffset === (selection.focusNode?.textContent ?? '').length && p.textContent!.endsWith(selection.focusNode?.textContent ?? '');
-          const editor = (root as EditorRoot).editor!;
-          let end = -1;
-          let seen = -1;
-          editor.state.doc.descendants((node, pos) => {
-            if (node.type.name === 'paragraph' && ++seen === at) end = pos + node.nodeSize - 1;
-          });
-          const { from, to } = editor.state.selection;
-          return { page: pageAtEnd, editor: from === to && from === end };
-        }, index),
-      { message: 'the caret at the paragraph’s end, on the page and in the editor' },
-    )
-    .toEqual({ page: true, editor: true });
+  const read = () =>
+    text.evaluate((root, at) => {
+      const selection = getSelection()!;
+      const p = root.querySelectorAll('p')[at]!;
+      const pageAtEnd = selection.isCollapsed && p.contains(selection.focusNode) && selection.focusOffset === (selection.focusNode?.textContent ?? '').length && p.textContent!.endsWith(selection.focusNode?.textContent ?? '');
+      const editor = (root as EditorRoot).editor!;
+      let end = -1;
+      let seen = -1;
+      editor.state.doc.descendants((node, pos) => {
+        if (node.type.name === 'paragraph' && ++seen === at) end = pos + node.nodeSize - 1;
+      });
+      const { from, to } = editor.state.selection;
+      return {
+        page: pageAtEnd,
+        editor: from === to && from === end,
+        seen: { focusText: selection.focusNode?.textContent ?? null, focusOffset: selection.focusOffset, collapsed: selection.isCollapsed, from, to, end, windowFocus: document.hasFocus() },
+      };
+    }, index);
+  await expect(async () => {
+    const lastLine = await paragraph.evaluate((p) => {
+      const range = document.createRange();
+      range.selectNodeContents(p);
+      const lines = range.getClientRects();
+      const line = lines[lines.length - 1]!;
+      const box = p.getBoundingClientRect();
+      return { x: Math.max(1, Math.min(line.right - box.left - 2, box.width - 1)), y: line.top - box.top + line.height / 2 };
+    });
+    await paragraph.click({ position: lastLine }); // P3-D
+    await page.keyboard.press('End');
+    try {
+      await expect(text).toBeFocused({ timeout: 2_000 });
+      await expect
+        .poll(read, { message: 'the caret at the paragraph’s end, on the page and in the editor', timeout: 2_000 })
+        .toMatchObject({ page: true, editor: true });
+    } catch (error) {
+      // A missed placement stays in the report even when a later one holds: the retry must not hide its cause.
+      const seen = JSON.stringify((await read().catch((failure: unknown) => ({ seen: String(failure) }))).seen);
+      test.info().annotations.push({ type: 'caret-retry', description: `paragraph ${index}: ${seen}` });
+      console.log(`caret-retry: paragraph ${index}: ${seen}`);
+      throw error;
+    }
+  }).toPass({ timeout: 10_000 });
 }
 
 // The window's Edit command on the OS pasteboard, as ⌘C, ⌘X and ⌘V run it: the app menu's Edit roles (src/main/menu.ts)

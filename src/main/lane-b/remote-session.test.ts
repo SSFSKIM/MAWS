@@ -841,3 +841,74 @@ describe('the stream’s answer', () => {
     l.session.stop();
   });
 });
+
+// The UX wave, U9 (M5, "The settled word"; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md): each lane has
+// exactly one standing at any moment, read in one synchronous reading, and tells the adapter each change of it after
+// whatever it said for that change (`standingChanged`), so the machine's round is evaluated in main's order of words.
+describe('the standing', () => {
+  function standingLab(answers: CallResult[]) {
+    const l = lab();
+    const told: Array<ReturnType<RemoteSession['standing']>> = [];
+    l.link.answers.set('session.get', () => answers.shift() ?? { ok: true, output: record(APP) });
+    const session = new RemoteSession({
+      machine: MINI,
+      app: APP,
+      link: l.link,
+      emit: () => {},
+      timing: { recordRetryMs: [500, 1000, 2000, 4000], idleRetryMs: [1000, 30_000], idleProbeMaxMs: 30 * 60_000, batchMax: 500 },
+      revision: () => 1,
+      standingChanged: () => void told.push(session.standing()),
+      log: () => {},
+    });
+    return { link: l.link, session, told };
+  }
+
+  it('is placing through a transient failure’s back-off and a null answer’s retry, and awaiting from the hand-over to its subscription', async () => {
+    const s = standingLab([{ ok: false, error: { code: 'offline' } }, { ok: true, output: null }]);
+    expect(s.session.standing()).toBeNull(); // not started: nothing to wait for
+    s.session.start();
+    expect(s.session.standing()).toBe('placing');
+    await vi.advanceTimersByTimeAsync(0); // offline: the back-off
+    expect(s.session.standing()).toBe('placing');
+    await vi.advanceTimersByTimeAsync(1_000); // null: the ladder's retry timer
+    expect(s.session.standing()).toBe('placing');
+    expect(s.link.open()).toEqual([]);
+    await vi.advanceTimersByTimeAsync(500); // the record: subscribed in the same step
+    expect(s.link.open()).toHaveLength(1);
+    expect(s.session.standing()).toBe('awaiting');
+    expect(s.told.includes('quiet'), 'never quiet between the record and its subscription').toBe(false);
+    s.link.open()[0].sink.subbed('snapshot', { epoch: 'L1', seq: 0 });
+    expect(s.session.standing()).toBe('quiet');
+    expect(s.told.at(-1)).toBe('quiet');
+  });
+
+  it('is awaiting again from main’s word of a loss for a subscription it keeps, until its next `subbed`', async () => {
+    const s = standingLab([]);
+    s.session.start();
+    await vi.advanceTimersByTimeAsync(0);
+    const sub = s.link.open()[0];
+    sub.sink.subbed('snapshot', { epoch: 'L1', seq: 0 });
+    expect(s.session.standing()).toBe('quiet');
+    s.session.lost();
+    expect(s.session.standing()).toBe('awaiting');
+    sub.sink.subbed('replay', { epoch: 'L1', seq: 0 });
+    expect(s.session.standing()).toBe('quiet');
+  });
+
+  it('is quiet once idle with no try out, or ended for good; and none once let go', async () => {
+    const s = standingLab([]);
+    s.session.start();
+    await vi.advanceTimersByTimeAsync(0);
+    s.link.open()[0].sink.ended('unavailable');
+    expect(s.session.standing()).toBe('quiet');
+    s.session.lost(); // nothing out: nothing kept across the loss
+    expect(s.session.standing()).toBe('quiet');
+    s.session.stop();
+    expect(s.session.standing()).toBeNull();
+    const ladder = standingLab([{ ok: true, output: null }, { ok: true, output: null }, { ok: true, output: null }, { ok: true, output: null }, { ok: true, output: null }]);
+    ladder.session.start();
+    await vi.advanceTimersByTimeAsync(10_000); // the ladder's end: can't place
+    expect(ladder.session.standing()).toBe('quiet');
+    expect(ladder.told.at(-1)).toBe('quiet');
+  });
+});

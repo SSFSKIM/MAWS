@@ -130,4 +130,10 @@ export const events = {
   // again at the link's `down` with the items it holds, and false from the next snapshot on. A machine whose feed ended
   // for good (the roster dropped it, an endpoint without the feed) is said once with no items.
   'remote.attention': z.strictObject({ machine: MachineRefSchema, items: z.array(AttentionItemSchema), greyed: z.boolean() }),
+  // The UX wave, U9 (M5, "The settled word"; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, Interfaces
+  // §9): main's lane B adapter to its own pages, once per machine and generation of its link: no session there is still
+  // being placed and no subscription is unanswered, so a history read made now no longer runs beside a resume. Said on
+  // the queue the sessions' events take, after the answer that carried the round, and again to a page that just
+  // subscribed (the adapter's `replay`).
+  'remote.settled': z.strictObject({ machine: MachineRefSchema, generation: z.number().int().nonnegative() }),
 } as const satisfies Record<`remote.${string}`, z.ZodType>;

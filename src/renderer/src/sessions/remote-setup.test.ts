@@ -17,7 +17,8 @@ import { useMachines } from '../stores/machines';
 import { EMPTY_REGISTRY, type OrgProjectLocation } from '../stores/registry';
 import { useSessions } from '../stores/sessions';
 import { SPAWN_HOME_CAPABILITY } from '@shared/ipc/schema/session';
-import { checkTrust, knownCheckouts, listFolders, readMachines, readPlaces, registerFolder, setupErrorWords, SETUP_WORDS, suggestionsFor } from './remote-setup';
+import { act, renderHook } from '@testing-library/react';
+import { checkTrust, forgetRemotePlaces, knownCheckouts, listFolders, readFolderPlaces, readMachines, registerFolder, setupErrorWords, SETUP_WORDS, suggestionsFor, useRemotePlaces } from './remote-setup';
 import { SPAWN_WORDS } from './remote-spawn';
 
 const THIRD = 'ThirdMachineRef0000000' as MachineRef;
@@ -39,6 +40,7 @@ beforeEach(() => {
 afterEach(() => {
   useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() });
   useSessions.setState({ projects: new Map(), registry: EMPTY_REGISTRY });
+  forgetRemotePlaces();
 });
 
 describe('the machines the menu offers', () => {
@@ -158,23 +160,72 @@ describe('a New chat in a project with no folder here (the project registry)', (
 });
 
 describe('a machine’s places (the project chip on it)', () => {
-  it('reads its projects and its home’s first page: an owner’s New project, and Don’t work in a project where its endpoint takes a chat in its home', async () => {
+  it('reads its home’s first page: an owner’s New project, and Don’t work in a project where its endpoint takes a chat in its home', async () => {
     useMachines.getState().applyRoster([machine(OTHER_MACHINE, 'mini', { capabilities: ['rl2.feeds', SPAWN_HOME_CAPABILITY] }), machine(THIRD, 'vm', { capabilities: ['rl2.feeds'] })]);
-    const fake = fakeClient({ 'session.projects.list': { projects: [projectOn(OTHER_MACHINE, 'app', '/Users/mini/app'), projectOn(OTHER_MACHINE, 'old', '/Users/mini/old', { hidden: true })], revision: 1 }, 'machine.folders.list': HOME_PAGE });
-    expect(await readPlaces(OTHER_MACHINE, 'mini', fake.client)).toEqual({ projects: [projectOn(OTHER_MACHINE, 'app', '/Users/mini/app')], error: null, newProject: null, noProject: null, home: '/Users/mini', first: HOME_PAGE });
+    const fake = fakeClient({ 'machine.folders.list': HOME_PAGE });
+    expect(await readFolderPlaces(OTHER_MACHINE, 'mini', fake.client)).toEqual({ newProject: null, noProject: null, home: '/Users/mini', first: HOME_PAGE });
     expect(fake.invoked('machine.folders.list')).toEqual([{}]);
     // an endpoint that predates the home spawn: no chat in its home there
-    expect((await readPlaces(THIRD, 'vm', fake.client)).noProject).toBe(SPAWN_WORDS.noHome('vm'));
+    expect((await readFolderPlaces(THIRD, 'vm', fake.client)).noProject).toBe(SPAWN_WORDS.noHome('vm'));
   });
 
-  it('greys New project and Don’t work in a project with why for a member who isn’t its owner, and says projects it couldn’t read', async () => {
+  it('greys New project and Don’t work in a project with why for a member who isn’t its owner', async () => {
     useMachines.getState().applyRoster([machine(OTHER_MACHINE, 'mini', { capabilities: [SPAWN_HOME_CAPABILITY] })]);
     const fake = fakeClient({});
-    const read = readPlaces(OTHER_MACHINE, 'mini', fake.client);
+    const read = readFolderPlaces(OTHER_MACHINE, 'mini', fake.client);
     await vi.waitFor(() => expect(fake.pending('machine.folders.list')).toBe(1));
-    await fake.fail('session.projects.list', 'unreachable', 'host_unavailable');
     await fake.fail('machine.folders.list', 'machine.folders.list: refused owners-only by machine mini', 'internal', { refusal: 'owners-only' });
-    expect(await read).toEqual({ projects: null, error: SETUP_WORDS.projectsUnread('mini'), newProject: SETUP_WORDS.notOwner('mini'), noProject: SETUP_WORDS.homeNotOwner('mini'), home: null, first: null });
+    expect(await read).toEqual({ newProject: SETUP_WORDS.notOwner('mini'), noProject: SETUP_WORDS.homeNotOwner('mini'), home: null, first: null });
+  });
+
+  // The UX wave, U9 (O-39, A1; M5, "The chooser is a hook"): the chooser answers at once with what this window knows of
+  // the machine's projects, and the machine's own answer replaces it; the folder read holds nothing back
+  describe('useRemotePlaces', () => {
+    const registered = (path: string) =>
+      useSessions.setState({ registry: { ...EMPTY_REGISTRY, projects: [{ id: ID, name: 'app', hub: true, renamable: true, locations: [location(OTHER_MACHINE, 'pid-app', path), location(OTHER_MACHINE, 'pid-gone', '/Users/mini/gone', { state: 'missing' }), location(THIRD, 'pid-vm', '/home/vm/app')] }] } });
+
+    it('opens with the registry’s projects on the machine, its list replacing them when it answers, without waiting for its folders', async () => {
+      registered('/Users/mini/src/app');
+      const fake = fakeClient({});
+      const { result } = renderHook(() => useRemotePlaces(OTHER_MACHINE, 'mini', fake.client));
+      expect(result.current.projects?.map((p) => p.directory)).toEqual(['/Users/mini/src/app']);
+      expect(result.current.reading, 'something is known').toBeNull();
+      expect(result.current.folders).toBeNull();
+      await act(() => fake.reply('session.projects.list', { projects: [projectOn(OTHER_MACHINE, 'notes', '/Users/mini/notes'), projectOn(OTHER_MACHINE, 'old', '/Users/mini/old', { hidden: true })], revision: 2 }));
+      expect(result.current.projects?.map((p) => p.directory)).toEqual(['/Users/mini/notes']);
+      expect(result.current.folders, 'the folder read is still out').toBeNull();
+      await act(() => fake.reply('machine.folders.list', HOME_PAGE));
+      expect(result.current.folders).toEqual({ newProject: null, noProject: SPAWN_WORDS.noHome('mini'), home: '/Users/mini', first: HOME_PAGE });
+    });
+
+    it('says it reads only while nothing is known, and opened again in the run shows the last listing at once, refreshing behind it', async () => {
+      const fake = fakeClient({});
+      const first = renderHook(() => useRemotePlaces(OTHER_MACHINE, 'mini', fake.client));
+      expect(first.result.current).toEqual({ projects: null, reading: SETUP_WORDS.reading('mini'), error: null, folders: null });
+      await act(() => fake.reply('session.projects.list', { projects: [projectOn(OTHER_MACHINE, 'notes', '/Users/mini/notes')], revision: 1 }));
+      expect(first.result.current.reading).toBeNull();
+      first.unmount();
+      const again = renderHook(() => useRemotePlaces(OTHER_MACHINE, 'mini', fake.client));
+      expect(again.result.current.projects?.map((p) => p.directory), 'the last listing of this run').toEqual(['/Users/mini/notes']);
+      expect(again.result.current.reading).toBeNull();
+      expect(fake.pending('session.projects.list'), 'asked again behind it').toBe(1);
+      await act(() => fake.reply('session.projects.list', { projects: [projectOn(OTHER_MACHINE, 'app', '/Users/mini/app')], revision: 2 }));
+      expect(again.result.current.projects?.map((p) => p.directory)).toEqual(['/Users/mini/app']);
+    });
+
+    it('says projects it couldn’t read, keeping what it knew', async () => {
+      registered('/Users/mini/src/app');
+      const fake = fakeClient({});
+      const { result } = renderHook(() => useRemotePlaces(OTHER_MACHINE, 'mini', fake.client));
+      await act(() => fake.fail('session.projects.list', 'unreachable', 'host_unavailable'));
+      expect(result.current.error).toBe(SETUP_WORDS.projectsUnread('mini'));
+      expect(result.current.projects?.map((p) => p.directory)).toEqual(['/Users/mini/src/app']);
+      forgetRemotePlaces();
+      useSessions.setState({ registry: EMPTY_REGISTRY });
+      const none = renderHook(() => useRemotePlaces(THIRD, 'vm', fake.client));
+      await act(() => fake.fail('session.projects.list', 'unreachable', 'host_unavailable'));
+      expect(none.result.current).toMatchObject({ projects: null, reading: null, error: SETUP_WORDS.projectsUnread('vm') });
+    });
   });
 
   it('suggests the paths the local project’s other checkouts use, on every machine the store holds', () => {

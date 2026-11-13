@@ -515,7 +515,7 @@ export class FakeSpine {
         try {
           return { ok: true, value: await handler(input, context) } as never;
         } catch (error) {
-          return { ok: false, error: { code: 'internal', message: (error as Error).message } } as never;
+          return { ok: false, error: thrownError(error) } as never; // a typed refusal (its issues) as the bus answers it
         }
       },
     });

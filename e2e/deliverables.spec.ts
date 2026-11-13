@@ -838,8 +838,11 @@ test('a 64 px image and a short video fill the pane, in the panel and in a main 
     const panelViewer = viewerOf(s.panel);
     const tabViewer = (record: DeliverableRecord) => s.page.locator(`[data-region="main"] [data-artifact-tab] [data-artifact-viewer="${record.id}"]`);
 
-    // the media's drawn box against the stage's content box: at fit one side meets the pane, neither passes it, the
-    // aspect is kept and a small medium is grown well past its natural size
+    // the media's drawn box against the stage's content box: at fit it is its natural size times the scale that fits it
+    // (the aspect kept, neither side past the box), it meets the box on the limiting side, and a small medium is grown
+    // past its natural size; stated by the box, so it holds at any column width (UX wave U8b, Addendum 5: in the 360 px
+    // column the box is 316 px wide, the column less its chrome and the stage's padding, and the 160 by 120 video draws
+    // 316 by 237)
     const measure = (viewer: Locator, media: string) =>
       viewer.locator('[data-zoom-stage]').evaluate((stage, selector) => {
         const style = getComputedStyle(stage);
@@ -851,7 +854,9 @@ test('a 64 px image and a short video fill the pane, in the panel and in a main 
       const fits = async () => {
         const { box, drawn, zoom } = await measure(viewer, media);
         const scale = Math.min(box.width / natural.width, box.height / natural.height);
-        return zoom === 'fit' && Math.abs(drawn.width - natural.width * scale) <= 1 && Math.abs(drawn.height - natural.height * scale) <= 1 && drawn.width >= natural.width * 2;
+        const meets = Math.abs(drawn.width - box.width) <= 1 || Math.abs(drawn.height - box.height) <= 1;
+        const grown = drawn.width > natural.width && drawn.height > natural.height;
+        return zoom === 'fit' && Math.abs(drawn.width - natural.width * scale) <= 1 && Math.abs(drawn.height - natural.height * scale) <= 1 && meets && grown;
       };
       await expect.poll(fits, { message: 'fills the pane at fit' }).toBe(true);
       const fitted = (await measure(viewer, media)).drawn;
@@ -1014,7 +1019,9 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
     await expect(s.panel.getByRole('tab', { name: /^Side/ }).or(tools.getByRole('button', { name: /^Side/ }))).toHaveCount(0);
     await expect(mainTabs).toHaveCount(mainTabsBefore);
 
-    // its box: 4 px under the heading's bottom edge, at its left, 300 px wide, inside the viewer's body
+    // its box: 4 px under the heading's bottom edge, at its left, 300 px wide, inside the viewer's body. The body holds the
+    // card and its 8 px margin each side (316 px): in the 360 px column the body is 348 px, the column less its chrome
+    // (UX wave U8b, Addendum 5; 348 measured on the hosted Macs)
     const hero = (await frame.locator('#hero').boundingBox())!;
     const body = (await viewer.locator('[data-card-host]').boundingBox())!;
     const placed = (await card.boundingBox())!;

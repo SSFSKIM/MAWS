@@ -22,17 +22,25 @@
 // offers the project's locations, "the record saves the round trip"): a project the registry holds takes its location on
 // the machine from its record, with no read over the link; a location missing or replaced there is no place to start in.
 // A project the registry does not hold is read live, as before.
+//
+// The UX wave, U9 (O-39, A1; M5, "The chooser is a hook"; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md):
+// the project chip's menu on a machine (`useRemotePlaces`) opens with the projects this window already knows there, the
+// registry's locations on it and the last listing it answered in this run, replaced by the machine's own list when it
+// answers. The folder read no longer holds the projects back: "New project" and "Don't work in a project" wait for it
+// alone. "Reading <machine>'s projects…" shows only while nothing is known.
+import { useEffect, useMemo, useState } from 'react';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { IpcError } from '@shared/ipc/errors';
 import type { MawsBridge, ProjectRecord } from '@shared/ipc/schema';
 import type { FolderEntry } from '@shared/ipc/schema/machine';
 import { SPAWN_HOME_CAPABILITY } from '@shared/ipc/schema/session';
+import { machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import type { TrustState } from '@shared/sessions/trust';
 import { ipc } from '../ipc/client';
 import { useMachines } from '../stores/machines';
 import { useSessions } from '../stores/sessions';
-import type { RegistryProject } from '../stores/registry';
+import { registryRecords, type OrgProjects, type RegistryProject } from '../stores/registry';
 import { SPAWN_WORDS, type SpawnTarget } from './remote-spawn';
 
 /**
@@ -196,10 +204,8 @@ export function knownCheckouts(of: TabProject): string[] {
   return [...new Set(declared.filter((p) => p.org?.key === key).map((p) => p.directory))];
 }
 
-/** What the project chip's menu offers on another machine (`readPlaces`): `newProject` and `noProject` null when offered, else why not. */
-export interface Places {
-  projects: ProjectRecord[] | null; // the machine's own, as its `session.projects.list` answers (null: unread, `error` says why)
-  error: string | null;
+/** What the folder read says the project chip's menu offers on another machine: `newProject` and `noProject` null when offered, else why not. */
+export interface FolderPlaces {
   newProject: string | null;
   noProject: string | null;
   home: string | null;
@@ -207,22 +213,72 @@ export interface Places {
 }
 
 /**
- * The machine's places, read when the project chip's menu opens on it: its own projects (this app's sessions store holds
- * none of a machine its org rows cover), and its home's first page, which only its owners may read, so it says whether
- * "New project" and "Don't work in a project" are theirs; the latter also needs its endpoint to take a chat in its home
- * (`rl2.spawn-home`, from MachineState's `capabilities`).
+ * The machine's home's first page, which only its owners may read, so it says whether "New project" and "Don't work in
+ * a project" are theirs; the latter also needs its endpoint to take a chat in its home (`rl2.spawn-home`, from
+ * MachineState's `capabilities`).
  */
-export async function readPlaces(machine: MachineRef, name: string, client: MawsBridge = ipc): Promise<Places> {
+export async function readFolderPlaces(machine: MachineRef, name: string, client: MawsBridge = ipc): Promise<FolderPlaces> {
   const spawnsHome = useMachines.getState().machines.get(machine)?.capabilities?.includes(SPAWN_HOME_CAPABILITY) === true;
-  const [listed, first] = await Promise.all([client.invoke('session.projects.list', undefined, { machine }).catch(() => null), listFolders(machine, name, { path: null }, client)]);
-  const projects = listed?.ok === true ? listed.value.projects.filter((p) => p.hidden !== true) : null;
-  const error = projects === null ? SETUP_WORDS.projectsUnread(name) : null;
+  const first = await listFolders(machine, name, { path: null }, client);
   if (!first.ok) {
     const noProject = !spawnsHome ? SPAWN_WORDS.noHome(name) : first.words === SETUP_WORDS.notOwner(name) ? SETUP_WORDS.homeNotOwner(name) : first.words;
-    return { projects, error, newProject: first.words, noProject, home: null, first: null };
+    return { newProject: first.words, noProject, home: null, first: null };
   }
   const home = first.page.entries.length === 0 ? null : first.page.entries[0].path.slice(0, first.page.entries[0].path.lastIndexOf('/')) || null;
-  return { projects, error, newProject: null, noProject: spawnsHome ? null : SPAWN_WORDS.noHome(name), home, first: first.page };
+  return { newProject: null, noProject: spawnsHome ? null : SPAWN_WORDS.noHome(name), home, first: first.page };
+}
+
+/** The project chip's menu on another machine, as it stands. */
+export interface RemotePlaces {
+  /** The machine's projects: those known at once, then its own list's answer; null while none is known. */
+  projects: ProjectRecord[] | null;
+  /** "Reading <machine>'s projects…" while nothing is known and the list has not answered; else null. */
+  reading: string | null;
+  /** Why the machine's list could not be read, once it answered so. */
+  error: string | null;
+  /** The folder read's answer; null until it answers. */
+  folders: FolderPlaces | null;
+}
+
+/** Each machine's last project list answered in this run (state of the run, never stored). */
+const lastListing = new Map<MachineRef, ProjectRecord[]>();
+/** Forgets the lists of this run (tests). */
+export const forgetRemotePlaces = (): void => lastListing.clear();
+
+/** The machine's projects known without a read: its last list of this run, then the registry's locations there it lacks. */
+function knownPlaces(machine: MachineRef, registry: OrgProjects): ProjectRecord[] {
+  const listed = lastListing.get(machine) ?? [];
+  const directories = new Set(listed.map((p) => p.directory));
+  const located = [...registryRecords(registry, ipc.localMachine).values()].filter((p) => machineOf(p.id) === machine && p.state === undefined && !directories.has(p.directory));
+  return [...listed, ...located];
+}
+
+/** The project chip's menu on `machine`: its two reads made as it opens, each shown as it answers. */
+export function useRemotePlaces(machine: MachineRef, name: string, client: MawsBridge = ipc): RemotePlaces {
+  const registry = useSessions((s) => s.registry);
+  const known = useMemo(() => knownPlaces(machine, registry), [machine, registry]);
+  // each answer keeps the machine it is of, so a menu opened on another machine shows none of the last one's
+  const [listed, setListed] = useState<{ of: MachineRef; projects: ProjectRecord[] | null; error: string | null } | null>(null);
+  const [read, setRead] = useState<{ of: MachineRef; folders: FolderPlaces } | null>(null);
+  useEffect(() => {
+    let live = true;
+    void client
+      .invoke('session.projects.list', undefined, { machine })
+      .catch(() => null)
+      .then((answered) => {
+        const projects = answered?.ok === true ? answered.value.projects.filter((p) => p.hidden !== true) : null;
+        if (projects !== null) lastListing.set(machine, projects);
+        if (live) setListed({ of: machine, projects, error: projects === null ? SETUP_WORDS.projectsUnread(name) : null });
+      });
+    void readFolderPlaces(machine, name, client).then((folders) => live && setRead({ of: machine, folders }));
+    return () => {
+      live = false;
+    };
+  }, [machine, name, client]);
+  const answer = listed?.of === machine ? listed : null;
+  const folders = read?.of === machine ? read.folders : null;
+  const projects = answer?.projects ?? (known.length > 0 ? known : null);
+  return { projects, reading: answer === null && known.length === 0 ? SETUP_WORDS.reading(name) : null, error: answer?.error ?? null, folders };
 }
 
 /** One page of the folders at `path` on the machine (null: its home); `open` reads inside a private folder. */

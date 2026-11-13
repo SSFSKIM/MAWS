@@ -6,7 +6,6 @@
 import { useEffect, useSyncExternalStore, type RefObject } from 'react';
 import { Icon } from '../../app/IconButton';
 import type { PanelTool } from '../../panel/tool';
-import { PANEL_BODY_ID } from '../../panel/PanelHost';
 import { useTranscriptStore } from '../../stores/transcript';
 import { Transcript, type SubagentRef, type TranscriptSource } from '../../transcript';
 import { OVERSCAN, type TranscriptListHandle } from '../../transcript/view/Transcript';
@@ -127,7 +126,8 @@ const rowsOfChild = () => {
   return key ? useTranscriptStore.getState().rows(key) : [];
 };
 
-const bodyElement = () => document.getElementById(`${PANEL_BODY_ID}-${CHILD_TOOL_ID}`);
+// UX wave U8b: a group's body is named by its group, so the child's is the tab panel of the surface that shows it.
+const bodyElement = () => document.querySelector<HTMLElement>(`[data-surface="${CHILD_TOOL_ID}"] [role="tabpanel"]`);
 // The region’s scroll slot wraps the surface stack; an individual tool body lives inside its own section.
 const slotElement = () => bodyElement()?.closest<HTMLElement>('[data-surface-stack]')?.parentElement ?? null;
 

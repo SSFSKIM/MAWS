@@ -1089,12 +1089,13 @@ describe('review tool', () => {
     expect(panelOf(A)?.tabs).toHaveLength(1);
   });
 
-  it('fills the folded Environment card’s change line with the staged count, and opens Review from it', async () => {
+  // UX wave U8b (A8, l5-code-16): the line is a control named Open changes, its counts its description, and Environment is open
+  it('fills the Environment card’s change line with the staged count, as a control that opens Review', async () => {
     render(<QueryClientProvider client={queryClient}><FloatingSummary appSessionId={A} /><TestHost /></QueryClientProvider>);
-    expect(screen.queryByTestId('change-line')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /^Environment/ }));
     await waitFor(() => expect(screen.getByTestId('change-line').textContent).toBe('+3 −0 across 3 files · 1 untracked · 1 staged'));
-    fireEvent.click(screen.getByTestId('change-line'));
+    const line = screen.getByRole('button', { name: 'Open changes', description: '+3 −0 across 3 files · 1 untracked · 1 staged' });
+    expect(line.textContent).toBe('+3 −0 across 3 files · 1 untracked · 1 staged›');
+    fireEvent.click(line);
     await waitFor(() => expect(header()).toBe('3 files changed · +3 −0 · Uncommitted'));
     expect(rows().map((r) => r[0])).toEqual(['src/app.ts', 'src/staged.ts', 'scratch.txt']);
   });

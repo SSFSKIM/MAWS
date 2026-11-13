@@ -131,6 +131,10 @@ export interface EndpointModule {
   // The project registry's M12 (Interfaces §H's RegistryRead, §K): the org's projects as the endpoint holds them, for
   // machine.sock's `projects.registry`. Absent from a module that has none: the daemon answers an unenrolled machine
   registryRead?: RegistryRead;
+  // The UX wave (docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, M2): whether the machine's ceiling, as
+  // its policy stands when asked, refuses a session started from another machine in `mode`, which the daemon hands the
+  // session service. Absent from a module that has none: every mode is refused
+  aboveCeiling?(mode: string): boolean;
 }
 
 // O10's endpoint module (P5 O10 M10), one for each daemon, loaded when it is needed; `build` is the daemon's build id,
@@ -172,6 +176,14 @@ export class LazyEndpoint implements EndpointModule {
   /** The project registry's M12: the loaded module's read of the org's projects; none while nothing is loaded. */
   get registryRead(): RegistryRead | undefined {
     return this.#module?.registryRead;
+  }
+
+  /**
+   * The UX wave (U9, M2): the loaded module's ceiling, read at each ask. Unloaded, or from a module that has none, every
+   * mode is above it: no act from another machine reaches the services while no endpoint is loaded.
+   */
+  aboveCeiling(mode: string): boolean {
+    return this.#module?.aboveCeiling?.(mode) ?? true;
   }
 
   constructor(build: string, load: () => Promise<Loaded>, extras: EndpointExtras = {}) {

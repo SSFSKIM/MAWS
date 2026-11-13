@@ -428,6 +428,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       home: homedir(),
       enrollment,
       ...(endpoint?.registry === undefined ? {} : { registry: endpoint.registry }),
+      // the UX wave (U9, M2): the ceiling a fork from another machine is held to, the endpoint's policy as it stands then
+      aboveCeiling: (mode) => endpoint?.aboveCeiling?.(mode) ?? true,
     }),
     quietMs: () => spineQuietMs ?? clocks.idleMs() ?? DEFAULT_IDLE_EXIT_MS,
     reexecute: kind === 'unit' && (SPINE_REEXECUTE_DEFAULT || env.MAWS_SPINE_REEXECUTE === '1'),

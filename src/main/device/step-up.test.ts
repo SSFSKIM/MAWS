@@ -230,7 +230,7 @@ describe('several step-ups under one confirmation', () => {
     // what was confirmed is every signed act's own rendering
     expect(h.prompts).toEqual([renderActions(signed.actions)]);
     for (const action of signed.actions) expect(h.prompts[0].text).toContain(renderAction(action).text);
-    expect(h.prompts[0].summary).toBe(`3 actions on machine ${MREF}`);
+    expect(h.prompts[0].summary).toBe(`3 actions on ${MREF}`); // S-13: with no org view held, the ref
   });
 
   it('signs none when the person cancels, the confirmation is unavailable, fails or throws', async () => {
@@ -316,7 +316,7 @@ describe('the rendered text of several acts', () => {
     if (!signed.ok) throw new Error(`refused: ${signed.reason}`);
     expect(renderActions(signed.actions.slice(0, 1))).toEqual(renderAction(signed.actions[0]));
     const both = renderActions(signed.actions);
-    expect(both.summary).toBe('2 actions on machines mini_0000000000000000000000, vm_00000000000000000000000');
+    expect(both.summary).toBe('2 actions on mini_0000000000000000000000, vm_00000000000000000000000');
     expect(both.text).toBe(`1 of 2\n${renderAction(signed.actions[0]).text}\n\n2 of 2\n${renderAction(signed.actions[1]).text}`);
   });
 });
@@ -340,7 +340,7 @@ describe('the rendered text', () => {
 
   it('shows every field the person is agreeing to, and a short summary for the system prompt', () => {
     const { summary, text } = renderAction(base);
-    expect(summary).toBe(`session.answer on machine ${REF}`);
+    expect(summary).toBe(`Approve a request on ${REF}`); // S-13's sentence; the ref, with no org view
     for (const shown of ['session.answer', REF, 'app-session-1', 'launch-1', 'engine-1', 'toolu_1', 'Bash', 'a'.repeat(64), 'requestId: "req-1"', 'answer: {"behavior":"allow"}']) {
       expect(text).toContain(shown);
     }
@@ -365,7 +365,7 @@ describe('the rendered text', () => {
 });
 
 describe('the confirmation main uses: promptTouchID (U5)', () => {
-  const prompt: StepUpPrompt = { summary: `sminos.spawn on machine ${REF}`, text: `Action: sminos.spawn\nMachine: ${REF}` };
+  const prompt: StepUpPrompt = { summary: 'Start a terminal session on mini', text: `Action: sminos.spawn\nMachine: mini (${REF})` };
 
   beforeEach(() => {
     touchID.reasons.length = 0;

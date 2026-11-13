@@ -37,8 +37,8 @@ import { failed, OutcomeLine, useOpen, useOwnSignIn, type Outcome, type ViewMach
 
 type Refused = Extract<EnrollStartResult, { ok: false }>;
 type Code = { value: string; expires: string };
-// A start refusal whose detail main words as the line already does.
-const SAID = new Set<Refused['reason']>(['not-root', 'not-admin']);
+// A start refusal whose detail main words as the line already does (U11a board 540, §B); any other's detail follows the line.
+const SAID = new Set<Refused['reason']>(['not-root', 'not-admin', 'shape', 'machine-name-taken', 'certified-machine', 'no-machine', 'cancelled']);
 
 /**
  * The sheet's own enrollment. `choosing`: none yet, a refused start's answer with it. `starting`: a start this sheet sent

@@ -73,7 +73,7 @@ describe('session.spawn on the spine', () => {
   // launch with the session ready, and a first message as sent. `parked`: the host is not up until a command's need
   // wakes it (mawsd's parked engine host; #411), and `need` counts those wakes.
   // P5 O7 M9: `machineRoute`, the machine route as the default instead (its managed settings beneath a scratch root)
-  const composed = async ({ parked = false, seed, machineRoute = false }: { parked?: boolean; seed?: (index: Index) => void; machineRoute?: boolean } = {}) => {
+  const composed = async ({ parked = false, seed, machineRoute = false, aboveCeiling }: { parked?: boolean; seed?: (index: Index) => void; machineRoute?: boolean; aboveCeiling?: (mode: string) => boolean } = {}) => {
     const seeded = new Index(join(profile, 'index.sqlite'));
     seeded.projects.add(checkout);
     seed?.(seeded);
@@ -118,6 +118,7 @@ describe('session.spawn on the spine', () => {
       profile, machine: MACHINE, data, hosts: host, bus, clientPort: noClientPort, interest: () => new Set(), browserSocket: () => null,
       trash: async () => {}, engineEnv: Promise.resolve({ HOME: join(dir.path, 'home'), CLAUDE_CONFIG_DIR: config }), env: { SMINOS_HOME: sminos },
       packaged: false, appPath: dir.path, devRoot: dir.path, home: join(dir.path, 'home'),
+      ...(aboveCeiling === undefined ? {} : { aboveCeiling }), // U9 (M2): the machine's ceiling, as mawsd hands it
     });
     held.push({ data, spine });
     if (machineRoute) await data.machineSettings.setDefaultRoute('machine');
@@ -286,6 +287,40 @@ describe('session.spawn on the spine', () => {
     expect([envelope.action.device, envelope.action.opId]).toEqual([envelope.device, envelope.opId]);
     expect(statSync(dirname(proofOf(appSessionId))).mode & 0o077).toBe(0);
     await expect.poll(() => phases(bus, appSessionId)).toContain('ready');
+  });
+
+  // The UX wave (U9, M2): a fork another machine asks for, claimed by `machine.op`, is held to the ceiling the daemon hands
+  // the spine (mawsd's endpoint's policy), answered `starting` once its record exists, and names no starter.
+  it('holds a fork another machine asks for to the ceiling the daemon hands the spine, and runs one within it with no starter', async () => {
+    trust(checkout);
+    const engine = 'e0000000-0000-4000-8000-0000000000f1' as SessionId;
+    const permissionMode = { requested: 'acceptEdits' as const, effective: 'acceptEdits' as const, refusal: null };
+    let source = '' as AppSessionId;
+    const above = new Set(['acceptEdits']);
+    const { bus, launched } = await composed({
+      aboveCeiling: (mode) => above.has(mode),
+      seed: (index) => {
+        source = index.sessions.createForLaunch({ directory: checkout, additionalDirectories: [], worktree: null, model: { requested: null, resolved: null }, effort: null, permissionMode }).record.appId;
+        index.sessions.bindEngineId(source, engine);
+      },
+    });
+    const transcript = await transcriptPathOf({ CLAUDE_CONFIG_DIR: config, HOME: join(dir.path, 'home') }, checkout, engine);
+    mkdirSync(dirname(transcript), { recursive: true });
+    writeFileSync(transcript, `${JSON.stringify({ type: 'user', sessionId: engine, uuid: 'u1', message: { role: 'user', content: 'hi' } })}\n`);
+    const op = (n: number) => ({
+      opId: `9b8f3a52-0000-4000-8000-0000000000f${n}`, opCreated: new Date().toISOString(), claim: { member: 'mem-a', device: 'dev-1', fingerprint: 'fp-1' },
+      name: 'session.fork', input: { appSessionId: source, target: { kind: 'inPlace' }, message: null, rewindTo: null },
+    });
+    expect(await bus.main('machine.op', op(1))).toMatchObject({ ok: true, value: { state: 'done', result: { ok: false, error: { issues: { refusal: 'ceiling', mode: 'acceptEdits' } } } } });
+    expect(launched).toEqual([]);
+    above.clear();
+    const ran = await bus.main('machine.op', op(2));
+    expect(ran).toMatchObject({ ok: true, value: { state: 'done', result: { ok: true, value: { status: 'starting' } } } });
+    const forkId = (ran as { value: { result: { value: { appSessionId: string } } } }).value.result.value.appSessionId;
+    expect(await record(bus, forkId)).toMatchObject({ appId: forkId, directory: checkout, permissionMode });
+    expect((await record(bus, forkId))?.launchedBy).toBeUndefined();
+    await expect.poll(() => launched.map((spec) => spec.appSessionId)).toEqual([forkId]);
+    expect(launched[0]).not.toHaveProperty('launchedBy');
   });
 
   it('resumes a spawned record naming its spawner, a lost proof written again first; its fork, the trust bootstrap and a session nobody spawned name nobody; the delete takes the proof', async () => {

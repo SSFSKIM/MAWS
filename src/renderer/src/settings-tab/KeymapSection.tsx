@@ -9,8 +9,13 @@ import { ACTIONS, type ActionId, type KeymapOverrides } from '@shared/keymap/act
 import { GatewaySheet } from '../gateway/GatewaySheet';
 import { ipc } from '../ipc/client';
 import { KEYBOARD } from './copy';
+import { useDrawnRow } from './drawn';
 import { captureChord, displayChord, keymapGroups, type KeymapRow } from './keymap';
-import { TEXT_ACTION, writeSettings } from './parts';
+import { LANDING, TEXT_ACTION, writeSettings } from './parts';
+
+// The table's rounded corners on the rows that touch them (a group's raised heading on top, a recording row's tint at the
+// bottom), in place of clipping the table
+const TABLE_CORNERS = '[&>[role=rowgroup]:first-child>[role=row]:first-child]:rounded-t-sm [&>[role=rowgroup]:last-child>[role=row]:last-child]:rounded-b-sm';
 
 function withChord(keymap: KeymapOverrides, id: ActionId, chord: string | null): KeymapOverrides {
   const next = { ...keymap };
@@ -23,6 +28,9 @@ export function KeymapSection({ keymap }: { keymap: KeymapOverrides }) {
   const [recording, setRecording] = useState<ActionId | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
+  // U11a M9: the section's two rows of the table (rows.ts), the bindings and their reset
+  useDrawnRow('keyboard.bindings', 'default');
+  useDrawnRow('keyboard.reset', 'default');
 
   // While a row records, the macOS menu sets its key equivalents aside (⌘W, ⌘K, ⌘1… would otherwise run before the page
   // sees them) and C5's dispatcher skips the recording element; both come back when recording ends, however it ends.
@@ -62,7 +70,9 @@ export function KeymapSection({ keymap }: { keymap: KeymapOverrides }) {
 
   return (
     <>
-      <div role="table" aria-label={KEYBOARD.table} className="mt-1 overflow-hidden rounded-sm border border-border">
+      {/* U11a M10: the table rounds its first and last rows' corners itself rather than clipping, so a binding the search
+          lands on draws its mark 8 px around it (SettingsSearch.tsx `MARK`) */}
+      <div role="table" aria-label={KEYBOARD.table} data-settings-row="keyboard.bindings" data-settings-state="default" tabIndex={-1} className={`mt-1 border border-border ${TABLE_CORNERS} ${LANDING}`}>
         {keymapGroups(keymap).map((group) => (
           <div key={group.label} role="rowgroup" aria-label={group.label}>
             <div role="row" className="border-t border-border bg-bg-raised px-2.5 py-1 text-ui-sm font-semibold tracking-wide text-fg-muted uppercase first:border-t-0">
@@ -85,7 +95,7 @@ export function KeymapSection({ keymap }: { keymap: KeymapOverrides }) {
           </div>
         ))}
       </div>
-      <div className="mt-2 flex items-center gap-2">
+      <div data-settings-row="keyboard.reset" data-settings-state="default" tabIndex={-1} className={`mt-2 flex items-center gap-2 ${LANDING}`}>
         <button type="button" className={TEXT_ACTION} disabled={Object.keys(keymap).length === 0} onClick={() => setConfirmReset(true)}>
           {KEYBOARD.reset}
         </button>
@@ -125,10 +135,10 @@ function KeyRow({
   onKeyDown(e: KeyboardEvent<HTMLElement>): void;
 }) {
   return (
-    <div role="row" aria-label={row.title} data-recording={recording || undefined} className={`border-t border-border px-2.5 text-ui-sm ${recording ? 'bg-accent-soft' : ''}`}>
-      {/* W9 (H1): narrower than 32rem (the Settings view's container) the title stacks over the chord and its action */}
-      <div className="grid h-[30px] grid-cols-[minmax(0,1fr)_160px_96px] items-center gap-2.5 @max-lg/settings:h-auto @max-lg/settings:grid-cols-[minmax(0,1fr)_auto] @max-lg/settings:gap-y-1 @max-lg/settings:py-1.5">
-        <span role="cell" className="truncate @max-lg/settings:col-span-2">
+    <div role="row" aria-label={row.title} data-recording={recording || undefined} data-settings-binding={row.id} tabIndex={-1} className={`border-t border-border px-2.5 text-ui-sm ${LANDING} -outline-offset-2 ${recording ? 'bg-accent-soft' : ''}`}>
+      {/* W9 (H1): narrower than 32rem (U11a M9: the Settings body's own column) the title stacks over the chord and its action */}
+      <div className="grid h-[30px] grid-cols-[minmax(0,1fr)_160px_96px] items-center gap-2.5 @max-lg/settings-body:h-auto @max-lg/settings-body:grid-cols-[minmax(0,1fr)_auto] @max-lg/settings-body:gap-y-1 @max-lg/settings-body:py-1.5">
+        <span role="cell" className="truncate @max-lg/settings-body:col-span-2">
           {row.title}
         </span>
         <span role="cell">

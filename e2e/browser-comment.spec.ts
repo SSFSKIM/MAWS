@@ -11,7 +11,7 @@
 // written prompts, the transcript's chip and image (P2-E2: the docked card becoming the thread, handed off to the Side
 // pane at the thread's permission), the thread header's page button reusing the parent's tab; (2b) P2-F L146: the Side
 // pane's "Show in browser" re-docking the thread into the card under its page, and Show here; (2c) P2-F: the Side pane
-// after Browser is closed, its "Reopen in browser" bringing Browser back with the thread's card under the page; (3) G2 without E4c: every target's anchor
+// with Browser out of view, its "Reopen in browser" bringing Browser back with the thread's card under the page; (3) G2 without E4c: every target's anchor
 // resolves with E4c's own expression in the view's page; (4) an area pick; (5) Esc in the page and in the chrome; (6)
 // the context menu's pick (through the seam's `pickAt`); (7) a navigation disarms, a stale report is dropped; (7b) a
 // tab whose preload never acknowledges the arm is refused; (7c) a tab adopted from window.open arms and shields; (8) a
@@ -36,7 +36,7 @@ import { clearToasts, closeScene, scratchProject, show, type Scratch } from './s
 import { REPO_ROOT } from './support/launch';
 import { latencyBudgets } from './support/latency';
 import { seedTranscript, SideJournal, solidPng, transcript } from './support/side-replay';
-import { closeSurface } from './support/shell';
+import { sideColumn, sideTab } from './support/shell';
 
 test.describe.configure({ timeout: 180_000 });
 
@@ -803,9 +803,9 @@ test('2b. a page thread in the Side pane re-docks into the card under the pane s
   );
 });
 
-// ---- (2c) P2-F: reopening a closed Browser surface from the Side pane ---------------------------------------------------------
+// ---- (2c) P2-F: reopening a Browser surface out of view from the Side pane --------------------------------------------------
 
-test('2c. with the Browser surface closed, the Side pane offers Reopen in browser (not Show in browser), which opens Browser again with the thread’s card docked under the page', async () => {
+test('2c. with the Browser surface out of view (the Side pane’s tab in its place), the Side pane offers Reopen in browser (not Show in browser), which brings Browser back into view with the thread’s card docked under the page', async () => {
   test.setTimeout(240_000);
   let parentJournal = '';
   await commentScene(
@@ -833,7 +833,8 @@ test('2c. with the Browser surface closed, the Side pane offers Reopen in browse
       await parentTurn(s, parent);
       const t = await openCommentPage(s, parent); // the page in the panel's Browser
 
-      // A Side thread from a pick, handed to the Side pane. Close Browser explicitly: surfaces now stack.
+      // A Side thread from a pick, handed to the Side pane, whose tab comes into view in Browser's place (UX wave U8b:
+      // one tab in view per group; Browser stays a tab of the strip, its body not mounted).
       await arm(s, t);
       await clickAt(t.page, centre(await rectOf(t.page.locator('#increment'))));
       let card = cardOf(s, INCREMENT_LABEL);
@@ -846,17 +847,18 @@ test('2c. with the Browser surface closed, the Side pane offers Reopen in browse
       await expect(card).toHaveCount(0);
       const pane = s.panel.locator('[data-side-thread-view]');
       await expect(pane, 'the Side pane draws the thread').toBeVisible();
-      await closeSurface(s.page, 'Browser');
-      await expect(t.panel, 'the Browser surface is closed').toHaveCount(0);
+      await expect(t.panel, 'the Browser surface is out of view').toHaveCount(0);
+      await expect(sideTab(sideColumn(s.page), 'Browser'), 'Browser is still a tab of the strip').toHaveAttribute('aria-selected', 'false');
       const header = pane.locator('header');
       await expect(header.getByRole('button', { name: 'Show in browser' }), 'no pane holds the page').toHaveCount(0);
 
       // Reopen in browser: Browser returns on the page; the thread is drawn only in its card, with no caret.
       await header.getByRole('button', { name: 'Reopen in browser' }).click();
       await expect(t.panel).toBeVisible();
-      // UX2-L keeps the other stacked surface mounted; it must not draw a second copy of the thread.
-      await expect(pane.getByText('Shown in the card under the page')).toBeVisible();
-      await expect(pane.getByRole('group', { name: 'Approval needed' })).toHaveCount(0);
+      // Browser's tab comes into view in the Side pane's place: the Side tab stays in the strip, its body (and so a
+      // second drawing of the thread) is not mounted.
+      await expect(sideTab(sideColumn(s.page), 'Side')).toHaveAttribute('aria-selected', 'false');
+      await expect(pane).toHaveCount(0);
       card = t.panel.locator('[data-card-dock] [data-comment-card]');
       await expect(card).toHaveAttribute('data-card-phase', 'thread');
       await expect(card.locator('[data-needs-you]'), 'the thread’s request, in the card again').toContainText('Waiting for your permission');

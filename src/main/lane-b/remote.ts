@@ -63,6 +63,23 @@
 //   endpoint that lists `rl2.upload-blocks` (the act `requires` it, so a later channel's older peer refuses rather than
 //   misreads it); to any other the message goes with its `@` mention alone, as before. The machine's refusal of a send's
 //   uploads, `malformed` with no reason, is the attachment's words.
+// - The UX wave (U9, docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, Interfaces §1, §3): archive,
+//   unarchive (`session.update {patch: {archived: false}}`), rename and a dismissal are `machine` acts, taking back a
+//   waiting message and a pane's answer engine-host acts (the answer never resumes a session), and the archived sessions'
+//   read a call by name; each goes only to an endpoint that lists `rl2.session-acts` (REMOTE_NEEDS), and a refusal of an
+//   act with words says UC-7.5's sentence (./remote-outcomes.ts' `refusalResult`). M2: a fork in place is a `machine` act
+//   with step-up (signed before its first copy goes; unasked on a machine the member owns, ../device/step-up.ts), not
+//   through the spawn table, so two forks from one tab are two forks; its answer comes once the fork is `launching` on
+//   the machine, waited for within the fork's command budget past the pending bound.
+// - The UX wave (U9, M5, "The settled word"; Interfaces §9): one round per machine and generation of its link. At each
+//   `up` the round settles, saying `remote.settled {machine, generation}` once, when none of the machine's lanes is
+//   placing or awaiting (./remote-session.ts' `standing`), evaluated at the `up` and at every change of a lane's
+//   standing, which the lane tells after what it said for it; at a `down` after `up` every subscription a lane keeps is
+//   marked awaiting and the round ends, unsaid if it had not settled. The generation is counted here as the roster counts
+//   it (src/main/machines/manager.ts: each reported `up`, per machine, never reset), a round attached at the roster's
+//   word of the link (as the attention feed's is), or with the machine's first lane. A page that just subscribed is told
+//   the settled generation again (`replay`). M5's three timing lines (./remote-timing.ts): a tab's open, here; a history
+//   read, ./remote-history.ts; New chat's chooser, its two reads timed where the router routes them (`routeLaneB`).
 import type { Socket } from 'node:net';
 import type { MessageChannelMain } from 'electron';
 import type { OpenAnswer } from '@shared/client/port';
@@ -71,6 +88,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import { ipcError, type IpcErrorCode } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandResult, EventName, EventPayload } from '@shared/ipc/schema';
 import { PROJECT_ACTS_CAPABILITY } from '@shared/ipc/schema/session';
+import { REMOTE_NEEDS } from '@shared/ipc/remote-unavailable';
 import { validateCommandOutput } from '@shared/ipc/validate';
 import type { MachineRef } from '@shared/machine/ref';
 import { REMOTE_ACT_PENDING_MS } from '@shared/machine/remote-pending';
@@ -81,6 +99,8 @@ import { OPERATION_COMMANDS, type OperationCommand } from '@shared/engine/operat
 import { listenLoopback, type LocalListener } from '../forwards';
 import type { MainContext, RemoteDispatch } from '../ipc/router';
 import type { LayoutFileStore } from '../layout/store';
+import type { LinkState } from '../machines/manager';
+import { budgetedMs } from '../machines/budgets'; // U9 (M2): a fork's answer within its command's budget
 import { peerLists } from '../machines/remote/capabilities';
 import { needsProjectActs } from '../machines/project-acts-peer';
 import { callOverLink, dispatchOverLink, refusalError } from '../machines/remote/dispatch';
@@ -97,8 +117,9 @@ import { createRemoteWindows } from './remote-windows';
 import { createRemoteCheckout, WATCH_COMMANDS, type RemoteCheckoutTiming } from './remote-checkout';
 import { readEventsInPages } from './remote-history';
 import { createRemoteInterest } from './remote-interest';
-import { outcomeAsResult, pendingResult } from './remote-outcomes';
+import { outcomeAsResult, pendingResult, refusalResult } from './remote-outcomes';
 import { RemoteSession, type RemoteSessionTiming } from './remote-session';
+import { chooserTimings, openTiming, type ChooserRead, type OpenTiming } from './remote-timing';
 import { createSpawnAttempts } from './remote-spawn';
 import { readFileInPages } from './remote-files-read';
 import { createRemoteForwards, REMOTE_FORWARDS_TIMING, type RemoteForwards, type RemoteForwardsTiming } from './remote-forward';
@@ -216,6 +237,8 @@ export interface RemoteLaneB {
   stop(): void;
   /** M4c fix wave 2: the spawn attempts kept, by tab (tests): an act out, or its answer. */
   spawnsKept(): Array<{ key: string; state: 'out' | 'said' | 'unresolved' }>;
+  /** The UX wave, U9 (M5): one of New chat's chooser reads of a machine answered (`routeLaneB` times them), for its timing line. */
+  chooserRead(machine: MachineRef, read: ChooserRead, startedAt: number, answeredAt: number): void;
 }
 
 /** The engine-host acts §L offers for lane B, each sealed for the session's live launch. */
@@ -226,6 +249,7 @@ export const ENGINE_HOST_ACTS: ReadonlySet<CommandName> = new Set<CommandName>([
   'session.stopTask', 'session.sideQuestion', 'session.mcpToggle', 'session.mcpReconnect',
   'session.rewind', 'session.rewindFiles', 'session.forget', 'session.setKeep', 'session.generateTitle',
   'maws.ask.answer', 'side.question.clear', 'session.reloadPlugins', // P5 O7 M8 (§U)
+  'session.steer.cancel', 'maws.pane.answer', // the UX wave (U9): behind `rl2.session-acts`; a pane's answer never resumes a session
 ]);
 /** The `machine` acts §L offers for lane B: placed by their args (or, a spawn, on the machine), neither a session nor a context. */
 export const MACHINE_ACTS: ReadonlySet<CommandName> = new Set<CommandName>([
@@ -243,6 +267,9 @@ export const MACHINE_ACTS: ReadonlySet<CommandName> = new Set<CommandName>([
   'session.projects.addFolder', // P5 O7 M9: the remote setup's registration (`machine-admin`, the machine's owners')
   'session.projects.link', 'session.projects.relocate', 'session.projects.update', 'session.projects.remove', // the project registry (M9, §I's acts): the machine's owners' (`machine-admin`)
   'session.drafts.set', // P5 O8 M6a: the caller's own draft, kept per member on the machine (`converse`)
+  // the UX wave (U9): behind `rl2.session-acts`; archive, unarchive and rename `manage`, a dismissal `converse`; M2: a fork
+  // in place, the machine's owners', stepped up and answered within its command's budget, never through the spawn table
+  'session.archive', 'session.update', 'session.rename', 'attention.acknowledge', 'session.fork',
 ]);
 /**
  * The project registry (Interfaces §G, "Older peers"): what goes only to a machine whose RL2 handshake lists
@@ -253,9 +280,24 @@ export const MACHINE_ACTS: ReadonlySet<CommandName> = new Set<CommandName>([
  * on the next channel follows that channel's peer), and `resolve` goes `oneChannel`, on the channel it was checked on.
  */
 const PROJECT_CALLS: ReadonlySet<CommandName> = new Set<CommandName>(['session.projects.resolve']);
+/**
+ * The UX wave (U9; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, Interfaces §1): what `REMOTE_NEEDS`
+ * names goes only to a machine whose handshake lists it. A current channel's peer that lacks it is refused here,
+ * `not-offered`, nothing sent; with no channel current an act waits under the link's hold (no outbox, A4), carrying the
+ * capability as `requires` for the channel it goes on to judge. The archived sessions' read (`session.list`) is the
+ * adapter's to send for that reason, a call by name on the channel it was checked on.
+ */
+const SESSION_CALLS: ReadonlySet<CommandName> = new Set<CommandName>(['session.list']);
+/** The capability an act carries as `requires`: the project registry's, else the one REMOTE_NEEDS names. */
+const requiredBy = (name: CommandName, fields: Fields): string | undefined => (needsProjectActs(name, fields) ? PROJECT_ACTS_CAPABILITY : REMOTE_NEEDS[name]);
 // `needsProjectActs` (../machines/project-acts-peer.ts) names what needs the capability; this Mac's daemon is checked by it too
 /** Acts the endpoint always asks a step-up of, signed before the first copy goes (no round trip to be asked). */
-const STEPPED_UP: ReadonlySet<CommandName> = new Set<CommandName>(['session.projects.addFolder', 'session.projects.link', 'session.projects.relocate']);
+const STEPPED_UP: ReadonlySet<CommandName> = new Set<CommandName>(['session.projects.addFolder', 'session.projects.link', 'session.projects.relocate', 'session.fork']);
+/**
+ * The UX wave (U9, M2): `machine` acts whose work on the machine outlasts the pending bound, answered up to their
+ * command's budget past it (`answerMs`): a fork answers once its setup reached `launching`, as a spawn's bound has it.
+ */
+const BUDGETED_ACTS: ReadonlySet<CommandName> = new Set<CommandName>(['session.fork']);
 // P5 O7 M5c ("O4's surfaces: the grade"): the six lease reads, sent as calls by name (./remote-connectors.ts)
 export { MACHINE_CALLS } from './remote-connectors';
 /** Reads the pane makes that no row offers, answered here from one that is. */
@@ -296,7 +338,7 @@ export function standInForMachines(standIn: MachineStandIn): () => void {
  * the adapter says that session's state again, so a reloaded page or a second window has what was said before it listened.
  */
 export function routeLaneB(base: RemoteDispatch, remote: (machine: MachineRef) => RemoteLink | null, laneB: RemoteLaneB): RemoteDispatch {
-  return async (machine, name, input, ctx) => {
+  const routed: RemoteDispatch = async (machine, name, input, ctx) => {
     const stood = machineStandIn?.(machine, name, input); // a harness build's fixture alone (above)
     if (stood !== undefined) return stood;
     const link = laneB.handles(name) ? remote(machine) : null;
@@ -311,6 +353,23 @@ export function routeLaneB(base: RemoteDispatch, remote: (machine: MachineRef) =
     }
     return result;
   };
+  // the UX wave, U9 (M5): New chat's chooser reads a machine's projects and its home's first page together
+  return async (machine, name, input, ctx) => {
+    const read = chooserReadOf(name, input);
+    if (read === null || remote(machine) === null) return routed(machine, name, input, ctx);
+    const startedAt = Date.now();
+    const result = await routed(machine, name, input, ctx);
+    laneB.chooserRead(machine, read, startedAt, Date.now());
+    return result;
+  };
+}
+
+/** The read of New chat's chooser a command is (its projects, or its home's first page of folders), or null. */
+function chooserReadOf(name: CommandName, input: unknown): ChooserRead | null {
+  if (name === 'session.projects.list') return name;
+  if (name !== 'machine.folders.list') return null;
+  const fields = record(input) ?? {};
+  return fields.path === undefined && fields.cursor === undefined && fields.open === undefined ? name : null;
 }
 
 type Fields = Record<string, unknown>;
@@ -420,8 +479,78 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     if (held !== undefined) for (const [app, lane] of held.lanes) end(link.machine, app, lane, 'closed');
     const lanes = new Map<string, Lane>();
     machines.set(link.machine, { link, lanes });
+    roundOf(link, false); // the machine's first lane: the lane's start evaluates
     return lanes;
   }
+
+  // ---- The settled word (the UX wave, U9, M5) ------------------------------------------------------------------------------
+
+  /** One machine's round: its link, the state last read, and the generation settling or settled. */
+  type Round = { link: RemoteLink; state: LinkState | null; settling: number | null; settled: number | null; off(): void };
+  const rounds = new Map<MachineRef, Round>();
+  /** Each machine's `up`s in this run, by its ref and never reset, as the roster's `generation` counts them. */
+  const ups = new Map<MachineRef, number>();
+
+  /** The machine's round under `link`; a link made again goes on counting the machine's `up`s. */
+  function roundOf(link: RemoteLink, evaluateNow: boolean): Round {
+    const held = rounds.get(link.machine);
+    if (held?.link === link) return held;
+    held?.off();
+    const round: Round = { link, state: null, settling: null, settled: null, off: () => {} };
+    rounds.set(link.machine, round);
+    round.off = link.onState(() => roundMoved(round, true));
+    roundMoved(round, evaluateNow);
+    return round;
+  }
+
+  function roundMoved(round: Round, evaluateNow: boolean): void {
+    const state = round.link.state();
+    if (state === round.state) return; // a carrier or a refusal moved: the same generation
+    const was = round.state;
+    round.state = state;
+    const machine = round.link.machine;
+    if (state === 'up') {
+      const generation = (ups.get(machine) ?? 0) + 1;
+      ups.set(machine, generation);
+      round.settling = generation;
+      round.settled = null;
+      for (const app of machines.get(machine)?.lanes.keys() ?? []) opens.get(`${machine}/${app}`)?.up();
+      if (evaluateNow) settleRound(round);
+      return;
+    }
+    if (was !== 'up') return;
+    // main's word of the loss: a subscription kept across it awaits its next answer, before any `up` can be evaluated
+    const held = machines.get(machine);
+    if (held?.link === round.link) for (const lane of held.lanes.values()) lane.session.lost();
+    round.settling = null;
+    round.settled = null;
+  }
+
+  /** The round settles once no lane of its machine is placing or awaiting: said once for its generation. */
+  function settleRound(round: Round): void {
+    if (round.settling === null || rounds.get(round.link.machine) !== round) return;
+    const held = machines.get(round.link.machine);
+    if (held?.link === round.link) {
+      for (const lane of held.lanes.values()) {
+        const standing = lane.session.standing();
+        if (standing === 'placing' || standing === 'awaiting') return;
+      }
+    }
+    round.settled = round.settling;
+    round.settling = null;
+    deps.emit(round.link.machine, 'remote.settled', { machine: round.link.machine, generation: round.settled });
+  }
+
+  /** A lane's standing changed (told after what it said for it): its record had, for the open's line; its machine's round. */
+  function standingChanged(machine: MachineRef, app: string): void {
+    if (sessionOf(machine, app)?.state.record != null) opens.get(`${machine}/${app}`)?.record();
+    const round = rounds.get(machine);
+    if (round !== undefined) settleRound(round);
+  }
+
+  /** The UX wave, U9 (M5): each remote tab's open, from the moment its interest opened the session, for its timing line. */
+  const opens = new Map<string, OpenTiming>();
+  const chooser = chooserTimings(deps.log);
 
   function open(machine: MachineRef, app: string): void {
     const link = deps.remote(machine);
@@ -442,9 +571,11 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
         attentionChanged: () => attention.streamsChanged(machine, app), // fix wave 4: the badge and the notifier hear them
         othersSession: () => deps.othersOf?.(machine, app) ?? false, // board #525: a refused read is a reader's grade only there
         nextAnswer: () => countAnswer(machine, app), // P5 O15 M2b
+        standingChanged: () => standingChanged(machine, app), // the UX wave, U9 (M5): the settled word
         log: deps.log,
       });
       lanes.set(app, (lane = { session, open: false, sends: [], sending: false, acquiring: null }));
+      opens.set(`${machine}/${app}`, openTiming(link.name, app, link.state() === 'up', now, deps.log));
     }
     lane.open = true;
     lane.session.start();
@@ -471,6 +602,9 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     const lanes = machines.get(machine)?.lanes;
     if (lanes?.get(app) !== lane) return;
     lanes.delete(app);
+    opens.delete(`${machine}/${app}`);
+    const round = rounds.get(machine);
+    if (round !== undefined) settleRound(round); // a lane let go waits for nothing
     if (lane.session.attentionItems().length > 0) attention.streamsChanged(machine, app); // fix wave 4: its items leave the streams'
   }
 
@@ -483,7 +617,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     open,
     close,
   });
-  const offRemote = deps.onRemote(() => {
+  const offRemote = deps.onRemote((refs) => {
     for (const link of [...follows.keys()]) if (deps.remote(link.machine) !== link) follows.delete(link);
     spawns.linksChanged(deps.remote); // M4c fix wave 2: a spawn out on a link that ended can't be known
     ptys.linksChanged(); // P5 O7 M3: a terminal or a forward on a link that ended ends
@@ -492,6 +626,16 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       if (deps.remote(machine) === link) continue;
       for (const [app, lane] of lanes) end(machine, app, lane, 'closed');
       machines.delete(machine);
+    }
+    // the UX wave, U9 (M5): a round per machine the roster lists, a machine with no lane at all included
+    for (const [machine, round] of [...rounds]) {
+      if (refs.includes(machine) && deps.remote(machine) !== null) continue; // its link, or the one made again below
+      round.off();
+      rounds.delete(machine);
+    }
+    for (const machine of refs) {
+      const link = deps.remote(machine);
+      if (link !== null) roundOf(link, true);
     }
     interest.refresh();
   });
@@ -537,7 +681,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       sendBy: deadline,
       ...(options.oneChannel === true ? { oneChannel: true as const } : {}),
       ...(STEPPED_UP.has(name) ? { stepUp: 'required' as const } : {}),
-      ...(needsProjectActs(name, fields) ? { requires: PROJECT_ACTS_CAPABILITY } : {}), // judged at each transmission
+      ...(requiredBy(name, fields) === undefined ? {} : { requires: requiredBy(name, fields) }), // judged at each transmission
     });
     options.onHandle?.(handle);
     const result = await settle(link, name, handle, deadline + (options.answerMs ?? 0), String(fields.appSessionId ?? fields.artifactId ?? ''));
@@ -589,6 +733,8 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     const app = lane.session.state.app;
     let context = lane.session.context();
     const resuming = context === null;
+    // U9: a pane's request died with the launch that asked it, so its answer resumes nothing and acquires nothing
+    if (context === null && name === 'maws.pane.answer') return failure('internal', `${name}: the pane’s request ended with its session’s launch on ${link.name}`, { refusal: 'not-live' });
     if (context === null) {
       // A launch already on its way is waited for; one that ended (its row kept, `exited`) or none is resumed first.
       const resume = lane.session.launching()
@@ -618,8 +764,9 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     const blocks = uploads && (link.peerCapabilities() === null || peerLists(link, 'rl2.upload-blocks'));
     if (uploads && !blocks) deps.log(`lane B: session.send on ${link.name}/${app}: its endpoint lists no rl2.upload-blocks; the uploads go as their mentions alone`);
     const since = lane.session.openings(); // the opening the act is made under: a receipt heard after a later one is asked of the machine
+    const needs = REMOTE_NEEDS[name]; // U9: judged at each transmission, as the uploads' capability is
     const make = (args: Fields, requires: boolean) =>
-      settle(link, name, link.act({ action: name, session: app, context: { lane: 'B', ...context }, args, executor: 'engine-host', sendBy: deadline, ...(requestDigest !== undefined && { requestDigest }), ...(requires && { requires: 'rl2.upload-blocks' }) }), deadline, app);
+      settle(link, name, link.act({ action: name, session: app, context: { lane: 'B', ...context }, args, executor: 'engine-host', sendBy: deadline, ...(requestDigest !== undefined && { requestDigest }), ...(requires ? { requires: 'rl2.upload-blocks' } : needs !== undefined ? { requires: needs } : {}) }), deadline, app);
     let result = await make(blocks || !uploads ? fields : withoutUploads(fields), blocks);
     const refusal = result.ok ? null : (result.error.issues as { refusal?: unknown } | undefined)?.refusal;
     // m8-3 review round 2: only when the channel it went on lists no `rl2.upload-blocks`; any other not-offered is the send's error
@@ -733,6 +880,12 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       // only on the channel checked: one that ends fails it `offline`, never carried to the next channel's peer unchecked
       if (PROJECT_CALLS.has(name)) return callOverLink(link, name, fields, { oneChannel: true });
     }
+    const needs = REMOTE_NEEDS[name];
+    if (needs !== undefined) {
+      const peers = link.peerCapabilities();
+      if (peers !== null && !peers.includes(needs)) return refusalResult(name, link.name, 'not-offered');
+      if (SESSION_CALLS.has(name)) return peers === null ? failure('host_unavailable', `${name}: machine ${link.name} is not reachable`) : callOverLink(link, name, fields, { oneChannel: true });
+    }
     if (artifacts.handles(name)) return artifacts.dispatch(link, name, fields, ctx.client); // P5 O7 M5a; M5b: the window a document opens in
     if (PTY_NAMES.has(name)) return ptys.dispatch(link, name, fields);
     if (WATCH_COMMANDS.has(name)) return checkout.dispatch(link, name, fields, ctx);
@@ -744,17 +897,22 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     if (name === 'files.read') return readFileInPages(link, fields, deps.log); // an answer past the channel, in ranged reads
     if (name === 'session.events') {
       const app = String(fields.appSessionId);
-      return readEventsInPages(link, fields, {
+      const opened = fields.before === undefined && fields.seek === undefined ? opens.get(`${link.machine}/${app}`) : undefined; // M5: the open's history read
+      opened?.asked();
+      const read = await readEventsInPages(link, fields, {
         budget: peerLists(link, 'rl2.events-budget'), // P5 O7 M4: the architect's ruling, the field only to a peer that reads it
         launch: () => lanesOf(link).get(app)?.session.state.launch ?? null,
         gap: (launchId, at) => deps.emit(link.machine, 'remote.gap', { appSessionId: app as EventPayload<'remote.gap'>['appSessionId'], launchId, at }),
         tooLarge: (window) => deps.emit(link.machine, 'remote.historyTooLarge', { appSessionId: app as EventPayload<'remote.historyTooLarge'>['appSessionId'], window }),
         log: deps.log,
       });
+      if (read.ok) opened?.rows();
+      return read;
     }
     if (connectors.handles(name)) return connectors.dispatch(link, name, fields, ctx.client); // P5 O7 M5c
     if (MACHINE_CALLS.has(name)) return callOverLink(link, name, fields); // P5 O7 M9: the remote setup's two reads
     if (TARGETED_CALLS.has(name)) return targeted(link, name, fields, ctx); // P5 O7 M8
+    if (BUDGETED_ACTS.has(name)) return machineAct(link, name, fields, deadline, { answerMs: budgetedMs(link.budgets, name) ?? 0 });
     if (MACHINE_ACTS.has(name)) return machineAct(link, name, fields, deadline);
     const lane = lanesOf(link).get(String(fields.appSessionId));
     if (lane === undefined || !lane.open) return failure('internal', `${name}: ${NOT_OPEN}`, { refusal: 'not-open' });
@@ -763,7 +921,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   }
 
   return {
-    handles: (name) => ENGINE_HOST_ACTS.has(name) || MACHINE_ACTS.has(name) || PROJECT_CALLS.has(name) || MACHINE_CALLS.has(name) || SUBSTITUTES.has(name) || PAGED_READS.has(name) || TARGETED_CALLS.has(name) || WATCH_COMMANDS.has(name) || PTY_NAMES.has(name) || artifacts.handles(name),
+    handles: (name) => ENGINE_HOST_ACTS.has(name) || MACHINE_ACTS.has(name) || PROJECT_CALLS.has(name) || SESSION_CALLS.has(name) || MACHINE_CALLS.has(name) || SUBSTITUTES.has(name) || PAGED_READS.has(name) || TARGETED_CALLS.has(name) || WATCH_COMMANDS.has(name) || PTY_NAMES.has(name) || artifacts.handles(name),
     async dispatch(link, name, input, ctx) {
       try {
         return await run(link, name, record(input) ?? {}, ctx);
@@ -787,12 +945,18 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       at: (localPort) => forwards.at(localPort),
     },
     spawnsKept: () => spawns.kept(),
+    chooserRead(machine, read, startedAt, answeredAt) {
+      chooser(deps.remote(machine)?.name ?? machine, read, startedAt, answeredAt);
+    },
     artifacts: { openCopy: (input) => artifacts.openCopy(input), files: (machine) => artifacts.files(machine), scheme: artifacts.scheme, assets: (machine) => artifacts.assets(machine) },
     attention: { machines: () => attention.machines(), machine: (machine) => attention.machine(machine), onChange: (listener) => attention.onChange(listener), sayAgain: () => attention.sayAgain() },
     replay(machine, app) {
       const lane = machines.get(machine)?.lanes.get(app);
       if (lane?.open === true) lane.session.replay();
       attention.replay(machine, app); // fix waves 1, 5: the feed's items, which the stream's replay leaves out while it is fed
+      // the UX wave, U9 (M5): the generation settled, for the page that has just subscribed to a session held here
+      const round = rounds.get(machine);
+      if (lane?.open === true && round?.settled != null && round.link.state() === 'up') deps.emit(machine, 'remote.settled', { machine, generation: round.settled });
     },
     stop() {
       interest.stop();
@@ -809,6 +973,8 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       for (const { lanes } of machines.values()) for (const lane of lanes.values()) lane.session.stop();
       machines.clear();
       follows.clear();
+      for (const round of rounds.values()) round.off();
+      rounds.clear();
     },
   };
 }

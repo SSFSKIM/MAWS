@@ -335,8 +335,7 @@
   position: fixed;
   inset: 0;
   z-index: 40;
-  background: var(--bg);
-  opacity: 0.6;
+  background: var(--bg-active); /* board 523 (UX wave U11a): the one scrim's value (src/renderer/src/sessions/ui.ts's SCRIM) */
 }
 .doc-confirm {
   position: fixed;

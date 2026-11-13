@@ -281,9 +281,9 @@ export function createEnrollment(deps: EnrollmentDeps): Enrollment {
       const listed = state.machines.find((m) => sameName(m.name, input.name));
       if (listed !== undefined) return no('machine-name-taken', `${listed.name} is listed: re-enroll it from its row`);
       const prefix = prefixOver(state, input.name);
-      if (prefix !== null) return no('prefix-names-machine', `${input.name} falls under the delegation prefix ${prefix}: a name there is a certificate's, never an enrolled machine's`);
+      if (prefix !== null) return no('prefix-names-machine', `${input.name} falls under the delegation prefix ${prefix}`);
     }
-    if (ctx.client === null) return no('hub', 'the hub sign-in has ended: sign in again to enroll');
+    if (ctx.client === null) return no('hub', 'the hub sign-in has ended');
 
     const mark = { asker };
     starting = mark;
@@ -300,8 +300,8 @@ export function createEnrollment(deps: EnrollmentDeps): Enrollment {
     if (closed || at === null) return no('cancelled', 'the sign-in ended while the token was minted: nothing was shown');
     if (!minted.ok) {
       return minted.kind === 'status'
-        ? no('refused', `the hub refused the enrollment: ${minted.status} ${minted.error ?? 'with no code'}`)
-        : no('hub', minted.kind === 'unreachable' ? `the hub was not reached: ${minted.detail}` : 'the hub sign-in has ended: sign in again to enroll');
+        ? no('refused', `${minted.status} ${minted.error ?? 'with no code'}`)
+        : no('hub', minted.kind === 'unreachable' ? `the hub was not reached: ${minted.detail}` : 'the hub sign-in has ended');
     }
     const k = crypto.getRandomValues(new Uint8Array(ENROLL_SECRET_BYTES));
     const { root } = at.head.state;

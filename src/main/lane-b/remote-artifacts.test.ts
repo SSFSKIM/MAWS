@@ -189,7 +189,8 @@ describe('the machine’s artifacts feed', () => {
     feed().sink.subbed('snapshot', { epoch: 'artifacts:boot1', seq: 0 });
     feed().sink.event({ epoch: 'artifacts:boot1', seq: 1 }, { name: 'artifacts.changed', payload: { artifactId: A1, kind: 'document', revision: 4, change: 'updated' } });
     feed().sink.event({ epoch: 'artifacts:boot1', seq: 2 }, { name: 'library.changed', payload: { revision: 9 } });
-    expect(l.emitted.map((e) => [e.machine, e.name])).toEqual([
+    // the UX wave, U9 (M5): the machine's settled word, said at the roster's `up` (./remote.ts), is no artifact's
+    expect(l.emitted.filter((e) => e.name !== 'remote.settled').map((e) => [e.machine, e.name])).toEqual([
       [MINI, 'artifacts.resync'], // every opening: what changed before it reached no one
       [MINI, 'artifacts.changed'],
       [MINI, 'library.changed'],

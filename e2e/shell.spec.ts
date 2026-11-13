@@ -21,7 +21,7 @@ import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { scratchProject } from './support/maws-tools'; // P5 O6 M2: the upgrade scene's indexed sessions
 import { slashPaletteMovesNothing } from './support/palette-geometry';
 import { closeProject, openProject, projectLine, projectRow, showProjectList, sidebarRow } from './support/sidebar';
-import { mainTabById, mainTabs, surfaceRow as shellSurfaceRow, usagePill } from './support/shell';
+import { mainTabById, mainTabs, openSurface, surfaceRow as shellSurfaceRow, usagePill } from './support/shell';
 
 const SHELL_ENV = {
   MAWS_HARNESS: '0',
@@ -704,6 +704,7 @@ interface Saved {
   main: unknown;
   panelPinned: unknown;
   surfaces: unknown;
+  side: { groups: unknown; widths: unknown; cards: unknown }; // UX wave U8b's three keys
   keys: string[];
   bounds: { x: number; y: number; width: number; height: number };
   left: string[];
@@ -1125,15 +1126,18 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     expect(await tabLabels(page, 'Left pane tabs')).toEqual([three[0], 'Charter + research']);
     expect(await tabLabels(page, 'Right pane tabs')).toEqual([three[2]]);
     await expect(projectChip).toHaveText('MAWS');
-    // UX2 optional surfaces: explicitly open one in the restored session before resizing it. Content-based widths
-    // replace the fixed 380px, so the pointer delta starts at the rendered size, not the former default.
+    // UX2 optional surfaces: explicitly open one in the restored session before resizing it. UX wave U8b (A5): the column
+    // remembers two widths; Files is a reading tool, so it opens at 60 % of the room right of the sidebar, and the drag
+    // moves that wide width alone (the narrow one stays automatic).
     await page.locator('[data-surface-row]').getByRole('button', { name: 'Files', exact: true }).click();
     const panelResizer = page.locator('[data-region="panel"]').getByRole('separator', { name: 'Resize right panel' });
     await expect(panelResizer).toBeVisible();
     const panelWidth = Number(await panelResizer.getAttribute('aria-valuenow'));
+    expect(panelWidth, 'Files opens at 60 % of the room').toBe(Math.round(((await page.evaluate(() => innerWidth)) - 200) * 0.6));
     await dragBy(page, panelResizer, panelWidth - 320);
     await expect(panelResizer).toHaveAttribute('aria-valuenow', '320');
-    await menu(app, 'panel.toggle'); // replace Files with session cards
+    await expect.poll(() => layoutGet(page, 'panelTools.widths'), { message: 'the drag wrote the wide width alone' }).toEqual({ version: 1, wide: 320, narrow: null });
+    await menu(app, 'panel.toggle'); // the column hides (Files stays a tab) and the session cards show
     await menu(app, 'panel.toggle'); // hide the cards
     await expect(panelResizer).toHaveCount(0);
     await expect.poll(async () => (await page.locator('[data-region="panel"]').boundingBox())?.width ?? 0).toBe(0);
@@ -1146,8 +1150,9 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
       }, { message: 'the layout is written back' })
       .toEqual([200, 320, true, true, 3, 'none', 2]);
     // UX2 preserves the layout and adds only the surface-selection key and this session's Files refs; U13a stores the one
-    // strip under the set `none`.
-    expect((await layoutList(page)).sort()).toEqual(['main.tabs', `panel.${await addressed(page, CHARTER)}`, 'panel.pinned', 'panelTools.surfaces', 'regions', 'window.main'].sort());
+    // strip under the set `none`; UX wave U8b's first read writes its three keys (the lower groups, the two widths, the
+    // cards' folds) at once.
+    expect((await layoutList(page)).sort()).toEqual(['cards.open', 'main.tabs', `panel.${await addressed(page, CHARTER)}`, 'panel.pinned', 'panelTools.groups', 'panelTools.surfaces', 'panelTools.widths', 'regions', 'window.main'].sort());
   });
 
   expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
@@ -1156,6 +1161,7 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     main: await layoutGet(page, 'main.tabs'),
     panelPinned: await layoutGet(page, 'panel.pinned'),
     surfaces: await layoutGet(page, 'panelTools.surfaces'),
+    side: { groups: await layoutGet(page, 'panelTools.groups'), widths: await layoutGet(page, 'panelTools.widths'), cards: await layoutGet(page, 'cards.open') },
     keys: (await layoutList(page)).sort(),
     bounds: await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBounds()),
     left: await tabLabels(page, 'Left pane tabs'),
@@ -1184,10 +1190,22 @@ async function relaunchedInstance(maws: MawsLaunch, saved: Saved): Promise<void>
   expect(await layoutGet(page, 'panel.pinned')).toEqual(saved.panelPinned);
   // UX2's optional-surface selections/pins round-trip without resetting the established tab sets or preferences.
   expect(await layoutGet(page, 'panelTools.surfaces')).toEqual(saved.surfaces);
+  // UX wave U8b: a second launch is no first read: the groups, the two widths and the folds are read as they were left
+  expect({ groups: await layoutGet(page, 'panelTools.groups'), widths: await layoutGet(page, 'panelTools.widths'), cards: await layoutGet(page, 'cards.open') }).toEqual(saved.side);
   expect((await layoutList(page)).sort()).toEqual(saved.keys);
   expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBounds()), 'the window bounds are restored').toEqual(saved.bounds);
   const file = JSON.parse(readFileSync(join(maws.userData, 'layout.json'), 'utf8')) as Record<string, unknown>;
   expect(file['window.main']).toMatchObject({ bounds: saved.bounds });
+
+  // UX wave U8b (A5): the two widths after the relaunch. Files, a reading tool, opens at the wide width it was dragged to;
+  // Background tasks, any other tool, at the narrow automatic 360 px; neither changes what is stored.
+  const panelResizer = page.locator('[data-region="panel"]').getByRole('separator', { name: 'Resize right panel' });
+  await page.locator('[data-surface-row]').getByRole('button', { name: 'Files', exact: true }).click();
+  await expect(page.locator('[data-region="panel"] [data-surface="files"]')).toBeVisible();
+  await expect(panelResizer, 'Files as wide as it was left').toHaveAttribute('aria-valuenow', '320');
+  await openSurface(page, 'Background tasks');
+  await expect(panelResizer, 'a narrow tool at its automatic width').toHaveAttribute('aria-valuenow', '360');
+  expect(await layoutGet(page, 'panelTools.widths'), 'opening the tools wrote no width').toEqual(saved.side.widths);
 
   expect(maws.consoleErrors(), 'the relaunched console stays free of errors').toEqual([]);
 }
@@ -1257,7 +1275,7 @@ async function captureEvents(page: Page): Promise<void> {
 
 const captured = (page: Page) => page.evaluate(() => window.__maws_e2e!);
 
-const layoutGet = async (page: Page, key: 'regions' | 'main.tabs' | 'panel.pinned' | 'panelTools.surfaces' | 'sidebar.hidden') => {
+const layoutGet = async (page: Page, key: 'regions' | 'main.tabs' | 'panel.pinned' | 'panelTools.surfaces' | 'sidebar.hidden' | 'panelTools.groups' | 'panelTools.widths' | 'cards.open') => {
   const result = await page.evaluate((key) => window.maws.invoke('layout.get', { key }), key);
   if (!result.ok) throw new Error(`layout.get ${key}: ${JSON.stringify(result.error)}`);
   return result.value.value;

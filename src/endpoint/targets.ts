@@ -120,7 +120,9 @@ export type Spawner = Pick<LaunchedBy, 'member'>;
  * P5 O7 M5a: `artifact`, how the `artifact` rule places an artifact by its id (the asking channel's cache, artifacts.ts);
  * absent, `placeArtifact` reads it afresh.
  */
-export type Placing = { dispatch: EndpointServices['dispatch']; log(line: string): void; live?: boolean; artifact?(artifactId: string): Promise<Resolved>; held?: HeldNames; members?: RecordMembers };
+// UX wave U9 (M1): `byRecord`, a lane B session with a recorded engine session is placed by its record alone, no status
+// read: a completion's act (a pane's answer), which a handover's drain must not hold for the successor (actions.ts).
+export type Placing = { dispatch: EndpointServices['dispatch']; log(line: string): void; live?: boolean; byRecord?: boolean; artifact?(artifactId: string): Promise<Resolved>; held?: HeldNames; members?: RecordMembers };
 
 /**
  * P5 O8 M6b: the member a lane B app session's record acts go to, as RL10's members join places it (rl10/members.ts'
@@ -227,7 +229,7 @@ export function resolveSubscription(session: { lane: 'A' | 'B'; id: string }, pl
  *     record is what the machine says the session is, and a caller below it learns nothing of a lag).
  *   - Without a recorded engine session the live row is the only placement, else `unknown` (`grade`).
  */
-async function laneB(appSessionId: string, { dispatch, log, live = true }: Placing): Promise<Resolved> {
+async function laneB(appSessionId: string, { dispatch, log, live = true, byRecord = false }: Placing): Promise<Resolved> {
   const unavailable: Resolved = { kind: 'refused', reason: 'unavailable' };
   const record = await dispatch('machine', 'session.get', { appSessionId }).catch((error: unknown) => ({ ok: false as const, error: { code: 'internal', message: (error as Error).message } }));
   if (!record.ok) {
@@ -238,6 +240,7 @@ async function laneB(appSessionId: string, { dispatch, log, live = true }: Placi
   const launchedBy = isId(spawner) ? { launchedBy: { member: spawner } } : {};
   const placed = (engine: string): Extract<Resolved, { kind: 'session' }> => ({ kind: 'session', target: { lane: 'B', session: engine, appSessionId }, ...launchedBy });
   const recorded = field(record.value, 'engineSessionId');
+  if (byRecord && isId(recorded)) return placed(recorded);
   const status = await dispatch('engine-host', 'session.status', { appSessionId });
   if (!status.ok && (status.error.code === 'host_unavailable' || status.error.code === 'timeout')) return unavailable;
   const running = status.ok ? field(status.value, 'engineSessionId') : undefined;

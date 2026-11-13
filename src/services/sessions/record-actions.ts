@@ -7,6 +7,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { Lineage, SessionRecord } from '@shared/graph/session';
+import type { Reader } from '@shared/ipc/client';
 import type { FirstMessage, ForkTarget, Location, SetupIntent } from '@shared/sessions/intent';
 import type { ArchiveOutcome, DeleteOutcome } from '@shared/ipc/schema/session';
 import { EffortSchema } from '@shared/engine/launch-spec';
@@ -128,16 +129,24 @@ function projectDirOf(s: Setup, record: SessionRecord): string {
 }
 
 // `session.rename`: a ready process renames through the engine (its store carries the title and C4 reads it back);
-// otherwise C4's override, which a later terminal `/rename` supersedes.
-export async function renameRecord(s: Setup, appSessionId: AppSessionId, title: string): Promise<{ record: SessionRecord; via: 'engine' | 'override' }> {
+// otherwise C4's override, which a later terminal `/rename` supersedes. The UX wave (U9, R9): under a reader (another
+// machine's member, through the endpoint) the answer is the record as `session.get` answers that reader, read after the
+// rename, never the owners' reading.
+export async function renameRecord(s: Setup, appSessionId: AppSessionId, title: string, reader?: Reader): Promise<{ record: SessionRecord; via: 'engine' | 'override' }> {
   const record = recordOf(s, appSessionId);
   const text = title.trim();
   const live = await reservationOf(s.dispatch, appSessionId);
+  let via: 'engine' | 'override' = 'override';
+  let renamed: SessionRecord;
   if (live?.process === 'ready') {
     await hostCall(s.dispatch, 'session.renameSession', { appSessionId, title: text });
-    return { record: s.sessions.get(appSessionId) ?? record, via: 'engine' };
-  }
-  return { record: s.sessions.update(appSessionId, { title: { text, source: 'user' } }), via: 'override' };
+    renamed = s.sessions.get(appSessionId) ?? record;
+    via = 'engine';
+  } else renamed = s.sessions.update(appSessionId, { title: { text, source: 'user' } });
+  if (reader === undefined) return { record: renamed, via };
+  const read = s.sessions.get(appSessionId, reader);
+  if (read === null) throw new Error(`unknown app session: ${appSessionId}`);
+  return { record: read, via };
 }
 
 // `session.revealPath`: only a project directory, a session's directory or worktree, or a path under the store's

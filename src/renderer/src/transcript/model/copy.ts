@@ -3,7 +3,7 @@
 import type { DenialKind } from '@shared/graph/enums';
 import type { AskAnswer } from '@shared/maws/tools'; // E1
 import { TOOL_CATEGORIES, type SubagentStatus, type ToolCategory } from './rows';
-import { MCP_TOOL } from './classify';
+import { isCuaJsTool, MCP_TOOL } from './classify';
 import type { BrowserActivity } from '@shared/browser/activity'; // E13
 import { duration } from './time';
 
@@ -191,6 +191,7 @@ export function cellLabel(input: CellLabelInput): string {
       break;
     }
     case 'generic': {
+      if (isCuaJsTool(input.toolName)) return 'Used computer use'; // UX wave U12a: the computer-use plugin's call, under either name
       const mcp = MCP_TOOL.exec(input.toolName);
       if (mcp) return `Used ${mcp[1]} · ${mcp[2]}`;
       const detail = input.detail ?? null;
@@ -401,8 +402,10 @@ export const SPILL = {
   retry: 'Retry',
 } as const;
 
-// A transcript whose history could not be loaded (the store's failed hydration phase).
-export const HYDRATION = { failed: (reason: string) => `Could not load this transcript · ${reason}`, retry: 'Retry' } as const;
+// A transcript whose history could not be loaded (the store's failed hydration phase): the UX wave, U9 (O-11b), one line,
+// its reason in the line's hover title, off the screen; and (O-39, A3) what a pane with nothing to draw says once its
+// history read has been out for 300 ms.
+export const HYDRATION = { failed: 'Couldn’t load this conversation', retry: 'Retry', loading: 'Loading…' } as const;
 // The long-transcript window: an older page that did not load (lane A's words, session/controls/lane-a.ts)
 export const OLDER = { failed: (reason: string) => `Older messages didn’t load: ${reason}`, retry: 'Retry' } as const;
 
