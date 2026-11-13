@@ -1138,6 +1138,13 @@ Found while checking the sections against the code at `48619c824`, then by the a
   Rationale: each is the row of §F's table that holds most nearly, chosen so a word never stands that the channel no longer means. The e2e scenes (three, one launch each, with the org's hub status `connected`) cover the case S-09 is about.
   Date/Author: 2026-11-12, M4's executor; folded by the controller.
 
+- Decision (M3's review, fixed): a row's names and the words between them ("and", "to everyone") are one group, `Names` in `channel/parts.tsx`, that never wraps and enters its line at the sum of its parts' minimums; the row wraps around it, so the fixed parts after the names move under them and the names never split. A part's minimum is a `width` (`w-[12ch]` for an alias, `w-0` for the others), not a flex basis, so the group's min-content is that sum. Below about 200 px the group overflows rather than cutting an alias under 12 characters. An exchange row's chevron and count stay before the names; where even they and the names' minimums do not fit, the names go under them. The e2e names check measures each part under its own `max-width`, so a chip cut at 24 characters has not given way, and a wide-row case exercises that check.
+  Rationale: the task review: an unrestricted `flex-wrap` over fixed words and names alike broke between the aliases while the prefix stayed, which is §E's pitfall one level up; and the first oracle failed a correct row whose chip was capped.
+  Date/Author: 2026-11-12, M3's executor on the task review; folded by the controller.
+- Decision (the architect's ruling): a board id is never written as `#` and three or six hex digits in this branch's files (comments, test names, strings); M3's fix wave rewrote every one the branch had added as "board NNN" in 34 files, and `test/support/tokens-guard.test.ts` stays as it is.
+  Rationale: the guard reads such an id as a colour literal, and its rule is right.
+  Date/Author: 2026-11-12, the wave's architect; applied by M3's executor.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
