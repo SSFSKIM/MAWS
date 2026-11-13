@@ -1,6 +1,6 @@
 // A background shell's row, a monitor's and a task of another kind's (C8b execution document, M3; the UX wave's U8b,
 // M7): its kind's mark, then `<description> · running <elapsed>`, then `· <status> <ago>` once it ends; the description
-// is the part a narrow row cuts, never the state and its time. A shell's `Output` opens the Log on the file the engine reported (the Bash result's
+// is the part a narrow row cuts first, the state only when the row cannot hold the state alone. A shell's `Output` opens the Log on the file the engine reported (the Bash result's
 // own sentence at start, or the notification), never a derived one, and is disabled until one is reported (P5 O9 M5: and
 // absent for a lane A job, whose output tail is remote-only). `Stop` asks
 // no confirmation (the TUI's `x` asks none) and reads `stopping…` until the engine's terminal frame. A monitor's
@@ -59,9 +59,12 @@ interface RowProps {
   stopDoubt?: boolean; // P5 O9: its stop's outcome is unknown
   onStop: (taskId: TaskId) => void;
   stopGap?: string | null; // P5 O9 M5: why Stop is unavailable, from the port's `stop-task` capability
+  // The UX wave's U8b: its kind's mark before the line, which the app's panel asks for; desk web's depth view, which
+  // draws these rows too, does not, and its rows hold no mark (Decision Log 18: no visible change there).
+  kindMark?: boolean;
 }
 
-function TaskRow({ node, now, selected, stopError, stopDoubt = false, onStop, stopGap = null, kind, children }: RowProps & { kind: 'shell' | 'monitor' | 'other'; children?: ReactNode }) {
+function TaskRow({ node, now, selected, stopError, stopDoubt = false, onStop, stopGap = null, kindMark = false, kind, children }: RowProps & { kind: 'shell' | 'monitor' | 'other'; children?: ReactNode }) {
   const running = node.status === 'running';
   const state = taskState(node, now);
   return (
@@ -75,12 +78,14 @@ function TaskRow({ node, now, selected, stopError, stopDoubt = false, onStop, st
     >
       <div className="flex min-h-6 items-center gap-2">
         <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${running ? 'bg-success' : 'bg-border-strong'}`} />
-        <KindMark kind={kind} />
-        <span data-part="line" title={taskLine(node, now)} className={`flex min-w-0 flex-1 text-ui-sm tabular-nums ${node.status === 'failed' ? 'text-danger' : 'text-fg'}`}>
+        {kindMark && <KindMark kind={kind} />}
+        {/* The line clips to its box: the description is cut first, down to nothing, and the state only once the row is
+            narrower than the state alone (at most the line's width); the buttons after it keep their size. */}
+        <span data-part="line" title={taskLine(node, now)} className={`flex min-w-0 flex-1 overflow-hidden text-ui-sm tabular-nums ${node.status === 'failed' ? 'text-danger' : 'text-fg'}`}>
           <span data-part="description" className="min-w-0 truncate">
             {node.description}
           </span>
-          <span data-part="state" className="shrink-0 whitespace-pre">
+          <span data-part="state" className="max-w-full shrink-0 overflow-hidden text-ellipsis whitespace-pre">
             {state}
           </span>
         </span>
