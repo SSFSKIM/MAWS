@@ -45,7 +45,7 @@ import { AddProject } from './AddProject';
 import { Search } from './Search';
 import { SidebarInteractionContext } from './interaction';
 import { openConversationSearch, openPalette } from '../palette/CommandPalette';
-import { NeedsYou } from './NeedsYou';
+import { NeedsYou, RECONNECTING } from './NeedsYou';
 import { SectionHeading } from './SectionHeading';
 import { HubNotice } from './HubNotice'; // P5 O7 M2
 import { moreNodeId, projectNodeId, sessionNodeId, treeCommand, TreeContext, type TreeNode } from './tree';
@@ -84,6 +84,7 @@ function SidebarBody() {
   const digests = useSessions((s) => s.digests);
   const listedSessions = useSessions((s) => s.listed); // P5 O8 M2
   const turnsSeen = useSessions((s) => s.turnsSeen); // P5 O7 M10
+  const reconnecting = useSessions((s) => s.reconnecting); // UX wave U7, #407: a read of this Mac's sessions is refused
   const seen = useMemo(() => seenActivity(listedSessions, turnsSeen), [listedSessions, turnsSeen]); // P5 O7 M10: a remote record's activity
   // P5 O7 M10's follow-up: the clock an unread session's 24 h freshness is judged at, rounded to RANK_CLOCK_MS, so a row
   // past its window moves within that much of crossing it (or at the next store change), with no timer per row
@@ -359,12 +360,12 @@ function SidebarBody() {
               className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-2.5 [scrollbar-width:thin]"
             >
               <NeedsYou rows={rows} greyed={greyedRows} selected={selected} onEmptyFocus={() => search.current?.querySelector('input')?.focus()} />
-              <SectionHeading title="Projects">
+              <SectionHeading title="Projects" status={reconnecting ? RECONNECTING : ''}>
                 <ProjectFilter projects={allKnownProjects} index={index} current={selectedKey} selected={projectFilter} onChange={setProjectFilter} />
                 <SortMenu sort={sidebar.sort} />
                 <AddProject />
               </SectionHeading>
-              {listEmpty && <EmptyProjects />}
+              {listEmpty && !reconnecting && <EmptyProjects /* #407: not while this Mac's read is refused */ />}
               {listed.length === 0 ? (
                 searching && <p className="m-0 px-[9px] py-1.5 text-ui-sm text-fg-faint">No projects match</p>
               ) : (

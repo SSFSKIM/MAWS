@@ -258,8 +258,8 @@ export function connectShell(
 
   // One machine's snapshots, under C1's ordering rule (every event is subscribed above, and each store reconciles the
   // events that raced its snapshot). Whether its record side's snapshot applied, so the machine counts as loaded, and
-  // whether its attention's did.
-  const snapshot = (machine: MachineRef): { records: Promise<boolean>; attended: Promise<boolean> } => {
+  // whether its attention's did. `refused` hears a refusal of any of the three record reads (UX wave U7, #407).
+  const snapshot = (machine: MachineRef, refused?: () => void): { records: Promise<boolean>; attended: Promise<boolean> } => {
     const link = linkOf(machine);
     const live = stampOf(link);
     const opts = { machine };
@@ -267,9 +267,9 @@ export function connectShell(
     attention().beginSnapshot(machine);
     const attended = answer('attention.list', live, client.invoke('attention.list', undefined, opts), (items) => attention().applySnapshot(items, machine), () => attention().cancelSnapshot(machine));
     const records = Promise.all([
-      answer('session.list', live, client.invoke('session.list', {}, opts), (value) => sessions().applyList(value, machine)),
-      answer('session.projects.list', live, client.invoke('session.projects.list', undefined, opts), (value) => sessions().applyProjects(value, machine)),
-      answer('session.digests', live, client.invoke('session.digests', undefined, opts), ({ digests }) => sessions().applyDigests(digests, machine)),
+      answer('session.list', live, client.invoke('session.list', {}, opts), (value) => sessions().applyList(value, machine), refused),
+      answer('session.projects.list', live, client.invoke('session.projects.list', undefined, opts), (value) => sessions().applyProjects(value, machine), refused),
+      answer('session.digests', live, client.invoke('session.digests', undefined, opts), ({ digests }) => sessions().applyDigests(digests, machine), refused),
     ]).then((applied) => applied.every(Boolean));
     return { records, attended };
   };
@@ -336,9 +336,12 @@ export function connectShell(
   const localFirst = new Promise<boolean>((resolve) => (firstLocal = resolve));
   let recordsIn!: () => void;
   const localRecords = new Promise<void>((resolve) => (recordsIn = resolve));
+  // UX wave U7, #407: from a refused record read until all three apply, the sidebar says "reconnecting"; a reply for a
+  // connection gone is no refusal (`answer`), and a start whose reads answer never says it.
   const stopLocal = askUntilAnswered(client, async () => {
-    const { records, attended } = snapshot(local);
+    const { records, attended } = snapshot(local, () => sessions().setReconnecting(true));
     void records.then((applied) => {
+      if (applied) sessions().setReconnecting(false);
       firstLocal(applied);
       if (applied) recordsIn();
     });
