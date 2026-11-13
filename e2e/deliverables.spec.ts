@@ -1201,6 +1201,24 @@ test('a pass on an HTML page: Escape keeps the text in the card, a second pick l
     await expect.poll(answered, { timeout: 20_000, message: 'the turn of that prompt reached its result and its completed lifecycle' }).toEqual({ result: true, completed: true });
     await expect.poll(async () => value(await invoke(s.page, 'session.status', { appSessionId: id })).turn, { timeout: 20_000, message: 'and the session holds no turn after it' }).toBeNull();
     expect(written(), 'one message for the two comments').toHaveLength(1);
+
+    // UX wave U5a (M5, decision 13): the session's transcript draws the message as one bubble, each comment its own chip
+    // over its own text, in the order made; the page's read (P4-A3) is not a comment, and no lead or framing line is drawn
+    await test.step('the transcript’s bubble of the two comments draws two chips, in order', async () => {
+      const main = s.page.locator('[data-region="main"]');
+      const bubble = main.locator('[data-bubble]').filter({ hasText: 'Make the heading larger.' }).filter({ hasText: 'Say which quarter this is.' });
+      await expect(bubble).toHaveCount(1, { timeout: 20_000 });
+      const chips = bubble.locator('[data-chip="anchor"][data-anchor-kind="artifact-element"]');
+      await expect(chips).toHaveText(read!.comments.map(({ anchor }) => anchor.label));
+      await expect(chips.nth(0)).toHaveAttribute('title', '#hero');
+      await expect(chips.nth(1)).toHaveAttribute('title', secondLocator);
+      const drawn = await bubble.innerText();
+      const order = [read!.comments[0]!.anchor.label, 'Make the heading larger.', read!.comments[1]!.anchor.label, 'Say which quarter this is.'].map((part) => drawn.indexOf(part));
+      expect(order.every((index) => index >= 0), `every part drawn: ${JSON.stringify({ order, drawn })}`).toBe(true);
+      expect([...order].sort((a, b) => a - b), `chip, text, chip, text in that order: ${JSON.stringify(drawn)}`).toEqual(order);
+      await expect(main.getByText('2 comments, in the order made:'), 'the framing line is not drawn').toHaveCount(0);
+      await expect(main.getByText('Comment on "', { exact: false }), 'the lead lines are not drawn').toHaveCount(0);
+    });
   });
 });
 

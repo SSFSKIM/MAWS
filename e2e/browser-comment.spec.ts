@@ -25,7 +25,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { Anchor } from '@shared/anchor/anchor';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { JournalRow } from '@shared/wire/journal';
-import { anchoredMessage, commentsMessage, parseAnchoredText, readAnchoredMessage } from '../src/shared/anchor/message';
+import { anchoredMessage, commentsMessage, readAnchoredMessage } from '../src/shared/anchor/message';
 import { COMMENT_COPY } from '../src/renderer/src/tools/browser/comment/copy';
 import { addressed } from './support/address';
 import { startBrowserServer, type BrowserServer } from './support/browser-server';
@@ -633,14 +633,16 @@ test('2. a pick sent to main writes [image, anchored text] whose tag round-trips
       expect(Buffer.from((image as { source: { data: string } }).source.data, 'base64').subarray(0, 8).equals(PNG_SIGNATURE), 'the crop’s PNG').toBe(true);
       expect(text?.type).toBe('text');
       const sent = (text as { text: string }).text;
-      const parsed = parseAnchoredText(sent);
-      expect(parsed, 'the tag parses').not.toBeNull();
-      expect(parsed!.destination).toBe('main');
-      expect(parsed!.text).toBe(MAIN_COMMENT);
-      const { box: sentBox, ...rest } = parsed!.anchor;
+      const read = readAnchoredMessage(sent);
+      expect(read?.comments, 'the tag parses: one comment').toHaveLength(1);
+      expect(read!.destination).toBe('main');
+      const parsed = read!.comments[0]!;
+      expect(parsed.text).toBe(MAIN_COMMENT);
+      expect(parsed.screenshot, 'its lead says a screenshot is attached').toBe(true);
+      const { box: sentBox, ...rest } = parsed.anchor;
       expect(rest).toEqual(expected);
       expectBox(sentBox, box);
-      expect(sent, 'E3’s lead, with the screenshot sentence').toBe(anchoredMessage({ anchor: parsed!.anchor, text: MAIN_COMMENT, destination: 'main', screenshot: true }));
+      expect(sent, 'E3’s lead, with the screenshot sentence').toBe(anchoredMessage({ anchor: parsed.anchor, text: MAIN_COMMENT, destination: 'main', screenshot: true }));
       expect(sent).toContain('a11y="main &gt; region “A form” &gt; button “Increment”"');
       // the transcript draws the prompt with its chip and its picture
       const main = s.page.locator('[data-region="main"]');
@@ -704,9 +706,10 @@ test('2. a pick sent to main writes [image, anchored text] whose tag round-trips
       await expect(pane.getByText(THREAD_REPLY)).toBeVisible({ timeout: 20_000 });
       const [threadImage, threadText] = contentOf(writtenUsers(s, child)[0]!);
       expect(threadImage?.type).toBe('image');
-      const threadParsed = parseAnchoredText((threadText as { text: string }).text);
-      expect(threadParsed?.destination).toBe('thread');
-      expect(threadParsed?.anchor).toMatchObject(expected);
+      const threadRead = readAnchoredMessage((threadText as { text: string }).text);
+      expect(threadRead?.destination).toBe('thread');
+      expect(threadRead?.comments, 'one comment').toHaveLength(1);
+      expect(threadRead!.comments[0]!.anchor).toMatchObject(expected);
       await expect(pane.locator('[data-chip="anchor"][data-anchor-kind="browser-element"]')).toHaveText(INCREMENT_LABEL);
 
       // the thread header's URL opens the page in the parent's browser: the commented tab, reused; the thread has none
@@ -971,8 +974,27 @@ test('2d. a pass on a page (A4): Escape keeps the text in the card; a second pic
       ]);
       expect(sent, 'the writer’s text of the two, to the byte').toBe(commentsMessage(read!.comments, 'main'));
       // the agent runs one turn for it
-      await expect(s.page.locator('[data-region="main"]').getByText(PASS_REPLY)).toBeVisible({ timeout: 20_000 });
+      const main = s.page.locator('[data-region="main"]');
+      await expect(main.getByText(PASS_REPLY)).toBeVisible({ timeout: 20_000 });
       expect(writtenUsers(s, parent), 'one message for the two comments').toHaveLength(1);
+
+      // UX wave U5a (M5, decision 13): the transcript draws the message as one bubble of two comments, each its own chip
+      // over its own text and its own picture, in the order made; no lead line, no framing line
+      await test.step('the transcript’s bubble of the two comments draws two chips, in order', async () => {
+        const bubble = main.locator('[data-bubble]').filter({ hasText: PASS_FIRST }).filter({ hasText: PASS_SECOND });
+        await expect(bubble).toHaveCount(1);
+        const chips = bubble.locator('[data-chip="anchor"][data-anchor-kind="browser-element"]');
+        await expect(chips).toHaveText([INCREMENT_LABEL, second.label]);
+        await expect(chips.nth(0)).toHaveAttribute('title', '#increment');
+        await expect(chips.nth(1)).toHaveAttribute('title', second.locator);
+        await expect(bubble.locator('img.transcript-attachment-image'), 'each comment’s picture').toHaveCount(2);
+        const drawn = await bubble.innerText();
+        const order = [INCREMENT_LABEL, PASS_FIRST, second.label, PASS_SECOND].map((part) => drawn.indexOf(part));
+        expect(order.every((index) => index >= 0), `every part drawn: ${JSON.stringify({ order, drawn })}`).toBe(true);
+        expect([...order].sort((a, b) => a - b), `chip, text, chip, text in that order: ${JSON.stringify(drawn)}`).toEqual(order);
+        await expect(main.getByText('2 comments, in the order made:'), 'the framing line is not drawn').toHaveCount(0);
+        await expect(main.getByText('Comment on "button', { exact: false }), 'the lead lines are not drawn').toHaveCount(0);
+      });
     },
   );
 });
