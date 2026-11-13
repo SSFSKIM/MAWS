@@ -114,7 +114,7 @@ export function connectAsks(client: MawsBridge = ipc): () => void {
   return () => {
     disposed = true; // a deferred open already queued does nothing
     waiting.clear();
-    automatic.forEach((off) => off());
+    automatic.forEach(({ stop }) => stop());
     automatic.clear();
     offs.forEach((off) => off());
   };

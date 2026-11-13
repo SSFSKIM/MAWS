@@ -6,7 +6,8 @@ import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useLayout } from '../stores/layout';
-import { A, probeTool, ref, resetPanelStores } from '../test-support/panel';
+import { A, probeTool, ref, resetPanelStores, type ProbeState } from '../test-support/panel';
+import type { PanelTool } from './tool';
 import { installResizeObserver } from '../test-support/resize';
 import { panelHost, registerPanelTool } from './host';
 import { sideGroups, surfaceTabs } from './surface-model';
@@ -21,7 +22,7 @@ afterEach(() => {
   offs.splice(0).forEach((off) => off());
 });
 
-const register = (...tools: Parameters<typeof registerPanelTool>[0][]) => tools.forEach((tool) => offs.push(registerPanelTool(tool)));
+const register = (...tools: PanelTool<ProbeState, unknown>[]) => tools.forEach((tool) => offs.push(registerPanelTool(tool)));
 // A strip over one group's tabs, as the column draws it from the store.
 function Strip({ group = 'upper' }: { group?: 'upper' | 'lower' }) {
   const groups = sideGroups(useLayout(), A);

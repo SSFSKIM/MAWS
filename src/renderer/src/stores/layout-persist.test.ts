@@ -644,9 +644,9 @@ describe('panel tabs of a session not on screen', () => {
     expect(store.getState().panelTabsOf(B).map((t) => t.id)).toEqual(['p1', 'term-1']); // a pin shows for every session
   });
 
-  it('selects a requested tab, keeps a surviving selection, and moves a removed one to its neighbour', () => {
+  it('shows a tab it is asked to, keeps a surviving selection, and moves a removed one to its neighbour', () => {
     const store = createLayoutStore();
-    store.getState().updatePanelTabs(A, () => [files, terminal], { activeTabId: 'term-1' });
+    store.getState().updatePanelTabs(A, () => [files, terminal], { activate: 'term-1' });
     expect(store.getState().panelBySession.get(A)?.activeTabId).toBe('term-1');
     store.getState().updatePanelTabs(A, (refs) => [...refs, { id: 'x', toolId: 'x', pinned: false }]);
     expect(store.getState().panelBySession.get(A)?.activeTabId).toBe('term-1');
