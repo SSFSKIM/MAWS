@@ -74,7 +74,7 @@ const firstPrompt = (fixture: string) => ((fixtureRows(fixture).find((r) => r.di
 export const recordedCwd = (fixture: string) => (fixtureRows(fixture).find((r) => r.direction === 'meta' && (r.frame as Frame).event === 'spawn')!.frame as { cwd: string }).cwd;
 
 // Every row the session's launches journaled (one file per launch, in the session's journal directory).
-function journalOf(userData: string, id: string): JournalRow[] {
+export function journalOf(userData: string, id: string): JournalRow[] {
   const dir = join(userData, 'engine-host', 'journal', id);
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
