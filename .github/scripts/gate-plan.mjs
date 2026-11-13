@@ -322,7 +322,13 @@ export function planOf(env, scripts, now, { docsOnly = false } = {}) {
   const listedVm = words(env.MAC_VM_E2E);
   const keptOffVm = listedVm.filter((name) => measured.has(name));
   const unbuilt = listedVm.filter((name) => name !== 'unit:darwin' && !measured.has(name) && variantOf(name) === undefined);
-  const macVm = new Set(listedVm.filter((name) => !measured.has(name) && !unbuilt.includes(name)));
+  // `default` alone, with no other e2e group and no DefaultBeside, runs the bare set: every spec, more than a guest job's
+  // bounds hold once its transfers over the Mac's uplink are counted (run 43435030658: 18 minutes of setup, then the
+  // tests past ci-kit's 50-minute job bound for the guest). So the bare set keeps the host; default beside others, its
+  // own specs, may take the guest.
+  const otherE2e = [...gates].some((gate) => gate.startsWith('e2e:') && gate !== 'e2e:default') || (!dispatched && words(trailer('DefaultBeside')).some((name) => name.replace(/^e2e:/, '') !== 'default'));
+  const bareDefault = listedVm.includes('default') && !otherE2e ? ['default'] : [];
+  const macVm = new Set(listedVm.filter((name) => !measured.has(name) && !unbuilt.includes(name) && !bareDefault.includes(name)));
   const onMac = (name) => (macVm.has(name) && vmLane ? LANES[vmLane] : macShared.has(name) ? RUNNERS.macShared : macVm.has(name) ? RUNNERS.macSolo : RUNNERS.macos);
   const launchdConflicts = [...launchd].flatMap((group) => [
     measured.has(group) && `${group} (MEASURED_E2E)`, home.has(group) && `${group} (MAC_HOME_E2E)`,
@@ -509,6 +515,7 @@ export function planOf(env, scripts, now, { docsOnly = false } = {}) {
     said('Solo Mac (the exclusive instance or the guest, whichever is free)', jobsOn(RUNNERS.macSolo)) +
     laneNote +
     said('On MAC_VM_E2E but measured, so on the exclusive instance', inRun(keptOffVm)) +
+    said('On MAC_VM_E2E but the bare set (no other e2e group, no DefaultBeside), so on the exclusive instance', lane === 'macos' ? inRun(bareDefault) : []) +
     said('On MAC_VM_E2E but not built through scripts/e2e-build.sh, so off the guest', lane === 'macos' ? inRun(unbuilt.filter((group) => !offMac.has(group))) : []) +
     said('Out/ built on the pool (e2e-build) for the guest-eligible jobs', e2eBuild) +
     hostedNote;
