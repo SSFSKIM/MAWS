@@ -1119,7 +1119,8 @@ test.describe('plugin management (E8)', () => {
     await expect.poll(() => page.evaluate(() => document.querySelector('[data-widget-dialog]')?.contains(document.activeElement) ?? false), { message: 'the dialog under it holds the keyboard' }).toBe(true);
     await expect(backdrops).toHaveCount(1);
     await expect(backdrops).toHaveClass(/\bbg-bg-active\b/); // the dialog's paints again
-    expect(apart(await pixelAt(page, point), alone), 'the dialog alone dims the window as before').toBeLessThanOrEqual(2);
+    const single = await pixelAt(page, point);
+    expect(apart(single, alone), 'the dialog alone dims the window as before').toBeLessThanOrEqual(2);
 
     // The confirmation again, then a press outside both layers: it closes the confirmation alone.
     await rowAction(installedRow(w, 'e8-tools@e8-scratch'), 'Uninstall…');
