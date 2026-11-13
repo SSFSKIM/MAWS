@@ -590,6 +590,17 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect(background.getByRole('button', { name: 'Background tasks 1 running', exact: true })).toBeVisible();
     await expect(sessionCard(page, 'Subagents'), 'no Subagents card on this route').toHaveCount(0);
     const above = sessionCard(page, 'Connectors');
+    // Read once two reads a moment apart agree: the Environment card's own reads (git's, the pull request's) may still
+    // land and grow it (as e2e/agent-tools.spec.ts's `settledBoxes` waits for), which is no move the card's leaving made.
+    let last = '';
+    await expect
+      .poll(async () => {
+        const now = JSON.stringify(await above.boundingBox());
+        const same = now === last;
+        last = now;
+        return same;
+      }, { intervals: [250], message: 'the cards above settle' })
+      .toBe(true);
     const before = await above.boundingBox();
     expect(before, 'the card above it is drawn').not.toBeNull();
 

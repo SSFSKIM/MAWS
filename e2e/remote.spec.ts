@@ -2862,8 +2862,10 @@ test('X-168 on B’s terminal session: the Subagents and Background tasks cards 
     await test.step('a pause of A’s link to B changes nothing', async () => {
       scene.aHub.cut();
       await expect.poll(linkState, { timeout: 60_000, message: `A's link to B goes down once cut\n${mainSaid(page)}` }).toBe('down');
-      await expect(agentRow, 'the link down says nothing of the process: the agent still works').toBeVisible();
-      await expect(onCard).toBeVisible();
+      // An offline machine's session tab holds only that (P5 Decision Log 28, T5; `main/Pane.tsx`), so while the link is
+      // down the agent is read where it stays drawn, on the card; its transcript row is read again once B is back.
+      await expect(main(page).locator('[data-machine-offline]'), 'the pane says B is offline').toBeVisible();
+      await expect(onCard, 'the link down says nothing of the process: the agent still works').toContainText('Working');
       scene.aHub.restore();
       await expect.poll(linkState, { timeout: 120_000, message: `A's link to B comes up again\n${mainSaid(page)}` }).toBe('up');
       await expect(agentRow).toBeVisible();
