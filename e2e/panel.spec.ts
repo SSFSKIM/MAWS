@@ -1718,6 +1718,49 @@ async function addBelow(page: Page, name: string, by: 'pointer' | 'keys'): Promi
 test.describe('the side column’s tabs and groups (UX wave U8b)', () => {
   test.use({ mawsEnv: HARNESS_ENV });
 
+  // Addendum 7 of the branch review's fix wave: a frame of another origin (the Artifacts viewer's delivered page) took the
+  // pointer's events from the bar as soon as a drag reached it, so the bar never moved toward it. A frame of the artifact
+  // scheme fills one group's body, then the other's, and the bar is dragged into it each time.
+  test('the bar between the groups drags over a frame of another origin in either group, and the release ends the drag', async ({ maws }) => {
+    const panel = await PanelPage.open(maws);
+    const { page } = maws;
+    for (const tool of ['harness-stub', 'session-info']) await panel.call('addTool', tool);
+    await moveSideTabByKeys(page, 'Stub', 'below');
+    await expect(sideGroup(page, 'lower')).toHaveAttribute('aria-label', 'Stub');
+    const bar = sideColumn(page).getByRole('separator', { name: 'Resize groups', exact: true });
+    const frameIn = (group: 'upper' | 'lower') =>
+      sideGroup(page, group).locator('[role="tabpanel"]').evaluate((body) => {
+        document.querySelector('[data-scene-frame]')?.remove();
+        body.style.position = 'relative';
+        const frame = document.createElement('iframe');
+        frame.setAttribute('sandbox', 'allow-scripts');
+        frame.setAttribute('data-scene-frame', '');
+        frame.src = 'maws-artifact://scene-frame/index.html';
+        frame.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0';
+        // loaded, so its document stands in its own process and hit-testing reaches it, as a delivered page's does
+        return new Promise<void>((resolve) => {
+          frame.addEventListener('load', () => resolve(), { once: true });
+          body.append(frame);
+        });
+      });
+    for (const [group, dy] of [['upper', -48], ['lower', 48]] as const) {
+      await frameIn(group);
+      const box = (await bar.boundingBox())!;
+      const x = Math.round(box.x + box.width / 2);
+      const y = Math.round(box.y + box.height / 2);
+      const before = Number(await bar.getAttribute('aria-valuenow'));
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      await page.mouse.move(x, y + dy, { steps: 4 });
+      await page.mouse.up();
+      await expect.poll(async () => Number(await bar.getAttribute('aria-valuenow')), { message: `dragged into the frame in the ${group} group` })[dy < 0 ? 'toBeGreaterThan' : 'toBeLessThan'](before);
+      const released = await bar.getAttribute('aria-valuenow');
+      await page.mouse.move(x, y - dy, { steps: 4 }); // no button: the drag is over
+      await expect(bar, 'the release ended the drag').toHaveAttribute('aria-valuenow', released!);
+      expect(await page.evaluate(() => document.documentElement.hasAttribute('data-resizing')), 'no drag left marked').toBe(false);
+    }
+  });
+
   // M2, decision 2: maintaining the refs is not choosing a tab. A tab that arrives unasked joins the strip and replaces
   // nothing; a ref removed elsewhere changes nothing in view; a hidden column stays hidden. The tab added here is the
   // plugin roster's own call for a pane it adds (`panelHost.addTool(…, { activate: false })`, engine-surface/panes.ts),

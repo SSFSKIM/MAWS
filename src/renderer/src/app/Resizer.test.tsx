@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { Resizer } from './Resizer';
+import { Resizer, RESIZING_ATTRIBUTE } from './Resizer';
 
 // A region whose width the resizer drives, as the shell does with the layout store.
 // P3-G: with `expand`, the region also floats (the panel's `onExpand`) when dragged past its maximum.
@@ -121,6 +121,31 @@ describe('resizer', () => {
     // Moving without a press does nothing.
     act(() => void fireEvent.pointerMove(separator(), { pointerId: 1, clientX: 100 }));
     expect(state()).toBe('470');
+  });
+
+  // UX wave U8b (Addendum 7): a release that never reaches the separator cannot leave a drag behind
+  it('a drag ends when it loses its pointer capture, so a later move changes nothing', () => {
+    render(<Harness />);
+    drag(300, 340);
+    expect(state()).toBe('340');
+    act(() => void fireEvent.lostPointerCapture(separator(), { pointerId: 1 }));
+    act(() => void fireEvent.pointerMove(separator(), { pointerId: 1, clientX: 400 }));
+    expect(state()).toBe('340');
+  });
+
+  it('marks the document while a drag is active, for the rule that keeps frames from taking its events', () => {
+    const { unmount } = render(<Harness />);
+    const marked = () => document.documentElement.hasAttribute(RESIZING_ATTRIBUTE);
+    drag(300, 340);
+    expect(marked()).toBe(true);
+    release(340);
+    expect(marked()).toBe(false);
+    drag(340, 350);
+    act(() => void fireEvent.lostPointerCapture(separator(), { pointerId: 1 }));
+    expect(marked(), 'a lost capture ends the drag').toBe(false);
+    drag(350, 360);
+    unmount();
+    expect(marked(), 'a separator removed mid-drag takes the mark with it').toBe(false);
   });
 
   it('a drag released less than 40 px past the minimum snaps back to the minimum', () => {

@@ -8,7 +8,11 @@
 // narrower than its persisted size (clamped to the window) passes that size as `restoreValue`, so the clamp is never
 // written back. P3-G (§D1.6): `expandThreshold` is the mirror on the maximum's side: a drag that reaches that far past
 // the maximum ends there and calls `onExpand` with the same restore value (the panel floats); the keyboard never does.
-import { useRef, type KeyboardEvent, type PointerEvent } from 'react';
+// UX wave U8b (Addendum 7): a frame of another origin takes the pointer's events as soon as the pointer is over it, past
+// the separator's capture, so a drag toward a delivered page never moved and never heard its release. While a drag is
+// active the document carries `data-resizing`, under which no frame takes pointer events (`styles/app.css`); and a drag
+// also ends when it loses its capture, so a release that never arrives leaves no drag behind.
+import { useEffect, useRef, type KeyboardEvent, type PointerEvent } from 'react';
 
 export const RESIZER_STEP = 8;
 export const RESIZER_BIG_STEP = 32;
@@ -34,6 +38,9 @@ export interface ResizerProps {
 }
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+// The document's mark of a drag in progress, read by the rule that keeps frames from taking the drag's events.
+export const RESIZING_ATTRIBUTE = 'data-resizing';
+const markResizing = (on: boolean) => document.documentElement.toggleAttribute(RESIZING_ATTRIBUTE, on);
 
 export function Resizer({
   label,
@@ -55,6 +62,10 @@ export function Resizer({
   className = '',
 }: ResizerProps) {
   const drag = useRef<{ pointerId: number; from: number; start: number; restore: number } | null>(null);
+  // A separator removed mid-drag (its group closed) takes its mark with it.
+  useEffect(() => () => {
+    if (drag.current) markResizing(false);
+  }, []);
   const vertical = orientation === 'vertical';
   const coordinate = (event: PointerEvent) => (vertical ? event.clientX : event.clientY);
   const aria = (px: number) => (percentOf ? Math.round((px / percentOf) * 100) : px);
@@ -85,6 +96,7 @@ export function Resizer({
   const end = (event: PointerEvent<HTMLDivElement>) => {
     if (drag.current?.pointerId !== event.pointerId) return;
     drag.current = null;
+    markResizing(false);
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
 
@@ -105,6 +117,7 @@ export function Resizer({
         event.preventDefault(); // no text selection while dragging
         event.currentTarget.setPointerCapture?.(event.pointerId);
         drag.current = { pointerId: event.pointerId, from: coordinate(event), start: value, restore: restoreValue ?? value };
+        markResizing(true);
       }}
       onPointerMove={(event) => {
         const current = drag.current;
@@ -124,6 +137,7 @@ export function Resizer({
       }}
       onPointerUp={end}
       onPointerCancel={end}
+      onLostPointerCapture={end}
       className={`group z-10 touch-none outline-none [-webkit-app-region:no-drag] ${vertical ? 'w-1.5 cursor-col-resize' : 'h-1.5 cursor-row-resize'} ${className}`}
     >
       {/* The visible line: shown on hover, focus and drag, over the region's own border. */}
