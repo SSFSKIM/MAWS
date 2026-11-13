@@ -13,7 +13,7 @@ import { Menu, webContents, type BaseWindow, type MenuItemConstructorOptions } f
 import { appWindows } from './windows'; // E2
 import type { Settings, ThemeSetting } from '@shared/ipc/schema';
 import type { EditOp } from '@shared/ipc/schema/layout'; // P4-B2 K6
-import { ACTIONS, effectiveChord, idsOf, type ActionId, type ActionSpec, type ActionTable, type KeymapOverrides } from '@shared/keymap/actions';
+import { ACTIONS, effectiveChord, idsOf, tabChords, type ActionId, type ActionSpec, type ActionTable, type KeymapOverrides } from '@shared/keymap/actions';
 import { pageOf } from './ipc/clients';
 import type { emit as emitEvent } from './ipc/events';
 import { emitTo, onEmitted } from './ipc/events';
@@ -119,11 +119,12 @@ export function menuTemplate(
   const itemsFor = (id: ActionId): Item[] => {
     const chord = chordOf(id);
     if (id === 'tab.select') {
-      // One action, nine items: a chord ending in 1 is numbered through 9; any other chord selects the first tab only.
+      // One action, nine items: a chord whose key is the digit 1 is numbered through 9 (`tabChords`); any other chord
+      // selects the first tab only.
+      const nine = chord === null ? null : tabChords(chord);
       return Array.from({ length: 9 }, (_, i) => {
         const n = i + 1;
-        const accelerator = chord?.endsWith('1') ? `${chord.slice(0, -1)}${n}` : n === 1 ? chord : null;
-        return item(id, `Select Tab ${n}`, accelerator, n);
+        return item(id, `Select Tab ${n}`, nine ? nine[i]! : n === 1 ? chord : null, n);
       });
     }
     return [item(id, actions[id].title, chord, null)];

@@ -152,9 +152,20 @@ export const RETIRED_ACTION_IDS: readonly string[] = ['composer.steer'];
 // `settings.keymap`: overrides only; null unbinds; absent means the default.
 export type KeymapOverrides = Partial<Record<ActionId, string | null>>;
 
-// The chords a row holds with `chord`: Select tab 1–9 the nine the menu expands a chord ending in 1 into.
+// The nine chords Select tab 1–9 numbers `chord` into, or null when it does not: only a chord whose key (the token after
+// its last `+`) is the digit 1 numbers through 9, so F11 or F21 is one chord, never F12 … F19 or F22 … F29 (the panel's
+// finding of 2026-11-12, "tab-chord expansion past F24"). The one statement of the rule: the menu's nine items, the
+// chords a row holds and the shown chord all read it.
+export function tabChords(chord: string): string[] | null {
+  const tokens = chord.split('+');
+  if (tokens.at(-1) !== '1') return null;
+  const mods = tokens.slice(0, -1).map((token) => `${token}+`).join('');
+  return Array.from({ length: 9 }, (_, i) => `${mods}${i + 1}`);
+}
+
+// The chords a row holds with `chord`: Select tab 1–9 the nine the menu numbers it into.
 export function heldChords(id: ActionId, chord: string): string[] {
-  return id === 'tab.select' && chord.endsWith('1') ? Array.from({ length: 9 }, (_, i) => `${chord.slice(0, -1)}${i + 1}`) : [chord];
+  return (id === 'tab.select' ? tabChords(chord) : null) ?? [chord];
 }
 
 // U6a (UC-14; the U6a execution document, decision 11): while build F may run on the same profile, a row takes a

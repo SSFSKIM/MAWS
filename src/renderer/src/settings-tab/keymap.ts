@@ -3,7 +3,7 @@
 // and punctuation, `key` for named keys, exactly as C5's `Chord` matches), the capture's outcome for one action, and
 // the action table as the section lists it. U6a: every row is listed, and a row takes a rebinding only when it is
 // rebindable (`isRebindable`: not a fixed key of an editor, and an action build F knows, UC-14).
-import { ACTIONS, effectiveChord, heldChords, idsOf, isRebindable, type ActionId, type ActionSpec, type ActionTable, type KeymapOverrides } from '@shared/keymap/actions';
+import { ACTIONS, effectiveChord, heldChords, idsOf, isRebindable, tabChords, type ActionId, type ActionSpec, type ActionTable, type KeymapOverrides } from '@shared/keymap/actions';
 import { formatChord, parseChord, type Chord, type KeyEventLike } from '@shared/keymap/chord';
 import { MENU_ROLE_CHORDS } from '@shared/keymap/menu-roles';
 import { KEYBOARD } from './copy';
@@ -115,7 +115,7 @@ export interface KeymapGroup {
 export function displayChord(id: ActionId, chord: string | null): string {
   if (chord === null) return KEYBOARD.unbound;
   const shown = formatChord(chord);
-  return id === 'tab.select' && chord.endsWith('1') ? `${shown}…9` : shown;
+  return id === 'tab.select' && tabChords(chord) !== null ? `${shown}…9` : shown;
 }
 
 const PLACEMENTS: [ActionSpec['menu'], string][] = [['app', 'MAWS menu'], ['file', 'File'], ['edit', 'Edit'], ['view', 'View'], ['go', 'Go'], ['help', 'Help']];
