@@ -11,8 +11,13 @@ import { under } from '../files/allowlist';
 import { InvalidSideInput } from './invalid';
 
 export class ScreenshotRefused extends InvalidSideInput {
-  constructor(readonly reason: string) {
-    super(['screenshot'], `screenshot: ${reason}`);
+  // `at`: where the comment whose screenshot this is sits in the command's input, before its `screenshot` (UX wave U5a:
+  // a later comment of several; empty for the one comment of today's inputs)
+  constructor(
+    readonly reason: string,
+    at: readonly (string | number)[] = [],
+  ) {
+    super([...at, 'screenshot'], `screenshot: ${reason}`);
     this.name = 'ScreenshotRefused';
   }
 }

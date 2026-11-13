@@ -3,7 +3,7 @@
 // command's own path, and no other refusal is ever read as one of these fields.
 export class InvalidSideInput extends Error {
   constructor(
-    readonly path: string[],
+    readonly path: (string | number)[], // an array's index a number, as in a schema's issue (UX wave U5a: `more.0.screenshot`)
     message: string,
   ) {
     super(message);

@@ -39,7 +39,7 @@ import type { ContentBlock } from '@shared/graph/events';
 import type { Lineage } from '@shared/graph/session';
 import { sendContentRefusal } from '@shared/engine/session-state-store';
 import type { SideThreadFrom } from '@shared/ipc/schema/side';
-import { commentContent, screenshotRoots, withoutScreenshot } from '../side/content';
+import { commentsContent, screenshotRoots, withoutScreenshot } from '../side/content';
 import { screenshotPreview } from '../side/screenshot'; // E11 F2b (Q4)
 import { InvalidSideInput } from '../side/invalid';
 import { sendToMain, type SendToMainInput, type SendToMainOutput } from '../side/send-to-main';
@@ -1011,9 +1011,11 @@ export class SessionService {
       const source = s.sessions.get(appSessionId);
       const refusal = await sideThreadRefusal(s, appSessionId);
       if (source === null || refusal !== null) return { status: 'refused', appSessionId, ...(refusal ?? { reason: 'unknown_session', message: `no session ${appSessionId}` }) };
+      // UX wave U5a: a comment's `more` joins it, oldest first, in one first message; a refused screenshot of the k-th
+      // later comment names `more.<k>`
       const content: ContentBlock[] =
         from.kind === 'comment'
-          ? await commentContent({ ...from, destination: 'thread' }, () => screenshotRoots(this.deps.userData, source))
+          ? await commentsContent([from, ...(from.more ?? [])], 'thread', () => screenshotRoots(this.deps.userData, source), (index) => (index === 0 ? [] : ['more', index - 1]))
           : [{ type: 'text', text: promotionMessage(from.exchanges, from.text) }];
       const tooLarge = sendContentRefusal(content);
       if (tooLarge !== null) throw new InvalidSideInput([], `the side thread's first message is too large: ${tooLarge.message}`);

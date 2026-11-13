@@ -160,6 +160,7 @@ import { legacySealer } from './connectors/legacy-custody';
 import { electronWindowShown } from './client/window-shown';
 import { registerDeliverySend } from './delivery/send';
 import { exportHeldFor } from './delivery/e2e-hold';
+import { registerCommentContent } from './side/comment-content'; // UX wave U5a
 // P5 O4 M2 end
 
 // P5 O2 landing: a test or harness launch never runs on the default profile, whose daemon and LaunchAgent are the
@@ -801,6 +802,7 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
     return page ? captureRegion(input, page, BrowserWindow.fromWebContents(page)) : { image: null }; // a page gone is a window closed meanwhile
   });
   registerMainHandler('layout.saveTextFile', (input, { client }) => saveTextFile(input, client, { downloads: app.getPath('downloads'), port: clientPort }));
+  registerCommentContent(registerMainHandler, app.getPath('userData')); // UX wave U5a: a ticked comment's content, its screenshots under <userData>
   // The widget e2e's engine stand-in: under MAWS_WIDGET_BACKEND=fixtures in launch mode scenario only (M2).
   const stopWidgetBackend = installWidgetBackend({ env: process.env, packaged: app.isPackaged, appRoot: process.cwd(), intercept: interceptCommand, emit, fail: (error) => new CommandFailure(error) });
   if (stopWidgetBackend) shutdown.add('widget backend', stopWidgetBackend);
