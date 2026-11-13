@@ -943,6 +943,12 @@ U7a's pull request carries the dated amendment of the ruling S-11 reverses; U7b'
   Rationale: the drawing showed each of these; the rulings are the architect's, who amends the child's file where a ruling changes one of its sentences.
   Date/Author: 2026-11-13, the document's author, on the architect's rulings.
 
+- Decision (M1, the executor's, folded by the controller): O-03 takes a third class, `focus-visible:-outline-offset-2` on the chip's button, beside the two of M1's decision 2. Once the wrapper clips, the outside focus ring would be clipped whole; the strip's tabs draw the same inset ring. Wherever R5 or §I says "two classes", whoever applies O-03 to the chip after U13a's M4 applies these three.
+  `snapshot(machine, refused?)` in `ipc/events.ts` gains an optional callback that the three record reads pass to `answer` as its `failed`: §B's "the local snapshot's closure only" is read as this signature plus the closure, since decision 3 needs `answer`'s callback inside `snapshot`. Only `snapshot(local, …)` passes it; the `hydrate` call is untouched, and no sibling's hunk meets these lines.
+  `SectionHeading` takes an optional `status` prop that keeps one `role="status"` element mounted (empty while there is nothing to say), so the word is announced when it appears; only the Projects heading passes it. `setReconnecting` writes only on a change, and `test-support/shell-stores.ts`' `resetShellStores` resets it. A mention's file name is its path's last non-empty segment, as Claude Desktop takes it (`@src/` gives `src`).
+  Rationale: each is the smallest means of M1's decisions 2 to 4 that the code allows.
+  Date/Author: 2026-11-13, M1's executor; folded by the controller.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
