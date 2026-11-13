@@ -26,7 +26,8 @@ export function UsagePopover({ close }: { close(): void }) {
   }, []);
 
   const model = snapshot?.available ? accountsViewModel(snapshot, relay, now) : null;
-  const accounts = model ? [...model.rows, ...(model.codex ?? [])] : [];
+  const claude = model?.rows ?? [];
+  const codex = model?.codex ?? [];
   // the relay's own line while it does not answer; else its last ten minutes, while they were degraded
   const trouble = relay?.ok === false ? relayLine(relay, now) : model?.health?.degraded ? model.health.line : null;
   const toSettings = () => {
@@ -41,12 +42,23 @@ export function UsagePopover({ close }: { close(): void }) {
         {model && <span className="ml-auto text-ui-sm text-fg-muted">{USAGE.updated(ago(Math.max(0, now - Date.parse(model.updatedAt))))}</span>}
       </div>
       <div className="px-4">
-        {accounts.length === 0 ? (
+        {claude.length === 0 && codex.length === 0 ? (
           <p data-usage-none className="m-0 py-2 text-ui-sm text-fg-muted">
             {ACCOUNTS.unavailable}
           </p>
         ) : (
-          accounts.map((row) => <Account key={`${row.provider}:${row.uuid}`} row={row} />)
+          <>
+            {claude.map((row) => (
+              <Account key={row.uuid} row={row} />
+            ))}
+            {codex.length > 0 && (
+              <div data-codex className={claude.length > 0 ? 'border-t border-border' : ''}>
+                {codex.map((row) => (
+                  <Account key={row.uuid} row={row} />
+                ))}
+              </div>
+            )}
+          </>
         )}
         {trouble && (
           <div className="flex items-center gap-2 border-t border-border py-2 text-ui-sm text-warning">
