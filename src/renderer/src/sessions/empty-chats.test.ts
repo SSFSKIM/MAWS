@@ -3,17 +3,18 @@
 // (the owner, 2026-11-12: "No, only chats with content").
 import { act, cleanup } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { EMPTY_STRIP, storedMain, tabId, type Strip } from '@shared/ipc/schema/layout';
 import type { SetupIntent } from '@shared/sessions/intent';
-import { record } from '../../../../test/support/builders';
+import { project, record } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { at } from '../../../../test/support/machine';
 import { registerLiveDraft } from '../composer/editor/drafts';
 import { ipc } from '../ipc/client';
-import { currentTabRetention, newChat } from '../keymap/actions-runtime';
-import { createLayoutStore, useLayout } from '../stores/layout';
+import { currentTabRetention, newChat, registerEmptyChats, registerSessionCreator } from '../keymap/actions-runtime';
+import { prefillComposer, queueComposerAttachment, resetComposerStore } from '../stores/composer';
+import { createLayoutStore, frontOf, useLayout } from '../stores/layout';
 import { allTabs } from '../stores/layout-model';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
@@ -21,7 +22,7 @@ import { preloadOf } from '../test-support/preload-of';
 import { ID, intent, MESSAGE, putIntent, REPO, resetSetupStore, resources, trustState } from '../test-support/setup-intents';
 import { resetShellStores } from '../test-support/shell-stores';
 import { connectSessions, createUnstartedSession } from './connect';
-import { discardEmptyChat, isEmptyChat, isEmptyIntent } from './setup-actions';
+import { discardEmptyChat, isEmptyChat, isEmptyIntent, patchIntent } from './setup-actions';
 import { useSetup } from './store';
 
 const T1 = '2026-09-29T10:00:01.000Z';
@@ -115,6 +116,82 @@ describe('an empty chat', () => {
   });
 });
 
+// The branch review (its findings 1 and 2): one definition of empty, read by the reuse, the close of the other empty
+// chats and the relaunch sweep. What the chat holds outside its stored intent counts too: a draft on its way to the
+// intent, a prompt or attachments waiting for its composer to mount.
+describe('an empty chat, with what waits outside its intent', () => {
+  afterEach(() => resetComposerStore());
+  const put = () => putIntent(intent({ appSessionId: A }));
+
+  it('is not empty with a prefill waiting for its composer (the Library’s Ask Claude)', () => {
+    put();
+    prefillComposer(A, { text: 'Make a deck: ' });
+    expect(isEmptyChat(A)).toBe(false);
+  });
+
+  it('is not empty with an attachment waiting for its composer', () => {
+    put();
+    queueComposerAttachment(A, { files: [new File(['sketch'], 'sketch.png', { type: 'image/png' })], text: 'Marked up' });
+    expect(isEmptyChat(A)).toBe(false);
+  });
+
+  it('is not empty while a write of its draft is on the way, and holds the draft once main answers', async () => {
+    fake = fakeClient();
+    window.maws = preloadOf(fake);
+    put();
+    const writing = patchIntent(A, { draft: draft(text('typed a moment ago')) });
+    expect(isEmptyChat(A), 'the write has left').toBe(false);
+    await fake.reply('session.intent.patch', intent({ draft: draft(text('typed a moment ago')), updatedAt: T1 }));
+    await expect(writing).resolves.toEqual({ ok: true });
+    expect(isEmptyChat(A), 'the intent holds it').toBe(false);
+  });
+
+  it('is empty again once a write of nothing is answered or refused', async () => {
+    fake = fakeClient();
+    window.maws = preloadOf(fake);
+    put();
+    const writing = patchIntent(A, { model: 'haiku' });
+    expect(isEmptyChat(A)).toBe(false);
+    await fake.fail('session.intent.patch', 'the intent is busy');
+    await writing;
+    expect(isEmptyChat(A)).toBe(true);
+  });
+
+  // the reviewer's sequence: a New chat for another project is slow; the person types into the empty chat in front and
+  // turns to another tab, which flushes the draft; the creation then answers before the draft's write
+  it('is not closed by a late New chat while its draft’s write is on the way', async () => {
+    const P = at('proj-here' as ProjectId);
+    const Q = at('proj-second' as ProjectId);
+    const X = at('in-p' as AppSessionId);
+    const NEW = at('new-1' as AppSessionId);
+    fake = fakeClient({ 'session.intent.discard': { leftover: null } });
+    window.maws = preloadOf(fake);
+    useSessions.setState({ projects: new Map([[P, project(P, 0)], [Q, project(Q, 1)]]), records: new Map([[X, record(X, { projectId: P })]]) });
+    const offs = [registerEmptyChats({ isEmpty: isEmptyChat, discard: discardEmptyChat })];
+    let answer!: (id: AppSessionId | null) => void;
+    offs.push(registerSessionCreator(() => new Promise((resolve) => (answer = resolve))));
+    try {
+      putIntent(intent({ appSessionId: A, projectId: Q }));
+      useSessions.getState().addUnstarted(A, { projectId: Q, createdAt: T1 });
+      useLayout.getState().openTab({ kind: 'session', appSessionId: X });
+      useLayout.getState().openTab({ kind: 'session', appSessionId: A });
+      const press = newChat({ row: P });
+      const writing = patchIntent(A, { draft: draft(text('keep this')) }); // the editor's cleanup flushes the draft
+      useLayout.getState().activateTab(tabId({ kind: 'session', appSessionId: X })); // and the person turned to another tab
+      await act(async () => answer(NEW));
+      await act(async () => expect(await press).toBe(NEW));
+      expect(fake.invoked('session.intent.discard')).toEqual([]);
+      expect(allTabs(useLayout.getState().main).map((t) => t.id)).toContain(tabId({ kind: 'session', appSessionId: A }));
+      expect(frontOf(useLayout.getState())).toBe(tabId({ kind: 'session', appSessionId: X }));
+      await fake.reply('session.intent.patch', intent({ projectId: 'proj-second' as ProjectId, draft: draft(text('keep this')), updatedAt: T1 }));
+      await writing;
+      expect(isEmptyChat(A)).toBe(false);
+    } finally {
+      offs.forEach((off) => off());
+    }
+  });
+});
+
 describe('the discard New chat asks for', () => {
   it('discards the intent and asks nothing', async () => {
     fake = fakeClient({ 'session.intent.discard': { leftover: null } });
@@ -191,6 +268,18 @@ describe('an empty New chat at a relaunch', () => {
     } finally {
       act(() => disconnect());
       warn.mockRestore();
+    }
+  });
+
+  it('reads the same definition: an earlier run’s chat with a prompt already waiting for its composer is kept', async () => {
+    prefillComposer(A, { text: 'Make a deck: ' });
+    const disconnect = await relaunch('index');
+    try {
+      await expect(currentTabRetention()!.ready).resolves.toBe(true);
+      expect(fake.invoked('session.intent.discard')).toEqual([]);
+    } finally {
+      act(() => disconnect());
+      resetComposerStore();
     }
   });
 

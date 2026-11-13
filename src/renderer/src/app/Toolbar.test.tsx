@@ -6,16 +6,18 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
-import { registerSessionCreator } from '../keymap/actions-runtime';
+import { newChat, registerSessionCreator } from '../keymap/actions-runtime';
 import { projectReveal } from '../sidebar/reveal';
 import { useLayout } from '../stores/layout';
 import { useMachines } from '../stores/machines';
 import { allTabs } from '../stores/layout-model';
 import { useShellView } from './shell-view';
-import { machineKey } from '@shared/machine/org-key';
+import { addressOf } from '@shared/machine/address';
+import { machineKey, type OrgKey } from '@shared/machine/org-key';
+import { project, remoteRow } from '../../../../test/support/builders';
 import { useSessions } from '../stores/sessions';
 import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
-import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { PROJECT_CHIP_COPY, Toolbar } from './Toolbar';
 
 const nine = scenarioFile('nine-sessions');
@@ -64,6 +66,26 @@ describe('the title bar’s project chip', () => {
     expect(chip()!.getAttribute('data-toolbar-project')).toBe(machineKey(TEST_MACHINE));
     act(() => useLayout.getState().openSession(bare, { how: 'tab' }));
     expect(chip()).toBeNull();
+  });
+
+  // the branch review (finding 4): a lane A listing opened with no record read sits under its listing's row, as lane B's does
+  it('names the row of a lane A session in front from its listing, and New chat starts in that row’s folder here', async () => {
+    const KEY = 'repo:lane-a-fixture' as OrgKey;
+    const LOCAL = at('proj-lane-a' as ProjectId);
+    const LISTED = addressOf(OTHER_MACHINE, 'lane-a-1' as AppSessionId);
+    useSessions.setState((s) => ({
+      projects: new Map(s.projects).set(LOCAL, project(LOCAL, 9, { name: 'lane-a-fixture', org: { key: KEY, name: 'lane-a-fixture', source: 'repository', smnsId: null } })),
+      listed: new Map([[LISTED, { ...remoteRow(OTHER_MACHINE, 'eng-lane-a', { lane: 'A', orgKey: KEY, title: 'Remote work' }), appId: LISTED }]]),
+    }));
+    useMachines.setState({ loaded: new Set([TEST_MACHINE, OTHER_MACHINE]) });
+    const asked: (ProjectId | null)[] = [];
+    offs.push(registerSessionCreator(async (projectId) => (asked.push(projectId), NEW)));
+    render(<Toolbar />);
+    act(() => useLayout.getState().openTab({ kind: 'session', appSessionId: LISTED }));
+    expect(chip()!.textContent).toBe('lane-a-fixture');
+    expect(chip()!.getAttribute('data-toolbar-project')).toBe(KEY);
+    await act(async () => void (await newChat()));
+    expect(asked).toEqual([LOCAL]);
   });
 
   it('a click reveals the row in the sidebar, shown, opened and handed to the sidebar, and creates nothing', async () => {

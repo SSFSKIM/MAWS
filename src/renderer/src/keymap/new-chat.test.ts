@@ -10,7 +10,9 @@ import { machineKey, type OrgKey } from '@shared/machine/org-key';
 import { project, record } from '../../../../test/support/builders';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
+import { connectPanelHost, instanceOf, panelHost, registerPanelTool } from '../panel/host';
 import { resetRemoteSpawn, spawnTargetOf } from '../sessions/remote-spawn';
+import { probeTool, resetPanelStores } from '../test-support/panel';
 import { registerFocusTarget, resetComposerStore, useComposerStore } from '../stores/composer';
 import { frontOf, useLayout } from '../stores/layout';
 import { allTabs } from '../stores/layout-model';
@@ -68,6 +70,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   disposers.splice(0).forEach((off) => off());
+  resetPanelStores();
   empty.clear();
   resetRemoteSpawn();
   resetComposerStore();
@@ -383,6 +386,35 @@ describe('closing an empty chat for the person', () => {
     await settle();
     expect(useLayout.getState().main.panes[0].tabs).toEqual([expect.objectContaining({ id: sessionTab(E), pinned: true }), expect.objectContaining({ id: sessionTab(IN_P), pinned: false })]);
     expect(front()).toBe(sessionTab(IN_P));
+    error.mockRestore();
+  });
+
+  // the branch review (finding 3): only the tab leaves at once; the side tools go once main has said yes
+  it.each([['refuses', false], ['throws', new Error('main went away')], ['agrees', true]] as const)('keeps the chat’s side tools and their state until main agrees (main %s)', async (_how, answer) => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    resetPanelStores();
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+    disposers.push(connectPanelHost());
+    const { tool, probe } = probeTool('t');
+    disposers.push(registerPanelTool(tool));
+    hold();
+    setUp();
+    const tab = panelHost.addTool('t', { appSessionId: E, activate: false });
+    const state = instanceOf(tab)!.state;
+    closeEmptyChat(E);
+    expect(panes()).toEqual([[sessionTab(IN_P)]]);
+    expect(probe.disposed, 'while main works').toEqual([]);
+    release(answer);
+    await settle();
+    if (answer === true) {
+      expect(probe.disposed).toEqual([tab]);
+      expect(useLayout.getState().panelBySession.has(E)).toBe(false);
+    } else {
+      expect(probe.disposed).toEqual([]);
+      expect(instanceOf(tab)?.state).toBe(state);
+      expect(useLayout.getState().panelBySession.get(E)?.tabs.map((t) => t.id)).toEqual([tab]);
+      expect(panes()).toEqual([[sessionTab(IN_P), sessionTab(E)]]);
+    }
     error.mockRestore();
   });
 

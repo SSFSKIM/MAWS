@@ -26,7 +26,7 @@ import { TRANSFER_COPY } from '../tools/artifacts/copy';
 import { requestArtifactOpen, resetOpenRequests, useOpenRequest } from '../tools/artifacts/viewers/requests'; // P4-B4 renamed the version request the open request
 import { recordTranscriptScroll, takeTranscriptCarry } from '../transcript/view/scroll-carry'; // P4-B3 M5
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
-import { dragAccepted, moveArtifactToPanel, moveArtifactToTab, transferRefusal, useTransferRefusal } from './transfer';
+import { dragAccepted, moveArtifactToPanel, moveArtifactToTab, transferRefusal, useCoverState, useTransferRefusal } from './transfer';
 
 const DOC = 'doc-1';
 const OTHER = 'doc-2';
@@ -399,6 +399,25 @@ describe('main → panel', () => {
 
 // P4-B3 (its Decision Log 32): a move is not a close. Neither move leaves a ⌘⇧T entry, so reopening never makes a second
 // view of the artifact the owner moved.
+// The branch review (finding 5): a target's eligibility reads the session's row, which waits for its machine to answer;
+// a drag in progress hears that answer.
+describe('a drag while the session’s machine has not answered', () => {
+  it('turns the panel’s cover from refused to accepted when the machine’s load arrives', () => {
+    const shared = at('project-x' as ProjectId);
+    sessionsIn({ [A]: shared });
+    useMachines.setState({ loaded: new Set() });
+    metadata(DOC, shared);
+    useLayout.setState({ main: panes([sessionTab(A), DOC_TAB]) });
+    act(() => useLayout.getState().setDragging({ source: 'main', tabId: DOC_TAB.id, fromPane: 0 }));
+    const cover = renderHook(() => useCoverState('panel'));
+    expect(cover.result.current).toBe('refused');
+    act(() => useMachines.setState({ loaded: new Set([TEST_MACHINE]) }));
+    expect(cover.result.current).toBe('accepted');
+    cover.unmount();
+    act(() => useLayout.getState().setDragging(null));
+  });
+});
+
 describe('the closed-tab history', () => {
   it('is unchanged by a hand-off into the panel (T1) and by an activate-existing move (T5)', async () => {
     useLayout.setState({ main: { ...panes([DOC_TAB, sessionTab(A), artifactTab(OTHER)]), closedTabs: [artifactTab('old')] } }); // each move shows A's panel next
