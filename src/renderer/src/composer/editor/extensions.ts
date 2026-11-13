@@ -115,7 +115,13 @@ export function composerExtensions(env: () => EditorEnv): AnyExtension[] {
     ComposerDocument,
     Paragraph,
     Text,
-    HardBreak,
+    // UX wave U4a: Shift+Enter alone breaks the line here (⌥Enter is the controller's); ⌘Enter is `composer.queue`'s,
+    // and where a stored binding takes that chord from it, ⌘Enter does nothing (no Mod-Enter line break)
+    HardBreak.extend({
+      addKeyboardShortcuts() {
+        return { 'Shift-Enter': () => this.editor.commands.setHardBreak() };
+      },
+    }),
     MentionNode.extend({ addNodeView: () => ReactNodeViewRenderer(MentionView, { as: 'span' }) }).configure({
       // the popups choose their own rows and apply them (`PopupItem.apply`), so the selected props are not mention attrs
       suggestions: [at, slash] as unknown as MentionOptions['suggestions'],
