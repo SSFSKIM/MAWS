@@ -372,13 +372,32 @@ describe('remote lane A over a real link', { timeout: 30_000 }, () => {
       expect(acceptedNow(l)).toEqual([]);
     });
 
-    it('names nothing for an answer the machine refused, or whose outcome is unknown', async () => {
+    const naming = (l: Lab, from: number) => l.emitted.slice(from).filter((e) => e.name === 'laneA.changed' && ((e.payload.state as LaneAState | null)?.accepted ?? []).includes('toolu_p1'));
+
+    it('names nothing for an answer the machine refused', async () => {
       const l = await lab();
       await watched(l);
       l.plane.raise(permission);
       await until(() => stateNow(l)?.pending.length === 1, 'the request');
+      const told = l.emitted.length;
       l.plane.handle('decide', () => ({ state: 'failed', error: { code: 'not-pending', message: 'it is no longer pending' } }));
       expect(await answer(l, 'deny')).toMatchObject({ outcome: 'not_pending' });
+      expect(naming(l, told)).toEqual([]);
+      expect(acceptedNow(l)).toEqual([]);
+    });
+
+    it('names nothing for an answer whose outcome is unknown: the link ended with the decision outstanding', async () => {
+      const l = await lab();
+      await watched(l);
+      l.plane.raise(permission);
+      await until(() => stateNow(l)?.pending.length === 1, 'the request');
+      const told = l.emitted.length;
+      l.carriers.at(-1)!.tap.mute = true; // the endpoint's ack and done never reach the link
+      const answering = answer(l);
+      await until(() => l.plane.runs.some((r) => r.rpc === 'decide'), 'the decision run at sminos');
+      l.link.close();
+      expect(await answering).toMatchObject({ outcome: 'unknown' });
+      expect(naming(l, told)).toEqual([]);
       expect(acceptedNow(l)).toEqual([]);
     });
   });

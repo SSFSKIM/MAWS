@@ -23,7 +23,7 @@ const raised = { request: 'toolu_1', session: 'eng-r', tool: 'Bash', input: { co
 let off: () => void = () => {};
 beforeEach(() => {
   resetLaneAStore();
-  useAttention.setState({ bySession: new Map(), requests: new Map() });
+  useAttention.setState({ bySession: new Map(), requests: new Map(), drafts: new Map() });
   off = connectRemoteLaneA();
 });
 afterEach(() => off());
@@ -90,6 +90,18 @@ describe('connectRemoteLaneA', () => {
     applyLaneAState(REMOTE, laneAState(REMOTE, { engineSessionId: 'eng-r', link: LINK, acts: [], pending: [raised, second], accepted: ['toolu_1'] }));
     useAttention.getState().applyRemote({ machine: OTHER_MACHINE, items: [], greyed: false });
     expect((useAttention.getState().bySession.get(REMOTE) ?? []).map((i) => i.request.requestId)).toEqual(['toolu_2']);
+  });
+
+  // The review of M1: the snapshot must not prune a mirrored question's draft before the list is back
+  it('keeps a mirrored question’s draft across a feed snapshot of the machine: the item stands and the draft is unchanged', () => {
+    const question = { ...raised, request: 'toolu_q', tool: 'AskUserQuestion', input: { questions: [{ question: 'Which file?', header: 'File', options: [{ label: 'a.ts', description: '' }, { label: 'b.ts', description: '' }], multiSelect: false }] } };
+    applyLaneAState(REMOTE, laneAState(REMOTE, { engineSessionId: 'eng-r', link: LINK, acts: [], pending: [question] }));
+    const [card] = useAttention.getState().bySession.get(REMOTE)!;
+    const draft = { step: 0, reached: 0, selected: { 'Which file?': ['b.ts'] }, other: { 'Which file?': 'made-up other text' } };
+    useAttention.getState().setDraft(card.id, draft);
+    useAttention.getState().applyRemote({ machine: OTHER_MACHINE, items: [], greyed: false });
+    expect(useAttention.getState().bySession.get(REMOTE)).toEqual([card]);
+    expect(useAttention.getState().drafts.get(card.id)).toBe(draft);
   });
 
   it('leaves a local state’s requests to main’s own list', () => {

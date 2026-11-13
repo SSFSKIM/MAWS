@@ -293,6 +293,49 @@ describe('an answered request in the store', () => {
   });
 });
 
+// UX wave U1a (Interfaces §B, Reported 9): a list the machine's feed and lists never carry (lane A's mirror of a remote
+// terminal session) stands through that machine's snapshots, its question's draft with it.
+describe('a mirrored session of another machine', () => {
+  const T = addressOf(OTHER_MACHINE, 'eng-t' as AppSessionId);
+  const fed = item(addressOf(OTHER_MACHINE, 'b1' as AppSessionId), 'permission', '2026-09-28T08:00:00Z');
+  const asked = item(T, 'question', '2026-09-28T09:00:00Z', { id: addressOf(OTHER_MACHINE, 'lane-a:eng-t:toolu_q') as never });
+  const draft = { step: 1, reached: 1, selected: { q: ['Red'] }, other: { q: 'made-up text' } };
+
+  it('stands, with its draft, through the machine’s feed snapshot, which replaces the rest of its partition', () => {
+    const store = createAttentionStore();
+    store.getState().applyRemote({ machine: OTHER_MACHINE, items: [fed], greyed: false });
+    store.getState().applyMirrored({ appSessionId: T, items: [asked] }, OTHER_MACHINE);
+    store.getState().setDraft(asked.id, draft);
+    const list = store.getState().bySession.get(T);
+    store.getState().applyRemote({ machine: OTHER_MACHINE, items: [], greyed: false });
+    expect(store.getState().bySession.get(T)).toBe(list);
+    expect(store.getState().bySession.has(fed.appSessionId)).toBe(false);
+    expect(store.getState().drafts.get(asked.id)).toBe(draft);
+  });
+
+  it('stands through the machine’s listed snapshot, written at once while that snapshot is outstanding', () => {
+    const store = createAttentionStore();
+    store.getState().beginSnapshot(OTHER_MACHINE);
+    store.getState().applyMirrored({ appSessionId: T, items: [asked] }, OTHER_MACHINE);
+    expect(store.getState().bySession.get(T)).toEqual([asked]);
+    store.getState().setDraft(asked.id, draft);
+    store.getState().applySnapshot([], OTHER_MACHINE);
+    expect(store.getState().bySession.get(T)).toEqual([asked]);
+    expect(store.getState().drafts.get(asked.id)).toBe(draft);
+  });
+
+  it('is the machine’s again once the mirror empties it: the next snapshot removes it, and its draft went at the empty write', () => {
+    const store = createAttentionStore();
+    store.getState().applyMirrored({ appSessionId: T, items: [asked] }, OTHER_MACHINE);
+    store.getState().setDraft(asked.id, draft);
+    store.getState().applyMirrored({ appSessionId: T, items: [] }, OTHER_MACHINE);
+    expect(store.getState().bySession.get(T)).toEqual([]);
+    expect(store.getState().drafts.has(asked.id)).toBe(false);
+    store.getState().applyRemote({ machine: OTHER_MACHINE, items: [], greyed: false });
+    expect(store.getState().bySession.has(T)).toBe(false);
+  });
+});
+
 // P5 O6 M4 (OX2): a machine's snapshot answers for that machine's sessions only, and buffers that machine's changes.
 describe('attention partitions its snapshots by machine', () => {
   const onB = (id: string) => addressOf(OTHER_MACHINE, id) as AppSessionId;
