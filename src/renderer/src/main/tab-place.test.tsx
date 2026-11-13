@@ -96,6 +96,19 @@ describe('a tab’s place', () => {
     expect(tabOf(idOf('Charter + research')).style.minWidth).toBe(bare);
   });
 
+  // The architect's ruling of 2026-11-13: a place is drawn readable or not at all. happy-dom lays nothing out, so the
+  // one-strip e2e scene measures it; here the classes it hangs on: a one-line box that clips what wraps, and a place
+  // that asks the line for its whole text or 5em, whichever is less.
+  it('sits in a one-line box that clips what wraps, asking for its whole text or 5em', () => {
+    render(<TabStrip pane={0} split={false} idPrefix="place" />);
+    open(idOf('Charter + research'));
+    open(idOf('Quota reset recovery'));
+    const place = tabOf(idOf('Charter + research')).querySelector<HTMLElement>('[data-tab-place]')!;
+    expect(place.className.split(' ')).toEqual(expect.arrayContaining(['basis-[5em]', 'grow', 'max-w-max', 'min-w-0', 'truncate']));
+    expect(place.parentElement!.className.split(' ')).toEqual(expect.arrayContaining(['flex', 'flex-wrap', 'h-[1lh]', 'overflow-hidden', 'gap-x-1.5']));
+    expect(place.previousElementSibling!.className.split(' ')).toEqual(expect.arrayContaining(['max-w-full', 'shrink-0', 'truncate']));
+  });
+
   it('is in the All tabs menu’s line with the title', async () => {
     vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockReturnValue(480);
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(180);

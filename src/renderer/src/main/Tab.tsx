@@ -189,10 +189,13 @@ export function Tab({ tab, pane, domId, active, place = null, stop, onKeyDown }:
         </span>
       )}
       {dirty && <DirtyMark />}{/* E5 */}
-      {/* U13a: the place shrinks to nothing before the title truncates, the title held at its width up to the whole box */}
-      <span className="flex min-w-0 items-baseline gap-1.5">
+      {/* U13a: the place gives way before the title, and is drawn readable or not at all. The box is one line high and
+          clips what wraps. The title keeps its width up to the whole box. The place asks the line for its whole text or
+          5em, whichever is less (four characters and an ellipsis are never wider), and grows to its whole text from there;
+          a line with less room wraps it out of sight, with its gap, and the title takes the room. */}
+      <span className="flex h-[1lh] min-w-0 flex-wrap items-baseline gap-x-1.5 overflow-hidden">
         <span className={`max-w-full shrink-0 truncate ${offline ? 'text-fg-faint' : ''}`}>{label.title}</span>
-        {place && <small data-tab-place className="min-w-0 truncate text-fg-muted">{place}</small>}
+        {place && <small data-tab-place className="max-w-max min-w-0 grow basis-[5em] truncate text-fg-muted">{place}</small>}
       </span>
       {holderMark && ( // P5 O9 (Q1)
         <small data-holder-marker title={holderMark.title} className="shrink-0 text-fg-muted">

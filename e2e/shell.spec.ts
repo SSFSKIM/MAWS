@@ -262,17 +262,34 @@ test('one strip: a project or machine row changes no tab, ⌘1 counts over the p
           tabs.map((tab) => {
             const place = tab.querySelector<HTMLElement>('[data-tab-place]');
             const title = place?.previousElementSibling as HTMLElement | null;
+            // the architect's ruling of 2026-11-13: a place shows on the box's one line or is wrapped out of sight below
+            // it; one that shows is its whole text or at least its first four characters and the ellipsis
+            const box = place?.parentElement?.getBoundingClientRect();
+            const shown = place !== null && box !== undefined && place.getBoundingClientRect().top < box.bottom - 1 && place.getBoundingClientRect().width > 0;
+            let readable = 0;
+            if (place !== null) {
+              const text = Array.from(place.textContent ?? '');
+              const probe = document.createElement('small');
+              probe.className = place.className;
+              probe.style.cssText = 'position:absolute;visibility:hidden;max-width:none;width:auto;flex:none';
+              probe.textContent = text.length > 4 ? `${text.slice(0, 4).join('')}…` : text.join('');
+              place.parentElement!.appendChild(probe);
+              readable = probe.getBoundingClientRect().width;
+              probe.remove();
+            }
             return {
               tab: Math.round(tab.getBoundingClientRect().width),
               titleCut: title !== null && title.scrollWidth > title.clientWidth + 1,
-              place: place === null ? null : Math.round(place.getBoundingClientRect().width),
-              placeCut: place !== null && place.scrollWidth > place.clientWidth + 1,
+              place: place === null ? null : shown ? Math.round(place.getBoundingClientRect().width) : 0,
+              placeCut: place !== null && shown && place.scrollWidth > place.clientWidth + 1,
+              placeReadable: place === null || !shown || place.getBoundingClientRect().width + 1 >= readable,
             };
           }),
         );
     type Squeezed = Awaited<ReturnType<typeof measure>>;
     const givesWay = (tabs: Squeezed) => tabs.some((t) => t.place !== null && (t.placeCut || t.place === 0));
     let squeezed: Squeezed = [];
+    const visited: Squeezed[] = [];
     let width = 0;
     const tried: string[] = [];
     for (width of [900, 800, 700, 600]) {
@@ -280,6 +297,7 @@ test('one strip: a project or machine row changes no tab, ⌘1 counts over the p
       await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBounds().width)).toBe(width);
       await page.waitForTimeout(300); // the strip lays out at the new width
       squeezed = await measure();
+      visited.push(squeezed);
       tried.push(`${width}px ${JSON.stringify(squeezed)}`);
       if (givesWay(squeezed)) break;
     }
@@ -287,7 +305,9 @@ test('one strip: a project or machine row changes no tab, ⌘1 counts over the p
     await test.info().attach('one-strip-narrow-title-bar', { body: await banner.screenshot(), contentType: 'image/png' });
     expect(givesWay(squeezed), `a place gave way by ${width} px`).toBe(true);
     expect(squeezed.map((t) => t.place !== null), 'every session tab still has its place').toEqual([true, true, true, true]);
-    expect(squeezed.filter((t) => t.titleCut && (t.place ?? 0) > 0), 'no title is cut while its place still takes room').toEqual([]);
+    // at every width visited: no title is cut while its place shows, and a place that shows is readable
+    expect(visited.flat().filter((t) => t.titleCut && (t.place ?? 0) > 0), 'no title is cut while its place still shows').toEqual([]);
+    expect(visited.flat().filter((t) => !t.placeReadable), 'a place that shows is whole, or four characters and the ellipsis').toEqual([]);
 
     // what is stored is one strip, in the envelope build F reads (UC-14)
     await expect
