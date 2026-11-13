@@ -68,8 +68,9 @@ function body(row: Row) {
   }
 }
 
-// The first row a turn shows: where a revealed branch's turn says it is not in context.
-const opensTurn = (row: Row) => row.kind === 'user' || (row.kind === 'divider' && row.origin !== 'human'); // engine and peer turns open with their divider
+// The first row a turn shows: where a revealed branch's turn says it is not in context. UX wave U2 (O-15): a turn with
+// nothing under it has no divider, so the mark goes on the turn's first drawn row, whatever its kind.
+const opensTurn = (row: Row, rows: readonly Row[] | undefined) => rows?.find((candidate) => candidate.turnId === row.turnId && candidate.kind !== 'time')?.id === row.id;
 
 // Keep one frame/body lineage when a surface answer moves a row into or out of the work area.
 export function RowView({ row }: { row: Row }) {
@@ -87,10 +88,15 @@ export function RowView({ row }: { row: Row }) {
 
 function RowFrame({ row, frameRef, children }: { row: Row; frameRef?: Ref<HTMLDivElement>; children: ReactNode }) {
   const { idPrefix, storeKey } = useTranscriptContext();
-  const muted = useTranscriptStore((state) => row.turnId !== null && (state.entries[storeKey]?.state.hidden?.turns.includes(row.turnId) ?? false));
+  const mark = useTranscriptStore((state) => {
+    const entry = state.entries[storeKey];
+    if (row.turnId === null || !(entry?.state.hidden?.turns.includes(row.turnId) ?? false)) return null;
+    return opensTurn(row, entry?.rows) ? 'opens' : 'muted';
+  });
+  const muted = mark !== null;
   return (
     <div ref={frameRef} id={rowElementId(idPrefix, row.id)} className="thread-column transcript-row" data-kind={row.kind} data-turn-id={row.turnId ?? undefined} data-muted={muted ? '' : undefined} tabIndex={-1}>
-      {muted && opensTurn(row) && <div className="transcript-not-in-context">{NOT_IN_CONTEXT}</div>}
+      {mark === 'opens' && <div className="transcript-not-in-context">{NOT_IN_CONTEXT}</div>}
       {children}
     </div>
   );

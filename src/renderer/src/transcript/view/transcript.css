@@ -295,7 +295,6 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-cell-label { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .transcript-file-verb { color: var(--fg-muted); }
 .transcript-file-target { color: var(--fg); }
-.transcript-cell[data-bookkeeping] .transcript-cell-line { opacity: 0.75; }
 /* The status mark is drawn here, so the line's text is its label alone. */
 .transcript-cell-line::before { flex: none; width: 12px; text-align: center; }
 /* The running ring, shared with E4c's browser row (its own rule below adds the row's flex and margin). */

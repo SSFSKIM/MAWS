@@ -75,9 +75,9 @@ export function presentationOf(toolName: string): Presentation {
   return Object.hasOwn(ROW_KIND_TOOLS, toolName) ? ROW_KIND_TOOLS[toolName] : 'cell';
 }
 
-interface TableRow { category: ToolCategory; groupable: boolean; hidden: boolean }
-const grouped = (category: ToolCategory, hidden = false): TableRow => ({ category, groupable: true, hidden });
-const standalone = (category: ToolCategory): TableRow => ({ category, groupable: false, hidden: false });
+interface TableRow { category: ToolCategory; groupable: boolean }
+const grouped = (category: ToolCategory): TableRow => ({ category, groupable: true });
+const standalone = (category: ToolCategory): TableRow => ({ category, groupable: false });
 
 const TABLE: Record<string, TableRow> = {
   Skill: grouped('skills'), ToolSearch: grouped('skills'),
@@ -86,9 +86,11 @@ const TABLE: Record<string, TableRow> = {
   Edit: grouped('files'), MultiEdit: grouped('files'), Write: grouped('files'), NotebookEdit: grouped('files'),
   Bash: grouped('commands'), PowerShell: grouped('commands'), BashOutput: grouped('commands'), KillShell: grouped('commands'), Monitor: grouped('commands'),
   WebFetch: grouped('web'), WebSearch: grouped('web'),
-  EnterPlanMode: grouped('other', true), EnterWorktree: grouped('other', true), ExitWorktree: grouped('other', true),
-  TodoWrite: grouped('other', true), TaskCreate: grouped('other', true), TaskUpdate: grouped('other', true), TaskList: grouped('other', true),
-  TaskGet: grouped('other', true), TaskOutput: grouped('other', true), TaskStop: grouped('other', true),
+  // UX wave U2 (O-29; X3's classification as amended by the U2a document, decision 10): the bookkeeping calls are
+  // ordinary steps of their run, nothing inside a run is hidden
+  EnterPlanMode: grouped('other'), EnterWorktree: grouped('other'), ExitWorktree: grouped('other'),
+  TodoWrite: grouped('other'), TaskCreate: grouped('other'), TaskUpdate: grouped('other'), TaskList: grouped('other'),
+  TaskGet: grouped('other'), TaskOutput: grouped('other'), TaskStop: grouped('other'),
   // E1 start: a pane shown for the model is a cell of its own, never folded into a group of MCP calls
   [MAWS_TOOL_USE.show_pane]: standalone('other'),
   // E1 end
@@ -96,25 +98,22 @@ const TABLE: Record<string, TableRow> = {
   // that Background work's `Open creating turn` jumps to (E7 execution document, Design §7)
   CronCreate: grouped('other'), CronList: grouped('other'), CronDelete: grouped('other'),
   // E7 end
-  // E2 start: listing and screenshotting artifacts are cells of their own, as show_pane is (P3-A: as are the namespace's
-  // other readers, its assets and its exports)
-  [MAWS_TOOL_USE.artifact_list]: standalone('other'),
+  // UX wave U2 (l6-artifacts-12): the `maws` server's plain artifact calls are steps of their run, as every other
+  // call is (E2, P3-B M7, P3-E and P4-B4 had made each a cell of its own). A screenshot stays one: its result is an
+  // image, which stands alone on every route
+  [MAWS_TOOL_USE.artifact_list]: grouped('other'),
   [MAWS_TOOL_USE.artifact_screenshot]: standalone('other'),
-  [MAWS_TOOL_USE.artifact_describe_type]: standalone('other'),
-  [MAWS_TOOL_USE.artifact_read]: standalone('other'),
-  [MAWS_TOOL_USE.artifact_upload_asset]: standalone('other'),
-  [MAWS_TOOL_USE.artifact_list_assets]: standalone('other'),
-  [MAWS_TOOL_USE.artifact_export]: standalone('other'),
-  // E2 end
-  // P3-B (M7): a document's edit and its comment threads' calls are cells of their own, as the namespace's others are
-  [MAWS_TOOL_USE.artifact_edit]: standalone('other'),
-  [MAWS_TOOL_USE.artifact_comments]: standalone('other'),
-  [MAWS_TOOL_USE.artifact_reply]: standalone('other'),
-  [MAWS_TOOL_USE.artifact_resolve]: standalone('other'),
-  // P3-E (E2 M2): a dashboard's dataset bind is a cell of its own, as the namespace's other writers are
-  [MAWS_TOOL_USE.artifact_dataset]: standalone('other'),
-  // P4-B4: the library search is a cell of its own, as the namespace's other readers are
-  [MAWS_TOOL_USE.artifact_search]: standalone('other'),
+  [MAWS_TOOL_USE.artifact_describe_type]: grouped('other'),
+  [MAWS_TOOL_USE.artifact_read]: grouped('other'),
+  [MAWS_TOOL_USE.artifact_upload_asset]: grouped('other'),
+  [MAWS_TOOL_USE.artifact_list_assets]: grouped('other'),
+  [MAWS_TOOL_USE.artifact_export]: grouped('other'),
+  [MAWS_TOOL_USE.artifact_edit]: grouped('other'),
+  [MAWS_TOOL_USE.artifact_comments]: grouped('other'),
+  [MAWS_TOOL_USE.artifact_reply]: grouped('other'),
+  [MAWS_TOOL_USE.artifact_resolve]: grouped('other'),
+  [MAWS_TOOL_USE.artifact_dataset]: grouped('other'),
+  [MAWS_TOOL_USE.artifact_search]: grouped('other'),
   // E13 start: a cua_repl `js` call is a cell of its own, never folded into a group of MCP calls, so the browser
   // activity under it is in view without opening a group (it folds with the turn's work, as every cell does)
   [CUA_JS_TOOLS[0]]: standalone('mcp'),
@@ -203,20 +202,26 @@ export function continuedAfter(events: readonly SessionEvent[]): ReadonlySet<Too
   return continued;
 }
 
-// Total over tool names; `startsGroup` is the group state machine's (derive.ts) and starts false here.
+// UX wave U2 (decision 23): a refused call that reads stopped is a member of its run, its status stopped (a Stop, the
+// engine's interrupt or cancel); `automode-unavailable` reads stopped too but stands alone, for the person may have to
+// act on it. Every other refusal (denied, auto-denied) stands alone.
+export const stoppedMember = (denial: { kind: DenialKind; disposition: 'denied' | 'auto_denied' | 'stopped' }): boolean =>
+  denial.disposition === 'stopped' && denial.kind !== 'automode-unavailable';
+
+// Total over tool names; `startsGroup` is the group state machine's (derive.ts) and starts false here. UX wave U2
+// (O-29): who allowed a call no longer decides whether it joins a run (only the live route knows it); `humanDecision`
+// stays a fact of the classification.
 export function classifyTool(toolName: string, _input: unknown, context: ClassifyContext): ToolClassification {
   const row = tableRowOf(toolName);
   let groupable = row.groupable;
   let denial: ToolClassification['denial'] = null;
   if (context.denial) {
-    groupable = false;
     denial = { kind: context.denial.kind, reason: context.denial.reason, ...denialDisposition(context.denial.kind, context.turn, context.continued) };
+    if (!stoppedMember(denial)) groupable = false;
   }
-  if (context.humanDecision) groupable = false;
   if (context.imageResult) groupable = false;
   return {
     groupable,
-    hidden: row.hidden,
     category: row.category,
     denial,
     subagentLifecycle: null,

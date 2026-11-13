@@ -1,5 +1,6 @@
 // Adjacent tool calls share one quiet block. Every call's summary is visible; its input/output is one disclosure
-// away, not behind an additional group fold. Thinking and internal bookkeeping remain available on demand.
+// away, not behind an additional group fold. Thinking remains available on demand. UX wave U2: the caption above the
+// block is the run's (caption.ts), with its finished edits' lines; every call, bookkeeping included, is in the block.
 import { Fragment, type ReactNode } from 'react';
 import { useTranscriptStore } from '../../../stores/transcript';
 import { DisclosureBody } from '../../../ui/disclosure';
@@ -13,18 +14,17 @@ type GroupRowData = Extract<Row, { kind: 'group' }>;
 
 export function GroupRow({ row, renderCell }: { row: GroupRowData; renderCell?: (cell: Cell) => ReactNode }) {
   const { storeKey } = useTranscriptContext();
-  const visible = row.cells.filter((cell) => !cell.classification.hidden);
-  const internal = row.cells.filter((cell) => cell.classification.hidden);
+  const visible = row.cells.filter((cell) => cell.toolName !== 'thinking');
+  const internal = row.cells.filter((cell) => cell.toolName === 'thinking');
   const thinking = row.state === 'active' && !visible.some((cell) => cell.status === 'running')
-    ? internal.find((cell) => cell.toolName === 'thinking' && cell.status === 'running') : undefined;
-  const edits = visible.flatMap((cell) => cell.status === 'done' && cell.detail.kind === 'edit' ? [cell.detail] : []);
+    ? internal.find((cell) => cell.status === 'running') : undefined;
   const draw = (cells: Cell[]) => cells.map((cell) => (
     <Fragment key={cell.id}>{renderCell ? renderCell(cell) : <CellLine cell={cell} turnId={row.turnId} />}</Fragment>
   ));
   return (
     <FilePathsContext value={row.cells.flatMap((cell) => cell.paths)}>
       <div className="transcript-group" data-state={row.state} data-cell-count={row.cells.length}>
-        {visible.length > 1 && <div className="transcript-group-summary">{row.summary} {edits.length > 0 && <LineCounts added={edits.reduce((n, edit) => n + edit.added, 0)} removed={edits.reduce((n, edit) => n + edit.removed, 0)} />}</div>}
+        {visible.length > 1 && <div className="transcript-group-summary">{row.summary} <LineCounts added={row.counts.added} removed={row.counts.removed} /></div>}
         <div className="transcript-tool-block" data-group-cells="">{draw(visible)}</div>
         {internal.length > 0 && <>
           <button type="button" className="transcript-group-header" aria-expanded={row.expanded} onClick={() => useTranscriptStore.getState().toggleGroup(storeKey, row.id)}>

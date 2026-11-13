@@ -32,18 +32,20 @@ function FileLabel({ label, path, target }: { label: string; path: string; targe
   return <><span className="transcript-file-verb">{label.slice(0, label.length - target.length).trimEnd()}</span>{' '}<span className="transcript-file-target">{shortestFileSuffix(path, peers)}</span></>;
 }
 
+// The model's label as it is: a refusal's diagnostic, and the one form of a stopped call (UX wave U2, decision 23, R2)
+const asLabelled = (cell: Cell) => cell.classification.denial !== null || cell.status === 'stopped';
+
 function Label({ cell, turnId }: { cell: Cell; turnId: TurnId | null }) {
   // Bash's description is the agent-authored summary, not a command to reformat. Keep diagnostic denial labels.
-  if (cell.detail.kind === 'shell' && !cell.classification.denial) {
+  if (cell.detail.kind === 'shell' && !asLabelled(cell)) {
     const description = cell.detail.description?.trim().split(/\r?\n/, 1)[0];
     const verb = { running: 'Running', done: 'Ran', error: 'Failed', stopped: 'Stopped', denied: 'Denied' }[cell.status];
     return <>{description ? descriptionLabel(description, cell.status) : `${verb} ${cell.toolName}`}</>;
   }
-  if (cell.toolName === 'Skill') return <>Ran /{cell.label.replace(/^Loaded (.*) skill$/, '$1').replace(/^\//, '')}</>;
   if (cell.toolName === 'thinking' && cell.status === 'running') return <LiveThinkingCellLabel cell={cell} turnId={turnId} />; // W8
-  const counts = cell.detail.kind === 'edit' && !cell.classification.denial ? EDIT_COUNTS.exec(cell.label) : null;
+  const counts = cell.detail.kind === 'edit' && !asLabelled(cell) ? EDIT_COUNTS.exec(cell.label) : null;
   const label = counts ? cell.label.slice(0, counts.index) : cell.label;
-  if (!cell.classification.denial) {
+  if (!asLabelled(cell)) {
     if (cell.detail.kind === 'edit') return <FileLabel label={label} path={cell.detail.filePath} target={cell.detail.filePath} />;
     if (cell.detail.kind === 'read' && cell.detail.files.length === 1) {
       const path = cell.detail.files[0].path;
@@ -55,13 +57,12 @@ function Label({ cell, turnId }: { cell: Cell; turnId: TurnId | null }) {
 
 export function CellLine({ cell, turnId, focusable = false, renderDetail, onToggle }: { cell: Cell; turnId: TurnId | null; focusable?: boolean; renderDetail?: (cell: Cell) => ReactNode; onToggle?: () => void }) {
   const { storeKey } = useTranscriptContext();
-  const counts = cell.detail.kind === 'edit' && !cell.classification.denial ? EDIT_COUNTS.exec(cell.label) : null;
+  const counts = cell.detail.kind === 'edit' && !asLabelled(cell) ? EDIT_COUNTS.exec(cell.label) : null;
   return (
     <div
       className="transcript-cell"
       data-cell-id={cell.id}
       data-status={cell.status}
-      data-bookkeeping={cell.classification.hidden && cell.toolName !== 'thinking' ? '' : undefined}
       data-expanded={cell.expanded ? '' : undefined}
       tabIndex={focusable ? -1 : undefined}
     >

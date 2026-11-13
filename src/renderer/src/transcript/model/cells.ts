@@ -7,8 +7,8 @@ import type { TaskId, ToolUseId } from '@shared/graph/ids';
 import { ShowPaneResultSchema } from '@shared/maws/tools'; // E1
 import { ArtifactScreenshotResultSchema } from '@shared/maws/tools'; // E2
 import * as z from 'zod'; // P3-A
-import { classifyTool, continuedAfter, isAbortedReason, MAWS_TOOL_USE, MCP_TOOL, tableRowOf, type ClassifyContext } from './classify';
-import { baseName, cellLabel, descriptionLabel, hostOf, PANE_CELL, thinkingLabel } from './copy';
+import { classifyTool, continuedAfter, isAbortedReason, MAWS_TOOL_USE, MCP_TOOL, stoppedMember, tableRowOf, type ClassifyContext } from './classify';
+import { baseName, cellLabel, descriptionLabel, hostOf, PANE_CELL, stoppedLabel, thinkingLabel } from './copy';
 import { ARTIFACT_CELL } from './copy'; // E2
 import { cellId } from './keys';
 import type { TurnState } from './reduce';
@@ -242,8 +242,26 @@ function statusOf(rec: ToolRecord, turn: TurnContext, disposition: 'denied' | 'a
 const elapsedMs = (rec: ToolRecord, turn: TurnContext) =>
   rec.result ? Date.parse(rec.result.at) - Date.parse(rec.use.at) : Math.max(rec.elapsedSeconds * 1000, Date.parse(turn.lastAt) - Date.parse(rec.use.at));
 
+// UX wave U2 (decision 23, R2; Interfaces §D): what a stopped call's row names, family by family: a shell call its
+// description as written (no marks) or else its command, a file change its path, an MCP call its shown name, every other
+// tool its name. The refusal that stands alone keeps today's subject.
+function stoppedSubject(rec: ToolRecord, detail: CellDetail): { subject: string; code: boolean } {
+  if (detail.kind === 'shell') {
+    const description = detail.description?.trim().split(/\r?\n/, 1)[0];
+    return description ? { subject: description, code: false } : { subject: detail.command, code: true };
+  }
+  if (detail.kind === 'edit') return { subject: detail.filePath, code: true };
+  const mcp = MCP_TOOL.exec(rec.use.toolName);
+  return { subject: mcp ? `${mcp[1]} · ${mcp[2]}` : rec.use.toolName, code: true };
+}
+
 function labelOf(rec: ToolRecord, detail: CellDetail, status: Cell['status'], category: ToolCategory, classification: Cell['classification'], turn: TurnContext): string {
   const input = record(rec.use.input);
+  // UX wave U2 (decision 23, R2): a stopped call that does not stand alone as a refusal reads one form on every family
+  if (status === 'stopped' && (classification.denial === null || stoppedMember(classification.denial))) {
+    const { subject, code } = stoppedSubject(rec, detail);
+    return stoppedLabel(subject, code);
+  }
   if (classification.denial) {
     const subject = detail.kind === 'shell' ? detail.command : detail.kind === 'edit' ? detail.filePath : rec.use.toolName;
     return cellLabel({ kind: 'denied', subject, disposition: classification.denial.disposition, denialKind: classification.denial.kind, reason: classification.denial.reason });
@@ -325,9 +343,13 @@ export function cellOf(rec: ToolRecord, turn: TurnContext, expanded: boolean, di
   const detail = detailOf(rec, status);
   const category = tableRowOf(use.toolName).category;
   const paths = detail.kind === 'read' ? detail.files.map((file) => file.path) : detail.kind === 'edit' ? [detail.filePath] : [];
+  const label = labelOf(rec, detail, status, category, labelClassification, turn);
+  // UX wave U2 (Interfaces §B): a stopped call's caption words are what its row reads done
+  const doneLabel = status === 'stopped' ? labelOf(rec, detailOf(rec, 'done'), 'done', category, { ...classification, denial: null }, turn) : label;
   return {
     id: cellId.tool(use.toolUseId), toolUseId: use.toolUseId, toolName: use.toolName, category, classification, status,
-    label: labelOf(rec, detail, status, category, labelClassification, turn), ...(rec.summary ? { summary: rec.summary } : {}), paths, startedAt: use.at, endedAt: result?.at ?? null, detail, expanded, agent: null,
+    label, ...(doneLabel !== label && { doneLabel }), ...(rec.summary ? { summary: rec.summary } : {}), paths, startedAt: use.at, endedAt: result?.at ?? null, detail, expanded, agent: null,
+    background: result !== null && recordedStatus === 'running', // UX wave U2 (decision 20)
   };
 }
 
@@ -352,7 +374,7 @@ export function mergeReads(into: Cell, next: Cell): Cell {
 export function thinkingCell(id: string, text: string, live: boolean, at: string, durationMs: number | null, recordedMs: number | null, expanded: boolean): Cell {
   const classification = classifyTool('thinking', null, { denial: null, turn: { closed: false, stopped: false }, continued: false, humanDecision: false, safeguard: 'not_evaluated', imageResult: false, isError: false });
   return {
-    id: id as Cell['id'], toolUseId: null, toolName: 'thinking', category: 'other', classification: { ...classification, hidden: true }, status: live ? 'running' : 'done',
-    label: thinkingLabel(live, durationMs), paths: [], startedAt: at, endedAt: live ? null : at, detail: { kind: 'thinking', text, durationMs, recordedMs }, expanded, agent: null,
+    id: id as Cell['id'], toolUseId: null, toolName: 'thinking', category: 'other', classification, status: live ? 'running' : 'done',
+    label: thinkingLabel(live, durationMs), paths: [], startedAt: at, endedAt: live ? null : at, detail: { kind: 'thinking', text, durationMs, recordedMs }, expanded, agent: null, background: false,
   };
 }

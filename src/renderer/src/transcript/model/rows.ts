@@ -27,7 +27,6 @@ export type ToolCategory = (typeof TOOL_CATEGORIES)[number];
 // Attached to every tool event at derivation time (X3's five fields, plus the two X1 facts the renderer shows in detail).
 export interface ToolClassification {
   groupable: boolean; // false ⇒ standalone: the cell is a row of its own and breaks the group run
-  hidden: boolean; // true ⇒ the cell exists in the expanded group but contributes no summary phrase (bookkeeping tools)
   category: ToolCategory;
   denial: { kind: DenialKind; disposition: 'denied' | 'auto_denied' | 'stopped'; interruption: boolean; reason: string | null } | null; // disposition from the denial table under Derivation; interruption: user-rejected inside an aborted turn
   subagentLifecycle: 'start' | 'progress' | 'finish' | 'message' | null;
@@ -71,8 +70,16 @@ export type Row = RowBase &
         // UX wave U3 (UC-2, "The rows"): on a turn the person did not start, what stands at its head and opened it, for U2
         // to name the turn from: that arrival's class and its row's words (no lead mark, no owners)
         opener?: { class: Arrival['class']; line: string };
+        // UX wave U2 (O-15; the U2a document, Interfaces §B): what the turn did, by caption.ts's builder over every step of
+        // the turn, ordered by what changed and capped (`''` while the turn runs and for a turn with no step); every part's
+        // text, uncapped (empty while it runs), for the popover; and the lines the main loop's finished edits added and
+        // removed, for every turn, a running one included
+        caption: string;
+        parts: string[];
+        counts: ChangedLines;
       }
-    | { kind: 'group'; state: 'active' | 'completed'; cells: Cell[]; summary: string; activeLabel: string | null; icon: ToolCategory; expanded: boolean }
+    // UX wave U2 (O-29; Interfaces §B): `summary` is the run's caption (caption.ts), `counts` its finished edits' lines
+    | { kind: 'group'; state: 'active' | 'completed'; cells: Cell[]; summary: string; counts: ChangedLines; icon: ToolCategory; expanded: boolean }
     | ({ kind: 'cell' } & Cell) // a standalone cell
     | { kind: 'receipt'; files: ChangedFile[]; added: number; removed: number; state: 'applied' | 'undoing' | 'undone' | 'reapplying'; canUndo: boolean; canReapply: boolean }
     | { kind: 'subagent'; agents: SubagentRef[]; sentence: string; status: SubagentStatus; overflow: number } // overflow: agents beyond the four glyphs
@@ -229,6 +236,10 @@ export interface Attachment {
   mediaType: string | null;
   text: string | null; // the content of a `text` attachment (pasted content, *Pasted content* under Derivation), null otherwise
 }
+export interface ChangedLines {
+  added: number;
+  removed: number;
+}
 export interface ChangedFile {
   path: string;
   change: 'create' | 'update' | 'delete';
@@ -265,6 +276,12 @@ export interface Cell {
   detail: CellDetail;
   expanded: boolean;
   agent: SubagentRef | null; // set when rendered inside a child transcript (variant 'child')
+  // UX wave U2 (decision 20): the call has its result and its recorded status still reads running, a call moved to the
+  // background; a mod's draw-time status does not change it
+  background: boolean;
+  // UX wave U2 (Interfaces §B): what the call's row reads in its done form, where its own label reads another (a stopped
+  // call's `Stopped: …`): the words a caption gives a call of no kind
+  doneLabel?: string;
 }
 
 export type CellDetail =

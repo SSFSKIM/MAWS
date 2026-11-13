@@ -17,10 +17,11 @@ import { askModAnswers } from './ask-mod'; // DC9
 import { cellOf, editCounts, engineRefusalOf, filePathOf, resultJson, resultText, toolErrorText, turnContextOf, type ToolRecord, type TurnContext } from './cells';
 import { firstJsonBlock, jsonObjectOf } from './cells'; // E2, E4c
 import { hookNotice, type HookRecord } from './hooks';
-import { agentMessageCopy, baseName, boundaryCopy, BRANCH_HISTORY_DETAIL, groupSummary, PLUGIN, processExitCopy, reconnectCopy, retryCopy, subagentSentence } from './copy';
+import { agentMessageCopy, baseName, boundaryCopy, BRANCH_HISTORY_DETAIL, PLUGIN, processExitCopy, reconnectCopy, retryCopy, subagentSentence } from './copy';
 import { HANDOVER_REINIT_COPY /* P5 O16 M3b */, RESUMED_COPY, RESUMING_COPY } from './copy'; // C12
 import { glyphFor } from './glyphs';
-import { collectCells, groupItems, phrasesOf, type WorkItem } from './groups';
+import { collectCells, groupItems, type WorkItem } from './groups';
+import { captionParts, captionText, finishedLines, stepsOfTurn, turnOrder } from './caption'; // UX wave U2
 import { cellId, rowId, turnId as turnIdOf } from './keys';
 import type { LiveBlock, TranscriptState, TranscriptUi, TurnState, TurnWork } from './reduce';
 import { isEngineOrigin, originOf, runningTurn, taskEndArrived, type ReceiptUndo } from './reduce';
@@ -222,12 +223,6 @@ export function restingRows(state: TranscriptState, rows: Row[]): Row[] {
 
 export function turnSummary(turn: TurnState): TurnSummary {
   return deriveTurn(turn, null).summary;
-}
-
-// The group phrases of a whole turn ("Edited 3 files, ran 2 commands"): the turn summary popover's category segment.
-// Denied and stopped calls did not run, so they are counted as tool calls but phrase nothing.
-export function turnPhrases(turn: TurnState): string {
-  return groupSummary(phrasesOf(deriveTurn(turn, null).cells.filter((cell) => cell.classification.denial === null)));
 }
 
 // Stable per-turn selector for consumers that must not follow unrelated streaming batches.
@@ -953,7 +948,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const forHuman = (row: Extract<Row, { kind: 'assistant_text' }>) => ui?.assistantInk.has(row.id) || (ui?.ownerLane === true && marksOfText(row.markdown, row.live).marked);
   // P4-R7: a message tool's message needs no such flag: it is addressed to the human whatever the lane, as a span the
   // presenter draws with the lane off is (inked, so kept), and `isPersistentRow` keeps every one
-  const allRows = groupItems(ordered, turn, ui, tools).map((row): Row => (row.kind === 'assistant_text' && forHuman(row) ? { ...row, forHuman: true } : row));
+  const allRows = groupItems(ordered, turn, ui).map((row): Row => (row.kind === 'assistant_text' && forHuman(row) ? { ...row, forHuman: true } : row));
   const workRows = allRows.filter((row) => !isPersistentRow(row));
   const cells = collectCells(workRows);
   const summary = summaryOf(turn, cells, subagents, model);
@@ -966,17 +961,21 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const dividerState: RowOf<'divider'>['state'] = turn.state === 'open' ? 'working' : turn.closedBy !== null ? turn.closedBy : isAborted(turn.ended?.terminalReason ?? null) ? 'stopped' : turn.ended?.isError && !endedOnApiError ? 'failed' : turn.ended ? 'completed' : 'stopped';
   const rows: Row[] = [...above];
   if (user) rows.push(user);
-  // The divider summarises a work area. A turn the owner did not start (engine, peer) always has one, because it is
-  // what tells the reader whose turn it was ("Continued for …"; pass2/workflow's engine turn is a single answer); a
-  // turn the engine accepted keeps one when stopped, even with only partial text or no output. A pending prompt
-  // has none until it starts.
-  if (workRows.length > 0 || turn.origin !== 'human' || (turn.accepted && (turn.state === 'open' || dividerState === 'stopped'))) {
+  // The divider summarises a work area. UX wave U2 (O-15, l2-transcript-04): a turn in which nothing was done has no
+  // line, whoever started it (an arrival's line already names a turn the person did not start); a turn the engine
+  // accepted keeps one while it runs and when stopped, even with only partial text or no output. A pending prompt has
+  // none until it starts.
+  if (workRows.length > 0 || (turn.accepted && (turn.state === 'open' || dividerState === 'stopped'))) {
     const denied = denials.filter((d) => d.disposition === 'denied');
     const firstDenied = denials.find((d) => d.disposition !== 'stopped')?.cellId ?? null;
+    // UX wave U2 (O-15; decision 9): what the turn did, once, here: the caption of every step of the turn for a turn
+    // that is not running, and the lines its finished edits changed for every turn
+    const parts = dividerState === 'working' ? [] : turnOrder(captionParts(stepsOfTurn(workRows, (ref) => byTask.get(ref.taskId)?.statuses.get(ref.taskId) ?? 'started')));
     rows.push({
       id: rowId.divider(turn.id), turnId: turn.id, at: user?.at ?? turn.startedAt, kind: 'divider', state: dividerState, ...(dividerState === 'stopped' && turn.closedCause !== null && { cause: turn.closedCause }), origin: turn.origin, startedAt: turn.startedAt, endedAt: turn.endedAt,
       toolCalls: summary.toolCalls, denied: denied.length, autoDenied: summary.autoDenied, firstDeniedCell: firstDenied, expanded, summary, files: changedFiles(cells, turn),
       ...(opener !== undefined && { opener }), // UX wave U3
+      caption: captionText(parts, true), parts: parts.map((part) => part.text), counts: finishedLines(cells),
     });
   }
   rows.push(...(expanded ? allRows : allRows.filter(staysInView))); // with no divider there is no work: every row is persistent

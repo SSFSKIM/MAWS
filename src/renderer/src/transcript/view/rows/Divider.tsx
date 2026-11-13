@@ -10,15 +10,15 @@
 import { Dialog, Popover } from 'radix-ui';
 import { rowId } from '../../model/keys';
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { ticks, useTranscriptStore, workingDurationMs, type TranscriptEntry } from '../../../stores/transcript';
-import { dividerCopy, turnSummaryCopy } from '../../model/copy';
-import { isPersistentRow, turnPhrases } from '../../model/derive';
+import { ticks, useTranscriptStore, workingDurationMs } from '../../../stores/transcript';
+import { dividerHead, turnSummaryCopy } from '../../model/copy';
+import { isPersistentRow } from '../../model/derive';
 import { latestPluginLine } from '../../model/plugins';
 import type { AppSessionId } from '@shared/graph/ids';
 import { useSpinnerText } from '../../../engine-surface/spinner'; // R2
 import type { CellId, Row, TurnId } from '../../model/rows';
 import { rowElementId, useTranscriptContext, useWorkMotion } from '../context';
-import { Chevron } from './parts';
+import { Chevron, LineCounts } from './parts';
 
 type DividerRowData = Extract<Row, { kind: 'divider' }>;
 
@@ -67,8 +67,11 @@ export function useDividerSummary(row: DividerRowData | undefined, open: boolean
   });
   // R2: a plugin hooking the Spinner gives the working label its text (a session's own transcript, never a child's)
   const spinner = useSpinnerText(variant === 'session' ? (storeKey as AppSessionId) : null, row?.state === 'working');
-  const label = row === undefined ? null : spinner ?? dividerCopy({ state: row.state, cause: row.cause, origin: row.origin, durationMs, toolCalls: row.toolCalls, denied: 0, autoDenied: 0 });
-  return { durationMs, controls, label: spinner === null ? label : <span data-plugin-spinner="">{label}</span> };
+  // UX wave U2 (O-15): the verb and what the turn did, then its lines in the diff colours (the denied counts are links,
+  // DividerDetails)
+  const head = row === undefined ? null : spinner === null ? dividerHead({ state: row.state, cause: row.cause, origin: row.origin, opener: row.opener, durationMs, caption: row.caption }) : <span data-plugin-spinner="">{spinner}</span>;
+  const label = row === undefined ? null : row.counts.added > 0 || row.counts.removed > 0 ? <>{head} <LineCounts added={row.counts.added} removed={row.counts.removed} /></> : head;
+  return { durationMs, controls, label };
 }
 
 export function DividerRow({ row }: { row: DividerRowData }) {
@@ -229,17 +232,16 @@ function TurnSummary({ row, durationMs }: { row: DividerRowData; durationMs: num
   );
 }
 
-// Mounted only while the popover is open: the whole turn's phrases come from a derivation of that turn.
+// UX wave U2 (decision 9): every part of what the turn did is on the row, made in the turn's derivation; the popover
+// derives nothing.
 function SummaryText({ row, durationMs }: { row: DividerRowData; durationMs: number }) {
-  const { storeKey } = useTranscriptContext();
-  const turn = useTranscriptStore((state: { entries: Record<string, TranscriptEntry> }) => state.entries[storeKey]?.state.turns.get(row.turnId as TurnId));
   const { summary } = row;
   return (
     <p>
       {turnSummaryCopy({
-        state: row.state, cause: row.cause, origin: row.origin, durationMs, toolCalls: summary.toolCalls, model: summary.model, phrases: turn ? turnPhrases(turn) : '',
+        state: row.state, cause: row.cause, origin: row.origin, opener: row.opener, durationMs, model: summary.model, parts: row.parts,
         denied: summary.denials.filter((denial) => denial.disposition !== 'stopped'), safeguard: summary.safeguard, costUsd: summary.costUsd,
-        tokens: tokensOf(summary.usage), childAgents: summary.childAgents,
+        tokens: tokensOf(summary.usage),
       })}
     </p>
   );
