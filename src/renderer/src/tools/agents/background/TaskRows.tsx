@@ -30,6 +30,9 @@ export function taskState(node: TaskNode, now: number): string {
   return BACKGROUND_COPY.endedState(word, formatAgo(now - Date.parse(node.endedAt)));
 }
 
+// The one line whole (a row's tooltip).
+export const taskLine = (node: TaskNode, now: number): string => BACKGROUND_COPY.line(node.description, taskState(node, now));
+
 // `gap`: why the session's port can't stop it (P5 O9 M5, its `stop-task` capability): drawn in place, disabled, with that.
 export function StopButton({ node, label, onStop, gap = null }: { node: TaskNode; label: string; onStop: (taskId: TaskId) => void; gap?: string | null }) {
   return (
@@ -73,7 +76,7 @@ function TaskRow({ node, now, selected, stopError, stopDoubt = false, onStop, st
       <div className="flex min-h-6 items-center gap-2">
         <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${running ? 'bg-success' : 'bg-border-strong'}`} />
         <KindMark kind={kind} />
-        <span data-part="line" title={BACKGROUND_COPY.line(node.description, state)} className={`flex min-w-0 flex-1 text-ui-sm tabular-nums ${node.status === 'failed' ? 'text-danger' : 'text-fg'}`}>
+        <span data-part="line" title={taskLine(node, now)} className={`flex min-w-0 flex-1 text-ui-sm tabular-nums ${node.status === 'failed' ? 'text-danger' : 'text-fg'}`}>
           <span data-part="description" className="min-w-0 truncate">
             {node.description}
           </span>
