@@ -1175,7 +1175,7 @@ describe('the turn’s line (O-15; decision 9)', () => {
     b.result('t3', 'ok', { structured: { filePath: '/w/b.ts', ...PATCH(2, 2) } });
     b.end(['u1'], { durationMs: 72_000 });
     const after = rowsOf(reduce(b.events));
-    expect(find(after, 'divider')).toMatchObject({ state: 'completed', caption: 'Edited 2 files, ran a command', parts: ['Edited 2 files', 'ran a command'], counts: { added: 5, removed: 3 } });
+    expect(find(after, 'divider')).toMatchObject({ state: 'completed', caption: 'Edited 2 files, ran a command', parts: ['edited 2 files', 'ran a command'], counts: { added: 5, removed: 3 } });
     expect(line(after)).toBe('Worked for 1m 12s · Edited 2 files, ran a command +5 −3');
   });
 
@@ -1231,7 +1231,7 @@ describe('the turn’s line (O-15; decision 9)', () => {
     const after = rowsOf(toggled);
     expect(turnDerivations.count - derived).toBe(1);
     expect(group(after)).toMatchObject({ id, expanded: true });
-    expect(find(after, 'divider')).toMatchObject({ caption: 'Ran 2 commands', parts: ['Ran 2 commands'] });
+    expect(find(after, 'divider')).toMatchObject({ caption: 'Ran 2 commands', parts: ['ran 2 commands'] });
     expect(rowsOf(toggled)).toBe(after);
     expect(turnDerivations.count - derived).toBe(1);
   });
@@ -1369,6 +1369,7 @@ describe('a waiting request’s slot, as sequences through the reducer', () => {
       b.turn('u1');
       b.toolUse('t1', 'Bash', { command: 'make' }, 'msg-1', 0);
       if (slot) asked(b, 'r1', 't1');
+      else b.tick(100); // the builder's clock moves 100 ms per event
       b.toolUse('t2', 'Read', { file_path: '/w/a.ts' }, 'msg-1', 1);
       b.result('t2', 'one');
       b.text('m2', 0, 'Waiting on make.');

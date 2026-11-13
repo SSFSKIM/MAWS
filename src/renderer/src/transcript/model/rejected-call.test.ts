@@ -54,7 +54,7 @@ describe('a Stop with four commands in flight (queue-and-interrupt), on the wire
 
   // UX wave U2, M2 (decision 23): the four calls are stopped members of their run, which the Stop does not split, unwrap
   // or re-key, applied event by event, in two batches or in one
-  const ids = rejected.map((e) => e.toolUseId as string);
+  const ids = events.flatMap((e) => (e.kind === 'tool.use' && rejected.some((r) => r.toolUseId === e.toolUseId) ? [e.toolUseId as string] : [])); // in call order
   const runsOf = (rows: Row[]) => rows.filter((row): row is Extract<Row, { kind: 'group' }> => row.kind === 'group' && row.cells.some((cell) => ids.includes(cell.toolUseId ?? '')));
 
   it('one run of four: before the Stop active; from the first rejected result on one group row with one key, its caption counting the stopped calls', () => {
