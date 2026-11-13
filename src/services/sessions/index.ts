@@ -10,9 +10,8 @@ import type { CommandOutput, EventName, EventPayload } from '@shared/ipc/schema'
 import { HostCommandError } from '@shared/host/runtime';
 import { waits } from '@shared/attention/kinds';
 import { ipcError } from '@shared/ipc/errors';
-import type { HostStatus, SupervisorStatus } from '@shared/ipc/schema/host';
-import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
-import { hostAppliesPlanMode, namesPlanMode, PLAN_MODE_OTHER_HOST } from '@shared/sessions/plan-next-mode';
+import { WIRE_MAJOR, WIRE_MINOR } from '@shared/ipc/wire';
+import { namesPlanMode, PLAN_MODE_NO_HOST, PLAN_MODE_OTHER_HOST } from '@shared/sessions/plan-next-mode';
 import type { ServicesBus } from '@shared/spine/bus';
 import { isAppSynthesised } from '@shared/sessions/app-events';
 import type { HostSupervisor } from '@shared/host/host-supervisor';
@@ -36,7 +35,9 @@ export interface HeldReplay {
   onDrained(listener: () => void): () => void;
 }
 
-export type SessionsHosts = Pick<HostSupervisor, 'onEvent' | 'onState' | 'dispatch' | 'setResync'> & { replay?: HeldReplay };
+// UX wave U1a §F: `peer` and `facts`, what the plan mode's guard reads of the engine host's served link (below); a host
+// adapter without them (a stand-in that never connects) is read as serving no link
+export type SessionsHosts = Pick<HostSupervisor, 'onEvent' | 'onState' | 'dispatch' | 'setResync'> & { replay?: HeldReplay } & Partial<Pick<HostSupervisor, 'peer' | 'facts'>>;
 
 export interface SessionsOptions {
   env: Record<string, string | undefined>;
@@ -184,11 +185,24 @@ function appEventsOf(model: SessionReadModel, appSessionId: AppSessionId, extra:
   return events.filter((event) => !seen.has(event.id) && (seen.add(event.id), true));
 }
 
-// What the plan-mode rule reads of the engine host a `session.answer` would reach: its own status, asked now, beside this
-// build's wire. A host that answers is serving (`ready`); one that does not gives nothing, and the rule does not hold.
-async function servingHostStatus(hosts: SessionsHosts): Promise<Pick<HostStatus, 'state' | 'supervisor' | 'appWire'> | null> {
-  const answer = await hosts.dispatch('engine-host', 'host.supervisorStatus', undefined);
-  return answer.ok ? { state: 'ready', supervisor: answer.value as SupervisorStatus, appWire: wireFingerprint() } : null;
+// UX wave U1a §F (the delta's ruling, 2026-11-13): why a plan answer that names a mode is not sent on the engine-host link
+// served now, or null. Read synchronously from what the supervisor already holds of that link, in the same tick as the
+// dispatch, so the check and the send see one link (a request made while a link is served goes out on it in the same
+// call: host-supervisor.ts `request`) and the caller's budget covers one request.
+// - The served link's welcome (`peer`) of this wire's major and minor: the host applies the mode. Equal major and minor
+//   agree with the port's rule (`hostAppliesPlanMode`, the wire fingerprint): the manifest gate (wire.test.ts) fails any
+//   change to an entry of the wire at an unchanged minor, and a bumped minor with no change, and the fingerprint's inputs
+//   (every engine-host command's input and output, the host events) are among the manifest's entries; so two builds of
+//   master at one minor have one fingerprint, and a host that knows `mode` (minor 37 on) is admitted. Two minors whose
+//   change lay outside the engine host's wire share a fingerprint and are refused here: the safe direction, in the port's
+//   words. The welcome's `build` is not compared: this process does not hold the engine host's build it would equal.
+// - No link served on a detached transport: refused, never held for a successor whose welcome is unread.
+// - A utility host has no welcome and is always this build: admitted.
+function planModeRefusal(hosts: SessionsHosts): { code: 'invalid_input' | 'host_unavailable'; message: string } | null {
+  if (hosts.facts?.('engine-host').transport === 'utility') return null;
+  const peer = hosts.peer?.('engine-host') ?? null;
+  if (peer === null) return { code: 'host_unavailable', message: PLAN_MODE_NO_HOST };
+  return peer.major === WIRE_MAJOR && peer.minor === WIRE_MINOR ? null : { code: 'invalid_input', message: PLAN_MODE_OTHER_HOST };
 }
 
 export function startSessions({ env, packaged, appRoot, hosts, bus, indexSource, appEventsExtra, restoredCost }: SessionsOptions): Sessions {
@@ -236,14 +250,15 @@ export function startSessions({ env, packaged, appRoot, hosts, bus, indexSource,
   const stops: (() => void)[] = [];
   if (mode === 'index') {
     // The renderer may still have an approval card after host loss. Never forward its stale answer.
-    // UX wave U1a §F (the panel's ruling, 2026-11-13): nor a plan answer that names a mode to an engine host that would
-    // drop it (one of another wire reads its inputs tolerantly and implements in the earlier mode). The renderer's port
-    // refuses it first; this is the guard for every caller, by the same rule over the serving host's own status. Refused
-    // with the port's words; nothing is dispatched, and the request still waits.
+    // UX wave U1a §F (the panel's ruling, then the delta's, 2026-11-13): nor a plan answer that names a mode to an engine
+    // host that would drop it (one of another wire reads its inputs tolerantly and implements in the earlier mode). The
+    // renderer's port refuses it first; this is the guard for every caller, over the served link's welcome, with nothing
+    // awaited between it and the dispatch. Nothing is dispatched on a refusal, and the request still waits.
     stops.push(bus.intercept('session.answer', async (input) => {
       const pending = model.allAttention().get(input.appSessionId as AppSessionId)?.some((item) => waits(item) && item.request.requestId === input.requestId);
       if (!pending) return { outcome: 'not_pending' };
-      if (namesPlanMode(input.answer) && !hostAppliesPlanMode(await servingHostStatus(hosts))) throw new HostCommandError(ipcError('invalid_input', PLAN_MODE_OTHER_HOST));
+      const refusal = namesPlanMode(input.answer) ? planModeRefusal(hosts) : null;
+      if (refusal !== null) throw new HostCommandError(ipcError(refusal.code, refusal.message));
       const result = await hosts.dispatch('engine-host', 'session.answer', input);
       if (!result.ok) throw new HostCommandError(result.error);
       return result.value as CommandOutput<'session.answer'>;
