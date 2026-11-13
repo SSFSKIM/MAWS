@@ -60,8 +60,10 @@ interface Waiter {
   answer(value: boolean): void;
 }
 interface Job {
-  key: string;
+  key: string; // the session, the transcript it was bound to when asked, and the path: who may join
+  entry: string; // the session and the path: what is remembered (an entry rests on the file's identity, not its name)
   appSessionId: AppSessionId;
+  transcript: string;
   path: string;
   waiters: Set<Waiter>;
 }
@@ -118,8 +120,8 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
 
   function remember(job: Job, entry: Entry): void {
     if (job.waiters.size === 0) return; // a job nobody waits for remembers nothing
-    entries.delete(job.key);
-    entries.set(job.key, entry);
+    entries.delete(job.entry);
+    entries.set(job.entry, entry);
     for (const key of entries.keys()) {
       if (entries.size <= entriesMax) break;
       entries.delete(key);
@@ -259,13 +261,13 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
       return buffer.subarray(0, bytesRead);
     };
 
-    const entry = entries.get(job.key);
+    const entry = entries.get(job.entry);
     if (entry?.kind === 'hit') {
       if (sameFile(entry, identity) && (await proves(read, entry, job.path))) {
         remember(job, entry);
         return true;
       }
-      entries.delete(job.key);
+      entries.delete(job.entry);
     }
 
     // The window: the newest `scanBytes`, read from one byte before so that a line starting exactly there is whole.
@@ -279,7 +281,7 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
         from = entry.offset;
         fromIsLine = true;
         verified = entry.fingerprint;
-      } else entries.delete(job.key);
+      } else entries.delete(job.entry);
     }
 
     let searchedTo: number | null = fromIsLine ? from : null;
@@ -307,14 +309,12 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
     return false;
   }
 
-  // A job never throws: every failure (no transcript, an unreadable one, a read error, a waiter that left) is "not named",
-  // and nothing of it is remembered.
+  // A job never throws: every failure (an unreadable transcript, a read error, a waiter that left) is "not named", and
+  // nothing of it is remembered.
   async function run(job: Job): Promise<boolean> {
     let handle: FileHandle | null = null;
     try {
-      const path = await transcript(job.appSessionId);
-      if (path === null) return false;
-      handle = await open(path, 'r');
+      handle = await open(job.transcript, 'r');
       return await decide(job, handle);
     } catch {
       return false;
@@ -337,38 +337,52 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
     });
   }
 
+  // An ask, once its session's transcript is known: it joins the job of the same session, transcript and path, running
+  // or waiting, or waits as a new one.
+  function ask(appSessionId: AppSessionId, located: string, path: string, signal: AbortSignal | undefined): Promise<boolean> {
+    if (signal?.aborted) return Promise.resolve(false);
+    const key = `${appSessionId}\u0000${located}\u0000${path}`;
+    let job = running !== null && running.key === key && running.waiters.size > 0 ? running : waiting.get(key);
+    if (job === undefined) {
+      if (waiting.size >= waitingMax) return Promise.resolve(false); // the queue is full: the refusal at once
+      job = { key, entry: `${appSessionId}\u0000${path}`, appSessionId, transcript: located, path, waiters: new Set() };
+      waiting.set(key, job);
+    }
+    const joined = job;
+    const answer = new Promise<boolean>((resolve) => {
+      const waiter: Waiter = {
+        answer(value) {
+          if (!joined.waiters.delete(waiter)) return;
+          clearTimeout(timer);
+          signal?.removeEventListener('abort', leave);
+          resolve(value);
+        },
+      };
+      // A waiter that leaves (its client ended, or its patience ran out) is answered not named; a waiting job left with
+      // no waiter is dropped, and a running one stops at its next read.
+      const leave = () => {
+        waiter.answer(false);
+        if (joined.waiters.size === 0 && waiting.get(joined.key) === joined) waiting.delete(joined.key);
+      };
+      const timer = setTimeout(leave, waitMs);
+      signal?.addEventListener('abort', leave, { once: true });
+      joined.waiters.add(waiter);
+    });
+    pump();
+    return answer;
+  }
+
   return {
+    // Each request finds its session's transcript itself, before it looks for a job (decision 13; the branch review's
+    // finding 5): `/clear` keeps the app session id and binds it to a new transcript, and a request never joins a job
+    // that reads another transcript than the one its session is bound to when it is made. No transcript, or a locator
+    // that throws: not named.
     names(appSessionId, path, signal) {
       if (signal?.aborted) return Promise.resolve(false);
-      const key = `${appSessionId}\u0000${path}`;
-      let job = running !== null && running.key === key && running.waiters.size > 0 ? running : waiting.get(key);
-      if (job === undefined) {
-        if (waiting.size >= waitingMax) return Promise.resolve(false); // the queue is full: the refusal at once
-        job = { key, appSessionId, path, waiters: new Set() };
-        waiting.set(key, job);
-      }
-      const joined = job;
-      const answer = new Promise<boolean>((resolve) => {
-        const waiter: Waiter = {
-          answer(value) {
-            if (!joined.waiters.delete(waiter)) return;
-            clearTimeout(timer);
-            signal?.removeEventListener('abort', leave);
-            resolve(value);
-          },
-        };
-        // A waiter that leaves (its client ended, or its patience ran out) is answered not named; a waiting job left
-        // with no waiter is dropped, and a running one stops at its next read.
-        const leave = () => {
-          waiter.answer(false);
-          if (joined.waiters.size === 0 && waiting.get(joined.key) === joined) waiting.delete(joined.key);
-        };
-        const timer = setTimeout(leave, waitMs);
-        signal?.addEventListener('abort', leave, { once: true });
-        joined.waiters.add(waiter);
-      });
-      pump();
-      return answer;
+      return transcript(appSessionId).then(
+        (located) => (located === null ? false : ask(appSessionId, located, path, signal)),
+        () => false,
+      );
     },
   };
 }

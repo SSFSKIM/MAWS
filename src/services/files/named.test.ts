@@ -368,7 +368,7 @@ describe('the sequences (S4 to S13)', () => {
     const locate = vi.fn(async () => file);
     const named = paths({ transcript: locate });
     expect(await Promise.all([named.names(S, P), named.names(S, P)])).toEqual([true, true]);
-    expect(locate).toHaveBeenCalledTimes(1);
+    expect(locate).toHaveBeenCalledTimes(2); // each request finds its session's transcript before it joins a job
     expect(stats.opens).toBe(1);
   });
 
@@ -538,12 +538,14 @@ describe('the queue (S14, S15)', () => {
     await held.reached;
     const controller = new AbortController();
     const second = named.names(S, '/work/out/second.md', controller.signal);
+    await turns(2); // its transcript found, it waits behind the first
     controller.abort();
     expect(await second).toBe(false);
     held.release();
     expect(await first).toBe(true);
     await turns();
-    expect(locate).toHaveBeenCalledTimes(1);
+    expect(locate).toHaveBeenCalledTimes(2);
+    expect(stats.opens).toBe(1); // the second job never opened its transcript
   });
 
   it('gives the event loop back as it reads', async () => {
