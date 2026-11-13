@@ -776,7 +776,7 @@ describe('background work', () => {
           startedTask('sh1', 'local_bash', 'Build the site', 2), ends('sh1', 'completed', 2),
           startedTask('m1', 'monitor_ws', 'until tests pass', 3), ends('m1', 'stopped', 3),
           startedTask('x1', 'local_mcp', 'Index the docs', 4), ends('x1', 'completed', 4),
-          startedTask('sh2', 'local_bash', 'Serve the docs', 5),
+          startedTask('sh2', 'local_bash', 'Serve the docs', 60),
         ],
       });
       expect(heading('running')).toBe('Running 1');
