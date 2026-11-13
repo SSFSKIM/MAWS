@@ -8,6 +8,7 @@ import type { JsonObject } from 'desk-hub/protocol';
 import { describe, expect, it } from 'vitest';
 import { reportRows } from '../../owner/report/project';
 import { createTranscriptStore } from '../../stores/transcript';
+import { rowsOf, withAllExpanded } from '../../transcript/model/derive';
 import type { Row } from '../../transcript/model/rows';
 import { answeredWords, askAnswers, CLARIFYING, isAnswerPrompt } from '../conversation/ask-answer';
 import { deliveredLines } from '../conversation/delivery-frame';
@@ -27,7 +28,8 @@ async function drawn(rows: JsonObject[]) {
   const store = createTranscriptStore();
   await store.getState().attach('fresh', freshSource(rows, SESSION, subagentLookupOf([])), { agentId: null as never });
   const entry = store.getState().entries.fresh;
-  return { rows: entry.rows, report: reportRows(entry.rows, entry.state, {}) };
+  // the notice is work of its turn, folded with it once the turn has closed (UX wave U3, M2): read it unfolded
+  return { rows: entry.rows, expanded: rowsOf(withAllExpanded(entry.state)), report: reportRows(entry.rows, entry.state, {}) };
 }
 const bubbles = (rows: Row[]) => rows.flatMap((r) => (r.kind === 'user' ? [r.text] : []));
 const lines = (rows: Row[]) => rows.flatMap((r) => (r.kind === 'notice' && r.class === 'answer' ? [r.text] : []));
@@ -78,13 +80,13 @@ describe("the ask mod's answer", () => {
     c.answerPrompt(delivered('toolu_01RZQ8nn9jVyPaqznEmsoXMr', CHOSEN));
     c.answer('<message>The palette is blue and summer-bright.</message>');
     c.end();
-    const { rows, report } = await drawn(c.rows);
+    const { rows, expanded, report } = await drawn(c.rows);
     expect(bubbles(rows)).toEqual(['Pick my colors, then write the palette.']);
-    expect(lines(rows)).toEqual([NOTICE.answered('Color → Blue · Season → Summer')]);
+    expect(lines(expanded)).toEqual([NOTICE.answered('Color → Blue · Season → Summer')]);
     // The turn the answer opened reads as one the session continued ("Continued for …").
     expect(dividers(rows)).toEqual(['engine']);
-    expect(rows.find((r) => r.kind === 'divider')?.turnId).toBe(rows.find((r) => r.kind === 'notice')?.turnId);
-    expect([...bubbles(rows), ...lines(rows)].some((text) => HARNESS.test(text))).toBe(false);
+    expect(rows.find((r) => r.kind === 'divider')?.turnId).toBe(expanded.find((r) => r.kind === 'notice')?.turnId);
+    expect([...bubbles(rows), ...lines(expanded)].some((text) => HARNESS.test(text))).toBe(false);
     // The report folds the answered turn's work and keeps the line, the persistent row it is.
     expect(lines(report)).toEqual([NOTICE.answered('Color → Blue · Season → Summer')]);
     expect(bubbles(report)).toEqual(['Pick my colors, then write the palette.']);
@@ -95,9 +97,9 @@ describe("the ask mod's answer", () => {
     c.answerPrompt(`${delivered('toolu_a', CHOSEN)}\n\n${delivered('toolu_b', TYPED)}`);
     c.answer('Noted both.');
     c.end();
-    const { rows } = await drawn(c.rows);
+    const { rows, expanded } = await drawn(c.rows);
     expect(bubbles(rows)).toEqual([]);
-    expect(lines(rows)).toEqual([
+    expect(lines(expanded)).toEqual([
       NOTICE.answered('Which color do you prefer? → Blue · Which season do you prefer? → Summer'),
       NOTICE.answered('Which color do you prefer? → teal, if we have it'),
     ]);
@@ -116,10 +118,10 @@ describe("the ask mod's answer", () => {
     c.answerContext(delivered('toolu_busy', TYPED), 'prompt.submit');
     c.answer('Serif.');
     c.end();
-    const { rows } = await drawn(c.rows);
+    const { rows, expanded } = await drawn(c.rows);
     expect(bubbles(rows)).toEqual(['Pick my colors, then write the palette.', 'And the font?']);
     const turns = rows.flatMap((r) => (r.kind === 'user' ? [r.turnId] : []));
-    expect(rows.flatMap((r) => (r.kind === 'notice' ? [[r.text, r.turnId]] : []))).toEqual([
+    expect(expanded.flatMap((r) => (r.kind === 'notice' ? [[r.text, r.turnId]] : []))).toEqual([
       [NOTICE.answered('Color → Blue · Season → Summer'), turns[0]],
       [NOTICE.answered('Color → teal, if we have it'), turns[1]],
     ]);
@@ -142,11 +144,11 @@ describe("the ask mod's answer under either plugin's name", () => {
     c.end();
     expect(isAnswerPrompt(idle)).toBe(true);
     expect(askAnswers(idle)).toEqual([{ call: 'toolu_01RZQ8nn9jVyPaqznEmsoXMr', text: CHOSEN }]);
-    const { rows } = await drawn(c.rows);
+    const { rows, expanded } = await drawn(c.rows);
     expect(bubbles(rows)).toEqual(['Pick my colors, then write the palette.']);
-    expect(lines(rows)).toEqual([NOTICE.answered('Color → Blue · Season → Summer')]);
+    expect(lines(expanded)).toEqual([NOTICE.answered('Color → Blue · Season → Summer')]);
     expect(dividers(rows)).toEqual(['engine']);
-    expect([...bubbles(rows), ...lines(rows)].some((text) => HARNESS.test(text))).toBe(false);
+    expect([...bubbles(rows), ...lines(expanded)].some((text) => HARNESS.test(text))).toBe(false);
   });
 
   it.each([
@@ -161,8 +163,8 @@ describe("the ask mod's answer under either plugin's name", () => {
     c.answerPrompt(delivered('toolu_roll', CHOSEN));
     c.answer('Blue.');
     c.end();
-    const { rows } = await drawn(c.rows);
-    expect(lines(rows)).toEqual([NOTICE.answered('Color → Blue · Season → Summer')]);
+    const { rows, expanded } = await drawn(c.rows);
+    expect(lines(expanded)).toEqual([NOTICE.answered('Color → Blue · Season → Summer')]);
     expect(bubbles(rows)).toEqual(['Pick my colors.']);
   });
 

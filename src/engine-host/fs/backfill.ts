@@ -55,9 +55,12 @@ export interface BackfillContext {
   // P5 O9 (the fix wave): whether a turn runs, from its `turn.started` (or, UX wave U3, the model's output) to its
   // `turn.ended` or an interrupt marker, and what the bridge delivered while none did, waiting for the turn that answers
   // it (withWaitingWords): the owner's words, and (UX wave U3) a peer's delivery the bridge appended, as the events it
-  // maps to. UX wave U3 (UC-2): whether the running turn has had no model output yet, so that what the engine queued
-  // reached the model with the prompt that opened it (a task the host stopped while the session was idle)
+  // maps to. UX wave U3 (UC-2): whether this mapping saw the last turn end (`running` false is also a history whose start
+  // it never saw, a page of rows, where a delivery is drawn at its row), and whether the running turn has had no model
+  // output yet, so that what the engine queued reached the model with the prompt that opened it (a task the host stopped
+  // while the session was idle)
   running: boolean;
+  idle: boolean;
   unanswered: boolean;
   readonly waitingWords: Waiting[];
   // P5 O9 (the M10 sitting): the latest `<local-command-caveat>` record, whose child is a command the terminal ran
@@ -75,7 +78,8 @@ export interface BackfillContext {
 
 // What the bridge delivered while no turn ran (withWaitingWords): the owner's words, drawn already as a prompt waiting
 // for its turn, or a peer's delivery's events, placed when a turn starts.
-type Waiting = { kind: 'own'; uuid: MessageUuid } | { kind: 'peer'; events: SessionEvent[] };
+// the owner's words (`words` null when they were drawn at their row already), or a peer's delivery as its events
+type Waiting = { kind: 'own'; uuid: MessageUuid; words: string | null } | { kind: 'peer'; events: SessionEvent[] };
 
 export function createBackfillContext(init: {
   sessionId: SessionId;
@@ -98,6 +102,7 @@ export function createBackfillContext(init: {
     lastAssistantWasApiError: false,
     bridgeRows: new Map(),
     running: false,
+    idle: false,
     unanswered: false,
     waitingWords: [],
     localCaveat: null,
@@ -460,8 +465,8 @@ function arrivalEvents(record: TranscriptRecord, uuid: MessageUuid, arrivals: Ar
         ctx.appendedLast = true;
         const delivered: SessionEvent[] = [];
         peerMessage(record, uuid, first, ctx, base, delivered);
-        if (ctx.running) events.push(...delivered);
-        else ctx.waitingWords.push({ kind: 'peer', events: delivered });
+        if (ctx.idle) ctx.waitingWords.push({ kind: 'peer', events: delivered });
+        else events.push(...delivered);
         return;
       }
       peerMessage(record, uuid, first, ctx, base, events);
@@ -470,8 +475,8 @@ function arrivalEvents(record: TranscriptRecord, uuid: MessageUuid, arrivals: Ar
     case 'own': {
       if (isBridgeRow(record)) {
         ctx.appendedLast = true;
-        steered(uuid, first.words, base, events);
-        if (!ctx.running) ctx.waitingWords.push({ kind: 'own', uuid });
+        if (ctx.idle) ctx.waitingWords.push({ kind: 'own', uuid, words: first.words });
+        else steered(uuid, first.words, base, events);
         return;
       }
       if (ctx.inToolLoop) return steered(uuid, first.words, base, events);
@@ -847,46 +852,50 @@ function sminosDelivery(record: TranscriptRecord, ctx: BackfillContext, base: Ba
   const row = ctx.bridgeRows.get(key);
   if (row === undefined) return false;
   ctx.bridgeRows.delete(key);
-  steered(row.uuid, row.content, base, events);
-  if (!ctx.running) ctx.waitingWords.push({ kind: 'own', uuid: row.uuid });
+  if (ctx.idle) ctx.waitingWords.push({ kind: 'own', uuid: row.uuid, words: row.content });
+  else steered(row.uuid, row.content, base, events);
   return true;
 }
 
 // P5 O9 (the fix wave): words the bridge delivers while no turn runs go in as such a row too: after a stop, since the
 // engine then refuses a plugin's prompt (the bridge wakes the session through its inbox, which the engine keeps as a
 // peer message); or the row lands as the turn it was given into ends (the bridge's wake is then its prompt as the user).
-// No turn runs to take them as sent during it, so they are a prompt waiting for the turn that answers them, as
-// desk-web's view has them (`renderer/src/lane-a/source/appended-turn.ts`): drawn where they went in, and taken by the
-// next turn that starts. The bridge's wake opens a turn of the words', the first its prompt (the wake's own text the
-// model's context, no bubble) and any others sent during it; any other turn that starts first takes them all as sent
-// during it. A turn the interrupt left open on this mapping (the marker opens and ends nothing here) is not one that
-// runs: the next turn's start closes it, stopped.
+// No turn runs to take them as sent during it, so they are a prompt waiting for the turn that answers them, placed at
+// that turn's start. The bridge's wake opens a turn of the words', the first its prompt (the wake's own text the model's
+// context, no bubble) and any others sent during it; any other turn that starts first takes them all as sent during it.
+// A turn the interrupt left open on this mapping (the marker opens and ends nothing here) is not one that runs: the next
+// turn's start closes it, stopped, so the words are not placed before it (they would fold into that turn).
 // (UX wave U3: the wake is the reader's class `wake`, its line the wake's notice in that turn; a peer's delivery the
-// bridge appended while no turn ran waits too, its message and companion placed at the turn's start, since a peer's
-// message is no prompt that waits.)
+// bridge appended while no turn ran waits too, as its events; desk-web's older, unmarked steer, drawn at its row by
+// `appended-turn.ts`, waits for its turn's start alone. A mapping that never saw a turn end, a page of rows, draws a
+// delivery at its row, as one into a running turn.)
 function withWaitingWords(wake: boolean, events: SessionEvent[], ctx: BackfillContext, base: Base): SessionEvent[] {
   const start = events.findIndex((event) => event.kind === 'turn.started');
+  const said = (row: Extract<Waiting, { kind: 'own' }>): SessionEvent[] => (row.words === null ? [] : [{ ...base(), kind: 'user.message', messageUuid: row.uuid, content: row.words, isReplay: false, isSynthetic: false, origin: 'human', bash: null }]);
+  const taken = (rows: Waiting[]) => rows.flatMap((row): SessionEvent[] => (row.kind === 'peer' ? row.events : [...said(row), { ...base(), kind: 'command.lifecycle', commandUuid: row.uuid, state: 'started' }]));
   let out = events;
   if (start >= 0 && ctx.waitingWords.length > 0) {
     const waiting = ctx.waitingWords.splice(0);
-    const taken = (rows: Waiting[]) => rows.flatMap((row): SessionEvent[] => (row.kind === 'peer' ? row.events : [{ ...base(), kind: 'command.lifecycle', commandUuid: row.uuid, state: 'started' }]));
     const first = wake ? waiting.find((row) => row.kind === 'own') : undefined;
     if (first !== undefined) {
       ctx.lastTurnUserUuid = first.uuid;
       const opened = { ...events[start], userMessageUuid: first.uuid, origin: null } as SessionEvent;
-      out = [...events.slice(0, start), opened, ...taken(waiting.filter((row) => row !== first)), ...events.slice(start + 1)];
+      out = [...events.slice(0, start), opened, ...said(first), ...taken(waiting.filter((row) => row !== first)), ...events.slice(start + 1)];
     } else out = [...events, ...taken(waiting)];
   } else if (ctx.waitingWords.length > 0 && events.some((event) => MODEL_RUNS.has(event.kind))) {
     // the model's output with no turn started (a history whose start was not held): the reducer places it with the
-    // waiting prompt, as it would; a waiting peer's message stands before it
-    const peers = ctx.waitingWords.splice(0).flatMap((row) => (row.kind === 'peer' ? row.events : []));
-    out = [...peers, ...events];
+    // waiting prompt, as it would
+    out = [...ctx.waitingWords.splice(0).flatMap((row) => (row.kind === 'peer' ? row.events : said(row))), ...events];
   }
   for (const event of out) {
     if (event.kind === 'turn.started' || MODEL_RUNS.has(event.kind)) {
       ctx.running = true;
+      ctx.idle = false;
       ctx.unanswered = event.kind === 'turn.started';
-    } else if (event.kind === 'turn.ended' || (event.kind === 'user.message' && event.origin === 'interrupt-marker')) ctx.running = ctx.unanswered = false;
+    } else if (event.kind === 'turn.ended' || (event.kind === 'user.message' && event.origin === 'interrupt-marker')) {
+      ctx.running = ctx.unanswered = false;
+      ctx.idle = true;
+    }
   }
   return out;
 }
@@ -898,7 +907,7 @@ const MODEL_RUNS = new Set<SessionEvent['kind']>(['assistant.block.complete', 't
  * mapping reads as a prompt queued into the turn.
  */
 export function waitForTurn(ctx: BackfillContext, messageUuid: MessageUuid): void {
-  if (!ctx.running) ctx.waitingWords.push({ kind: 'own', uuid: messageUuid });
+  if (!ctx.running) ctx.waitingWords.push({ kind: 'own', uuid: messageUuid, words: null });
 }
 
 // P5 O9 (the M10 sitting): the sminos bridge's mirror of an interrupt's rows for the terminal (`<plugin>: interrupt: …`)
