@@ -472,11 +472,12 @@ function SelectorBody({ name, args, binding, state, error, appSessionId, focusSl
   const modelName = shownRow?.displayName ?? aliasOf(binding.shown, binding.models) ?? SELECTOR.model;
 
   // UX wave U4a (decision 20): the fast-mode row, where the model offers it, it is on or a change is on its way; its line
-  // the pending word, today's reason, why this route has no switch, or On / Off
+  // the pending word, then why this route has no switch (before the engine's own reason, which can say "turned on here"),
+  // today's reason or cooling down, else On or Off
   const fast = binding.fast;
   const fastRow =
     fast && (fast.offered || fast.view.checked || fast.pending)
-      ? { view: fast.view, line: fast.pending ? MODEL.pending : (fast.view.caption ?? fast.closed ?? (fast.view.checked ? MODEL.fastState.on : MODEL.fastState.off)) }
+      ? { view: fast.view, line: fast.pending ? MODEL.pending : (fast.closed ?? fast.view.caption ?? (fast.view.checked ? MODEL.fastState.on : MODEL.fastState.off)) }
       : null;
 
   const choose = async (model: string | null) => {
