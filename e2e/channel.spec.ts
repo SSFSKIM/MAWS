@@ -223,34 +223,71 @@ function overflowing(root: Element): string[] {
     .map((el) => `${el.tagName.toLowerCase()}${el.hasAttribute('data-channel-entry') ? `[${el.getAttribute('data-channel-entry')}]` : ''} "${(el.textContent ?? '').slice(0, 60)}" ${el.scrollWidth} > ${el.clientWidth}`);
 }
 
-// board 505 (UX wave U11a M3; the execution document's Interfaces §E): where a row's names give way out of §E's one order.
-// In each row that holds names, a part that has given way (cut, or narrower than its whole) means every part that gives
-// way before it is at its minimum: the title and the chip at nothing, the recipients at their twelve characters; and an
-// alias is never narrower than twelve characters, or than its whole where that is less. Each fault as `<row> <part>: …`.
-function namesOutOfOrder(root: Element): string[] {
+// board 505 (UX wave U11a M3; the execution document's Interfaces §E): a Channel row's names, measured in the page. A
+// part's whole width is its text's, under its own ceiling where it has one (the chip's 24 characters), so a chip cut at
+// that ceiling holds its whole width and has not given way; its least width is twelve characters for an alias (or its
+// whole, where less), the recipients' floor for a label, and nothing for the others.
+function measureNames(root: Element) {
   const RANK: Record<string, number> = { title: 0, label: 1, chip: 2, alias: 3 };
-  const faults: string[] = [];
-  const rows = new Set(Array.from(root.querySelectorAll('[data-name-part]')).map((part) => part.closest('header, button, li > div')).filter((row): row is Element => row !== null));
+  const ROW = 'header, button, li > div';
+  const rows = new Set(Array.from(root.querySelectorAll('[data-name-part]')).map((part) => part.closest(ROW)).filter((row): row is Element => row !== null));
+  const text = (el: HTMLElement) => el.querySelector<HTMLElement>('[data-machine-chip]') ?? el;
+  const width = (el: Element) => el.getBoundingClientRect().width;
+  const ceiling = (el: HTMLElement) => {
+    const max = getComputedStyle(text(el)).maxWidth;
+    return max.endsWith('px') ? Number.parseFloat(max) : Infinity;
+  };
+  const whole = (el: HTMLElement) => Math.min(text(el).scrollWidth, ceiling(el));
+  const twelve = (el: HTMLElement) => {
+    const probe = document.createElement('span');
+    probe.style.cssText = 'position: absolute; visibility: hidden; display: block; width: 12ch';
+    el.append(probe);
+    const px = probe.getBoundingClientRect().width;
+    probe.remove();
+    return px;
+  };
+  const least = (el: HTMLElement) => {
+    const kind = el.getAttribute('data-name-part');
+    if (kind === 'alias') return Math.min(twelve(el), whole(el));
+    if (kind === 'label') return Math.min(Number.parseFloat(getComputedStyle(el).minWidth) || 0, whole(el));
+    return 0;
+  };
+  const gaveWay = (el: HTMLElement) => width(el) + 1 < whole(el);
+  /** Two boxes on one line of a row: their boxes overlap in height. */
+  const sameLine = (a: Element, b: Element) => {
+    const [x, y] = [a.getBoundingClientRect(), b.getBoundingClientRect()];
+    return x.top < y.bottom && y.top < x.bottom;
+  };
+  const order: string[] = [];
+  const lines: string[] = [];
+  const wrapped: string[] = [];
+  let cappedBesideTitle = 0;
   for (const row of rows) {
-    const parts = Array.from(row.querySelectorAll<HTMLElement>('[data-name-part]')).filter((part) => part.closest('header, button, li > div') === row);
-    const text = (el: HTMLElement) => (el.querySelector<HTMLElement>('[data-machine-chip]') ?? el);
-    const width = (el: HTMLElement) => el.getBoundingClientRect().width;
-    const whole = (el: HTMLElement) => text(el).scrollWidth <= text(el).clientWidth + 1 && width(el) > 0;
-    const least = (el: HTMLElement) => {
-      const style = getComputedStyle(el);
-      return Math.max(Number.parseFloat(style.minWidth) || 0, Math.min(Number.parseFloat(style.flexBasis) || 0, text(el).scrollWidth));
-    };
     const name = `${row.tagName.toLowerCase()} "${(row.textContent ?? '').slice(0, 40)}"`;
+    const parts = Array.from(row.querySelectorAll<HTMLElement>('[data-name-part]')).filter((part) => part.closest(ROW) === row);
     for (const part of parts) {
       const kind = part.getAttribute('data-name-part')!;
-      if (kind === 'alias' && width(part) + 1 < least(part)) faults.push(`${name} alias: ${width(part)} px, under its ${least(part)}`);
-      if (whole(part) || (width(part) === 0 && text(part).scrollWidth === 0)) continue;
+      if (kind === 'alias' && width(part) + 1 < least(part)) order.push(`${name} alias: ${width(part)} px, under its ${least(part)}`);
+      if (!gaveWay(part)) continue;
       for (const before of parts) {
-        if (RANK[before.getAttribute('data-name-part')!]! < RANK[kind]! && width(before) > least(before) + 1) faults.push(`${name} ${kind} gave way while its ${before.getAttribute('data-name-part')} holds ${width(before)} px`);
+        if (RANK[before.getAttribute('data-name-part')!]! < RANK[kind]! && width(before) > least(before) + 1) order.push(`${name} ${kind} gave way while its ${before.getAttribute('data-name-part')} holds ${width(before)} px`);
       }
     }
+    const title = parts.find((part) => part.getAttribute('data-name-part') === 'title');
+    if (title !== undefined && width(title) > 1 && parts.some((part) => part.getAttribute('data-name-part') === 'chip' && text(part).scrollWidth > ceiling(part) && !gaveWay(part))) cappedBesideTitle++;
+    // The names never split between lines; whatever the row moves to another line is a fixed part, never a name.
+    const names = row.querySelector(':scope > [data-names]');
+    if (names === null) {
+      lines.push(`${name}: its names are not one group`);
+      continue;
+    }
+    const visible = parts.filter((part) => width(part) > 0);
+    for (const part of visible) if (!sameLine(part, visible[0]!)) lines.push(`${name}: its ${part.getAttribute('data-name-part')} is on another line than its ${visible[0]!.getAttribute('data-name-part')}`);
+    const moved = Array.from(row.children).filter((child) => child !== names && width(child) > 0 && !sameLine(child, names));
+    for (const child of moved) if (child.querySelector('[data-name-part]') !== null) lines.push(`${name}: a name is outside its group`);
+    if (moved.length > 0) wrapped.push(`${name}: ${moved.map((child) => `"${(child.textContent ?? '').trim().slice(0, 24)}" ${child.getBoundingClientRect().top < names.getBoundingClientRect().top ? 'above' : 'under'}`).join(', ')} the names`);
   }
-  return faults;
+  return { order, lines, wrapped, cappedBesideTitle };
 }
 
 /** A box's left and right edges, in CSS pixels. */
@@ -367,7 +404,9 @@ test('channel: a seeded project channel offline, its exchange of 40 opened, its 
       await test.info().attach('channel-exchange-foot', { body: await page.screenshot(), contentType: 'image/png' });
 
       expect(await channel.evaluate(overflowing), 'nothing in the Channel tab is wider than its box').toEqual([]);
-      expect(await channel.evaluate(namesOutOfOrder), "every row's names give way in §E's order").toEqual([]);
+      const atDefault = await channel.evaluate(measureNames);
+      expect(atDefault.order, "every row's names give way in §E's order").toEqual([]);
+      expect(atDefault.lines, "every row's names stay on one line").toEqual([]);
       expect(await channel.getByRole('button').count(), 'the seeded channel offers its actions').toBeGreaterThan(0);
       expect(await channel.evaluate(actionsNotWhole, ENTRY), 'every action is drawn whole inside its entry').toEqual([]);
       // ...and the check sees a clipped action when there is one
@@ -376,8 +415,19 @@ test('channel: a seeded project channel offline, its exchange of 40 opened, its 
       await channel.evaluate((root) => root.querySelectorAll('[data-probe]').forEach((probe) => probe.remove()));
       expect(probeFaults(probed), `the check names every clipped probe and not the mirror: ${probed.join('; ')}`).toEqual([]);
 
+      // board 505: a wide row, where a long machine name is cut at its chip's 24 characters while the title beside it still
+      // shows: the chip holds its whole width there and has given no way, so the order holds (the check's own case).
+      await channel.evaluate((el) => void ((el as HTMLElement).style.width = '1100px'));
+      await expect.poll(() => channel.evaluate((el) => Math.round(el.getBoundingClientRect().width))).toBe(1100);
+      const wide = await channel.evaluate(measureNames);
+      expect(wide.cappedBesideTitle, 'a row holds a chip cut at its 24 characters beside a title that shows').toBeGreaterThan(0);
+      expect(wide.order, "in a wide Channel every row's names give way in §E's order").toEqual([]);
+      expect(wide.lines, 'in a wide Channel every row is one line').toEqual([]);
+      expect(wide.wrapped, 'in a wide Channel no row wraps').toEqual([]);
+
       // board 505: in a column about 420 px wide (a split pane's) no row overflows and the names give way in the one order:
-      // the long alias, title and machine of the seed's second session meet there, the exchange opened.
+      // the long alias, title and machine of the seed's second session meet there, the exchange opened. A row too narrow
+      // for its names' minimums and its fixed parts moves the fixed parts after the names under them; the names never split.
       await channel.evaluate((el) => void ((el as HTMLElement).style.width = '420px'));
       await expect.poll(() => channel.evaluate((el) => Math.round(el.getBoundingClientRect().width))).toBe(420);
       await scrollLog(page, 'top');
@@ -387,7 +437,11 @@ test('channel: a seeded project channel offline, its exchange of 40 opened, its 
       await toHuman.first().evaluate((el) => el.scrollIntoView({ block: 'start', behavior: 'instant' }));
       await test.info().attach('channel-420-to-human', { body: await channel.screenshot(), contentType: 'image/png' });
       expect(await channel.evaluate(overflowing), 'nothing in a 420 px Channel is wider than its box').toEqual([]);
-      expect(await channel.evaluate(namesOutOfOrder), "in a 420 px Channel every row's names give way in §E's order").toEqual([]);
+      const narrow = await channel.evaluate(measureNames);
+      expect(narrow.order, "in a 420 px Channel every row's names give way in §E's order").toEqual([]);
+      expect(narrow.lines, 'in a 420 px Channel no row splits its names, and only fixed parts leave the names’ line').toEqual([]);
+      expect(narrow.wrapped.filter((row) => / above the names/.test(row)), 'in a 420 px Channel a row moves its fixed parts under its names, none above them').toEqual([]);
+      test.info().annotations.push({ type: 'rows wrapped at 420 px', description: narrow.wrapped.join('\n') || 'none' });
       await expectSameEdges(channel.locator('[data-channel-offline]'), channel.locator('[data-channel-entry="say"]').first(), 'the footer and a stream row share both edges in a 420 px Channel');
     } finally {
       await maws.cleanup();

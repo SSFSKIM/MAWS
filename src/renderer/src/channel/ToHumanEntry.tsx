@@ -7,7 +7,7 @@ import { formatDayTime } from '@shared/app/date-format';
 import { addressOf } from '@shared/machine/address';
 import { useMachineMark } from '../app/machine-mark';
 import { CHANNEL } from './copy';
-import { GIVES_WAY, MachineChipPart, NAMES_ROW, partyTooltip, Time } from './parts';
+import { GIVES_WAY, MachineChipPart, Names, NAMES_ROW, partyTooltip, Time } from './parts';
 import type { ToHumanEntry as Entry, ToHumanQuestion } from './project';
 
 const PROSE = 'm-0 break-words whitespace-pre-wrap [overflow-wrap:anywhere] text-prose leading-[var(--lh-prose)] text-fg';
@@ -28,15 +28,17 @@ export function ToHumanEntry({ entry }: { entry: Entry }) {
     >
       {/* board 505: the Channel's one order (parts.tsx's GIVES_WAY): the title gives way first, then the chip, then the name. */}
       <header className={`${NAMES_ROW} text-ui-sm`}>
-        <span data-name-part="alias" className={`${GIVES_WAY.alias} font-medium text-fg`} title={tooltip}>
-          {entry.name}
-        </span>
-        {entry.title !== null && (
-          <span data-name-part="title" className={`${GIVES_WAY.title} text-fg-muted`} title={tooltip}>
-            {entry.title}
+        <Names>
+          <span data-name-part="alias" className={`${GIVES_WAY.alias} font-medium text-fg`} title={tooltip}>
+            {entry.name}
           </span>
-        )}
-        <MachineChipPart address={address} name={entry.machineName ?? undefined} />
+          {entry.title !== null && (
+            <span data-name-part="title" className={`${GIVES_WAY.title} text-fg-muted`} title={tooltip}>
+              {entry.title}
+            </span>
+          )}
+          <MachineChipPart address={address} name={entry.machineName ?? undefined} />
+        </Names>
         <span className="shrink-0 text-fg-muted">{CHANNEL.host[entry.host]}</span>
         <Time at={entry.at} />
       </header>

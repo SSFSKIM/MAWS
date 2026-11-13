@@ -1072,8 +1072,8 @@ test.describe('plugin management (E8)', () => {
   });
 
   // board 523 (UX wave U11a M3; the execution document's Interfaces §E): where layers stack only the top one's backdrop
-  // paints, so the window is dimmed once; Esc and the focus are the dialog library's, the top layer's first.
-  test('board 523: the Plugins dialog, then a plugin’s Uninstall… confirmation over it: one backdrop paints, the confirmation’s, and the window reads as under one layer; Esc closes the confirmation, the dialog keeps the keyboard; Esc again closes the dialog', async ({ appBackend: backend }) => {
+  // paints, so the window is dimmed once; Esc, a press outside and the focus are the dialog library's, the top layer's first.
+  test('board 523: the Plugins dialog, then a plugin’s Uninstall… confirmation over it: one backdrop paints, the confirmation’s, and the window reads as under one layer; Esc, and then a press outside both, closes the confirmation alone and the dialog keeps the keyboard; Esc again closes the dialog', async ({ appBackend: backend }) => {
     const { page } = backend;
     const w = await openSessionPlugins(backend);
     const backdrops = page.locator('[data-scrim]');
@@ -1103,6 +1103,17 @@ test.describe('plugin management (E8)', () => {
     await expect(backdrops).toHaveCount(1);
     await expect(backdrops).toHaveClass(/\bbg-bg-active\b/); // the dialog's paints again
     expect(apart(await pixelAt(page, point), alone), 'the dialog alone dims the window as before').toBeLessThanOrEqual(2);
+
+    // The confirmation again, then a press outside both layers: it closes the confirmation alone.
+    await rowAction(installedRow(w, 'e8-tools@e8-scratch'), 'Uninstall…');
+    await expect(sheet).toBeVisible();
+    await expect(backdrops).toHaveCount(2);
+    await page.mouse.click(point.x, point.y);
+    await expect(sheet).toBeHidden();
+    await expect(w).toBeVisible();
+    await expect.poll(() => page.evaluate(() => document.querySelector('[data-widget-dialog]')?.contains(document.activeElement) ?? false), { message: 'after a press outside, the dialog holds the keyboard' }).toBe(true);
+    await expect(backdrops).toHaveCount(1);
+    await expect(backdrops).toHaveClass(/\bbg-bg-active\b/);
     await page.keyboard.press('Escape');
     await expect(w).toBeHidden();
     await expect(backdrops).toHaveCount(0);
