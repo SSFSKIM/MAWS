@@ -123,7 +123,7 @@ export type ChannelsContext = {
   adopt(states: unknown, transitions: unknown): Promise<unknown>;
   /** The member's grades on this machine: all three for an owner, else what a grant in force gives. */
   rights(member: string): Promise<Right[]>;
-  hold(reason: string): () => void;
+  hold(reason: string, standing?: boolean): () => void;
   counts(counts: { relayed: number; direct: number }): void;
   log(line: string): void;
   now?(): number;
@@ -492,7 +492,7 @@ export class Channels {
     // A number the hub gives again on a later connection replaces whatever still closes under it.
     this.#entries.get(key)?.remote.close('endpoint-gone');
     this.#entries.set(key, entry);
-    this.#release ??= this.#ctx.hold('channel');
+    this.#release ??= this.#ctx.hold('channel', true); // P5 Decision Log 273: standing while any channel is open, no operation
     this.#counted();
     channel.onClose(() => this.#forget(entry));
     this.#arm(entry);

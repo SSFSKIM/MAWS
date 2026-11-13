@@ -116,6 +116,13 @@ paths = ['''^spikes/protocol-probe/fixtures/(?:pass3/)?uxwave/[^/]+\.jsonl$''']
 regexes = ['''^msg_[0-9A-Za-z]{19,23}$''']
 
 [[allowlists]]
+description = "The same fixtures: the head of a message id, cut where the scanner's read of a large file ends (gitleaks reads 100 kB, then up to 25 kB more in search of a blank line, which a journal of one JSON object per line never has, so a journal over 125 kB is cut inside a line; in u4p3-promote-late-2.jsonl the cut falls inside an api_message_id): msg_ and fewer than 19 base62 characters, part of an identifier, not a credential"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^spikes/protocol-probe/fixtures/(?:pass3/)?uxwave/[^/]+\.jsonl$''']
+regexes = ['''^msg_[0-9A-Za-z]{6,18}$''']
+
+[[allowlists]]
 description = "gitleaks' default global allowlist of values (placeholders, booleans, repeated letters, template expressions, home and system paths) and its two stopwords; its list of exempt paths is removed"
 regexes = [
     '''(?i)^true|false|null$''',

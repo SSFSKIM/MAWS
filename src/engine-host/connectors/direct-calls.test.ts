@@ -152,6 +152,32 @@ describe('DirectCalls: honest acknowledgments and typed outcomes for every opera
     expect(await taken(operationId)).toEqual({ kind: 'resolve', answer: { ready: false, why: 'unavailable' } });
   });
 
+  // P5 Decision Log 273: an operation's run outlives its answer, so it is the host's work until it settles or is dropped
+  it('holds a work lifetime from the start until its run settles, and lets go of a stuck one when the operation is dropped', async () => {
+    let open = 0;
+    const work = () => {
+      open += 1;
+      let ended = false;
+      return () => void (ended || ((ended = true), (open -= 1)));
+    };
+    calls = build({ work });
+    const { start } = await granted();
+    expect(open).toBe(0); // the resolution's run has settled
+    const input = start();
+    calls.start(input);
+    expect(open).toBe(1); // answered, its call still running
+    await callOutcome(input.operationId);
+    expect(open).toBe(0);
+    const stuck = { resolve: () => new Promise(() => {}), resolveSource: () => new Promise(() => {}), readEntryForWrite: () => new Promise(() => {}) };
+    void calls.close();
+    calls = build({ cache: stuck as never, work });
+    const operationId = nextId();
+    calls.resolve({ operationId, artifactId, directories: [project], server: 'usertoy', tool: 'rows' });
+    expect(open).toBe(1);
+    expect(calls.cancel(operationId)).toBe(true); // withdrawn while its lookup never settles
+    expect(open).toBe(0);
+  });
+
   it('runs a granted call at once, announcing its id alone, its result taken once; the fence goes with the take', async () => {
     const { start } = await granted();
     const input = start();

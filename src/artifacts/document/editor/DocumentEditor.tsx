@@ -646,7 +646,7 @@ function TabEditor({ tabId, tabTitle, newSection, artifactId, handle, host, rend
   };
   const onKeyDown = (event: KeyboardEvent) => {
     const mod = event.metaKey || event.ctrlKey;
-    if (mod && !event.altKey && event.key.toLowerCase() === 'f') {
+    if (mod && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'f') { // U6a: ⇧⌘F is View ▸ Files'
       event.preventDefault();
       openFind();
     } else if (mod && event.altKey && event.shiftKey && event.code === 'KeyH' && historyController) {

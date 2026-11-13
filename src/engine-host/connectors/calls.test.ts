@@ -256,6 +256,18 @@ describe('ConnectorCalls: an operation’s life', () => {
     expect(engine.calls()).toEqual([{ subtype: 'mcp_call', tool: 'mcp__fixture__rows', arguments: { series: 'revenue' } }]);
   });
 
+  // P5 Decision Log 273: the call runs on past `start`'s answer, so it is the host's work until it settles
+  it('holds a work lifetime from the start until its call settles', async () => {
+    let open = 0;
+    calls = makeCalls({ work: () => ((open += 1), () => void (open -= 1)) });
+    await grant({ server: 'fixture', tool: 'rows', mode: 'read' });
+    const start = startOf();
+    calls.start(start);
+    expect(open).toBe(1); // answered, its call running
+    await ended(start.operationId);
+    expect(open).toBe(0);
+  });
+
   it('refuses at once what cannot run, still through the completion: no session, no store, a duplicate id', async () => {
     const gone = startOf({ appSessionId: 'app-2' });
     calls.start(gone);
