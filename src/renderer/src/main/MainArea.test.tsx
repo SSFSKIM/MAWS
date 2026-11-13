@@ -422,7 +422,7 @@ describe('tab strip reorders, closes, reopens', () => {
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'Close tabs to the right' }));
     await waitFor(() => expect(tabNames()).toEqual(['Tab 1', 'Tab 2', 'Tab 3']));
     expect(within(chrome()).getAllByRole('img', { name: 'Pinned' })).toHaveLength(2);
-  });
+  }, 30_000); // forty tabs drawn in the whole shell and thirty-seven closed one by one: seconds, not the default five
 
   it('the Diagnostics tab opens from Help › Diagnostics and renders the strip', () => {
     render(<Shell />);

@@ -279,7 +279,7 @@ async function closeOthers(id: string, pane: 0 | 1) {
 
 // U13a (A10): the pane's unpinned tabs to the right of this one, in order, each through its close guard as "Close other
 // tabs" closes them; disabled when there is none.
-export const CLOSE_TO_RIGHT = 'Close tabs to the right';
+const CLOSE_TO_RIGHT = 'Close tabs to the right';
 const tabsRightOf = (main: Strip, id: string, pane: 0 | 1): TabRef[] => {
   const tabs = currentSet(main).panes[pane]?.tabs ?? [];
   const at = tabs.findIndex((t) => t.id === id);
