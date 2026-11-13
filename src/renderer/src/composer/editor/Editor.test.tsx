@@ -7,11 +7,13 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge, PreloadBridge } from '@shared/ipc/schema';
 import type { Draft } from '@shared/ipc/schema/session';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { fakeClient } from '../../../../../test/support/fake-client';
 import { at, TEST_MACHINE } from '../../../../../test/support/machine';
 import { connectKeys } from '../../keymap/dispatcher';
 import { resetCatalogStore } from '../../stores/catalog';
 import { prefillComposer, resetComposerStore, useComposerStore } from '../../stores/composer';
+import { useSettings } from '../../stores/settings';
 import { useNotices } from '../../stores/notices'; // E3
 import { registerSlashWidget } from '../mentions/widgets'; // C11
 import { attachmentsOf, docOf, hardBreak, paragraph, pastedNode, textNode } from './doc';
@@ -295,6 +297,28 @@ describe('the editor mounts over its draft, takes prefills and submits through t
     act(() => handle.current?.submit('after'));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(3));
     expect(onSubmit.mock.calls[2]![1]).toBe('after');
+  });
+
+  // UX wave U4a (review): a stored binding takes ⌘Enter from `composer.queue` and the holder has no key in this editor
+  it('does nothing on a ⌘Enter the queue row yielded: no send, no line break', async () => {
+    act(() => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V21, keymap: { 'composer.cycleMode': 'Cmd+Enter' } }, resolvedTheme: 'light' } }));
+    try {
+      const onSubmit = vi.fn<(s: Serialized, when?: 'after') => Promise<boolean>>(async () => true);
+      const { port } = drafts({ doc: docOf([paragraph(textNode('kept'))]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
+      const handle = createRef<EditorHandle>();
+      const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} handle={handle} />);
+      const content = contentOf(container);
+      await waitFor(() => expect(content.textContent).toBe('kept'));
+      content.focus();
+      await act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true })));
+      await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 20))));
+      expect(onSubmit).not.toHaveBeenCalled();
+      expect(handle.current?.doc().content?.[0]?.content?.some((node) => node.type === 'hardBreak')).toBe(false);
+      await act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true, cancelable: true })));
+      expect(handle.current?.doc().content?.[0]?.content?.some((node) => node.type === 'hardBreak')).toBe(true); // Shift+Enter still breaks
+    } finally {
+      useSettings.setState({ state: null });
+    }
   });
 
   it('treats an open @ popup with no rows as no popup: Enter sends', async () => {

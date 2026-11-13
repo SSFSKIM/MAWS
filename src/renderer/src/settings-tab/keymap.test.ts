@@ -169,6 +169,12 @@ describe('the capture’s conflicts', () => {
   it('refuses an app-wide or a menu row a fixed key it could take, and leaves a pane row free to take it', () => {
     expect(captureChord(optionEnter, 'composer.stop', {})).toEqual({ kind: 'refused', message: 'New line keeps this key' });
     expect(captureChord(optionEnter, 'attention.next', {})).toEqual({ kind: 'refused', message: 'New line keeps this key' });
+    // a bare key too: the fixed key's sentence, not the modifier rule's
+    expect(captureChord(enter, 'composer.stop', {})).toEqual({ kind: 'refused', message: 'Send keeps this key' });
+    expect(captureChord(enter, 'attention.next', {})).toEqual({ kind: 'refused', message: 'Send keeps this key' });
+    expect(captureChord(shiftEnter, 'composer.stop', {})).toEqual({ kind: 'refused', message: 'New line keeps this key' });
+    expect(captureChord(shiftEnter, 'attention.next', {})).toEqual({ kind: 'refused', message: 'New line keeps this key' });
+    expect(captureChord(key('KeyU', 'u'), 'attention.next', {})).toEqual({ kind: 'refused', message: 'A menu shortcut needs ⌘, ⌃ or ⌥' }); // any other bare key as before
     expect(captureChord(shiftEnter, 'request.accept', {}, EXTENDED_TABLE)).toEqual({ kind: 'chord', chord: 'Shift+Enter' });
     expect(captureChord(optionEnter, 'request.decline', {})).toEqual({ kind: 'chord', chord: 'Alt+Enter' });
   });
