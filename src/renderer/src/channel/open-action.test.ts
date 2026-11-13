@@ -1,7 +1,8 @@
 // UX wave U11a M5 (S-10; Interfaces §F, "The action"): View › Project channel. Its row stands after the Tabs rows and
 // before Split, with no default chord and no rebinding while build F stands; its handler is registered exactly while the
 // tab in front names a project that has a channel (a Channel tab's own project, or a session tab's row, a New chat's by
-// its intent), and opens that project's Channel, bringing an open one forward.
+// its intent, read as the title bar's chip reads it: `sessionRow`), and opens that project's Channel, bringing an open one
+// forward.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ProjectRecord } from '@shared/ipc/schema';
@@ -10,7 +11,8 @@ import type { OrgKey } from '@shared/machine/org-key';
 import { ACTIONS, ACTION_IDS, isRebindable } from '@shared/keymap/actions';
 import { project, record, remoteRow } from '../../../../test/support/builders';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
-import { isActionEnabled, runAction } from '../keymap/actions-runtime';
+import { isActionEnabled, runAction, sessionRow } from '../keymap/actions-runtime';
+import { useMachines } from '../stores/machines';
 import { useLayout } from '../stores/layout';
 import { activeTab, allTabs } from '../stores/layout-model';
 import { useSessions, type ListedSession } from '../stores/sessions';
@@ -36,11 +38,13 @@ beforeEach(() => {
     projects: new Map([NORTH, SCRATCH].map((p) => [p.id, p])),
     records: new Map([record(IN_NORTH, { projectId: NORTH.id }), record(IN_SCRATCH, { projectId: SCRATCH.id })].map((r) => [r.appId, r])),
   });
+  useMachines.setState({ loaded: new Set([TEST_MACHINE, OTHER_MACHINE]) }); // both machines' first snapshots are in
   disconnect = connectChannelAction();
 });
 afterEach(() => {
   disconnect?.();
   disconnect = null;
+  useMachines.setState({ loaded: new Set() });
 });
 
 describe('channel.open: the row', () => {
@@ -129,6 +133,18 @@ describe('channel.open: registered while the tab in front has a project with a c
     expect(isActionEnabled('channel.open')).toBe(true);
     runAction('channel.open');
     expect(activeTab(layout().main)).toMatchObject({ kind: 'channel', project: SMNS });
+  });
+
+  // U13a merged: the row is `sessionRow`'s, the one the title bar's chip names, so nothing is read of a session whose
+  // machine has not answered in this run, and the action follows that machine's first snapshot in.
+  it('reads the row the chip reads: none until the session’s machine has answered, then its project’s', () => {
+    useMachines.setState({ loaded: new Set() });
+    layout().openTab({ kind: 'session', appSessionId: IN_NORTH });
+    expect(sessionRow(IN_NORTH)).toBeUndefined();
+    expect(isActionEnabled('channel.open')).toBe(false);
+    useMachines.setState({ loaded: new Set([TEST_MACHINE]) });
+    expect(sessionRow(IN_NORTH)).toBe(`smns:${SMNS}`);
+    expect(isActionEnabled('channel.open')).toBe(true);
   });
 
   it('leaves nothing registered once disconnected', () => {
