@@ -1100,6 +1100,65 @@ describe('the three menu chords', () => {
     await waitFor(() => expect(screen.queryByRole('menu', { name: 'Permission mode' })).toBeNull());
   });
 
+  // the selector moves between its views itself (its model row, its Back button, a pick): the chord follows the view on
+  // screen, not the request that opened the menu
+  describe('beside the real selector', () => {
+    let real: (() => void)[] = [];
+    beforeEach(() => {
+      real = [
+        registerSlashWidget('model', { title: 'Model', placement: 'modelChip', component: modelSelector('model') }),
+        registerSlashWidget('effort', { title: 'Effort', placement: 'modelChip', component: modelSelector('effort') }),
+      ];
+    });
+    afterEach(() => {
+      real.forEach((off) => off());
+      resetModelRequests();
+    });
+    const shownView = () => document.querySelector('[data-model-selector]')?.getAttribute('data-model-selector') ?? null;
+    const chip = () => within(composerOf(0)).getByRole('button', { name: /^Model / });
+
+    it('after a pointer goes to the model list, ⇧⌘E opens effort with the slider focused and ⇧⌘I closes the list', async () => {
+      live(A);
+      tabs(0);
+      mount([{ index: 0, id: A }], <ComposerAppKeys />);
+      await userEvent.click(chip()); // the chip opens on the effort view
+      await waitFor(() => expect(shownView()).toBe('effort'));
+      await userEvent.click(screen.getByRole('button', { name: /· Select model$/ })); // into the model list by pointer
+      await waitFor(() => expect(useComposerStore.getState().chipViews.get(A)).toBe('model'));
+      await chord(...EFFORT);
+      await waitFor(() => expect(shownView()).toBe('effort'));
+      expect(useComposerStore.getState().chipWidgets.get(A)).toMatchObject({ name: 'effort', focus: 'slider' });
+      await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('slider', { name: 'Effort' })));
+      await userEvent.click(screen.getByRole('button', { name: /· Select model$/ }));
+      await waitFor(() => expect(shownView()).toBe('model'));
+      await chord(...MODEL); // the list on screen: closed, not reopened
+      expect(useComposerStore.getState().chipWidgets.has(A)).toBe(false);
+      await waitFor(() => expect(shownView()).toBeNull());
+    });
+
+    it('after a model is chosen the effort view is on screen: ⇧⌘I opens the list again, and ⇧⌘E closes the menu', async () => {
+      live(A);
+      tabs(0);
+      mount([{ index: 0, id: A }], <ComposerAppKeys />);
+      act(() => editorOf(0).focus());
+      await chord(...MODEL);
+      fireEvent.click(await screen.findByRole('menuitemradio', { name: /^Haiku/ }));
+      await waitFor(() => expect(fake.pending('session.setModel')).toBe(1));
+      await act(() => fake.reply('session.setModel', { ok: true, error: null, code: null }));
+      await waitFor(() => expect(shownView()).toBe('effort')); // a pick returns to the effort view
+      await chord(...MODEL);
+      await waitFor(() => expect(shownView()).toBe('model'));
+      expect(useComposerStore.getState().chipWidgets.get(A)).toMatchObject({ name: 'model' });
+      fireEvent.click(await screen.findByRole('menuitemradio', { name: /^Sonnet/ }));
+      await waitFor(() => expect(fake.pending('session.setModel')).toBe(1));
+      await act(() => fake.reply('session.setModel', { ok: true, error: null, code: null }));
+      await waitFor(() => expect(shownView()).toBe('effort'));
+      await chord(...EFFORT); // the effort view on screen: closed
+      expect(useComposerStore.getState().chipWidgets.has(A)).toBe(false);
+      await waitFor(() => expect(shownView()).toBeNull());
+    });
+  });
+
   it('asks for nothing when the focused pane shows no session, or a card holds the composer’s place', async () => {
     live(A);
     useLayout.setState((s) => ({ main: { ...s.main, panes: [{ tabs: [{ id: 'overview', kind: 'overview', pinned: false }], activeTabId: 'overview' }], focusedPane: 0, splitRatio: 0.5 } }) as never);

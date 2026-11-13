@@ -107,9 +107,12 @@ describe('session info renders the six sections', () => {
     expect(valueOf('Version')).toBe('2.1.283'); // W13: the session's own, no pin note
     expect(valueOf('Binary')).toBe('~/.local/share/claude/versions/2.1.283'); // W13: the file it was spawned from, not today's setting
     expect(valueOf('Session id')).toBe(record.engineSessionId);
-    // UX wave U4a (decision 19): the chip's name (no catalogue listed here, so the alias), the raw id as its title
-    expect(valueOf('Main')).toBe('sonnet');
+    // UX wave U4a (decision 19): before any selector has listed the engine's models, the chip's name from the route's
+    // catalogue (`engine.models`), as the chip reads it; the raw id as its title
+    await waitFor(() => expect(valueOf('Main')).toBe('Sonnet 5'));
     expect(titleOf('Main')).toBe('claude-sonnet-5[1m]');
+    const routeCatalogue = (fixtureLine(ROOT, RESPONSES.list_models) as { models: ListedModel[] }).models; // the backend's engine.models
+    expect(liveBindings(useSessions.getState().engine.get(READY)!, record, { modelNames: routeCatalogue }).model.label).toBe('Sonnet 5'); // the chip, before any menu
     expect(valueOf('Subagents')).toBe("each agent's own, else Main"); // W3: no "engine default"
     expect(valueOf('Route')).toBe('Gateway · ClaudeUsage relay · http://127.0.0.1:8641Switch to Direct…Back to the machine’s own…'); // W2: the switch; P5 O7 M9: and back
     expect(valueOf('Account')).toBe('1@example.test · pinned for this session');
@@ -135,7 +138,9 @@ describe('session info renders the six sections', () => {
     expect(valueOf('Context')).toBe('42,812 of 200,000 · 21% · autocompact at 167,000');
     await waitFor(() => expect(valueOf('Rules')).toMatch(/^1 allow/)); // the other reads answered meanwhile
     expect(backend.calls.filter((c) => c.command === 'session.getContextUsage')).toEqual([]);
-    expect(backend.calls.filter((c) => c.command === 'engine.models'), 'the lane reads the listed models only').toEqual([]);
+    // UX wave U4a (decision 19): the Main row names the model from the route's catalogue, as the chip does (the lane's
+    // entry still reads the listed models only)
+    await waitFor(() => expect(backend.calls.filter((c) => c.command === 'engine.models')).toHaveLength(1));
   });
 
   // Whole-branch review: after a set_model the engine accepted and before the next init frame, the Main row names the

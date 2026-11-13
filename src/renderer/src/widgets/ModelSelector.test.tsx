@@ -43,6 +43,9 @@ let offs: (() => void)[] = [];
 
 beforeEach(() => {
   backend = createWidgetBackend({ root: ROOT, statuses: loadScenario(join(ROOT, 'test/fixtures/shell/nine-sessions.json')).engine });
+  // the machine's default route, as main answers it (the intent binding reads it on every mount); unanswered, each
+  // mount warned on stderr
+  backend.script('machineSettings.get', () => ({ settings: machineSettingsDefaults(), version: 1, defaultRoute: 'machine' }));
   window.maws = backend.bridge();
   useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
   offs = [ipc.on('session.status', (event) => useSessions.getState().applyStatus(event, TEST_MACHINE))];
