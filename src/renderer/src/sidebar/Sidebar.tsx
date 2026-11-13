@@ -157,13 +157,6 @@ function SidebarBody() {
       setFocusWithin(false);
     }
   }, []);
-  useLayoutEffect(() => {
-    // Removing a row can omit leave/blur and move focus to BODY without focusin. Reconcile after this
-    // sidebar's commit; surviving targets and focus transfers performed by children keep their ownership.
-    for (const owner of [pointerOwner.current, focusOwner.current]) {
-      if (owner && !owner.isConnected) releaseRemoved(owner);
-    }
-  });
   useEffect(() => {
     // Clear at document capture first; this subtree's React capture renews ownership for its own controls,
     // including portals. A focus elsewhere also clears stale ownership left by a removed portal.
@@ -184,11 +177,21 @@ function SidebarBody() {
   // A deliberate sort change is immediate, and so is a Hide or an Unhide (UX wave U7, O-16); no timer can reshuffle a
   // row between two actions.
   const holding = pointerWithin || focusWithin || menuTarget !== null;
+  // UX wave U7, O-16: a hidden row of the Hidden list is ordered by its newest activity, as the sidebar's age reads it; that
+  // order is held with the ranks
+  const activityOf = useCallback(
+    (item: SidebarSession) => (item.kind === 'record' ? lastActivity(item.record, digests.get(item.record.appId), seen.get(item.record.appId)) : issuedAt(item.listed)),
+    [digests, seen],
+  );
+  const hiddenOrder = useMemo(
+    () => new Map(rankedEntries.map((entry) => [entry.key, splitHidden(entry.items, (id) => hiddenSessions.has(id), activityOf).hidden])),
+    [rankedEntries, hiddenSessions, activityOf],
+  );
   // An act settles even when it changed no rank (a Hide with no lead): it is consumed then, never left to release a later
   // live update while the person is still inside.
-  const [settledOrder, setSettledOrder] = useState({ entries: rankedEntries, sort: sidebar.sort, acts: hideActs });
-  if (settledOrder.acts !== hideActs || ((!holding || settledOrder.sort !== sidebar.sort) && settledOrder.entries !== rankedEntries)) {
-    setSettledOrder({ entries: rankedEntries, sort: sidebar.sort, acts: hideActs });
+  const [settledOrder, setSettledOrder] = useState({ entries: rankedEntries, hidden: hiddenOrder, sort: sidebar.sort, acts: hideActs });
+  if (settledOrder.acts !== hideActs || ((!holding || settledOrder.sort !== sidebar.sort) && (settledOrder.entries !== rankedEntries || settledOrder.hidden !== hiddenOrder))) {
+    setSettledOrder({ entries: rankedEntries, hidden: hiddenOrder, sort: sidebar.sort, acts: hideActs });
   }
   const everyEntry = useMemo(() => {
     if (!holding) return rankedEntries;
@@ -216,11 +219,6 @@ function SidebarBody() {
     return { listed: [...real.slice(0, PROJECTS_FIRST), ...own], folded: Math.max(0, real.length - PROJECTS_FIRST) };
   }, [everyEntry, query, projects, searching, allProjects, projectFilter]);
 
-  // UX wave U7, O-16: a hidden row of the Hidden list is ordered by its newest activity, as the sidebar's age reads it
-  const activityOf = useCallback(
-    (item: SidebarSession) => (item.kind === 'record' ? lastActivity(item.record, digests.get(item.record.appId), seen.get(item.record.appId)) : issuedAt(item.listed)),
-    [digests, seen],
-  );
   const shown: ShownProject[] = useMemo(
     () =>
       listed.map((entry) => {
@@ -232,10 +230,11 @@ function SidebarBody() {
         const all = nestItems(split.shown); // E3: the caps count trees; rank was settled above
         const drawn = shownTrees(all, more.has(entry.key), spawned); // P5 O7 M8: a spawned lead is never cut
         const hiddenOpen = openHidden.has(entry.key) && split.hidden.length > 0;
-        const hidden = split.hidden.length === 0 ? NO_HIDDEN : { count: split.hidden.length, open: hiddenOpen, rows: hiddenOpen ? nestItems(split.hidden).flatMap((tree) => tree.rows) : [] };
+        const hiddenItems = holding ? holdOrder(split.hidden, settledOrder.hidden.get(entry.key) ?? [], sidebarSessionId) : split.hidden;
+        const hidden = split.hidden.length === 0 ? NO_HIDDEN : { count: split.hidden.length, open: hiddenOpen, rows: hiddenOpen ? nestItems(hiddenItems).flatMap((tree) => tree.rows) : [] };
         return { entry, open, sessions: drawn.shown.flatMap((tree) => tree.rows), more: drawn.more, items: split.shown, hidden };
       }),
-    [listed, searching, expanded, itemMatches, more, spawned, hiddenSessions, activityOf, openHidden],
+    [listed, searching, expanded, itemMatches, more, spawned, hiddenSessions, activityOf, openHidden, holding, settledOrder],
   );
   // A Hidden row whose last session returned or was unhidden closes, so the next Hide finds it closed.
   const emptied = searching ? [] : [...openHidden].filter((key) => shown.some((p) => p.entry.key === key && p.open && p.hidden.count === 0));
@@ -279,6 +278,34 @@ function SidebarBody() {
     },
     [itemElement],
   );
+  // UX wave U7, O-16: a row that returns from the Hidden list is drawn anew in its project's list, so the keyboard it held
+  // goes back to it. When the Hidden row goes (its last session returned or gone) while the keyboard is on it or on a row
+  // under it, the keyboard goes to the row that returned, else to the project's row; a row under it that left alone
+  // hands it to the Hidden row. Only a keyboard the sidebar held is placed: its focus owner, which this commit removed.
+  // Before the reconcile below, which releases that owner.
+  const nodesBefore = useRef(nodes);
+  useLayoutEffect(() => {
+    const before = nodesBefore.current;
+    nodesBefore.current = nodes;
+    const owner = focusOwner.current;
+    if (!(owner instanceof Element) || owner.isConnected) return;
+    const id = owner.closest('[data-tree-id]')?.getAttribute('data-tree-id');
+    const node = before.find((n) => n.id === id);
+    const disclosure = node?.kind === 'hidden' ? node : before.find((n) => n.kind === 'hidden' && node !== undefined && 'parent' in node && n.id === node.parent);
+    if (node === undefined || disclosure?.kind !== 'hidden') return;
+    const under = new Set(before.flatMap((n) => ('parent' in n && n.parent === disclosure.id ? [n.id] : [])));
+    const returned = nodes.find((n) => under.has(n.id));
+    const has = (target: string) => nodes.some((n) => n.id === target);
+    const target = node.kind !== 'hidden' && has(node.id) ? node.id : has(disclosure.id) ? disclosure.id : (returned?.id ?? projectNodeId(disclosure.key));
+    if (has(target)) focusItem(target);
+  }, [nodes, focusItem]);
+  useLayoutEffect(() => {
+    // Removing a row can omit leave/blur and move focus to BODY without focusin. Reconcile after this
+    // sidebar's commit; surviving targets and focus transfers performed by children keep their ownership.
+    for (const owner of [pointerOwner.current, focusOwner.current]) {
+      if (owner && !owner.isConnected) releaseRemoved(owner);
+    }
+  });
   // UX wave U7, O-16 (M3, decision 6): after a Hide the keyboard goes to the row that took the hidden row's place, else to
   // the Hidden row, once the render without it is on screen. A Hide that places the keyboard (`hideAct`) always changes
   // `shown` (its row leaves its group), so the effect runs after that render.

@@ -169,7 +169,7 @@ describe('sidebar action stability', () => {
   // The review's finding (round 3): the Hidden list's order, by newest activity, is held like every other row's
   it('holds the order of an open Hidden list while a row’s activity changes, then applies it on leaving', async () => {
     const hiddenAt = '2026-10-24T11:00:00Z';
-    window.maws = fakeClient({ 'layout.get': { value: { version: 1, hidden: { [first.appId]: { at: hiddenAt, armedAt: null }, [second.appId]: { at: hiddenAt, armedAt: null } } } }, 'layout.set': undefined }).client as unknown as PreloadBridge;
+    window.maws = fakeClient({ 'layout.get': { value: { version: 1, hidden: { [at(first.appId)]: { at: hiddenAt, armedAt: null }, [at(second.appId)]: { at: hiddenAt, armedAt: null } } } }, 'layout.set': undefined }).client as unknown as PreloadBridge;
     await act(() => useHidden.getState().load());
     start();
     const tree = screen.getByTestId('sidebar-tree');
