@@ -14,6 +14,7 @@ import { parseEach } from '../parts';
 import { displayNameOf, GROUP_ORDER, SKILLS_DIR, type PluginIdentity, type SourceGroup } from '../plugins/library';
 import type { ObservedPlugin } from '@shared/engine/observed-facts';
 import type { CustomizationSkill } from '@shared/ipc/schema/customization';
+import { SKILLS_LIBRARY } from '../copy';
 
 export interface SkillRow {
   name: string; // the engine's qualified name for live rows; display metadata for disk rows
@@ -22,6 +23,7 @@ export interface SkillRow {
   description: string;
   source: string; // the engine's source word; '' from the catalogue
   path?: string; // disk inventory: distinguishes same-named skills at different scopes
+  unavailable?: string | null; // why Use in chat is greyed (U11a: its plugin is off for the chat); absent: usable
 }
 export interface SkillGroup {
   group: SourceGroup | null; // null: one list (the catalogue's, or a sort that flattens)
@@ -91,7 +93,10 @@ export function skillGroups(dialog: GetSkillsDialogResponse, catalog: SessionCat
 // tab's `/skills`, where "Use in chat" inserts the form the engine runs: `/<name> ` for a project's and a person's skill,
 // `/<manifest name>:<name> ` for a plugin's; a plugin skill whose manifest name is not known (null, or absent from an
 // earlier engine host) has no invocation. Customize's own page lists them with none.
-export function diskSkillGroups(skills: readonly CustomizationSkill[], { invocable }: { invocable: boolean }): SkillGroup[] {
+// `pluginsOff` (the branch panel's finding 1): the installed plugins the chat will start without, the launch profile's
+// `plugins.off` (src/shared/engine/launch-profile.ts, which the launch writes as `enabledPlugins[id] = false`). Their
+// skills stay listed; their Use in chat is greyed with the reason, since the engine that starts loads none of them.
+export function diskSkillGroups(skills: readonly CustomizationSkill[], { invocable, pluginsOff }: { invocable: boolean; pluginsOff?: ReadonlySet<string> }): SkillGroup[] {
   const invocationOfDisk = (skill: CustomizationSkill): string | null => {
     if (!invocable) return null;
     if (skill.source !== 'plugin') return skill.name;
@@ -99,7 +104,10 @@ export function diskSkillGroups(skills: readonly CustomizationSkill[], { invocab
   };
   const result: SkillGroup[] = [];
   for (const [source, group] of [['project', 'here'], ['user', 'yours'], ['plugin', 'added']] as const) {
-    const rows = skills.filter((skill) => skill.source === source).map((skill) => ({ name: skill.name, invocation: invocationOfDisk(skill), description: skill.description, source, plugin: skill.plugin, path: skill.path }));
+    const rows = skills.filter((skill) => skill.source === source).map((skill): SkillRow => {
+      const off = invocable && skill.plugin !== null && pluginsOff?.has(skill.plugin) === true;
+      return { name: skill.name, invocation: invocationOfDisk(skill), description: skill.description, source, plugin: skill.plugin, path: skill.path, ...(off && { unavailable: SKILLS_LIBRARY.pluginOff }) };
+    });
     if (rows.length) result.push({ group, rows });
   }
   return result;

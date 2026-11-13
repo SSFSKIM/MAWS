@@ -3,7 +3,7 @@
 // sections in the index's list and scroll as that list scrolls; the first is preselected, Up and Down move, Enter
 // chooses, and the keyboard stays in the field until a choice, which gives it to the row itself (search.ts says what
 // is found). Esc in a field that holds text clears it (`data-escape-clears`, so a dialog around Settings lets it).
-import { useId, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { useId, useLayoutEffect, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import type { KeymapOverrides } from '@shared/keymap/actions';
 import { SearchIcon } from '../app/IconButton';
 import { INDEX, ORG } from './copy';
@@ -33,9 +33,21 @@ export function SettingsSearch({ keymap, field, onChoose, children }: { keymap: 
   const orgGroups = ORG_GROUPS.filter((id) => groups.has(id)).map((id) => ORG.groups[id]);
   const searching = keymap !== null && query.trim() !== '';
   const results = searching ? searchSettings(query, { rows: SETTINGS_ROWS, shown, bindings, orgGroups }) : [];
-  const current = Math.min(active, results.length - 1); // -1 with no results
+  // U11a's branch panel, finding 2: a query that leaves the results as they were (a trailing space, which the search
+  // ignores) keeps the selection; other results select their first. The selected result is always the one in view: it
+  // is revealed whenever the selection or the results change, not only on Up and Down.
+  const resultsKey = results.map((result) => result.id).join('\n');
+  const [selectedIn, setSelectedIn] = useState(resultsKey);
+  if (selectedIn !== resultsKey) {
+    setSelectedIn(resultsKey);
+    setActive(0);
+  }
+  const current = Math.min(selectedIn === resultsKey ? active : 0, results.length - 1); // -1 with no results
   const listed = results.length > 0; // the field controls a listbox only while one is drawn
   const optionId = (i: number) => `${listId}-${i}`;
+  useLayoutEffect(() => {
+    if (current >= 0) document.getElementById(`${listId}-${current}`)?.scrollIntoView({ block: 'nearest' });
+  }, [current, resultsKey, listId]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.nativeEvent.isComposing) return; // an input method's keys are its own
@@ -43,15 +55,13 @@ export function SettingsSearch({ keymap, field, onChoose, children }: { keymap: 
       if (query === '') return; // nothing to clear: Esc is the host's
       event.preventDefault();
       setQuery('');
-      setActive(0);
       return;
     }
     if (current < 0) return;
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
       const next = event.key === 'ArrowDown' ? Math.min(current + 1, results.length - 1) : Math.max(current - 1, 0);
-      setActive(next);
-      document.getElementById(optionId(next))?.scrollIntoView({ block: 'nearest' });
+      setActive(next); // revealed by the effect above
     } else if (event.key === 'Enter') {
       event.preventDefault();
       onChoose(results[current]!);
@@ -76,10 +86,7 @@ export function SettingsSearch({ keymap, field, onChoose, children }: { keymap: 
             maxLength={200}
             value={query}
             data-escape-clears
-            onChange={(event) => {
-              setQuery(event.target.value);
-              setActive(0);
-            }}
+            onChange={(event) => setQuery(event.target.value)}
             onKeyDown={onKeyDown}
             className="min-w-0 flex-1 bg-transparent text-ui-sm text-fg outline-none placeholder:text-fg-faint [&::-webkit-search-cancel-button]:hidden"
           />

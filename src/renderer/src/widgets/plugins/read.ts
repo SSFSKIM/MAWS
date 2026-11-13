@@ -4,7 +4,7 @@
 // listing already in flight, whose answer may predate the change). Each runs
 // the engine's CLI, which refreshes its own catalogue cache (D-12), so none refetches on focus, and a harness mounting
 // widgets passively (`WidgetReadPolicyContext`) issues none.
-import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { hashKey, useQuery, useQueryClient, type QueryClient, type QueryKey } from '@tanstack/react-query';
 import { useCallback, useContext, useEffect, useRef } from 'react';
 import type { CommandOutput } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
@@ -43,6 +43,32 @@ export const pluginsReadKey = (command: PluginsRead, cwd: string | null, machine
 export const readInstalledNow = (client: QueryClient, cwd: string, machine?: MachineRef) =>
   client.fetchQuery({ queryKey: pluginsReadKey('plugins.list', cwd, machine), queryFn: () => invokeRead('plugins.list', { cwd }, machine), staleTime: 0 });
 
+// The one rule for a read that a plugin change can make stale (`plugins.changed`, sent when any CLI change ends): the
+// read is asked again after the change. A change during a read in flight is owed a read after that one, not joined to
+// it: the read in flight may have read the state before the change, and TanStack Query lets an invalidation of a query
+// with no answer yet join its first flight, whose success then clears it (M2 review; U11a's branch panel, finding 3).
+// Changes meanwhile coalesce into that one read. `on` false listens to nothing; `shown` false owes the read until shown.
+// Read by `usePluginsRead` and by Customize's inventory (customize/inventory.ts).
+export function useReadAfterPluginsChange({ queryKey, on, shown = true, isFetching, refetch }: { queryKey: QueryKey; on: boolean; shown?: boolean; isFetching: boolean; refetch(): Promise<unknown> }): void {
+  const client = useQueryClient();
+  const owed = useRef(false);
+  const key = hashKey(queryKey);
+  const latest = useRef(queryKey);
+  latest.current = queryKey;
+  useEffect(() => {
+    if (!on) return;
+    return ipc.on('plugins.changed', () => {
+      if (!shown || client.isFetching({ queryKey: latest.current }) > 0) owed.current = true;
+      else void refetch();
+    });
+  }, [on, shown, client, key, refetch]);
+  useEffect(() => {
+    if (isFetching || !owed.current || !on || !shown) return;
+    owed.current = false;
+    void refetch();
+  }, [isFetching, on, shown, refetch]);
+}
+
 // `enabled: false` holds the read (Browse until its first click). `shown: false` keeps the last answer without
 // rereading it on a change (Browse's catalogue while My items shows, P2-B §5.8): a change meanwhile is read once it shows.
 // `retry` reads again through this observer: the client's `refetchQueries` may run another observer's options for the
@@ -50,7 +76,6 @@ export const readInstalledNow = (client: QueryClient, cwd: string, machine?: Mac
 export function usePluginsRead<N extends PluginsRead>(command: N, cwd: string | null, enabled = true, shown = true, machine?: MachineRef): PluginsReadResult<CommandOutput<N>> & { retry(): void } {
   const active = useContext(WidgetReadPolicyContext).mode === 'active';
   const on = active && enabled && cwd !== null;
-  const client = useQueryClient();
   const query = useQuery<CommandOutput<N>, IpcCommandError>({
     queryKey: pluginsReadKey(command, cwd, machine),
     queryFn: () => invokeRead(command, { cwd: cwd! } as never, machine),
@@ -59,21 +84,7 @@ export function usePluginsRead<N extends PluginsRead>(command: N, cwd: string | 
     refetchOnWindowFocus: false,
   });
   const { refetch, isFetching } = query;
-  // A change during a listing in flight: that listing may have read the state before the change, so one more read
-  // follows it rather than joining it (M2 review); changes meanwhile coalesce into that one read.
-  const owed = useRef(false);
-  useEffect(() => {
-    if (!on) return;
-    return ipc.on('plugins.changed', () => {
-      if (!shown || client.isFetching({ queryKey: pluginsReadKey(command, cwd, machine) }) > 0) owed.current = true;
-      else void refetch();
-    });
-  }, [on, shown, client, command, cwd, machine, refetch]);
-  useEffect(() => {
-    if (isFetching || !owed.current || !on || !shown) return;
-    owed.current = false;
-    void refetch();
-  }, [isFetching, on, shown, refetch]);
+  useReadAfterPluginsChange({ queryKey: pluginsReadKey(command, cwd, machine), on, shown, isFetching, refetch });
   const retry = useCallback(() => void refetch(), [refetch]);
   return { ...resultOf(query.data, query.error, query.isError), retry };
 }

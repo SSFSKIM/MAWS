@@ -16,6 +16,7 @@ import type { PluginManifestView } from '@shared/ipc/schema/plugins';
 import { insertComposerText } from '../composer';
 import { useSessionCatalog } from '../stores/catalog';
 import { useSessions } from '../stores/sessions';
+import { useSettings } from '../stores/settings';
 import { BEFORE_START, LIBRARY as L, SKILLS_LIBRARY as S, WIDGET_TITLE } from './copy';
 import { operationLine, useOperation } from './operation';
 import { identitiesOf, installationRef } from './plugins/library';
@@ -57,7 +58,11 @@ export function SkillsWidget(props: { appSessionId: AppSessionId; args: string; 
 // engine runs (`diskSkillGroups`), a plugin skill whose manifest name is unknown is listed without it; no Reload.
 function SkillsOnDisk({ appSessionId, folder, place, close }: { appSessionId: AppSessionId; folder: string | null; place: string; close(): void }) {
   const inventory = useCustomizationInventory(folder);
-  const groups = useMemo(() => (inventory.data ? diskSkillGroups(inventory.data.skills, { invocable: true }) : null), [inventory.data]);
+  // the launch's own source of which plugins a chat started here goes without (the branch panel's finding 1); none
+  // until the settings are read, which the window does before it draws
+  const off = useSettings((s) => s.state?.settings.engine.launchProfile.plugins.off);
+  const pluginsOff = useMemo(() => new Set(off ?? []), [off]);
+  const groups = useMemo(() => (inventory.data ? diskSkillGroups(inventory.data.skills, { invocable: true, pluginsOff }) : null), [inventory.data, pluginsOff]);
   const view = useLibraryStore((s) => s.skills);
   const plugin = groups !== null && hasPluginSkills(groups);
   const shown = useMemo(() => (groups === null ? null : skillsView(groups, { search: view.search, sort: plugin ? view.sort : 'name' })), [groups, view, plugin]);

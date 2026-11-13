@@ -15,7 +15,7 @@ import { GroupHeading } from '../plugins/PluginRow';
 import { badgeOf, invocationOf, labelOf, type SkillGroup, type SkillRow, type SkillsSort } from './skills';
 
 const setSkills = (patch: Partial<ReturnType<typeof useLibraryStore.getState>['skills']>) => useLibraryStore.setState((s) => ({ skills: { ...s.skills, ...patch } }));
-const ACTION = 'inline-flex h-7 shrink-0 items-center rounded-md px-2.5 text-ui outline-accent focus-visible:outline-2 disabled:cursor-default';
+const ACTION = 'inline-flex h-7 shrink-0 items-center rounded-md px-2.5 text-ui outline-accent focus-visible:outline-2 disabled:cursor-default disabled:opacity-50';
 const SECONDARY = `${ACTION} border border-border text-fg hover:bg-bg-hover`;
 const PRIMARY = `${ACTION} bg-accent text-bg hover:opacity-90`;
 const BADGE = 'shrink-0 truncate rounded-sm bg-bg-active px-1.5 text-ui-sm leading-[18px] text-fg-muted';
@@ -87,7 +87,7 @@ function SkillItem({ row, onOpen, onUse }: { row: SkillRow; onOpen(row: SkillRow
         </span>
         {row.description !== '' && <span className="truncate text-ui-sm text-fg-muted">{row.description}</span>}
       </div>
-      {onUse && invocation !== null && <button type="button" className={`relative ${SECONDARY}`} onClick={() => onUse(invocation)}>
+      {onUse && invocation !== null && <button type="button" className={`relative ${SECONDARY}`} disabled={row.unavailable != null} title={row.unavailable ?? undefined} onClick={() => onUse(invocation)}>
         {S.useInChat}
       </button>}
     </li>
@@ -112,7 +112,7 @@ function SkillDetail({ row, onBack, onUse }: { row: SkillRow; onBack(): void; on
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <h3 className="m-0 truncate text-prose font-semibold text-fg">{labelOf(row)}</h3>
         </div>
-        {onUse && invocation !== null && <button type="button" className={PRIMARY} onClick={() => onUse(invocation)}>
+        {onUse && invocation !== null && <button type="button" className={PRIMARY} disabled={row.unavailable != null} title={row.unavailable ?? undefined} onClick={() => onUse(invocation)}>
           {S.useInChat}
         </button>}
       </div>
