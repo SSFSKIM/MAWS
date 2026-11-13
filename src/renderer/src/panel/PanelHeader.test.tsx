@@ -1,7 +1,8 @@
 // P3-G (§D2.2, M3): the panel's header over C8a's host in C5's region: the strip's label for a tool that registers
 // nothing (its `setTitle` suffix included), "Session overview" on the summary, and an editor's X32 registration drawn
 // as the breadcrumb, the saved state, the open-comment count, its actions (three, then "More actions"), its Export menu,
-// beside the region's own controls, all of them folded into "More actions" under a 360 px header; an inactive tab's
+// beside the region's own controls, all of them folded into "More actions" under a header narrower than the side
+// column's default width leaves it (UX wave U8b's branch review fix wave); an inactive tab's
 // registration still vetoes its close.
 import { QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, render, screen, within } from '@testing-library/react';
@@ -22,7 +23,8 @@ import { panelHost, registerPanelTool, setTitle } from './host';
 import { PanelHost } from './PanelHost';
 import { PanelRegion } from './PanelRegion';
 import type { PanelToolContext } from './tool';
-import { EditorHeader } from './PanelHeader';
+import { COLUMN_CHROME_PX, EditorHeader, NARROW_HEADER_PX } from './PanelHeader';
+import { NARROW_AUTOMATIC_WIDTH } from '../app/shell-geometry';
 
 const offs: (() => void)[] = [];
 beforeEach(() => {
@@ -371,7 +373,7 @@ describe('the panel header', () => {
     expect(off.querySelector('[data-menu-check]'), 'but keeps the check’s room, so the labels align').not.toBeNull();
   });
 
-  it('under a 360 px header, folds every editor action and export into "More actions" so the title keeps the room', async () => {
+  it('under a narrow header, folds every editor action and export into "More actions" so the title keeps the room', async () => {
     const user = userEvent.setup();
     const { resize } = installResizeObserver();
     let width = 0;
@@ -400,9 +402,38 @@ describe('the panel header', () => {
     await user.click(within(menu).getByRole('menuitem', { name: 'PDF' }));
     expect(calls).toEqual(['export:pdf']);
 
-    width = 360; // at 360 px and wider, the actions and Export are inline again
-    resize(header(), { width: 344, height: 40 });
+    width = NARROW_HEADER_PX; // at the threshold and wider, the actions and Export are inline again
+    resize(header(), { width: NARROW_HEADER_PX - 16, height: 40 });
     expect(buttons()).toEqual(['Action 1', 'Action 2', 'Action 3', 'Export']);
+  });
+
+  // UX wave U8b (the branch review's fix wave): "narrow" is narrower than the side column's default width, so a viewer
+  // in a column at that width keeps Comment in its header's row (the deliverables scenes press it there)
+  it('keeps Comment in the row of a header in a column at its default width, and folds the actions one pixel under it', () => {
+    const { resize } = installResizeObserver();
+    let width = 0;
+    const spy = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.hasAttribute('data-editor-header') ? width : 0;
+    });
+    offs.push(() => spy.mockRestore());
+    const action = (id: string, label: string): EditorHostAction => ({ id, label, icon: () => <svg />, onSelect: () => {} });
+    offs.push(registerPanelTool(probeTool('t').tool));
+    mount();
+    const id = add('t');
+    act(() =>
+      void registerEditorHost(
+        { surface: 'panel', tabId: id },
+        { title: 'Q3 brief', actions: [action('comment', 'Comment'), action('reload', 'Reload'), action('reveal', 'Reveal in Finder'), action('file', 'Open as file')], exports: [{ id: 'pdf', label: 'PDF', onSelect: () => {} }] },
+      ),
+    );
+
+    width = NARROW_AUTOMATIC_WIDTH - COLUMN_CHROME_PX; // the header of a column at its default width
+    resize(header(), { width: width - 16, height: 40 });
+    expect(buttons()).toEqual(['Comment', 'Reload', 'Reveal in Finder', 'More actions', 'Export']);
+
+    width -= 1;
+    resize(header(), { width: width - 16, height: 40 });
+    expect(buttons()).toEqual(['More actions']);
   });
 
   // P3-G (§D2.2, §D4.4, M4): Mark up shows for a tab whose body registered a mark-up surface, after the actions and

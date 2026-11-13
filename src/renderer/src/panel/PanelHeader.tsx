@@ -1,7 +1,8 @@
 // The pane header (the P3-G execution document §D2.2, after Claude Desktop's frame-artifact header): one 40 px row with
 // what the open tab is on the left (its icon, an editor's breadcrumb and title, its saved state and open-comment count)
-// and what can be done with it on the right (an editor's actions, three then "More actions", and its Export menu; under a
-// 360 px header all of them in "More actions", so the title keeps the room), then the region's own controls.
+// and what can be done with it on the right (an editor's actions, three then "More actions", and its Export menu; in a
+// header narrower than the side column's at its default width, all of them in "More actions", so the title keeps the
+// room), then the region's own controls.
 // An editor-owned toolbar can host the saved state, grouped actions and region controls instead of this metadata row.
 // `EditorHeader` is the row; a main tab whose body registers draws it with no region controls (`main/Pane.tsx`). UX wave
 // U8b (M2, decision 4): in the side column the strip names the tab, so the panel draws the row (`PanelHeader`) under a
@@ -14,6 +15,7 @@ import { createPortal } from 'react-dom';
 import { Fragment, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type ReactNode, type RefObject } from 'react';
 import type { PanelTabRef } from '@shared/ipc/schema/layout';
 import { FloatIcon, Icon, IconButton, MaximizeIcon, PanelIcon, PenIcon, RestoreIcon } from '../app/IconButton';
+import { NARROW_AUTOMATIC_WIDTH } from '../app/shell-geometry';
 import { runAction } from '../keymap/actions-runtime';
 import { useLayout } from '../stores/layout';
 import { cardHost, cardSession, FLOAT_COPY, useFloatingCard } from '../shell/floating'; // P3-F L129; FLOAT_COPY: wave S (F6); cardHost: P4-B3
@@ -31,9 +33,14 @@ export const HEADER_COPY = {
 
 // Claude's narrow-layout rule, applied at every width: past three, an editor's actions go into "More actions".
 const SHOWN_ACTIONS = 3;
-// Under this header width every action and export folds into "More actions" (the controller's ruling on M3): at a 280 px
-// panel three actions and Export had left the title no room at all.
-export const NARROW_HEADER_PX = 360;
+// UX wave U8b (the branch review's fix wave): what the side column draws around a group's header, so a header in a
+// column at its automatic width is that width less this: the region's padding (`pl-1 pr-1.5`, `PanelRegion`) and a
+// group's border (`border`, one pixel each side, `PanelHost`). Change it with those classes.
+export const COLUMN_CHROME_PX = 4 + 6 + 2;
+// Under this header width every action and export folds into "More actions" (the controller's ruling on M3: at a 280 px
+// panel three actions and Export had left the title no room at all). UX wave U8b: "narrow" is narrower than the header
+// of a column at its default width, so at that width and wider the actions draw in the row.
+export const NARROW_HEADER_PX = NARROW_AUTOMATIC_WIDTH - COLUMN_CHROME_PX;
 const COMMENTS_ACTION = 'comments';
 
 export interface EditorHeaderProps {
