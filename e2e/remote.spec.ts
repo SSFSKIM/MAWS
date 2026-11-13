@@ -3164,7 +3164,9 @@ test('U9 A11, a Stop pressed once the line says B reconnects: it reads “Stoppi
 // B's session from A's window, over RL2, under the harness's accepting confirmation. Rename… on its listed row (A holds no
 // record of it) renames it on B and the row says the new title; Fork from its row's menu, its tab open, opens the fork in
 // a new tab on B's address, a session B's index holds as the source's fork; Archive from its menu closes its tab and its
-// row leaves A's sidebar; "Archived sessions…" on B's machine row lists it, and Unarchive brings its row back.
+// row leaves A's sidebar; "Archived sessions…" on B's machine row lists it, and Unarchive brings its row back; archived
+// again, the sidebar footer's "Archived sessions…" lists it in B's section (M5, the architect's ruling (A)), and Unarchive
+// there brings it back too.
 const ACTS_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000d7';
 const ACTS_FORK = 'b0c0d0e0-0000-4000-8000-0000000000d8'; // the fork's launch on B, pinned by its own journal
 const ACTS_TITLE = 'B’s session to act on';
@@ -3186,7 +3188,7 @@ async function menuItemOfRow(page: Page, row: ReturnType<typeof sessionRow>, nam
   return item;
 }
 
-test('U9 A8, A9, A10: from A, Rename… on B’s listed row renames it on B; Fork from its row opens a fork there in a new tab; Archive closes its tab and row; Unarchive brings it back', async () => {
+test('U9 A8, A9, A10: from A, Rename… on B’s listed row renames it on B; Fork from its row opens a fork there in a new tab; Archive closes its tab and row; Unarchive brings it back, from B’s machine row and from the footer', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-acts-')));
   const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-acts-'));
   const held: TerminalHeld = { scene: null, a: null };
@@ -3258,6 +3260,24 @@ test('U9 A8, A9, A10: from A, Rename… on B’s listed row renames it on B; For
       await expect(listed).toBeHidden({ timeout: 30_000 });
       await page.keyboard.press('Escape');
       await expect.poll(async () => (await onB(app))?.archived ?? null, { timeout: 30_000, message: 'B’s record is unarchived' }).toBe(false);
+      await quoting(expect(row, 'its row is back in A’s sidebar').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
+    });
+
+    await test.step('Archived again, the footer’s “Archived sessions…” lists it under B’s name, and Unarchive there brings its row back', async () => {
+      await (await menuItemOfRow(page, row, 'Archive')).click();
+      const sheet = page.getByRole('dialog', { name: /^Archive “.*”\?$/ });
+      await sheet.getByRole('button', { name: 'Archive' }).click();
+      await expect(sheet).toBeHidden({ timeout: 60_000 });
+      await expect(row, 'the row leaves at once').toHaveCount(0, { timeout: 5_000 });
+      await expect.poll(async () => (await onB(app))?.archived ?? null, { timeout: 30_000, message: 'B’s record is archived again' }).toBe(true);
+      await page.getByRole('button', { name: 'Archived sessions…', exact: true }).click();
+      const dialog = page.getByRole('dialog', { name: 'Archived sessions', exact: true });
+      const listed = dialog.getByRole('region', { name: B_NAME }).getByRole('listitem', { name: (await onB(app))!.title.text });
+      await quoting(expect(listed, 'B’s section of the footer’s sheet lists it').toBeVisible({ timeout: 30_000 }), () => mainSaid(page));
+      await listed.getByRole('button', { name: 'Unarchive' }).click();
+      await expect(listed).toBeHidden({ timeout: 30_000 });
+      await page.keyboard.press('Escape');
+      await expect.poll(async () => (await onB(app))?.archived ?? null, { timeout: 30_000, message: 'B’s record is unarchived from the footer' }).toBe(false);
       await quoting(expect(row, 'its row is back in A’s sidebar').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
     });
   } finally {

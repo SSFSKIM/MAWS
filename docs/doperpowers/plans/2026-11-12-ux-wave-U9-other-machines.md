@@ -510,13 +510,13 @@ The acceptance is the section's A1 to A15, as written there. An executor proves 
 
 | item | built in | an executor proves | the architect's run |
 |---|---|---|---|
-| A1 the chooser answers at once | M5 | the hook's states, unit | by hand in T5, timed in T7 |
+| A1 the chooser answers at once | M5 | the hook's states: `src/renderer/src/sessions/remote-setup.test.ts`, `useRemotePlaces` › “opens with the registry’s projects on the machine, its list replacing them when it answers, without waiting for its folders”, “says it reads only while nothing is known, and opened again in the run shows the last listing at once, refreshing behind it”, “says projects it couldn’t read, keeping what it knew”; the menu: `src/renderer/src/composer/frame/ProjectRow.test.tsx`, “lists the machine’s projects before its folders answer, New project and Don’t work in a project disabled until they do” | by hand in T5, timed in T7 |
 | A2 connecting is not offline | M3 | the phase per row of O-39's table; rows and tabs by phase | T2 (`e2e/remote.spec.ts`, `e2e/machines.spec.ts`) |
-| A3 a loading pane says so | M3 | the 300 ms rule, unit | T2 |
+| A3 a loading pane says so | M3 | the 300 ms rule: `src/renderer/src/transcript/view/Transcript.test.tsx`, “says “Loading…” once a read with nothing to draw has been out 300 ms, and not before” | T2 |
 | A4 the reader keeps their place | M3 | two component cases across down and up, one for a terminal session's recordless pane and one for a pane with a record: the mount's identity, the scroll position, the draft | T2, each scene run alone first, for both kinds of session: scroll, select, copy and no error text while the link is down, and a following reader at the end; "searched" is proven by U3's second landing (the architect's ruling, 2026-11-13) |
-| A5 no history read beside a resume | M5 | three unit cases, in main's order of words | T4 (CI's mini) |
+| A5 no history read beside a resume | M5 | the ticket's three cases, in `src/renderer/src/lane-b/transcript-hold.test.tsx`: a cold mount, “a first read with nothing held” › “waits from the roster’s up for the settled word of its generation, and a pane mounted after it reads at once” and “reads at the backstop when no word comes”; an idle tab, “a whole key whose stream comes back idle is read again once, staged”; a return nothing subscribes after, “whose hydration failed is read again when nothing resubscribes: at the backstop after up, with no word”. The four ordered tests of the word, in main's order of words: `src/main/lane-b/remote.test.ts`, “the settled word” › “holds the word through a transient refusal of the record and its retry, the record, its subscription, and says it after that subscription’s answer”, “says nothing between a record read that succeeds and its subscription, and the word after the answer”, “holds the next generation’s word for a subscription kept across a loss until its `subbed`, and says it once”, “says it at `up` when the machine has no lane at all, and a round that had not settled says nothing at `down`”. The scene's reader: `test/support/remote-wake.test.ts`, “the reads beside a resume” | T4 (CI's mini) |
 | A6 a failed first read heals | M3 | retry at ready, the 15 s line, a later ready | T2, by restarting the engine host under a scratch home |
-| A7 a remote row reads Working | M5 | the one reader's cases | T5 |
+| A7 a remote row reads Working | M5 | the one reader's cases: `src/renderer/src/sessions/listed-state.test.ts`, “listedStateOf and isWorking” (five cases, a private session's and one with no listing entry among them); the word: `src/renderer/src/lane-b/live-word.test.ts`, “the live word” (six cases) | T5 |
 | A8 fork on another machine | M2, M4 | every refusal at the endpoint; no prompt on an owned machine; the menu, the edit's Fork | T2 (the acts' scene); T5 for "no Touch ID sheet" |
 | A9 archive and unarchive | M1, M4 | the rows; the cut of the archived read; the project-wide act stays local; the listing withdrawn at an archive (M1's listing test) | T2; T5 for "every other device's within a few seconds" |
 | A10 rename | M1, M4 | the row; the dialog from a listing; the listing's title after a rename (M1's listing test) | T2; T5 for the other machine's own window |
@@ -524,7 +524,7 @@ The acceptance is the section's A1 to A15, as written there. An executor proves 
 | A12 the sheet names the machine | M2 | the message and the detail for each action of S-13's table | T5: Touch ID's own prompt, a person at the Mac |
 | A13 UC-7 holds by test | M1, M2, M4 | `test/lane-b/offer-coverage.test.ts` and the renderer coverage test | — |
 | A14 an older machine says so | M1, M4 | a peer without the capability is sent nothing; the four controls' sentence | T6 |
-| A15 the measurement can be made | M5 | the three lines' text, unit | T7 reads them |
+| A15 the measurement can be made | M5 | the three lines' text: `src/main/lane-b/remote-history.test.ts`, “the timing line” (three cases, one per path); `src/main/lane-b/remote.test.ts`, “the timing lines” › “logs a remote tab’s open once: the link up, its record, its history asked and its first rows, each from the open” and “logs the chooser’s two reads of a machine, started together, as one line once both answered, and a lone read not at all” | T7 reads them |
 
 ## Checks an executor cannot run
 
