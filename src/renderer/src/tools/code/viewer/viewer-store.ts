@@ -224,12 +224,18 @@ const sameSource = (a: ArtifactRead | null, b: ArtifactRead | null) => a?.artifa
 // first chunk's answer.
 type LoadedFile = Pick<ViewerEntry, 'kind' | 'mime' | 'encoding' | 'bytes' | 'text' | 'base64' | 'loaded' | 'complete' | 'hash' | 'named'> & { utf8: boolean | null };
 
-// U6c (M3 decision 3): an unhashed read that found what the entry shows, so a revisit of an image or an external kind (or
-// of a named head, which a revisit re-reads too) does not flash Updated over a file that did not change. A watched head
-// keeps today's rule: its re-read follows an event, and lands.
-const sameUnhashed = (entry: ViewerEntry, read: LoadedFile) =>
+// What made a load: an event (`files.changed`, or one left for the next showing), or the person asking again (U6c's
+// `revisit`, or showing a failed or named tab again).
+type LoadCause = 'event' | 'revisit';
+
+// U6c (M3 decision 3; Decision Log 15 b, 16): an unhashed read that found what the entry shows, so a revisit of an image
+// or an external kind (or of a named head, which a revisit re-reads too) does not flash Updated over a file that did not
+// change. An image's and a head's bytes are compared; an external kind is read for its size and type alone, which two
+// different files can share, so it is taken as unchanged only on a revisit: after an event it lands, as before. A watched
+// head keeps today's rule: its re-read follows an event, and lands.
+const sameUnhashed = (entry: ViewerEntry, read: LoadedFile, cause: LoadCause) =>
   read.hash === null &&
-  (read.kind === 'image' || read.kind === 'external' || (read.kind === 'head' && read.named)) &&
+  (read.kind === 'image' || (read.kind === 'external' && cause === 'revisit') || (read.kind === 'head' && read.named)) &&
   read.kind === entry.kind && read.mime === entry.mime && read.encoding === entry.encoding && read.bytes === entry.bytes &&
   read.loaded === entry.loaded && read.complete === entry.complete && read.text === entry.text && read.base64 === entry.base64;
 
@@ -244,7 +250,7 @@ export function createViewerStore(client: MawsBridge) {
   const incarnations = new Map<string, number>();
   let lastIncarnation = 0;
   const mounted = new Map<string, number>();
-  const stale = new Set<string>();
+  const stale = new Map<string, LoadCause>(); // tabs to read at their next mount, and why (an event's reason wins)
   const used = new Map<string, number>();
   let clock = 0;
   let unsubscribe: (() => void) | null = null;
@@ -328,7 +334,7 @@ export function createViewerStore(client: MawsBridge) {
     // nor the theirs already shown becomes theirs, when it is a text the editor could take; the baseline itself
     // withdraws a theirs shown earlier. U6c (M3 decision 2): `named` is the read's, also when it lands nothing else, and
     // a named entry is never editable; a read of the same bytes whose `named` differs sets editable again from the read.
-    const commitChange = (tabId: string, read: LoadedFile) => {
+    const commitChange = (tabId: string, read: LoadedFile, cause: LoadCause) => {
       const entry = get().entries.get(tabId);
       if (!entry) return;
       const named = read.named;
@@ -352,7 +358,7 @@ export function createViewerStore(client: MawsBridge) {
         if (!settledAlready) patch(tabId, unsavedReady);
         return;
       }
-      if ((read.hash !== null && read.hash === entry.hash) || sameUnhashed(entry, read)) {
+      if ((read.hash !== null && read.hash === entry.hash) || sameUnhashed(entry, read, cause)) {
         if (!settledAlready) patch(tabId, ready);
         return;
       }
@@ -366,7 +372,7 @@ export function createViewerStore(client: MawsBridge) {
     // E5: every read of a text the editor could take asks for the file's hash; a continuation answering another hash
     // than the first chunk's means the file changed mid-load, and the load ends there (an open load shows what it has,
     // read-only; a change load lands nothing): the change's own `files.changed` re-reads it.
-    const loadOnce = async (tabId: string, reason: 'open' | 'change') => {
+    const loadOnce = async (tabId: string, reason: 'open' | 'change', cause: LoadCause) => {
       const entry = get().entries.get(tabId);
       if (!entry) return;
       const generation = ++lastGeneration;
@@ -396,7 +402,7 @@ export function createViewerStore(client: MawsBridge) {
       const opened = { status: 'ready' as const, error: null, removed: false, loadingMore: false, epoch: (get().entries.get(tabId)?.epoch ?? 0) + 1, dirty: false, theirs: null, diskUnusable: null, saveError: null };
       const commit = ({ utf8, ...loaded }: LoadedFile) =>
         reason === 'change'
-          ? commitChange(tabId, { ...loaded, utf8 })
+          ? commitChange(tabId, { ...loaded, utf8 }, cause)
           : patch(tabId, { ...opened, ...loaded, editable: !loaded.named && !entry.readOnly && isEditable({ ...loaded, utf8 }) });
       // A markdown file opened at a line is shown as its source, where the line exists.
       const sourceView = kind === 'markdown' && get().entries.get(tabId)?.pendingJump != null ? true : undefined;
@@ -444,19 +450,19 @@ export function createViewerStore(client: MawsBridge) {
     // incarnation it was issued for. An e2e waiting out an own save's re-reads needs both: one write can raise two
     // events and so two overlapping loads, and the older one's completion moves `loads` while the newer is in flight
     // (the router answers reads independently, so no later read is a barrier for an earlier one).
-    const load = async (tabId: string, reason: 'open' | 'change') => {
+    const load = async (tabId: string, reason: 'open' | 'change', cause: LoadCause = 'event') => {
       const incarnation = incarnations.get(tabId);
       const issued = get().entries.get(tabId);
       if (!issued) return;
       patch(tabId, { pending: issued.pending + 1 });
-      await loadOnce(tabId, reason);
+      await loadOnce(tabId, reason, cause);
       const entry = get().entries.get(tabId);
       if (entry && incarnations.get(tabId) === incarnation) patch(tabId, { loads: entry.loads + 1, pending: entry.pending - 1 });
     };
 
     const refresh = (tabId: string) => {
       if (mounted.get(tabId)) void load(tabId, 'change');
-      else stale.add(tabId); // read when next shown
+      else stale.set(tabId, 'event'); // read when next shown
     };
 
     // E5: the editor's document as the file's text, or undefined when no code view ever showed the tab.
@@ -500,8 +506,12 @@ export function createViewerStore(client: MawsBridge) {
         kind: kindOf({ name: entry.path, mime: read.mime, bytes: read.bytes, encoding: read.encoding }), mime: read.mime, encoding: read.encoding, bytes: read.bytes,
         text: read.content, base64: null, loaded: read.length, complete: !read.truncated, hash: read.hash, utf8: read.utf8, named: read.named === true,
       };
-      if (file.hash !== null && file.hash === get().entries.get(tabId)?.hash) {
-        patch(tabId, { saving: false, theirs: null, diskUnusable: null });
+      // U6c (Decision Log 15 e): the answer's `named` is the entry's, the document standing: a file named now is no longer
+      // writable, so no later save reaches the service with it.
+      const shown = get().entries.get(tabId)!;
+      const naming = file.named !== shown.named ? { named: file.named, editable: !file.named && shown.editable } : {};
+      if (file.hash !== null && file.hash === shown.hash) {
+        patch(tabId, { saving: false, theirs: null, diskUnusable: null, ...naming });
         return true;
       }
       // A file that is no longer a text the editor could take (grown past its cap, binary, not UTF-8) is not offered;
@@ -509,8 +519,8 @@ export function createViewerStore(client: MawsBridge) {
       patch(
         tabId,
         isEditable(file)
-          ? { saving: false, theirs: { text: file.text, hash: file.hash!, view: 'merge' }, diskUnusable: null }
-          : { saving: false, saveError: EDITOR_COPY.conflictOnSave, theirs: null, diskUnusable: unusableReason(file) },
+          ? { saving: false, theirs: { text: file.text, hash: file.hash!, view: 'merge' }, diskUnusable: null, ...naming }
+          : { saving: false, saveError: EDITOR_COPY.conflictOnSave, theirs: null, diskUnusable: unusableReason(file), ...naming },
       );
       return true;
     };
@@ -558,7 +568,9 @@ export function createViewerStore(client: MawsBridge) {
         } else {
           if (line !== entry.line) patch(tabId, { line, pendingJump: line, ...(line !== null && entry.kind === 'markdown' ? { sourceView: true } : {}) });
           // a re-read an event left for the next showing, or (U6c) a failed or named entry shown again
-          if (stale.delete(tabId) || revisitable(entry)) void load(tabId, reasonOf(entry));
+          const left = stale.get(tabId);
+          stale.delete(tabId);
+          if (left !== undefined || revisitable(entry)) void load(tabId, reasonOf(entry), left ?? 'revisit');
         }
         mounted.set(tabId, (mounted.get(tabId) ?? 0) + 1);
         prune();
@@ -697,8 +709,8 @@ export function createViewerStore(client: MawsBridge) {
       revisit(tabId, appSessionId) {
         const entry = get().entries.get(tabId);
         if (!entry || (appSessionId !== undefined && appSessionId !== entry.appSessionId) || !revisitable(entry)) return;
-        if (mounted.get(tabId)) void load(tabId, reasonOf(entry));
-        else stale.add(tabId); // read when next shown
+        if (mounted.get(tabId)) void load(tabId, reasonOf(entry), 'revisit');
+        else if (!stale.has(tabId)) stale.set(tabId, 'revisit'); // read when next shown; an event's re-read already waiting stays one
       },
 
       reset() {

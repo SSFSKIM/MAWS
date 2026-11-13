@@ -728,6 +728,19 @@ describe('a file the transcript names (U6c)', () => {
     expect(document.querySelector('[data-updated]')).toBeNull();
   });
 
+  it('W4: a PDF changed in place to the same size and type lands, with Updated, when an event says so', async () => {
+    const main = disk({ '/r/doc.pdf': '%PDF-1.4 one\n' });
+    const offs = [connectCodeEvents()];
+    show('/r/doc.pdf');
+    await screen.findByText('PDF files open outside MAWS');
+    const { epoch } = shown('/r/doc.pdf')!;
+    main.files['/r/doc.pdf'] = '%PDF-1.4 two\n'; // other bytes, the same length: the external read sees size and type alone
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: '/r/doc.pdf', kind: 'changed' }));
+    await waitFor(() => expect(shown('/r/doc.pdf')).toMatchObject({ updated: 1, epoch: epoch + 1 }));
+    expect(document.querySelector('[data-updated]')?.textContent).toBe('Updated');
+    offs.forEach((off) => off());
+  });
+
   it('W5: a named file whose later read is refused shows the refusal and none of its content', async () => {
     const main = disk({ [OUT]: 'was named\n' }, [OUT]);
     show();
