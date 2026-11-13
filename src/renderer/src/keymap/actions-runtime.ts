@@ -405,6 +405,18 @@ export function useCurrentRow(): RowKey | null {
   return session === null ? null : rowOrNone(rowOf(session, { projects, registry, records, listed, unstarted }, loaded, revision));
 }
 
+/** `sessionRow` of each session, as a hook (U13a: the place each session tab names, `main/tab-place.ts`). */
+export function useSessionRows(appSessionIds: readonly AppSessionId[]): (RowKey | null | undefined)[] {
+  const loaded = useMachines((s) => s.loaded);
+  const projects = useSessions((s) => s.projects);
+  const registry = useSessions((s) => s.registry);
+  const records = useSessions((s) => s.records);
+  const listed = useSessions((s) => s.listed);
+  const unstarted = useSessions((s) => s.unstarted);
+  const revision = useTitleRevision((s) => s.n);
+  return appSessionIds.map((id) => rowOf(id, { projects, registry, records, listed, unstarted }, loaded, revision));
+}
+
 // New chat's preselection (2026-10-01): the current project's folder on this Mac, unless it is hidden from the sidebar
 // (W11). None for a machine's row, a project with no folder here or no current project (U13a: New chat's place, which
 // may then be another machine's).

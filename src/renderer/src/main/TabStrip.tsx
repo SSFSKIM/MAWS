@@ -4,8 +4,8 @@
 // (`application/x-maws-tab`) moves to the pointer's position, computed against the tabs' midpoints, and a sidebar row
 // (`application/x-maws-session`) opens its session there; P4-B3 (X38): a panel record (`application/x-maws-panel-tab`)
 // moves there as a main tab, its insertion line labelled "Move to tab". Under a split the focused pane's strip carries an
-// accent inset. W12 (I3): the strips show the current project's tab set; P3-F wave S (F17, the owner's obs 8): its name
-// is the title bar's project chip (app/Toolbar.tsx), so the crowded strip carries tabs only.
+// accent inset. UX wave U13a: one strip for every project and machine; in a strip that mixes places each session tab
+// names its own (`tab-place.ts`), here and in the All tabs menu.
 import { DropdownMenu } from 'radix-ui';
 import type { TabRef } from '@shared/ipc/schema/layout';
 import { Icon, IconButton } from '../app/IconButton';
@@ -17,7 +17,8 @@ import { dragAccepted, dropPanelRecord, endDrag, moveMainTab, PANEL_TAB_DRAG_TYP
 import { useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
 import { TRANSFER_COPY } from '../tools/artifacts/copy'; // P4-B3
-import { Tab, useTabLabel, TAB_DRAG_TYPE } from './Tab';
+import { Tab, tabName, useTabLabel, TAB_DRAG_TYPE } from './Tab';
+import { useStripPlaces } from './tab-place';
 import { useKeyChord } from '../keymap/useKeyChord';
 import { focusPaneElement } from './pane-dom';
 
@@ -50,6 +51,7 @@ const dropTab = (id: string, pane: Pane, index: number) => moveMainTab(id, pane,
 export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean; idPrefix: string }) {
   const state = useLayout((s) => currentSet(s.main).panes[pane]);
   const focused = useLayout((s) => currentSet(s.main).focusedPane === pane);
+  const places = useStripPlaces();
   const strip = useRef<HTMLDivElement>(null);
   // A strip portaled into the window chrome is outside its pane's native DOM. Own Ctrl+Tab here as well as in the pane.
   const cycle = (delta: 1 | -1) => {
@@ -173,6 +175,7 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
             pane={pane}
             domId={`${idPrefix}-tab-${index}`}
             active={tab.id === state.activeTabId}
+            place={places?.get(tab.id) ?? null}
             stop={tab.id === stop}
             onKeyDown={onTabKeyDown(index)}
           />
@@ -191,7 +194,7 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
         <DropdownMenu.Trigger asChild><IconButton label="All tabs" className="self-center"><Icon><path d="m4 6 4 4 4-4" /></Icon></IconButton></DropdownMenu.Trigger>
         <DropdownMenu.Portal><DropdownMenu.Content align="end" sideOffset={4} className="z-50 max-h-80 min-w-48 max-w-96 overflow-y-auto rounded-md border border-border-strong bg-bg-overlay p-1 text-fg shadow-float">
           <DropdownMenu.RadioGroup value={activeTabId ?? ''} onValueChange={(id) => { useLayout.getState().focusPane(pane); useLayout.getState().activateTab(id); }}>
-            {tabs.map((tab) => <OverflowTab key={tab.id} tab={tab} />)}
+            {tabs.map((tab) => <OverflowTab key={tab.id} tab={tab} place={places?.get(tab.id) ?? null} />)}
           </DropdownMenu.RadioGroup>
         </DropdownMenu.Content></DropdownMenu.Portal>
       </DropdownMenu.Root>}
@@ -222,9 +225,11 @@ function NewSessionButton({ pane }: { pane: Pane }) {
   );
 }
 
-function OverflowTab({ tab }: { tab: TabRef }) {
+// A line of the All tabs menu: the tab's full name, its place included while the strip draws places (U13a).
+function OverflowTab({ tab, place }: { tab: TabRef; place: string | null }) {
   const label = useTabLabel(tab);
-  return <DropdownMenu.RadioItem value={tab.id} className="flex min-h-8 items-center gap-2 rounded-sm px-2 py-1 text-ui outline-none data-highlighted:bg-bg-hover data-[state=checked]:bg-bg-active">
-    <span>{label.title}{label.secondary && <small className="ml-2 text-fg-muted">{label.secondary}</small>}</span>
+  const after = place ?? label.secondary;
+  return <DropdownMenu.RadioItem value={tab.id} aria-label={tabName(label, place)} className="flex min-h-8 items-center gap-2 rounded-sm px-2 py-1 text-ui outline-none data-highlighted:bg-bg-hover data-[state=checked]:bg-bg-active">
+    <span>{label.title}{after && <small className="ml-2 text-fg-muted">{after}</small>}</span>
   </DropdownMenu.RadioItem>;
 }
