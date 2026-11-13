@@ -933,7 +933,7 @@ test('2d. a pass on a page (A4): Escape keeps the text in the card; a second pic
 
       // the side surface away and back: the card went with its pane and its comments stayed; the chip under the page
       // counts them and opens the card on the newest, with its text
-      await closeSurface(s.page, 'Browser');
+      await hideSurface(s.page, 'Browser');
       await expect(t.panel, 'the Browser surface is closed').toHaveCount(0);
       await openBrowser(s);
       await expectOnPane(s, t.tabId, paneIn(t.panel), 'panel');

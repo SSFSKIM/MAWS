@@ -24,7 +24,7 @@
 // Runs under `pnpm e2e:deliverables` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list); each launch
 // passes MAWS_HARNESS=0, so the window is the product app.
 import { addressed } from './support/address';
-import { closeSurface, openSurface, surface, surfaceRow, mainTabs as shellMainTabs } from './support/shell';
+import { hideSurface, openSurface, surface, surfaceRow, mainTabs as shellMainTabs } from './support/shell';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -1154,7 +1154,7 @@ test('a pass on an HTML page: Escape keeps the text in the card, a second pick l
 
     // the side surface away and back: the card went with its viewer and its comments stayed; at the page's top right the
     // chip counts them and opens the card on the newest, with its text
-    await closeSurface(s.page, 'Artifacts');
+    await hideSurface(s.page, 'Artifacts');
     await expect(viewer, 'the surface closed, its viewer with it').toHaveCount(0);
     await openSurface(s.page, 'Artifacts');
     await expect(viewer, 'the surface back on the page').toHaveAttribute('data-artifact-viewer', record.id);
