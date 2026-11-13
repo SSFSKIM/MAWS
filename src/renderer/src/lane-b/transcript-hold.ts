@@ -1,13 +1,14 @@
 // A remote lane B session's tab holds its transcript's key while it is mounted (P5 O15 M2b, docs/doperpowers/plans/
-// 2026-11-10-p5-o15-recomposition.md, Decision Log 39), so the pane the offline placeholder replaces (P5 Decision Log
-// 28, T5) leaves the key attached, its subscription live through the link's loss. At `up` the pane joins that
+// 2026-11-10-p5-o15-recomposition.md, Decision Log 39), so a pane unmounted while its tab stays (the floating card taking
+// the session; the offline placeholder until the UX wave's U9 M3, which keeps a pane with something to keep mounted
+// through an outage) leaves the key attached, its subscription live through the link's loss. At `up` the pane joins that
 // attachment and nothing hydrates: a `replay` opening delivers what the loss held back into the subscription, and the
 // whole-launch read that contended with B's stream openings is not made. The armed gap (a `missing` or `snapshot`
 // opening, a relaunch) and a return whose stream first says neither `live` nor `gap` (`idle`, `ended`: B lost or ended
 // the launch meanwhile) re-read, staged, in the source (../transcript/source/ipc.ts).
 //
 // - The hold keeps an attachment and never makes one: it joins only what a pane attached while the roster says the
-//   machine is `up`. A tab that has only shown the placeholder (restored at launch, opened while offline) holds nothing,
+//   machine is `up`. A tab that has only shown the phase's words (restored at launch, opened while offline) holds nothing,
 //   and its pane hydrates at `up` as before.
 // - A held key not whole at the return (its hydration failed, or was still out at the loss and fails) is read again,
 //   as a remount used to: once the machine is `up` and main has said the stream's next answer since its word of the

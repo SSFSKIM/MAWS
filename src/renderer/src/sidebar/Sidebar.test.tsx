@@ -1353,6 +1353,25 @@ describe('the sidebar across machines', () => {
     expect(row('MAWS').dataset.offline).toBeUndefined();
   });
 
+  // The UX wave, U9 (O-39, A2): a machine whose link connects, or reconnects within the minute an act is held, is not
+  // greyed: its rows keep their @name chip, and its project rows read as live
+  it('greys nothing of a machine that connects or reconnects, its rows keeping their @name chip', () => {
+    fill();
+    act(() => useLayout.getState().setSidebar({ expandedProjects: ['repo:maws', `folder:${OTHER_MACHINE}:notes`] as ProjectKey[] }));
+    const here = { ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-10-27T10:00:00Z', generation: 0 } as const;
+    for (const studio of [
+      { state: 'connecting', since: new Date().toISOString(), generation: 0 },
+      { state: 'down', since: new Date().toISOString(), generation: 1 },
+    ] as const) {
+      act(() => useMachines.getState().applyRoster([here, { ref: OTHER_MACHINE, name: 'Studio', local: false, ...studio }]));
+      render(<Sidebar />);
+      expect(projectRows(), studio.state).toEqual(['MAWS', 'notes', 'This Mac', 'Studio']);
+      expect(row('Studio build').dataset.offline).toBeUndefined();
+      expect(chip('Studio build')).toBe('@Studio');
+      cleanup();
+    }
+  });
+
   it('marks Needs you rows with their machine, greys them in place while it is offline, and names no project by its machine', () => {
     fill();
     const waits = [studio('there'), studio('home'), at('home-here')] as AppSessionId[];

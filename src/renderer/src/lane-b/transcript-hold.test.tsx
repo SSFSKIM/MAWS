@@ -1,6 +1,7 @@
 // The tab's hold on a remote lane B session's transcript (P5 O15 M2b, Decision Log 39; ./transcript-hold.ts): over the
 // real stores and a session source on a fake X2 client, the pane's own attach and detach played as its mount and its
-// unmount at the offline placeholder.
+// unmount while its tab stays (the floating card taking the session; before the UX wave's U9 M3, the offline placeholder,
+// which no longer replaces a pane that has something to keep).
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, EventId } from '@shared/graph/ids';
 import type { CommandName, CommandResult, EventName, EventPayload, EventSource, MawsBridge } from '@shared/ipc/schema';
@@ -118,7 +119,7 @@ afterEach(() => {
   resetRemoteLaneBStore();
 });
 
-// Hydrated with the link up, the tab mounted; then the machine goes offline: the placeholder unmounts the pane.
+// Hydrated with the link up, the tab mounted; then the machine goes offline and the pane unmounts while the tab stays.
 async function heldThroughALoss() {
   roster('up');
   const first = pane();
@@ -155,7 +156,7 @@ describe('the hold', () => {
 
   it('keeps the key the pane attached across offline: at up the pane joins it, and nothing is read again', async () => {
     const hold = await heldThroughALoss();
-    expect(attached(), 'held through the placeholder').toBe(true);
+    expect(attached(), 'held while the pane is unmounted').toBe(true);
     roster('up');
     const again = pane();
     stream('live', 'replay');
@@ -168,7 +169,25 @@ describe('the hold', () => {
     hold.unmount();
   });
 
-  it('closing the tab releases it, from the placeholder or the pane', async () => {
+  // The UX wave, U9 (M3; #563): a pane that has something to keep stays mounted through the outage, its attachment its own
+  it('reads nothing again at up for a pane kept mounted through the loss', async () => {
+    roster('up');
+    const shown = pane();
+    const hold = tab();
+    answered(0);
+    await shown.hydrated;
+    lose();
+    roster('up');
+    stream('live', 'replay');
+    await settle();
+    expect(reads(), 'one read in all').toHaveLength(1);
+    expect(entry().phase).toBe('live');
+    shown.unmount();
+    hold.unmount();
+    expect(attached()).toBe(false);
+  });
+
+  it('closing the tab releases it, with its pane unmounted or mounted', async () => {
     const offline = await heldThroughALoss();
     offline.unmount();
     expect(attached()).toBe(false);
@@ -181,7 +200,7 @@ describe('the hold', () => {
     expect(attached()).toBe(false);
   });
 
-  it('never creates an attachment: a tab that has only shown the placeholder holds nothing, and its pane hydrates at up as today', async () => {
+  it('never creates an attachment: a tab that has only shown the phase’s words holds nothing, and its pane hydrates at up as today', async () => {
     lose();
     const hold = tab();
     expect(attached()).toBe(false);

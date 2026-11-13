@@ -777,6 +777,22 @@ describe('remote lane B over a real link', { timeout: 30_000 }, () => {
     expect(l.host.runs).toHaveLength(1);
   });
 
+  // The UX wave, U9 (M3; R4): a Stop that went out on a channel that then stalled is not answered offline: it may have run,
+  // so it ends with the pending sentence UC-7.5 keeps, never "Not stopped: mini is offline"
+  it('answers a Stop the channel carried and lost with the pending sentence, never as offline', async () => {
+    const l = await lab({ adapter: { sendPendingMs: 500 } });
+    const s = l.host.add('app-1');
+    l.place('app-1');
+    await opened(l.a, 'app-1', s.launchId);
+    l.host.handlers.set('session.interrupt', () => ({ stillQueued: [], cancelled: [] }));
+    l.a.carriers.at(-1)!.tap.mute = true; // nothing the endpoint says reaches the link: no ack, no done
+    const stopping = l.a.route('session.interrupt', { appSessionId: 'app-1', cancelEngineQueued: false, holdEngineQueued: true });
+    await until(() => l.host.arrived.includes('session.interrupt'), 'the Stop at the host');
+    l.a.direct.dead = true;
+    l.a.carriers.at(-1)!.carrier.close('dropped');
+    expect(await stopping).toEqual({ ok: false, error: { code: 'timeout', message: 'mini took the request but hasn’t confirmed it' } });
+  });
+
   it('answers a request with DX6’s digest over the pending request, which the host checks', async () => {
     const l = await lab();
     const s = l.host.add('app-1');
