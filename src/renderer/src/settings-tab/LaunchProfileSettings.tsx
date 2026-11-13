@@ -1,6 +1,6 @@
 // P4-A2 (settings version 17; P4 §4.2 "The per-session launch profile", the owner's ruling of 2026-10-21: one profile,
-// chosen here, never when a session starts): Settings › Engine, the launch profile every session MAWS launches runs
-// under (src/shared/engine/launch-profile.ts). Two rows beside the engine's other launch settings: the user's plugins,
+// chosen here, never when a session starts): Settings › Sessions (Engine's until U11a M9), the launch profile every
+// session MAWS launches runs under (src/shared/engine/launch-profile.ts). Two rows, first in the section: the user's plugins,
 // each with its switch (off keeps it out of MAWS's sessions), and the hooks (the user's or none); the output style is
 // always the user's (settings version 19, the owner's ruling of 2026-10-28). Each change writes the whole profile
 // through `settings.set` and reaches a session at its next launch. The plugins listed are the ones the user's settings
@@ -36,7 +36,7 @@ export function LaunchProfileSettings({ settings }: { settings: Settings }) {
   return (
     <>
       <Plugins profile={profile} disabled={busy} write={write} />
-      <Setting label={LAUNCH_PROFILE.hooks} note={LAUNCH_PROFILE.hooksNote}>
+      <Setting row="sessions.hooks">
         <Segment
           label={LAUNCH_PROFILE.hooks}
           value={profile.hooks}
@@ -61,7 +61,7 @@ function Plugins({ profile, disabled, write }: { profile: LaunchProfile; disable
     void write({ ...profile, plugins: { off: [...new Set(next)].sort() } });
   };
   return (
-    <Setting label={LAUNCH_PROFILE.plugins} note={LAUNCH_PROFILE.pluginsNote}>
+    <Setting row="sessions.plugins">
       {ids.map((id) => (
         <span key={id} className="flex min-w-0 basis-full items-center gap-2">
           <Switch checked={!off.has(id)} onChange={(on) => toggle(id, on)} label={LAUNCH_PROFILE.pluginOn(id)} disabled={disabled} />
