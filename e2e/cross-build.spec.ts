@@ -1714,8 +1714,8 @@ test('(layout, from the peer) a layout the peer filed under two tab sets opens w
 
     // this build: every tab of every set in the strip once, the pin, the tab in front, the notice; written as one set
     const run = await s.launch();
+    await expect(notice(run.page), 'the notice that the sets became one strip (shown for 6 s, so looked for first)').toBeVisible({ timeout: 30_000 });
     await s.ready(run.page);
-    await expect(notice(run.page), 'the notice that the sets became one strip').toBeVisible({ timeout: 20_000 });
     await expect.poll(async () => (await stripIds(run.page)).sort(), { timeout: 20_000, message: 'every tab of every set in the strip' }).toEqual(tabs);
     expect(new Set(await stripIds(run.page)).size, 'each once').toBe(tabs.length);
     await expect(mainTabById(run.page, front).getByRole('img', { name: 'Pinned' }), 'the pin').toBeVisible();

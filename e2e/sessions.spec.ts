@@ -901,14 +901,13 @@ test.describe('sessions', () => {
     expect(value(await invoke(page, 'session.intent.list', undefined)).intents, 'two New chats at the quit, one of them empty').toHaveLength(2);
     type Stored = { sets: Record<string, { panes: { tabs: { id: string; pinned: boolean }[]; activeTabId: string }[]; focusedPane: number; splitRatio: number }> };
     const stored = async (p: Page) => (value(await invoke(p, 'layout.get', { key: 'main.tabs' })).value as Stored).sets.none!;
-    let ratio = 0.5;
     await expect
       .poll(async () => {
         const set = await stored(page);
-        ratio = set.splitRatio;
         return [set.panes.map((pane) => pane.tabs.map((tab) => tab.id)), set.panes[0]!.activeTabId, set.focusedPane, set.splitRatio !== 0.5];
       }, { message: 'the strip is written, the empty chat in it' })
       .toEqual([[[t1, chat, empty], [t2]], chat, 0, true]);
+    const divider = await resizer.getAttribute('aria-valuenow');
     await first.maws.app.close();
 
     const second = await launchCase({ fixtures: [], trusted: [repo.root], store, userData: first.maws.userData });
@@ -919,10 +918,10 @@ test.describe('sessions', () => {
     expect(await tabIdsOf(again, 'Right pane tabs')).toEqual([t2]);
     await expect(mainTabById(again, t1).getByRole('img', { name: 'Pinned' }), 'the pin is back').toBeVisible();
     await expect(activeMainTab(again), 'the same tab in front').toHaveAttribute('data-tab-id', chat);
-    await expect(editor(again), 'the draft is back in the editor').toHaveText('half a thought');
-    const set = await stored(again);
-    expect(set.splitRatio, 'the split’s ratio').toBe(ratio);
-    expect(set.panes[0]!.tabs.map((tab) => [tab.id, tab.pinned])).toEqual([[t1, true], [chat, false]]);
+    // two panes, two composers: the chat's is the one holding the draft
+    await expect(editor(again).filter({ hasText: 'half a thought' }), 'the draft is back in the chat’s editor').toBeVisible();
+    await expect(mainTabById(again, chat).getByRole('img', { name: 'Pinned' }), 'the chat unpinned').toHaveCount(0);
+    await expect(again.locator('[data-region="main"]').getByRole('separator', { name: 'Resize panes' }), 'the split’s ratio, as the divider draws it').toHaveAttribute('aria-valuenow', divider!);
     const intents = value(await invoke(again, 'session.intent.list', undefined)).intents.map((i) => i.appSessionId);
     expect(intents, 'the chat with a draft keeps its intent; the empty chat’s was discarded at the start').toEqual([id]);
     expect(second.maws.consoleErrors()).toEqual([]);
