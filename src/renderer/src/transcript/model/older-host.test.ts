@@ -255,7 +255,9 @@ describe('a history read through an older host’s transcript backfill', () => {
       const ended = noticesOf(rows, taskId).filter((row) => row.kind === 'notice' && row.outcome !== null);
       // the stall is no end to this branch's reader (an event, its own line with no outcome); the older host told it as one
       expect(ended, taskId).toHaveLength(taskId === STALL ? 0 : 1);
-      expect(noticesOf(rows, taskId).length, taskId).toBeGreaterThan(0);
+      // the stall is exactly one line, its event line with no outcome; a monitor keeps its event lines beside its one end
+      if (taskId === STALL) expect(noticesOf(rows, taskId), taskId).toHaveLength(1);
+      else expect(noticesOf(rows, taskId).length, taskId).toBeGreaterThan(0);
     }
   });
 });
