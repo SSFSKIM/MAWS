@@ -22,7 +22,7 @@ import { phaseOf, phaseWords, usePhaseClock } from '../app/machine-mark';
 import { useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { useIsOverRl2 } from '../lane-b/remote-session';
 import { useMachines } from '../stores/machines';
-import { machineName, machineOfRow, rowName, rowOfSession, rowProjects, selectOrgIndex, type RowKey } from '../stores/org-projects';
+import { machineName, machineOfRow, rowName, rowOfSession, rowProjects, selectOrgIndex, type OrgIndex, type RowKey } from '../stores/org-projects';
 import { useSessions } from '../stores/sessions';
 import { isManagedWorktree } from './ArchiveDialog';
 import { cleanupTargetOf } from './CleanupDialog';
@@ -41,13 +41,7 @@ export function ArchivedSessionsDialog({ projectId, machine: named }: { projectI
   const now = usePhaseClock();
   const project = projectId === null ? undefined : projects.get(projectId);
   const row: RowKey = projectId === null ? machineKey(named ?? local) : project ? index.keyOf(project) : machineKey(machineOf(projectId));
-  // the machines the row's sessions are on: a machine's row its own, an org project's those its projects are on; each asked
-  // as `askOf` says, or said as a line
-  const own = machineOfRow(row);
-  const on = own !== null ? [own] : [...new Set(rowProjects(index, row, () => true).map((p) => machineOf(p.id)))].sort();
-  const plans = on.map((machine) => askOf(machine, local, rl2.has(machine), machines, now));
-  const readOn = on.filter((_, i) => plans[i] === 'ask').join(' ');
-  const lines = plans.filter((plan): plan is { line: string } => typeof plan === 'object').map((plan) => plan.line);
+  const { readOn, lines } = readsOf(index, row, local, rl2, machines, now);
   const title = rowName(index, row, (m) => machineName(machines, m, local)) ?? project?.name ?? '';
   const [lists, setLists] = useState<SessionRecord[][] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -129,6 +123,20 @@ function ArchivedRow({ record: r, onUnarchive }: { record: SessionRecord; onUnar
       </button>
     </li>
   );
+}
+
+/**
+ * The machines a row's archived sessions are read on, as one string for the effect, and the line said for each machine
+ * not asked: a machine's row its own, an org project's those its projects are on (the UX wave, U9: `askOf`).
+ */
+function readsOf(index: OrgIndex, row: RowKey, local: MachineRef, rl2: ReadonlySet<MachineRef>, machines: ReadonlyMap<MachineRef, MachineState>, now: number): { readOn: string; lines: string[] } {
+  const own = machineOfRow(row);
+  const on = own !== null ? [own] : [...new Set(rowProjects(index, row, () => true).map((p) => machineOf(p.id)))].sort();
+  const plans = on.map((machine) => askOf(machine, local, rl2.has(machine), machines, now));
+  return {
+    readOn: on.filter((_, i) => plans[i] === 'ask').join(' '),
+    lines: plans.flatMap((plan) => (plan !== null && plan !== 'ask' ? [plan.line] : [])),
+  };
 }
 
 /**
