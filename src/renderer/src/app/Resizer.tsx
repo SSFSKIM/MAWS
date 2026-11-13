@@ -75,7 +75,9 @@ export function Resizer({
   // A separator removed mid-drag (its group closed) takes its drag off the count. `drag` is set exactly while this
   // separator's one drag is counted, so it never takes off more than it added.
   useEffect(() => () => {
-    if (drag.current) dragEnded();
+    if (!drag.current) return;
+    drag.current = null; // as `end` does: a late end for this pointer then finds no drag of its own
+    dragEnded();
   }, []);
   const vertical = orientation === 'vertical';
   const coordinate = (event: PointerEvent) => (vertical ? event.clientX : event.clientY);

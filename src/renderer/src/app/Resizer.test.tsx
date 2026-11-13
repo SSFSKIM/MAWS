@@ -197,6 +197,21 @@ describe('resizer', () => {
     unmount();
   });
 
+  // React delivers no event to an unmounted node, so a late end is the separator's own handler, taken from the node's
+  // React props before the unmount and called after it
+  it('a late end from a separator already unmounted takes nothing off', () => {
+    const { rerender } = render(<Two />);
+    press('A', 1);
+    press('B', 2);
+    const a = screen.getByRole('separator', { name: 'A' });
+    const props = Object.entries(a).find(([key]) => key.startsWith('__reactProps$'))![1] as { onPointerUp(event: unknown): void };
+    rerender(<Two a={false} />);
+    act(() => props.onPointerUp({ pointerId: 1, currentTarget: a }));
+    expect(marked(), 'B still drags').toBe(true);
+    up('B', 2);
+    expect(marked()).toBe(false);
+  });
+
   it('a separator takes off no more than it added: a second end changes nothing', () => {
     render(<Two />);
     press('A', 1);
