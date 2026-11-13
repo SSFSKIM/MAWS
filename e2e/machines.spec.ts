@@ -281,7 +281,8 @@ test('two machines in one sidebar by org project; one leaving reads reconnecting
       await expect(projectRowByKey(a.page, bMachineKey)).toHaveAttribute('aria-label', B_NAME);
       await expect(sessionRowIn(a.page, sharedKey, bSharedAt).locator('[data-machine-chip]')).toHaveText(`@${B_NAME}`);
       await expect(tab, 'B’s open tab stays').toBeVisible();
-      await expect(tab.locator('span.text-fg-faint'), 'its title not in the disabled token').toHaveCount(0);
+      // the title's own element: the tab's status glyph (an idle one) is in the faint tone whatever the link does
+      await expect(tab.getByText('B’s shared session', { exact: true }), 'its title not in the disabled token').not.toHaveClass(/\btext-fg-faint\b/);
       expect(await rowsOfMachine(a.page, aRef), 'A’s rows, statuses and Needs-you entries are as they were').toEqual(aBefore);
 
       // Past the minute, offline: B's rows and tab grey and the line says so, over the same pane

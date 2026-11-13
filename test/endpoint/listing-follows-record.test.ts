@@ -50,6 +50,8 @@ afterEach(async () => {
 const REPORTED = 'Studio scratch';
 /** The title the owner gives the session in the machine's own window. */
 const RENAMED = 'Loft notes';
+/** The session's first prompt, which a record with no title of its own shows in a title's place (source `none`). */
+const FIRST_PROMPT = 'Say hello from the machine.';
 /** How long a listing is given to follow its record. */
 const FOLLOWS_WITHIN_MS = 3000;
 
@@ -60,7 +62,7 @@ const WINDOW: ClientRef = { id: 'window-1' as ClientId, onGone: () => () => {} }
  * The machine: its endpoint, the services' real index and session service behind the spine, one lane B session of
  * `@machine`'s shared with B at `view` and reported by sminos (with the project open on the log plane), and B's channel.
  */
-async function machine(): Promise<{ f: Fixture; h: SessionHarness; app: AppSessionId; b: Remote }> {
+async function machine(titled: { customTitle?: string | null } = {}): Promise<{ f: Fixture; h: SessionHarness; app: AppSessionId; b: Remote }> {
   const f = await startEndpoint(org, started);
   const h = await new SessionHarness().start();
   harnesses.push(h);
@@ -72,8 +74,8 @@ async function machine(): Promise<{ f: Fixture; h: SessionHarness; app: AppSessi
     for (const { name, payload } of entries) f.host.emitMachine(name, payload);
     return push(...entries);
   };
-  const record = h.index.sessions.upsertFromSummary(summary({ directory: h.work, customTitle: REPORTED })).record;
-  expect(record.title.text).toBe(REPORTED);
+  const record = h.index.sessions.upsertFromSummary(summary({ directory: h.work, customTitle: REPORTED, firstPrompt: FIRST_PROMPT, ...titled })).record;
+  if (titled.customTitle === undefined) expect(record.title.text).toBe(REPORTED);
   const engine = record.engineSessionId!;
   f.host.add(record.appId, engine); // the endpoint's engine host names the pair, so the member joins its app session
   f.records.set({ lane: 'B', session: engine, owners: ['@machine'], shares: [{ member: org.B, grade: 'view' }] }, record.appId);
@@ -143,6 +145,15 @@ describe('a machine’s listing follows its record, read by a remote reader with
 
     await windowAct(f, 'session.update', { appSessionId: app, patch: { archived: false } });
     await expect.poll(() => surfaces(f, b, app), { timeout: FOLLOWS_WITHIN_MS, interval: 100 }).toEqual({ channel: { title: REPORTED }, hub: { title: REPORTED } });
+  });
+
+  // The UX wave, U9's T2 (e2e/remote.spec.ts's first scene): a record that holds no title of its own, only its first
+  // prompt in a title's place (`source: 'none'`), names nothing, so the title sminos reports stands
+  it('keeps the reported title for a record whose only title is its first prompt', async () => {
+    const { f, h, app, b } = await machine({ customTitle: null });
+    expect(h.index.sessions.get(app)!.title).toEqual({ text: FIRST_PROMPT, source: 'none' });
+    await until(() => said(hubListing(f, app)) !== null, 'the session listed for the hub');
+    expect(await surfaces(f, b, app)).toEqual({ channel: { title: REPORTED }, hub: { title: REPORTED } });
   });
 
   it('re-issues the listing of a stopped session renamed in the machine’s own window with the record’s title', async () => {

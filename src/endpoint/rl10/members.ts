@@ -35,7 +35,7 @@
 // The UX wave (U9, M1's listing rule; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md): a lane B session's
 // listing follows the spine's record, which the member frame does not carry. A joined session whose record is archived
 // is withdrawn with the gone record, and listed again when it is unarchived; a record's title replaces the one sminos
-// reported. The record is read (`session.get`) when the session is first reported, and judged again at each
+// reported (one it holds as a title: its first prompt standing in for none does not). The record is read (`session.get`) when the session is first reported, and judged again at each
 // `session.changed` the spine says of it (`recordChanged`), so it holds alike for the listing the hub keeps and for the
 // one a channel's `endpoint.listings` signs afresh (`recordSays`). No listing field is added. Each read runs inside an
 // operation's hold, so the daemon does not collect over it.
@@ -114,10 +114,15 @@ export type MembersContext = {
   marks?: { read(): Marks | null; write(marks: Marks): void };
 };
 
-/** U9: what a lane B session's spine record says of its listing. `title` null: the record names none (the report's stands). */
+/**
+ * U9: what a lane B session's spine record says of its listing. `title` null: the record names none (the report's stands),
+ * which includes a record whose title is only its first prompt standing in (`source: 'none'`): a rename, the engine's
+ * generated title or a tool's is a title the record holds.
+ */
 export type RecordSays = { archived: boolean; title: string | null };
 const recordSaysOf = (record: Record<string, unknown>): RecordSays => {
-  const title = isObject(record.title) && isText(record.title.text) && record.title.text !== '' ? record.title.text : null;
+  const held = isObject(record.title) ? record.title : null;
+  const title = held !== null && held.source !== 'none' && isText(held.text) && held.text !== '' ? held.text : null;
   return { archived: record.archived === true, title };
 };
 
