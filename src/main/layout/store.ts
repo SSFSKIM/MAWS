@@ -129,10 +129,11 @@ function panelKeyAllowed(session: string, local: MachineRef, known: (appSessionI
   return machineOf(session) !== local || known(bareOf(session) as AppSessionId);
 }
 
-// `layout.get/set/list` for the renderer. `window.main` and `library.exportFolder` are main's own keys: listed (they exist
-// in the file), but never read or written across IPC. A session's own panel key is written only while the session exists (`known`), so a write
-// already on its way when the session was removed cannot bring the key back. P5 O6 M2: a null value deletes the key (the
-// renderer's migration of a bare panel key to its address), whatever main knows of the session.
+// `layout.get/set/list` for the renderer. `window.main` and `library.exportFolder` are main's own keys: listed (they
+// exist in the file), but never read or written across IPC. A session's own panel key is written only while the session
+// exists (`known`), so a write already on its way when the session was removed cannot bring the key back. P5 O6 M2: a
+// null value deletes the key (the renderer's migration of a bare panel key to its address), whatever main knows of the
+// session.
 export function registerLayoutHandlers(store: LayoutStore, known: (appSessionId: AppSessionId) => boolean, local: MachineRef): void {
   const renderersOnly = (key: LayoutKey) => {
     if (MAIN_KEYS.has(key)) throw new Error(`${key} is main's own layout key`);

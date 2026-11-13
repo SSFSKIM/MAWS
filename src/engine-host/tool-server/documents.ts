@@ -8,9 +8,9 @@
 //                      the same transaction, before A's service runs the adapter's hooks; `answering` posts the agent's
 //                      `reply` (UX wave U5; else "Edited this passage.") into the thread in the same transaction; the
 //                      session's presence names the blocks while the batch lands and drops them 4 s after (D11;
-//                      P3-F wave S F19, was 1.5 s). P4-A2 (X35): while
-//                      its input streams the batch is shown provisionally (`./provisional.ts`); the write's frame
-//                      announces the commit to that layer, and any other ending of the call drops it.
+//                      P3-F wave S F19, was 1.5 s). P4-A2 (X35): while its input streams the batch is shown
+//                      provisionally (`./provisional.ts`); the write's frame announces the commit to that layer, and
+//                      any other ending of the call drops it.
 //   artifact_comments  the threads, open (orphans included), resolved or all, with their messages.
 //   artifact_reply     a message into a thread as the session.
 //   artifact_resolve   resolve or reopen a thread as the session.
