@@ -349,6 +349,26 @@ function lineAt(text: string, start: number): Line {
   return { start, end, quote, opens, footnote, content, indent };
 }
 
+// After at most `max` of a quote's `>` markers at the start of a line: how many stood there, and the index after them.
+function quoteMarkers(text: string, start: number, end: number, max: number): { count: number; at: number } {
+  let at = start;
+  let count = 0;
+  while (count < max) {
+    let j = at;
+    while (j < end && j - at < 3 && text.charCodeAt(j) === 32) j += 1;
+    if (text.charCodeAt(j) !== 62) break;
+    count += 1;
+    at = j + 1;
+    if (isSpaceOrTab(text.charCodeAt(at))) at += 1;
+  }
+  return { count, at };
+}
+const columnsBetween = (text: string, from: number, to: number) => {
+  let columns = 0;
+  for (let i = from; i < to; i += 1) columns += text.charCodeAt(i) === 9 ? 4 : 1;
+  return columns;
+};
+
 // A fence's opening at `at`: three or more backticks (whose info has none) or tildes, or two or more dollars (math).
 function fenceAt(text: string, at: number, end: number): { marker: number; length: number } | null {
   const marker = text.charCodeAt(at);
@@ -413,7 +433,7 @@ interface Context {
 // (its parser has HTML switched off). Where the pass cannot tell (a list item's own indentation, an ordered item that
 // cannot interrupt a paragraph, a table under a paragraph), it takes the side that reads fewer links.
 function* blocksOf(text: string, contexts: Context[], defined: Set<string>): Generator<null, void, void> {
-  let fence: { marker: number; length: number; quote: number } | null = null;
+  let fence: { marker: number; length: number; quote: number; column: number } | null = null;
   let paragraph: { lines: number[]; quote: number; end: number; dropped: boolean } | null = null;
   let table: { quote: number } | null = null;
   // A footnote's definition, from its line to a line indented less than four columns after a blank one: the window
@@ -451,11 +471,23 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>): Gen
     if (line.footnote) footnote = true;
     else if (footnote && !blank && afterBlank && line.indent < 4) footnote = false;
     afterBlank = blank;
-    if (fence !== null && line.quote < fence.quote) fence = null; // its container closed
     if (fence !== null) {
-      if (line.indent < 4 && closesFence(text, line.content, line.end, fence)) fence = null;
-      start = next;
-      continue;
+      // Inside a fence a line is read for the fence's own quote markers and nothing else (a list marker there is code).
+      // A quote that ends closes the fence. A closing fence stands at the opening's column, up to three more: one less
+      // indented, in a list item, closes the item and opens a fence of its own, which this reads as the same code.
+      const quoted = quoteMarkers(text, start, line.end, fence.quote);
+      if (quoted.count < fence.quote) fence = null;
+      else {
+        let content = quoted.at;
+        let indent = 0;
+        while (content < line.end && isSpaceOrTab(text.charCodeAt(content))) {
+          indent += text.charCodeAt(content) === 9 ? 4 : 1;
+          content += 1;
+        }
+        if (indent >= fence.column && indent <= fence.column + 3 && closesFence(text, content, line.end, fence)) fence = null;
+        start = next;
+        continue;
+      }
     }
     if (skipBlank(text, line.content, line.end) >= line.end) {
       closeParagraph();
@@ -482,7 +514,7 @@ function* blocksOf(text: string, contexts: Context[], defined: Set<string>): Gen
     }
     if (opened !== null) {
       closeParagraph();
-      fence = { ...opened, quote: line.quote };
+      fence = { ...opened, quote: line.quote, column: columnsBetween(text, quoteMarkers(text, start, line.end, Infinity).at, line.content) };
     } else if (heading >= 0) {
       closeParagraph();
       if (!footnote) contexts.push({ start: heading, end: line.end });

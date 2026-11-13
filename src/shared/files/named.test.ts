@@ -85,6 +85,8 @@ describe('the link form: linkPaths', () => {
     '```\n[r](/work/out/report.md)\n```',
     '~~~\n[r](/work/out/report.md)\n~~~',
     '$$\n[r](/work/out/report.md)\n$$',
+    '```\n- ```\n[r](/work/out/report.md)', // a list marker inside a fence is code, and closes nothing
+    '- ```\n  x\n```\n[r](/work/out/report.md)', // a fence less indented than its list item's opens a fence of its own
     '    [r](/work/out/report.md)',
     '`[r](/work/out/report.md)`',
     '``a ` [r](/work/out/report.md)``',
