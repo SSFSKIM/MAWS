@@ -3,9 +3,10 @@
 // storage key, as the module built it; nodes.dom.test.tsx compares the fingerprints), then the binding, the comment
 // plugins (M4), find, code highlighting and the table cells' fill, (M5) the other replicas' presence and the history
 // preview's paint, (P3-F) a modifier-click opening a link, (P4) an image pasted from another document copied into
-// this one, and (P4-A2, X35) the agent's streaming edit drawn beside its presence. Every editor of the document kind
-// builds from here.
-import type { AnyExtension, Extensions } from '@tiptap/core';
+// this one, (P4-A2, X35) the agent's streaming edit drawn beside its presence, and (U10a) the gap caret. Every editor of
+// the document kind builds from here.
+import { Extension, type AnyExtension, type Extensions } from '@tiptap/core';
+import { gapCursor } from '@tiptap/pm/gapcursor';
 import { Collaboration, type CollaborationOptions } from '../collab';
 import { AssetPaste } from './asset-paste';
 import { Presence, cursorBuilders } from './awareness';
@@ -19,6 +20,14 @@ import { renderMermaid } from './nodes/mermaid';
 import { TableCellFill } from './nodes/table';
 import { nodeViews, type ViewEnvironment } from './nodes/views';
 import { Provisional, type ProvisionalOptions } from './provisional';
+
+// U10a (docs/doperpowers/plans/2026-11-12-ux-wave-U10a-unmade-writes.md, decision 9): the place to type after a block
+// that holds no text, where no text position is (after a final chart, table, rule, math block, diagram or pending
+// upload; before a first one; between two): ProseMirror's gap cursor, set by a click there or an arrow key from the
+// block, in a transaction that only sets the selection. What is typed or composed at it makes a paragraph there. The
+// trailing paragraph no longer stands in for it, since no repair answers a mere look (`guard` in ../schema.ts). The
+// plugin alone: Tiptap's `Gapcursor` wrapper also adds a field to every node's spec, which nothing here reads.
+const GapCaret = Extension.create({ name: 'gapCaret', addProseMirrorPlugins: () => [gapCursor()] });
 
 export type EditorEnvironment = Omit<ViewEnvironment, 'renderDiagram'> & Partial<Pick<ViewEnvironment, 'renderDiagram'>>;
 
@@ -49,5 +58,5 @@ export function editorExtensions({
     : [];
   const linkClick = LinkClick.configure({ open: (url) => env.host.openExternal?.(url) }); // P3-F (F1)
   const assetPaste = AssetPaste.configure({ artifactId: env.artifactId, copyAsset: (from, ref, to) => env.host.copyAsset(from, ref, to) }); // P4
-  return [...withViews, linkClick, ...live, ...(comments ? [Comments.configure(comments)] : []), Find, CodeHighlight, TableCellFill, HistoryPaint, assetPaste];
+  return [...withViews, linkClick, ...live, ...(comments ? [Comments.configure(comments)] : []), Find, CodeHighlight, TableCellFill, HistoryPaint, assetPaste, GapCaret];
 }
