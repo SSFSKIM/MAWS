@@ -11,7 +11,7 @@ import { ipc } from '../ipc/client';
 import { KEYBOARD } from './copy';
 import { useDrawnRow } from './drawn';
 import { captureChord, displayChord, keymapGroups, type KeymapRow } from './keymap';
-import { TEXT_ACTION, writeSettings } from './parts';
+import { LANDING, TEXT_ACTION, writeSettings } from './parts';
 
 function withChord(keymap: KeymapOverrides, id: ActionId, chord: string | null): KeymapOverrides {
   const next = { ...keymap };
@@ -66,7 +66,7 @@ export function KeymapSection({ keymap }: { keymap: KeymapOverrides }) {
 
   return (
     <>
-      <div role="table" aria-label={KEYBOARD.table} data-settings-row="keyboard.bindings" data-settings-state="default" className="mt-1 overflow-hidden rounded-sm border border-border">
+      <div role="table" aria-label={KEYBOARD.table} data-settings-row="keyboard.bindings" data-settings-state="default" tabIndex={-1} className={`mt-1 overflow-hidden border border-border ${LANDING}`}>
         {keymapGroups(keymap).map((group) => (
           <div key={group.label} role="rowgroup" aria-label={group.label}>
             <div role="row" className="border-t border-border bg-bg-raised px-2.5 py-1 text-ui-sm font-semibold tracking-wide text-fg-muted uppercase first:border-t-0">
@@ -89,7 +89,7 @@ export function KeymapSection({ keymap }: { keymap: KeymapOverrides }) {
           </div>
         ))}
       </div>
-      <div data-settings-row="keyboard.reset" data-settings-state="default" className="mt-2 flex items-center gap-2">
+      <div data-settings-row="keyboard.reset" data-settings-state="default" tabIndex={-1} className={`mt-2 flex items-center gap-2 ${LANDING}`}>
         <button type="button" className={TEXT_ACTION} disabled={Object.keys(keymap).length === 0} onClick={() => setConfirmReset(true)}>
           {KEYBOARD.reset}
         </button>
@@ -129,7 +129,7 @@ function KeyRow({
   onKeyDown(e: KeyboardEvent<HTMLElement>): void;
 }) {
   return (
-    <div role="row" aria-label={row.title} data-recording={recording || undefined} className={`border-t border-border px-2.5 text-ui-sm ${recording ? 'bg-accent-soft' : ''}`}>
+    <div role="row" aria-label={row.title} data-recording={recording || undefined} data-settings-binding={row.id} tabIndex={-1} className={`border-t border-border px-2.5 text-ui-sm ${LANDING} -outline-offset-2 ${recording ? 'bg-accent-soft' : ''}`}>
       {/* W9 (H1): narrower than 32rem (U11a M9: the Settings body's own column) the title stacks over the chord and its action */}
       <div className="grid h-[30px] grid-cols-[minmax(0,1fr)_160px_96px] items-center gap-2.5 @max-lg/settings-body:h-auto @max-lg/settings-body:grid-cols-[minmax(0,1fr)_auto] @max-lg/settings-body:gap-y-1 @max-lg/settings-body:py-1.5">
         <span role="cell" className="truncate @max-lg/settings-body:col-span-2">

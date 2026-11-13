@@ -8,7 +8,11 @@
 // then Org with no heading of its own and the Customize link; the body in the same order, opening at its first section.
 // The index's list scrolls by itself and its footer stays. The stored tab keeps build F's ten sections (UC-14): every one
 // of them is a section here, and `supervisor`, reached by the index and the search only, is never stored.
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+// U11a M10: "Search settings" at the index's top (SettingsSearch.tsx); a chosen result scrolls the body, opens the More it
+// was found behind, gives the row the keyboard and marks it. ⌘F focuses the field while Settings holds the keyboard
+// (UC-6's focus first: a region keeps a key it handles), so it needs no row in the action table.
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 import type { Settings } from '@shared/ipc/schema';
 import { SessionsSection } from './SessionsSection';
 import { AppearanceSection } from './AppearanceSection';
@@ -25,6 +29,8 @@ import { BrowserSection } from './BrowserSection'; // E4a
 import { ArtifactsSection } from './ArtifactsSection'; // P3-D
 import { OrgSection } from './org/OrgSection'; // P5 O8 M1; M4a: the Org page, split by group
 import { openCustomize } from '../customize/open';
+import type { SettingsResult } from './search';
+import { landingOf, MARK, RowMark, scrollTopToLand, SettingsSearch } from './SettingsSearch';
 
 export const SETTINGS_SECTIONS = ['appearance', 'notifications', 'keyboard', 'voice', 'browser', 'artifacts', 'sessions', 'gateway', 'engine', 'supervisor', 'org'] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
@@ -57,7 +63,10 @@ const UNGROUPED = SECTION_TABLE.filter(({ group }) => group === null).map(({ sec
 export function SettingsView({ section }: { section: SettingsSection | null }) {
   const settings = useSettingsValue();
   const body = useRef<HTMLDivElement>(null);
+  const field = useRef<HTMLInputElement>(null);
   const [drawn] = useState(() => new DrawnRows());
+  const [mark] = useState(() => new RowMark());
+  useEffect(() => () => mark.clear(), [mark]);
   const [active, setActive] = useState<SettingsSection>(section ?? ORDER[0]!);
   const [opened, setOpened] = useState(section);
   if (opened !== section) {
@@ -91,6 +100,35 @@ export function SettingsView({ section }: { section: SettingsSection | null }) {
     setActive(current);
   };
 
+  // A chosen result: its row's section heading at the body's top (or the row in the middle), its More open when the
+  // words were found there, the row itself holding the keyboard, and the mark. The query stays in the field.
+  const choose = (result: SettingsResult) => {
+    if (result.target === 'customize') return openCustomize();
+    const root = body.current;
+    const landing = root === null ? null : landingOf(root, result.target);
+    if (root === null || landing === null) return;
+    const more = result.openMore ? landing.querySelector<HTMLElement>('[data-settings-more][aria-expanded="false"]') : null;
+    if (more !== null) flushSync(() => more.click()); // drawn before the row is measured
+    const section = landing.closest<HTMLElement>('section[aria-labelledby]');
+    const landed = ORDER.find((s) => section?.getAttribute('aria-labelledby') === sectionHeadingId(s));
+    if (section !== null && landed !== undefined) {
+      const origin = root.getBoundingClientRect().top - root.scrollTop;
+      const box = landing.getBoundingClientRect();
+      root.scrollTop = scrollTopToLand({ sectionTop: section.getBoundingClientRect().top - origin, rowTop: box.top - origin, rowHeight: box.height, viewHeight: root.clientHeight });
+      setActive(landed);
+    }
+    landing.focus({ preventScroll: true });
+    mark.mark(landing);
+  };
+  // ⌘F, not ⇧⌘F (Files) nor any other chord on F
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.code !== 'KeyF' || !event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || field.current === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    field.current.focus();
+    field.current.select();
+  };
+
   const entry = (s: SettingsSection) => (
     <button
       key={s}
@@ -109,48 +147,48 @@ export function SettingsView({ section }: { section: SettingsSection | null }) {
   // rows), the `settings-body` container, so a view between 32rem and the body's 760 px stacks them while its index stays
   // a column.
   return (
-    <div className="@container/settings h-full min-h-0 bg-bg text-ui text-fg">
-      <div className="grid h-full min-h-0 grid-cols-[148px_minmax(0,1fr)] @max-lg/settings:grid-cols-1 @max-lg/settings:grid-rows-[auto_minmax(0,1fr)]">
-        <nav
-          aria-label="Settings sections"
-          className="flex min-h-0 flex-col border-r border-border bg-bg-raised px-2 py-3.5 @max-lg/settings:border-r-0 @max-lg/settings:border-b @max-lg/settings:py-1.5"
-        >
-          <div className="shrink-0 px-2 pb-2.5 text-ui font-semibold @max-lg/settings:hidden">{INDEX.title}</div>
-          <div data-settings-index className="flex min-h-0 flex-1 flex-col overflow-y-auto @max-lg/settings:flex-row @max-lg/settings:flex-wrap @max-lg/settings:gap-0.5 @max-lg/settings:overflow-visible">
-            {GROUPS.map(({ group, sections }, i) => (
-              <div key={group} className="flex flex-col @max-lg/settings:contents">
-                <div data-settings-group className={`px-2 pb-1 text-ui-sm font-semibold whitespace-nowrap text-fg-muted @max-lg/settings:hidden ${i === 0 ? '' : 'pt-3'}`}>
-                  {INDEX.groups[group]}
+    <DrawnRowsContext.Provider value={drawn}>
+      <div onKeyDown={onKeyDown} className="@container/settings h-full min-h-0 bg-bg text-ui text-fg">
+        <div className="grid h-full min-h-0 grid-cols-[148px_minmax(0,1fr)] @max-lg/settings:grid-cols-1 @max-lg/settings:grid-rows-[auto_minmax(0,1fr)]">
+          <nav
+            aria-label="Settings sections"
+            className="flex min-h-0 flex-col border-r border-border bg-bg-raised px-2 py-3.5 @max-lg/settings:border-r-0 @max-lg/settings:border-b @max-lg/settings:py-1.5"
+          >
+            <div className="shrink-0 px-2 pb-2.5 text-ui font-semibold @max-lg/settings:hidden">{INDEX.title}</div>
+            <SettingsSearch keymap={settings?.keymap ?? null} field={field} onChoose={choose}>
+              {GROUPS.map(({ group, sections }, i) => (
+                <div key={group} className="flex flex-col @max-lg/settings:contents">
+                  <div data-settings-group className={`px-2 pb-1 text-ui-sm font-semibold whitespace-nowrap text-fg-muted @max-lg/settings:hidden ${i === 0 ? '' : 'pt-3'}`}>
+                    {INDEX.groups[group]}
+                  </div>
+                  {sections.map(entry)}
                 </div>
-                {sections.map(entry)}
+              ))}
+              <div className="mt-2 flex flex-col border-t border-border pt-2 @max-lg/settings:contents">
+                {UNGROUPED.map(entry)}
+                <button type="button" onClick={() => openCustomize()} className="shrink-0 rounded-sm px-2 py-1.5 text-left text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover focus-visible:outline-2">
+                  {INDEX.customize} <span aria-hidden>›</span>
+                </button>
               </div>
-            ))}
-            <div className="mt-2 flex flex-col border-t border-border pt-2 @max-lg/settings:contents">
-              {UNGROUPED.map(entry)}
-              <button type="button" onClick={() => openCustomize()} className="shrink-0 rounded-sm px-2 py-1.5 text-left text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover focus-visible:outline-2">
-                {INDEX.customize} <span aria-hidden>›</span>
-              </button>
-            </div>
-          </div>
-          <p className="m-0 shrink-0 px-2 pt-3.5 text-ui-sm leading-normal text-fg-muted @max-lg/settings:hidden">{INDEX.footer}</p>
-        </nav>
-        <div ref={body} onScroll={onScroll} data-settings-body className="min-h-0 overflow-x-hidden overflow-y-auto px-5 pt-2 pb-3 @max-lg/settings:px-3">
-          {settings === null ? (
-            <p className="text-ui-sm text-fg-muted">{INDEX.reading}</p>
-          ) : (
-            <DrawnRowsContext.Provider value={drawn}>
-              <div data-settings-column className="@container/settings-body max-w-[760px]">
+            </SettingsSearch>
+            <p className="m-0 shrink-0 px-2 pt-3.5 text-ui-sm leading-normal text-fg-muted @max-lg/settings:hidden">{INDEX.footer}</p>
+          </nav>
+          <div ref={body} onScroll={onScroll} data-settings-body className="min-h-0 overflow-x-hidden overflow-y-auto px-5 pt-2 pb-3 @max-lg/settings:px-3">
+            {settings === null ? (
+              <p className="text-ui-sm text-fg-muted">{INDEX.reading}</p>
+            ) : (
+              <div data-settings-column className={`@container/settings-body max-w-[760px] ${MARK}`}>
                 {SECTION_TABLE.map(({ section: s }) => (
                   <Section key={s} id={s}>
                     <SectionBody section={s} settings={settings} showKeyboard={() => show('keyboard')} />
                   </Section>
                 ))}
               </div>
-            </DrawnRowsContext.Provider>
-          )}
+            )}
+          </div>
         </div>
       </div>
-    </div>
+    </DrawnRowsContext.Provider>
   );
 }
 

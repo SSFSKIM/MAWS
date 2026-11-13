@@ -38,6 +38,10 @@ const SETTING_NOTE = 'col-start-2 -mt-0.5 mb-0.5 text-ui-sm leading-normal text-
 // U11a M9: More reads as a button after a muted sentence, so it is drawn in `fg`; with its gap it takes 48 px of the line
 const MORE = 'ml-2 shrink-0 rounded-sm px-1.5 py-0.5 text-ui-sm whitespace-nowrap text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2';
 
+// U11a M10: what a search result lands on (a row, a key binding, an Org group) takes the keyboard itself, with the accent
+// outline, so that a second Enter acts on no control of it; Tab then enters its controls. Out of the Tab order.
+export const LANDING = 'rounded-sm outline-accent focus-visible:outline-2';
+
 type Values = Readonly<Record<string, string | null>>;
 // A row of the table: its words are its declaration's, in the state it shows; a repeating row is drawn under its own
 // `label`; `lineEnd` follows the line's words, before More (Direct login's sign-in and its Copy).
@@ -60,7 +64,7 @@ export function Setting(props: DeclaredSetting | PlainSetting) {
       note = <Note key={stateName} line={shown.line === undefined ? undefined : fillPlaces(shown.line, props.values)} more={shown.more === undefined ? undefined : fillPlaces(shown.more, props.values)} state={shown.state === true} lineEnd={props.lineEnd} />;
   }
   return (
-    <div role="group" aria-labelledby={id} data-settings-row={declared?.id} data-settings-state={stateName ?? undefined} className={SETTING_ROW}>
+    <div role="group" aria-labelledby={id} data-settings-row={declared?.id} data-settings-state={stateName ?? undefined} tabIndex={-1} className={`${SETTING_ROW} ${LANDING}`}>
       <span id={id} className="min-w-0 text-fg-muted [overflow-wrap:anywhere]">
         {props.label ?? declared!.label}
       </span>
@@ -79,7 +83,7 @@ function Note({ line, more, state, lineEnd }: { line: string | undefined; more: 
       {line}
       {lineEnd !== undefined && <> {lineEnd}</>}
       {more !== undefined && (
-        <button type="button" aria-expanded={open} onClick={() => setOpen((was) => !was)} className={MORE}>
+        <button type="button" aria-expanded={open} data-settings-more onClick={() => setOpen((was) => !was)} className={MORE}>
           {open ? NOTE.less : NOTE.more}
         </button>
       )}

@@ -26,6 +26,11 @@ export const INDEX = {
   // and its last link
   groups: { app: 'App', sessions: 'Sessions & engine' },
   customize: 'Customize',
+  // U11a M10 (l8-settings-06): the search at the index's top; a result is a name with what stands under it, a row's
+  // section, or one of these
+  search: 'Search settings',
+  noMatch: 'No matching settings',
+  under: { section: 'Section', customize: 'Plugins, skills and connectors' },
 };
 
 // U11a M9 (l8-settings-06): a row's note is one line; the rest is behind More, opened in place. A note's words are its
