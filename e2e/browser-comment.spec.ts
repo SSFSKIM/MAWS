@@ -700,8 +700,7 @@ test('2. a pick sent to main writes [image, anchored text] whose tag round-trips
       await expect(pane, 'the Side pane opens on the thread').toBeVisible();
       const request = pane.getByRole('group', { name: 'Approval needed' });
       await expect(request).toContainText('echo the-count');
-      await request.getByRole('radio', { name: 'Allow once' }).click();
-      await request.getByRole('button', { name: 'Allow', exact: true }).click();
+      await request.getByRole('button', { name: 'Allow once', exact: true }).click();
       await expect(pane.getByText(THREAD_REPLY)).toBeVisible({ timeout: 20_000 });
       const [threadImage, threadText] = contentOf(writtenUsers(s, child)[0]!);
       expect(threadImage?.type).toBe('image');

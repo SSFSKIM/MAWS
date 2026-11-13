@@ -2,7 +2,7 @@
 // place, and the sidebar is sized against the window less main's floor alone.
 import { describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, tabId, type LayoutRegions, type TabRef } from '@shared/ipc/schema/layout';
+import { LAYOUT_DEFAULTS, tabId, type LayoutRegions, type Strip, type TabRef, storedMain } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { useLayout } from '../stores/layout';
@@ -38,11 +38,11 @@ describe('regions while floating', () => {
 // case: Float pressed, or a float restored, with an artifact tab in front left main at 0 px and its tab strip hidden.
 describe('a float with no card session', () => {
   const ARTIFACT: TabRef = { id: tabId({ kind: 'artifact', artifactId: 'deck-1', machine: TEST_MACHINE }), kind: 'artifact', artifactId: 'deck-1', machine: TEST_MACHINE, pinned: false };
-  const main = { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [ARTIFACT], activeTabId: ARTIFACT.id }] } } };
+  const main: Strip = { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [ARTIFACT], activeTabId: ARTIFACT.id }] };
 
   it('restored with an artifact tab in front, main keeps its column and is not hidden', async () => {
     resetShellStores();
-    const values: Record<string, unknown> = { regions: regions({ floating: true }), 'main.tabs': main };
+    const values: Record<string, unknown> = { regions: regions({ floating: true }), 'main.tabs': storedMain(main) };
     const { client } = fakeClient({ 'layout.list': { keys: ['regions', 'main.tabs'] }, 'layout.get': (input: unknown) => ({ value: values[(input as { key: string }).key] ?? null }) });
     useLayout.setState({ hydrated: false });
     await useLayout.getState().hydrate(client, () => true);
@@ -60,7 +60,7 @@ describe('a split float', () => {
     const SESSION: TabRef = { id: `session:${at('app-s')}`, kind: 'session', appSessionId: at('app-s' as AppSessionId), pinned: false };
     const DIAGNOSTICS: TabRef = { id: 'diagnostics', kind: 'diagnostics', pinned: false };
     useLayout.setState({
-      main: { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [SESSION], activeTabId: SESSION.id }, { tabs: [DIAGNOSTICS], activeTabId: DIAGNOSTICS.id }] } } },
+      main: { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [SESSION], activeTabId: SESSION.id }, { tabs: [DIAGNOSTICS], activeTabId: DIAGNOSTICS.id }] },
     });
     const before = useLayout.getState().regions;
     useLayout.getState().floatSplit(SESSION.id);

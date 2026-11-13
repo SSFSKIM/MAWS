@@ -1,5 +1,6 @@
 // `engine.pendingItems` (P5 O10): for the endpoint's lane B counts, how many of each session's broker items wait on an
-// answer (`waitsOnAnswer`, the rule the endpoint applies to each live `session.brokerItems`), never the items
+// answer (`waitsOnAnswer`, the rule the endpoint applies to each live `session.brokerItems`; UX wave U1's UC-1: a
+// delivered item, which the broker still holds live, waits on nothing), never the items
 // themselves, whose summaries and payloads are unbounded. A session with none is left out: the endpoint reads the
 // answer as the whole set, so a session absent from it waits on nothing. Its size is therefore bounded by the sessions
 // waiting on an answer, one `{appSessionId, waiting}` each (a MAWS-minted id and a count, well under 100 bytes), and

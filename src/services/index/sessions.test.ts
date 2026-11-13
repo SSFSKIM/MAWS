@@ -8,8 +8,9 @@ import type { AppSessionId, AttentionId, MessageUuid, RequestId, SessionId } fro
 import type { SessionRecord } from '@shared/graph/session';
 import { SessionRecordSchema } from '@shared/graph/session';
 import { sessionIdFor, summary, tempDir } from '../../../test/support/index-fixture';
+import { budgetVerdict, machineLoad } from '../../../test/support/latency-budget';
 import { Index } from './index';
-import { promptTitle } from './sessions';
+import { cutPrompt, promptTitle } from './sessions';
 
 const LAUNCH = {
   directory: '/nowhere/launch',
@@ -60,7 +61,7 @@ describe('session records in the index', () => {
       index.sessions.upsertFromSummary(s);
       expect(titleOf(record.appId)).toEqual({ text: 'Fix the drag handle', source: 'none' });
       index.sessions.upsertFromSummary({ ...s, firstPrompt: 'Fix the drag handle, as written to disk', size: 300 });
-      expect(titleOf(record.appId)).toEqual({ text: 'Fix the drag handle, as written to disk', source: 'none' });
+      expect(titleOf(record.appId)).toEqual({ text: 'Fix the drag handle, as written', source: 'none' }); // S-11: six words
       index.sessions.upsertFromSummary({ ...s, firstPrompt: 'Fix the drag handle, as written to disk', aiTitle: 'Drag handle fix', size: 400 });
       expect(titleOf(record.appId)).toEqual({ text: 'Drag handle fix', source: 'generated' });
     });
@@ -85,6 +86,53 @@ describe('session records in the index', () => {
       expect(promptTitle(`Review this\n\n<pasted_content id="ab12">\nline one\nline two, cut at the c`)).toBe('Review this [Pasted text #1]');
       const { record } = index.sessions.createForLaunch({ ...LAUNCH, firstPrompt: 'Review this [Pasted text #1 +3 lines]' });
       expect(record.title.text).toBe('Review this [Pasted text #1 +3 lines]');
+    });
+  });
+
+  // UX wave U7, S-11 (Interfaces §A): a session with no title is named by six words of its first prompt, cut as Claude
+  // Desktop cuts it; the stored prompt stays whole, so the conversation search still reads all of it.
+  describe('a prompt names its session by six words', () => {
+    const thirty = Array.from({ length: 30 }, (_, n) => `word${n + 1}`).join(' ');
+
+    it('keeps the first six words, at most 60 code points, never splitting a surrogate pair', () => {
+      expect(cutPrompt(thirty)).toBe('word1 word2 word3 word4 word5 word6');
+      const long = 'a'.repeat(80);
+      expect(cutPrompt(long)).toBe(`${'a'.repeat(59)}…`);
+      expect(Array.from(cutPrompt(long))).toHaveLength(60);
+      const paired = `${'b'.repeat(58)}😀😀 next`; // the second emoji is the 60th code point, past the 59 kept
+      expect(cutPrompt(paired)).toBe(`${'b'.repeat(58)}😀…`);
+      expect(cutPrompt(`${'c'.repeat(59)}😀`)).toBe(`${'c'.repeat(59)}😀`); // 60 code points (61 UTF-16 units): whole
+    });
+
+    it('takes the file mentions at its start off, in both forms, and is named by their files when they are all it has', () => {
+      expect(cutPrompt('@"my notes/plan.md" @src/app.ts, tidy the imports in both files please')).toBe('tidy the imports in both files');
+      expect(cutPrompt('@"my notes/plan.md" @src/app.ts')).toBe('plan.md, app.ts');
+      expect(cutPrompt('@src/ walk it')).toBe('walk it');
+      expect(cutPrompt('@src/')).toBe('src');
+      expect(cutPrompt('Look at @src/app.ts first')).toBe('Look at @src/app.ts first'); // a mention inside the prompt is a word
+      expect(cutPrompt('@agent-reviewer look at this')).toBe('@agent-reviewer look at this');
+      expect(cutPrompt('@src/app.ts @agent-reviewer look at this')).toBe('@agent-reviewer look at this');
+    });
+
+    it('counts a pasted block’s placeholder as one word', () => {
+      expect(cutPrompt('Review this [Pasted text #1 +3 lines] and the two files beside it now')).toBe('Review this [Pasted text #1 +3 lines] and the two');
+      expect(cutPrompt('[Image #1] [PDF #2] [Pasted text #3] one two three four')).toBe('[Image #1] [PDF #2] [Pasted text #3] one two three');
+    });
+
+    it('cuts only a prompt’s title: a rename, the engine’s title and a generated title are kept whole', () => {
+      const s = summary({ customTitle: null, aiTitle: thirty, firstPrompt: thirty });
+      const { record } = index.sessions.upsertFromSummary(s);
+      expect(titleOf(record.appId)).toEqual({ text: thirty, source: 'generated' });
+      index.sessions.upsertFromSummary({ ...s, customTitle: thirty, size: 300 });
+      expect(titleOf(record.appId)).toEqual({ text: thirty, source: 'user' });
+      index.sessions.update(record.appId, { title: { text: `${thirty} again`, source: 'user' } });
+      expect(titleOf(record.appId)).toEqual({ text: `${thirty} again`, source: 'user' });
+    });
+
+    it('names a session by six words while the conversation search still finds it by its thirtieth', () => {
+      const { record } = index.sessions.upsertFromSummary(summary({ customTitle: null, aiTitle: null, firstPrompt: thirty }));
+      expect(titleOf(record.appId)).toEqual({ text: 'word1 word2 word3 word4 word5 word6', source: 'none' });
+      expect(index.sessionSearch.search('word30').map((hit) => hit.appSessionId)).toEqual([record.appId]);
     });
   });
 
@@ -228,17 +276,42 @@ describe('session records in the index', () => {
   it.skipIf(process.platform !== 'darwin')('upserts 4,000 synthetic summaries inside one transaction in under 500 ms of CPU time', () => {
     const summaries = Array.from({ length: 4_000 }, (_, i) => summary({ sessionId: sessionIdFor(i + 1), customTitle: i % 3 === 0 ? `t${i}` : null }));
     // The bound is on the work the upserts cost (this process's CPU time; vitest runs each file in its own process), so
-    // a loaded machine's scheduling does not decide it.
-    const cpu = process.cpuUsage();
-    const started = performance.now();
-    index.transaction(() => {
-      for (const s of summaries) index.sessions.upsertFromSummary(s);
-    });
-    const spent = process.cpuUsage(cpu);
-    const elapsed = performance.now() - started;
+    // a loaded machine's scheduling does not decide it. Contention still adds to CPU time (shared caches, a slower clock
+    // with every core busy): master's own code measured 512 ms on the mini while e2e jobs ran on both its desktops (run
+    // 43429465758; 605.9, 519.5 and 518.4 ms in runs 43206290258, 43420507070 and 43427405095). So the cost is the least
+    // of three runs, each on a fresh index, and it is held to 500 ms as named only on a quiet machine; loaded (busy cores,
+    // a shared desktop, the guest, or a guest beside the host) it is recorded and held to the loose ceiling, as every
+    // latency bound is (test/support/latency-budget.ts).
+    const machine = machineLoad();
+    const at = Date.now();
+    const run = (target: Index) => {
+      const cpu = process.cpuUsage();
+      const started = performance.now();
+      target.transaction(() => {
+        for (const s of summaries) target.sessions.upsertFromSummary(s);
+      });
+      const spent = process.cpuUsage(cpu);
+      return { ms: (spent.user + spent.system) / 1000, elapsed: performance.now() - started };
+    };
+    const first = run(index);
     expect(index.sessions.list()).toHaveLength(4_000);
-    expect((spent.user + spent.system) / 1000).toBeLessThan(500);
-    expect(elapsed).toBeLessThan(2000); // a sanity bound on the wall clock, as M5's instant pin keeps
+    const runs = [first];
+    for (let i = 1; i < 3; i++) {
+      const fresh = tempDir();
+      const other = new Index(join(fresh.path, 'index.sqlite'));
+      try {
+        runs.push(run(other));
+        expect(other.sessions.list()).toHaveLength(4_000);
+      } finally {
+        other.close();
+        fresh.dispose();
+      }
+    }
+    const least = Math.round(Math.min(...runs.map((r) => r.ms)) * 10) / 10;
+    const { ceiling, reason } = budgetVerdict('4,000 upserts, CPU time', least, 500, machine, at);
+    if (reason !== null) console.log(`[latency] ${reason}`);
+    expect(least).toBeLessThan(ceiling);
+    expect(Math.min(...runs.map((r) => r.elapsed))).toBeLessThan(2000); // a sanity bound on the wall clock, as M5's instant pin keeps
   });
 
   it('createForLaunch takes a caller-supplied UUID v4 and answers exists with the first record on a collision', () => {

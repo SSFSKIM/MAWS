@@ -188,6 +188,19 @@ describe('the stream', () => {
     expect(l.of('attention.changed').at(-1)).toEqual({ appSessionId: APP, items: [] });
   });
 
+  // UC-1 (A17): a machine on an older build still sends a delivered broker item; it is answered, so the window is not told it
+  it('tells the window no broker item whose answer was delivered', async () => {
+    const l = lab();
+    l.session.start();
+    await vi.advanceTimersByTimeAsync(0);
+    const sub = l.link.open()[0];
+    sub.sink.subbed('snapshot', { epoch: 'L1', seq: 0 });
+    const waiting = item(APP, 'permission', '2026-10-31T00:00:00.000Z');
+    const answered = item(APP, 'permission', '2026-10-31T00:00:01.000Z', { id: 'att-answered' as never, state: 'delivered' });
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, { status: statusOf('L1'), queue, pendingItems: [waiting, answered], catalog });
+    expect(l.of('attention.changed')).toEqual([{ appSessionId: APP, items: [waiting] }]);
+  });
+
   it('batches events per macrotask, at most 500 to a batch, before any part that follows', async () => {
     const l = lab();
     const sub = await opened(l);

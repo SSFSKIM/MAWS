@@ -280,7 +280,7 @@ test('share: the reach marks across machines, a row’s hover card, the private 
       await expect(rowOf(at(STUDIO, S3))).toBeVisible();
       await expect(rowOf(at(STUDIO, S3)).locator('[data-reach]')).toHaveCount(0); // the default: no mark
       await expect(rowOf(at(FARM, S5)).locator('[data-reach]')).toHaveCount(0); // its machine can't say a reach
-      await expect(rowOf(at(STUDIO, S4))).toHaveAttribute('data-menu', 'none'); // not yours: no Share
+      await expect(rowOf(at(STUDIO, S4))).toHaveAttribute('data-menu', `session:${at(STUDIO, S4)}`); // UX wave U7: every listed row's menu, its two opens; not yours, so no Share (sidebar/reach.test.tsx)
       await expect(rowOf(at(STUDIO, S1))).toHaveAttribute('data-menu', `session:${at(STUDIO, S1)}`);
       const rows = await Promise.all(Object.values(marked).map((row) => row.elementHandle()));
       expect(await page.evaluate(marksNotWhole, rows.filter((row) => row !== null)), 'each mark lies inside its row, and no marked row is wider than its box').toEqual([]);

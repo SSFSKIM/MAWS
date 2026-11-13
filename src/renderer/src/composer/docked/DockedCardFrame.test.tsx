@@ -15,7 +15,7 @@ const B = 'app-b' as AppSessionId;
 // A card another child docks (C10's trust card, here a stub): its own content and outcome, the frame's rules.
 function ForeignCard({ appSessionId, onAccept, onDecline }: { appSessionId: AppSessionId; onAccept: () => void; onDecline: (() => void) | null }) {
   return (
-    <DockedCardFrame appSessionId={appSessionId} title="Trust this folder" onAccept={onAccept} onDecline={onDecline}>
+    <DockedCardFrame appSessionId={appSessionId} title="Trust this folder" titleAlone onAccept={onAccept} onDecline={onDecline}>
       <p>Do you trust the files in this folder?</p>
       <textarea aria-label={`note ${appSessionId}`} />
       <button type="button">Trust</button>
@@ -54,7 +54,9 @@ describe('docked frame hosts a foreign card', () => {
       </Pane>,
     );
     const frame = screen.getByRole('group', { name: 'Trust this folder' });
-    expect(frame.textContent).toContain('Trust this folder · Composer paused · draft preserved');
+    // UX wave U1a §J: a card another child docks reads its title alone; a request's frame keeps the composer's words
+    expect(frame.querySelector(':scope > p')?.textContent).toBe('Trust this folder');
+    expect(frame.textContent).not.toContain('Composer paused');
     const user = userEvent.setup();
 
     act(() => screen.getByLabelText(`note ${A}`).focus());
@@ -160,6 +162,152 @@ describe('docked frame hosts a foreign card', () => {
   });
 });
 
+// UX wave U1a (§D): the frame binds the permission prompt's two allow keys beside Enter and Esc, within itself, and every
+// key it binds acts on a fresh press only, a card another child docks included.
+describe('the frame’s request keys', () => {
+  const key = (target: HTMLElement, init: KeyboardEventInit) => {
+    const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+    target.dispatchEvent(event);
+    return event;
+  };
+  const CMD_ENTER = { key: 'Enter', code: 'Enter', metaKey: true };
+  const SHIFT_CMD_ENTER = { key: 'Enter', code: 'Enter', metaKey: true, shiftKey: true };
+
+  it('runs Allow once on ⌘↩ and the lasting allow on ⇧⌘↩ from the frame itself, and neither from a button inside it', () => {
+    const once = vi.fn();
+    const lasting = vi.fn();
+    render(
+      <Pane index={0}>
+        <DockedCardFrame appSessionId={A} title="Approval needed" onAccept={null} onDecline={null} onAllowOnce={once} onAllowLasting={lasting}>
+          <button type="button">Allow once</button>
+        </DockedCardFrame>
+      </Pane>,
+    );
+    act(() => screen.getByRole('button', { name: 'Allow once' }).focus());
+    key(document.activeElement as HTMLElement, CMD_ENTER);
+    key(document.activeElement as HTMLElement, SHIFT_CMD_ENTER);
+    expect(once).not.toHaveBeenCalled();
+    expect(lasting).not.toHaveBeenCalled();
+    const frame = screen.getByRole('group', { name: 'Approval needed' });
+    act(() => frame.focus());
+    expect(key(frame, CMD_ENTER).defaultPrevented).toBe(true);
+    expect(key(frame, SHIFT_CMD_ENTER).defaultPrevented).toBe(true);
+    expect(once).toHaveBeenCalledTimes(1);
+    expect(lasting).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the allow keys unbound for a card that passes none', () => {
+    render(
+      <Pane index={0}>
+        <ForeignCard appSessionId={A} onAccept={() => {}} onDecline={null} />
+      </Pane>,
+    );
+    const frame = screen.getByRole('group', { name: 'Trust this folder' });
+    act(() => frame.focus());
+    expect(key(frame, CMD_ENTER).defaultPrevented).toBe(false);
+  });
+
+  it('acts on a fresh press only, for a card another child docks too: a repeat is taken and runs nothing', () => {
+    const accept = vi.fn();
+    const decline = vi.fn();
+    render(
+      <Pane index={0}>
+        <ForeignCard appSessionId={A} onAccept={accept} onDecline={decline} />
+      </Pane>,
+    );
+    const frame = screen.getByRole('group', { name: 'Trust this folder' });
+    act(() => frame.focus());
+    expect(key(frame, { key: 'Enter', code: 'Enter', repeat: true }).defaultPrevented).toBe(true);
+    expect(key(frame, { key: 'Escape', code: 'Escape', repeat: true }).defaultPrevented).toBe(true);
+    expect(accept).not.toHaveBeenCalled();
+    expect(decline).not.toHaveBeenCalled();
+    key(frame, { key: 'Enter', code: 'Enter' });
+    key(frame, { key: 'Escape', code: 'Escape' });
+    expect(accept).toHaveBeenCalledTimes(1);
+    expect(decline).toHaveBeenCalledTimes(1);
+  });
+});
+
+// UX wave U1a (decision 17, the ruling of 2026-11-13 on the held-chord scene): the next prompt can dock a commit after
+// the answered one left (a replayed or real engine asks about its next call once the first is answered). The hand-over
+// mark then lives until the animation frame in which the editor's deferred focus has had its turn, and a frame of the
+// session mounting meanwhile takes the focus when it is on the body or inside its own pane.
+describe('the hand-over to a frame that mounts a commit later', () => {
+  const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  const microtasks = async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  };
+  function View({ shown, onAccept = () => {} }: { shown: string | null; onAccept?: () => void }) {
+    return (
+      <>
+        <button type="button">outside</button>
+        <Pane index={0}>
+          <input aria-label="editor" />
+          {shown !== null && (
+            <DockedCardFrame key={shown} appSessionId={A} title={`prompt ${shown}`} onAccept={onAccept} onDecline={null}>
+              <p>{shown}</p>
+            </DockedCardFrame>
+          )}
+        </Pane>
+      </>
+    );
+  }
+  const frameOf = (shown: string) => screen.getByRole('group', { name: `prompt ${shown}` });
+  const editorFocus = (focusEditor: () => void) => registerFocusTarget(A, { focusEditor, focusFrame: () => {}, insertText: () => {} });
+  // the first prompt docked and focused, then answered: it leaves, and its microtask has run
+  async function answered(focusEditor: () => void, accept?: () => void) {
+    editorFocus(focusEditor);
+    const view = render(<View shown="one" onAccept={accept} />);
+    act(() => frameOf('one').focus());
+    view.rerender(<View shown={null} onAccept={accept} />);
+    await microtasks();
+    return view;
+  }
+
+  it('(a) gives the focus to the next frame mounting before the editor’s deferred focus has had its turn, and a key held from the first answer does not answer it', async () => {
+    const accept = vi.fn();
+    const view = await answered(() => {}, accept); // the editor's focus is still outstanding (Tiptap defers it a frame)
+    view.rerender(<View shown="two" onAccept={accept} />);
+    expect(document.activeElement).toBe(frameOf('two'));
+    const press = (repeat: boolean) => frameOf('two').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', repeat, bubbles: true, cancelable: true }));
+    press(true);
+    press(true);
+    expect(accept).not.toHaveBeenCalled();
+    press(false);
+    expect(accept).toHaveBeenCalledTimes(1);
+  });
+
+  it('(b) gives it, in the other order, to a frame mounting after the editor took the focus, by its pane holding it', async () => {
+    // the editor as Tiptap focuses it, a frame later; held by reference, so a later test's editor is never this one
+    const view = await answered(() => {
+      const editor = document.querySelector<HTMLElement>('[aria-label="editor"]');
+      requestAnimationFrame(() => void (editor?.isConnected && editor.focus()));
+    });
+    await nextFrame();
+    await nextFrame();
+    expect(document.activeElement).toBe(screen.getByLabelText('editor'));
+    view.rerender(<View shown="two" />);
+    expect(document.activeElement).toBe(frameOf('two'));
+  });
+
+  it('(c) takes nothing when the focus was moved outside the pane before the frame mounted', async () => {
+    const view = await answered(() => {});
+    act(() => screen.getByRole('button', { name: 'outside' }).focus());
+    view.rerender(<View shown="two" />);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'outside' }));
+  });
+
+  it('(d) takes nothing once the animation frame has passed with no frame mounted and the body focused', async () => {
+    const view = await answered(() => {});
+    await nextFrame();
+    await nextFrame();
+    expect(document.activeElement).toBe(document.body);
+    view.rerender(<View shown="two" />);
+    expect(document.activeElement).toBe(document.body);
+  });
+});
+
 describe('dockCard', () => {
   function Docked({ appSessionId }: { appSessionId: AppSessionId }) {
     const cards = useDockedCards(appSessionId);
@@ -186,5 +334,22 @@ describe('dockCard', () => {
     act(() => undockTrust()); // twice is harmless
     act(() => undockRelay());
     expect(screen.getByRole('list', { name: `docked ${A}` }).textContent).toBe('');
+  });
+});
+
+describe('the frame’s title line (UX wave U1a §J)', () => {
+  it('says the composer is paused for a request, and nothing more for a card that passes its title alone', () => {
+    render(
+      <Pane index={0}>
+        <DockedCardFrame appSessionId={A} title="Approval needed" onAccept={null} onDecline={null}>
+          <p>a request</p>
+        </DockedCardFrame>
+        <DockedCardFrame appSessionId={B} title="Trust this folder?" titleAlone onAccept={null} onDecline={null}>
+          <p>a setup card</p>
+        </DockedCardFrame>
+      </Pane>,
+    );
+    expect(screen.getByRole('group', { name: 'Approval needed' }).querySelector(':scope > p')?.textContent).toBe('Approval needed · Composer paused · draft preserved');
+    expect(screen.getByRole('group', { name: 'Trust this folder?' }).querySelector(':scope > p')?.textContent).toBe('Trust this folder?');
   });
 });

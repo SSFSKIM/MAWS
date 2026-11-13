@@ -38,4 +38,16 @@ describe('RequestAnswerSchema', () => {
     expect(RequestAnswerSchema.safeParse({ kind: 'elicitation', action: 'accept', content: { color: 'teal' } }).success).toBe(true);
     expect(RequestAnswerSchema.safeParse({ kind: 'elicitation', action: 'accept', extra: 1 }).success).toBe(false);
   });
+
+  // UX wave U1a §F: an approved plan may name the mode the session is in afterwards; nothing else names one
+  it('takes a plan answer with no mode as today, and a mode only with implement, at path mode', () => {
+    expect(RequestAnswerSchema.parse({ kind: 'plan', outcome: 'implement', feedback: null })).toEqual({ kind: 'plan', outcome: 'implement', feedback: null });
+    expect(RequestAnswerSchema.parse({ kind: 'plan', outcome: 'implement', feedback: null, mode: 'acceptEdits' })).toEqual({ kind: 'plan', outcome: 'implement', feedback: null, mode: 'acceptEdits' });
+    for (const outcome of ['keep_planning', 'clear_and_implement']) {
+      const parsed = RequestAnswerSchema.safeParse({ kind: 'plan', outcome, feedback: null, mode: 'default' });
+      expect([outcome, parsed.success]).toEqual([outcome, false]);
+      expect(parsed.error?.issues.map((i) => i.path)).toEqual([['mode']]);
+    }
+    expect(RequestAnswerSchema.safeParse({ kind: 'plan', outcome: 'implement', feedback: null, mode: 'turbo' }).success).toBe(false);
+  });
 });

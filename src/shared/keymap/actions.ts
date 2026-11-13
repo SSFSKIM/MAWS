@@ -94,8 +94,12 @@ export const ACTIONS = {
   'sidebar.focus':        { title: 'Focus sidebar',               chord: null,           sink: 'menu', menu: 'go', scope: 'app' },
   'shortcuts.open':       { title: 'Keyboard shortcuts',          chord: 'Cmd+/',        sink: 'menu', menu: 'help', scope: 'app' },
   'diagnostics.open':     { title: 'Diagnostics',                 chord: null,           sink: 'menu', menu: 'help', scope: 'app' },
-  'request.accept':       { title: 'Approve / answer the docked request', chord: 'Enter', sink: 'renderer', menu: null, scope: 'pane' },     // C7's card subscribes through useKeyChord
-  'request.decline':      { title: 'Decline the docked request', chord: 'Escape',       sink: 'renderer', menu: null, scope: 'pane' },
+  'request.accept':       { title: 'Next or Submit on a question; Implement on a plan', chord: 'Enter', sink: 'renderer', menu: null, scope: 'pane' },     // C7's card subscribes through useKeyChord
+  'request.decline':      { title: 'Deny a prompt, or decline a question', chord: 'Escape', sink: 'renderer', menu: null, scope: 'pane' },
+  // UX wave U1a (UC-6; its §D): a permission prompt's two allows, beside the rows they extend. ⌘↩ is also composer.send's
+  // default; the pane scope and the composer scope never meet on one target (decision 8's sharing rule)
+  'request.allowOnce':    { title: 'Allow once',                  chord: 'Cmd+Enter',    sink: 'renderer', menu: null, scope: 'pane' },
+  'request.allowLasting': { title: 'Allow with the lasting scope the prompt names', chord: 'Cmd+Shift+Enter', sink: 'renderer', menu: null, scope: 'pane' },
   'composer.send':        { title: 'Send (multi-line editor)',    chord: 'Cmd+Enter',    sink: 'renderer', menu: null, scope: 'composer' },  // C7 consumes
   'composer.cycleMode':   { title: 'Cycle permission mode',       chord: 'Shift+Tab',    sink: 'renderer', menu: null, scope: 'composer' },  // C7 consumes
   // C7 start: the composer's own actions (C7 execution document, Keymap additions). Stop and Focus are app-scoped

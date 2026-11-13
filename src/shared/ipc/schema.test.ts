@@ -574,6 +574,18 @@ describe('ipc schema validates both directions', () => {
     expect(layout.SidebarPeopleSchema.safeParse({ version: 1, on: [1] }).success).toBe(false);
   });
 
+  // UX wave U7, O-16: the hidden sessions' layout key (docs/doperpowers/plans/2026-11-12-ux-wave-U7-sidebar-title-bar-destinations.md, Interfaces §E)
+  it('takes sidebar.hidden as a layout key, outside the panel namespace, and holds its value to its shape', () => {
+    const value = { version: 1, hidden: { 'machine-a/app-1': { at: '2026-11-12T10:00:00Z', armedAt: null }, 'machine-b/app-2': { at: '2026-11-12T10:00:00Z', armedAt: '2026-11-12T10:05:00Z' } } };
+    expect(validateCommandInput('layout.get', { key: 'sidebar.hidden' }).ok).toBe(true);
+    expect(validateCommandInput('layout.set', { key: 'sidebar.hidden', value })).toEqual({ ok: true, value: { key: 'sidebar.hidden', value } });
+    expect(layout.SidebarHiddenSchema.safeParse(value).success).toBe(true);
+    expect(layout.SidebarHiddenSchema.safeParse({ version: 2, hidden: {} }).success).toBe(false);
+    expect(layout.SidebarHiddenSchema.safeParse({ version: 1, hidden: { '': { at: 'x', armedAt: null } } }).success).toBe(false);
+    expect(layout.SidebarHiddenSchema.safeParse({ version: 1, hidden: { a: { at: 'x' } } }).success).toBe(false);
+    expect(layout.SidebarHiddenSchema.safeParse({ version: 1, hidden: { a: { at: 'x', armedAt: null, extra: 1 } } }).success).toBe(false);
+  });
+
   // C7 start: C7's additions (C7 execution document, Interfaces "X2 additions" and the Decision Log's execution-start entry)
   describe('C7 entries', () => {
     it("carries the queue's pause reason on session.queue and session.queue.list as a closed, nullable, optional set", () => {

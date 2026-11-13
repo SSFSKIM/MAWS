@@ -559,7 +559,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     const sidebar = sidebarOf(page);
 
     bridge.raise({ request: 'toolu_allow', tool: 'Bash', input: { command: 'ls -la' } });
-    await expect(card(page).getByRole('button', { name: 'Allow', exact: true }), 'docked in the pane within 1 s').toBeVisible({ timeout: 1_000 });
+    await expect(card(page).getByRole('button', { name: 'Allow once', exact: true }), 'docked in the pane within 1 s').toBeVisible({ timeout: 1_000 });
     await expect(sidebar.getByRole('heading', { name: 'Needs you · 1' }), 'in Needs you within 1 s').toBeVisible({ timeout: 1_000 });
     await expect(sidebar.getByRole('list', { name: 'Needs you' }).getByRole('button')).toHaveAccessibleName(/ · Approval needed$/);
     await expect(card(page), 'the terminal asks it too (Q3)').toContainText('Also asked in the terminal: the first answer wins');
@@ -578,30 +578,35 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await page.mouse.move(700, 20);
     await maws.app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('tab.overview')?.click());
     const overview = main(page).getByRole('dialog', { name: 'Overview' });
-    await expect(overview.locator(`[data-card="${await addressed(page, c.appId)}"]`).getByRole('radio', { name: 'Allow once' }), 'the card answers it through the port').toBeVisible({ timeout: 10_000 });
+    await expect(overview.locator(`[data-card="${await addressed(page, c.appId)}"]`).getByRole('button', { name: 'Allow once', exact: true }), 'the card answers it through the port').toBeVisible({ timeout: 10_000 });
     await overview.getByRole('button', { name: 'Close Overview' }).click();
     await expect(overview).toHaveCount(0);
 
-    // allowed in MAWS: the fake takes Interfaces §D's body; its settle takes the item away within 1 s
-    await card(page).getByRole('button', { name: 'Allow', exact: true }).click();
+    // allowed in MAWS: the fake takes Interfaces §D's body. U1a §B: the request stops waiting when the bridge takes the
+    // answer (its 200), before its `settled`: the card, Needs you and the badge go then, and the settle changes nothing
+    await card(page).getByRole('button', { name: 'Allow once', exact: true }).click();
     await expect.poll(() => decided(bridge)).toEqual([{ request: 'toolu_allow', behavior: 'allow', ...AS_MAWS }]);
-    bridge.settle('toolu_allow', 'web', 'allow');
-    await expect(card(page)).toHaveCount(0, { timeout: 1_000 });
+    await expect(card(page), 'gone at the 200, before the settle').toHaveCount(0, { timeout: 1_000 });
     await expect(sidebar.getByRole('heading', { name: /^Needs you/ })).toHaveCount(0, { timeout: 1_000 });
     await expect.poll(() => badge(maws)).toBe('');
+    bridge.settle('toolu_allow', 'web', 'allow');
+    await page.waitForTimeout(300);
+    await expect(card(page), 'the settle changes nothing').toHaveCount(0);
+    await expect(sidebar.getByRole('heading', { name: /^Needs you/ })).toHaveCount(0);
+    expect(await badge(maws)).toBe('');
 
     // answered in the terminal first: the card settles in place as such, stays a moment, then leaves
     bridge.raise({ request: 'toolu_term', tool: 'Bash', input: { command: 'git status' } });
-    await expect(card(page).getByRole('button', { name: 'Allow', exact: true })).toBeVisible({ timeout: 1_000 });
+    await expect(card(page).getByRole('button', { name: 'Allow once', exact: true })).toBeVisible({ timeout: 1_000 });
     bridge.settle('toolu_term', 'terminal', 'allow');
     await expect(card(page).getByRole('status')).toHaveText('Answered in the terminal: Allowed', { timeout: 2_000 });
-    await expect(card(page).getByRole('button', { name: 'Allow', exact: true })).toHaveCount(0);
+    await expect(card(page).getByRole('button', { name: 'Allow once', exact: true })).toHaveCount(0);
     await expect(card(page)).toHaveCount(0, { timeout: 5_000 });
 
     // an answer the bridge refuses because another won reads as that settlement, never an error
     bridge.raise({ request: 'toolu_late', tool: 'Bash', input: { command: 'rm notes.md' } });
     bridge.answer('decision:toolu_late', () => ({ status: 409, body: { error: 'already settled', settled: { request: 'toolu_late', winner: 'terminal', outcome: 'deny', by: 'terminal' } } }));
-    await card(page).getByRole('button', { name: 'Allow', exact: true }).click();
+    await card(page).getByRole('button', { name: 'Allow once', exact: true }).click();
     await expect(card(page).getByRole('status')).toHaveText('Answered in the terminal: Denied', { timeout: 5_000 });
     await expect(card(page).getByRole('alert')).toHaveCount(0);
     expect(decided(bridge).map((d) => d.request), 'the refused one taken by no one').toEqual(['toolu_allow']);
@@ -617,17 +622,25 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     const { bridge } = await drive(c);
     const one = { type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm test' }], behavior: 'allow', destination: 'localSettings' };
 
+    // U1a §D: a localSettings suggestion puts "Always allow in <project>" third, and the session scope in the menu on Allow once
     bridge.raise({ request: 'toolu_scoped', tool: 'Bash', input: { command: 'npm test' }, suggestions: [one] });
-    await card(page).getByRole('radio', { name: 'Allow for this session' }).click();
-    await card(page).getByRole('button', { name: 'Allow', exact: true }).click();
+    await expect(card(page).getByRole('button', { name: /^Always allow in / })).toBeVisible({ timeout: 5_000 });
+    await card(page).getByRole('button', { name: 'More allow options' }).click();
+    await page.getByRole('menuitem', { name: 'Allow for this session' }).click();
     await expect.poll(() => decided(bridge)).toEqual([{ request: 'toolu_scoped', behavior: 'allow', updatedPermissions: [{ ...one, destination: 'session' }], ...AS_MAWS }]);
     await settledHere(page, bridge, 'toolu_scoped');
 
     // two suggestions: no scope; deny-and-interrupt closed with its reason; an edited input refused before the bridge
     bridge.raise({ request: 'toolu_two', tool: 'Bash', input: { command: 'npm test' }, suggestions: [one, { ...one, destination: 'session' }] });
-    const session = card(page).getByRole('radio', { name: 'Allow for this session' });
-    await expect(session).toBeDisabled({ timeout: 5_000 });
-    await expect(session).toHaveAttribute('title', "A scoped allow takes the request's one suggestion; this request offers 2");
+    const offers2 = "A scoped allow takes the request's one suggestion; this request offers 2";
+    const always = card(page).getByRole('button', { name: /^Always allow in / });
+    await expect(always).toBeDisabled({ timeout: 5_000 });
+    await expect(always).toHaveAttribute('title', offers2);
+    await card(page).getByRole('button', { name: 'More allow options' }).click();
+    const session = page.getByRole('menuitem', { name: 'Allow for this session' });
+    await expect(session).toHaveAttribute('aria-disabled', 'true');
+    await expect(session).toHaveAttribute('title', offers2);
+    await page.keyboard.press('Escape');
     await card(page).getByRole('button', { name: 'More deny options' }).click();
     const stop = page.getByRole('menuitem', { name: 'Deny and stop the turn' });
     await expect(stop).toHaveAttribute('aria-disabled', 'true');
@@ -641,10 +654,10 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
 
     // a background subagent's request: answerable in its window, the terminal's once it closes
     bridge.raise({ request: 'toolu_bg', tool: 'Bash', input: { command: 'make' }, agentId: 'a1e2e000000000002', deadline: Date.now() + 4_000 });
-    const allow = card(page).getByRole('button', { name: 'Allow', exact: true });
+    const allow = card(page).getByRole('button', { name: 'Allow once', exact: true });
     await expect(allow).toBeEnabled({ timeout: 1_000 });
     await expect(card(page).getByText('Answer this in the terminal')).toBeVisible({ timeout: 8_000 });
-    for (const name of ['Allow', 'Deny']) {
+    for (const name of ['Deny', 'Allow for this session', 'Allow once']) {
       const button = card(page).getByRole('button', { name, exact: true });
       await expect(button).toBeDisabled();
       await expect(button).toHaveAttribute('title', 'Answer this in the terminal');
@@ -711,4 +724,41 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     }
     expect(c.maws.consoleErrors()).toEqual([]);
   });
+
+  // U1a (A5, A18; §G): a terminal session's asynchronous question does not stop the agent, so its row reads "Question
+  // waiting" in the calm tone, and Esc ends nothing. Its form's Dismiss sends the bridge's dismissal where the bridge
+  // declares `decide.dismiss` (sminos 1.47.0), and is closed with its reason where it does not (the plugin as installed).
+  for (const declared of [false, true]) {
+    test(`an asynchronous question reads "Question waiting"; its Dismiss ${declared ? 'sends the bridge’s dismissal and the card leaves at the 200' : 'is closed: dismiss it in the terminal'}`, async () => {
+      test.setTimeout(120_000);
+      const c = await begin();
+      const { page } = c;
+      const controls = { ...FULL_CAPABILITIES.controls, ...(declared && { 'decide.dismiss': { available: true } }) };
+      const { bridge } = await drive(c, { bridge: { capabilities: { ...FULL_CAPABILITIES, controls } } });
+      bridge.raise({ request: 'toolu_async', tool: 'mcp__plugin_sminos_ask__ask', async: true, input: { questions: [{ question: 'Ship it today?', header: 'Ship it', options: [{ label: 'Yes' }, { label: 'Not yet' }], multiSelect: false }] } });
+      const dismiss = card(page).getByRole('button', { name: 'Dismiss', exact: true }); // the docked card's own: every question card has one
+      await expect(dismiss).toBeVisible({ timeout: 5_000 });
+      const row = await sidebarRow(page, { appSessionId: c.appId });
+      await expect(row.getByRole('img', { name: 'Question waiting' }), 'the calm tone on its row').toBeVisible();
+      await expect(sidebarOf(page).getByRole('list', { name: 'Needs you' }).getByRole('button')).toHaveAccessibleName(/ · Question waiting$/);
+
+      // Esc on the docked form sends nothing (O-22)
+      await main(page).locator('[data-docked-frame]').focus();
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
+      expect(decided(bridge), 'Esc sends nothing').toEqual([]);
+
+      if (!declared) {
+        await expect(dismiss).toBeDisabled();
+        await expect(dismiss).toHaveAttribute('title', 'Dismiss it in the terminal');
+      } else {
+        await expect(dismiss).toBeEnabled();
+        await dismiss.click();
+        await expect.poll(() => decided(bridge)).toEqual([{ request: 'toolu_async', behavior: 'dismiss', ...AS_MAWS }]);
+        await expect(card(page), 'the card leaves at the 200, before any settle').toHaveCount(0, { timeout: 2_000 });
+        await expect(row.getByRole('img', { name: 'Question waiting' }), 'the row no longer counts the question').toHaveCount(0);
+      }
+      expect(c.maws.consoleErrors()).toEqual([]);
+    });
+  }
 });

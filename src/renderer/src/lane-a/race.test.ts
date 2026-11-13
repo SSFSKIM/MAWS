@@ -25,10 +25,10 @@ describe('the race', () => {
 
   it('names who settled it, from the state or from what an answer was told', () => {
     const state = laneAState(A, { settled: [{ request: 'r1', session: 'eng-1', winner: 'terminal', outcome: 'allow', by: 'terminal' }] });
-    expect(raceOf(state, null, 'r1', T).settled).toEqual({ where: 'terminal', outcome: 'allow' });
-    expect(raceOf(laneAState(A), { winner: 'web', outcome: 'deny', by: 'maws' }, 'r1', T).settled).toEqual({ where: 'maws', outcome: 'deny' });
-    expect(raceOf(laneAState(A), { winner: 'other', outcome: 'answered', by: 'cli' }, 'r1', T).settled).toEqual({ where: 'elsewhere', outcome: 'answered' });
-    expect(raceOf(laneAState(A), { winner: null, outcome: null, by: 'terminal' }, 'r1', T).settled).toEqual({ where: 'terminal', outcome: null });
+    expect(raceOf(state, null, 'r1', T).settled).toEqual({ where: 'terminal', outcome: 'allow', by: 'terminal' });
+    expect(raceOf(laneAState(A), { winner: 'web', outcome: 'deny', by: 'maws' }, 'r1', T).settled).toEqual({ where: 'maws', outcome: 'deny', by: 'maws' });
+    expect(raceOf(laneAState(A), { winner: 'other', outcome: 'answered', by: 'cli' }, 'r1', T).settled).toEqual({ where: 'elsewhere', outcome: 'answered', by: 'cli' });
+    expect(raceOf(laneAState(A), { winner: null, outcome: null, by: 'terminal' }, 'r1', T).settled).toEqual({ where: 'terminal', outcome: null, by: 'terminal' });
   });
 
   it('is the terminal’s alone past a background request’s window, less 200 ms, or when an answer was told so', () => {
@@ -42,13 +42,27 @@ describe('the race', () => {
   });
 
   it('says a settlement in the owner’s words', () => {
-    expect(settledWords({ where: 'terminal', outcome: 'allow' })).toBe('Answered in the terminal: Allowed');
-    expect(settledWords({ where: 'terminal', outcome: 'deny' })).toBe('Answered in the terminal: Denied');
-    expect(settledWords({ where: 'terminal', outcome: 'answered' })).toBe('Answered in the terminal');
-    expect(settledWords({ where: 'elsewhere', outcome: 'withdrawn' })).toBe('No longer asked');
-    expect(settledWords({ where: 'maws', outcome: 'allow' })).toBe('Answered in MAWS: Allowed');
+    expect(settledWords({ where: 'terminal', outcome: 'allow', by: 'terminal' })).toBe('Answered in the terminal: Allowed');
+    expect(settledWords({ where: 'terminal', outcome: 'deny', by: 'terminal' })).toBe('Answered in the terminal: Denied');
+    expect(settledWords({ where: 'terminal', outcome: 'answered', by: 'terminal' })).toBe('Answered in the terminal');
+    expect(settledWords({ where: 'elsewhere', outcome: 'withdrawn', by: 'bridge' })).toBe('No longer asked');
+    expect(settledWords({ where: 'maws', outcome: 'allow', by: 'maws' })).toBe('Answered in MAWS: Allowed');
     expect(RACE.asked).toBe('Also asked in the terminal: the first answer wins');
     expect(RACE.terminal).toBe('Answer this in the terminal');
+  });
+});
+
+// U1a §G: a withdrawn asynchronous question was dismissed, by whom the settlement names; withdrawn by the bridge (a
+// `/clear`, the session's end), or any other request withdrawn, is no longer asked
+describe('the words of a withdrawn request', () => {
+  it('reads a dismissal of an asynchronous question by who made it, and anything else withdrawn as no longer asked', () => {
+    const withdrawn = (by: string) => raceOf(laneAState(A), { winner: null, outcome: 'withdrawn', by }, 'r1', T).settled!;
+    expect(settledWords(withdrawn('terminal'), { asyncQuestion: true })).toBe('Dismissed in the terminal');
+    expect(settledWords(withdrawn('maws'), { asyncQuestion: true })).toBeNull(); // this app's: the card leaves at once
+    expect(settledWords(withdrawn('cli'), { asyncQuestion: true })).toBe('Dismissed elsewhere');
+    expect(settledWords(withdrawn('member-0042'), { asyncQuestion: true })).toBe('Dismissed elsewhere');
+    expect(settledWords(withdrawn('bridge'), { asyncQuestion: true })).toBe('No longer asked');
+    for (const by of ['terminal', 'cli', 'bridge']) expect(settledWords(withdrawn(by))).toBe('No longer asked');
   });
 });
 

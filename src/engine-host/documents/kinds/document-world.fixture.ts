@@ -34,6 +34,8 @@ export interface DocumentWorld {
   connect(artifactId: string, actor: Actor): RawEnd;
   /** The distinct authors the store's committed attribution rows credit for a block's characters. */
   persistedAuthors(artifactId: string, blockId: string): string[];
+  /** Closes this world and opens a fresh one on the same files (a restart of the store and the service). */
+  reopen(): DocumentWorld;
   close(): void;
 }
 
@@ -49,8 +51,7 @@ export interface RawEnd {
   pull(): void;
 }
 
-export function openDocumentWorld(): DocumentWorld {
-  const dir = mkdtempSync(join(tmpdir(), 'maws-doc-kind-'));
+export function openDocumentWorld(dir = mkdtempSync(join(tmpdir(), 'maws-doc-kind-'))): DocumentWorld {
   const logs: string[] = [];
   const storage = SqliteDocumentStorage.open(join(dir, 'artifacts', 'store.sqlite'), { log: (line) => logs.push(line) });
   const service = new DocumentService(storage, { kindOf: (id) => storage.kindOf(id), log: (line) => logs.push(line) });
@@ -105,6 +106,13 @@ export function openDocumentWorld(): DocumentWorld {
       const map = mergeMaps(storage.attributions(artifactId, 1, Number.MAX_SAFE_INTEGER).map(decodeMap));
       const node = DocIndex.of(service.live(artifactId)).find(blockId)!.node;
       return [...new Set([...Array(node.length).keys()].map((k) => insertedBy(map, idAt(node, k)!)?.actor ?? '?'))];
+    },
+    reopen() {
+      kind.close();
+      store.close();
+      service.close();
+      storage.close();
+      return openDocumentWorld(dir);
     },
     close() {
       kind.close();

@@ -1,6 +1,8 @@
 // One local terminal session's jobs, followed from its transcript on disk (P5 O9 M5, the Decision Log's derived-jobs
 // entry): each `read` catches the ledger (./jobs.ts) up with the rows appended since the last, a line not yet whole
-// waiting for its end. A file replaced (another inode) or cut short is read again from its start. The engine's request
+// waiting for its end. A file replaced (another inode) or cut short is read again from its start. Where the file is, is
+// asked at every read (U8c-1): the engine renames a session's transcript into another project folder when its agent
+// enters or leaves a worktree, and the same inode at the new path is read on from where it was. The engine's request
 // records hold no row and repeat the conversation, so they are skipped unparsed, as sminos's `task_rows` skips them.
 // Read-only: the file is opened with 'r' per read and no descriptor is held between reads.
 import { open } from 'node:fs/promises';
@@ -18,10 +20,9 @@ export class TranscriptJobs {
   private ino: number | null = null;
   private offset = 0;
   private rest: Buffer = Buffer.alloc(0); // the last line's bytes while it has no end
-  private path: string | null = null;
   private reading: Promise<void> = Promise.resolve();
 
-  // `locate`: the transcript's path, or null while none is known.
+  // `locate`: the transcript's path now, or null while none is known; asked at every read.
   constructor(private readonly locate: () => Promise<string | null>) {}
 
   // Catches up with the file as it is now; one catch-up at a time, a second waiting for the first.
@@ -40,13 +41,13 @@ export class TranscriptJobs {
   }
 
   private async catchUp(): Promise<void> {
-    this.path ??= await this.locate();
-    if (this.path === null) return;
+    const path = await this.locate();
+    if (path === null) return;
     let file;
     try {
-      file = await open(this.path, 'r');
+      file = await open(path, 'r');
     } catch (error) {
-      if (missing(error)) return;
+      if (missing(error)) return; // moved or not written yet: the next read, located again, catches up
       throw error;
     }
     try {

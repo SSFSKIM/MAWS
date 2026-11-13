@@ -1,9 +1,9 @@
 /* The document editor's chrome (M3 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md): the tab strip, the toolbar,
    menus, the find bar, find's highlights, the other replicas' cursors, and (M4) the comment highlights and the threads
    rail, and (M5) the version history rail, the preview's bar and its change marks, Show editors, the new-changes pill,
-   the restore banner and an agent's editing blocks. These are the app's UI around and over the page, so they read the
-   app's tokens directly (the page itself is theme.css's, in the design system's; the author colours are app tokens by
-   design, D3). No literal colour (theme.dom.test.tsx). */
+   the restore banner and an agent's editing blocks, and (U10a) the gap caret with its room under the live page. These
+   are the app's UI around and over the page, so they read the app's tokens directly (the page itself is theme.css's,
+   in the design system's; the author colours are app tokens by design, D3). No literal colour (theme.dom.test.tsx). */
 
 .doc-editor {
   display: flex;
@@ -453,6 +453,24 @@
 .ds-doc .find-match-current {
   background: var(--accent);
   color: var(--bg-raised);
+}
+
+/* ── the gap caret (U10a, decisions 9 and 10): the place to type after a final block that holds no text ── */
+/* one line of room under the live page's last block, where the empty paragraph used to stand: a click there is the
+   editor's (ProseMirror answers it with the document's end), not the page margin's, which no plugin sees */
+.ds-doc .doc-content[data-editor='live'] {
+  padding-bottom: 1lh;
+}
+/* the library's bar at the gap (Tiptap's injected sheet draws it, shown only while the editor has the keyboard), in
+   the page's text colour */
+.ds-doc .ProseMirror-gapcursor::after {
+  width: calc(var(--space) * 5);
+  border-top-color: var(--ds-color-text, var(--fg));
+}
+@media (prefers-reduced-motion: reduce) {
+  .ds-doc .ProseMirror-gapcursor::after {
+    animation: none;
+  }
 }
 
 /* ── the other replicas' cursors (@y/prosemirror's cursor plugin; --user-color is an author colour) ── */
