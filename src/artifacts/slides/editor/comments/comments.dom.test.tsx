@@ -139,7 +139,7 @@ describe('comments on a deck’s elements (D9)', () => {
       addThread(doc, { threadId: 'live', slideId: 's1', elementId: 'body', quote: 'One path', by: { kind: 'human' }, at: 1, body: 'Keep this path.' });
       addThread(doc, { threadId: 'deleted', slideId: 's1', elementId: 'title', quote: 'Plan', by: { kind: 'human' }, at: 2, body: 'Shorter title?' });
     });
-    fireEvent.click(within(toolbar).getByRole('button', { name: 'Comments' })); // UX wave U5a (M7; A3): two threads nothing was said in count none
+    fireEvent.click(within(toolbar).getByRole('button', { name: 'Comments (2 open)' }));
     const rail = screen.getByRole('complementary', { name: 'Comments' });
     const item = () => rail.querySelector<HTMLElement>('article[data-thread="deleted"]');
     act(() => session.edit((origin) => deleteElementTree(doc, 's1', 'title', origin)));
@@ -179,7 +179,7 @@ describe('comments on a deck’s elements (D9)', () => {
     fireEvent.click(within(toolbar).getByRole('button', { name: 'Add comment' }));
     act(() => session.select(['title']));
     fireEvent.click(within(toolbar).getByRole('button', { name: 'Add comment' }));
-    fireEvent.click(within(toolbar).getByRole('button', { name: 'Comments (2 open)' }));
+    fireEvent.click(within(toolbar).getByRole('button', { name: 'Comments' })); // UX wave U5a (M7; A3): two threads nothing was said in count none
     await settle();
     const rail = screen.getByRole('complementary', { name: 'Comments' });
     const [body, title] = listThreads(doc).map((t) => t.id);
