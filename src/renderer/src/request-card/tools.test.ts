@@ -1,7 +1,7 @@
 // The permission card's first line by the tool's class (UX wave U1a, §D): what is asked, in the card's words.
 import { describe, expect, it } from 'vitest';
 import { permission, syntheticRequest, type PermissionEvent } from './test-requests';
-import { askedLine, toolVerb } from './tools';
+import { askedLine, pathIn, toolVerb } from './tools';
 
 const ask = (toolName: string, input: unknown, over: Partial<PermissionEvent> = {}) => askedLine(permission({ toolName, displayName: toolName, input, ...over }));
 
@@ -24,6 +24,16 @@ describe('the first line of a permission prompt', () => {
     expect(ask('MultiEdit', { file_path: '/w/a.ts', edits: [{ old_string: 'a', new_string: 'b' }] })).toBe('Edit a.ts');
   });
 
+  it('says "Create" for a file the diff creates and "Edit" for one it changes, whatever the tool (M4, §I)', () => {
+    const write = permission({ toolName: 'Write', displayName: 'Write', input: { file_path: '/w/src/new.ts', content: 'x' } });
+    expect(askedLine(write, { kind: 'diff', change: 'create', hunks: [] })).toBe('Create new.ts');
+    expect(askedLine(write, { kind: 'diff', change: 'update', hunks: [] })).toBe('Edit new.ts');
+    expect(askedLine(write, { kind: 'input' })).toBe('Write new.ts');
+    const edit = permission({ toolName: 'Edit', displayName: 'Edit', input: { file_path: '/w/src/app.ts', old_string: 'a', new_string: 'b' } });
+    expect(askedLine(edit, { kind: 'input' })).toBe('Edit app.ts');
+    expect(askedLine(edit, { kind: 'diff', change: 'update', hunks: [] })).toBe('Edit app.ts');
+  });
+
   it('counts the files when the call names several', () => {
     const input = { file_path: '/w/a.ts', edits: [{ file_path: '/w/b.ts', old_string: 'a', new_string: 'b' }, { file_path: '/w/c.ts', old_string: 'c', new_string: 'd' }] };
     expect(ask('MultiEdit', input)).toBe('Edit 3 files');
@@ -42,6 +52,16 @@ describe('the first line of a permission prompt', () => {
   it('names any other tool by its display name', () => {
     expect(ask('Task', { prompt: 'x' }, { displayName: 'Agent' })).toBe('Use Agent');
     expect(ask('ExitWorktree', {}, { displayName: null })).toBe('Use ExitWorktree');
+  });
+
+  it('shows a path relative to the working folder when it lies inside it, else whole (M4, §I)', () => {
+    expect(pathIn('/w/proj/src/a.ts', '/w/proj')).toBe('src/a.ts');
+    expect(pathIn('/w/proj/src/a.ts', '/w/proj/')).toBe('src/a.ts');
+    expect(pathIn('/w/project-two/a.ts', '/w/proj')).toBe('/w/project-two/a.ts');
+    expect(pathIn('/w/proj', '/w/proj')).toBe('/w/proj');
+    expect(pathIn('/elsewhere/a.ts', '/w/proj')).toBe('/elsewhere/a.ts');
+    expect(pathIn('/w/proj/a.ts', null)).toBe('/w/proj/a.ts');
+    expect(pathIn('/w/proj/a.ts', '')).toBe('/w/proj/a.ts'); // a record that names no folder
   });
 
   it('keeps the verb desk web reads', () => {
