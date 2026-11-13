@@ -138,11 +138,13 @@ export class BackgroundHandle {
     this.update({ placing: null, expanded: new Set([...this.state.expanded, section]) });
   };
 
-  // E7 start: the widget's view. Opening a run selects its card too, so Back finds it marked.
-  openRun = (taskId: string) => this.update({ view: { kind: 'run', taskId, phase: null }, pendingRun: null, selected: taskId });
+  // E7 start: the widget's view. Opening a run selects its card too, so Back finds it marked. U8b (M9): both supersede a
+  // placement still pending, which must not unfold a section later.
+  openRun = (taskId: string) => this.update({ view: { kind: 'run', taskId, phase: null }, pendingRun: null, selected: taskId, placing: null });
 
   back = () => {
-    if (this.state.view.kind !== 'list' || this.state.pendingRun !== null) this.update({ view: LIST, pendingRun: null });
+    const { view, pendingRun, placing } = this.state;
+    if (view.kind !== 'list' || pendingRun !== null || placing !== null) this.update({ view: LIST, pendingRun: null, placing: null });
   };
 
   selectPhase = (phase: PhaseSelection) => {
