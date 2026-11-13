@@ -772,10 +772,11 @@ describe('background work', () => {
     it('folds one Done N last, newest first, its heading counting by kind with a kind of zero left out', async () => {
       await mount({
         events: [
-          startedTask('wf1', 'local_workflow', 'Judge panel', 1), ends('wf1', 'failed', 1),
-          startedTask('sh1', 'local_bash', 'Build the site', 2), ends('sh1', 'completed', 2),
-          startedTask('m1', 'monitor_ws', 'until tests pass', 3), ends('m1', 'stopped', 3),
-          startedTask('x1', 'local_mcp', 'Index the docs', 4), ends('x1', 'completed', 4),
+          startedTask('wf1', 'local_workflow', 'Judge panel', 1),
+          startedTask('sh1', 'local_bash', 'Build the site', 2),
+          startedTask('m1', 'monitor_ws', 'until tests pass', 3),
+          startedTask('x1', 'local_mcp', 'Index the docs', 4),
+          ends('wf1', 'failed', 1), ends('sh1', 'completed', 2), ends('m1', 'stopped', 3), ends('x1', 'completed', 4),
           startedTask('sh2', 'local_bash', 'Serve the docs', 60),
         ],
       });
@@ -788,7 +789,7 @@ describe('background work', () => {
       expect(ids('done')).toEqual(['x1', 'm1', 'sh1', 'wf1']);
       expect(document.querySelector('[data-shell="sh1"] [data-part="line"]')?.textContent).toMatch(/^Build the site · completed /);
       unmountAll();
-      await mount({ events: [startedTask('sh1', 'local_bash', 'Build the site', 1), ends('sh1', 'completed', 1), startedTask('sh2', 'local_bash', 'Lint', 2), ends('sh2', 'failed', 2)] });
+      await mount({ events: [startedTask('sh1', 'local_bash', 'Build the site', 1), startedTask('sh2', 'local_bash', 'Lint', 2), ends('sh1', 'completed', 1), ends('sh2', 'failed', 2)] });
       expect(heading('done')).toBe('Done 2 · 2 shells');
     });
 
