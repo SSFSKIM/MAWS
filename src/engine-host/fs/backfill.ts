@@ -601,7 +601,7 @@ function taskState(blocks: TaskNotificationBlock[], ctx: BackfillContext, base: 
       events.push({ ...base(), kind: 'subagent.finished', taskId: block.taskId === null ? started : (block.taskId as TaskId), status: block.outcome, summary: summary.slice(0, TEXT_CAP), outputFile: block.outputFile, reason: null });
     } else if (block.taskId !== null) {
       // Like the live normaliser, an outcome without a known task type is a task.notification.
-      events.push({ ...base(), kind: 'task.notification', taskId: block.taskId as TaskId, toolUseId: block.toolUseId as ToolUseId, status: block.outcome, summary: block.result ?? block.summary, outputFile: block.outputFile, reason: null });
+      events.push({ ...base(), kind: 'task.notification', taskId: block.taskId as TaskId, toolUseId: block.toolUseId as ToolUseId, status: block.outcome, summary: block.result ?? block.summary, outputFile: block.outputFile, reason: null, arrivals: true });
     }
   }
 }

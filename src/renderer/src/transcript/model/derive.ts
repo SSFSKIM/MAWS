@@ -23,7 +23,7 @@ import { glyphFor } from './glyphs';
 import { collectCells, groupItems, phrasesOf, type WorkItem } from './groups';
 import { cellId, rowId, turnId as turnIdOf } from './keys';
 import type { LiveBlock, TranscriptState, TranscriptUi, TurnState, TurnWork } from './reduce';
-import { isEngineOrigin, olderHostTaskEnds, originOf, runningTurn, type ReceiptUndo } from './reduce';
+import { isEngineOrigin, originOf, runningTurn, type ReceiptUndo } from './reduce';
 import { closedByUnseenExit } from './reduce'; // DC9
 import { TOOL_CATEGORIES, type Cell, type ChangedFile, type Row, type RowId, type SubagentRef, type SubagentStatus, type ToolCategory, type TurnId, type TurnSummary } from './rows';
 import { firstLineOf, previewHidesBody, previewOf } from './rows'; // E7; UX wave U3
@@ -465,11 +465,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   };
   const questionsOf: CallQuestions = (call) => callQuestions(turn, state, call as ToolUseId);
   // The whole-branch review's finding 3: the tasks of this turn that ran in the background, whose ends an older engine
-  // host tells only as `task.notification` (reduce.ts, olderHostTaskEnds)
-  // and the lines drawn of them, which are no work of the turn's: the wire said the task ended, mostly after the turn's
-  // answer, which stays its answer
+  // host tells only as `task.notification` (one without the `arrivals` mark), and the lines drawn of them, which are no
+  // work of the turn's: the wire said the task ended, mostly after the turn's answer, which stays its answer
   const backgroundTasks = new Set<TaskId>();
-  const olderHost = state !== null && olderHostTaskEnds(state);
   const olderHostEnds = new Set<RowId>();
 
   const blockRow = (block: LiveBlock, at: string): Item | null => {
@@ -703,7 +701,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
           break;
         }
         for (const rec of tools.values()) if (rec.backgroundTaskId === event.taskId) rec.backgroundDone = true;
-        if (olderHost && event.kind === 'task.notification' && backgroundTasks.has(event.taskId)) {
+        if (event.kind === 'task.notification' && event.arrivals !== true && backgroundTasks.has(event.taskId)) {
           const row = olderHostNotice(event, turn.id);
           olderHostEnds.add(row.id);
           items.push({ kind: 'row', row });
@@ -1438,7 +1436,7 @@ function noticeOf(event: Event<'user.message'>, arrival: Exclude<CarriedArrival,
 }
 
 // UX wave U3 (the whole-branch review's finding 3): a background task's end as an older engine host tells it, which sends
-// no arrival: its one line from the `task.notification`, its dot the event's outcome, its words the event's summary (the
+// no arrival (its `task.notification` has no `arrivals` mark): its one line from the `task.notification`, its dot the event's outcome, its words the event's summary (the
 // engine's sentence, or the task's description where the engine gives none, as for a stopped task), its detail the
 // event's reason; the task, its call and its output file as the event names them. Drawn where the event stands, in the
 // turn of its task; it raises nothing else (attention derives no item from a task's end).
