@@ -23,6 +23,11 @@
 //   stack is walked from; kept when the active thread clears, dropped when that thread is no longer open. A click on a
 //   passage also puts the caret at the click (Surprise 7: the activation's redraw would otherwise write ProseMirror's
 //   stale state selection back over the native caret when the click's `selectionchange` has not been read yet).
+// - UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, M7; A17): the answered passage. Asked
+//   by the editor's surface when an agent's answer to a thread arrives (`flashThread`), the thread's live text (or its
+//   block) is drawn with `ANSWERED_CLASS` for ANSWER_FLASH_MS by a decoration of its own, mapped through edits made
+//   meanwhile; nothing scrolls, the caret and the active thread stay, and the display's reading of a passage's threads
+//   (its `comment-<id>` classes, `drawnThreads`) never sees it. The stylesheet tints and fades it.
 // - The paste dedupe (Outline's rule): a pasted comment mark is kept only when its thread is in this document and no
 //   live text carries it, so a cut followed by a paste moves the comment, a copy pastes plain text, and another
 //   document's mark, or an external `span[data-thread]`, never comes in. A drag-move counts the dragged range as gone,
@@ -330,6 +335,70 @@ export const activeThread = (state: EditorState): string | null => commentDispla
 /** P4-B1: the last thread the human activated, while it is open (the margin walks its stack from it), or null. */
 export const pinnedThread = (state: EditorState): string | null => commentDisplayKey.getState(state)?.pinned ?? null;
 
+// UX wave U5a start (M7; A17): the answered passage, tinted once
+/** How long the answered passage is drawn tinted (the stylesheet's fade runs over the same time). */
+export const ANSWER_FLASH_MS = 1_500;
+/** The class the answered passage carries while it is tinted; not a `comment-` class, which the display reads as a thread. */
+export const ANSWERED_CLASS = 'doc-answered';
+const answeredKey = new PluginKey<AnsweredState>('commentAnswered');
+interface AnsweredState {
+  decorations: DecorationSet;
+  /** One more for each ask, so a second ask while the first shows draws for its own full time. */
+  asks: number;
+}
+type AnsweredMeta = { threadId: string | null };
+
+// The thread's live text in this editor, else its block (a view commented whole), drawn answered.
+function answeredDecorations(doc: PMNode, ydoc: Doc, threadId: string): Decoration[] {
+  const ranges = liveRanges(doc).get(threadId) ?? [];
+  const out = ranges.map(({ from, to }) => Decoration.inline(from, to, { class: ANSWERED_CLASS }));
+  const blockId = blockThreads(ydoc, [threadId]).get(threadId);
+  if (blockId !== undefined)
+    doc.descendants((node, pos) => {
+      if (node.attrs.id === blockId) out.push(Decoration.node(pos, pos + node.nodeSize, { class: ANSWERED_CLASS }));
+      return !node.isTextblock;
+    });
+  return out;
+}
+
+function answered(ydoc: Doc): Plugin<AnsweredState> {
+  return new Plugin<AnsweredState>({
+    key: answeredKey,
+    state: {
+      init: () => ({ decorations: DecorationSet.empty, asks: 0 }),
+      apply(tr, old) {
+        const meta = tr.getMeta(answeredKey) as AnsweredMeta | undefined;
+        if (meta?.threadId === null) return { decorations: DecorationSet.empty, asks: old.asks };
+        if (meta) return { decorations: DecorationSet.create(tr.doc, answeredDecorations(tr.doc, ydoc, meta.threadId)), asks: old.asks + 1 };
+        return tr.docChanged && old.decorations !== DecorationSet.empty ? { ...old, decorations: old.decorations.map(tr.mapping, tr.doc) } : old;
+      },
+    },
+    props: { decorations: (state) => answeredKey.getState(state)?.decorations },
+    view: (view) => {
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      let seen = answeredKey.getState(view.state)?.asks ?? 0;
+      const stop = () => {
+        if (timer !== null) clearTimeout(timer);
+        timer = null;
+      };
+      return {
+        update: (current) => {
+          const asks = answeredKey.getState(current.state)?.asks ?? 0;
+          if (asks === seen) return;
+          seen = asks;
+          stop();
+          timer = setTimeout(() => {
+            timer = null;
+            if (!current.isDestroyed) current.dispatch(current.state.tr.setMeta(answeredKey, { threadId: null } satisfies AnsweredMeta).setMeta('addToHistory', false));
+          }, ANSWER_FLASH_MS);
+        },
+        destroy: stop,
+      };
+    },
+  });
+}
+// UX wave U5a end
+
 // ── the paste dedupe ──
 /** The fragment with every comment mark `keep` refuses removed, at every depth. */
 export function stripCommentMarks(fragment: Fragment, keep: (threadId: string) => boolean): Fragment {
@@ -539,6 +608,8 @@ declare module '@tiptap/core' {
     comments: {
       /** Shows a thread as active (its passage drawn as such), or none. */
       setActiveThread: (threadId: string | null) => ReturnType;
+      /** UX wave U5a (M7): tints the thread's passage once, for ANSWER_FLASH_MS (an agent's answer to it arrived). */
+      flashThread: (threadId: string) => ReturnType;
     };
   }
 }
@@ -554,6 +625,13 @@ export const Comments = Extension.create<CommentsOptions>({
         (threadId) =>
         ({ tr, dispatch }) => {
           if (dispatch) tr.setMeta(commentDisplayKey, { active: threadId } satisfies DisplayMeta).setMeta('addToHistory', false);
+          return true;
+        },
+      // UX wave U5a (M7)
+      flashThread:
+        (threadId) =>
+        ({ tr, dispatch }) => {
+          if (dispatch) tr.setMeta(answeredKey, { threadId } satisfies AnsweredMeta).setMeta('addToHistory', false);
           return true;
         },
     };
@@ -583,7 +661,7 @@ export const Comments = Extension.create<CommentsOptions>({
   addProseMirrorPlugins() {
     const { doc, tabId } = this.options;
     if (!doc) return [];
-    return [display(doc, this.options.onActivate), ...(this.options.paste ? [paste(doc, tabId)] : []), ...(this.options.artifactId ? [blockCarry(doc, this.options.artifactId)] : []) /* P3-E */];
+    return [display(doc, this.options.onActivate), answered(doc) /* UX wave U5a */, ...(this.options.paste ? [paste(doc, tabId)] : []), ...(this.options.artifactId ? [blockCarry(doc, this.options.artifactId)] : []) /* P3-E */];
   },
 });
 

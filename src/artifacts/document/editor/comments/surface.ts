@@ -46,6 +46,12 @@ export interface CommentOverlayProps {
   hosting?(threadId: string | null): void;
   /** P4-B1: `margin` when the overlay is drawn inside the margin's stack (in flow, the column's width); absent over the frame. */
   placement?: 'margin';
+  /**
+   * UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, M7; A17): tints the thread's passage once,
+   * briefly, where this editor shows it (an agent's answer to it arrived); never scrolls, nothing else moves. A document's
+   * editor offers it; a deck's and a design's do not.
+   */
+  flash?(threadId: string): void;
 }
 
 export interface DocumentComments {

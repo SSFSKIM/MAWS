@@ -23,9 +23,16 @@
 // artifact's last view closes (the pass ends), never because a host unmounted. Each such thread holds the tab's replica
 // until then, so its withdrawal is written after the tab went. A comment in flight keeps its thread and its hold until
 // its send settles: a refusal with the pass gone withdraws it.
+//
+// UX wave U5a (M7; decision 20, A17): when the agent's answer to a comment arrives (./answers.ts), the host asks the
+// editor once to tint the passage, only while the document is on screen; in a body under 720 px the card on that thread,
+// floating over the text there, closes to the passage's mark unless the keyboard is in it (a click on the mark opens
+// the thread again, as the editor's activation does). In the margin the card stays. A deck's and a design's editor
+// offer no tint, so nothing is read for them.
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, type ReactNode } from 'react';
 import type { CommentOverlayProps, CommentedPassage, DocumentComments } from '@artifacts/document/editor/comments/surface';
 import { useThreadStatus } from '@artifacts/document/editor/comments/use-threads';
+import { RAIL_BESIDE_FROM_PX } from '@artifacts/document/rail-width'; // UX wave U5a (M7)
 import { anchorField, type Anchor } from '@shared/anchor/anchor';
 import type { ArtifactKind } from '@shared/artifacts/entity'; // P3-C
 import type { AppSessionId } from '@shared/graph/ids';
@@ -35,6 +42,7 @@ import { CommentCardHost, type CardFrame } from '../../side/card/CardHost';
 import { closeCard, editComment /* UX wave U5a */, handCardTo /* P4-B3 */, noteThreadOf /* UX wave U5a */, useCommentCard, type CardHostMode, type OpenCard, type PassComment } from '../../side/card/store';
 import { focusAtEnd } from '../../side/card/CommentCard'; // P4-B1
 import { openCommentComposer, type CommentPlacement } from '../code/anchor/anchor'; // P4-B1: CommentPlacement
+import { watchAnswers } from './answers'; // UX wave U5a (M7)
 import { commentDraftOf, unsentCommentOf } from './comment-drafts'; // P4-B1; UX wave U5a: readers over the pass
 import { cancelPendingComment, PendingCommentNotice, pendingThreadOf, startCommentSession, subscribePending, usePendingComment } from './comment-session'; // P3-F1
 
@@ -306,8 +314,23 @@ const threadOf = (card: OpenCard | null): string | null => (card?.target?.kind =
 function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { binding: Binding }) {
   const { artifactId, hostId, mode, visible, holdReplica } = binding;
   const pending = usePendingComment(hostId); // P3-F1
-  const { doc, locate, layoutKey, setActive, resolve, reopen, record, focus, hosting, placement } = editor; // P4-B1: hosting, placement
+  const { doc, locate, layoutKey, setActive, resolve, reopen, record, focus, hosting, placement, flash } = editor; // P4-B1: hosting, placement; UX wave U5a: flash
   const inMargin = placement === 'margin'; // P4-B1
+
+  // UX wave U5a (M7; A17): the answer's arrival, read while the editor offers its tint, and acted on only while the
+  // document is on screen
+  const shown = useRef({ visible, inMargin });
+  useLayoutEffect(() => {
+    shown.current = { visible, inMargin };
+  });
+  useEffect(() => {
+    if (!flash) return;
+    return watchAnswers(doc, hostId, (threadId) => {
+      if (!shown.current.visible || document.visibilityState === 'hidden') return;
+      flash(threadId);
+      if (!shown.current.inMargin) foldCard(hostId, threadId);
+    });
+  }, [doc, hostId, flash]);
 
   // The card on screen draws its thread as active. The overlay going is the editor going only when no overlay of this
   // host is back a microtask later; a remount (a tab switch) keeps the composing card. UX wave U5a: neither withdraws a
@@ -437,6 +460,17 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
       />
     </>
   );
+}
+
+// UX wave U5a (M7; A17): the host's card on the answered thread closes to the passage's mark when it floats over the text
+// of a body under 720 px and the keyboard is not in it; nothing else changes.
+function foldCard(hostId: string, threadId: string): void {
+  const { open } = useCommentCard.getState();
+  if (open?.hostId !== hostId || threadOf(open) !== threadId) return;
+  const card = document.querySelector<HTMLElement>(`[data-comment-card][data-card-serial="${open.serial}"]`);
+  if (!card || card.contains(document.activeElement)) return;
+  const width = card.closest<HTMLElement>('.doc-editor-body')?.clientWidth ?? 0; // 0: not laid out, which is not narrow
+  if (width > 0 && width < RAIL_BESIDE_FROM_PX) closeCard(open.serial);
 }
 
 // Resolve for an open thread, Reopen for a resolved one, following the threads map.

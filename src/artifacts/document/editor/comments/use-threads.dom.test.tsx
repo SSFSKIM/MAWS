@@ -34,7 +34,7 @@ it('waits for a quiet moment: a change every 30 ms holds the list until the chan
 it('counts only live-target threads, waiting for quiet target edits but following thread status at once (WR 49)', () => {
   const doc = newDoc();
   createDocument(doc, { id: 'tab1', title: 'Plan', generateID: () => 'p1' });
-  addThread(doc, { threadId: 'live', tabId: 'tab1', blockId: 'p1', quote: 'Plan', anchor: { kind: 'block' }, by: { kind: 'human' }, at: 1 });
+  addThread(doc, { threadId: 'live', tabId: 'tab1', blockId: 'p1', quote: 'Plan', anchor: { kind: 'block' }, by: { kind: 'human' }, at: 1, body: 'Retitle?' }); // UX wave U5a: a comment counts once it holds a message
   thread(doc, 'orphan');
   const { result, unmount } = renderHook(() => ({ total: useOpenThreadCount(doc), tabs: useOpenThreadCounts(doc) }));
   expect(result.current.total).toBe(1);
