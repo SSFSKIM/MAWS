@@ -11,9 +11,10 @@
 // while a turn runs (W10, charter §4.2 as amended 2026-10-01) Send is a steer with priority `next` the engine delivers
 // at the turn's next tool boundary; `!` and `#` run through their modes. UX wave U4a (l3-input-08, l3-input-03): Enter
 // sends whatever the line count, and ⌘Enter keeps the message for after a running turn (`when: 'after'`, which the seam
-// sends and the host's queue holds; a terminal session refuses it during its turn); the empty box says so. Esc in the editor interrupts and sends
-// now: the held head (a `now` promote), else whatever `next` steer waits (the engine starts it once the turn is
-// interrupted), else it just stops; an open `@` or `/` list takes it before the composer does, and with no turn
+// sends and the host's queue holds; a terminal session refuses it during its turn); the empty box says so.
+//
+// Esc in the editor interrupts and sends now: the held head (a `now` promote), else whatever `next` steer waits (the
+// engine starts it once the turn is interrupted), else it just stops; an open `@` or `/` list takes it before the composer does, and with no turn
 // running a second Esc within a moment on an empty editor opens the rewind picker (W3, B7). The Stop button and ⌘. are the plain stop: `session.interrupt` with `holdEngineQueued`, which first
 // holds every waiting `next` steer in MAWS's queue, so nothing runs until Resume or Send now and the queue reads
 // paused because you interrupted. ⌘. and ⌘L are not registered here: `ComposerAppKeys` holds the one app-level handler.
