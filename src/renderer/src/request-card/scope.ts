@@ -2,10 +2,10 @@
 // `session` unless the request is downgraded, `local_settings` only from the engine's own `localSettings` suggestion
 // and never when downgraded. Downgraded is exactly what C3's broker downgrades (an ask rule outranks any allow rule,
 // §4.6), so the card never offers a scope the broker would answer as once. `updatedPermissions` is what the broker
-// writes for the scope (`engine-host/broker.ts`, `sessionRule` and `localSettingsRule`), shown, never sent: the answer
-// carries the scope alone. Pure.
+// writes for the scope (`engine-host/broker.ts`, `sessionRule` and `localSettingsRule`), never sent: the answer carries the
+// scope alone. UX wave U1a (§D): the card draws a button per scope, named by `label`; the project scope's `rule` is the
+// rule's text, for the line under the buttons that names the file it is written to. Pure.
 import type { SessionEvent } from '@shared/graph/events';
-import { filePaths, toolClass } from './tools';
 
 type PermissionEvent = Extract<SessionEvent, { kind: 'permission.requested' }>;
 export type Scope = 'once' | 'session' | 'local_settings';
@@ -13,7 +13,7 @@ export type Scope = 'once' | 'session' | 'local_settings';
 export interface ScopeOption {
   scope: Scope;
   label: string;
-  detail: string;
+  rule: string | null; // the rule `local_settings` writes, in words; null for the other scopes
   updatedPermissions: unknown[] | null;
 }
 
@@ -42,14 +42,8 @@ function ruleFromRequest(ev: PermissionEvent, destination: string): AddRules {
 
 const ruleText = (rules: AddRules['rules']) => rules.map((r) => r.ruleContent ?? r.toolName).join(', ');
 
-// F5 (owner's ruling, W4): the project scope names the file the engine writes the rule to (`updatedPermissions`
-// destination `localSettings`, the project's `.claude/settings.local.json`), since that is the one control on the card
-// that persists into the user's own files.
-export const LOCAL_SETTINGS_DETAIL = 'Saved to .claude/settings.local.json in the project';
-
 export function scopeOptions(ev: PermissionEvent, project: { name: string } | null): ScopeOption[] {
-  const files = toolClass(ev.toolName) === 'edit' ? Math.max(1, filePaths(ev.input).length) : 0; // the preview's file rows
-  const once: ScopeOption = { scope: 'once', label: 'Allow once', detail: files === 0 ? 'Only this invocation' : files === 1 ? 'This 1 file' : `These ${files} files`, updatedPermissions: null };
+  const once: ScopeOption = { scope: 'once', label: 'Allow once', rule: null, updatedPermissions: null };
   if (isDowngraded(ev)) return [once];
 
   const suggestions = addRulesSuggestions(ev);
@@ -57,7 +51,7 @@ export function scopeOptions(ev: PermissionEvent, project: { name: string } | nu
   const session: ScopeOption = {
     scope: 'session',
     label: 'Allow for this session',
-    detail: first?.rules.some((r) => r.ruleContent) ? `Matching ${ruleText(first.rules)} commands` : 'Until this session ends',
+    rule: null,
     updatedPermissions: [first ? { ...first, destination: 'session' } : ruleFromRequest(ev, 'session')],
   };
   const local = suggestions.find((s) => s.destination === 'localSettings');
@@ -65,6 +59,6 @@ export function scopeOptions(ev: PermissionEvent, project: { name: string } | nu
   return [
     once,
     session,
-    { scope: 'local_settings', label: `Always allow ${ruleText(local.rules)} in ${project?.name ?? 'this project'}`, detail: LOCAL_SETTINGS_DETAIL, updatedPermissions: [local] },
+    { scope: 'local_settings', label: `Always allow in ${project?.name ?? 'this project'}`, rule: ruleText(local.rules), updatedPermissions: [local] },
   ];
 }

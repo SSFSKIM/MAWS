@@ -3,11 +3,12 @@
 // `attention.request` through the attention store's cache), answers through `session.answer` with payloads `toAnswer`
 // validated, reports the delivery (`answering`; `delivered` standing as it was, its controls disabled, until its item
 // leaves the session's list, UX wave U1's UC-1 and U1a's §C; `not_pending` for two seconds; `write_failed` back to
-// pending with Retry), and owns the keyboard: Enter and Esc
-// through C5's dispatcher, bound `within` the element that owns focus for the placement. Docked, that is the
-// `DockedCardFrame` around the card; in an Overview card, the nearest ancestor with a `tabindex` (C5's article), since
-// the article, not the card, holds focus there; hover and inline bind no key. Digits pick a permission's scope from
-// the same owner. E1 M4b: a blocking `maws` ask's item (originating in `maws.ask.opened`) renders compact
+// pending with Retry), and owns the keyboard: Enter and Esc (and a permission prompt's ⌘↩ and ⇧⌘↩, UX wave U1a §D)
+// through C5's dispatcher, bound `within` the element that owns focus for the placement, each on a fresh press only.
+// Docked, that is the `DockedCardFrame` around the card; in an Overview card, the nearest ancestor with a `tabindex` (C5's
+// article), since the article, not the card, holds focus there; hover and inline bind no key. Digits pick a question's
+// option from the same owner. U1a §D: a permission prompt opens on one line saying what is asked (`askedLine`), where the
+// other kinds have their title; the hover placement keeps its heading, its "wants to" line and the folder line. E1 M4b: a blocking `maws` ask's item (originating in `maws.ask.opened`) renders compact
 // (`variants/Ask.tsx`), its one action opening the Question sheet; the card never answers it. P5 O8 M7a: a placement
 // that asks for it (`askInPlace`: the project channel's waiting cards) draws the sheet's body inline instead, which
 // answers through `maws.ask.answer` as the sheet does; the sheet stays the session pane's.
@@ -48,7 +49,7 @@ import { CardButton, Controls, Muted } from './controls';
 import { HoverPreview } from './preview/HoverPreview';
 import { hoverApproval } from './quick-approval';
 import { requesterName } from './requester';
-import { mcpParts, toolVerb } from './tools';
+import { askedLine, mcpParts, toolVerb } from './tools';
 import { DialogBody } from './variants/Dialog';
 import { dialogTitle, declaredDialog } from './variants/dialog-kinds';
 import { ElicitationBody } from './variants/Elicitation';
@@ -82,6 +83,8 @@ export interface RequestCardProps {
 export const HEADINGS = ATTENTION_HEADINGS;
 const TONE: Record<AttentionTone, string> = { warning: 'text-warning', info: 'text-info', danger: 'text-danger', accent: 'text-accent' /* P2-C */ };
 const NOT_PENDING_MS = 2_000;
+const KEY_NAMES = ['accept', 'decline', 'allowOnce', 'allowLasting'] as const;
+const NO_KEYS: Record<(typeof KEY_NAMES)[number], boolean> = { accept: false, decline: false, allowOnce: false, allowLasting: false };
 const CARRIED: Capability = { available: true }; // no port: today's delivery path refuses it in the holder's words
 
 // `sent`: the answer was delivered, and the card stands as it was, its controls disabled, until the session's list no
@@ -246,15 +249,18 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   const shown = request !== null;
   useEffect(() => (placement === 'docked' && requestId !== null && shown ? markDocked(item.appSessionId, requestId) : undefined), [placement, item.appSessionId, requestId, shown]);
 
-  // The variant's Enter, Esc and digit actions, and whether it has each (a key it lacks stays unbound).
+  // The variant's key actions, and whether it has each (a key it lacks stays unbound).
   const keys = useRef<CardKeys>({ accept: null, decline: null });
-  const [bound, setBound] = useState({ accept: false, decline: false });
+  const [bound, setBound] = useState(NO_KEYS);
   const bindKeys = useCallback((next: CardKeys) => {
     keys.current = next;
-    setBound((b) => (b.accept === (next.accept !== null) && b.decline === (next.decline !== null) ? b : { accept: next.accept !== null, decline: next.decline !== null }));
+    const has = { accept: next.accept != null, decline: next.decline != null, allowOnce: next.allowOnce != null, allowLasting: next.allowLasting != null };
+    setBound((b) => (KEY_NAMES.every((name) => b[name] === has[name]) ? b : has));
   }, []);
   const accept = useCallback(() => keys.current.accept?.(), []);
   const decline = useCallback(() => keys.current.decline?.(), []);
+  const allowOnce = useCallback(() => keys.current.allowOnce?.(), []);
+  const allowLasting = useCallback(() => keys.current.allowLasting?.(), []);
   const live = phase === 'pending' && !concealed && race.settled === null; // M6: a settled race answers nothing
 
   // Card placement: the focus owner is C5's article (the nearest `tabindex` ancestor), the card root without one.
@@ -265,8 +271,10 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
     ownerRef.current = root ? (root.parentElement?.closest<HTMLElement>('[tabindex]') ?? root) : null;
   });
   const cardKeys = placement === 'card' && live;
-  useKeyChord('request.accept', accept, { within: ownerRef, enabled: cardKeys && bound.accept });
-  useKeyChord('request.decline', decline, { within: ownerRef, enabled: cardKeys && bound.decline });
+  useKeyChord('request.accept', accept, { within: ownerRef, enabled: cardKeys && bound.accept, fresh: true });
+  useKeyChord('request.decline', decline, { within: ownerRef, enabled: cardKeys && bound.decline, fresh: true });
+  useKeyChord('request.allowOnce', allowOnce, { within: ownerRef, enabled: cardKeys && bound.allowOnce, fresh: true });
+  useKeyChord('request.allowLasting', allowLasting, { within: ownerRef, enabled: cardKeys && bound.allowLasting, fresh: true });
 
   // Digits, from the element that owns the keys (the article, or the docked frame, which mounts once the request is
   // known to be answerable).
@@ -294,6 +302,9 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   const requester = requesterName(rows ?? [], request?.agentId ?? item.request.agentId);
   const { title, subtitle } = titleOf(request, requester);
   const hover = placement === 'hover';
+  // U1a §D: a permission prompt's first line, outside the hover placement, in place of the kind line and the title
+  const asked = request?.kind === 'permission.requested' && !hover ? askedLine(request) : null;
+  const from = request?.agentId && requester !== 'Main session' ? requester : null;
   // P5 O9 M6: by the session's port, which a session held elsewhere has only while its bridge drives it
   const canAnswerHover = hover && hoverApproval(item, request) && controls !== null
     && capability({ kind: 'permission', decision: 'allow', scope: 'once' }).available && capability({ kind: 'permission', decision: 'deny' }).available;
@@ -364,14 +375,26 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   const questionCard = placement === 'inline' && request?.kind === 'question.requested' ? 'max-w-[480px] rounded-lg border border-border bg-bg-raised p-3' : '';
   const content = (
     <div ref={rootRef} data-request-card={item.id} aria-busy={busy} {...named} className={`flex flex-col gap-3 text-fg ${placement === 'docked' || placement === 'inline' ? 'text-ui' : 'text-ui-sm'} ${questionCard}`}>
-      {!framed && (
+      {asked !== null && (
+        <div className="flex flex-col gap-1">
+          <h3 className="m-0 flex items-baseline gap-1.5 text-ui font-semibold">
+            <span aria-hidden className={TONE[heading.tone]}>
+              {heading.char}
+            </span>
+            <span>{asked}</span>
+            {from !== null && <span className="font-normal text-fg-muted"> · from {from}</span>}
+          </h3>
+          {race.asked && settled === null && <Muted>{race.terminalOnly ? RACE.terminal : RACE.asked}</Muted>}
+        </div>
+      )}
+      {!framed && asked === null && (
         <div className={`flex items-center gap-1.5 ${TONE[heading.tone]}`}>
           <span aria-hidden>{heading.char}</span>
           <span>{heading.text}</span>
-          {request?.agentId && requester !== 'Main session' && <span className="text-fg-muted">from {requester}</span>}
+          {from !== null && <span className="text-fg-muted">from {from}</span>}
         </div>
       )}
-      {title !== null && (
+      {title !== null && asked === null && (
         <div className="flex flex-col gap-1">
           <h3 className="m-0 text-ui font-semibold">{title}</h3>
           {subtitle && <Muted>{subtitle}</Muted>}
@@ -396,7 +419,7 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
           <CardButton onClick={() => void useAttention.getState().retryRequest(ipc, item)}>Retry</CardButton>
         </div>
       )}
-      {request?.kind === 'permission.requested' && record && (
+      {request?.kind === 'permission.requested' && hover && record && (
         <p className="m-0 truncate font-mono text-ui-sm text-fg-muted" title={record.directory}>
           {record.directory}
         </p>
@@ -440,7 +463,14 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
 
   if (!framed) return content;
   return (
-    <DockedCardFrame appSessionId={item.appSessionId} title={heading.text} onAccept={live && bound.accept ? accept : null} onDecline={live && bound.decline ? decline : null}>
+    <DockedCardFrame
+      appSessionId={item.appSessionId}
+      title={heading.text}
+      onAccept={live && bound.accept ? accept : null}
+      onDecline={live && bound.decline ? decline : null}
+      onAllowOnce={live && bound.allowOnce ? allowOnce : null}
+      onAllowLasting={live && bound.allowLasting ? allowLasting : null}
+    >
       {content}
     </DockedCardFrame>
   );

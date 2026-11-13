@@ -67,3 +67,35 @@ export function toolVerb(ev: PermissionEvent): string {
       return `use ${ev.displayName ?? ev.toolName}`;
   }
 }
+
+// UX wave U1a (§D): what a permission prompt asks, the card's first line, by the tool's class. A file tool names its file
+// ("Write <name>" for the Write tool, "Edit <name>" for the others) or counts several; M4 reads "Create" or "Edit" from
+// the file itself where it can be read.
+export function askedLine(ev: PermissionEvent): string {
+  switch (toolClass(ev.toolName)) {
+    case 'command':
+      return 'Run a command';
+    case 'edit': {
+      const paths = filePaths(ev.input);
+      if (paths.length > 1) return `Edit ${paths.length} files`;
+      const name = paths.length === 1 ? baseName(paths[0]!) : 'a file';
+      return ev.toolName === 'Write' ? `Write ${name}` : `Edit ${name}`;
+    }
+    case 'read':
+      return 'Read a file';
+    case 'search':
+      return 'Search files';
+    case 'fetch':
+      return 'Fetch a page';
+    case 'web_search':
+      return 'Search the web';
+    case 'mcp': {
+      const { server, tool } = mcpParts(ev)!;
+      return `Use ${server} · ${tool}`;
+    }
+    case 'other':
+      return `Use ${ev.displayName ?? ev.toolName}`;
+  }
+}
+
+const baseName = (path: string): string => path.split('/').filter(Boolean).at(-1) ?? path;
