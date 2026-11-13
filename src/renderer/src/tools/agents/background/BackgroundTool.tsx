@@ -364,10 +364,11 @@ function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
 }
 
 // P5 O9 M5: a session not live here: the graph's workflows (its runs read from disk) and its terminal's jobs as one
-// graph, in the order they started, a stop the bridge took reading stopping… while its job runs.
+// graph, in the order they started, a stop the bridge took reading stopping… while its job runs. The UX wave's U8b (M8):
+// the Background tasks card lists through it too, so one rule merges and orders what the card and the panel read.
 const NO_JOBS: ReadonlySet<string> = new Set();
 const startMs = (n: TaskNode) => (n.startedAt === null ? Infinity : Date.parse(n.startedAt));
-function withJobs(graph: TaskGraph, jobs: readonly Job[], stopping: ReadonlySet<string>): TaskGraph {
+export function withJobs(graph: TaskGraph, jobs: readonly Job[], stopping: ReadonlySet<string>): TaskGraph {
   const flows = graph.order.map((taskId) => graph.tasks.get(taskId)!).filter((n) => n.kind === 'workflow');
   const mark = (n: TaskNode): TaskNode => (n.status === 'running' && stopping.has(n.taskId) ? { ...n, stopping: true } : n);
   const nodes = [...flows, ...jobs.map((job) => mark(taskNodeOf(job)))].sort((a, b) => startMs(a) - startMs(b) || 0);
