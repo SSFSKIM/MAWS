@@ -13,10 +13,14 @@
 //
 // A word's state is main's alone (Task 2's fix round 2): main lists the signed-in member's words the log doesn't hold
 // yet, `sending`, `sent`, `not-sent` or refused, and the tab draws them as given. Nothing is remembered or inferred here.
+//
+// UX wave U11a M4 (S-09; Interfaces §F): the channel's own `reach` and the hub's `refused`, whole from each answer and
+// change as the rest is; null where main told none (live, or no refusal standing).
 import type { ChannelAnswer, ChannelChanged, ChannelEvent, ChannelHost, ChannelMachine, ChannelSession, ChannelWord } from '@shared/ipc/schema/org';
 import type { TailWord } from './project';
 
 type Closed = Extract<ChannelAnswer, { ok: false }>['reason'];
+type Open = Extract<ChannelAnswer, { ok: true }>;
 export type OpenHeld = {
   phase: 'open';
   rev: number;
@@ -26,6 +30,8 @@ export type OpenHeld = {
   unverified: number;
   asOf: string | null;
   live: boolean;
+  reach: NonNullable<Open['reach']> | null;
+  refused: NonNullable<Open['refused']> | null;
   hosts: ChannelHost[]; // M7b: oldest first, as main orders them
   machines: ChannelMachine[];
 };
@@ -37,8 +43,21 @@ const byOffset = (a: ChannelEvent, b: ChannelEvent) => a.offset - b.offset;
 
 export function openedWith(answer: ChannelAnswer): ChannelHeld {
   if (!answer.ok) return { phase: 'closed', reason: answer.reason, rev: answer.rev };
-  const { rev, events, sessions, pending, unverified, asOf, live } = answer;
-  return { phase: 'open', rev, events: [...events].sort(byOffset), sessions, pending, unverified, asOf, live, hosts: answer.hosts ?? [], machines: answer.machines ?? [] };
+  const { rev, events, sessions, pending, unverified, asOf, live, reach, refused } = answer;
+  return {
+    phase: 'open',
+    rev,
+    events: [...events].sort(byOffset),
+    sessions,
+    pending,
+    unverified,
+    asOf,
+    live,
+    reach: reach ?? null,
+    refused: refused ?? null,
+    hosts: answer.hosts ?? [],
+    machines: answer.machines ?? [],
+  };
 }
 
 /** The to-human entries after a change: by key over what is held, in main's order (time, machine, the machine's `order`). */
@@ -57,13 +76,26 @@ function hostsAfter(current: ChannelHeld, change: Extract<ChannelChanged, { ok: 
 export function applyChange(current: ChannelHeld, change: ChannelChanged): ChannelHeld {
   if (current.phase !== 'opening' && change.rev <= current.rev) return current;
   if (!change.ok) return { phase: 'closed', reason: change.reason, rev: change.rev };
-  const { rev, upserts, removed, sessions, pending, unverified, asOf, live } = change;
+  const { rev, upserts, removed, sessions, pending, unverified, asOf, live, reach, refused } = change;
   const base = change.reset === true || current.phase !== 'open' ? [] : current.events;
   const events = new Map(base.map((event) => [event.offset, event]));
   for (const offset of removed) events.delete(offset);
   for (const event of upserts) events.set(event.offset, event);
   const machines = change.machines ?? (current.phase === 'open' ? current.machines : []);
-  return { phase: 'open', rev, events: [...events.values()].sort(byOffset), sessions, pending, unverified, asOf, live, hosts: hostsAfter(current, change), machines };
+  return {
+    phase: 'open',
+    rev,
+    events: [...events.values()].sort(byOffset),
+    sessions,
+    pending,
+    unverified,
+    asOf,
+    live,
+    reach: reach ?? null,
+    refused: refused ?? null,
+    hosts: hostsAfter(current, change),
+    machines,
+  };
 }
 
 /** The words after the log: main's pending, in its order. */

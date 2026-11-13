@@ -11,6 +11,7 @@ import { Search } from './Search';
 import { machineOf } from '@shared/machine/address';
 import { useMachines } from '../stores/machines';
 import { openDialog } from '../sessions/dialogs';
+import { Backdrop } from '../sessions/scrim'; // board 523 (U11a): the one scrim, which yields to a sheet opened over it
 import { machineChoices } from './AddProjectSheet';
 
 // Discovery supplies choices, never membership. Adding uses the persisted user-origin path, also used by Finder.
@@ -42,7 +43,7 @@ export function AddProject() {
   return <Dialog.Root open={open} onOpenChange={(next) => { setOpen(next); if (next) { setQuery(''); setError(null); } }}>
     <Dialog.Trigger asChild><IconButton label="Add project" className="size-[22px]"><PlusIcon className="size-[13px]" /></IconButton></Dialog.Trigger>
     <Dialog.Portal>
-      <Dialog.Overlay className="fixed inset-0 z-50 bg-bg-active" />
+      <Dialog.Overlay asChild><Backdrop className="fixed inset-0 z-50" /></Dialog.Overlay>
       <Dialog.Content className="fixed top-1/2 left-1/2 z-50 flex max-h-[80vh] w-[min(480px,92vw)] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 rounded-md border border-border-strong bg-bg-overlay p-4 text-ui text-fg shadow-float">
         <Dialog.Title className="m-0 text-ui font-semibold">Add project</Dialog.Title>
         <Dialog.Description className="m-0 text-ui-sm text-fg-muted">Your sidebar projects come first. Add a hidden or discovered project, or choose a folder.</Dialog.Description>

@@ -6,6 +6,7 @@
 // (`placement: 'modelChip'`, C4).
 import { Dialog } from 'radix-ui';
 import { create } from 'zustand';
+import { Backdrop } from '../sessions/scrim'; // board 523 (U11a): the one scrim
 import type { AppSessionId } from '@shared/graph/ids';
 import { useComposerStore } from '../stores/composer';
 import { slashWidget, useRegisteredWidgets } from './mentions/widgets';
@@ -55,7 +56,9 @@ export function WidgetDialogHost() {
   return (
     <Dialog.Root open onOpenChange={(next) => !next && closeWidgetDialog()}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-bg opacity-60" />
+        <Dialog.Overlay asChild>
+          <Backdrop className="fixed inset-0 z-40" />
+        </Dialog.Overlay>
         <Dialog.Content
           aria-describedby={undefined}
           data-widget-dialog={open.name}

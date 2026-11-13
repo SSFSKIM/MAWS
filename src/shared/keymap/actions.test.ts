@@ -34,8 +34,8 @@ const WAVE_DEFAULTS: Record<string, string | null> = {
   'tab.overview': 'Cmd+0', 'palette.open': 'Cmd+K', 'composer.focus': 'Cmd+L', 'composer.stop': 'Cmd+.', 'attention.next': 'Cmd+Shift+J',
   'shortcuts.open': 'Cmd+/', 'sidebar.toggle': 'Cmd+B', 'panel.toggle': 'Cmd+Shift+B', 'pane.split': 'Cmd+\\',
 };
-// The rows of landed children: each must exist (U6b adds its seven).
-const LANDED = ['surface.terminal', 'surface.review', 'surface.files'];
+// The rows of landed children: each must exist (U6b adds its seven; U11a its one).
+const LANDED = ['surface.terminal', 'surface.review', 'surface.files', 'channel.open'];
 
 // Decision 8 (A13 as amended): two dispatched rows share a default chord only if both are `renderer` rows and at most one
 // of them has scope `app`. Every chord a row holds counts, the nine of Select tab included.
