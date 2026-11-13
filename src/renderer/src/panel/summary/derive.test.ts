@@ -78,6 +78,13 @@ describe('summary derivations', () => {
       expect(backgroundCounts([task('local_bash'), task('local_workflow'), task('local_agent'), task('monitor_ws')])).toEqual({ shells: 1, workflows: 1, monitors: 1, other: 0 });
       expect(backgroundCounts([task('remote_thing')])).toEqual({ shells: 0, workflows: 0, monitors: 0, other: 1 });
     });
+
+    // The UX wave's U8b, fix round A: a status taken from the Stop callback's list carries its labels
+    // (p5/p5-o16-holder-main seq 162: `shell`, `subagent`), read as the listing's types are.
+    it('reads the Stop callback’s labels as the task types they name', () => {
+      const task = (taskType: string) => ({ taskId: taskType as TaskId, taskType, description: '', ambient: false });
+      expect(backgroundCounts([task('shell'), task('subagent'), task('workflow'), task('monitor'), task('MCP task')])).toEqual({ shells: 1, workflows: 1, monitors: 1, other: 1 });
+    });
   });
 
   describe('sourcesOf', () => {

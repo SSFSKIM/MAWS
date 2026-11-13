@@ -15,6 +15,7 @@ import {
   doneByOutcome,
   emptyGraph,
   firstLevelAgents,
+  kindOf,
   nestedOf,
   onCard,
   runningAgents,
@@ -108,6 +109,25 @@ describe('the graph’s readings', () => {
       const graph = graphOf([...agent('A'), shell('s1', 'gone')]);
       expect(tasksRunningUnder(graph, id('A'))).toBe(0);
       expect(backgroundRunning(graph).map((n) => n.taskId)).toEqual(['s1']);
+    });
+  });
+
+  // Fix round A (the architect's ruling of 2026-11-13): the Stop callback's labels (`Guo`, engine 2.1.322), which a
+  // status taken from its list carries, are read as the task types they name.
+  describe('a task type or the Stop’s label', () => {
+    it('reads each label as its type’s kind, and an unknown one, MCP task among them, as other', () => {
+      expect(['local_bash', 'shell', 'local_agent', 'subagent', 'local_workflow', 'workflow', 'monitor_mcp', 'monitor', 'mcp_task', 'MCP task', 'teammate'].map(kindOf))
+        .toEqual(['shell', 'shell', 'agent', 'agent', 'workflow', 'workflow', 'monitor', 'monitor', 'other', 'other', 'other']);
+    });
+
+    it('a subagent listed by its label is an agent of the tree and no background task', () => {
+      const graph = applySnapshot(emptyGraph(), [
+        { taskId: id('b1'), taskType: 'shell', description: 'sleep', ambient: false },
+        { taskId: id('a1'), taskType: 'subagent', description: 'Probe', ambient: false },
+      ]);
+      expect(firstLevelAgents(graph)).toEqual({ running: ids(['a1']), done: [] });
+      expect(runningAgents(graph)).toBe(1);
+      expect(backgroundRunning(graph).map((n) => [n.taskId, n.kind])).toEqual([['b1', 'shell']]);
     });
   });
 
