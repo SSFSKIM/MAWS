@@ -102,7 +102,8 @@ const AUTHORIZATION = ['grade', 'not-offered', 'act-required', 'ungraded', 'no-t
 describe('lane B’s offer rows (M2)', () => {
   it('are offered, each as its kind, executor and target', () => {
     for (const name of Object.keys(CALLS)) expect([name, OFFERS.commands[name]]).toEqual([name, { kind: 'call', executor: name === 'session.get' || name === 'session.appEvents' || name === 'session.history.list' ? 'machine' : 'engine-host', target: 'appSessionId' }]);
-    for (const name of Object.keys(ACTS)) expect([name, OFFERS.commands[name]]).toEqual([name, { kind: 'act', executor: name === 'session.acquire' ? 'machine' : 'engine-host', target: 'appSessionId' }]);
+    // UX wave U1a §F: `session.answer` narrows what another machine may send (below)
+    for (const name of Object.keys(ACTS)) expect([name, OFFERS.commands[name]]).toEqual([name, { kind: 'act', executor: name === 'session.acquire' ? 'machine' : 'engine-host', target: 'appSessionId', ...(name === 'session.answer' && { accepts: expect.any(Function) }) }]);
   });
 
   it('take inputs the registry’s schemas hold (so what follows is about the grade alone)', () => {
@@ -140,6 +141,34 @@ describe('lane B’s offer rows (M2)', () => {
       expect([name, ran(f, name)]).toEqual([name, true]);
       expect([name, (await call(a, name, args)).error]).toEqual([name, { code: 'act-required' }]);
     }
+  });
+});
+
+// UX wave U1a §F (Reported 2, ruled): a plan's answer from another machine names no mode. At this endpoint an answer is
+// graded `approve` and a mode change `manage`, so a mode inside an answer would let a caller set a mode it may not; the
+// row refuses it (`malformed`) on the input the engine host would act on, whatever the caller holds. The plain answer
+// passes as before.
+describe('`session.answer` from another machine', () => {
+  const plan = (answer: Record<string, unknown>) => at({ requestId: 'r1', answer: { kind: 'plan', outcome: 'implement', feedback: null, ...answer } });
+
+  it('is a schema the registry holds with or without a mode, so the row alone refuses the mode', () => {
+    expect(validateCommandInput('session.answer', plan({ mode: 'acceptEdits' })).ok).toBe(true);
+    expect(OFFERS.commands['session.answer'].accepts?.(plan({ mode: 'acceptEdits' }))).toBe(false);
+    expect(OFFERS.commands['session.answer'].accepts?.(plan({}))).toBe(true);
+    expect(OFFERS.commands['session.answer'].accepts?.(ACTS['session.answer'])).toBe(true);
+  });
+
+  it('refuses a plan answer naming a mode, malformed and unrun, for an owner and for a caller who holds nothing; the same answer without it runs', async () => {
+    const { f, s, a, b } = await setup();
+    const context = { lane: 'B' as const, launchId: s.launchId, engineSessionId: s.engineSessionId! };
+    const fields = (args: Record<string, unknown>) => ({ machine: f.ref, action: 'session.answer', args, session: APP, context });
+    for (const caller of [a, b]) expect(await act(caller, caller.device.action(fields(plan({ mode: 'acceptEdits' }))))).toBe('malformed');
+    expect(ran(f, 'session.answer')).toBe(false);
+    const admitted = a.device.action(fields(plan({})));
+    const from = a.inbox.length;
+    expect(await act(a, admitted)).toBe('ok');
+    await waitFor(a, (m) => m.t === 'done' && m.opId === admitted.opId, 'the done of the plain answer', from);
+    expect(ran(f, 'session.answer')).toBe(true);
   });
 });
 

@@ -1,18 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import type { AppSessionId, RequestId } from '@shared/graph/ids';
 import { mawsToolList, TOOL_ERRORS } from '@shared/maws/tools';
-import { MAWS_SERVER_INSTRUCTIONS } from '@shared/maws/instructions';
+import { MAWS_SERVER_INSTRUCTIONS, mawsServerInstructions } from '@shared/maws/instructions';
 import type { ControlRequestFrame } from '@shared/wire/frames';
 import { defineMawsTool, MawsToolServer, toolText, type McpToolContext, type McpToolDefinition } from './server';
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-function harness(tools: McpToolDefinition[] = []) {
+function harness(tools: McpToolDefinition[] = [], instructions = MAWS_SERVER_INSTRUCTIONS) {
   const sent: { requestId: RequestId; response: unknown }[] = [];
   const logs: string[] = [];
   let changes = 0;
   const server = new MawsToolServer({
-    tools, appSessionId: 'app-1' as AppSessionId, version: '0.9.0', cwd: () => '/r/repo', log: (m) => logs.push(m), onChange: () => changes++,
+    tools, instructions, appSessionId: 'app-1' as AppSessionId, version: '0.9.0', cwd: () => '/r/repo', log: (m) => logs.push(m), onChange: () => changes++,
     respond: async (requestId, response) => void sent.push({ requestId, response }),
   });
   let n = 0;
@@ -32,6 +32,14 @@ describe('the maws server speaks MCP over mcp_message (E0a Q1)', () => {
     await flush();
     expect(rpcOf(id)).toEqual({ jsonrpc: '2.0', id: 0, result: { protocolVersion: '2025-11-25', capabilities: { tools: { listChanged: true } }, serverInfo: { name: 'maws', version: '0.9.0' }, instructions: MAWS_SERVER_INSTRUCTIONS } });
     expect(JSON.stringify(rpcOf(id)).startsWith('{"jsonrpc":"2.0","id":0,"result"')).toBe(true); // the key order the engine echoes
+  });
+
+  // U12a (M1; Interfaces §A): the session's instructions are the server's dependency, chosen from the launch spec
+  it('answers initialize with the instructions it was given, the in-app browser’s paragraph included (U12a)', async () => {
+    const { send, rpcOf } = harness([], mawsServerInstructions({ inAppBrowser: true }));
+    const id = send({ method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'claude-code', version: '2.1.290' } }, jsonrpc: '2.0', id: 0 });
+    await flush();
+    expect((rpcOf(id) as { result: { instructions: string } }).result.instructions).toBe(mawsServerInstructions({ inAppBrowser: true }));
   });
 
   it("answers a notification as the official SDK does, and ping with an empty result", async () => {
@@ -176,7 +184,7 @@ describe('the maws server speaks MCP over mcp_message (E0a Q1)', () => {
     const sent: { requestId: RequestId; response: unknown }[] = [];
     let fail = true;
     const server = new MawsToolServer({
-      tools: [held], appSessionId: 'app-1' as AppSessionId, version: '0', cwd: () => '/r', log: () => {},
+      tools: [held], instructions: MAWS_SERVER_INSTRUCTIONS, appSessionId: 'app-1' as AppSessionId, version: '0', cwd: () => '/r', log: () => {},
       respond: async (requestId, response, opts) => {
         options.push(opts);
         if (fail) throw new Error('EPIPE');
@@ -203,7 +211,7 @@ describe('the maws server speaks MCP over mcp_message (E0a Q1)', () => {
 
   it('logs an answer the pipe refused', async () => {
     const logs: string[] = [];
-    const server = new MawsToolServer({ tools: [], appSessionId: 'app-1' as AppSessionId, version: '0', cwd: () => '/r', log: (m) => logs.push(m), respond: async () => Promise.reject(new Error('no engine process')) });
+    const server = new MawsToolServer({ tools: [], instructions: MAWS_SERVER_INSTRUCTIONS, appSessionId: 'app-1' as AppSessionId, version: '0', cwd: () => '/r', log: (m) => logs.push(m), respond: async () => Promise.reject(new Error('no engine process')) });
     server.accept({ type: 'control_request', request_id: 'r1', request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id: 1, method: 'ping' } } } as ControlRequestFrame);
     await flush();
     expect(logs).toEqual(['mcp_message r1 not answered: no engine process']);
@@ -217,7 +225,7 @@ describe('the calls in flight through delivery (the handover drain)', () => {
     const writes: { requestId: RequestId; settle(ok: boolean): void }[] = [];
     let changes = 0;
     const server = new MawsToolServer({
-      tools, appSessionId: 'app-1' as AppSessionId, version: '0.9.0', cwd: () => '/r/repo', log: () => {}, onChange: () => changes++,
+      tools, instructions: MAWS_SERVER_INSTRUCTIONS, appSessionId: 'app-1' as AppSessionId, version: '0.9.0', cwd: () => '/r/repo', log: () => {}, onChange: () => changes++,
       respond: (requestId) => new Promise<void>((resolve, reject) => writes.push({ requestId, settle: (ok) => (ok ? resolve() : reject(new Error('the host refused the write'))) })),
     });
     let n = 0;
@@ -300,7 +308,7 @@ describe('the calls in flight through delivery (the handover drain)', () => {
     const tool = (name: 'show_pane' | 'ask') => defineMawsTool(name, async () => (ran.push(name), toolText({ ok: true })));
     const writes: RequestId[] = [];
     const server = new MawsToolServer({
-      tools: [tool('show_pane'), tool('ask')], appSessionId: 'app-1' as AppSessionId, version: '0.9.0', cwd: () => '/r/repo', log: () => {},
+      tools: [tool('show_pane'), tool('ask')], instructions: MAWS_SERVER_INSTRUCTIONS, appSessionId: 'app-1' as AppSessionId, version: '0.9.0', cwd: () => '/r/repo', log: () => {},
       respond: async (requestId) => void writes.push(requestId),
       hold: () => new Promise<void>((resolve) => (release = resolve)),
     });
@@ -357,7 +365,7 @@ describe('the calls in flight through delivery (the handover drain)', () => {
     const ran: string[] = [];
     const tool = (name: 'show_pane' | 'ask') => defineMawsTool(name, async () => (ran.push(name), toolText({ ok: true })));
     const server = new MawsToolServer({
-      tools: [tool('show_pane'), tool('ask')], appSessionId: 'app-1' as AppSessionId, version: '0.9.0', cwd: () => '/r/repo', log: () => {},
+      tools: [tool('show_pane'), tool('ask')], instructions: MAWS_SERVER_INSTRUCTIONS, appSessionId: 'app-1' as AppSessionId, version: '0.9.0', cwd: () => '/r/repo', log: () => {},
       respond: async () => {},
       gate: () => new Promise<void>((resolve) => (open = resolve)),
     });

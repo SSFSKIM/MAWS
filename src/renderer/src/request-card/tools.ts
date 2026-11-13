@@ -1,6 +1,7 @@
 // What a permission request's tool does, in the card's words: the class that picks its preview and its verb, the files
 // a file tool touches, and the MCP server a tool belongs to. Pure.
 import type { SessionEvent } from '@shared/graph/events';
+import type { Proposed } from './preview/proposed';
 
 type PermissionEvent = Extract<SessionEvent, { kind: 'permission.requested' }>;
 
@@ -66,4 +67,45 @@ export function toolVerb(ev: PermissionEvent): string {
     case 'other':
       return `use ${ev.displayName ?? ev.toolName}`;
   }
+}
+
+// UX wave U1a (§D): what a permission prompt asks, the card's first line, by the tool's class. A file tool names its file
+// or counts several: "Create <name>" or "Edit <name>" as its diff against the file read says (§I), else "Write <name>"
+// for the Write tool and "Edit <name>" for the others.
+export function askedLine(ev: PermissionEvent, proposed: Proposed | null = null): string {
+  switch (toolClass(ev.toolName)) {
+    case 'command':
+      return 'Run a command';
+    case 'edit': {
+      const paths = filePaths(ev.input);
+      if (paths.length > 1) return `Edit ${paths.length} files`;
+      const name = paths.length === 1 ? baseName(paths[0]!) : 'a file';
+      if (proposed?.kind === 'diff') return proposed.change === 'create' ? `Create ${name}` : `Edit ${name}`;
+      return ev.toolName === 'Write' ? `Write ${name}` : `Edit ${name}`;
+    }
+    case 'read':
+      return 'Read a file';
+    case 'search':
+      return 'Search files';
+    case 'fetch':
+      return 'Fetch a page';
+    case 'web_search':
+      return 'Search the web';
+    case 'mcp': {
+      const { server, tool } = mcpParts(ev)!;
+      return `Use ${server} · ${tool}`;
+    }
+    case 'other':
+      return `Use ${ev.displayName ?? ev.toolName}`;
+  }
+}
+
+const baseName = (path: string): string => path.split('/').filter(Boolean).at(-1) ?? path;
+
+// UX wave U1a (§I): a file's path as the card shows it, relative to the session's working folder when it lies inside it,
+// whole otherwise (and where the window knows no folder: null, or the '' a record that names none holds).
+export function pathIn(path: string, folder: string | null): string {
+  if (folder === null || folder === '') return path;
+  const root = folder.endsWith('/') ? folder : `${folder}/`;
+  return path.startsWith(root) && path.length > root.length ? path.slice(root.length) : path;
 }

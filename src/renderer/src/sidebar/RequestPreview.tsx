@@ -16,7 +16,7 @@ import { useNow } from '../app/use-now';
 import { answerSession, useSessionControls } from '../session/controls/controls-for'; // P5 O9 M4
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
-import { isOpen } from '../attention/derive';
+import { waits } from '@shared/attention/kinds';
 import { itemAge } from './derive';
 import { displayTitle } from '../sessions/title';
 
@@ -66,7 +66,7 @@ export const RequestPreview: Slots['requestCard'] = ({ item, request, placement 
   const heading = HEADINGS[item.kind];
   const shown = request ? describe(request) : { title: item.summary, input: null };
   const answerable = useSessionControls(item.appSessionId)?.capability('answer').available === true; // P5 O9 M4: none for a session held elsewhere
-  const canAnswer = placement === 'hover' && item.kind === 'permission' && isOpen(item) && answerable && isReadOnlyRequest(request);
+  const canAnswer = placement === 'hover' && item.kind === 'permission' && waits(item) && answerable && isReadOnlyRequest(request);
   const where = [projectName, record ? displayTitle(record) : null, itemAge(item, now)].filter(Boolean).join(' · ');
 
   // The button a pointer pressed; a click counts only as the release of that press (`detail` > 0: a keyboard- or

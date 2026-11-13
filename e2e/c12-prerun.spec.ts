@@ -606,11 +606,10 @@ test('§10.3 from Overview cards: approve P, answer Q; R asks while the window i
     const board = overview.getByRole('list', { name: 'Overview' });
     const cardP = board.locator(`[data-card="${await addressed(page, P)}"]`);
     const cardQ = board.locator(`[data-card="${await addressed(page, Q)}"]`);
-    await expect(cardP.getByRole('button', { name: 'Allow', exact: true })).toBeVisible({ timeout: 20_000 });
+    await expect(cardP.getByRole('button', { name: 'Allow once', exact: true })).toBeVisible({ timeout: 20_000 });
     await expect(cardQ.getByRole('button', { name: 'Submit' })).toBeVisible();
     const shotsCards = await shoot(page, '10.3-overview-cards');
-    await cardP.getByRole('radio', { name: 'Allow once' }).click();
-    await cardP.getByRole('button', { name: 'Allow', exact: true }).click();
+    await cardP.getByRole('button', { name: 'Allow once', exact: true }).click();
     await cardQ.getByRole('radio', { name: 'Red' }).click();
     await cardQ.getByRole('button', { name: 'Submit' }).click();
     await idle(page, P);

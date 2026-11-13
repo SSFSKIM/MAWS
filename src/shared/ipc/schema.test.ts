@@ -574,6 +574,18 @@ describe('ipc schema validates both directions', () => {
     expect(layout.SidebarPeopleSchema.safeParse({ version: 1, on: [1] }).success).toBe(false);
   });
 
+  // UX wave U7, O-16: the hidden sessions' layout key (docs/doperpowers/plans/2026-11-12-ux-wave-U7-sidebar-title-bar-destinations.md, Interfaces §E)
+  it('takes sidebar.hidden as a layout key, outside the panel namespace, and holds its value to its shape', () => {
+    const value = { version: 1, hidden: { 'machine-a/app-1': { at: '2026-11-12T10:00:00Z', armedAt: null }, 'machine-b/app-2': { at: '2026-11-12T10:00:00Z', armedAt: '2026-11-12T10:05:00Z' } } };
+    expect(validateCommandInput('layout.get', { key: 'sidebar.hidden' }).ok).toBe(true);
+    expect(validateCommandInput('layout.set', { key: 'sidebar.hidden', value })).toEqual({ ok: true, value: { key: 'sidebar.hidden', value } });
+    expect(layout.SidebarHiddenSchema.safeParse(value).success).toBe(true);
+    expect(layout.SidebarHiddenSchema.safeParse({ version: 2, hidden: {} }).success).toBe(false);
+    expect(layout.SidebarHiddenSchema.safeParse({ version: 1, hidden: { '': { at: 'x', armedAt: null } } }).success).toBe(false);
+    expect(layout.SidebarHiddenSchema.safeParse({ version: 1, hidden: { a: { at: 'x' } } }).success).toBe(false);
+    expect(layout.SidebarHiddenSchema.safeParse({ version: 1, hidden: { a: { at: 'x', armedAt: null, extra: 1 } } }).success).toBe(false);
+  });
+
   // C7 start: C7's additions (C7 execution document, Interfaces "X2 additions" and the Decision Log's execution-start entry)
   describe('C7 entries', () => {
     it("carries the queue's pause reason on session.queue and session.queue.list as a closed, nullable, optional set", () => {
@@ -1054,6 +1066,10 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('maws.pane.answer', { appSessionId: 'a', requestId: 'r1', result: { ok: true, opened: { kind: 'panel-tool', toolId: 'terminal', tabId: 't', title: 'Terminal' } } }).ok).toBe(true);
       expect(validateCommandInput('maws.pane.answer', { appSessionId: 'a', requestId: 'r1', result: { ok: false, error: 'show_pane: the artifact pane is not available in this build of MAWS' } }).ok).toBe(true);
       expect(validateCommandInput('maws.pane.answer', { appSessionId: 'a', requestId: 'r1', result: { ok: false } }).ok).toBe(false);
+      // U12a (M1): a browser answer's page; a refusal carries none
+      expect(validateCommandInput('maws.pane.answer', { appSessionId: 'a', requestId: 'r1', result: { ok: true, opened: { kind: 'panel-tool', toolId: 'browser', tabId: 't', title: 'Browser' }, page: 'kept' } }).ok).toBe(true);
+      expect(validateCommandInput('maws.pane.answer', { appSessionId: 'a', requestId: 'r1', result: { ok: true, opened: { kind: 'panel-tool', toolId: 'browser', tabId: 't', title: 'Browser' }, page: 'stale' } }).ok).toBe(false);
+      expect(validateCommandInput('maws.pane.answer', { appSessionId: 'a', requestId: 'r1', result: { ok: false, error: 'x', page: 'kept' } }).ok).toBe(false);
       expect(validateCommandOutput('maws.pane.answer', { outcome: 'write_failed' }).ok).toBe(false);
     });
   });
@@ -1304,7 +1320,7 @@ describe('ipc schema validates both directions', () => {
       tabId: TAB_ID, appSessionId: 'a', partition: 'persist:maws-browser', url: 'https://example.com/', title: 'Example', favicon: null,
       loading: false, canGoBack: false, canGoForward: false, zoom: 1, control: 'idle', controlSince: 't', suspended: true,
       loadError: null, crashed: null, failed: null, unresponsive: false, blockedPopups: 0, find: null, denied: [], download: null,
-      memoryKiB: null, placedIn: null, covered: false, createdAt: 't', lastShownAt: 't', agentBadge: null /* E13 */, internal: null /* cua #90 */,
+      memoryKiB: null, placedIn: null, covered: false, createdAt: 't', lastShownAt: 't', agentBadge: null /* E13 */, internal: null /* cua #90 */, viewport: null /* U12a */,
     };
 
     // P5 O17 M9b: the remote view's names are appended last and pinned in their own case (below); the blocks before are read without them
@@ -1339,6 +1355,8 @@ describe('ipc schema validates both directions', () => {
         'browser.view.cover', 'browser.control.handBack', 'browser.history.suggest', 'browser.profiles.list',
         'browser.comment.set' /* E4d */,
         'browser.agent.activities.list' /* E13 */,
+        'browser.agent.show' /* U12a */,
+        'browser.tabs.setViewport', 'browser.view.copyScreenshot' /* U12a */,
       ]);
       for (const spec of Object.values(browser.commands)) expect(spec.owner).toBe('main');
       expect(ownKeys(browser.events).filter((name) => !name.startsWith('browser.import.') && !name.startsWith('browser.bookmarks.') && !name.startsWith('browser.extensions.')) /* E4b, cua #90 */).toEqual([
@@ -1361,6 +1379,11 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('browser.tabs.open', { ...open, reuse: 'title' }).ok).toBe(false);
       expect(validateCommandOutput('browser.tabs.open', { tab, reused: false }).ok).toBe(true);
       expect(validateCommandOutput('browser.tabs.open', { tab: { ...tab, extra: 1 }, reused: false }).ok).toBe(false);
+      // U12a (M1; Interfaces §B): show_pane's open asks for the reload, and the answer says which outcome
+      expect(validateCommandInput('browser.tabs.open', { ...open, reuse: 'url', reload: true, requestId: 'r1' }).ok).toBe(true);
+      expect(validateCommandInput('browser.tabs.open', { ...open, reload: false }).ok).toBe(false);
+      for (const page of ['opened', 'reloaded', 'kept']) expect(validateCommandOutput('browser.tabs.open', { tab, reused: true, page }).ok, page).toBe(true);
+      expect(validateCommandOutput('browser.tabs.open', { tab, reused: true, page: 'stale' }).ok).toBe(false);
       for (const tabId of ['b_0123', 'B_0123456789ab', 'b_0123456789AB', 'tab-1', ''])
         expect(validateCommandInput('browser.tabs.close', { tabId }).ok, tabId).toBe(false);
       expect(validateCommandInput('browser.tabs.close', { tabId: TAB_ID }).ok).toBe(true);
@@ -1369,6 +1392,20 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('browser.tabs.navigate', { tabId: TAB_ID, to: { url: 'file:///x' } }).ok).toBe(false);
       expect(validateCommandInput('browser.tabs.navigate', { tabId: TAB_ID, to: 'home' }).ok).toBe(false);
       expect(validateCommandOutput('browser.tabs.navigate', { accepted: true }).ok).toBe(true);
+    });
+
+    it("U12a: validates a tab's device size (null: Responsive) and Copy screenshot's answer", () => {
+      for (const name of ['browser.tabs.setViewport', 'browser.view.copyScreenshot'] as const) expect(commands[name].owner).toBe('main');
+      expect(validateCommandInput('browser.tabs.setViewport', { tabId: TAB_ID, viewport: { width: 375, height: 812 } }).ok).toBe(true);
+      expect(validateCommandInput('browser.tabs.setViewport', { tabId: TAB_ID, viewport: null }).ok).toBe(true);
+      expect(validateCommandInput('browser.tabs.setViewport', { tabId: TAB_ID }).ok).toBe(false);
+      expect(validateCommandInput('browser.tabs.setViewport', { tabId: TAB_ID, viewport: { width: 0, height: 812 } }).ok).toBe(false);
+      expect(validateCommandInput('browser.tabs.setViewport', { tabId: 'nope', viewport: null }).ok).toBe(false);
+      expect(validateCommandInput('browser.view.copyScreenshot', { tabId: TAB_ID }).ok).toBe(true);
+      expect(validateCommandInput('browser.view.copyScreenshot', { tabId: TAB_ID, rect: null }).ok).toBe(false);
+      expect(validateCommandOutput('browser.view.copyScreenshot', { copied: true }).ok).toBe(true);
+      expect(validateCommandOutput('browser.view.copyScreenshot', {}).ok).toBe(false);
+      expect(validateEventPayload('browser.tabs.changed', { appSessionId: 'a', tabs: [{ ...tab, viewport: { width: 768, height: 1024 } }], selected: TAB_ID }).ok).toBe(true);
     });
 
     it('validates the list, the chrome commands and the history and profile reads', () => {
@@ -1487,7 +1524,7 @@ describe('ipc schema validates both directions', () => {
         'browser.import.profiles', 'browser.import.chooseUserData', 'browser.import.inspect', 'browser.import.discard', 'browser.import.start',
         'browser.import.cancel', 'browser.import.list', 'browser.import.remove', 'browser.import.setExtension',
       ]);
-      expect(ownKeys(browser.commands).filter((name) => name !== 'browser.agent.activities.list' /* E13, appended after E4b */ && !name.startsWith('browser.bookmarks.') && !name.startsWith('browser.extensions.') /* cua #90 */ && name !== 'browser.view.capture' /* P3-G */).slice(-added.length)).toEqual(added); // nothing of E4a's reordered
+      expect(ownKeys(browser.commands).filter((name) => name !== 'browser.agent.activities.list' /* E13, appended after E4b */ && name !== 'browser.agent.show' && name !== 'browser.tabs.setViewport' && name !== 'browser.view.copyScreenshot' /* U12a */ && !name.startsWith('browser.bookmarks.') && !name.startsWith('browser.extensions.') /* cua #90 */ && name !== 'browser.view.capture' /* P3-G */).slice(-added.length)).toEqual(added); // nothing of E4a's reordered
       for (const name of added) expect(commands[name as keyof typeof commands].owner, name).toBe('main');
       const events = importNames(Object.keys(browser.events));
       expect(events).toEqual(['browser.import.progress', 'browser.import.finished', 'browser.import.changed']);
@@ -1718,6 +1755,24 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('browser.agent.activities.list', { appSessionId: 'a' }).ok).toBe(true);
       expect(validateCommandOutput('browser.agent.activities.list', { activities: [kept] }).ok).toBe(true);
       expect(validateCommandOutput('browser.agent.activities.list', { activities: Array(501).fill(kept) }).ok).toBe(false);
+    });
+
+    it("U12a: validates the window's ask for the agent's tab: a tab alone, answered with the session's selected tab, whole, or null", () => {
+      const selected = {
+        tabId: TAB_ID, appSessionId: 'a', partition: 'persist:maws-browser', url: 'https://example.com/', title: 'Example', favicon: null,
+        loading: false, canGoBack: false, canGoForward: false, zoom: 1, control: 'agent', controlSince: 't', suspended: false,
+        loadError: null, crashed: null, failed: null, unresponsive: false, blockedPopups: 0, find: null, denied: [], download: null,
+        memoryKiB: null, placedIn: null, covered: false, createdAt: 't', lastShownAt: 't', agentBadge: null, internal: null, viewport: null,
+      };
+      expect(commands['browser.agent.show'].owner).toBe('main');
+      expect(validateCommandInput('browser.agent.show', { tabId: TAB_ID }).ok).toBe(true);
+      expect(validateCommandInput('browser.agent.show', { tabId: 'nope' }).ok).toBe(false);
+      expect(validateCommandInput('browser.agent.show', { tabId: TAB_ID, appSessionId: 'a' }).ok).toBe(false); // the tab's record names the session
+      expect(validateCommandOutput('browser.agent.show', { selected }).ok).toBe(true);
+      expect(validateCommandOutput('browser.agent.show', { selected: null }).ok).toBe(true);
+      expect(validateCommandOutput('browser.agent.show', { selected: TAB_ID }).ok).toBe(false); // the tab itself, so the window can list it
+      expect(validateCommandOutput('browser.agent.show', { selected: false }).ok).toBe(false);
+      expect(validateCommandOutput('browser.agent.show', {}).ok).toBe(false);
     });
 
     it('adds the notice for a page dialog MAWS answered on a tab nobody had placed (A-42): its type and a short plain excerpt', () => {

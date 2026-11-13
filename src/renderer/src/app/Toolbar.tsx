@@ -131,7 +131,8 @@ export function Toolbar() {
           </IconButton>
         </div>
       </div>
-      {projectChip && <div className="max-w-24 min-w-0 shrink"><ProjectChip /></div>}
+      {/* UX wave U7, O-03: the wrapper owns the chip's 96 px and clips; the button fills it and truncates, its focus ring inset */}
+      {projectChip && <div className="max-w-24 min-w-0 shrink overflow-hidden"><ProjectChip /></div>}
       <div ref={mountChromeTabs} data-chrome-tabs className="flex h-full min-w-0 flex-1 items-stretch">
         <div data-chrome-slot="0" className="contents" />
         <div data-chrome-slot="1" className="contents" />
@@ -170,7 +171,7 @@ function ProjectChip() {
       aria-label={label}
       title={label}
       onClick={() => revealRow(current)}
-      className="flex h-6 max-w-48 min-w-0 items-center gap-1.5 rounded-sm px-1.5 text-ui-sm text-fg-muted outline-accent [-webkit-app-region:no-drag] hover:bg-bg-hover hover:text-fg focus-visible:outline-2"
+      className="flex h-6 max-w-full min-w-0 items-center gap-1.5 rounded-sm px-1.5 text-ui-sm text-fg-muted outline-accent [-webkit-app-region:no-drag] hover:bg-bg-hover hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-2"
     >
       <FolderIcon className="size-[12px] shrink-0" />
       <span className="truncate">{name}</span>

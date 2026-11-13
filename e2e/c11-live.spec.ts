@@ -25,6 +25,7 @@ import { c11LiveSkipReason, c11Scratch, Forwarder, FORWARDER_PORT, relayCatalogu
 import { ENGINE_BIN } from '../test/support/engine-pin';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { newChatIn, sidebarRow } from './support/sidebar';
+import { allowForTheSession } from './support/request-keys';
 
 const skip = c11LiveSkipReason();
 test.skip(skip !== null, skip ?? '');
@@ -267,8 +268,7 @@ test('every widget opens with live engine data; controls take effect and are rea
       await send(page, main, 'Use the Bash tool to run exactly this command and nothing else: touch c11-live.txt');
       const frame = main.getByRole('group', { name: 'Approval needed' });
       await expect(frame).toBeVisible({ timeout: 120_000 });
-      await frame.getByRole('radio', { name: 'Allow for this session' }).click();
-      await frame.getByRole('button', { name: 'Allow', exact: true }).click();
+      await allowForTheSession(frame); // U1a §D: the session scope, by its button or its menu entry
       await idle(page, id);
       const grantsWidget = await openWidget(live, 'permissions');
       // a read cached before the grant shows until the refetch on mount lands
@@ -390,11 +390,11 @@ test('every widget opens with live engine data; controls take effect and are rea
       await send(page, main, 'Plan adding a file named hello.txt that contains the word hi. Keep the plan to one or two short steps.');
       const card = main.getByRole('group', { name: 'Plan review' });
       await expect(card).toBeVisible({ timeout: 180_000 });
-      await card.getByRole('button', { name: 'Implement', exact: true }).click();
+      await card.getByRole('button', { name: /^Implement/ }).click(); // U1a §F: "Implement · <the mode before Plan>"
       // default mode again: the write asks
       const approval = main.getByRole('group', { name: 'Approval needed' });
       await expect.poll(async () => {
-        if (await approval.count()) await approval.getByRole('button', { name: 'Allow', exact: true }).click().catch(() => undefined);
+        if (await approval.count()) await approval.getByRole('button', { name: 'Allow once', exact: true }).click().catch(() => undefined);
         const s = await status(page, id);
         return s.turn === null && s.pendingRequests === 0;
       }, { timeout: 240_000, intervals: [1_000] }).toBe(true);

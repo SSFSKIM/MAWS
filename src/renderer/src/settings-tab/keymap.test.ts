@@ -1,8 +1,7 @@
 // The Keyboard section's pure half (C11 execution document, Interfaces "Settings tab" Keyboard; M5 decisions): a keydown
 // read into Electron accelerator syntax through C5's chord vocabulary, the conflict and menu rules, and the table's rows.
 import { describe, expect, it } from 'vitest';
-import { ACTIONS, idsOf, type ActionTable, type KeymapOverrides } from '@shared/keymap/actions';
-import { BUILD_F_ACTION_IDS } from '@shared/keymap/build-f';
+import { ACTIONS, ACTION_IDS, idsOf, isRebindable, type ActionTable, type KeymapOverrides } from '@shared/keymap/actions';
 import type { KeyEventLike } from '@shared/keymap/chord';
 import { EXTENDED_TABLE, SAMPLE_IDS, SAMPLE_ROWS, sample } from '@shared/keymap/sample-rows'; // U6a
 import { acceleratorOf, captureChord, displayChord, keymapGroups } from './keymap';
@@ -108,7 +107,12 @@ describe('the keymap table', () => {
     expect(row('tab.select')).toMatchObject({ display: '⌘1…9' });
     expect(row('surface.terminal')).toMatchObject({ title: 'Terminal', chord: 'Cmd+J', display: '⌘J' });
     expect(groups.find((g) => g.label === 'View › Tabs')!.rows.map((r) => r.id)).toEqual(['tab.select', 'tab.next', 'tab.previous']); // renderer actions placed in a menu's submenu
-    expect(groups.find((g) => g.label === 'In a pane')!.rows.map((r) => r.id)).toEqual(expect.arrayContaining(['request.accept', 'request.decline']));
+    expect(groups.find((g) => g.label === 'In a pane')!.rows.map((r) => r.id)).toEqual(expect.arrayContaining(['request.accept', 'request.decline', 'request.allowOnce', 'request.allowLasting']));
+    // UX wave U1a (§D): the two keys a permission prompt gains, and the titles the four request rows read
+    expect(row('request.allowOnce')).toMatchObject({ title: 'Allow once', chord: 'Cmd+Enter', display: '⌘↩', rebindable: false });
+    expect(row('request.allowLasting')).toMatchObject({ title: 'Allow with the lasting scope the prompt names', chord: 'Cmd+Shift+Enter', display: '⌘⇧↩', rebindable: false });
+    expect(row('request.decline')).toMatchObject({ title: 'Deny a prompt, or decline a question', display: '⎋' });
+    expect(row('request.accept')).toMatchObject({ title: 'Next or Submit on a question; Implement on a plan', display: '↩' });
   });
 
   // A9: the sheet and Settings list every row once, under the group the menus draw it in
@@ -133,8 +137,8 @@ describe('the keymap table', () => {
     expect(composer.find((r) => r.id === sample('sample.fixed'))).toMatchObject({ chord: 'Shift+Enter', display: '⇧↩', rebindable: false });
     const rows = groups.flatMap((g) => g.rows);
     for (const id of SAMPLE_IDS) expect(rows.find((r) => r.id === id)!.rebindable, id).toBe(false);
-    for (const id of BUILD_F_ACTION_IDS) expect(rows.find((r) => r.id === id)!.rebindable, id).toBe(true); // the rows build F knows keep their control (U11a M5: a landed child's row, channel.open, takes none)
-    expect(rows.find((r) => r.id === 'channel.open')!.rebindable).toBe(false);
+    for (const id of ACTION_IDS) expect(rows.find((r) => r.id === id)!.rebindable, id).toBe(isRebindable(id)); // today's rows keep their control; a row build F does not know takes none (U11a M5's channel.open, U1a's two)
+    expect(ACTION_IDS.filter((id) => !isRebindable(id))).toEqual(['channel.open', 'request.allowOnce', 'request.allowLasting']);
   });
 
   it('shows a row that yields its default to a stored rebinding as unbound, and an override it cannot take as no override', () => {
@@ -155,7 +159,7 @@ describe('the capture’s conflicts', () => {
   it('accepts an action’s own default where another row shares it by default, and refuses that chord for any other action', () => {
     const cmdEnter = key('Enter', 'Enter', { metaKey: true });
     expect(captureChord(cmdEnter, 'composer.send', { 'composer.send': null }, EXTENDED_TABLE)).toEqual({ kind: 'chord', chord: 'Cmd+Enter' });
-    expect(captureChord(cmdEnter, 'request.accept', {}, EXTENDED_TABLE)).toEqual({ kind: 'refused', message: 'Already bound to Send (multi-line editor) · unbind it first' });
+    expect(captureChord(cmdEnter, 'request.accept', {}, EXTENDED_TABLE)).toEqual({ kind: 'refused', message: 'Already bound to Allow once · unbind it first' }); // U1a: the first row holding ⌘↩
     // a row holding it by its own override is still a conflict
     expect(captureChord(cmdEnter, 'composer.send', { 'composer.send': null, 'composer.cycleMode': 'Cmd+Enter' }, EXTENDED_TABLE)).toEqual({ kind: 'refused', message: 'Already bound to Cycle permission mode · unbind it first' });
   });

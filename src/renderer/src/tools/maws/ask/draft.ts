@@ -140,6 +140,11 @@ export const toAnswers = (questions: readonly AskQuestion[], drafts: ReadonlyMap
 export const skippedCount = (questions: readonly AskQuestion[], drafts: ReadonlyMap<string, Draft> | undefined): number =>
   questions.filter((question) => ['skipped', 'empty'].includes(draftStatus(question, draftOf(drafts, question)))).length;
 
+// UX wave U1a §E: whether the form is complete, every question answered, skipped or decided: a double-click that leaves
+// it so submits it.
+export const complete = (questions: readonly AskQuestion[], drafts: ReadonlyMap<string, Draft> | undefined): boolean =>
+  questions.every((question) => !['empty', 'incomplete'].includes(draftStatus(question, draftOf(drafts, question))));
+
 // Whether Submit may send: no question is half answered.
 export const canSubmit = (questions: readonly AskQuestion[], drafts: ReadonlyMap<string, Draft> | undefined): boolean =>
   questions.every((question) => draftStatus(question, draftOf(drafts, question)) !== 'incomplete');

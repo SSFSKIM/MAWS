@@ -1,6 +1,6 @@
 // Following one transcript's jobs (P5 O9 M5): rows appended in any pieces, a line not yet whole, the engine's request
 // records, a file replaced or cut short, and a file not there yet.
-import { appendFileSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { TranscriptJobs } from './transcript-jobs';
@@ -79,5 +79,64 @@ describe('TranscriptJobs', () => {
     writeFileSync(path, call('toolu_4', 'd', 'T7') + started('toolu_4', 'bfourth4', 'T8')); // the same file, shorter
     await jobs.read();
     expect(jobs.body(true).map((j) => j.taskId)).toEqual(['bfourth4']);
+  });
+  // U8c-1 (M1 decision 5): the engine moves a session's transcript to another project folder when its agent enters or
+  // leaves a worktree (a rename: the inode stays); the reader asks where the file is at every read.
+  describe('a transcript the engine moves', () => {
+    const moved = () => {
+      const root = scratch();
+      mkdirSync(join(root, 'a'));
+      mkdirSync(join(root, 'b'));
+      return { from: join(root, 'a', 'session.jsonl'), to: join(root, 'b', 'session.jsonl') };
+    };
+
+    it('reads a job row appended after a rename once locate answers the new path', async () => {
+      const { from, to } = moved();
+      let located = from;
+      writeFileSync(from, call('toolu_1', 'a', 'T1') + started('toolu_1', 'bfirst01', 'T2'));
+      const jobs = new TranscriptJobs(async () => located);
+      await jobs.read();
+      expect(jobs.body(true).map((j) => j.taskId)).toEqual(['bfirst01']);
+
+      renameSync(from, to);
+      located = to;
+      appendFileSync(to, call('toolu_2', 'b', 'T3') + started('toolu_2', 'bsecond2', 'T4'));
+      await jobs.read();
+      expect(jobs.body(true).map((j) => j.taskId)).toEqual(['bfirst01', 'bsecond2']);
+      appendFileSync(to, ended('bfirst01', 'completed', 'T5'));
+      await jobs.read();
+      expect(jobs.body(true)[0]).toMatchObject({ taskId: 'bfirst01', status: 'completed' });
+    });
+
+    it('a read while locate still names the missing path neither throws nor starts over, and the next read catches up', async () => {
+      const { from, to } = moved();
+      let located = from;
+      writeFileSync(from, call('toolu_1', 'a', 'T1') + started('toolu_1', 'bfirst01', 'T2'));
+      const jobs = new TranscriptJobs(async () => located);
+      await jobs.read();
+
+      renameSync(from, to);
+      appendFileSync(to, call('toolu_2', 'b', 'T3') + started('toolu_2', 'bsecond2', 'T4'));
+      await expect(jobs.read()).resolves.toBeUndefined();
+      expect(jobs.body(true).map((j) => j.taskId)).toEqual(['bfirst01']);
+
+      located = to;
+      await jobs.read();
+      expect(jobs.body(true).map((j) => j.taskId)).toEqual(['bfirst01', 'bsecond2']);
+    });
+
+    it('reads a file that is another inode at the new path from its start', async () => {
+      const { from, to } = moved();
+      let located = from;
+      writeFileSync(from, call('toolu_1', 'a', 'T1') + started('toolu_1', 'bfirst01', 'T2'));
+      const jobs = new TranscriptJobs(async () => located);
+      await jobs.read();
+
+      writeFileSync(to, call('toolu_3', 'c', 'T5') + started('toolu_3', 'bthird03', 'T6')); // a copy, not a rename
+      rmSync(from);
+      located = to;
+      await jobs.read();
+      expect(jobs.body(true).map((j) => j.taskId)).toEqual(['bthird03']);
+    });
   });
 });

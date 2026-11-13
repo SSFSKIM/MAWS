@@ -81,13 +81,13 @@ import { BOARD, drawsRows, labelOf, liveBlock, liveViews, NOT_FETCHED, openSheet
 import { installedEngine } from './support/p1-live';
 import { isAlive, tcpListeners } from './support/processes';
 import { DATASET_STATES } from '../src/artifacts/dashboard/states';
-import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { applicationOf, launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { menu } from './support/menu';
 import { startRemoteScene, B_NAME, type RemoteScene } from './support/remote-scene';
 import type { PlaneRow } from './support/fake-sminos'; // 2026-11-06
 import { answered, BUTTON, FIELD, startPages } from './support/headless-browser'; // P5 O17 M10
 import { connectorControl, writeCuaEngine, type ConnectorControl } from '../test/support/cua-engine'; // P5 O17 M10
-import { closeSurface, mainTabById, openSurface, surface } from './support/shell';
+import { activeMainTab, closeSurface, mainTabById, mainTabs, openSurface, surface } from './support/shell';
 import { seedTranscript, SIDE_QUESTION, SideJournal, slugOf, transcript } from './support/side-replay';
 import { newChatIn, openProject, projectLine, projectRow, showProjectList, sidebarOf } from './support/sidebar';
 import { clickRevealed } from './support/hover'; // P5 O7 M8
@@ -589,6 +589,68 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     const row = sessionRow(page, address);
     await expect(row, `B's row in A's sidebar\n${mainSaid(page)}`).toBeVisible({ timeout: 30_000 });
     await hoverMachineLine(page, row, `${B_NAME} · via the hub`);
+    // UX wave U7a (O-38 with #559, O-16; docs/doperpowers/plans/2026-11-12-ux-wave-U7-sidebar-title-bar-destinations.md,
+    // M4; A2, A3): the row, only listed here, opens as a local row does. Its menu begins Open, Open in new tab, Hide (then
+    // Share and Add owner where the row has them); ⌘-click opens it through lane B's opener in a tab of its own, which
+    // comes to the front as a local row's ⌘-click does; Hide puts it under its project's "Hidden · 1" and the tab stays.
+    // Unhide brings the row back for the steps below.
+    await test.step('UX wave U7: the listed row’s menu, ⌘-click to a tab of its own, Hide and Unhide', async () => {
+      await expect(row, 'only listed: A holds no record of it yet').toHaveAttribute('data-kind', 'listed');
+      // its project's key, from the project row that holds it (`has` is matched inside each project row, so it names the
+      // row by its tree id alone)
+      const projectKey = (await sidebarOf(page).locator('[data-kind="project"]', { has: page.locator(`[data-tree-id="s:${address}"]`) }).getAttribute('data-tree-id'))!.slice('p:'.length);
+      const hidden = sidebarOf(page).locator(`[data-tree-id="hidden:${projectKey}"]`);
+      await row.click({ button: 'right' });
+      await expect(page.getByRole('menu')).toBeVisible();
+      const items = await page.getByRole('menuitem').allTextContents();
+      expect(items.slice(0, 3), 'a listed row’s menu: its two opens, then Hide').toEqual(['Open', 'Open in new tab', 'Hide']);
+      expect(items.slice(3).filter((item) => item !== 'Share…' && item !== 'Add owner…'), 'nothing after Hide but Share and Add owner').toEqual([]);
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('menu')).toHaveCount(0);
+
+      // First a tab a plain open would replace: Diagnostics, unpinned and in front of the one strip (U13a). A plain open
+      // (`replaceActive`) would give its place to the session; only a tab of its own keeps both. On this fresh profile the
+      // strip is otherwise empty, where the two opens could not be told apart.
+      type StoredMain = { current: string; sets: Record<string, { panes: { tabs: { id: string }[] }[] }> };
+      const storedTabs = async () => {
+        const stored = (await invoke<{ value: StoredMain | null }>(page, 'layout.get', { key: 'main.tabs' })).value;
+        return Object.values(stored?.sets ?? {}).flatMap((set) => set.panes.flatMap((pane) => pane.tabs.map((tab) => tab.id))).sort();
+      };
+      await menu(applicationOf(page), 'diagnostics.open');
+      await expect(activeMainTab(page), 'a replaceable tab in front: Diagnostics').toHaveAttribute('data-tab-id', 'diagnostics');
+      await expect(mainTabById(page, 'diagnostics').getByRole('img', { name: 'Pinned' }), 'unpinned').toHaveCount(0);
+      await expect.poll(storedTabs, { message: 'Diagnostics stored in the strip' }).toContain('diagnostics');
+      await expect(row, 'still only listed').toHaveAttribute('data-kind', 'listed');
+
+      const tabIds = () => mainTabs(page).locator('[role="tab"]').evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('data-tab-id')));
+      const before = await tabIds();
+      await row.click({ modifiers: ['Meta'] });
+      const added = async () => (await tabIds()).filter((id) => !before.includes(id));
+      await expect.poll(added, { timeout: 60_000, message: `⌘-click adds a tab of its own\n${mainSaid(page)}` }).toEqual([`session:${address}`]);
+      expect(await tabIds(), 'and keeps every tab it found, Diagnostics among them').toEqual(expect.arrayContaining(before));
+      const opened = await tabIds();
+      await expect(activeMainTab(page), 'the new tab is in front').toHaveAttribute('data-tab-id', `session:${address}`);
+      await expect.poll(storedTabs, { message: 'both tabs stored in the strip' }).toEqual(expect.arrayContaining(['diagnostics', `session:${address}`]));
+      await expect(main(page).getByText(FIRST_REPLY).first(), `B's history in the new tab\n${mainSaid(page)}`).toBeVisible({ timeout: 60_000 });
+
+      await row.click({ button: 'right' });
+      await page.getByRole('menuitem', { name: 'Hide', exact: true }).click();
+      await expect(row, 'hidden: out of its project’s list').toHaveCount(0);
+      await expect(hidden).toHaveText('Hidden · 1');
+      await expect(hidden).toHaveAttribute('aria-expanded', 'false');
+      await expect(mainTabById(page, `session:${address}`), 'its tab stays, in front').toHaveAttribute('aria-selected', 'true');
+      expect(await tabIds(), 'no tab closed or opened').toEqual(opened);
+
+      await hidden.click();
+      await expect(row, 'under the Hidden row, indented').toHaveAttribute('data-indented', 'true');
+      await row.click({ button: 'right' });
+      await page.getByRole('menuitem', { name: 'Unhide', exact: true }).click();
+      await expect(hidden).toHaveCount(0);
+      await expect(row).toBeVisible();
+      await expect(row).not.toHaveAttribute('data-indented', 'true');
+      await mainTabById(page, 'diagnostics').click({ button: 'middle' }); // the steps below meet the strip as before: B's session alone
+      await expect(mainTabById(page, 'diagnostics')).toHaveCount(0);
+    });
     await row.click();
     await expect(main(page).getByText(FIRST_REPLY).first(), `B's history in A's pane\n${mainSaid(page)}`).toBeVisible({ timeout: 60_000 });
 
@@ -624,8 +686,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     const card = main(page).getByRole('group', { name: 'Approval needed' });
     await expect(card, `the permission card in A's pane\n${mainSaid(page)}`).toBeVisible({ timeout: 60_000 });
     await expect(card).toContainText(`echo ${APPROVED}`);
-    await card.getByRole('radio', { name: 'Allow once' }).click();
-    await card.getByRole('button', { name: 'Allow', exact: true }).click();
+    await card.getByRole('button', { name: 'Allow once', exact: true }).click();
     await expect(card).toBeHidden({ timeout: 30_000 });
     await expect(main(page).getByText(THIRD_REPLY).first(), `the turn goes on on B\n${b.log().slice(-3000)}`).toBeVisible({ timeout: 60_000 });
     await expect.poll(turnOverOnB, { timeout: 30_000 }).toBe(true);
@@ -1406,8 +1467,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       const card = main(again).getByRole('group', { name: 'Approval needed' });
       await expect(card, 'the permission card in A’s pane').toBeVisible({ timeout: 60_000 });
       await expect(card).toContainText(`echo ${WAITING_FIRST}`);
-      await card.getByRole('radio', { name: 'Allow once' }).click();
-      await card.getByRole('button', { name: 'Allow', exact: true }).click();
+      await card.getByRole('button', { name: 'Allow once', exact: true }).click();
       await expect(card).toBeHidden({ timeout: 30_000 });
       await quoting(expect(main(again).getByText(WAITING_REPLY).first(), 'the turn goes on on B').toBeVisible({ timeout: 60_000 }), () => b.log().slice(-3000));
       await expect(row, 'answered: gone from Needs you').toHaveCount(0, { timeout: 30_000 });

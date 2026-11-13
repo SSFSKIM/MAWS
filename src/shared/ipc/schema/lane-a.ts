@@ -1,6 +1,6 @@
 // X2 `laneA.*` (P5 O9 M2, docs/doperpowers/plans/2026-10-28-p5-o9-lane-a.md, Interfaces §A): a terminal session's
-// bridge (sminos's DX5 child) as main's local driver reaches it (src/main/lane-a/). Owned by main, which the wire manifest
-// leaves out, so no WIRE_MINOR moves; O3 retags the namespace `machine` when it moves main's services.
+// bridge (sminos's DX5 child) as the spine's driver reaches it (src/services/lane-a/). Owned by `machine`, which the
+// wire manifest carries, so a change here moves WIRE_MINOR.
 //
 // Every command but `laneA.list` names its session by `appSessionId` (an address in the renderer, bare in main, OX2), so
 // it routes `addressed`. What comes from the bridge (its capabilities, its raised requests and settlements, its catalog,
@@ -114,6 +114,10 @@ export const LaneAStateSchema = z.strictObject({
   deliveries: z.array(LaneADeliverySchema), // this app's sends; settled ones kept 60 s
   link: LaneALinkSchema.optional(), // M9: a remote session's only
   acts: z.array(LaneAActSchema).optional(), // M9: a remote session's only
+  // UX wave U1a (UC-1, Interfaces §B): a remote session's only, as `link` and `acts` are. The requests whose answer the
+  // session's machine has said it took (`done` to this device's own act), until the bridge settles them, the plane is
+  // reset or the bridge stops being live; the window's mirror lists no request named here.
+  accepted: z.array(z.string()).optional(),
 });
 export type LaneAState = z.infer<typeof LaneAStateSchema>;
 
@@ -224,6 +228,11 @@ export const commands = {
   // M7: 1 to 4 images or PDFs, saved by main and handed to the bridge's `media` op; `result.upload` names the `op` messages
   // that follow each file's state (`op: 'media'`, `id` the upload).
   'laneA.media': { input: input({ files: z.array(LaneAMediaFileSchema).min(1).max(4) }), output: ControlResultSchema, owner: 'machine' },
+  // UX wave U1a (UC-1, Interfaces §B): this machine's endpoint telling its own spine that sminos took an answer to
+  // `request` (a `sminos.answer` or `sminos.decide` it handed down, whose result said `done`), so the lane A list hides
+  // it before the bridge's settlement. `session`: the engine's session id, bare, as the act's digest names it; no app
+  // session address, since the command crosses no link (a row of no offer: a caller on another machine cannot send it).
+  'laneA.accepted': { input: z.strictObject({ session: z.string().min(1), request: z.string().min(1) }), output: z.void(), owner: 'machine' },
 } as const satisfies Record<`laneA.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 const watchEvent = <S extends z.ZodRawShape>(shape: S) => z.strictObject({ ...session, watch: z.string(), ...shape });

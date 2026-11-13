@@ -2,7 +2,7 @@
 // loads), the address field, (cua #90) the extensions action bar, the partition pill (cua #90: with its profile
 // popover), the control slot, later children's
 // extras (E4d's Comment toggle), and the overflow menu. While the page loads a thin bar runs along the row's foot, as Codex's toolbar shows it; it sits
-// over the row's border, so the row keeps its height.
+// over the row's border, so the row keeps its height. U12a: before the overflow menu, the device size's chip while one is on.
 import { useState, type RefObject } from 'react';
 import { DEFAULT_PARTITION, type BrowserTab } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -16,6 +16,8 @@ import { AddressField } from './AddressField';
 import { ControlSlot } from './ControlSlot';
 import { OverflowMenu } from './OverflowMenu';
 import { PartitionPill } from './PartitionPill';
+import { ViewportChip } from './ViewportChip'; // U12a
+import type { Room } from '../viewport'; // U12a
 
 export interface NavRowProps {
   appSessionId: AppSessionId;
@@ -23,10 +25,11 @@ export interface NavRowProps {
   tab: BrowserTab | null;
   addressRef: RefObject<HTMLInputElement | null>;
   owns: boolean;
+  room: Room | null; // U12a: the room of this chrome's pane while it holds the view
   onFind(): void;
 }
 
-export function NavRow({ appSessionId, surface, tab, addressRef, owns, onFind }: NavRowProps) {
+export function NavRow({ appSessionId, surface, tab, addressRef, owns, room, onFind }: NavRowProps) {
   const extras = useChromeExtras();
   const loading = tab?.loading ?? false;
   // cua #90: the address field's slot, whose width folds the action bar; held in state (a callback ref), since the field
@@ -54,7 +57,8 @@ export function NavRow({ appSessionId, surface, tab, addressRef, owns, onFind }:
       <PartitionPill appSessionId={appSessionId} surface={surface} partition={tab?.partition ?? DEFAULT_PARTITION} />
       {tab?.control === 'agent' && <ControlSlot tab={tab} />}
       {tab && extras.map((Extra, index) => <Extra key={index} tab={tab} appSessionId={appSessionId} surface={surface} />)}
-      <OverflowMenu appSessionId={appSessionId} surface={surface} tab={tab} owns={owns} onFind={onFind} />
+      {tab && room && <ViewportChip tab={tab} room={room} />}
+      <OverflowMenu appSessionId={appSessionId} surface={surface} tab={tab} owns={owns} room={room} onFind={onFind} />
       {loading && (
         <div aria-hidden data-browser-loading="" className="pointer-events-none absolute inset-x-0 -bottom-px h-0.5 overflow-hidden">
           <div className="size-full animate-pulse bg-accent motion-reduce:animate-none" />

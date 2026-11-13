@@ -58,11 +58,9 @@ function addressedPane(pane: HarnessPane): HarnessPane {
 const at = (item: AttentionItem) => Date.parse(item.createdAt);
 const oldest = (items: AttentionItem[]) => items.reduce<AttentionItem | null>((a, b) => (a === null || at(b) < at(a) ? b : a), null);
 
-// The request a pane shows: the session's oldest pending item, else its oldest open one (an answered item stays,
-// collapsed, until C3 retires it).
+// The request a pane shows: the session's oldest waiting item (UC-1: an answered one waits nowhere, so none is shown).
 function useShown(appSessionId: AppSessionId): AttentionItem | null {
-  const open = useAttention((s) => selectPendingOf(s, appSessionId));
-  return oldest(open.filter((item) => item.state === 'pending')) ?? oldest(open);
+  return oldest(useAttention((s) => selectPendingOf(s, appSessionId)));
 }
 
 function RequestPane({ appSessionId, placement, index }: { appSessionId: AppSessionId; placement: HarnessPlacement; index: 0 | 1 }) {

@@ -6,7 +6,8 @@
 // quit guard by its stderr line, whose count is the one the driven engine state implies. Never `setViewportSize`: the
 // window's own bounds are what the test drives (it shifted hover coordinates in M3's live check). This spec is the
 // template for C7's and C8's end-to-end tests.
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { ACTIONS, type ActionId, type ActionTable } from '../src/shared/keymap/actions';
@@ -15,7 +16,8 @@ import { formatChord } from '../src/shared/keymap/chord';
 import { addressed, localName, localRef } from './support/address';
 import { invoke, value } from './support/c7-replay'; // P5 O6 M2: the upgrade scene's raw-bridge calls
 import { activateForScene, traceForeground } from './support/foreground-trace';
-import { launchMaws, type MawsLaunch } from './support/launch';
+import { clickRevealed } from './support/hover'; // UX wave U7: the row's own Hide, shown on hover
+import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { scratchProject } from './support/maws-tools'; // P5 O6 M2: the upgrade scene's indexed sessions
 import { slashPaletteMovesNothing } from './support/palette-geometry';
 import { closeProject, openProject, projectLine, projectRow, showProjectList, sidebarRow } from './support/sidebar';
@@ -524,6 +526,135 @@ test('sidebar at scale: the flat tree, 36px project rows, 30px session rows, fiv
   }
 });
 
+// UX wave U7a, O-03 (docs/doperpowers/plans/2026-11-12-ux-wave-U7-sidebar-title-bar-destinations.md, M4; A5): the title
+// bar's project chip owns 96 px. With a session of a project whose name is forty characters (invented here) in front,
+// the chip's button stays inside that box and left of the strip, its name ends cut by its ellipsis, and its tooltip
+// still names the whole project.
+test('a long project name stays inside the chip’s box', async () => {
+  const LONG = 'meridian-lighthouse-survey-archive-tools';
+  expect(LONG).toHaveLength(40);
+  const scratch = mkdtempSync(join(tmpdir(), 'maws-u7-chip-'));
+  const scenario = JSON.parse(readFileSync(join(REPO_ROOT, 'test/fixtures/shell/nine-sessions.json'), 'utf8')) as { projects: { id: string; name: string }[] };
+  scenario.projects.find((project) => project.id === 'proj-codex-somersault')!.name = LONG;
+  const source = join(scratch, 'scenario.json');
+  writeFileSync(source, JSON.stringify(scenario));
+  try {
+    const maws = await launchMaws({ env: { ...SHELL_ENV, MAWS_SESSION_SOURCE: `stub:${source}` } });
+    try {
+      const { app, page } = maws;
+      await expect(page.locator('[data-region="sidebar"] [data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
+      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setBounds({ x: 72, y: 48, width: 1360, height: 860 }));
+      await (await sidebarRow(page, 'Trace stream reconnects')).click();
+      await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'a session of the long-named project in front' }).toEqual(['Trace stream reconnects']);
+      const chip = page.getByRole('banner').locator('[data-toolbar-project]');
+      // U13a's chip: it names the row of the session in front, and a click reveals that row
+      await expect(chip).toHaveAccessibleName(`Reveal ${LONG} in sidebar`);
+      await expect(chip, 'the tooltip holds the whole name').toHaveAttribute('title', `Reveal ${LONG} in sidebar`);
+      const name = chip.locator('.truncate');
+      await expect(name).toHaveText(LONG);
+      const box = (await chip.boundingBox())!;
+      const strip = (await mainTabs(page).boundingBox())!;
+      expect(box.width, 'the chip is at most its 96 px').toBeLessThanOrEqual(96);
+      expect(box.x + box.width, 'the chip ends where the strip begins (half a pixel for rounding), never under the first tab').toBeLessThanOrEqual(strip.x + 0.5);
+      expect(await name.evaluate((el) => el.scrollWidth > el.clientWidth), 'the name is cut inside the chip').toBe(true);
+      expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
+      // the owner's look: more tabs open beside the long name's, at the wide width and at a narrow one
+      // (the long name's project last, so the chip still names it with a mixed strip of four behind it)
+      for (const title of [FIX, QUOTA, 'Somersault terminal run']) await (await sidebarRow(page, title)).click({ modifiers: ['Meta'] });
+      await page.mouse.move(700, 400); // off the sidebar: no hover card in the pictures
+      await attachWindowShot(maws, 'u7a-title-bar-long-name', 1280, 820);
+      await attachWindowShot(maws, 'u7a-title-bar-narrow', 700, 820);
+    } finally {
+      await maws.cleanup();
+    }
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+// UX wave U7a, O-16 (the same document, M4; A2). Hide from a row's context menu takes the row out of its project's list
+// at once, and "Hidden · 1" stands at the project's end, closed; open, it holds the hidden row, indented one step. A
+// relaunch shows the same. Unhide puts the row at the project's head, and `sidebar.hidden` in layout.json is left with no
+// entry. Then the row's own button (M3, decision 9; the owner's answer, "Button on the row"): one click hides, opening
+// nothing, and the hidden row's button unhides. The session is one at rest (no holder, exited), so no look returns it
+// by itself while the scene runs.
+test('hide and unhide', async () => {
+  const SDK = 'SDK wire inventory';
+  const shown = ['Usage reset countdown', 'Settings idle probe'];
+  const parts = (page: Page) => {
+    const project = projectRow(page, USAGE_PROJECT);
+    return { project, row: project.getByRole('treeitem', { name: SDK, exact: true }), hidden: project.locator('[data-kind="hidden"]') };
+  };
+  const closedHiddenRow = async ({ project, row, hidden }: ReturnType<typeof parts>, message: string) => {
+    await expect(row, message).toHaveCount(0);
+    expect(await treeRows(project), `${message}: the rest of the list`).toEqual(shown);
+    await expect(hidden, message).toHaveText('Hidden · 1');
+    await expect(hidden).toHaveAccessibleName('Hidden, 1 session');
+    await expect(hidden, `${message}: closed`).toHaveAttribute('aria-expanded', 'false');
+    await expect(project.locator('[role="treeitem"]').last(), `${message}: the project's last row`).toHaveAttribute('data-kind', 'hidden');
+  };
+  const openHiddenRow = async ({ project, row, hidden }: ReturnType<typeof parts>) => {
+    await hidden.click();
+    await expect(hidden).toHaveAttribute('aria-expanded', 'true');
+    await expect(row).toBeVisible();
+    await expect(row, 'the hidden row is the Hidden row’s contents').toHaveAttribute('data-indented', 'true');
+    await expect(row, 'indented one step, the inset of a nested row').toHaveCSS('padding-left', '30px');
+    await expect(project.getByRole('treeitem', { name: shown[0], exact: true }), 'a shown row keeps its inset').toHaveCSS('padding-left', '7px');
+  };
+  const unhidden = async ({ project, row, hidden }: ReturnType<typeof parts>, userData: string, message: string) => {
+    await expect(hidden, message).toHaveCount(0);
+    await expect.poll(() => treeRows(project), { message: `${message}: the row first, the pointer still in the sidebar` }).toEqual([SDK, ...shown]);
+    await expect(row).not.toHaveAttribute('data-indented', 'true');
+    await expect.poll(() => storedKey(userData, 'sidebar.hidden'), { message: `${message}: sidebar.hidden in layout.json, with no entry` }).toEqual({ version: 1, hidden: {} });
+  };
+
+  const first = await launchMaws({ env: SHELL_ENV });
+  try {
+    const { page } = first;
+    await expect(page.locator('[data-region="sidebar"] [data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
+    const at = parts(page);
+    await openProject(page, USAGE_PROJECT);
+    expect(await treeRows(at.project)).toEqual([...shown, SDK]);
+    await at.row.click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Hide', exact: true }).click();
+    await expect(page.getByRole('menu')).toHaveCount(0);
+    await closedHiddenRow(at, 'hidden from its menu');
+    const address = await addressed(page, 'app-1238089b');
+    await expect.poll(async () => Object.keys(((await layoutGet(page, 'sidebar.hidden')) as { hidden: Record<string, unknown> } | null)?.hidden ?? {}), { message: 'the hide is stored' }).toEqual([address]);
+    await openHiddenRow(at);
+    await attachWindowShot(first, 'u7a-hidden-list', 1280, 820);
+    expect(first.consoleErrors(), 'the console stays free of errors').toEqual([]);
+    await first.app.close();
+
+    const second = await launchMaws({ env: SHELL_ENV, userData: first.userData });
+    try {
+      const { page } = second;
+      const again = parts(page);
+      await expect(page.locator('[data-region="sidebar"] [data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
+      await openProject(page, USAGE_PROJECT);
+      await closedHiddenRow(again, 'after the relaunch');
+      await openHiddenRow(again);
+      await again.row.click({ button: 'right' });
+      await page.getByRole('menuitem', { name: 'Unhide', exact: true }).click();
+      await unhidden(again, second.userData, 'unhidden from its menu');
+
+      // the row's own button: one click hides and opens nothing; in the Hidden list it reads Unhide
+      const tabs = await tabLabels(page, 'Open tabs');
+      await clickRevealed(again.row, again.row.getByRole('button', { name: 'Hide', exact: true }));
+      await closedHiddenRow(again, 'hidden by its button');
+      expect(await tabLabels(page, 'Open tabs'), 'the button opened no session').toEqual(tabs);
+      await openHiddenRow(again);
+      await clickRevealed(again.row, again.row.getByRole('button', { name: 'Unhide', exact: true }));
+      await unhidden(again, second.userData, 'unhidden by its button');
+      expect(second.consoleErrors(), 'the relaunched console stays free of errors').toEqual([]);
+    } finally {
+      await second.cleanup();
+    }
+  } finally {
+    await first.cleanup(); // removes the profile both launches used
+  }
+});
+
 // UX2 owner rulings: one chrome row (tabs inside it), with the usage pill and its unit in the sidebar footer.
 async function assertToolbarPlacement(page: Page): Promise<void> {
   const toolbar = page.getByRole('banner');
@@ -682,7 +813,7 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     expect((await foreign.boundingBox())!.height, 'a 30px row').toBe(30);
     await foreign.click({ button: 'right' });
     await expect(page.getByRole('menu')).toBeVisible();
-    expect(await page.getByRole('menuitem').allTextContents(), 'a foreign-live session offers only the opens (I2)').toEqual(['Open', 'Open in new tab']);
+    expect(await page.getByRole('menuitem').allTextContents(), 'a foreign-live session offers only the opens (I2), then Hide (UX wave U7, O-16)').toEqual(['Open', 'Open in new tab', 'Hide']);
     await page.keyboard.press('Escape');
     await expect(page.getByRole('menu')).toHaveCount(0);
     expect(await noLeftovers(page, tokens.dark), 'no dark colour in the light theme').toEqual([]);
@@ -734,7 +865,7 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     });
     const fixCard = board.getByRole('article', { name: FIX });
     await expect(fixCard.getByTestId('request-input')).toHaveText('git log --oneline');
-    await expect(fixCard.getByRole('heading', { name: 'Bash' })).toBeVisible();
+    await expect(fixCard.getByRole('heading', { name: 'Run a command' })).toBeVisible(); // U1a §D: what is asked, in place of the tool's name
     const charterCard = board.getByRole('article', { name: 'Charter + research' });
     await expect(charterCard.getByTestId('card-activity')).toHaveText('Running bun test');
     await expect(charterCard).toContainText('ctx 41%');
@@ -750,12 +881,14 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     await expect(foreignCard.getByRole('button'), 'a foreign-live card holds no control').toHaveCount(0);
   });
 
-  await test.step('Item 3: the hover card on a Bash request answers nothing', async () => {
+  await test.step('Item 3 (U1a §H): the hover card on a shell command offers Allow once and Deny', async () => {
     const fixHover = await hoverRow(page, FIX);
     await expect(fixHover.getByTestId('request-input')).toHaveText('git log --oneline');
     await expect(fixHover).toContainText('/private/tmp/maws-probe-qqboLh');
     await expect(fixHover.getByRole('button', { name: 'Open session' })).toBeVisible();
-    await expect(fixHover.getByRole('button', { name: 'Approve' }), 'Bash is not read-only').toHaveCount(0);
+    // a shell command the hover card shows whole may be allowed once from it, and any permission denied; neither pressed here
+    await expect(fixHover.getByRole('button', { name: 'Allow once', exact: true }), 'a command shown whole').toBeVisible();
+    await expect(fixHover.getByRole('button', { name: 'Deny', exact: true })).toBeVisible();
     await unhover(page, fixHover);
   });
 
@@ -797,13 +930,13 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
 
   await test.step('Item 3: approve the read-only request from its hover card, by pointer only', async () => {
     // Keyboard first: arrowing onto the session's row opens its hover card (W5: every session row has one), and Enter
-    // on a focused Approve answers nothing (§5.1: approval from the hover card is an explicit click).
+    // on a focused Allow once answers nothing (§5.1: approval from the hover card is an explicit click).
     const charterDialog = page.getByRole('dialog', { name: 'Charter + research' });
     await (await sidebarRow(page, SIP)).focus();
     await page.keyboard.press('ArrowDown');
     await expect(await sidebarRow(page, 'Charter + research')).toBeFocused();
-    await expect(charterDialog.getByRole('button', { name: 'Approve' })).toBeVisible();
-    await charterDialog.getByRole('button', { name: 'Approve' }).focus();
+    await expect(charterDialog.getByRole('button', { name: 'Allow once', exact: true })).toBeVisible();
+    await charterDialog.getByRole('button', { name: 'Allow once', exact: true }).focus();
     await page.keyboard.press('Enter');
     await page.waitForTimeout(300);
     expect(await badge(), 'Enter answered nothing').toBe('4');
@@ -815,8 +948,8 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     await expect(charterHover.getByTestId('request-input')).toHaveText(/\/docs\/charter\.md$/);
     await expect(charterHover.getByRole('button', { name: 'Deny' })).toBeVisible();
     expect(await noLeftovers(page, tokens.light), 'no light colour in the dark theme (hover card)').toEqual([]);
-    await charterHover.getByRole('button', { name: 'Approve' }).click();
-    await expect(charterHover.getByRole('button', { name: 'Approve' })).toHaveCount(0);
+    await charterHover.getByRole('button', { name: 'Allow once', exact: true }).click();
+    await expect(charterHover.getByRole('button', { name: 'Allow once', exact: true })).toHaveCount(0);
     await closeProject(page, 'MAWS');
     await expect(projectRow(page, 'MAWS').getByLabel('2 waiting')).toBeVisible();
     await expect(board.getByRole('article', { name: 'Charter + research' }).getByTestId('card-activity')).toHaveText('Continuing');
@@ -1062,6 +1195,22 @@ async function relaunchedInstance(maws: MawsLaunch, saved: Saved): Promise<void>
 // ---- helpers ---------------------------------------------------------------------------------------------------------------
 
 // Clicks an application-menu item in main, by the id `buildMenu` gives it (`tab.select:<n>` for the numbered tabs).
+// UX wave U7a: a full-window picture for the owner's look, attached to the run's report and written nowhere else. The
+// window takes the content size for the shot and goes back to the one it had, so the scene's own steps see what they saw.
+async function attachWindowShot(maws: MawsLaunch, name: string, width: number, height: number): Promise<void> {
+  const { app, page } = maws;
+  const contentSize = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.getContentSize());
+  const before = await contentSize();
+  const resize = async ([w, h]: readonly number[]) => {
+    await app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setContentSize(w!, h!), [w, h] as const);
+    await page.waitForFunction(([w, h]) => window.innerWidth === w && window.innerHeight === h, [w, h] as const);
+    await page.waitForTimeout(300); // the layout settles at the new size
+  };
+  await resize([width, height]);
+  await test.info().attach(name, { body: await page.screenshot(), contentType: 'image/png' });
+  await resize(before);
+}
+
 async function menu(app: ElectronApplication, id: string): Promise<void> {
   const clicked = await app.evaluate(({ Menu }, id) => {
     const item = Menu.getApplicationMenu()?.getMenuItemById(id);
@@ -1108,11 +1257,14 @@ async function captureEvents(page: Page): Promise<void> {
 
 const captured = (page: Page) => page.evaluate(() => window.__maws_e2e!);
 
-const layoutGet = async (page: Page, key: 'regions' | 'main.tabs' | 'panel.pinned' | 'panelTools.surfaces') => {
+const layoutGet = async (page: Page, key: 'regions' | 'main.tabs' | 'panel.pinned' | 'panelTools.surfaces' | 'sidebar.hidden') => {
   const result = await page.evaluate((key) => window.maws.invoke('layout.get', { key }), key);
   if (!result.ok) throw new Error(`layout.get ${key}: ${JSON.stringify(result.error)}`);
   return result.value.value;
 };
+
+// A key as main last wrote layout.json (UX wave U7: what a relaunch, or another build, reads)
+const storedKey = (userData: string, key: string): unknown => (JSON.parse(readFileSync(join(userData, 'layout.json'), 'utf8')) as Record<string, unknown>)[key];
 
 const layoutList = async (page: Page) => {
   const result = await page.evaluate(() => window.maws.invoke('layout.list', undefined));

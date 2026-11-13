@@ -1,7 +1,7 @@
 import type { AppSessionId, ProjectId, SessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { ArchiveOutcome } from '@shared/ipc/schema/session';
-import { isActionable, isOpen } from '@shared/attention/kinds';
+import { isActionable, waits } from '@shared/attention/kinds';
 import type { Index } from '../index/index';
 import type { GitRun } from '../git/runner';
 
@@ -44,7 +44,7 @@ export class InactiveArchive {
     const { index } = this.deps;
     if (!this.ready()) throw new DiscoveryPendingError();
     const cutoff = (this.deps.now?.() ?? Date.now()) - days * 86_400_000;
-    const waiting = new Set((await index.attention.list()).filter((item) => isOpen(item) && isActionable(item)).map((item) => item.appSessionId));
+    const waiting = new Set((await index.attention.list()).filter((item) => waits(item) && isActionable(item)).map((item) => item.appSessionId));
     let archived = 0;
     let skipped = 0;
     for (const record of index.sessions.list().filter((r) => projectId === null || r.projectId === projectId)) {

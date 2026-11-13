@@ -11,8 +11,11 @@
 // are silent, as restored local items are, when it arrives within REMOTE_STARTUP_SILENCE_MS of the notifier's start (by
 // this Mac's clock: a machine's own clock decides nothing), and a greyed machine (offline since its last snapshot) raises none and
 // counts in no badge. Such a notification is titled by the machine and the session's listed row, offers no reply and no
-// Allow once (their actions are this Mac's), is reported from its machine (`emitFrom`), and its click opens the session
-// on that machine (the navigation is the machine's).
+// Allow once or Deny (their actions are this Mac's), is reported from its machine (`emitFrom`), and its click opens the
+// session on that machine (the navigation is the machine's).
+// UX wave U1a §H (l4-approvals-09, ticket 333): a permission's notification carries what the one rule for answers from
+// outside a pane admits for its request, read before it posts ("Allow once" and "Deny", or "Deny" alone), and a short
+// command is its body; the port numbers the buttons by position, so the order sent is kept to map a press back.
 import type { AttentionItem } from '@shared/graph/attention';
 import { isNoClient, type ClientPort, type NotificationHandle, type NotifyEvent, type NotifyRequest } from '@shared/client/port';
 import type { AttentionKind } from '@shared/graph/enums';
@@ -22,11 +25,16 @@ import type { SpineView } from '@shared/spine/view';
 import type { EventPayload, NotificationKinds, Settings, SessionDigest } from '@shared/ipc/schema';
 import type { AttentionNavigate } from '@shared/ipc/schema/attention';
 import type { MachineRef } from '@shared/machine/ref';
-import { isActionable, isOpen } from '@shared/attention/kinds';
+import { isActionable, waits } from '@shared/attention/kinds';
 import { previewLine } from '@shared/owner/preview';
 import type { emit as emitEvent, emitFrom as emitEventFrom } from '../ipc/events';
 import type { RemoteAttention, RemoteAttentionChange } from '../lane-b/remote-attention';
-import type { NotificationActions } from './actions';
+import type { NotificationActions, NotificationOffer } from './actions';
+
+// The buttons of a permission's notification, in the order they are sent, and their words.
+type Act = 'allow' | 'deny';
+const BUTTON: Record<Act, string> = { allow: 'Allow once', deny: 'Deny' };
+const buttonsOf = (offer: NotificationOffer | null): Act[] => [...(offer?.allowOnce ? (['allow'] as const) : []), ...(offer?.deny ? (['deny'] as const) : [])];
 
 const GROUP: Record<AttentionKind, keyof NotificationKinds> = {
   permission: 'approvals', dialog: 'approvals', elicitation: 'approvals', question: 'questions',
@@ -75,21 +83,23 @@ export function startNotifier(view: NotifierView, deps: NotifierDeps): () => voi
     deps.navigate({ appSessionId: notice.appSessionId, attentionId: notice.attentionId, source: 'notification' });
     deps.failure({ appSessionId: notice.appSessionId, attentionId: notice.attentionId, delivery: 'in-app', at: new Date().toISOString(), error: message, ...(reply !== undefined ? { reply } : {}) });
   };
-  const post = (notice: Notice, allowOnce = false, checked = false) => {
+  // `offer`: what a permission's request was read to offer, once read (`checked`)
+  const post = (notice: Notice, offer: NotificationOffer | null = null, checked = false) => {
     if (notice.remote === undefined && deps.isViewing(notice.appSessionId)) return; // a page viewing a remote session reports none
     if (deps.isFocused()) { notified(notice, 'in-app'); return; }
     if (notice.attentionId !== null && isLaneAItem(notice.attentionId)) return; // P5 O9 M6: in-app only
     if (fallback !== null) { fallBack(notice); return; }
     let request: NotifyRequest;
     let item: AttentionItem | undefined;
+    const buttons = buttonsOf(offer);
     if (notice.remote !== undefined) {
       if (!remotePending(notice.remote.machine, notice.appSessionId, notice.attentionId)) return;
       request = { title: notice.remote.title, body: previewLine(notice.body, 200) ?? notice.body, silent: !deps.settings().notifications.sound };
     } else {
-      item = notice.attentionId === null ? undefined : view.attention(notice.appSessionId).find((i) => i.id === notice.attentionId && i.state === 'pending');
+      item = notice.attentionId === null ? undefined : view.attention(notice.appSessionId).find((i) => i.id === notice.attentionId && waits(i));
       if (notice.attentionId !== null && !item) return;
       if (item?.kind === 'permission' && deps.actions && !checked) {
-        void deps.actions.canAllow(item).then((allowed) => post(notice, allowed, true)).catch(() => post(notice, false, true));
+        void deps.actions.offer(item).then((read) => post(notice, read, true)).catch(() => post(notice, null, true));
         return;
       }
       const record = view.record(notice.appSessionId)!;
@@ -97,10 +107,10 @@ export function startNotifier(view: NotifierView, deps: NotifierDeps): () => voi
       const project = row?.hidden ? null : row; // a project removed from the sidebar names none, as having none
       request = {
         title: project ? `${project.name} · ${record.title.text}` : record.title.text,
-        body: previewLine(notice.body, 200) ?? notice.body,
+        body: offer?.body ?? previewLine(notice.body, 200) ?? notice.body,
         silent: !deps.settings().notifications.sound,
         ...(deps.actions && notice.attentionId === null ? { reply: { placeholder: 'Reply to session' } } : {}),
-        ...(allowOnce ? { actions: ['Allow once'] } : {}),
+        ...(buttons.length > 0 ? { actions: buttons.map((act) => BUTTON[act]) } : {}),
       };
     }
     let handle: NotificationHandle | null = null;
@@ -123,9 +133,11 @@ export function startNotifier(view: NotifierView, deps: NotifierDeps): () => voi
         case 'replied':
           if (notice.attentionId !== null || !deps.actions) return;
           return void deps.actions.reply(notice.appSessionId, event.text).catch((error: unknown) => actionFailure(notice, error, event.text));
-        case 'action':
-          if (event.index !== 0 || !allowOnce || !item || !deps.actions) return;
-          return void deps.actions.allow(item).catch((error: unknown) => actionFailure(notice, error));
+        case 'action': {
+          const act = buttons[event.index];
+          if (act === undefined || !item || !deps.actions) return;
+          return void deps.actions[act](item).catch((error: unknown) => actionFailure(notice, error));
+        }
         case 'closed':
           return end();
       }
@@ -139,7 +151,7 @@ export function startNotifier(view: NotifierView, deps: NotifierDeps): () => voi
   const inNeedsYou = (id: AppSessionId) => { const r = view.record(id); return r !== null && !r.archived; };
   const onAttention = (appSessionId: AppSessionId, items: readonly AttentionItem[], silent: ReadonlySet<AttentionId>) => {
     for (const [handle, notice] of live) {
-      if (notice.remote === undefined && notice.appSessionId === appSessionId && notice.attentionId !== null && !items.some((i) => i.id === notice.attentionId && isOpen(i))) {
+      if (notice.remote === undefined && notice.appSessionId === appSessionId && notice.attentionId !== null && !items.some((i) => i.id === notice.attentionId && waits(i))) {
         live.delete(handle);
         handle.close();
       }
@@ -148,7 +160,7 @@ export function startNotifier(view: NotifierView, deps: NotifierDeps): () => voi
       if (seen.has(item.id)) continue;
       seen.add(item.id);
       if (silent.has(item.id)) continue;
-      if (item.state !== 'pending' || !isActionable(item) || !inNeedsYou(appSessionId)) continue;
+      if (!waits(item) || !isActionable(item) || !inNeedsYou(appSessionId)) continue;
       const settings = deps.settings().notifications;
       if (settings.enabled && settings.kinds[GROUP[item.kind]]) post({ appSessionId, attentionId: item.id, body: item.summary });
     }
@@ -165,7 +177,7 @@ export function startNotifier(view: NotifierView, deps: NotifierDeps): () => voi
     if (!record || record.archived || record.holder.kind !== 'self' || !policy.enabled || !policy.kinds.turnFinished) return;
     post({ appSessionId: digest.appSessionId, attentionId: null, body: digest.lastAssistantLine ?? 'Turn finished' });
   };
-  const counts = (items: readonly AttentionItem[]) => items.some((i) => isOpen(i) && isActionable(i));
+  const counts = (items: readonly AttentionItem[]) => items.some((i) => waits(i) && isActionable(i));
   const updateBadge = () => {
     let count = 0;
     for (const [id, items] of view.allAttention()) if (inNeedsYou(id) && counts(items)) count++;
@@ -183,7 +195,7 @@ export function startNotifier(view: NotifierView, deps: NotifierDeps): () => voi
   const remoteMet = new Set<MachineRef>();
   const remotePending = (machine: MachineRef, app: string, id: AttentionId | null) => {
     const held = deps.remote?.machine(machine);
-    return held !== null && held !== undefined && !held.greyed && (held.sessions.get(app) ?? []).some((i) => i.id === id && i.state === 'pending');
+    return held !== null && held !== undefined && !held.greyed && (held.sessions.get(app) ?? []).some((i) => i.id === id && waits(i));
   };
   const titleOf = (machine: MachineRef, name: string, app: string) => {
     const title = deps.remoteTitle?.(machine, app) ?? null;
@@ -193,7 +205,7 @@ export function startNotifier(view: NotifierView, deps: NotifierDeps): () => voi
     const held = deps.remote?.machine(change.machine) ?? null;
     for (const [handle, notice] of live) {
       if (notice.remote?.machine !== change.machine || (change.kind === 'session' && notice.appSessionId !== change.app)) continue;
-      if ((held?.sessions.get(notice.appSessionId) ?? []).some((i) => i.id === notice.attentionId && isOpen(i))) continue;
+      if ((held?.sessions.get(notice.appSessionId) ?? []).some((i) => i.id === notice.attentionId && waits(i))) continue;
       live.delete(handle);
       handle.close();
     }
@@ -208,7 +220,7 @@ export function startNotifier(view: NotifierView, deps: NotifierDeps): () => voi
           if (remoteSeen.has(key)) continue;
           remoteSeen.add(key);
           if (restoring) continue;
-          if (item.state !== 'pending' || !isActionable(item)) continue;
+          if (!waits(item) || !isActionable(item)) continue;
           const settings = deps.settings().notifications;
           if (settings.enabled && settings.kinds[GROUP[item.kind]]) post({ appSessionId: app as AppSessionId, attentionId: item.id, body: item.summary, remote: { machine: change.machine, title: titleOf(change.machine, held.name, app) } });
         }
