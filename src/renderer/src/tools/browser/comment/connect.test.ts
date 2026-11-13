@@ -16,6 +16,7 @@ import { connectBrowserComment } from './connect';
 import { COMMENT_COPY } from './copy';
 import { registerDock } from './dock';
 import { resetCommentMode, useCommentMode } from './store';
+import { openCard, passKey, registerCardHost, resetPlaceNotes, setCommentText, useCommentCard } from '../../../side/card/store'; // UX wave U5a
 
 const A = 'app-a' as AppSessionId;
 const B = 'app-b' as AppSessionId;
@@ -182,5 +183,37 @@ describe('connectBrowserComment', () => {
     expect(opened).not.toHaveBeenCalled();
     expect(toasts()).toEqual([]);
     expect(notices()).toEqual([]);
+  });
+});
+
+// UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, decision 22): a tab's unsent comments end
+// with the tab, read from this window's mirror of main's tabs while no pane is mounted, for a change and a full list.
+describe('the end of a tab ends its pass', () => {
+  function unsentOn(tabId: string, appSessionId: AppSessionId): string {
+    const off = registerCardHost('pane-x', { kind: 'browser', subject: tabId, holds: 'many' });
+    openCard(ANCHOR, { appSessionId, placement: { kind: 'card', host: 'browser', hostId: 'pane-x' } });
+    const { open } = useCommentCard.getState();
+    const key = passKey('browser', tabId, appSessionId);
+    if (open?.phase.kind === 'composing') setCommentText(key, open.phase.comment, 'Make it bolder');
+    useCommentCard.setState({ open: null }); // the pane went: no host is mounted
+    off();
+    return key;
+  }
+  const passes = () => [...useCommentCard.getState().passes.keys()];
+  afterEach(() => resetPlaceNotes());
+
+  it('a change that no longer lists the tab ends its pass; a tab still listed keeps its own', () => {
+    const one = unsentOn(T1, A);
+    const two = unsentOn(T2, B);
+    browser.setState((s) => ({ sessions: new Map(s.sessions).set(A, { tabs: [browserTab(T3, A)], selected: T3 }) }));
+    expect(passes()).toEqual([two]);
+    expect(passes()).not.toContain(one);
+  });
+
+  it('a full list without the tab’s session ends its pass', () => {
+    unsentOn(T1, A);
+    const two = unsentOn(T2, B);
+    browser.setState({ sessions: new Map([[B, { tabs: [browserTab(T2, B)], selected: T2 }]]) });
+    expect(passes()).toEqual([two]);
   });
 });

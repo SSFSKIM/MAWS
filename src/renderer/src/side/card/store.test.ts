@@ -9,7 +9,7 @@ import { artifactUrl } from '@shared/artifacts/scheme'; // P3-L (M5b)
 import { fileLineAnchor } from '../../tools/code/anchor/anchor';
 import { laneAState } from '../../lane-a/test-support/lane-a-state';
 import { applyLaneAState, dismissPendingSend, holdPendingSend, resetLaneAStore } from '../../stores/lane-a';
-import { CLAIM_DEADLINE_MS, cardGone, claimCard, closeCard, notePlace, openCard, resetPlaceNotes, SENT_NOTE_MS, targetOf, useCommentCard } from './store';
+import { CLAIM_DEADLINE_MS, cardGone, claimCard, closeCard, discardComment, dropSession, dropSubject, flightRefused, launchFlight, leaveCard, notePlace, openCard, passKey, registerCardHost, resetPlaceNotes, SENT_NOTE_MS, setCommentText, setPassToMain, targetOf, useCommentCard } from './store';
 
 const PARENT = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
 const RECORD = '00000000-0000-4000-8000-000000000001';
@@ -192,5 +192,96 @@ describe('the place’s note', () => {
     applyLaneAState(PARENT, laneAState(PARENT, { deliveries: [{ key: KEY, at: AT, state: 'entered' }] }));
     notePlace('h1', pending);
     expect(note('h1')).toMatchObject({ kind: 'sent', text: 'Sent to Q3 plan' });
+  });
+});
+
+// UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, M3; §C): the pass. A composing open adds a
+// comment to the pass of its host's subject; a host that keeps one unsent comment returns the person to it; a card that
+// goes leaves its comment unless nothing is typed in it; a subject or a session that ends takes its passes with it.
+describe('the pass', () => {
+  const doc = (threadId: string): Anchor => ({ kind: 'artifact-comment', locator: 'ships quarterly', label: 'Q3 plan', artifactId: 'art-1', threadId });
+  const docKey = passKey('artifact', 'art-1', PARENT);
+  const offs: (() => void)[] = [];
+  const host = (hostId: string, holds: 'one' | 'many', subject = 'art-1') => offs.push(registerCardHost(hostId, { kind: holds === 'one' ? 'artifact' : 'artifact-page', subject, holds }));
+  beforeEach(() => resetPlaceNotes());
+  afterEach(() => offs.splice(0).forEach((off) => off()));
+  const texts = (key: string) => useCommentCard.getState().passes.get(key)?.comments.map((c) => c.text) ?? null;
+  const editingNow = () => {
+    const phase = open()?.phase;
+    return phase?.kind === 'composing' ? phase.comment : null;
+  };
+
+  it('a `one` host with an unsent comment that has text opens the card on it and adds nothing; one with nothing typed is replaced', () => {
+    host('d1', 'one');
+    openCard(doc('t1'), { appSessionId: PARENT, placement: { kind: 'card', host: 'artifact', hostId: 'd1' } });
+    const first = editingNow();
+    openCard(doc('t2'), { appSessionId: PARENT, placement: { kind: 'card', host: 'artifact', hostId: 'd1' } });
+    expect(texts(docKey), 'nothing typed in the first: the second takes its place').toEqual(['']);
+    expect(editingNow()).not.toBe(first);
+    setCommentText(docKey, editingNow()!, 'Monthly?');
+    const typed = editingNow();
+    closeCard();
+    openCard(doc('t3'), { appSessionId: PARENT, placement: { kind: 'card', host: 'artifact', hostId: 'd1' } });
+    expect(texts(docKey)).toEqual(['Monthly?']);
+    expect(editingNow()).toBe(typed);
+  });
+
+  it('a `many` host’s pass grows; the card that goes keeps a comment with text and drops one without', () => {
+    host('p1', 'many', RECORD);
+    const key = passKey('artifact-page', RECORD, PARENT);
+    openCard(ANCHOR, { appSessionId: PARENT, placement: { kind: 'card', host: 'artifact-page', hostId: 'p1', rect: RECT } });
+    setCommentText(key, editingNow()!, 'Bolder');
+    openCard(ANCHOR, { appSessionId: PARENT, placement: { kind: 'card', host: 'artifact-page', hostId: 'p1', rect: RECT } });
+    expect(texts(key)).toEqual(['Bolder', '']);
+    leaveCard();
+    expect(open()).toBeNull();
+    expect(texts(key)).toEqual(['Bolder']);
+    expect(useCommentCard.getState().passes.get(key)?.comments[0]?.rect).toEqual(RECT);
+  });
+
+  it('starts the checkbox at the surface’s default, and moves only by the pass', () => {
+    host('p1', 'many', RECORD);
+    const key = passKey('artifact-page', RECORD, PARENT);
+    openCard(ANCHOR, { appSessionId: PARENT, destination: 'main', placement: { kind: 'card', host: 'artifact-page', hostId: 'p1' } });
+    expect(useCommentCard.getState().passes.get(key)?.toMain).toBe(true);
+    setPassToMain(key, false);
+    expect(useCommentCard.getState().passes.get(key)?.toMain).toBe(false);
+  });
+
+  it('a subject that ends, or a session, ends its passes and the card on them; another subject’s stays', () => {
+    host('p1', 'many', RECORD);
+    host('p2', 'many', 'other-record');
+    const key = passKey('artifact-page', RECORD, PARENT);
+    const other = passKey('artifact-page', 'other-record', PARENT);
+    openCard(ANCHOR, { appSessionId: PARENT, placement: { kind: 'card', host: 'artifact-page', hostId: 'p2' } });
+    setCommentText(other, editingNow()!, 'Elsewhere');
+    openCard(ANCHOR, { appSessionId: PARENT, placement: { kind: 'card', host: 'artifact-page', hostId: 'p1' } });
+    setCommentText(key, editingNow()!, 'Bolder');
+    dropSubject('artifact-page', RECORD);
+    expect(texts(key)).toBeNull();
+    expect(open()).toBeNull();
+    expect(texts(other)).toEqual(['Elsewhere']);
+    dropSession(PARENT);
+    expect(texts(other)).toBeNull();
+  });
+
+  it('the person’s discard tells the pass’s mounted host; a comment in flight cannot be discarded', () => {
+    const discarded: string[] = [];
+    offs.push(registerCardHost('p1', { kind: 'artifact-page', subject: RECORD, holds: 'many', discarded: (c) => discarded.push(c.text) }));
+    const key = passKey('artifact-page', RECORD, PARENT);
+    openCard(ANCHOR, { appSessionId: PARENT, placement: { kind: 'card', host: 'artifact-page', hostId: 'p1' } });
+    const first = editingNow()!;
+    setCommentText(key, first, 'Bolder');
+    openCard(ANCHOR, { appSessionId: PARENT, placement: { kind: 'card', host: 'artifact-page', hostId: 'p1' } });
+    setCommentText(key, editingNow()!, 'Left');
+    const flight = launchFlight(key)!;
+    expect(flight.comments.map((c) => c.text)).toEqual(['Bolder', 'Left']);
+    expect(launchFlight(key), 'one flight per pass').toBeNull();
+    discardComment(key, first);
+    expect(texts(key)).toEqual(['Bolder', 'Left']);
+    flightRefused(flight, 'no');
+    discardComment(key, first);
+    expect(texts(key)).toEqual(['Left']);
+    expect(discarded).toEqual(['Bolder']);
   });
 });
