@@ -92,6 +92,7 @@ import { seedTranscript, SIDE_QUESTION, SideJournal, slugOf, transcript } from '
 import { newChatIn, openProject, projectLine, projectRow, showProjectList, sidebarOf } from './support/sidebar';
 import { clickRevealed } from './support/hover'; // P5 O7 M8
 import { REMOTE_UNAVAILABLE } from '../src/shared/ipc/remote-unavailable'; // P5 O7 M8
+import { withNativeClipboard } from './support/clipboard'; // the UX wave, U9 (A4)
 
 test.skip(process.env.MAWS_REMOTE_E2E !== '1', 'the remote scenes run under pnpm e2e:remote (MAWS_REMOTE_E2E=1)');
 test.setTimeout(900_000);
@@ -2773,12 +2774,15 @@ test('a subagent of B’s terminal session, where B’s endpoint lists no rl2.ag
 // B's keeps its pane through the link's drop, one status line above it, and the reader keeps their place (A4), for a
 // session MAWS runs on B (lane B) and for a terminal session of B's (lane A, which has no record by design); a Stop
 // pressed in A reaches B's engine and the turn ends, and one pressed once the link is down reads "Stopping…" and then
-// says it did not stop (A11). A's way to B is the hub alone (the relay), so cutting its pipe takes the link down.
+// says it did not stop (A11). A's way to B is the hub alone (the relay), so cutting its pipe takes the link down. While
+// the link is down the reader also scrolls, selects and copies a paragraph, and sees no error text (`readWhileDown`;
+// the pane has no find to read a count from); a second outage with the reader at the end keeps the arriving row in view.
 const PLACE_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000d5';
 const STOP_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000d6';
 const PLACE_TURNS = 10; // enough of B's history for the pane to scroll
 const longReply = (turn: number) => Array.from({ length: 12 }, (_, k) => `B’s reply ${turn}, paragraph ${k + 1}.`).join('\n\n');
 const WHILE_DOWN_REPLY = 'B answered this while A was cut off.';
+const SECOND_DOWN_REPLY = 'B answered this through the second outage.';
 const PLACE_DRAFT = 'a draft kept while B reconnects';
 const STOP_FIRST_REPLY = 'B is ready to count.';
 const STOP_DELTAS = ['Counting ', 'on B: 1, 2, '];
@@ -2824,6 +2828,56 @@ const alertsSeen = (page: Page) => page.evaluate(() => (window as unknown as { _
 const linkLine = (page: Page) => main(page).locator('[data-link-words="line"]');
 const primaryOf = (page: Page) => main(page).locator('[data-submit-state]');
 const toastsOf = (page: Page) => page.locator('[data-toast-viewport]');
+// The pane's error texts, by name: any alert in the main region, the transcript's failed read and older page
+// (src/renderer/src/transcript/model/copy.ts's HYDRATION.failed and OLDER.failed), and an act's ending without its
+// effect (UC-7.5's "Not sent", "Not stopped").
+const PANE_ERRORS = /Couldn’t load this conversation|Older messages didn’t load|Not sent|Not stopped/;
+async function paneErrors(page: Page): Promise<string[]> {
+  const alerts = await main(page).locator('[role="alert"]').allTextContents();
+  const words = await main(page).getByText(PANE_ERRORS).allTextContents();
+  return [...alerts.map((t) => `alert: ${t}`), ...words.map((t) => `text: ${t}`)];
+}
+// The transcript's scroller, and whether its last row is in view (the reader following the end).
+const scrollerOf = (page: Page) => main(page).locator('[data-transcript-scroller]').first();
+const lastRowInView = (page: Page) =>
+  scrollerOf(page).evaluate((scroller) => {
+    const rows = scroller.querySelectorAll<HTMLElement>('[data-row-id]');
+    const last = rows[rows.length - 1];
+    if (last === undefined) return false;
+    const box = scroller.getBoundingClientRect();
+    const at = last.getBoundingClientRect();
+    return at.bottom <= box.bottom + 2 && at.bottom > box.top && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 2;
+  });
+
+/**
+ * What a reader does in the kept pane while its link is down (A4): scrolls, and the first row in view moves; selects a
+ * paragraph of that row and copies it, and the Mac's pasteboard reads it back (webContents' own copy, as Edit ▸ Copy);
+ * and sees no error text. MAWS's session pane has no find of its own (⌘F there is unbound: find is the Browser tool's
+ * and the document editor's), so a find and its count are not read here. Answers the place left once done.
+ */
+async function readWhileDown(page: Page, electron: ElectronApplication, before: { id: string }): Promise<{ id: string; offset: number; scrollHeight: number }> {
+  const moved = await scrollUp(page);
+  expect(moved.id, 'the reader scrolls the kept pane: another first row in view').not.toBe(before.id);
+  const copied = await scrollerOf(page).evaluate((scroller, id) => {
+    const row = scroller.querySelector<HTMLElement>(`[data-row-id="${CSS.escape(id)}"]`);
+    const paragraph = Array.from(row?.querySelectorAll<HTMLElement>('p') ?? []).find((p) => (p.textContent ?? '').trim() !== '');
+    if (paragraph === undefined) return null;
+    const range = document.createRange();
+    range.selectNodeContents(paragraph);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return selection.toString();
+  }, moved.id);
+  expect(copied, `a paragraph of the row in view (${moved.id}) is selected`).toBeTruthy();
+  await withNativeClipboard(electron, [copied!], async () => {
+    await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())!.webContents.copy());
+    await expect.poll(() => electron.evaluate(({ clipboard }) => clipboard.readText()), { message: 'the copy reads back from the pasteboard' }).toBe(copied);
+  });
+  await page.evaluate(() => window.getSelection()?.removeAllRanges());
+  expect(await paneErrors(page), 'no error text in the pane while the link is down').toEqual([]);
+  return (await placeIn(page))!;
+}
 
 /** B's lane B session on `journal`, its first turn over and listed; A launched over the relay, the session open in A. */
 async function laneBOpened(opts: { root: string; aUserData: string; journal: SideJournal; first: string; firstReply: string; title: string }, held: TerminalHeld) {
@@ -2871,7 +2925,7 @@ async function laneBOpened(opts: { root: string; aUserData: string; journal: Sid
   await expect(row, `B's row in A's sidebar\n${mainSaid(page)}`).toBeVisible({ timeout: 30_000 });
   await row.click();
   await quoting(expect(main(page).getByText(opts.firstReply).first(), 'B’s history in A’s pane').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
-  return { scene, b, page, turnOver, sendOnB };
+  return { scene, b, page, electron: a.app, turnOver, sendOnB };
 }
 
 test('U9 A4, a session MAWS runs on B: its tab keeps its pane through the link’s drop under one status line, and the reader keeps their place, their draft and no error', async () => {
@@ -2882,7 +2936,8 @@ test('U9 A4, a session MAWS runs on B: its tab keeps its pane through the link�
     const journal = new SideJournal(PLACE_SESSION, join(root, 'b-checkout'));
     for (let turn = 1; turn <= PLACE_TURNS; turn += 1) journal.turn(longReply(turn));
     journal.turn(WHILE_DOWN_REPLY);
-    const { scene, b, page, turnOver, sendOnB } = await laneBOpened({ root, aUserData, journal, first: 'Write the first long reply.', firstReply: 'B’s reply 1, paragraph 1.', title: 'B’s long session' }, held);
+    journal.turn(SECOND_DOWN_REPLY);
+    const { scene, b, page, electron, turnOver, sendOnB } = await laneBOpened({ root, aUserData, journal, first: 'Write the first long reply.', firstReply: 'B’s reply 1, paragraph 1.', title: 'B’s long session' }, held);
     // B's history, written on B before A reads it again
     for (let turn = 2; turn <= PLACE_TURNS; turn += 1) {
       await sendOnB(`Write long reply ${turn}.`);
@@ -2890,7 +2945,7 @@ test('U9 A4, a session MAWS runs on B: its tab keeps its pane through the link�
     }
     await quoting(expect(main(page).getByText(`B’s reply ${PLACE_TURNS}, paragraph 12.`).first(), 'B’s last reply in A’s pane').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
 
-    const place = await scrollUp(page);
+    let place = await scrollUp(page);
     await composerOf(page).click();
     await page.keyboard.type(PLACE_DRAFT);
     const pane = await main(page).locator('[data-transcript-scroller]').first().elementHandle();
@@ -2904,6 +2959,8 @@ test('U9 A4, a session MAWS runs on B: its tab keeps its pane through the link�
       await sendOnB('Answer while A is cut off.');
       await expect.poll(turnOver, { timeout: 60_000 }).toBe(true);
       expect((await machineOf(page, b.ref))?.state, 'A has not seen it').not.toBe('up');
+      place = await readWhileDown(page, electron, place);
+      await expect(linkLine(page), 'still down, the line still above the pane').toHaveText(RECONNECTING);
     });
 
     await test.step('the link back: the same first row at the same place, the new reply below it, the draft, and no error drawn', async () => {
@@ -2920,6 +2977,20 @@ test('U9 A4, a session MAWS runs on B: its tab keeps its pane through the link�
       const scroller = main(page).locator('[data-transcript-scroller]').first();
       await scroller.evaluate((node) => node.scrollTo({ top: node.scrollHeight }));
       await expect(main(page).getByText(WHILE_DOWN_REPLY).first(), 'the reply below, once scrolled to').toBeVisible({ timeout: 30_000 });
+    });
+
+    await test.step('a second down and up with the reader at the end: the reply that arrives is in view', async () => {
+      await expect.poll(() => lastRowInView(page), { timeout: 10_000, message: 'the reader follows the end' }).toBe(true);
+      scene.aHub.cut();
+      await quoting(expect(linkLine(page)).toHaveText(RECONNECTING, { timeout: 60_000 }), () => mainSaid(page));
+      await sendOnB('Answer through the second outage.');
+      await expect.poll(turnOver, { timeout: 60_000 }).toBe(true);
+      scene.aHub.restore();
+      await expect.poll(async () => (await machineOf(page, b.ref))?.state, { timeout: 120_000, message: `A's link to B comes up again
+${mainSaid(page)}` }).toBe('up');
+      await expect(main(page).getByText(SECOND_DOWN_REPLY).first(), 'the reply that arrived').toBeVisible({ timeout: 60_000 });
+      await expect.poll(() => lastRowInView(page), { timeout: 10_000, message: 'the last row in view: the reader still follows' }).toBe(true);
+      expect(await paneErrors(page)).toEqual([]);
     });
   } finally {
     await held.a?.cleanup();
@@ -2965,7 +3036,7 @@ test('U9 A4, a terminal session of B’s: its recordless pane stays through the 
     await row.click();
     await quoting(expect(main(page).getByText(`B’s reply ${PLACE_TURNS}, paragraph 12.`).first(), 'the terminal session’s transcript in A’s pane').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
 
-    const place = await scrollUp(page);
+    let place = await scrollUp(page);
     await composerOf(page).click();
     await page.keyboard.type(PLACE_DRAFT);
     const pane = await main(page).locator('[data-transcript-scroller]').first().elementHandle();
@@ -2978,6 +3049,8 @@ test('U9 A4, a terminal session of B’s: its recordless pane stays through the 
       expect(await pane!.evaluate((node) => node.isConnected), 'the same pane, still mounted').toBe(true);
       plane.append(null, add('user', 'Answer while A is cut off.'));
       plane.append(null, add('assistant', WHILE_DOWN_REPLY));
+      place = await readWhileDown(page, a.app, place);
+      await expect(linkLine(page), 'still down, the line still above the pane').toHaveText(RECONNECTING);
     });
 
     await test.step('the link back: the same first row at the same place, the new rows below it, the draft, and no error drawn', async () => {
@@ -2994,6 +3067,20 @@ test('U9 A4, a terminal session of B’s: its recordless pane stays through the 
       const scroller = main(page).locator('[data-transcript-scroller]').first();
       await scroller.evaluate((node) => node.scrollTo({ top: node.scrollHeight }));
       await expect(main(page).getByText(WHILE_DOWN_REPLY).first(), 'the rows below, once scrolled to').toBeVisible({ timeout: 30_000 });
+    });
+
+    await test.step('a second down and up with the reader at the end: the rows that arrive are in view', async () => {
+      await expect.poll(() => lastRowInView(page), { timeout: 10_000, message: 'the reader follows the end' }).toBe(true);
+      scene.aHub.cut();
+      await quoting(expect(linkLine(page)).toHaveText(RECONNECTING, { timeout: 60_000 }), () => mainSaid(page));
+      plane.append(null, add('user', 'Answer through the second outage.'));
+      plane.append(null, add('assistant', SECOND_DOWN_REPLY));
+      scene.aHub.restore();
+      await expect.poll(async () => (await machineOf(page, b.ref))?.state, { timeout: 120_000, message: `A's link to B comes up again
+${mainSaid(page)}` }).toBe('up');
+      await expect(main(page).getByText(SECOND_DOWN_REPLY).first(), 'the row that arrived').toBeVisible({ timeout: 60_000 });
+      await expect.poll(() => lastRowInView(page), { timeout: 10_000, message: 'the last row in view: the reader still follows' }).toBe(true);
+      expect(await paneErrors(page)).toEqual([]);
     });
   } finally {
     await held.a?.cleanup();
