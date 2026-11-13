@@ -22,7 +22,7 @@ import { closeDialog } from '../dialogs';
 import { Sheet, SheetForm } from '../Sheet';
 import { displayTitle, listedTitle } from '../title';
 import { PRIMARY, SECONDARY } from '../ui';
-import { OWNER, ownerOutcomeWords, refusalWords, SHARE } from './copy';
+import { OWNER, ownerOutcomeWords, refusalWords, SHARE, subtitleTooltip } from './copy';
 import { readPolicy, SELECT, Words, type Read } from './ShareSheet';
 
 const NO_OWNERS: readonly string[] = [];
@@ -106,7 +106,7 @@ function ReaderSheet({ address }: { address: AppSessionId }) {
   const ready = read.state === 'ready';
 
   return (
-    <Sheet title={OWNER.title} width="w-[min(440px,90vw)]" scrim="bg-bg-active" data-owner-sheet={address}>
+    <Sheet title={OWNER.title} width="w-[min(440px,90vw)]" data-owner-sheet={address}>
       <SheetForm
         canSubmit={ready && chosen !== '' && !saving}
         onSubmit={() => void save()}
@@ -114,7 +114,7 @@ function ReaderSheet({ address }: { address: AppSessionId }) {
         submitClass={PRIMARY}
         cancelLabel={!ready || outcome !== null ? SHARE.close : undefined}
       >
-        <div data-share-session className="flex min-w-0 text-ui-sm text-fg-muted" title={title}>
+        <div data-share-session className="flex min-w-0 text-ui-sm text-fg-muted" title={subtitleTooltip(title, machine)}>
           <span className="min-w-0 truncate">{title}</span>
           <span className="max-w-[50%] shrink-0 truncate whitespace-pre"> · {machine}</span>
         </div>

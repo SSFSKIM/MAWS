@@ -7,6 +7,8 @@ import type { CommandName, EventName, HostState } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
 import { interruptedSummary, PERSIST_RETRY_MS, startAttentionService, type AttentionServiceDeps } from './service';
 import type { AttentionStore } from './store';
+import { laneAAttention } from '../lane-a/attention';
+import type { LaneAView } from '../lane-a/driver';
 
 const APP = 'app-a' as AppSessionId;
 const SID = '33333333-3333-4333-8333-333333333333';
@@ -78,17 +80,30 @@ function setup(opts: { store?: FakeStore; dispatch?: AttentionServiceDeps['dispa
 }
 
 describe('attention service merges broker items with the derived kinds', () => {
-  it('keeps the broker\'s pending and delivered items, persists the merged list, and emits it whole', async () => {
+  it('keeps the broker\'s waiting items, persists the merged list, and emits it whole', async () => {
     const { service, store, fire, last } = setup();
     await service.ready;
     const permission = item({ kind: 'permission', state: 'pending' });
     const question = item({ kind: 'question', state: 'delivered', request: { requestId: 'req-2' as never, toolUseId: 'toolu_2' as never, taskId: null, agentId: null } });
     const plan = item({ kind: 'plan', state: 'confirmed', request: { requestId: 'req-3' as never, toolUseId: 'toolu_3' as never, taskId: null, agentId: null } });
     fire('session.brokerItems', { appSessionId: APP, items: [permission, question, plan] });
-    expect(last()).toEqual([permission, question]); // the engine moved past a confirmed item
+    expect(last()).toEqual([permission]); // UC-1: an answered (delivered) item waits nowhere; the engine moved past a confirmed one
     await service.settled();
-    expect(store.sessions.get(APP)).toEqual([permission, question]);
-    expect(await service.list()).toEqual([permission, question]);
+    expect(store.sessions.get(APP)).toEqual([permission]);
+    expect(await service.list()).toEqual([permission]);
+  });
+
+  // UC-1 (A17, §B): the publisher keeps only what waits, so no answered request reaches any window, machine or the store
+  it('sends, persists and lists a broker list of a pending and a delivered item as the pending one alone', async () => {
+    const { service, store, fire, last, handlers } = setup();
+    await service.ready;
+    const permission = item({ kind: 'permission', state: 'pending' });
+    const answered = item({ kind: 'permission', state: 'delivered', request: { requestId: 'req-2' as never, toolUseId: 'toolu_2' as never, taskId: null, agentId: null } });
+    fire('session.brokerItems', { appSessionId: APP, items: [permission, answered] });
+    expect(last()).toEqual([permission]);
+    await service.settled();
+    expect(store.sessions.get(APP)).toEqual([permission]);
+    expect(await handlers.get('attention.list')!(undefined)).toEqual([permission]);
   });
 
   it('a process exit with lost approvals raises one interrupted item with the contract summary; the broker items are gone', async () => {
@@ -610,7 +625,7 @@ describe('attention service persistence failures', () => {
     await expect(service.settled()).rejects.toThrow('EIO: attention.json not written');
     expect(await handlers.get('attention.list')!(undefined)).toEqual([first]);
     expect(last()).toEqual([first]);
-    const second = item({ kind: 'permission', state: 'delivered', request: { requestId: 'req-2' as never, toolUseId: 'toolu_2' as never, taskId: null, agentId: null } });
+    const second = item({ kind: 'permission', state: 'pending', request: { requestId: 'req-2' as never, toolUseId: 'toolu_2' as never, taskId: null, agentId: null } });
     fire('session.brokerItems', { appSessionId: APP, items: [first, second] });
     await expect(service.settled()).resolves.toBeUndefined();
     expect(store.sessions.get(APP)).toEqual([first, second]);
@@ -826,6 +841,24 @@ describe('lane A items', () => {
     service.setLaneAItems(APP, []);
     expect(last()).toEqual([]);
     expect(await handlers.get('attention.request')!({ appSessionId: APP, requestId: 'toolu_a' })).toEqual({ event: null });
+    service.stop();
+  });
+
+  // UC-1 (U1a's §B): with the bridge's settlement held back, the session's machine stops listing a request at the moment
+  // the answer was taken (the holder told by its endpoint's `laneA.accepted`), though the bridge still lists it
+  it('carries no request the holder was told was taken, in attention.changed or attention.list, while the bridge still lists it', async () => {
+    const { service, last, handlers } = setup();
+    await service.ready;
+    const holder = laneAAttention({ set: (appId, entries) => service.setLaneAItems(appId, entries) });
+    const raised = { request: 'toolu_a', session: SID, tool: 'Bash', input: { command: 'echo made-up' }, t: Date.parse(AT) };
+    const view = { state: { appSessionId: APP, engineSessionId: SID, bridge: 'live', reason: null, launch: 'l1', sminos: '1.47.0', ops: [], reads: [], controls: {}, turn: { running: true, unknown: false }, model: null, effort: null, override: null, mode: null, catalog: null, pending: [raised], settled: [], deliveries: [] }, fresh: true, tool: null } as LaneAView;
+    holder.update(APP, view);
+    expect(last().map((i) => i.request.requestId)).toEqual(['toolu_a']);
+    holder.accepted(APP, 'toolu_a');
+    holder.update(APP, view); // the bridge has not settled it
+    expect(last()).toEqual([]);
+    expect(await handlers.get('attention.list')!(undefined)).toEqual([]);
+    holder.stop();
     service.stop();
   });
 

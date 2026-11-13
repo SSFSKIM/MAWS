@@ -2,7 +2,7 @@
 // name with its machine chip; a click opens the exchange's messages in place, and closes them again.
 import { useId, useState } from 'react';
 import { CHANNEL } from './copy';
-import { faintOf, LabelLine, Party, Recipients, Time } from './parts';
+import { faintOf, LabelLine, Names, NAMES_ROW, Party, Recipients, Time } from './parts';
 import type { ExchangeEntry, SayEntry } from './project';
 
 export function ExchangeRow({ entry }: { entry: ExchangeEntry }) {
@@ -18,21 +18,23 @@ export function ExchangeRow({ entry }: { entry: ExchangeEntry }) {
         aria-expanded={open}
         aria-controls={body}
         onClick={() => setOpen((was) => !was)}
-        className="-mx-2 flex min-w-0 items-baseline gap-1.5 rounded-sm px-2 py-1 text-left text-ui text-fg-muted outline-accent hover:bg-bg-hover focus-visible:outline-2"
+        className={`-mx-2 ${NAMES_ROW} rounded-sm px-2 py-1 text-left text-ui text-fg-muted outline-accent hover:bg-bg-hover focus-visible:outline-2`}
       >
         <span aria-hidden className={`shrink-0 text-ui-sm text-fg-faint transition-transform motion-reduce:transition-none ${open ? 'rotate-90' : ''}`}>
           ›
         </span>
         <span className="shrink-0">{other === 'everyone' ? CHANNEL.broadcast(entry.count) : CHANNEL.exchange(entry.count)}</span>
-        <Party party={from} title={false} />
-        {other === 'everyone' ? (
-          <span className="shrink-0">{CHANNEL.toEveryone}</span>
-        ) : (
-          <>
-            <span className="shrink-0">{CHANNEL.and}</span>
-            <Party party={other} title={false} />
-          </>
-        )}
+        <Names>
+          <Party party={from} title={false} />
+          {other === 'everyone' ? (
+            <span className="shrink-0">{CHANNEL.toEveryone}</span>
+          ) : (
+            <>
+              <span className="shrink-0">{CHANNEL.and}</span>
+              <Party party={other} title={false} />
+            </>
+          )}
+        </Names>
         <Time at={entry.last} />
       </button>
       <LabelLine entry={entry} />
@@ -50,9 +52,11 @@ export function ExchangeRow({ entry }: { entry: ExchangeEntry }) {
 function SayLine({ say }: { say: SayEntry }) {
   return (
     <li data-offset={say.offset} className="flex min-w-0 flex-col gap-0.5">
-      <div className="flex min-w-0 items-baseline gap-1.5 text-ui-sm">
-        <Party party={say.from} title={false} />
-        <Recipients to={say.to} />
+      <div className={`${NAMES_ROW} text-ui-sm`}>
+        <Names>
+          <Party party={say.from} title={false} />
+          <Recipients to={say.to} />
+        </Names>
         <Time at={say.at} />
       </div>
       <p className="m-0 text-ui break-words whitespace-pre-wrap text-fg [overflow-wrap:anywhere]">{say.text}</p>

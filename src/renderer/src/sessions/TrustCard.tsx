@@ -7,7 +7,9 @@
 // (tools/document/comment-session.tsx) shows too, so an answer given there consents to the same words.
 // P5 O7 M9 ("Remote setup"): another machine's trust card, answered for a spawn there, names its own accept and offers no
 // start without trusting (the machine refuses an untrusted checkout), so `onStartWithoutTrusting` is optional.
-import { TRUST_GATES, type TrustState } from '@shared/sessions/trust';
+// UX wave U1a §J (l4-approvals-13): a folder that holds nothing trust would load says so in one line, where the card listed
+// five things that would load; one that holds something lists what it holds, as before.
+import type { TrustState } from '@shared/sessions/trust';
 import { PRIMARY, QUIET, SECONDARY } from './ui';
 
 export const TRUST_CARD_TITLE = 'Trust this folder?';
@@ -61,16 +63,24 @@ export function TrustDetails({ trust }: { trust: TrustState }) {
         <p className="m-0 text-fg-muted">{HOME_TRUST_COPY}</p>
       ) : (
         <>
-          <p className="m-0 text-fg-muted">
-            Loads its settings, hooks, MCP servers and plugins, exactly as the terminal does. Recorded in <span className="font-mono text-ui-sm">{trust.configPath}</span>; the
-            terminal will not ask again.
-          </p>
+          {trust.found.length > 0 ? (
+            <p className="m-0 text-fg-muted">
+              Loads its settings, hooks, MCP servers and plugins, exactly as the terminal does. <RecordedIn trust={trust} />
+            </p>
+          ) : (
+            <>
+              <p className="m-0 text-fg-muted">Nothing in this folder loads or runs automatically.</p>
+              <p className="m-0 text-fg-muted">
+                <RecordedIn trust={trust} />
+              </p>
+            </>
+          )}
           {trust.trustKey !== trust.directory && (
             <p className="m-0 text-fg-muted">
               Trust is recorded for the repository at <span className="font-mono text-ui-sm">{trust.trustKey}</span>
             </p>
           )}
-          {trust.found.length > 0 ? (
+          {trust.found.length > 0 && (
             <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-ui-sm">
               {trust.found.map((f) => (
                 <div key={f.file} className="contents">
@@ -79,15 +89,17 @@ export function TrustDetails({ trust }: { trust: TrustState }) {
                 </div>
               ))}
             </dl>
-          ) : (
-            <ul aria-label="Trust would load" className="m-0 list-disc pl-5 text-ui-sm text-fg-muted">
-              {TRUST_GATES.map((gate) => (
-                <li key={gate}>{gate}</li>
-              ))}
-            </ul>
           )}
         </>
       )}
+    </>
+  );
+}
+
+function RecordedIn({ trust }: { trust: TrustState }) {
+  return (
+    <>
+      Recorded in <span className="font-mono text-ui-sm">{trust.configPath}</span>; the terminal will not ask again.
     </>
   );
 }

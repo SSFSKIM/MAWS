@@ -229,7 +229,7 @@ test.describe('the #panel harness: the agent tools', () => {
     await expect.poll(async () => (await h.drillIn())?.requestCards).toBe(1);
     const card = h.region.locator('[data-view="agent"] [data-request-card]');
     await expect(card.getByRole('button', { name: 'Deny', exact: true })).toBeVisible();
-    await expect(card.getByRole('button', { name: 'Allow', exact: true })).toBeVisible();
+    await expect(card.getByRole('button', { name: 'Allow once', exact: true })).toBeVisible();
     h.expectQuietConsole();
   });
 

@@ -9,11 +9,12 @@
 // temp directory (`MAWS_E2E_TRASH_DIR`, main's e2e seam), never the owner's `~/.Trash`. No native panel opens:
 // under MAWS_E2E `layout.pickFiles` answers from `MAWS_E2E_PICK_PATHS` or as cancelled (main's pick seam).
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
+import { slugOf } from '../src/engine-host/fs/paths';
 import { fixtureIdentity } from '../test/support/fixture-session-id';
 import { runGit } from '../test/support/git-fixture';
 import { ScratchRepo } from '../test/support/scratch-repo';
@@ -355,6 +356,28 @@ test.describe('sessions', () => {
     await expect(page.getByRole('tab')).toHaveCount(2); // the source, the fork (W5: the Overview is no tab)
   });
 
+  // U1a §J (A13): a folder with nothing to load says so in one line, in place of the list of what trust would turn on
+  test('trust card, nothing to load: a folder with no project settings and no .mcp.json shows its path, one line saying so and where trust is recorded, and no list; the frame reads its title alone', async () => {
+    const repo = await ScratchRepo.create({ sentinels: false });
+    const launched = await launchCase({ fixtures: [], trusted: [] });
+    current = { ...launched, repos: [repo] };
+    const { page, maws } = launched;
+    const project = await addProject(page, repo.root);
+    const id = await plus(page, project.name);
+    await routeDirect(page, id);
+    await send(page, 'Nothing loads in this folder.');
+    const card = page.getByRole('group', { name: 'Trust this folder?', exact: true });
+    await expect(card, 'docked in the composer’s place').toBeVisible();
+    await expect(card.getByText(repo.root, { exact: true })).toBeVisible();
+    await expect(card.getByText('Nothing in this folder loads or runs automatically.', { exact: true })).toBeVisible();
+    await expect(card.getByText(/^Recorded in .*; the terminal will not ask again\.$/)).toBeVisible();
+    await expect(card.getByText(/^Loads its settings, hooks, MCP servers and plugins/), 'no sentence of what loads').toHaveCount(0);
+    await expect(card.locator('dl'), 'and no list').toHaveCount(0);
+    await expect(card, 'the frame reads its title alone').not.toContainText('Composer paused');
+    await expect(card.getByRole('button', { name: 'Trust and start' })).toBeVisible();
+    expect(maws.consoleErrors()).toEqual([]);
+  });
+
   test('rollback keeps the tab: a launch past the fixture list is refused, the worktree and record go, the failure card stays, and Back to editing returns the message to the editor', async () => {
     const { page, untrustedRepos } = await begin({ fixtures: [BOOTSTRAP], untrusted: 1 });
     const repo = untrustedRepos[0]!;
@@ -561,7 +584,7 @@ test.describe('sessions', () => {
     await expect.poll(async () => value(await invoke(page, 'session.get', { appSessionId: id }))!.holder, { timeout: 2_000, message: 'foreign-live in the sidebar within two seconds' }).toEqual(job);
 
     await (await sidebarRow(page, { appSessionId: id })).click({ button: 'right' }); // W11: in its expanded project
-    await expect(page.getByRole('menuitem')).toHaveText(['Open', 'Open in new tab', 'Attach in a terminal tab']); // W12 I2: Open in new tab beside Open
+    await expect(page.getByRole('menuitem')).toHaveText(['Open', 'Open in new tab', 'Attach in a terminal tab', 'Hide']); // W12 I2: Open in new tab beside Open; UX wave U7, O-16: Hide after the opens
     await page.keyboard.press('Escape');
     await (await row(page, id)).click();
     const notice = page.locator('[data-region="main"]').getByRole('note');
@@ -594,7 +617,7 @@ test.describe('sessions', () => {
     await expect(notice.getByRole('button', { name: 'Attach in a terminal tab' })).toHaveCount(0);
     await expect(notice.getByRole('button', { name: 'Fork a copy' })).toBeVisible();
     await (await sidebarRow(page, { appSessionId: id })).click({ button: 'right' });
-    await expect(page.getByRole('menuitem')).toHaveText(['Open', 'Open in new tab']);
+    await expect(page.getByRole('menuitem')).toHaveText(['Open', 'Open in new tab', 'Hide']); // UX wave U7, O-16
     await page.keyboard.press('Escape');
     await store.removeRegistryRecord(pid);
     expect(launched.maws.consoleErrors()).toEqual([]);
@@ -965,7 +988,7 @@ test.describe('sessions', () => {
     expect(second.maws.consoleErrors()).toEqual([]);
   });
 
-  test("C5's acceptance item 10, replay clause: a replayed read-only request reaches the session's row through a recorded session and its hover card's Approve answers the broker", async () => {
+  test("C5's acceptance item 10, replay clause: a replayed read-only request reaches the session's row through a recorded session and its hover card's Allow once answers the broker", async () => {
     const { page, trustedRepos } = await begin({ fixtures: [READ_ONLY] });
     const project = await addProject(page, trustedRepos[0]!.root);
     const id = await plus(page, project.name);
@@ -986,9 +1009,51 @@ test.describe('sessions', () => {
       await expect(card).toBeVisible({ timeout: 2_000 });
     }).toPass({ timeout: 10_000 });
     await expect(card.getByText('Approval needed')).toBeVisible();
-    await card.getByRole('button', { name: 'Approve' }).click();
+    await card.getByRole('button', { name: 'Allow once', exact: true }).click(); // U1a §H: the hover card's once-only allow
     await expect(entry.getByRole('img', { name: 'Needs approval' })).toHaveCount(0);
     await expect(entry, 'the project tree row survives attention retirement').toBeVisible();
     await turnEnded(page, id);
+  });
+  // U8c-1 (M1 decision 9): on EnterWorktree the engine renames the session's transcript, and its folder beside it, into
+  // the worktree's project folder, then appends a `relocated` row and the next turn's rows there (engine 2.1.322,
+  // cli.pretty.js:381469-381548). An open transcript reads on, and the session is listed throughout, never archived.
+  test('a session whose transcript the engine moves stays listed and goes on reading', async () => {
+    const repo = await ScratchRepo.create();
+    const store = await StoreFixture.create();
+    const sid = '5e551011-0000-4000-8000-0000000000c8';
+    const user = (uuid: string, parentUuid: string | null, cwd: string, text: string) => ({ type: 'user', uuid, parentUuid, cwd, sessionId: sid, timestamp: '2026-11-13T10:00:00.000Z', message: { role: 'user', content: text } });
+    const from = await store.addTranscript(repo.root, sid, [user(`u-${sid}`, null, repo.root, 'Written before the move')]);
+    await store.addSidecar(sid, 'subagents/agent-a1.jsonl', '');
+    const worktree = await repo.addManagedWorktree('w1');
+    const launched = await launchCase({ fixtures: [], trusted: [repo.root], store });
+    current = { ...launched, repos: [repo] };
+    const { page } = launched;
+    await expect.poll(async () => value(await invoke(page, 'session.list', {})).sessions.some((r) => r.engineSessionId === sid), { timeout: 20_000 }).toBe(true);
+    const record = value(await invoke(page, 'session.list', {})).sessions.find((r) => r.engineSessionId === sid)!;
+    // Every record the window is sent for the session from here on, and any removal.
+    await page.evaluate((id) => {
+      const seen: unknown[] = [];
+      (window as unknown as { __u8c: unknown[] }).__u8c = seen;
+      window.maws.on('session.changed', ({ record: changed }) => changed.appId === id && seen.push(changed.archived ? 'archived' : 'listed'));
+      window.maws.on('session.removed', ({ appSessionId }) => appSessionId === id && seen.push('removed'));
+    }, record.appId);
+    await (await sidebarRow(page, { appSessionId: record.appId })).click();
+    const main = page.locator('[data-region="main"]');
+    await expect(main.getByText('Written before the move', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+    const project = join(store.paths.projects, slugOf(worktree));
+    const target = join(project, `${sid}.jsonl`);
+    mkdirSync(project, { recursive: true });
+    renameSync(from, target);
+    renameSync(join(dirname(from), sid), join(project, sid));
+    appendFileSync(target, [{ type: 'relocated', relocatedCwd: worktree, sessionId: sid }, user('u-after-move', `u-${sid}`, worktree, 'Written after the move')].map((r) => `${JSON.stringify(r)}\n`).join(''));
+
+    await expect(main.getByText('Written after the move', { exact: true }), 'the open transcript reads on at the new path').toBeVisible({ timeout: 20_000 });
+    await expect(await sidebarRow(page, { appSessionId: record.appId })).toBeVisible();
+    expect(value(await invoke(page, 'session.list', {})).sessions.some((r) => r.appId === record.appId), 'listed, not among the archived').toBe(true);
+    expect(value(await invoke(page, 'session.get', { appSessionId: record.appId }))!.archived).toBe(false);
+    const seen = await page.evaluate(() => (window as unknown as { __u8c: unknown[] }).__u8c);
+    expect(seen, 'never told archived or removed across the move').not.toContain('archived');
+    expect(seen).not.toContain('removed');
   });
 });

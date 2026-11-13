@@ -43,6 +43,7 @@ import { READ_REFUSED } from '@shared/org/reader'; // board 525
 import { READER } from '../sessions/share/copy'; // board 525
 import { useCantRead, useWhomToAsk } from '../sessions/share/reader'; // board 525
 import { useReaderPane } from '../sessions/share/reader-connect'; // board 525
+import { ComputerUseStrip } from '../computer-use/Strip'; // UX wave U12a
 
 type PaneIndex = 0 | 1;
 
@@ -131,11 +132,12 @@ function StartedPane({ appSessionId: id, record, paneIndex, compact }: { appSess
     <div className="flex h-full flex-col">
       {/* P2-C (2026-10-09): while the session's owner-channel lane is on, the header with the view toggle */}
       {!compact && <ReportBar appSessionId={id} />}
-      {!compact && <div className="min-h-0 flex-1 overflow-auto">
+      {!compact && <ComputerUseStrip appSessionId={id} /> /* UX wave U12a: no height, its line over the transcript's top edge */}
+      {!compact && <div className="scroll-gutter-scope min-h-0 flex-1 overflow-auto">
         {/* eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render */}
         <Transcript appSessionId={id} agentId={null} paneIndex={paneIndex} />
       </div>}
-      <div className={`shrink-0 ${compact ? "py-2" : "pt-4 pb-4"}`}>
+      <div className={`shrink-0 ${compact ? "py-2" : "scroll-gutter-under pt-4 pb-4"}`}>
         <ComposerColumn>
           {docked && <DockedRequest item={docked} paneIndex={paneIndex} />}
           {/* C10 start: an interrupted delete's Finish deleting or Keep, and the card a resume waits on */}

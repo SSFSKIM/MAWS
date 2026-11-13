@@ -38,6 +38,7 @@ function renderSection(initial: Settings = SETTINGS_DEFAULTS_V21, answers: Setti
 }
 const row = (label: string) => screen.getByRole('group', { name: label });
 const names = () => b.calls.map((c) => c.name);
+const openMore = (label: string) => fireEvent.click(within(row(label)).getByRole('button', { name: 'More' })); // U11a M9: the rest of a note
 
 afterEach(() => {
   unsubscribe();
@@ -88,17 +89,21 @@ describe('the binary row and the update', () => {
     renderSection();
     expect(await within(row('Binary')).findByText('~/.local/share/claude/versions/2.1.287')).toBeTruthy();
     expect(within(row('Binary')).getByText('2.1.287')).toBeTruthy();
-    expect(within(row('Binary')).getByText('MAWS was verified against Claude Code 2.1.283')).toBeTruthy();
+    expect(row('Binary').textContent).not.toContain('MAWS was verified against'); // U11a M9: information, behind More
+    openMore('Binary');
+    expect(row('Binary').textContent).toContain("Found again at every launch: ~/.local/bin/claude, else claude on your shell's PATH. Running sessions keep the binary they started on. MAWS was verified against Claude Code 2.1.283.");
     expect(within(row('Binary')).queryByRole('button', { name: 'Use installed' })).toBeNull(); // nothing chosen
     expect(row('Binary').querySelector('.text-warning')).toBeNull(); // a newer version is information, never a refusal
     expect(screen.queryByRole('group', { name: 'Pinned version' })).toBeNull();
     expect(screen.queryByRole('group', { name: 'Engine copy' })).toBeNull();
   });
 
-  it('says in one line what MAWS shows of a plugin, with no control (R1)', () => {
+  // U11a M9 (l8-settings-06): the R1 paragraph row is gone, its sentence out of date (plugins' panes are drawn)
+  it('holds Binary, Update and Config home and no Plugins paragraph', async () => {
     renderSection();
-    expect(within(row('Plugins')).getByText('Plugin hooks run in MAWS sessions as in the terminal; their toasts, status lines and log lines show in the session, their panes and bands not yet.')).toBeTruthy();
-    expect(within(row('Plugins')).queryByRole('button')).toBeNull();
+    await within(row('Binary')).findByText('~/.local/share/claude/versions/2.1.287');
+    expect(screen.getAllByRole('group').map((g) => g.firstElementChild?.textContent)).toEqual(['Binary', 'Update', 'Config home']);
+    expect(within(row('Config home')).getByText('Where the engine keeps transcripts, settings and trust.')).toBeTruthy();
   });
 
   it('a binary that is missing says why, in the warning colour', async () => {
@@ -110,7 +115,9 @@ describe('the binary row and the update', () => {
 
   it('Update Claude Code… opens the update in a terminal tab and says which sessions take the new version', async () => {
     renderSection();
-    expect(within(row('Update')).getByText('Runs claude update in a terminal tab. New sessions start on the new version; running sessions keep theirs.')).toBeTruthy();
+    expect(within(row('Update')).getByText('Runs claude update in a terminal tab.')).toBeTruthy();
+    openMore('Update');
+    expect(within(row('Update')).getByText('New sessions start on the new version; running sessions keep theirs.')).toBeTruthy();
     fireEvent.click(within(row('Update')).getByRole('button', { name: 'Update Claude Code…' }));
     expect(openEngineUpdate).toHaveBeenCalledOnce();
     expect(names()).not.toContain('settings.set'); // nothing written: the user's own updater runs
@@ -119,20 +126,11 @@ describe('the binary row and the update', () => {
   it('with a chosen binary, the notes say new sessions stay on it until Use installed', async () => {
     renderSection({ ...SETTINGS_DEFAULTS_V21, engine: { ...SETTINGS_DEFAULTS_V21.engine, binaryPath: '/opt/claude' } });
     expect(await within(row('Binary')).findByText('/opt/claude')).toBeTruthy();
-    expect(within(row('Binary')).getByText('New sessions start on the binary you chose. Running sessions keep the binary they started on.', { exact: false })).toBeTruthy();
-    expect(within(row('Update')).getByText('Runs claude update in a terminal tab. New sessions stay on the binary you chose until Use installed.')).toBeTruthy();
-  });
-});
-
-// W3 (charter D-18 as amended 2026-10-01): the mode a session takes when the engine refuses auto, settings version 6
-describe('the auto fallback row', () => {
-  it('offers every engine mode but auto, shows acceptEdits by default and writes permissions.autoFallback', async () => {
-    renderSection();
-    const select = screen.getByRole('combobox', { name: 'When auto mode is unavailable' }) as HTMLSelectElement;
-    expect([...select.options].map((o) => o.value)).toEqual(['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk']);
-    expect([...select.options].map((o) => o.textContent)).toEqual(['Manual', 'Accept edits', 'Plan', 'Bypass permissions', "Don't ask"]);
-    expect(select.value).toBe('acceptEdits');
-    fireEvent.change(select, { target: { value: 'default' } });
-    await vi.waitFor(() => expect(b.sets).toEqual([{ permissions: { autoFallback: 'default' } }]));
+    expect(within(row('Binary')).getByText('New sessions start on the binary you chose.')).toBeTruthy();
+    openMore('Binary');
+    expect(within(row('Binary')).getByText('Running sessions keep the binary they started on. MAWS was verified against Claude Code 2.1.283.')).toBeTruthy();
+    expect(within(row('Update')).getByText('Runs claude update in a terminal tab.')).toBeTruthy();
+    openMore('Update');
+    expect(within(row('Update')).getByText('New sessions stay on your chosen binary until Use installed. Running sessions keep theirs.')).toBeTruthy();
   });
 });

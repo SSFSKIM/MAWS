@@ -169,10 +169,8 @@ test('an agent makes an html artifact and a file artifact through the tools; the
       const open = ofKind(all, 'permission.requested').filter((e) => !resolved.has(e.requestId));
       if (open.length > 0) {
         const frame = pane.getByRole('group', { name: 'Approval needed' });
-        const allow = frame.getByRole('button', { name: 'Allow', exact: true });
+        const allow = frame.getByRole('button', { name: 'Allow once', exact: true });
         if ((await allow.isVisible().catch(() => false)) && (await allow.isEnabled().catch(() => false))) {
-          const once = frame.getByRole('radio', { name: 'Allow once' });
-          if ((await once.count()) > 0) await once.click();
           await allow.click();
           allowed.push(open[0]!.toolName);
           await expect.poll(async () => ofKind(await events(), 'permission.resolved').some((e) => e.requestId === open[0]!.requestId), { timeout: 30_000 }).toBe(true);

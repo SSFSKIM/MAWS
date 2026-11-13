@@ -402,6 +402,18 @@ export function shownTrees(trees: readonly SidebarTree[], more: boolean, spawned
   return { shown, more: withinCap };
 }
 
+// UX wave U7, O-16 (Interfaces §D): a project's ranked sessions split by the hidden set, after ranking and before the caps,
+// so a hidden session still counts in its project's marks and rollups and is absent from the five and the eight.
+/** A project's ranked sessions, split by the hidden set: `shown` keeps its order; `hidden` is newest activity first. */
+export function splitHidden(items: readonly SidebarSession[], isHidden: (id: AppSessionId) => boolean, activityOf: (item: SidebarSession) => number): { shown: SidebarSession[]; hidden: SidebarSession[] } {
+  const shown: SidebarSession[] = [];
+  const hidden: SidebarSession[] = [];
+  for (const item of items) (isHidden(sidebarSessionId(item)) ? hidden : shown).push(item);
+  if (hidden.length === 0) return { shown, hidden };
+  const at = new Map(hidden.map((item) => [item, activityOf(item)]));
+  return { shown, hidden: hidden.sort((a, b) => at.get(b)! - at.get(a)!) }; // stable: equal activity keeps the rank order
+}
+
 // The trees the caps count, in the items' order: each record's lineage tree (`nestLineage`) where its root sits, each
 // listed row a tree of one.
 export function nestItems(items: readonly SidebarSession[]): SidebarTree[] {

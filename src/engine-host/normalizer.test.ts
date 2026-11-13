@@ -887,6 +887,21 @@ describe('maws tools/call admission follows the server envelope (E1)', () => {
     ]);
     expect(kinds(events.filter((e) => e.kind.startsWith('maws.')))).toEqual(['maws.pane.shown']); // the well-formed one alone
   });
+
+  // U12a (M1; Interfaces §H): a browser answer's `page` and `note` are the agent's to read; the journaled event keeps its shape
+  it('maps a show_pane result that carries page and note to maws.pane.shown of the same shape as before', () => {
+    const opened = { kind: 'panel-tool', toolId: 'browser', tabId: 'browser:1', title: 'Browser' };
+    const result = { content: [{ type: 'text', text: JSON.stringify({ status: 'shown', pane: 'browser', opened, page: 'kept', note: 'The user is using this tab.' }) }] };
+    const events = feed(make(), [
+      call('r1', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'show_pane', arguments: { pane: 'browser', target: 'https://a.test/' }, _meta: meta } }),
+      answer('r1', 1, result),
+    ]);
+    expect(only(events, 'maws.pane.shown')).toEqual([
+      expect.objectContaining({ kind: 'maws.pane.shown', toolUseId: 'toolu_a', requestId: 'r1', pane: 'browser', target: 'https://a.test/', opened, error: null }),
+    ]);
+    expect(Object.keys(only(events, 'maws.pane.shown')[0]!)).not.toContain('page');
+    expect(Object.keys(only(events, 'maws.pane.shown')[0]!)).not.toContain('note');
+  });
 });
 
 // E7 start: a message from another session, beside the user.message that carries it (E7 execution document, Design §4,

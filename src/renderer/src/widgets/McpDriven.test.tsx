@@ -37,6 +37,20 @@ describe('McpDriven', () => {
     await waitFor(() => expect(document.querySelector('[data-mcp-server="probe"]')).not.toBeNull());
   });
 
+  // UX wave U11a (§C): a terminal session's Connectors dialog has the dialog's title and the status words; its Enable,
+  // Disable and Reconnect stay the terminal's own `/mcp` commands
+  it('is titled Connectors and words each server’s status', async () => {
+    reads.readLaneA.mockResolvedValue({ ok: true, result: { exact: false, servers: [{ name: 'probe', status: 'connected', tools: 1 }, { name: 'tracker', status: 'needs-auth', tools: 0 }] } });
+    render(<McpDriven appSessionId={ID} controls={controlsWith({}, vi.fn())} close={() => {}} />);
+    await waitFor(() => expect(document.querySelector('[data-mcp-server="tracker"]')).not.toBeNull());
+    const frame = document.querySelector<HTMLElement>('[data-widget="mcp"]')!;
+    expect(frame.querySelector('h3')?.textContent).toBe('Connectors');
+    expect(screen.getByRole('list', { name: 'Connectors' })).toBeTruthy();
+    expect(document.querySelector('[data-mcp-server="probe"]')!.textContent).toContain('Connected · 1 tool');
+    expect(document.querySelector('[data-mcp-server="tracker"]')!.textContent).toContain('Sign in needed');
+    expect(frame.textContent).not.toContain('Off here is off');
+  });
+
   it('shows Disable disabled in place with its reason when the bridge cannot disable, and runs it when it can', async () => {
     const command = vi.fn(async (): Promise<ControlResult> => ({ state: 'done', result: { id: 'run-1' } }));
     render(<McpDriven appSessionId={ID} controls={controlsWith({ 'mcp.disable': DISABLE_GAP }, command)} close={() => {}} />);

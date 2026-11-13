@@ -624,6 +624,7 @@ export const LayoutKeySchema = z.union([
   z.literal('sessions.attachTabs'),
   // C10 end
   z.literal('sidebar.people'), // P5 O8 M5: SidebarPeopleSchema
+  z.literal('sidebar.hidden'), // UX wave U7 (O-16): SidebarHiddenSchema
   z.literal('cards.open'), z.literal('panelTools.widths'), z.literal('panelTools.groups'), // UX wave U8b: the three above
 ]);
 // P5 O8 M5 (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, "The People toggle"): the sidebar rows (org projects'
@@ -631,6 +632,15 @@ export const LayoutKeySchema = z.union([
 // A key of its own rather than a field of `SidebarRegionSchema`, which an older build would fail to parse.
 export const SidebarPeopleSchema = z.strictObject({ version: z.literal(1), on: z.array(z.string()) });   // key `sidebar.people`
 export type SidebarPeople = z.infer<typeof SidebarPeopleSchema>;
+// UX wave U7, O-16 (docs/doperpowers/plans/2026-11-12-ux-wave-U7-sidebar-title-bar-destinations.md, Interfaces §E): the
+// sessions hidden from the sidebar, written by `stores/hidden.ts`: session address → when it was hidden, and since when
+// its entry is armed (ISO-8601; null: not armed). An absent key means nothing hidden. A key of its own, which build F
+// never asks for and its main keeps whole through its own writes.
+export const SidebarHiddenSchema = z.strictObject({
+  version: z.literal(1),
+  hidden: z.record(z.string().min(1), z.strictObject({ at: z.string(), armedAt: z.string().nullable() })),
+});   // key `sidebar.hidden`
+export type SidebarHidden = z.infer<typeof SidebarHiddenSchema>;
 export type LayoutKey = z.infer<typeof LayoutKeySchema>;
 
 // C7 start: the composer's file picker and the near-limit banners' dismissals (C7 execution document, Interfaces "X2

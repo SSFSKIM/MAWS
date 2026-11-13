@@ -9,8 +9,13 @@
 // permission deny the terminal's Escape writes: C3's broker admits it for a question, the engine hands the model
 // `Denied by the user in MAWS.` and the turn goes on (pass3/question-deny seq 108 to 154), and the transcript records
 // the question with no answers. P5 O9 M6: what the session's port can't carry is drawn disabled in place with its reason
-// and bound to no key (a terminal session's async question is answered, never declined, so neither Esc nor a last Skip
-// that leaves every question unanswered sends).
+// and bound to no key (a last Skip that leaves a terminal session's async question unanswered sends nothing).
+//
+// UX wave U1a (Interfaces §E): two behaviours a host asks for, both absent in desk web's use. `dismiss`, a Dismiss button
+// in the foot apart from Submit, with no key: the app's card sends through it the decline Esc sends. `doubleClick`: a
+// double-click on a single-choice option picks it and goes on (Next, or Submit on the last step, where the port carries
+// it); a multi-choice option and Other never go on. An asynchronous question (an `async_input` item) binds no Esc, so
+// its Dismiss is the one way to end it without an answer (O-22).
 import { Checkbox, RadioGroup } from 'radix-ui';
 import { useEffect, useLayoutEffect, useRef, type KeyboardEvent } from 'react';
 import type { Question } from '@shared/graph/events';
@@ -66,12 +71,13 @@ interface StepProps {
   draft: QuestionDraft;
   disabled: boolean;
   onPick(label: string): void; // single-select
+  onChoose?: (label: string) => void; // single-select: a double-click on the option (U1a §E)
   onToggle(label: string, on: boolean): void; // multi-select
   onOther(text: string | null): void;
   onEnter(): void;
 }
 
-function SingleSelect({ question, draft, disabled, onPick, onOther, onEnter }: StepProps) {
+function SingleSelect({ question, draft, disabled, onPick, onChoose, onOther, onEnter }: StepProps) {
   const selected = questionValue(draft.selected, question.question) ?? [];
   const other = questionValue(draft.other, question.question) ?? null;
   const value = other !== null ? OTHER : (selected[0] ?? '');
@@ -87,7 +93,7 @@ function SingleSelect({ question, draft, disabled, onPick, onOther, onEnter }: S
         className="flex min-w-0 flex-col gap-1"
       >
         {question.options.map((option, i) => (
-          <RadioGroup.Item key={option.label} value={option.label} aria-label={option.label} className={ROW}>
+          <RadioGroup.Item key={option.label} value={option.label} aria-label={option.label} className={ROW} onDoubleClick={onChoose && !disabled ? () => onChoose(option.label) : undefined}>
             <OptionText n={i + 1} label={option.label} description={option.description} />
           </RadioGroup.Item>
         ))}
@@ -141,7 +147,12 @@ function keyOwner(body: HTMLElement, placement: VariantProps<'question.requested
 
 const ARROW = 'rounded-sm px-1 text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent';
 
-export function QuestionBody({ item, request, placement, busy, submit, bindKeys, capability = carried }: VariantProps<'question.requested'>) {
+export interface QuestionHostProps {
+  dismiss?: { disabled: boolean; title: string | undefined; run(): void }; // the Dismiss button in the form's foot; no key
+  doubleClick?: boolean; // a double-click on a single-choice option picks it and goes on
+}
+
+export function QuestionBody({ item, request, placement, busy, submit, bindKeys, capability = carried, dismiss, doubleClick = false }: VariantProps<'question.requested'> & QuestionHostProps) {
   const { questions } = request;
   const count = questions.length;
   const storedDraft = useAttention((s) => s.drafts.get(item.id)) ?? EMPTY_DRAFT;
@@ -181,6 +192,14 @@ export function QuestionBody({ item, request, placement, busy, submit, bindKeys,
   };
   const decline = () => !declineGate.disabled && submit(declining, 'Skipped');
 
+  // U1a §E: the option's own label, not the state the click left (Radix's radio changes on the first click)
+  const onChoose = (label: string) => {
+    if (busy) return;
+    const picked = pick(draft, question, label);
+    if (!last) return saveStep(advance(picked, count));
+    save(picked);
+    if (!gated(capability(replyOf(picked))).disabled) reply(picked);
+  };
   const onPick = (label: string) => save(pick(draft, question, label));
   const onToggle = (label: string, on: boolean) => save(toggle(draft, question, label, on));
   const onOther = (text: string | null) => save(setOther(draft, question, text));
@@ -189,7 +208,7 @@ export function QuestionBody({ item, request, placement, busy, submit, bindKeys,
   useEffect(() => {
     bindKeys({
       accept: forward,
-      decline: declineGate.disabled ? null : decline,
+      decline: item.kind === 'async_input' || declineGate.disabled ? null : decline, // O-22: Esc never ends an async question
       digit: (n) => {
         const option = question.options[n - 1];
         if (option) {
@@ -237,8 +256,13 @@ export function QuestionBody({ item, request, placement, busy, submit, bindKeys,
         </div>
         <span className="text-fg">{question.question}</span>
       </div>
-      <Step key={question.question} question={question} draft={draft} disabled={busy} onPick={onPick} onToggle={onToggle} onOther={onOther} onEnter={forward} />
+      <Step key={question.question} question={question} draft={draft} disabled={busy} onPick={onPick} onChoose={doubleClick ? onChoose : undefined} onToggle={onToggle} onOther={onOther} onEnter={forward} />
       <Controls>
+        {dismiss && (
+          <CardButton disabled={busy || dismiss.disabled} title={dismiss.title} onClick={dismiss.run} className="mr-auto">
+            Dismiss
+          </CardButton>
+        )}
         <CardButton disabled={busy || skipGate.disabled} title={skipGate.title} onClick={skipStep}>
           Skip
         </CardButton>

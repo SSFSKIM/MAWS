@@ -21,6 +21,7 @@ export interface RequestedEntry {
 export interface EndpointEntry extends ConfiguredEntry {
   transport: string;
   url: string | null;
+  revision?: string | null; // UX wave U11a M8: the engine host's revision of the configuration; absent from an earlier build's
 }
 
 /** A server as the session's mcp_status reports it (loose: only `name` is certain). */
@@ -47,9 +48,28 @@ export function entryRefusal(requested: RequestedEntry, sessionCwd: string, entr
 // file writes with `${…}` the engine expands from its own environment, which MAWS cannot read; scope and transport decide.
 // `streamable-http` is the engine's alias of `http` (2.1.309 cli.pretty.js 719781), and its status may report either.
 const transportOf = (type: unknown) => (type === 'streamable-http' ? 'http' : type);
-function holds(server: LiveServer, entry: EndpointEntry): boolean {
-  if (server.scope !== entry.scope || transportOf(server.transport) !== transportOf(entry.transport)) return false;
+// `scope`: the scope the engine reports for the entry (a server of MAWS's own list, given with --mcp-config, is `dynamic`)
+function holds(server: LiveServer, entry: EndpointEntry, scope: string = entry.scope): boolean {
+  if (server.scope !== scope || transportOf(server.transport) !== transportOf(entry.transport)) return false;
   if (entry.url === null || entry.url.includes('${')) return true;
   const config = server.config;
   return typeof config === 'object' && config !== null && (config as { url?: unknown }).url === entry.url;
+}
+
+// UX wave U11a M8 (docs/doperpowers/plans/2026-11-12-ux-wave-U11a-settings-connectors-org.md, §A, "The check"): a dynamic
+// connector, one a plugin brings or one of MAWS's own list, is named by no configuration file the session reads; what
+// the engine signs in is the session's own server of the name, which its mcp_status lists with scope `dynamic`. A press
+// from a row of MAWS's own list also names the configuration that row was drawn from, by its revision: the entry of the
+// name must still be of that revision, and the session's server must be that entry. So what is authenticated is the
+// session's server, the session's server is the entry, and the entry is the configuration the row showed.
+/** Why the session cannot sign this dynamic server in, in words, or null. `own`: MAWS's own entries as the engine host answers them now, read only for a press that names an entry. */
+export function dynamicRefusal(requested: { name: string; entry?: { revision: string } }, live: readonly LiveServer[], own: readonly EndpointEntry[]): string | null {
+  const held = live.find((server) => server.name === requested.name);
+  if (held === undefined) return `that session has no ${requested.name} server`;
+  const different = `this session uses a different ${requested.name}; start a new session to sign in`;
+  if (held.scope !== 'dynamic') return different;
+  if (requested.entry === undefined) return null;
+  const entry = own.find((candidate) => candidate.scope === 'app' && candidate.name === requested.name);
+  if (entry === undefined || typeof entry.revision !== 'string' || entry.revision !== requested.entry.revision) return `MAWS’s ${requested.name} server changed since this page read it; refresh the page, then sign in`;
+  return holds(held, entry, 'dynamic') ? null : different;
 }

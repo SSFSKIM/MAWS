@@ -7,12 +7,27 @@ import { item, record, remoteRow } from '../../../../test/support/builders';
 import { OTHER_MACHINE } from '../../../../test/support/machine';
 import { TEST_FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { loadScenario } from '../../../../test/support/scenario';
-import { needsYou, nextNeedsYou } from './derive';
+import { ATTENTION_HEADINGS } from '@shared/attention/headings';
+import { isActionable, waits } from '@shared/attention/kinds';
+import { laneAEntryOf } from '@shared/lane-a/attention-entry';
+import { needsYou, nextNeedsYou, waitingItem } from './derive';
 
 const scenario = loadScenario(join(TEST_FIXTURE_DIR, 'shell/nine-sessions.json'));
 const records = new Map(scenario.sessions.map((r) => [r.appId, r]));
 const titleOf = (id: AppSessionId) => records.get(id)?.title.text;
 const atLoad = () => new Map(scenario.attention.map((a) => [a.appSessionId, a.items]));
+
+// U1a (A5): a terminal session's asynchronous question has its row, worded as the calm question, and counts in the badge
+describe('a terminal session’s asynchronous question', () => {
+  it('is a tier 1 row whose kind line reads Question waiting, and counts where the badge counts', () => {
+    const id = 'app-t' as AppSessionId;
+    const { item: asked } = laneAEntryOf(id, { request: 'toolu_q', session: 'eng-1', tool: 'mcp__plugin_sminos_ask__ask', async: true, input: { questions: [{ question: 'Ship it?', header: 'Ship', options: [] }] } }, '2026-10-28T10:00:00.000Z');
+    const rows = needsYou(new Map([[id, [asked]]]), new Map([[id, record(id, { holder: { kind: 'terminal', pid: 7 } })]]));
+    expect(rows).toEqual([{ appSessionId: id, oldest: asked, count: 1, tier: 1 }]);
+    expect(ATTENTION_HEADINGS[rows[0]!.oldest.kind]).toEqual({ char: '?', tone: 'info', text: 'Question waiting' });
+    expect(waits(asked) && isActionable(asked)).toBe(true); // the dock badge's rule (src/main/attention/notifier.ts)
+  });
+});
 
 describe('needs-you ordering', () => {
   it('lists one row per waiting session, longest wait first', () => {
@@ -65,16 +80,17 @@ describe('needs-you ordering', () => {
     expect(row).toMatchObject({ tier: 1, count: 3, oldest: { kind: 'question' } });
   });
 
-  it('counts delivered items, ignores confirmed and retired ones, and excludes archived sessions', () => {
+  it('ignores delivered (UC-1), confirmed and retired items, and excludes archived sessions', () => {
     const rows = needsYou(
       new Map([
         ['d' as AppSessionId, [item('d', 'permission', '2026-09-28T10:00:00Z', { state: 'delivered' })]],
         ['r' as AppSessionId, [item('r', 'permission', '2026-09-28T10:00:00Z', { state: 'retired' })]],
         ['x' as AppSessionId, [item('x', 'permission', '2026-09-28T10:00:00Z')]],
+        ['p' as AppSessionId, [item('p', 'permission', '2026-09-28T10:00:00Z')]],
       ]),
-      rs(record('d'), record('r'), record('x', { archived: true })),
+      rs(record('d'), record('r'), record('x', { archived: true }), record('p')),
     );
-    expect(rows.map((r) => r.appSessionId)).toEqual(['d']);
+    expect(rows.map((r) => r.appSessionId)).toEqual(['p']);
   });
 
   it('breaks a tie on wait by title', () => {
@@ -165,5 +181,14 @@ describe('needs-you across machines', () => {
     );
     expect(nextNeedsYou(rows, 'live' as AppSessionId)?.appSessionId).toBe('live');
     expect(nextNeedsYou(rows.filter((r) => r.greyed), null)).toBeNull();
+  });
+});
+
+// UC-1 (A17): Needs you, its counts and ⇧⌘J read the one predicate, so an answered request gives its session no row.
+describe('an answered request in Needs you', () => {
+  it('is no row and no count', () => {
+    const answered = [item('d', 'permission', '2026-09-28T10:00:00Z', { state: 'delivered' })];
+    expect(waitingItem(answered)).toBeNull();
+    expect(needsYou(new Map([['d' as AppSessionId, answered]]), new Map([['d' as AppSessionId, record('d')]]))).toEqual([]);
   });
 });

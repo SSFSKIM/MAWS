@@ -31,9 +31,10 @@ export interface SessionTabs {
   selected: string | null;
 }
 
-// `urlCopied` is the chrome's own (Copy URL is the renderer's clipboard write; Decision Log 37); every other kind is
-// main's, which the chrome may also raise itself (the address field's refused scheme).
-export type ChromeNoticeKind = BrowserNotice['kind'] | 'urlCopied' | CommentNoticeKind /* E4d */;
+// `urlCopied` is the chrome's own (Copy URL is the renderer's clipboard write; Decision Log 37), as are (U12a) Copy
+// screenshot's two outcomes, from main's answer; every other kind is main's, which the chrome may also raise itself (the
+// address field's refused scheme).
+export type ChromeNoticeKind = BrowserNotice['kind'] | 'urlCopied' | 'screenshotCopied' | 'screenshotFailed' /* U12a */ | CommentNoticeKind /* E4d */;
 // E4d start: comment mode's own lines (E4d execution document, Decision Log 35): an arm the page never confirmed, and a
 // pick main refused, said where the person is looking with no sheet over the page.
 export type CommentNoticeKind =
@@ -119,6 +120,18 @@ export function tabOpened(tab: BrowserTab): void {
   const current = sessionTabs(browser.getState(), appSessionId);
   if (current.tabs.some((listed) => listed.tabId === tab.tabId)) return;
   setSessions(new Map([[appSessionId, { tabs: [...current.tabs, tab], selected: tab.tabId }]]));
+}
+
+// U12a (the branch review's ruling 7): main's answer to `browser.agent.show` that the agent's tab is its session's
+// selected one, listed so before main's own event says so (that event follows on a later task), so the Browser that opens
+// by itself mounts on that tab and never claims the previous one's placement first. A tab this window has not listed yet
+// is added; one it lists keeps what it has. Main's event is the newer word.
+export function agentTabSelected(tab: BrowserTab): void {
+  const appSessionId = tab.appSessionId as AppSessionId;
+  const current = sessionTabs(browser.getState(), appSessionId);
+  const listed = current.tabs.some((known) => known.tabId === tab.tabId);
+  if (listed && current.selected === tab.tabId) return;
+  setSessions(new Map([[appSessionId, { tabs: listed ? current.tabs : [...current.tabs, tab], selected: tab.tabId }]]));
 }
 
 // Lists every session (`appSessionId` absent) or one, applying the answer where nothing moved meanwhile.

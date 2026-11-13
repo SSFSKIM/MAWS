@@ -594,7 +594,7 @@ describe('drill-in', () => {
     await mount({ events: [started(child, 1)], params: { agentId: child } });
     act(() => useAttention.getState().applySnapshot([itemFor(perm, A)], TEST_MACHINE));
     const drill = document.querySelector<HTMLElement>('[data-view="agent"]')!;
-    await waitFor(() => expect(within(drill).getByRole('heading', { name: 'Bash' })).toBeTruthy());
+    await waitFor(() => expect(within(drill).getByRole('heading', { name: /^Run a command · from / })).toBeTruthy()); // UX wave U1a §D: the card's first line
     expect(within(drill).getAllByRole('button').some((button) => /Allow/.test(button.textContent ?? ''))).toBe(true);
     // A callback another child registered (C8c's openFile, stubbed here) reaches the child transcript's rows.
     const openFile = vi.fn();

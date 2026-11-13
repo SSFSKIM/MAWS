@@ -336,6 +336,15 @@ describe('show_pane cells', () => {
       ['toolu_4', 'running', 'Opening the diff pane', 'other'],
     ]);
   });
+
+  // U12a (M1): a browser answer's page and note leave the label as it was
+  it('read what opened from a browser answer that carries page and note', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('toolu_1', SHOW_PANE, { pane: 'browser', target: 'https://a.test/' });
+    b.result('toolu_1', json({ status: 'shown', pane: 'browser', opened: { kind: 'panel-tool', toolId: 'browser', tabId: 'browser:1', title: 'Browser' }, page: 'reloaded', note: 'This page is in the session’s in-app browser.' }));
+    expect(ofKind(expandedRows(b.events), 'cell').map((cell) => [cell.status, cell.label])).toEqual([['done', 'Opened Browser']]);
+  });
 });
 
 describe('the question row’s refusal (A-17)', () => {

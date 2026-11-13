@@ -241,7 +241,7 @@ describe('Submit', () => {
     const first = submitAsk(A, 'a1', fake.client, []);
     await fake.reply('maws.ask.answer', { outcome: 'write_failed' });
     await first;
-    expect(state().failed).toEqual({ askId: 'a1', detail: null });
+    expect(state().failed).toEqual({ askId: 'a1', detail: null, dismiss: false }); // U1a: a Submit's, retried as a Submit
     expect(state().drafts.get('a1')?.get('q1')).toEqual({ ...EMPTY_DRAFT, selected: ['Blue'] });
     const retry = submitAsk(A, 'a1', fake.client, []);
     expect(state().failed).toBeNull();
@@ -278,7 +278,7 @@ describe('Submit', () => {
     const done = submitAsk(A, 'a1', fake.client, []);
     await fake.fail('maws.ask.answer', 'engine host unavailable');
     await done;
-    expect(state().failed).toEqual({ askId: 'a1', detail: 'engine host unavailable' });
+    expect(state().failed).toEqual({ askId: 'a1', detail: 'engine host unavailable', dismiss: false });
   });
 
   it('not_pending drops the ask and says it was answered elsewhere', async () => {

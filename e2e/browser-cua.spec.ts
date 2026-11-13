@@ -14,9 +14,13 @@
 // Runs under `pnpm e2e:browser-cua` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list); the launch passes
 // MAWS_HARNESS=0 (the product app), quiet as every e2e window is, over a profile under /tmp (a Unix socket path is short).
 // The final fix wave's case (the owner's decision; P1 A-54, amended): the Browser panel follows the agent again. In a
-// window that shows a seeded session, a lease's reading commands open nothing, its first acting command opens the
-// session's Browser tool, and the agent's tab is not selected: the person's tab stays the session's selection. Then the
-// app restarts over the same profile (cua board #93): the session's activity lists the same as before the quit.
+// window that shows a seeded session, a lease's reading commands open nothing and its first acting command opens the
+// session's Browser tool. U12a (the UX wave's U12, A9; A-54 reversed on 2026-11-12, "Yes, unless I use mine"): that
+// Browser opens on the agent's tab, the person's being idle and on show nowhere; with the Browser open on the person's
+// tab, a later lease's first acting command moves nothing and its tab waits in the strip with its badge (the case of
+// a person using the selected tab is held by the window's and main's unit tests: with the Browser closed there is no
+// page to click in). Then the app restarts over the same profile (cua board #93): the session's activity lists the same
+// as before the quit.
 // cua board #98's case: on a leased idle tab the person's own navigations are theirs, never an agent row: ⌘R in the page
 // (through the page's input hook) and the chrome's Reload over IPC (through none, which the Navigator now stamps).
 // cua board #90's case (its spec's acceptance 11): a person's bookmark click on a leased idle tab of an imported profile
@@ -39,7 +43,7 @@ import type { BrowserAgentActivity } from '@shared/browser/activity';
 import type { AppSessionId } from '@shared/graph/ids';
 import { connectFakeHost, type FakeHost } from '../test/support/cua-fake-host';
 import { invoke, value } from './support/c7-replay';
-import { browserIn, tabsOf } from './support/browser-scene';
+import { browserIn, chipOf, chipsIn, tabsOf } from './support/browser-scene';
 import { launchMaws, onLaunched, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { startProfileDaemon } from './support/profile-daemon'; // P5 O5 M5
 import { cuaSocketDir } from '@shared/daemon/files'; // P5 O5 M5
@@ -391,7 +395,7 @@ test('takeover and the cursor through a lease: cursor.move draws, a screenshot h
   }
 });
 
-test('the Browser panel follows the agent: a lease\'s first acting command opens the shown session\'s Browser tool, and the agent\'s tab is not selected; after a restart the session\'s activity lists as before', async () => {
+test('the Browser panel follows the agent (A9): with the Browser closed, a lease\'s first acting command opens the shown session\'s Browser tool on the agent\'s tab; with the Browser open on the person\'s tab, a second lease\'s first acting command moves nothing, the agent\'s tab one click away with its badge; after a restart the session\'s activity lists as before', async () => {
   const tmp = process.env.TMPDIR;
   process.env.TMPDIR = '/tmp'; // the scratch profile under /tmp: a Unix socket path is short
   const scratch = scratchProject({ titles: ['E13: the panel follows the agent'], label: 'cua-panel' });
@@ -410,29 +414,53 @@ test('the Browser panel follows the agent: a lease\'s first acting command opens
       await app.trustThisProcess();
       const panelBrowser = browserIn(s, 'panel');
       await expect(panelBrowser).toHaveCount(0);
+      const selected = async () => (await tabsOf(s, id)).selected;
 
       // the person's tab, the session's selection (opened from the window, as the address field does)
       expect(await app.open(id, pages.url('/'))).toMatchObject({ ok: true });
-      const person = (await tabsOf(s, id)).selected;
+      const person = await selected();
       expect(person).not.toBeNull();
 
       host = await connectFakeHost((await app.socketPathFor(id))!);
       const created = await host.request<{ id: number }>('tabs.create', { url: 'about:blank' });
       await host.request('debugger.attach', { tabId: created.id });
+      const agent = (await app.inspect())[id]!.leased[0]!;
       const send = cdp(host, created.id);
       await send('Page.enable'); // reading: the panel stays as it is
       await send('Emulation.setFocusEmulationEnabled', { enabled: true });
       await s.page.waitForTimeout(300);
       await expect(panelBrowser).toHaveCount(0);
+      expect(await selected()).toBe(person);
 
-      await send('Page.navigate', { url: pages.url('/') }); // the lease's first acting command
+      // U12a (A9; P1 A-54 reversed, "Yes, unless I use mine"): the lease's first acting command opens the Browser by itself,
+      // and it opens on the agent's tab: the person's tab was idle and on show in no panel
+      await send('Page.navigate', { url: pages.url('/') });
       await expect(panelBrowser).toBeVisible();
-      const { tabs, selected } = await tabsOf(s, id);
-      expect(tabs).toHaveLength(2);
-      expect(selected).toBe(person); // the agent's tab is not selected
+      await expect.poll(selected).toBe(agent);
+      expect((await tabsOf(s, id)).tabs).toHaveLength(2);
+      await expect(chipOf(panelBrowser, person!)).toBeVisible();
+      await host.request('debugger.detach', { tabId: created.id });
+
+      // a later turn of the scene: the Browser open on the person's tab, a second agent tab, badged by its group; that
+      // lease's first acting command moves nothing (a Browser already open is never moved), and the agent's tab is one
+      // click away in the strip
+      await chipOf(panelBrowser, person!).getByRole('tab').click();
+      await expect.poll(selected).toBe(person);
+      const second = await host.request<{ id: number }>('tabs.create', { url: 'about:blank', group: { key: 'u12a', title: 'U12a agent' } });
+      await host.request('debugger.attach', { tabId: second.id });
+      let agentTwo = '';
+      await expect.poll(async () => (agentTwo = (await app.inspect())[id]!.leased.find((tab) => tab !== agent) ?? '')).not.toBe('');
+      const sendTwo = cdp(host, second.id);
+      await sendTwo('Page.enable');
+      await sendTwo('Page.navigate', { url: pages.url('/') });
+      await expect.poll(async () => (await listed(s.page, id)).map((a) => a.activity.kind)).toEqual(['tabOpened', 'navigated', 'tabOpened', 'navigated']);
+      await s.page.waitForTimeout(300); // past the window's ask, had it made one
+      expect(await selected()).toBe(person);
+      expect((await tabsOf(s, id)).tabs).toHaveLength(3);
+      await expect(chipsIn(panelBrowser)).toHaveCount(3);
+      await expect(chipOf(panelBrowser, agentTwo).locator('[data-agent-badge]')).toBeVisible();
       await host.close();
       host = undefined;
-      await expect.poll(async () => (await listed(s.page, id)).map((a) => a.activity.kind)).toEqual(['tabOpened', 'navigated']);
       before = await listed(s.page, id);
     } finally {
       await closeScene(s);

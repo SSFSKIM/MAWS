@@ -6,6 +6,10 @@
 // docked frame mounts in the same commit, which takes it instead. Enter and Esc are
 // `request.accept` and `request.decline` bound `within` the frame root, so C5's dispatcher delivers them only while
 // the frame itself holds focus: never from a textarea, a button or another pane. A null handler leaves its key unbound.
+// UX wave U1a (§D): a permission prompt adds `request.allowOnce` (⌘↩) and `request.allowLasting` (⇧⌘↩), bound the same
+// way; every key the frame binds acts on a fresh press only, so a key held through one answer cannot answer the request
+// whose frame takes focus next (a card another child docks has the rule too). UX wave U1a §J: the title line says the
+// composer is paused for a request; a card another child docks (trust, relay down, a failed start) passes `titleAlone`.
 // This module imports no editor code: the request card imports it directly, never through `composer/index.ts`.
 import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -15,41 +19,58 @@ import { useComposerStore } from '../../stores/composer';
 export interface DockedCardFrameProps {
   appSessionId: AppSessionId;
   title: string;
+  titleAlone?: boolean; // U1a §J: the title with nothing after it (a card another child docks)
   onAccept: (() => void) | null;
   onDecline: (() => void) | null;
+  onAllowOnce?: (() => void) | null; // U1a: only a permission prompt has them
+  onAllowLasting?: (() => void) | null;
   children: ReactNode;
 }
 
-// Sessions whose frame is unmounting with focus inside it, in the commit that unmounts it. A frame that mounts for the
+// Sessions whose frame unmounted with focus inside it, each with the mark of that hand-over. A frame that mounts for the
 // same session in that commit (the next docked request, behind the `1 more waiting` pager) takes the focus instead
 // of the editor, which stays hidden behind it: its own mount sees focus on the body by then, never in its pane.
-const handingOver = new Set<AppSessionId>();
+// UX wave U1a (decision 17; the ruling of 2026-11-13): the next request can also dock a commit later, the engine asking
+// about its next call once the first is answered. The mark then lives until the animation frame in which the editor's
+// deferred focus has had its turn, and a frame mounting meanwhile claims it when the focus is on the body or inside its
+// own pane; anywhere else the person moved it, and the mark is dropped. After that frame, the editor holds the focus
+// inside the pane and the next frame takes it by `before`, or nothing does. No timer: the frame order bounds it.
+const handingOver = new Map<AppSessionId, object>();
 
-export function DockedCardFrame({ appSessionId, title, onAccept, onDecline, children }: DockedCardFrameProps) {
+export function DockedCardFrame({ appSessionId, title, titleAlone = false, onAccept, onDecline, onAllowOnce = null, onAllowLasting = null, children }: DockedCardFrameProps) {
   const frameRef = useRef<HTMLDivElement>(null);
-  useKeyChord('request.accept', () => onAccept?.(), { within: frameRef, enabled: onAccept !== null });
-  useKeyChord('request.decline', () => onDecline?.(), { within: frameRef, enabled: onDecline !== null });
+  useKeyChord('request.accept', () => onAccept?.(), { within: frameRef, enabled: onAccept !== null, fresh: true });
+  useKeyChord('request.decline', () => onDecline?.(), { within: frameRef, enabled: onDecline !== null, fresh: true });
+  useKeyChord('request.allowOnce', () => onAllowOnce?.(), { within: frameRef, enabled: onAllowOnce !== null, fresh: true });
+  useKeyChord('request.allowLasting', () => onAllowLasting?.(), { within: frameRef, enabled: onAllowLasting !== null, fresh: true });
 
   useLayoutEffect(() => {
     const frame = frameRef.current!;
     const pane = frame.closest('[data-pane]');
     const active = document.activeElement;
     const before = pane !== null && active instanceof HTMLElement && active !== document.body && pane.contains(active) ? active : null;
-    const handedOver = handingOver.delete(appSessionId);
+    // A mark claimed with the focus elsewhere than the body or this pane (`before`) is dropped: the person moved it.
+    const handedOver = handingOver.delete(appSessionId) && (active === null || active === document.body);
     if (before || handedOver) frame.focus();
     return () => {
       // Still in the document here (effect cleanups run before the host node is removed).
       const now = document.activeElement;
       if (now !== null && now !== document.body && !frame.contains(now)) return;
       // Layout effects of this commit run before its microtasks: a frame mounting for the session now claims focus.
-      handingOver.add(appSessionId);
+      const mark = {};
+      handingOver.set(appSessionId, mark);
+      const ours = () => handingOver.get(appSessionId) === mark;
       queueMicrotask(() => {
-        if (!handingOver.delete(appSessionId)) return;
+        if (!ours()) return;
         const target = useComposerStore.getState().focusTargets.get(appSessionId);
         // The composer's editor is visible again: its Frame's `hidden` cleared in the commit this frame unmounted in,
         // and `focusEditor` is Tiptap's `commands.focus()`, which defers to the next frame besides.
         if (target) target.focusEditor();
         else if (before?.isConnected && !frame.contains(before)) before.focus();
+        // Registered after the editor's own deferred focus, so it runs once that has had its turn in the same frame.
+        requestAnimationFrame(() => {
+          if (ours()) handingOver.delete(appSessionId);
+        });
       });
     };
   }, [appSessionId]);
@@ -64,7 +85,8 @@ export function DockedCardFrame({ appSessionId, title, onAccept, onDecline, chil
       className="flex flex-col gap-3 rounded-lg border border-border-strong bg-bg-raised p-3 outline-accent focus-visible:outline-2"
     >
       <p className="m-0 text-ui-sm text-fg-muted">
-        <span className="font-medium text-fg">{title}</span> · Composer paused · draft preserved
+        <span className="font-medium text-fg">{title}</span>
+        {!titleAlone && ' · Composer paused · draft preserved'}
       </p>
       {children}
     </div>

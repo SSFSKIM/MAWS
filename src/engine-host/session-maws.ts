@@ -17,6 +17,7 @@ import type { MawsArtifactCapturedResult, MawsDownloadRecorded, MawsPaneAnswerRe
 import { askAnswersProblem, askSteerText, type PendingAsk } from '@shared/maws/ask';
 import { CAPTURE_ANSWER_MS } from '@shared/maws/panes';
 import { EXPORT_ANSWER_MS, type AskAnswer, type AskResult } from '@shared/maws/tools';
+import { mawsServerInstructions } from '@shared/maws/instructions'; // U12a
 import type { ControlRequestFrame } from '@shared/wire/frames';
 import type { LinkedArtifact } from '@shared/maws/linked-read'; // P4-A3
 import { recordDownload } from './library/downloads'; // E13; P3-L M6b: a File artifact
@@ -58,6 +59,7 @@ export interface SessionMawsHost {
   artifactScope?: readonly AppSessionIdOf[]; // P2-E1: EngineSessionOptions.artifactScope, handed to the artifact tools
   artifacts?: () => ArtifactStore | null; // P3-A (M6): EngineSessionOptions.artifacts
   datasetRefresh?: Pick<DatasetRefreshRequests, 'ask'>; // E3: EngineSessionOptions.datasetRefresh
+  inAppBrowser: boolean; // U12a: the launch spec carried a browser backend (the instructions' second paragraph, show_pane's note)
   emit<K extends keyof MawsListeners>(name: K, payload: Parameters<MawsListeners[K]>[0]): void;
   respond(requestId: RequestId, response: unknown, opts?: WriteOptions): Promise<void>;
   cwd(): string; // the engine's working directory as the frames report it, else the launch's
@@ -86,7 +88,7 @@ export class SessionMaws {
 
   constructor(private readonly host: SessionMawsHost) {
     // E1 start: served from construction on, since the engine's MCP handshake begins before initialize is answered (E0a Q1)
-    this.panes = new PaneBridge({ show: (request) => host.emit('paneShow', { appSessionId: host.appSessionId, ...request }), hasClient: host.appAttached /* E10 */ });
+    this.panes = new PaneBridge({ show: (request) => host.emit('paneShow', { appSessionId: host.appSessionId, ...request }), hasClient: host.appAttached /* E10 */, inAppBrowser: host.inAppBrowser /* U12a */ });
     const renders = host.rendersAnswered ?? host.appAttached; // P5 O5 M4: a client that answers render requests, app or no app
     this.captures = new HostBridge({ send: (request) => host.emit('artifactCapture', { appSessionId: host.appSessionId, ...request }), answerMs: CAPTURE_ANSWER_MS, hasClient: renders /* E10 */ }); // E2
     this.exports = new HostBridge({ send: (request) => host.emit('artifactExport', request), answerMs: EXPORT_ANSWER_MS, hasClient: renders }); // P3-A M7
@@ -109,6 +111,7 @@ export class SessionMaws {
     this.read = tools.find((tool) => tool.name === 'artifact_read')!;
     this.toolServer = new MawsToolServer({
       tools,
+      instructions: mawsServerInstructions({ inAppBrowser: host.inAppBrowser }), // U12a
       respond: (requestId, response, writeOpts) => host.respond(requestId, response, writeOpts),
       cwd: () => host.cwd(),
       appSessionId: host.appSessionId,

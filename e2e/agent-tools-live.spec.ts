@@ -639,7 +639,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       const card = panel.locator('[data-view="agent"] [data-request-card]');
       await expect(card).toHaveCount(1, { timeout: 15_000 });
       const cardText = await card.textContent();
-      await card.getByRole('button', { name: 'Allow', exact: true }).click();
+      await card.getByRole('button', { name: 'Allow once', exact: true }).click();
       await s.until('the permission resolved', (ev) => ev.find((e) => e.kind === 'permission.resolved' && e.requestId === asked.requestId));
       await s.until('the agent finished', (ev) => ev.find((e) => e.kind === 'subagent.finished' && e.taskId === ids.perm), 180_000);
       await expect.poll(() => existsSync(TMP.perm), { timeout: 10_000 }).toBe(true);

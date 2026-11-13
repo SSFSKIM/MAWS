@@ -27,7 +27,12 @@
 //   at most once per 10 s. The state carries the link (`link`: its state, this device's member, class and machine rights
 //   from `caps`, and the reason no control acts, if so), refreshed at each `caps` and link state change; while that
 //   reason stands every act is refused with it here. It also carries each control's act in flight (`acts`) with the
-//   link's progress, until its outcome.
+//   link's progress, until its outcome. UX wave U1a (UC-1, Interfaces §B, the ruling on Reported 8): it names each request
+//   whose answer the session's machine said it took (`done` to this device's own act) in `accepted`, which every window
+//   of this device reads, so the request is drawn nowhere here before the bridge's settlement; nothing reaches this
+//   device of the session machine's own holder. An entry leaves at the bridge's `settled`, at a reset of the session's
+//   main watch (its snapshot clears `pending` too, and the requests restated after it wait again), and when the bridge
+//   stops being live. No timer: a window on a third device waits for the settlement.
 // - Reads name the watch's subscription (`input.sub`). `rows`, `diff` and `output` answer `{requested: true}` and arrive
 //   as plane messages of their kind; one of each kind is outstanding per watch, a second waiting for the first's answer,
 //   the watch's reset or 10 s. Every other read carries an id minted here and is answered by that id's `read` message
@@ -135,6 +140,7 @@ type Session = {
   sends: Send[];
   sending: boolean;
   acts: Map<string, LaneAAct>; // controls' acts in flight, by opId (a send's is its delivery)
+  accepted: Set<string>; // UC-1: the requests the machine said it took, until a word of the machine's says otherwise
   last: string; // the last state sent
 };
 
@@ -148,6 +154,8 @@ export const MEDIA_GAP = 'attachments to a session on another machine wait for u
 /** 2026-11-06: an endpoint that lists no `rl2.agent-scope` carries no subagent's own transcript. */
 export const AGENT_SCOPE_GAP = (machine: string) => `${machine} can’t show a subagent’s own transcript here yet; update MAWS on ${machine}`;
 const AGENT_READ = 'a read is the session’s: ask it on the session’s own view';
+const DISMISS_GAP = (machine: string) => `dismiss it in the terminal on ${machine}`; // UX wave U1a §G (correction 5)
+export const ACCEPTED_IS_LOCAL = 'laneA.accepted is the session machine’s own word to its spine, never sent to another machine';
 
 export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
   const timing: RemoteLaneATiming = { ...REMOTE_LANE_A_TIMING, ...deps.timing };
@@ -189,7 +197,7 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
     const sessions = machineOf(link);
     let s = sessions.get(id) ?? null;
     if (s === null && create) {
-      s = { machine: link.machine, link, id, watches: new Map(), status: null, hydratedAt: 0, deliveries: new Map(), sends: [], sending: false, acts: new Map(), last: '' };
+      s = { machine: link.machine, link, id, watches: new Map(), status: null, hydratedAt: 0, deliveries: new Map(), sends: [], sending: false, acts: new Map(), accepted: new Set(), last: '' };
       sessions.set(id, s);
     }
     return s;
@@ -202,11 +210,13 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
     const w = primary(s);
     if (w === null) return null;
     const deliveries = [...s.deliveries.values()].map((d): LaneADelivery => ({ key: d.key, at: d.at, state: d.state, ...(d.uuid !== undefined && { uuid: d.uuid }), ...(d.reason !== undefined && { reason: d.reason }) }));
-    return w.fold.state({ appSessionId: s.id, status: s.status, deliveries, link: linkView(s.link), acts: [...s.acts.values()] });
+    return w.fold.state({ appSessionId: s.id, status: s.status, deliveries, link: linkView(s.link), acts: [...s.acts.values()], accepted: [...s.accepted] });
   }
 
   function changed(s: Session): void {
     const state = stateOf(s);
+    // UC-1: an entry the state no longer names (settled, or the bridge no longer live) is gone for good
+    if (state !== null) s.accepted = new Set(state.accepted);
     const text = JSON.stringify(state);
     if (text === s.last) return;
     s.last = text;
@@ -287,6 +297,7 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
           w.backoffMs = timing.backoffMs[0];
           const message = value as PlaneMessage;
           if (w.agentId === null) w.fold.message(message);
+          if (primary(s) === w) s.accepted.clear(); // UC-1: a reset; the requests restated after it wait again
           emitPlane(s, { watch: w.id, messages: [message] });
           if (w.paused !== null) {
             w.paused = null;
@@ -565,8 +576,12 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
     if (typeof raised.deadline === 'string' && Date.parse(raised.deadline) - timing.deadlineSlackMs <= now()) {
       return { outcome: 'not_pending', settled: null, terminalOnly: true, message: 'answer this in the terminal: its window here has closed' };
     }
-    const read = answerIntent({ raised, answer: given, controls: live.state.controls });
+    // U1a §G (correction 5): sminos's `decide` takes allow or deny, so a dismissal is not carried over the link,
+    // whatever the machine's bridge declares; refused here, before any act is built
+    const notCarried = DISMISS_GAP(live.s.link.name);
+    const read = answerIntent({ raised, answer: given, controls: { ...live.state.controls, 'decide.dismiss': { available: false, reason: notCarried } } });
     if (!read.ok) return { outcome: 'refused', code: read.code, message: read.message };
+    if (read.intent.kind === 'dismiss') return { outcome: 'refused', code: 'unsupported', message: notCarried }; // none, with the control closed
     let digest: { session: string; request: string; tool: string; input_sha256: string };
     try {
       digest = { session: live.s.id, request, tool: raised.tool, input_sha256: await inputSha256(raised.input as JsonValue) };
@@ -585,7 +600,11 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
       args = { decision: 'allow', scope: { suggestion: 0, sha256, destination: intent.destination }, digest };
     }
     const outcome = await act(live, rpc, args, { target: request, requestDigest: digest });
-    if (outcome.state === 'done') return { outcome: 'delivered' };
+    if (outcome.state === 'done') {
+      live.s.accepted.add(request); // UC-1: the machine took it; its settlement follows on the plane
+      changed(live.s);
+      return { outcome: 'delivered' };
+    }
     if (outcome.state === 'unknown') return { outcome: 'unknown', why: 'gone' };
     const result = controlOf(outcome, live.s.link.name, rpc) as Extract<ControlResult, { state: 'refused' }>;
     if (result.code === 'not-pending') return { outcome: 'not_pending', settled: fold.settledOf(request), message: result.message };
@@ -603,6 +622,8 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
 
   async function run(link: RemoteLink, name: LaneACommand, input: Fields, ctx: MainContext): Promise<unknown> {
     if (name === 'laneA.list') return { states: [...machineOf(link).values()].map(stateOf).filter((x): x is LaneAState => x !== null) };
+    // UX wave U1a: a session machine's endpoint tells its own spine, inside its daemon; it never crosses a link
+    if (name === 'laneA.accepted') throw new Error(ACCEPTED_IS_LOCAL);
     const id = String(input.appSessionId);
     const s = sessionOf(link, id, name === 'laneA.watch');
     switch (name) {

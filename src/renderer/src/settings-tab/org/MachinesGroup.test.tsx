@@ -168,8 +168,26 @@ describe('Settings › Org: Machines’ actions and rights (M4b)', () => {
       'org.grants.view': (input: { ref: string }) => ({ ok: false, ref: input.ref, reason: 'damaged' }) satisfies GrantsView,
     });
     const mini = await found('mini');
-    expect(await within(mini).findByText('Grants can’t be signed on this Mac: its record of the grants it issued is damaged.')).toBeTruthy();
+    expect(await within(mini).findByText('Grants can’t be signed on this Mac: its record of the grants it issued is damaged. Sign them from another device of the machine’s owner.')).toBeTruthy();
     expect(buttons('mini')).toEqual(['Owners…', 'Re-enroll…', 'Drop…', 'Retry']); // Retry reads again; nothing signs
+  });
+
+  // U11a board 540: an enrollment's end on its row names who can act, or what to do next
+  it('an enrollment that ended on a problem says it on its row, beside Show…: on the Enroll row for a new machine, on the machine’s row for a re-enrollment', async () => {
+    const words = {
+      'not-yours': 'Another admin started this enrollment, and the hub answers only to them. Ask them to finish it, or Start over to enroll the machine yourself.',
+      'machine-names': 'That name is bound to another machine for the life of the org. Start over with a different name.',
+    } as const;
+    for (const [problem, line] of Object.entries(words) as [keyof typeof words, string][]) {
+      for (const replace of [null, MINI]) {
+        const enrolling = { generation: 3, name: replace === null ? 'gpu-box' : 'mini', replace, expires: '2026-10-28T13:00:00.000Z', candidate: null, problem };
+        renderSection(signing(ROOT, { enrolling }));
+        const at = await found(replace === null ? 'Enroll a machine' : 'mini');
+        expect(within(at).getByText(line)).toBeTruthy();
+        expect(within(at).getByRole('button', { name: 'Show…' })).toBeTruthy();
+        resetHarness();
+      }
+    }
   });
 
   it('missing grants are counted on the row with Re-grant…; none is offered where this Mac may not grant', async () => {
