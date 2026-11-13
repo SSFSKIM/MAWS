@@ -146,6 +146,26 @@ describe('sidebar action stability', () => {
     expect(sessionRows(row('alpha'))).toEqual(['second', 'first']);
   });
 
+  // UX wave U7, O-16 (M3, decision 5; the review's finding): a Hide settles the order at once, and only then
+  it('a Hide settles the order at once, and a later live update is held again until the person leaves', async () => {
+    window.maws = fakeClient({ 'layout.get': { value: null }, 'layout.set': undefined }).client as unknown as PreloadBridge;
+    const third = record('third', { projectId: alpha.id, updatedAt: '2026-10-24T08:30:00Z' });
+    fillStores({ projects: [alpha, beta], sessions: [first, second, third, elsewhere], digests: [], attention: [], engine: [], timeline: [] });
+    expand(alpha.id);
+    render(<><Sidebar /><button>Outside</button></>);
+    const tree = screen.getByTestId('sidebar-tree');
+    fireEvent.pointerEnter(tree);
+    fireEvent.contextMenu(row('third'));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Hide' }));
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+    expect(sessionRows(row('alpha'))).toEqual(['first', 'second']);
+    working(second.appId); // no lead changed with the Hide: this is the first change of rank since
+    expect(sessionRows(row('alpha'))).toEqual(['first', 'second']);
+    fireEvent.pointerLeave(tree);
+    act(() => screen.getByRole('button', { name: 'Outside' }).focus());
+    await waitFor(() => expect(sessionRows(row('alpha'))).toEqual(['second', 'first']));
+  });
+
   it('keeps ranks held when the pointer leaves for the project context menu', async () => {
     start();
     const tree = screen.getByTestId('sidebar-tree');
@@ -948,6 +968,24 @@ describe('hiding a session', () => {
     expect(within(row('MAWS')).getByLabelText('2 waiting')).toBeTruthy();
   });
 
+  // The architect's ruling of 2026-11-13: a Needs you row stays where it is whatever is hidden, so its menu offers no Hide
+  it('a Needs you row’s menu holds no Hide or Unhide; the same session’s tree row’s menu does', async () => {
+    await storedHidden();
+    expand('proj-maws');
+    render(<Sidebar />);
+    const waiting = within(screen.getByRole('list', { name: 'Needs you' })).getByRole('button', { name: 'MAWS · Fix sidebar drag · Approval needed' });
+    fireEvent.contextMenu(waiting);
+    const items = await menuItems();
+    expect(items).toContain('Open');
+    expect(items).not.toContain('Hide');
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+    fireEvent.contextMenu(row('Fix sidebar drag'));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Hide' }));
+    fireEvent.contextMenu(waiting);
+    expect(await menuItems()).not.toContain('Unhide');
+  });
+
   it('a search lists a hidden session in place, with no Hidden row', async () => {
     await storedHidden('Fix sidebar drag');
     expand('proj-maws');
@@ -1461,6 +1499,25 @@ describe('the sidebar’s lineage nesting', () => {
     row('Charter (fork)').focus();
     await userEvent.keyboard('{ArrowLeft}');
     expect(document.activeElement).toBe(row('Charter + research'));
+  });
+
+  // UX wave U7, O-16 (Interfaces §D; the review's finding): under the Hidden row every row's keyboard parent is the Hidden
+  // row, a lineage child's included, while it keeps its lineage's depth and mark
+  it('a hidden thread of a hidden parent keeps its mark and depth, and ArrowLeft from it lands on the Hidden row', async () => {
+    fillStores({ ...nine, sessions: [...nine.sessions, child('side-1', 'x.ts:42', 'side-thread', 1)] });
+    const hidden = { at: '2026-11-12T10:00:00.000Z', armedAt: null };
+    window.maws = fakeClient({ 'layout.get': { value: { version: 1, hidden: { [idOf('Charter + research')]: hidden, [at('side-1')]: hidden } } }, 'layout.set': undefined }).client as unknown as PreloadBridge;
+    await act(() => useHidden.getState().load());
+    expand('proj-maws');
+    const user = userEvent.setup();
+    render(<Sidebar />);
+    const hiddenRow = within(row('MAWS')).getByRole('treeitem', { name: 'Hidden, 2 sessions' });
+    await user.click(hiddenRow);
+    expect(row('x.ts:42').getAttribute('aria-level')).toBe('4');
+    expect(within(row('x.ts:42')).getByTestId('row-nested').textContent).toBe('↳');
+    act(() => row('x.ts:42').focus());
+    await user.keyboard('{ArrowLeft}');
+    expect(document.activeElement).toBe(hiddenRow);
   });
 
   it('a thread of a thread carries its real depth in aria-level, indented as its parent is', () => {
