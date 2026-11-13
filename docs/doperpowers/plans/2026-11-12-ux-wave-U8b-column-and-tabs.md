@@ -79,6 +79,10 @@ How to see it working, on the wave's build: open a session with nothing running 
     - the round trip with build F (`e2e:cross-build`, peer `f1852de3a`), run 43470268727: green, with 16 scenes: 9 passed, 7 skipped, none failed. Both side-column scenes (from the peer, to the peer) passed;
     - `e2e:desk-web`, run 43470416955: green, 198 passed and 1 skipped.
   - The hosted Mac groups, default, layout and browser-comment on the Mac mini, and the paid `e2e:agents-live` group report in the pull request's body, not here.
+  - (2026-11-13) The hosted groups' run 43470192794 (all green by job) had one flaky scene, the side column's "Move below and Move above…" in `e2e/panel.spec.ts`. Its first attempt failed in `addBelow`'s walk by keys, and its retry passed.
+    - The cause was a race in the scene, not a product fault. Radix's menu (2.1.24, `loop` false) gives a menu opened by keys its first item's focus only after it mounts. A press that lands before that moves one past the first item, and the menu does not wrap.
+    - The walk now waits for the first item's focus, which it asserts as the keyboard rule it stands on. It then presses ArrowDown one at a time, waits for the focus to move each time, is bounded by the number of items, and names the element holding the keyboard if it ends short.
+    - `moveSideTabByKeys` has no walk (its menu holds the one move), so it is unchanged.
 
 ## The landing's edge
 
