@@ -148,9 +148,10 @@ function bringForward(appSessionId: AppSessionId, pane: 0 | 1 | undefined): void
   const { panes, focusedPane } = layout.main;
   const at = locateTab(layout.main, id)!;
   const to = pane !== undefined && pane < panes.length ? pane : focusedPane;
-  const mounted = at.pane === to && panes[to].activeTabId === id;
+  const target = panes[to]!; // a pane the strip has
+  const mounted = at.pane === to && target.activeTabId === id;
   if (at.pane === to) layout.activateTab(id);
-  else layout.moveTab(id, to, panes[to].tabs.findIndex((t) => t.id === panes[to].activeTabId) + 1);
+  else layout.moveTab(id, to, target.tabs.findIndex((t) => t.id === target.activeTabId) + 1);
   const composer = mounted ? useComposerStore.getState().focusTargets.get(appSessionId) : undefined;
   if (composer) composer.focusFrame();
   else markFocusOnMount(appSessionId);
