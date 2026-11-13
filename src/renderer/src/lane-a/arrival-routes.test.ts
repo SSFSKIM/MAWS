@@ -4,20 +4,21 @@
 // them (`freshSource`, the reader of another machine's rows), and the arrival rows of the two are the same: every
 // message line, notice and command output, every user row, and each turn's origin and opener. The rows written by hand
 // (no probe recorded them) are invented, from the carriers' key sets. M4 adds the live half (the journal through
-// `Normalizer`).
+// `Normalizer`). It lives beside the reader of another machine's rows, not in the transcript's model: the node project
+// typechecks the model's directory, and that reader's graph is the renderer's.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { JsonObject } from 'desk-hub/protocol';
 import { describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { SessionId } from '@shared/graph/ids';
-import { ChainFollower } from '../../../../engine-host/fs/chain-follower';
-import { FIXTURE_DIR } from '../../../../../test/support/fixtures';
-import { MemoryFileReader } from '../../../../../test/support/memory-reader';
-import { freshSource, subagentLookupOf } from '../../lane-a/plane-transcript';
-import { rowsOf, withAllExpanded } from './derive';
-import { applyEvents, createState, type TranscriptState } from './reduce';
-import type { Row } from './rows';
+import { ChainFollower } from '../../../engine-host/fs/chain-follower';
+import { FIXTURE_DIR } from '../../../../test/support/fixtures';
+import { MemoryFileReader } from '../../../../test/support/memory-reader';
+import { rowsOf, withAllExpanded } from '../transcript/model/derive';
+import { applyEvents, createState, type TranscriptState } from '../transcript/model/reduce';
+import type { Row } from '../transcript/model/rows';
+import { freshSource, subagentLookupOf } from './plane-transcript';
 
 const SESSION = '0f0e0d0c-0000-4000-8000-00000000c0de';
 
