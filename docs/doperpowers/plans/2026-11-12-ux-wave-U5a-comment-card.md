@@ -20,7 +20,7 @@ How to see it working, on the wave's build: open a page in the in-app browser be
 - [x] (2026-11-12) The adversarial review (needs attention, five findings, all accepted) and the architect's rulings on R1 to R6 (all six defaults stand); the document revised once on them and on the drawn example (Decision Log 2 to 20).
 - [x] (2026-11-12) P7's live run (the architect): intact in every state, 12 of 12 rows equal to the sent text by SHA-256 in §A's framed format (findings on branch `ux-wave/probe2-text-defaults` at `de7261796`, `spikes/protocol-probe/findings-uxwave-u5-terminal-text.txt`); step 5 (65,536 units over the machine link) not run. M2 stands at "intact"; the fallback is not built (Decision Log 23).
 - [ ] The owner's look at the drawn example (`~/.local/share/maws-ux-wave/examples/u5-comments/`, outside the repository): one question, where the screenshots sit in a message of several comments. A is written here (decision 13); B changes decision 13, §H and M5's tests only.
-- [ ] M1 — What a comment says, and what the machine takes
+- [x] (2026-11-12) M1 — What a comment says, and what the machine takes (commits `fd852eeb1`..`8637eb021`, the renderer boundary guard `49a0cba1b`; reviewed clean)
 - [ ] M2 — The checkbox and the one send path
 - [ ] M3 — The pass: drafts that stay, and several comments in one send
 - [ ] M4 — The page is told when its card opens and closes
