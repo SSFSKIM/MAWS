@@ -307,6 +307,19 @@ describe('a pass’s send (§D), each awaited promise held open', () => {
   });
 });
 
+describe('the host’s frame (§C)', () => {
+  it('onClosed hears each card of the host that went, once, whatever took it: another comment, Escape kept, Close', () => {
+    const closed: string[] = [];
+    render(<Host frame={{ ...FRAME, onClosed: (gone) => closed.push(gone.anchor.locator) }} />);
+    pick(1);
+    type('Make it bolder');
+    pick(2); // the card moves to the new comment
+    expect(closed).toEqual(['#e1']);
+    fireEvent.click(within(card()!).getByRole('button', { name: 'Close' }));
+    expect(closed).toEqual(['#e1', '#e2']);
+  });
+});
+
 describe('the card’s structure (decision 23)', () => {
   it('the header and the row with the checkbox and Send are outside the scrolling region, which holds the list, capped at three lines', () => {
     render(<Host />);
