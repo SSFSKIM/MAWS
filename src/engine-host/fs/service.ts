@@ -180,6 +180,9 @@ export class FsService {
   private readonly leaving = new Map<SessionId, Leaving>();
   private looks: Promise<void> = Promise.resolve();
   private nextLook: Promise<void> | null = null;
+  // Per session noted leaving, settled once a look has decided for it (not when a look only noted it again): what a
+  // scan's answer waits for.
+  private readonly settling = new Map<SessionId, Deferred<void>>();
   private registryRead: Promise<unknown> = Promise.resolve(); // the holder registry's first read, which a scan orders by
   private lastScanAt: string | null = null;
   private lastScan: FsScanResult | null = null;
@@ -467,7 +470,9 @@ export class FsService {
         // A meta without `toolUseId` (the schema requires only `agentType`) attributes nothing either.
         if (agent.runId === null && typeof agent.meta?.toolUseId !== 'string') throw new Error(`agent meta not yet available: ${agentId}`);
         const parentToolUseId = (agent.meta?.toolUseId ?? null) as ParentToolUseId | null;
-        return this.newFollow(appSessionId, sessionId, agent.transcriptPath, { agentId, parentToolUseId });
+        // the listing read may predate a move its session's transcript made meanwhile (U8c-1)
+        const path = this.rebased(agent.transcriptPath, sessionId, this.listed.get(sessionId)?.path ?? null);
+        return this.newFollow(appSessionId, sessionId, path, { agentId, parentToolUseId });
       });
     } finally {
       if (client !== undefined) this.stopAwaiting(key);
@@ -946,19 +951,19 @@ export class FsService {
     return join(dirname(transcript), sessionId, ...parts.slice(2));
   }
 
-  // U8c-1 (M1 decision 3): the listing holds a session at another path than it did: the engine moved its transcript and
-  // its folder. Its follows are re-pointed and poked, and an agent listing main was told is walked again at the new
-  // folder, so main is told the agents' new paths.
+  // U8c-1 (M1 decision 3): the listing holds a session at another path than it did (or at one for the first time): the
+  // engine moved its transcript and its folder. Its follows are re-pointed and poked, and an agent listing that was read
+  // or asked for (one in flight included) is walked again at the new folder, so main is told the agents' new paths.
   private listingMoved(sessionId: SessionId): void {
     this.locateFollows(sessionId);
-    if (this.agents.has(sessionId)) this.listAgents(sessionId).catch(logAgentListFailure);
+    if (this.agentSyncs.has(sessionId)) this.listAgents(sessionId).catch(logAgentListFailure);
   }
 
-  // Lists a session at `file`; a session listed elsewhere before has moved.
+  // Lists a session at `file`; a session listed elsewhere before, or not at all, has moved.
   private setListed(file: ListedTranscript): void {
     const previous = this.listed.get(file.sessionId)?.path;
     this.listed.set(file.sessionId, file);
-    if (previous !== undefined && previous !== file.path) this.listingMoved(file.sessionId);
+    if (previous !== file.path) this.listingMoved(file.sessionId);
   }
 
   private enqueueScan(known: Map<SessionId, FsScanKnown> | null, mode: ScanMode): Promise<FsScanResult> {
@@ -982,6 +987,7 @@ export class FsService {
     // U8c-1: what the listing did not find is looked for before it is told removed (a rename during the listing can be
     // missed at both ends); the scan answers once that look has decided.
     const looked = [...gone].filter((sessionId) => !stale(sessionId)).map((sessionId) => this.noteLeaving(sessionId));
+    const visited: SessionId[] = [];
     for (const file of files) if (!stale(file.sessionId)) this.setListed(file);
 
     // Only list until main has spoken (or the fallback fired), and while main's fs.scan waits behind this pass: that
@@ -1002,6 +1008,7 @@ export class FsService {
     const rest = todo.filter((file) => !held.has(file.sessionId));
     let scanned = 0;
     const visit = async (file: ListedTranscript) => {
+      visited.push(file.sessionId);
       const cached = this.summaries.get(file.sessionId);
       if (cached && cached.transcriptPath === file.path && matchesKnown(file, cached)) {
         if (mode === 'command') this.sendSummary(cached);
@@ -1015,7 +1022,8 @@ export class FsService {
       const visits = mapConcurrent(batch, SUMMARY_CONCURRENCY, visit)[Symbol.asyncIterator]();
       while (!(await visits.next()).done); // drain: every visit has run
     }
-    await Promise.all(looked);
+    // a transcript the listing held and its summary then found missing is decided by a look too, before the answer
+    await Promise.all([...looked, ...visited.flatMap((sessionId) => this.settling.get(sessionId)?.promise ?? [])]);
     const result = { projects: countSlugs(this.listed.values()), sessions: this.listed.size, changed: todo.length, durationMs: Math.round(performance.now() - started) };
     if (!summarising) return result;
     this.send('fs.scanProgress', { scanned, total: todo.length });
@@ -1026,33 +1034,34 @@ export class FsService {
 
   // Re-reads one transcript's head and tail (serialised per file, so results land in the order they were asked for)
   // and emits `fs.sessionChanged` when any summary field changed, or always when main asked. A transcript that no
-  // longer exists is reported removed; one that cannot be read keeps its previous summary.
-  private summarizePath(path: string, sessionId: SessionId, emit: 'always' | 'changed'): Promise<void> {
+  // longer exists where the listing holds it is looked for (`noteLeaving`); one that cannot be read keeps its previous
+  // summary. Answers whether the file was listed, missing, or not read.
+  private summarizePath(path: string, sessionId: SessionId, emit: 'always' | 'changed'): Promise<'listed' | 'missing' | 'unread'> {
     const previous = this.perPath.get(path) ?? Promise.resolve();
-    const run = previous.then(async () => {
-      if (this.stopped) return;
+    const run = previous.then(async (): Promise<'listed' | 'missing' | 'unread'> => {
+      if (this.stopped) return 'unread';
       if (this.hooks?.at) await this.hooks.at('summary', path);
       let summary: TranscriptSummary | null;
       try {
         summary = await this.discovery.summarizeOne(path);
       } catch (error) {
         console.error(`[fs] cannot summarise ${path}:`, error instanceof Error ? error.message : error);
-        return;
+        return 'unread';
       }
       this.observedSinceListing.add(sessionId);
       if (summary === null) {
         // U8c-1: missing where the listing holds it: moved or deleted, which a look under every project folder tells apart
         if (this.listed.get(sessionId)?.path === path) void this.noteLeaving(sessionId);
-        return;
+        return 'missing';
       }
       this.raise(sessionId);
       const before = this.summaries.get(sessionId);
       this.summaries.set(sessionId, summary);
       const listedAt = this.listed.get(sessionId)?.path;
-      const moved = listedAt !== undefined && listedAt !== path;
       this.listed.set(sessionId, { sessionId, slug: summary.slug, path, size: summary.size, mtimeMs: summary.mtimeMs });
       if (emit === 'always' || before === undefined || !sameSummary(before, summary)) this.sendSummary(summary);
-      if (moved) this.listingMoved(sessionId);
+      if (listedAt !== path) this.listingMoved(sessionId);
+      return 'listed';
     });
     this.perPath.set(path, run);
     void run.finally(() => {
@@ -1070,9 +1079,12 @@ export class FsService {
   }
 
   // U8c-1 (M1 decision 4): the session is noted leaving, with its generation and the path it is listed at, and is
-  // decided by the next look to begin. Answers when that look has decided; a look never rejects.
+  // decided by the next look to begin. Answers when a look has decided for it, across the looks that only note it
+  // again; it never rejects.
   private noteLeaving(sessionId: SessionId): Promise<void> {
     this.leaving.set(sessionId, { generation: this.generationOf(sessionId), path: this.listed.get(sessionId)?.path ?? null });
+    let settled = this.settling.get(sessionId);
+    if (settled === undefined) this.settling.set(sessionId, (settled = deferred<void>()));
     if (this.nextLook === null) {
       const look = this.looks
         .then(() => {
@@ -1083,40 +1095,48 @@ export class FsService {
       this.nextLook = look;
       this.looks = look;
     }
-    return this.nextLook;
+    return settled.promise;
+  }
+
+  // A look is done with the session: what waits for its decision goes on, unless it was noted again meanwhile.
+  private settle(sessionId: SessionId): void {
+    if (this.leaving.has(sessionId)) return;
+    this.settling.get(sessionId)?.resolve();
+    this.settling.delete(sessionId);
   }
 
   // One look for every session noted leaving when it begins: the names in every project folder read once
   // (`Discovery.find`). A transcript found is summarised where it lies, which lists the session there and re-points its
-  // follows; nothing is told. One found nowhere is forgotten and told removed, once, only if nothing newer was heard of
-  // the session meanwhile (its generation is the one noted) and it is still listed where it was noted; otherwise this
-  // look decides nothing for it, and a session still listed where it left is looked for again. Two moves within one look
-  // (an enter and an exit within its milliseconds) can still read as a removal and a return.
+  // follows; nothing is told. One found nowhere, or found and gone again by the time it is read, is forgotten and told
+  // removed, once, only if nothing newer was heard of the session meanwhile (its generation is the one noted) and it is
+  // still listed where it was noted; otherwise this look decides nothing for it, and a session still listed where it
+  // left is looked for again. Two moves within one look (an enter and an exit within its milliseconds) can still read as
+  // a removal and a return.
   private async look(): Promise<void> {
     const noted = [...this.leaving];
     this.leaving.clear();
-    if (noted.length === 0 || this.stopped) return;
-    const found = await this.discovery.find(new Set(noted.map(([sessionId]) => sessionId)));
-    await Promise.all(
-      noted.map(async ([sessionId, note]) => {
-        if (this.hooks?.at) await this.hooks.at('look', sessionId);
-        if (this.stopped) return;
-        const path = found.get(sessionId);
-        if (path !== undefined) {
-          await this.summarizePath(path, sessionId, 'changed');
-          return;
-        }
-        const listedAt = this.listed.get(sessionId)?.path ?? null;
-        if (listedAt !== note.path) return; // a read listed it elsewhere meanwhile, or it was forgotten already
-        if (this.generationOf(sessionId) !== note.generation) {
-          void this.noteLeaving(sessionId);
-          return;
-        }
-        if (this.leaving.get(sessionId)?.generation === note.generation) this.leaving.delete(sessionId); // noted again, by nothing newer
-        this.forget(sessionId);
-        this.locateFollows(sessionId);
-      }),
-    );
+    try {
+      if (noted.length === 0 || this.stopped) return;
+      const found = await this.discovery.find(new Set(noted.map(([sessionId]) => sessionId)));
+      await Promise.all(noted.map(([sessionId, note]) => this.decide(sessionId, note, found.get(sessionId))));
+    } finally {
+      for (const [sessionId] of noted) this.settle(sessionId);
+    }
+  }
+
+  private async decide(sessionId: SessionId, note: Leaving, found: string | undefined): Promise<void> {
+    if (this.hooks?.at) await this.hooks.at('look', sessionId);
+    if (this.stopped) return;
+    if (found !== undefined && (await this.summarizePath(found, sessionId, 'changed')) !== 'missing') return;
+    const listedAt = this.listed.get(sessionId)?.path ?? null;
+    if (listedAt !== note.path) return; // a read listed it elsewhere meanwhile, or it was forgotten already
+    if (this.generationOf(sessionId) !== note.generation) {
+      void this.noteLeaving(sessionId);
+      return;
+    }
+    if (this.leaving.get(sessionId)?.generation === note.generation) this.leaving.delete(sessionId); // noted again, by nothing newer
+    this.forget(sessionId);
+    this.locateFollows(sessionId);
   }
 
   private forget(sessionId: SessionId): void {

@@ -8,7 +8,7 @@
 // Linux's watch tree and on macOS's FSEvents alike; (g) to (i) drive a watcher by hand and hold the interleaving open
 // through the service's test hook.
 import { EventEmitter } from 'node:events';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { mkdir, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -22,6 +22,7 @@ import type { StoreHooks } from './discovery';
 import { FsFileReader } from './follow';
 import { slugOf } from './paths';
 import { FsService } from './service';
+import { SubagentReader } from './subagents';
 import { DEBOUNCE_MS, SETTLE_MS, type WatchFn } from './watcher';
 
 const S1 = '5a1e0001-0000-4000-8000-000000000001' as SessionId;
@@ -244,16 +245,19 @@ describe('a transcript the engine moves keeps its readers', { timeout: 30_000 },
 
     for (const { from, to } of MOVES) {
       const targetListed = deferred();
+      let looked = false;
       hold = async (point, detail) => {
+        if (point === 'look' && detail === S1) looked = true;
         if (point !== 'listing') return;
         if (detail === slugOf(to)) return targetListed.resolve();
         if (detail !== slugOf(from)) return;
         await targetListed.promise;
-        await sleep(50); // the target folder's readdir, begun as its hook returned, has answered
+        await sleep(200); // the target folder's readdir, begun as its hook returned, has answered
         await renameFiles(S1, from, to);
       };
       const answer = await fs.scan([]);
       hold = null;
+      expect(looked, 'the listing missed the file at both ends, and a look found it').toBe(true);
       expect(answer.sessions).toBe(1);
       expect(removed()).toEqual([]);
       expect(changedPaths(S1).at(-1)).toBe(transcriptAt(to, S1));
@@ -301,23 +305,28 @@ describe('a transcript the engine moves keeps its readers', { timeout: 30_000 },
     await fs.bind([{ sessionId: S1, appSessionId: APP }]);
     await fs.scan([]);
 
-    for (const { from, to } of MOVES) {
+    // Into the other folder and back, then back where it was: there only the generation tells the look it is stale.
+    for (const { from, to } of [...MOVES, { from: HOME, to: HOME }]) {
       const target = transcriptAt(to, S1);
       const looked = deferred();
       const held = deferred();
+      let reached = false;
       hold = async (point, detail) => {
-        if (point !== 'look' || detail !== S1) return;
+        if (point !== 'look' || detail !== S1 || reached) return;
+        reached = true;
         looked.resolve();
         await held.promise;
       };
       await rename(transcriptAt(from, S1), away);
       manual.fire(transcriptAt(from, S1));
-      await Promise.race([looked.promise, sleep(2_000)]); // the look has read every project folder and found the file in none
+      await Promise.race([looked.promise, sleep(2_000)]);
+      expect(reached, 'the look has read every project folder and found the file in none').toBe(true);
 
       await mkdir(join(fixture.paths.projects, slugOf(to)), { recursive: true });
       await rename(away, target);
       manual.fire(target);
       await expect.poll(() => changedPaths(S1).at(-1), { timeout: 2_000 }).toBe(target);
+      await sleep(DEBOUNCE_MS * 4); // back at the same path the summary changes nothing main is sent: its read has run
       held.resolve();
       await sleep(SETTLE_MS);
       hold = null;
@@ -348,5 +357,105 @@ describe('a transcript the engine moves keeps its readers', { timeout: 30_000 },
     expect(told).toHaveLength(51);
     expect(new Set(told)).toEqual(new Set([S1, ...many]));
     expect(fs.state().sessions).toBe(1); // the one kept
+  });
+
+  // The task review's cases: what a scan waits for, a file found and gone before it is read, and readers a move meets
+  // before they are settled.
+  it('(k) a transcript the listing holds and its summary finds gone is told removed before the scan answers', async () => {
+    await fixture.addTranscript(HOME, S1, rowsOf([user('u1', null, HOME, 'one')]));
+    const fs = await start(manualWatch().watch);
+    await fs.bind([{ sessionId: S1, appSessionId: APP }]);
+    hold = async (point, detail) => {
+      if (point === 'summary' && detail === transcriptAt(HOME, S1)) await rm(detail);
+    };
+    await fs.scan([]);
+    expect(removed()).toEqual([{ sessionId: S1, appSessionId: APP }]);
+    expect(fs.state().sessions).toBe(0);
+  });
+
+  it('(l) a scan’s look overtaken by an event, and the look after it that finds nothing: the removal is told before the scan answers', async () => {
+    await fixture.addTranscript(HOME, S1, rowsOf([user('u1', null, HOME, 'one')]));
+    const manual = manualWatch();
+    const fs = await start(manual.watch);
+    await fs.bind([{ sessionId: S1, appSessionId: APP }]);
+    await fs.scan([]);
+    await rm(transcriptAt(HOME, S1)); // nothing heard of it yet
+    let looks = 0;
+    hold = async (point, detail) => {
+      if (point !== 'look' || detail !== S1 || looks++ > 0) return;
+      manual.fire(transcriptAt(HOME, S1)); // its event, newer than the look
+      await sleep(DEBOUNCE_MS * 4);
+    };
+    await fs.scan([]);
+    expect(looks).toBe(2);
+    expect(removed()).toEqual([{ sessionId: S1, appSessionId: APP }]);
+  });
+
+  it('(m) a transcript moved and then deleted before the look reads it where it found it is told removed once, with no scan', async () => {
+    await fixture.addTranscript(HOME, S1, rowsOf([user('u1', null, HOME, 'one')]));
+    const manual = manualWatch();
+    const fs = await start(manual.watch);
+    await fs.bind([{ sessionId: S1, appSessionId: APP }]);
+    await fs.scan([]);
+    hold = async (point, detail) => {
+      if (point === 'look' && detail === S1) await rm(transcriptAt(WORKTREE, S1));
+    };
+    await mkdir(join(fixture.paths.projects, slugOf(WORKTREE)), { recursive: true });
+    await renameFiles(S1, HOME, WORKTREE);
+    manual.fire(transcriptAt(HOME, S1));
+    await expect.poll(() => removed(), { timeout: 2_000 }).toEqual([{ sessionId: S1, appSessionId: APP }]);
+    manual.fire(transcriptAt(WORKTREE, S1)); // the deletion's own event
+    await sleep(SETTLE_MS);
+    expect(removed()).toHaveLength(1);
+    expect(fs.state().sessions).toBe(0);
+  });
+
+  it('(n) a follow of a session main knows and the host never listed reads once a look finds its transcript', async () => {
+    const manual = manualWatch();
+    const fs = await start(manual.watch);
+    await fs.bind([{ sessionId: S1, appSessionId: APP }]);
+    expect(await fs.eventsSnapshot(APP, null)).toEqual({ events: [], complete: true }); // follows a transcript not seen yet
+    const at = await fixture.addTranscript(WORKTREE, S1, rowsOf([user('u1', null, WORKTREE, 'one')]));
+    await mkdir(join(fixture.paths.projects, slugOf(HOME)), { recursive: true });
+    const targetListed = deferred();
+    hold = async (point, detail) => {
+      if (point !== 'listing') return;
+      if (detail === slugOf(HOME)) return targetListed.resolve();
+      await targetListed.promise;
+      await sleep(200);
+      await renameFiles(S1, WORKTREE, HOME); // missed by the listing at both ends
+    };
+    const { size, mtimeMs } = statSync(at);
+    await fs.scan([{ sessionId: S1, appSessionId: APP, size, mtimeMs }]);
+    hold = null;
+    expect(removed()).toEqual([]);
+    await expect.poll(() => lastState(APP)?.leafUuid, { timeout: 5_000 }).toBe('u1');
+    expect(locators[0]!()).toBe(transcriptAt(HOME, S1));
+  });
+
+  it('(o) a move while the agents’ first walk is in flight leaves the agent’s follow and its listing at the new path', async () => {
+    await addParent();
+    const fs = await start();
+    await fs.bind([{ sessionId: PARENT, appSessionId: APP }]);
+    const list = SubagentReader.prototype.list;
+    const walked = deferred();
+    const gate = deferred();
+    vi.spyOn(SubagentReader.prototype, 'list').mockImplementationOnce(async function (this: SubagentReader, dir: string) {
+      const agents = await list.call(this, dir); // read at the old folder
+      walked.resolve();
+      await gate.promise;
+      return agents;
+    });
+    const following = fs.agentEvents(APP, AGENT);
+    await walked.promise;
+    const { to, uuid, content } = MOVES[0];
+    await move(PARENT, HOME, to, user(`p-${uuid}`, '5fe8e26b-1f38-4083-8117-f064a4b1dd85', to, content));
+    await expect.poll(() => changedPaths(PARENT).at(-1), { timeout: 5_000 }).toBe(transcriptAt(to, PARENT));
+    gate.resolve();
+    await following;
+
+    await fixture.appendLines(agentPathAt(to), rowsOf([{ ...user(uuid, AGENT_LAST, to, content), isSidechain: true, agentId: AGENT, sessionId: PARENT }]));
+    await expect.poll(() => lastState(APP, AGENT)?.leafUuid, { timeout: 5_000 }).toBe(uuid);
+    await expect.poll(() => events('fs.subagentsChanged').at(-1)?.agents.map((agent) => agent.transcriptPath), { timeout: 5_000 }).toEqual([agentPathAt(to)]);
   });
 });
