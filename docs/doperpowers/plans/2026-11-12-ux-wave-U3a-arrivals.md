@@ -653,6 +653,9 @@ Found while checking the section against the code at `85e934368` and the probes'
   Rationale: the engine mounts one site per carrier (`cli.pretty.js` of `2.1.322`, the task renderer); the M5 review found the answer drawn once per notice, then the followers hiding on a drawing the owner had refused.
   Date/Author: 2026-11-13, the U3a controller, from M5's executor.
 
+- Decision: the last step's base and checks (the architect's word, 2026-11-13). The branch merges not `origin/master` of the moment but the head the architect names when the controller reports it is at that step: the wave's landings go to master as a chain, each branch holding the one before it, because the session that keeps master takes a Mac run as proof only on the tree that lands. `WIRE_MINOR` is then set one above that head's. The acceptance run gains two checks the common brief now asks of a head that touches `e2e/` or a schema: the gate's script tests (`node --test .github/scripts/*.test.mjs scripts/*.test.mjs`) and `pnpm exec vitest run src/shared/machine`.
+  Date/Author: 2026-11-13, the wave's architect, recorded by the U3a controller.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
