@@ -627,7 +627,8 @@ describe('an expanded project', () => {
     expand('proj-codex-somersault');
     render(<Sidebar />);
     const foreign = row('Somersault terminal run');
-    expect(within(foreign).getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual(['Mark unread']); // local read state, no holder actions
+    // the three dots (UX wave U7: on every session row) and the local read state, no holder actions
+    expect(within(foreign).getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual(['Actions for Somersault terminal run', 'Mark unread']);
     fireEvent.contextMenu(foreign);
     const menu = await screen.findByRole('menu');
     expect(within(menu).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open', 'Open in new tab']);
