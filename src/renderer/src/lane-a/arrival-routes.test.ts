@@ -35,6 +35,15 @@ async function fromFile(text: string): Promise<SessionEvent[]> {
   return events;
 }
 
+/** The file route followed on: a follower nobody holds, over a file the test writes on, read at each poke. */
+async function following(text: string): Promise<{ reader: MemoryFileReader; follower: ChainFollower; events: SessionEvent[] }> {
+  const events: SessionEvent[] = [];
+  const reader = new MemoryFileReader(text);
+  const follower = new ChainFollower(reader, SESSION as SessionId, null, (e) => e.t === 'events' && events.push(...e.events), { holders: () => 0 });
+  await follower.start();
+  return { reader, follower, events };
+}
+
 /** The remote route: the same rows, each with its uuid, through the reader of another machine's rows. */
 const fromRows = (text: string): Promise<SessionEvent[]> =>
   freshSource(rowsIn(text).filter((row) => typeof row.uuid === 'string'), SESSION, subagentLookupOf([])).snapshot();
@@ -266,6 +275,50 @@ describe('a scheduled prompt’s firing, from the file (Acceptance 7)', () => {
       expect(rows.filter((row) => row.startsWith('● schedule')), route).toEqual(['● schedule: Running scheduled task · UXW tick: reply with only the word TOCK.']);
       expect(rows.at(-1), route).toBe('turn engine, opened by schedule: Running scheduled task · UXW tick: reply with only the word TOCK.');
     }
+  });
+
+  // M3's second fix round: nothing is held for the meta row, so a fire is placed wherever the rows it is read with end:
+  // written after the backfill, at a reload's end, and before a meta row the follower reads after its exit
+  const TICK = '● schedule: Running scheduled task · UXW tick: reply with only the word TOCK.';
+  const OPENED = 'turn engine, opened by schedule: Running scheduled task · UXW tick: reply with only the word TOCK.';
+  const cronLines = (from: number, to: number) => `${recorded('u3-terminal-cron-r1').split('\n').slice(from, to).join('\n')}\n`;
+  const fireTurn = (state: TranscriptState) => turnsOf(state).find((turn) => turn.events.some((event) => event.kind === 'user.message' && event.arrival?.[0]?.class === 'schedule'));
+  const answerTurn = (state: TranscriptState) => turnsOf(state).find((turn) => turn.events.some((event) => event.kind === 'assistant.block.complete' && event.block.type === 'text' && event.block.text === 'TOCK'));
+
+  it('u3-terminal-cron-r1: a fire written after the backfill is drawn at the next read, in the engine’s turn it opens', async () => {
+    const { reader, follower, events } = await following(cronLines(0, 49)); // to the queue rows before the first fire
+    expect(arrivalRows(drawn(stateOf(events))).filter((row) => row.startsWith('● schedule'))).toEqual([]);
+    reader.append(cronLines(49, 50));
+    await follower.poke();
+    follower.stop();
+    const rows = arrivalRows(drawn(stateOf(events)));
+    expect(rows.filter((row) => row.startsWith('● schedule'))).toEqual([TICK]);
+    expect(rows.at(-1)).toBe(OPENED);
+  });
+
+  it('u3-terminal-cron-r1: a file rewritten to end at a fire draws it from the reload', async () => {
+    const { reader, follower, events } = await following(cronLines(0, 49));
+    reader.replace(cronLines(0, 50));
+    await follower.poke();
+    follower.stop();
+    const rows = arrivalRows(drawn(stateOf(events)));
+    expect(rows.filter((row) => row.startsWith('● schedule'))).toEqual([TICK]);
+    expect(rows.at(-1)).toBe(OPENED);
+  });
+
+  it('u3-terminal-cron-r1: a meta row written after the follower’s exit ended the fire’s turn: the answer is in an engine turn, the line stays in the fire’s', async () => {
+    const { reader, follower, events } = await following(cronLines(0, 50)); // nobody holds it: its unended turn gets the exit
+    expect(events.at(-1)).toMatchObject({ kind: 'process.exited' });
+    reader.append(cronLines(50, 54));
+    await follower.poke();
+    follower.stop();
+    const state = stateOf(events);
+    const rows = arrivalRows(drawn(state));
+    expect(rows.filter((row) => row.startsWith('● schedule'))).toEqual([TICK]);
+    const fire = fireTurn(state)!;
+    expect(fire).toMatchObject({ origin: 'engine', state: 'closed' });
+    expect(answerTurn(state)).toMatchObject({ origin: 'engine' });
+    expect(answerTurn(state)!.id).not.toBe(fire.id);
   });
 });
 
