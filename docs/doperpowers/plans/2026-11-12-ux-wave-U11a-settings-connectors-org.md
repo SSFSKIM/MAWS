@@ -33,7 +33,7 @@ How to see it working: the unit tests named under each milestone fail before its
 - [x] (2026-11-12 03:41Z) M4 — the Channel says it is offline, or refused (`d3c3fa456`, `e1d925148`, `0adbfd07c`; the review's fix, a refusal that stands through another tab's open, `3ffc6dd65`, `8a6a631c2`), reviewed clean. P4 waits for a Mac.
 - [x] (2026-11-12 04:50Z) M5 — the Channel from the palette and the View menu (`7f1590056` to `139c6038b`; the review's fix, a listed-only lane A session, `f03ac349b`, `205a869ea`), reviewed clean. (`f0994be8c`, a debugging commit of the test, lacks the trailer; it is not amended, the branch is never force-pushed.)
 - [x] (2026-11-12) P6, first scenes (the architect's, on the mini): e2e:settings passed at `9412a40e1` (run 43362983335: the Channel's edges, its 420 px names, its footer's words); e2e:widgets 30 of 30 and e2e:composer 26 of 26 at `0be74a6ea` (run 43367397788, after run 43359967651's two fixes). The photographs show the session pane's footer keeping the composer's shadow whole under classic scrollbars and one wash over the window and the Plugins dialog under the Uninstall confirmation. §E's gutter, edges and footer, the stacked scrim and the focus rule are proved on a Mac.
-- [ ] M6 — the Connectors dialog.
+- [x] (2026-11-12 05:25Z) M6 — the Connectors dialog (`627d912aa`, `2f3202ebe`; the review's fix, the switch waits for the head's sentence, `539b2ab30`, `e45d064ec`), reviewed clean.
 - [ ] M7 — Plugins, Connectors and Skills before the first message.
 - [x] (2026-11-12) P1's verdict: both kinds promote as designed (runs 43357272365, 43358963647); M8 is released, after M7 in the order.
 - [ ] M8 — Sign in for a dynamic connector.
@@ -1184,6 +1184,10 @@ Found while checking the sections against the code at `48619c824`, then by the a
 - Decision: M6's means. The row is `ConnectorRow` (exported from `widgets/McpWidget.tsx`: `server`, `words`, `control`, `actions`, `opened`, `under`); it opens through a button with `aria-expanded`, not `<details>`, and its opened part is drawn only while open. `<place>` reads the main root through the existing `git.worktree.list` (home abbreviated); any failed read, and a session on another machine, falls back to the folder, and no sentence is drawn while the read is out. The terminal session's dialog takes the "MCP servers" subtitle and no head sentence (its switch is the terminal's `/mcp`). Sign in sits on the row's line and its progress line under the row, beside the toggle's and the reconnect's answer. The head's note may wrap, so a long path is not cut. In `composer/mentions/items.ts` a one-entry map lets only `mcp`'s declared description win. The "+" › Connectors submenu's rows take `connectorStatusWords` in M7, through its `widgets/` hook.
   Rationale: §C's row and words, with the controls outside the disclosure (M6's second decision); the submenu's rows are M7's by the Constraints table.
   Date/Author: 2026-11-12, M6's executor; folded by the controller.
+
+- Decision (M6's review, fixed): the dialog's switch stays disabled until the head's sentence of what it reaches can be drawn (`reachSaid`, the same `place !== null` that draws it); Reconnect does not wait. A failed main-root read falls back to the folder, so the sentence then shows and the switch enables.
+  Rationale: the sentence is the switch's disclosure; a switch usable while it is still out would let a person turn a connector off for every session in a place without being told.
+  Date/Author: 2026-11-12, M6's executor on the task review; folded by the controller.
 
 ## Outcomes & Retrospective
 
