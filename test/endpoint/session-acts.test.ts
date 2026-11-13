@@ -234,18 +234,20 @@ describe('the archived sessions’ read (`session.list {includeArchived: true}`,
 
   it('answers each caller the records they hold `manage` on, archived ones included, and nothing else', async () => {
     const { f, h } = await machine();
-    const machines = session(f, h, { archived: true, shares: [{ member: org.B, grade: 'converse' }, { member: org.C, grade: 'list' }] }).appId;
+    const machines = session(f, h, { archived: true, shares: [{ member: org.B, grade: 'converse' }] }).appId;
+    const listed = session(f, h, { archived: true, shares: [{ member: org.B, grade: 'list' }] }).appId;
     const live = session(f, h).appId;
     const bobs = session(f, h, { owners: [org.B], archived: true }).appId;
     const [a, b, c] = [await openRemote(f, org.a1, org.A), await openRemote(f, org.b1, org.B), await openRemote(f, org.c1, org.C)];
     const asOwner = await call(a, 'session.list', { includeArchived: true });
     expect(codeOf(asOwner)).toBe('ok');
-    expect(idsOf(asOwner)).toEqual([machines, live].sort());
-    expect(idsOf(await call(b, 'session.list', { includeArchived: true }))).toEqual([bobs]);
-    // a member who can only list, or who holds no `manage`, is answered no record
-    const asLister = await call(c, 'session.list', { includeArchived: true });
-    expect(codeOf(asLister)).toBe('ok');
-    expect(idsOf(asLister)).toEqual([]);
+    expect(idsOf(asOwner)).toEqual([machines, listed, live].sort());
+    // a session the member may converse in or only list is not theirs to unarchive: their own alone is answered
+    const asMember = await call(b, 'session.list', { includeArchived: true });
+    expect(codeOf(asMember)).toBe('ok');
+    expect(idsOf(asMember)).toEqual([bobs]);
+    // a web-cards device reads listings and answers, never this read (its class, step 3)
+    expect(codeOf(await call(c, 'session.list', { includeArchived: true }))).toBe('class');
   });
 
   it('answers a member their own reading of each record', async () => {

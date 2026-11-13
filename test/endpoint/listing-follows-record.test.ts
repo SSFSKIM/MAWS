@@ -112,10 +112,15 @@ function hubListing(f: Fixture, app: AppSessionId): Signed<Listing> | null {
 /** What a listing says, for comparing: withdrawn, or listed with its title; null for no listing at all. */
 const said = (record: Signed<Listing> | null) => (record === null ? null : isListingGone(record.body) ? 'withdrawn' : { title: record.body.fields.title });
 
-/** Both surfaces at once, so a failure names each. A channel answer with no listing of the session is a withdrawal. */
+/**
+ * Both surfaces at once, so a failure names each. A channel answer with no listing of the session is a withdrawal; so is
+ * no listing kept for the hub of a session listed before: no hub connection is up in this harness, and a listing no
+ * connection carried is dropped at its withdrawal rather than signed gone (listings.ts, `#withdraw`: the hub has nothing
+ * of the session, and gets nothing).
+ */
 async function surfaces(f: Fixture, b: Remote, app: AppSessionId): Promise<{ channel: unknown; hub: unknown }> {
   const channel = said(await channelListing(b, app));
-  return { channel: channel ?? 'withdrawn', hub: said(hubListing(f, app)) };
+  return { channel: channel ?? 'withdrawn', hub: said(hubListing(f, app)) ?? 'withdrawn' };
 }
 
 describe('a machine’s listing follows its record, read by a remote reader with no tab open', () => {

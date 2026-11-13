@@ -121,7 +121,7 @@ describe('the roster', () => {
     closers.push(() => source.close());
     await until(() => source.machines().some((m) => m.ref === o.LIVE));
     await until(() => !source.machines().some((m) => m.ref === o.LIVE), 4000);
-    expect(source.machines()).toEqual([{ ref: o.MINI, name: 'mini' }]);
+    expect(source.machines()).toEqual([{ ref: o.MINI, name: 'mini', owner: true }]);
   });
 });
 
