@@ -154,6 +154,7 @@ export const MEDIA_GAP = 'attachments to a session on another machine wait for u
 /** 2026-11-06: an endpoint that lists no `rl2.agent-scope` carries no subagent's own transcript. */
 export const AGENT_SCOPE_GAP = (machine: string) => `${machine} can’t show a subagent’s own transcript here yet; update MAWS on ${machine}`;
 const AGENT_READ = 'a read is the session’s: ask it on the session’s own view';
+export const ACCEPTED_IS_LOCAL = 'laneA.accepted is the session machine’s own word to its spine, never sent to another machine';
 
 export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
   const timing: RemoteLaneATiming = { ...REMOTE_LANE_A_TIMING, ...deps.timing };
@@ -616,6 +617,8 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
 
   async function run(link: RemoteLink, name: LaneACommand, input: Fields, ctx: MainContext): Promise<unknown> {
     if (name === 'laneA.list') return { states: [...machineOf(link).values()].map(stateOf).filter((x): x is LaneAState => x !== null) };
+    // UX wave U1a: a session machine's endpoint tells its own spine, inside its daemon; it never crosses a link
+    if (name === 'laneA.accepted') throw new Error(ACCEPTED_IS_LOCAL);
     const id = String(input.appSessionId);
     const s = sessionOf(link, id, name === 'laneA.watch');
     switch (name) {
