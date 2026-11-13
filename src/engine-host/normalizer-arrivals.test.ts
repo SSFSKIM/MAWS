@@ -269,8 +269,10 @@ describe('a reseed reads on from what the live wire told', () => {
     const claimed = JSON.parse(readFileSync(join(FIXTURE_DIR, 'uxwave', 'u3-tasks-r1.transcript.jsonl'), 'utf8').split('\n')[113]!) as Record<string, unknown>;
     expect(claimed).toMatchObject({ queueTranscriptOnly: true, origin: { kind: 'task-notification' } });
     const reseeded = n.push({ seq: 338, direction: 'meta', at: '2026-11-12T14:53:00.000Z', frame: { event: 'transcript_reseed', rows: [claimed] } });
-    expect(reseeded.map((event) => event.kind)).toEqual(['task.notification']);
-    expect(reseeded[0]).toMatchObject({ taskId: 'a91c8f61a920a8733', status: 'completed' });
+    // what continuous mapping makes of the row: the task's end, nothing else (a reseed's first record with a cwd also
+    // makes the session's start, as every reseed's does)
+    expect(reseeded.map((event) => event.kind).filter((kind) => kind !== 'session.started')).toEqual(['task.notification']);
+    expect(reseeded.find((event) => event.kind === 'task.notification')).toMatchObject({ taskId: 'a91c8f61a920a8733', status: 'completed' });
     const rows = drawn(stateOf([...before, ...reseeded]));
     expect(rows.filter((row) => row.kind === 'agent_message' && row.text.startsWith('Report from uxw agent'))).toHaveLength(1);
     expect(notices(rows).filter((line) => line.includes('Agent "uxw agent" finished'))).toEqual([]);

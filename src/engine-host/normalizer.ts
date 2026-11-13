@@ -784,7 +784,10 @@ export class Normalizer {
       // earlier reseed showed yields nothing again. The lanes' streaming state is reset, but for a lane streaming a
       // message the reseed showed, whose surviving deltas are dropped by its id; the next message start re-anchors it.
       case 'transcript_reseed': {
-        const ctx = createBackfillContext({ sessionId: this.state.sessionId ?? ('unknown' as SessionId), agent: null });
+        // UX wave U3 (the whole-branch review's finding 2): the rows are read on from what the live reader already read
+        // (the tasks it knows, the completions a hand-back claimed), so an arrival the live wire told is not told again;
+        // the live reader goes on from its own state, since it still reads the frames of rows a reseed showed
+        const ctx = createBackfillContext({ sessionId: this.state.sessionId ?? ('unknown' as SessionId), agent: null, arrivals: this.state.arrivals.open });
         for (const raw of Array.isArray(meta.rows) ? meta.rows : []) {
           const parsed = TranscriptRecordSchema.safeParse(raw);
           if (!parsed.success || typeof parsed.data.uuid !== 'string' || this.state.reseeded.has(parsed.data.uuid)) continue;

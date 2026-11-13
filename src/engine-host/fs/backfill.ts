@@ -84,6 +84,8 @@ export function createBackfillContext(init: {
   sessionId: SessionId;
   agent: { agentId: AgentId; parentToolUseId: ParentToolUseId | null } | null; // a workflow agent names no tool use (its meta has no toolUseId)
   subagents?: SubagentLookup;
+  // what the arrivals reader already read of this session elsewhere (a gap's reseed reads on from the live wire's reader)
+  arrivals?: OpenArrivals;
 }): BackfillContext {
   return {
     sessionId: init.sessionId,
@@ -105,7 +107,7 @@ export function createBackfillContext(init: {
     unanswered: false,
     waitingWords: [],
     localCaveat: null,
-    arrivals: nothingOpen,
+    arrivals: init.arrivals ?? nothingOpen,
     appendedLast: false,
     commandLast: null,
   };
