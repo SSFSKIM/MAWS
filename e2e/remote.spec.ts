@@ -2890,11 +2890,12 @@ async function readWhileDown(page: Page, electron: ElectronApplication, before: 
  * B's lane B session on `journal`, its first turn over and listed; A launched over the relay, the session open in A (with
  * `open: false`, left as A's listed row, no tab of it opened: the UX wave, U9, M4's acts scene).
  */
-async function laneBOpened(opts: { root: string; aUserData: string; journal: SideJournal; first: string; firstReply: string; title: string; open?: boolean }, held: TerminalHeld) {
+async function laneBOpened(opts: { root: string; aUserData: string; journal: SideJournal; first: string; firstReply: string; title: string; open?: boolean; launches?: readonly SideJournal[] }, held: TerminalHeld) {
   const checkout = join(opts.root, 'b-checkout');
   const journals = join(opts.root, 'journals');
   for (const dir of [checkout, journals]) mkdirSync(dir);
-  const fixture = opts.journal.write(journals, 'b-session');
+  // the session's own journal, then one for each later launch on B in turn (the UX wave, U9: a fork's)
+  const fixture = [opts.journal.write(journals, 'b-session'), ...(opts.launches ?? []).map((launch, i) => launch.write(journals, `b-launch-${i + 1}`))].join(',');
   const scene = (held.scene = await startRemoteScene({
     scratch: join(opts.root, 'scene'),
     aUserData: opts.aUserData,
@@ -3162,6 +3163,7 @@ test('U9 A11, a Stop pressed once the line says B reconnects: it reads “Stoppi
 // a new tab on B's address, a session B's index holds as the source's fork; Archive from its menu closes its tab and its
 // row leaves A's sidebar; "Archived sessions…" on B's machine row lists it, and Unarchive brings its row back.
 const ACTS_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000d7';
+const ACTS_FORK = 'b0c0d0e0-0000-4000-8000-0000000000d8'; // the fork's launch on B, pinned by its own journal
 const ACTS_TITLE = 'B’s session to act on';
 const ACTS_REPLY = 'B is ready to be acted on.';
 const RENAMED_ON_A = 'Renamed from A';
@@ -3188,7 +3190,9 @@ test('U9 A8, A9, A10: from A, Rename… on B’s listed row renames it on B; For
   try {
     const journal = new SideJournal(ACTS_SESSION, join(root, 'b-checkout'));
     journal.turn(ACTS_REPLY);
-    const { b, page, app } = await laneBOpened({ root, aUserData, journal, first: 'Get ready to be acted on.', firstReply: ACTS_REPLY, title: ACTS_TITLE, open: false }, held);
+    journal.rename(RENAMED_ON_A); // a live session is renamed through its engine (the host's `rename_session`)
+    const fork = new SideJournal(ACTS_FORK, join(root, 'b-checkout')); // the fork's engine: its prelude, no turn
+    const { b, page, app } = await laneBOpened({ root, aUserData, journal, first: 'Get ready to be acted on.', firstReply: ACTS_REPLY, title: ACTS_TITLE, open: false, launches: [fork] }, held);
     const address = addressOf(b.ref, app);
     const row = sessionRow(page, address);
     type Record = { title: { text: string }; archived: boolean; lineage: { parentAppSessionId: string } | null };
@@ -3212,13 +3216,13 @@ test('U9 A8, A9, A10: from A, Rename… on B’s listed row renames it on B; For
       await quoting(expect(main(page).getByText(ACTS_REPLY).first(), 'B’s history in A’s pane').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
       const before = await sessionTabsOf(page);
       await (await menuItemOfRow(page, row, 'Fork')).click();
-      let fork: string | undefined;
+      let forked: string | undefined;
       await quoting(
-        expect.poll(async () => (fork = (await sessionTabsOf(page)).find((id) => !before.includes(id))), { timeout: 60_000, message: 'a new session tab opens' }).toBeDefined(),
+        expect.poll(async () => (forked = (await sessionTabsOf(page)).find((id) => !before.includes(id))), { timeout: 60_000, message: 'a new session tab opens' }).toBeDefined(),
         () => mainSaid(page),
       );
-      expect(fork!.startsWith(`${b.ref}/`), `the fork's tab is on B's address (${fork})`).toBe(true);
-      const bare = bareOf(fork!);
+      expect(forked!.startsWith(`${b.ref}/`), `the fork's tab is on B's address (${forked})`).toBe(true);
+      const bare = bareOf(forked!);
       await expect.poll(async () => (await onB(bare))?.lineage?.parentAppSessionId ?? null, { timeout: 30_000, message: 'B holds the fork, of the session' }).toBe(app);
       expect(await sessionTabsOf(page), 'the source’s tab stays').toContain(address);
     });
