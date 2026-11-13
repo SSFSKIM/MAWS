@@ -149,8 +149,9 @@ describe('a document tab’s state', () => {
     await ready(state);
     const handle = w.handles[0];
     createDocument(handle.doc, { title: 'Launch', id: 'tab00001', generateID: () => 'p1' });
-    addThread(handle.doc, { threadId: 'th1', tabId: 'tab00001', blockId: 'p1', quote: 'q', anchor: { kind: 'block' }, by: { kind: 'human' }, at: 1 });
-    addThread(handle.doc, { threadId: 'th2', tabId: 'tab00001', blockId: 'gone', quote: 'Gone', anchor: { kind: 'block' }, by: { kind: 'human' }, at: 2 });
+    // UX wave U5a (M7; A3): a comment counts once it holds a message
+    addThread(handle.doc, { threadId: 'th1', tabId: 'tab00001', blockId: 'p1', quote: 'q', anchor: { kind: 'block' }, by: { kind: 'human' }, at: 1, body: 'Shorter?' });
+    addThread(handle.doc, { threadId: 'th2', tabId: 'tab00001', blockId: 'gone', quote: 'Gone', anchor: { kind: 'block' }, by: { kind: 'human' }, at: 2, body: 'Why?' });
     expect(state.snapshot().unresolved).toBe(1);
     const block = tabBody(handle.doc, 'tab00001')!.get(0) as import('@artifacts/yjs').Node;
     block.setAttr('id', 'replacement');

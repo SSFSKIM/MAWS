@@ -119,8 +119,9 @@ describe('comments on a design', () => {
 
   it('showing a board’s thread selects its frame; an element’s activates its board and selects it', async () => {
     const { doc, session, view } = mount();
-    addThread(doc, { threadId: 'tb', slideId: 'b2', elementId: ROOT, quote: 'Desktop', by: { kind: 'human' }, at: 1 }, 'deck-comments');
-    addThread(doc, { threadId: 'te', slideId: 'b1', elementId: 'lede', quote: 'Ship the first week.', by: { kind: 'human' }, at: 1 }, 'deck-comments');
+    // UX wave U5a (M7; A3): a comment counts once it holds a message
+    addThread(doc, { threadId: 'tb', slideId: 'b2', elementId: ROOT, quote: 'Desktop', by: { kind: 'human' }, at: 1, body: 'Wider margins?' }, 'deck-comments');
+    addThread(doc, { threadId: 'te', slideId: 'b1', elementId: 'lede', quote: 'Ship the first week.', by: { kind: 'human' }, at: 1, body: 'Which week?' }, 'deck-comments');
     fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ }));
     const rail = await screen.findByRole('complementary', { name: 'Comments' });
     await act(async () => new Promise((r) => setTimeout(r, 80)));
