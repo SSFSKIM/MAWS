@@ -479,6 +479,115 @@ test('settings: the regrouped page; each note one line where the body has its 76
   }
 });
 
+// U11a M10 (l8-settings-06, A7; the execution document's Interfaces §G, "Search"): "Search settings" at the index's top.
+// ⌘F inside Settings focuses it; A7's four queries list their rows, each the row's name over its section; a row chosen
+// far down a short section lands with its section's heading in view, holds the keyboard and is marked for a moment; a
+// word behind a row's More opens it; the results scroll as the index's list does, the field and the footer staying; Esc
+// clears the field; in the narrow form the field is a first row and its results a list under it.
+test('settings: Search settings finds rows by their words; a choice lands under its heading; the list scrolls with the index; the narrow form', async () => {
+  test.setTimeout(150_000);
+  const maws = await launchMaws();
+  try {
+    const { app, page } = maws;
+    const resize = async (width: number, height = 900) => {
+      await app.evaluate(({ BrowserWindow }, [width, height]) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setContentSize(width, height), [width, height] as const);
+      await page.waitForFunction(([width, height]) => window.innerWidth === width && window.innerHeight === height, [width, height] as const);
+    };
+    await resize(1440);
+    await hideSurfaces(page);
+    await menu(app, 'session.new'); // a second tab, so ⌘\ has one to leave behind
+    await expect(mainTab(page, /New chat/)).toBeVisible();
+    await menu(app, 'settings.open');
+    const view = panel(page);
+    const nav = view.getByRole('navigation', { name: 'Settings sections' });
+    const body = view.locator('[data-settings-body]');
+    const field = nav.getByRole('combobox', { name: 'Search settings' });
+    const options = nav.getByRole('listbox', { name: 'Search settings' }).getByRole('option');
+    const option = (name: string, under: string) => options.filter({ has: page.getByText(name, { exact: true }) }).filter({ has: page.getByText(under, { exact: true }) });
+
+    // ⌘F from a row of the page focuses the field
+    await view.getByRole('group', { name: 'Theme' }).getByText('Theme', { exact: true }).click();
+    await page.keyboard.press('Meta+F');
+    await expect(field).toBeFocused();
+
+    // A7's four queries, each result the row's name with its section under it; "mcp" also finds the Customize link
+    for (const [query, name, under] of [['mcp', 'MCP servers', 'Sessions'], ['hook', 'Hooks in sessions', 'Sessions'], ['theme', 'Theme', 'Appearance'], ['shortcut', 'Shortcut', 'Voice']] as const) {
+      await field.fill(query);
+      await expect(option(name, under), query).toHaveCount(1);
+    }
+    await field.fill('mcp');
+    await expect(option('Customize', 'Plugins, skills and connectors')).toHaveCount(1);
+    await expect(nav.getByRole('button', { name: 'Appearance', exact: true })).toHaveCount(0); // the results in the sections' place
+    await field.fill('zebra crossing');
+    await expect(nav.getByText('No matching settings')).toBeVisible();
+
+    // a row far down a short section: Voice's last, Recognition, lands with Voice's heading at the body's top
+    await field.fill('recognition');
+    await option('Recognition', 'Voice').click();
+    const recognition = view.getByRole('region', { name: 'Voice' }).getByRole('group', { name: 'Recognition' });
+    await expect(recognition).toBeFocused();
+    await expect(recognition).toHaveAttribute('data-settings-mark', 'on');
+    const bodyBox = (await body.boundingBox())!;
+    const heading = (await view.getByRole('heading', { name: 'Voice' }).boundingBox())!;
+    const landed = (await recognition.boundingBox())!;
+    expect(heading.y, 'the heading at the body’s top').toBeGreaterThanOrEqual(bodyBox.y - 1);
+    expect(heading.y, 'the heading at the body’s top').toBeLessThanOrEqual(bodyBox.y + 24);
+    expect(landed.y + landed.height, 'the row in view').toBeLessThanOrEqual(bodyBox.y + bodyBox.height);
+    await expect(field).toHaveValue('recognition'); // the query stays
+    await expect(recognition).not.toHaveAttribute('data-settings-mark', /./, { timeout: 4_000 }); // the mark goes after its moment
+    await page.screenshot({ path: test.info().outputPath('settings-search-landed.png') });
+
+    // a word behind the More a row shows now opens that More
+    await field.fill('PATH');
+    await option('Binary', 'Engine').click();
+    const binary = view.getByRole('region', { name: 'Engine' }).getByRole('group', { name: 'Binary' });
+    await expect(binary.getByRole('button', { name: 'Less' })).toHaveAttribute('aria-expanded', 'true');
+    await expect(binary).toBeFocused();
+
+    // a short window: the results scroll as the index's list does; the field and the footer stay
+    await resize(1440, 600);
+    await field.fill('session');
+    const list = nav.locator('[data-settings-index]');
+    expect(await list.evaluate((el) => el.scrollHeight > el.clientHeight), 'the results scroll by themselves').toBe(true);
+    await list.evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
+    await expect(options.last()).toBeInViewport();
+    await expect(field).toBeInViewport();
+    await expect(nav.getByText("Stored in MAWS's own Application Support folder.", { exact: false })).toBeInViewport();
+
+    // Esc clears the field and brings the sections back
+    await field.focus();
+    await page.keyboard.press('Escape');
+    await expect(field).toHaveValue('');
+    await expect(nav.getByRole('button', { name: 'Appearance', exact: true })).toBeVisible();
+    await resize(1440);
+
+    // the narrow form: Settings in a pane about 330 px wide; the field a first row over the links, its results under it
+    await menu(app, 'pane.split');
+    const pane = page.locator('[data-region="main"] [data-pane="1"]').getByRole('tabpanel');
+    const now = (await pane.boundingBox())!.width;
+    await resize(Math.max(600, Math.round(1440 + 2 * (330 - now))));
+    expect((await pane.boundingBox())!.width, 'a view under 32rem').toBeLessThan(512);
+    const paneNav = pane.getByRole('navigation', { name: 'Settings sections' });
+    const paneField = paneNav.getByRole('combobox', { name: 'Search settings' });
+    const fieldBox = (await paneNav.locator('label').filter({ has: paneField }).boundingBox())!; // the field's box, its icon in it
+    const navBox = (await paneNav.boundingBox())!;
+    expect(fieldBox.width, 'the field takes the row').toBeGreaterThanOrEqual(navBox.width - 24);
+    expect(fieldBox.y + fieldBox.height, 'the field over the links').toBeLessThanOrEqual((await paneNav.getByRole('button', { name: 'Appearance', exact: true }).boundingBox())!.y + 1);
+    await paneField.fill('mcp');
+    const paneList = paneNav.locator('[data-settings-index]');
+    expect((await paneList.boundingBox())!.height, 'at most 12rem').toBeLessThanOrEqual(192.5);
+    expect((await paneList.boundingBox())!.y, 'under the field').toBeGreaterThanOrEqual(fieldBox.y + fieldBox.height - 1);
+    await page.screenshot({ path: test.info().outputPath('settings-search-330.png') });
+    await paneNav.getByRole('option').filter({ has: page.getByText('MCP servers', { exact: true }) }).click();
+    const servers = pane.getByRole('region', { name: 'Sessions' }).getByRole('group', { name: 'MCP servers' });
+    await expect(servers).toBeFocused();
+    await expect(servers).toBeInViewport();
+    expect(maws.consoleErrors()).toEqual([]);
+  } finally {
+    await maws.cleanup();
+  }
+});
+
 // ---- the powerline glyphs, on the harness's #probe page ------------------------------------------------------------
 
 type Harness = { terminals: { ready(): Promise<string[]>; list(): { id: string; status: string }[]; type(id: string, data: string): Promise<void>; probe(id: string): { cols: number; rows: number; line(row: number): string; lineCount(): number } | null } };
