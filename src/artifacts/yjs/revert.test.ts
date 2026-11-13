@@ -9,7 +9,7 @@ import { liveMarkers } from './format-cleanup.fixture';
 import { revertUpdate } from './revert';
 
 const live = () => {
-  const doc = new Y.Doc({ gc: true });
+  const doc = newDoc();
   doc.clientID = 1;
   return doc;
 };

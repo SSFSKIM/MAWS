@@ -1,11 +1,10 @@
-// UX wave, U10 · l6-artifacts-07 (a): "a formatting clean-up is never a write of its own". The probe "Does the inferred
-// cause of l6-artifacts-07 (a) hold?" of docs/doperpowers/specs/2026-11-12-ux-wave/U10-artifacts.md (Probes and checks),
-// written before the fix, through the real document service and the `maws` server's own tool definitions over A's real
-// store (the wired suite's pattern). Findings: spikes/protocol-probe/findings-uxwave-u10-format-cleanup.txt.
-//
-// The `it.fails` cases are what the design asks for and fail today; vitest passes an `it.fails` whose body throws, so the
-// gate stays green until the fix, when they start failing as "expected to fail" and are turned into plain `it`. The
-// cases named "today" pin the cause as it stands (they pass now) and are deleted with the fix.
+// UX wave, U10 · l6-artifacts-07 (a), "a formatting clean-up is never a write of its own": the regression suite. Written by
+// the check of 2026-11-12 (docs/doperpowers/specs/2026-11-12-ux-wave/U10-artifacts.md, Probes and checks; findings in
+// spikes/protocol-probe/findings-uxwave-u10-format-cleanup.txt) before the fix, through the real document service and
+// the `maws` server's own tool definitions over A's real store (the wired suite's pattern), and kept as the fix's proof
+// (docs/doperpowers/plans/2026-11-12-ux-wave-U10a-unmade-writes.md, M1). The trigger: an agent's edit that keeps part of
+// a bold run without the bold leaves formatting markers that Yjs's post-apply clean-up removed in a transaction of its
+// own, which the live doc refused and every replica that received the edit sent on as its reader's write.
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { MessageChannel } from 'node:worker_threads';
@@ -25,7 +24,6 @@ import type { McpToolContext, McpToolDefinition, McpToolResult } from './server'
 import { mawsTools } from './tools';
 
 const SELF = 'app-format' as AppSessionId;
-const RESET = /failed and the document was reset: the live doc of \S+ was edited outside a replica/;
 let world: DocumentWorld;
 let tools: Map<string, McpToolDefinition>;
 let calls = 0;
@@ -102,31 +100,16 @@ const UNBOLD_REST = [
 
 describe('l6-artifacts-07 (a): an agent edit that leaves a formatting marker for the clean-up', () => {
   for (const { where, content } of UNBOLD_REST) {
-    it.fails(`in ${where}: replace_text of **A B** text by B text lands as one row of the agent's, and a replace_block from the returned revision lands`, async () => {
+    it(`in ${where}: replace_text of **A B** text by B text lands as one row of the agent's, and a replace_block from the returned revision lands`, async () => {
       const doc = await created(content);
       const untouched = doc.ids[doc.ids.length - 1];
+      const seen = watch(doc.id);
       const edited = json<{ revision: number }>(await call('artifact_edit', { artifact: doc.id, baseRevision: doc.revision, ops: [{ op: 'replace_text', old: '**A B** text', new: 'B text' }] }));
       await world.service.whenCommitted();
       expect(rows(doc.id).filter((row) => row.seq > doc.revision)).toEqual([{ seq: edited.revision, actor: `session:${SELF}` }]);
       json(await call('artifact_edit', { artifact: doc.id, baseRevision: edited.revision, ops: [{ op: 'replace_block', id: untouched, markdown: 'Changed.' }] }));
       expect(textOf(world.service.live(doc.id), untouched)).toBe('Changed.');
-    });
-
-    it(`today, in ${where}: the batch is refused because Yjs's own clean-up in the live doc names no writer, and the next edit is refused as stale`, async () => {
-      const doc = await created(content);
-      const seen = watch(doc.id);
-      const answer = await call('artifact_edit', { artifact: doc.id, baseRevision: doc.revision, ops: [{ op: 'replace_text', old: '**A B** text', new: 'B text' }] });
-      expect(answer.isError).toBe(true);
-      expect(text(answer)).toMatch(RESET);
-      // the agent's host replica's update, applied (not local), then the clean-up Yjs runs after it: origin null, two
-      // formatting markers deleted; its update is the one `integrated` throws on
-      expect(seen).toEqual([
-        { origin: `session:${SELF}`, local: false, cleanup: false, deleted: 3 },
-        { origin: null, local: true, cleanup: true, deleted: 2 },
-      ]);
-      expect(rows(doc.id).filter((row) => row.seq > doc.revision)).toEqual([]);
-      const next = await call('artifact_edit', { artifact: doc.id, baseRevision: doc.revision, ops: [{ op: 'replace_block', id: doc.ids[doc.ids.length - 1], markdown: 'Changed.' }] });
-      expect(text(next)).toMatch(/changed since the read/);
+      expect(seen.filter((entry) => entry.cleanup)).toEqual([]);
     });
   }
 
@@ -159,41 +142,30 @@ describe('l6-artifacts-07 (a): accepting a suggestion that removes a bold', () =
   // proposal's deletions inside the copy's own transaction, which Yjs then treats as remote (`readUpdateV2` sets
   // `transaction.local = false` on the transaction it joins), so the clean-up runs when that transaction ends, after
   // such a hold, and reaches the live doc as a second row (the findings file, the second probe).
-  it.fails('the probe\'s own markdown in a paragraph, suggested and accepted by the person, lands as one row of the person\'s', async () => {
+  it('the probe\'s own markdown in a paragraph, suggested and accepted by the person, lands as one row of the person\'s', async () => {
     const doc = await suggested('**A** text\n\nUntouched.', { op: 'replace_text', old: '**A** text', new: 'B text' });
     const before = world.service.revision(doc.id);
+    const seen = watch(doc.id);
     await world.service.acceptSuggestion(doc.id, [doc.range], HUMAN);
     await world.service.whenCommitted();
     expect(textOf(world.service.live(doc.id), doc.ids[0])).toBe('B text');
     expect(rows(doc.id).filter((row) => row.seq > before).map((row) => row.actor)).toEqual(['human']);
-  });
-
-  it('today: the accept is refused on the live doc\'s own clean-up, after the agent\'s host replica has echoed its clean-up into the live doc as the agent\'s', async () => {
-    const doc = await suggested('**A** text\n\nUntouched.', { op: 'replace_text', old: '**A** text', new: 'B text' });
-    const seen = watch(doc.id);
-    await expect(world.service.acceptSuggestion(doc.id, [doc.range], HUMAN)).rejects.toThrow(RESET);
-    // the copy (the person's), the live doc's clean-up (null), then, while that clean-up is still queued, the agent's host
-    // replica's own clean-up of the relayed copy, applied to the live doc as the agent's write (deferred, so it never runs
-    // before the null transaction throws)
-    expect(seen.map(({ origin, cleanup }) => ({ origin, cleanup }))).toEqual([
-      { origin: 'human', cleanup: false },
-      { origin: null, cleanup: true },
-      { origin: `session:${SELF}`, cleanup: false },
-    ]);
-    expect(seen[1].deleted).toBe(1);
+    expect(seen.filter((entry) => entry.cleanup)).toEqual([]);
   });
 });
 
 // A restore applies the revert inside the restorer's own write (`restoreArtifact`), the same nesting as the accept's copy.
 describe('l6-artifacts-07 (a): restoring a version across a bold the agent removed', () => {
-  it.fails('the agent un-bolds what is left of a bold run, the person restores the earlier version: each lands as one row', async () => {
+  it('the agent un-bolds what is left of a bold run, the person restores the earlier version: each lands as one row', async () => {
     const doc = await created('**A B** text\n\nUntouched.');
     const versionId = (await world.store.createVersion(doc.id, { kind: 'named', actor: HUMAN, label: 'before' }))!;
+    const seen = watch(doc.id);
     const edited = json<{ revision: number }>(await call('artifact_edit', { artifact: doc.id, baseRevision: doc.revision, ops: [{ op: 'replace_block', id: doc.ids[0], markdown: 'B text' }] }));
     await world.store.restore(doc.id, versionId, HUMAN);
     await world.service.whenCommitted();
     expect(textOf(world.service.live(doc.id), doc.ids[0])).toBe('A B text');
     expect(rows(doc.id).filter((row) => row.seq >= edited.revision).map((row) => row.actor)).toEqual([`session:${SELF}`, 'human']);
+    expect(seen.filter((entry) => entry.cleanup)).toEqual([]);
   });
 });
 

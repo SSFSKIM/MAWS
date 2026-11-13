@@ -3,8 +3,7 @@ import { Schema } from '@tiptap/pm/model';
 import * as Y from '@y/y';
 import { ySyncPluginKey } from '@y/prosemirror';
 import { describe, expect, it } from 'vitest';
-import { adoptClientId, applyV1, applyV2, bindingVersion, diffV1, isBindingTransaction, newDoc, newSuggestionDoc, onUpdate, stateV2, stateVector, transact, type Doc } from './doc';
-import { newDocGcOff } from './document';
+import { adoptClientId, applyV1, applyV2, bindingVersion, diffV1, isBindingTransaction, newDoc, newDocGcOff, newSuggestionDoc, onUpdate, stateV2, stateVector, transact, type Doc } from './doc';
 import { liveMarkers, newDocAsF } from './format-cleanup.fixture';
 
 describe('the binding module’s docs and encodings', () => {
