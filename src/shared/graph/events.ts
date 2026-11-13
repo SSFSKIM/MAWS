@@ -16,6 +16,7 @@ import {
   ToolUseIdSchema,
 } from './ids';
 import { PaneRosterSchema, PromptFillModeSchema, SURFACE_ASKS } from '../engine/surface'; // R2
+import { ArrivalEntrySchema } from '../engine/arrival-schema'; // UX wave U3 (UC-2)
 // E1 start
 import { PaneSchema } from '../maws/panes';
 import { AskAnswerSchema, AskQuestionSchema, DeliveredFileSchema, ShowPaneOpenedSchema } from '../maws/tools';
@@ -185,6 +186,11 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
       z.strictObject({ part: z.literal('input'), command: z.string() }),
       z.strictObject({ part: z.literal('output'), stdout: z.string(), stderr: z.string(), exitCode: z.number() }),
     ]).nullable(),
+    // UX wave U3 (UC-2; the charter's X1, amended 2026-11-12): the arrivals its carrier holds of class `task`, `schedule`,
+    // `answer`, `wake` or `consent`, absent when it holds none. An entry of a class this build does not know is ignored
+    // (read through `carriedOf`); two synthetic messages under one `messageUuid` are one arrival, the later standing,
+    // and an empty list withdraws it
+    arrival: z.array(ArrivalEntrySchema).optional(),
   }),
   event('tool.use', { toolUseId: ToolUseIdSchema, toolName: z.string(), input: z.unknown(), apiMessageId: ApiMessageIdSchema.nullable(), messageUuid: MessageUuidSchema.nullable() }),
   event('tool.safeguard', { toolUseId: ToolUseIdSchema, verdict: z.enum(['skipped', 'not_flagged', 'flagged']), lane: z.literal('server') }), // one per tool use named in a message_delta.safeguard_results entry
