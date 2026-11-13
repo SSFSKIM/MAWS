@@ -1,7 +1,7 @@
 // The record's two facts in the index (UX wave U8c-2, M2; docs/doperpowers/plans/2026-11-12-ux-wave-U8c-live-working-folder.md,
 // §B to §D): where the session was launched and where its agent is, written beside every column build F's record
 // carries, which keep build F's rule. Every case runs over real repositories made in a temporary folder.
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -10,9 +10,10 @@ import { workingBranch, workingFolder, workingWorktree } from '@shared/sessions/
 import type { TranscriptSummary } from '@shared/wire/store';
 import { runGit } from '../../../test/support/git-fixture';
 import { gitCheckout, gitWorktree, sessionIdFor, summary, tempDir } from '../../../test/support/index-fixture';
+import { FolderReads, folderColumns } from './folder-facts';
 import { Index } from './index';
 import { MIGRATIONS } from './migrations';
-import { locate, repositoryAt } from './projects';
+import { headBranch, locate, repositoryAt } from './projects';
 
 describe("the record's two facts", () => {
   let tree: ReturnType<typeof tempDir>;
@@ -26,6 +27,7 @@ describe("the record's two facts", () => {
     await gitCheckout(at('repo'), 'main', { 'README.md': 'hello\n', 'src/index.ts': 'export {};\n' });
     await gitWorktree(at('repo'), w1(), 'worktree-w1');
     await gitWorktree(at('repo'), at('side'), 'side');
+    await gitWorktree(at('repo'), at('side2'), 'side2'); // deregistered by the batch case
     await runGit(at('repo'), ['worktree', 'add', '-q', '--detach', at('detached')]);
     await gitCheckout(at('other'), 'main');
     mkdirSync(at('plain/sub'), { recursive: true });
@@ -262,6 +264,45 @@ describe("the record's two facts", () => {
       asF.close();
       fDir.dispose();
     }
+  });
+
+  // M2 fix wave 2 (decision 11, amended): one batch (one transaction: discovery applies a scan's burst 200 to one) reads
+  // git's files for a folder once, and the next batch reads them again, so a worktree made a moment ago is seen at the
+  // next pass.
+  describe('the reads one batch shares', () => {
+    it("reads each folder's repository, branch and location once for any number of summaries", () => {
+      const calls: string[] = [];
+      const reads = new FolderReads({
+        repositoryAt: (folder) => (calls.push(`repository ${folder}`), repositoryAt(folder)),
+        headBranch: (workTree) => (calls.push(`head ${workTree}`), headBranch(workTree)),
+        locate: (folder) => (calls.push(`locate ${folder}`), locate(folder)),
+      });
+      const stamp = { size: 1, mtimeMs: 1 };
+      const byCd = summary({ directory: at('repo'), newestCwd: at('side'), gitBranch: 'main' });
+      const byTool = summary({ directory: at('repo'), relocatedCwd: w1(), newestCwd: `${w1()}/src`, gitBranch: 'worktree-w1' });
+      const first = [folderColumns(byCd, locate(at('repo')), stamp, reads), folderColumns(byTool, locate(w1()), stamp, reads)];
+      const once = calls.length;
+      expect(once).toBeGreaterThan(0);
+      for (let i = 0; i < 50; i++) {
+        expect(folderColumns(byCd, locate(at('repo')), stamp, reads)).toEqual(first[0]);
+        expect(folderColumns(byTool, locate(w1()), stamp, reads)).toEqual(first[1]);
+      }
+      expect(calls).toHaveLength(once);
+      expect(new Set(calls).size).toBe(calls.length); // no folder read twice
+      expect(JSON.parse(first[0].agent_folder!)).toMatchObject({ checkout: at('side'), branch: 'side' });
+      expect(JSON.parse(first[1].launch_folder!)).toMatchObject({ folder: at('repo') });
+    });
+
+    it('answers a whole transaction from its first reads, and reads again in the next', () => {
+      const cd = () => index.sessions.upsertFromSummary(summary({ sessionId: sessionIdFor(++n), directory: at('repo'), newestCwd: at('side2') })).record;
+      index.transaction(() => {
+        expect(cd().agentFolder?.checkout).toBe(at('side2'));
+        rmSync(at('repo/.git/worktrees/side2/gitdir')); // deregistered: its pointer is no longer named back
+        expect(cd().agentFolder?.checkout).toBe(at('side2')); // the batch's own read
+      });
+      expect(cd()).not.toHaveProperty('agentFolder'); // the next batch sees the change
+      expect(workingFolder(cd())).toEqual({ path: at('repo'), cwd: at('repo'), launch: at('repo'), moved: false });
+    });
   });
 
   // §C: a database build F made has neither column; the opener adds both, null, and leaves its version where it was
