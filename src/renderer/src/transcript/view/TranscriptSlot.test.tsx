@@ -146,7 +146,7 @@ describe('TranscriptSlot', () => {
     b.result('t1', 'a', { structured: BASH_RESULT('a') });
     b.end(['u1']);
     const records = useSessions.getState().records;
-    act(() => useSessions.setState({ records: new Map([[id, { directory: '/w/project', worktree: { path: '/w/project-wt', branch: 'wt' }, holder: { kind: 'self' } } as unknown as SessionRecord]]) }));
+    act(() => useSessions.setState({ records: new Map([[id, { directory: '/w/project-wt', worktree: { path: '/w/project-wt', branch: 'wt' }, holder: { kind: 'self' } } as unknown as SessionRecord]]) }));
     onTestFinished(() => useSessions.setState({ records }));
     const invoke = vi.fn((name: string) => Promise.resolve({ ok: true, value: name === 'session.queue.list' ? EMPTY : name === 'session.appEvents' ? { events: [] } : { events: b.events, lastSeq: 3, complete: true } }));
     window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;

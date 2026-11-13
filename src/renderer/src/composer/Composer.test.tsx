@@ -1530,13 +1530,15 @@ describe('a lane B session on another machine', () => {
   // P5 O7 M4 (the M4b report's order for a spawn with attachments): the session a New chat tab spawned is handed that
   // tab's document; its composer, once open, sends it once through the remote path: the files up, then one message
   // M4c fix wave 1 (review finding 3): an idle worktree session (no engine status) runs in its worktree, where main
-  // writes the uploads, so the mention is relative to the worktree, not to the checkout it was made from
+  // writes the uploads, so the mention is relative to the worktree, not to the checkout it was made from. The record is
+  // the index's shape: a session in a worktree has its directory inside it (UX wave U8c-2: the selector's `cwd` is the
+  // record's directory)
   const idleInWorktree = () => {
     const WT = '/work/app-r/.claude/worktrees/feature';
     const s = useSessions.getState();
     const engine = new Map(s.engine);
     engine.delete(R);
-    useSessions.setState({ engine, records: new Map(s.records).set(R, addressing.output('session.get').lift({ ...record('app-r'), directory: '/work/app-r', worktree: { path: WT, branch: 'feature' } }, OTHER_MACHINE)!), recordsVersion: s.recordsVersion + 1 });
+    useSessions.setState({ engine, records: new Map(s.records).set(R, addressing.output('session.get').lift({ ...record('app-r'), directory: WT, worktree: { path: WT, branch: 'feature' } }, OTHER_MACHINE)!), recordsVersion: s.recordsVersion + 1 });
     return `${WT}/.claude/desk-uploads/app-r/u.0.txt`;
   };
 
