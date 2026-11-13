@@ -138,8 +138,8 @@ function ArchivedRow({ record: r, onUnarchive }: { record: SessionRecord; onUnar
  */
 function askOf(machine: MachineRef, local: MachineRef, rl2: boolean, machines: ReadonlyMap<MachineRef, MachineState>, now: number): 'ask' | { line: string } | null {
   if (machine === local) return 'ask';
-  if (!rl2) return selectOffline({ machines }, machine) ? null : 'ask';
   const entry = machines.get(machine);
+  if (!rl2) return entry !== undefined && entry.state !== 'up' ? null : 'ask'; // selectOffline's rule
   const phase = phaseOf(entry, now);
   const capabilities = entry?.capabilities ?? null;
   const needs = REMOTE_NEEDS['session.list'];
