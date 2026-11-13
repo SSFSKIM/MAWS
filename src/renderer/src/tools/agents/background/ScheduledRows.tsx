@@ -1,4 +1,4 @@
-// Background work's Scheduled section (E7 execution document, Design §7; G5; Decision Log 10, 11): the jobs the engine
+// Background tasks' Scheduled section (E7 execution document, Design §7; G5; Decision Log 10, 11): the jobs the engine
 // holds for the session, durable first (the project's `scheduled_tasks.json`, `scheduled-file.ts`) then session-only
 // (the transcript's `CronCreate` pairs on its activity, so a disk-only session and one resumed list them alike). A row:
 // the schedule, its kind and store, the prompt's first line, its next run (MAWS's cron match from now, the engine's
@@ -13,7 +13,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import { formatClock, formatDayTime, formatShortDate, formatWeekdayClock } from '@shared/app/date-format';
 import { useTranscriptStore } from '../../../transcript';
 import { cellId } from '../../../transcript/model/keys';
-import { SCHEDULED_COPY } from '../copy';
+import { BACKGROUND_COPY, SCHEDULED_COPY } from '../copy';
 import { formatAgo, formatIn } from '../model/elapsed';
 import { createdCrons, cronHistoryActivity, scheduledRows, sessionCrons, type ScheduledRow } from '../model/scheduled';
 import { SLOW_TICK_MS, useTicker } from '../subagents/shared';
@@ -76,7 +76,7 @@ export function ScheduledSection({ appSessionId, session, live, visible, expande
     else useTranscriptStore.getState().jumpTo(appSessionId, cell, { align: 'center', turnId: row.link.turnId });
   };
   return (
-    <Group id="scheduled" heading={SCHEDULED_COPY.heading(rows.length)} expanded={expanded} onToggle={onToggle}>
+    <Group id="scheduled" heading={BACKGROUND_COPY.scheduled(rows.length)} expanded={expanded} onToggle={onToggle}>
       {error !== null && <p className="px-3.5 pb-1 text-ui-sm text-danger">{SCHEDULED_COPY.unavailable(error)}</p>}
       <ul className="flex flex-col">
         {rows.map((row, i) => (

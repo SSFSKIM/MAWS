@@ -444,7 +444,7 @@ describe('the menus drawn from the table', () => {
       'Comments ▸', 'Appearance ▸', 'Usage', '—', 'Developer ▸', '—', 'togglefullscreen',
     ]), shape(view).join(' · ')).toBe(true);
     expect(shape(submenuOf(view, 'Tabs'))).toEqual(Array.from({ length: 9 }, (_, i) => `Select Tab ${i + 1}`));
-    expect(shape(submenuOf(view, 'More surfaces'))).toEqual(['Source control', 'Subagents', 'Background work', 'Session info', 'Questions']);
+    expect(shape(submenuOf(view, 'More surfaces'))).toEqual(['Source control', 'Subagents', 'Background tasks', 'Session info', 'Questions']);
     expect(shape(submenuOf(view, 'Comments'))).toEqual(['Expand comments', 'Minimize comments', 'Hide comments']);
     expect(shape(submenuOf(view, 'Developer'))).toEqual(['reload', 'forceReload', 'toggleDevTools']);
     expect(subsequence(shape(submenuOf(template, 'Go')), [

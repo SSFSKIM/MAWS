@@ -64,7 +64,7 @@ export const ACTIONS = {
   'surface.browser': { title: 'Browser', chord: null, sink: 'menu', menu: 'view', scope: 'app' },
   'surface.source-control': { title: 'Source control', chord: null, sink: 'menu', menu: 'view', submenu: 'More surfaces', scope: 'app' },
   'surface.subagents': { title: 'Subagents', chord: null, sink: 'menu', menu: 'view', submenu: 'More surfaces', scope: 'app' },
-  'surface.background': { title: 'Background work', chord: null, sink: 'menu', menu: 'view', submenu: 'More surfaces', scope: 'app' },
+  'surface.background': { title: 'Background tasks', chord: null, sink: 'menu', menu: 'view', submenu: 'More surfaces', scope: 'app' },
   'surface.session-info': { title: 'Session info', chord: null, sink: 'menu', menu: 'view', submenu: 'More surfaces', scope: 'app' },
   'surface.ask-sheet': { title: 'Questions', chord: null, sink: 'menu', menu: 'view', submenu: 'More surfaces', scope: 'app' },
   // P4-B3 (X38; its Decision Log 21): the focused main artifact tab into the panel ("Show in panel"), and the shown

@@ -1,28 +1,30 @@
-// The Background work tool (C8b execution document, Interfaces *Tools*; M3; mockup 03 study 03): one single-instance,
-// pinnable tool listing a session's background work in the fixed order Workflows, Shells, Monitors, Tasks, each a
-// collapsible section with a sticky heading (C8a's summary `Section` pattern, reimplemented here because C8a's is not
-// exported). A section with nothing to show is omitted, except Tasks, which always says its state. Stop is the one
-// action on a task (§5.6: stop only), through the task-graph store's two-phase stop. Its state is a small handle holding
+// The Background tasks tool (C8b execution document, Interfaces *Tools*; M3; mockup 03 study 03; the UX wave's U8b,
+// M7): one single-instance, pinnable tool listing a session's background tasks by state, not by kind: Running N, every
+// running workflow, shell, monitor and task of another kind in the order they started, each row its kind's (§F's mark);
+// Scheduled N and Tasks only when the session has them; then one Done N, folded at first, every ended one newest first,
+// its heading counting them by kind. With nothing running, `Nothing running` stands in Running's place. Each section is
+// collapsible with a sticky heading (C8a's summary `Section` pattern, reimplemented here because C8a's is not
+// exported). Stop is the one action on a task (§5.6: stop only), through the task-graph store's two-phase stop. Its state is a small handle holding
 // an immutable snapshot the body reads through useSyncExternalStore, plus the store watch for the session it shows.
 // E7 (Design §2): its view is the list or one run's widget, as Subagents' is its lists or a drill-in (Back is a state
 // change; the host sees one tab); a card's title or chevron, the transcript's workflow ref and `open({ view: 'run' })`
-// open the widget. Its Scheduled section (Design §7) lists the session's cron jobs after Monitors.
+// open the widget. Its Scheduled section (Design §7) lists the session's cron jobs after Running.
 // P5 O9 M5: a terminal session driven through its bridge lists the shells and monitors main derives from its transcript
 // (../../../lane-a/jobs/lane-jobs.ts), each stopped through its bridge, with no output tail; an ended one's stay listed
-// exited. Whether it is driven is the port's to say (a non-null `turn()`), whatever engine status MAWS kept from an
+// exited. They join the graph's workflows before the sections are read (§E), so one rule orders and counts both. Whether it is driven is the port's to say (a non-null `turn()`), whatever engine status MAWS kept from an
 // earlier run of the session: that status is not live while a terminal holds it.
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { AppSessionId, TaskId } from '@shared/graph/ids';
-import { Icon } from '../../../app/IconButton';
 import type { PanelTool, PanelToolContext } from '../../../panel/tool';
 import type { Job } from 'desk-hub/protocol';
 import { useDrivenJobs } from '../../../lane-a/jobs/lane-jobs'; // P5 O9 M5
-import { jobLists } from '../../../lane-a/jobs/job-nodes'; // P5 O9 M5
+import { taskNodeOf } from '../../../lane-a/jobs/job-nodes'; // P5 O9 M5
 import { stopSessionTask, useSessionControls } from '../../../session/controls/controls-for'; // P5 O9 M5
 import { BACKGROUND_COPY } from '../copy';
 import { openLog } from '../log/LogTool';
+import { BackgroundIcon } from '../marks';
 import { elapsedOf } from '../model/elapsed';
-import { emptyGraph, monitors, shells, workflows, type TaskNode } from '../model/task-graph';
+import { backgroundDone, backgroundRunning, doneByKind, emptyGraph, type TaskGraph, type TaskNode } from '../model/task-graph';
 import { resolveRun, runView, type PhaseSelection } from '../model/workflow-run'; // E7
 import { useTaskGraph } from '../store';
 import { SLOW_TICK_MS, STOP_DOUBT_MS, useTicker } from '../subagents/shared';
@@ -32,7 +34,7 @@ import { Group, type BackgroundSection } from './Group';
 import { RunWidget } from './RunWidget'; // E7
 import { ScheduledSection } from './ScheduledRows'; // E7
 import { TaskChecklist } from '../checklist/TaskChecklist';
-import { MonitorRow, ShellRow } from './TaskRows';
+import { MonitorRow, OtherTaskRow, ShellRow } from './TaskRows';
 import { WorkflowCard } from './WorkflowCard';
 
 // Additive to the document's `{ taskId? }`: `appSessionId`, the session the selection belongs to, so a pinned tab still
@@ -45,10 +47,13 @@ export interface BackgroundParams {
   view?: 'run';
   runId?: string;
   // E7 end
+  // The UX wave's U8b (M7 decision 8): the list with Done unfolded, no other fold changed (a card's `N finished`)
+  section?: 'done';
 }
 
 export type { BackgroundSection } from './Group';
-const ALL_SECTIONS: readonly BackgroundSection[] = ['workflows', 'shells', 'monitors', 'tasks', /* E7 */ 'scheduled'];
+// Done is folded at first, for each session the tab shows (M7 decision 2).
+const OPEN_AT_FIRST: readonly BackgroundSection[] = ['running', 'scheduled', 'tasks'];
 
 // E7: the list, or one run's widget (`taskId` the id it was opened on; `phase` the owner's pick, null following the run).
 export type BackgroundView = { kind: 'list' } | { kind: 'run'; taskId: string; phase: PhaseSelection | null };
@@ -71,7 +76,8 @@ export interface BackgroundState {
   doubtedJobs: ReadonlySet<string>; // P5 O9: a lane A job's stop whose outcome is unknown: it may not have stopped
 }
 
-const sectionOfNode = (node: TaskNode | undefined): BackgroundSection => (node?.kind === 'shell' ? 'shells' : node?.kind === 'monitor' ? 'monitors' : 'workflows');
+// A task not known yet (an open that came before the graph has it) is taken for running.
+const sectionOfNode = (node: TaskNode | undefined): BackgroundSection => (node === undefined || node.status === 'running' ? 'running' : 'done');
 
 export class BackgroundHandle {
   private state: BackgroundState;
@@ -81,7 +87,7 @@ export class BackgroundHandle {
 
   constructor(appSessionId: AppSessionId | null, params: BackgroundParams | undefined) {
     this.state = {
-      appSessionId, view: LIST, pendingRun: null, selected: null, expanded: new Set(ALL_SECTIONS), showEarlierTasks: false, scrollTop: 0, stopErrors: new Map(), reveal: 0, stoppingJobs: new Set(), doubtedJobs: new Set(),
+      appSessionId, view: LIST, pendingRun: null, selected: null, expanded: new Set(OPEN_AT_FIRST), showEarlierTasks: false, scrollTop: 0, stopErrors: new Map(), reveal: 0, stoppingJobs: new Set(), doubtedJobs: new Set(),
     };
     this.watch(appSessionId);
     this.open(params);
@@ -105,17 +111,22 @@ export class BackgroundHandle {
 
   // X5's `open`: a task id selects its card, expands its section and scrolls to it, in the list. E7: with `view: 'run'`
   // it opens the run's widget, the id resolved through the graph (Design §2); while nothing resolves, the list reads
-  // `Run not found yet` with the id selected until a read brings the run. No task id (the summary's Open) shows the list.
+  // `Run not found yet` with the id selected until a read brings the run. No task id (the summary's Open) shows the list;
+  // with `section: 'done'`, Done unfolded.
   open = (params: BackgroundParams | undefined) => {
     if (params?.appSessionId !== undefined) this.follow(params.appSessionId);
-    if (!params?.taskId) return this.back();
+    if (!params?.taskId) {
+      this.back();
+      if (params?.section === 'done' && !this.state.expanded.has('done')) this.update({ expanded: new Set([...this.state.expanded, 'done']) });
+      return;
+    }
     const { appSessionId } = this.state;
     const graph = appSessionId === null ? undefined : useTaskGraph.getState().entries.get(appSessionId)?.graph;
     if (params.view === 'run') {
       const ids = params.runId === undefined ? [params.taskId] : [params.taskId, params.runId];
       const taskId = graph === undefined ? null : resolveRun(graph, ids);
       if (taskId !== null) return this.openRun(taskId);
-      return this.update({ view: LIST, pendingRun: ids, selected: params.taskId, expanded: new Set([...this.state.expanded, 'workflows']), reveal: this.state.reveal + 1 });
+      return this.update({ view: LIST, pendingRun: ids, selected: params.taskId, expanded: new Set([...this.state.expanded, 'running']), reveal: this.state.reveal + 1 });
     }
     const node = graph?.tasks.get(params.taskId as TaskId);
     this.update({ view: LIST, pendingRun: null, selected: params.taskId, expanded: new Set([...this.state.expanded, sectionOfNode(node)]), reveal: this.state.reveal + 1 });
@@ -194,13 +205,14 @@ export class BackgroundHandle {
     }
   }
 
-  // A pinned tab's session changed under it: that session's work, with the selection, scroll and stop errors reset. No
-  // session shown (the Overview) changes nothing: returning to the same session finds the tab as it was (as Subagents).
+  // A pinned tab's session changed under it: that session's work, with the selection, scroll, stop errors and folds
+  // reset (Done folded again). No session shown (the Overview) changes nothing: returning to the same session finds the
+  // tab as it was (as Subagents).
   follow = (appSessionId: AppSessionId | null) => {
     if (appSessionId === null || appSessionId === this.state.appSessionId) return;
     this.watch(appSessionId);
     this.clearDoubt();
-    this.update({ appSessionId, view: LIST, pendingRun: null, selected: null, showEarlierTasks: false, scrollTop: 0, stopErrors: new Map(), stoppingJobs: new Set(), doubtedJobs: new Set() });
+    this.update({ appSessionId, view: LIST, pendingRun: null, selected: null, expanded: new Set(OPEN_AT_FIRST), showEarlierTasks: false, scrollTop: 0, stopErrors: new Map(), stoppingJobs: new Set(), doubtedJobs: new Set() });
   };
 
   dispose = () => {
@@ -250,22 +262,24 @@ function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
   const driven = controls !== null && controls.turn() !== null;
   const live = !driven && ctx.status !== null;
   const jobs = useDrivenJobs(appSessionId, driven && !live);
-  const derived = live || jobs === null ? null : jobNodes(jobs, own ? snapshot.stoppingJobs : NO_JOBS);
-  const listed = live || derived !== null;
-  const flows = workflows(graph);
-  const shellNodes = live ? shells(graph) : (derived?.shells ?? []);
-  const monitorNodes = live ? monitors(graph) : (derived?.monitors ?? []);
-  const onStop = derived !== null ? handle.stopJob : handle.stop;
+  const listed = live || jobs !== null;
+  const stopping = own ? snapshot.stoppingJobs : NO_JOBS;
+  // What the sections read: the graph of a session live here; else its workflows (a run read from disk) with the jobs
+  // its terminal's transcript gives, the graph's shells and monitors being known only while it runs here.
+  const source = useMemo(() => (live ? graph : withJobs(graph, jobs ?? [], stopping)), [live, graph, jobs, stopping]);
+  const running = backgroundRunning(source);
+  const done = backgroundDone(source);
+  const onStop = jobs !== null && !live ? handle.stopJob : handle.stop;
   const stopCapability = controls?.capability('stop-task') ?? null; // P5 O9 M5: Stop drawn from its own capability
   const stopGap = stopCapability !== null && !stopCapability.available ? stopCapability.reason : null;
   const selected = own ? snapshot.selected : null;
   const stopErrors = own ? snapshot.stopErrors : new Map<string, string>();
-  const doubted = own && derived !== null ? snapshot.doubtedJobs : NO_JOBS; // P5 O9
+  const doubted = own && jobs !== null && !live ? snapshot.doubtedJobs : NO_JOBS; // P5 O9
 
   const expanded = snapshot.expanded;
   // A running task's elapsed (a running workflow's on its card's line) ticks once a second; an ended shell's or monitor's
-  // `<ago>` on the slow tick. Neither ticks while its section is collapsed or the tool hidden.
-  const shown = [...(expanded.has('workflows') ? flows : []), ...(expanded.has('shells') ? shellNodes : []), ...(expanded.has('monitors') ? monitorNodes : [])];
+  // `<ago>` on the slow tick. Neither ticks while its section is folded or the tool hidden.
+  const shown = [...(expanded.has('running') ? running : []), ...(expanded.has('done') ? done : [])];
   const fast = useTicker(ctx.visible && shown.some((n) => n.status === 'running' && (n.kind === 'workflow' || elapsedOf(n, 0)?.live === true)));
   const slow = useTicker(ctx.visible && shown.some((n) => n.kind !== 'workflow' && n.status !== 'running' && n.endedAt !== null), SLOW_TICK_MS);
   const now = Math.max(fast, slow);
@@ -290,56 +304,30 @@ function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
     if (arrived !== null) handle.openRun(arrived);
   }, [arrived, handle]);
 
-  const running = (nodes: TaskNode[]) => nodes.filter((n) => n.status === 'running').length;
-  const nothing = listed && flows.length === 0 && shellNodes.length === 0 && monitorNodes.length === 0;
+  // One row by its kind, as each kind's row was drawn in its own section before.
+  const row = (node: TaskNode) => {
+    const key = node.taskId;
+    const common = { node, selected: selected === node.taskId, stopError: stopErrors.get(node.taskId) ?? null };
+    if (node.kind === 'workflow') return <WorkflowCard key={key} {...common} view={runView(node, null, now)} live={live} onOpen={handle.openRun} onStop={handle.stop} />;
+    const task = { ...common, now, stopDoubt: doubted.has(node.taskId), onStop, stopGap };
+    if (node.kind === 'shell') return <ShellRow key={key} {...task} onOutput={live ? (path) => openLog(appSessionId, path, node.description) : null} />; // a lane A job's tail is remote-only
+    if (node.kind === 'monitor') return <MonitorRow key={key} {...task} />;
+    return <OtherTaskRow key={key} {...task} />;
+  };
 
   return (
     <div ref={scroller} onScroll={(e) => handle.setScrollTop(e.currentTarget.scrollTop)} className="flex h-full min-h-0 flex-col overflow-auto">
       {!listed && !driven && <p className="shrink-0 px-3.5 pt-3 text-ui-sm text-fg-muted">{BACKGROUND_COPY.shellsDiskOnly}</p>}
       {runsError !== null && <p className="shrink-0 px-3.5 pt-3 text-ui-sm text-danger">{BACKGROUND_COPY.runsUnavailable(runsError)}</p>}
       {pendingRun !== null && <p className="shrink-0 px-3.5 pt-3 text-ui-sm text-fg-muted">{BACKGROUND_COPY.runNotFound}</p>}
-      {nothing && <p className="shrink-0 px-3.5 pt-3 text-ui text-fg-muted">{BACKGROUND_COPY.nothingRunning}</p>}
-      {flows.length > 0 && (
-        <Group id="workflows" heading={live ? BACKGROUND_COPY.workflows(flows.length) : BACKGROUND_COPY.runsOnDisk(flows.length)} expanded={expanded.has('workflows')} onToggle={handle.toggle}>
-          {flows.map((node) => (
-            <WorkflowCard
-              key={node.taskId}
-              node={node}
-              view={runView(node, null, now)}
-              live={live}
-              selected={selected === node.taskId}
-              stopError={stopErrors.get(node.taskId) ?? null}
-              onOpen={handle.openRun}
-              onStop={handle.stop}
-            />
-          ))}
+      {running.length > 0 ? (
+        <Group id="running" heading={BACKGROUND_COPY.running(running.length)} expanded={expanded.has('running')} onToggle={handle.toggle}>
+          {running.map(row)}
         </Group>
+      ) : (
+        listed && <p className="shrink-0 px-3.5 py-3 text-ui text-fg-muted">{BACKGROUND_COPY.nothingRunning}</p>
       )}
-      {shellNodes.length > 0 && (
-        <Group id="shells" heading={BACKGROUND_COPY.shellsRunning(running(shellNodes))} expanded={expanded.has('shells')} onToggle={handle.toggle}>
-          {shellNodes.map((node) => (
-            <ShellRow
-              key={node.taskId}
-              node={node}
-              now={now}
-              selected={selected === node.taskId}
-              stopError={stopErrors.get(node.taskId) ?? null}
-              stopDoubt={doubted.has(node.taskId)}
-              onStop={onStop}
-              stopGap={stopGap}
-              onOutput={derived !== null ? null : (path) => openLog(appSessionId, path, node.description)} // a lane A job's tail is remote-only
-            />
-          ))}
-        </Group>
-      )}
-      {monitorNodes.length > 0 && (
-        <Group id="monitors" heading={BACKGROUND_COPY.monitors(monitorNodes.length)} expanded={expanded.has('monitors')} onToggle={handle.toggle}>
-          {monitorNodes.map((node) => (
-            <MonitorRow key={node.taskId} node={node} now={now} selected={selected === node.taskId} stopError={stopErrors.get(node.taskId) ?? null} stopDoubt={doubted.has(node.taskId)} onStop={onStop} stopGap={stopGap} />
-          ))}
-        </Group>
-      )}
-      {/* E7: the session's scheduled jobs, after Monitors (Decision Log 10) */}
+      {/* E7: the session's scheduled jobs (Decision Log 10) */}
       <ScheduledSection appSessionId={appSessionId} session={ctx.session} live={live} visible={ctx.visible} expanded={expanded.has('scheduled')} onToggle={handle.toggle} />
       <TaskChecklist
         status={ctx.status}
@@ -350,25 +338,29 @@ function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
         onToggleEarlier={handle.toggleEarlierTasks}
         onOpen={() => ctx.openTool(AGENT_TOOL_IDS.tasks, { appSessionId, params: { appSessionId } })} // E7: the Tasks panel
       />
+      {done.length > 0 && (
+        <Group id="done" heading={BACKGROUND_COPY.done(done.length, doneByKind(done))} expanded={expanded.has('done')} onToggle={handle.toggle}>
+          {done.map(row)}
+        </Group>
+      )}
     </div>
   );
 }
 
-// P5 O9 M5: a lane A session's jobs as the list's rows, a stop the bridge took reading stopping… while its job runs.
+// P5 O9 M5: a session not live here: the graph's workflows (its runs read from disk) and its terminal's jobs as one
+// graph, in the order they started, a stop the bridge took reading stopping… while its job runs.
 const NO_JOBS: ReadonlySet<string> = new Set();
-function jobNodes(jobs: readonly Job[], stopping: ReadonlySet<string>): { shells: TaskNode[]; monitors: TaskNode[] } {
-  const lists = jobLists(jobs);
+const startMs = (n: TaskNode) => (n.startedAt === null ? Infinity : Date.parse(n.startedAt));
+function withJobs(graph: TaskGraph, jobs: readonly Job[], stopping: ReadonlySet<string>): TaskGraph {
+  const flows = graph.order.map((taskId) => graph.tasks.get(taskId)!).filter((n) => n.kind === 'workflow');
   const mark = (n: TaskNode): TaskNode => (n.status === 'running' && stopping.has(n.taskId) ? { ...n, stopping: true } : n);
-  return { shells: lists.shells.map(mark), monitors: lists.monitors.map(mark) };
-}
-
-export function BackgroundIcon({ className }: { className?: string }) {
-  return (
-    <Icon className={className}>
-      <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
-      <path d="M5 6.5h6M5 9.5h3.5" />
-    </Icon>
-  );
+  const nodes = [...flows, ...jobs.map((job) => mark(taskNodeOf(job)))].sort((a, b) => startMs(a) - startMs(b) || 0);
+  const merged = emptyGraph();
+  for (const node of nodes) {
+    if (!merged.tasks.has(node.taskId)) merged.order.push(node.taskId);
+    merged.tasks.set(node.taskId, node);
+  }
+  return merged;
 }
 
 export const backgroundTool: PanelTool<BackgroundHandle, BackgroundParams> = {
