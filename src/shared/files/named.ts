@@ -338,13 +338,25 @@ export type RowClaim = { names: true } | { names: false; pending: PendingCall[] 
 
 const NOTHING: RowClaim = { names: false, pending: [] };
 const NAMES: RowClaim = { names: true };
-const blocks = (value: unknown): Record<string, unknown>[] => (Array.isArray(value) ? value.map(record) : []);
-const textsOf = (content: unknown): string[] => (typeof content === 'string' ? [content] : blocks(content).flatMap((block) => (block.type === 'text' && typeof block.text === 'string' ? [block.text] : [])));
 const isThePath = (value: unknown, path: string) => typeof value === 'string' && normalizeLexically(value) === path;
+const listOf = (value: unknown): readonly unknown[] => (Array.isArray(value) ? value : []);
 
-// The rule's work on one record, as steps: one per string looked at and one per step of `linkSteps`, each bounded, and
-// the answer at the end. `rowClaim` runs them at once; the daemon's search gives the event loop back between them.
+// The rule's work on one record, as steps: one per value visited (a block, a container or a string of a tool's input:
+// fix round 1, item 5) and one per step of `linkSteps`, each bounded, and the answer at the end. `rowClaim` runs them
+// at once; the daemon's search gives the event loop back between them.
 type Steps<T> = Generator<void, T, void>;
+
+// A content's texts: the content when a string, else the `text` of each block of type `text`, a step per block.
+function* textsOf(content: unknown): Steps<string[]> {
+  if (typeof content === 'string') return [content];
+  const texts: string[] = [];
+  for (const value of listOf(content)) {
+    yield;
+    const block = record(value);
+    if (block.type === 'text' && typeof block.text === 'string') texts.push(block.text);
+  }
+  return texts;
+}
 
 // Whether one of the texts links the path; it stops at the first that does.
 function* linksTo(texts: readonly string[], path: string): Steps<boolean> {
@@ -359,14 +371,21 @@ function* linksTo(texts: readonly string[], path: string): Steps<boolean> {
   return false;
 }
 
-// Whether any string of a value, at any depth (a tool's input), links the path; walked without recursion.
+// Whether any string of a value, at any depth (a tool's input), links the path; walked without recursion, a step per
+// value visited, containers included, and an array's items read in place.
 function* anyStringLinks(value: unknown, path: string): Steps<boolean> {
-  const stack = [value];
+  const stack: { items: readonly unknown[]; at: number }[] = [{ items: [value], at: 0 }];
   while (stack.length > 0) {
-    const next = stack.pop();
+    const top = stack[stack.length - 1]!;
+    if (top.at >= top.items.length) {
+      stack.pop();
+      continue;
+    }
+    const next = top.items[top.at++];
+    yield;
     if (typeof next === 'string') {
       if (yield* linksTo([next], path)) return true;
-    } else if (next !== null && typeof next === 'object') for (const child of Object.values(next)) stack.push(child);
+    } else if (next !== null && typeof next === 'object') stack.push({ items: Array.isArray(next) ? next : Object.values(next), at: 0 });
   }
   return false;
 }
@@ -374,7 +393,7 @@ function* anyStringLinks(value: unknown, path: string): Steps<boolean> {
 // A person's message names the path by a link in its text, or by its anchored comment's tag; the window joins the text
 // blocks this way before it reads the tag (`userTextOf`, model/user-text.ts).
 function* personNames(content: unknown, path: string): Steps<boolean> {
-  const texts = textsOf(content);
+  const texts = yield* textsOf(content);
   return (yield* linksTo(texts, path)) || isThePath(anchorPath(texts.join('\n\n')), path);
 }
 
@@ -393,7 +412,9 @@ export function* rowClaimSteps(row: unknown, path: string): Steps<RowClaim> {
   const fields = record(row);
   switch (fields.type) {
     case 'assistant': {
-      for (const block of blocks(record(fields.message).content)) {
+      for (const value of listOf(record(fields.message).content)) {
+        yield;
+        const block = record(value);
         if (block.type === 'text' && (yield* linksTo([str(block.text)], path))) return NAMES;
         if (block.type === 'tool_use' && (isThePath(chipPath(str(block.name), block.input), path) || (yield* anyStringLinks(block.input, path)))) return NAMES;
       }
@@ -405,9 +426,11 @@ export function* rowClaimSteps(row: unknown, path: string): Steps<RowClaim> {
       if (yield* personNames(content, path)) return NAMES;
       const edited = isThePath(record(fields.toolUseResult).filePath, path);
       const pending: PendingCall[] = [];
-      for (const block of blocks(content)) {
+      for (const value of listOf(content)) {
+        yield;
+        const block = record(value);
         if (block.type !== 'tool_result' || typeof block.tool_use_id !== 'string') continue;
-        if (yield* linksTo(textsOf(block.content), path)) pending.push({ toolUseId: block.tool_use_id, when: 'mcp' });
+        if (yield* linksTo(yield* textsOf(block.content), path)) pending.push({ toolUseId: block.tool_use_id, when: 'mcp' });
         if (edited) pending.push({ toolUseId: block.tool_use_id, when: 'edit' });
       }
       return pending.length > 0 ? { names: false, pending } : NOTHING;
@@ -429,7 +452,7 @@ export function* rowClaimSteps(row: unknown, path: string): Steps<RowClaim> {
 export function callClass(row: unknown, toolUseId: string): 'mcp' | 'edit' | 'other' | null {
   const fields = record(row);
   if (fields.type !== 'assistant') return null;
-  const block = blocks(record(fields.message).content).find((candidate) => candidate.type === 'tool_use' && candidate.id === toolUseId);
+  const block = listOf(record(fields.message).content).map(record).find((candidate) => candidate.type === 'tool_use' && candidate.id === toolUseId);
   if (!block) return null;
   const name = str(block.name);
   return isMcpTool(name) ? 'mcp' : EDIT_TOOLS.has(name) ? 'edit' : 'other';
