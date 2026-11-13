@@ -24,7 +24,7 @@
 // Runs under `pnpm e2e:deliverables` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list); each launch
 // passes MAWS_HARNESS=0, so the window is the product app.
 import { addressed } from './support/address';
-import { surface, surfaceRow, mainTabs as shellMainTabs } from './support/shell';
+import { closeSurface, openSurface, surface, surfaceRow, mainTabs as shellMainTabs } from './support/shell';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -34,8 +34,9 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { ArtifactConsole } from '@shared/ipc/schema/artifacts';
 import type { MawsArtifactCapture, MawsArtifactCapturedResult } from '@shared/ipc/schema/maws';
 import type { DeliverableRecord } from '../src/shared/maws/deliverable';
+import { commentsMessage, readAnchoredMessage } from '../src/shared/anchor/message'; // UX wave U5a
 import { TOOL_ERRORS } from '../src/shared/maws/tools';
-import { invoke, value } from './support/c7-replay';
+import { invoke, launchReady, turnsJournal, value } from './support/c7-replay';
 import { FIRST_CREATED_REVISION } from './support/design-systems'; // Decision Log 67: fresh artifacts follow the seeded defaults.
 import {
   allowNext, asPublishReplay, closeScene, frameAt, headerAction, headerActions, idle, importSeeded, launchScene, listOf, mcpCalls, mcpResultOf, ofKind, openArtifacts, PASS3, pageUrlOf,
@@ -949,8 +950,9 @@ const near = (actual: number, expected: number, what: string) => expect(Math.abs
 
 // P2-E1 (M1; P2-E1 document, acceptance 1 and 2): a pick opens the comment card beside the element inside the viewer's
 // body (no sheet, no Side tab, the main area's tabs unchanged, the Artifacts tab still selected), below the element
-// with room and above one at the frame's bottom; the same in the artifact's main tab; Escape dismisses it and gives
-// focus back to Comment (the viewer's X32 header's, P3-L M5b).
+// with room and above one at the frame's bottom; the same in the artifact's main tab; Escape gives focus back to Comment
+// (the viewer's X32 header's, P3-L M5b), dismissing an empty card and keeping one with text (UX wave U5a: X36's draft rule
+// is every host's), which Close then discards.
 test('comment mode: Escape ends picking and nothing else, picking highlights the element under the pointer, and a click opens the comment card beside the element', async () => {
   await scene({ titles: ['E2: comment'] }, async (s) => {
     const [id] = s.ids;
@@ -1022,19 +1024,24 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
     expect(placed.x + placed.width).toBeLessThanOrEqual(body.x + body.width - 8 + 1);
     expect(placed.y + placed.height).toBeLessThanOrEqual(body.y + body.height + 1);
 
-    // the composer half: the sheet's names, the field focused, Side thread chosen, Send waiting for text
+    // the composer half: the sheet's names, the field focused, "Send to main" unchecked (a side thread; UX wave U5a's one
+    // checkbox in place of the two segments), Send waiting for text
     const field = card.getByRole('textbox', { name: 'Comment' });
     await expect(field).toBeFocused();
-    await expect(card.getByRole('radio', { name: 'Side thread' })).toBeChecked();
-    await expect(card.locator('[data-destination="thread"]')).toHaveCount(1);
-    await expect(card.locator('[data-destination="main"]')).toHaveCount(1);
+    await expect(card.getByRole('checkbox', { name: 'Send to main' })).not.toBeChecked();
+    await expect(card.getByRole('radio'), 'no two-segment control').toHaveCount(0);
     await expect(card.getByRole('button', { name: 'Send' })).toBeDisabled();
     await field.fill('Make the heading larger.');
     await expect(card.getByRole('button', { name: 'Send' })).toBeEnabled();
     await shoot(s, 'comment-card');
+    // Escape keeps a card with text and gives the keyboard back; the person's Close discards it
     await s.page.keyboard.press('Escape');
-    await expect(card).toHaveCount(0);
     await expect(comment).toBeFocused();
+    await expect(card, 'a card with text is kept').toBeVisible();
+    await expect(field).toHaveValue('Make the heading larger.');
+    await card.getByRole('button', { name: 'Close' }).click();
+    await expect(card).toHaveCount(0);
+    await expect(viewer.locator('[data-unsent-chip]'), 'Close discarded it: nothing unsent').toHaveCount(0);
     await expect(artifactsSurface).toBeVisible();
 
     // the same pick in the artifact's main tab opens the card inside that tab's viewer
@@ -1079,6 +1086,95 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
     near(aboveBox.y + aboveBox.height, footBox.y - 4, 'the card’s bottom');
     await s.page.keyboard.press('Escape');
     await expect(above).toHaveCount(0);
+  });
+});
+
+// UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, M8; A4 on an HTML page): the page's comments
+// are one pass, as a browser tab's are. Escape keeps a typed card; a second pick joins the first; with no card open the
+// chip "N unsent comments" sits at the page's top right and reopens the card on the newest; one Send carries them all.
+test('a pass on an HTML page: Escape keeps the text in the card, a second pick lists the first and Send reads "Send 2 comments", the Artifacts surface away and back shows "2 unsent comments" at the page’s top right, and one Send to main delivers both as one message', async () => {
+  await scene({ titles: ['U5a: a pass on a page'] }, async (s) => {
+    const [id] = s.ids;
+    const record = seedArtifact(s.maws.userData, id, 'dash', 'Dashboard', [COMMENT_PAGE]);
+    await importSeeded(s.page);
+    const journals = join(s.scratch.root, 'journals');
+    mkdirSync(journals, { recursive: true });
+    await launchReady(s.page, id, turnsJournal(journals, 'u5a-pass', 1), { cwd: s.repo }); // the one turn the pass's message opens
+    await show(s, id);
+    await openArtifacts(s);
+    await rowOf(listOf(s), record).click();
+    const viewer = viewerOf(s.panel);
+    const frame = await frameAt(s.page, await pageUrlOf(s.page, record.id));
+    await expect(frame.locator('#hero')).toHaveText('Sales overview');
+    const comment = s.panel.locator('[data-editor-header]').getByRole('button', { name: 'Comment', exact: true });
+    const card = viewer.locator('[data-comment-card]');
+    const field = card.getByRole('textbox', { name: 'Comment' });
+    const pick = async (selector: string) => {
+      await comment.click();
+      await expect(viewer.locator('[data-picking]')).toBeVisible();
+      const box = (await frame.locator(selector).boundingBox())!;
+      await pointInFrame(s.page, frame, box.x + 20, box.y + box.height / 2);
+      await s.page.mouse.click(box.x + 20, box.y + box.height / 2);
+    };
+
+    // the first pick, typed, then Escape: the card stays with its text, the keyboard back on Comment
+    await pick('#hero');
+    await expect(card).toHaveAttribute('data-anchor-locator', '#hero');
+    await field.fill('Make the heading larger.');
+    await field.press('Escape');
+    await expect(comment).toBeFocused();
+    await expect(card, 'Escape keeps the card').toBeVisible();
+    await expect(field).toHaveValue('Make the heading larger.');
+
+    // a second pick: the card moves to it and lists the first; Send counts both once the second has words
+    await pick('p.lead');
+    await expect(card).not.toHaveAttribute('data-anchor-locator', '#hero');
+    const secondLocator = (await card.getAttribute('data-anchor-locator'))!;
+    const others = card.locator('[data-pass-comment]');
+    await expect(others).toHaveCount(1);
+    await expect(others).toContainText('Make the heading larger.');
+    await field.fill('Say which quarter this is.');
+    await expect(card.getByRole('button', { name: 'Send 2 comments' })).toBeEnabled();
+
+    // the side surface away and back: the card went with its viewer and its comments stayed; at the page's top right the
+    // chip counts them and opens the card on the newest, with its text
+    await closeSurface(s.page, 'Artifacts');
+    await expect(viewer, 'the surface closed, its viewer with it').toHaveCount(0);
+    await openSurface(s.page, 'Artifacts');
+    await expect(viewer, 'the surface back on the page').toHaveAttribute('data-artifact-viewer', record.id);
+    const chip = viewer.locator('[data-unsent-chip]');
+    await expect(chip).toHaveText('2 unsent comments');
+    await expect(card, 'no card while the chip shows').toHaveCount(0);
+    const [chipBox, hostBox] = [(await chip.boundingBox())!, (await viewer.locator('[data-card-host]').boundingBox())!];
+    near(chipBox.x + chipBox.width, hostBox.x + hostBox.width - 8, 'the chip’s right, 8 px in from the page’s');
+    near(chipBox.y, hostBox.y + 8, 'the chip’s top, 8 px under the page’s');
+    await chip.click();
+    await expect(card).toHaveAttribute('data-anchor-locator', secondLocator);
+    await expect(field).toHaveValue('Say which quarter this is.');
+    await expect(others).toContainText('Make the heading larger.');
+
+    // one Send to main: one message holding both comments in the order made, and the page's corner says where it went
+    const listed = value(await invoke(s.page, 'session.list', {})).sessions.find((r) => r.appId === id)?.title.text ?? '';
+    const title = listed.trim() === '' ? 'New chat' : listed;
+    await card.getByRole('checkbox', { name: 'Send to main' }).check();
+    await card.getByRole('button', { name: 'Send 2 comments' }).click();
+    await expect(card).toHaveCount(0);
+    await expect(viewer.locator('[data-sent-note]')).toHaveText(`Sent to ${title}`);
+    const written = () => s.journal(id).filter((r) => r.direction === 'out' && (r.frame as { type?: string }).type === 'user');
+    await expect.poll(() => written().length, { timeout: 20_000 }).toBe(1);
+    const content = (written()[0]!.frame as { message: { content: { type: string; text?: string }[] } }).message.content;
+    expect(content.map((block) => block.type), 'one text block: the page gives no screenshots').toEqual(['text']);
+    const sent = content[0]!.text!;
+    expect(sent.startsWith('2 comments, in the order made:\n\n'), 'the framing line first').toBe(true);
+    const read = readAnchoredMessage(sent);
+    expect(read?.destination).toBe('main');
+    expect(read!.comments.map(({ anchor, text }) => ({ kind: anchor.kind, locator: anchor.locator, text }))).toEqual([
+      { kind: 'artifact-element', locator: '#hero', text: 'Make the heading larger.' },
+      { kind: 'artifact-element', locator: secondLocator, text: 'Say which quarter this is.' },
+    ]);
+    expect(sent, 'the writer’s text of the two, to the byte').toBe(commentsMessage(read!.comments, 'main'));
+    await expect.poll(async () => value(await invoke(s.page, 'session.status', { appSessionId: id })).turn, { timeout: 20_000, message: 'its one turn ended' }).toBeNull();
+    expect(written(), 'one message for the two comments').toHaveLength(1);
   });
 });
 
