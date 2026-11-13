@@ -31,7 +31,7 @@ How to see it working: the unit suite (each reader of "what waits" handed one an
 - [x] (2026-11-13) M3 — The permission card: three buttons, the hints and the keys. Reviewed clean (one fix wave `1577c0469`: the call's "Why" drawn after the preview for every tool class, where only a command's showed it). Built `e4790393c..4c55c614d` (red at the tests commit: 67 failing over 9 files).
 - [x] (2026-11-13) M4 — A file change as a diff. Reviewed clean (one fix wave `c5aea04d3`: "Show all" lifts the transcript's unlayered 240 px with important utilities scoped to the card's region, which alone holds the bound, 12 lines collapsed and 60vh expanded). Built `8cbf1f785..c4c846169` (red at the tests commit: 34 failing, two new modules failing at import).
 - [x] (2026-11-13) M5 — The plan's next mode; the trust card. Reviewed clean, no fix wave. Built `d8fd9ee9b..4f4f24af3` (red at the tests commit: 40 failing).
-- [ ] M6 — From outside: one rule for the notification and the hover card. Built `bb1e17cb5..aae5e2b08` (red at the tests commit: 42 failing).
+- [x] (2026-11-13) M6 — From outside: one rule for the notification and the hover card. Reviewed clean, no fix wave. Built `bb1e17cb5..aae5e2b08` (red at the tests commit: 42 failing).
 - [ ] M7 — The e2e edits, the record, and the acceptance run.
 - [ ] Handed back to the architect: the branch review, class 1a, the Electron e2e groups, the checks that need a Mac, the pull request.
 
