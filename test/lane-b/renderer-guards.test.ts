@@ -34,6 +34,10 @@ const GUARDED_ELSEWHERE: Readonly<Record<string, Entries>> = {
     commands: ['session.start', 'session.intent.patch', 'session.intent.release', 'session.intent.resolveWorktree', 'session.intent.discard'],
     guard: 'acts on intents of useSetup, which come from session.create and session.intent.list, both this Mac’s',
   },
+  'sessions/connect.ts': {
+    commands: ['session.intent.discard'],
+    guard: 'a relaunch’s sweep of empty New chats: its candidates are useSetup’s intents as session.intent.list (this Mac’s) answered them, before any chat of this run exists, and no RL2 machine answers session.create (UX wave U13a)',
+  },
   'sessions/remote-spawn.ts': { commands: ['session.intent.discard'], guard: 'discards the New chat tab’s own intent, on this Mac, once the session started on the other machine' },
   'composer/dev/ResumeLauncher.tsx': { commands: ['session.launch'], guard: 'a development tool, drawn only under import.meta.env.DEV (app/Diagnostics.tsx)' },
   // the record's acts, from controls a session on another machine is not offered
@@ -51,6 +55,11 @@ const GUARDED_ELSEWHERE: Readonly<Record<string, Entries>> = {
   'composer/modes/bash.ts': { commands: ['session.bash'], guard: 'only through composer/editor/submit.ts’ dispatchByMode, behind composer/Composer.tsx’s read of the helper (button and Enter)' },
   'composer/modes/memory.ts': { commands: ['session.memoryAppend'], guard: 'as composer/modes/bash.ts' },
   'composer/frame/bindings.ts': { commands: ['session.applyFlagSettings'], guard: 'liveBindings serve this Mac’s sessions; a session on another machine takes remoteBindings or lane A’s controls, which refuse the added directories (session/controls/lane-b.ts, lane-a.ts)' },
+  'customize/connectors/sign-in.ts': {
+    commands: ['connectors.signInDynamicServer'],
+    guard:
+      'startSignInDynamic’s callers: widgets/McpWidget.tsx’s Sign in reads the helper for this command; customize/connectors/ConnectorsSection.tsx signs in through ownSignInSessionOf, whose sessions are the ready ones of this Mac (machineOf === localMachine) (UX wave U11a)',
+  },
   'widgets/SkillsWidget.tsx': { commands: ['session.reloadSkills'], guard: 'through widgets/operation.ts’ useOperation, which reads the helper and greys the control' },
   'widgets/plugins/reload.tsx': { commands: ['session.reloadSkills'], guard: 'through widgets/operation.ts’ useOperation, which reads the helper; its controls take that answer' },
   'side/actions.ts': { commands: ['side.thread.open', 'side.sendToMain'], guard: 'called only behind side/comment-form.ts’ canSend and side/BtwView.tsx’s canPromote, which read the helper' },
