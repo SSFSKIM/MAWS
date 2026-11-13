@@ -13,8 +13,15 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { coversHome } from '@shared/machine/machine-home';
 import type { SpineView } from '@shared/spine/view';
+import { workingFolder } from '@shared/sessions/working-folder';
 
-export type AllowlistRecord = Pick<SessionRecord, 'directory' | 'additionalDirectories' | 'worktree'>;
+export type AllowlistRecord = Pick<SessionRecord, 'directory' | 'additionalDirectories' | 'worktree'> & Partial<Pick<SessionRecord, 'launchFolder' | 'agentFolder'>>;
+
+// RED STUB (M3's cases first): the branch as M2 left it, where nothing admits a fact's folder.
+export async function admittedFolder(record: AllowlistRecord, which: 'launch' | 'path'): Promise<{ folder: string; checked: boolean } | null> {
+  const folder = workingFolder(record)[which];
+  return folder === record.directory || folder === record.worktree?.path ? { folder, checked: false } : null;
+}
 
 // Whose directories `files.*` reads (E11's sitting: a New chat's Files pane answered "unknown app session" until the
 // session started): a session's record once it has one; before its first send, its setup intent's location, which is

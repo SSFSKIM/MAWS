@@ -41,6 +41,23 @@ describe('files tree', () => {
     expect(rootsFor(record('a', { directory: '/repo', worktree: { path: '/repo', branch: null } }))).toEqual([{ path: '/repo', role: 'directory' }]);
   });
 
+  // UX wave U8c-2, M3 (§G): the launch folder and the working folder a fact names are candidates too, after the record's
+  // own, in the service's order (it lists them only while the admission holds); a session that has not moved has none.
+  it('adds the launch folder and the working folder a fact names as candidates, each once', () => {
+    const cd = record('a', { directory: '/repo', agentFolder: { checkout: '/repo-wt', cwd: '/repo-wt/src', branch: 'w', linked: true } });
+    expect(rootsFor(cd)).toEqual([
+      { path: '/repo', role: 'directory' },
+      { path: '/repo-wt', role: 'working folder' },
+    ]);
+    const tool = record('a', { directory: '/repo/.claude/worktrees/w1', worktree: { path: '/repo/.claude/worktrees/w1', branch: 'w1' }, launchFolder: '/repo' });
+    expect(rootsFor(tool)).toEqual([
+      { path: '/repo/.claude/worktrees/w1', role: 'directory' },
+      { path: '/repo', role: 'directory' },
+    ]);
+    const inside = record('a', { directory: '/repo/sub', agentFolder: { checkout: '/repo', cwd: '/repo/sub', branch: 'main', linked: false } });
+    expect(rootsFor(inside).map((c) => c.path)).toEqual(['/repo/sub', '/repo']);
+  });
+
   it('matches a root realpath to its record entry through /tmp and case', () => {
     const candidates = [
       { path: '/tmp/Repo', role: 'directory' as const },

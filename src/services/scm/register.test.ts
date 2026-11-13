@@ -1,12 +1,17 @@
 // `scm.*` through the services bus, routed as main's router routes them: every command reaches the service with the session id as sent (a run with its kind),
 // refusals arrive as values, a git timeout as `timeout` and anything else as `internal`.
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName } from '@shared/ipc/schema';
+import { record as sessionRecord } from '../../../test/support/builders';
 import { fakeBus, type FakeBus } from '../../../test/support/fake-bus';
+import { fakeSpineView } from '../../../test/support/fake-spine-view';
+import { GitFixture } from '../../../test/support/git-fixture';
+import { TrustStoreFixture } from '../../../test/support/trust-store';
 import { GitTimeoutError } from '../git/runner';
 import { endableClientRef } from '@shared/ipc/client';
 import { registerScmHandlers, SCM_HOME_REFUSAL } from './register';
-import type { ScmService } from './service';
+import { ScmService, type ScmServiceDeps } from './service';
 
 const appSessionId = 'a1111111-1111-4111-8111-111111111111';
 
@@ -98,5 +103,57 @@ describe('main answers scm.* on the services bus', () => {
     service.stage.mockRejectedValue(new Error(`unknown app session: ${appSessionId}`));
     expect(await invoke('scm.stage', { appSessionId, paths: ['a'] })).toEqual({ ok: false, error: { code: 'internal', message: `unknown app session: ${appSessionId}` } });
     expect(await invoke('scm.stage', { appSessionId, paths: [] })).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+  });
+});
+
+// UX wave U8c-2, M3 (docs/doperpowers/plans/2026-11-12-ux-wave-U8c-live-working-folder.md, decision 8): for a request from
+// another machine the home rule is judged on the folder the request then uses, from one read of the record, so a record
+// whose working folder changes while the check is under way cannot send git to a folder the check never judged.
+describe('a remote request’s home check and its git calls name one folder', () => {
+  let repo: GitFixture;
+  let trust: TrustStoreFixture;
+  afterEach(() => {
+    repo.dispose();
+    trust.dispose();
+  });
+
+  it('runs a read at the folder the home check judged, though the record’s working folder is replaced while the check is held', async () => {
+    repo = await GitFixture.create();
+    trust = new TrustStoreFixture();
+    const [first, second] = [await repo.addWorktree('first'), await repo.addWorktree('second')];
+    trust.write({ [first]: { hasTrustDialogAccepted: true }, [second]: { hasTrustDialogAccepted: true } });
+    const id = appSessionId as AppSessionId;
+    const view = fakeSpineView();
+    const movedTo = (folder: string) => view.putRecord(sessionRecord(id, { directory: repo.root, worktree: null, agentFolder: { checkout: folder, cwd: folder, branch: null, linked: true } }));
+    movedTo(first);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let reached!: () => void;
+    const reachedCheck = new Promise<void>((resolve) => (reached = resolve));
+    const asked: string[] = [];
+    const read: ScmServiceDeps['read'] = async (directory, args) => {
+      asked.push(directory);
+      const command = args.join(' ');
+      if (command === 'rev-parse --path-format=absolute --show-toplevel') {
+        reached(); // the home check's read of git's top level
+        await held;
+        return `${directory}\n`;
+      }
+      if (args[0] === 'rev-parse') return `${directory}\n${directory}/.git\n${directory}/.git\n`;
+      if (command === 'remote -v') return '';
+      throw new Error(`unexpected read: git ${command}`);
+    };
+    const service = new ScmService({
+      view, read, pushRead: () => read, status: vi.fn(), mutate: vi.fn(), refresh: vi.fn(),
+      captured: async () => ({ HOME: repo.home, CLAUDE_CONFIG_DIR: trust.configHome }), env: {}, emit: () => {},
+    });
+    const bus = fakeBus();
+    registerScmHandlers(service, bus, () => ['/nonexistent-home-of-this-suite']);
+    const answer = bus.invoke('scm.status', { appSessionId }, { client: endableClientRef('endpoint'), remote: true });
+    await reachedCheck;
+    movedTo(second);
+    release();
+    expect(await answer).toMatchObject({ ok: true, value: { directory: first } });
+    expect(asked.filter((directory) => directory !== first)).toEqual([]);
   });
 });

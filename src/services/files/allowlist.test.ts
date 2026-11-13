@@ -1,13 +1,14 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync } from 'node:fs';
 import { realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SetupIntent } from '@shared/sessions/intent';
+import { ADMISSION_CASES, admissionRepos, type AdmissionPaths } from '../../../test/support/admission-cases';
 import { record as sessionRecord } from '../../../test/support/builders';
 import { fakeSpineView } from '../../../test/support/fake-spine-view';
-import { allowlistOf, rootsOf, under } from './allowlist';
+import { admittedFolder, allowlistOf, rootsOf, under } from './allowlist';
 
 describe('files allowlist', () => {
   let base: string;
@@ -85,5 +86,58 @@ describe('the allowlist of a session that has not started', () => {
   it('is nothing for an unknown id or a New chat with no project chosen yet', () => {
     expect(recordOf(null, null)(ID)).toBeNull();
     expect(recordOf(null, intent(null))(ID)).toBeNull();
+  });
+});
+
+// UX wave U8c-2, M3 (docs/doperpowers/plans/2026-11-12-ux-wave-U8c-live-working-folder.md, §G): a folder that comes from
+// one of the record's two facts is a root only through the one admission, read at the call from git's own files: the work
+// tree git finds for it must itself be a work tree of the repository the record's directory is in. The table of cases is
+// the endpoint's too (test/endpoint/checkout-rule.test.ts), over the same repositories.
+describe('the admission of a fact’s folder (§G), read from git’s own files', () => {
+  let repos: Awaited<ReturnType<typeof admissionRepos>>;
+  let p: AdmissionPaths;
+  beforeAll(async () => {
+    repos = await admissionRepos();
+    p = repos.paths;
+  });
+  afterAll(() => repos.dispose());
+
+  it.each(ADMISSION_CASES)('%s', async (_name, make) => {
+    const { record, which, admitted } = make(p);
+    expect(await admittedFolder(record, which)).toEqual(admitted === null ? null : { folder: admitted, checked: true });
+    // and rootsOf appends exactly what it admits, after the record's own roots
+    expect(await rootsOf(record)).toEqual([...new Set([record.directory, ...(record.worktree ? [record.worktree.path] : []), ...(admitted === null ? [] : [admitted])])]);
+  });
+
+  it('answers the record’s own folder as it names it, unchecked and with nothing read, for a record with no fact', async () => {
+    const plain = { directory: join(p.base, 'nowhere'), additionalDirectories: [], worktree: null };
+    expect(await admittedFolder(plain, 'path')).toEqual({ folder: plain.directory, checked: false });
+    expect(await admittedFolder(plain, 'launch')).toEqual({ folder: plain.directory, checked: false });
+    const filed = { directory: join(p.w1, 'packages'), additionalDirectories: [], worktree: { path: p.w1, branch: 'w1' } };
+    expect(await admittedFolder(filed, 'path')).toEqual({ folder: p.w1, checked: false });
+  });
+
+  it('appends the launch folder and then the working folder, each once, after the record’s own roots', async () => {
+    const both = { directory: p.beside, additionalDirectories: [p.other], worktree: { path: p.beside, branch: 'beside' }, launchFolder: p.main, agentFolder: { checkout: p.w1, cwd: p.w1, branch: 'w1', linked: true } };
+    expect(await rootsOf(both)).toEqual([p.beside, p.other, p.main, p.w1]);
+  });
+
+  it('drops an admitted folder that is a home of the machine for a remote caller, as any root', async () => {
+    const record = { directory: p.main, additionalDirectories: [], worktree: null, agentFolder: { checkout: p.beside, cwd: p.beside, branch: 'beside', linked: true } };
+    expect(await rootsOf(record, [p.beside])).toEqual([p.main]);
+    expect(await rootsOf(record, [join(p.base, 'elsewhere')])).toEqual([p.main, p.beside]);
+  });
+
+  it('reads the predicate again at each call: a registration removed since is no root', async () => {
+    const record = { directory: p.main, additionalDirectories: [], worktree: null, agentFolder: { checkout: p.w1, cwd: p.w1, branch: 'w1', linked: true } };
+    expect(await admittedFolder(record, 'path')).toEqual({ folder: p.w1, checked: true });
+    const moved = join(p.base, 'w1-registration');
+    renameSync(join(p.main, '.git/worktrees/w1'), moved);
+    try {
+      expect(await admittedFolder(record, 'path')).toBeNull();
+    } finally {
+      renameSync(moved, join(p.main, '.git/worktrees/w1'));
+    }
+    expect(await admittedFolder(record, 'path')).toEqual({ folder: p.w1, checked: true });
   });
 });

@@ -7,9 +7,10 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GitFileStatus, GitStatus } from '@shared/ipc/schema/git';
+import { GitFixture } from '../../../test/support/git-fixture';
 import { TrustStoreFixture } from '../../../test/support/trust-store';
 import { GitCommandError, GitTimeoutError, NotARepositoryError } from '../git/runner';
-import { ScmService, type ScmServiceDeps } from './service';
+import { AWAY_DETAIL, ScmService, type FolderGuard, type ScmServiceDeps } from './service';
 import { record as sessionRecord } from '../../../test/support/builders';
 import { fakeSpineView, type FakeSpineView } from '../../../test/support/fake-spine-view';
 
@@ -533,6 +534,112 @@ describe('scm service', () => {
       read.mockImplementation(async () => { throw new NotARepositoryError(); });
       expect(await service().status(ID)).toMatchObject({ directory: root, repository: false, trusted: true, remotes: [], defaultRemote: null, defaultBase: null });
       expect(read).toHaveBeenCalledOnce(); // the trust key's rev-parse
+    });
+  });
+
+  // UX wave U8c-2, M3 (docs/doperpowers/plans/2026-11-12-ux-wave-U8c-live-working-folder.md, decision 8; §G): one capture
+  // of the record per request gives the folder (the working folder as the admission takes it), whether the session is
+  // away from its launch folder, and the caller's guard on that folder; every act refuses while the session is away.
+  describe('a session whose agent works away from its launch folder', () => {
+    let repo: GitFixture;
+    let wt: string;
+    let second: string;
+    const TOKEN = 'c3333333-3333-4333-8333-333333333333';
+    const movedTo = (folder: string) => view.putRecord(sessionRecord(ID, { directory: repo.root, worktree: null, agentFolder: { checkout: folder, cwd: folder, branch: 'wt', linked: true } }));
+    const away = { refused: 'changed', detail: AWAY_DETAIL, output: '' };
+    beforeEach(async () => {
+      repo = await GitFixture.create();
+      wt = await repo.addWorktree('wt');
+      second = await repo.addWorktree('second');
+      trust.write({ [root]: { hasTrustDialogAccepted: true }, [repo.root]: { hasTrustDialogAccepted: true }, [wt]: { hasTrustDialogAccepted: true }, [second]: { hasTrustDialogAccepted: true } });
+    });
+    afterEach(() => repo.dispose());
+
+    it('refuses every act, running nothing and reading nothing', async () => {
+      movedTo(wt);
+      const scm = service();
+      expect(await scm.stage({ appSessionId: ID, paths: ['a.txt'] })).toEqual(away);
+      expect(await scm.unstage({ appSessionId: ID, paths: ['s.ts'] })).toEqual(away);
+      expect(await scm.discard({ appSessionId: ID, entries: [{ path: 'a.txt', group: 'unstaged' }] })).toEqual(away);
+      expect(await scm.commit({ appSessionId: ID, message: 'x', noVerify: false })).toEqual(away);
+      expect(await scm.planPush({ appSessionId: ID })).toEqual(away);
+      expect(await scm.planPr({ appSessionId: ID, title: 'T', body: '', base: 'main', draft: false })).toEqual(away);
+      expect(await scm.run({ appSessionId: ID, token: TOKEN }, 'push')).toEqual(away);
+      expect(await scm.run({ appSessionId: ID, token: TOKEN }, 'pr')).toEqual(away);
+      expect(mutate).not.toHaveBeenCalled();
+      expect(read).not.toHaveBeenCalled();
+      expect(readStatus).not.toHaveBeenCalled();
+      expect(refresh).not.toHaveBeenCalled();
+    });
+
+    it('finishes in the launch folder an act whose record moves after the service took its folder', async () => {
+      view.putRecord(sessionRecord(ID, { directory: repo.root, worktree: null }));
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => (release = resolve));
+      let reached!: () => void;
+      const reachedStatus = new Promise<void>((resolve) => (reached = resolve));
+      readStatus.mockImplementationOnce(async (directory) => {
+        reached();
+        await held;
+        return statusOf(directory);
+      });
+      const answer = service().stage({ appSessionId: ID, paths: ['a.txt'] });
+      await reachedStatus;
+      movedTo(wt); // the agent leaves while the stage is under way
+      release();
+      expect(await answer).toMatchObject({ ok: true });
+      expect(mutate).toHaveBeenCalledExactlyOnceWith(repo.root, ['add', '--', ':(top,literal)a.txt'], { timeoutMs: 10_000 });
+      expect(readStatus.mock.calls.map(([directory]) => directory)).toEqual([repo.root, repo.root]);
+    });
+
+    it('reads in the working folder, and fails a read whose working folder is no worktree of the repository', async () => {
+      movedTo(wt);
+      expect(await service().status(ID)).toMatchObject({ directory: wt, trusted: true });
+      expect(new Set(read.mock.calls.map(([directory]) => directory))).toEqual(new Set([wt]));
+      const plain = realpathSync(mkdtempSync(join(tmpdir(), 'maws-scm-plain-')));
+      try {
+        movedTo(plain);
+        read.mockClear();
+        await expect(service().status(ID)).rejects.toThrow("path outside the session's directories");
+        await expect(service().last(ID)).rejects.toThrow("path outside the session's directories");
+        expect(read).not.toHaveBeenCalled();
+      } finally {
+        rmSync(plain, { recursive: true, force: true });
+      }
+    });
+
+    it('runs a read at the folder its guard judged, though the record changes while the guard is held, and nothing when the guard refuses', async () => {
+      movedTo(wt);
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => (release = resolve));
+      const judged: string[] = [];
+      const guard: FolderGuard = async (folder) => {
+        judged.push(folder);
+        await held;
+      };
+      const answer = service().status(ID, {}, guard);
+      await vi.waitFor(() => expect(judged).toEqual([wt]));
+      movedTo(second);
+      release();
+      expect(await answer).toMatchObject({ directory: wt });
+      expect(read.mock.calls.filter(([directory]) => directory !== wt)).toEqual([]);
+
+      read.mockClear();
+      const refuse: FolderGuard = async () => {
+        throw new Error('refused by the guard');
+      };
+      await expect(service().status(ID, {}, refuse)).rejects.toThrow('refused by the guard');
+      await expect(service().stage({ appSessionId: ID, paths: ['a.txt'] }, refuse)).rejects.toThrow('refused by the guard');
+      expect(read).not.toHaveBeenCalled();
+      expect(mutate).not.toHaveBeenCalled();
+    });
+
+    it('acts again once the agent is back in the launch folder', async () => {
+      movedTo(wt);
+      expect(await service().stage({ appSessionId: ID, paths: ['a.txt'] })).toEqual(away);
+      view.putRecord(sessionRecord(ID, { directory: repo.root, worktree: null }));
+      expect(await service().stage({ appSessionId: ID, paths: ['a.txt'] })).toMatchObject({ ok: true });
+      expect(mutate).toHaveBeenCalledExactlyOnceWith(repo.root, ['add', '--', ':(top,literal)a.txt'], { timeoutMs: 10_000 });
     });
   });
 });

@@ -221,6 +221,93 @@ describe('files.upload refuses, with nothing written', () => {
   });
 });
 
+// UX wave U8c-2, M3 (docs/doperpowers/plans/2026-11-12-ux-wave-U8c-live-working-folder.md, decision 7): the base is the
+// working folder as the admission takes it, decided once per call before a root is recorded, the exclude file is touched
+// or a part is written, and that one base serves the whole call.
+describe('files.upload into a working folder a fact names', () => {
+  const NOT_ADMITTED = 'the session’s working folder is not a worktree of its repository, so nothing was saved';
+  // a repository with a linked worktree beside it, and a session filed in the repository whose agent is in `folder`
+  async function moved() {
+    const f = await repo();
+    const wt = join(dir('o3e-upload-wt-'), 'wt');
+    await f.git('worktree', 'add', '-q', '-b', 'wt', wt);
+    const exclude = join(f.root, '.git', 'info', 'exclude');
+    const view = fakeSpineView();
+    const at = (folder: string) => view.putRecord(sessionRecord(ID, { directory: f.root, worktree: null, agentFolder: { checkout: folder, cwd: folder, branch: 'wt', linked: true } }));
+    return { f, wt, exclude, view, at, excluded: () => (existsSync(exclude) ? readFileSync(exclude, 'utf8') : null) };
+  }
+
+  it('writes under the working folder while it is a registered worktree, and excludes it by the repository’s common exclude', async () => {
+    const { f, wt, view, at, excluded } = await moved();
+    at(wt);
+    const { run, recorded } = upload({ sessions: view, git: createGitRunner({ env: f.serviceEnv() }) });
+    expect(await run(input(file('a.txt', TEXT)))).toEqual({ status: 'ok', paths: [join(rootIn(wt), 'up1.0.txt')] });
+    expect(recorded).toEqual([{ session: ID, root: rootIn(wt), held: null }]);
+    expect(existsSync(join(f.root, '.claude'))).toBe(false);
+    expect(excluded()?.split('\n')).toContain(EXCLUDE_LINE);
+  });
+
+  it.each([
+    ['its registration removed', async ({ f }: Awaited<ReturnType<typeof moved>>) => renameSync(join(f.root, '.git', 'worktrees', 'wt'), join(dir(), 'wt-registration'))],
+    ['the worktree replaced by a plain folder', async ({ f, wt }: Awaited<ReturnType<typeof moved>>) => {
+      await f.git('worktree', 'remove', wt);
+      mkdirSync(wt);
+    }],
+  ])('refuses with %s: nothing written, no root recorded, no exclude file touched', async (_name, change) => {
+    const m = await moved();
+    m.at(m.wt);
+    await change(m);
+    const before = m.excluded();
+    const { run, recorded } = upload({ sessions: m.view, git: createGitRunner({ env: m.f.serviceEnv() }) });
+    expect(await run(input(file('a.txt', TEXT)))).toEqual({ status: 'refused', reason: NOT_ADMITTED });
+    expect(recorded).toEqual([]);
+    expect(m.excluded()).toBe(before);
+    expect(existsSync(join(m.wt, '.claude')), 'nothing written').toBe(false);
+  });
+
+  it('judges a link where it lands: written through while it names the worktree, refused once retargeted to a plain folder', async () => {
+    const m = await moved();
+    const plain = dir();
+    const link = join(dir(), 'link');
+    symlinkSync(m.wt, link);
+    m.at(link);
+    const first = upload({ sessions: m.view, git: createGitRunner({ env: m.f.serviceEnv() }) });
+    expect(await first.run(input(file('a.txt', TEXT)))).toEqual({ status: 'ok', paths: [join(rootIn(m.wt), 'up1.0.txt')] });
+    rmSync(link);
+    symlinkSync(plain, link);
+    const before = m.excluded();
+    const second = upload({ sessions: m.view, git: createGitRunner({ env: m.f.serviceEnv() }) });
+    expect(await second.run(input(file('b.txt', TEXT)))).toEqual({ status: 'refused', reason: NOT_ADMITTED });
+    expect(second.recorded).toEqual([]);
+    expect(m.excluded()).toBe(before);
+    expect(existsSync(join(plain, '.claude')), 'nothing written').toBe(false);
+  });
+
+  it('writes every file of a call under the base it was admitted with, when the working folder changes while the exclude step is held', async () => {
+    const m = await moved();
+    const second = join(dir('o3e-upload-wt-'), 'second');
+    await m.f.git('worktree', 'add', '-q', '-b', 'second', second);
+    m.at(m.wt);
+    const real = createGitRunner({ env: m.f.serviceEnv() });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let reached!: () => void;
+    const reachedExclude = new Promise<void>((resolve) => (reached = resolve));
+    const git: UploadDeps['git'] = async (directory, args, options) => {
+      reached();
+      await held;
+      return real(directory, args, options);
+    };
+    const { run } = upload({ sessions: m.view, git });
+    const answer = run(input(file('a.png', PNG), file('b.txt', TEXT)));
+    await reachedExclude;
+    m.at(second); // the agent moves on while the call is at its exclude step
+    release();
+    expect(await answer).toEqual({ status: 'ok', paths: [join(rootIn(m.wt), 'up1.0.png'), join(rootIn(m.wt), 'up1.1.txt')] });
+    expect(existsSync(join(second, '.claude')), 'nothing under the second base').toBe(false);
+  });
+});
+
 describe('the upload roots’ record and its sweep', () => {
   it('records under its own file and sweeps a root a day after its last upload: indices 0 to 7 of every extension and none, nothing else', async () => {
     const data = dir();

@@ -16,6 +16,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import { workingBranch, workingFolder, workingWorktree } from '@shared/sessions/working-folder';
 import { slugOf } from '../src/engine-host/fs/paths';
 import { HEAD_TAIL_BYTES, summarize } from '../src/engine-host/fs/summarize';
+import { rootsOf } from '../src/services/files/allowlist';
 import { Index } from '../src/services/index/index';
 import { FIXTURE_DIR } from './support/fixtures';
 import { gitCheckout, gitWorktree, tempDir } from './support/index-fixture';
@@ -172,6 +173,14 @@ describe('the working folder on the routes (§E)', () => {
         expect(factsOf(record), `${step}: the facts behind the table`).toBe(want.facts);
       }
       expect(steps.map((s) => s.step)).toContain('s5b-run-after-subfolder');
+    });
+
+    // M3 (§G): the files service reads the selector's working folder and launch folder at every step, through the admission
+    it("gives the files service the selector's working folder and launch folder as roots at every step", async () => {
+      for (const { step, record } of replay(name).steps) {
+        const folder = workingFolder(record);
+        expect(await rootsOf(record), step).toEqual(expect.arrayContaining([folder.path, folder.launch]));
+      }
     });
 
     it('names the working folder\'s branch and worktree at every step', () => {

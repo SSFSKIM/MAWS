@@ -62,6 +62,9 @@ export const COMMIT_TIMEOUT_MS = 60_000; // hooks run linters
 // request deadline has already answered for (the daemon shape's `timeout`) never starts afterwards, and the command's
 // budget covers the wait rather than accepting it.
 export const SCM_ADMIT_MS = 30_000;
+// RED STUB (M3's cases first): the names the cases import, with nothing behind them yet.
+export type FolderGuard = (folder: string) => Promise<void>;
+export const AWAY_DETAIL = 'The session is working in another folder now, so nothing was changed';
 const GH_PROBE_KEPT_MS = 10 * 60_000;
 const PR_STATE_KEPT_MS = 60_000;
 const GH_PROBE_CWD = '/'; // the probe reads no repository, so it runs in none

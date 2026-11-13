@@ -44,6 +44,11 @@ export function spineRoots(view: Pick<SpineView, 'records' | 'intents' | 'projec
   return listableRoots([...knownSessionDirectories(view, { includeArchived: false }), ...intentDirectories], view.projectRows().map((project) => project.directory));
 }
 
+// RED STUB (M3's cases first): the branch as M2 left it, where nothing admits a fact's folder.
+export function spineAdmitted(_view: Pick<SpineView, 'records'>): () => Promise<string[]> {
+  return async () => [];
+}
+
 // The root set is read again after any record, project or intent change the view reports; the function returned stops.
 export function followSpineRoots(view: Pick<SpineView, 'on'>, lister: Pick<FileLister, 'invalidateRoots'>): () => void {
   const invalidate = () => lister.invalidateRoots();

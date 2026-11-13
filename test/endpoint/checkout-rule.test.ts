@@ -4,7 +4,7 @@
 // the path must lie in one of the session's roots or the repository a root belongs to, so the boundary a reader gets is
 // the repository with its worktrees; what a worktree read names beyond that the service bounds itself. A spawn's args
 // hold to the registry's schema (step 2), then to the machine's policy (step 6's guard, as `sminos.spawn`'s).
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -16,13 +16,14 @@ import { ipcError } from '@shared/ipc/errors';
 import { REMOTE_UPLOAD_PART_BYTES, type FilesUploadInput } from '@shared/ipc/schema/files';
 import { HOME_CHECKOUT } from '@shared/ipc/schema/session';
 import { machineHome } from '@shared/machine/machine-home';
-import { CheckoutBounds } from '../../src/endpoint/targets';
+import { CheckoutBounds, withinBounds } from '../../src/endpoint/targets';
 import { createUpload } from '../../src/services/files/upload';
 import { registerGitHandlers } from '../../src/services/git/register';
 import { createGitRunner } from '../../src/services/git/runner';
 import { GitService } from '../../src/services/git/service';
 import { WorktreeService } from '../../src/services/git/worktrees';
 import { registerWorktreeHandlers } from '../../src/services/git/worktrees-register';
+import { ADMISSION_CASES, admissionRepos, type AdmissionPaths, type AdmissionRecord } from '../support/admission-cases';
 import { record as sessionRecord } from '../support/builders';
 import { fakeSpineView } from '../support/fake-spine-view';
 import { GitFixture, runGit } from '../support/git-fixture';
@@ -487,6 +488,78 @@ describe('the checkout rule', () => {
     expect(code(await call(a, 'git.status', { directory: one.root }, B('app-1')))).toBe('unavailable');
     expect(code(await call(a, 'session.status', { appSessionId: 'app-1' }))).toBe('unavailable');
     expect(f.host.calls.slice(asked).filter((c) => c.name === 'git.status')).toEqual([]);
+  });
+});
+
+// UX wave U8c-2, M3 (docs/doperpowers/plans/2026-11-12-ux-wave-U8c-live-working-folder.md, decision 5 and §G): the launch
+// folder and the working folder, where a fact names them, join the record's roots only when the machine's
+// `git.worktree.list`, asked for the request, says the work tree git finds for the folder is one of the work trees of the
+// repository the record's directory is in. The table of cases is the files service's too (src/services/files/allowlist.test.ts).
+describe('the checkout bounds and the folders a record’s facts name', () => {
+  let repos: Awaited<ReturnType<typeof admissionRepos>>;
+  let p: AdmissionPaths;
+  beforeAll(async () => {
+    repos = await admissionRepos();
+    p = repos.paths;
+  });
+  afterAll(() => repos.dispose());
+  const env = () => ({ PATH: process.env.PATH, HOME: p.plain });
+  const real = (path: string) => (existsSync(path) ? realpathSync(path) : path);
+  const moved = (f: Fixture, appSessionId: string, record: AdmissionRecord) => {
+    f.spine.set(appSessionId, `eng-${appSessionId}`, { appId: appSessionId, ...record });
+    f.records.set({ lane: 'B', session: `eng-${appSessionId}`, owners: ['@machine'] }, appSessionId);
+  };
+
+  it('admits a fact’s folder by every row of the table, as the machine answers it', async () => {
+    const f = await machine(env());
+    const dispatch: Parameters<CheckoutBounds['of']>[1] = (owner, name, input) => f.services.dispatch(owner, name, input);
+    for (const [name, make] of ADMISSION_CASES) {
+      const { record, which, folder, admitted } = make(p);
+      const bounds = await f.endpoint.checkoutBounds.of(record, dispatch);
+      if (admitted !== null) {
+        expect(bounds.roots, name).toContain(admitted);
+        expect(withinBounds(bounds.within, admitted), name).toBe(true);
+      } else {
+        expect(bounds.roots, name).not.toContain(real(folder));
+        expect(bounds.roots, name).toEqual([record.directory]); // the record's own root alone
+      }
+      if (which === 'path') expect(bounds.checkoutCovers, `${name}: the working folder is Source control’s checkout`).toBe(admitted === null);
+    }
+  });
+
+  it('asks the machine again at each request, and keeps nothing of the answer', async () => {
+    const f = await machine(env());
+    const dispatch: Parameters<CheckoutBounds['of']>[1] = (owner, name, input) => f.services.dispatch(owner, name, input);
+    const record = { directory: p.main, additionalDirectories: [], worktree: null, agentFolder: { checkout: p.beside, cwd: p.beside, branch: null, linked: true } };
+    const asked = () => f.host.calls.filter((c) => c.name === 'git.worktree.list' && (c.input as { repoRoot: string }).repoRoot === p.beside).length;
+    expect((await f.endpoint.checkoutBounds.of(record, dispatch)).roots).toEqual([p.main, p.beside]);
+    expect(asked()).toBe(1);
+    const away = join(p.base, 'beside-registration');
+    renameSync(join(p.main, '.git/worktrees/beside'), away);
+    try {
+      expect(await f.endpoint.checkoutBounds.of(record, dispatch)).toMatchObject({ roots: [p.main], checkoutCovers: true });
+      expect(asked()).toBe(2);
+    } finally {
+      renameSync(away, join(p.main, '.git/worktrees/beside'));
+    }
+    expect(await f.endpoint.checkoutBounds.of(record, dispatch)).toMatchObject({ roots: [p.main, p.beside], checkoutCovers: false });
+    expect(asked()).toBe(3);
+  });
+
+  it('passes a remote git read at a worktree beside the repository while a fact names it and it is registered, and refuses it once deregistered', async () => {
+    const f = await machine(env());
+    moved(f, 'app-moved', { directory: p.main, additionalDirectories: [], worktree: null, agentFolder: { checkout: p.beside, cwd: p.beside, branch: 'beside', linked: true } });
+    moved(f, 'app-forged', { directory: p.main, additionalDirectories: [], worktree: null, agentFolder: { checkout: p.copy, cwd: p.copy, branch: null, linked: true } });
+    const a = await openRemote(f, org.a1, org.A);
+    expect(await call(a, 'git.status', { directory: p.beside }, B('app-moved'))).toMatchObject({ ok: true, output: { repoRoot: p.beside } });
+    expect(code(await call(a, 'git.status', { directory: p.copy }, B('app-forged')))).toBe('no-target');
+    const away = join(p.base, 'beside-registration');
+    renameSync(join(p.main, '.git/worktrees/beside'), away);
+    try {
+      expect(code(await call(a, 'git.status', { directory: p.beside }, B('app-moved')))).toBe('no-target');
+    } finally {
+      renameSync(away, join(p.main, '.git/worktrees/beside'));
+    }
   });
 });
 
