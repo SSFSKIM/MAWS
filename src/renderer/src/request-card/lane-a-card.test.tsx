@@ -131,25 +131,38 @@ describe('a terminal session’s permission card', () => {
   });
 });
 
-// The O9 sitting (item 9): the hover card read "Approval needed" with no Allow or Deny, on a Bash and a Write. The hover
-// approves only a read-only tool's permission (charter §5.1), for every lane: a lane A Read is approved there through
-// the port, and a Bash or Write offers Open session alone, as lane B's does.
+// The O9 sitting (item 9): the hover card read "Approval needed" with no Allow or Deny, on a Bash and a Write. UX wave U1a
+// §H: the hover card offers what the one rule admits, for every lane, each button by the session's port on its own answer:
+// a lane A read or command is allowed once there through the bridge, a file change only denied, and a terminal session
+// whose bridge is not live offers neither.
 describe('a terminal session’s request in the sidebar’s hover card', () => {
   const hover = (event: Extract<SessionEvent, { kind: `${string}.requested` }>) => render(<RequestCard item={itemFor(event, APP)} request={event} placement="hover" paneIndex={null} />);
+  const buttons = () => screen.queryAllByRole('button').map((b) => b.textContent);
 
-  it('approves a read-only tool’s permission through the bridge', async () => {
-    live({ pending: [raised({ tool: 'Read', input: { file_path: '/w/notes.txt' } })] });
-    hover(permission({ requestId: REQ, toolName: 'Read', displayName: 'Read', input: { file_path: '/w/notes.txt' } }));
-    expect(screen.getByRole('button', { name: 'Deny' })).toBeTruthy();
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Approve' }));
+  it.each([
+    ['a read-only tool’s', 'Read', { file_path: '/w/notes.txt' }],
+    ['a command’s', 'Bash', { command: 'ls' }],
+  ])('allows %s permission once through the bridge', async (_, tool, input) => {
+    live({ pending: [raised({ tool, input })] });
+    hover(permission({ requestId: REQ, toolName: tool, displayName: tool, input }));
+    expect(buttons()).toEqual(['Open session', 'Deny', 'Allow once']);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Allow once' }));
     await waitFor(() => expect(answers()).toEqual([{ kind: 'permission', decision: 'allow', scope: 'once' }]));
   });
 
-  it.each(['Bash', 'Write'])('offers %s only Open session, as for any session', (tool) => {
-    live({ pending: [raised({ tool })] });
-    hover(permission({ requestId: REQ, toolName: tool, displayName: tool }));
-    expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Open session' })).toBeTruthy();
+  it('only denies a file change, through the bridge', async () => {
+    const input = { file_path: '/w/a.ts', content: 'export {};' };
+    live({ pending: [raised({ tool: 'Write', input })] });
+    hover(permission({ requestId: REQ, toolName: 'Write', displayName: 'Write', input }));
+    expect(buttons()).toEqual(['Open session', 'Deny']);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Deny' }));
+    await waitFor(() => expect(answers()).toEqual([{ kind: 'permission', decision: 'deny' }]));
+  });
+
+  it('offers neither while the bridge is not live', () => {
+    live({ bridge: 'none', pending: [raised({ tool: 'Read', input: { file_path: '/w/notes.txt' } })] });
+    hover(permission({ requestId: REQ, toolName: 'Read', displayName: 'Read', input: { file_path: '/w/notes.txt' } }));
+    expect(buttons()).toEqual(['Open session']);
   });
 });
 

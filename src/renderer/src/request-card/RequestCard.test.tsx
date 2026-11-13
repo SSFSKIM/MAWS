@@ -625,31 +625,75 @@ describe('request card placements and delivery states', () => {
     expect(screen.getByText(item.summary)).toBeTruthy();
   });
 
+  // UX wave U1a §H (M6, A14): the hover card offers what the one rule admits for its surface, each button gated by the
+  // session's port on its own answer, by pointer click only; its layout is unchanged
   describe('the hover placement', () => {
-    it('offers Approve and Deny for an unflagged Read, answering by pointer only', async () => {
+    const hoverButtons = () => screen.queryAllByRole('button').map((b) => b.textContent);
+    const LONG = ['cd /w/site', `npm run build -- --out ${'dist/'.repeat(40)}`, 'npm test'].join('\n');
+    const longCommand = permission({ input: { command: LONG } });
+    const edit = permission({ toolName: 'Edit', displayName: 'Edit', input: { file_path: '/w/a.ts', old_string: 'a', new_string: 'b' } });
+    const defaultToNo = permission({ toolName: 'Read', displayName: 'Read', input: { file_path: '/w/notes.txt' }, defaultToNo: true });
+
+    it('offers Allow once and Deny for an unflagged Read, answering by pointer only', async () => {
       const { item } = mount(unflaggedRead, 'hover');
       // named for its request and tool, so a reader of the hover dialog (named for the session) finds the approval
       expect(screen.getByRole('group', { name: 'Approval needed: Read' }).dataset.requestCard).toBe(item.id);
-      const approve = screen.getByRole('button', { name: 'Approve' });
+      const allow = screen.getByRole('button', { name: 'Allow once' });
       expect(screen.getByRole('button', { name: 'Deny' })).toBeTruthy();
       expect(screen.getByRole('button', { name: 'Open session' })).toBeTruthy();
+      expect(screen.getByText('Approve applies to this request only.')).toBeTruthy();
       expect(screen.getByTestId('request-input').textContent).toBe('/tmp/maws-c7-scratch/README.md');
-      focusOn(approve);
+      focusOn(allow);
       await press('{Enter}');
-      fireEvent.click(approve, { detail: 1 }); // no pointer press before it
+      fireEvent.click(allow, { detail: 1 }); // no pointer press before it
       expect(answers()).toEqual([]);
-      await userEvent.setup().click(approve);
+      await userEvent.setup().click(allow);
       await waitFor(() => expect(answers()).toEqual([{ kind: 'permission', decision: 'allow', scope: 'once' }]));
     });
 
     it.each([
-      ['a Bash request', reapply],
-      ['a question', question],
-      ['a flagged Read', flaggedRead],
-    ])('shows only Open session for %s', (_, event) => {
+      ['a one-line command', reapply, 'touch granted.txt'],
+      ['a command of several long lines', longCommand, LONG],
+    ])('offers Allow once and Deny for %s, its preview whole', async (_, event, command) => {
       mount(event, 'hover');
-      expect(screen.queryAllByRole('button').map((b) => b.textContent)).toEqual(['tab 0', 'Open session']);
+      expect(hoverButtons()).toEqual(['tab 0', 'Open session', 'Deny', 'Allow once']);
+      expect(screen.getByTestId('request-input').textContent).toBe(command);
+      await userEvent.setup().click(screen.getByRole('button', { name: 'Allow once' }));
+      await waitFor(() => expect(answers()).toEqual([{ kind: 'permission', decision: 'allow', scope: 'once' }]));
+    });
+
+    it.each([
+      ['a file change', edit],
+      ['a request flagged “default to no”', defaultToNo],
+      ['a request needing its own consent surface', flaggedRead],
+    ])('offers Deny alone for %s, and Deny sends the plain deny', async (_, event) => {
+      mount(event, 'hover');
+      expect(hoverButtons()).toEqual(['tab 0', 'Open session', 'Deny']);
+      expect(screen.queryByText('Approve applies to this request only.')).toBeNull();
+      await userEvent.setup().click(screen.getByRole('button', { name: 'Deny' }));
+      await waitFor(() => expect(answers()).toEqual([{ kind: 'permission', decision: 'deny' }]));
+    });
+
+    it.each([
+      ['a question', question],
+      ['a plan', plan],
+    ])('offers only Open session for %s', (_, event) => {
+      mount(event, 'hover');
+      expect(hoverButtons()).toEqual(['tab 0', 'Open session']);
       expect(bindingsOf('request.accept')).toEqual([]);
+    });
+
+    it('answers nothing for a click a key synthesised, on Deny and on Allow once', async () => {
+      mount(reapply, 'hover');
+      for (const name of ['Deny', 'Allow once']) {
+        const button = screen.getByRole('button', { name });
+        focusOn(button);
+        await press('{Enter}');
+        await press(' ');
+        fireEvent.click(button, { detail: 0 });
+        fireEvent.click(button, { detail: 1 }); // no pointer press before it
+      }
+      expect(answers()).toEqual([]);
     });
   });
 });
