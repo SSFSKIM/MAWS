@@ -450,7 +450,12 @@ describe('Connectors', () => {
     const OWN = { name: 'fx-own', scope: 'app', path: '/maws/machine-settings.json', transport: 'http' } as const;
     const ownPosture = (revision: string | null) => backend.script('catalog.postures', () => ({ servers: [{ name: 'fx-own', scope: 'app', path: OWN.path, authPosture: 'auth_required', fingerprint: 'print-own', revision }] }));
     const holding = (bare: string, cwd: string, names: string[]) => ({ ...pageStatus(bare), cwd, mcpServers: names.map((name) => ({ name, status: 'needs-auth', source: null })) });
-    const ownRow = async () => (await screen.findByText('fx-own')).closest('li')!;
+    // the disk row, not the live list's line of the same name below it
+    const ownRow = () => waitFor(() => {
+      const found = document.querySelector<HTMLElement>('[data-connector="fx-own"][data-connector-scope="app"]');
+      expect(found).not.toBeNull();
+      return found!;
+    });
     beforeEach(() => {
       backend.script('customization.inventory', () => ({ skills: [], servers: [OWN], warnings: [], serversRead: true }));
       backend.script('connectors.signInDynamicServer', () => ({ opId: 'op-own' }));
