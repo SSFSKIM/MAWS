@@ -8,6 +8,7 @@ import type { AppSessionId, AttentionId, MessageUuid, RequestId, SessionId } fro
 import type { SessionRecord } from '@shared/graph/session';
 import { SessionRecordSchema } from '@shared/graph/session';
 import { sessionIdFor, summary, tempDir } from '../../../test/support/index-fixture';
+import { budgetVerdict, machineLoad } from '../../../test/support/latency-budget';
 import { Index } from './index';
 import { promptTitle } from './sessions';
 
@@ -229,9 +230,13 @@ describe('session records in the index', () => {
     const summaries = Array.from({ length: 4_000 }, (_, i) => summary({ sessionId: sessionIdFor(i + 1), customTitle: i % 3 === 0 ? `t${i}` : null }));
     // The bound is on the work the upserts cost (this process's CPU time; vitest runs each file in its own process), so
     // a loaded machine's scheduling does not decide it. Contention still adds to CPU time (shared caches, a slower clock
-    // with every core busy): unit:darwin measured 605.9 and 519.5 ms on the mini while e2e jobs ran on both its desktops
-    // (runs 43206290258 and 43420507070), on paths these upserts barely reach. So the cost is the least of three runs,
-    // each on a fresh index: load only ever adds, and a slower upsert is slower in every run.
+    // with every core busy): master's own code measured 512 ms on the mini while e2e jobs ran on both its desktops (run
+    // 43429465758; 605.9, 519.5 and 518.4 ms in runs 43206290258, 43420507070 and 43427405095). So the cost is the least
+    // of three runs, each on a fresh index, and it is held to 500 ms as named only on a quiet machine; loaded (busy cores,
+    // a shared desktop, the guest, or a guest beside the host) it is recorded and held to the loose ceiling, as every
+    // latency bound is (test/support/latency-budget.ts).
+    const machine = machineLoad();
+    const at = Date.now();
     const run = (target: Index) => {
       const cpu = process.cpuUsage();
       const started = performance.now();
@@ -255,7 +260,10 @@ describe('session records in the index', () => {
         fresh.dispose();
       }
     }
-    expect(Math.min(...runs.map((r) => r.ms))).toBeLessThan(500);
+    const least = Math.round(Math.min(...runs.map((r) => r.ms)) * 10) / 10;
+    const { ceiling, reason } = budgetVerdict('4,000 upserts, CPU time', least, 500, machine, at);
+    if (reason !== null) console.log(`[latency] ${reason}`);
+    expect(least).toBeLessThan(ceiling);
     expect(Math.min(...runs.map((r) => r.elapsed))).toBeLessThan(2000); // a sanity bound on the wall clock, as M5's instant pin keeps
   });
 
