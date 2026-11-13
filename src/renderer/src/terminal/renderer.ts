@@ -35,6 +35,7 @@ export interface TerminalProbe {
   cursorX: number;
   cursorY: number; // relative to the viewport's base (the screen's top row is 0)
   line(row: number): string; // row counted from the top of the whole buffer (scrollback first)
+  wrapped(row: number): boolean; // the row continues the one above it (a soft wrap), counted as `line`
   lineCount(): number;
   modes(): TerminalModes;
 }

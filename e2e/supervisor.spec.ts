@@ -58,7 +58,7 @@
 //   (f) and (g) branch on `host.holder` (above): the older host's form is kept with an engine host that stands in for
 //        one before O16 (MAWS_E2E_HOST_WITHOUT_HOLDER, detached.ts).
 import { addressed } from './support/address';
-import { openSurface, surface } from './support/shell';
+import { openSurface, sideColumn, surface } from './support/shell';
 import { createConnection } from 'node:net'; // P3-A M5
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -1009,7 +1009,8 @@ test('(h) G4, inverted: after a keep-quit the restored terminal is the same live
     await showSession(second.page, id);
     await openSurface(second.page, 'Terminal');
     const region = surface(second.page, 'terminal');
-    await expect(region.locator(`[data-tab-id="${label}"]`)).toBeVisible({ timeout: 15_000 });
+    // UX wave U8b: a terminal is a tab of the side column's strip (no strip of the tool's own); the body is the tab in view
+    await expect(sideColumn(second.page).locator(`[data-side-strip] [data-tab-id="${label}"]`)).toBeVisible({ timeout: 15_000 });
     const restored = region.locator('[data-terminal-id]:visible');
     await expect(restored).toHaveCount(1, { timeout: 15_000 });
     // the restored terminal shows it: its emulator's buffer, read through the page's terminals seam (it draws on a canvas)

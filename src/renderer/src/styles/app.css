@@ -96,6 +96,12 @@
     overflow: hidden;
   }
 
+  /* UX wave U8b (Addendum 7; app/Resizer.tsx): while a resizer is dragged no frame takes the pointer's events, so a drag
+     over a delivered page (a frame of another origin) stays the separator's. */
+  html[data-resizing] iframe {
+    pointer-events: none;
+  }
+
   body,
   #root {
     overflow: clip;

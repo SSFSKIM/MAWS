@@ -24,6 +24,7 @@ import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { slashPaletteMovesNothing } from './support/palette-geometry';
 import { clickRevealed } from './support/hover';
 import { activeMainTab, mainTabById, mainTabs } from './support/shell';
+import { backgroundAgentRecords, backgroundAgentSidecars, turnEndRecords, userRecord } from './support/lane-a';
 import { newChatIn, openProject, projectLine, projectRow, showProjectList, sidebarRow } from './support/sidebar';
 
 const FIXTURES = 'spikes/protocol-probe/fixtures';
@@ -619,6 +620,43 @@ test.describe('sessions', () => {
     await expect(page.getByRole('menuitem')).toHaveText(['Open', 'Open in new tab', 'Hide']); // UX wave U7, O-16
     await page.keyboard.press('Escape');
     await store.removeRegistryRecord(pid);
+    expect(launched.maws.consoleErrors()).toEqual([]);
+  });
+
+  // UX wave U8b (A7, M6; X-168): a terminal session that MAWS only reads (a registry record names its live process, and
+  // no bridge drives it) whose last turn ended while an agent it started in the background still works: the row of that
+  // Agent call stays in view under the ended turn. The terminal's process goes (its registry record removed) and the
+  // transcript never says the agent ended, yet the agent ended with the process: its row folds with the turn.
+  test('X-168: a terminal session whose turn ended with a background agent still working; its process goes, its registry record removed, and the agent’s row folds with the ended turn', async () => {
+    const repo = await ScratchRepo.create();
+    const store = await StoreFixture.create();
+    const sid = '5e551011-0000-4000-8000-00000000000c';
+    const agent = { agentId: 'a5e55000000000001', description: 'Survey the folder', prompt: 'List what is in this folder.', at: '2026-09-29T10:00:01.000Z' };
+    const ask = `u-${sid}`;
+    const turn = backgroundAgentRecords(sid, repo.root, ask, agent);
+    const end = turnEndRecords(sid, repo.root, turn.at(-1)!.uuid as string, '2026-09-29T10:00:02.000Z');
+    await store.addTranscript(repo.root, sid, [userRecord(sid, repo.root, ask, null, 'Survey this folder in the background.', '2026-09-29T10:00:00.000Z'), ...turn, ...end].map((r) => JSON.stringify(r)));
+    await backgroundAgentSidecars(store, sid, repo.root, agent);
+    const launched = await launchCase({ fixtures: [], trusted: [repo.root], store });
+    current = { ...launched, repos: [repo] };
+    const { page } = launched;
+    await expect.poll(async () => value(await invoke(page, 'session.list', {})).sessions.some((r) => r.engineSessionId === sid), { timeout: 20_000 }).toBe(true);
+    const id = value(await invoke(page, 'session.list', {})).sessions.find((r) => r.engineSessionId === sid)!.appId;
+
+    const pid = process.pid;
+    const procStart = execFileSync('/bin/ps', ['-o', 'lstart=', '-p', String(pid)], { env: { LC_ALL: 'C', TZ: 'UTC' }, encoding: 'utf8' }).trim();
+    await store.addRegistryRecord(pid, { pid, sessionId: sid, cwd: repo.root, kind: 'interactive', procStart, status: 'idle' });
+    const holder = async () => value(await invoke(page, 'session.get', { appSessionId: id }))?.holder.kind;
+    await expect.poll(holder, { timeout: 10_000 }).toBe('terminal');
+    await (await sidebarRow(page, { appSessionId: id })).click();
+    const main = page.locator('[data-region="main"]');
+    await expect(main.getByRole('note')).toContainText(`Live in Terminal · pid ${pid} · read-only`, { timeout: 10_000 });
+    const agentRow = main.locator('.transcript-subagent', { hasText: agent.description });
+    await expect(agentRow, 'the turn ended while its agent works: the call stays in view').toContainText(`${agent.description} started working`, { timeout: 15_000 });
+
+    await store.removeRegistryRecord(pid);
+    await expect.poll(holder, { timeout: 10_000 }).toBe('none');
+    await expect(agentRow, 'its process went: the agent ended with it, and its row folds with the turn').toHaveCount(0, { timeout: 15_000 });
     expect(launched.maws.consoleErrors()).toEqual([]);
   });
 

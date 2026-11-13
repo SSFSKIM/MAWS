@@ -1,4 +1,4 @@
-// Background work (C8b execution document, M3): workflow cards with phases and the per-agent table over the recorded
+// Background tasks (C8b execution document, M3; the UX wave's U8b, M7: by state, Running, Scheduled, Tasks, Done): workflow cards with phases and the per-agent table over the recorded
 // pass-2 run, shells with Output from the Bash result text, monitors, Stop's two-phase state over R6's recorded
 // sequence, the disk-only wording, the tool's X5 pins and its summary section; and the task checklist over the client's
 // `tasks` for the status's list id. The stores are the product singletons over the fake agent-work client; C5's
@@ -33,6 +33,8 @@ import { SLOW_TICK_MS, STOP_DOUBT_MS } from '../subagents/shared';
 import { subagentsTool, type SubagentsParams } from '../subagents/SubagentsTool';
 import { BackgroundSummary } from './BackgroundSummary';
 import { backgroundTool, type BackgroundHandle, type BackgroundParams } from './BackgroundTool';
+import { MonitorRow, ShellRow } from './TaskRows'; // the UX wave's U8b
+import type { TaskNode } from '../model/task-graph';
 // E7 start: the Scheduled section
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -146,6 +148,8 @@ const push = (events: SessionEvent[]) => act(() => fake.batch(A, events));
 const section = (name: string) => document.querySelector<HTMLElement>(`[data-section="${name}"]`);
 // the heading's own text: its toggle (E7: the Tasks heading also holds `Open`)
 const heading = (name: string) => section(name)?.querySelector('h3 > button')?.textContent;
+// The UX wave's U8b (M7): a section folded or unfolded by its heading (Done is folded at first)
+const toggleSection = (name: string) => act(() => void fireEvent.click(section(name)!.querySelector('h3 > button')!));
 const card = (taskId: string) => document.querySelector<HTMLElement>(`[data-workflow="${taskId}"]`)!;
 const summaryLine = (taskId: string) => card(taskId).querySelector('[data-part="summary"]')?.textContent;
 // E7: the run's widget, as shown: the phase options (`<title>|<count>`, the selected one marked `*`) and the agent rows.
@@ -199,7 +203,8 @@ afterEach(() => {
 describe('background work', () => {
   it('shows a compact workflow card from pass2/workflow: its description, workflow maws-probe and one summary line per frame', async () => {
     await mount({ events: upTo(workflow, 82) });
-    expect(heading('workflows')).toBe('Workflows · 1');
+    expect(heading('running')).toBe('Running 1');
+    expect(card('wayue3on6').querySelector('[data-kind-mark="workflow"]')).not.toBeNull(); // the Subagents tool's icon marks a workflow
     const wf = card('wayue3on6');
     expect(within(wf).getByRole('heading').textContent).toBe('Two echo agents in one phase');
     const line = wf.querySelector('[data-part="line"]')?.textContent;
@@ -209,6 +214,11 @@ describe('background work', () => {
     push(upTo(workflow, 93).filter((e) => (e.seq ?? 0) > 82));
     expect(summaryLine('wayue3on6')).toBe('Done');
     expect(card('wayue3on6').querySelector('[data-part="line"]')?.textContent).toMatch(/ · 17\.7k tokens$/); // alpha's 8,861 + beta's 8,857
+    push(workflow.filter((e) => (e.seq ?? 0) > 93)); // the run's notification (seq 96): it ended, under the folded Done
+    expect(section('running')).toBeNull();
+    expect(heading('done')).toBe('Done 1 · 1 workflow');
+    toggleSection('done');
+    expect(summaryLine('wayue3on6')).toBe('Done');
   });
 
   // E7 (Design §2, G1): the widget.
@@ -233,7 +243,7 @@ describe('background work', () => {
     ]);
     expect(tableRows().map((cells) => cells[0])).toEqual([expect.stringMatching(/alpha$/), expect.stringMatching(/beta$/)]);
     // Back returns to the list, the card still selected
-    fireEvent.click(within(widget()!).getByRole('button', { name: '‹ Background work' }));
+    fireEvent.click(within(widget()!).getByRole('button', { name: '‹ Background tasks' }));
     expect(widget()).toBeNull();
     expect(card('wayue3on6').dataset.selected).toBe('true');
     openWidget('wayue3on6');
@@ -285,6 +295,7 @@ describe('background work', () => {
         event('task.notification', { taskId: 'wf1', status: 'stopped' }, { seq: 3 }),
       ],
     });
+    toggleSection('done');
     openWidget('wf1');
     expect(tableRows()).toEqual([['slow', '', 'running', '', '']]);
     expect(widget()!.querySelector('.animate-spin')).toBeNull();
@@ -326,6 +337,7 @@ describe('background work', () => {
       snapshot: { ...run.snapshot!, workflowProgress: run.snapshot!.workflowProgress!.map((row) => ({ ...(row as Record<string, unknown>), agentId: undefined })) },
     };
     await mount({ status: null, sidecars: sidecarsOf('pass2/workflow-disk', run.runId), runs: [stripped] });
+    toggleSection('done');
     openWidget(run.snapshot!.taskId!);
     expect(within(widget()!).queryByRole('button', { name: 'Stop workflow' })).toBeNull();
     expect(widget()!.querySelector('[data-part="status"]')?.textContent).toBe('completed');
@@ -337,6 +349,7 @@ describe('background work', () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'Date'] });
     vi.setSystemTime(Date.parse('2026-09-28T10:03:00.000Z')); // five seconds after the shell's notification (seq 71)
     const { handle, rerender } = await mount({ events: upTo(stopOn, 71) });
+    toggleSection('done');
     const line = () => document.querySelector('[data-shell="b53no4rmo"] [data-part="line"]')?.textContent;
     expect(line()).toBe(`Sleep 30s then write BG_DONE to bg.txt · completed ${REL.now}`);
     act(() => vi.advanceTimersByTime(4 * SLOW_TICK_MS));
@@ -430,7 +443,7 @@ describe('background work', () => {
 
   it('lists a background shell from per-task-stop-on with Output enabled from the result text, before the notification', async () => {
     await mount({ events: upTo(stopOn, 44) });
-    expect(heading('shells')).toBe('Shells · 1 running');
+    expect(heading('running')).toBe('Running 1');
     const row = document.querySelector<HTMLElement>('[data-shell="b53no4rmo"]')!;
     expect(row.querySelector('[data-part="line"]')?.textContent).toMatch(/^Sleep 30s then write BG_DONE to bg\.txt · running /);
     const output = within(row).getByRole('button', { name: 'Output' }) as HTMLButtonElement;
@@ -449,7 +462,7 @@ describe('background work', () => {
 
   it('lists a monitor from a task.started of type monitor_ws', async () => {
     await mount({ events: [event('task.started', { taskId: 'm1', taskType: 'monitor_ws', description: 'until tests pass' }, { seq: 1, at: T })] });
-    expect(heading('monitors')).toBe('Monitors · 1');
+    expect(heading('running')).toBe('Running 1');
     expect(document.querySelector('[data-monitor="m1"] [data-part="line"]')?.textContent).toMatch(/^until tests pass · running /);
   });
 
@@ -461,6 +474,7 @@ describe('background work', () => {
     expect(fake.inputs.stopTask[0]).toEqual([A, 'ba3cr5gnx']);
     push(upTo(stopTask, 46).filter((e) => (e.seq ?? 0) > 43));
     await act(async () => fake.answer('stopTask'));
+    toggleSection('done');
     expect(row().querySelector('[data-part="line"]')?.textContent).toMatch(/^Sleep then write DONE to bg\.txt · stopped /);
     expect(within(row()).queryByRole('button', { name: /Stop|stopping/ })).toBeNull();
   });
@@ -515,7 +529,9 @@ describe('background work', () => {
       expect(bridge.invoked('laneA.watch')).toEqual([{ appSessionId: 'A' }]);
       expect(screen.queryByText('Shells and monitors are known only while the session runs here')).toBeNull();
       plane('snapshot', [job('bsleep01'), job('bbuild02', { status: 'failed', endedAt: T }), job('bmon0003', { kind: 'monitor', command: undefined, outputFile: null, description: 'watch the log' })]);
-      expect(heading('shells')).toBe('Shells · 1 running');
+      expect(heading('running')).toBe('Running 2');
+      expect(heading('done')).toBe('Done 1 · 1 shell');
+      toggleSection('done');
       expect(within(row('bsleep01')!).getByRole('button', { name: 'Stop' })).toBeTruthy();
       expect(within(row('bsleep01')!).queryByRole('button', { name: 'Output' })).toBeNull();
       expect(within(row('bbuild02')!).queryByRole('button', { name: 'Stop' })).toBeNull();
@@ -531,6 +547,7 @@ describe('background work', () => {
       await waitFor(() => expect(bridge.invoked('laneA.stopTask')).toEqual([{ appSessionId: 'A', taskId: 'bsleep01' }]));
       expect(within(row('bsleep01')!).getByRole('button', { name: 'stopping…' })).toBeTruthy();
       plane('subagents', [job('bsleep01', { status: 'stopped', endedAt: T })]);
+      toggleSection('done');
       expect(within(row('bsleep01')!).queryByRole('button')).toBeNull();
       expect(row('bsleep01')!.textContent).toContain('stopped');
     });
@@ -567,6 +584,7 @@ describe('background work', () => {
         applyLaneAState(A, null);
         holder({ kind: 'none' });
       });
+      toggleSection('done');
       expect(row('bsleep01')!.textContent).toBe('run bsleep01 · ended with the session'); // exited
       expect(within(row('bsleep01')!).queryByRole('button')).toBeNull();
       expect(screen.queryByText('Shells and monitors are known only while the session runs here')).toBeNull();
@@ -596,7 +614,7 @@ describe('background work', () => {
       render(<Mounted state={create(undefined)} />);
       await watched();
       plane('snapshot', [job('bsleep01')]);
-      expect(heading('shells')).toBe('Shells · 1 running');
+      expect(heading('running')).toBe('Running 1');
       expect(within(row('bsleep01')!).queryByRole('button', { name: 'Output' })).toBeNull();
       fireEvent.click(within(row('bsleep01')!).getByRole('button', { name: 'Stop' }));
       await waitFor(() => expect(bridge.invoked('laneA.stopTask')).toEqual([{ appSessionId: 'A', taskId: 'bsleep01' }]));
@@ -641,8 +659,29 @@ describe('background work', () => {
       fireEvent.click(within(row('bsleep01')!).getByRole('button', { name: 'Stop' }));
       await waitFor(() => expect(row('bsleep01')!.textContent).toContain('May not have stopped'));
       plane('subagents', [job('bsleep01', { status: 'stopped', endedAt: T })]);
+      toggleSection('done');
       expect(row('bsleep01')!.textContent).not.toContain('May not have stopped');
       expect(within(row('bsleep01')!).queryByRole('button')).toBeNull();
+    });
+
+    // M7 fix round 1: a deep link is placed in the list on screen, which holds the jobs, not the engine's graph.
+    it('a deep link to an ended job unfolds Done and selects its row', async () => {
+      const state = create(undefined);
+      render(<Mounted state={state} />);
+      await watched();
+      plane('snapshot', [job('bsleep01'), job('bbuild02', { status: 'completed', endedAt: T })]);
+      act(() => backgroundTool.open!(state, { taskId: 'bbuild02' }));
+      expect(state.snapshot().expanded.has('done')).toBe(true);
+      expect(row('bbuild02')?.dataset.selected).toBe('true');
+    });
+
+    it('reads Nothing running once its jobs are read and none runs', async () => {
+      render(<Mounted state={create(undefined)} />);
+      await watched();
+      expect(screen.queryByText('Nothing running')).toBeNull(); // not read yet
+      plane('snapshot', [job('bbuild02', { status: 'completed', endedAt: T })]);
+      expect(screen.getByText('Nothing running')).toBeTruthy();
+      expect(heading('done')).toBe('Done 1 · 1 shell');
     });
 
     it('the summary counts its running jobs', async () => {
@@ -654,15 +693,17 @@ describe('background work', () => {
     });
   });
 
-  it('a disk-only session reads the shells sentence and lists the runs on disk with their state and summary', async () => {
+  it('a disk-only session reads the shells sentence, Nothing running, and lists the runs on disk with their state and summary', async () => {
     await mount({ status: null, sidecars: sidecarsOf('pass2/workflow-disk', 'wf_7cacbb2d-902'), runs: workflowRunsOf() });
     expect(screen.getByText('Shells and monitors are known only while the session runs here')).toBeTruthy();
-    expect(heading('workflows')).toBe('Workflow runs on disk · 1');
+    expect(section('running')).toBeNull(); // its past runs are in Done
+    expect(screen.getByText('Nothing running').compareDocumentPosition(section('done')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(heading('done')).toBe('Done 1 · 1 workflow');
+    toggleSection('done');
     const [run] = workflowRunsOf();
     const wf = card(run.snapshot!.taskId!);
     expect(wf.querySelector('[data-part="status"]')?.textContent).toBe('completed');
     expect(summaryLine(run.snapshot!.taskId!)).toBe('Done');
-    expect(section('shells')).toBeNull();
     expect(within(wf).queryByRole('button', { name: 'Stop workflow' })).toBeNull();
     openWidget(run.snapshot!.taskId!);
     expect(tableRows()).toHaveLength(2);
@@ -707,11 +748,11 @@ describe('background work', () => {
 
   it('Back keeps the list’s scroll; a pinned tab following another session leaves the widget', async () => {
     const { handle } = await mount({ events: upTo(workflow, 93) });
-    const scroller = () => document.querySelector<HTMLElement>('[data-section="workflows"]')!.parentElement!;
+    const scroller = () => document.querySelector<HTMLElement>('[data-section="running"]')!.parentElement!;
     scroller().scrollTop = 40;
     fireEvent.scroll(scroller());
     openWidget('wayue3on6');
-    fireEvent.click(within(widget()!).getByRole('button', { name: '‹ Background work' }));
+    fireEvent.click(within(widget()!).getByRole('button', { name: '‹ Background tasks' }));
     expect(handle.snapshot().scrollTop).toBe(40);
     expect(scroller().scrollTop).toBe(40);
     openWidget('wayue3on6');
@@ -719,29 +760,172 @@ describe('background work', () => {
     expect(handle.snapshot()).toMatchObject({ appSessionId: 'B', view: { kind: 'list' }, pendingRun: null });
   });
 
-  it('reads Nothing running for a live session with no background work, the Tasks section still shown', async () => {
-    await mount({ events: [] });
-    expect(screen.getByText('Nothing running')).toBeTruthy();
-    expect(section('workflows')).toBeNull();
-    expect(section('tasks')).not.toBeNull();
+  // The UX wave's U8b (M7; Interfaces §F): by state, not by kind.
+  describe('by state', () => {
+    const later = (seconds: number) => new Date(Date.parse(T) + seconds * 1000).toISOString();
+    const startedTask = (taskId: string, taskType: string, description: string, seq: number, over: Record<string, unknown> = {}) =>
+      event('task.started', { taskId, toolUseId: `toolu_${taskId}`, taskType, description, isBackground: true, workflowName: taskType === 'local_workflow' ? 'demo' : null, ...over }, { seq, at: later(seq) });
+    const ends = (taskId: string, status: string, n: number) => event('task.notification', { taskId, status }, { seq: 50 + n, at: later(100 + n) });
+    const ids = (name: string) => Array.from(section(name)?.querySelectorAll<HTMLElement>('[data-task-id]') ?? []).map((el) => el.dataset.taskId);
+    const marks = (name: string) => Array.from(section(name)?.querySelectorAll<HTMLElement>('[data-kind-mark]') ?? []).map((el) => el.dataset.kindMark);
+
+    it('lists every running workflow, shell, monitor and other task in one Running N, in the order they started, each with its kind’s mark', async () => {
+      await mount({
+        events: [
+          startedTask('wf1', 'local_workflow', 'Judge panel', 1),
+          startedTask('sh1', 'local_bash', 'Build the site', 2),
+          startedTask('m1', 'monitor_ws', 'until tests pass', 3),
+          startedTask('x1', 'local_mcp', 'Index the docs', 4),
+        ],
+      });
+      expect(heading('running')).toBe('Running 4');
+      expect(section('running')!.querySelector('h3 [data-part="detail"]')?.className).toContain('text-fg-muted'); // the count muted
+      expect(ids('running')).toEqual(['wf1', 'sh1', 'm1', 'x1']);
+      expect(marks('running')).toEqual(['workflow', 'shell', 'monitor', 'other']);
+      expect(section('done')).toBeNull();
+      // a task of another kind: no Output, a Stop as a monitor has
+      const other = document.querySelector<HTMLElement>('[data-other="x1"]')!;
+      expect(other.querySelector('[data-part="line"]')?.textContent).toMatch(/^Index the docs · running /);
+      expect(within(other).queryByRole('button', { name: 'Output' })).toBeNull();
+      await act(async () => void fireEvent.click(within(other).getByRole('button', { name: 'Stop' })));
+      expect(fake.inputs.stopTask[0]).toEqual([A, 'x1']);
+    });
+
+    it('folds one Done N last, newest first, its heading counting by kind with a kind of zero left out', async () => {
+      await mount({
+        events: [
+          startedTask('wf1', 'local_workflow', 'Judge panel', 1),
+          startedTask('sh1', 'local_bash', 'Build the site', 2),
+          startedTask('m1', 'monitor_ws', 'until tests pass', 3),
+          startedTask('x1', 'local_mcp', 'Index the docs', 4),
+          ends('wf1', 'failed', 1), ends('sh1', 'completed', 2), ends('m1', 'stopped', 3), ends('x1', 'completed', 4),
+          startedTask('sh2', 'local_bash', 'Serve the docs', 60),
+        ],
+      });
+      expect(heading('running')).toBe('Running 1');
+      expect(heading('done')).toBe('Done 4 · 1 workflow · 1 shell · 1 monitor · 1 task');
+      expect(within(section('done')!).getByRole('button', { name: /^Done 4/ }).getAttribute('aria-expanded')).toBe('false');
+      expect(ids('done')).toEqual([]);
+      expect(Array.from(document.querySelectorAll<HTMLElement>('section[data-section]')).map((el) => el.dataset.section).at(-1)).toBe('done');
+      toggleSection('done');
+      expect(ids('done')).toEqual(['x1', 'm1', 'sh1', 'wf1']);
+      expect(document.querySelector('[data-shell="sh1"] [data-part="line"]')?.textContent).toMatch(/^Build the site · completed /);
+      unmountAll();
+      await mount({ events: [startedTask('sh1', 'local_bash', 'Build the site', 1), startedTask('sh2', 'local_bash', 'Lint', 2), ends('sh1', 'completed', 1), ends('sh2', 'failed', 2)] });
+      expect(heading('done')).toBe('Done 2 · 2 shells');
+    });
+
+    it('reads Nothing running above the folded Done; no heading reads 0', async () => {
+      await mount({ events: [startedTask('sh1', 'local_bash', 'Build the site', 1), ends('sh1', 'completed', 1)] });
+      expect(screen.getByText('Nothing running')).toBeTruthy();
+      expect(section('running')).toBeNull();
+      expect(heading('done')).toBe('Done 1 · 1 shell');
+      expect(screen.getByText('Nothing running').compareDocumentPosition(section('done')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(Array.from(document.querySelectorAll('section[data-section] h3')).map((h) => h.textContent)).not.toContainEqual(expect.stringMatching(/\b0\b/));
+    });
+
+    it('open({ section: "done" }) shows the list with Done unfolded and changes no other fold', async () => {
+      const { handle } = await mount({ events: [startedTask('sh1', 'local_bash', 'Build the site', 1), ends('sh1', 'completed', 1)], params: { taskId: 'wf-none', view: 'run' } });
+      act(() => handle.toggle('scheduled')); // folded by the person
+      act(() => backgroundTool.open!(handle, { section: 'done' }));
+      expect(handle.snapshot().view).toEqual({ kind: 'list' });
+      expect([...handle.snapshot().expanded].sort()).toEqual(['done', 'running', 'tasks']);
+      expect(ids('done')).toEqual(['sh1']);
+    });
+
+    // M7 fix round 1: a task opened before it is listed has its section settled once it is, by where it is listed.
+    it('open({ taskId }) of a task not listed yet unfolds Done once it loads ended, and selects it', async () => {
+      const { handle } = await mount({ events: [] });
+      act(() => backgroundTool.open!(handle, { taskId: 'sh1' }));
+      expect(handle.snapshot().expanded.has('done')).toBe(false);
+      push([startedTask('sh1', 'local_bash', 'Build the site', 1), ends('sh1', 'completed', 1)]);
+      expect(handle.snapshot().expanded.has('done')).toBe(true);
+      expect(document.querySelector<HTMLElement>('[data-shell="sh1"]')?.dataset.selected).toBe('true');
+      toggleSection('done'); // settled once: the fold is the person's again
+      expect(ids('done')).toEqual([]);
+    });
+
+    // M9 (M7's deferred Minor): navigation that supersedes a pending placement cancels it, so a later listing of the
+    // task it named unfolds nothing.
+    it.each([
+      ['a run opened', (handle: BackgroundHandle) => handle.openRun('wf-other')],
+      ['the list opened again', (handle: BackgroundHandle) => backgroundTool.open!(handle, {})],
+      ['a run opened by its id', (handle: BackgroundHandle) => backgroundTool.open!(handle, { taskId: 'wf-other', view: 'run' })],
+    ])('a placement superseded by %s does not unfold Done when its task loads ended', async (_, supersede) => {
+      const { handle } = await mount({ events: [] });
+      act(() => backgroundTool.open!(handle, { taskId: 'sh1' }));
+      act(() => supersede(handle));
+      expect(handle.snapshot().placing).toBeNull();
+      act(() => handle.back());
+      push([startedTask('sh1', 'local_bash', 'Build the site', 1), ends('sh1', 'completed', 1)]);
+      expect(handle.snapshot().expanded.has('done')).toBe(false);
+      expect(ids('done')).toEqual([]);
+    });
+
+    // The branch review's finding 7: the line clips to its box; its description is cut first (it shrinks to nothing before
+    // the state gives up any width) and the state only once the row is narrower than the state alone, at most the line's
+    // whole width; the buttons keep their size.
+    it('a narrow row cuts a shell’s description first, then its state, and never paints past its own box', async () => {
+      await mount({ events: [startedTask('sh1', 'local_bash', 'Build the site and then publish every page of it to the staging host', 1)] });
+      const line = document.querySelector<HTMLElement>('[data-shell="sh1"] [data-part="line"]')!;
+      expect(line.className.split(' ')).toEqual(expect.arrayContaining(['min-w-0', 'overflow-hidden']));
+      expect(line.querySelector('[data-part="description"]')?.className.split(' ')).toEqual(expect.arrayContaining(['min-w-0', 'truncate']));
+      const state = line.querySelector<HTMLElement>('[data-part="state"]')!;
+      expect(state.className.split(' ')).toEqual(expect.arrayContaining(['shrink-0', 'max-w-full', 'overflow-hidden', 'text-ellipsis', 'whitespace-pre']));
+      expect(state.textContent).toMatch(/^ · running /);
+      expect(line.title).toBe(line.textContent);
+      for (const button of within(document.querySelector<HTMLElement>('[data-shell="sh1"]')!).getAllByRole('button')) expect(button.className).toContain('shrink-0');
+    });
   });
 
-  it('createState with no params opens every section expanded and nothing selected; open({ taskId }) selects the card', async () => {
+  // The branch review's finding 8: a row draws its kind's mark only when its caller asks (the panel does; desk web's depth
+  // view, which draws the same rows, does not), and without the ask it holds no mark's element at all.
+  it('a shell’s and a monitor’s rows hold their kind’s mark only when asked', () => {
+    const shell: TaskNode = {
+      taskId: 'sh1' as TaskId, kind: 'shell', taskType: 'local_bash', toolUseId: null, description: 'Build the site', status: 'running', stopping: false,
+      startedAt: null, endedAt: null, usage: null, lastToolName: null, activity: null, summary: null, report: null, reason: null, outputFile: null,
+      isBackground: true, parentTaskId: null, agent: null, workflow: null, provenance: { wire: true, disk: false, snapshot: true },
+    };
+    const monitor: TaskNode = { ...shell, taskId: 'm1' as TaskId, kind: 'monitor', taskType: 'monitor_ws' };
+    const rows = (kindMark?: boolean) => (
+      <>
+        <ShellRow node={shell} now={0} selected={false} stopError={null} onStop={() => {}} onOutput={null} kindMark={kindMark} />
+        <MonitorRow node={monitor} now={0} selected={false} stopError={null} onStop={() => {}} kindMark={kindMark} />
+      </>
+    );
+    const marks = () => Array.from(document.querySelectorAll<HTMLElement>('[data-kind-mark]'), (mark) => mark.dataset.kindMark);
+    const { rerender } = render(rows());
+    expect(marks()).toEqual([]);
+    rerender(rows(true));
+    expect(marks()).toEqual(['shell', 'monitor']);
+  });
+
+  it('reads Nothing running for a live session with no background work, and no line about task lists', async () => {
+    await mount({ events: [] });
+    expect(screen.getByText('Nothing running')).toBeTruthy();
+    expect(section('running')).toBeNull();
+    expect(section('tasks')).toBeNull(); // no list: nothing about task lists here (the Tasks panel says it)
+    expect(screen.queryByText('Tasks unavailable until the engine reports its list')).toBeNull();
+  });
+
+  it('createState with no params unfolds every section but Done and selects nothing; open({ taskId }) selects the card', async () => {
     const { handle } = await mount({ events: upTo(workflow, 82) });
     expect(handle.snapshot()).toMatchObject({ selected: null });
-    expect([...handle.snapshot().expanded].sort()).toEqual(['monitors', /* E7 */ 'scheduled', 'shells', 'tasks', 'workflows']);
-    fireEvent.click(within(section('workflows')!).getByRole('button', { name: 'Workflows · 1' }));
+    expect([...handle.snapshot().expanded].sort()).toEqual(['running', 'scheduled', 'tasks']);
+    fireEvent.click(within(section('running')!).getByRole('button', { name: 'Running 1' }));
     expect(document.querySelector('[data-workflow="wayue3on6"]')).toBeNull();
     act(() => backgroundTool.open!(handle, { taskId: 'wayue3on6' }));
     expect(handle.snapshot().selected).toBe('wayue3on6');
     expect(card('wayue3on6').dataset.selected).toBe('true');
   });
 
-  it('a pinned tab follows the shown session: selection and scroll reset, the old watch released', async () => {
+  it('a pinned tab follows the shown session: selection, scroll and folds reset (Done folded again), the old watch released', async () => {
     const { handle } = await mount({ events: upTo(workflow, 82), params: { taskId: 'wayue3on6' } });
     expect(handle.snapshot().selected).toBe('wayue3on6');
+    act(() => handle.toggle('done'));
     act(() => handle.follow('B' as AppSessionId));
     expect(handle.snapshot()).toMatchObject({ appSessionId: 'B', selected: null, scrollTop: 0 });
+    expect([...handle.snapshot().expanded].sort()).toEqual(['running', 'scheduled', 'tasks']);
     expect(fake.calls.filter((c) => c === 'off eventBatch')).toHaveLength(1);
   });
 
@@ -866,9 +1050,9 @@ describe('task checklist', () => {
     };
   });
 
-  it('reads Tasks · 2/4, the in-progress row first with its activeForm, the completed folded behind the toggle', async () => {
+  it('reads Tasks, the in-progress row first with its activeForm, the completed folded behind the toggle', async () => {
     await mount({ status: live({ taskListId: 'sess-1' }) });
-    await waitFor(() => expect(heading('tasks')).toBe('Tasks · 2/4'));
+    await waitFor(() => expect(heading('tasks')).toBe('Tasks'));
     expect(rows()).toEqual(['Checking keyboard reorder', 'Run tests']);
     const toggle = within(checklist()).getByRole('button', { name: '2 earlier tasks completed' });
     fireEvent.click(toggle);
@@ -878,21 +1062,20 @@ describe('task checklist', () => {
 
   it('follows the status’s list id to another list', async () => {
     await mount({ status: live({ taskListId: 'sess-1' }) });
-    await waitFor(() => expect(heading('tasks')).toBe('Tasks · 2/4'));
+    await waitFor(() => expect(rows()).toEqual(['Checking keyboard reorder', 'Run tests']));
     setStatus(live({ taskListId: 'team-list' }));
-    await waitFor(() => expect(heading('tasks')).toBe('Tasks · 0/1'));
-    expect(rows()).toEqual(['Team task']);
+    await waitFor(() => expect(rows()).toEqual(['Team task']));
   });
 
   it('labels a disk-only session’s list session list, read from the record’s engine session id', async () => {
     await mount({ status: null, engineSessionId: 'sess-1' });
-    await waitFor(() => expect(heading('tasks')).toBe('Tasks · 2/4'));
+    await waitFor(() => expect(heading('tasks')).toBe('Tasks'));
     expect(checklist().querySelector('[data-part="label"]')?.textContent).toBe('session list');
   });
 
-  it('reads unavailable until the engine reports its list, and reads nothing', async () => {
+  it('draws no Tasks section until the engine reports its list, and reads nothing', async () => {
     await mount({ status: live({ taskListId: null }) });
-    expect(within(checklist()).getByText('Tasks unavailable until the engine reports its list')).toBeTruthy();
+    expect(section('tasks')).toBeNull();
     expect(tasksCalls).toEqual([]);
   });
 
@@ -904,32 +1087,37 @@ describe('task checklist', () => {
     expect(tasksCalls).toEqual(['sess-1']);
     lists['sess-1'] = [...(lists['sess-1'] as PersistedTask[]), task('5', 'pending', 'New one')];
     act(() => tasksChanged.forEach((l) => l({ listId: 'sess-1' } as EventPayload<'fs.tasksChanged'>)));
-    await waitFor(() => expect(heading('tasks')).toBe('Tasks · 2/5'));
+    await waitFor(() => expect(rows()).toEqual(['Checking keyboard reorder', 'Run tests', 'New one']));
     expect(tasksCalls).toEqual(['sess-1', 'sess-1']);
   });
 
-  it('a failed read says why; an empty list says the engine is not creating task lists; useCommand is never called', async () => {
+  // The UX wave's U8b (M7 decision 3): a list that cannot be read, and an empty one, draw no section here.
+  it('a failed read and an empty list draw no Tasks section; useCommand is never called', async () => {
     lists['sess-1'] = new Error('permission denied');
     await mount({ status: live({ taskListId: 'sess-1' }) });
-    await waitFor(() => expect(within(checklist()).getByText('Tasks unavailable: permission denied')).toBeTruthy());
+    await waitFor(() => expect(tasksCalls).toEqual(['sess-1']));
+    await act(async () => {});
+    expect(section('tasks')).toBeNull();
+    expect(screen.queryByText('Tasks unavailable: permission denied')).toBeNull();
     unmountAll();
     // The architect's ruling (2026-09-29): TaskCreate is off on the current models unless the launch enables TODO tools,
     // so an empty list is the engine not creating one, not an empty plan. The launch's environment is not on any renderer
     // surface, so the line that would say TODO tools are off is not shown.
     await mount({ status: live({ taskListId: 'empty' }) });
-    await waitFor(() => expect(within(checklist()).getByText('The engine is not creating task lists in this session')).toBeTruthy());
-    expect(within(checklist()).queryByText('No tasks')).toBeNull();
-    expect(within(checklist()).queryByText('TODO tools are off in this launch')).toBeNull();
+    await waitFor(() => expect(tasksCalls).toContain('empty'));
+    await act(async () => {});
+    expect(section('tasks')).toBeNull();
+    expect(screen.queryByText('The engine is not creating task lists in this session')).toBeNull();
     expect(query.useCommand).not.toHaveBeenCalled();
   });
 
   // E7 (P-20, Design §6): the section stays and its heading opens the Tasks panel on this session.
   it('the heading’s Open opens the Tasks panel on the session', async () => {
     await mount({ status: live({ taskListId: 'sess-1' }) });
-    await waitFor(() => expect(heading('tasks')).toBe('Tasks · 2/4'));
+    await waitFor(() => expect(heading('tasks')).toBe('Tasks'));
     // the action sits beside the heading, not in it: the heading's accessible name is its own text
-    expect(within(checklist()).getByRole('heading', { level: 3 }).textContent).toBe('Tasks · 2/4');
-    expect(within(checklist()).getByRole('heading', { name: 'Tasks · 2/4' })).toBeTruthy();
+    expect(within(checklist()).getByRole('heading', { level: 3 }).textContent).toBe('Tasks');
+    expect(within(checklist()).getByRole('heading', { name: 'Tasks' })).toBeTruthy();
     fireEvent.click(within(checklist()).getByRole('button', { name: 'Open the Tasks panel' }));
     expect(openTool).toHaveBeenCalledWith('tasks', { appSessionId: A, params: { appSessionId: A } });
   });
@@ -977,9 +1165,9 @@ describe('scheduled jobs', () => {
     await attachTranscript(CRON.filter((e) => (e.seq ?? 0) <= 166));
     const monitor = event('task.started', { taskId: 'm1', taskType: 'monitor_ws', description: 'until tests pass' }, { seq: 1, at: T });
     await mount({ engineSessionId: CREATOR, events: [monitor] });
-    await waitFor(() => expect(heading('scheduled')).toBe('Scheduled · 3'));
-    // after Monitors, before Tasks (Decision Log 10)
-    expect(Array.from(document.querySelectorAll<HTMLElement>('section[data-section]')).map((s) => s.dataset.section)).toEqual(['monitors', 'scheduled', 'tasks']);
+    await waitFor(() => expect(heading('scheduled')).toBe('Scheduled 3'));
+    // after Running, before Tasks and Done (Decision Log 10; the UX wave's U8b, M7: Tasks only with a list)
+    expect(Array.from(document.querySelectorAll<HTMLElement>('section[data-section]')).map((s) => s.dataset.section)).toEqual(['running', 'scheduled']);
     const rows = scheduled();
     expect(rows.map(({ id, schedule, kind, prompt, link }) => ({ id, schedule, kind, prompt, link }))).toEqual([
       { id: '598b1690', schedule: '0 9 * * 1', kind: 'recurring · durable · this session', prompt: 'E7 durable weekly', link: null }, // made after this point of the transcript
@@ -1008,7 +1196,7 @@ describe('scheduled jobs', () => {
     // the one-shot left out: whether it has fired by now depends on the machine's zone (scheduled.test.ts pins it)
     await attachTranscript(CRON.filter((e) => !('toolUseId' in e) || e.toolUseId !== ONE_SHOT.toolUseId));
     await mount({ engineSessionId: CREATOR }); // the session that recorded the run, as the file names it
-    await waitFor(() => expect(heading('scheduled')).toBe('Scheduled · 2'));
+    await waitFor(() => expect(heading('scheduled')).toBe('Scheduled 2'));
     expect(scheduled().map(({ id, schedule, kind, link }) => ({ id, schedule, kind, link }))).toEqual([
       { id: '598b1690', schedule: 'Every Monday at 9:00 AM', kind: 'recurring · durable · this session', link: 'Open creating turn' },
       { id: '1040f3a5', schedule: 'Every day at 3:00 AM', kind: 'recurring · session-only', link: 'Open creating turn' },
@@ -1022,7 +1210,7 @@ describe('scheduled jobs', () => {
     withDurable();
     await attachTranscript(CRON.filter((e) => (e.seq ?? 0) <= 166));
     await mount({ status: null });
-    await waitFor(() => expect(heading('scheduled')).toBe('Scheduled · 3'));
+    await waitFor(() => expect(heading('scheduled')).toBe('Scheduled 3'));
     const rows = scheduled();
     expect(rows.map((r) => [r.id, r.when])).toEqual([
       ['598b1690', expect.stringMatching(/^Next ≈ /)],
@@ -1047,7 +1235,7 @@ describe('scheduled jobs', () => {
     expect(seen().has(ONE_SHOT.id)).toBe(false); // the open: the newest window, without the turn that made the job
     expect(seen().size).toBeLessThan(history.length / 2);
     await mount({ status: null });
-    await waitFor(() => expect(heading('scheduled')).toBe('Scheduled · 1'));
+    await waitFor(() => expect(heading('scheduled')).toBe('Scheduled 1'));
     expect(scheduled().map(({ id, kind, link }) => ({ id, kind, link }))).toEqual([{ id: '8d1a2582', kind: 'one-shot · session-only', link: 'Open creating turn' }]);
     fireEvent.click(within(document.querySelector<HTMLElement>('[data-scheduled="8d1a2582"]')!).getByRole('button', { name: 'Open creating turn' }));
     await waitFor(() => expect(useTranscriptStore.getState().entries[A]!.jump?.focus).toBe(cellId.tool(ONE_SHOT.toolUseId)));

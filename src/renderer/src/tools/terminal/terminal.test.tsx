@@ -965,7 +965,10 @@ it.each([620, 1280])('lets only the terminal menu consume its Escape before the 
   useLayout.getState().setOverviewOpen(true);
   try {
     render(<QueryClientProvider client={queryClient}><Shell /></QueryClientProvider>);
-    act(() => useLayout.getState().setPanelTabs(SHELL_A, { tabs: [ref('terminal:aaaaaaaa')], activeTabId: 'terminal:aaaaaaaa' }));
+    act(() => {
+      useLayout.getState().setPanelTabs(SHELL_A, { tabs: [ref('terminal:aaaaaaaa')], activeTabId: 'terminal:aaaaaaaa' });
+      useLayout.getState().showSurfaceTab(SHELL_A, 'terminal:aaaaaaaa'); // UX wave U8b: a write of refs shows nothing
+    });
     const surface = screen.getByTestId('terminal-surface');
     fireEvent.contextMenu(surface, { clientX: 20, clientY: 30 });
     const copy = screen.getByRole('menuitem', { name: 'Copy' });
