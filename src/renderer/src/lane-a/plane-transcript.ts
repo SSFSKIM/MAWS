@@ -371,6 +371,8 @@ export class PlaneTranscript {
    */
   private exit: SessionEvent | null = null;
   private exits = 0;
+  /** A rebuild asked for by `rebuildSoon` and not yet made. */
+  private rebuildAsked = false;
   /**
    * Agent tool calls a held row's mapping looked up before their subagent's metadata was in: metadata naming one
    * rebuilds the transcript, so the rows mapped without it are attributed as a fresh load attributes them.
@@ -723,12 +725,10 @@ export class PlaneTranscript {
     }
     if (!fresh) return;
     // X-168: a row after the supplied exit (presence travels outside the ordered rows, so the last ones can follow it): the
-    // rows are rebuilt with the kept exit after them, staged, so what it brings ends too and nothing is drawn twice
-    if (this.exit !== null) {
-      this.rebuild();
-      return this.publish();
-    }
-    this.source.live(row);
+    // rows are rebuilt with the kept exit after them, staged, so what it brings ends too and nothing is drawn twice; one
+    // rebuild for a delivery's rows, while the tree takes each row as it comes, the exit laid over it
+    if (this.exit !== null) this.rebuildSoon();
+    else this.source.live(row);
     if (this.treeContext !== null) this.setTree(withEvents(this.heldTasks, this.drawnEventsOf(row, this.treeContext)));
     this.publish();
   }
@@ -854,8 +854,20 @@ export class PlaneTranscript {
     return [...this.rows.slice(0, at), ...fresh, ...this.rows.slice(at).filter((row) => !inSnapshot.has(row.uuid))];
   }
 
+  /** One rebuild after the rows of the delivery in hand (X-168's late rows); any rebuild before it serves. */
+  private rebuildSoon(): void {
+    if (this.rebuildAsked) return;
+    this.rebuildAsked = true;
+    queueMicrotask(() => {
+      if (!this.rebuildAsked) return;
+      this.rebuild();
+      this.publish();
+    });
+  }
+
   /** The held rows under a new source: MAWS's store rebuilds the key from all of them, staged; the tree with them. */
   private rebuild(): void {
+    this.rebuildAsked = false;
     this.source = new RowsSource(this);
     this.state.setState({ source: this.source, held: this.rows });
     this.retree();
