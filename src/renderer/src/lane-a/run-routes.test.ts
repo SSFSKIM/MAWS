@@ -70,10 +70,11 @@ describe('a call the person’s Stop interrupted is the same refused call by eve
   const refusedCalls = (rows: Row[]) => refusals(rows).filter((line) => !line.startsWith('turn '));
   const firstLine = (rows: Row[]) => refusals(rows).find((line) => line.startsWith('turn '));
 
-  it('steer-next-interrupted: the shell call reads `Stopped: …` on all three, and the turn the Stop cut reads stopped with no denied count', async () => {
+  it('steer-next-interrupted: the shell call reads stopped (`Stopped a command`) on all three, and the turn the Stop cut reads stopped with no denied count', async () => {
     for (const { route, events, rows } of await routes('steer-next-interrupted', 'w1-steer-next-interrupted')) {
       expect(rejectedResults(events), route).toEqual(['toolu_018A2pQ8opsSUGLt6bscFJ4R user-rejected']);
-      expect(refusedCalls(rows), route).toEqual(['stopped stopped: Stopped: `sleep 6 && echo 1`']);
+      // from M3 the stopped row names the short command, and `echo` is no command Desktop's rule shows: the fallback
+      expect(refusedCalls(rows), route).toEqual(['stopped stopped: Stopped a command']);
       expect(firstLine(rows), route).toBe('turn stopped · 0 denied · 0 auto-denied');
     }
   });

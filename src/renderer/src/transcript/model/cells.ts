@@ -341,14 +341,17 @@ function artifactLabel(rec: ToolRecord, status: 'running' | 'done' | 'error', ti
   return status === 'running' ? words.running(subject) : status === 'error' ? words.failed(subject) : words.done(subject, input);
 }
 
-// A failed call's reason (decision 13): the first line of its error with the engine's refusal tags stripped, and for an
-// artifact call the host's own `<tool>: ` before it. The pane-opening call keeps its reason in its words (M3 does not
+// A failed call's reason (decision 13): the first line of its error with the engine's tags stripped (its refusal's, and
+// the one it closes an aborted command's output with), and for an artifact call the host's own `<tool>: ` before it. The pane-opening call keeps its reason in its words (M3 does not
 // touch it).
+// The engine's shell result closes a command it aborted with its own tagged line (`cli.pretty.js:505894` of 2.1.322)
+const ENGINE_ERROR_LINE = /^<error>([\s\S]*)<\/error>$/;
 function errorOf(rec: ToolRecord): string | undefined {
   if (rec.result === null || rec.use.toolName === MAWS_TOOL_USE.show_pane) return undefined;
   const call = artifactCallOf(rec.use.toolName);
   const text = toolErrorText(resultText(rec.result.content));
-  const line = text.split(/\r?\n/).map((part) => part.trim()).find((part) => part !== '');
+  const first = text.split(/\r?\n/).map((part) => part.trim()).find((part) => part !== '');
+  const line = first === undefined ? undefined : (ENGINE_ERROR_LINE.exec(first)?.[1].trim() || first);
   return line === undefined ? undefined : call === null ? line : line.replace(new RegExp(`^${call}: `), '') || undefined;
 }
 // UX wave U2 end

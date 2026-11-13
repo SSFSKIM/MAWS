@@ -214,6 +214,7 @@ describe('a failed call carries the first line of its error', () => {
     ['a shell call', 'Bash', { command: 'make build' }, 'Exit code 2\nmake: no rule to make target', 'Exit code 2'],
     ['a read, the engine’s refusal tags stripped', 'Read', { file_path: 'src/missing.ts' }, '<tool_use_error>File does not exist.</tool_use_error>', 'File does not exist.'],
     ['an MCP call, blank lines skipped', 'mcp__docs__search', { query: 'tokens' }, '\n\n  rate limited  \ntry again later', 'rate limited'],
+    ['a shell call the engine aborted, its tags stripped', 'Bash', { command: 'sleep 60' }, '<error>Command was aborted before completion</error>', 'Command was aborted before completion'],
     ['an artifact call, the host’s own tool name stripped', MAWS('artifact_export'), { artifact: 'q3-memo', format: 'pdf' }, 'artifact_export: the exporter is not available', 'the exporter is not available'],
   ])('%s', (_name, tool, input, content, error) => {
     const cell = failed(tool, input, content);
