@@ -12,9 +12,9 @@
 // whether a command can go now.
 import { useSyncExternalStore } from 'react';
 import type { LinkPhase } from '@shared/ipc/remote-unavailable';
-import type { MachineState } from '@shared/ipc/schema/machines';
 import { machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
+import { phaseOf, showsOffline } from '@shared/machine/link-phase';
 import { REMOTE_ACT_PENDING_MS } from '@shared/machine/remote-pending';
 import { ipc } from '../ipc/client';
 import { useMachines, type MachinesStore } from '../stores/machines';
@@ -29,18 +29,6 @@ export interface MachineMark {
   since: string | null; // when its link entered its state, as the roster says; null before the roster names it
   carrier: 'socket' | 'direct' | 'relay' | null; // P5 O7 M2: how main reaches it while up; null for this machine or none said
   refusal: string | null; // P5 O7 M2: the permanent verdict holding an RL2 link down (`removed`: the machine removed this device)
-}
-
-/**
- * O-39's table, from the roster entry: `connecting` until the link's first answer; `down` with the machine's removal,
- * removed; `down` within a minute (the hold an act gets) of a link that was up earlier in this run (`generation > 0`),
- * reconnecting; any other `down`, offline. A machine the roster does not name, and this Mac: up.
- */
-export function phaseOf(entry: Pick<MachineState, 'state' | 'since' | 'generation' | 'refusal'> | undefined, now: number): LinkPhase {
-  if (entry === undefined || entry.state === 'up') return 'up';
-  if (entry.state === 'connecting') return 'connecting';
-  if (entry.refusal === 'removed') return 'removed';
-  return entry.generation > 0 && now - Date.parse(entry.since) < REMOTE_ACT_PENDING_MS ? 'reconnecting' : 'offline';
 }
 
 /** O-39's words for a phase; null for up. */
@@ -59,10 +47,11 @@ export function phaseWords(phase: LinkPhase, machine: string): string | null {
   }
 }
 
-const shownOffline = (phase: LinkPhase) => phase === 'offline' || phase === 'removed';
+// O-39's table is one rule for main and the window (the Decision Log's ruling of 2026-11-13): it lives under src/shared/
+export { phaseOf };
 
 /** The display answer for one machine at `now`: greyed, "offline" in its chip's place. */
-export const selectShownOffline = (state: Pick<MachinesStore, 'machines'>, machine: MachineRef, now: number): boolean => shownOffline(phaseOf(state.machines.get(machine), now));
+export const selectShownOffline = (state: Pick<MachinesStore, 'machines'>, machine: MachineRef, now: number): boolean => showsOffline(phaseOf(state.machines.get(machine), now));
 
 /** The phase now, for an act's handler (a render follows `useLinkPhase`). */
 export const linkPhaseNow = (machine: MachineRef): LinkPhase => phaseOf(useMachines.getState().machines.get(machine), Date.now());
@@ -129,7 +118,7 @@ export function useMachineMark(address: string, unknownName?: string): MachineMa
   const since = useMachines((s) => s.machines.get(machine)?.since ?? null);
   const carrier = useMachines((s) => s.machines.get(machine)?.carrier ?? null);
   const refusal = useMachines((s) => s.machines.get(machine)?.refusal ?? null);
-  return { machine, local: machine === local, name, offline: shownOffline(phase), phase, since, carrier, refusal };
+  return { machine, local: machine === local, name, offline: showsOffline(phase), phase, since, carrier, refusal };
 }
 
 // T1 and T2: what a row says in its machine's place: "offline" for an offline machine's, `@<name>` for another
