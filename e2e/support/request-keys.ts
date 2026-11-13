@@ -34,7 +34,7 @@ export async function watchPrompts(page: Page): Promise<void> {
     if (w.__u1aDrawn) return;
     const drawn: Record<string, number> = (w.__u1aDrawn = {});
     const read = () => {
-      for (const card of document.querySelectorAll('[data-request-card]')) {
+      for (const card of Array.from(document.querySelectorAll('[data-request-card]'))) {
         const id = card.getAttribute('data-request-card')!;
         if (drawn[id] === undefined && card.querySelector('[aria-keyshortcuts]') !== null) drawn[id] = performance.now();
       }

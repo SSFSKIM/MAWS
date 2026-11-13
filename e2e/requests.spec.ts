@@ -880,7 +880,7 @@ test('a file change as a diff: Edit with numbered lines, Create for a missing fi
     expect(await style(region), 'and the region clips').toMatchObject({ overflowY: 'hidden', scrolls: true });
     const shown = await region.evaluate((e) => {
       const bottom = e.getBoundingClientRect().top + e.clientHeight + 1;
-      return [...e.querySelectorAll('.transcript-diff-line')].filter((line) => line.getBoundingClientRect().bottom <= bottom).length;
+      return Array.from(e.querySelectorAll('.transcript-diff-line')).filter((line) => line.getBoundingClientRect().bottom <= bottom).length;
     });
     expect(shown, 'the collapsed region holds twelve lines').toBe(12);
     await frame.getByRole('button', { name: 'Show all' }).click();
