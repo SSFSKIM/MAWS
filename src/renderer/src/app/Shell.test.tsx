@@ -832,7 +832,7 @@ describe('a page beside the sidebar', () => {
     expect([mainArea(), region('cards')]).toEqual([area, cards]);
     expect([hiddenNow(area), hiddenNow(cards)]).toEqual([[true, true], [true, true]]);
     expect([grid().style.gridTemplateColumns, area.parentElement!.style.paddingRight]).toEqual([columns, padding]);
-    expect(region('main').hasAttribute('inert'), 'the main region holds the Overview, which is drawn over the page').toBe(false);
+    expect(region('main').hasAttribute('inert'), 'the main region stays as it is: only its content is hidden').toBe(false);
     expect(header().className).toContain('col-span-3');
     act(() => useLayout.getState().closeDestination());
     expect([mainArea(), region('cards')]).toEqual([area, cards]);
@@ -892,6 +892,31 @@ describe('a page beside the sidebar', () => {
     expect(overview).not.toBeNull();
     expect(overview.closest('[inert]')).toBeNull();
     expect(useLayout.getState().destination).toEqual(PAGE);
+  });
+
+  // The M5 review: a maximized or floating side column leaves the main track 0 px wide, so over a page the Overview moves
+  // in the page's box (its own host over the page's grid area), and the main area keeps its node, its box and the grid.
+  it.each(['maximized', 'floating'] as const)('with the side surface %s, the Overview over a page is hosted in the page’s area, not the main track', (how) => {
+    openSurface();
+    useLayout.getState().setPanel({ collapsed: false, [how]: true });
+    renderShell();
+    const [area, columns] = [mainArea(), grid().style.gridTemplateColumns];
+    const padding = area.parentElement!.style.paddingRight;
+    act(() => useLayout.getState().openDestination(PAGE));
+    act(() => useLayout.getState().setOverviewOpen(true));
+    expect(useLayout.getState().regions.panel[how], 'the Overview over a page docks nothing').toBe(true);
+    const overview = document.querySelector<HTMLElement>('[data-overview-panel]')!;
+    const host = overview.closest<HTMLElement>('[data-overview-host]')!;
+    expect(host.parentElement).toBe(grid());
+    expect(host.className.split(' ')).toEqual(expect.arrayContaining(['col-[2/-1]', 'row-start-3', 'z-30']));
+    expect(host.className.split(' ')).toEqual(expect.arrayContaining(document.getElementById('region-page')!.className.split(' ').filter((c) => c.startsWith('col-') || c.startsWith('row-'))));
+    expect(region('main').contains(overview), 'not in the main track').toBe(false);
+    expect(overview.closest('[inert]')).toBeNull();
+    expect([mainArea(), grid().style.gridTemplateColumns, area.parentElement!.style.paddingRight]).toEqual([area, columns, padding]);
+    act(() => useLayout.getState().setOverviewOpen(false));
+    act(() => useLayout.getState().closeDestination());
+    expect(useLayout.getState().regions.panel[how], 'Back shows the column as it was').toBe(true);
+    expect(document.querySelector('[data-overview-host]')).toBeNull();
   });
 
   it('⌘W closes the Settings dialog, then the page, and only then the tab in front', () => {

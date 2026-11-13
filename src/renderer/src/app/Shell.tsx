@@ -58,11 +58,14 @@ export function Shell() {
           <div data-behind-page inert={page} className={`relative flex min-h-0 min-w-0 flex-1 flex-col ${page ? 'invisible' : ''}`}>
             <MainArea />
           </div>
-          <OverviewLayer />
+          {!page && <OverviewLayer />}
         </div>
         {placed && <aside data-region="cards" aria-label="Session cards" hidden={yieldCards} inert={!cards} className={`absolute top-3 right-3 bottom-3 z-20 w-70 overflow-y-auto ${cards ? '' : 'invisible'}`}><FloatingSummary appSessionId={session} /></aside>}
       </section>
       <DestinationPage />
+      {/* UX wave U7b (the M5 review): over a page the Overview moves in the page's box, not in the main track, which a
+          maximized or floating side column leaves at 0 px; it is drawn over the page and is inside no inert element. */}
+      {page && <div data-overview-host className="pointer-events-none relative z-30 col-[2/-1] row-start-3 min-h-0 min-w-0"><OverviewLayer /></div>}
       <ToastHost />
       <PanelRegion />
       <MarkupLayer />
