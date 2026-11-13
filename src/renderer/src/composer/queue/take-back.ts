@@ -73,7 +73,7 @@ type Row = { kind: 'next' | 'after' | 'held' | 'uncertain'; key: string; content
 
 const boxes = new Map<AppSessionId, TakeBackBox>();
 const inHand = new Set<AppSessionId>();
-const waitingForBox = new Map<AppSessionId, { stage: Draft; deps: TakeBackDeps }>();
+const waitingForBox = new Map<AppSessionId, { stage: Draft; deps: TakeBackDeps; line: string | null }>();
 
 /** The composer's box for the session, while it mounts it. */
 export function attachTakeBackBox(appSessionId: AppSessionId, box: TakeBackBox): () => void {
@@ -90,9 +90,13 @@ export const takingBack = (appSessionId: AppSessionId): boolean => inHand.has(ap
 /** A load the box refused is tried again at the editor's next change of state. */
 export function retryTakeBackLoad(appSessionId: AppSessionId): void {
   const waiting = waitingForBox.get(appSessionId);
-  if (waiting === undefined || inHand.has(appSessionId)) return;
+  const box = boxes.get(appSessionId);
+  if (waiting === undefined || box === undefined || inHand.has(appSessionId)) return;
+  // tried before the hold, so that a box still not free changes nothing (no hold to set and lift, no second notice)
+  const doc = boxDocOf(waiting.stage);
+  if (!box.load(doc)) return;
   waitingForBox.delete(appSessionId);
-  void inHandFor(appSessionId, () => load(appSessionId, waiting.stage, waiting.deps, null));
+  void inHandFor(appSessionId, () => loaded(appSessionId, waiting.stage, waiting.deps, doc, waiting.line));
 }
 
 // ---- a store of an earlier build (Reported, 20) -----------------------------------------------------------------------
@@ -322,9 +326,14 @@ async function load(appSessionId: AppSessionId, stage: Draft, deps: TakeBackDeps
   const box = boxes.get(appSessionId);
   if (box === undefined || !box.load(doc)) {
     // the stage stays stored: a later mount carries it forward, or this box takes it once it is free
-    if (box !== undefined) waitingForBox.set(appSessionId, { stage, deps });
+    if (box !== undefined) waitingForBox.set(appSessionId, { stage, deps, line });
     return notice(appSessionId, TAKE_BACK_WORDS.later);
   }
+  await loaded(appSessionId, stage, deps, doc, line);
+}
+
+// The box holds the message: its line, if the record left one, and the stage settled as the box's draft.
+async function loaded(appSessionId: AppSessionId, stage: Draft, deps: TakeBackDeps, doc: ComposerDoc, line: string | null): Promise<void> {
   if (line !== null) notice(appSessionId, line);
   await settle(appSessionId, stage, deps, draftOf(doc, new Date().toISOString()));
 }

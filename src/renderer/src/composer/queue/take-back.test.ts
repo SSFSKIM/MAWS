@@ -397,6 +397,10 @@ describe('(b) a refused load', () => {
     expect(notice()).toBe(TAKE_BACK_WORDS.later);
     expect(stageMark(w.store.get(APP))).toEqual({ ref: U1, kind: 'steer', since: SINCE }); // the stage stays stored
     expect(w.steers.size).toBe(0);
+    const holds = b.state.held.length;
+    retryTakeBackLoad(APP); // still not free: nothing changes
+    expect(b.state.held).toHaveLength(holds);
+    expect(w.log).toEqual(['claim', 'cancel']);
     b.state.free = true;
     retryTakeBackLoad(APP);
     await vi.waitFor(() => expect(w.log).toEqual(['claim', 'cancel', 'settle']));
