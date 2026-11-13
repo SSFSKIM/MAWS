@@ -3230,7 +3230,8 @@ test('U9 A8, A9, A10: from A, Rename… on B’s listed row renames it on B; For
 
     await test.step('Archive from the row’s menu: its tab closes, its row leaves A’s sidebar, and B’s record is archived', async () => {
       await (await menuItemOfRow(page, row, 'Archive')).click();
-      const sheet = page.getByRole('dialog', { name: `Archive “${RENAMED_ON_A}”?` });
+      // its tab open, A holds B's record, whose title the sheet says (B's own: the replay above keeps its first one)
+      const sheet = page.getByRole('dialog', { name: `Archive “${(await onB(app))!.title.text}”?` });
       await expect(sheet).toContainText(`Ends its engine process on ${B_NAME} and hides it`);
       await sheet.getByRole('button', { name: 'Archive' }).click();
       await expect(sheet).toBeHidden({ timeout: 60_000 });
