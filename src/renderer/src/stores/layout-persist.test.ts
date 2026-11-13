@@ -272,8 +272,8 @@ describe('layout persistence', () => {
     const failing = { ...fake.client, invoke: (name: never, input: never, ...rest: unknown[]) => (name === 'layout.get' && (input as { key: string }).key === 'main.tabs' ? Promise.resolve({ ok: false, error: { code: 'internal', message: 'x' } }) : (fake.client.invoke as unknown as (...a: unknown[]) => Promise<never>)(name, input, ...rest)) } as typeof fake.client;
     const store = createLayoutStore();
     await store.getState().hydrate(failing, () => true);
-    // UX wave U8b: an empty listing is a first read, which writes the side column's three keys and nothing else
-    expect((fake.invoked('layout.set') as { key: string }[]).map((write) => write.key)).toEqual(['panelTools.groups', 'panelTools.widths', 'cards.open']);
+    // UX wave U8b: an empty listing is a first read, which waits for a launch whose every read answered
+    expect(fake.invoked('layout.set')).toEqual([]);
     error.mockRestore();
   });
 
@@ -703,17 +703,19 @@ describe('the side column’s first read of a profile', () => {
   const multiInstance = (toolId: string) => (toolId === 'plugin-pane' ? undefined : toolId === 'terminal');
   const fixed = { regions: LAYOUT_DEFAULTS.regions, 'main.tabs': LAYOUT_DEFAULTS.main, 'panel.pinned': [] };
 
-  // A launch over `file`; `file()` after it is layout.json as its writes left it.
-  async function launch(file: Record<string, unknown>) {
+  // A launch over `file`, each key of `failing` failing its `layout.get`; `after()` is layout.json as its writes left it.
+  async function launch(file: Record<string, unknown>, failing: readonly string[] = []) {
     const fake = fakeClient({
       'layout.list': { keys: Object.keys(file) },
       'layout.get': ({ key }: { key: string }) => ({ value: file[key] ?? null }),
       'layout.set': undefined,
     });
+    const invoke = fake.client.invoke as unknown as (name: string, input: { key?: string }, ...rest: unknown[]) => Promise<unknown>;
+    const client = { ...fake.client, invoke: (name: string, input: { key?: string }, ...rest: unknown[]) => (name === 'layout.get' && failing.includes(input.key!) ? Promise.resolve({ ok: false, error: { code: 'internal', message: 'x' } }) : invoke(name, input, ...rest)) } as unknown as typeof fake.client;
     const store = createLayoutStore();
-    const stop = persistLayout(fake.client, store);
+    const stop = persistLayout(client, store);
     running.push(stop);
-    const hydrating = store.getState().hydrate(fake.client, () => true, { multiInstance });
+    const hydrating = store.getState().hydrate(client, () => true, { multiInstance });
     await vi.runAllTimersAsync();
     await hydrating;
     const sets = () => fake.invoked('layout.set') as { key: string; value: unknown }[];
@@ -742,6 +744,48 @@ describe('the side column’s first read of a profile', () => {
     await vi.advanceTimersByTimeAsync(LAYOUT_WRITE_DELAY_MS);
     const third = await launch(again.after());
     expect(third.store.getState().effectivePanelTabs(A)).toContainEqual(info);
+  });
+
+  // The first read prunes and marks the profile for good, so it waits for a launch at which every read answered (Decision
+  // Log 3): a failed read's fallback would make a scope look as if it held less than it does.
+  it.each(['panelTools.surfaces', 'panel.pinned', `panel.${A}`, 'panelTools.params', 'regions'])('waits while the read of %s fails: nothing pruned, nothing marked; the next launch reads it first', async (key) => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const f = {
+      ...fixed,
+      regions: { ...LAYOUT_DEFAULTS.regions, panel: { ...LAYOUT_DEFAULTS.regions.panel, width: 512 } },
+      'panel.pinned': [pin],
+      [`panel.${A}`]: { tabs: [files, info, review, t1], activeTabId: review.id },
+      'panelTools.surfaces': { version: 2, stacks: { [A]: [files.id, review.id] }, pinnedTools: [], contexts: {} },
+      'panelTools.params': { version: 1, params: { [info.id]: { kept: 'invented' }, [files.id]: { root: 'invented' } } },
+    };
+    const failed = await launch(f, [key]);
+    expect(error).toHaveBeenCalledWith(`[layout] layout.get ${key} failed`, expect.anything());
+    error.mockRestore();
+    if (key !== `panel.${A}`) expect(failed.store.getState().panelBySession.get(A)?.tabs).toEqual([files, info, review, t1]);
+    await vi.advanceTimersByTimeAsync(LAYOUT_WRITE_DELAY_MS);
+    expect(failed.sets().map((write) => write.key)).not.toContain('panelTools.groups');
+    expect(failed.sets().map((write) => write.key)).not.toContain(`panel.${A}`);
+    expect(failed.sets().map((write) => write.key)).not.toContain('panelTools.params');
+    expect(failed.sets().map((write) => write.key)).not.toContain('panelTools.widths');
+    expect(failed.after()).toMatchObject({ [`panel.${A}`]: f[`panel.${A}`], 'panelTools.params': f['panelTools.params'] });
+    const next = await launch(failed.after());
+    expect(next.store.getState().effectivePanelTabs(A)).toEqual([pin, files, review, t1]);
+    expect(sideGroups(next.store.getState(), A)).toMatchObject({ upper: { shown: files }, lower: { tabs: [review], shown: review }, hidden: false });
+    expect(next.after()).toMatchObject({ 'panelTools.groups': { version: 1, lower: {} }, 'panelTools.widths': { version: 1, wide: 512, narrow: null } });
+  });
+
+  it('writes back the params without the tabs the first read dropped', async () => {
+    const f = {
+      ...fixed,
+      [`panel.${A}`]: { tabs: [files, info, review], activeTabId: files.id },
+      'panelTools.surfaces': { version: 2, stacks: { [A]: [files.id] }, pinnedTools: [], contexts: {} },
+      'panelTools.params': { version: 1, params: { [info.id]: { kept: 'invented' }, [files.id]: { root: 'invented' } } },
+    };
+    const first = await launch(f);
+    expect(first.store.getState().effectivePanelTabs(A)).toEqual([files]);
+    expect(first.after()['panelTools.params']).toEqual({ version: 1, params: { [files.id]: { root: 'invented' } } });
+    const again = await launch(first.after());
+    expect(again.sets()).toEqual([]);
   });
 
   it('takes F’s one width as the wide width, 380 as automatic, and keeps 380 once dragged to it', async () => {
