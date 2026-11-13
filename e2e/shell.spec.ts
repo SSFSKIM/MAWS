@@ -558,6 +558,12 @@ test('a long project name stays inside the chip’s box', async () => {
       expect(box.x + box.width, 'the chip ends where the strip begins (half a pixel for rounding), never under the first tab').toBeLessThanOrEqual(strip.x + 0.5);
       expect(await name.evaluate((el) => el.scrollWidth > el.clientWidth), 'the name is cut inside the chip').toBe(true);
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
+      // the owner's look: more tabs open beside the long name's, at the wide width and at a narrow one
+      // (the long name's project last, so the chip still names it with a mixed strip of four behind it)
+      for (const title of [FIX, QUOTA, 'Somersault terminal run']) await (await sidebarRow(page, title)).click({ modifiers: ['Meta'] });
+      await page.mouse.move(700, 400); // off the sidebar: no hover card in the pictures
+      await attachWindowShot(maws, 'u7a-title-bar-long-name', 1280, 820);
+      await attachWindowShot(maws, 'u7a-title-bar-narrow', 700, 820);
     } finally {
       await maws.cleanup();
     }
@@ -616,6 +622,7 @@ test('hide and unhide', async () => {
     const address = await addressed(page, 'app-1238089b');
     await expect.poll(async () => Object.keys(((await layoutGet(page, 'sidebar.hidden')) as { hidden: Record<string, unknown> } | null)?.hidden ?? {}), { message: 'the hide is stored' }).toEqual([address]);
     await openHiddenRow(at);
+    await attachWindowShot(first, 'u7a-hidden-list', 1280, 820);
     expect(first.consoleErrors(), 'the console stays free of errors').toEqual([]);
     await first.app.close();
 
@@ -1186,6 +1193,22 @@ async function relaunchedInstance(maws: MawsLaunch, saved: Saved): Promise<void>
 // ---- helpers ---------------------------------------------------------------------------------------------------------------
 
 // Clicks an application-menu item in main, by the id `buildMenu` gives it (`tab.select:<n>` for the numbered tabs).
+// UX wave U7a: a full-window picture for the owner's look, attached to the run's report and written nowhere else. The
+// window takes the content size for the shot and goes back to the one it had, so the scene's own steps see what they saw.
+async function attachWindowShot(maws: MawsLaunch, name: string, width: number, height: number): Promise<void> {
+  const { app, page } = maws;
+  const contentSize = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.getContentSize());
+  const before = await contentSize();
+  const resize = async ([w, h]: readonly number[]) => {
+    await app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setContentSize(w!, h!), [w, h] as const);
+    await page.waitForFunction(([w, h]) => window.innerWidth === w && window.innerHeight === h, [w, h] as const);
+    await page.waitForTimeout(300); // the layout settles at the new size
+  };
+  await resize([width, height]);
+  await test.info().attach(name, { body: await page.screenshot(), contentType: 'image/png' });
+  await resize(before);
+}
+
 async function menu(app: ElectronApplication, id: string): Promise<void> {
   const clicked = await app.evaluate(({ Menu }, id) => {
     const item = Menu.getApplicationMenu()?.getMenuItemById(id);

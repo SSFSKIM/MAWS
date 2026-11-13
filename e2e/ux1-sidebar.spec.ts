@@ -106,6 +106,18 @@ test('UX1: titles keep their width on hover and conversation search stays reacha
     expect(await age.boundingBox(), 'the age slot stands where it stood').toEqual(ageRest);
     expect(hideBox!.x + hideBox!.width, 'Hide and overflow remain separate hit targets').toBeLessThanOrEqual(actionBox!.x);
     expect(actionBox!.x + actionBox!.width, 'unread and overflow remain separate hit targets').toBeLessThanOrEqual(unreadBox!.x);
+    // UX wave U7a, the owner's look at the row: the worktree mark at the left, the state at the right, the branch on the
+    // hover card (the card opens after its delay, so it is awaited without being asserted); then the three-dot menu.
+    const shoot = async (name: string) => info.attach(name, { body: await page.screenshot(), contentType: 'image/png' });
+    await page.locator('[data-hover-card]').first().waitFor({ state: 'visible', timeout: 3_000 }).catch(() => undefined);
+    await shoot('u7a-row-hover-card');
+    await actions.click();
+    const rowMenu = page.getByRole('menu');
+    await rowMenu.waitFor({ state: 'visible', timeout: 3_000 }).catch(() => undefined);
+    await shoot('u7a-row-menu');
+    await page.keyboard.press('Escape');
+    await rowMenu.waitFor({ state: 'detached', timeout: 3_000 }).catch(() => undefined);
+    await page.mouse.move(700, 400);
     await attachSidebarStates(maws, info, 'rows');
     await unread.click();
     await expect(row.getByRole('img', { name: 'Unread', exact: true })).toHaveCount(0);
