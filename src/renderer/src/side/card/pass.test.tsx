@@ -426,6 +426,29 @@ describe('onClosed across hosts (M3’s second re-review)', () => {
     await settle();
     expect(lost).toEqual(['h1', 'h2']);
   });
+
+  it('a card handed back to its first host is told lost by that host again when it closes', async () => {
+    const lost: string[] = [];
+    const a: CardFrame = { ...FRAME, onClosed: () => lost.push('h1') };
+    const b: CardFrame = { ...FRAME, onClosed: () => lost.push('h2') };
+    render(
+      <>
+        <Host id="h1" frame={a} />
+        <Host id="h2" frame={b} />
+      </>,
+    );
+    pick(1);
+    type('Make it bolder');
+    const serial = useCommentCard.getState().open!.serial;
+    act(() => handCardTo(serial, 'h2'));
+    await settle();
+    act(() => handCardTo(serial, 'h1'));
+    await settle();
+    expect(lost).toEqual(['h1', 'h2']);
+    fireEvent.click(within(card()!).getByRole('button', { name: 'Close' }));
+    await settle();
+    expect(lost).toEqual(['h1', 'h2', 'h1']);
+  });
 });
 
 describe('the card’s structure (decision 23)', () => {

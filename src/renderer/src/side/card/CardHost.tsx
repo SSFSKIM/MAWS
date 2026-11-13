@@ -152,6 +152,8 @@ export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, vi
     if (shownCard === null) return;
     const went = useCommentCard.getState().open;
     if (went?.serial !== shownCard) return;
+    // Drawing it again (a card handed back to this host): its next loss is a new one to report.
+    if (reportedClosed.get(hostId) === shownCard) reportedClosed.delete(hostId);
     return () => {
       queueMicrotask(() => {
         const open = useCommentCard.getState().open;
