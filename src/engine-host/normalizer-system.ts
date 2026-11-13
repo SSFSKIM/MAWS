@@ -58,6 +58,8 @@ const none: SystemMapping = { payloads: [], agentId: null };
 const one = (payload: EventPayload, agentId: AgentId | null = null): SystemMapping => ({ payloads: [payload], agentId });
 const asTaskId = (id: string) => id as TaskId;
 const emptyToNull = (v: unknown): string | null => (typeof v === 'string' && v.length > 0 ? v : null);
+// The UX wave's U8b (M5): the subagent that started a task (the engine's `parent_task_id`), absent for the main loop's
+const starterOf = (v: string | undefined): TaskId | undefined => (v ? asTaskId(v) : undefined);
 
 const apiRetryPayload = (f: SystemApiRetryFrame): EventPayload => (
   { kind: 'api.retry', attempt: f.attempt, maxRetries: f.max_retries, retryDelayMs: f.retry_delay_ms, errorStatus: f.error_status ?? null, error: f.error }
@@ -153,7 +155,10 @@ export function mapSystemFrame(frame: SystemFrame, tasks: TaskRegistry): SystemM
           isBackground: f.is_backgrounded ?? false, spawnDepth: f.spawn_depth ?? 0, prompt: f.prompt ?? null,
         }, f.task_id as AgentId);
       }
-      return one({ kind: 'task.started', taskId: asTaskId(f.task_id), toolUseId, taskType, description: f.description, isBackground: f.is_backgrounded ?? false, workflowName: f.workflow_name ?? null });
+      return one(compact({
+        kind: 'task.started', taskId: asTaskId(f.task_id), toolUseId, taskType, description: f.description, isBackground: f.is_backgrounded ?? false, workflowName: f.workflow_name ?? null,
+        parentTaskId: starterOf(f.parent_task_id), // the UX wave's U8b (M5)
+      }));
     }
     case 'task_progress': {
       const f = frame as SystemTaskProgressFrame;
@@ -186,7 +191,7 @@ export function mapSystemFrame(frame: SystemFrame, tasks: TaskRegistry): SystemM
     }
     case 'background_tasks_changed': {
       const f = frame as SystemBackgroundTasksChangedFrame;
-      return one({ kind: 'tasks.snapshot', tasks: f.tasks.map((t) => ({ taskId: asTaskId(t.task_id), taskType: t.task_type, description: t.description, ambient: boolOr(t.ambient, false) })) });
+      return one({ kind: 'tasks.snapshot', tasks: f.tasks.map((t) => compact({ taskId: asTaskId(t.task_id), taskType: t.task_type, description: t.description, ambient: boolOr(t.ambient, false), parentTaskId: starterOf(t.parent_task_id) })) });
     }
     case 'ui_toast': { // R1
       const f = frame as SystemUiToastFrame;

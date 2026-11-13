@@ -146,6 +146,7 @@ test('the jobs view: shells and the monitor with MAWS’s rows, Stop offered on 
     const stop = jobRow(jobs, taskId).getByRole('button', { name: 'Stop' });
     await expect(stop).toBeEnabled();
     await expect(stop).not.toHaveAttribute('title');
+    await expect(jobRow(jobs, taskId).locator('[data-kind-mark]'), 'MAWS’s row drawn as it was: no kind mark').toHaveCount(0);
   }
 
   // ok: the file's tail as plain text.

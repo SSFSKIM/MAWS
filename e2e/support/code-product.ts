@@ -9,6 +9,7 @@ import { launchMaws, type MawsLaunch } from './launch';
 import { CHARTER } from './panel-support';
 import { sidebarOf, sidebarRow } from './sidebar';
 import { mainTabById, openSurface, surface } from './shell';
+import { storedMain, stripOf, type LayoutMain, type Strip, type TabRef } from '../../src/shared/ipc/schema/layout';
 
 // ---- themes: C5's smoke's scan, with the `--code-*` tokens in the palette -------------------------------------------------
 
@@ -221,21 +222,20 @@ export function numstat(scratch: CodeScratch): { files: number; added: number; r
 }
 
 // A tab written into layout.json's focused pane beside the session's, then the window reloaded (C5's restore path).
-// W12: `main.tabs` holds a tab set per project; the strip's is `current`.
-export async function restoreWithTab(p: Product, tabs: Record<string, unknown>[]): Promise<void> {
-  type Set = { panes: { tabs: { id: string }[]; activeTabId: string }[]; focusedPane: number };
-  const main = await p.page.evaluate(async () => {
+// UX wave U13a: `main.tabs` is the one strip, read with `stripOf` and written back through `storedMain`, the store's own.
+export async function restoreWithTab(p: Product, tabs: TabRef[]): Promise<void> {
+  const stored = await p.page.evaluate(async () => {
     const result = await window.maws.invoke('layout.get', { key: 'main.tabs' });
-    return result.ok ? (result.value.value as { current: string; sets: Record<string, Set> }) : null;
+    return result.ok ? (result.value.value as LayoutMain | null) : null;
   });
-  expect(main, 'the session tab reached layout.json').not.toBeNull();
-  const shown = main!.sets[main!.current];
-  const pane = shown.panes[shown.focusedPane];
-  pane.tabs.push(...(tabs as never[]));
-  pane.activeTabId = String(tabs.at(-1)!.id);
+  expect(stored, 'the session tab reached layout.json').not.toBeNull();
+  const { strip, canonical } = stripOf(stored!);
+  expect(canonical, 'the strip as U13a stores it').toBe(true);
+  const pane = strip.panes[strip.focusedPane];
+  const next: Strip = { ...strip, panes: strip.panes.map((each) => (each === pane ? { tabs: [...each.tabs, ...tabs], activeTabId: tabs.at(-1)!.id } : each)) as Strip['panes'] };
   await p.page.evaluate(async (value) => {
     const result = await window.maws.invoke('layout.set', { key: 'main.tabs', value });
     if (!result.ok) throw new Error(result.error.message);
-  }, main);
+  }, storedMain(next));
   await p.page.reload();
 }

@@ -87,7 +87,8 @@ import { startRemoteScene, B_NAME, type RemoteScene } from './support/remote-sce
 import type { PlaneRow } from './support/fake-sminos'; // 2026-11-06
 import { answered, BUTTON, FIELD, startPages } from './support/headless-browser'; // P5 O17 M10
 import { connectorControl, writeCuaEngine, type ConnectorControl } from '../test/support/cua-engine'; // P5 O17 M10
-import { activeMainTab, closeSurface, mainTabById, mainTabs, openSurface, surface } from './support/shell';
+import { activeMainTab, hideSurface, mainTabById, mainTabs, moveSideTab, openSurface, sessionCard, showSessionCards, sideColumn, sideGroup, sideTab, surface } from './support/shell';
+import { backgroundAgentRecords, backgroundBashRecords, turnEndRecords, userRecord } from './support/lane-a'; // UX wave U8b M9
 import { seedTranscript, SIDE_QUESTION, SideJournal, slugOf, transcript } from './support/side-replay';
 import { newChatIn, openProject, projectLine, projectRow, showProjectList, sidebarOf } from './support/sidebar';
 import { clickRevealed } from './support/hover'; // P5 O7 M8
@@ -762,6 +763,11 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
 
     await test.step('M4: files written on B show in A’s tree and status with no click, one written while A is cut off after the reconnect', async () => {
       await openSurface(page, 'Source control');
+      // UX wave U8b: one tab is in view per group, so Source control came into view in Files' place; moved below, it is
+      // the lower group's, and Files, the tab it left, is in view above it
+      await moveSideTab(page, 'Source control', 'below');
+      await expect(sideGroup(page, 'lower')).toHaveAttribute('aria-label', 'Source control');
+      await expect(sideGroup(page, 'upper')).toHaveAttribute('aria-label', 'Files');
       await expect(scm.locator('[data-scm-header]'), `B's repository in A's Source control tool\n${mainSaid(page)}`).toContainText('⎇ main', { timeout: 60_000 });
       await expect(scmRow('unstaged', NOTES), 'the saved file is a change in B’s status').toBeVisible({ timeout: 60_000 });
       await expect(files, 'both tools are on screen').toBeVisible();
@@ -1748,16 +1754,28 @@ test('O17 M10: the agent’s tab on B, which runs no app, seen and driven from A
       console.log('[e2e:remote] M10: A took control, clicked and typed into B’s page, and gave it back');
     });
 
-    await test.step('the Browser tool hidden closes its view, not B’s tab; shown again it opens a new view of the tab', async () => {
+    await test.step('the Browser tool out of view closes its view, not B’s tab, its column hidden or another tool in its place; in view again it opens a new view of the tab', async () => {
+      const bTabGoesOn = async () => {
+        expect((await b.request<Render>('daemon.status')).render?.browserTabs, 'B’s tab goes on').toBe(2);
+        const tabs = await cua.call<{ id: number }[]>('tabs.query');
+        expect(tabs.ok && tabs.result.some((t) => t.id === created.tabId), 'the agent still holds it').toBe(true);
+      };
       const before = (await canvas.getAttribute('data-remote-view'))!;
-      await closeSurface(page, 'Browser'); // the panel's surfaces sit side by side: another opened beside it hides nothing
+      await hideSurface(page, 'Browser'); // UX wave U8b: the side column hides; its Browser tab stays, and only a tab in view is mounted
       await expect(canvas).toHaveCount(0);
-      expect((await b.request<Render>('daemon.status')).render?.browserTabs, 'B’s tab goes on').toBe(2);
-      const tabs = await cua.call<{ id: number }[]>('tabs.query');
-      expect(tabs.ok && tabs.result.some((t) => t.id === created.tabId), 'the agent still holds it').toBe(true);
+      await bTabGoesOn();
       await openSurface(page, 'Browser');
       await quoting(expect(canvas, 'live again').toHaveAttribute('data-remote-stream', 'live', { timeout: 60_000 }), toolSaid);
-      expect(await canvas.getAttribute('data-remote-view'), 'a new view').not.toBe(before);
+      const shown = (await canvas.getAttribute('data-remote-view'))!;
+      expect(shown, 'a new view').not.toBe(before);
+      // a second tool opened beside the chat comes into view in the Browser's place, which stays a tab of the strip
+      await openSurface(page, 'Session info');
+      await expect(canvas).toHaveCount(0);
+      await expect(sideTab(sideColumn(page), 'Browser'), 'the Browser still a tab').toBeVisible();
+      await bTabGoesOn();
+      await sideTab(sideColumn(page), 'Browser').click();
+      await quoting(expect(canvas, 'live again').toHaveAttribute('data-remote-stream', 'live', { timeout: 60_000 }), toolSaid);
+      expect(await canvas.getAttribute('data-remote-view'), 'a new view again').not.toBe(shown);
     });
 
     await test.step('B’s app arriving mid-lease closes A’s stream engine-changed; the agent’s next tab is the app’s, and A views it', async () => {
@@ -2821,6 +2839,115 @@ test('a subagent of B’s terminal session, where B’s endpoint lists no rl2.ag
     await page.waitForTimeout(2_000); // what a watch of the agent would have asked by now
     expect(plane.subscribes(agent), 'nothing asked of B for the agent').toEqual([]);
     expect(plane.subscribes(null), 'the session’s own transcript still read').toHaveLength(1);
+  } finally {
+    await held.a?.cleanup();
+    await held.scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// UX wave U8b (docs/doperpowers/plans/2026-11-12-ux-wave-U8b-column-and-tabs.md; A2 and A7, M6 and M8; X-168 and the
+// architect's ruling of 2026-11-13, Decision Log 13): a terminal session on B whose turn ended while an agent it started
+// in the background still works, beside a shell it runs in the background. A's card column for it draws the Subagents
+// card from B's plane (the subagent tree its plane transcript keeps) and the Background tasks card from the jobs its
+// lane A watch carries. A pause of A's link to B changes nothing. Then B's sminos says the session has no live process
+// (its presence, `record: null`) while B is up: the agent ended with the session, whatever B last reported of it, so the
+// row of its Agent call in the transcript folds with the ended turn, the Subagents card leaves, and the Subagents panel
+// lists it under Done, ended with the session. The scene sends the presence alone, not the tree a current sminos derives
+// again beside it once the process is gone, so the exit holds against a tree that still says running (M6 decision 5).
+// What becomes of the shell is not asserted: on this route its end is the jobs B's plane derives, which the scene leaves.
+const GONE = { engine: 'b0c0d0e0-0000-4000-8000-0000000000c2', title: 'B’s terminal session that ends', launch: 'L-terminal-2' };
+const GONE_AGENT = { agentId: 'ab5e2e000000000c2', description: 'Count the files on B', prompt: 'Count every file of the checkout.', at: '2026-11-06T10:00:02.000Z' };
+const GONE_SHELL = { taskId: 'bwatch0c2', command: 'sleep 600', description: 'Watch the build on B', at: '2026-11-06T10:00:01.000Z' };
+
+test('X-168 on B’s terminal session: the Subagents and Background tasks cards from B’s plane; a pause of the link changes nothing; its presence with no live record ends its agent: the transcript’s row folds, the Subagents card leaves, the panel reads ended with the session', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-la-gone-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-la-gone-'));
+  const held: TerminalHeld = { scene: null, a: null };
+  try {
+    const checkout = join(root, 'b-terminal');
+    mkdirSync(checkout);
+    const scene = (held.scene = await startRemoteScene({ scratch: join(root, 'scene'), aUserData }));
+    const { b } = scene;
+    // its main transcript: the ask, the shell and the agent each started in the background, the answer, the turn's end
+    const ask = 'c2c2c2c2-0000-4000-8000-000000000001';
+    const shell = backgroundBashRecords(GONE.engine, checkout, ask, GONE_SHELL);
+    const turn = backgroundAgentRecords(GONE.engine, checkout, shell.at(-1)!.uuid as string, GONE_AGENT);
+    const rows = [
+      userRecord(GONE.engine, checkout, ask, null, 'Watch the build and count the files in the background.', '2026-11-06T10:00:00.000Z'),
+      ...shell,
+      ...turn,
+      ...turnEndRecords(GONE.engine, checkout, turn.at(-1)!.uuid as string, '2026-11-06T10:00:03.000Z'),
+    ] as PlaneRow[];
+    const plane = scene.sminos.laneA(PROJECT, {
+      engine: GONE.engine,
+      title: GONE.title,
+      cwd: checkout,
+      owners: [scene.member],
+      launch: GONE.launch,
+      main: rows,
+      agents: {},
+      subagents: [{ agentId: GONE_AGENT.agentId, meta: { agentType: 'general-purpose', description: GONE_AGENT.description, toolUseId: `toolu_${GONE_AGENT.agentId}` }, status: 'running', evidence: 'bridge' }],
+      jobs: [{ taskId: GONE_SHELL.taskId, kind: 'shell', toolUseId: `toolu_${GONE_SHELL.taskId}`, startedAt: GONE_SHELL.at, description: GONE_SHELL.description, command: GONE_SHELL.command, outputFile: `/tmp/claude/tasks/${GONE_SHELL.taskId}.output`, status: 'running' }],
+    });
+    const a = (held.a = await launchMaws({ userData: aUserData, env: { MAWS_DEV_ORG: scene.devOrgDir(false), MAWS_MACHINE_NAME: 'A' } }));
+    keepMainLines(a);
+    const { page } = a;
+    const said = () => `${mainSaid(page)}\nB's endpoint to sminos:\n${scene.sminos.said().split('\n').slice(-30).join('\n')}`;
+    const linkState = async () => (await machineOf(page, b.ref))?.state ?? null;
+    await expect.poll(linkState, { timeout: 60_000, message: `A's link to B comes up over the relay\n${mainSaid(page)}` }).toBe('up');
+    await expect
+      .poll(async () => (await rowsOf(page)).find((row) => row.machine === b.ref && row.session === GONE.engine) ?? null, { timeout: 60_000, message: `B's terminal session is a row of A's\n${said()}` })
+      .toMatchObject({ lane: 'A', title: GONE.title });
+    await expandMachine(page, b.ref);
+    const row = sessionRow(page, addressOf(b.ref, GONE.engine));
+    await expect(row, `the terminal session's row in A's sidebar\n${mainSaid(page)}`).toBeVisible({ timeout: 30_000 });
+    await row.click();
+    await quoting(expect(main(page).getByText('It is working in the background.').first(), 'the terminal session’s transcript in A’s pane').toBeVisible({ timeout: 60_000 }), said);
+    const agentRow = main(page).locator('.transcript-subagent', { hasText: GONE_AGENT.description });
+    const subagentsCard = sessionCard(page, 'Subagents');
+    const backgroundCard = sessionCard(page, 'Background tasks');
+    const onCard = subagentsCard.locator(`[data-agent-row="${GONE_AGENT.agentId}"]`);
+
+    await test.step('the turn ended while its agent works: its row stays in view, and the column has a card for each kind of running work', async () => {
+      await quoting(expect(agentRow, 'the agent’s call stays in view under the ended turn').toBeVisible({ timeout: 60_000 }), said);
+      await showSessionCards(page);
+      await quoting(expect(onCard, 'the agent on the Subagents card, from B’s subagent tree').toContainText(GONE_AGENT.description, { timeout: 60_000 }), said);
+      await expect(subagentsCard.getByRole('button', { name: 'Subagents 1 running', exact: true })).toBeVisible();
+      await quoting(expect(backgroundCard.locator(`[data-task-id="${GONE_SHELL.taskId}"]`), 'the shell on the Background tasks card, from the session’s lane A watch').toContainText(GONE_SHELL.description, { timeout: 60_000 }), said);
+      await expect(backgroundCard.getByRole('button', { name: 'Background tasks 1 running', exact: true })).toBeVisible();
+    });
+
+    await test.step('a pause of A’s link to B changes nothing', async () => {
+      scene.aHub.cut();
+      await expect.poll(linkState, { timeout: 60_000, message: `A's link to B goes down once cut\n${mainSaid(page)}` }).toBe('down');
+      // An offline machine's session tab holds only that (P5 Decision Log 28, T5; `main/Pane.tsx`), so while the link is
+      // down the agent is read where it stays drawn, on the card; its transcript row is read again once B is back.
+      await expect(main(page).locator('[data-machine-offline]'), 'the pane says B is offline').toBeVisible();
+      await expect(onCard, 'the agent stays on the Subagents card while the link is down').toBeVisible();
+      await expect(onCard, 'the link down says nothing of the process: the agent still works').toContainText('Working');
+      scene.aHub.restore();
+      await expect.poll(linkState, { timeout: 120_000, message: `A's link to B comes up again\n${mainSaid(page)}` }).toBe('up');
+      await expect(agentRow).toBeVisible();
+      await expect(onCard).toBeVisible();
+    });
+
+    await test.step('B says the session has no live process while B is up: its agent ended with the session', async () => {
+      expect(await linkState(), 'B is up').toBe('up');
+      plane.presence(null);
+      await quoting(expect(agentRow, 'the agent’s row folds with the ended turn').toHaveCount(0, { timeout: 60_000 }), said);
+      await expect(subagentsCard, 'nothing of the session’s runs as an agent: the Subagents card leaves').toHaveCount(0, { timeout: 30_000 });
+      await openSurface(page, 'Subagents');
+      const tool = surface(page, 'subagents');
+      const done = tool.locator('section[data-section="done"]');
+      await quoting(expect(done, 'the agent under Done').toHaveAttribute('aria-label', 'Done 1', { timeout: 30_000 }), async () => `the tool: ${await tool.innerText().catch(() => 'none')}\n${said()}`);
+      await expect(tool.locator('section[data-section="running"]'), 'nothing under Running').toHaveCount(0);
+      const unfold = done.getByRole('heading').getByRole('button');
+      if ((await unfold.getAttribute('aria-expanded')) !== 'true') await unfold.click(); // Done is folded at first
+      await expect(done.locator(`[data-agent-row="${GONE_AGENT.agentId}"]`)).toContainText('ended with the session');
+      console.log(`[e2e:remote] X-168: ${GONE.engine}/${GONE_AGENT.agentId} ended with the session on B's presence`);
+    });
   } finally {
     await held.a?.cleanup();
     await held.scene?.stop();

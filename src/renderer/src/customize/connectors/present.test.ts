@@ -9,7 +9,7 @@ import { item } from '../discover/test-items';
 import { argvOf } from '../../widgets/plugins/present';
 import { installRequestOf } from '../discover/add';
 import { cardContentsWords } from '../discover/present';
-import { configuredOf, connectorAddOf, existingOf, resultFor, shadowedBy, shadowWords, nameProblem, removeRequestOf, removalDirectoryOf, scopesFor, signInSessionOf, signInViewOf, urlProblem, writesFor } from './present';
+import { configuredOf, connectorAddOf, existingOf, resultFor, shadowedBy, shadowWords, nameProblem, removeRequestOf, removalDirectoryOf, scopesFor, ownSignInSessionOf, signInSessionOf, signInViewOf, urlProblem, writesFor } from './present';
 
 const linear = (over: Partial<CatalogItem['install']> = {}, item_: Partial<CatalogItem> = {}): CatalogItem =>
   item({
@@ -120,6 +120,28 @@ describe('removing a connector', () => {
     expect(removalDirectoryOf(server({ scope: 'project', path: '/.mcp.json' }))).toBe('/');
     expect(removalDirectoryOf(server({ scope: 'local' }))).toBeNull(); // the page's project key
     expect(removalDirectoryOf(server({ scope: 'user' }))).toBeNull();
+  });
+});
+
+// UX wave U11a M8 (§A, "Who offers Sign in"): a row of MAWS's own list signs in through a session that holds the server:
+// the attached one when it is ready and its status lists the name; else the first ready session that lists it, one in
+// the page's directory first, then by id. The services' check decides; this only picks whom to ask.
+describe('which session signs in a server of MAWS’s own list', () => {
+  const holding = (appSessionId: string, cwd: string, servers: string[]) => ({ appSessionId, cwd, servers });
+  const ready = [holding('c', '/elsewhere', ['fx-own']), holding('b', '/elsewhere', ['fx-own']), holding('a', '/p', ['fx-own']), holding('z', '/p', ['other'])];
+  it('takes the attached session when it is ready and lists the name', () => {
+    expect(ownSignInSessionOf('fx-own', ready, 'b', '/p')).toBe('b');
+  });
+  it('else the first ready session that lists it, the page’s directory first, then by id', () => {
+    expect(ownSignInSessionOf('fx-own', ready, 'z', '/p')).toBe('a'); // the attached one does not list it
+    expect(ownSignInSessionOf('fx-own', ready, 'gone', '/p')).toBe('a'); // the attached one is not ready
+    expect(ownSignInSessionOf('fx-own', ready, null, '/elsewhere')).toBe('b');
+    expect(ownSignInSessionOf('fx-own', ready, null, '/q')).toBe('a');
+    expect(ownSignInSessionOf('fx-own', ready, null, null)).toBe('a');
+  });
+  it('none when no ready session lists it (Open a session, then sign in)', () => {
+    expect(ownSignInSessionOf('fx-missing', ready, 'a', '/p')).toBeNull();
+    expect(ownSignInSessionOf('fx-own', [], null, '/p')).toBeNull();
   });
 });
 

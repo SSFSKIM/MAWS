@@ -20,15 +20,17 @@ const { name: rootName, scripts } = JSON.parse(readFileSync(join(root, 'package.
 const workflow = readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8');
 const class1 = /^ {2}CLASS1_E2E: >-\n((?: {4}.*\n)+)/m.exec(workflow)[1].replace(/\s+/g, ' ').trim();
 
+const vmList = /^ {2}MAC_VM_E2E: >-\n((?: {4}.*\n)+)/m.exec(workflow)[1].replace(/\s+/g, ' ').trim();
+
 // The plan job's outputs for a push on the macOS lane, CLASS1_E2E read from the workflow: the e2e matrix and the
-// DefaultBeside groups, for a commit carrying `trailers` (none: the default set).
-function plan(trailers = '') {
+// DefaultBeside groups, for a commit carrying `trailers` (none: the default set), with `lists` over the env.
+function plan(trailers = '', lists = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'maws-default-specs-'));
   try {
     const output = join(dir, 'output');
     execFileSync(process.execPath, [join(root, '.github/scripts/gate-plan.mjs')], {
       cwd: root,
-      env: { ...process.env, EVENT: 'push', HEAD_MESSAGE: trailers && `ci-gate: test\n\n${trailers}`, GATE_RUNNER: '', GATE_E2E_RUNNER: 'macos', CLASS1_E2E: class1, LINUX_E2E: '', LIBREOFFICE_E2E: '', GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: join(dir, 'summary') },
+      env: { ...process.env, EVENT: 'push', HEAD_MESSAGE: trailers && `ci-gate: test\n\n${trailers}`, GATE_RUNNER: '', GATE_E2E_RUNNER: 'macos', CLASS1_E2E: class1, LINUX_E2E: '', LIBREOFFICE_E2E: '', ...lists, GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: join(dir, 'summary') },
     });
     const outputs = readFileSync(output, 'utf8');
     return { e2e: /^e2e=(.*)$/m.exec(outputs)[1], defaultBeside: /^default_beside=(.*)$/m.exec(outputs)[1] };
@@ -65,11 +67,17 @@ const relaunchGates = 'Gates: e2e:default,e2e:side,e2e:library\nRunner: macos';
 const whole = derive(plan());
 const relaunch = derive(plan(`${relaunchGates}\nDefaultBeside: ${class1}`));
 const widened = deriveStep(plan(relaunchGates));
-for (const derivation of [whole, relaunch, widened]) derivation.catch(() => {}); // a failure is the awaiting test's
+// default on the guest's labels, as gate.yml's MAC_VM_E2E puts it: on either desktop, and on the guest alone.
+// The host's placement sets MAC_VM_E2E without default: in CI this process inherits gate.yml's own list.
+const hostPlan = plan('', { MAC_VM_E2E: vmList.split(' ').filter((group) => group !== 'default').join(' ') });
+const guestPlans = [plan('', { MAC_VM_E2E: vmList }), plan('Lane: vm', { MAC_VM_E2E: vmList })];
+const onHost = derive(hostPlan);
+const onGuest = guestPlans.map(derive);
+for (const derivation of [whole, relaunch, widened, onHost, ...onGuest]) derivation.catch(() => {}); // a failure is the awaiting test's
 
 test("this tree: beside the macOS lane's other groups, default runs its own specs", async () => {
   const { specs, total } = await whole;
-  assert.equal(total, 108); // The project registry's M11: e2e/registry.spec.ts in e2e:settings (the page over a seeded registry, skipped without the harness build). P5 O15 M2: e2e/repair.spec.ts in e2e:supervisor-daemon (the repair window, skipped without MAWS_SUPERVISOR_E2E=1). P5 O15 M1: E11's live keep-quit probe deleted (a kept turn across an embedded quit, a subject gone with that shape). P5 O8 M6b: e2e/share.spec.ts in e2e:settings (the Share sheet and the reach marks over a seeded org, skipped without the harness build). P5 O8 M7a: e2e/channel.spec.ts in e2e:settings (the Channel tab's look over a seeded channel, skipped without the harness build). P5 O7 M7: e2e/remote-latency.spec.ts, default's own (the measured remote bench, skipped without MAWS_REMOTE_LATENCY_PERF=1), and e2e/remote-latency-live.spec.ts, default's own (the live bench against a scratch machine, skipped without MAWS_REMOTE_LATENCY_LIVE=1). P5 O5 M3: e2e/render-host.spec.ts, in e2e:render-host (the render host alone against a fake mawsd). P5 O7 M2: e2e/remote.spec.ts, in e2e:remote (the two-profile RL2 scene, skipped without MAWS_REMOTE_E2E=1). P5 O8 M4a: e2e/org-page.spec.ts in e2e:settings (the Org page's look over a seeded org, skipped without the harness build). P5 O9 M5: e2e/lane-a.spec.ts, in e2e:lane-a (a terminal session driven through the fake bridge). P5 O3-A: e2e/spine-lock.spec.ts in e2e:settings (the refused launch beside a live holder). P5 O6 M3: e2e/machines.spec.ts, in e2e:machines (the two-profile scenes, skipped without MAWS_MACHINES_E2E=1). P5 O2 M7: e2e/daemon-unit.spec.ts in e2e:daemon-unit (the LaunchAgent group; e2e:supervisor-daemon reruns e2e/supervisor.spec.ts). P5 OX1: e2e/cross-build.spec.ts, default's own (the two-build check, skipped without MAWS_CROSS_BUILD_E2E=1; the plan adds its group beside a peer a minor apart). P5 O2 M1: e2e/daemon-idle.spec.ts, default's own (the measured idle cost, skipped without MAWS_DAEMON_IDLE_PERF=1). P5 O1 M1: e2e/local-latency.spec.ts, default's own (the measured bench, skipped without MAWS_LOCAL_LATENCY_PERF=1). P4-AGG M5: e2e/discover-live.spec.ts, default's own (the opt-in live smoke, skipped without MAWS_LIVE_SMOKE=1). P4-AGG M1: e2e/discover.spec.ts and discover-connectors.spec.ts in e2e:discover. UX2-L: ux2-shell.spec.ts is part of default as well as the focused layout group. // P4-A2 G2.7: e2e/presentations-provisional-live.spec.ts, default's own (a live group); P4-A2 G2.6: presentations-provisional.spec.ts, design-provisional.spec.ts and dashboard-provisional.spec.ts in e2e:presentations, e2e:design and e2e:dashboard; P4-B1: e2e/document-margin.spec.ts in e2e:document-app; P4-B3: e2e/layout-transfer.spec.ts, default's own; P4-B2: e2e/presentations-ime.spec.ts, presentations-ime-live.spec.ts and (M0) presentations-drag.spec.ts in e2e:presentations
+  assert.equal(total, 109); // The UX wave's U12a: e2e/computer-use.spec.ts, default's own (the computer-use line's scenes on the replay transport). The project registry's M11: e2e/registry.spec.ts in e2e:settings (the page over a seeded registry, skipped without the harness build). P5 O15 M2: e2e/repair.spec.ts in e2e:supervisor-daemon (the repair window, skipped without MAWS_SUPERVISOR_E2E=1). P5 O15 M1: E11's live keep-quit probe deleted (a kept turn across an embedded quit, a subject gone with that shape). P5 O8 M6b: e2e/share.spec.ts in e2e:settings (the Share sheet and the reach marks over a seeded org, skipped without the harness build). P5 O8 M7a: e2e/channel.spec.ts in e2e:settings (the Channel tab's look over a seeded channel, skipped without the harness build). P5 O7 M7: e2e/remote-latency.spec.ts, default's own (the measured remote bench, skipped without MAWS_REMOTE_LATENCY_PERF=1), and e2e/remote-latency-live.spec.ts, default's own (the live bench against a scratch machine, skipped without MAWS_REMOTE_LATENCY_LIVE=1). P5 O5 M3: e2e/render-host.spec.ts, in e2e:render-host (the render host alone against a fake mawsd). P5 O7 M2: e2e/remote.spec.ts, in e2e:remote (the two-profile RL2 scene, skipped without MAWS_REMOTE_E2E=1). P5 O8 M4a: e2e/org-page.spec.ts in e2e:settings (the Org page's look over a seeded org, skipped without the harness build). P5 O9 M5: e2e/lane-a.spec.ts, in e2e:lane-a (a terminal session driven through the fake bridge). P5 O3-A: e2e/spine-lock.spec.ts in e2e:settings (the refused launch beside a live holder). P5 O6 M3: e2e/machines.spec.ts, in e2e:machines (the two-profile scenes, skipped without MAWS_MACHINES_E2E=1). P5 O2 M7: e2e/daemon-unit.spec.ts in e2e:daemon-unit (the LaunchAgent group; e2e:supervisor-daemon reruns e2e/supervisor.spec.ts). P5 OX1: e2e/cross-build.spec.ts, default's own (the two-build check, skipped without MAWS_CROSS_BUILD_E2E=1; the plan adds its group beside a peer a minor apart). P5 O2 M1: e2e/daemon-idle.spec.ts, default's own (the measured idle cost, skipped without MAWS_DAEMON_IDLE_PERF=1). P5 O1 M1: e2e/local-latency.spec.ts, default's own (the measured bench, skipped without MAWS_LOCAL_LATENCY_PERF=1). P4-AGG M5: e2e/discover-live.spec.ts, default's own (the opt-in live smoke, skipped without MAWS_LIVE_SMOKE=1). P4-AGG M1: e2e/discover.spec.ts and discover-connectors.spec.ts in e2e:discover. UX2-L: ux2-shell.spec.ts is part of default as well as the focused layout group. // P4-A2 G2.7: e2e/presentations-provisional-live.spec.ts, default's own (a live group); P4-A2 G2.6: presentations-provisional.spec.ts, design-provisional.spec.ts and dashboard-provisional.spec.ts in e2e:presentations, e2e:design and e2e:dashboard; P4-B1: e2e/document-margin.spec.ts in e2e:document-app; P4-B3: e2e/layout-transfer.spec.ts, default's own; P4-B2: e2e/presentations-ime.spec.ts, presentations-ime-live.spec.ts and (M0) presentations-drag.spec.ts in e2e:presentations
   assert.deepEqual(specs, [
     'e2e/agent-tools-live.spec.ts',
     'e2e/bench-edit-live.spec.ts',
@@ -81,6 +89,7 @@ test("this tree: beside the macOS lane's other groups, default runs its own spec
     'e2e/c7-shots.spec.ts',
     'e2e/code-tools-live.spec.ts',
     'e2e/composer-live.spec.ts',
+    'e2e/computer-use.spec.ts', // the UX wave's U12a, the computer-use line
     'e2e/connectors-soak.spec.ts',
     'e2e/cross-build.spec.ts', // P5 OX1, the two-build check (e2e:cross-build, beside a peer)
     'e2e/daemon-idle.spec.ts', // P5 O2 M1, the measured idle cost
@@ -124,6 +133,19 @@ test("this tree: beside the macOS lane's other groups, default runs its own spec
   ]);
 });
 
+// The derivation reads the run's group names alone, so where the plan puts default (the host's `pnpm build`, or the
+// guest's restored plain out/) leaves its own specs as they are.
+test("this tree: default's own specs are the same whether it runs on the host or the guest", async () => {
+  const entry = (outputs) => JSON.parse(outputs.e2e).find((job) => job.group === 'default');
+  assert.equal(entry(hostPlan).variant, undefined);
+  for (const outputs of guestPlans) assert.equal(entry(outputs).variant, 'plain');
+  const all = await whole;
+  for (const derivation of [onHost, ...onGuest]) {
+    const guest = await derivation;
+    assert.deepEqual([guest.specs, guest.total], [all.specs, all.total]);
+  }
+});
+
 test("this tree: a relaunch of default and two groups, DefaultBeside naming the whole class-1 set, runs exactly the whole set's own specs", async () => {
   const [all, part] = await Promise.all([whole, relaunch]);
   assert.deepEqual([part.specs, part.total], [all.specs, all.total]);
@@ -132,7 +154,7 @@ test("this tree: a relaunch of default and two groups, DefaultBeside naming the 
 
 test("this tree: the same relaunch without DefaultBeside still widens default by the specs of the groups it leaves out, read from the job's output", async () => {
   const [all, part] = await Promise.all([whole, widened]);
-  assert.match(part.summary, /^#### e2e:default: its own \d+ of the bare set's 108 specs, beside 2 other e2e groups \(/);
+  assert.match(part.summary, /^#### e2e:default: its own \d+ of the bare set's 109 specs, beside 2 other e2e groups \(/);
   assert.deepEqual(all.specs.filter((spec) => !part.specs.includes(spec)), []);
   assert.ok(part.specs.includes('e2e/artifacts-store.spec.ts'), 'e2e:artifacts, absent from the relaunch, leaves its spec to default');
   assert.ok(!part.specs.includes('e2e/side.spec.ts') && !part.specs.includes('e2e/library.spec.ts'));

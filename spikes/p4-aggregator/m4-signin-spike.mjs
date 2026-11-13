@@ -12,7 +12,7 @@
 //   input: {bin, configDir, project, resourceUrl, outDir}
 //   writes <outDir>/frames.jsonl (every control exchange, OAuth query values redacted), <outDir>/result.json (the
 //   answers per question and each failure's classification), <outDir>/pids.txt (every engine pid, one per line, as it
-//   starts) and <outDir>/debug-*.log (the engine's debug files)
+//   starts) and <outDir>/debug-*.log (the engine's debug files); <outDir>/fx-plugin is the plugin question's plugin
 //
 // Each question runs in its own engine process over the same configuration, so the credential one question stores is
 // what the last question's file-configured session reads.
@@ -30,6 +30,15 @@
 //               survives a call naming only the new server, and one naming both; then the sign-in of the loaded server.
 //   next        a fresh session over the file configuration (every server above, pathA's added to the file now): which
 //               servers it reports connected, so whether a sign-in's credential is what the next session uses.
+// The UX wave's U11a M1 (docs/doperpowers/plans/2026-11-12-ux-wave-U11a-settings-connectors-org.md, Proof P1) adds two,
+// for the servers the engine reports with scope `dynamic`, each signed in as MAWS's operation signs one in
+// (src/services/connectors/sign-in.ts: mcp_authenticate with MAWS's redirect, the browser step, mcp_oauth_callback_url,
+// then mcp_reconnect and mcp_status until connected; the engine's own listener if it answers another scheme), in a
+// session holding an SDK server as MAWS's hold `maws`; then a second process launched the same way reads the server.
+//   dynamic     fx-own, a server of the launch's own list (--mcp-config, as MAWS passes Settings' MCP servers).
+//   plugin      fx-oauth of the plugin fx-plugin, given by --plugin-dir: the engine names it plugin:fx-plugin:fx-oauth.
+// For either, a custom callback or reconnect the engine refuses is followed by a second sign-in through the engine's own
+// listener in the same session (`fallback`).
 import { spawn, execFileSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -74,12 +83,12 @@ const record = (row) => appendFileSync(FRAMES, `${JSON.stringify(redact({ at: ne
 const FLAGS = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--permission-prompt-tool', 'stdio', '--include-partial-messages', '--setting-sources', 'user,project,local'];
 
 class Engine {
-  constructor(label, { mcpConfig = null, sdkServers = [] } = {}) {
+  constructor(label, { mcpConfig = null, sdkServers = [], pluginDirs = [] } = {}) {
     this.label = label;
     this.sdkServers = sdkServers;
     this.pending = new Map();
     this.sdkSeen = [];
-    const args = [...FLAGS, '--debug-file', join(outDir, `debug-${label}.log`), ...(mcpConfig ? ['--mcp-config', JSON.stringify(mcpConfig)] : [])];
+    const args = [...FLAGS, '--debug-file', join(outDir, `debug-${label}.log`), ...(mcpConfig ? ['--mcp-config', JSON.stringify(mcpConfig)] : []), ...pluginDirs.flatMap((dir) => ['--plugin-dir', dir])];
     this.child = spawn(bin, args, { cwd: project, env: ENGINE_ENV, stdio: ['pipe', 'pipe', 'pipe'] });
     appendFileSync(PIDS, `${this.child.pid}\n`);
     record({ engine: label, event: 'spawn', pid: this.child.pid, args });
@@ -179,14 +188,18 @@ class Engine {
     return (await this.status()).find((server) => server.name === name) ?? null;
   }
 
-  // mcp_status until `name` reads one of `states` (or the bound), every 1.5 s; the last reading.
-  async until(name, states, bound = 30_000) {
+  // mcp_status until the server `matches` picks reads one of `states` (or the bound), every 1.5 s; the last reading.
+  async untilMatch(matches, states, bound = 30_000) {
     const stop = Date.now() + bound;
     for (;;) {
-      const server = await this.statusOf(name);
+      const server = (await this.status()).find(matches) ?? null;
       if ((server !== null && states.includes(server.status)) || Date.now() > stop) return server;
       await delay(1500);
     }
+  }
+
+  until(name, states, bound) {
+    return this.untilMatch((server) => server.name === name, states, bound);
   }
 
   async stop() {
@@ -255,24 +268,106 @@ async function question(name, body) {
   save();
 }
 
-async function signIn(engine, name, { redirectUri, consentDelayMs = 0 } = {}, step) {
+// `reconnectAfterCallback`: as MAWS's operation does, an accepted custom callback is followed at once by mcp_reconnect,
+// since the engine does not reconnect a server whose callback came that way (findings-m4.txt 1).
+async function signIn(engine, name, { redirectUri, consentDelayMs = 0, reconnectAfterCallback = false } = {}, step) {
   const auth = await engine.request('mcp_authenticate', { serverName: name, ...(redirectUri && { redirectUri }) }, 45_000);
   step('mcp_authenticate', answerOf(auth));
   if (auth.subtype !== 'success' || !auth.response?.authUrl) return { auth, connected: null };
   const browsed = await browse(auth.response.authUrl, consentDelayMs);
   step('browser', { status: browsed.status, location: browsed.location === null ? null : redactUrl(browsed.location), body: browsed.body });
   if (browsed.location === null) return { auth, browsed, connected: null };
+  let callback = null;
+  let reconnect = null;
+  let delivered = null;
   if (auth.response.redirectScheme === 'custom') {
-    const submitted = await engine.request('mcp_oauth_callback_url', { serverName: name, callbackUrl: browsed.location }, 45_000);
-    step('mcp_oauth_callback_url', answerOf(submitted));
+    callback = await engine.request('mcp_oauth_callback_url', { serverName: name, callbackUrl: browsed.location }, 45_000);
+    step('mcp_oauth_callback_url', answerOf(callback));
+    if (reconnectAfterCallback && callback.subtype === 'success') {
+      step('mcp_status after the callback', { server: brief(await engine.statusOf(name)) });
+      reconnect = await engine.request('mcp_reconnect', { serverName: name }, 30_000);
+      step('mcp_reconnect', answerOf(reconnect));
+    }
   } else {
     // the engine's own listener receives the redirect, as the person's browser would deliver it
-    const delivered = await fetch(browsed.location, { redirect: 'manual' }).then(async (response) => ({ status: response.status, body: (await response.text()).slice(0, 200) }), (error) => ({ error: String(error) }));
+    delivered = await fetch(browsed.location, { redirect: 'manual' }).then(async (response) => ({ status: response.status, body: (await response.text()).slice(0, 200) }), (error) => ({ error: String(error) }));
     step('delivered to the engine listener', delivered);
   }
   const server = await engine.until(name, ['connected', 'failed'], 30_000);
   step('mcp_status after', { server: brief(server) });
-  return { auth, browsed, connected: server?.status === 'connected' };
+  return { auth, browsed, callback, reconnect, delivered, connected: server?.status === 'connected' };
+}
+
+// A control answer in a word for the summary: `ok`, the engine's refusal, or null when the step was not reached.
+const outcomeOf = (answer) => (answer === null ? null : answer.subtype === 'success' ? 'ok' : (answer.error ?? answer.subtype));
+
+// dynamic and plugin: `launch` is the Engine's options for both processes, `expectedName` the name the server should be
+// listed under, `matches` how it is found in mcp_status whatever its name turns out to be.
+// `fallback`: when the first attempt answered `custom` and its callback or reconnect was refused, a second sign-in in the
+// same session with no redirect of MAWS's (the engine's own localhost listener, which the fixture's consent is delivered
+// to), as M8 would sign that kind in instead. Null when it was not needed or not reached; `fallback.next` is the second
+// process's reading, which comes after both attempts.
+async function dynamicQuestion(kind, { launch, expectedName, matches }) {
+  await question(kind, async (q, step) => {
+    const options = { ...launch, sdkServers: ['spike-sdk'] };
+    q.expectedName = expectedName;
+    q.fallback = null;
+    const engine = new Engine(kind, options);
+    const { server, redirectUri } = await listener();
+    try {
+      step('initialize', answerOf(await engine.init()));
+      const listed = await engine.untilMatch(matches, ['needs-auth', 'connected', 'failed'], 30_000);
+      step('mcp_status before', { servers: (await engine.status()).map((s) => ({ name: s.name, status: s.status, scope: s.scope ?? null })) });
+      q.name = listed?.name ?? null;
+      q.before = brief(listed);
+      if (q.name === null) {
+        fail(kind, 'undetermined', 'the server is not listed in mcp_status');
+        return;
+      }
+      const outcome = await signIn(engine, q.name, { redirectUri, reconnectAfterCallback: true }, step);
+      q.authenticate = outcomeOf(outcome.auth);
+      q.redirectScheme = outcome.auth.response?.redirectScheme ?? null;
+      q.callback = outcomeOf(outcome.callback ?? null);
+      q.reconnect = outcomeOf(outcome.reconnect ?? null);
+      q.connected = outcome.connected;
+      if (outcome.auth.subtype !== 'success') fail(kind, 'engine', outcome.auth.error);
+      else if (outcome.connected !== true) fail(kind, 'undetermined', 'the server did not report connected');
+      const refused = (answer) => answer !== null && answer !== undefined && answer.subtype !== 'success';
+      if (q.redirectScheme === 'custom' && outcome.connected !== true && (refused(outcome.callback) || refused(outcome.reconnect))) {
+        const second = await signIn(engine, q.name, {}, (label, value) => step(`fallback: ${label}`, value));
+        q.fallback = {
+          authenticate: outcomeOf(second.auth),
+          scheme: second.auth.response?.redirectScheme ?? null,
+          delivered: second.delivered ? (second.delivered.status ?? second.delivered.error) : null,
+          connected: second.connected,
+          next: null,
+        };
+        if (second.connected !== true) fail(kind, 'undetermined', 'the fallback through the engine\'s own listener did not report connected');
+      }
+    } finally {
+      server.close();
+      step('exit', await engine.stop());
+    }
+    if (q.name === null) return;
+    const next = new Engine(`${kind}-next`, options);
+    try {
+      step('next: initialize', answerOf(await next.init()));
+      q.next = brief(await next.until(q.name, ['needs-auth', 'connected', 'failed'], 30_000));
+      if (q.fallback) q.fallback.next = q.next;
+      step('next: mcp_status', { server: q.next });
+    } finally {
+      step('next: exit', await next.stop());
+    }
+  });
+}
+
+// The plugin question's plugin: a manifest and an .mcp.json naming the fixture's resource.
+function scratchPlugin() {
+  const root = join(outDir, 'fx-plugin');
+  mkdirSync(join(root, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(root, '.claude-plugin', 'plugin.json'), `${JSON.stringify({ name: 'fx-plugin', version: '0.0.1', description: 'The sign-in spike\'s plugin: one HTTP server, the OAuth fixture' }, null, 2)}\n`);
+  writeFileSync(join(root, '.mcp.json'), `${JSON.stringify({ mcpServers: { 'fx-oauth': { type: 'http', url: resourceUrl } } }, null, 2)}\n`);
+  return root;
 }
 
 async function main() {
@@ -461,6 +556,18 @@ async function main() {
       step('exit', await engine.stop());
     }
   });
+
+  // dynamic: a server of the launch's own list, shaped as appMcpConfig shapes MAWS's (src/shared/engine/app-mcp-servers.ts)
+  await dynamicQuestion('dynamic', { launch: { mcpConfig: { mcpServers: { 'fx-own': { type: 'http', url: resourceUrl } } } }, expectedName: 'fx-own', matches: (server) => server.name === 'fx-own' });
+
+  // The engine drops a plugin's server whose address a file-configured server already names ("Suppressing plugin MCP
+  // server … duplicates manually-configured …", gate run 43357272365: the plugin's server was never listed), so the
+  // file-configured servers leave the configuration before the plugin is asked.
+  result.removes = {};
+  for (const name of [...NAMES, 'fx-dynamic']) result.removes[name] = cli(['mcp', 'remove', name, '--scope', 'user']);
+
+  // plugin: a plugin's server; found by its own name's end, so a name form other than the expected one is still asked
+  await dynamicQuestion('plugin', { launch: { pluginDirs: [scratchPlugin()] }, expectedName: 'plugin:fx-plugin:fx-oauth', matches: (server) => server.name.startsWith('plugin:') && server.name.endsWith(':fx-oauth') });
 
   result.plaintextCredentials = existsSync(join(configDir, '.credentials.json'));
   save();

@@ -159,7 +159,7 @@
     {
       "name": "show_pane",
       "title": "Show pane",
-      "description": "Open a MAWS pane for the user: \"diff\", \"file\", \"terminal\", \"tasks\", \"artifact\", \"browser\" or \"source-control\"; without this tool, describe where the user should look. target names what to open: a file path for diff or file (line optional), an artifact id or handle for artifact, a URL for browser. at opens an artifact at a place: {block} or {tab} of a document, {slide} of a presentation, {version} of any. Returns what was opened, or an error for an unknown pane or a pane this build of MAWS does not have.",
+      "description": "Open a MAWS pane for the user: \"diff\", \"file\", \"terminal\", \"tasks\", \"artifact\", \"browser\" or \"source-control\"; without this tool, describe where the user should look. target names what to open: a file path for diff or file (line optional), an artifact id or handle for artifact, a URL for browser (a page already open is reloaded, unless the user is using that tab). at opens an artifact at a place: {block} or {tab} of a document, {slide} of a presentation, {version} of any. Returns what was opened, or an error for an unknown pane or a pane this build of MAWS does not have.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",

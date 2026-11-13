@@ -304,8 +304,15 @@ class RowsSource implements TranscriptSource {
     await this.owner.whenSnapshotted();
     const ctx = this.owner.newContext();
     const events = this.owner.heldRows().flatMap((row) => this.owner.mapRow(row, ctx));
+    const exit = this.owner.suppliedExit();
+    if (exit !== null) events.push(exit); // X-168: after the rows it ends
     this.ctx = ctx;
     return events;
+  }
+
+  /** X-168: the exit supplied once the snapshot is in; before it, the snapshot holds it. */
+  exited(exit: SessionEvent): void {
+    if (this.ctx !== null) this.listener?.([exit]);
   }
 
   /**
@@ -347,6 +354,15 @@ export class PlaneTranscript {
   private subagents: SubagentLookup = subagentLookupOf([]);
   /** The tree's own backfill context, continued by each row after the held ones; null until a snapshot. */
   private treeContext: BackfillContext | null = null;
+  /**
+   * X-168: the exit the session's gone process left, which its rows never hold, while its presence says no process
+   * (`sessionPresence`); laid after the rows of every source and over the tree after every status overlay. `exits`
+   * counts those supplied, for each one's own id.
+   */
+  private exit: SessionEvent | null = null;
+  private exits = 0;
+  /** A rebuild asked for by `rebuildSoon` and not yet made. */
+  private rebuildAsked = false;
   /**
    * Agent tool calls a held row's mapping looked up before their subagent's metadata was in: metadata naming one
    * rebuilds the transcript, so the rows mapped without it are attributed as a fresh load attributes them.
@@ -432,6 +448,38 @@ export class PlaneTranscript {
     this.offStore?.();
     this.offStore = null;
     this.outputs.clear();
+  }
+
+  /**
+   * The session's presence as its machine publishes it, a snapshot's and each `presence` message's (`remote-source.ts`
+   * hands them on; a machine gone offline publishes none, so its sessions keep what they drew). No live record: the
+   * session's process is gone, and its exit is supplied to the rows and the tree (X-168; the architect's ruling of
+   * 2026-11-13), so the agents it left running end. A live record clears it. The main thread's only, once served.
+   */
+  sessionPresence(presence: { record?: unknown } | undefined): void {
+    if (this.target.agentId !== null || !this.held || presence?.record === undefined) return;
+    const gone = presence.record === null;
+    if (gone === (this.exit !== null)) return;
+    if (gone) {
+      this.exits += 1;
+      const id = `session:${this.target.session}:exited${this.exits === 1 ? '' : `@${this.exits}`}`;
+      const at = this.rows.findLast((row) => typeof row.timestamp === 'string')?.timestamp;
+      this.exit = {
+        id: id as EventId, sessionId: this.target.session as SessionId, at: typeof at === 'string' ? at : new Date().toISOString(), seq: null, agentId: null, parentToolUseId: null,
+        kind: 'process.exited', code: null, signal: null, reason: 'unknown', lostAttentionCount: 0, budget: null,
+      };
+      this.source.exited(this.exit);
+      this.setTree(this.heldTasks);
+    } else {
+      this.exit = null;
+      this.rebuild(); // the rows and the tree as the held rows alone give them
+    }
+    this.publish();
+  }
+
+  /** X-168: the exit supplied now, or null. */
+  suppliedExit(): SessionEvent | null {
+    return this.exit;
   }
 
   /** After an `end`: subscribe again; the fresh snapshot is merged into what is drawn, which stays drawn meanwhile. */
@@ -666,7 +714,11 @@ export class PlaneTranscript {
       }
     }
     if (!fresh) return;
-    this.source.live(row);
+    // X-168: a row after the supplied exit (presence travels outside the ordered rows, so the last ones can follow it): the
+    // rows are rebuilt with the kept exit after them, staged, so what it brings ends too and nothing is drawn twice; one
+    // rebuild for a delivery's rows, while the tree takes each row as it comes, the exit laid over it
+    if (this.exit !== null) this.rebuildSoon();
+    else this.source.live(row);
     if (this.treeContext !== null) this.setTree(withEvents(this.heldTasks, this.drawnEventsOf(row, this.treeContext)));
     this.publish();
   }
@@ -792,8 +844,20 @@ export class PlaneTranscript {
     return [...this.rows.slice(0, at), ...fresh, ...this.rows.slice(at).filter((row) => !inSnapshot.has(row.uuid))];
   }
 
+  /** One rebuild after the rows of the delivery in hand (X-168's late rows); any rebuild before it serves. */
+  private rebuildSoon(): void {
+    if (this.rebuildAsked) return;
+    this.rebuildAsked = true;
+    queueMicrotask(() => {
+      if (!this.rebuildAsked) return;
+      this.rebuild();
+      this.publish();
+    });
+  }
+
   /** The held rows under a new source: MAWS's store rebuilds the key from all of them, staged; the tree with them. */
   private rebuild(): void {
+    this.rebuildAsked = false;
     this.source = new RowsSource(this);
     this.state.setState({ source: this.source, held: this.rows });
     this.retree();
@@ -806,10 +870,11 @@ export class PlaneTranscript {
     this.setTree(taskGraphOf(this.metas, this.rows.flatMap((row) => this.drawnEventsOf(row, ctx))));
   }
 
-  /** The tree as the held rows and metas build it, published with each agent's DX4 status laid over it. */
+  /** The tree as the held rows and metas build it, published with each agent's DX4 status and then the supplied exit laid over it. */
   private setTree(held: TaskGraph): void {
     this.heldTasks = held;
-    this.state.setState({ tasks: withStatuses(held, this.metas) });
+    const reported = withStatuses(held, this.metas);
+    this.state.setState({ tasks: this.exit === null ? reported : withEvents(reported, [this.exit]) }); // X-168: the exit outranks a status
   }
 
   /** The transcript's latest response came from `model`: the session info names it, and the pickers offer it. */

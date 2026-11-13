@@ -8,6 +8,8 @@ import {
   BROWSER_SUGGESTIONS_MAX,
   BrowserPartitionSchema,
   BrowserTabSchema,
+  BROWSER_VIEWPORTS, // U12a
+  BrowserViewportSchema, // U12a
   isExtensionPage,
   DEFAULT_PARTITION,
   profilePartition,
@@ -25,6 +27,7 @@ const TAB = {
   createdAt: '2026-10-06T00:00:00.000Z', lastShownAt: '2026-10-06T00:00:00.000Z',
   agentBadge: null, // E13
   internal: null, // cua #90
+  viewport: null, // U12a
 } as const;
 
 describe('BrowserTab (E4a, the cross-child model)', () => {
@@ -46,6 +49,19 @@ describe('BrowserTab (E4a, the cross-child model)', () => {
     expect(BrowserTabSchema.parse({ ...TAB, agentBadge: 'agent' }).agentBadge).toBe('agent');
     expect(BrowserTabSchema.safeParse({ ...TAB, agentBadge: 'x'.repeat(41) }).success).toBe(false);
     expect(BrowserTabSchema.safeParse({ ...TAB, agentBadge: undefined }).success).toBe(false);
+  });
+
+  // U12a (the UX wave's U12, l9-browser-delivery-06; Interfaces §D): the tab's device size, in the page's CSS pixels
+  it('U12a: carries the tab\'s device size, or null for Responsive; always present, whole pixels within bounds', () => {
+    expect(BROWSER_VIEWPORTS).toEqual([
+      { id: 'mobile', width: 375, height: 812 },
+      { id: 'tablet', width: 768, height: 1024 },
+    ]);
+    expect(BrowserTabSchema.parse({ ...TAB, viewport: { width: 375, height: 812 } }).viewport).toEqual({ width: 375, height: 812 });
+    expect(BrowserTabSchema.parse(TAB).viewport).toBeNull();
+    expect(BrowserTabSchema.safeParse({ ...TAB, viewport: undefined }).success).toBe(false);
+    for (const viewport of [{ width: 0, height: 812 }, { width: 375.5, height: 812 }, { width: 375, height: 8193 }, { width: 375 }, { width: 375, height: 812, id: 'mobile' }])
+      expect(BrowserViewportSchema.safeParse(viewport).success, JSON.stringify(viewport)).toBe(false);
   });
 
   it('P5 O7 M3: carries a forwarded port\'s tab\'s forward, or none', () => {

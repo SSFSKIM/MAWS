@@ -5,15 +5,18 @@
 // machine reads nothing at all (an older MAWS) it is greyed. Plain text, as M7a's channel draws every word. Tokens only.
 import { formatDayTime } from '@shared/app/date-format';
 import { addressOf } from '@shared/machine/address';
-import { MachineChip } from '../app/MachineChip';
+import { useMachineMark } from '../app/machine-mark';
 import { CHANNEL } from './copy';
-import { Time } from './parts';
+import { GIVES_WAY, MachineChipPart, Names, NAMES_ROW, partyTooltip, Time } from './parts';
 import type { ToHumanEntry as Entry, ToHumanQuestion } from './project';
 
 const PROSE = 'm-0 break-words whitespace-pre-wrap [overflow-wrap:anywhere] text-prose leading-[var(--lh-prose)] text-fg';
 
 export function ToHumanEntry({ entry }: { entry: Entry }) {
   const asOf = entry.asOf === null ? NaN : Date.parse(entry.asOf);
+  const address = addressOf(entry.machine, 'channel');
+  const machine = useMachineMark(address, entry.machineName ?? undefined).name; // the chip's name
+  const tooltip = partyTooltip(entry.name, entry.title, machine); // the name, title and machine whole, as a party's
   return (
     <article
       data-channel-entry="to-human"
@@ -23,15 +26,19 @@ export function ToHumanEntry({ entry }: { entry: Entry }) {
       data-greyed={entry.greyed ? 'true' : undefined}
       className={`flex min-w-0 flex-col gap-1 ${entry.greyed ? 'opacity-60' : ''}`}
     >
-      <header className="flex min-w-0 items-baseline gap-1.5 text-ui-sm">
-        <span className="max-w-[24ch] shrink-0 truncate font-medium text-fg" title={entry.name}>
-          {entry.name}
-        </span>
-        {/* The title gives way first, all of it before the chip gives any: the chip keeps up to 24 characters, as the name does. */}
-        {entry.title !== null && <span className="min-w-0 truncate text-fg-muted">{entry.title}</span>}
-        <span className="inline-flex max-w-[24ch] min-w-0 shrink-0">
-          <MachineChip address={addressOf(entry.machine, 'channel')} name={entry.machineName ?? undefined} className="max-w-full" />
-        </span>
+      {/* board 505: the Channel's one order (parts.tsx's GIVES_WAY): the title gives way first, then the chip, then the name. */}
+      <header className={`${NAMES_ROW} text-ui-sm`}>
+        <Names>
+          <span data-name-part="alias" className={`${GIVES_WAY.alias} font-medium text-fg`} title={tooltip}>
+            {entry.name}
+          </span>
+          {entry.title !== null && (
+            <span data-name-part="title" className={`${GIVES_WAY.title} text-fg-muted`} title={tooltip}>
+              {entry.title}
+            </span>
+          )}
+          <MachineChipPart address={address} name={entry.machineName ?? undefined} />
+        </Names>
         <span className="shrink-0 text-fg-muted">{CHANNEL.host[entry.host]}</span>
         <Time at={entry.at} />
       </header>

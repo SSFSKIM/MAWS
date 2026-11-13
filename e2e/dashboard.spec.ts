@@ -348,7 +348,8 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
     const sites = figures(main).nth(6);
     const divider = panel.getByRole('separator', { name: 'Resize right panel', exact: true });
     const defaultWidth = await divider.getAttribute('aria-valuenow');
-    // This case deliberately needs a narrow main column, independent of the resting surface's content-sized default.
+    // This case deliberately needs a narrow main column, independent of the resting surface's default (360 px for the
+    // Artifacts tool, a narrow one).
     await divider.press('End');
     try {
       await expect.poll(() => sites.locator('.dash-figure').evaluate((frame) => frame.scrollWidth - frame.clientWidth), { message: 'the real divider leaves the figure horizontally scrollable' }).toBeGreaterThan(0);
@@ -358,7 +359,7 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
       expect(hovered.lines, 'the tip wraps').toBeGreaterThanOrEqual(2);
       expect(hovered.roomBelow, 'too little room below the point: the tip must turn above it').toBeLessThan(hovered.tipHeight + 12);
     } finally {
-      await divider.press('Enter'); // the scene started at the surface's default width; return to it for the sheet steps
+      await divider.press('Enter'); // the scene started at the automatic width, which Enter restores (UX wave U8b); for the sheet steps
       await expect(divider).toHaveAttribute('aria-valuenow', defaultWidth!);
     }
   });

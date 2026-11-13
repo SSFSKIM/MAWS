@@ -5,6 +5,7 @@
 // SKILL.md lives one folder below each skills directory (765453-765544), project .mcp.json files are read up the entire
 // ancestor chain (737077-737101), and installed_plugins.json v2 holds arrays of scoped installation records (775499,
 // 775585). Local keys use the already-probed conservative derivation in connectors/local-key.ts.
+import { createHmac, randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, open, opendir, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -23,6 +24,17 @@ export const INVENTORY_BOUNDS = {
   entries: 2048, rows: 1024, ancestors: 128, timeoutMs: 7000,
 } as const;
 interface InventoryDeps { userData: string; captureEnv: () => Promise<Record<string, string>>; timeoutMs?: number }
+
+type Revision = (configuration: Pick<CustomizationEndpoint, 'name' | 'transport' | 'url'>) => string | null;
+/** UX wave U11a M8 (docs/doperpowers/plans/2026-11-12-ux-wave-U11a-settings-connectors-org.md, §A): a configuration's
+ * revision, an HMAC of its name, transport and address under `key`, in hex cut to 32 characters (the form of main's
+ * `configurationFingerprint`). It tells two configurations of one name apart for a press from Customize, which never holds
+ * an address; keyed, so a known address cannot be confirmed from it. Null for one without an address. */
+export function configurationRevision(key: Buffer): Revision {
+  return ({ name, transport, url }) => (url === null ? null : createHmac('sha256', key).update(`${name}\u0000${transport}\u0000${url}`).digest('hex').slice(0, 32));
+}
+// The host's key: made at its start, kept in memory, never written or sent; a revision lives for one run of the host.
+const revisionOf = configurationRevision(randomBytes(32));
 const record = (value: unknown): Record<string, unknown> | null => typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
 const absent = (error: unknown) => ['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '');
 const LIMIT = 'Customization inventory reached its read limit; some configured items are not inventoried.';
@@ -51,7 +63,8 @@ class Reading {
   }
   addServer(row: CustomizationServer, url: string | null): void {
     this.check(); if (this.servers.length >= INVENTORY_BOUNDS.rows) throw new Stop(); this.servers.push(row);
-    this.endpoints.push({ name: row.name, scope: row.scope, path: row.path, transport: row.transport, url: url === null ? null : url.slice(0, 4096) });
+    const address = url === null ? null : url.slice(0, 4096);
+    this.endpoints.push({ name: row.name, scope: row.scope, path: row.path, transport: row.transport, url: address, revision: revisionOf({ name: row.name, transport: row.transport, url: address }) });
   }
 
   async exists(path: string): Promise<boolean> {
@@ -146,12 +159,13 @@ class Reading {
     } finally { await directory.close(); }
   }
 
-  async skillDirectory(path: string, source: CustomizationSkill['source'], plugin: string | null, anchor?: string): Promise<boolean> {
+  // `pluginName`: a plugin skill's plugin as the engine names it (UX wave U11a); the other skills carry none
+  async skillDirectory(path: string, source: CustomizationSkill['source'], plugin: string | null, anchor?: string, pluginName: string | null = null): Promise<boolean> {
     const file = join(path, 'SKILL.md');
     const text = await this.text(file, true, anchor);
     if (text === null) return false;
     const words = frontMatter(text);
-    this.addSkill({ name: (words.name ?? basename(path)).slice(0, 256), description: (words.description ?? '').slice(0, 4096), source, path: file, plugin });
+    this.addSkill({ name: (words.name ?? basename(path)).slice(0, 256), description: (words.description ?? '').slice(0, 4096), source, path: file, plugin, ...(source === 'plugin' && { pluginName }) });
     return true;
   }
   async skillsIn(path: string, source: CustomizationSkill['source'], plugin: string | null = null, anchor?: string): Promise<void> {
@@ -173,6 +187,12 @@ class Reading {
   }
 }
 
+// UX wave U11a (§D "Skills"; P3, spikes/protocol-probe/findings-uxwave-u11-skill-names.txt): the engine names a plugin by
+// its manifest's `name`, not by the installed key up to its `@`, and runs a plugin's skill as `/<that name>:<skill>`. A
+// name the engine's rule refuses (2.1.322 cli.pretty.js:953562: empty, a space, a control or formatting character) loads
+// no plugin under any name, and a longer one than the row holds would be cut wrong: both answer null.
+const pluginNameOf = (name: unknown): string | null => (typeof name === 'string' && name.length > 0 && name.length <= 256 && !/[\s\p{Cc}\p{Cf}]/u.test(name) ? name : null);
+
 async function installedSkills(r: Reading, configHome: string, cwd: string | null): Promise<void> {
   const path = join(configHome, 'plugins', 'installed_plugins.json');
   const raw = await r.json(path);
@@ -193,17 +213,19 @@ async function installedSkills(r: Reading, configHome: string, cwd: string | nul
       const anchor = await r.confined(row.installPath);
       if (anchor === null) { r.warn(`${path}: an installed plugin directory could not be read`); continue; }
       const id = plugin.slice(0, 256);
+      // the manifest first: its name is every skill's of the plugin (U11a), its declarations add folders below
+      const manifestPath = join(row.installPath, '.claude-plugin', 'plugin.json');
+      const manifest = record(await r.json(manifestPath, anchor));
+      const pluginName = pluginNameOf(manifest?.name);
       const seen = new Set<string>();
       const addDirectory = async (directory: string): Promise<boolean> => {
         const real = await r.confined(directory, anchor);
         if (real === null) return false;
         if (seen.has(real)) return true;
         seen.add(real);
-        return r.skillDirectory(directory, 'plugin', id, anchor);
+        return r.skillDirectory(directory, 'plugin', id, anchor, pluginName);
       };
       for (const directory of await r.directories(join(row.installPath, 'skills'), anchor)) await addDirectory(directory);
-      const manifestPath = join(row.installPath, '.claude-plugin', 'plugin.json');
-      const manifest = record(await r.json(manifestPath, anchor));
       for (const declaration of [manifest?.skills, record(manifest?.experimental)?.skills]) {
         if (declaration === undefined) continue;
         const paths = typeof declaration === 'string' ? [declaration] : Array.isArray(declaration) ? declaration : [];

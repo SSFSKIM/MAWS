@@ -128,7 +128,12 @@ export const EDITOR_COPY = {
   mineLabel: (name: string | null) => (name ? `mine (${name})` : 'mine'), theirsLabel: (name: string | null) => (name ? `theirs (${name})` : 'theirs'), base: 'base',
   previousConflict: 'Previous conflict', nextConflict: 'Next conflict',
   closeTitle: (name: string) => `Save changes to ${name}?`, closeBody: 'Your changes will be lost if you don’t save them.', dontSave: 'Don’t save',
-  readOnly: { head: 'Read-only: the file is larger than the editor’s cap', encoding: 'Read-only: the file is not UTF-8', loading: 'Read-only until the file has loaded' },
+  readOnly: {
+    outside: 'Read-only: the file is outside the folders this session works in', // UX wave U6c: a file the transcript names
+    head: 'Read-only: the file is larger than the editor’s cap',
+    encoding: 'Read-only: the file is not UTF-8',
+    loading: 'Read-only until the file has loaded',
+  },
   comment: (line: number) => `Comment on line ${line}`,
   anchorTitle: (label: string) => `Comment on ${label}`, anchorBody: 'The comment composer arrives with side threads (E3). This anchor will open it:', close: 'Close',
   // M5: the quit-when-idle banner's part (the quit question's own words are main's, in quit-guard.ts)

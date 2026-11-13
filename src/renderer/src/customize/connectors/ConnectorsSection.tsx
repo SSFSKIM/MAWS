@@ -3,7 +3,10 @@
 // - My items: the servers configured on disk for the page's directory, each with its scope and file, its sign-in state
 //   (presented by ./present.ts), Sign in (the engine's own flow, run in a ready session whose scope includes the server;
 //   with none, "Open a session in <place>, then sign in" and nothing else: Customize never starts a session), Cancel
-//   while one runs, and Remove; then what the attached session has live (the caller's `live`).
+//   while one runs, and Remove; then what the attached session has live (the caller's `live`). UX wave U11a M8
+//   (docs/doperpowers/plans/2026-11-12-ux-wave-U11a-settings-connectors-org.md, §A): a row of MAWS's own list signs in
+//   through a ready session on this Mac whose status lists it, as a dynamic connector, sending the revision of the
+//   configuration the row was drawn with (main's `catalog.postures`); with no revision it offers no Sign in.
 // - Discover: the catalog's connectors; + opens the connector sheet and runs `claude mcp add`. Without Anthropic's
 //   directory (no copy at all) the pane says so, with Retry.
 // The management state (the operations and the sheet) lives here, above both views, so an add or a removal runs on, and
@@ -32,8 +35,8 @@ import { DiscoverToolbar } from '../discover/DiscoverToolbar';
 import { useCatalogPostures, useCatalogRefresh, useCatalogSources } from '../discover/read';
 import { ConnectorSheet } from './ConnectorSheet';
 import { CONNECTORS as C } from './copy';
-import { removalDirectoryOf, removeRequestOf, resultFor, serverKey, shadowedBy, shadowWords, signInSessionOf, signInViewOf, type AuthPosture, type ConfiguredServers, type ReadySession, type SignInFacts, type SignInView } from './present';
-import { cancelSignIn, forgetSignIn, signInKeyOf, signInMachineOf, startSignIn, useSignIns } from './sign-in';
+import { ownSignInSessionOf, removalDirectoryOf, removeRequestOf, resultFor, serverKey, shadowedBy, shadowWords, signInSessionOf, signInViewOf, type AuthPosture, type ConfiguredServers, type HoldingSession, type SignInFacts, type SignInView } from './present';
+import { cancelSignIn, forgetSignIn, signInKeyOf, signInMachineOf, signsInDynamic, startSignIn, startSignInDynamic, useSignIns, type SignInServer } from './sign-in';
 
 const BUTTON = 'rounded-sm px-2 py-1 text-ui-sm outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint';
 const TONE: Record<SignInView['tone'], string> = { muted: 'text-fg-muted', success: 'text-success', danger: 'text-danger' };
@@ -146,8 +149,23 @@ function Configured({ servers, readAt, cwd, place, attached, askIn }: { servers:
   const engine = useSessions((s) => s.engine);
   // P5 O7 M5c: this Mac's ready sessions alone (the architect's ruling): a sign-in keeps its credential on the machine it
   // runs on, and this Mac's Customize signs in on this Mac; another machine's are configured from its Connectors sheet
-  const ready = useMemo<ReadySession[]>(() => [...engine.values()].filter((status) => status.process === 'ready' && machineOf(status.appSessionId) === ipc.localMachine).map((status) => ({ appSessionId: status.appSessionId, cwd: status.cwd })), [engine]);
   const read = useEngineRead('session.mcpStatus', { appSessionId: attached ?? ('' as AppSessionId) }, { enabled: attached !== null });
+  // U11a M8 (§A): the servers each ready session holds, for a row of MAWS's own list. The store's list is the engine's
+  // init frame's, which a session started with no message has not sent (P7 run 43386195217); for the attached session
+  // the page's own mcp_status read says it too. A ready session that is not the attached one and has had no first turn
+  // is still not found (ticket 619).
+  const attachedServers = read.data?.mcpServers;
+  const ready = useMemo<HoldingSession[]>(
+    () =>
+      [...engine.values()]
+        .filter((status) => status.process === 'ready' && machineOf(status.appSessionId) === ipc.localMachine)
+        .map((status) => {
+          const listed = status.mcpServers.map((server) => server.name);
+          const answered = status.appSessionId === attached && attachedServers ? attachedServers.map((server) => server.name) : [];
+          return { appSessionId: status.appSessionId, cwd: status.cwd, servers: [...new Set([...listed, ...answered])] };
+        }),
+    [engine, attached, attachedServers],
+  );
   const liveOf = (name: string) => {
     if (attached === null || !read.data) return undefined;
     const entry = read.data.mcpServers.find((server) => server.name === name);
@@ -173,7 +191,7 @@ function Configured({ servers, readAt, cwd, place, attached, askIn }: { servers:
       ))}
       <ul aria-label={C.configured} className="m-0 list-none p-0">
         {servers.map((server) => (
-          <ServerRow key={serverKey(server)} server={server} askIn={askIn} shadow={shadowedBy(server, servers)} cwd={cwd} place={place} session={signInSessionOf(server.scope, ready, attached, cwd)} live={liveOf(server.name)} liveRead={liveRead} posture={postureOf(server)?.authPosture ?? null} fingerprint={postureOf(server)?.fingerprint ?? null} />
+          <ServerRow key={serverKey(server)} server={server} askIn={askIn} shadow={shadowedBy(server, servers)} cwd={cwd} place={place} session={server.scope === 'app' ? ownSignInSessionOf(server.name, ready, attached, cwd) : signInSessionOf(server.scope, ready, attached, cwd)} live={liveOf(server.name)} liveRead={liveRead} posture={postureOf(server)?.authPosture ?? null} fingerprint={postureOf(server)?.fingerprint ?? null} revision={postureOf(server)?.revision ?? null} />
         ))}
       </ul>
     </>
@@ -183,12 +201,15 @@ function Configured({ servers, readAt, cwd, place, attached, askIn }: { servers:
 // A row the engine does not use (the same name in a scope it ranks higher, or MAWS's own server of the name; ./present.ts
 // `shadowedBy`) says which entry
 // shadows it and offers no Sign in: the engine signs a name in, so Sign in belongs to the row it uses.
-function ServerRow({ server, askIn, shadow, cwd, place, session, live, liveRead, posture, fingerprint }: { server: CustomizationServer; askIn: AskIn; shadow: CustomizationServer['scope'] | null; cwd: string | null; place: string | null; session: string | null; live: SignInFacts['live']; liveRead: SignInFacts['liveRead']; posture: AuthPosture | null; fingerprint: string | null }) {
+// U11a M8: a row of MAWS's own list is a dynamic connector to the sign-in, offered only with its configuration's revision.
+function ServerRow({ server, askIn, shadow, cwd, place, session, live, liveRead, posture, fingerprint, revision }: { server: CustomizationServer; askIn: AskIn; shadow: CustomizationServer['scope'] | null; cwd: string | null; place: string | null; session: string | null; live: SignInFacts['live']; liveRead: SignInFacts['liveRead']; posture: AuthPosture | null; fingerprint: string | null; revision: string | null }) {
   const { ops } = useManage();
+  const own = server.scope === 'app';
   const target = server.scope === 'app' ? null : { name: server.name, scope: server.scope, cwd, path: server.path };
+  const kept: Omit<SignInServer, 'machine'> | null = own ? (signsInDynamic(server.name) ? { name: server.name, scope: 'dynamic', cwd: null } : null) : target;
   // P5 O7 M5c: the result of the machine its Sign in runs on (a session's address names it; none, this Mac)
   const machine = signInMachineOf(session);
-  const record = resultFor(useSignIns((s) => (target === null ? null : (s.byServer.get(signInKeyOf({ ...target, machine })) ?? null))), fingerprint);
+  const record = resultFor(useSignIns((s) => (kept === null ? null : (s.byServer.get(signInKeyOf({ ...kept, machine })) ?? null))), fingerprint);
   const last = record?.event ?? null;
   const state: SignInView | null = shadow !== null ? { text: shadowWords(shadow, server.name), tone: 'muted', signIn: false, cancel: false } : signInViewOf({ live, liveRead, posture, last: record, transport: server.transport });
   const key = serverKey(server);
@@ -207,7 +228,20 @@ function ServerRow({ server, askIn, shadow, cwd, place, session, live, liveRead,
         <span className="ml-auto flex shrink-0 items-baseline gap-1">
           {state?.cancel && last && <TextButton onClick={() => cancelSignIn(last.opId, record!.appSessionId)}>{C.cancel}</TextButton>}
           {state?.signIn &&
-            (session === null ? (
+            (own ? (
+              // U11a M8: only with the revision the press must carry, so it signs in this configuration or nothing
+              kept !== null &&
+              revision !== null &&
+              (session === null ? (
+                <span data-sign-in-needs-session className="text-ui-sm text-fg-muted">
+                  {C.openSession(null)}
+                </span>
+              ) : (
+                <button type="button" aria-label={C.signInName(server.name)} className={SECONDARY} onClick={() => void startSignInDynamic({ name: server.name, revision }, fingerprint, session as AppSessionId)}>
+                  {C.signIn}
+                </button>
+              ))
+            ) : session === null ? (
               <span data-sign-in-needs-session className="text-ui-sm text-fg-muted">
                 {C.openSession(server.scope === 'user' ? null : place)}
               </span>

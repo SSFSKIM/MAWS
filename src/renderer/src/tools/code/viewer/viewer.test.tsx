@@ -8,8 +8,9 @@ import { mimeOf } from '@shared/files/mime';
 import type { AppSessionId } from '@shared/graph/ids';
 import { FILES_READ_DEFAULT_LENGTH } from '@shared/ipc/schema/files';
 import { LAYOUT_DEFAULTS, type TabRef } from '@shared/ipc/schema/layout';
+import { addressOf } from '@shared/machine/address';
 import { record } from '../../../../../../test/support/builders';
-import { at, TEST_MACHINE } from '../../../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../../../test/support/machine';
 import { connectCodeEvents } from '../../../ipc/events';
 import { useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
@@ -20,10 +21,10 @@ import { useFiles } from '../files/store';
 import { codeTranscriptActions, normalizeLexically, openFile, sessionOfTurn } from '../open-file';
 import { FLASH_CLASS } from './CodeView';
 import { FileBody, FileViewer } from './FileViewer';
-import { installDisk } from '../../../test-support/code-disk';
+import { fakeHash, installDisk, OUTSIDE_REFUSAL } from '../../../test-support/code-disk';
 import { installResizeObserver } from '../../../test-support/resize';
 import { CODE_CAP, dataUrl, externalKindOf, IMAGE_CAP, jumpTarget, kindOf, MARKDOWN_RENDER_CAP } from './kinds';
-import { existingViewState, useViewer, VIEWER_ENTRIES_MAX } from './viewer-store';
+import { existingViewState, readOnlyReason, useViewer, VIEWER_ENTRIES_MAX } from './viewer-store';
 import { currentSet } from '../../../stores/layout-model';
 
 const text = { encoding: 'utf8' as const };
@@ -329,7 +330,7 @@ describe('viewer', () => {
     const { unmount } = render(<FileViewer tab={fileTab('/r/doc.pdf')} />);
     expect((await screen.findByText('PDF files open outside MAWS')).tagName).toBe('P');
     fireEvent.click(screen.getByRole('button', { name: 'Open externally' }));
-    await waitFor(() => expect(main.callsOf('files.openExternal')).toEqual([{ appSessionId: MAIN_A, path: '/r/doc.pdf' }]));
+    await waitFor(() => expect(main.callsOf('files.openExternal')).toEqual([{ appSessionId: MAIN_A, path: '/r/doc.pdf', named: true }]));
     expect(document.querySelector('iframe, embed, object')).toBeNull();
     unmount();
     render(<FileViewer tab={fileTab('/r/data.bin')} />);
@@ -599,6 +600,265 @@ describe('a read-only mount (E2)', () => {
     openFile(A, '/r/app.ts');
     render(<FileViewer tab={fileTab('/r/app.ts')} />);
     await waitFor(() => expect(useViewer.getState().entries.get(FILE('/r/app.ts'))).toMatchObject({ editable: true, readOnly: false }));
+  });
+});
+
+// UX wave U6c (M3; docs/doperpowers/plans/2026-11-12-ux-wave-U6c-linked-file.md, Interfaces §E and sequences W1 to W6):
+// a file outside the session's folders that its transcript names is read with `named`, held read-only with the reason
+// as the editor's title, and read again when it is asked for again, since no watch keeps it current; a session on
+// another machine is asked as today.
+describe('a file the transcript names (U6c)', () => {
+  const OUT = '/elsewhere/notes.txt';
+  const PDF = '/elsewhere/report.pdf';
+  const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+  const OUTSIDE_TITLE = 'Read-only: the file is outside the folders this session works in';
+  beforeAll(() => import('./CodeView'));
+  beforeEach(() => {
+    useViewer.getState().reset();
+    useFiles.getState().reset();
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+  });
+  afterEach(() => cleanup());
+
+  const shown = (path = OUT) => useViewer.getState().entries.get(FILE(path));
+  const title = () => document.querySelector('.cm-content')?.getAttribute('title') ?? null;
+  const editorEditable = () => EditorView.findFromDOM(document.querySelector('.cm-editor') as HTMLElement)!.state.facet(EditorView.editable);
+  const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+  // The disk as the service answers it: `/elsewhere` outside the session's folders, and `named` the paths session A's
+  // transcript names there (no other session's names any).
+  function disk(files: Record<string, string>, named: string[] = []) {
+    const names = new Set(named);
+    const served = installDisk(files, { outside: ['/elsewhere'], names: (appSessionId, path) => appSessionId === MAIN_A && names.has(path) });
+    return { ...served, names };
+  }
+  // A file tab the layout holds (so a remount finds its entry), shown.
+  const show = (path = OUT, appSessionId: AppSessionId = A) => {
+    act(() => openFile(appSessionId, path));
+    return render(<FileViewer tab={fileTab(path, null, appSessionId)} />);
+  };
+
+  it('asks with named for a session on this Mac, and never for a session on another machine', async () => {
+    const main = disk({ '/r/a.ts': 'a\n' });
+    render(<FileViewer tab={fileTab('/r/a.ts')} />);
+    await waitFor(() => expect(shown('/r/a.ts')?.status).toBe('ready'));
+    expect(main.callsOf('files.read')).toEqual([{ appSessionId: MAIN_A, path: '/r/a.ts', offset: 0, length: FILES_READ_DEFAULT_LENGTH, hash: true, named: true }]);
+    expect(shown('/r/a.ts')).toMatchObject({ named: false, editable: true }); // inside the folders the answer carries no named
+    cleanup();
+    main.calls.splice(0);
+    const remote: Extract<TabRef, { kind: 'file' }> = { ...fileTab('/r/a.ts', null, REMOTE), id: `file:${OTHER_MACHINE}:/r/a.ts`, machine: OTHER_MACHINE };
+    render(<FileViewer tab={remote} />);
+    await waitFor(() => expect(useViewer.getState().entries.get(remote.id)?.status).toBe('ready'));
+    expect(main.callsOf('files.read')).toEqual([{ appSessionId: 'app-r', path: '/r/a.ts', offset: 0, length: FILES_READ_DEFAULT_LENGTH, hash: true }]);
+  });
+
+  it('opens a file the transcript names read-only, the editor’s title saying why, and writes nothing', async () => {
+    const main = disk({ [OUT]: 'outside text\n' }, [OUT]);
+    show();
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', kind: 'code', complete: true, named: true, editable: false }));
+    expect(shown()!.hash).not.toBeNull(); // everything else the editor asks for is there: the name alone withholds it
+    expect(readOnlyReason(shown()!)).toBe('outside');
+    await waitFor(() => expect(title()).toBe(OUTSIDE_TITLE));
+    expect(codeText()).toBe('outside text');
+    expect(editorEditable()).toBe(false);
+    expect(document.querySelector('[data-file-viewer]')!.getAttribute('data-editable')).toBe('false');
+    expect(document.querySelector('[data-editor-controls]')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
+    expect(await useViewer.getState().save(FILE(OUT))).toBe('noop');
+    expect(main.callsOf('files.write')).toEqual([]);
+    expect(main.files[OUT]).toBe('outside text\n');
+  });
+
+  it('shows a named PDF as the row whose Open externally asks with named', async () => {
+    const main = disk({ [PDF]: '%PDF-1.4 invented\n' }, [PDF]);
+    show(PDF);
+    expect((await screen.findByText('PDF files open outside MAWS')).tagName).toBe('P');
+    fireEvent.click(screen.getByRole('button', { name: 'Open externally' }));
+    await waitFor(() => expect(main.callsOf('files.openExternal')).toEqual([{ appSessionId: MAIN_A, path: PDF, named: true }]));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('W3: reads a refused file again when its link is clicked again, and when its tab is shown again', async () => {
+    const main = disk({ [OUT]: 'written later\n', '/elsewhere/other.txt': 'other\n' });
+    show();
+    expect((await screen.findByRole('alert')).textContent).toContain(`Refused: ${OUTSIDE_REFUSAL}`);
+    await settle();
+    expect(main.callsOf('files.read')).toHaveLength(1);
+    main.names.add(OUT); // the row that links it is written
+    act(() => openFile(A, OUT)); // the link clicked again, its tab already shown
+    await waitFor(() => expect(codeText()).toBe('written later'));
+    expect(shown()).toMatchObject({ status: 'ready', named: true, editable: false });
+    expect(main.callsOf('files.read')).toHaveLength(2);
+
+    const OTHER = '/elsewhere/other.txt';
+    const first = show(OTHER);
+    expect((await screen.findByRole('alert')).textContent).toContain(OUTSIDE_REFUSAL);
+    first.unmount();
+    main.names.add(OTHER);
+    render(<FileViewer tab={fileTab(OTHER)} />); // shown again
+    await waitFor(() => expect(shown(OTHER)).toMatchObject({ status: 'ready', named: true, text: 'other\n' }));
+  });
+
+  // The branch review's finding 4, with the two real stores: a file opened before its folder exists fails its watch
+  // and its read; read again once it exists, it takes its watch again too (the Files store installs a refused watch
+  // again only for a new holder), so a later change shows Updated. Main's events follow only an installed watch.
+  it.each(['its link is clicked again', 'its tab is shown again'])('a failed tab read again when %s is watched again, and shows a later change', async (how) => {
+    const PATH = '/r/gen/file.ts';
+    const files: Record<string, string> = {};
+    const installed = new Set<string>();
+    const main = installFakeMain(async (name, input) => {
+      const path = input.path as string;
+      if (name === 'files.watch') {
+        if (!Object.keys(files).some((file) => file.startsWith(`${path}/`))) return fail(`not found: ${path}`);
+        installed.add(path);
+        return ok();
+      }
+      if (name === 'files.unwatch') {
+        installed.delete(path);
+        return ok();
+      }
+      if (name !== 'files.read') return fail(`unexpected ${name}`);
+      const content = files[path];
+      if (content === undefined) return fail(`not found: ${path}`);
+      const hashed = input.hash === true;
+      return ok({ encoding: 'utf8', content, bytes: content.length, offset: 0, length: content.length, truncated: false, mime: 'text/plain', hash: hashed ? fakeHash(content) : null, utf8: hashed ? true : null });
+    });
+    const offs = [connectCodeEvents()];
+    const first = show(PATH);
+    expect((await screen.findByRole('alert')).textContent).toContain(`not found: ${PATH}`);
+    files[PATH] = 'one\n'; // the folder and the file are made
+    if (how === 'its link is clicked again') act(() => openFile(A, PATH));
+    else {
+      first.unmount();
+      render(<FileViewer tab={fileTab(PATH)} />);
+    }
+    await waitFor(() => expect(codeText()).toBe('one'));
+    files[PATH] = 'two\n';
+    act(() => {
+      if (installed.has('/r/gen')) main.emit('files.changed', { appSessionId: MAIN_A, path: PATH, kind: 'changed' });
+    });
+    await waitFor(() => expect(codeText()).toBe('two'));
+    expect(document.querySelector('[data-updated]')?.textContent).toBe('Updated');
+    offs.forEach((off) => off());
+  });
+
+  it('W4: reads a named file again each time its tab is shown, Updated only when its bytes changed', async () => {
+    const main = disk({ [OUT]: 'one\n' }, [OUT]);
+    const first = show();
+    await waitFor(() => expect(codeText()).toBe('one'));
+    first.unmount();
+    const again = render(<FileViewer tab={fileTab(OUT)} />);
+    await waitFor(() => expect(main.callsOf('files.read')).toHaveLength(2));
+    await waitFor(() => expect(shown()!.pending).toBe(0));
+    expect(document.querySelector('[data-updated]')).toBeNull(); // the same bytes land nothing
+    again.unmount();
+    main.files[OUT] = 'two\n';
+    render(<FileViewer tab={fileTab(OUT)} />);
+    await waitFor(() => expect(codeText()).toBe('two'));
+    expect(document.querySelector('[data-updated]')?.textContent).toBe('Updated');
+    expect(shown()).toMatchObject({ named: true, editable: false });
+  });
+
+  it('W4: a named PDF shown again with the same bytes lands nothing but named', async () => {
+    const main = disk({ [PDF]: '%PDF-1.4 invented\n' }, [PDF]);
+    const first = show(PDF);
+    await screen.findByText('PDF files open outside MAWS');
+    const { epoch } = shown(PDF)!;
+    first.unmount();
+    render(<FileViewer tab={fileTab(PDF)} />);
+    await waitFor(() => expect(main.callsOf('files.read')).toHaveLength(2));
+    await waitFor(() => expect(shown(PDF)!.pending).toBe(0));
+    expect(shown(PDF)).toMatchObject({ named: true, updated: 0, epoch });
+    expect(document.querySelector('[data-updated]')).toBeNull();
+  });
+
+  it('W4: a PDF changed in place to the same size and type lands, with Updated, when an event says so', async () => {
+    const main = disk({ '/r/doc.pdf': '%PDF-1.4 one\n' });
+    const offs = [connectCodeEvents()];
+    show('/r/doc.pdf');
+    await screen.findByText('PDF files open outside MAWS');
+    const { epoch } = shown('/r/doc.pdf')!;
+    main.files['/r/doc.pdf'] = '%PDF-1.4 two\n'; // other bytes, the same length: the external read sees size and type alone
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: '/r/doc.pdf', kind: 'changed' }));
+    await waitFor(() => expect(shown('/r/doc.pdf')).toMatchObject({ updated: 1, epoch: epoch + 1 }));
+    expect(document.querySelector('[data-updated]')?.textContent).toBe('Updated');
+    offs.forEach((off) => off());
+  });
+
+  it('W5: a named file whose later read is refused shows the refusal and none of its content', async () => {
+    const main = disk({ [OUT]: 'was named\n' }, [OUT]);
+    show();
+    await waitFor(() => expect(codeText()).toBe('was named'));
+    main.names.delete(OUT); // the transcript no longer names it
+    act(() => openFile(A, OUT));
+    expect((await screen.findByRole('alert')).textContent).toContain(OUTSIDE_REFUSAL);
+    expect(shown()).toMatchObject({ status: 'error', named: false, text: '', kind: null, hash: null, editable: false });
+    expect(codeText()).toBeNull();
+  });
+
+  it('W6: a read of the same bytes sets named, and with it whether the file may be edited', async () => {
+    const main = disk({ '/r/app.ts': 'const a = 1;\n' });
+    const offs = [connectCodeEvents()];
+    show('/r/app.ts');
+    await waitFor(() => expect(shown('/r/app.ts')).toMatchObject({ named: false, editable: true }));
+    main.outside.add('/r'); // the folder is no longer the session's, and the transcript names the file
+    main.names.add('/r/app.ts');
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: '/r/app.ts', kind: 'changed' }));
+    await waitFor(() => expect(shown('/r/app.ts')).toMatchObject({ named: true, editable: false, text: 'const a = 1;\n' }));
+    await waitFor(() => expect(title()).toBe(OUTSIDE_TITLE));
+    main.outside.delete('/r'); // the session's again
+    act(() => openFile(A, '/r/app.ts'));
+    await waitFor(() => expect(shown('/r/app.ts')).toMatchObject({ named: false, editable: true }));
+    expect(shown('/r/app.ts')!.updated).toBe(0); // neither read changed the bytes
+    offs.forEach((off) => off());
+  });
+
+  // The branch review's finding 3: admission is any chunk's answer, not the first one's alone. A text past its first
+  // chunk read first inside the folders and then, the same file by its hash, admitted by the transcript is named.
+  it('a continuation read that answers named makes the entry named and read-only', async () => {
+    const big = 'a'.repeat(MiB + 1);
+    installFakeMain(async (name, input) => {
+      if (name === 'files.watch' || name === 'files.unwatch') return ok();
+      if (name !== 'files.read') return fail(`unexpected ${name}`);
+      const offset = (input.offset as number | undefined) ?? 0;
+      const end = Math.min(big.length, offset + ((input.length as number | undefined) ?? FILES_READ_DEFAULT_LENGTH));
+      const hashed = input.hash === true;
+      return ok({
+        encoding: 'utf8', content: big.slice(offset, end), bytes: big.length, offset, length: end - offset, truncated: end < big.length, mime: 'text/plain',
+        hash: hashed ? fakeHash(big) : null, utf8: hashed ? true : null, ...(offset > 0 ? { named: true } : {}),
+      });
+    });
+    show('/r/big.txt');
+    await waitFor(() => expect(shown('/r/big.txt')?.loads).toBe(1));
+    expect(shown('/r/big.txt')).toMatchObject({ status: 'ready', complete: true, named: true, editable: false });
+    expect(readOnlyReason(shown('/r/big.txt')!)).toBe('outside');
+  });
+
+  it('W1: a read in flight when its tab closes lands nowhere', async () => {
+    const main = disk({ [OUT]: 'late\n' }, [OUT]);
+    const gate = main.hold('files.read');
+    const { unmount } = show();
+    await waitFor(() => expect(main.callsOf('files.read')).toHaveLength(1));
+    act(() => useLayout.getState().closeTab(FILE(OUT)));
+    unmount();
+    expect(useViewer.getState().entries.has(FILE(OUT))).toBe(false);
+    gate.release();
+    await settle();
+    expect(useViewer.getState().entries.has(FILE(OUT))).toBe(false);
+  });
+
+  it('W2: a read in flight when another session opens the same path lands nowhere, and the refusal under it shows none of the file', async () => {
+    const main = disk({ [OUT]: 'session a’s\n' }, [OUT]);
+    const gate = main.hold('files.read');
+    const { rerender } = show();
+    await waitFor(() => expect(main.callsOf('files.read')).toHaveLength(1));
+    act(() => openFile(B, OUT)); // the tab is one per machine and path: it takes session B
+    rerender(<FileViewer tab={fileTab(OUT, null, B)} />);
+    expect((await screen.findByRole('alert')).textContent).toContain(OUTSIDE_REFUSAL);
+    gate.release(); // session A's answer, the file's text
+    await settle();
+    expect(shown()).toMatchObject({ appSessionId: B, status: 'error', named: false, text: '' });
+    expect(codeText()).toBeNull();
+    expect(main.callsOf('files.read').map((input) => input.appSessionId)).toEqual([MAIN_A, 'app-b']);
   });
 });
 

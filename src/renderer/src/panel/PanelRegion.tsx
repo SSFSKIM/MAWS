@@ -11,7 +11,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PanelTabRef } from '@shared/ipc/schema/layout';
 import { runAction } from '../keymap/actions-runtime';
-import { useLayout } from '../stores/layout';
+import { panelWidthClass, useLayout } from '../stores/layout';
 import { surfaceSession } from './surface-model';
 import { shellGeometryOf, useShellGeometry } from '../app/shell-view';
 import { focusPaneElement } from '../main/pane-dom';
@@ -26,6 +26,9 @@ import { moveArtifactToPanel, TAB_DRAG_TYPE, useCoverState } from '../shell/tran
 import { TRANSFER_COPY } from '../tools/artifacts/copy'; // P4-B3 M4
 
 export const PANEL_REGION_ID = 'region-panel';
+// UX wave U8b: the resizer's restore value for a width in use that is automatic (no width is 0), which a drag past either
+// end hands back as automatic again.
+const AUTOMATIC = 0;
 
 export function PanelRegion() {
   const { maximized, floating } = useLayout((s) => s.regions.panel);
@@ -33,8 +36,11 @@ export function PanelRegion() {
   const collapsed = geometry.panel === 0;
   const width = geometry.panel;
   const max = geometry.panelMax;
-  const persisted = useLayout((s) => s.regions.panel.width);
+  // UX wave U8b (O-09, X-165): a drag moves only the width in use, wide or narrow; a reset makes it automatic again.
+  const stored = useLayout((s) => s.panelWidths[panelWidthClass(s)]);
   const setPanel = useLayout((s) => s.setPanel);
+  const setPanelWidth = useLayout((s) => s.setPanelWidth);
+  const restore = (value: number) => setPanelWidth(value === AUTOMATIC ? null : value);
   const body = useRef<HTMLDivElement>(null); // P3-G: the floating card's layer starts at the host's tool body
   const shown = useShownPanel(); // P3-G: the header and the host read one selection
   const cover = useCoverState('panel'); // P4-B3 (Z3): the panel is one target for an artifact main tab
@@ -59,11 +65,18 @@ export function PanelRegion() {
           defaultValue={PANEL_BOUNDS.default}
           grow={-1}
           collapseThreshold={COLLAPSE_THRESHOLD_PX}
-          restoreValue={persisted}
-          onChange={(next) => setPanel({ width: next })}
-          onCollapse={(restore) => setPanel({ collapsed: true, width: restore })}
+          restoreValue={stored ?? AUTOMATIC}
+          onChange={(next) => setPanelWidth(next)}
+          onReset={() => setPanelWidth(null)}
+          onCollapse={(value) => {
+            restore(value);
+            setPanel({ collapsed: true });
+          }}
           expandThreshold={COLLAPSE_THRESHOLD_PX}
-          onExpand={(restore) => floatPanel({ width: restore })}
+          onExpand={(value) => {
+            restore(value);
+            floatPanel();
+          }}
           className="absolute inset-y-0 -left-0.75"
         />
       )}

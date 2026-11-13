@@ -31,6 +31,7 @@
     "test/support/fake-client.ts",
     "test/support/fixtures.ts",
     "test/support/git-env.ts",
+    "test/support/layout-build-f.ts", // UX wave U8b: build F's frozen reader of the side column's values
     "test/support/import-reports.ts",
     "test/support/machine.ts", // P5 O6 M2: the unit suites' local machine
     "test/support/memory-reader.ts",

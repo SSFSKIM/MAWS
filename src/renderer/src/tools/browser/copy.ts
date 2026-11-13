@@ -78,6 +78,17 @@ export const BROWSER_COPY = {
     copyUrl: 'Copy URL',
     inspect: 'Inspect',
     closeTab: 'Close tab',
+    viewport: 'Viewport', // U12a
+    copyScreenshot: 'Copy screenshot', // U12a
+  },
+  // U12a (the UX wave's U12, Interfaces §G): the Viewport submenu's three choices, a size's hint, and the chip
+  viewport: {
+    responsive: 'Responsive',
+    mobile: 'Mobile',
+    tablet: 'Tablet',
+    tooWide: 'Wider than this pane',
+    size: (width: number, height: number) => `${width} × ${height}`,
+    chip: (width: number, height: number) => `Viewport: ${width} × ${height}`,
   },
   // Codex's `browserSidebar.zoomBanner.*` and `thread.browser.zoomPercent`
   zoom: { label: 'Page zoom', level: (percent: number) => `${percent}%`, out: 'Zoom out', in: 'Zoom in', reset: 'Reset' },
@@ -113,6 +124,8 @@ export const BROWSER_COPY = {
   partitionFallback: (name: string | undefined) => `${profileNamed(name)} could not be opened; this tab browses with the default profile`,
   downloadRefusedAgent: 'A download the agent started was refused; downloads are yours to start',
   urlCopied: 'URL copied to clipboard', // Codex's `thread.browser.url.copied`
+  screenshotCopied: 'Screenshot copied to clipboard', // U12a: Copy screenshot
+  screenshotFailed: 'Couldn’t copy a screenshot of this page', // U12a: nothing could be captured
   tabsFileBroken: 'The saved browser tabs could not be read; the file was set aside',
   // E4c start: a dialog a never-placed tab's page raised, which MAWS answered with the page's default (A-42)
   dialogAnswered: (type: 'alert' | 'confirm', excerpt: string) =>

@@ -34,9 +34,11 @@ import { useKeyChord } from '../../keymap/useKeyChord';
 import { RequestCard } from '../../request-card';
 import { ComposerColumn, SessionPane } from '../../session/SessionPane';
 import { selectPendingOf, useAttention } from '../../stores/attention';
+import { useHosts } from '../../stores/hosts';
 import { useLayout } from '../../stores/layout';
 import { useSettings } from '../../stores/settings';
 import { TranscriptSlot } from '../../transcript';
+import { connectTranscript } from '../../transcript/shell';
 import { RewindWidget } from '../../widgets/RewindWidget';
 import type { CardsHarnessApi, HarnessPane, HarnessPlacement } from './api';
 import { setStubIntent, stubLog } from './intent-stub';
@@ -140,8 +142,11 @@ export function ComposerHarness() {
     const theme = new URLSearchParams(location.search).get('theme');
     if (theme === 'dark' || theme === 'light') document.documentElement.dataset.theme = theme;
     connectComposer(); // C5's session pane (a `shell` pane) finds the composer in its slot, as in the app
-    // W3: C11's rewind picker, which `/rewind` and Esc Esc open as the app's floating dialog
-    const offs = [connectShell(), connectKeys(), connectInlineEdit(composerClient), registerSlashWidget('rewind', { title: 'Rewind', component: RewindWidget }), useSettings.getState().connect()];
+    // W3: C11's rewind picker, which `/rewind` and Esc Esc open as the app's floating dialog. UX wave U1a §F: the hosts
+    // store, which App.tsx connects app-wide (connectSupervisorNotices), so a plan card reads main's host.status here too.
+    // UX wave U11a M3 (e2e run 43359967651): and the transcript in its slot, as App.tsx connects it, so a `shell` pane's
+    // started session draws its transcript above its composer rather than C5's "Transcript unavailable"
+    const offs = [connectShell(), connectKeys(), connectInlineEdit(composerClient), connectTranscript(), registerSlashWidget('rewind', { title: 'Rewind', component: RewindWidget }), useSettings.getState().connect(), useHosts.getState().connect()];
     window.__maws_cards = {
       // Committed before the call returns: rendered later, the previous placement's card would still be in the page for
       // a test's next step to find (a docked card answering for the inline one it moved to).
