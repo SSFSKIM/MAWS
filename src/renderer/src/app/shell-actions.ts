@@ -89,7 +89,7 @@ export function registerShellActions(client: MawsBridge = ipc): () => void {
       if (shown.panes.length < 2) return;
       const other = shown.focusedPane === 0 ? 1 : 0;
       if (floatingPane(shown) === other) return focusSplitCard();
-      layout().focusPane(other);
+      layout().showPane(other); // U13a (rule 7): a pane the person chose
       focusPaneElement(other);
     }),
     registerAction('diagnostics.open', () => layout().openTab({ kind: 'diagnostics' })),

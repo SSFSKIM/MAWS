@@ -765,17 +765,12 @@ describe('one Stop handler for every pane', () => {
     useLayout.setState((s) => ({
       main: {
         ...s.main,
-        current: 'none',
-        sets: {
-          none: {
-            panes: [
-              { tabs: [{ id: `session:${A}`, kind: 'session', appSessionId: A, pinned: false }], activeTabId: `session:${A}` },
-              { tabs: [{ id: `session:${B}`, kind: 'session', appSessionId: B, pinned: false }], activeTabId: `session:${B}` },
-            ],
-            focusedPane,
-            splitRatio: 0.5,
-          },
-        },
+        panes: [
+          { tabs: [{ id: `session:${A}`, kind: 'session', appSessionId: A, pinned: false }], activeTabId: `session:${A}` },
+          { tabs: [{ id: `session:${B}`, kind: 'session', appSessionId: B, pinned: false }], activeTabId: `session:${B}` },
+        ],
+        focusedPane,
+        splitRatio: 0.5,
       },
     }));
 
@@ -1766,14 +1761,9 @@ describe('dictation into the focused pane’s composer', () => {
     useLayout.setState((s) => ({
       main: {
         ...s.main,
-        current: 'none',
-        sets: {
-          none: {
-            panes: ids.map((id) => ({ tabs: [{ id: `session:${id}`, kind: 'session' as const, appSessionId: id, pinned: false }], activeTabId: `session:${id}` })) as TabSet['panes'], // one or two
-            focusedPane,
-            splitRatio: 0.5,
-          },
-        },
+        panes: ids.map((id) => ({ tabs: [{ id: `session:${id}`, kind: 'session' as const, appSessionId: id, pinned: false }], activeTabId: `session:${id}` })) as TabSet['panes'], // one or two
+        focusedPane,
+        splitRatio: 0.5,
       },
     }));
   const altSpace = { code: 'Space', key: ' ', altKey: true };

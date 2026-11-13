@@ -11,11 +11,10 @@ import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { projectReveal } from '../sidebar/reveal';
 import { useAttention } from '../stores/attention';
 import { useShellView } from '../app/shell-view';
-import { NO_PROJECT_OF, useLayout } from '../stores/layout';
+import { useLayout } from '../stores/layout';
 import { EMPTY_REGISTRY } from '../stores/registry';
 import { useSessions } from '../stores/sessions';
 import { resetHidden } from '../stores/hidden'; // UX wave U7, O-16
-import { sessionSetKey } from '../stores/org-projects';
 import { TEST_FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { loadScenario, type Scenario } from '../../../../test/support/scenario';
 import { at, TEST_MACHINE } from '../../../../test/support/machine';
@@ -90,13 +89,5 @@ export function resetShellStores(): void {
     dragging: null, // P4-B3
     hydrated: true,
     overviewOpen: false,
-    projectOf: NO_PROJECT_OF,
   });
-}
-
-// W12: the layout files each session's tabs under its record's project's row, as the shell's hydration has it do (P5 O6
-// M5: `sessionSetKey`, an org project's key, a machine's row's for a session of no checkout; until this, a component test
-// keeps every tab in the no-project set). An unstarted session's tabs stay in the no-project set.
-export function fileTabsByProject(): void {
-  useLayout.setState({ projectOf: (id) => sessionSetKey(useSessions.getState(), TEST_MACHINE, id, () => null) ?? null });
 }

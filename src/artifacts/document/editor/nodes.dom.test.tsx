@@ -3,6 +3,7 @@
 // tone, the chips, the placeholders, code highlighted by shiki, each atom edited in place through its field; and the
 // editor half of D4's identity test (the editor builds the schema module's schema).
 import { Editor, type JSONContent } from '@tiptap/core';
+import { GapCursor } from '@tiptap/pm/gapcursor';
 import { NodeSelection } from '@tiptap/pm/state';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { coreExtensionOptions } from '../ids';
@@ -284,11 +285,14 @@ describe('leaving an atom’s field', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it('after the last block, leaves a valid selection without a warning', () => {
+  // U10a (decision 11): nothing follows, so the caret goes to the gap after the atom, where the next key typed makes a
+  // paragraph; a selected atom would be replaced by it
+  it('after the last block, puts the gap caret after it without a warning', () => {
     const warn = vi.spyOn(console, 'warn');
     const e = make(doc({ type: 'pending', attrs: { id: 'x1', intent: 'Results' } }));
     leave(e, 'pending', 'Intent');
-    expect(e.state.selection.$head.parent.inlineContent || e.state.selection instanceof NodeSelection).toBe(true);
+    expect(e.state.selection).toBeInstanceOf(GapCursor);
+    expect(e.state.selection.head).toBe(e.state.doc.content.size);
     expect(warn).not.toHaveBeenCalled();
   });
 

@@ -15,7 +15,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import type { RecordPolicyEntry } from '@shared/ipc/schema/endpoint';
-import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, type TabRef } from '@shared/ipc/schema/layout';
+import { LAYOUT_DEFAULTS, type TabRef } from '@shared/ipc/schema/layout';
 import type { OrgPolicy } from '@shared/ipc/schema/org';
 import { addressOf } from '@shared/machine/address';
 import { machineKey, type OrgKey } from '@shared/machine/org-key';
@@ -222,7 +222,7 @@ describe('Share in the session header', () => {
   it("holds Share in the Toolbar's session actions for a session you own", async () => {
     const user = userEvent.setup();
     fill([mine('m', { title: 'Mine', lane: 'A', availability: 'foreign_held' })]);
-    act(() => useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [tab(studio('m'))], activeTabId: tab(studio('m')).id }] } } } }));
+    act(() => useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [tab(studio('m'))], activeTabId: tab(studio('m')).id }] } }));
     render(
       <QueryClientProvider client={queryClient}>
         <Toolbar />
@@ -240,7 +240,7 @@ describe('Share in the session header', () => {
   it("holds Add owner beside Share in the Toolbar's session actions", async () => {
     const user = userEvent.setup();
     fill([mine('m', { title: 'Mine', lane: 'A', availability: 'foreign_held' })]);
-    act(() => useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [tab(studio('m'))], activeTabId: tab(studio('m')).id }] } } } }));
+    act(() => useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [tab(studio('m'))], activeTabId: tab(studio('m')).id }] } }));
     render(
       <QueryClientProvider client={queryClient}>
         <Toolbar />

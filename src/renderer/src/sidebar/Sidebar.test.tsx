@@ -12,7 +12,7 @@ import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machin
 import { machineKey, type OrgKey } from '@shared/machine/org-key';
 import { useMachines } from '../stores/machines';
 import { registerSessionAction } from '../app/session-actions';
-import { registerSessionCreator } from '../keymap/actions-runtime';
+import { registerEmptyChats, registerSessionCreator } from '../keymap/actions-runtime';
 import { closeDialog, useDialogs } from '../sessions/dialogs';
 import { resetRemoteSpawn, spawnTargetOf } from '../sessions/remote-spawn'; // the project registry's M11
 import { SessionDialogs } from '../sessions/SessionDialogs';
@@ -28,7 +28,7 @@ import { useSessions, type ListedSession } from '../stores/sessions';
 import { usePeople } from '../stores/people'; // P5 O8 M5
 import { HIDDEN_KEY, useHidden } from '../stores/hidden'; // UX wave U7, O-16
 import { connectRemoteReadMarks, resetRemoteReadMarks } from '../lane-b/read-marks'; // P5 O7 M2
-import { fileTabsByProject, fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
+import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { formatAge, type ProjectKey } from './derive';
 import { registerProjectAction } from './project-actions';
 import { useResumeChooser } from '../resume/host'; // P2-D
@@ -320,24 +320,22 @@ describe('sidebar recovery routes', () => {
     expect(useNotices.getState().notices.at(-1)).toMatchObject({ level: 'danger', text: 'Directory no longer exists' });
   });
 
-  // P3-F wave S (F17): the title bar's project chip, whose context menu is the reveal the strip's label was
-  it('the title bar chip’s Show in sidebar restores a hidden project before revealing and focusing its sidebar row', async () => {
+  // P3-F wave S (F17); UX wave U13a (O-31): the title bar's project chip reveals its row; a hidden project's is restored
+  // first, as the chip's menu item did before the click became the reveal
+  it('the title bar chip shows a hidden project: restored first, then its row revealed, expanded and focused', async () => {
     const project = nine.projects.find((p) => p.name === 'MAWS')!;
     fillStores({ ...nine, projects: nine.projects.map((p) => ({ ...p, hidden: p.id === project.id })) });
-    useLayout.getState().setCurrentProject(at(project.id));
+    useMachines.setState({ loaded: new Set([TEST_MACHINE]) }); // U13a: the chip's project is the session in front's
+    offs.push(() => useMachines.setState({ loaded: new Set() }));
+    useLayout.getState().openSession(idOf('Charter + research'), { how: 'tab' });
     useLayout.getState().setSidebar({ collapsed: true });
     const fake = fakeClient();
     window.maws = fake.client as unknown as PreloadBridge;
     render(<><Sidebar /><Toolbar /></>);
-    const chip = document.querySelector<HTMLElement>('[data-toolbar-project]')!;
-    const menuItem = async () => {
-      fireEvent.contextMenu(chip);
-      return screen.findByRole('menuitem');
-    };
+    const chip = () => document.querySelector<HTMLElement>('[data-toolbar-project]')!;
     expect(screen.queryByRole('treeitem', { name: 'MAWS' })).toBeNull();
-    const show = await menuItem();
-    expect(show.textContent).toBe('Show in sidebar');
-    await userEvent.click(show);
+    expect(chip().getAttribute('aria-label')).toBe('Show MAWS in sidebar');
+    await userEvent.click(chip());
     expect(fake.invoked('session.projects.add')).toEqual([{ directory: project.directory }]);
     expect(useLayout.getState().regions.sidebar.collapsed).toBe(true);
     await act(() => fake.reply('session.projects.add', { ...project, hidden: false }));
@@ -346,10 +344,25 @@ describe('sidebar recovery routes', () => {
     await waitFor(() => expect(document.activeElement).toBe(row('MAWS')));
     expect(row('MAWS').getAttribute('aria-expanded')).toBe('true');
     expect(useLayout.getState().regions.sidebar.collapsed).toBe(false);
-    const reveal = await menuItem();
-    expect(reveal.textContent).toBe('Reveal in sidebar');
-    await userEvent.click(reveal);
+    expect(chip().getAttribute('aria-label')).toBe('Reveal MAWS in sidebar');
+    await userEvent.click(chip());
     expect(fake.invoked('session.projects.add')).toHaveLength(1);
+    expect(useSessions.getState().unstarted.size).toBe(0); // the chip created nothing
+  });
+
+  it('the title bar chip reveals a machine’s own row: the sidebar shown, the row expanded and focused', async () => {
+    fillStores(nine);
+    useMachines.setState({ loaded: new Set([TEST_MACHINE]) });
+    offs.push(() => useMachines.setState({ loaded: new Set() }));
+    useLayout.getState().openSession(idOf('Terminal workflow notes'), { how: 'tab' }); // a session in no project
+    useLayout.getState().setSidebar({ collapsed: true, expandedProjects: [] });
+    render(<><Sidebar /><Toolbar /></>);
+    const chip = document.querySelector<HTMLElement>('[data-toolbar-project]')!;
+    expect(chip.getAttribute('aria-label')).toBe('Reveal This Mac in sidebar');
+    await userEvent.click(chip);
+    await waitFor(() => expect(document.activeElement).toBe(row('This Mac')));
+    expect(row('This Mac').getAttribute('aria-expanded')).toBe('true');
+    expect(useLayout.getState().regions.sidebar).toMatchObject({ collapsed: false, expandedProjects: [machineKey(TEST_MACHINE)] });
   });
 });
 
@@ -374,7 +387,6 @@ describe('Needs you across projects', () => {
 
   it('has one tab stop before the project controls; arrows and Home/End navigate, Enter opens without answering', async () => {
     fillStores(nine);
-    fileTabsByProject();
     const fake = fakeClient({ 'attention.request': () => ({ event: null }) });
     window.maws = fake.client as unknown as PreloadBridge;
     const user = userEvent.setup();
@@ -391,7 +403,6 @@ describe('Needs you across projects', () => {
     await user.keyboard('{End}{ArrowUp}{Home}{ArrowDown}{Enter}');
     expect(document.activeElement).toBe(buttons()[1]);
     expect(activeTab(useLayout.getState().main)).toMatchObject({ appSessionId: idOf('Sidebar interaction pass') });
-    expect(useLayout.getState().main.current).toBe(at('proj-maws'));
     expect(fake.invoked('session.answer')).toEqual([]);
     await user.tab();
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Filter projects' }));
@@ -1243,7 +1254,7 @@ describe('the resume chooser from the sidebar', () => {
     expect(options()).toContain('Quota reset recovery');
     expect(options()).toContain('Terminal workflow notes');
     await user.keyboard('quota{Meta>}{Enter}{/Meta}');
-    const panes = currentSet(useLayout.getState().main).panes; // W12: the strip's tab set (one here: no projectOf given)
+    const panes = currentSet(useLayout.getState().main).panes;
     expect(panes[0].tabs.map((t) => (t.kind === 'session' ? t.appSessionId : t.id))).toEqual([idOf('Charter + research'), idOf('Quota reset recovery')]);
     expect(activeTab(useLayout.getState().main)).toMatchObject({ appSessionId: idOf('Quota reset recovery') });
     await openFromRow(user);
@@ -1369,7 +1380,6 @@ describe('sidebar keyboard', () => {
     expect(document.activeElement).toBe(row('This Mac'));
     await user.keyboard('{ArrowUp}{Enter}');
     expect(expanded()).toEqual([at('proj-maws')]);
-    expect(useLayout.getState().main.current, 'W12: Enter shows the project’s tab set, as a click does').toBe(at('proj-maws'));
     expect(document.activeElement).toBe(row('MAWS'));
     await user.keyboard('{ArrowRight}');
     expect(document.activeElement).toBe(row('Workstation north star'));
@@ -1394,30 +1404,27 @@ describe('sidebar keyboard', () => {
     expect(expanded()).toEqual([at('proj-maws')]);
   });
 
-  // W12 (I3) on W11's tree: a project's activation is one path for the pointer and the keys, and it shows the project's
-  // tab set, so a project reached by keyboard switches the strip as a click does.
-  it('a click, Enter, ArrowRight or Space on a project row shows its tab set; a machine’s row shows its own set', async () => {
+  // W12 (I3) on W11's tree: a project's activation is one path for the pointer and the keys. UX wave U13a: it expands or
+  // collapses the row and changes nothing else; the one strip shows the same tabs before and after.
+  it('a click, Enter, ArrowRight or Space on a project row or a machine’s row leaves the strip as it was', async () => {
     const user = userEvent.setup();
-    fileTabsByProject();
     act(() => useLayout.getState().openSession(idOf('Fix sidebar drag')));
-    const current = () => useLayout.getState().main.current;
-    const shown = () => activeTab(useLayout.getState().main);
-    expect(current()).toBe(at('proj-maws'));
+    const strip = useLayout.getState().main;
     render(<Sidebar />);
     await toggle(user, 'codex_somersault');
-    expect(current()).toBe(at('proj-codex-somersault'));
-    expect(shown(), 'the other project’s set is empty').toBeNull();
+    expect(useLayout.getState().main).toBe(strip);
     row('MAWS').focus();
     await user.keyboard('{Enter}');
-    expect(current()).toBe(at('proj-maws'));
-    expect(shown()).toMatchObject({ kind: 'session', appSessionId: idOf('Fix sidebar drag') });
+    expect(useLayout.getState().main).toBe(strip);
     row('claude-usage-menubar').focus();
     await user.keyboard('{ArrowRight}');
-    expect(current()).toBe(at('proj-claude-usage-menubar'));
+    expect(useLayout.getState().main).toBe(strip);
     expect(expanded()).toEqual([at('proj-codex-somersault'), at('proj-maws'), at('proj-claude-usage-menubar')]);
     row('This Mac').focus();
     await user.keyboard(' ');
-    expect(current()).toBe(machineKey(TEST_MACHINE));
+    expect(expanded()).toContain(machineKey(TEST_MACHINE));
+    expect(useLayout.getState().main).toBe(strip);
+    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: idOf('Fix sidebar drag') });
   });
 
   it('the selected session is the tree’s stop when it is on screen', () => {
@@ -1459,6 +1466,36 @@ describe('new sessions from the sidebar', () => {
     expect(useSessions.getState().unstarted.get(at('app-new-1' as AppSessionId))?.projectId).toBe(at('proj-maws'));
     expand('proj-maws');
     expect(sessionRows(row('MAWS'))).toHaveLength(4);
+  });
+});
+
+// U13a (A3): a project row's "+" and its menu's New chat are New chat for their row, so an empty chat of the project in the
+// strip comes to the front instead of a second, from behind a tab of another project.
+describe('New chat from a project row', () => {
+  const EMPTY = at('app-empty-1' as AppSessionId);
+  beforeEach(() => {
+    fillStores(nine);
+    offs.push(registerEmptyChats({ isEmpty: (id) => id === EMPTY, discard: async () => true }));
+    useSessions.getState().addUnstarted(EMPTY, { projectId: at('proj-maws' as ProjectId), createdAt: '2026-11-12T09:00:00.000Z' });
+    useLayout.getState().openTab({ kind: 'session', appSessionId: EMPTY });
+    useLayout.getState().openSession(idOf('Quota reset recovery'), { how: 'tab' });
+  });
+
+  it.each([
+    ['its "+"', () => userEvent.click(within(row('MAWS')).getByRole('button', { name: 'New chat in MAWS' }))],
+    ['its menu’s New chat', async () => {
+      fireEvent.contextMenu(row('MAWS'));
+      fireEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'New chat' }));
+    }],
+  ])('%s brings the project’s empty chat to the front and makes none', async (_control, press) => {
+    const creator = vi.fn(async () => at('app-new-1' as AppSessionId));
+    offs.push(registerSessionCreator(creator));
+    render(<Sidebar />);
+    await press();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(creator).not.toHaveBeenCalled();
+    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: EMPTY });
+    expect(currentSet(useLayout.getState().main).panes[0].tabs.map((t) => t.id)).toEqual([`session:${EMPTY}`, `session:${idOf('Quota reset recovery')}`]);
   });
 });
 

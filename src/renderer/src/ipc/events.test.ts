@@ -18,7 +18,8 @@ import { createLayoutStore } from '../stores/layout';
 import { allTabs } from '../stores/layout-model';
 import { createMachinesStore, selectOffline } from '../stores/machines';
 import { createSessionsStore } from '../stores/sessions';
-import { connectShell } from './events';
+import { connectShell, ONE_STRIP_NOTICE } from './events';
+import { useNotices } from '../stores/notices';
 import { ownersLabel } from '../sidebar/owners'; // P5 O8 M5
 import { resetRemoteLaneBStore } from '../lane-b/remote-session'; // P5 O7 M2
 import { remoteSessionState } from '../lane-b/test-support/remote-session';
@@ -100,59 +101,38 @@ describe('shell event subscription', () => {
     expect(stores.sessions.getState().records.has(A)).toBe(false);
   });
 
-  // W12: a session's tab lives in its project's set; a record moved to another project (a refold) moves its tab, and
-  // the strip follows the tab it shows.
-  it('files the tabs by project at hydration and moves a tab whose record changes project', async () => {
+  // UX wave U13a (rule 1): a session's project changing moves no tab.
+  it('keeps the strip as it is when a record changes project', async () => {
     const { fake, stores } = setup();
     await fake.reply('session.list', { sessions: [record('a', { projectId: 'p1' as ProjectId })], revision: 1 });
     await fake.reply('session.projects.list', { projects: [project('p1', 0), project('p2', 1)], revision: 1 });
     await fake.reply('session.digests', { digests: [digest('a')] });
     await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
-    expect(stores.layout.getState().main.current).toBe(at('p1'));
-    expect(Object.keys(stores.layout.getState().main.sets)).toEqual([at('p1')]);
+    const before = stores.layout.getState().main;
     fake.event('session.changed', { record: record('a', { projectId: 'p2' as ProjectId }), cause: 'update', revision: 2 });
-    expect(stores.layout.getState().main.current).toBe(at('p2'));
-    expect(Object.keys(stores.layout.getState().main.sets)).toEqual([at('p2')]);
+    expect(stores.layout.getState().main).toBe(before);
     expect(tabIds(stores)).toEqual([`session:${A}`]);
   });
 
-  // P5 O6 M5: a set saved under a project's address waits whole while that project is not derived and its sessions file
-  // elsewhere meanwhile (a folder nobody opened, under its machine's row); derived, it moves whole, panes and ratio kept.
-  it('keeps a saved set of a folder not yet derived whole, and moves it whole once the folder is derived', async () => {
+  // U13a (its plan's §G): a read that merged a stored value's sets into the one strip says so, once per such read.
+  it('shows the one-strip notice for a read that merged sets, and none for one that did not', async () => {
     const session = (id: string) => ({ id: `session:${at(id)}`, kind: 'session', appSessionId: at(id), pinned: false }); // a v3 layout holds addresses
-    const split = { panes: [{ tabs: [session('a')], activeTabId: `session:${A}` }, { tabs: [session('c')], activeTabId: `session:${at('c')}` }], focusedPane: 1, splitRatio: 0.3 };
-    const { fake, stores } = setup(0, { tabs: { version: 3, current: at('pd'), sets: { [at('pd')]: split }, closedTabs: [] } });
-    const folder = project('pd', 0, { discovered: true });
-    await fake.reply('session.list', { sessions: [record('a', { projectId: 'pd' as ProjectId }), record('c', { projectId: 'pd' as ProjectId })], revision: 1 });
-    await fake.reply('session.projects.list', { projects: [folder], revision: 1 });
-    await fake.reply('session.digests', { digests: [] });
-    await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
-    await vi.waitFor(() => expect(stores.machines.getState().loaded.has(TEST_MACHINE)).toBe(true));
-    const PD = at('pd');
-    const shape = () => Object.fromEntries(Object.entries(stores.layout.getState().main.sets).map(([key, set]) => [key, { panes: set!.panes.map((p) => p.tabs.map((t) => t.id)), splitRatio: set!.splitRatio }]));
-    const whole = { panes: [[`session:${A}`], [`session:${at('c')}`]], splitRatio: 0.3 };
-    expect(stores.layout.getState().main.current).toBe(PD);
-    expect(shape()).toEqual({ [PD]: whole });
-    const org = { key: `folder:${TEST_MACHINE}:pd`, name: 'pd', source: 'folder', smnsId: null };
-    fake.event('session.projects.changed', { projects: [{ ...folder, org }], revision: 2 });
-    await vi.waitFor(() => expect(stores.layout.getState().main.current).toBe(`machine:${TEST_MACHINE}`));
-    expect(shape()).toEqual({ [`machine:${TEST_MACHINE}`]: whole });
-  });
-
-  // The review's F3: the records change of a removal reaches the layout before the removal closes the tab; a session no
-  // longer known is not refiled, so its tab closes in its own set and the strip keeps showing that project.
-  it('removing the shown session of a project closes its tab there and shows the project’s next tab', async () => {
-    const { fake, stores } = setup();
-    await fake.reply('session.list', { sessions: [record('a', { projectId: 'p1' as ProjectId }), record('c', { projectId: 'p1' as ProjectId })], revision: 1 });
-    await fake.reply('session.projects.list', { projects: [project('p1', 0)], revision: 1 });
-    await fake.reply('session.digests', { digests: [] });
-    await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
-    stores.layout.getState().openSession(at('c' as AppSessionId), { how: 'tab' });
-    stores.layout.getState().activateTab(`session:${A}`);
-    fake.event('session.removed', { appSessionId: 'a', revision: 2 });
-    expect(stores.layout.getState().main.current).toBe(at('p1'));
-    expect(Object.keys(stores.layout.getState().main.sets)).toEqual([at('p1')]);
-    expect(tabIds(stores)).toEqual([`session:${at('c')}`]);
+    const set = (id: string) => ({ panes: [{ tabs: [session(id)], activeTabId: `session:${at(id)}` }], focusedPane: 0, splitRatio: 0.5 });
+    const notices = () => useNotices.getState().notices.filter((n) => n.text === ONE_STRIP_NOTICE);
+    useNotices.setState({ notices: [] });
+    const merged = setup(0, { tabs: { version: 3, current: at('p1'), sets: { [at('p1')]: set('a'), [at('p2')]: set('c') }, closedTabs: [] } });
+    await answerSnapshots(merged.fake);
+    await vi.waitFor(() => expect(merged.stores.layout.getState().hydrated).toBe(true));
+    await vi.waitFor(() => expect(notices()).toHaveLength(1));
+    expect(notices()[0]).toMatchObject({ kind: 'toast', level: 'info', actions: [], dismissible: true });
+    merged.disconnect();
+    useNotices.setState({ notices: [] });
+    const single = setup(0, { tabs: { version: 3, current: at('p1'), sets: { [at('p1')]: set('a') }, closedTabs: [] } });
+    await answerSnapshots(single.fake);
+    await vi.waitFor(() => expect(single.stores.layout.getState().hydrated).toBe(true));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(notices()).toEqual([]);
+    single.disconnect();
   });
 
   it('keeps a session’s tabs when its removal is older than what the store knows', async () => {
@@ -685,32 +665,6 @@ describe('the shell per machine', () => {
     expect(stores.sessions.getState().records.has(at('a4' as AppSessionId))).toBe(true);
   });
 
-  // The branch review: B's session.list lands before its session.projects.list, so for a moment B's records name projects
-  // the page does not hold yet. A restored org set holding B's sessions stays whole, panes and ratio, through it.
-  it('keeps a restored org set whole while another machine’s records arrive before its projects', async () => {
-    const ORG = 'remote:github.com/example/shared' as OrgKey;
-    const org = { key: ORG, name: 'shared', source: 'remote' as const, smnsId: null };
-    const session = (id: string) => ({ id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false });
-    const split = { panes: [{ tabs: [session(A)], activeTabId: `session:${A}` }, { tabs: [session(onB('b1'))], activeTabId: `session:${onB('b1')}` }], focusedPane: 1, splitRatio: 0.3 };
-    const { fake, stores } = setup(0, { machines: [LOCAL_ENTRY, other('up', 1)], tabs: { version: 3, current: ORG, sets: { [ORG]: split }, closedTabs: [] } });
-    await fake.reply('session.list', { sessions: [record('a', { projectId: 'p1' as ProjectId })], revision: 1 });
-    await fake.reply('session.projects.list', { projects: [project('p1', 0, { org })], revision: 1 });
-    await fake.reply('session.digests', { digests: [] });
-    await fake.reply('attention.list', []);
-    await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
-    const shape = () => Object.fromEntries(Object.entries(stores.layout.getState().main.sets).map(([key, set]) => [key, { panes: set!.panes.map((p) => p.tabs.map((t) => t.id)), splitRatio: set!.splitRatio }]));
-    const whole = { [ORG]: { panes: [[`session:${A}`], [`session:${onB('b1')}`]], splitRatio: 0.3 } };
-    expect(shape()).toEqual(whole);
-    await fake.reply('session.list', { sessions: [record('b1', { projectId: 'pb' as ProjectId })], revision: 4 }); // B's records first
-    expect(shape(), 'nothing moves while B’s projects are unknown').toEqual(whole);
-    await fake.reply('session.projects.list', { projects: [project('pb', 0, { org })], revision: 4 });
-    await fake.reply('session.digests', { digests: [] });
-    await fake.reply('attention.list', []);
-    await vi.waitFor(() => expect(stores.machines.getState().loaded.has(OTHER_MACHINE)).toBe(true));
-    expect(shape()).toEqual(whole);
-    expect(stores.layout.getState().main.current).toBe(ORG);
-  });
-
   it('keeps another machine’s tabs until that machine has loaded, then drops the ones it does not list', async () => {
     const { fake, stores } = setup(0, { machines: [LOCAL_ENTRY, other('connecting', 0)], tabs: sessionTabs(A, onB('b1'), onB('b9')) });
     await answerSnapshots(fake);
@@ -922,25 +876,5 @@ describe('the project registry', () => {
     fake.event('org.projects.changed', registryOf(['newer']));
     await fake.reply('org.projects', registryOf(['older']));
     expect([...stores.sessions.getState().projects.keys()]).toEqual([onB('newer')]);
-  });
-
-  // §J.2: a set saved under a project's label, once its project's id takes a key of the table, moves whole to that key
-  it('moves a set saved under a label whole to the key main gave the label’s project, panes and ratio kept', async () => {
-    const LABEL = 'remote:example.org/app';
-    const session = (id: string) => ({ id: `session:${at(id)}`, kind: 'session', appSessionId: at(id), pinned: false });
-    const split = { panes: [{ tabs: [session('a')], activeTabId: `session:${A}` }, { tabs: [session('c')], activeTabId: `session:${at('c')}` }], focusedPane: 1, splitRatio: 0.3 };
-    const { fake, stores } = setup(0, { tabs: { version: 3, current: LABEL, sets: { [LABEL]: split }, closedTabs: [] } });
-    const app = project('p1', 0, { org: { key: LABEL as OrgKey, name: 'app', source: 'remote', smnsId: ID } });
-    await fake.reply('session.list', { sessions: [record('a', { projectId: 'p1' as ProjectId }), record('c', { projectId: 'p1' as ProjectId })], revision: 1 });
-    await fake.reply('session.projects.list', { projects: [app], revision: 1 });
-    await fake.reply('session.digests', { digests: [] });
-    await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
-    await vi.waitFor(() => expect(stores.machines.getState().loaded.has(TEST_MACHINE)).toBe(true));
-    const shape = () => Object.fromEntries(Object.entries(stores.layout.getState().main.sets).map(([key, set]) => [key, { panes: set!.panes.map((p) => p.tabs.map((t) => t.id)), splitRatio: set!.splitRatio }]));
-    const whole = { panes: [[`session:${A}`], [`session:${at('c')}`]], splitRatio: 0.3 };
-    expect(shape()).toEqual({ [LABEL]: whole }); // signed out so far: the row is the label's
-    await fake.reply('org.projects', { ...registryOf([]), keys: { [ID]: `id:${ID}` } });
-    await vi.waitFor(() => expect(stores.layout.getState().main.current).toBe(`id:${ID}`));
-    expect(shape()).toEqual({ [`id:${ID}`]: whole });
   });
 });

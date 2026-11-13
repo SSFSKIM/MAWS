@@ -131,6 +131,10 @@
 # printed paths, not a path reconstructed from the sha. Each invocation owns its paths, including identical calls.
 #
 #   MAWS_GATE_IGNORE_ALERTS=1  skip that check, for an alert left open by mistake
+# The whole script is one brace group, closed on its last line: bash parses a group whole before running it, so
+# editing this file while a call started from this worktree is still waiting cannot change the waiting call
+# (it read the file as it went, and died mid-run with 'view_err: unbound variable', leaving its ci/ ref).
+{
 set -uo pipefail
 
 # Preflight errors keep stderr and have no run evidence. Once admitted, every exit names this invocation's paths.
@@ -533,3 +537,5 @@ echo "ci-gate: run $run_id $conclusion"
 verdict=$conclusion
 [[ $conclusion == success ]] && finish 0
 finish 1
+exit 1
+}

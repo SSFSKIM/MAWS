@@ -31,14 +31,14 @@ import { ipc } from '../ipc/client';
 import { selectOffline, useMachines } from '../stores/machines';
 import { usePeople } from '../stores/people'; // P5 O8 M5
 import { ChevronDownIcon, FolderIcon, Icon, PlusIcon, SearchIcon } from '../app/IconButton';
-import { createSession, useSessionCreatorRegistered } from '../keymap/actions-runtime';
+import { newChat, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { DisclosureBody } from '../ui/disclosure';
 import { isListedRow, type ProjectEntry, type ProjectKey, type SidebarTreeRow } from './derive';
 import { ListedRow } from './ListedRow'; // P5 O8 M2
 import { focusVisible } from './HoverCard';
 import { ProjectHoverCard } from './ProjectHoverCard';
 import { machinesWords } from './locations'; // the project registry
-import { newChatElsewhere, registrySpawnTarget } from './registry-new-chat'; // the project registry
+import { registrySpawnTarget } from './registry-new-chat'; // the project registry
 import type { RegistryProject } from '../stores/registry'; // the project registry
 import { useLocationView } from './location-view'; // the project registry
 import { runProjectAction, useProjectActionEnabled } from './project-actions';
@@ -262,7 +262,7 @@ function ProjectActions({ projectId, rowKey, name, people, registry }: { project
         disabled={!canCreate}
         onClick={(event) => {
           event.stopPropagation();
-          void (elsewhere !== null ? newChatElsewhere(elsewhere) : createSession(projectId));
+          void newChat({ row: rowKey }); // U13a: here, or elsewhere as `elsewhere` says
         }}
         className={ACTION}
       >

@@ -12,7 +12,7 @@
 import { create } from 'zustand';
 import type { AttentionKind } from '@shared/graph/enums';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { FloatingCardSize, LayoutMain, LayoutRegions } from '@shared/ipc/schema/layout';
+import type { FloatingCardSize, LayoutRegions, Strip } from '@shared/ipc/schema/layout';
 import { panelInMain } from '../app/regions';
 import { surfaceSession, surfaceTabs } from '../panel/surface-model';
 import { selectPendingOf, useAttention } from '../stores/attention';
@@ -111,8 +111,8 @@ const hasPanelSurface = (state: Layout) => surfaceTabs(state, surfaceSession(sta
 const isFloating = (regions: LayoutRegions) => regions.panel.floating && !regions.panel.collapsed;
 const otherPane = (pane: 0 | 1): 0 | 1 => (pane === 0 ? 1 : 0);
 
-// P4-B3: the current set's float: the pane that yielded and the session its card draws; null while docked.
-export function splitFloat(main: LayoutMain): { pane: 0 | 1; appSessionId: AppSessionId } | null {
+// P4-B3: the strip's float: the pane that yielded and the session its card draws; null while docked.
+export function splitFloat(main: Strip): { pane: 0 | 1; appSessionId: AppSessionId } | null {
   const set = currentSet(main);
   const pane = floatingPane(set);
   const tab = pane === null ? undefined : set.panes[pane]?.tabs.find((t) => t.id === set.floating?.sessionTabId);
@@ -189,7 +189,7 @@ export function focusCompactCard(): void {
 // P4-B3 (its Decision Log 7): the split's card stands for S. While it is a pill, the focused pane moving to S (a sidebar
 // click on S's session, attention navigation, ⌘⇧\) opens it, and its composer takes the keyboard.
 useLayout.subscribe((state, before) => {
-  if (focusingCompact || !useFloatingCard.getState().closed || cardHost(state) !== 'split' || state.main.current !== before.main.current) return;
+  if (focusingCompact || !useFloatingCard.getState().closed || cardHost(state) !== 'split') return;
   const split = splitFloat(state.main);
   if (split !== null && currentSet(state.main).focusedPane === split.pane && currentSet(before.main).focusedPane !== split.pane) openCard();
 });
@@ -343,7 +343,7 @@ export function floatSplit(sessionTabId: string, opts: { foldPanel?: boolean } =
   markFocusOnMount(split.appSessionId);
   markTranscriptCarry(split.appSessionId);
   layout().floatSplit(sessionTabId, opts);
-  layout().focusPane(split.pane);
+  layout().showPane(split.pane);
   return true;
 }
 
@@ -355,7 +355,7 @@ export function dockSplit(): void {
   markFocusOnMount(split.appSessionId);
   markTranscriptCarry(split.appSessionId);
   layout().dockSplit();
-  layout().focusPane(split.pane);
+  layout().showPane(split.pane);
 }
 
 // The card's Dock, whichever card it is.
@@ -369,7 +369,7 @@ export function dockCard(): void {
 export function closeCard(): void {
   useFloatingCard.setState({ closed: true, pillTakesFocus: true });
   const split = cardHost(layout()) === 'split' ? splitFloat(layout().main) : null;
-  if (split !== null) layout().focusPane(otherPane(split.pane));
+  if (split !== null) layout().showPane(otherPane(split.pane));
 }
 
 // The pill: the card comes back, its composer taking the keyboard; the split's card stands for S again.
@@ -378,7 +378,7 @@ export function openCard(): void {
   if (session !== null) markFocusOnMount(session);
   useFloatingCard.getState().setClosed(false);
   const split = cardHost(layout()) === 'split' ? splitFloat(layout().main) : null;
-  if (split !== null) layout().focusPane(split.pane);
+  if (split !== null) layout().showPane(split.pane);
 }
 
 // `panel.float` (⌥⌘B, the header's Float): floats a panel that is not floating (refused with no session to show); on a
@@ -418,6 +418,6 @@ export function focusSplitCard(): void {
   // A compact composer is still registered until React swaps it for the expanded pane.
   // Let openCard's mount handoff focus the replacement, not the departing composer.
   if (useFloatingCard.getState().closed) return openCard();
-  layout().focusPane(split.pane);
+  layout().showPane(split.pane);
   useComposerStore.getState().focusTargets.get(split.appSessionId)?.focusFrame();
 }
