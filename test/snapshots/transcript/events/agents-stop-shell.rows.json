@@ -62,52 +62,56 @@
     "turnId": "turn:77244027-54d4-46df-9794-2c1b36b8b601"
   },
   {
-    "activeLabel": "Thinking",
+    "agent": null,
     "at": "2026-09-28T10:02:23.408Z",
-    "cells": [
-      {
-        "agent": null,
-        "category": "commands",
-        "classification": {
-          "category": "commands",
-          "denial": null,
-          "groupable": true,
-          "hidden": false,
-          "humanDecision": false,
-          "safeguard": "not_flagged",
-          "startsGroup": true,
-          "subagentLifecycle": null
-        },
-        "detail": {
-          "backgroundTaskId": "b53no4rmo",
-          "command": "sleep 30 && echo BG_DONE > bg.txt",
-          "cwd": null,
-          "description": "Sleep 30s then write BG_DONE to bg.txt",
-          "exitCode": 0,
-          "interrupted": false,
-          "kind": "shell",
-          "spill": null,
-          "stderr": "",
-          "stdout": "",
-          "truncated": null
-        },
-        "endedAt": "2026-09-28T10:02:25.865Z",
-        "expanded": true,
-        "id": "cell:toolu_018tRuD61WcQz8FakAbzkFcE",
-        "label": "Ran `sleep 30 && echo BG_DONE > bg.txt` in 2s",
-        "paths": [],
-        "startedAt": "2026-09-28T10:02:23.408Z",
-        "status": "done",
-        "toolName": "Bash",
-        "toolUseId": "toolu_018tRuD61WcQz8FakAbzkFcE"
-      }
-    ],
+    "category": "commands",
+    "classification": {
+      "category": "commands",
+      "denial": null,
+      "groupable": true,
+      "hidden": false,
+      "humanDecision": false,
+      "safeguard": "not_flagged",
+      "startsGroup": false,
+      "subagentLifecycle": null
+    },
+    "detail": {
+      "backgroundTaskId": "b53no4rmo",
+      "command": "sleep 30 && echo BG_DONE > bg.txt",
+      "cwd": null,
+      "description": "Sleep 30s then write BG_DONE to bg.txt",
+      "exitCode": 0,
+      "interrupted": false,
+      "kind": "shell",
+      "spill": null,
+      "stderr": "",
+      "stdout": "",
+      "truncated": null
+    },
+    "endedAt": "2026-09-28T10:02:25.865Z",
     "expanded": true,
-    "icon": "commands",
-    "id": "group:cell:toolu_018tRuD61WcQz8FakAbzkFcE",
-    "kind": "group",
-    "state": "active",
-    "summary": "Ran 1 command",
+    "id": "cell:toolu_018tRuD61WcQz8FakAbzkFcE",
+    "kind": "cell",
+    "label": "Ran `sleep 30 && echo BG_DONE > bg.txt` in 2s",
+    "paths": [],
+    "startedAt": "2026-09-28T10:02:23.408Z",
+    "status": "done",
+    "toolName": "Bash",
+    "toolUseId": "toolu_018tRuD61WcQz8FakAbzkFcE",
+    "turnId": "turn:77244027-54d4-46df-9794-2c1b36b8b601"
+  },
+  {
+    "at": "2026-09-28T10:02:26.765Z",
+    "class": "task",
+    "detail": null,
+    "durationMs": null,
+    "id": "notice:agents-stop-shell:journal:47:0:0",
+    "kind": "notice",
+    "outcome": "stopped",
+    "outputFile": "/private/tmp/claude-501/-private-tmp-maws-probe2-jJmuGs/dd4b0f5f-2900-4680-84df-c1930264bb5d/tasks/b53no4rmo.output",
+    "taskId": "b53no4rmo",
+    "text": "Sleep 30s then write BG_DONE to bg.txt",
+    "toolUseId": "toolu_018tRuD61WcQz8FakAbzkFcE",
     "turnId": "turn:77244027-54d4-46df-9794-2c1b36b8b601"
   }
 ]
