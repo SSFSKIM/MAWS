@@ -80,7 +80,7 @@ export function ArchivedSessionsDialog({ projectId, machine: named }: { projectI
       {rows === null ? (
         (error !== null || readOn !== '') && <p className="m-0 text-fg-muted">{error ?? 'Loading…'}</p>
       ) : rows.length === 0 ? (
-        lines.length === 0 && <p className="m-0 text-fg-muted">No archived sessions.</p>
+        <NoneArchived saidElsewhere={lines.length > 0} />
       ) : (
         <ul aria-label="Archived sessions" className="m-0 flex max-h-[50vh] list-none flex-col overflow-auto p-0">
           {rows.map((r) => (
@@ -89,14 +89,22 @@ export function ArchivedSessionsDialog({ projectId, machine: named }: { projectI
         </ul>
       )}
       {rows !== null && error && <p className="m-0 mt-2 text-ui-sm text-danger">{error}</p>}
-      {lines.map((line) => (
-        <p key={line} data-machine-line className="m-0 mt-2 text-ui-sm text-fg-muted">
-          {line}
-        </p>
-      ))}
+      <MachineLines lines={lines} />
     </Sheet>
   );
 }
+
+// The UX wave, U9: the line of each machine the archived read was not asked of.
+function MachineLines({ lines }: { lines: readonly string[] }) {
+  return lines.map((line) => (
+    <p key={line} data-machine-line className="m-0 mt-2 text-ui-sm text-fg-muted">
+      {line}
+    </p>
+  ));
+}
+
+// "No archived sessions." unless a machine's line says why it wasn't asked.
+const NoneArchived = ({ saidElsewhere }: { saidElsewhere: boolean }) => (saidElsewhere ? null : <p className="m-0 text-fg-muted">No archived sessions.</p>);
 
 // P5 O7 M8: deleting a session of a machine reached over RL2 is declared not offered there (lane-b/remote-unavailable.ts):
 // the button stays, greyed with the declared words. The UX wave, U9: Unarchive is offered there, behind the capability.
