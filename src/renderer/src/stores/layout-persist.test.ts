@@ -354,7 +354,7 @@ describe('layout persistence', () => {
     const pins = [{ id: 'p1', toolId: 'terminal', pinned: true }, { id: 'p2', toolId: 'files', pinned: true }];
     const { store, hydrate, sets } = setup({ 'panel.pinned': pins });
     await hydrate();
-    store.getState().setPanelTabs(null, { tabs: store.getState().panelPinned, activeTabId: 'p2' });
+    store.getState().showSurfaceTab(null, 'p2'); // UX wave U8b: the act that shows a pin with no session
     vi.advanceTimersByTime(1000);
     expect(sets()).toEqual([
       { key: 'panelTools.activeNoSession', value: { version: 1, activeTabId: 'p2' } },
@@ -566,7 +566,8 @@ describe('panel tabs from the host', () => {
       activeTabId: 'o',
     });
     expect(store.getState().panelPinned).toEqual([{ id: 'p', toolId: 'terminal', pinned: true }]);
-    expect(store.getState().panelBySession.get(A)).toEqual({ tabs: [{ id: 'o', toolId: 'files', pinned: false }], activeTabId: 'o' });
+    // UX wave U8b (M2): the write maintains the refs; what is in view is chosen by `showSurfaceTab` alone
+    expect(store.getState().panelBySession.get(A)).toEqual({ tabs: [{ id: 'o', toolId: 'files', pinned: false }], activeTabId: null });
     expect(store.getState().effectivePanelTabs(A).map((t) => t.id)).toEqual(['p', 'o']);
   });
 
@@ -575,6 +576,7 @@ describe('panel tabs from the host', () => {
     const p1 = { id: 'p1', toolId: 'terminal', pinned: true };
     const p2 = { id: 'p2', toolId: 'files', pinned: true };
     store.getState().setPanelTabs(null, { tabs: [p1, p2], activeTabId: 'p2' });
+    store.getState().showSurfaceTab(null, 'p2'); // UX wave U8b: the write chooses nothing
     expect(store.getState().panelActiveNoSession).toBe('p2');
     store.getState().setPanelTabs(null, { tabs: [p1, p2, { id: 'o', toolId: 'x', pinned: false }], activeTabId: 'o' });
     expect(store.getState().panelActiveNoSession).toBe('p2'); // an unpinned tab has nowhere to live without a session
@@ -584,6 +586,7 @@ describe('panel tabs from the host', () => {
     const store = createLayoutStore();
     const pin = (id: string) => ({ id, toolId: 'files', pinned: true });
     store.getState().setPanelTabs(null, { tabs: [pin('p1'), pin('p2'), pin('p3')], activeTabId: 'p2' });
+    store.getState().showSurfaceTab(null, 'p2'); // UX wave U8b: the write chooses nothing
     // Unpinned from a session's panel: p2 leaves the pins, and its right neighbour takes the selection.
     store.getState().setPanelTabPinned(A, 'p2', false);
     expect(store.getState().panelPinned.map((t) => t.id)).toEqual(['p1', 'p3']);
@@ -658,6 +661,7 @@ describe('panel tabs of a session not on screen', () => {
     const store = createLayoutStore();
     const pin = (id: string) => ({ id, toolId: 'files', pinned: true });
     store.getState().setPanelTabs(null, { tabs: [pin('p1'), pin('p2'), pin('p3')], activeTabId: 'p2' });
+    store.getState().showSurfaceTab(null, 'p2'); // UX wave U8b: the write chooses nothing
     store.getState().updatePanelTabs(A, (refs) => refs.filter((t) => t.id !== 'p2'));
     expect(store.getState().panelPinned.map((t) => t.id)).toEqual(['p1', 'p3']);
     expect(store.getState().panelActiveNoSession).toBe('p3');

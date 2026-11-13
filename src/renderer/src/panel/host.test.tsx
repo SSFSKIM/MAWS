@@ -111,7 +111,7 @@ describe('panel host registry and instances', () => {
     useLayout.setState({ panelBySession: new Map([[A, { tabs: [ref('terminal:aaaaaaaa')], activeTabId: 'terminal:aaaaaaaa' }]]) });
     render(<TestHost />);
     expect(screen.getByRole('tabpanel').textContent).toBe('terminal is not available');
-    expect(document.querySelector('[data-header-title]')?.textContent).toContain('terminal');
+    expect(screen.getByRole('tab', { name: 'terminal' })).toBeTruthy(); // the strip names it (UX wave U8b: no header row)
     await act(async () => void expect(await panelHost.closeTab('terminal:aaaaaaaa')).toBe(true));
     expect(panelOf(A)).toEqual({ tabs: [], activeTabId: null });
   });
@@ -590,14 +590,16 @@ describe('panel host transitions', () => {
       await hydrateHeld(bridge);
       expect([...restoredLogIds()].sort()).toEqual(['log:aaaaaaaa', 'log:bbbbbbbb', 'log:cccccccc']);
       render(<TestHost />);
-      expect(onChangeCalls).toEqual([{ appSessionId: A, next: { tabs: [ref('t:aaaaaaaa')], activeTabId: 't:aaaaaaaa' } }]);
+      expect(onChangeCalls.map(({ appSessionId, next }) => [appSessionId, next.tabs])).toEqual([[A, [ref('t:aaaaaaaa')]]]);
+      expect(panelOf(A)!.activeTabId).toBe('t:aaaaaaaa'); // the store's repair moved the view off the pruned Log
       expect(screen.queryByRole('tab', { name: /log/ })).toBeNull();
       expect(panelOf(B)!.tabs).toEqual([ref('log:cccccccc')]); // not shown yet
       expect(log.probe.created).toEqual([]);
       show(C);
       expect(onChangeCalls).toHaveLength(1); // C held no restored log
       show(B);
-      expect(onChangeCalls.at(-1)).toEqual({ appSessionId: B, next: { tabs: [], activeTabId: null } });
+      expect(onChangeCalls.at(-1)).toMatchObject({ appSessionId: B, next: { tabs: [] } });
+      expect(panelOf(B)!.activeTabId).toBeNull();
       expect(restoredLogIds().size).toBe(0);
 
       show(A);
@@ -615,7 +617,7 @@ describe('panel host transitions', () => {
       expect(screen.getByTestId(`body:${fresh}`)).toBeTruthy();
     });
 
-    it('a restored pinned log that B selected, pruned when A is first shown, repairs B, and A’s onChange carries A’s own replacement', async () => {
+    it('a restored pinned log that B selected, pruned when A is first shown, moves A’s and B’s view to its neighbour with no write of B’s list', async () => {
       connect();
       register(probeTool('log', { pinnable: false }).tool, probeTool('t').tool);
       const bridge = heldBridge(
@@ -628,12 +630,9 @@ describe('panel host transitions', () => {
       await hydrateHeld(bridge);
       const spies = spyLayout();
       render(<TestHost />);
-      expect(onChangeCalls).toEqual([{ appSessionId: A, next: { tabs: [ref('t:pin00000', true), ref('t:aaaaaaaa')], activeTabId: 't:pin00000' } }]);
-      expect(spies.updatePanelTabs.mock.calls).toHaveLength(1);
-      const [target, fn, opts] = spies.updatePanelTabs.mock.calls[0];
-      const refs = [ref('t:x')];
-      expect([target, fn(refs), opts]).toEqual([B, refs, { activeTabId: 't:pin00000' }]);
-      expect(fn(refs)).toBe(refs);
+      expect(onChangeCalls.map(({ appSessionId, next }) => [appSessionId, next.tabs])).toEqual([[A, [ref('t:pin00000', true), ref('t:aaaaaaaa')]]]);
+      expect(spies.updatePanelTabs).not.toHaveBeenCalled(); // UX wave U8b (M1, decision 5): the store repairs every scope
+      expect(panelOf(A)!.activeTabId).toBe('t:pin00000');
       expect(panelOf(B)!.activeTabId).toBe('t:pin00000');
       expect(pinIds()).toEqual(['t:pin00000']);
     });
@@ -723,7 +722,7 @@ describe('panel host transitions', () => {
       return { off, spies: spyLayout() };
     };
 
-    it.each(['close', 'unregister', 'unpin'] as const)('%s of a pin selected in A (shown) and B (not shown) moves B through one identity updatePanelTabs', async (how) => {
+    it.each(['close', 'unregister', 'unpin'] as const)('%s of a pin selected in A (shown) and B (not shown) moves B’s view to its neighbour with no write of B’s list', async (how) => {
       const { off, spies } = setup();
       if (how === 'close') await act(() => panelHost.closeTab('p:pin00000'));
       if (how === 'unregister') {
@@ -731,11 +730,7 @@ describe('panel host transitions', () => {
         await settle();
       }
       if (how === 'unpin') act(() => togglePinned('p:pin00000'));
-      const toB = spies.updatePanelTabs.mock.calls.filter(([target]) => target === B);
-      expect(toB).toHaveLength(1);
-      const refs = [ref('q:x')];
-      expect(toB[0][1](refs)).toBe(refs);
-      expect(toB[0][2]).toEqual({ activeTabId: 'q:pin00001' });
+      expect(spies.updatePanelTabs.mock.calls.filter(([target]) => target === B)).toEqual([]); // the store's repair
       expect(panelOf(B)!.activeTabId).toBe('q:pin00001');
       expect(spies.updatePanelTabs.mock.calls.filter(([target]) => target === C)).toEqual([]);
       expect(panelOf(C)!.activeTabId).toBe('q:pin00001');
@@ -763,7 +758,7 @@ describe('panel host transitions', () => {
     });
 
     it.each(['close', 'unregister'] as const)(
-      '%s of a pin selected in B while the shown session holds no list creates no list and moves B through one identity updatePanelTabs',
+      '%s of a pin selected in B while the shown session holds no list creates no list and moves B’s view with no write of B’s list',
       async (how) => {
         connect();
         const [off] = register(probeTool('p').tool, probeTool('q').tool);
@@ -779,11 +774,7 @@ describe('panel host transitions', () => {
           await settle();
         }
         expect([...useLayout.getState().panelBySession.keys()]).toEqual([B]);
-        const toB = spies.updatePanelTabs.mock.calls.filter(([target]) => target === B);
-        expect(toB).toHaveLength(1);
-        const refs = [ref('q:x')];
-        expect(toB[0][1](refs)).toBe(refs);
-        expect(toB[0][2]).toEqual({ activeTabId: 'q:pin00001' });
+        expect(spies.updatePanelTabs.mock.calls.filter(([target]) => target === B)).toEqual([]); // the store's repair
         expect(panelOf(B)!.activeTabId).toBe('q:pin00001');
         expect(pinIds()).toEqual(['q:pin00001']);
       },
