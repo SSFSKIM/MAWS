@@ -172,20 +172,24 @@ describe('the hold', () => {
     settledWord();
     const hold = tab();
     const first = pane();
-    roster('down'); // main's order: the roster first
-    stream('paused'); // then the session's word, the link down
-    refused(0);
-    await first.hydrated;
-    expect(entry().phase).toBe('failed');
-    roster('up');
-    await settle();
-    expect(reads(), 'decided at the settled word').toHaveLength(1);
-    settledWord();
-    await vi.waitFor(() => expect(reads()).toHaveLength(2));
-    answered(1);
-    await vi.waitFor(() => expect(entry().phase).toBe('live'));
-    first.unmount();
-    hold.unmount();
+    try {
+      roster('down'); // main's order: the roster first
+      stream('paused'); // then the session's word, the link down
+      refused(0);
+      await first.hydrated;
+      expect(entry().phase).toBe('failed');
+      roster('up');
+      await settle();
+      expect(reads(), 'decided at the settled word').toHaveLength(1);
+      settledWord();
+      await vi.waitFor(() => expect(reads()).toHaveLength(2));
+      answered(1);
+      await vi.waitFor(() => expect(entry().phase).toBe('live'));
+    } finally {
+      // unmounted on a failure too: a hold left mounted hears the next test's words with this test's source
+      first.unmount();
+      hold.unmount();
+    }
   });
 
   it('keeps the key the pane attached across offline: at up the pane joins it, and nothing is read again', async () => {
