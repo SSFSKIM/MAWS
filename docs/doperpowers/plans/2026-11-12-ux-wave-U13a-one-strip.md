@@ -587,6 +587,12 @@ The pull request carries the dated amendments of the two rulings this landing re
   - Decision: the project menu's New chat calls `newChat({ row: rowKey ?? projectId })`; `newChatElsewhere` gains an optional pane. `keymap/actions-runtime.ts` and `sidebar/registry-new-chat.ts` import each other; both use the other only when called, never at load.
   - Decision: the Overview still closes when a late chat arrives in the background (the press completed); its composer does not take the keyboard.
     Date/Author: 2026-11-13, the M3 executor; folded by the controller.
+- **2026-11-13 · M3's review: the relaunch sweep sees only an earlier run's chats; a put-back keeps its pin.**
+  - Decision: the Q1 discard takes its candidates from the first intent snapshot's own answer, never from the live store, excludes every session created in this run, and checks synchronously before each discard that the session has no tab in the strip. A chat of this run is never discarded by the sweep, empty or not: the sweep is a relaunch's cleanup, and an earlier run's chats have no tab yet because hydration waits for the retention's `ready`.
+    Rationale: the creator is enabled before the snapshot answers, so a chat made and typed into meanwhile was in the merged store and its persisted intent looked empty; the reviewer reproduced its discard while the tab was mounted.
+  - Decision: `closeEmptyChat`'s put-back restores the tab's pin as it was.
+  - Dismissed: stderr from four unchanged tests in M3's runs (baseline output of those suites, not M3's).
+    Date/Author: 2026-11-13, the controller, on M3's task review.
 
 ## Outcomes & Retrospective
 
