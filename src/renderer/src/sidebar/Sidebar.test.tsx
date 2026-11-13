@@ -1863,27 +1863,22 @@ describe('New chat in a project with no folder here', () => {
 // attempt that failed, it does.
 describe('a registry row’s machines line by the link’s phase', () => {
   const ID = '7e9f2d83-5c4b-4a7f-9e0d-1b2c3d4e5f60';
-  const NOW = Date.parse('2026-11-13T09:00:00.000Z');
   const here = { ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-11-13T08:00:00.000Z', generation: 0 } as const;
-  const studio = (over: Partial<MachineState>): MachineState => ({ ref: OTHER_MACHINE, name: 'studio', local: false, state: 'up', since: new Date(NOW).toISOString(), generation: 1, carrier: 'direct', ...over });
+  const studio = (over: Partial<MachineState>): MachineState => ({ ref: OTHER_MACHINE, name: 'studio', local: false, state: 'up', since: new Date().toISOString(), generation: 1, carrier: 'direct', ...over });
   const machinesLine = () => within(row('scrape')).getByText((_, el) => el?.hasAttribute('data-row-machines') ?? false).textContent;
-  beforeEach(() => vi.useFakeTimers({ now: NOW, toFake: ['setTimeout', 'clearTimeout', 'Date'] }));
-  afterEach(() => {
-    vi.useRealTimers();
-    useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() });
-  });
+  afterEach(() => useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() }));
 
-  it('names the machine plain while it connects or reconnects, and “offline” past the minute or when its first attempt failed', () => {
+  it('names the machine plain while it connects or reconnects, and “offline” past the minute or when its first attempt failed', async () => {
     fillStores({ projects: [], sessions: [], digests: [], engine: [], attention: [], timeline: [] });
     const location = { machine: OTHER_MACHINE, pid: 'p-studio', path: '/srv/p-studio', key: `folder:${OTHER_MACHINE}:p-studio` as OrgKey, name: 'p-studio', source: 'folder' as const, acts: true };
     act(() => useSessions.getState().applyRegistry({ projects: [{ id: ID, name: 'scrape', hub: true, renamable: true, locations: [location] }], keys: { [ID]: `id:${ID}` as OrgKey }, moved: {}, removals: [], seen: {} }, TEST_MACHINE));
     act(() => useMachines.getState().applyRoster([here, studio({ state: 'connecting', generation: 0 })]));
     render(<Sidebar />);
     expect(machinesLine(), 'connecting').toBe('studio');
-    act(() => useMachines.getState().applyRoster([here, studio({ state: 'down' })]));
+    // down a second short of the minute: reconnecting now, offline at the phase clock's own turn, with no roster change
+    act(() => useMachines.getState().applyRoster([here, studio({ state: 'down', since: new Date(Date.now() - REMOTE_ACT_PENDING_MS + 1_000).toISOString() })]));
     expect(machinesLine(), 'reconnecting').toBe('studio');
-    act(() => vi.advanceTimersByTime(REMOTE_ACT_PENDING_MS));
-    expect(machinesLine(), 'past the minute, at the clock’s own turn').toBe('studio offline');
+    await waitFor(() => expect(machinesLine(), 'past the minute, at the clock’s own turn').toBe('studio offline'), { timeout: 4_000 });
     act(() => useMachines.getState().applyRoster([here, studio({ state: 'down', generation: 0 })]));
     expect(machinesLine(), 'a first attempt that failed').toBe('studio offline');
     act(() => useMachines.getState().applyRoster([here, studio({})]));
