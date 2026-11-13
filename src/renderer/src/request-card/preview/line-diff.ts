@@ -89,22 +89,34 @@ function scriptOf(a: readonly string[], b: readonly string[]): Op[] {
 // The hunks that turn `before` into `after`; none when the two are the same text.
 export function lineDiff(before: string, after: string): Hunk[] {
   const ops = scriptOf(linesOf(before), linesOf(after));
+  // the old and the new line number each op starts at
+  const olds: number[] = [];
+  const news: number[] = [];
+  let old = 1;
+  let next = 1;
+  for (const op of ops) {
+    olds.push(old);
+    news.push(next);
+    if (op.sign !== '+') old += 1;
+    if (op.sign !== '-') next += 1;
+  }
   const changes = ops.flatMap((op, i) => (op.sign === ' ' ? [] : [i]));
   const hunks: Hunk[] = [];
   let at = 0;
   while (at < changes.length) {
     let end = at;
     while (end + 1 < changes.length && changes[end + 1]! - changes[end]! - 1 <= 2 * CONTEXT) end += 1;
-    hunks.push(hunkOf(ops, Math.max(0, changes[at]! - CONTEXT), Math.min(ops.length - 1, changes[end]! + CONTEXT)));
+    const from = Math.max(0, changes[at]! - CONTEXT);
+    const to = Math.min(ops.length - 1, changes[end]! + CONTEXT);
+    const shown = ops.slice(from, to + 1);
+    hunks.push({
+      oldStart: olds[from]!,
+      oldLines: shown.filter((op) => op.sign !== '+').length,
+      newStart: news[from]!,
+      newLines: shown.filter((op) => op.sign !== '-').length,
+      lines: shown.flatMap(({ sign, line }) => (line.endsWith('\n') ? [`${sign}${line.slice(0, -1)}`] : [`${sign}${line}`, NO_NEWLINE])),
+    });
     at = end + 1;
   }
   return hunks;
-}
-
-function hunkOf(ops: readonly Op[], from: number, to: number): Hunk {
-  const before = ops.slice(0, from);
-  const shown = ops.slice(from, to + 1);
-  const count = (list: readonly Op[], side: '-' | '+') => list.filter((op) => op.sign !== (side === '-' ? '+' : '-')).length;
-  const lines = shown.flatMap(({ sign, line }) => (line.endsWith('\n') ? [`${sign}${line.slice(0, -1)}`] : [`${sign}${line}`, NO_NEWLINE]));
-  return { oldStart: count(before, '-') + 1, oldLines: count(shown, '-'), newStart: count(before, '+') + 1, newLines: count(shown, '+'), lines };
 }
