@@ -193,8 +193,7 @@ test('computer use in the session (A6): a js call waiting for a permission answe
     await expect(strip).toHaveCount(0);
     await shot(c.pane, 'u12a-computer-use-waiting');
 
-    await approval.getByRole('radio', { name: 'Allow once' }).click();
-    await approval.getByRole('button', { name: 'Allow', exact: true }).click();
+    await approval.getByRole('button', { name: 'Allow once', exact: true }).click(); // U1a's card: a button per scope
     await expect(strip).toHaveAttribute('data-computer-use-strip', 'running', { timeout: 20_000 });
     await expect(strip.getByRole('status')).toContainText('Computer use running');
     value(await invoke(c.page, 'session.getContextUsage', { appSessionId: id, detail: 'summary' })); // lets the engine go on
