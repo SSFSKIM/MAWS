@@ -4,8 +4,8 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { anchoredMessage, parseAnchoredText } from '@shared/anchor/message';
-import { anchorPath, callClass, chipPath, clickPath, EDIT_TOOLS, hrefOf, isMcpTool, linkPaths, linkWork, needlesOf, normalizeLexically, PAUSE, READ_TOOLS, rowClaim, rowClaimSteps, STRETCH_MAX, WORK_FLOOR, WORK_PER_CHAR } from './named';
+import { anchoredMessage, commentsMessage, readAnchoredMessage } from '@shared/anchor/message';
+import { anchorPaths, callClass, chipPath, clickPath, EDIT_TOOLS, hrefOf, isMcpTool, linkPaths, linkWork, needlesOf, normalizeLexically, PAUSE, READ_TOOLS, rowClaim, rowClaimSteps, STRETCH_MAX, WORK_FLOOR, WORK_PER_CHAR } from './named';
 
 const P = '/work/out/report.md';
 
@@ -443,7 +443,7 @@ describe('the value form: chipPath', () => {
   });
 });
 
-describe('isMcpTool and anchorPath', () => {
+describe('isMcpTool and anchorPaths', () => {
   it('isMcpTool has the window’s MCP shape', () => {
     expect(isMcpTool('mcp__docs__search')).toBe(true);
     expect(isMcpTool('mcp__a__b__c')).toBe(true);
@@ -452,12 +452,17 @@ describe('isMcpTool and anchorPath', () => {
     expect(isMcpTool('Read')).toBe(false);
   });
 
-  it('anchorPath reads the anchored comment’s path, and nothing from another text', () => {
+  it('anchorPaths reads the anchored comment’s path, and nothing from another text', () => {
     const text = anchoredMessage({ anchor: { kind: 'file-line', label: 'report.md', locator: `${P}:3`, path: P, line: 3 }, text: 'Look here', destination: 'main', screenshot: false });
-    expect(parseAnchoredText(text)?.anchor.path).toBe(P);
-    expect(anchorPath(text)).toBe(P);
-    expect(anchorPath(`Look at ${P}`)).toBeNull();
-    expect(anchorPath(`<maws_anchor kind="file-line" path="${P}"/>`)).toBeNull(); // the schema refuses it: no label, no locator
+    expect(readAnchoredMessage(text)?.comments.map((comment) => comment.anchor.path)).toEqual([P]);
+    expect(anchorPaths(text)).toEqual([P]);
+    expect(anchorPaths(`Look at ${P}`)).toEqual([]);
+    expect(anchorPaths(`<maws_anchor kind="file-line" path="${P}"/>`)).toEqual([]); // the schema refuses it: no label, no locator
+  });
+
+  // UX wave U5a: a message of several comments draws a chip for each, so each comment's path is one the window clicks
+  it('anchorPaths reads every comment’s path of a message of several, in the order made, and none from a page element', () => {
+    expect(anchorPaths(several)).toEqual([P, OTHER]);
   });
 });
 
@@ -474,6 +479,13 @@ const queued = (prompt: string | object[], extra: object = {}) => ({
 });
 const LINK = `[r](${P})`;
 const anchored = anchoredMessage({ anchor: { kind: 'file-line', label: 'report.md', locator: P, path: P }, text: 'Look', destination: 'main', screenshot: false });
+// UX wave U5a: a message of several comments, the asked path the first comment's (a one-comment reader reads the last)
+const OTHER = '/work/notes/plan.md';
+const several = commentsMessage([
+  { anchor: { kind: 'file-line', label: 'report.md', locator: `${P}:3`, path: P, line: 3 }, text: 'Look here', screenshot: false },
+  { anchor: { kind: 'browser-element', label: 'Save', locator: 'button.save', pageUrl: 'http://localhost:5173/' }, text: 'And this button', screenshot: false },
+  { anchor: { kind: 'file-line', label: 'plan.md', locator: `${OTHER}:1`, path: OTHER, line: 1 }, text: 'And this line', screenshot: false },
+], 'main');
 
 describe('rowClaim', () => {
   const names = { names: true };
@@ -490,6 +502,8 @@ describe('rowClaim', () => {
     ['a person’s queued prompt', queued(`Open ${LINK}`)],
     ['a person’s queued prompt in blocks', queued([text(`Open ${LINK}`)])],
     ['a person’s queued anchored comment', queued(anchored)],
+    ['the first of a message’s several comments (UX wave U5a)', user([text(several)])],
+    ['the first of a queued message’s several comments (UX wave U5a)', queued(several)],
   ])('names the path: %s', (_, row) => {
     expect(rowClaim(row, P)).toEqual(names);
   });
