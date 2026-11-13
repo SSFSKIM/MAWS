@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
+import type { JournalRow } from '@shared/wire/journal';
 import { parseTranscriptRecord } from '@shared/wire/transcript';
 import { loadJournal, loadUxwaveJournal, loadUxwaveTranscript } from '../../test/support/fixtures';
 import { createBackfillContext, recordToEvents } from './fs/backfill';
@@ -15,7 +16,7 @@ type Complete = Extract<SessionEvent, { kind: 'assistant.block.complete' }>;
 const SESSION = 'sess-1' as SessionId;
 const AT = '2026-11-13T10:00:00.000Z';
 
-const live = (rows: { seq: number; direction: 'in' | 'out' | 'meta'; at: string; frame: unknown }[]): SessionEvent[] => {
+const live = (rows: JournalRow[]): SessionEvent[] => {
   const normalizer = new Normalizer({ appSessionId: 'app-1' as AppSessionId, launchId: 'LAUNCH01', sessionId: null });
   return rows.flatMap((row) => normalizer.push(row));
 };
