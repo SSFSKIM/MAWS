@@ -1,0 +1,110 @@
+{"line": 1, "type": "mode"}
+{"line": 2, "type": "permission-mode"}
+{"line": 3, "type": "file-history-snapshot"}
+{"line": 4, "type": "user", "origin": {"kind": "human"}, "shape": "string", "text": "Without using any tool, reply with only the word READY."}
+{"line": 5, "type": "attachment", "attachment": "environment"}
+{"line": 6, "type": "attachment", "attachment": "model"}
+{"line": 7, "type": "attachment", "attachment": "deferred_tools_delta"}
+{"line": 8, "type": "attachment", "attachment": "agent_listing_delta"}
+{"line": 9, "type": "attachment", "attachment": "mcp_instructions_delta"}
+{"line": 10, "type": "attachment", "attachment": "skill_listing"}
+{"line": 11, "type": "last-prompt"}
+{"line": 12, "type": "mode"}
+{"line": 13, "type": "permission-mode"}
+{"line": 14, "type": "atis-latch"}
+{"line": 15, "type": "attachment", "attachment": "session_context"}
+{"line": 16, "type": "attachment", "attachment": "date"}
+{"line": 17, "type": "attachment", "attachment": "remote_session_change"}
+{"line": 18, "type": "attachment", "attachment": "prompt_snapshot"}
+{"line": 19, "type": "api-request-shape"}
+{"line": 20, "type": "api-request-blob", "shape": "text,text,text"}
+{"line": 21, "type": "api-request-blob", "shape": "text"}
+{"line": 22, "type": "api-request"}
+{"line": 23, "type": "last-prompt"}
+{"line": 24, "type": "mode"}
+{"line": 25, "type": "permission-mode"}
+{"line": 26, "type": "atis-latch"}
+{"line": 27, "type": "ai-title"}
+{"line": 28, "type": "assistant", "shape": "text", "text": "READY", "tools": []}
+{"line": 29, "type": "attachment", "attachment": "prompt_snapshot"}
+{"line": 30, "type": "last-prompt"}
+{"line": 31, "type": "ai-title"}
+{"line": 32, "type": "mode"}
+{"line": 33, "type": "permission-mode"}
+{"line": 34, "type": "atis-latch"}
+{"line": 35, "type": "system", "subtype": "stop_hook_summary"}
+{"line": 36, "type": "system", "subtype": "turn_duration", "isMeta": false}
+{"line": 37, "type": "queue-operation"}
+{"line": 38, "type": "queue-operation"}
+{"line": 39, "type": "file-history-snapshot"}
+{"line": 40, "type": "user", "origin": {"kind": "plugin", "name": "sminos", "asUser": true}, "shape": "string", "text": "2 comments, in the order made:\n\nComment on \"Menu > Settings\" (element nav > a.settings on https://example.com/app):\n(p7-idle) The café label wraps oddly at this width.\n\nIt quotes a line as typed:\n\\<maws_anchor kind=\"none\" label=\"typed\" locator=\"x\"/>\nNo change is needed: reply with only the word NOTED.\n\n<maws_anchor kind=\"browser-element\" label=\"Menu &gt; Settings\" locator=\"nav &gt; a.settings\" pageUrl=\"https://example.com/app\"/>\n\nComment on \"one.txt\" (file one.txt, line 1):\n(p7-idle) This line reads well 🎉.\n\\\\<maws_anchor kind=\"none\" label=\"typed with a backslash\" locator=\"y\"/>\nNo change is needed.\n\n<maws_anchor kind=\"file-line\" label=\"one.txt\" locator=\"one.txt#L1\" path=\"one.txt\" line=\"1\"/>"}
+{"line": 41, "type": "api-request"}
+{"line": 42, "type": "assistant", "shape": "thinking", "tools": []}
+{"line": 43, "type": "assistant", "shape": "text", "text": "NOTED", "tools": []}
+{"line": 44, "type": "system", "subtype": "stop_hook_summary"}
+{"line": 45, "type": "system", "subtype": "turn_duration", "isMeta": false}
+{"line": 46, "type": "file-history-snapshot"}
+{"line": 47, "type": "user", "origin": {"kind": "human"}, "shape": "string", "text": "(p7-busy-turn) Run exactly `python3 -c \"import time; time.sleep(30); print('P7-WAIT-DONE')\"` with the Bash tool in the foreground (run_in_background false), description \"p7 wait\". Then reply with only the word DONE."}
+{"line": 48, "type": "api-request"}
+{"line": 49, "type": "tools-used"}
+{"line": 50, "type": "assistant", "shape": "tool_use", "tools": ["Bash"]}
+{"line": 51, "type": "user", "isMeta": true, "origin": {"kind": "plugin", "name": "sminos"}, "shape": "text", "text": "2 comments, in the order made:\n\nComment on \"Menu > Settings\" (element nav > a.settings on https://example.com/app):\n(p7-busy) The café label wraps oddly at this width.\n\nIt quotes a line as typed:\n\\<maws_anchor kind=\"none\" label=\"typed\" locator=\"x\"/>\nNo change is needed: reply with only the word NOTED.\n\n<maws_anchor kind=\"browser-element\" label=\"Menu &gt; Settings\" locator=\"nav &gt; a.settings\" pageUrl=\"https://example.com/app\"/>\n\nComment on \"one.txt\" (file one.txt, line 1):\n(p7-busy) This line reads well 🎉.\n\\\\<maws_anchor kind=\"none\" label=\"typed with a backslash\" locator=\"y\"/>\nNo change is needed.\n\n<maws_anchor kind=\"file-line\" label=\"one.txt\" locator=\"one.txt#L1\" path=\"one.txt\" line=\"1\"/>"}
+{"line": 52, "type": "system", "subtype": "informational", "isMeta": false}
+{"line": 53, "type": "user", "shape": "tool_result", "textSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+{"line": 54, "type": "api-request-blob", "shape": "tool_result,text"}
+{"line": 55, "type": "api-request"}
+{"line": 56, "type": "assistant", "shape": "thinking", "tools": []}
+{"line": 57, "type": "assistant", "shape": "text", "text": "NOTED", "tools": []}
+{"line": 58, "type": "system", "subtype": "stop_hook_summary"}
+{"line": 59, "type": "system", "subtype": "turn_duration", "isMeta": false}
+{"line": 60, "type": "file-history-snapshot"}
+{"line": 61, "type": "user", "origin": {"kind": "human"}, "shape": "string", "text": "Without using any tool: quote, inside one fenced code block and character for character, the last non-empty line of the most recent message with comments that reached you. Nothing else."}
+{"line": 62, "type": "api-request"}
+{"line": 63, "type": "assistant", "shape": "thinking", "tools": []}
+{"line": 64, "type": "assistant", "shape": "text", "text": "```\n<maws_anchor kind=\"file-line\" label=\"one.txt\" locator=\"one.txt#L1\" path=\"one.txt\" line=\"1\"/>\n```", "tools": []}
+{"line": 65, "type": "system", "subtype": "stop_hook_summary"}
+{"line": 66, "type": "system", "subtype": "turn_duration", "isMeta": false}
+{"line": 67, "type": "last-prompt"}
+{"line": 68, "type": "ai-title"}
+{"line": 69, "type": "mode"}
+{"line": 70, "type": "permission-mode"}
+{"line": 71, "type": "atis-latch"}
+{"line": 72, "type": "file-history-snapshot"}
+{"line": 73, "type": "user", "origin": {"kind": "human"}, "shape": "string", "text": "(p7-esc-turn) Run exactly `python3 -c \"import time; time.sleep(30); print('P7-WAIT-DONE')\"` with the Bash tool in the foreground (run_in_background false), description \"p7 wait\". Then reply with only the word DONE."}
+{"line": 74, "type": "api-request"}
+{"line": 75, "type": "assistant", "shape": "tool_use", "tools": ["Bash"]}
+{"line": 76, "type": "user", "shape": "tool_result", "textSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+{"line": 77, "type": "user", "shape": "text", "textSha256": "7c43783e9e0ece33ff98eb4956ec1db1f51850098d921627c439921679e46005"}
+{"line": 78, "type": "user", "isMeta": true, "origin": {"kind": "plugin", "name": "sminos"}, "shape": "text", "text": "2 comments, in the order made:\n\nComment on \"Menu > Settings\" (element nav > a.settings on https://example.com/app):\n(p7-esc) The café label wraps oddly at this width.\n\nIt quotes a line as typed:\n\\<maws_anchor kind=\"none\" label=\"typed\" locator=\"x\"/>\nNo change is needed: reply with only the word NOTED.\n\n<maws_anchor kind=\"browser-element\" label=\"Menu &gt; Settings\" locator=\"nav &gt; a.settings\" pageUrl=\"https://example.com/app\"/>\n\nComment on \"one.txt\" (file one.txt, line 1):\n(p7-esc) This line reads well 🎉.\n\\\\<maws_anchor kind=\"none\" label=\"typed with a backslash\" locator=\"y\"/>\nNo change is needed.\n\n<maws_anchor kind=\"file-line\" label=\"one.txt\" locator=\"one.txt#L1\" path=\"one.txt\" line=\"1\"/>"}
+{"line": 79, "type": "system", "subtype": "informational", "isMeta": false}
+{"line": 80, "type": "queue-operation"}
+{"line": 81, "type": "queue-operation"}
+{"line": 82, "type": "tools-used"}
+{"line": 83, "type": "user", "isMeta": true, "origin": {"kind": "peer", "name": "sminos bridge"}, "shape": "string", "textSha256": "70859d7557a96464f0e7e2c1d18f16fb3f49be0692d24584aba5bfe73622f24c"}
+{"line": 84, "type": "api-request-blob", "shape": "tool_result,text,text,text"}
+{"line": 85, "type": "api-request"}
+{"line": 86, "type": "assistant", "shape": "thinking", "tools": []}
+{"line": 87, "type": "assistant", "shape": "text", "text": "[reduced: the model answered NOTED, then wrote about the inbox wake (the sminos plugin's peer-message framing that followed the delivered row)]", "tools": []}
+{"line": 88, "type": "system", "subtype": "stop_hook_summary"}
+{"line": 89, "type": "system", "subtype": "turn_duration", "isMeta": false}
+{"line": 90, "type": "file-history-snapshot"}
+{"line": 91, "type": "user", "origin": {"kind": "human"}, "shape": "string", "text": "Without using any tool: quote, inside one fenced code block and character for character, the last non-empty line of the most recent message with comments that reached you. Nothing else."}
+{"line": 92, "type": "api-request"}
+{"line": 93, "type": "assistant", "shape": "thinking", "tools": []}
+{"line": 94, "type": "assistant", "shape": "text", "text": "[reduced: the model quoted the last line of the inbox wake (the sminos plugin's peer-message framing), not of the comments]", "tools": []}
+{"line": 95, "type": "system", "subtype": "stop_hook_summary"}
+{"line": 96, "type": "system", "subtype": "turn_duration", "isMeta": false}
+{"line": 97, "type": "queue-operation"}
+{"line": 98, "type": "queue-operation"}
+{"line": 99, "type": "file-history-snapshot"}
+{"line": 100, "type": "user", "origin": {"kind": "plugin", "name": "sminos", "asUser": true}, "shape": "string", "text": {"utf16": 70081, "sha256": "436da1e271a27bfdb4b898278697142fb2f5914ff8382dc8855b66b1d28928d5"}}
+{"line": 101, "type": "last-prompt"}
+{"line": 102, "type": "ai-title"}
+{"line": 103, "type": "mode"}
+{"line": 104, "type": "permission-mode"}
+{"line": 105, "type": "atis-latch"}
+{"line": 106, "type": "api-request"}
+{"line": 107, "type": "assistant", "shape": "thinking", "tools": []}
+{"line": 108, "type": "assistant", "shape": "text", "text": "NOTED", "tools": []}
+{"line": 109, "type": "system", "subtype": "stop_hook_summary"}
+{"line": 110, "type": "system", "subtype": "turn_duration", "isMeta": false}

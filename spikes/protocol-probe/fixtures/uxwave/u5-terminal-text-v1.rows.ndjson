@@ -1,0 +1,117 @@
+{"line": 1, "type": "mode"}
+{"line": 2, "type": "permission-mode"}
+{"line": 3, "type": "file-history-snapshot"}
+{"line": 4, "type": "user", "origin": {"kind": "human"}, "shape": "string", "text": "Without using any tool, reply with only the word READY."}
+{"line": 5, "type": "attachment", "attachment": "environment"}
+{"line": 6, "type": "attachment", "attachment": "model"}
+{"line": 7, "type": "attachment", "attachment": "deferred_tools_delta"}
+{"line": 8, "type": "attachment", "attachment": "agent_listing_delta"}
+{"line": 9, "type": "attachment", "attachment": "mcp_instructions_delta"}
+{"line": 10, "type": "attachment", "attachment": "skill_listing"}
+{"line": 11, "type": "last-prompt"}
+{"line": 12, "type": "mode"}
+{"line": 13, "type": "permission-mode"}
+{"line": 14, "type": "atis-latch"}
+{"line": 15, "type": "attachment", "attachment": "session_context"}
+{"line": 16, "type": "attachment", "attachment": "date"}
+{"line": 17, "type": "attachment", "attachment": "remote_session_change"}
+{"line": 18, "type": "attachment", "attachment": "prompt_snapshot"}
+{"line": 19, "type": "api-request-shape"}
+{"line": 20, "type": "api-request-blob", "shape": "text,text,text"}
+{"line": 21, "type": "api-request-blob", "shape": "text"}
+{"line": 22, "type": "api-request"}
+{"line": 23, "type": "last-prompt"}
+{"line": 24, "type": "mode"}
+{"line": 25, "type": "permission-mode"}
+{"line": 26, "type": "atis-latch"}
+{"line": 27, "type": "ai-title"}
+{"line": 28, "type": "assistant", "shape": "text", "text": "READY", "tools": []}
+{"line": 29, "type": "attachment", "attachment": "prompt_snapshot"}
+{"line": 30, "type": "last-prompt"}
+{"line": 31, "type": "ai-title"}
+{"line": 32, "type": "mode"}
+{"line": 33, "type": "permission-mode"}
+{"line": 34, "type": "atis-latch"}
+{"line": 35, "type": "system", "subtype": "stop_hook_summary"}
+{"line": 36, "type": "system", "subtype": "turn_duration", "isMeta": false}
+{"line": 37, "type": "queue-operation"}
+{"line": 38, "type": "queue-operation"}
+{"line": 39, "type": "file-history-snapshot"}
+{"line": 40, "type": "user", "origin": {"kind": "plugin", "name": "sminos", "asUser": true}, "shape": "string", "text": "Comment on \"Menu > Settings\" (element nav > a.settings on https://example.com/app):\n(p7-idle) The café label wraps oddly at this width.\n\nNo change is needed: reply with only the word NOTED.\n\n<maws_anchor kind=\"browser-element\" label=\"Menu &gt; Settings\" locator=\"nav &gt; a.settings\" pageUrl=\"https://example.com/app\"/>\n\nComment on \"one.txt\" (file one.txt, line 1):\n(p7-idle) This line reads well 🎉.\nNo change is needed.\n\n<maws_anchor kind=\"file-line\" label=\"one.txt\" locator=\"one.txt#L1\" path=\"one.txt\" line=\"1\"/>"}
+{"line": 41, "type": "api-request"}
+{"line": 42, "type": "assistant", "shape": "thinking", "tools": []}
+{"line": 43, "type": "assistant", "shape": "text", "text": "NOTED", "tools": []}
+{"line": 44, "type": "system", "subtype": "stop_hook_summary"}
+{"line": 45, "type": "system", "subtype": "turn_duration", "isMeta": false}
+{"line": 46, "type": "file-history-snapshot"}
+{"line": 47, "type": "user", "origin": {"kind": "human"}, "shape": "string", "text": "(p7-busy-turn) Run exactly `sleep 30` with the Bash tool in the foreground (run_in_background false). Then reply with only the word DONE."}
+{"line": 48, "type": "api-request"}
+{"line": 49, "type": "api-request-blob", "shape": "tool_use"}
+{"line": 50, "type": "api-request-blob", "shape": "tool_result"}
+{"line": 51, "type": "api-request"}
+{"line": 52, "type": "tools-used"}
+{"line": 53, "type": "assistant", "shape": "tool_use", "tools": ["Bash"]}
+{"line": 54, "type": "user", "shape": "tool_result", "textSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+{"line": 55, "type": "assistant", "shape": "thinking", "tools": []}
+{"line": 56, "type": "user", "isMeta": true, "origin": {"kind": "plugin", "name": "sminos"}, "shape": "text", "text": "Comment on \"Menu > Settings\" (element nav > a.settings on https://example.com/app):\n(p7-busy) The café label wraps oddly at this width.\n\nNo change is needed: reply with only the word NOTED.\n\n<maws_anchor kind=\"browser-element\" label=\"Menu &gt; Settings\" locator=\"nav &gt; a.settings\" pageUrl=\"https://example.com/app\"/>\n\nComment on \"one.txt\" (file one.txt, line 1):\n(p7-busy) This line reads well 🎉.\nNo change is needed.\n\n<maws_anchor kind=\"file-line\" label=\"one.txt\" locator=\"one.txt#L1\" path=\"one.txt\" line=\"1\"/>"}
+{"line": 57, "type": "system", "subtype": "informational", "isMeta": false}
+{"line": 58, "type": "assistant", "shape": "text", "text": "The sandbox blocked the `sleep 30` command. It rejects standalone sleeps and points to Monitor or background jobs instead. I didn't try a workaround, so the sleep did not run and I can't reply DONE. If you want the wait anyway, I can run it in the background, or you can run `! sleep 30` yourself in the prompt.", "tools": []}
+{"line": 59, "type": "system", "subtype": "stop_hook_summary"}
+{"line": 60, "type": "system", "subtype": "turn_duration", "isMeta": false}
+{"line": 61, "type": "queue-operation"}
+{"line": 62, "type": "queue-operation"}
+{"line": 63, "type": "file-history-snapshot"}
+{"line": 64, "type": "user", "origin": {"kind": "plugin", "name": "sminos", "asUser": true}, "shape": "string", "textSha256": "4e64b2f58425ab6b71d1cc90d0918453cc6faf77a7728f5efb9a76b6b8e2c9fe"}
+{"line": 65, "type": "api-request"}
+{"line": 66, "type": "assistant", "shape": "thinking", "tools": []}
+{"line": 67, "type": "assistant", "shape": "text", "text": "NOTED", "tools": []}
+{"line": 68, "type": "system", "subtype": "stop_hook_summary"}
+{"line": 69, "type": "system", "subtype": "turn_duration", "isMeta": false}
+{"line": 70, "type": "last-prompt"}
+{"line": 71, "type": "ai-title"}
+{"line": 72, "type": "mode"}
+{"line": 73, "type": "permission-mode"}
+{"line": 74, "type": "atis-latch"}
+{"line": 75, "type": "file-history-snapshot"}
+{"line": 76, "type": "user", "origin": {"kind": "human"}, "shape": "string", "text": "Without using any tool: quote, inside one fenced code block and character for character, the last non-empty line of the most recent message with comments that reached you. Nothing else."}
+{"line": 77, "type": "api-request"}
+{"line": 78, "type": "assistant", "shape": "thinking", "tools": []}
+{"line": 79, "type": "assistant", "shape": "text", "text": "```\n<maws_anchor kind=\"file-line\" label=\"one.txt\" locator=\"one.txt#L1\" path=\"one.txt\" line=\"1\"/>\n```", "tools": []}
+{"line": 80, "type": "system", "subtype": "stop_hook_summary"}
+{"line": 81, "type": "system", "subtype": "turn_duration", "isMeta": false}
+{"line": 82, "type": "file-history-snapshot"}
+{"line": 83, "type": "user", "origin": {"kind": "human"}, "shape": "string", "text": "(p7-esc-turn) Run exactly `sleep 30` with the Bash tool in the foreground (run_in_background false). Then reply with only the word DONE."}
+{"line": 84, "type": "api-request"}
+{"line": 85, "type": "assistant", "shape": "thinking", "tools": []}
+{"line": 86, "type": "assistant", "shape": "text", "text": "I haven't run it. The same `sleep 30` was blocked earlier. The sandbox rejects standalone sleeps, so retrying the same command would just hit the same block.\n\nI can run the wait as a background job, or you can run `! sleep 30` yourself in the prompt. Either way I won't reply DONE until the sleep has actually finished.", "tools": []}
+{"line": 87, "type": "system", "subtype": "stop_hook_summary"}
+{"line": 88, "type": "system", "subtype": "turn_duration", "isMeta": false}
+{"line": 89, "type": "queue-operation"}
+{"line": 90, "type": "queue-operation"}
+{"line": 91, "type": "file-history-snapshot"}
+{"line": 92, "type": "user", "origin": {"kind": "plugin", "name": "sminos", "asUser": true}, "shape": "string", "text": "Comment on \"Menu > Settings\" (element nav > a.settings on https://example.com/app):\n(p7-esc) The café label wraps oddly at this width.\n\nNo change is needed: reply with only the word NOTED.\n\n<maws_anchor kind=\"browser-element\" label=\"Menu &gt; Settings\" locator=\"nav &gt; a.settings\" pageUrl=\"https://example.com/app\"/>\n\nComment on \"one.txt\" (file one.txt, line 1):\n(p7-esc) This line reads well 🎉.\nNo change is needed.\n\n<maws_anchor kind=\"file-line\" label=\"one.txt\" locator=\"one.txt#L1\" path=\"one.txt\" line=\"1\"/>"}
+{"line": 93, "type": "api-request"}
+{"line": 94, "type": "assistant", "shape": "text", "text": "NOTED", "tools": []}
+{"line": 95, "type": "system", "subtype": "stop_hook_summary"}
+{"line": 96, "type": "system", "subtype": "turn_duration", "isMeta": false}
+{"line": 97, "type": "file-history-snapshot"}
+{"line": 98, "type": "user", "origin": {"kind": "human"}, "shape": "string", "text": "Without using any tool: quote, inside one fenced code block and character for character, the last non-empty line of the most recent message with comments that reached you. Nothing else."}
+{"line": 99, "type": "api-request"}
+{"line": 100, "type": "assistant", "shape": "thinking", "tools": []}
+{"line": 101, "type": "assistant", "shape": "text", "text": "```\n<maws_anchor kind=\"file-line\" label=\"one.txt\" locator=\"one.txt#L1\" path=\"one.txt\" line=\"1\"/>\n```", "tools": []}
+{"line": 102, "type": "system", "subtype": "stop_hook_summary"}
+{"line": 103, "type": "system", "subtype": "turn_duration", "isMeta": false}
+{"line": 104, "type": "queue-operation"}
+{"line": 105, "type": "queue-operation"}
+{"line": 106, "type": "file-history-snapshot"}
+{"line": 107, "type": "user", "origin": {"kind": "plugin", "name": "sminos", "asUser": true}, "shape": "string", "text": {"utf16": 69968, "sha256": "969d7beec5ab4ece283887aa21c801386f77a42c903b3e5e15ad2604a01e29bc"}}
+{"line": 108, "type": "last-prompt"}
+{"line": 109, "type": "ai-title"}
+{"line": 110, "type": "mode"}
+{"line": 111, "type": "permission-mode"}
+{"line": 112, "type": "atis-latch"}
+{"line": 113, "type": "api-request"}
+{"line": 114, "type": "assistant", "shape": "thinking", "tools": []}
+{"line": 115, "type": "assistant", "shape": "text", "text": "NOTED", "tools": []}
+{"line": 116, "type": "system", "subtype": "stop_hook_summary"}
+{"line": 117, "type": "system", "subtype": "turn_duration", "isMeta": false}

@@ -1,0 +1,137 @@
+UX wave, child U3, probe 4: a command's output and a compaction that fails, on engine 2.1.322
+(docs/doperpowers/specs/2026-11-12-ux-wave/U3-transcript-rows.md, "Probes and checks" 4; it serves O-18 with #330, the
+failure rule of #331, and the `command` class of UC-2 in docs/doperpowers/specs/2026-11-12-ux-wave-design.md;
+2026-11-12, VM dc-uxprobe-dc94, branch ux-wave/probe-arrivals)
+
+Question. Which commands' output arrives as the assistant frame with `local_command_source`, whether any still arrives
+as a `user` frame, how an error's text arrives, what `local_command_outcome` holds, and what the engine sends when
+`/compact` fails (`compact_result`, `compact_error`, the command's own error). And, for the reader's other two routes,
+what a terminal session's transcript file writes for the same commands.
+
+Verdict. The reader must take three forms, not two, and #331's rule holds as written.
+  1. Every command tried except a successful `/compact` sends its output as the assistant frame of model `<synthetic>`
+     with `local_command_source` (the output inside `<local-command-stdout>` or `<local-command-stderr>`) and, for a
+     command the person typed, `local_command_run {command, args}`. `local_command_outcome` was seen once, `{kind:
+     "failed"}`, on `/compact` with nothing to compact; it is absent on every other output, an error included.
+  2. A successful `/compact` still sends its output ("Compacted ") as a `user` frame holding `<local-command-stdout>`
+     (isReplay true, no origin). It is on the wire with and without `--replay-user-messages`.
+  3. In a terminal session's file the same output is either a `system` row of subtype `local_command` or a `user` row
+     holding `<local-command-stdout>`, depending on the command, and the command itself is either a `user` row holding
+     `<command-name>` or a `system` row `local_command` whose content is that `<command-name>` block. The content keeps
+     the terminal's ANSI escapes.
+  A failed compaction says so on the status frame that ends it: `status: null, compact_result: "failed",
+  compact_error: "API Error: Request was aborted."`, followed by the command's output "Compaction canceled.". So a line
+  drawn while `status` is `compacting` and removed at the next status goes on failure as on success; the spec's
+  outcome "#331's rule is confirmed" applies, and `compact_result` is there if a check is wanted.
+  Two things the spec does not expect, both of which bear on #330 ("an output under the wrong command"): on the wire a
+  command's output arrives BEFORE the replay of the command's own `<command-name>` frame; and after a compaction that
+  preserves a segment, the engine sends that segment's last command output again, with the same uuid, between the
+  summary and the new "Compacted" (3 of 3 runs).
+
+Method.
+  Engine 2.1.322 (/opt/maws-probe/engines/2.1.322, system/init claude_code_version "2.1.322"), model haiku (resolves to
+  claude-haiku-5-5), route: the gateway through vm-run.sh's loopback forward (spikes/protocol-probe/VM.md).
+  Headless: scenarios/pass3/uxwave-u3-commands.mjs, launched as MAWS launches (scenarios/pass3/uxwave-common.mjs, after
+  src/engine-host/launch.ts and session.ts): `-p --input-format stream-json --output-format stream-json --verbose
+  --permission-prompt-tool stdio --include-partial-messages --model haiku --setting-sources user,project,local
+  --permission-mode auto --forward-subagent-text --replay-user-messages --include-hook-events --await-initialize
+  --session-id <id> --disallowedTools AskUserQuestion --allowedTools mcp__maws__ask --settings {"dialogExpiry":"never"}
+  --max-budget-usd 1.50` (the last is the probe's guard), MAWS's environment constants (CLAUDE_CODE_ENTRYPOINT sdk-ts,
+  CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES false, CLAUDE_CODE_FORK_SUBAGENT, file checkpointing, session state events,
+  fine-grained tool streaming, question preview html, SMNS_MEMBER, MAWS_LANE B, TERM dumb), MAWS's initialize
+  (appInitialize with the cwd's trust and the `maws` SDK server, served with p4-maws-tools.json), then ui_attach as
+  surface "desktop", ui_panes and set_max_thinking_tokens {null, summarized}. Each command is sent as a user prompt,
+  as MAWS's composer sends it.
+    u3-commands-r1.jsonl (+ .transcript.jsonl): /compact on an empty session, one exchange, /compact, /cost, /context,
+      /reload-plugins, /rename uxw renamed, /effort low, /model uxw-no-such-model, /uxw-no-such-command, two
+      exchanges, /compact with `interrupt` sent once status says compacting, /compact.
+    u3-commands-r2.jsonl (+ .transcript.jsonl): the same less /reload-plugins, /effort and the unknown command.
+    u3-commands-bare.jsonl (+ .transcript.jsonl): the same launch without --forward-subagent-text,
+      --replay-user-messages and --include-hook-events; /compact empty, /cost, /rename, the interrupted and the
+      successful /compact.
+  Terminal: scenarios/pass3/uxwave-u3-terminal.mjs (UXW_TERM=commands): the interactive engine in tmux (`--model
+  haiku`, auto mode, as `vm-run.sh term` starts it), the same commands typed; u3-terminal-commands-r1.terminal.json
+  (the pane and the new file rows at each step) and .transcript.jsonl.
+  Each command ran once per launch: 2 headless MAWS launches and 1 bare for the forms that could vary, 1 terminal run.
+
+Observed: the live wire (a session MAWS runs). Seqs are r1's unless named.
+  /compact, nothing to compact: assistant <synthetic>, local_command_source
+      "<local-command-stderr>Error: No messages to compact</local-command-stderr>", local_command_run {compact, ""},
+      local_command_outcome {kind: "failed"} (seq 28; r2 seq 28; bare seq 25). No status frame at all.
+  /cost: assistant <synthetic>, stdout "Total cost: …", local_command_run {command: "usage"} (seq 167): /cost runs as
+      /usage, and the replayed command frame names /usage (seq 168).
+  /context: assistant <synthetic> with the markdown table, local_command_run {context}, and a `context_usage` object
+      on the frame (seq 179).
+  /reload-plugins (191), /rename uxw renamed (204, args "uxw renamed"), /effort low (216): assistant <synthetic>, stdout.
+  /model uxw-no-such-model: assistant <synthetic>, the error in <local-command-STDOUT> ("API error: 400 … · model not
+      changed"), no local_command_outcome (seq 228; r2 the same). An error therefore does not always come as stderr
+      or with an outcome.
+  /uxw-no-such-command: not a command on this route: it is sent to the model as a prompt (replay seq 241 with origin
+      human; the file has an `unknown_command_fallback` attachment, line 90) and the model answers.
+  /compact that succeeds: status compacting (150), status {status: null, compact_result: "success"} (151),
+      system/compact_boundary (153), the summary as a synthetic user frame (154, isReplay false), then
+      "<local-command-stdout>Compacted </local-command-stdout>" as a USER frame (155, isReplay true, no origin), then
+      the command's replay (156). The same in r2 (342) and in the bare launch (288): this user frame does not depend
+      on --replay-user-messages. In r2 and bare the engine sent status `compacting` four and three times in a row
+      before the end (r2 333-336, bare 280-282).
+  /compact interrupted: status compacting (400), `interrupt` answered {still_queued: []}, status {status: null,
+      compact_result: "failed", compact_error: "API Error: Request was aborted."} (404), assistant <synthetic>
+      "<local-command-stdout>Compaction canceled.</local-command-stdout>" with no local_command_run (406), then the
+      command's replay (407). r2: 316, 320, 322, 323. bare: 264, 268, 270.
+  Order: in every case the output frame precedes the replay of its command (`<command-name>`, isReplay true, no
+      origin): 28 then 29, 167/168, 179/180, 191/192, 204/205, 216/217, 228/229, 406/407.
+  The replayed output after a later compaction: the successful /compact that followed the interrupted one sent, after
+      its summary, the earlier "Compaction canceled." assistant frame again with the SAME uuid (r1 seq 422 = seq 406,
+      uuid 09e4afdb…; r2 341 = 322; bare 287 = 270), then "Compacted" and the command. Its compact_boundary lists a
+      preserved_segment whose tail_uuid is that frame (r1 seq 420). The first /compact of r1, whose boundary had no
+      preserved_segment, re-sent nothing (153-156).
+  Without the product flags (bare): the command replays (`<command-name>` frames) are gone; the output frames, the
+      status frames and the "Compacted" user frame are unchanged.
+
+Observed: the file. Headless (u3-commands-r1.transcript.jsonl): for each command a meta caveat row
+  (<local-command-caveat>, isMeta true), a `user` row holding <command-name>, and a `system` row of subtype
+  `local_command` with the output in `content` (lines 3-5, 53-55, 58-60, 66-68, 73-75, 78-80, 83-85, 131-133); the
+  successful /compact writes compact_boundary, the summary (isCompactSummary), the caveat, the command and a `user`
+  row "<local-command-stdout>Compacted </local-command-stdout>" (lines 41-45, 141-145). The system row's uuid is the
+  assistant frame's uuid (line 5 = seq 28), so the wire and the file pair by uuid. The re-sent frame is not written
+  twice.
+  Terminal (u3-terminal-commands-r1.transcript.jsonl, steps in .terminal.json):
+    /compact empty: caveat, `user` <command-name>, `system` local_command with <local-command-stderr> (lines 4-6).
+    /compact success: compact_boundary, summary, caveat, `user` <command-name>, and a `user` row
+      "<local-command-stdout>\e[2mCompacted (ctrl+o to see full summary)\e[22m</local-command-stdout>" (lines 46-50,
+      115-119): ANSI escapes inside the content.
+    /context: TWO `system` local_command rows, the first whose content is the <command-name> block, the second the
+      output drawn as the terminal's coloured grid (ANSI), then a meta `user` row with the markdown table for the
+      model (lines 56-58).
+    /reload-plugins: caveat, `user` <command-name>, `system` local_command output (65-67).
+    /rename: `system` local_command <command-name>, `system` local_command output, a meta reminder row (70-72).
+    /effort low: caveat, `user` <command-name>, and the output as a `user` row <local-command-stdout> (74-76).
+    /model bad: `system` local_command <command-name>, `system` local_command output (77-78).
+    /cost: opens the Usage dialog; nothing is written (step "cost", closed with Esc).
+    unknown command: one `system` row of subtype `informational`, level warning, "Unknown command: /uxw-no-such-command"
+      (line 79); the model is not asked.
+
+Inference, in the spec's terms.
+  - O-18's reading of the newer form (the assistant frame with local_command_source) covers every output but a
+    successful /compact's; the reader also needs the `user` frame or row holding <local-command-stdout> on the live
+    wire, as UC-2's table already lists for the file. "The assistant frame becomes a user.message of origin
+    local-command, never an assistant block" stands, and the `user` form needs the same treatment.
+  - `local_command_outcome` cannot be the test of an error: the /model error came as stdout with no outcome. Text in
+    <local-command-stderr> is the only reliable mark of an error's colour, and some errors do not carry it.
+  - Placement under the command's bubble cannot assume the bubble is already there: on the wire the output comes
+    first. The replay of the command follows within the same turn and before its `result`.
+  - A command's output that the engine re-sends after a compaction (same uuid) must be dropped by uuid, or it is drawn
+    under the /compact that re-sent it: one concrete way for #330's "output under the wrong command".
+  - In the file, the command bubble and its output each come in two row types; a reader that takes the bubble from
+    `user` rows alone misses /rename's, /context's and /model's, and one that takes the output from `system` rows alone
+    misses /effort's and a successful /compact's. Contents carry ANSI escapes from the terminal, which must be stripped
+    before the line is drawn.
+  - #331: the status frame that ends a compaction always followed its start, on failure as on success (3 runs of each).
+    Repeated `compacting` statuses mean the line must be idempotent on the same status. "A compaction that fails
+    leaves no line behind" holds with the status alone; `compact_result: "failed"` and `compact_error` are available.
+  - The unknown command is the model's prompt on the live wire and a warning row in the terminal: neither is class
+    `command`.
+
+Not provoked. A compaction that fails on an API error other than an abort, and "Not enough messages to compact."
+  (the too-few-groups failure of a session with a little history): the session with one exchange compacted
+  successfully. /cost in a terminal writes nothing, so its file form is not known.

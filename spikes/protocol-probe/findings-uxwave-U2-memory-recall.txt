@@ -1,0 +1,85 @@
+UX wave U2, Probes and checks 2: the memory recall (#351)
+(docs/doperpowers/specs/2026-11-12-ux-wave/U2-transcript-structure.md, check 2, serving "#351 · a memory recall is a
+step"; 2026-11-12)
+
+Question. Record one `system/memory_recall` frame and the transcript row beside it on engine 2.1.322: the frame's shape
+(no fixture held one) and whether the transcript keeps a `relevant_memories` attachment. No row on disk: #351 holds on a
+session MAWS runs only.
+
+Verdict. Both exist, and #351 can be built on every route that reads the file. The frame is
+`{type: "system", subtype: "memory_recall", mode: "select", memories: [{path, scope: "personal"}], uuid, session_id}`;
+the transcript row beside it is an `attachment` row of type `relevant_memories` whose `memories` hold `{path, content,
+mtimeMs, header}` (more than the frame: the content and the header line), with a `rendered` copy of what the model was
+given. The spec's reading of the source is confirmed (cli.pretty.js:279517 builds the frame from that attachment,
+:280628 yields it). Two things the spec does not say, both observed:
+  1. On the owner's configuration no recall happens at all. The owner's user settings set autoMemoryEnabled false and
+     the owner's feature cache holds the gate `tengu_moth_copse` false; the recall needs auto memory on and that gate
+     (or CLAUDE_MEMORY_STORES) on (cli.pretty.js:462283, Ih() && Rwe(), :1320863). With the owner's settings: 0 of 1
+     launches recalled; with auto memory on and the gate as cached: 0 of 1 (the index MEMORY.md is then loaded as an
+     `instructions` attachment instead). The frames were provoked by turning the gate on in the scratch home's copy of
+     the cache, the only change made to the owner's configuration.
+  2. The recall joins the turn late: its selector runs beside the turn and its result is attached at the turn's next
+     model request, so the frame arrives after the first tool call's result and before the next model call (seq 34
+     tool_result, seq 35 memory_recall, then the model's next message). In the trials, the one turn answered without any tool call
+     got no recall although its selector's query ran. So the step sits inside the run after its first call, not at its
+     head, and a turn with no call shows none.
+Confidence: high on the shapes (5 recalls, identical shape); moderate on when a recall fires (it depends on the
+selector's choice: with memories of type `user` it chose none in 7 launches; with type `reference` 5 of 6 launches whose
+gate was on, 4 of 4 through the cached gate).
+
+Method. scenarios/pass3/uxwave-memory.mjs over uxwave-common.mjs (MAWS's launch; flags, environment, owner's user
+settings, ui_attach and the thinking request as in findings-uxwave-U2-thinking-text.txt), through vm-run.sh on the
+devcloud VM, engine 2.1.322, gateway route, model haiku (claude-haiku-5-5), plus `--debug-file` per launch (its memory
+lines would be copied into the fixture's debug_lines note; there were none). Before each launch the scenario writes a
+memory folder at the path the init frame names (`memory_paths.auto`, `<HOME>/.claude/projects/<slug of work/>/memory/`,
+checked per launch, `memoryDirMatches`): MEMORY.md indexing two files, greenhouse_watering.md (name, description,
+`type: reference`; "watered on Tuesdays and Fridays at seven in the morning") and bicycle.md (unrelated). One turn: "First
+run `date` in Bash. Then tell me in one sentence: on which days of the week do I water the tomatoes in my greenhouse?"
+Cases (one launch each, in one scratch home):
+  owner      the owner's user settings (autoMemoryEnabled false), the cache as copied (gate false)
+  memory-on  autoMemoryEnabled true, the gate false
+  provoked   autoMemoryEnabled true, `tengu_moth_copse: true` written into the scratch home's .claude.json cache copy
+  stores     autoMemoryEnabled true, the gate false, CLAUDE_MEMORY_STORES='[]' (Rwe's other arm)
+  fc         autoMemoryEnabled true, CLAUDE_INTERNAL_FC_OVERRIDES={"tengu_moth_copse":true} (did not reach the gate)
+Fixtures fixtures/pass3/uxwave/uxwave-memory-<case>-<k>.jsonl; each has a `memory_record` note (the init frame's memory
+paths, every memory_recall frame with its seq, every memory attachment row of the session file with its keys, the
+row types, the answer).
+
+Observed (the recorded run):
+  case       k  recall frame seq   relevant_memories row   answer from the memory
+  owner      1  none               none                    no ("I can't tell from what I have here")
+  memory-on  2  none               none                    yes (the model read the file itself)
+  provoked   3  35                 row 25                  yes
+  provoked   4  35                 row 25                  yes
+  provoked   5  35                 row 25                  yes
+  provoked   6  35                 row 25                  yes
+  stores     7  none               none                    yes (read by the model)
+  stores     8  35                 row 25                  yes
+  fc         9  none               none                    yes (read by the model)
+  - Frame (provoked-3 seq 35): {"type":"system","subtype":"memory_recall","mode":"select","memories":[{"path":
+    "<HOME>/.claude/projects/-tmp-pz-…-work/memory/greenhouse_watering.md","scope":"personal"}],"session_id":…,
+    "uuid":…}. Before it: seq 30 the assistant's Bash `date` call, seq 34 its tool_result; after it seq 36 status, then
+    the model's next message.
+  - Row (provoked-3, row 25 of the session file): type attachment, attachment {type: "relevant_memories", memories:
+    [{path, content (238 characters), mtimeMs, header: "Memory: <path>:"}]}, with uuid and parentUuid in the chain
+    (parent: the tool result's following attachment row) and a `rendered` list holding the system-reminder the model
+    got ("Retrieved for possible relevance — use only if it actually applies to what the user asked. …").
+  - The `instructions` attachment (MEMORY.md) appears in the memory-on and fc sessions and not in the provoked and
+    stores ones: with the recall on, the index is not loaded whole.
+Trials before the recorded run (not committed; scratch fixtures): with memories of type `user`, 7 launches with the
+gate on (cache, stores, fc) recalled nothing although the selector's side query ran in the cache and stores cases
+(`source=side_query` in the debug log, 0 in the others); with type `reference` and a prompt that asked for no tool call,
+1 of 2 turns recalled: the one in which the model made a call first; the other made none, and its selector query ran
+(debug log) with nothing attached.
+
+Inference.
+  - #351's "After" holds on every route: a terminal session's file carries the same attachment row (the row is the
+    engine's own transcript, written the same way in both modes; the terminal half was not run for this check).
+    Drawing the step from the row needs the path list only; the row has the content too.
+  - On the owner's machine today, with auto memory off and the gate off, #351 draws nothing: no session would show the
+    step until one of those changes. Worth telling the owner before the item is built.
+  - The selector honours its instruction to be conservative with [user] (and [project]) memories, so which memories a
+    recall shows depends on their types.
+
+Not provoked. A recall in a terminal session; `mode` values other than "select"; a recall of more than one memory
+(the selector picked one file each time); the gate reached through CLAUDE_INTERNAL_FC_OVERRIDES (it did not apply).

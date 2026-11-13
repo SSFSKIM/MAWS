@@ -1,0 +1,90 @@
+UX wave U8, Probes and checks 2 and 3: does the engine say that a subagent waits on its own background work (#359), and
+how does a shell that a subagent started name its starter
+(docs/doperpowers/specs/2026-11-12-ux-wave/U8-card-column-working-folder.md, "Probes and checks", the two entries after
+the folder probe; 2026-11-12)
+
+Questions.
+  (a) #359: the engine's task status list includes `paused`; does a subagent ever report it, or anything else that says
+      it waits on its own background shell, or on a permission? Reported: the row reads "waiting on background work"
+      from that state on the route that has it. Not reported: the count alone.
+  (b) Can "N running under it" count shells as well as agents, that is, does a shell a subagent started name it?
+
+Verdicts.
+  (a) Not reported. In three sessions no task frame carried `paused` or any other waiting state, and no task frame
+      changed while a subagent's permission request waited 20 s. What the wire does say: a subagent's shells are listed
+      under it while they run (b), and a subagent that ends its run while its own shell still runs is reported
+      `completed` and later started again under the same task id with a new run id when the shell's notification
+      wakes it. A permission a subagent waits on is visible only as the session's `requires_action` and the
+      `can_use_tool` request's `agent_id`. So #359 stays as written: the count alone. (Inference beyond the spec, for
+      the owner: "waiting on background work" could be derived, not read, from "an agent whose own shells are still
+      listed"; the probe saw an agent in that position both while running and after its run had completed.)
+      Confidence: high that no waiting state is sent on this engine and route for these two cases (3 of 3 sessions).
+  (b) Yes. Every shell (and Monitor) a subagent started arrives with `owned_by_subagent: true` and `parent_task_id`
+      set to the subagent's task id, on `task_started` and on every `background_tasks_changed` entry; a shell the main
+      loop started has neither key. "N running under it" can count shells as well as agents. Confidence: high (every
+      subagent shell in 3 sessions, 6 shells).
+
+Method. scenarios/pass3/uxwave-subagent-tasks.mjs over uxwave-common.mjs (MAWS's launch: flags, environment, the
+owner's user settings, ui_attach and the thinking request after initialize, all as listed in
+findings-uxwave-U2-thinking-text.txt), through vm-run.sh on the devcloud VM, engine 2.1.322, gateway route, main model
+haiku (claude-haiku-5-5), subagents on the owner's subagent model (CLAUDE_CODE_SUBAGENT_MODEL=opus, claude-opus-5-5 on
+the wire), permission mode default, every permission allowed. Three turns in one session:
+  A  the main loop dispatches a general-purpose subagent: start `sleep 30; echo BG-DONE` with run_in_background, wait
+     until it has finished, reply with its output
+  B  a general-purpose subagent runs `touch pz-permission-probe.txt && echo TOUCHED` (needs a permission in default
+     mode); from B on, the probe answers each permission request only after 20 s
+  C  the main loop starts `sleep 8; echo MAIN-BG-DONE` in the background itself and replies at once; then the probe
+     waits for an empty background_tasks_changed and the turns it woke
+Each subagent was backgrounded by the engine (Agent result `status: async_launched`), so its frames run on while the
+next turn starts. Three sessions:
+  fixtures/pass3/uxwave/uxwave-subagent-tasks-nodelay.jsonl  the first recording, in which the delay was reset before
+                     B's request arrived (both requests were answered at once)
+  fixtures/pass3/uxwave/uxwave-subagent-tasks-1.jsonl, -2.jsonl  with the delay held (20 s per request)
+Every recording has a `task_record` note per turn listing the task-shaped frames whole.
+
+Observed.
+  Frame keys. task_started: task_id, run_id, tool_use_id, description, task_type (local_agent | local_bash),
+  is_backgrounded; for an agent also subagent_type, spawn_depth (1), prompt; for a subagent's shell also
+  owned_by_subagent (true) and parent_task_id. background_tasks_changed: `tasks`, each {task_id, run_id, task_type,
+  description, subagent_type for an agent, parent_task_id for a subagent's shell}; no status field. task_updated: a
+  `patch` {status: "completed", end_time}. task_notification: status, summary, output_file, usage for an agent.
+  task_progress: description, last_tool_name, usage. No frame in any recording names `paused`.
+
+  (b) the starter.
+    nodelay  agent ab2a8… started seq 41; its shell brqab7ydc task_started seq 76 {owned_by_subagent: true,
+             parent_task_id: "ab2a8ea9925ee4d69"}; its Monitor b10457gss seq 157, the same two keys; the listing at
+             seq 75, 156 carries parent_task_id on both. The main loop's shell bfg1i3ud3 seq 177: no owned_by_subagent,
+             no parent_task_id.
+    run 1    agent ac52cf…; its shell bn3uhhbza seq 49 and its Monitor b47ejejpo seq 158 with both keys; the main
+             loop's shell bhf4sauza seq 188 with neither.
+    run 2    agent af4192…; its shell b3mgbvg8y seq 50 and its Monitor bbu38gisa seq 211 with both keys; the main
+             loop's shell b8hfnanpy seq 192 with neither.
+
+  (a) waiting.
+    On its own shell. In every session the subagent waited by starting a Monitor, which the engine runs as a background
+    local_bash task of its own under the agent (above). nodelay: the agent's run ended while its shell and Monitor still
+    ran: task_updated {status: completed} seq 197 and task_notification seq 198 (summary "The background command is
+    still running. I'll wait for the completion notification."), the listing at seq 199 keeps the agent's two tasks
+    with parent_task_id; when the shell ended (seq 234-236) the agent was listed again with a new run_id
+    ("0mwdnp0kz-…" against the first "0mwdno8xm-…", seq 237) and a second task_started under the same task_id (seq
+    238) whose prompt is the shell's task-notification; it completed for good later. Runs 1 and 2: the agent's Monitor
+    request was held 20 s (below), the shell had ended by the time the Monitor ran, and the agent stayed running to
+    its single completion (run 1 seq 195-196, run 2 seq 286-287). No paused state in any of the three.
+    On a permission. nodelay: B's subagent request at seq 142 (session_state_changed requires_action seq 141, answered
+    at once). Run 1: the A agent's Monitor request (agent_id ac52cf…) seq 112-114 at 14:45:03, answered 14:45:23
+    (seq 155); B's Bash request (agent_id ac1b79…) seq 145-147 at 14:45:10, answered 14:45:30 (seq 163); between them
+    the only task frames are the A shell's completion (seq 148-150) and the Monitor's own start and end (157-162), and
+    session_state_changed `running` returns at seq 165. Run 2: requests at seq 131-133 and 169-171, answered at seq 208
+    and 221, the same picture. The waiting agent's own task entry never changes while it waits.
+
+Inference.
+  - The engine reports a subagent's background work by its children's parent_task_id, not by a state on the agent; an
+    agent between runs is not listed at all (nodelay seq 199-236), so a reader that counts listed agents counts it as
+    gone while its shell runs.
+  - The permission wait is a session-level fact (requires_action) plus the request's agent_id, which MAWS's request card
+    already reads; nothing per task.
+  - Run-to-run variation is the model's choice (end the run or keep it open while waiting), not the engine's; seen 1 of
+    3 and 2 of 3.
+
+Not provoked. A subagent's `paused` state: neither a background shell nor a permission produced one; the task list's
+`paused` (cli.pretty.js:42645, :483610) was not reached by any case tried. A nested agent's shell (spawn_depth 2).
