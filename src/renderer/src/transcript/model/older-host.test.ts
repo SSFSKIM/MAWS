@@ -145,7 +145,11 @@ describe('a background task’s end told by an older engine host', () => {
     const rows = rowsOf(withAllExpanded(state));
     const [arrival] = ended(rows, taskId);
     expect(arrival!.id).not.toBe(fallbackOf(taskId));
-    expect(arrival!.turnId).not.toBe(fallback!.turnId); // the arrival's turn, not the task's
+    // at its own place: where its carrier stands (seq 578), not where the older host's notification stood (559)
+    const carrier = events.find((event) => event.kind === 'user.message' && carriedOf(event.arrival).some((entry) => entry.class === 'task' && entry.taskId === taskId && entry.outcome !== null))!;
+    expect(carrier.seq).toBe(578);
+    expect(arrival!.at).toBe(carrier.at);
+    expect(fallback!.at).not.toBe(carrier.at);
   });
 
   it('the arrival is already in the window when the older host’s notification pages in: the fallback is not drawn', () => {
