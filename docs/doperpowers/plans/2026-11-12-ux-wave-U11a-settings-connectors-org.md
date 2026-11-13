@@ -1189,6 +1189,10 @@ Found while checking the sections against the code at `48619c824`, then by the a
   Rationale: the sentence is the switch's disclosure; a switch usable while it is still out would let a person turn a connector off for every session in a place without being told.
   Date/Author: 2026-11-12, M6's executor on the task review; folded by the controller.
 
+- Decision: M7's means. `useTabPlace` reads the two stores `useSetupIntent` rests on without calling it, so no model or trust read reruns per dialog, and answers a started place for an id it does not know. The "+" › Connectors submenu reads the inventory only while the menu is open (`enabled: open`); `useCustomizationInventory` has a 30 s stale time, shared with Customize through the unchanged key. A started session that is not ready keeps "Live details are unavailable…" in the Connectors submenu; only the Plugins submenu's sentence goes. The submenu's pending line is "Reading configuration…", and a failed read shows the read's own message. An unstarted Connectors row opens onto its transport and its configuration file. The engine host reads a plugin's manifest before its skill folders, and `pluginName` is null when the manifest is absent or unreadable or its name is not a non-empty string of at most 256 characters without whitespace, control or format characters. The unstarted Plugins dialog draws `LibraryBody` with no session and a `NotObservedLine`, so nothing reads a record-less id's observed facts; Open Discover with no folder opens the user configuration's page. `InventoryState` moves to `customize/InventoryState.tsx`; Customize's disk groups are built by `diskSkillGroups`. `harness/composer/EditorHarness.tsx` (nobody's) wraps its `PlusMenu` in a QueryClientProvider, as the two unit tests that render it do, because the menu now holds a query. The wire's minor is 37 (master's was 36).
+  Rationale: §D's states with no second read of what a dialog already holds; the manifest's name is what the engine names a plugin by (P3).
+  Date/Author: 2026-11-12, M7's executor; folded by the controller.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
