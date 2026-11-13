@@ -119,11 +119,11 @@ beforeEach(() => {
     },
     'session.listPermissionRules': rules,
     // C10's catalogue per route (`engine.models`): an entry names a resolved id through `resolvedModel`, as initialize's do
-    // (W3: the chip names the row's value, so the two routes' rows differ by value); Haiku's row says what `haiku` runs, so
+    // (UX wave U4a, decision 19: the chip names the row's display name, so the two routes' rows differ by it); Haiku's row says what `haiku` runs, so
     // the chip can tell a request for it from the model reported (exact ids, the review of S-chip)
     'engine.models': (input: { gateway?: string }) => ({
       models: [
-        { value: input.gateway === 'direct' ? 'sonnet' : 'claude/sonnet-relay', resolvedModel: 'claude-sonnet', displayName: 'Sonnet' },
+        { value: input.gateway === 'direct' ? 'sonnet' : 'claude/sonnet-relay', resolvedModel: 'claude-sonnet', displayName: input.gateway === 'direct' ? 'Sonnet' : 'Sonnet relay' },
         { value: 'haiku', resolvedModel: 'claude-haiku-5-5', displayName: 'Haiku' },
       ],
       source: 'cached',
@@ -633,14 +633,14 @@ describe("composer DOM under C5's dispatcher", () => {
     live(A, { status: { model: { requested: null, resolved: 'claude-sonnet' }, gateway: direct } });
     const view = mount([{ index: 0, id: A }]);
     const chip = () => within(composerOf(0)).getByRole('button', { name: /^Model / });
-    await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model sonnet'));
+    await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Sonnet'));
     expect(invoked('engine.models')).toContainEqual({ refresh: false, gateway: 'direct', cwd: '/work/app-a' }); // the session's own route and directory
     expect(invoked('session.listModels')).toEqual([]); // the engine is not asked on mount
     view.unmount();
     // an exited session names it from the route its record kept
     useSessions.setState({ engine: new Map(), records: new Map([[A, pageRecord(A, { model: { requested: null, resolved: 'claude-sonnet' } })]]) });
     mount([{ index: 0, id: A }]);
-    await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model sonnet-relay'));
+    await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Sonnet relay'));
     expect(invoked('engine.models')).toContainEqual({ refresh: false, gateway: 'gateway', cwd: '/work/app-a' });
   });
 
@@ -651,11 +651,11 @@ describe("composer DOM under C5's dispatcher", () => {
     live(A, { status: { model: { requested: 'haiku', resolved: 'claude-sonnet' }, gateway: direct } });
     mount([{ index: 0, id: A }]);
     const chip = () => within(composerOf(0)).getByRole('button', { name: /^Model / });
-    await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku, setting…'));
-    expect(chip().textContent).toBe('haikusetting…⌄');
+    await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Haiku, setting…'));
+    expect(chip().textContent).toBe('Haikusetting…⌄');
     live(A, { status: { model: { requested: 'haiku', resolved: 'claude-haiku-5-5' }, gateway: direct } }); // the next turn's init frame
-    await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku'));
-    expect(chip().textContent).toBe('haiku⌄');
+    await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Haiku'));
+    expect(chip().textContent).toBe('Haiku⌄');
   });
 
   // The review of S-chip: the chip and the selector hold one rule on every path, through the request the selector holds
@@ -683,29 +683,29 @@ describe("composer DOM under C5's dispatcher", () => {
     it('a choice on a session with no ready process is named, marked, while the session starts for it', async () => {
       live(A, { status: { process: 'exited', model: { requested: 'sonnet', resolved: 'claude-sonnet' }, gateway: direct } });
       mount([{ index: 0, id: A }]);
-      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model sonnet'));
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Sonnet'));
       await choose(/^Haiku/);
       await waitFor(() => expect(fake.pending('session.acquire')).toBe(1)); // the start is held
-      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku, setting…'));
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Haiku, setting…'));
       await act(() => fake.reply('session.acquire', { status: 'failed', appSessionId: A_ID, message: 'The session did not become ready.', resources: { worktree: null, record: 'kept', transcript: 'kept' } }));
-      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model sonnet')); // nothing applied: the request is gone
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Sonnet')); // nothing applied: the request is gone
     });
 
     // S-R2-r2-i1: the report the session last made predates the choice, so it acknowledges nothing until set_model is accepted
     it('choosing the model the session last reported is marked while the session starts for it, until set_model is accepted', async () => {
       live(A, { status: { process: 'exited', model: { requested: null, resolved: 'claude-haiku-5-5' }, gateway: direct } });
       mount([{ index: 0, id: A }]);
-      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku'));
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Haiku'));
       await choose(/^Haiku/);
       await waitFor(() => expect(fake.pending('session.acquire')).toBe(1)); // the start is held
-      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku, setting…'));
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Haiku, setting…'));
       live(A, { status: { process: 'ready', model: { requested: null, resolved: 'claude-haiku-5-5' }, gateway: direct } });
       await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A_ID, launched: true, joined: false }));
       await waitFor(() => expect(fake.pending('session.setModel')).toBe(1));
-      expect(chip().getAttribute('aria-label')).toBe('Model haiku, setting…'); // acquired, set_model in flight
+      expect(chip().getAttribute('aria-label')).toBe('Model Haiku, setting…'); // acquired, set_model in flight
       live(A, { status: { model: { requested: 'haiku', resolved: 'claude-haiku-5-5' }, gateway: direct } }); // the host's status after the answer
       await act(() => fake.reply('session.setModel', SET));
-      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku'));
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Haiku'));
     });
 
     it('a model chosen before the engine has reported any is marked until it does', async () => {
@@ -715,28 +715,28 @@ describe("composer DOM under C5's dispatcher", () => {
       await waitFor(() => expect(fake.pending('session.setModel')).toBe(1));
       await act(() => fake.reply('session.setModel', SET));
       live(A, { status: { model: { requested: 'haiku', resolved: null }, gateway: direct } }); // the host's status after the answer
-      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku, setting…'));
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Haiku, setting…'));
       live(A, { status: { model: { requested: 'haiku', resolved: 'claude-haiku-5-5' }, gateway: direct } }); // the first init frame
-      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku'));
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Haiku'));
     });
 
     it('Default chosen over another model names what Default runs, marked until the engine runs it', async () => {
       live(A, { status: { model: { requested: 'haiku', resolved: 'claude-haiku-5-5' }, gateway: direct } });
       mount([{ index: 0, id: A }]);
-      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku'));
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Haiku'));
       await choose(/^Default/);
       await waitFor(() => expect(invoked('session.setModel')).toEqual([{ appSessionId: A_ID, model: null }]));
       await act(() => fake.reply('session.setModel', SET));
       live(A, { status: { model: { requested: null, resolved: 'claude-haiku-5-5' }, gateway: direct } }); // the host records the null request
-      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model sonnet, setting…'));
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Sonnet, setting…'));
       live(A, { status: { model: { requested: null, resolved: 'claude-sonnet' }, gateway: direct } }); // the next turn's init frame
-      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model sonnet'));
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Sonnet'));
     });
   });
 
   // W3 (C4): the chip names the effort get_settings applied, and opens the selector C11 registers in its own menu, as
   // `/model` from the editor does
-  it('the model chip reads `<alias> <effort>` and opens the registered selector, from the chip and from `/model`', async () => {
+  it('the model chip reads the model’s name and effort and opens the registered selector, from the chip and from `/model`', async () => {
     live(A, { status: { model: { requested: null, resolved: 'claude-sonnet' } } });
     const off = registerSlashWidget('model', { title: 'Model', placement: 'modelChip', component: ({ args }) => <p>selector {args || '(none)'}</p> });
     const offEffort = registerSlashWidget('effort', { title: 'Effort', placement: 'modelChip', component: () => <p>effort view</p> });
@@ -744,9 +744,13 @@ describe("composer DOM under C5's dispatcher", () => {
       mount([{ index: 0, id: A }]);
       const chip = () => within(composerOf(0)).getByRole('button', { name: /^Model / });
       await waitFor(() => expect(fake.pending('session.getSettings')).toBe(1));
-      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model sonnet-relay')); // the relay's row names it (the stub catalogue); the effort is not known yet
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Sonnet relay')); // the relay's row names it (the stub catalogue); the effort is not known yet
       await act(() => fake.reply('session.getSettings', { effective: {}, sources: [], applied: { model: 'claude-sonnet', effort: 'high', advisor: null, ultracode: false } }));
-      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model sonnet-relay high'));
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Sonnet relay High'));
+      // UX wave U4a (decision 19): the name, the effort drawn muted, the whole display name and the alias as the tooltip
+      expect(within(chip()).getByText('Sonnet relay').className).not.toContain('text-fg-muted');
+      expect(within(chip()).getByText('High').className).toContain('text-fg-muted');
+      expect(chip().title).toBe('Sonnet relay · sonnet-relay');
       expect(invoked('session.getSettings')).toEqual([{ appSessionId: A_ID }]); // once, at ready
       await userEvent.click(chip());
       expect(await screen.findByText('effort view')).toBeTruthy(); // the chip opens on the effort view (Codex's)
@@ -1039,6 +1043,79 @@ describe('one Stop handler for every pane', () => {
     expect(invoked('session.interrupt')).toEqual([]);
     await key(document.body, { key: 'l', code: 'KeyL', metaKey: true });
     await waitFor(() => expect(editorOf(0).editor.isFocused).toBe(true));
+  });
+});
+
+// UX wave U4a M5 (decision 21; Acceptance 13): ⇧⌘I, ⇧⌘E and ⇧⌘M, registered once beside ⌘. and ⌘L, ask for the model
+// list, the effort view and the mode menu of the focused pane's session; a chord pressed while its menu is open closes
+// it; nothing for a pane that shows no session, or while a card holds the composer's place.
+describe('the three menu chords', () => {
+  const tabs = (focusedPane: 0 | 1) =>
+    useLayout.setState((s) => ({
+      main: {
+        ...s.main,
+        panes: [
+          { tabs: [{ id: `session:${A}`, kind: 'session', appSessionId: A, pinned: false }], activeTabId: `session:${A}` },
+          { tabs: [{ id: `session:${B}`, kind: 'session', appSessionId: B, pinned: false }], activeTabId: `session:${B}` },
+        ],
+        focusedPane,
+        splitRatio: 0.5,
+      },
+    }));
+  const chord = (code: string, keyName: string) => key((document.activeElement as HTMLElement | null) ?? document.body, { key: keyName, code, metaKey: true, shiftKey: true });
+  const MODEL = ['KeyI', 'I'] as const;
+  const EFFORT = ['KeyE', 'E'] as const;
+  const MODE = ['KeyM', 'M'] as const;
+  let offs: (() => void)[] = [];
+  beforeEach(() => {
+    offs = [
+      registerSlashWidget('model', { title: 'Model', placement: 'modelChip', component: () => <p>model list</p> }),
+      registerSlashWidget('effort', { title: 'Effort', placement: 'modelChip', component: () => <p>effort view</p> }),
+    ];
+  });
+  afterEach(() => offs.forEach((off) => off()));
+
+  it('each chord asks for its menu on the focused pane’s session, and a second press closes it', async () => {
+    live(A);
+    live(B);
+    tabs(1);
+    mount([{ index: 0, id: A }, { index: 1, id: B }], <ComposerAppKeys />);
+    expect(bindingsOf('composer.modelMenu')).toHaveLength(1);
+    act(() => editorOf(1).focus());
+    await chord(...MODEL);
+    expect(useComposerStore.getState().chipWidgets.get(B)).toMatchObject({ name: 'model', args: '' });
+    expect(useComposerStore.getState().chipWidgets.has(A)).toBe(false);
+    expect(await screen.findByText('model list')).toBeTruthy();
+    await chord(...EFFORT); // another menu of the chip: it moves there, with the keyboard asked for on the slider
+    expect(useComposerStore.getState().chipWidgets.get(B)).toMatchObject({ name: 'effort', focus: 'slider' });
+    await chord(...EFFORT); // pressed while its menu is open: closed
+    expect(useComposerStore.getState().chipWidgets.has(B)).toBe(false);
+    await waitFor(() => expect(screen.queryByText('effort view')).toBeNull());
+    act(() => editorOf(1).focus());
+    await chord(...MODE);
+    expect(useComposerStore.getState().modeMenus.has(B)).toBe(true);
+    expect(await within(document.body).findByRole('menu', { name: 'Permission mode' })).toBeTruthy();
+    await chord(...MODE);
+    expect(useComposerStore.getState().modeMenus.has(B)).toBe(false);
+    await waitFor(() => expect(screen.queryByRole('menu', { name: 'Permission mode' })).toBeNull());
+  });
+
+  it('asks for nothing when the focused pane shows no session, or a card holds the composer’s place', async () => {
+    live(A);
+    useLayout.setState((s) => ({ main: { ...s.main, panes: [{ tabs: [{ id: 'overview', kind: 'overview', pinned: false }], activeTabId: 'overview' }], focusedPane: 0, splitRatio: 0.5 } }) as never);
+    const view = mount([{ index: 0, id: A }], <ComposerAppKeys />);
+    for (const pressed of [MODEL, EFFORT, MODE]) await key(document.body, { key: pressed[1], code: pressed[0], metaKey: true, shiftKey: true });
+    expect(useComposerStore.getState().chipWidgets.size).toBe(0);
+    expect(useComposerStore.getState().modeMenus.size).toBe(0);
+    view.unmount();
+    tabs(0);
+    mount([{ index: 0, id: A }], <ComposerAppKeys />);
+    const undock = dockCard(A, { id: 'c10:trust', render: () => <DockedCardFrame appSessionId={A} title="Trust this folder?" onAccept={() => {}} onDecline={null}>Trust?</DockedCardFrame> });
+    await within(composerOf(0)).findByRole('group', { name: 'Trust this folder?' });
+    for (const pressed of [MODEL, EFFORT, MODE]) await key(document.body, { key: pressed[1], code: pressed[0], metaKey: true, shiftKey: true });
+    expect(useComposerStore.getState().chipWidgets.size).toBe(0);
+    expect(useComposerStore.getState().modeMenus.size).toBe(0);
+    act(() => undock());
   });
 });
 

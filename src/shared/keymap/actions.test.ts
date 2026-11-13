@@ -43,6 +43,8 @@ const LANDED = [
   'composer.submit', 'composer.newLine', 'composer.newLineOption', 'composer.queue',
   // U4a: M3's rows
   'composer.takeBack', 'composer.sendNowOrStop',
+  // U4a: M5's rows
+  'composer.modelMenu', 'composer.effortMenu', 'composer.modeMenu',
 ];
 
 // Decision 8 (A13 as amended): two dispatched rows share a default chord only if both are `renderer` rows and at most one
@@ -155,6 +157,15 @@ describe('keymap: the table', () => {
     expect(ACTIONS['composer.takeBack']).toEqual({ title: 'Take back the newest waiting message', chord: 'Up', sink: 'renderer', menu: null, scope: 'composer', fixed: true });
     expect(ACTIONS['composer.sendNowOrStop']).toEqual({ title: 'Send the first waiting message now, or stop', chord: 'Escape', sink: 'renderer', menu: null, scope: 'composer', fixed: true });
     for (const id of ['composer.takeBack', 'composer.sendNowOrStop'] as const) expect(isRebindable(id), id).toBe(false);
+  });
+
+  // UX wave U4a M5 (Interfaces H; decision 21): the three menu chords, app-scoped like ⌘. and ⌘L and registered once
+  // (ComposerAppKeys), acting on the focused pane's session; none takes a menu role's chord
+  it('carries the model, effort and mode menus’ chords, app-scoped and out of the menu', () => {
+    expect(ACTIONS['composer.modelMenu']).toEqual({ title: 'Model menu', chord: 'Cmd+Shift+I', sink: 'renderer', menu: null, scope: 'app' });
+    expect(ACTIONS['composer.effortMenu']).toEqual({ title: 'Effort', chord: 'Cmd+Shift+E', sink: 'renderer', menu: null, scope: 'app' });
+    expect(ACTIONS['composer.modeMenu']).toEqual({ title: 'Permission mode menu', chord: 'Cmd+Shift+M', sink: 'renderer', menu: null, scope: 'app' });
+    for (const id of ['composer.modelMenu', 'composer.effortMenu', 'composer.modeMenu'] as const) expect(isRebindable(id), id).toBe(false); // build F knows none
   });
   // C7 end
 

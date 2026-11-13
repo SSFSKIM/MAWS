@@ -98,6 +98,18 @@ describe('floating session cards', () => {
     expect(within(env).queryByRole('switch')).toBeNull();
   });
 
+  // UX wave U4a (decision 19): the model row reads the chip's name over the route's catalogue, the raw id as its title;
+  // the record carries no fast-mode state, so it never says Fast
+  it('names the model as the composer’s chip does, with the engine’s id in the tooltip', async () => {
+    useSessions.setState((s) => ({ records: new Map(s.records).set(A, record(A, { projectId: P, model: { requested: 'opus', resolved: 'claude-opus-5-5[1m]' }, effort: 'high' })) }));
+    mount();
+    await open('Environment');
+    await waitFor(() => expect(fake.pending('engine.models')).toBeGreaterThan(0));
+    await act(() => fake.reply('engine.models', { models: [{ value: 'default', displayName: 'Default (recommended)', resolvedModel: 'claude-opus-5-5[1m]' }, { value: 'opus', displayName: 'Opus 5.5 (1M context)', resolvedModel: 'claude-opus-5-5[1m]' }], source: 'live', at: null }));
+    const line = await within(region('Environment')).findByText('Opus 5.5 High');
+    expect(line.getAttribute('title')).toBe('claude-opus-5-5[1m]');
+  });
+
   it('reads sampled context without presenting an unknown sample as zero', async () => {
     mount();
     await open('Context');

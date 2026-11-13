@@ -21,13 +21,13 @@ describe('the mode menu on a live session', () => {
     render(<ModeMenu binding={liveModeBinding(record('app-a'), status('app-a'), OPUS, fake.client)} onDone={done} />);
     const menu = screen.getByRole('menu', { name: 'Permission mode' });
     const items = within(menu).getAllByRole('menuitemradio');
-    // W3: auto and bypass first; W9 (H4): the labels in the UI font, not mono
-    expect(items.map((i) => i.firstElementChild?.textContent)).toEqual(['Auto', 'Bypass permissions', 'Manual', 'Accept edits', 'Plan']);
+    // UX wave U4a (l3-input-10): Auto, Manual, Accept edits, Plan, then Bypass permissions; W9 (H4): the UI font, not mono
+    expect(items.map((i) => i.firstElementChild?.textContent)).toEqual(['Auto', 'Manual', 'Accept edits', 'Plan', 'Bypass permissions']);
     expect(menu.querySelector('.font-mono')).toBeNull();
     expect(items[0].getAttribute('aria-checked')).toBe('true'); // auto
     expect((items[0] as HTMLButtonElement).disabled).toBe(true);
     expect(items[0].textContent).toContain('This model does not support auto mode');
-    fireEvent.click(items[4]); // plan
+    fireEvent.click(items[3]); // plan
     await settle();
     expect(fake.invoked('session.setPermissionMode')).toEqual([{ appSessionId: A, mode: 'plan' }]);
     expect(done).toHaveBeenCalledTimes(1); // closed on the engine's answer
@@ -43,6 +43,59 @@ describe('the mode menu on a live session', () => {
     fireEvent.click(screen.getByRole('menuitemradio', { name: /^Manual/ }));
     await settle();
     expect(screen.getByRole('alert').textContent).toBe('Auto mode is disabled by settings');
+  });
+});
+
+// UX wave U4a (l3-input-10, decision 25): Bypass permissions set apart, after a separator, in the warning tone with its
+// mark after the label and its line; (l3-input-12, decision 21) a digit 1 to 9 picks the row drawn at that place.
+describe('Bypass permissions set apart, and the digits', () => {
+  const own = (over: Partial<ModeBinding> = {}): ModeBinding => ({
+    value: 'default', options: ['auto', 'default', 'acceptEdits', 'plan', 'bypassPermissions'], disabled: null, refusal: null, autoUnavailable: null, set: async () => ({ ok: true }), ...over,
+  });
+
+  it('draws a separator before Bypass permissions, which is in the warning tone with its mark after the label and its line', () => {
+    render(<ModeMenu binding={own()} />);
+    const menu = screen.getByRole('menu', { name: 'Permission mode' });
+    const bypass = within(menu).getByRole('menuitemradio', { name: /Bypass permissions/ });
+    expect(bypass.previousElementSibling?.getAttribute('role')).toBe('separator');
+    expect(within(menu).getAllByRole('separator')).toHaveLength(1);
+    expect(bypass.firstElementChild?.textContent).toBe('Bypass permissions');
+    expect(bypass.className).toContain('text-warning');
+    expect(bypass.textContent).toBe('Bypass permissions⚠Every tool runs without asking');
+    const plain = within(menu).getByRole('menuitemradio', { name: /^Plan/ });
+    expect(plain.className).not.toContain('text-warning');
+  });
+
+  it('a digit picks the row at that place; a disabled row is not picked; Bypass still asks, the focus on Cancel', async () => {
+    const set = vi.fn(async () => ({ ok: true }) as const);
+    const done = vi.fn();
+    render(<ModeMenu binding={own({ set, autoUnavailable: 'This model does not support auto mode' })} onDone={done} />);
+    const menu = screen.getByRole('menu', { name: 'Permission mode' });
+    const items = within(menu).getAllByRole('menuitemradio');
+    act(() => items[1].focus());
+    fireEvent.keyDown(items[1], { key: '1' }); // Auto, disabled here
+    fireEvent.keyDown(items[1], { key: '9' }); // no ninth row
+    await settle();
+    expect(set).not.toHaveBeenCalled();
+    fireEvent.keyDown(items[1], { key: '3' }); // Accept edits
+    await settle();
+    expect(set.mock.calls).toEqual([['acceptEdits']]);
+    expect(done).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(within(screen.getByRole('menu', { name: 'Permission mode' })).getAllByRole('menuitemradio')[0], { key: '5' }); // Bypass
+    expect(set).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }));
+  });
+
+  it('takes no digit with a modifier, and counts only the rows drawn', async () => {
+    const set = vi.fn(async () => ({ ok: true }) as const);
+    render(<ModeMenu binding={own({ set, options: ['default', 'plan'] })} />);
+    const items = within(screen.getByRole('menu', { name: 'Permission mode' })).getAllByRole('menuitemradio');
+    fireEvent.keyDown(items[0], { key: '2', metaKey: true });
+    await settle();
+    expect(set).not.toHaveBeenCalled();
+    fireEvent.keyDown(items[0], { key: '2' });
+    await settle();
+    expect(set.mock.calls).toEqual([['plan']]);
   });
 });
 

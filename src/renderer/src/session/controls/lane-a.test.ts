@@ -241,18 +241,21 @@ describe('the chips', () => {
   it('names the override, else the session’s model, and lists the catalog’s models with fable', () => {
     const { controls } = port({ override: { model: 'haiku', effort: 'low' } });
     const model = controls.bindings().model;
-    expect(model.label).toBe('haiku low');
+    expect(model.label).toBe('haiku Low');
     expect(model.value).toEqual({ model: 'haiku', effort: 'low' });
     expect(model.options.map((o) => o.value)).toEqual(['opus', 'sonnet', 'haiku', 'fable']);
     expect(port().controls.bindings().model.label).toBe('opus');
+    // UX wave U4a (decision 19): the bridge's catalog has no display names, so each row is named by its alias; no status,
+    // so no Fast; the tooltip's display name is the alias itself
+    expect(port().controls.bindings().model.name).toMatchObject({ name: 'opus', fast: false, display: 'opus', alias: 'opus' });
   });
 
   // The O9 sitting (item 4): after `/model haiku` and `/effort low` in the terminal the chip still read Opus. It names
   // what the session's latest request ran on; an override MAWS set names itself before the next request carries it.
   it('names the model and effort the session runs on, an override MAWS set winning, each part on its own', () => {
-    expect(port({ model: 'claude-haiku-5-5', effort: 'low' }).controls.bindings().model.label).toBe('haiku low');
-    expect(port({ model: 'claude-haiku-5-5', effort: 'low', override: { model: 'sonnet', effort: null } }).controls.bindings().model.label).toBe('sonnet low');
-    expect(port({ model: 'claude-haiku-5-5', effort: 'low', override: { model: null, effort: 'high' } }).controls.bindings().model.label).toBe('haiku high');
+    expect(port({ model: 'claude-haiku-5-5', effort: 'low' }).controls.bindings().model.label).toBe('haiku Low');
+    expect(port({ model: 'claude-haiku-5-5', effort: 'low', override: { model: 'sonnet', effort: null } }).controls.bindings().model.label).toBe('sonnet Low');
+    expect(port({ model: 'claude-haiku-5-5', effort: 'low', override: { model: null, effort: 'high' } }).controls.bindings().model.label).toBe('haiku High');
     // what MAWS set stays the selector's choice: the terminal's own is its Default
     expect(port({ model: 'claude-haiku-5-5', effort: 'low' }).controls.bindings().model.value).toEqual({ model: null, effort: null });
   });
