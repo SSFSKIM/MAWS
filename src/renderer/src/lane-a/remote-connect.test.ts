@@ -70,6 +70,28 @@ describe('connectRemoteLaneA', () => {
     expect(useAttention.getState().drafts.has(third.id)).toBe(true); // the other machine's settling leaves this one's draft
   });
 
+  // UC-1 (U1a's Interfaces §B, "A window on another machine"): main says in the session's state which requests the
+  // session's machine said it took (`accepted`); the mirror lists a pending request unless it is named there
+  it('lists no request the session’s machine said it took, until the bridge settles it or the plane is reset', () => {
+    const second = { ...raised, request: 'toolu_2', input: { command: 'echo made-up' } };
+    const ids = () => (useAttention.getState().bySession.get(REMOTE) ?? []).map((i) => i.request.requestId);
+    applyLaneAState(REMOTE, laneAState(REMOTE, { engineSessionId: 'eng-r', link: LINK, acts: [], pending: [raised, second] }));
+    expect(ids()).toEqual(['toolu_1', 'toolu_2']);
+    applyLaneAState(REMOTE, laneAState(REMOTE, { engineSessionId: 'eng-r', link: LINK, acts: [], pending: [raised, second], accepted: ['toolu_1'] }));
+    expect(ids()).toEqual(['toolu_2']);
+    applyLaneAState(REMOTE, laneAState(REMOTE, { engineSessionId: 'eng-r', link: LINK, acts: [], pending: [raised, second], accepted: [] })); // a reset: the request restated waits again
+    expect(ids()).toEqual(['toolu_1', 'toolu_2']);
+  });
+
+  // §B, the default of Reported 9: the machine's feed never carries a terminal session's item, and its snapshot replaces
+  // that machine's partition whole; the mirror writes its sessions again after it
+  it('keeps the mirrored cards across a feed snapshot of the machine: the accepted request stays undrawn, the other waiting one drawn', () => {
+    const second = { ...raised, request: 'toolu_2', input: { command: 'echo made-up' } };
+    applyLaneAState(REMOTE, laneAState(REMOTE, { engineSessionId: 'eng-r', link: LINK, acts: [], pending: [raised, second], accepted: ['toolu_1'] }));
+    useAttention.getState().applyRemote({ machine: OTHER_MACHINE, items: [], greyed: false });
+    expect((useAttention.getState().bySession.get(REMOTE) ?? []).map((i) => i.request.requestId)).toEqual(['toolu_2']);
+  });
+
   it('leaves a local state’s requests to main’s own list', () => {
     const local = 'TestMachineRef00000000/app-l' as AppSessionId;
     applyLaneAState(local, laneAState(local, { pending: [raised] }));

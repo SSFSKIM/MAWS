@@ -11,7 +11,7 @@ import { fakeClient, type FakeClient } from '../../../../test/support/fake-clien
 import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { BUTTON_LIKE_INPUTS, connectKeys } from '../keymap/dispatcher';
 import { bindingsOf } from '../keymap/useKeyChord';
-import { useAttention } from '../stores/attention';
+import { selectPendingOf, useAttention } from '../stores/attention';
 import { resetComposerStore, useComposerStore } from '../stores/composer';
 import { useNotices } from '../stores/notices';
 import { resetShellStores } from '../test-support/shell-stores';
@@ -688,6 +688,69 @@ describe('card focus owner is the Overview article', () => {
     await press('{Enter}');
     await waitFor(() => expect(fake.invoked('session.answer')).toHaveLength(1));
     expect(fake.invoked('session.answer')[0]).toMatchObject({ appSessionId: 'app-b' });
+  });
+});
+
+// UC-1 (§C, decision 2): the list decides when a card goes. After its answer is delivered the card stands as it was, its
+// controls disabled, until its item is no longer in the session's list; it draws no "Answered" line in between.
+describe('the card after an answer', () => {
+  // A placement as every host draws one: the session's oldest waiting item, from the store
+  function Listed({ placement, event }: { placement: Placement; event: SessionEvent }) {
+    const item = useAttention((s) => selectPendingOf(s, APP)[0] ?? null);
+    return item === null ? null : <Card event={event} placement={placement} item={item} />;
+  }
+  const list = (items: AttentionItem[]) => act(() => useAttention.getState().applySnapshot(items, TEST_MACHINE));
+  const card = () => document.querySelector('[data-request-card]');
+  const button = (name: string) => screen.getByRole('button', { name }) as HTMLButtonElement;
+
+  it('after a delivered outcome draws no "Answered" text, its controls disabled, and goes when its item leaves the list', async () => {
+    const item = itemFor(unflaggedRead, APP);
+    list([item]);
+    render(<Pane><Listed placement="inline" event={unflaggedRead} /></Pane>);
+    fireEvent.click(button('Allow'));
+    await waitFor(() => expect(answers()).toHaveLength(1));
+    await act(async () => {});
+    expect(screen.queryByText(/Answered/)).toBeNull();
+    expect(button('Allow').disabled).toBe(true);
+    expect(button('Deny').disabled).toBe(true);
+    list([]);
+    expect(card()).toBeNull();
+  });
+
+  it('goes the same when its item leaves the list before the outcome arrives', async () => {
+    fake = fakeClient({ 'session.events': () => ({ events: [], lastSeq: 0, complete: true }) }); // session.answer held open
+    window.maws = fake.client as unknown as PreloadBridge;
+    const item = itemFor(unflaggedRead, APP);
+    list([item]);
+    render(<Pane><Listed placement="inline" event={unflaggedRead} /></Pane>);
+    fireEvent.click(button('Allow'));
+    await waitFor(() => expect(fake.invoked('session.answer')).toHaveLength(1));
+    list([]); // the broker told its list before session.answer returned
+    expect(card()).toBeNull();
+    await act(() => fake.reply('session.answer', { outcome: 'delivered' }));
+    expect(card()).toBeNull();
+    expect(screen.queryByText(/Answered/)).toBeNull();
+  });
+
+  it('stands, sent and disabled, while a delivered answer’s item is still listed', async () => {
+    list([itemFor(unflaggedRead, APP)]);
+    render(<Pane><Listed placement="card" event={unflaggedRead} /></Pane>);
+    fireEvent.click(button('Allow'));
+    await waitFor(() => expect(answers()).toHaveLength(1));
+    await act(async () => {});
+    expect(card()).not.toBeNull();
+    expect(screen.queryByText(/Answered/)).toBeNull();
+    expect(button('Allow').disabled).toBe(true);
+    expect(bindingsOf('request.accept')).toEqual([]);
+  });
+
+  // A17: an item whose state is delivered (only a machine on an older build still sends one) is drawn nowhere
+  it.each(['docked', 'card', 'hover', 'inline'] as const)('draws nothing for an item of state delivered, %s, and binds no key', (placement) => {
+    const { view } = mount(unflaggedRead, placement, { state: 'delivered' });
+    expect(view.container.querySelector('[data-request-card]')).toBeNull();
+    expect(screen.queryByText(/Answered/)).toBeNull();
+    expect(bindingsOf('request.accept')).toEqual([]);
+    expect(bindingsOf('request.decline')).toEqual([]);
   });
 });
 

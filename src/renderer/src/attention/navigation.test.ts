@@ -390,6 +390,19 @@ describe('the fallback toast', () => {
       expect(toasted()).toEqual([]);
     });
 
+    // UC-1 (A17): an answered request waits nowhere, so its notice is not raised, and one standing goes at the answer
+    it('an answered request: no toast is raised for it, and a standing one is dismissed at the answer', () => {
+      const item = fix();
+      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [{ ...item, state: 'delivered' }] }, TEST_MACHINE));
+      notify(item);
+      expect(toasted()).toEqual([]);
+      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [item] }, TEST_MACHINE));
+      notify(item);
+      expect(toasted()).toEqual([`attention:${item.id}`]);
+      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [{ ...item, state: 'delivered' }] }, TEST_MACHINE));
+      expect(toasted()).toEqual([]);
+    });
+
     it('its item cleared with a dead host (gone from the list), or retired, while another toast stays', () => {
       const item = fix();
       const plan = nine.attention.find((a) => a.appSessionId === idOf('Quota reset recovery'))!.items[0];

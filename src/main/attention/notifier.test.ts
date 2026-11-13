@@ -353,6 +353,39 @@ describe('dock badge', () => {
   });
  });
 
+// UC-1 (A17): the dock badge and the notifications read the one predicate: an answered request is not counted, its banner
+// closes at the answer, and its Allow once takes no action.
+describe('an answered request', () => {
+  it('is not counted in the badge, here or from another machine, and its banner closes at the answer', () => {
+    const r = fakeRemote();
+    const h = harness({ remote: r });
+    const request = item(CHARTER, 'permission', T);
+    h.set(CHARTER, [request]);
+    expect(os.badge).toHaveBeenLastCalledWith(null, 1);
+    h.set(CHARTER, [{ ...request, state: 'delivered' }]);
+    expect(posted()[0].close).toHaveBeenCalledOnce();
+    expect(os.badge).toHaveBeenLastCalledWith(null, 0);
+    const remote = item('app-mini', 'permission', T);
+    r.session('app-mini', [remote]);
+    expect(os.badge).toHaveBeenLastCalledWith(null, 1);
+    r.session('app-mini', [{ ...remote, state: 'delivered' }]);
+    expect(posted()[1].close).toHaveBeenCalledOnce();
+    expect(os.badge).toHaveBeenLastCalledWith(null, 0);
+  });
+
+  it('takes no action at its banner’s Allow once', async () => {
+    const dispatch = vi.fn().mockResolvedValue({ ok: true, value: { event: { kind: 'permission.requested', toolName: 'Read', input: { file_path: '/made/up.md' } } } });
+    const view = fakeSpineView();
+    const request = item(CHARTER, 'permission', T);
+    view.setAttention(CHARTER, [{ ...request, state: 'delivered' }]);
+    const { notificationActions } = await import('./actions');
+    const actions = notificationActions({ dispatch, view });
+    expect(await actions.canAllow(request)).toBe(false);
+    await expect(actions.allow(request)).rejects.toThrow();
+    expect(dispatch.mock.calls.some(([, name]) => name === 'session.answer')).toBe(false);
+  });
+});
+
 // P5 O9 M6 (the owner's Q5): a terminal session's prompt shows in the terminal the owner may be looking at, so its items
 // join Needs you and the dock badge, with a toast while MAWS is focused, but raise no system notification and no bounce.
 describe('a terminal session’s requests', () => {

@@ -96,3 +96,12 @@ describe('a record read by its listing', () => {
     expect(glyphFor(r, null, [], undefined).label).toBe('Idle');
   });
 });
+
+// UC-1 (A17): an answered request waits nowhere, so a session whose permission was answered reads as what it is now.
+describe('an answered request', () => {
+  it('leaves the glyph of a row, a tab and an Overview card to the session’s own state, not "Needs approval"', () => {
+    const answered = item('s', 'permission', at, { state: 'delivered' });
+    expect(glyphFor(record('s'), digest('s', { phase: 'working' }), [answered]).label).toBe('Working');
+    expect(listedGlyph('busy', [answered]).label).toBe('Working');
+  });
+});

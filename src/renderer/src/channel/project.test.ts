@@ -211,6 +211,14 @@ describe('waitingFor', () => {
     expect(waitingFor({ project: 'nobody', index, projects, records: new Map(), listed, bySession, greyed: new Set() })).toEqual([]);
   });
 
+  // UC-1 (A17): the project channel's waiting cards read the one predicate, so an answered request has no card
+  it('takes no request whose answer was delivered', () => {
+    const mine = local('p1', KEY, SMNS);
+    const s1 = record('s1', mine.id);
+    const bySession = new Map<AppSessionId, AttentionItem[]>([[s1.appId, [item(s1.appId, 'i3', { state: 'delivered' })]]]);
+    expect(waitingFor({ project: SMNS, index: orgIndex([mine], TEST_MACHINE), projects: new Map([[mine.id, mine]]), records: new Map([[s1.appId, s1]]), listed: new Map(), bySession, greyed: new Set() })).toEqual([]);
+  });
+
   it('names the project by its smnsId', () => {
     const mine = local('p1', KEY, SMNS);
     const index = orgIndex([mine], TEST_MACHINE);

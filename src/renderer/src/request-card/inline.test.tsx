@@ -127,6 +127,16 @@ describe("request renderer registers through C6's seam", () => {
     expect(screen.queryByRole('heading', { name: 'Edit' })).toBeNull();
   });
 
+  // UC-1 (A17): an answered request waits nowhere, so its slot in the transcript draws no card
+  it('draws nothing for a request whose answer was delivered', async () => {
+    act(() => useAttention.getState().applySnapshot([{ ...itemFor(bash, APP), state: 'delivered' }, itemFor(read, APP)], TEST_MACHINE));
+    const slotRow = { id: 'slot:r1', turnId: null, at: bash.at, kind: 'request_slot', requestId: 'r1', toolUseId: 'b1', requestKind: 'permission', toolName: 'Bash', requestedAt: bash.at } as never;
+    const { renderInlineRequest: forSession } = await import('./inline');
+    const { container } = render(<>{forSession(APP)(slotRow)}</>);
+    await act(async () => {});
+    expect(container.textContent).toBe('');
+  });
+
   it('a docked notice for an unreadable request leaves the transcript its card, whose Retry reads it again', async () => {
     const item = itemFor(bash, APP);
     useAttention.setState({ requests: new Map([[item.id, null]]), unreadable: new Map([[item.id, 'no host']]) });

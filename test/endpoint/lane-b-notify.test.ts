@@ -92,6 +92,15 @@ describe('lane B’s pending counts with no device subscribed', () => {
     expect(sent.frames).toEqual([notify('app-1', 'waiting', 2)]);
   });
 
+  // UC-1 (A17): the endpoint's lane B count leaves out a request whose answer was delivered
+  it('counts no request whose answer was delivered', async () => {
+    const { f, sent } = await lab(['app-1'], ['app-1']);
+    const s = f.host.session('app-1');
+    f.host.setItems('app-1', [{ ...item(s, 'rq-1', 'permission'), state: 'delivered' }, item(s, 'rq-2', 'question')]);
+    await sent.count(1);
+    expect(sent.frames).toEqual([notify('app-1', 'waiting', 1)]);
+  });
+
   it('restates the whole set at an engine-host reconnect: a count that changed while the host was away is told, and none stays stale', async () => {
     const { f, sent } = await lab(['app-1', 'app-2', 'app-3'], ['app-1', 'app-2', 'app-3', 'app-4']);
     f.host.request('app-1', 'permission', 'rq-1');

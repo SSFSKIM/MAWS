@@ -7,7 +7,7 @@ import { item, record, remoteRow } from '../../../../test/support/builders';
 import { OTHER_MACHINE } from '../../../../test/support/machine';
 import { TEST_FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { loadScenario } from '../../../../test/support/scenario';
-import { needsYou, nextNeedsYou } from './derive';
+import { needsYou, nextNeedsYou, waitingItem } from './derive';
 
 const scenario = loadScenario(join(TEST_FIXTURE_DIR, 'shell/nine-sessions.json'));
 const records = new Map(scenario.sessions.map((r) => [r.appId, r]));
@@ -165,5 +165,14 @@ describe('needs-you across machines', () => {
     );
     expect(nextNeedsYou(rows, 'live' as AppSessionId)?.appSessionId).toBe('live');
     expect(nextNeedsYou(rows.filter((r) => r.greyed), null)).toBeNull();
+  });
+});
+
+// UC-1 (A17): Needs you, its counts and ⇧⌘J read the one predicate, so an answered request gives its session no row.
+describe('an answered request in Needs you', () => {
+  it('is no row and no count', () => {
+    const answered = [item('d', 'permission', '2026-09-28T10:00:00Z', { state: 'delivered' })];
+    expect(waitingItem(answered)).toBeNull();
+    expect(needsYou(new Map([['d' as AppSessionId, answered]]), new Map([['d' as AppSessionId, record('d')]]))).toEqual([]);
   });
 });

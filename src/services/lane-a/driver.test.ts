@@ -607,6 +607,46 @@ describe('decisions', () => {
   });
 });
 
+// UC-1 (U1a's Interfaces §B, "One holder"): the bridge publishes nothing when it takes an answer, so the driver tells its
+// listeners (the lane A list) who heard the 200: its own answer, or this machine's endpoint through `laneA.accepted`.
+describe('an answer the bridge took', () => {
+  async function driving() {
+    const b = await bridge();
+    const h = harness();
+    h.driver.observe({ appId: APP, engineSessionId: ENGINE, holder: terminal });
+    await h.live();
+    await expect.poll(() => b.subscribers()).toBe(1);
+    b.raise({ request: 'toolu_1', tool: 'Bash', input: { command: 'echo made-up' } });
+    await expect.poll(() => h.state()?.pending.map((p) => p.request)).toEqual(['toolu_1']);
+    const told: Array<[AppSessionId, string]> = [];
+    h.driver.onAccepted((appId, request) => void told.push([appId, request]));
+    return { b, h, told };
+  }
+
+  it('is told once by the driver’s own delivered answer, and never by a refused, settled or unknown one', async () => {
+    const { b, h, told } = await driving();
+    b.answer('decision', () => ({ status: 409, body: { error: 'the terminal answered it; its settlement follows', winner: 'terminal', by: 'terminal' } }));
+    await h.driver.answer(APP, 'toolu_1', { kind: 'permission', decision: 'allow', scope: 'once' });
+    b.answer('decision', () => ({ status: 504, body: { error: 'the session did not answer within 5000 ms' } }));
+    await h.driver.answer(APP, 'toolu_1', { kind: 'permission', decision: 'allow', scope: 'once' });
+    await h.driver.answer(APP, 'toolu_1', { kind: 'permission', decision: 'deny_and_stop' });
+    expect(told).toEqual([]);
+    b.answer('decision', () => ({ status: 200, body: { accepted: true } }));
+    expect(await h.driver.answer(APP, 'toolu_1', { kind: 'permission', decision: 'allow', scope: 'once' })).toEqual({ outcome: 'delivered' });
+    expect(told).toEqual([[APP, 'toolu_1']]);
+  });
+
+  it('is told by laneA.accepted naming the engine session it drives, and by none naming another', async () => {
+    const { h, told } = await driving();
+    const handlers = new Map<string, (input: unknown, ctx: unknown) => unknown>();
+    registerLaneA(h.driver, ((name: string, handler: (input: unknown, ctx: unknown) => unknown) => void handlers.set(name, handler)) as never);
+    handlers.get('laneA.accepted')!({ session: 'e5b1c0de-0000-4000-8000-00000000ffff', request: 'toolu_1' }, {});
+    expect(told).toEqual([]);
+    handlers.get('laneA.accepted')!({ session: ENGINE, request: 'toolu_1' }, {});
+    expect(told).toEqual([[APP, 'toolu_1']]);
+  });
+});
+
 // Fix wave 1, finding 1: an operation keeps the launch it was admitted under through every post and retry.
 describe('the launch an operation was admitted under', () => {
   async function liveBridge() {

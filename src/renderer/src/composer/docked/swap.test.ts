@@ -53,6 +53,18 @@ describe('the docked swap takes the oldest answerable request, once it is read',
     expect(swapOf([itemFor(event, A, { state: 'retired' })], new Map()).item).toBeNull();
   });
 
+  // UC-1 (A17, §C): the composer's place is given back at the answer
+  it('docks no answered request: the next waiting one docks, and the count behind it leaves the answered one out', () => {
+    const first = permission({ requestId: 'req-1' as never, at: '2026-09-29T09:00:00.000Z' });
+    const second = permission({ requestId: 'req-2' as never, at: '2026-09-29T09:05:00.000Z' });
+    const third = permission({ requestId: 'req-3' as never, at: '2026-09-29T09:10:00.000Z' });
+    const items = [itemFor(first, A, { state: 'delivered' }), itemFor(second, A), itemFor(third, A)];
+    const swap = swapOf(items, new Map<AttentionId, SessionEvent | null>(items.map((i, n) => [i.id, [first, second, third][n] as SessionEvent])));
+    expect(swap.item?.id).toBe(items[1].id);
+    expect(swap.waiting).toBe(1);
+    expect(swapOf([items[0]], new Map([[items[0].id, first as SessionEvent]])).item).toBeNull();
+  });
+
   // E1 M4b: the Question sheet answers an ask, not the composer, so its item never takes the editor's place
   it('shows a blocking ask as a notice above the frame, leaving the editor and any request to dock', () => {
     const ask = askOpened({ at: '2026-09-29T08:00:00.000Z' });

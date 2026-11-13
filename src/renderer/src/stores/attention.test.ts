@@ -6,7 +6,7 @@ import { ev } from '../../../../test/support/events';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { swapOf } from '../composer/docked/swap';
-import { createAttentionStore, REQUEST_RETRY_MS, selectGreyedNeedsYou, selectNeedsYou, selectPendingOf } from './attention';
+import { createAttentionStore, REQUEST_RETRY_MS, selectGreyedNeedsYou, selectNeedsYou, selectPendingOf, selectWaitingAgents, selectWaitingByCall } from './attention';
 
 const M = TEST_MACHINE; // the store reads no machine from ids, so the one-machine cases keep bare ids
 
@@ -264,6 +264,32 @@ describe('a question card’s draft', () => {
     store.getState().beginSnapshot(M);
     store.getState().applySnapshot([], M);
     expect(store.getState().drafts.size).toBe(0);
+  });
+});
+
+// UC-1 (A17): the session's list every in-session surface reads holds what waits, and a form's draft goes at the answer.
+describe('an answered request in the store', () => {
+  it('is not in the session’s list, and its question’s draft is dropped', () => {
+    const store = createAttentionStore();
+    store.getState().applySnapshot([older, newer], M);
+    store.getState().setDraft(newer.id, { step: 1, reached: 1, selected: { q: ['Red'] }, other: {} });
+    store.getState().applyChanged({ appSessionId: S, items: [older, { ...newer, state: 'delivered' }] }, M);
+    expect(selectPendingOf(store.getState(), S)).toEqual([older]);
+    expect(store.getState().drafts.has(newer.id)).toBe(false);
+  });
+
+  it('is in neither the waiting calls nor the waiting agents, each the same object until the session’s list changes', () => {
+    const store = createAttentionStore();
+    const call = item('s1', 'permission', '2026-09-28T09:00:00Z', { id: 'att-call' as never, request: { requestId: 'req-c' as never, toolUseId: 'toolu_c' as never, taskId: 'task-c' as never, agentId: 'agent-c' as never } });
+    const answered = item('s1', 'permission', '2026-09-28T09:01:00Z', { id: 'att-answered' as never, state: 'delivered', request: { requestId: 'req-d' as never, toolUseId: 'toolu_d' as never, taskId: null, agentId: 'agent-d' as never } });
+    store.getState().applySnapshot([call, answered], M);
+    const calls = selectWaitingByCall(store.getState(), S);
+    expect([...calls.keys()]).toEqual(['toolu_c']);
+    expect([...selectWaitingAgents(store.getState(), S)].sort()).toEqual(['agent-c', 'task-c']);
+    expect(selectWaitingByCall(store.getState(), S)).toBe(calls);
+    expect(selectWaitingAgents(store.getState(), S)).toBe(selectWaitingAgents(store.getState(), S));
+    store.getState().applyChanged({ appSessionId: S, items: [call] }, M);
+    expect(selectWaitingByCall(store.getState(), S)).not.toBe(calls);
   });
 });
 

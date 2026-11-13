@@ -7,6 +7,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { LaneARaised, LaneAState } from '@shared/ipc/schema/lane-a';
 import { laneAAttention, type LaneAEntry } from './attention';
 import type { LaneAView } from './driver';
+import { bridgedDigest } from '../sessions/digest';
 
 const APP = 'app-1' as AppSessionId;
 const ENGINE = 'e5b1c0de-0000-4000-8000-000000000001';
@@ -128,5 +129,115 @@ describe('lane A attention items', () => {
     a.stop();
     vi.advanceTimersByTime(10_000);
     expect(last()).toHaveLength(1);
+  });
+});
+
+// UC-1 (U1a's Interfaces §B, "One holder"): the bridge publishes nothing when it takes an answer, so whoever heard its 200
+// tells this list (`accepted`), which hides the request at once; the bridge's settlement then takes it away. If the
+// bridge still lists it once STREAM_GRACE_MS has passed, it waits again. Every case holds the sequence open.
+describe('an answer the bridge accepted, not yet settled', () => {
+  const ids = () => last().map((e) => e.item.request.requestId);
+
+  it('hides the request at once; the settlement takes it away and the mark is forgotten', () => {
+    const a = start();
+    a.update(APP, view([raised('r1'), raised('r2')]));
+    a.accepted(APP, 'r1');
+    expect(ids()).toEqual(['r2']);
+    const told = sets.length;
+    a.update(APP, view([raised('r2')])); // the bridge settled it
+    expect(sets).toHaveLength(told); // nothing to tell: it was not listed
+    a.update(APP, view([raised('r1'), raised('r2')])); // a request of the same id raised again waits, the mark gone
+    expect(ids()).toEqual(['r1', 'r2']);
+  });
+
+  it('keeps it hidden while a fresh state still lists it, and lets it wait again when the grace ends with it still listed', () => {
+    const a = start();
+    a.update(APP, view([raised('r1')]));
+    a.accepted(APP, 'r1');
+    expect(ids()).toEqual([]);
+    vi.advanceTimersByTime(3000);
+    a.update(APP, view([raised('r1')])); // still listed, before the grace ends
+    expect(ids()).toEqual([]);
+    vi.advanceTimersByTime(1999);
+    expect(ids()).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(ids()).toEqual(['r1']);
+    a.update(APP, view([raised('r1')]));
+    expect(ids()).toEqual(['r1']); // the mark is forgotten: a fresh state no longer hides it
+  });
+
+  it('accepted while the stream is not fresh: the next fresh state decides once the grace has passed', () => {
+    const a = start();
+    a.update(APP, view([raised('r1'), raised('r2')]));
+    a.update(APP, view([raised('r1'), raised('r2')], false)); // the stream ended: what it said stands for 5 s
+    vi.advanceTimersByTime(1000);
+    a.accepted(APP, 'r1');
+    expect(ids()).toEqual(['r2']);
+    vi.advanceTimersByTime(6000); // both graces ended while the stream was not fresh
+    expect(ids()).toEqual([]); // the stream's own rule cleared the list
+    a.update(APP, view([raised('r1'), raised('r2')])); // the first fresh state after the grace lists it: it waits again
+    expect(ids()).toEqual(['r1', 'r2']);
+  });
+
+  it('accepted while the stream is not fresh, and settled by the next fresh state', () => {
+    const a = start();
+    a.update(APP, view([raised('r1')]));
+    a.update(APP, view([raised('r1')], false));
+    a.accepted(APP, 'r1');
+    expect(ids()).toEqual([]);
+    vi.advanceTimersByTime(2000);
+    a.update(APP, view([])); // fresh again, settled meanwhile
+    vi.advanceTimersByTime(10_000);
+    expect(ids()).toEqual([]);
+  });
+
+  it('changes nothing for a request its bridge does not list, and leaves no mark for a later one of that id', () => {
+    const a = start();
+    a.update(APP, view([raised('r1')]));
+    const told = sets.length;
+    a.accepted(APP, 'r9');
+    a.accepted('app-unknown' as AppSessionId, 'r1');
+    expect(sets).toHaveLength(told);
+    a.update(APP, view([raised('r1'), raised('r9')]));
+    expect(ids()).toEqual(['r1', 'r9']);
+  });
+
+  it('forgets every mark of the session when its bridge stops being live, or the session leaves', () => {
+    const a = start();
+    a.update(APP, view([raised('r1')]));
+    a.accepted(APP, 'r1');
+    a.update(APP, view([raised('r1')], true, 'none'));
+    a.update(APP, view([raised('r1')]));
+    expect(ids()).toEqual(['r1']);
+    a.accepted(APP, 'r1');
+    a.update(APP, null);
+    a.update(APP, view([raised('r1')]));
+    expect(ids()).toEqual(['r1']);
+  });
+
+  it('stops its graces', () => {
+    const a = start();
+    a.update(APP, view([raised('r1')]));
+    a.accepted(APP, 'r1');
+    a.stop();
+    vi.advanceTimersByTime(10_000);
+    expect(ids()).toEqual([]);
+  });
+});
+
+// UC-1 (§B, "The digest"): a bridged session reads waiting only for a request that stops it and that MAWS has not answered
+describe('what a bridged session’s digest counts', () => {
+  const question = (request: string) => raised(request, { tool: 'mcp__plugin_sminos_ask__ask', async: true, input: { questions: [{ question: 'Ship it?', header: 'Ship', options: [] }] } });
+  const phaseOf = (a: ReturnType<typeof start>) => bridgedDigest({ running: true, pending: a.stopping(APP), tool: null }).phase;
+
+  it('reads working with an asynchronous question open, waiting with a blocking request, working again once that is accepted', () => {
+    const a = start();
+    a.update(APP, view([question('q1')]));
+    expect(phaseOf(a)).toBe('working');
+    a.update(APP, view([question('q1'), raised('r1')]));
+    expect(phaseOf(a)).toBe('waiting');
+    a.accepted(APP, 'r1');
+    a.update(APP, view([question('q1'), raised('r1')])); // still listed by the bridge
+    expect(phaseOf(a)).toBe('working');
   });
 });

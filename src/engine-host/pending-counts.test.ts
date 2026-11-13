@@ -36,6 +36,11 @@ describe('engine.pendingItems’s answer', () => {
     expect(commands['engine.pendingItems'].output.parse(answer)).toEqual(answer);
   });
 
+  // UC-1 (A17): a phone or a desk client is told what waits, so an answered request counts zero
+  it('counts no item whose answer was delivered', () => {
+    expect(pendingCounts([row('app-1', [item('app-1', 1, 'delivered')])])).toEqual({ sessions: [] });
+  });
+
   it('stays small whatever the items carry: 65 sessions, each a 1 MiB question, answer in under 4 KiB', () => {
     const huge = 'x'.repeat(1024 * 1024);
     const rows = Array.from({ length: 65 }, (_, i) => row(`app-${i}`, [item(`app-${i}`, 1, 'pending', { summary: huge })]));
