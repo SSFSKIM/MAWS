@@ -913,6 +913,20 @@ The pull request carries the dated lines of the two records this landing amends,
   - The *(reload)* scene's three-second window is staged, not bounded. Each try counts from just before the first key to main's answer, and only a try under 3 s asserts `kept`. A try outside the window is repeated from a clean state made by the product's own reload, at most `KEPT_TRIES` (3) times. When no try lands inside, the case is skipped with a reason naming the runner's load. The later marker and hit counts are counted from the loads after the loop. The guard is unchanged.
   - On the VM: `node --test .github/scripts/*.test.mjs scripts/*.test.mjs` 556 of 556; `vitest run src/shared/machine` 12 of 13 files, the one failure `git-reads.test.ts` on build-common's list; e2e `tsc` and eslint on `e2e/browser.spec.ts` exit 0. Under `src/`, only `address-paths.json` changed since `c6d4b03dd`.
 
+- **2026-11-13 · The chain merge of `90a91001e` (`origin/ux-wave/U7`), at `74866d867`.** The wave's landings reach master as a chain, each branch holding the ones before it. `90a91001e` holds master with U13a and the moved-transcript landing, U1a (requests) and U7a (sidebar), and this landing's class 1a and Mac set run once on the merged tree.
+  - Four conflicts, each one where both sides added, resolved by keeping both with the chain head's first:
+    - the charter's §19 entries;
+    - the tracker's last rows;
+    - `WIRE_MINOR`;
+    - the wire fingerprint.
+  - `WIRE_MINOR` is 38. The chain head's 37 is U1a's: `laneA.accepted`, a remote lane A state's `accepted`, and a plan answer's mode. This landing's `maws.pane.answer` `page` takes 38, and the history note names both. The auto-merged manifest held the union of both sides at 37. The wire test refuses a minor bump when nothing has changed since the manifest's minor, so the manifest and the fingerprint were regenerated from the chain head's manifest (`747a82d5d`), and 38 records what this landing adds.
+  - `address-paths.json` needed no rewrite. The merged file lists both sides' paths, and `coverage.test.ts` passes. The one path new against the chain head is this landing's `browser.agent.show` answer, reviewed in the class 1a fix wave.
+  - U1a redrew the request card as one button per scope. The computer-use permission scene answered its card with the old radio and Allow; it now presses `Allow once` (`ec73a220e`), as the merged helper `allowNext` does. No other scene of this landing answers a request card.
+  - On the VM at `ec73a220e`:
+    - the `tsc` of node, web and e2e, and eslint on the files both sides changed: all pass;
+    - vitest over `session`, `tools/browser`, `shared/ipc` and `shared/machine`: 126 of 127 files pass; the one failure, `git-reads.test.ts`, is on build-common's list;
+    - the gate's script tests: 556 of 556, so the spec-file count holds on the merged tree.
+
 ## Outcomes & Retrospective
 
 **2026-11-13, at the executors' end (before the architect's runs).** The five milestones are built and each was reviewed clean at its boundary; the branch review, the Mac runs and class 1a are the architect's and are not in this entry.
