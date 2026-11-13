@@ -1865,7 +1865,8 @@ describe('a registry row’s machines line by the link’s phase', () => {
   const ID = '7e9f2d83-5c4b-4a7f-9e0d-1b2c3d4e5f60';
   const here = { ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-11-13T08:00:00.000Z', generation: 0 } as const;
   const studio = (over: Partial<MachineState>): MachineState => ({ ref: OTHER_MACHINE, name: 'studio', local: false, state: 'up', since: new Date().toISOString(), generation: 1, carrier: 'direct', ...over });
-  const machinesLine = () => within(row('scrape')).getByText((_, el) => el?.hasAttribute('data-row-machines') ?? false).textContent;
+  // the row by its name's start: offline, its name says so ("scrape, machine offline")
+  const machinesLine = () => within(screen.getByRole('treeitem', { name: /^scrape/ })).getByText((_, el) => el?.hasAttribute('data-row-machines') ?? false).textContent;
   afterEach(() => useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() }));
 
   it('names the machine plain while it connects or reconnects, and “offline” past the minute or when its first attempt failed', async () => {
