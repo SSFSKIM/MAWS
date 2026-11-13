@@ -11,7 +11,7 @@ import type { PanelHostProps } from '../panel/host-slot';
 import { FALLBACKS } from './slot-fallbacks';
 
 export interface Slots {
-  transcript: ComponentType<{ appSessionId: AppSessionId; agentId: AgentId | null; paneIndex: 0 | 1 }>; // C6 registers <Transcript>
+  transcript: ComponentType<{ appSessionId: AppSessionId; agentId: AgentId | null; paneIndex: 0 | 1; waiting?: 'stacked' /* UX wave U4a: the pane mounts a composer, whose stack draws a waiting message */ }>; // C6 registers <Transcript>
   composer: ComponentType<{ appSessionId: AppSessionId; paneIndex: 0 | 1 }>; // C7
   requestCard: ComponentType<{ item: AttentionItem; request: SessionEvent | null; placement: 'docked' | 'card' | 'hover'; paneIndex: 0 | 1 | null }>; // X4, C7
   panelHost: ComponentType<PanelHostProps>; // X5, C8

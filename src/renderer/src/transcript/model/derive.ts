@@ -171,11 +171,16 @@ export function askAnsweredHere(state: TranscriptState, askId: string): boolean 
   return owner !== undefined && state.turns.get(owner)?.askSteers?.has(askId) === true;
 }
 
+const isUnread = (row: Row): boolean => row.kind === 'user' && row.unread === true; // UX wave U4a
+
 // W1: what the session's transcript shows around its derived rows: no bubble for a prompt held back into MAWS's queue
 // (the engine reports it cancelled, and it is not lost: it waits in the queue), and the held messages at the tail.
-export function withQueueTail(rows: Row[], withdrawn: ReadonlySet<string>, tail: readonly Row[]): Row[] {
+// UX wave U4a (decision 12): a mount with a stack (`'stacked'`) draws a message there while it is unread, so no row
+// marked unread either.
+export function withQueueTail(rows: Row[], withdrawn: ReadonlySet<string>, tail: readonly Row[], waiting?: 'stacked'): Row[] {
   const kept = withdrawn.size === 0 ? rows : rows.filter((row) => !(row.kind === 'user' && row.messageUuid !== null && withdrawn.has(row.messageUuid) && (row.dropped || row.pending !== undefined)));
-  return tail.length === 0 ? kept : [...kept, ...tail];
+  const read = waiting === 'stacked' && kept.some(isUnread) ? kept.filter((row) => !isUnread(row)) : kept;
+  return tail.length === 0 ? read : [...read, ...tail];
 }
 
 // P5 O9: rows a mount keeps outside the store (a terminal session's reply its interrupt cut before the engine wrote it,
@@ -448,6 +453,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     return {
       id, turnId: turn.id, at: event.at, kind: 'user', messageUuid: event.messageUuid, text: text.text, attachments: text.attachments, placeholders: text.placeholders, lines: text.lines, editable, steer, dropped: !steer && openerDropped,
       ...(waiting && !steer && { pending: 'next' as const }),
+      ...(turn.waited && turn.state === 'open' && !turn.accepted && !openerDropped && !steer && { unread: true as const }), // UX wave U4a (decision 12)
       ...anchorOf(text), // E3
       ...consentOf(event), // UX wave U3 (decision 10)
     };

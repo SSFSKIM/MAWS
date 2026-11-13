@@ -126,6 +126,7 @@ function StartedPane({ appSessionId: id, record, paneIndex, compact }: { appSess
   // are not requests.
   const waiting = waitingItem(pending);
   const docked = useSettling(!readOnly && waiting?.tier === 1 && Composer === FALLBACKS.composer ? waiting.oldest : null); // C7: a registered composer is the one docked swap (it docks the request itself)
+  const noticed = readOnly && holder !== null && (holder.kind === 'terminal' || holder.kind === 'background_job'); // the holder notice stands in the composer's place
 
   return (
     <div className="flex h-full flex-col">
@@ -133,7 +134,7 @@ function StartedPane({ appSessionId: id, record, paneIndex, compact }: { appSess
       {!compact && <ReportBar appSessionId={id} />}
       {!compact && <div className="min-h-0 flex-1 overflow-auto">
         {/* eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render */}
-        <Transcript appSessionId={id} agentId={null} paneIndex={paneIndex} />
+        <Transcript appSessionId={id} agentId={null} paneIndex={paneIndex} waiting={noticed ? undefined : 'stacked'} /* UX wave U4a: the composer's stack draws a waiting message */ />
       </div>}
       <div className={`shrink-0 ${compact ? "py-2" : "pt-4 pb-4"}`}>
         <ComposerColumn>
@@ -141,7 +142,7 @@ function StartedPane({ appSessionId: id, record, paneIndex, compact }: { appSess
           {/* C10 start: an interrupted delete's Finish deleting or Keep, and the card a resume waits on */}
           <SessionTabNotes appSessionId={id} />
           {/* C10 end */}
-          {readOnly && holder !== null && (holder.kind === 'terminal' || holder.kind === 'background_job') ? (
+          {noticed ? (
             // C10: the notice carries the session's id for its actions
             <HolderNotice appSessionId={id} holder={holder} reason={bridgeReason} />
           ) : (

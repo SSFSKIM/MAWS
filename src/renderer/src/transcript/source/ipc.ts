@@ -12,6 +12,7 @@ import { isAppSynthesised } from '@shared/sessions/app-events';
 import { ipc } from '../../ipc/client';
 import { useTranscriptStore } from '../../stores/transcript';
 import { turnId as turnIdOf } from '../model/keys';
+import { opensTurn } from '../model/head'; // UX wave U4a: promptOf, a joined message
 import type { TranscriptState } from '../model/reduce';
 import type { Spill, TurnId } from '../model/rows';
 import type { RewindInterface } from '../view/context';
@@ -960,6 +961,7 @@ export const ipcOpenExternal = ipcOpenExternalOver(ipc);
 function promptOf(state: TranscriptState | undefined, turnId: TurnId): MessageUuid | null {
   for (const event of state?.turns.get(turnId)?.events ?? []) {
     if (event.kind === 'user.message' && event.messageUuid !== null && turnIdOf.ofMessage(event.messageUuid) === turnId) return event.messageUuid;
+    if (event.kind === 'user.message' && opensTurn(event, turnId)) return event.messageUuid!; // UX wave U4a: a joined message's own uuid, the one the engine's file holds
   }
   return null;
 }

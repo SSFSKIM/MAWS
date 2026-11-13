@@ -527,6 +527,27 @@ describe('the queue tail', () => {
     expect(withQueueTail(rows, new Set(), [])).toBe(rows);
   });
 
+  // UX wave U4a (decision 12): a mount with a stack (`'stacked'`) draws a message there while it is unread, so the
+  // transcript also leaves out the rows marked unread; a dropped one, a prompt that ran and the tail stay as above.
+  it('with a stack, also leaves out the rows of messages still unread, and nothing else', () => {
+    const b = builder();
+    b.turn('u1', 'count slowly');
+    b.emit('user.message', { messageUuid: uuid('s1'), content: 'look at b too', isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    b.emit('user.message', { messageUuid: uuid('s2'), content: 'and at c', isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    b.emit('command.lifecycle', { commandUuid: uuid('s2'), state: 'cancelled' });
+    const rows = rowsOf(applyEvents(createState(null, null), b.events));
+    expect(rows.find((row) => row.kind === 'user' && row.messageUuid === 's1')).toMatchObject({ unread: true, pending: 'next' });
+    const s2 = rows.find((row) => row.kind === 'user' && row.messageUuid === 's2');
+    expect([s2?.kind === 'user' && s2.dropped, s2?.kind === 'user' && s2.unread]).toEqual([true, undefined]);
+    const held = heldRow({ queueId: 'q-1', content: 'then run the tests', createdAt: '2026-09-28T10:00:09.000Z' });
+    const prompts = (shown: Row[]) => shown.filter((row) => row.kind === 'user').map((row) => (row.kind === 'user' && row.messageUuid) || row.id);
+    expect(prompts(withQueueTail(rows, new Set(), [held]))).toEqual(['u1', 's1', 's2', 'held:q-1']); // no stack: as today
+    expect(prompts(withQueueTail(rows, new Set(), [held], 'stacked'))).toEqual(['u1', 's2', 'held:q-1']);
+    expect(prompts(withQueueTail(rows, new Set(['s2']), [], 'stacked'))).toEqual(['u1']);
+    const ran = rowsOf(applyEvents(createState(null, null), b.events.slice(0, 2)));
+    expect(withQueueTail(ran, new Set(), [], 'stacked')).toBe(ran); // nothing unread: the rows as they are
+  });
+
   // P5 O9 (the M8 sitting): rows a mount keeps outside the store (a terminal session's reply cut by an interrupt) sit
   // after the last row of their turn, in their order, so a later turn's rows never come before them; a row whose turn
   // is not drawn goes last.
