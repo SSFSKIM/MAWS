@@ -45,6 +45,7 @@ import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { liveSpend } from './support/live-lifecycle'; // P3-F (editor-proof scalpel-3#1)
 import { eventsOf, mcpCalls, mcpResultOf, ofKind, recordEvents, resultText, seedTranscripts, type McpResult } from './support/maws-tools';
 import { sidebarRow } from './support/sidebar';
+import { allowForTheSession } from './support/request-keys';
 
 test.skip(process.env.MAWS_LIVE_DOCUMENT !== '1', 'the document live run runs only under MAWS_LIVE_DOCUMENT=1');
 test.describe.configure({ timeout: 1_200_000 });
@@ -161,11 +162,9 @@ async function allowPending(s: Live): Promise<boolean> {
   const open = ofKind(events, 'permission.requested').filter((e) => !resolved.has(e.requestId));
   if (open.length === 0) return false;
   const frame = s.pane.getByRole('group', { name: 'Approval needed' });
-  const allow = frame.getByRole('button', { name: 'Allow', exact: true });
+  const allow = frame.getByRole('button', { name: 'Allow once', exact: true });
   if (!(await allow.isVisible().catch(() => false)) || !(await allow.isEnabled().catch(() => false))) return false;
-  const session = frame.getByRole('radio', { name: 'Allow for this session' });
-  if ((await session.count()) > 0) await session.click();
-  await allow.click();
+  await allowForTheSession(frame); // U1a §D: the session scope, by its button or its menu entry
   s.allowed.push(open[0]!.toolName);
   await expect.poll(async () => ofKind(await s.events(), 'permission.resolved').some((e) => e.requestId === open[0]!.requestId), { timeout: 30_000 }).toBe(true);
   return true;

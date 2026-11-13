@@ -8,4 +8,5 @@ export interface ModalityProps {
   draft: Draft;
   disabled: boolean;
   edit(change: (draft: Draft) => Draft): void;
+  choose?: (label: string) => void; // a choice: a double-click on a single-choice option (UX wave U1a §E)
 }

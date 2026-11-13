@@ -1,4 +1,5 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
+import { storedMain } from '@shared/ipc/schema/layout';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'; // C7: vi
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
@@ -208,7 +209,7 @@ describe('session pane', () => {
       render(<SessionPane appSessionId={REMOTE} paneIndex={0} />);
       expect(screen.getByRole('status').textContent).toContain('mini can’t place this session');
       act(() => screen.getByRole('button', { name: 'Try again' }).click());
-      expect(fake.invoked('layout.set')).toEqual([{ key: 'main.tabs', value: useLayout.getState().main }]);
+      expect(fake.invoked('layout.set')).toEqual([{ key: 'main.tabs', value: storedMain(useLayout.getState().main) }]);
       useLayout.setState({ hydrated: false });
     });
 

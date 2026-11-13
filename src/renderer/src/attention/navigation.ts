@@ -7,7 +7,7 @@
 // P5 O7 M6 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M6): another machine's item opens the same three
 // ways through its lane's opener (M2's pane, `sessions/remote-openers.ts`), with or without a record; its toast names its
 // listed row when there is no record. A greyed machine's item is never ⌘⇧J's (`selectNeedsYou` holds none).
-import { isOpen } from '@shared/attention/kinds';
+import { waits } from '@shared/attention/kinds';
 import { previewLine } from '@shared/owner/preview';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId, AttentionId } from '@shared/graph/ids';
@@ -133,7 +133,7 @@ function fallbackToast(toasted: ToastedItems, { appSessionId, attentionId, deliv
   const id = appSessionId as AppSessionId;
   const item = itemOf(id, attentionId as AttentionId);
   if (delivery === 'fallback' && requestOnScreen(id, item)) return;
-  if (item && !isOpen(item)) return; // settled before its notice arrived
+  if (item && !waits(item)) return; // answered or settled before its notice arrived
   const record = useSessions.getState().records.get(id);
   const listed = record ? undefined : useSessions.getState().listed.get(id); // P5 O7 M6: another machine's, with no record
   const title = record ? displayTitle(record) : listed ? listedTitle(listed) : 'A session';
@@ -157,7 +157,7 @@ function retractSettled(toasted: ToastedItems): void {
       continue;
     }
     const item = itemOf(entry.appSessionId, attentionId);
-    if (item === undefined ? !entry.held : isOpen(item)) {
+    if (item === undefined ? !entry.held : waits(item)) {
       entry.held ||= item !== undefined;
       continue;
     }

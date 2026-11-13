@@ -81,6 +81,12 @@ export const LANE_A_WORDS = {
   unknownCommand: 'The command may have run: check the transcript before running it again',
   unknownAsk: 'It may have been asked: its answer shows here if it was',
   unknownAnswer: 'The answer may have been taken: the card settles if it was',
+  // UX wave U1a §G: an asynchronous question's Dismiss, closed where the bridge declares no dismissal, or on another
+  // machine (sminos's `decide` there takes allow or deny)
+  dismiss: 'Dismiss it in the terminal',
+  remoteDismiss: (machine: string) => `Dismiss it in the terminal on ${machine}`,
+  // UX wave U1a §F: the bridge carries a plan's allow and deny, never a mode, so its card offers none
+  planMode: 'The mode after a plan is chosen in the terminal',
   unknown: 'It may have run: the transcript shows it if it did',
   // M9: a session on another machine (Q2's words where it gives them). 2026-11-06: a subagent's own transcript crosses
   // from a machine whose endpoint lists `rl2.agent-scope`; an older one is named to update
@@ -186,8 +192,10 @@ function partsOf(content: string | readonly Block[], names: readonly string[] = 
 const FILES_MAX = 4; // the bridge's MEDIA_FILES_MAX
 
 // Whether lane A carries a card's answer on this request, and why not (Interfaces §D): the same rules main's driver
-// applies before it posts (src/main/lane-a/decisions.ts), checked here before the option is offered.
-export function laneAAnswerCapability(raised: LaneARaised | null, answer: RequestAnswer, controls: LaneAState['controls']): Capability {
+// applies before it posts (src/main/lane-a/decisions.ts), checked here before the option is offered. U1a §G: an
+// asynchronous question's deny is the bridge's dismissal, carried where the bridge declares it and never to `machine`,
+// the session's other machine.
+export function laneAAnswerCapability(raised: LaneARaised | null, answer: RequestAnswer, controls: LaneAState['controls'], machine?: string): Capability {
   const control = (key: string, otherwise: string) => sentence(controls[key]?.reason ?? otherwise);
   const question = raised !== null && (raised.tool === 'AskUserQuestion' || raised.async === true);
   switch (answer.kind) {
@@ -197,9 +205,10 @@ export function laneAAnswerCapability(raised: LaneARaised | null, answer: Reques
     case 'question':
       return Object.keys(answer.answers).length === 0 && raised?.async === true ? closed('An async question needs an answer') : AVAILABLE;
     case 'plan':
+      if (answer.mode !== undefined) return closed(LANE_A_WORDS.planMode); // U1a §F
       return answer.outcome === 'clear_and_implement' ? closed('/clear runs in the terminal') : AVAILABLE;
     case 'permission': {
-      if (question) return answer.decision === 'deny' && raised?.async === true ? closed('An async question is answered, never declined') : AVAILABLE;
+      if (question) return answer.decision === 'deny' && raised?.async === true ? dismissal(controls, machine) : AVAILABLE;
       if (answer.decision === 'deny_and_stop') return closed(control('decide.interrupt', 'deny-and-interrupt is answered in the terminal'));
       if (answer.updatedInput !== undefined) return closed('An edited input is answered in the terminal');
       if (answer.decision === 'deny' || answer.scope === undefined || answer.scope === 'once') return AVAILABLE;
@@ -212,6 +221,13 @@ export function laneAAnswerCapability(raised: LaneARaised | null, answer: Reques
       return AVAILABLE;
     }
   }
+}
+
+function dismissal(controls: LaneAState['controls'], machine: string | undefined): Capability {
+  if (machine !== undefined) return closed(LANE_A_WORDS.remoteDismiss(machine));
+  const given = controls['decide.dismiss'];
+  if (given?.available === true) return AVAILABLE;
+  return closed(given?.reason === undefined ? LANE_A_WORDS.dismiss : sentence(given.reason));
 }
 
 export interface LaneAInputs {
@@ -341,7 +357,7 @@ export function laneAControls(state: LaneAState, record: SessionRecord | null, {
       const raised = stateNow().pending.find((p) => p.request === item.request.requestId) ?? null;
       const told = item.request.requestId === null ? undefined : useLaneA.getState().told.get(appSessionId)?.get(item.request.requestId);
       if (told?.terminalOnly === true || (raised !== null && pastWindow(raised, Date.now()))) return closed(RACE.terminal); // M6: the terminal's alone
-      return laneAAnswerCapability(raised, answer, state.controls);
+      return laneAAnswerCapability(raised, answer, state.controls, remote?.machine);
     },
     async send(content, options) {
       if (options.current?.() === false || options.precheck?.() === false) return { disposition: 'refused', started: false };

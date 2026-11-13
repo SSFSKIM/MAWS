@@ -20,6 +20,7 @@ import { framesOf, journal, liveScratch, liveSkipReason, mainResults, printSessi
 import { invoke, value } from './support/c7-replay';
 import { ENGINE_BIN } from '../test/support/engine-pin';
 import { launchMaws, type MawsLaunch } from './support/launch';
+import { ALLOW_ONCE_KEY, allowForTheSession, answerByKey } from './support/request-keys';
 import { sidebarRow } from './support/sidebar';
 
 const skip = liveSkipReason();
@@ -234,7 +235,7 @@ test('auto mode: interrupt and send, stop and resume behave as labelled', async 
 
 // ---- 2. the ask rule in auto mode, in the focused pane only -------------------------------------------------------
 
-test('auto mode with an ask rule: the card replaces the composer, offers Allow once, and Enter answers in the focused pane only', async () => {
+test('auto mode with an ask rule: the card replaces the composer, offers Allow once, and ⌘Enter answers in the focused pane only', async () => {
   await withApp('ask', async (live) => {
     const { page, maws } = live;
     // As the gate in requests.spec.ts: the ask session's tab first, then the other one split into the right pane, then
@@ -252,10 +253,12 @@ test('auto mode with an ask rule: the card replaces the composer, offers Allow o
     await expect(frame).toBeVisible({ timeout: 90_000 });
     await expect(messageIn(left)).toBeHidden();
     await expect(frame).toBeFocused();
-    const radios = await frame.getByRole('radio').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label')));
+    // U1a §D: an ask rule offers no lasting scope, so the card's answer buttons are Deny and Allow once
+    const lasting = await frame.getByRole('button', { name: /^(Allow for this session|Always allow in )/ }).count();
     const requests = controlRequests(ask.journalPath, 'can_use_tool');
-    observe('ask.request', { radios, requests, input: await frame.getByTestId('request-input').innerText().catch(() => null) });
-    expect(radios).toEqual(['Allow once']);
+    observe('ask.request', { lasting, requests, input: await frame.getByTestId('request-input').innerText().catch(() => null) });
+    await expect(frame.getByRole('button', { name: 'Allow once', exact: true })).toBeVisible();
+    expect(lasting, 'no lasting scope beside an ask rule').toBe(0);
 
     await messageIn(right).click();
     await page.keyboard.press('Enter');
@@ -263,8 +266,7 @@ test('auto mode with an ask rule: the card replaces the composer, offers Allow o
     const ids = requests.map((r) => (r.frame as { request_id: string }).request_id);
     expect(controlResponsesTo(ask.journalPath, ids), 'the other pane’s Enter answered nothing').toEqual([]);
 
-    await frame.focus();
-    await page.keyboard.press('Enter');
+    await answerByKey(page, { focus: frame, control: frame.getByRole('button', { name: 'Allow once', exact: true }), key: ALLOW_ONCE_KEY, answered: async () => controlResponsesTo(ask.journalPath, ids).length > 0, what: 'the ask session' });
     await expect.poll(() => controlResponsesTo(ask.journalPath, ids).length).toBe(1);
     await expect(messageIn(left)).toBeVisible();
     await expect(messageIn(left)).toBeFocused();
@@ -290,9 +292,8 @@ test('default mode: Allow for this session grants the exact command and a second
     await send(page, pane, `Use the Bash tool to run exactly this command and nothing else: ${command}`);
     const frame = pane.getByRole('group', { name: 'Approval needed' });
     await expect(frame).toBeVisible({ timeout: 90_000 });
-    const radios = await frame.getByRole('radio').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label')));
-    await frame.getByRole('radio', { name: 'Allow for this session' }).click();
-    await frame.getByRole('button', { name: 'Allow', exact: true }).click();
+    const buttons = await frame.getByRole('button').allTextContents(); // observed: the card's buttons, each with its key hint
+    await allowForTheSession(frame);
     await expect.poll(async () => (await statusOf(page, g.id)).grants, { timeout: 30_000 }).toContain(`Bash(${command})`);
     await idle(page, g.id);
     const first = controlRequests(g.journalPath, 'can_use_tool');
@@ -302,7 +303,7 @@ test('default mode: Allow for this session grants the exact command and a second
     await busy(page, g.id);
     await idle(page, g.id);
     const second = controlRequests(g.journalPath, 'can_use_tool');
-    observe('grant.answer', { radios, grants: (await statusOf(page, g.id)).grants, response, requestsAfterSecond: second.length, results: resultsOf(g.journalPath).slice(-2), toolUses: toolUses(g.journalPath).length });
+    observe('grant.answer', { buttons, grants: (await statusOf(page, g.id)).grants, response, requestsAfterSecond: second.length, results: resultsOf(g.journalPath).slice(-2), toolUses: toolUses(g.journalPath).length });
     expect(second.length, 'the second identical touch prompted nothing').toBe(first.length);
     expect(existsSync(join(g.cwd, target))).toBe(true);
   });
@@ -327,7 +328,7 @@ test('auto mode: a two-question mcp__maws__ask (one choice, one text) answered f
     await expect
       .poll(
         async () => {
-          const allow = pane.getByRole('group', { name: 'Approval needed' }).getByRole('button', { name: 'Allow', exact: true });
+          const allow = pane.getByRole('group', { name: 'Approval needed' }).getByRole('button', { name: 'Allow once', exact: true });
           if ((await allow.isVisible().catch(() => false)) && (await allow.isEnabled().catch(() => false))) await allow.click();
           return sheet.locator('section[data-question-id]').count();
         },
@@ -372,7 +373,7 @@ test('plan mode from the mode chip: Keep planning returns a second plan, Impleme
     await expect.poll(() => controlRequests(p.journalPath, 'can_use_tool').filter((r) => JSON.stringify(r.frame).includes('ExitPlanMode')).length, { timeout: 180_000 }).toBe(2);
     await expect(pane.getByRole('group', { name: 'Plan review' })).toBeVisible();
     await expect(pane.getByRole('group', { name: 'Plan review' })).toContainText('bye.txt');
-    await pane.getByRole('group', { name: 'Plan review' }).getByRole('button', { name: 'Implement', exact: true }).click();
+    await pane.getByRole('group', { name: 'Plan review' }).getByRole('button', { name: /^Implement/ }).click(); // U1a §F: "Implement · <the mode before Plan>"; its caret is "More implement options"
     await idle(page, p.id);
     const afterImplement = { status: (await statusOf(page, p.id)).permissionMode, chip: await pane.getByRole('button', { name: /^Permission mode / }).getAttribute('aria-label') };
     // the implementation runs inside the approving turn; the next prompt's turn carries the next init

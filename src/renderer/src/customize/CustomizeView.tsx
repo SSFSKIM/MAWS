@@ -6,6 +6,7 @@ import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { CommandOutput } from '@shared/ipc/schema';
 import { CUSTOMIZATION_INVENTORY_COVERAGE } from '@shared/ipc/schema/customization';
 import { ipc } from '../ipc/client';
+import { useCurrentRow } from '../keymap/actions-runtime';
 import { localProjectOfSet } from '../stores/org-projects'; // P5 O6 M5
 import { IpcCommandError } from '../ipc/query';
 import { useLayout } from '../stores/layout';
@@ -55,11 +56,11 @@ export function CustomizeView({ section }: { section: CustomizeSection }) {
   const projects = useMemo(() => new Map([...allProjects].filter(([id]) => machineOf(id) === ipc.localMachine)), [allProjects]);
   const records = useSessions((s) => s.records);
   const engine = useSessions((s) => s.engine);
-  const current = useLayout((s) => s.main.current);
+  const current = useCurrentRow(); // U13a: the current project
   const chosen = useCustomizeProject((s) => s.projectId);
   // a directory no project has as its own (Open Discover from a session there, Decision Log 10): the page is that directory
   const directory = useCustomizeProject((s) => s.directory);
-  const focused = chosen === undefined ? (localProjectOfSet({ projects: allProjects }, current, ipc.localMachine)?.id ?? null) : chosen; // P5 O6 M5: the strip's set's checkout here
+  const focused = chosen === undefined ? (current === null ? null : (localProjectOfSet({ projects: allProjects }, current, ipc.localMachine)?.id ?? null)) : chosen; // P5 O6 M5: the row's checkout here
   const projectId = focused !== null && projects.has(focused) ? focused : null; // another machine's project: the user configuration
   const project = directory === undefined && projectId ? projects.get(projectId) : undefined;
   const cwd = directory ?? project?.directory ?? null;

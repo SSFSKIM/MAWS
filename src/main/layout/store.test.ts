@@ -59,6 +59,17 @@ describe('layout file store', () => {
     expect(reopened.get('panel.app-1')).toEqual({ tabs: [], activeTabId: null });
   });
 
+  // UX wave U7, O-16 (Interfaces §G): build F's main reads the whole file into a map and writes the whole map, so a key F
+  // never asks for survives its writes; held here on the same code, which F's build shares.
+  it('keeps a stored sidebar.hidden, value equal, through a set of another key', () => {
+    const hidden = { version: 1, hidden: { [addressOf(LOCAL, 'app-1')]: { at: '2026-11-12T10:00:00.000Z', armedAt: null }, [addressOf(OTHER, 'app-2')]: { at: '2026-11-12T10:00:00.000Z', armedAt: '2026-11-12T10:01:00.000Z' } } };
+    writeFileSync(file, JSON.stringify({ 'sidebar.hidden': hidden, regions: { width: 240 } }));
+    new LayoutFileStore(file).set('regions', { width: 260 });
+    const written = JSON.parse(readFileSync(file, 'utf8'));
+    expect(written['sidebar.hidden']).toEqual(hidden);
+    expect(written.regions).toEqual({ width: 260 });
+  });
+
   it('P5 O2 M2: reports a renderer key set or deleted, never the window key', () => {
     const store = new LayoutFileStore(file);
     const keys: string[] = [];

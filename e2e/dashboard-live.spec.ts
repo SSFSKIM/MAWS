@@ -47,6 +47,7 @@ import { endLiveRun, liveSpend } from './support/live-lifecycle';
 import { eventsOf, mcpCalls, mcpResultOf, ofKind, recordEvents, resultText, seedTranscripts, type McpResult } from './support/maws-tools';
 import { a15Line, a15Reading, chargeOf, initPluginsOf, installedEngine } from './support/p1-live';
 import { sidebarRow } from './support/sidebar';
+import { allowForTheSession } from './support/request-keys';
 
 test.skip(process.env.MAWS_LIVE !== '1', 'the P3-E2 live run runs only under MAWS_LIVE=1');
 test.describe.configure({ timeout: 1_800_000 });
@@ -173,11 +174,9 @@ test('the agent creates a dashboard from markdown, binds the CSV it wrote in one
       const open = ofKind(all, 'permission.requested').filter((e) => !resolved.has(e.requestId));
       if (open.length === 0) return false;
       const frame = pane.getByRole('group', { name: 'Approval needed' });
-      const allow = frame.getByRole('button', { name: 'Allow', exact: true });
+      const allow = frame.getByRole('button', { name: 'Allow once', exact: true });
       if (!(await allow.isVisible().catch(() => false)) || !(await allow.isEnabled().catch(() => false))) return false;
-      const forSession = frame.getByRole('radio', { name: 'Allow for this session' });
-      if ((await forSession.count()) > 0) await forSession.click();
-      await allow.click();
+      await allowForTheSession(frame); // U1a §D: the session scope, by its button or its menu entry
       allowed.push(open[0]!.toolName);
       await expect.poll(async () => ofKind(await events(), 'permission.resolved').some((e) => e.requestId === open[0]!.requestId), { timeout: 30_000 }).toBe(true);
       return true;

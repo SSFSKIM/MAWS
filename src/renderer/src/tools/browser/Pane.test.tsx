@@ -6,7 +6,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BrowserTab } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
-import { LAYOUT_DEFAULTS, NO_PROJECT } from '@shared/ipc/schema/layout';
+import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { useFloatingCard } from '../../shell/floating';
 import { useLayout } from '../../stores/layout';
 import { browserTab, T1 } from '../../test-support/browser';
@@ -376,7 +376,7 @@ describe('the floating card’s column', () => {
     const beside = { id: 'diagnostics', kind: 'diagnostics', pinned: false } as const;
     act(() => {
       useLayout.setState({
-        main: { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { panes: [{ tabs: [session], activeTabId: session.id }, { tabs: [beside], activeTabId: beside.id }], focusedPane: 1, splitRatio: 0.5, floating: { sessionTabId: session.id } } } },
+        main: { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [session], activeTabId: session.id }, { tabs: [beside], activeTabId: beside.id }], focusedPane: 1, splitRatio: 0.5, floating: { sessionTabId: session.id } },
         regions: LAYOUT_DEFAULTS.regions,
       });
       useLayout.getState().setFloatingCardSize('main:diagnostics', { w: 480, h: 400 });

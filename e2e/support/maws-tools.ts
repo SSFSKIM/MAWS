@@ -284,8 +284,7 @@ export async function allowNext(s: Scene, id: string): Promise<void> {
   const answered = ofKind(await s.events(id), 'permission.resolved').length;
   await expect.poll(async () => ofKind(await s.events(id), 'permission.requested').length, { timeout: 30_000 }).toBeGreaterThan(answered);
   const frame = s.pane.getByRole('group', { name: 'Approval needed' });
-  await frame.getByRole('radio', { name: 'Allow once' }).click();
-  await frame.getByRole('button', { name: 'Allow', exact: true }).click();
+  await frame.getByRole('button', { name: 'Allow once', exact: true }).click();
   await expect.poll(async () => ofKind(await s.events(id), 'permission.resolved').length, { timeout: 30_000 }).toBe(answered + 1);
 }
 

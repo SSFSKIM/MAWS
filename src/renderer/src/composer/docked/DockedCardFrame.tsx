@@ -6,6 +6,10 @@
 // docked frame mounts in the same commit, which takes it instead. Enter and Esc are
 // `request.accept` and `request.decline` bound `within` the frame root, so C5's dispatcher delivers them only while
 // the frame itself holds focus: never from a textarea, a button or another pane. A null handler leaves its key unbound.
+// UX wave U1a (§D): a permission prompt adds `request.allowOnce` (⌘↩) and `request.allowLasting` (⇧⌘↩), bound the same
+// way; every key the frame binds acts on a fresh press only, so a key held through one answer cannot answer the request
+// whose frame takes focus next (a card another child docks has the rule too). UX wave U1a §J: the title line says the
+// composer is paused for a request; a card another child docks (trust, relay down, a failed start) passes `titleAlone`.
 // This module imports no editor code: the request card imports it directly, never through `composer/index.ts`.
 import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -15,8 +19,11 @@ import { useComposerStore } from '../../stores/composer';
 export interface DockedCardFrameProps {
   appSessionId: AppSessionId;
   title: string;
+  titleAlone?: boolean; // U1a §J: the title with nothing after it (a card another child docks)
   onAccept: (() => void) | null;
   onDecline: (() => void) | null;
+  onAllowOnce?: (() => void) | null; // U1a: only a permission prompt has them
+  onAllowLasting?: (() => void) | null;
   children: ReactNode;
 }
 
@@ -25,10 +32,12 @@ export interface DockedCardFrameProps {
 // of the editor, which stays hidden behind it: its own mount sees focus on the body by then, never in its pane.
 const handingOver = new Set<AppSessionId>();
 
-export function DockedCardFrame({ appSessionId, title, onAccept, onDecline, children }: DockedCardFrameProps) {
+export function DockedCardFrame({ appSessionId, title, titleAlone = false, onAccept, onDecline, onAllowOnce = null, onAllowLasting = null, children }: DockedCardFrameProps) {
   const frameRef = useRef<HTMLDivElement>(null);
-  useKeyChord('request.accept', () => onAccept?.(), { within: frameRef, enabled: onAccept !== null });
-  useKeyChord('request.decline', () => onDecline?.(), { within: frameRef, enabled: onDecline !== null });
+  useKeyChord('request.accept', () => onAccept?.(), { within: frameRef, enabled: onAccept !== null, fresh: true });
+  useKeyChord('request.decline', () => onDecline?.(), { within: frameRef, enabled: onDecline !== null, fresh: true });
+  useKeyChord('request.allowOnce', () => onAllowOnce?.(), { within: frameRef, enabled: onAllowOnce !== null, fresh: true });
+  useKeyChord('request.allowLasting', () => onAllowLasting?.(), { within: frameRef, enabled: onAllowLasting !== null, fresh: true });
 
   useLayoutEffect(() => {
     const frame = frameRef.current!;
@@ -64,7 +73,8 @@ export function DockedCardFrame({ appSessionId, title, onAccept, onDecline, chil
       className="flex flex-col gap-3 rounded-lg border border-border-strong bg-bg-raised p-3 outline-accent focus-visible:outline-2"
     >
       <p className="m-0 text-ui-sm text-fg-muted">
-        <span className="font-medium text-fg">{title}</span> · Composer paused · draft preserved
+        <span className="font-medium text-fg">{title}</span>
+        {!titleAlone && ' · Composer paused · draft preserved'}
       </p>
       {children}
     </div>

@@ -16,6 +16,7 @@
 import { useEffect } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
+import { storedMain } from '@shared/ipc/schema/layout';
 import { ipc } from '../ipc/client';
 import { registerRemoteOpener } from '../sessions/remote-openers';
 import { useLayout } from '../stores/layout';
@@ -50,7 +51,7 @@ export function useRemotePaneOpening(appSessionId: AppSessionId): void {
 export function retryRemoteSession(client: MawsBridge = connected ?? ipc): void {
   const layout = useLayout.getState();
   if (!layout.hydrated) return; // nothing is written before hydration; the tabs main has are the persisted ones
-  void client.invoke('layout.set', { key: 'main.tabs', value: layout.main }).then((result) => {
+  void client.invoke('layout.set', { key: 'main.tabs', value: storedMain(layout.main) }).then((result) => { // U13a: the stored form
     if (!result.ok) console.error('[lane B] could not ask main to open the session again', result.error);
   });
 }

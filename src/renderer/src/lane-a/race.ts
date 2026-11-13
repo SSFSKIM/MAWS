@@ -20,7 +20,7 @@ const WINDOW_MARGIN_MS = 200; // the bridge closes a background request's window
 export type RaceWinner = 'terminal' | 'maws' | 'elsewhere';
 export interface Race {
   asked: boolean; // the terminal asks it too
-  settled: { where: RaceWinner; outcome: string | null } | null;
+  settled: { where: RaceWinner; outcome: string | null; by: string | null } | null; // `by`: who, as the bridge named it
   terminalOnly: boolean;
 }
 
@@ -34,7 +34,7 @@ export function raceOf(state: LaneAState | null, told: RequestSettlement | null,
   const decided = settlement !== null && (settlement.winner !== null || settlement.by !== null);
   return {
     asked: raised !== undefined || decided,
-    settled: decided ? { where: settlement.winner === 'terminal' || settlement.by === 'terminal' ? 'terminal' : settlement.by === 'maws' ? 'maws' : 'elsewhere', outcome: settlement.outcome } : null,
+    settled: decided ? { where: settlement.winner === 'terminal' || settlement.by === 'terminal' ? 'terminal' : settlement.by === 'maws' ? 'maws' : 'elsewhere', outcome: settlement.outcome, by: settlement.by } : null,
     terminalOnly: settlement?.terminalOnly === true || (raised !== undefined && pastWindow(raised, now)),
   };
 }
@@ -42,9 +42,18 @@ export function raceOf(state: LaneAState | null, told: RequestSettlement | null,
 const OUTCOME: Record<string, string> = { allow: 'Allowed', deny: 'Denied' };
 const WHERE: Record<RaceWinner, string> = { terminal: 'Answered in the terminal', maws: 'Answered in MAWS', elsewhere: 'Answered elsewhere' };
 
+// The bridge's own name for itself as the one who settled (sminos's `RESERVED_BY`): a `/clear`, or the session's end.
+const BY_BRIDGE = 'bridge';
+
 // "Answered in the terminal: Allowed" (Q3); a question's answers are not carried by the settlement, so it says only where.
-export function settledWords(settled: NonNullable<Race['settled']>): string {
-  if (settled.outcome === 'withdrawn') return 'No longer asked';
+// UX wave U1a §G: a withdrawn asynchronous question was dismissed, said by who did it ("Dismissed in the terminal",
+// "Dismissed elsewhere"; this app's own says nothing, null: its card leaves at once); withdrawn by the bridge, or any
+// other request withdrawn, is "No longer asked".
+export function settledWords(settled: NonNullable<Race['settled']>, request: { asyncQuestion?: boolean } = {}): string | null {
+  if (settled.outcome === 'withdrawn') {
+    if (request.asyncQuestion !== true || settled.by === BY_BRIDGE) return 'No longer asked';
+    return settled.where === 'terminal' ? 'Dismissed in the terminal' : settled.where === 'maws' ? null : 'Dismissed elsewhere';
+  }
   const outcome = settled.outcome === null ? undefined : OUTCOME[settled.outcome];
   return outcome ? `${WHERE[settled.where]}: ${outcome}` : WHERE[settled.where];
 }

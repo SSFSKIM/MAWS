@@ -174,6 +174,11 @@ const composerOf = (index: 0 | 1) => screen.getByRole('region', { name: `pane ${
 const editorOf = (index: 0 | 1 = 0) => within(composerOf(index)).getByRole('textbox', { name: 'Message', hidden: true }) as TiptapElement;
 const type = (text: string, index: 0 | 1 = 0) => act(() => void editorOf(index).editor.commands.insertContent(text));
 const key = (target: HTMLElement, init: KeyboardEventInit) => act(async () => void target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })));
+// UX wave U1a (§D): a permission prompt is allowed once with ⌘↩, which acts once the prompt has been drawn for 400 ms
+const allowOnceKey = async (target: HTMLElement) => {
+  await act(() => new Promise((resolve) => setTimeout(resolve, 400)));
+  await key(target, { key: 'Enter', code: 'Enter', metaKey: true });
+};
 const primary = (index: 0 | 1 = 0) => composerOf(index).querySelector<HTMLButtonElement>('[data-submit-state]')!;
 const invoked = (name: Parameters<FakeClient['invoked']>[0]) => fake.invoked(name);
 const plusOf = (index: 0 | 1 = 0) => within(composerOf(index)).getByRole('button', { name: 'Add files, photos or commands' });
@@ -374,7 +379,7 @@ describe("composer DOM under C5's dispatcher", () => {
     expect(editorOf().editor.getText()).toBe('a draft kept aside'); // mounted, hidden
     await waitFor(() => expect(document.activeElement).toBe(frame)); // the pane held focus
     expect(useComposerStore.getState().docked.get(A)?.has('req-a' as never)).toBe(true);
-    await key(frame, { key: 'Enter' });
+    await allowOnceKey(frame);
     await waitFor(() => expect(invoked('session.answer')).toHaveLength(1));
     act(() => useAttention.setState({ bySession: new Map([[A, []]]), version: 2 }));
     await waitFor(() => expect(composerOf(0).querySelector('[data-composer-draft]')!.hasAttribute('hidden')).toBe(false));
@@ -410,7 +415,7 @@ describe("composer DOM under C5's dispatcher", () => {
     }
   });
 
-  it('hands focus from a retiring docked request to the next one, whose Enter answers it (§5.7)', async () => {
+  it('hands focus from a retiring docked request to the next one, whose ⌘↩ answers it (§5.7)', async () => {
     live(A);
     mount([{ index: 0, id: A }]);
     act(() => editorOf().focus());
@@ -424,14 +429,14 @@ describe("composer DOM under C5's dispatcher", () => {
     act(() => useAttention.setState({ bySession: new Map([[A, [one, two]]]), requests, version: 1 }));
     await waitFor(() => expect(document.activeElement?.getAttribute('data-docked-frame')).toBe(A));
     expect(within(composerOf(0)).getByText('1 more waiting')).toBeTruthy();
-    await key(document.activeElement as HTMLElement, { key: 'Enter' });
+    await allowOnceKey(document.activeElement as HTMLElement);
     await waitFor(() => expect(invoked('session.answer')).toEqual([{ appSessionId: A_ID, requestId: 'req-1', answer: { kind: 'permission', decision: 'allow', scope: 'once' } }]));
     act(() => useAttention.setState({ bySession: new Map([[A, [two]]]), version: 2 })); // the first retires behind the second
     await waitFor(() => expect(composerOf(0).querySelector('[data-request-card]')?.getAttribute('data-request-card')).toBe(two.id));
     await new Promise((resolve) => requestAnimationFrame(resolve)); // past any deferred return to the editor
     const next = composerOf(0).querySelector<HTMLElement>('[data-docked-frame]')!;
     expect(document.activeElement).toBe(next);
-    await key(next, { key: 'Enter' });
+    await allowOnceKey(next);
     await waitFor(() => expect(invoked('session.answer').at(-1)).toEqual({ appSessionId: A_ID, requestId: 'req-2', answer: { kind: 'permission', decision: 'allow', scope: 'once' } }));
   });
 
@@ -765,17 +770,12 @@ describe('one Stop handler for every pane', () => {
     useLayout.setState((s) => ({
       main: {
         ...s.main,
-        current: 'none',
-        sets: {
-          none: {
-            panes: [
-              { tabs: [{ id: `session:${A}`, kind: 'session', appSessionId: A, pinned: false }], activeTabId: `session:${A}` },
-              { tabs: [{ id: `session:${B}`, kind: 'session', appSessionId: B, pinned: false }], activeTabId: `session:${B}` },
-            ],
-            focusedPane,
-            splitRatio: 0.5,
-          },
-        },
+        panes: [
+          { tabs: [{ id: `session:${A}`, kind: 'session', appSessionId: A, pinned: false }], activeTabId: `session:${A}` },
+          { tabs: [{ id: `session:${B}`, kind: 'session', appSessionId: B, pinned: false }], activeTabId: `session:${B}` },
+        ],
+        focusedPane,
+        splitRatio: 0.5,
       },
     }));
 
@@ -1766,14 +1766,9 @@ describe('dictation into the focused pane’s composer', () => {
     useLayout.setState((s) => ({
       main: {
         ...s.main,
-        current: 'none',
-        sets: {
-          none: {
-            panes: ids.map((id) => ({ tabs: [{ id: `session:${id}`, kind: 'session' as const, appSessionId: id, pinned: false }], activeTabId: `session:${id}` })) as TabSet['panes'], // one or two
-            focusedPane,
-            splitRatio: 0.5,
-          },
-        },
+        panes: ids.map((id) => ({ tabs: [{ id: `session:${id}`, kind: 'session' as const, appSessionId: id, pinned: false }], activeTabId: `session:${id}` })) as TabSet['panes'], // one or two
+        focusedPane,
+        splitRatio: 0.5,
       },
     }));
   const altSpace = { code: 'Space', key: ' ', altKey: true };
