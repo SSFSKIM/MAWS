@@ -16,6 +16,9 @@
 // UX wave U11a M4 (S-09; Interfaces §F, "The footer"): while the org's hub status reads connected, a channel whose own
 // reach is unreachable says "Offline · retrying" after its "As of"; one the hub refused says the refusal with its button
 // and never "retrying"; one never read on this Mac says this Mac has no copy, its footer with no "As of".
+// UX wave U11a M5 (S-10; Interfaces §F, "The Channel's entries" and "The action"): ⌘K's "<project> · channel" with what
+// waits in the project opens the tab; View › Project channel, pressed by its id as an agent would, opens it from a session
+// of the project, bringing the open tab forward, and is greyed while a tab of no project is in front.
 //
 // The channel is seeded where no real log can hold it at once: under MAWS_E2E=1 a harness build's main answers
 // `org.status` and the project's `org.channel.open` from a file the `org.*` schemas admit (src/main/org/channel-fixture.ts),
@@ -36,6 +39,7 @@ import { CHANNEL } from '../src/renderer/src/channel/copy';
 import { addressed } from './support/address';
 import { actionsNotWhole, addClippedProbes, probeFaults, type ActionEntry } from './support/actions-whole';
 import { launchMaws, REPO_ROOT } from './support/launch';
+import { menu } from './support/menu';
 
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now; a plain build's main lacks the seam.
 const HARNESS_BUILT = !process.env.MAWS_E2E_EXECUTABLE && existsSync(join(REPO_ROOT, 'out/renderer/harness.html'));
@@ -49,6 +53,7 @@ const S2 = 'f1be24ad-29cd-46ce-a59a-cf9764256091';
 const S3 = 'a2cf35be-3ade-46ce-a59a-df0875367102';
 const S4 = 'b3d046cf-4bef-47df-b6ab-e01986478213';
 const WAITING = ['app-3eb04b84', 'app-d095dc75']; // the scenario's permission and question sessions
+const TITLES = ['Approve the shard rerun on the clinical research operations cluster before the nightly window', 'Choose the colours for the migration dashboard']; // theirs, in that order
 const EXCHANGE = 40;
 
 /** Two other machines, as their refs are minted (22 base64url characters). */
@@ -193,7 +198,6 @@ function seededChannel(now: number, local: MachineRef): { status: Extract<OrgSta
 function scenario(): unknown {
   const shell = JSON.parse(readFileSync(join(REPO_ROOT, 'test/fixtures/shell/nine-sessions.json'), 'utf8')) as Record<string, Array<Record<string, unknown>>>;
   const ours = (entry: Record<string, unknown>) => WAITING.includes((entry.appId ?? entry.appSessionId) as string);
-  const titles = ['Approve the shard rerun on the clinical research operations cluster before the nightly window', 'Choose the colours for the migration dashboard'];
   return {
     version: 1,
     projects: [
@@ -206,7 +210,7 @@ function scenario(): unknown {
         org: { key: `smns:${PROJECT}`, name: PROJECT_NAME, source: 'smns', smnsId: PROJECT },
       },
     ],
-    sessions: shell.sessions.filter(ours).map((s, i) => ({ ...s, projectId: PROJECT_ID, title: { text: titles[i], source: 'user' } })),
+    sessions: shell.sessions.filter(ours).map((s, i) => ({ ...s, projectId: PROJECT_ID, title: { text: TITLES[i], source: 'user' } })),
     digests: shell.digests.filter(ours),
     engine: shell.engine.filter(ours),
     attention: shell.attention.filter(ours),
@@ -550,3 +554,66 @@ for (const scrollbars of ['Always', 'WhenScrolling'] as const) {
     }
   });
 }
+
+// UX wave U11a M5 (S-10; Interfaces §F): the Channel reached from outside the sidebar. The palette's entry names the project
+// and the requests waiting in it (the scenario's permission and question); View › Project channel is pressed by its id in
+// main, as an agent drives the app in the background: greyed with Diagnostics in front, it opens the Channel from a
+// session of the project, the tab already open brought forward rather than a second one made.
+test('channel: ⌘K lists "<project> · channel" with what waits in it and opens the tab; View › Project channel opens it from a session of the project, and is greyed where no project is in front', async () => {
+  test.setTimeout(90_000);
+  const userData = realpathSync(mkdtempSync(join(tmpdir(), 'maws-channel-')));
+  try {
+    const local = readOrMintMachineRef(userData);
+    const { status, answer } = seededChannel(Date.now(), local);
+    const fixture = join(userData, 'channel.json');
+    writeFileSync(fixture, JSON.stringify({ status, project: PROJECT, answer: { ...answer, live: true } }));
+    const stub = join(userData, 'channel-scenario.json');
+    writeFileSync(stub, JSON.stringify(scenario()));
+    const maws = await launchMaws({ userData, env: { [FIXTURE_ENV]: fixture, MAWS_SESSION_SOURCE: `stub:${stub}` } });
+    try {
+      const { page, app } = maws;
+      await expect(page.locator(`[data-menu="project:${await addressed(page, PROJECT_ID)}"]`).first()).toBeVisible({ timeout: 15_000 });
+      const palette = page.getByRole('dialog', { name: 'Command palette' });
+      const search = async (query: string) => {
+        await menu(app, 'palette.open');
+        // Under load the first keystrokes can land before the input takes focus; type only once it holds it.
+        await expect(palette.getByPlaceholder('Search sessions, projects and actions')).toBeFocused();
+        await page.keyboard.type(query);
+      };
+      const enabled = () => app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('channel.open')?.enabled ?? null);
+      const channel = page.locator(`[data-channel="${PROJECT}"]`);
+      const channelTabs = page.locator(`[data-tab-id="channel:${PROJECT}"]`);
+
+      // A tab of no project in front: the item is there, greyed.
+      await menu(app, 'diagnostics.open');
+      await expect.poll(enabled, { message: 'View › Project channel is greyed with Diagnostics in front' }).toBe(false);
+
+      // ⌘K, "channel": the project's entry, with what waits in it; Enter opens the tab.
+      await search('channel');
+      const entry = palette.getByRole('group', { name: 'Channels' }).getByRole('option');
+      await expect(entry).toHaveCount(1);
+      await expect(entry.locator('[data-channel-name]')).toHaveText(CHANNEL.title(PROJECT_NAME));
+      await expect(entry.locator('[data-channel-count]')).toHaveText(CHANNEL.waitingCount(WAITING.length));
+      await test.info().attach('channel-palette-entry', { body: await palette.screenshot(), contentType: 'image/png' });
+      await page.keyboard.press('Enter');
+      await expect(palette).toHaveCount(0);
+      await expect(channel).toBeVisible();
+      await expect(channelTabs).toHaveCount(1);
+
+      // A session of the project in front, then View › Project channel by its id: the open tab comes forward.
+      await search(TITLES[1]);
+      await expect(palette.getByRole('group', { name: 'Sessions' }).getByRole('option')).toHaveCount(1);
+      await page.keyboard.press('Enter');
+      await expect(palette).toHaveCount(0);
+      await expect(channel).toBeHidden();
+      await expect.poll(enabled, { message: 'View › Project channel is enabled with a session of the project in front' }).toBe(true);
+      await menu(app, 'channel.open');
+      await expect(channel).toBeVisible();
+      await expect(channelTabs).toHaveCount(1);
+    } finally {
+      await maws.cleanup();
+    }
+  } finally {
+    rmSync(userData, { recursive: true, force: true });
+  }
+});

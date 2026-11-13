@@ -8,6 +8,7 @@ type Refusal = Extract<ChannelSendResult, { ok: false }>;
 export const CHANNEL = {
   title: (project: string | null) => (project === null ? 'Channel' : `${project} · channel`),
   menuItem: 'Channel',
+  waitingCount: (count: number) => `${count} waiting`, // U11a M5: a palette entry's detail, the Channel's "Waiting on you" count
   you: 'You',
   nobody: 'Someone',
   someone: (member: string) => `member ${member.slice(0, 8)}`,
