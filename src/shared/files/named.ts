@@ -112,53 +112,50 @@ function pathOfHref(href: string): string | null {
 // times that percent-encoded): a longer one is not recognised, so each link costs a bounded scan of a hostile text.
 const LINK_TAIL_MAX = 16 * 1024;
 const PAREN_DEPTH_MAX = 32; // micromark's linkResourceDestinationBalanceMax
+const LABEL_MAX = 999; // a reference label's length at most (CommonMark)
+const SCAN_STEP_CHARS = 64 * 1024; // the scan yields a step after this much text, so a caller can give the loop back
 
-const isEscaped = (text: string, at: number) => {
-  let slashes = 0;
-  for (let i = at - 1; i >= 0 && text.charCodeAt(i) === 92; i -= 1) slashes += 1;
-  return slashes % 2 === 1;
-};
 const isSpaceOrTab = (code: number) => code === 32 || code === 9;
 const isLineEnding = (code: number) => code === 10 || code === 13;
 const isControl = (code: number) => code < 32 || code === 127;
+const isDigit = (code: number) => code >= 48 && code <= 57;
 const escapes = (text: string, at: number, limit: number) => text.charCodeAt(at) === 92 && at + 1 < limit && ASCII_PUNCTUATION.test(text[at + 1]!);
-// What may stand before a reference definition's `[` on its line: indentation and the markers of a quote or a list item.
-const isLinePrefix = (code: number) => isSpaceOrTab(code) || code === 13 || code === 62 || code === 45 || code === 43 || code === 42 || code === 46 || code === 41 || (code >= 48 && code <= 57);
 
-// Whether the line that starts at `at` is blank (spaces or tabs, then a line ending or the end).
-function blankLineAt(text: string, at: number): boolean {
+// The end of the line that starts at `at`: its line ending, or the text's end.
+function lineEndAt(text: string, at: number): number {
+  const newline = text.indexOf('\n', at);
+  return newline === -1 ? text.length : newline;
+}
+// From `at`, spaces, tabs and carriage returns up to `end`: the index after them.
+function skipBlank(text: string, at: number, end: number): number {
   let i = at;
-  while (i < text.length && isSpaceOrTab(text.charCodeAt(i))) i += 1;
-  return i >= text.length || isLineEnding(text.charCodeAt(i));
+  while (i < end && (isSpaceOrTab(text.charCodeAt(i)) || text.charCodeAt(i) === 13)) i += 1;
+  return i;
 }
 
-// The first newline at or after `at` that a blank line follows, or the text's end: no link's resource runs past it.
-function blankLineAfter(text: string, at: number): number {
-  for (let i = text.indexOf('\n', at); i !== -1; i = text.indexOf('\n', i + 1)) if (blankLineAt(text, i + 1)) return i;
-  return text.length;
-}
-
-// From `at`, spaces or tabs and at most one line ending (a blank line ends the paragraph): the index after them, or -1.
-function skipWhitespace(text: string, at: number): number {
+// From `at`, spaces or tabs and at most one line ending, after which a continuation line's container prefix (a quote's
+// `>` markers and indentation, which Markdown strips) is passed over too: the index after them, or -1 at a second line
+// ending. A context holds no blank line, so this never crosses one.
+function skipWhitespace(text: string, at: number, end: number): number {
   let i = at;
-  while (i < text.length && isSpaceOrTab(text.charCodeAt(i))) i += 1;
-  if (i < text.length && isLineEnding(text.charCodeAt(i))) {
+  while (i < end && isSpaceOrTab(text.charCodeAt(i))) i += 1;
+  if (i < end && isLineEnding(text.charCodeAt(i))) {
     i += text.charCodeAt(i) === 13 && text.charCodeAt(i + 1) === 10 ? 2 : 1;
-    if (blankLineAt(text, i)) return -1;
-    while (isSpaceOrTab(text.charCodeAt(i))) i += 1;
+    while (i < end && (isSpaceOrTab(text.charCodeAt(i)) || text.charCodeAt(i) === 62)) i += 1;
+    if (i < end && isLineEnding(text.charCodeAt(i))) return -1;
   }
   return i;
 }
 
-// A scan that reached `LINK_TAIL_MAX` before it could tell: whether a resource stands there, and where it ends, is not
-// known, so nothing up to the next blank line is read as a link.
+// A scan that reached `LINK_TAIL_MAX` before it could tell: whether a resource or a definition stands there, and where
+// it ends, is not known, so nothing more of its context is read as a link.
 const UNKNOWN = Symbol('past the bound');
 type Scan<T> = T | null | typeof UNKNOWN;
-const pastBound = (text: string, limit: number): null | typeof UNKNOWN => (limit < text.length ? UNKNOWN : null);
+const pastBound = (end: number, limit: number): null | typeof UNKNOWN => (limit < end ? UNKNOWN : null);
 
 // A destination at `at`: `<…>` with no line ending and no unescaped `<` or `>` inside, or a run with no space and no
-// control character whose unescaped parentheses balance. `next` is the index after it.
-function destinationAt(text: string, at: number, limit: number): Scan<{ destination: string; next: number }> {
+// control character whose unescaped parentheses balance (the context's end also ends a run). `next` is the index after.
+function destinationAt(text: string, at: number, limit: number, end: number): Scan<{ destination: string; next: number }> {
   let i = at;
   if (text.charCodeAt(i) === 60) {
     for (i += 1; i < limit; i += 1) {
@@ -167,7 +164,7 @@ function destinationAt(text: string, at: number, limit: number): Scan<{ destinat
       else if (code === 62) break;
       else if (code === 60 || isLineEnding(code)) return null;
     }
-    return i >= limit ? pastBound(text, limit) : { destination: text.slice(at + 1, i), next: i + 1 };
+    return i >= limit ? pastBound(end, limit) : { destination: text.slice(at + 1, i), next: i + 1 };
   }
   let depth = 0;
   for (; i < limit; i += 1) {
@@ -180,12 +177,12 @@ function destinationAt(text: string, at: number, limit: number): Scan<{ destinat
       depth -= 1;
     } else if (code === 32 || isControl(code)) break;
   }
-  if (i >= limit && limit < text.length) return UNKNOWN;
-  return depth === 0 ? { destination: text.slice(at, i), next: i } : null; // the text's end also ends a run (a definition's)
+  if (i >= limit && limit < end) return UNKNOWN;
+  return depth === 0 && i > at ? { destination: text.slice(at, i), next: i } : null;
 }
 
-// A title at `at` (its opening marker): `"…"`, `'…'` or `(…)`, with no blank line inside. The index after it.
-function titleAt(text: string, at: number, limit: number): Scan<number> {
+// A title at `at` (its opening marker): `"…"`, `'…'` or `(…)`. The index after it.
+function titleAt(text: string, at: number, limit: number, end: number): Scan<number> {
   const marker = text.charCodeAt(at);
   const close = marker === 40 ? 41 : marker;
   let i = at + 1;
@@ -194,118 +191,449 @@ function titleAt(text: string, at: number, limit: number): Scan<number> {
     if (escapes(text, i, limit)) i += 1;
     else if (code === close) break;
     else if (marker === 40 && code === 40) return null;
-    else if (isLineEnding(code) && blankLineAt(text, code === 13 && text.charCodeAt(i + 1) === 10 ? i + 2 : i + 1)) return null;
   }
-  return i >= limit ? pastBound(text, limit) : i + 1;
+  return i >= limit ? pastBound(end, limit) : i + 1;
 }
 const isTitleMarker = (code: number) => code === 34 || code === 39 || code === 40;
 
 // After the `(` of `](` at `open`: the inline resource its `)` closes, that is its destination and the index of the `)`.
-function resourceAt(text: string, open: number): Scan<{ destination: string; end: number }> {
-  const limit = Math.min(text.length, open + LINK_TAIL_MAX);
-  let i = skipWhitespace(text, open);
+function resourceAt(text: string, open: number, end: number): Scan<{ destination: string; end: number }> {
+  const limit = Math.min(end, open + LINK_TAIL_MAX);
+  let i = skipWhitespace(text, open, limit);
   if (i < 0) return null;
-  if (i >= limit) return pastBound(text, limit);
-  const angle = text.charCodeAt(i) === 60;
-  const found = destinationAt(text, i, limit);
-  if (found === null || found === UNKNOWN) return found;
-  i = found.next;
-  const after = text.charCodeAt(i);
-  if (angle && i < limit && !isSpaceOrTab(after) && !isLineEnding(after) && after !== 41) return null;
-  // an optional title, after whitespace; then whitespace and `)`
-  const beforeTitle = i;
-  i = skipWhitespace(text, i);
-  if (i < 0) return null;
-  if (i >= limit) return pastBound(text, limit);
-  if (i > beforeTitle && isTitleMarker(text.charCodeAt(i))) {
-    const title = titleAt(text, i, limit);
-    if (title === null || title === UNKNOWN) return title;
-    i = skipWhitespace(text, title);
+  if (i >= limit) return pastBound(end, limit);
+  let destination = ''; // an empty destination: `[r]()`, a link to nothing
+  if (text.charCodeAt(i) !== 41) {
+    const angle = text.charCodeAt(i) === 60;
+    const found = destinationAt(text, i, limit, end);
+    if (found === null || found === UNKNOWN) return found;
+    destination = found.destination;
+    i = found.next;
+    const after = text.charCodeAt(i);
+    if (angle && i < limit && !isSpaceOrTab(after) && !isLineEnding(after) && after !== 41) return null;
+    // an optional title, after whitespace; then whitespace and `)`
+    const beforeTitle = i;
+    i = skipWhitespace(text, i, limit);
     if (i < 0) return null;
-    if (i >= limit) return pastBound(text, limit);
+    if (i >= limit) return pastBound(end, limit);
+    if (i > beforeTitle && isTitleMarker(text.charCodeAt(i))) {
+      const title = titleAt(text, i, limit, end);
+      if (title === null || title === UNKNOWN) return title;
+      i = skipWhitespace(text, title, limit);
+      if (i < 0) return null;
+      if (i >= limit) return pastBound(end, limit);
+    }
   }
-  return text.charCodeAt(i) === 41 ? { destination: found.destination, end: i } : null;
+  return text.charCodeAt(i) === 41 ? { destination, end: i } : null;
 }
 
-// After the `:` of a reference definition's label at `colon`: the index of the last character of its destination, and
-// of its title when one follows; -1 when no destination does. Neither is a link, and the window draws neither. The
-// definition's validity is not judged (what may follow it on the line): passing over too much fails towards the refusal.
-function definitionEnd(text: string, colon: number): number | typeof UNKNOWN {
-  const limit = Math.min(text.length, colon + 1 + LINK_TAIL_MAX);
-  const i = skipWhitespace(text, colon + 1);
-  if (i < 0) return -1;
-  if (i >= limit) return pastBound(text, limit) ?? -1;
-  const found = destinationAt(text, i, limit);
-  if (found === UNKNOWN) return UNKNOWN;
-  if (found === null) return -1;
-  const t = skipWhitespace(text, found.next);
+// A link label from the `[` at `at`: no unescaped bracket inside, at most LABEL_MAX characters, not only whitespace.
+// The index of its `]`, or -1.
+function labelEnd(text: string, at: number, end: number): number {
+  const limit = Math.min(end, at + 1 + LABEL_MAX + 1);
+  let blank = true;
+  for (let i = at + 1; i < limit; i += 1) {
+    const code = text.charCodeAt(i);
+    if (escapes(text, i, limit)) {
+      i += 1;
+      blank = false;
+    } else if (code === 93) return blank ? -1 : i;
+    else if (code === 91) return -1;
+    else if (!isSpaceOrTab(code) && !isLineEnding(code)) blank = false;
+  }
+  return -1;
+}
+// A label as references match it: whitespace collapsed, case folded.
+const labelKey = (label: string) => label.trim().replace(/\s+/g, ' ').toLowerCase().toUpperCase();
+
+// A reference definition at `at` (a paragraph's `[`), CommonMark's: `[label]:`, whitespace with at most one line ending,
+// a destination, and either a title after whitespace or nothing, with only spaces or tabs after it to its line's end.
+// Its label and the index of the line ending (or the context's end) that ends it; null when none stands there. A
+// definition whose destination or title runs past the bound is taken as one to the context's end: nothing in it is read.
+function definitionAt(text: string, at: number, end: number): { label: string; end: number } | null {
+  if (text.charCodeAt(at + 1) === 94) return null; // `[^…]:` is a footnote's definition, whose text is Markdown
+  const close = labelEnd(text, at, end);
+  if (close < 0 || text.charCodeAt(close + 1) !== 58) return null;
+  const label = text.slice(at + 1, close);
+  const limit = Math.min(end, close + 2 + LINK_TAIL_MAX);
+  const i = skipWhitespace(text, close + 2, limit);
+  if (i < 0 || i >= end) return null;
+  if (i >= limit) return { label, end };
+  const found = destinationAt(text, i, limit, end);
+  if (found === UNKNOWN) return { label, end };
+  if (found === null) return null;
+  const lineEnded = (from: number) => {
+    const e = skipBlank(text, from, end);
+    return e >= end || text.charCodeAt(e) === 10 ? e : -1;
+  };
+  const t = skipWhitespace(text, found.next, limit);
   if (t > found.next && t < limit && isTitleMarker(text.charCodeAt(t))) {
-    const title = titleAt(text, t, limit);
-    if (title === UNKNOWN) return UNKNOWN;
-    if (title !== null) return title - 1;
+    const title = titleAt(text, t, limit, end);
+    if (title === UNKNOWN) return { label, end };
+    if (title !== null && lineEnded(title) >= 0) return { label, end: lineEnded(title) };
   }
-  return found.next - 1;
+  const plain = lineEnded(found.next);
+  return plain >= 0 ? { label, end: plain } : null;
 }
 
-// The click path of every inline link the local check finds in `text`, in order. At each unescaped `]` followed by `(`:
-// the `[` it closes (square brackets balance, escaped ones do not count, no blank line between) must not be escaped nor
-// follow an unescaped `!` (an image); then the destination, an optional title, and `)`. A link's or an image's resource
-// is read once and the scan goes on after it, and a reference definition's destination and title (a `[` that only
-// indentation or a quote's or a list's marker precede on its line, closed by `]:`; not a footnote's `[^`) are passed
-// over: text shaped like a link inside any of them is no link (the branch review's finding 1). No knowledge of the
-// blocks around, so a link in a code fence or in inline code is found too (ruled).
+// One line's container prefix, as far as it decides a block: the quote's depth (`>` markers), whether the line opens a
+// container (a list item's marker, a footnote's definition), and where its content begins after the prefix, with the
+// columns of indentation before it (a tab counted as four).
+interface Line {
+  start: number;
+  end: number;
+  quote: number;
+  opens: boolean;
+  content: number; // the first character after the prefix and the indentation
+  indent: number;
+}
+
+const isThematicBreak = (text: string, at: number, end: number) => {
+  const marker = text.charCodeAt(at);
+  if (marker !== 45 && marker !== 42 && marker !== 95) return false;
+  let count = 0;
+  for (let i = at; i < end; i += 1) {
+    const code = text.charCodeAt(i);
+    if (code === marker) count += 1;
+    else if (!isSpaceOrTab(code) && code !== 13) return false;
+  }
+  return count >= 3;
+};
+
+function lineAt(text: string, start: number): Line {
+  const end = lineEndAt(text, start);
+  let i = start;
+  let quote = 0;
+  let opens = false;
+  for (;;) {
+    let j = i;
+    let columns = 0;
+    while (j < end && columns < 4 && isSpaceOrTab(text.charCodeAt(j))) {
+      columns += text.charCodeAt(j) === 9 ? 4 : 1;
+      j += 1;
+    }
+    if (columns >= 4) break;
+    const code = text.charCodeAt(j);
+    if (code === 62) {
+      quote += 1;
+      i = j + 1;
+      if (isSpaceOrTab(text.charCodeAt(i))) i += 1;
+      continue;
+    }
+    let marker = -1; // the index after a list item's marker
+    if ((code === 45 || code === 43 || code === 42) && !isThematicBreak(text, j, end)) marker = j + 1;
+    else if (isDigit(code)) {
+      let k = j;
+      while (k < end && k - j < 9 && isDigit(text.charCodeAt(k))) k += 1;
+      if (text.charCodeAt(k) === 46 || text.charCodeAt(k) === 41) marker = k + 1;
+    } else if (code === 91 && text.charCodeAt(j + 1) === 94) {
+      const close = labelEnd(text, j, end);
+      if (close > 0 && text.charCodeAt(close + 1) === 58) marker = close + 2;
+    }
+    if (marker < 0 || (marker < end && !isSpaceOrTab(text.charCodeAt(marker)) && text.charCodeAt(marker) !== 13)) break;
+    opens = true;
+    // one to four spaces after the marker belong to it; past four, one does, and the rest is the content's indentation
+    let spaces = 0;
+    while (marker + spaces < end && spaces < 5 && isSpaceOrTab(text.charCodeAt(marker + spaces))) spaces += 1;
+    i = marker + (spaces >= 5 ? 1 : spaces);
+  }
+  let content = i;
+  let indent = 0;
+  while (content < end && isSpaceOrTab(text.charCodeAt(content))) {
+    indent += text.charCodeAt(content) === 9 ? 4 : 1;
+    content += 1;
+  }
+  return { start, end, quote, opens, content, indent };
+}
+
+// A fence's opening at `at`: three or more backticks (whose info has none) or tildes, or two or more dollars (math).
+function fenceAt(text: string, at: number, end: number): { marker: number; length: number } | null {
+  const marker = text.charCodeAt(at);
+  if (marker !== 96 && marker !== 126 && marker !== 36) return null;
+  let i = at;
+  while (i < end && text.charCodeAt(i) === marker) i += 1;
+  const length = i - at;
+  if (length < (marker === 36 ? 2 : 3)) return null;
+  if (marker !== 126 && text.slice(i, end).includes(String.fromCharCode(marker))) return null;
+  return { marker, length };
+}
+const closesFence = (text: string, at: number, end: number, fence: { marker: number; length: number }) => {
+  let i = at;
+  while (i < end && text.charCodeAt(i) === fence.marker) i += 1;
+  return i - at >= fence.length && skipBlank(text, i, end) >= end;
+};
+const headingAt = (text: string, at: number, end: number) => {
+  let i = at;
+  while (i < end && i - at < 7 && text.charCodeAt(i) === 35) i += 1;
+  const level = i - at;
+  return level >= 1 && level <= 6 && (i >= end || isSpaceOrTab(text.charCodeAt(i)) || text.charCodeAt(i) === 13) ? i : -1;
+};
+const isSetextUnderline = (text: string, at: number, end: number) => {
+  const marker = text.charCodeAt(at);
+  if (marker !== 61 && marker !== 45) return false;
+  let i = at;
+  while (i < end && text.charCodeAt(i) === marker) i += 1;
+  return skipBlank(text, i, end) >= end;
+};
+// The cells of a table row, [start, end) each: split at every unescaped `|`, the row's outer pipes dropped.
+function cellsOf(text: string, at: number, end: number): [number, number][] {
+  const cells: [number, number][] = [];
+  let start = at;
+  for (let i = at; i < end; i += 1) {
+    if (escapes(text, i, end)) i += 1;
+    else if (text.charCodeAt(i) === 124) {
+      cells.push([start, i]);
+      start = i + 1;
+    }
+  }
+  cells.push([start, end]);
+  if (cells.length > 1 && skipBlank(text, cells[0]![0], cells[0]![1]) >= cells[0]![1]) cells.shift();
+  if (cells.length > 1 && skipBlank(text, cells[cells.length - 1]![0], cells[cells.length - 1]![1]) >= cells[cells.length - 1]![1]) cells.pop();
+  return cells;
+}
+const DELIMITER_ROW = /^\|?[ \t]*:?-+:?[ \t]*(\|[ \t]*:?-+:?[ \t]*)*\|?[ \t\r]*$/;
+const isDelimiterRow = (text: string, at: number, end: number) => {
+  const row = text.slice(at, end);
+  return row.includes('|') && DELIMITER_ROW.test(row);
+};
+
+// Where inline links can stand: a paragraph after its leading reference definitions, a heading's text, a table's cell.
+interface Context {
+  start: number;
+  end: number;
+}
+
+// The block pass: the text's contexts, in order, and the labels of the reference definitions it holds. A code fence
+// (backticks, tildes, or math's dollars), an indented code block, a thematic break or a heading's underline holds no
+// link; a blank line, or a line of a quote's markers alone, ends a paragraph; a list item or a deeper quote starts a new
+// one; a line that only continues a paragraph (a lazy one too) stays in it. Raw HTML is no block here, as in the window
+// (its parser has HTML switched off). Where the pass cannot tell (a list item's own indentation, an ordered item that
+// cannot interrupt a paragraph, a table under a paragraph), it takes the side that reads fewer links.
+function* blocksOf(text: string, contexts: Context[], defined: Set<string>): Generator<null, void, void> {
+  let fence: { marker: number; length: number; quote: number } | null = null;
+  let paragraph: { lines: number[]; quote: number; end: number } | null = null;
+  let table: { quote: number } | null = null;
+  let pause = SCAN_STEP_CHARS;
+  const closeParagraph = () => {
+    if (paragraph === null) return;
+    const { lines, end } = paragraph;
+    paragraph = null;
+    let at = lines[0]!;
+    let k = 0;
+    for (;;) {
+      const definition = text.charCodeAt(at) === 91 ? definitionAt(text, at, end) : null;
+      if (definition === null) break;
+      defined.add(labelKey(definition.label));
+      while (k < lines.length && lines[k]! <= definition.end) k += 1;
+      if (k >= lines.length) return;
+      at = lines[k]!;
+    }
+    contexts.push({ start: at, end });
+  };
+  const row = (line: Line) => {
+    for (const [start, end] of cellsOf(text, line.content, line.end)) contexts.push({ start, end });
+  };
+  for (let start = 0; start < text.length; ) {
+    if (start >= pause) {
+      pause = start + SCAN_STEP_CHARS;
+      yield null;
+    }
+    const line = lineAt(text, start);
+    const next = line.end + 1;
+    if (fence !== null && line.quote < fence.quote) fence = null; // its container closed
+    if (fence !== null) {
+      if (line.indent < 4 && closesFence(text, line.content, line.end, fence)) fence = null;
+      start = next;
+      continue;
+    }
+    if (skipBlank(text, line.content, line.end) >= line.end) {
+      closeParagraph();
+      table = null;
+      start = next;
+      continue;
+    }
+    const opened = line.indent < 4 ? fenceAt(text, line.content, line.end) : null;
+    const heading = line.indent < 4 ? headingAt(text, line.content, line.end) : -1;
+    const blockStarts = opened !== null || heading >= 0 || (line.indent < 4 && isThematicBreak(text, line.content, line.end));
+    if (table !== null && (line.quote < table.quote || line.opens || blockStarts)) table = null;
+    if (table !== null) {
+      row(line);
+      start = next;
+      continue;
+    }
+    if (line.indent >= 4) {
+      if (paragraph !== null && !line.opens) {
+        paragraph.lines.push(line.content);
+        paragraph.end = line.end;
+      } else closeParagraph(); // indented code
+      start = next;
+      continue;
+    }
+    if (opened !== null) {
+      closeParagraph();
+      fence = { ...opened, quote: line.quote };
+    } else if (heading >= 0) {
+      closeParagraph();
+      contexts.push({ start: heading, end: line.end });
+    } else if (blockStarts || (paragraph !== null && !line.opens && isSetextUnderline(text, line.content, line.end))) {
+      closeParagraph();
+    } else if (next < text.length && isTableHeader(text, line, lineAt(text, next))) {
+      closeParagraph();
+      table = { quote: line.quote };
+      row(line);
+      start = lineEndAt(text, next) + 1; // the delimiter row holds no link
+      continue;
+    } else if (paragraph === null || line.opens || line.quote > paragraph.quote) {
+      closeParagraph();
+      paragraph = { lines: [line.content], quote: line.quote, end: line.end };
+    } else {
+      paragraph.lines.push(line.content);
+      paragraph.end = line.end;
+    }
+    start = next;
+  }
+  closeParagraph();
+}
+// A table's head: a row whose next line, in the same quote, is a delimiter row of as many cells.
+const isTableHeader = (text: string, line: Line, below: Line) =>
+  below.quote === line.quote && !below.opens && below.indent < 4 && isDelimiterRow(text, below.content, below.end) && cellsOf(text, below.content, below.end).length === cellsOf(text, line.content, line.end).length;
+
+const AUTOLINK = /<(?:[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\x00-\x20<>]*|[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*)>/y;
+const LITERAL_URL = /https?:\/\/|www\./iy; // GFM's literal autolinks
+const isAlphanumeric = (code: number) => asciiAlphanumeric(code);
+
+// The click path of every inline link the window draws as a path chip in `text`, in order (the link form; Interfaces
+// §A). The text is read as the window's Markdown reads it, as far as a link's standing goes: by blocks first
+// (`blocksOf`), then each context left to right, a code span, inline math, an autolink or a literal URL holding no
+// link, and links as CommonMark pairs them (an opener closed by a link no longer opens one around it; a link inside an
+// image's text is no chip). A link's or an image's resource, and a reference definition, are read once. Where the scan
+// cannot tell how the window reads a span (a literal URL's extent, a resource past 16 KiB), it reads no link there:
+// every path it names is one the window draws (the differential in `named-links.test.tsx` holds it), and a chip it does
+// not name fails towards the refusal.
 export function linkPaths(text: string): string[] {
   const out: string[] = [];
   for (const path of linkSteps(text)) if (path !== null) out.push(path);
   return out;
 }
 
-// What `linkPaths` reads, one bounded step at a time (the branch review's finding 2): each link or definition met
-// yields its click path, or null when it names none, and the scan yields null after every `SCAN_STEP_CHARS` of text, so a
-// caller can stop at the first path it wants and give the event loop back between steps.
-const SCAN_STEP_CHARS = 64 * 1024;
+// What `linkPaths` reads, one bounded step at a time (the branch review's finding 2): each link met yields its click
+// path, or null when it names none, and the scan yields null after every `SCAN_STEP_CHARS` of text, so a caller can stop
+// at the first path it wants and give the event loop back between steps.
 function* linkSteps(text: string): Generator<string | null, void, void> {
+  const contexts: Context[] = [];
+  const defined = new Set<string>();
+  yield* blocksOf(text, contexts, defined);
   let pause = SCAN_STEP_CHARS;
-  const opens: { at: number; leads: boolean }[] = []; // each unescaped `[` not yet closed, and whether it leads its line
-  let lineHasContent = false;
-  let prefixOnly = true; // nothing but a line prefix so far on this line
-  for (let i = 0; i < text.length; i += 1) {
-    if (i >= pause) {
-      pause = i + SCAN_STEP_CHARS;
-      yield null;
-    }
-    const code = text.charCodeAt(i);
-    if (code === 10) {
-      if (!lineHasContent) opens.length = 0; // a blank line: nothing before it closes after it
-      lineHasContent = false;
-      prefixOnly = true;
-      continue;
-    }
-    if (!isSpaceOrTab(code) && code !== 13) lineHasContent = true;
-    const leads = prefixOnly;
-    if (!isLinePrefix(code)) prefixOnly = false;
-    if (code === 91 && !isEscaped(text, i)) opens.push({ at: i, leads });
-    else if (code === 93 && !isEscaped(text, i)) {
-      const opener = opens.pop();
-      if (opener === undefined) continue;
-      const after = text.charCodeAt(i + 1);
-      let end: number;
-      if (after === 40) {
-        const resource = resourceAt(text, i + 2);
-        if (resource === null) continue; // no resource: what follows the `(` is text
-        if (resource === UNKNOWN) end = blankLineAfter(text, i + 2) - 1;
-        else {
-          end = resource.end;
-          const image = opener.at > 0 && text.charCodeAt(opener.at - 1) === 33 && !isEscaped(text, opener.at - 1);
-          yield image ? null : clickPath(resource.destination);
+  for (const { start, end } of contexts) {
+    const opens: { at: number; image: boolean; active: boolean }[] = [];
+    const runs = new Map<string, { from: number; at: number }>(); // per delimiter run, the first of its length found from a point
+    // The first run of exactly `length` of `marker` from `from` before `end`, or -1 (a code span's or math's closing run).
+    const runAt = (marker: string, length: number, from: number): number => {
+      const key = `${marker}${length}`;
+      const known = runs.get(key);
+      if (known !== undefined && known.from <= from && (known.at === -1 || known.at >= from)) return known.at;
+      let found = -1;
+      for (let j = text.indexOf(marker, from); j !== -1 && j < end; ) {
+        let k = j;
+        while (k < end && text[k] === marker) k += 1;
+        if (k - j === length) {
+          found = j;
+          break;
         }
-      } else if (after === 58 && opener.leads && text.charCodeAt(opener.at + 1) !== 94) {
-        const definition = definitionEnd(text, i + 1);
-        if (definition !== UNKNOWN && definition < 0) continue;
-        end = definition === UNKNOWN ? blankLineAfter(text, i + 2) - 1 : definition;
+        j = text.indexOf(marker, k);
+      }
+      runs.set(key, { from, at: found });
+      return found;
+    };
+    const deactivate = () => {
+      for (const opener of opens) if (!opener.image) opener.active = false;
+    };
+    for (let i = start; i < end; ) {
+      if (i >= pause) {
+        pause = i + SCAN_STEP_CHARS;
         yield null;
-      } else continue;
-      i = end; // what the resource or the definition holds is not read again
+      }
+      const code = text.charCodeAt(i);
+      if (escapes(text, i, end)) {
+        i += 2;
+        continue;
+      }
+      if (code === 96 || code === 36) {
+        // a code span, or inline math (two dollars or more): its run closed by the next run of the same length
+        let k = i;
+        while (k < end && text.charCodeAt(k) === code) k += 1;
+        const length = k - i;
+        const close = code === 36 && length < 2 ? -1 : runAt(text[i]!, length, k);
+        i = close >= 0 ? close + length : k;
+        continue;
+      }
+      if (code === 60) {
+        AUTOLINK.lastIndex = i;
+        const autolink = AUTOLINK.exec(text);
+        i = autolink !== null && AUTOLINK.lastIndex <= end ? AUTOLINK.lastIndex : i + 1;
+        continue;
+      }
+      if ((code === 104 || code === 72 || code === 119 || code === 87) && (i === start || !isAlphanumeric(text.charCodeAt(i - 1)))) {
+        LITERAL_URL.lastIndex = i;
+        if (LITERAL_URL.test(text)) {
+          // a literal URL, to the next whitespace or `<`: no link in it, and none around it
+          let k = i;
+          while (k < end && !isSpaceOrTab(text.charCodeAt(k)) && !isLineEnding(text.charCodeAt(k)) && text.charCodeAt(k) !== 60) k += 1;
+          opens.length = 0;
+          i = k;
+          continue;
+        }
+      }
+      if (code === 33 && text.charCodeAt(i + 1) === 91) {
+        opens.push({ at: i + 1, image: true, active: true });
+        i += 2;
+        continue;
+      }
+      if (code === 91) {
+        opens.push({ at: i, image: false, active: true });
+        i += 1;
+        continue;
+      }
+      if (code !== 93) {
+        i += 1;
+        continue;
+      }
+      const opener = opens.pop();
+      if (opener === undefined || !opener.active) {
+        i += 1; // a literal `]`
+        continue;
+      }
+      if (text.charCodeAt(i + 1) === 40) {
+        const resource = resourceAt(text, i + 2, end);
+        if (resource === UNKNOWN) {
+          yield null; // past the bound: nothing more of this context is read
+          break;
+        }
+        if (resource !== null) {
+          if (opener.image) yield null;
+          else {
+            yield opens.some((open) => open.image) ? null : clickPath(resource.destination); // inside an image's text: alt text
+            deactivate();
+          }
+          i = resource.end + 1;
+          continue;
+        }
+      }
+      // a reference link: full (`[text][label]`), collapsed (`[text][]`) or shortcut (`[text]`), when its label is defined
+      let after = i + 1;
+      let key = labelKey(text.slice(opener.at + 1, i)); // a shortcut's, unless a label follows
+      if (text.charCodeAt(i + 1) === 91) {
+        const close = text.charCodeAt(i + 2) === 93 ? i + 2 : labelEnd(text, i + 1, end);
+        if (close > i + 2) key = labelKey(text.slice(i + 2, close));
+        if (close > 0) after = close + 1;
+      }
+      if (defined.has(key)) {
+        yield null; // the window draws no path chip for a reference link
+        if (!opener.image) deactivate();
+        i = after;
+        continue;
+      }
+      i += 1; // no link: a literal `]`, and its opener gone
     }
   }
 }

@@ -33,8 +33,6 @@ describe('the link form: linkPaths', () => {
     '| a | b |\n|---|---|\n| [r](/work/out/report.md) | x |',
     '> quoted [r](/work/out/report.md)',
     'two lines [of\nlink text](/work/out/report.md)',
-    '```\n[r](/work/out/report.md)\n```', // inside a code fence: the daemon reads no blocks (ruled)
-    '`[r](/work/out/report.md)`', // inside inline code: the same
   ])('%j names the path', (text) => {
     expect(linkPaths(text)).toContain(P);
   });
@@ -83,6 +81,18 @@ describe('the link form: linkPaths', () => {
     '[r](/work/out/report.md.bak)',
     '[r](/work/out/report.mdx)',
     '[r](/work/out/report.md/x)',
+    // the window draws no chip in code, in math, in another link's text or in an image's (fix round 1, the differential)
+    '```\n[r](/work/out/report.md)\n```',
+    '~~~\n[r](/work/out/report.md)\n~~~',
+    '$$\n[r](/work/out/report.md)\n$$',
+    '    [r](/work/out/report.md)',
+    '`[r](/work/out/report.md)`',
+    '``a ` [r](/work/out/report.md)``',
+    '$$[r](/work/out/report.md)$$',
+    '[a [b](/work/x.md) c](/work/out/report.md)',
+    '![a [b](/work/out/report.md) c](/work/i.png)',
+    '<https://e.com/[r](/work/out/report.md)>',
+    'see https://e.com/[r](/work/out/report.md)',
   ])('%j does not name the path', (text) => {
     expect(linkPaths(text)).not.toContain(P);
   });

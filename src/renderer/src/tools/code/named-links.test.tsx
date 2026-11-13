@@ -98,10 +98,21 @@ describe('what is not clickable today yields no path chip', () => {
     expect(linkPaths(markdown)).toEqual([]);
   });
 
-  // the one place the rule answers yes where the window draws no chip: the daemon reads no blocks (ruled)
-  it.each(['`[r](/work/out/report.md)`', '```\n[r](/work/out/report.md)\n```'])('%j: no chip, and the rule names the path', (markdown) => {
-    expect(clickedPaths(markdown)).toEqual([]);
-    expect(linkPaths(markdown)).toEqual([P]);
+  // a link in code, in math, in another link's text or in an image's: no chip, and the rule names nothing (fix round 1)
+  it.each([
+    '`[r](/work/out/report.md)`',
+    '```\n[r](/work/out/report.md)\n```',
+    '    [r](/work/out/report.md)',
+    '$$[r](/work/out/report.md)$$',
+    '![a [b](/work/out/report.md) c](/work/i.png)',
+  ])('%j: no chip, and the rule names nothing', (markdown) => {
+    expect(chipPaths(markdown)).toEqual([]);
+    expect(linkPaths(markdown)).toEqual([]);
+  });
+  it('a link inside another link\'s text is the chip; the outer one is none', () => {
+    const markdown = '[a [b](/work/x.md) c](/work/out/report.md)';
+    expect(clickedPaths(markdown)).toEqual(['/work/x.md']);
+    expect(linkPaths(markdown)).toEqual(['/work/x.md']);
   });
 });
 
