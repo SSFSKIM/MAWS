@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PendingSteer, QueueEntry } from '@shared/engine/session-state-store';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
+import { STALE_DRAFT_WORDS } from '@shared/ipc/schema/session';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { addressOf } from '@shared/machine/address';
 import { askSteerText } from '@shared/maws/ask';
@@ -23,6 +24,7 @@ import { hostStatus, supervisorStatus } from '../../test-support/host-status';
 import { HOST_UPDATING } from './host-wire';
 import { PAUSED_COPY, QueueList, UNCERTAIN_TEXT } from './QueueList';
 import { STACK_WORDS } from './stack';
+import { resetTakeBack, TAKE_BACK_WORDS, takeBack } from './take-back';
 
 const APP = 'app-1' as AppSessionId;
 const U1 = '11111111-1111-4111-8111-111111111111' as MessageUuid;
@@ -79,6 +81,7 @@ describe('the stack’s rows and their marks', () => {
     await user.click(within(row).getByRole('button', { name: 'Delete' }));
     expect(invoke).toHaveBeenCalledWith('session.queue.remove', { appSessionId: APP, queueId: 'q-1' });
     expect(invoke.mock.calls.map(([name]) => name)).not.toContain('session.queue.edit');
+    expect(invoke.mock.calls.map(([name]) => name)).not.toContain('session.drafts.set'); // Delete stages nothing
   });
 
   it('titles Send now by whether a turn runs', () => {
@@ -336,5 +339,22 @@ describe('the stack’s refused controls', () => {
     expect((within(rows()[1]).getByRole('button', { name: 'Send now' }) as HTMLButtonElement).disabled).toBe(false);
     act(() => useHosts.setState({ supervisor: hostStatus() }));
     expect(send().disabled).toBe(false);
+  });
+
+  // decision 13, "Where the store is of an earlier build": Edit is refused for that machine's sessions; Delete never is
+  it('once this Mac’s draft store answered a claim as stale, draws Edit refused with the sentence and leaves Delete', async () => {
+    window.maws = { localMachine: TEST_MACHINE } as never;
+    const { client, invoke } = bridge({ 'session.drafts.set': { ok: false, error: { code: 'internal', message: STALE_DRAFT_WORDS } } });
+    await takeBack(APP, { kind: 'after', key: 'q-1', queueId: 'q-1', content: 'message q-1', createdAt: '2026-09-29T10:00:00.000Z' }, { client, controls: () => null });
+    expect(invoke.mock.calls.map(([name]) => name)).toEqual(['session.drafts.set']); // nothing withdrawn
+    render(<QueueList appSessionId={APP} busy queue={queue([entry('q-1')])} client={client} />);
+    expect(notice()).toBe(TAKE_BACK_WORDS.needsServices);
+    const del = within(rows()[0]).getByRole('button', { name: 'Delete' }) as HTMLButtonElement;
+    expect(del.disabled).toBe(false);
+    await userEvent.setup().click(within(rows()[0]).getByRole('button', { name: 'More' }));
+    const edit = await screen.findByRole('menuitem', { name: 'Edit' });
+    expect(edit.getAttribute('aria-disabled')).toBe('true');
+    expect(edit.getAttribute('title')).toBe(TAKE_BACK_WORDS.needsServices);
+    resetTakeBack();
   });
 });

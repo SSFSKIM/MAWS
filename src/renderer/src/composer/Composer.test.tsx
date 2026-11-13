@@ -42,6 +42,7 @@ import type { Draft } from '@shared/ipc/schema/session'; // P3-G
 import { useHosts } from '../stores/hosts'; // UX wave U4a M3
 import { hostStatus, supervisorStatus } from '../test-support/host-status'; // UX wave U4a M3
 import { HOST_UPDATING } from './queue/host-wire'; // UX wave U4a M3
+import { STACK_WORDS } from './queue/stack'; // UX wave U4a M3
 import { resetTakeBack } from './queue/take-back'; // UX wave U4a M3
 import { addMarkupToChat, MARKUP_COPY, resetMarkup, startMarkup, useMarkup } from '../markup/session'; // P3-G
 import { registerMarkupSurface, resetMarkupSurfaces } from '../markup/surface'; // P3-G
@@ -332,6 +333,21 @@ describe("composer DOM under C5's dispatcher", () => {
     act(() => fake.event('session.queue', { appSessionId: A_ID, entries: [later], paused: false, pauseReason: null }));
     await key(editorOf(), { key: 'ArrowUp' });
     await waitFor(() => expect(invoked('session.drafts.set')).toEqual([expect.objectContaining({ appSessionId: A_ID, replaces: DRAFT_CLAIM })])); // the stage, under the claim
+  });
+
+  it('Edit with text in the box says the box holds a draft and takes nothing back', async () => {
+    busy(A);
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
+    const later: QueueEntry = { queueId: 'q-1', appSessionId: A_ID, content: 'later', createdAt: '2026-09-29T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false };
+    act(() => fake.event('session.queue', { appSessionId: A_ID, entries: [later], paused: false, pauseReason: null }));
+    await type('a draft');
+    const user = userEvent.setup();
+    await user.click(within(composerOf(0)).getByRole('button', { name: 'More' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Edit' }));
+    expect(screen.getByRole('status', { name: 'Stack notice' }).textContent).toBe(STACK_WORDS.boxHoldsDraft);
+    expect(invoked('session.drafts.set').filter((input) => (input as { replaces?: string }).replaces === DRAFT_CLAIM)).toEqual([]);
+    expect(invoked('session.queue.remove')).toEqual([]);
   });
 
   // W3 (B7, charter §5.4 as amended 2026-10-01): the terminal's Esc Esc, with no turn running, on an empty editor
