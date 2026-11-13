@@ -15,10 +15,12 @@ import { addressOf, isAddress } from '../../machine/address';
 import { MachineRefSchema, type MachineRef } from '../../machine/ref';
 import { OrgKeySchema } from '../../machine/org-key'; // P5 O6 M5
 
-// UX wave U4a M3: the action ids' enum typed by its alias. Inferred, each use printed every id twice into `REGISTRY`'s
-// declaration (src/shared/ipc/registry.ts), which the wave's growing action table pushed past what the compiler
-// serializes (TS7056); typed so, it is printed by name. The schema itself is the same.
-const ActionIdSchema: z.ZodType<ActionId, ActionId> = z.enum(ACTION_IDS);
+// UX wave U4a M3: the action ids' enum typed by a named interface. Inferred, each use printed every id twice into
+// `REGISTRY`'s declaration (src/shared/ipc/registry.ts), which sits near what the compiler serializes; the wave's growing
+// action table pushed it past (TS7056). An interface is printed by its name (a union or a type alias over one is not), so
+// the table's size no longer reaches that declaration. The schema itself is the same.
+export interface ActionIdSchemaType extends z.ZodType<ActionId, ActionId> {}
+const ActionIdSchema: ActionIdSchemaType = z.enum(ACTION_IDS);
 
 // W5 (§5.2 as amended 2026-10-01): the Overview is no longer a tab; it floats over the main area (`regions.overview`).
 // A stored `main.tabs` that still holds its tab is read through `StoredMainSchema`, which drops it. W6 (E1): the
