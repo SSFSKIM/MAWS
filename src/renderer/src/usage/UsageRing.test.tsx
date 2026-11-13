@@ -150,7 +150,7 @@ describe('the usage popover', () => {
       ['Weekly usage', '63'],
       ['Fable weekly usage', '82'],
     ]);
-    expect(popover.querySelectorAll('[data-account]:not([data-codex] [data-account])')).toHaveLength(5); // the Codex accounts stand apart
+    expect(accounts.filter((a) => a.closest('[data-codex]') === null)).toHaveLength(5); // the Codex accounts stand apart
     for (const codex of accounts.slice(5)) {
       expect(within(codex).queryAllByRole('meter')).toHaveLength(0);
       expect(codex.textContent).toContain("Limits show in ClaudeUsage's own panel");
