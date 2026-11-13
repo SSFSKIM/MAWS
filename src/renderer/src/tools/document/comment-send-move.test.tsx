@@ -16,7 +16,7 @@ import { createDocument } from '@artifacts/document/tabs';
 import { listThreads } from '@artifacts/document/threads';
 import type { ArtifactHost } from '@artifacts/host';
 import type { CommandName, MawsBridge, PreloadBridge } from '@shared/ipc/schema';
-import type { Strip, TabRef } from '@shared/ipc/schema/layout';
+import type { Strip, TabRef, TabSet } from '@shared/ipc/schema/layout';
 import type { LibraryRow } from '@shared/ipc/schema/library';
 import { library, resetLibrary, rowKey } from '../../library/store';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
@@ -209,7 +209,7 @@ describe('an unsent comment when its document moves onto a view of it already op
 
   // The main area: `left` beside session A's tab (focused), so the panel shown is A's once the document's tab is gone.
   function mainWith(left: TabRef[]): void {
-    const set = { ...EMPTY_TAB_SET, focusedPane: 1 as const, panes: [{ tabs: left, activeTabId: left.at(-1)!.id }, { tabs: [sessionTab(A)], activeTabId: sessionTab(A).id }] };
+    const set: TabSet = { ...EMPTY_TAB_SET, focusedPane: 1, panes: [{ tabs: left, activeTabId: left.at(-1)!.id }, { tabs: [sessionTab(A)], activeTabId: sessionTab(A).id }] };
     useLayout.setState({ hydrated: true, main: { ...LAYOUT_DEFAULTS.main, ...set } });
   }
   // A's Artifacts tab showing the document as a record.

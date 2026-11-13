@@ -45,7 +45,7 @@ function metadata(artifactId: string, projectId?: ProjectId): void {
 function sessionsIn(projects: Record<AppSessionId, ProjectId>): void {
   const ids = [...new Set(Object.values(projects))];
   useSessions.setState({
-    records: new Map([A, B, C].map((id) => [id, record(id, projects[id] === undefined ? {} : { projectId: projects[id] })])),
+    records: new Map([A, B].map((id) => [id, record(id, projects[id] === undefined ? {} : { projectId: projects[id] })])),
     projects: new Map(ids.map((id, order) => [id, project(id, order)])),
   });
   useMachines.setState({ loaded: new Set([TEST_MACHINE]) });

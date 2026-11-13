@@ -108,7 +108,7 @@ describe('layout persistence', () => {
       splitRatio: 0.4,
       closedTabs: [bare('x3')],
     };
-    const known = new Set([at('x1'), at('x2'), at('x3'), at('y1'), at('new')]); // `gone` is unknown
+    const known = new Set<string>([at('x1'), at('x2'), at('x3'), at('y1'), at('new')]); // `gone` is unknown
     const { store, hydrate, sets } = setup({ 'main.tabs': v1 });
     await hydrate((id) => known.has(id));
     const main = store.getState().main;
