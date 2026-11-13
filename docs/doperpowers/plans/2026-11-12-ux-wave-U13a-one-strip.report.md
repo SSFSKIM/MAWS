@@ -178,6 +178,12 @@ No merge conflicted. `3958e7df4` carries git's default merge message, without th
   - the guard and the touched test files: 5 files, 76 tests passed.
 - A12: `git diff origin/master...HEAD -- src/shared/keymap/actions.ts` prints nothing.
 
+### M5's third fix round and the round trip with F
+
+`a45780aad` changes only `e2e/cross-build.spec.ts`. In `(layout, to the peer)`, the peer now brings the page's tab forward from its own library row, as build F does. The fix's checks are the e2e tsc and eslint, both passing. The re-review of the scene was clean: every assertion proves the read or write it names.
+
+The round trip with build F at `a45780aad` is the run of record: run 43389572773, `--peer-exact f1852de3a`. It passed 6, skipped 7 and failed none. The three U13a scenes all ran and passed. The skipped scenes are the daemon-shape ones, which do not apply to this pair. Since that run, `e2e/cross-build.spec.ts` has not changed.
+
 ### e2e
 
 No executor runs e2e. The scenes to run alone first, the groups, and the cross-build run of record with F are in the execution document's Progress (the hand-over line of 2026-11-13).
@@ -185,7 +191,7 @@ No executor runs e2e. The scenes to run alone first, the groups, and the cross-b
 ### Not verified
 
 - A whole unit suite with no failure outside the known set. The VM's runs were noisy under load, and every other failure passes rerun alone. Class 1a is the record.
-- Every e2e scene on a real build. Your trial runs passed `(layout, from the peer)` and `(settings, both ways)`. `(layout, to the peer)` has been fixed twice since and has not been run since.
+- Not every e2e scene has been seen green on a real build yet. The groups at `4206f9520` passed `code`, `default`, `machines`, `panel` and `remote`; `layout` failed. `layout` and `default` are being rerun at `6b6cb77fa`.
 
 ## Residue
 
