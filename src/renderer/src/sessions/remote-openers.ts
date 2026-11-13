@@ -24,7 +24,7 @@ export function remoteOpenerFor(lane: RemoteLane): RemoteOpener | null {
 
 // P5 O7 M6 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M6): a session given by its address, as attention
 // names one (Needs you, ⌘⇧J, a notification click), opens through its lane's opener when it is listed and the lane has one
-// registered. Whether it did; the caller opens anything else its own way. UX wave U7 (O-38, #559): `how` goes to the opener,
+// registered. Whether it did; the caller opens anything else its own way. UX wave U7 (O-38, ticket 559): `how` goes to the opener,
 // so a new-tab request (a listed row's ⌘-click, middle click and Open in new tab; Needs you's) keeps the lane's retry.
 export function openListed(appSessionId: AppSessionId, how?: { newTab: boolean }): boolean {
   const listed = useSessions.getState().listed.get(appSessionId);

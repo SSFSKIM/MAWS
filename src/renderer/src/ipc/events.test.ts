@@ -482,7 +482,7 @@ describe('shell event subscription', () => {
     });
   });
 
-  // UX wave U7, #407 (Interfaces §B): from a refused read of this Mac's sessions until all three record reads apply, the
+  // UX wave U7, ticket 407 (Interfaces §B): from a refused read of this Mac's sessions until all three record reads apply, the
   // sessions store says "reconnecting"; nothing else writes it.
   describe('“reconnecting” while a read of this Mac’s sessions is refused', () => {
     const restarting = (fake: FakeClient, name: 'session.list' | 'session.projects.list' | 'session.digests' | 'attention.list') =>

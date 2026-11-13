@@ -258,7 +258,7 @@ export function connectShell(
 
   // One machine's snapshots, under C1's ordering rule (every event is subscribed above, and each store reconciles the
   // events that raced its snapshot). Whether its record side's snapshot applied, so the machine counts as loaded, and
-  // whether its attention's did. `refused` hears a refusal of any of the three record reads (UX wave U7, #407).
+  // whether its attention's did. `refused` hears a refusal of any of the three record reads (UX wave U7, ticket 407).
   const snapshot = (machine: MachineRef, refused?: () => void): { records: Promise<boolean>; attended: Promise<boolean> } => {
     const link = linkOf(machine);
     const live = stampOf(link);
@@ -336,7 +336,7 @@ export function connectShell(
   const localFirst = new Promise<boolean>((resolve) => (firstLocal = resolve));
   let recordsIn!: () => void;
   const localRecords = new Promise<void>((resolve) => (recordsIn = resolve));
-  // UX wave U7, #407: from a refused record read until all three apply, the sidebar says "reconnecting"; a reply for a
+  // UX wave U7, ticket 407: from a refused record read until all three apply, the sidebar says "reconnecting"; a reply for a
   // connection gone is no refusal (`answer`), and a start whose reads answer never says it.
   const stopLocal = askUntilAnswered(client, async () => {
     const { records, attended } = snapshot(local, () => sessions().setReconnecting(true));

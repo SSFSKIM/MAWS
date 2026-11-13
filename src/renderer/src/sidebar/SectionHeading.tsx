@@ -1,5 +1,5 @@
 // A sidebar section heading (mockup 01 `.section-heading`): small caps text with room for the section's own controls
-// beside it, outside the heading so its text stays the section's name. UX wave U7 (#407): a section that can say what
+// beside it, outside the heading so its text stays the section's name. UX wave U7 (ticket 407): a section that can say what
 // state it is in (`status`) gets a live region beside its name, in the muted colour and not in capitals, mounted while
 // the prop is given so that a word appearing in it is announced; an empty string draws nothing.
 import type { ReactNode } from 'react';

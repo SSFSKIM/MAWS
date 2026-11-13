@@ -93,7 +93,7 @@ function SidebarBody() {
   const digests = useSessions((s) => s.digests);
   const listedSessions = useSessions((s) => s.listed); // P5 O8 M2
   const turnsSeen = useSessions((s) => s.turnsSeen); // P5 O7 M10
-  const reconnecting = useSessions((s) => s.reconnecting); // UX wave U7, #407: a read of this Mac's sessions is refused
+  const reconnecting = useSessions((s) => s.reconnecting); // UX wave U7, ticket 407: a read of this Mac's sessions is refused
   const seen = useMemo(() => seenActivity(listedSessions, turnsSeen), [listedSessions, turnsSeen]); // P5 O7 M10: a remote record's activity
   // P5 O7 M10's follow-up: the clock an unread session's 24 h freshness is judged at, rounded to RANK_CLOCK_MS, so a row
   // past its window moves within that much of crossing it (or at the next store change), with no timer per row
@@ -450,7 +450,7 @@ function SidebarBody() {
                 <SortMenu sort={sidebar.sort} />
                 <AddProject />
               </SectionHeading>
-              {listEmpty && !reconnecting && <EmptyProjects /* #407: not while this Mac's read is refused */ />}
+              {listEmpty && !reconnecting && <EmptyProjects /* ticket 407: not while this Mac's read is refused */ />}
               {listed.length === 0 ? (
                 searching && <p className="m-0 px-[9px] py-1.5 text-ui-sm text-fg-faint">No projects match</p>
               ) : (

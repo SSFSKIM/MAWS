@@ -108,7 +108,7 @@ function NeedsYouItem({ row, labels, selected, tabStop, onFocus, onBlur, onKeyDo
   // every activation opens the session its way (a click takes the focused pane's place; ⌘-click and a middle click give
   // it a tab of its own), and an owner item's lands on its mark (P2-C); P5 O7 M6: a plain click on another machine's
   // listed session goes through its lane's opener (M2's pane, which tries a session it could not place again); UX wave U7
-  // (#559): every activation, an owner item's included, with the opener's new-tab request for a ⌘-click and a middle click
+  // (ticket 559): every activation, an owner item's included, with the opener's new-tab request for a ⌘-click and a middle click
   const open = (how: OpenSessionOptions) => {
     const openSession = (id: AppSessionId) => {
       if (!openListed(id, how.how === 'tab' ? { newTab: true } : undefined)) useLayout.getState().openSession(id, how);

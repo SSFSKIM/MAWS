@@ -6,7 +6,7 @@
 // while it draws other people's sessions. P5 O8 M7a (Q5): an org project's row whose sminos id the index knows offers
 // Channel, the project's one channel tab. P5 O8 M6b: a session's menu offers Share for a session you own, a listed row's
 // with no record here included. P5 O8 M5b: Add owner… after Share, for the
-// session's owners (sessions/share/target.ts' `useCanAddOwner`). UX wave U7 (O-38, #559): a listed row's menu opens with
+// session's owners (sessions/share/target.ts' `useCanAddOwner`). UX wave U7 (O-38, ticket 559): a listed row's menu opens with
 // Open and Open in new tab, through its lane's opener. UX wave U7 (O-16): Hide, or Unhide for a hidden session, in every
 // tree row's session menu, where `withHide` places it among a record's actions, and after a listing's opens; a Needs you
 // row's menu has none (the architect's ruling of 2026-11-13: that row stays where it is whatever is hidden). The project registry (docs/doperpowers/plans/
@@ -128,7 +128,7 @@ function SessionItems({ appSessionId, dropdown = false, hidable }: { appSessionI
   );
 }
 
-// UX wave U7 (O-38, #559): a listing's two opens, each through its lane's opener, never the session actions' handlers,
+// UX wave U7 (O-38, ticket 559): a listing's two opens, each through its lane's opener, never the session actions' handlers,
 // whose layout-store `openSession` skips the opener and its retry; drawn disabled where its lane has registered none.
 function ListedOpenItems({ listed, dropdown }: { listed: ListedSession; dropdown: boolean }) {
   const enabled = remoteOpenerFor(listed.lane) !== null;

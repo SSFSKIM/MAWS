@@ -29,7 +29,7 @@ describe('remote openers', () => {
     expect(remoteOpenerFor('A')).toBeNull();
   });
 
-  // UX wave U7, O-38 and #559: the new-tab request reaches the lane's opener
+  // UX wave U7, O-38 and ticket 559: the new-tab request reaches the lane's opener
   describe('openListed', () => {
     const studio = (id: string) => addressOf(OTHER_MACHINE, id) as AppSessionId;
     const listing: ListedSession = { ...remoteRow(OTHER_MACHINE, 'b1'), appId: studio('b1') };

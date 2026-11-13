@@ -1377,7 +1377,7 @@ describe('sidebar states', () => {
     const { rerender } = render(<Sidebar />);
     expect(screen.getByText('No projects yet')).toBeTruthy();
     expect(screen.queryByText('No projects match')).toBeNull();
-    expect(screen.queryByText('reconnecting')).toBeNull(); // #407: an ordinary empty workspace
+    expect(screen.queryByText('reconnecting')).toBeNull(); // ticket 407: an ordinary empty workspace
     expect((screen.getByRole('button', { name: 'Add project' }) as HTMLButtonElement).disabled).toBe(false);
     const create = screen.getByRole('button', { name: 'New chat' }) as HTMLButtonElement;
     expect(create.disabled).toBe(true);
@@ -1389,7 +1389,7 @@ describe('sidebar states', () => {
     expect(useSessions.getState().unstarted.get(at('app-new-2' as AppSessionId))?.projectId).toBeNull();
   });
 
-  // UX wave U7, #407: while a read of this Mac's sessions is refused (its daemon restarting), the sidebar draws what events
+  // UX wave U7, ticket 407: while a read of this Mac's sessions is refused (its daemon restarting), the sidebar draws what events
   // delivered and says so beside the Projects heading, instead of reading as an empty workspace.
   it('says “reconnecting” beside the Projects heading while this Mac’s read is refused, drawing the rows it has and no “No projects yet”', () => {
     fillStores(scenarioFile('empty'));
@@ -1843,7 +1843,7 @@ describe('listed rows from another machine', () => {
       expect(opened).toEqual([studio('b1')]);
     });
 
-    // UX wave U7, #559: the store's own open skips the opener's retry for a session whose stream ended
+    // UX wave U7, ticket 559: the store's own open skips the opener's retry for a session whose stream ended
     it('⌘-click and a middle click on its Needs you row open it in a tab of its own through its lane’s opener', () => {
       const calls: [AppSessionId, { newTab: boolean } | undefined][] = [];
       offs.push(registerRemoteOpener('B', (listed, how) => calls.push([listed.appId, how])));
@@ -1858,7 +1858,7 @@ describe('listed rows from another machine', () => {
       expect(needsYou()[0].getAttribute('data-menu')).toBe('none'); // a Needs you row keeps no menu for a listed session
     });
 
-    // UX wave U7, #559: an owner item's row lands on its mark, and still opens a listed session through its lane's opener
+    // UX wave U7, ticket 559: an owner item's row lands on its mark, and still opens a listed session through its lane's opener
     it('an anchored item of its Needs you row opens it through its lane’s opener, ⌘-click and a middle click with the new-tab request', () => {
       const calls: [AppSessionId, { newTab: boolean } | undefined][] = [];
       offs.push(registerRemoteOpener('B', (listed, how) => calls.push([listed.appId, how])));
@@ -1922,7 +1922,7 @@ describe('listed rows from another machine', () => {
     expect(drawn(row('MAWS'))).toEqual([['Remote refactor', 'listed']]);
   });
 
-  // UX wave U7, O-38 and #559: a listed row opens like a local one, every way through its lane's opener
+  // UX wave U7, O-38 and ticket 559: a listed row opens like a local one, every way through its lane's opener
   it('a click calls its lane’s opener; with none the row is selected and its card shows, opening nothing, and its two opens are disabled', async () => {
     fill([listedOn('b1', { title: 'Studio build', lane: 'A' })]);
     act(() => useLayout.getState().setSidebar({ expandedProjects: [ORG] as ProjectKey[] }));

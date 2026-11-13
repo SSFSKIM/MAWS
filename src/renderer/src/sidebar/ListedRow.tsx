@@ -3,7 +3,7 @@
 // and the age of its listing, in a session row's slots. A click calls its lane's opener (`remote-openers.ts`); with none,
 // the row is selected and its hover card shows. No drag, pin or unread: those act on a record. P5 O8 M5: its owners after
 // the title when they aren't you alone. P5 O8 M6b: its reach mark, and Share for a session you own in its menu (the
-// listing-capable session menu, menus.tsx). UX wave U7 (O-38, #559): it opens like a local row, through its lane's opener
+// listing-capable session menu, menus.tsx). UX wave U7 (O-38, ticket 559): it opens like a local row, through its lane's opener
 // (`openListed`): its menu (always named) and its three dots offer Open and Open in new tab, and a ⌘-click or a middle click
 // asks for a tab of its own; with no opener each of them selects the row and shows its card, as a click does. UX wave U7
 // (O-16): under its project's Hidden row it is `indented` one step.

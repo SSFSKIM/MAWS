@@ -28,7 +28,7 @@ import { EMPTY_REGISTRY, registryRecords } from './registry';
 
 export interface SessionsState {
   loaded: boolean;
-  // UX wave U7, #407 (Interfaces §B): a read of this Mac's sessions was refused (its daemon restarting) and none has
+  // UX wave U7, ticket 407 (Interfaces §B): a read of this Mac's sessions was refused (its daemon restarting) and none has
   // succeeded since; set and cleared only by the local snapshot's reads (`ipc/events.ts`), never timed out.
   reconnecting: boolean;
   revision: number; // the highest record-side revision seen
