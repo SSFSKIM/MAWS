@@ -19,8 +19,9 @@ const wait = (ms = DELAY * 4) => new Promise((resolve) => setTimeout(resolve, ms
 const T0 = Date.parse('2026-11-12T10:00:00.000Z');
 const iso = (ms: number) => new Date(ms).toISOString();
 const MIN = 60_000;
-const A = at('app-a');
-const B = at('app-b');
+const A = at('app-a' as AppSessionId);
+const B = at('app-b' as AppSessionId);
+const GONE = at('gone' as AppSessionId);
 const studio = (id: string) => addressOf(OTHER_MACHINE, id) as AppSessionId;
 
 const AT_REST: Look = { route: 'says', working: false };
@@ -195,7 +196,7 @@ describe('hidden store: reading and writing', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const fake = fakeClient({ 'layout.set': undefined });
     let throws = true;
-    const client = { ...fake.client, invoke: (name: string, input: unknown) => (throws && name === 'layout.get' ? Promise.reject(new Error('no bridge')) : fake.client.invoke(name as never, input as never)) } as unknown as MawsBridge;
+    const client = { ...fake.client, invoke: (name: string, input: unknown) => (throws && name === 'layout.get' ? Promise.reject(new Error('no bridge')) : (fake.client.invoke as (name: string, input: unknown) => Promise<unknown>)(name, input)) } as unknown as MawsBridge;
     const store = createHiddenStore(client, { writeDelayMs: DELAY, now });
     store.getState().hide(A);
     await wait();
@@ -382,11 +383,11 @@ describe('hidden store: the connection', () => {
 
   it("drops this Mac's entry once this Mac is loaded and holds no record at the address, and not before", async () => {
     setRecords(record(A));
-    const { fake, store } = await connected({ [at('gone')]: { at: iso(T0 - MIN), armedAt: null } });
+    const { fake, store } = await connected({ [GONE]: { at: iso(T0 - MIN), armedAt: null } });
     store.getState().hide(A);
-    expect(store.getState().hidden.has(at('gone'))).toBe(true); // an empty list at a start is not evidence
+    expect(store.getState().hidden.has(GONE)).toBe(true); // an empty list at a start is not evidence
     useMachines.getState().setLoaded(TEST_MACHINE);
-    expect(store.getState().hidden.has(at('gone'))).toBe(false);
+    expect(store.getState().hidden.has(GONE)).toBe(false);
     expect(store.getState().hidden.has(A)).toBe(true);
     setRecords();
     expect(store.getState().hidden.has(A)).toBe(false);

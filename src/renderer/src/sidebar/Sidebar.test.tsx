@@ -962,7 +962,7 @@ describe('hiding a session', () => {
     expand('proj-claude-usage-menubar');
     render(<Sidebar />);
     expect(projectRows()).toContain('claude-usage-menubar');
-    expect(kinds(row('claude-usage-menubar'))).toEqual(['project', 'hidden']);
+    expect(kinds(row('claude-usage-menubar'))).toEqual(['hidden']); // the project's own row, then its Hidden row alone
     expect(hiddenRow(row('claude-usage-menubar')).textContent).toBe('Hidden · 3');
   });
 });
