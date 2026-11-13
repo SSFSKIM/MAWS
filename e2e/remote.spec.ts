@@ -3192,7 +3192,7 @@ test('U9 A8, A9, A10: from A, Rename… on B’s listed row renames it on B; For
     journal.turn(ACTS_REPLY);
     journal.rename(RENAMED_ON_A); // a live session is renamed through its engine (the host's `rename_session`)
     const fork = new SideJournal(ACTS_FORK, join(root, 'b-checkout')); // the fork's engine: its prelude, no turn
-    const { b, page, app } = await laneBOpened({ root, aUserData, journal, first: 'Get ready to be acted on.', firstReply: ACTS_REPLY, title: ACTS_TITLE, open: false, launches: [fork] }, held);
+    const { scene, b, page, app } = await laneBOpened({ root, aUserData, journal, first: 'Get ready to be acted on.', firstReply: ACTS_REPLY, title: ACTS_TITLE, open: false, launches: [fork] }, held);
     const address = addressOf(b.ref, app);
     const row = sessionRow(page, address);
     type Record = { title: { text: string }; archived: boolean; lineage: { parentAppSessionId: string } | null };
@@ -3226,6 +3226,9 @@ test('U9 A8, A9, A10: from A, Rename… on B’s listed row renames it on B; For
       const bare = bareOf(forked!);
       await expect.poll(async () => (await onB(bare))?.lineage?.parentAppSessionId ?? null, { timeout: 30_000, message: 'B holds the fork, of the session' }).toBe(app);
       expect(await sessionTabsOf(page), 'the source’s tab stays').toContain(address);
+      // sminos lists the fork as it lists every session of B's: B's machine row keeps a row once the source is archived
+      await scene.sminos.list({ engine: ACTS_FORK, app: bare, owners: [scene.member], project: PROJECT, title: 'B’s fork', cwd: join(root, 'b-checkout') });
+      await quoting(expect(sessionRow(page, forked!), 'the fork’s row in A’s sidebar').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
     });
 
     await test.step('Archive from the row’s menu: its tab closes, its row leaves A’s sidebar, and B’s record is archived', async () => {
