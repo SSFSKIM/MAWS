@@ -292,34 +292,49 @@ describe('a run', () => {
 
 // Decision Log 33 (d): `conditions` holds only what §F lists, from the inject, where §F's window opens; the fourth
 // condition is about the lane that was adopted, so the other lane's failed attempts and its spent line are kept apart
-// A5 (UX wave U9 M5, #565): beside the live session's resume, a cold or idle tab's pane reads nothing on B; it reads at
-// main's settled word, which follows that resume's answer. Here app-1 is the live session (B answered its sub at
-// +240 ms) and app-2 the tab beside it.
+// A5 (UX wave U9 M5, #565): beside the live session's resume, a cold or idle tab's pane reads nothing; it reads at
+// main's settled word, which follows that resume's answer. Here app-1 is the live session (A heard its subbed at +250 ms,
+// B answered it at +240 ms) and app-2 the tab beside it. A's own start line of each history read (`asked`) is the read
+// whatever B answers it from (its ring, its journal or disk) and whether or not it has ended.
 describe('the reads beside a resume', () => {
   const whole = (s: number, app: string, ms: number) => line(s, `warn: [engine-host] session.events ${app} after start: from the journal, 420 rows read in ${ms} ms`);
-  const beside = (...reads: LogLine[]) => {
+  const asked = (s: number, app: string) => line(s, `[lane-b] lane B: timing history B/${app}: asked`);
+  const read = (s: number, app: string, ms: number) => line(s, `[lane-b] lane B: timing history B/${app}: budgeted launch, 1 pages, 5469 bytes, ${ms} ms`);
+  const beside = (a: readonly LogLine[], b: readonly LogLine[] = []) => {
     const input = passing('direct');
-    return historyReadsBeside({ carrier: 'direct', live: 'app-1', endpoint: input.endpoint, host: [...input.host, ...reads], restoredAt: input.restoredAt });
+    return historyReadsBeside({ carrier: 'direct', ref: REF, live: 'app-1', main: [...input.main, ...a], endpoint: input.endpoint, host: [...input.host, ...b], restoredAt: input.restoredAt });
   };
 
-  it('are none in a run whose resume reads only from its cursor', () => {
-    expect(beside()).toEqual([]);
+  it('are none in a run whose resume reads only from its cursor, and a read asked after the live session’s subbed passes', () => {
+    expect(beside([])).toEqual({ failures: [], inFlight: [] });
+    expect(beside([asked(82.3, 'app-2'), read(82.35, 'app-2', 50), asked(81.5, 'app-2'), read(81.6, 'app-2', 100)])).toEqual({ failures: [], inFlight: [] });
   });
 
-  it('name a whole-launch read of any session on B between the restore and the live session’s subbed', () => {
-    expect(beside(whole(82.1, 'app-2', 40))).toEqual(["direct: B read session app-2's whole launch (session.events app-2 after start, 420 rows in 40 ms, from +60 ms to +100 ms) before B's subbed of the live session app-1 at +240 ms"]);
-    expect(beside(whole(82.5, 'app-2', 400)), 'begun before the subbed, ended after it').toEqual(["direct: B read session app-2's whole launch (session.events app-2 after start, 420 rows in 400 ms, from +100 ms to +500 ms) before B's subbed of the live session app-1 at +240 ms"]);
-    expect(beside(whole(82.2, 'app-1', 10)), 'the live session’s own').toEqual(["direct: B read session app-1's whole launch (session.events app-1 after start, 420 rows in 10 ms, from +190 ms to +200 ms) before B's subbed of the live session app-1 at +240 ms"]);
+  it('name a history read A asked before it heard the live session’s subbed, whatever B answered it from', () => {
+    // B answered from its ring: no journal line on B at all
+    expect(beside([asked(82.1, 'app-2'), read(82.12, 'app-2', 20)]).failures).toEqual(["direct: A asked B for session app-2's history at +100 ms, before it heard B's subbed of the live session app-1 at +250 ms"]);
   });
 
-  it('let a read after the live session’s subbed, or one before the restore, pass', () => {
-    expect(beside(whole(82.3, 'app-2', 50), whole(81.9, 'app-2', 30))).toEqual([]);
+  it('name a read still in flight, and keep it among those in flight until its end line', () => {
+    const outstanding = beside([asked(82.2, 'app-2')]);
+    expect(outstanding.failures).toEqual(["direct: A asked B for session app-2's history at +200 ms, before it heard B's subbed of the live session app-1 at +250 ms"]);
+    expect(outstanding.inFlight).toEqual(['app-2 (asked at +200 ms)']);
+    expect(beside([asked(82.3, 'app-2')]).inFlight, 'after the subbed, in flight still').toEqual(['app-2 (asked at +300 ms)']);
+    expect(beside([asked(82.3, 'app-2'), read(82.4, 'app-2', 100)]).inFlight).toEqual([]);
   });
 
-  it('name a live session B did not answer after the restore', () => {
+  it('name a whole-launch read on B between the restore and B’s subbed of the live session, begun before it', () => {
+    expect(beside([], [whole(82.1, 'app-2', 40)]).failures).toEqual(["direct: B read session app-2's whole launch (session.events app-2 after start, 420 rows in 40 ms, from +60 ms to +100 ms) before B's subbed of the live session app-1 at +240 ms"]);
+    expect(beside([], [whole(82.5, 'app-2', 400)]).failures, 'begun before the subbed, ended after it').toEqual(["direct: B read session app-2's whole launch (session.events app-2 after start, 420 rows in 400 ms, from +100 ms to +500 ms) before B's subbed of the live session app-1 at +240 ms"]);
+    expect(beside([], [whole(82.3, 'app-2', 50), whole(81.9, 'app-2', 30)]).failures, 'after the subbed, or before the restore').toEqual([]);
+  });
+
+  it('name a live session not answered after the restore, on either side', () => {
     const input = passing('direct');
-    const endpoint = input.endpoint.filter((l) => !(l.at >= input.restoredAt && l.text.includes('session B:app-1')));
-    expect(historyReadsBeside({ carrier: 'direct', live: 'app-1', endpoint, host: input.host, restoredAt: input.restoredAt })).toEqual(["direct: B's mawsd.log has no sub … session B:app-1: subbed line after the restore"]);
+    const after = (l: LogLine) => l.at >= input.restoredAt && l.text.includes('session B:app-1: subbed');
+    const reading = (main: readonly LogLine[], endpoint: readonly LogLine[]) => historyReadsBeside({ carrier: 'direct', ref: REF, live: 'app-1', main, endpoint, host: input.host, restoredAt: input.restoredAt }).failures;
+    expect(reading(input.main.filter((l) => !after(l)), input.endpoint)).toEqual(["direct: main.log has no subscription … session B:app-1: subbed line after the restore"]);
+    expect(reading(input.main, input.endpoint.filter((l) => !after(l)))).toEqual(["direct: B's mawsd.log has no sub … session B:app-1: subbed line after the restore"]);
   });
 });
 

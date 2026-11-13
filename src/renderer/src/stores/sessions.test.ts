@@ -325,6 +325,24 @@ describe('what this window did to another machine’s session', () => {
     expect(store.getState().listed.has(B1)).toBe(true);
   });
 
+  // M5's review, finding 2: the archive keeps the listing as it was, its live word among it; the word is the window's
+  // to derive now, so the unarchive gives the listing the word the window holds at that moment, or none
+  it('lists an unarchived session with the live word the window holds now, not the one it had at the archive', () => {
+    const store = createSessionsStore();
+    store.getState().applyRows(rows(remoteRow(OTHER_MACHINE, 'b1', { revision: 4 })));
+    store.getState().applyLive(new Map([[B1, 'running']]));
+    expect(store.getState().listed.get(B1)?.live).toBe('running');
+    store.getState().noteArchived(B1);
+    store.getState().applyLive(new Map()); // the tab closed
+    store.getState().noteUnarchived(B1);
+    expect(store.getState().listed.has(B1)).toBe(true);
+    expect(store.getState().listed.get(B1)).not.toHaveProperty('live');
+    store.getState().noteArchived(B1);
+    store.getState().applyLive(new Map([[B1, 'resting']]));
+    store.getState().noteUnarchived(B1);
+    expect(store.getState().listed.get(B1)?.live).toBe('resting');
+  });
+
   it('marks a held record at the address archived or renamed, and unarchived again, without its revision', () => {
     const store = createSessionsStore();
     store.getState().applyChanged({ record: record(B1, { title: { text: 'Old title', source: 'generated' } }), cause: 'live', revision: 3 }, OTHER_MACHINE);

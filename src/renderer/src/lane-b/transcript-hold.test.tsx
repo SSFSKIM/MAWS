@@ -164,6 +164,30 @@ describe('the hold', () => {
     hold.unmount();
   });
 
+  // M5's review, finding 1: main says the roster's `down` before the session's (machines/index.ts, manager.ts), and the
+  // store publishes `hydrating` before it counts the pane's attachment, so a hold mounted first has acquired at neither
+  // word of the loss; the pane stays mounted through the outage, and nothing subscribes or remounts at the return
+  it('in main’s order, the roster’s down before the session’s: a hold not yet acquired at the loss heals a hydration that failed in the outage at the next generation’s word', async () => {
+    roster('up');
+    settledWord();
+    const hold = tab();
+    const first = pane();
+    roster('down'); // main's order: the roster first
+    stream('paused'); // then the session's word, the link down
+    refused(0);
+    await first.hydrated;
+    expect(entry().phase).toBe('failed');
+    roster('up');
+    await settle();
+    expect(reads(), 'decided at the settled word').toHaveLength(1);
+    settledWord();
+    await vi.waitFor(() => expect(reads()).toHaveLength(2));
+    answered(1);
+    await vi.waitFor(() => expect(entry().phase).toBe('live'));
+    first.unmount();
+    hold.unmount();
+  });
+
   it('keeps the key the pane attached across offline: at up the pane joins it, and nothing is read again', async () => {
     const hold = await heldThroughALoss();
     expect(attached(), 'held while the pane is unmounted').toBe(true);

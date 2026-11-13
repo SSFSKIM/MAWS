@@ -48,8 +48,23 @@ describe('the timing line', () => {
   const timed = async (link: FakeLink, input: Record<string, unknown> = { appSessionId: APP, afterSeq: null, limit: null }, budget = false) => {
     const logs: string[] = [];
     const answer = await readEventsInPages(link, input, { launch: () => 'L1', gap: () => {}, tooLarge: () => {}, log: (line) => void logs.push(line), pageEvents: 8, budget, pageBytes: 4000 });
-    return { answer, timing: logs.filter((line) => line.startsWith('lane B: timing ')) };
+    return { answer, timing: logs.filter((line) => line.startsWith('lane B: timing ') && !line.endsWith(': asked')), logs };
   };
+
+  // M5's review, finding 3: a read's start, said before its first page goes out, so a reader of the log sees a read in
+  // flight, and one the machine answers from its ring or from disk, whatever its end
+  it('says the read has been asked before its first page crosses, once', async () => {
+    const link = new FakeLink();
+    const atFirstPage: string[][] = [];
+    const logs: string[] = [];
+    link.answers.set('session.events', () => {
+      atFirstPage.push([...logs]);
+      return { ok: true, output: { events: [event(1)], lastSeq: 1, complete: true } };
+    });
+    await readEventsInPages(link, { appSessionId: APP, afterSeq: null, limit: null }, { launch: () => 'L1', gap: () => {}, tooLarge: () => {}, log: (line) => void logs.push(line), pageEvents: 8 });
+    expect(atFirstPage[0]).toEqual([`lane B: timing history mini/${APP}: asked`]);
+    expect(logs.filter((line) => line.endsWith(': asked'))).toHaveLength(1);
+  });
 
   it('names one call that answered whole, with its bytes', async () => {
     const rows = [[event(1)], [event(2), event(2, 1)]];
