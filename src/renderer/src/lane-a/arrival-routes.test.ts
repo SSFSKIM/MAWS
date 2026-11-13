@@ -120,7 +120,8 @@ describe('a background task’s end, from the file (Acceptance 4)', () => {
     // delivered with the person's next prompt, directly above that prompt.
     const at = (line: string) => rows.indexOf(line);
     expect(rows[at('● task completed: Background command "uxw ok" completed (exit code 0)') + 1]).toBe('turn engine, opened by task: Background command "uxw ok" completed (exit code 0)');
-    expect(rows[at('● task failed: Background command "uxw fail" failed with exit code 1') + 1]).toBe('turn engine, opened by task: Background command "uxw fail" failed with exit code 1');
+    // UX wave U2 (O-15; the U2a document's C5): the turn the failed one opened only answers, so it has no line
+    expect(rows).not.toContain('turn engine, opened by task: Background command "uxw fail" failed with exit code 1');
     expect(rows[at('● task stopped: Task "uxw stop" was stopped by the user or by the app connected to this session') + 1]).toMatch(/^prompt: Use the Agent tool/);
     // A hand-back's turn is the engine's ("Continued for"), opened by its report, which names the agent by its title
     expect(rows[at('› Report from uxw agent: PONG') - 1]).toBe('turn engine, opened by subagent: Report from uxw agent: PONG');
@@ -276,13 +277,14 @@ describe('deliveries no probe recorded, on both routes (Acceptance 2)', () => {
 });
 
 describe('a scheduled prompt’s firing, from the file (Acceptance 7)', () => {
-  it('a headless session’s meta row and a terminal’s fire row each open the engine’s turn, which the line names', async () => {
+  // UX wave U2 (O-15; the U2a document's C5): each fired turn only answers, so the fire's row stands and the turn has no line
+  it('a headless session’s meta row and a terminal’s fire row each open the engine’s turn, which only answers and has no line', async () => {
     for (const name of ['u3-cron-r1', 'u3-terminal-cron-r1']) {
       const rows = arrivalRows(drawn(stateOf(await fromFile(recorded(name)))));
       const fires = rows.filter((row) => row.startsWith('● schedule'));
       expect(fires.length, name).toBeGreaterThanOrEqual(3);
       for (const fire of new Set(fires)) expect(fire, name).toBe('● schedule: Running scheduled task · UXW tick: reply with only the word TOCK.');
-      expect(rows[rows.indexOf(fires[0]!) + 1], name).toBe('turn engine, opened by schedule: Running scheduled task · UXW tick: reply with only the word TOCK.');
+      expect(rows.filter((row) => row.startsWith('turn engine, opened by schedule')), name).toEqual([]);
     }
   });
 
@@ -296,7 +298,9 @@ describe('a scheduled prompt’s firing, from the file (Acceptance 7)', () => {
     for (const [route, state] of [['file', file], ['remote', remote]] as const) {
       const rows = arrivalRows(drawn(state));
       expect(rows.filter((row) => row.startsWith('● schedule')), route).toEqual(['● schedule: Running scheduled task · UXW tick: reply with only the word TOCK.']);
-      expect(rows.at(-1), route).toBe('turn engine, opened by schedule: Running scheduled task · UXW tick: reply with only the word TOCK.');
+      // UX wave U2 (O-15; the U2a document's C5): the fired turn has a line while it runs; once closed with nothing done, none
+      const line = drawn(state).find((row): row is Extract<Row, { kind: 'divider' }> => row.kind === 'divider' && row.opener?.class === 'schedule');
+      expect(line === undefined || line.state === 'working', route).toBe(true);
     }
   });
 
@@ -387,6 +391,9 @@ const FILE_ONLY: Record<string, Notice[]> = {
   'u3-cron-r1': [],
   'u3-commands-r1': [],
 };
+// UX wave U2 (O-15; the U2a document's C5 and its point 10, "A turn nobody announced"): a turn whose one row in the file
+// is a file-only notice and that only answers has nothing under it on the live wire, and so no line there
+const UNANNOUNCED: Record<string, string[]> = { 'u3-tasks-r1': ['Monitor event: "uxw monitor"'] };
 const FIRE_PROMPT = ' · UXW tick: reply with only the word TOCK.';
 const TYPED: Record<string, [file: string, live: string][]> = { 'u3-commands-r1': [['prompt: /usage', 'prompt: /cost']] };
 
@@ -396,6 +403,7 @@ function asTheLiveWireCarries(name: string, rows: string[]): string[] {
   return rows.flatMap((row) => {
     if (only.some((notice) => row === noticeRow(notice))) return [];
     const opened = only.find((notice) => row.endsWith(`, opened by ${notice.class}: ${notice.text}`));
+    if (opened !== undefined && UNANNOUNCED[name]?.includes(opened.text)) return [];
     if (opened !== undefined) return [row.slice(0, row.length - `, opened by ${opened.class}: ${opened.text}`.length)];
     const typed = TYPED[name]?.find(([file]) => file === row);
     if (typed !== undefined) return [typed[1]];
@@ -441,7 +449,8 @@ describe('a background task’s end, from the journal (Acceptance 4)', () => {
       '● task completed: Monitor "uxw busy monitor" stream ended',
     ]);
     expect(rows[at(rows, '● task completed: Background command "uxw ok" completed (exit code 0)') + 1]).toBe('turn engine, opened by task: Background command "uxw ok" completed (exit code 0)');
-    expect(rows[at(rows, '● task failed: Background command "uxw fail" failed with exit code 1') + 1]).toBe('turn engine, opened by task: Background command "uxw fail" failed with exit code 1');
+    // UX wave U2 (O-15; the U2a document's C5): the turn the failed one opened only answers, so it has no line
+    expect(rows).not.toContain('turn engine, opened by task: Background command "uxw fail" failed with exit code 1');
     expect(rows[at(rows, '● task stopped: Task "uxw stop" was stopped by the user or by the app connected to this session') + 1]).toMatch(/^prompt: Use the Agent tool/);
     // drawn when its turn opens: the journal read up to that turn's init
     const opened = journalToEvents(loadUxwaveJournal('u3-tasks-r1').filter((row) => row.seq <= 61));
