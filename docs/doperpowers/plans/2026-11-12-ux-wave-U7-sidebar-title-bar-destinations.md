@@ -21,7 +21,7 @@ Build F (commit `f1852de3a`) is the build on the owner's machines, and the owner
 - [x] (2026-11-13 03:30Z) Document written against master `5c9cfa0c5` (`d6f8c10de` at the end of the writing: probe fixtures and one scanner entry since, nothing this document rests on). The section checked against that code; what is consumed from landings in flight read at `origin/ux-wave/U13a` `772fd07ca`, `U8b` `6dc2f24de`, `U11a` `0adbfd07c`, `U6a` `936d6c003`, and U9's and U1a's documents.
 - [x] (2026-11-13) Adversarial review of this document (one P1, six P2, three short points) and the architect's rulings on it and on the thirteen points reported at authoring: folded in, one revision (Decision Log). The cut stands as written. Read again for the revision: master `d7ca414ae`, and `origin/ux-wave/U9` `c13d710b0`, which now holds code.
 - [x] (2026-11-13) The drawn example came back with nineteen points, and the architect ruled on each; the nine points handed back with revision 2 were accepted as written. Folded in, one pass (Decision Log).
-- [ ] M1 — Three small fixes: six words, "reconnecting", the chip's box.
+- [x] (2026-11-13) M1 — Three small fixes: six words, "reconnecting", the chip's box. Commits `83f56a79c..d3578520b`; reviewed clean.
 - [ ] M2 — A listed session opens like a local one.
 - [ ] M3 — Hide a session, and get it back. Its last step, the row's own button, is built on the owner's answer to question 1 (M3, decision 9).
 - [ ] M4 — U7a's e2e scenes, the record, and the acceptance run.
