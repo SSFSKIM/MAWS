@@ -26,6 +26,7 @@ import { useNotices } from '../stores/notices';
 import { activeTab, currentSet } from '../stores/layout-model';
 import { useSessions, type ListedSession } from '../stores/sessions';
 import { usePeople } from '../stores/people'; // P5 O8 M5
+import { HIDDEN_KEY, useHidden } from '../stores/hidden'; // UX wave U7, O-16
 import { connectRemoteReadMarks, resetRemoteReadMarks } from '../lane-b/read-marks'; // P5 O7 M2
 import { fileTabsByProject, fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { formatAge, type ProjectKey } from './derive';
@@ -631,7 +632,7 @@ describe('an expanded project', () => {
     expect(within(foreign).getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual(['Actions for Somersault terminal run', 'Mark unread']);
     fireEvent.contextMenu(foreign);
     const menu = await screen.findByRole('menu');
-    expect(within(menu).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open', 'Open in new tab']);
+    expect(within(menu).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Hide']); // UX wave U7, O-16: Hide after the opens
   });
 
   it('toggles an unread row on hover without opening or pinning it, retaining an accessible unread marker', async () => {
@@ -672,9 +673,10 @@ describe('an expanded project', () => {
     fireEvent.contextMenu(row('Charter + research'));
     const menu = await screen.findByRole('menu');
     const items = within(menu).getAllByRole('menuitem');
-    // C10: a live session offers no Resume; "Fork to a new worktree…" sits beside the fork in place
-    expect(items.map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Open in split', 'Pin', 'Rename…', 'Fork', 'Fork to a new worktree…', 'Archive', 'Delete conversation…']);
-    expect(items.map((m) => m.hasAttribute('data-disabled'))).toEqual([false, true, true, true, true, true, true, true, true]);
+    // C10: a live session offers no Resume; "Fork to a new worktree…" sits beside the fork in place. UX wave U7, O-16: Hide
+    // directly after Pin, always enabled, and nothing of it after "Delete conversation…"
+    expect(items.map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Open in split', 'Pin', 'Hide', 'Rename…', 'Fork', 'Fork to a new worktree…', 'Archive', 'Delete conversation…']);
+    expect(items.map((m) => m.hasAttribute('data-disabled'))).toEqual([false, true, true, true, false, true, true, true, true, true]);
   });
 
   // P5 O2 M2: the owner's Keep running mark, offered while the session's engine status reports it
@@ -775,6 +777,193 @@ describe('an expanded project', () => {
     await toggle(user, 'MAWS');
     await toggle(user, 'MAWS');
     expect(sessionRows(row('MAWS'))).toHaveLength(5);
+  });
+});
+
+// UX wave U7, O-16 (docs/doperpowers/plans/2026-11-12-ux-wave-U7-sidebar-title-bar-destinations.md, M3; Interfaces §C and
+// §D): Hide in every session row's menu, the project's "Hidden · N" row and its rows, Unhide at the head of the list.
+describe('hiding a session', () => {
+  const T = '2026-11-12T10:00:00.000Z';
+  let fake: ReturnType<typeof fakeClient>;
+  // The hidden store's first read answers these entries (or nothing), as main's layout file holds them.
+  const storedHidden = async (...titles: string[]) => {
+    fake = fakeClient({ 'layout.get': { value: titles.length === 0 ? null : { version: 1, hidden: Object.fromEntries(titles.map((t) => [idOf(t), { at: T, armedAt: null }])) } }, 'layout.set': undefined });
+    window.maws = fake.client as unknown as PreloadBridge;
+    await act(() => useHidden.getState().load());
+  };
+  const kinds = (el: HTMLElement) => within(el).getAllByRole('treeitem').map((t) => t.dataset.kind);
+  const hiddenRow = (el: HTMLElement) => within(el).getByRole('treeitem', { name: /^Hidden, / });
+  const menuItems = async () => within(await screen.findByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent);
+  beforeEach(() => fillStores(nine));
+
+  it('Hide from the context menu takes the row out at once; "Hidden · 1" ends the project, closed, and opens to the row, indented', async () => {
+    await storedHidden();
+    expand('proj-maws');
+    render(<Sidebar />);
+    fireEvent.contextMenu(row('Charter + research'));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Hide' }));
+    expect(sessionRows(row('MAWS'))).toEqual(['Workstation north star', 'Fix sidebar drag', 'Sidebar interaction pass']);
+    const hidden = hiddenRow(row('MAWS'));
+    expect(hidden.textContent).toBe('Hidden · 1');
+    expect(hidden.getAttribute('aria-label')).toBe('Hidden, 1 session');
+    expect(hidden.getAttribute('aria-expanded')).toBe('false');
+    expect(kinds(row('MAWS')).at(-1)).toBe('hidden');
+    await userEvent.click(hidden);
+    expect(hidden.getAttribute('aria-expanded')).toBe('true');
+    const shown = row('Charter + research');
+    expect(shown.getAttribute('aria-level')).toBe('3');
+    expect(shown.dataset.indented).toBe('true');
+    expect(row('Fix sidebar drag').dataset.indented).toBeUndefined();
+    expect(useHidden.getState().hidden.has(idOf('Charter + research'))).toBe(true);
+    fireEvent.contextMenu(shown);
+    expect(await menuItems()).toEqual(['Open', 'Open in new tab', 'Open in split', 'Pin', 'Unhide', 'Rename…', 'Fork', 'Fork to a new worktree…', 'Archive', 'Delete conversation…']);
+  });
+
+  it('Hide from the three dots, for a local record, without opening it', async () => {
+    await storedHidden();
+    expand('proj-maws');
+    const user = userEvent.setup();
+    render(<Sidebar />);
+    await user.click(within(row('Fix sidebar drag')).getByRole('button', { name: 'Actions for Fix sidebar drag' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Hide' }));
+    expect(sessionRows(row('MAWS'))).toEqual(['Workstation north star', 'Sidebar interaction pass', 'Charter + research']);
+    expect(hiddenRow(row('MAWS')).textContent).toBe('Hidden · 1');
+    expect(activeTab(useLayout.getState().main)).toBeNull();
+  });
+
+  it('draws "Hidden · 2" after "Show more", and a hidden session counts against neither the five nor the eight', async () => {
+    const many = scenarioFile('many-sessions');
+    fillStores(many);
+    const maws = pageScenario(many).sessions.filter((r) => r.projectId === at('proj-maws'));
+    fake = fakeClient({ 'layout.get': { value: { version: 1, hidden: Object.fromEntries(maws.slice(0, 2).map((r) => [r.appId, { at: T, armedAt: null }])) } }, 'layout.set': undefined });
+    window.maws = fake.client as unknown as PreloadBridge;
+    await act(() => useHidden.getState().load());
+    expand('proj-maws');
+    render(<Sidebar />);
+    expect(sessionRows(row('MAWS'))).toHaveLength(5);
+    expect(kinds(row('MAWS')).slice(-2)).toEqual(['more', 'hidden']);
+    expect(hiddenRow(row('MAWS')).textContent).toBe('Hidden · 2');
+    expect(hiddenRow(row('MAWS')).getAttribute('aria-label')).toBe('Hidden, 2 sessions');
+    expect(sessionRows(row('MAWS'))).not.toContain(maws[0].title.text);
+  });
+
+  it('the arrow keys reach the Hidden row; Enter opens it, ArrowDown steps in, ArrowLeft lands on it, then closes it, then steps to the project', async () => {
+    await storedHidden('Charter + research');
+    expand('proj-maws');
+    const user = userEvent.setup();
+    render(<Sidebar />);
+    row('MAWS').focus();
+    await user.keyboard('{ArrowRight}{ArrowDown}{ArrowDown}{ArrowDown}');
+    const hidden = hiddenRow(row('MAWS'));
+    expect(document.activeElement).toBe(hidden);
+    await user.keyboard('{Enter}');
+    expect(hidden.getAttribute('aria-expanded')).toBe('true');
+    await user.keyboard('{ArrowDown}');
+    expect(document.activeElement).toBe(row('Charter + research'));
+    await user.keyboard('{ArrowLeft}');
+    expect(document.activeElement).toBe(hidden);
+    await user.keyboard('{ArrowLeft}');
+    expect(hidden.getAttribute('aria-expanded')).toBe('false');
+    await user.keyboard('{ArrowRight}');
+    expect(hidden.getAttribute('aria-expanded')).toBe('true');
+    await user.keyboard(' ');
+    expect(hidden.getAttribute('aria-expanded')).toBe('false');
+    await user.keyboard('{ArrowLeft}');
+    expect(document.activeElement).toBe(row('MAWS'));
+  });
+
+  it('a Hidden row closes with its project and is closed when the project opens again', async () => {
+    await storedHidden('Charter + research');
+    expand('proj-maws');
+    const user = userEvent.setup();
+    render(<Sidebar />);
+    await user.click(hiddenRow(row('MAWS')));
+    expect(hiddenRow(row('MAWS')).getAttribute('aria-expanded')).toBe('true');
+    await toggle(user, 'MAWS');
+    await toggle(user, 'MAWS');
+    expect(hiddenRow(row('MAWS')).getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('the keyboard goes, after Hide, to the row that took its place, else to the Hidden row; after Unhide, to the unhidden row', async () => {
+    await storedHidden();
+    expand('proj-maws');
+    const user = userEvent.setup();
+    render(<Sidebar />);
+    act(() => row('Fix sidebar drag').focus());
+    fireEvent.contextMenu(row('Fix sidebar drag'));
+    await user.click(await screen.findByRole('menuitem', { name: 'Hide' }));
+    await waitFor(() => expect(document.activeElement).toBe(row('Sidebar interaction pass')));
+    act(() => row('Charter + research').focus());
+    fireEvent.contextMenu(row('Charter + research'));
+    await user.click(await screen.findByRole('menuitem', { name: 'Hide' }));
+    await waitFor(() => expect(document.activeElement).toBe(hiddenRow(row('MAWS'))));
+    await user.keyboard('{Enter}{ArrowDown}');
+    fireEvent.contextMenu(document.activeElement!);
+    await user.click(await screen.findByRole('menuitem', { name: 'Unhide' }));
+    const unhidden = useHidden.getState().leading;
+    expect(unhidden.size).toBe(1);
+    const back = [...unhidden][0] === idOf('Charter + research') ? 'Charter + research' : 'Fix sidebar drag';
+    await waitFor(() => expect(document.activeElement).toBe(row(back)));
+    expect(row(back).dataset.indented).toBeUndefined();
+    expect(within(projectsTree()).getAllByRole('treeitem').filter((t) => t.tabIndex === 0)).toEqual([row(back)]);
+  });
+
+  it('Unhide puts the session at the head of its list while the pointer is still inside the sidebar', async () => {
+    await storedHidden('SDK wire inventory');
+    expand('proj-claude-usage-menubar');
+    const user = userEvent.setup();
+    render(<Sidebar />);
+    fireEvent.pointerEnter(screen.getByTestId('sidebar-tree'));
+    expect(sessionRows(row('claude-usage-menubar'))).toEqual(['Usage reset countdown', 'Settings idle probe']);
+    await user.click(hiddenRow(row('claude-usage-menubar')));
+    fireEvent.contextMenu(row('SDK wire inventory'));
+    await user.click(await screen.findByRole('menuitem', { name: 'Unhide' }));
+    expect(sessionRows(row('claude-usage-menubar'))).toEqual(['SDK wire inventory', 'Usage reset countdown', 'Settings idle probe']);
+    expect(within(row('claude-usage-menubar')).queryByRole('treeitem', { name: /^Hidden, / })).toBeNull();
+    await waitFor(() => expect(fake.invoked('layout.set')).toEqual([{ key: HIDDEN_KEY, value: { version: 1, hidden: {} } }]));
+  });
+
+  it('a hidden pinned session is under Hidden, and pinned first again after Unhide', async () => {
+    await storedHidden('Workstation north star');
+    expand('proj-maws');
+    const user = userEvent.setup();
+    render(<Sidebar />);
+    expect(sessionRows(row('MAWS'))).toEqual(['Fix sidebar drag', 'Sidebar interaction pass', 'Charter + research']);
+    await user.click(hiddenRow(row('MAWS')));
+    expect(within(row('Workstation north star')).getByRole('img', { name: 'Pinned' })).toBeTruthy();
+    fireEvent.contextMenu(row('Workstation north star'));
+    await user.click(await screen.findByRole('menuitem', { name: 'Unhide' }));
+    expect(sessionRows(row('MAWS'))).toEqual(['Workstation north star', 'Fix sidebar drag', 'Sidebar interaction pass', 'Charter + research']);
+  });
+
+  it('a hidden session that waits is still under Needs you, and its project still counts it', async () => {
+    await storedHidden('Fix sidebar drag', 'Sidebar interaction pass');
+    render(<Sidebar />);
+    expect(within(screen.getByRole('list', { name: 'Needs you' })).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual([
+      'MAWS · Fix sidebar drag · Approval needed',
+      'MAWS · Sidebar interaction pass · Question',
+      'codex_somersault · Quota reset recovery · Plan review',
+    ]);
+    expect(within(row('MAWS')).getByLabelText('2 waiting')).toBeTruthy();
+  });
+
+  it('a search lists a hidden session in place, with no Hidden row', async () => {
+    await storedHidden('Fix sidebar drag');
+    expand('proj-maws');
+    render(<Sidebar />);
+    await userEvent.type(screen.getByRole('searchbox'), 'sidebar');
+    expect(sessionRows(row('MAWS'))).toEqual(['Fix sidebar drag', 'Sidebar interaction pass']);
+    expect(row('Fix sidebar drag').dataset.indented).toBeUndefined();
+    expect(within(row('MAWS')).queryByRole('treeitem', { name: /^Hidden, / })).toBeNull();
+  });
+
+  it('a project whose sessions are all hidden keeps its row, open on its Hidden row alone', async () => {
+    await storedHidden('Usage reset countdown', 'Settings idle probe', 'SDK wire inventory');
+    expand('proj-claude-usage-menubar');
+    render(<Sidebar />);
+    expect(projectRows()).toContain('claude-usage-menubar');
+    expect(kinds(row('claude-usage-menubar'))).toEqual(['project', 'hidden']);
+    expect(hiddenRow(row('claude-usage-menubar')).textContent).toBe('Hidden · 3');
   });
 });
 
@@ -1353,6 +1542,20 @@ describe('the sidebar across machines', () => {
     expect(row('Studio').getAttribute('data-menu')).toBe(`machine:${OTHER_MACHINE}`);
   });
 
+  it('Hide from the context menu of a record at another machine’s address takes it under Hidden, where its menu offers Unhide', async () => {
+    window.maws = fakeClient({ 'layout.get': { value: null }, 'layout.set': undefined }).client as unknown as PreloadBridge;
+    fill();
+    act(() => useLayout.getState().setSidebar({ expandedProjects: [maws.key] as ProjectKey[] }));
+    render(<Sidebar />);
+    fireEvent.contextMenu(row('Studio build'));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Hide' }));
+    expect(screen.queryByRole('treeitem', { name: 'Studio build' })).toBeNull();
+    await userEvent.click(within(row('MAWS')).getByRole('treeitem', { name: 'Hidden, 1 session' }));
+    expect(row('Studio build').dataset.indented).toBe('true');
+    fireEvent.contextMenu(row('Studio build'));
+    expect(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Unhide' })).toBeTruthy();
+  });
+
   it('marks another machine’s session rows with @name, this machine’s with nothing, and the project row with no machine', () => {
     fill();
     act(() => useLayout.getState().setSidebar({ expandedProjects: ['repo:maws'] as ProjectKey[] }));
@@ -1640,6 +1843,7 @@ describe('listed rows from another machine', () => {
     expect(items.map((m) => [m.textContent, m.hasAttribute('data-disabled'), m.getAttribute('title')])).toEqual([
       ['Open', true, 'Not available here'],
       ['Open in new tab', true, 'Not available here'],
+      ['Hide', false, null], // UX wave U7, O-16: hiding needs no opener
     ]);
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
@@ -1663,7 +1867,7 @@ describe('listed rows from another machine', () => {
     const tabsBefore = useLayout.getState().main;
     fireEvent.contextMenu(row('Studio build'));
     const menu = await screen.findByRole('menu');
-    expect(within(menu).getAllByRole('menuitem').map((m) => [m.textContent, m.hasAttribute('data-disabled')])).toEqual([['Open', false], ['Open in new tab', false]]);
+    expect(within(menu).getAllByRole('menuitem').map((m) => [m.textContent, m.hasAttribute('data-disabled')])).toEqual([['Open', false], ['Open in new tab', false], ['Hide', false]]);
     await userEvent.click(within(menu).getByRole('menuitem', { name: 'Open' }));
     fireEvent.contextMenu(row('Studio build'));
     await userEvent.click(await screen.findByRole('menuitem', { name: 'Open in new tab' }));
@@ -1687,11 +1891,32 @@ describe('listed rows from another machine', () => {
     act(() => useLayout.getState().setSidebar({ expandedProjects: [ORG] as ProjectKey[] }));
     render(<Sidebar />);
     await user.click(within(row('Studio build')).getByRole('button', { name: 'Actions for Studio build' }));
-    expect(within(await screen.findByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open', 'Open in new tab']);
+    expect(within(await screen.findByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Hide']);
     expect(row('Studio build').getAttribute('aria-selected')).not.toBe('true'); // the dots open the menu, not the session
     await user.keyboard('{Escape}');
     await user.click(within(row('Terminal pass')).getByRole('button', { name: 'Actions for Terminal pass' }));
-    expect(within(await screen.findByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open', 'Open in new tab']);
+    expect(within(await screen.findByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Hide']);
+  });
+
+  it('Hide from its three dots takes a listed row under Hidden, opening nothing; Unhide brings it back', async () => {
+    const user = userEvent.setup();
+    const open = vi.fn();
+    offs.push(registerRemoteOpener('B', open));
+    window.maws = fakeClient({ 'layout.get': { value: null }, 'layout.set': undefined }).client as unknown as PreloadBridge;
+    fill([listedOn('b1', { title: 'Studio build' })]);
+    act(() => useLayout.getState().setSidebar({ expandedProjects: [ORG] as ProjectKey[] }));
+    render(<Sidebar />);
+    await user.click(within(row('Studio build')).getByRole('button', { name: 'Actions for Studio build' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Hide' }));
+    expect(drawn(row('MAWS'))).toEqual([['Sidebar pass', 'session']]);
+    const hidden = within(row('MAWS')).getByRole('treeitem', { name: 'Hidden, 1 session' });
+    await user.click(hidden);
+    expect(row('Studio build').dataset.indented).toBe('true');
+    expect(row('Studio build').getAttribute('aria-level')).toBe('3');
+    await user.click(within(row('Studio build')).getByRole('button', { name: 'Actions for Studio build' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Unhide' }));
+    expect(drawn(row('MAWS')).map(([title]) => title)).toEqual(['Studio build', 'Sidebar pass']);
+    expect(open).not.toHaveBeenCalled();
   });
 
   it('a selected listed row stays unselected once the shown tab changes, even when the tab it was picked over returns', async () => {

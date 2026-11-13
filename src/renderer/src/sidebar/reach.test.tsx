@@ -134,10 +134,10 @@ describe('Share on a row', () => {
     );
     expect(row('Mine').getAttribute('data-menu')).toBe(`session:${studio('m')}`);
     expect(row('No project').getAttribute('data-menu')).toBe(`session:${studio('n')}`); // UX wave U7, O-38: every listed row's menu
-    expect(within(await menuOf('No project')).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open', 'Open in new tab']);
+    expect(within(await menuOf('No project')).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open', 'Open in new tab', 'Hide']); // UX wave U7, O-16: Hide after the opens
     await userEvent.keyboard('{Escape}');
     const menu = await menuOf('Mine');
-    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open', 'Open in new tab', SHARE.menuItem, OWNER.menuItem]);
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open', 'Open in new tab', 'Hide', SHARE.menuItem, OWNER.menuItem]);
     fireEvent.click(within(menu).getByRole('menuitem', { name: SHARE.menuItem }));
     expect(await screen.findByRole('dialog', { name: SHARE.title })).toBeTruthy();
   });

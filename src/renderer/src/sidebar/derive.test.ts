@@ -38,6 +38,7 @@ import {
   shownCount,
   shownTrees,
   sidebarSessionId,
+  splitHidden,
   type ProjectListInput,
   type ProjectSessionsInput,
   type SessionTree,
@@ -599,6 +600,33 @@ describe('an expanded project’s sessions', () => {
     expect([shownCount(3, false), shownCount(5, false), shownCount(250, false)]).toEqual([3, 5, 5]);
     expect([shownCount(3, true), shownCount(6, true), shownCount(250, true)]).toEqual([3, 6, 8]);
     expect(SESSIONS_CAP).toBe(8);
+  });
+});
+
+// UX wave U7, O-16 (Interfaces §D): a project's hidden sessions leave its ranked list after ranking and before the caps
+describe('a project’s hidden sessions', () => {
+  const at = (minutes: number) => `2026-11-12T${String(10 + Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}:00.000Z`;
+  const item = (id: string, minutes: number): { kind: 'record'; record: SessionRecord } => ({ kind: 'record', record: record(addr(id), { updatedAt: at(minutes) }) });
+  const listedItem = (id: string, minutes: number): { kind: 'listed'; listed: ListedSession } => ({ kind: 'listed', listed: { ...remoteRow(OTHER_MACHINE, id, { issued: at(minutes) }), appId: there(id) as AppSessionId } });
+  const activity = (entry: Parameters<typeof sidebarSessionId>[0]) => (entry.kind === 'record' ? Date.parse(entry.record.updatedAt) : Date.parse(entry.listed.issued));
+  const ids = (list: Parameters<typeof sidebarSessionId>[0][]) => list.map(sidebarSessionId);
+
+  it('keeps the rank order among the shown, and orders the hidden by newest activity, records and listed rows alike', () => {
+    const ranked = [item('a', 1), listedItem('b', 5), item('c', 9), item('d', 3), listedItem('e', 7)];
+    const hidden = new Set<AppSessionId>([addr('a') as AppSessionId, there('b') as AppSessionId, addr('d') as AppSessionId, there('e') as AppSessionId]);
+    const split = splitHidden(ranked, (id) => hidden.has(id), activity);
+    expect(ids(split.shown)).toEqual([addr('c')]);
+    expect(ids(split.hidden)).toEqual([there('e'), there('b'), addr('d'), addr('a')]);
+    expect(splitHidden(ranked, () => false, activity)).toEqual({ shown: ranked, hidden: [] });
+  });
+
+  it('takes a hidden session out of the five: six sessions with one hidden show five and no "Show more"', () => {
+    const ranked = Array.from({ length: 6 }, (_, i) => item(`s${i}`, 60 - i));
+    const split = splitHidden(ranked, (id) => id === addr('s2'), activity);
+    const drawn = shownTrees(nestItems(split.shown), false, new Set());
+    expect(drawn.shown.map((tree) => sidebarSessionId(tree.root))).toEqual(['s0', 's1', 's3', 's4', 's5'].map(addr));
+    expect(drawn.more).toBe(0);
+    expect(ids(split.hidden)).toEqual([addr('s2')]);
   });
 });
 
