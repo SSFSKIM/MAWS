@@ -20,8 +20,9 @@ The build on the owner's machines today, build F (commit `f1852de3a`), reads the
 
 - [x] (2026-11-12 22:46Z) Document written against master `85e934368`; the section checked against the code at that head ("What the code holds today").
 - [x] (2026-11-12 23:09Z) Adversarial review of this document: its five findings and two remarks, and the architect's rulings on the six points reported at authoring, are folded in (Decision Log).
-- [ ] Step 0 on master (U6a and U8a landed); this branch merges it (not a rebase: Decision Log, 2026-11-12 23:40Z). M1 runs before it, on the architect's word, over a merge of master at `eeba4e916`.
-- [x] (2026-11-13 01:31Z) M1 — The stored form and its reader. Commits `4a4f915d1..d07608d6c`, review fix `0c147f02f`; task review clean on its second round. Next: the architect's rehearsal on real layout files (Concrete Steps 4), then step 0 merged, then M2.
+- [ ] Step 0 on master (U6a and U8a landed); this branch merges it (not a rebase: Decision Log, 2026-11-12 23:40Z). M1 ran before it, over a merge of master at `eeba4e916`. U8a is in, through the merge of master at `4141b9cb1` (2026-11-13); U6a (#604) is not yet, and M2 to M5 do not wait for it (Decision Log, 2026-11-13).
+- [x] (2026-11-13 01:31Z) M1 — The stored form and its reader. Commits `4a4f915d1..d07608d6c`, review fix `0c147f02f`; task review clean on its second round. Next: the architect's rehearsal on real layout files (Concrete Steps 4), then M2.
+- [x] (2026-11-13) The rehearsal (Concrete Steps 4), run by the architect at `fcbe6e448` over copies of two of the owner's layout files, both `main.tabs` version 3: both lines end `pass`, with missing 0, added 0 and twice 0, and the sessions held equal in every machine view (one file has three). M1 accepted.
 - [ ] M2 — One strip in the store, and the current project.
 - [ ] M3 — New chat.
 - [ ] M4 — What the tabs and the title bar show.
@@ -231,7 +232,9 @@ Working directory for every command: the branch's worktree (the controller's bri
 
 4. **The rehearsal** (the architect; "Proof that an executor does not run"), in a checkout of the branch with dependencies installed, on a machine that may hold the copies:
 
-       MAWS_LAYOUT_REHEARSAL=<a directory outside any repository> pnpm exec vitest run test/layout/owner-files.test.ts
+       MAWS_LAYOUT_REHEARSAL=<a directory outside any repository> ./node_modules/.bin/vitest run test/layout/owner-files.test.ts --silent=false
+
+   `--silent=false` because vitest 5 hides a passing test's console output without it; `./node_modules/.bin/vitest` rather than `pnpm exec` because `pnpm exec` starts an install in a checkout whose `node_modules` is a link. vitest's own `RUN` header prints the checkout's absolute path: only the `file N of M` lines are quoted.
 
    Expected: the suite passing, and one entry per file of this shape. Files are named by a generated label, in the order of their names; a file that does not pass shows its label and one category word and nothing else. The numbers here are invented.
 
@@ -546,6 +549,12 @@ The pull request carries the dated amendments of the two rulings this landing re
   - Decision: the rehearsal compares the distinct tab ids both ways and gains a word, `tab-added`, for an id in the strip that no set held, checked after `tab-missing`. The closed list of M1's decisions is revised to hold it.
     Rationale: "tabs in must equal tabs out" (section, "The rehearsal"); the reviewer showed a converter that adds a tab passing every other check. Rejected: reusing `tab-missing` or `not-stored-form`, whose words would then misname what the architect reads.
     Date/Author: 2026-11-13, the controller, on M1's task review.
+- **2026-11-13 · The rehearsal passed; M2 to M5 go on before U6a lands** (the architect's word).
+  - Observation recorded: the architect ran the rehearsal at `fcbe6e448` over copies of two of the owner's layout files, both `main.tabs` version 3. Both lines end `pass`: missing 0, added 0, twice 0, and the sessions held equal in every machine view (one file has three). Nothing more of those files is recorded here or in the pull request: their counts are facts about the owner's profile.
+  - Decision: Concrete Steps 4 runs `./node_modules/.bin/vitest run test/layout/owner-files.test.ts --silent=false` (the architect's two findings: vitest 5 hides a passing test's output without the flag; `pnpm exec` starts an install where `node_modules` is a link).
+  - Decision: step 0 is not waited for. U8a is on master and merged (`4141b9cb1`); U6a (#604) is not, and this landing consumes nothing of it (§I). The branch merges `origin/master` at each milestone boundary; until #604 lands, the milestone that edits `keymap/actions-runtime.ts` or `shell/transfer.ts` reads U6a's version first (`git show origin/ux-wave/U6a:<path>`) and writes its edit so the later merge is small, without merging that branch. U8b is built in parallel and touches `stores/layout.ts`, `panel/surface-model.ts`, `test-support/panel.tsx`, `stores/layout-persist.test.ts` and `ipc/events.ts` (its M1 passes `multiInstance` to the hydrate call); whichever lands second takes that merge, and if master holds U8b at a boundary of ours, the merge is ours.
+  - Decision: M3 takes Q1's "no" branch: the owner answered on 2026-11-12, "only chats with content". M3 records it in Progress, makes §E's last paragraph read as settled, and builds that branch with its tests, its e2e clause and its dated amendment.
+    Date/Author: 2026-11-13, the controller, on the architect's message.
 
 ## Outcomes & Retrospective
 
