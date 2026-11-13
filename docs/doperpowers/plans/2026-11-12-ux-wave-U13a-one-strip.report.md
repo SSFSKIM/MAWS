@@ -129,6 +129,7 @@ Each milestone had one executor and an independent task review. Every Critical a
 | `d76a8d41a` | U6a | `pnpm typecheck` exit 0; vitest over `stores/ shell/ main/ keymap/ panel/ sidebar/ app/ ipc/ shared/ipc/schema/ shared/keymap/`: 152 files, 2268 tests passed |
 | `3958e7df4` | `d3c7edce3`, the gate's `--peer-exact` | the acceptance run below ran on top of it |
 | `438a8d116` | `80dcc59af`, `scripts/ci-gate.sh` only | `bash -n scripts/ci-gate.sh` passes |
+| `f8f8fda67` | `c0e7b2ae8`, U10a (#618: the document editor; none of U13a's files) | `pnpm typecheck` exit 0; vitest over the token guard, the layout schema, `stores/` and `tools/document/`: 46 files, 698 tests passed |
 
 No merge conflicted. `3958e7df4` carries git's default merge message, without the session line.
 
