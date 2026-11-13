@@ -20,8 +20,8 @@ import { openPaneTab, usePanes } from '../engine-surface/panes'; // R2
 import { PANE_COPY } from '../engine-surface/PaneTool'; // R2
 import { beginDrag, endDragFrom, moveArtifactToTab, panelTabMoves, usePanelRecord, useTransferRefusal } from '../shell/transfer'; // P4-B3
 import { TRANSFER_COPY } from '../tools/artifacts/copy'; // P4-B3
-import { panelHost, requestFocus, togglePinned, usePanelHost, useTabLabel, type PanelHostState } from './host';
-import { sideGroups, type SideGroupName } from './surface-model';
+import { panelHost, togglePinned, usePanelHost, useTabLabel, type PanelHostState } from './host';
+import { groupOf, sideGroups, type SideGroupName } from './surface-model';
 
 interface TabStripProps {
   appSessionId: AppSessionId | null;
@@ -34,14 +34,17 @@ interface TabStripProps {
 
 export function TabStrip({ appSessionId, group, tabs, activeTabId, bodyId, trailing }: TabStripProps) {
   const list = useRef<HTMLDivElement>(null);
-  const fit = useTabFit(list, tabs, activeTabId);
+  const fit = useTabFit(list, tabs, activeTabId, group);
   const split = useLayout((s) => sideGroups(s, appSessionId).lower !== null);
   // Where a tab's menu offers to move it (M3, decision 1): below from the upper group once there is something to split or
   // a group to join, above from the lower group.
   const moveTo: SideGroupName | null = group === 'lower' ? 'upper' : split || tabs.length > 1 ? 'lower' : null;
+  // The tab comes into view in the other group's strip, where it mounts again; the keyboard goes to its button there, that
+  // strip's Tab stop (the branch review's finding 4: the strip decides where the keyboard lands after its own act).
   const move = (tabId: string, to: SideGroupName) => {
+    handKeyboardTo(tabId, to);
     useLayout.getState().moveSurfaceTab(appSessionId, tabId, to);
-    requestFocus(tabId); // it comes into view in the other group, as a tab that is chosen: its tool takes the keyboard
+    if (groupOf(sideGroups(useLayout.getState(), appSessionId), tabId) !== to) keyboardFor = null; // the move was refused
   };
   // Arrow keys move focus along the tabs (the WAI-ARIA tabs pattern, manual activation).
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -59,13 +62,27 @@ export function TabStrip({ appSessionId, group, tabs, activeTabId, bodyId, trail
         {tabs.map((tab) => {
           const selected = tab.id === activeTabId;
           const shape: TabShape = fit.icons.has(tab.id) ? 'icon' : selected && fit.shownMax !== null ? 'cut' : 'whole';
-          return <Tab key={tab.id} tab={tab} selected={selected} shape={shape} maxWidth={shape === 'cut' ? fit.shownMax : null} canPin={appSessionId !== null} bodyId={bodyId} onSelect={() => panelHost.selectTab(tab.id)} moveTo={moveTo} onMove={(to) => move(tab.id, to)} />;
+          return <Tab key={tab.id} tab={tab} group={group} selected={selected} shape={shape} maxWidth={shape === 'cut' ? fit.shownMax : null} canPin={appSessionId !== null} bodyId={bodyId} onSelect={() => panelHost.selectTab(tab.id)} moveTo={moveTo} onMove={(to) => move(tab.id, to)} />;
         })}
       </div>
       <AddMenu appSessionId={appSessionId} group={group} />
       {trailing}
     </div>
   );
+}
+
+// ---- where the keyboard goes after a strip's own act (UX wave U8b; the branch review's findings 4 and 5) -----------------
+
+// A tab whose button takes the keyboard the next time it is drawn in `group`'s strip: after a move, in the strip it lands
+// in; after a fold to its icon, which takes away the glyph that held the keyboard, in its own.
+let keyboardFor: { tabId: string; group: SideGroupName } | null = null;
+function handKeyboardTo(tabId: string, group: SideGroupName): void {
+  keyboardFor = { tabId, group };
+}
+function takesKeyboard(tabId: string, group: SideGroupName): boolean {
+  if (keyboardFor?.tabId !== tabId || keyboardFor.group !== group) return false;
+  keyboardFor = null;
+  return true;
 }
 
 // ---- a strip too narrow for its tabs (UX wave U8b, M2, decision 5) ------------------------------------------------------
@@ -99,7 +116,7 @@ const sameFit = (a: TabFit, b: TabFit) => a.shownMax === b.shownMax && a.icons.s
 
 // The strip's fit, followed through resizes of the row and of its tabs. A tab's whole width is read while it is drawn
 // whole and kept for when it is not; a tab not measured yet is drawn whole first. A row not laid out (0 px) fits all.
-function useTabFit(list: RefObject<HTMLDivElement | null>, tabs: readonly PanelTabRef[], shownId: string | null): TabFit {
+function useTabFit(list: RefObject<HTMLDivElement | null>, tabs: readonly PanelTabRef[], shownId: string | null, group: SideGroupName): TabFit {
   const [fit, setFit] = useState<TabFit>(WHOLE);
   const whole = useRef(new Map<string, number>());
   useLayoutEffect(() => {
@@ -111,6 +128,10 @@ function useTabFit(list: RefObject<HTMLDivElement | null>, tabs: readonly PanelT
       }
       const room = element.clientWidth;
       const next = room === 0 ? WHOLE : fitTabs(room, tabs.map((tab) => ({ id: tab.id, whole: whole.current.get(tab.id) ?? MIN_TAB_PX })), shownId);
+      // A tab that folds now while one of its glyphs holds the keyboard hands it to the tab's own button.
+      const glyph = document.activeElement instanceof HTMLElement && document.activeElement.getAttribute('role') !== 'tab' ? document.activeElement : null;
+      const holder = glyph && element.contains(glyph) ? glyph.closest<HTMLElement>('[data-tab-id]') : null;
+      if (holder && holder.dataset.tabShape !== 'icon' && next.icons.has(holder.dataset.tabId!)) handKeyboardTo(holder.dataset.tabId!, group);
       setFit((previous) => (sameFit(previous, next) ? previous : next));
     };
     measure();
@@ -119,7 +140,7 @@ function useTabFit(list: RefObject<HTMLDivElement | null>, tabs: readonly PanelT
     observer.observe(element);
     for (const node of element.children) observer.observe(node);
     return () => observer.disconnect();
-  }, [list, tabs, shownId, fit]);
+  }, [list, tabs, shownId, fit, group]);
   return fit;
 }
 
@@ -127,6 +148,7 @@ type TabShape = 'whole' | 'icon' | 'cut';
 
 interface TabProps {
   tab: PanelTabRef;
+  group: SideGroupName; // the group whose strip draws it
   selected: boolean;
   shape: TabShape;
   maxWidth: number | null;
@@ -137,7 +159,7 @@ interface TabProps {
   onMove(to: SideGroupName): void;
 }
 
-function Tab({ tab, selected, shape, maxWidth, canPin, bodyId, onSelect, moveTo, onMove }: TabProps) {
+function Tab({ tab, group, selected, shape, maxWidth, canPin, bodyId, onSelect, moveTo, onMove }: TabProps) {
   const { tool, title, suffix } = useTabLabel(tab); // the header reads the same label (P3-G)
   const closing = usePanelHost((s) => s.closing.has(tab.id));
   const pinnable = tool ? tool.pinnable : true;
@@ -147,6 +169,12 @@ function Tab({ tab, selected, shape, maxWidth, canPin, bodyId, onSelect, moveTo,
   const revealed = selected ? '' : 'hidden group-hover:inline-flex group-focus-within:inline-flex'; // unrevealed glyphs take no width
   const record = usePanelRecord(tab.id); // P4-B3: the artifact it shows, which a drag moves to main
   useEffect(() => () => endDragFrom('panel', tab.id), [tab.id]); // INV-5: a tab unmounting mid-drag ends its drag
+  const button = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    if (takesKeyboard(tab.id, group)) button.current?.focus();
+  });
+  // A move remounts the tab in the other strip, which takes the keyboard; its menu closing gives none back here.
+  const moved = useRef(false);
 
   const element = (
     <div
@@ -158,6 +186,7 @@ function Tab({ tab, selected, shape, maxWidth, canPin, bodyId, onSelect, moveTo,
       className={`group flex h-7 shrink-0 items-center rounded-sm ${iconOnly ? 'w-7' : 'max-w-48 min-w-18'} ${selected ? 'bg-bg-active text-fg' : 'text-fg-muted hover:bg-bg-hover hover:text-fg'}`}
     >
       <button
+        ref={button}
         type="button"
         role="tab"
         aria-selected={selected}
@@ -201,10 +230,16 @@ function Tab({ tab, selected, shape, maxWidth, canPin, bodyId, onSelect, moveTo,
     <ContextMenu.Root modal={false}>
       <ContextMenu.Trigger asChild disabled={!toMain && moveTo === null} onKeyDown={openMenuOnShiftF10}>{element}</ContextMenu.Trigger>
       <ContextMenu.Portal>
-        <ContextMenu.Content className="z-50 min-w-44 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
+        <ContextMenu.Content onCloseAutoFocus={(event) => moved.current && event.preventDefault()} className="z-50 min-w-44 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
           {toMain && <MoveToMainItem tabId={tab.id} />}
           {moveTo !== null && (
-            <ContextMenu.Item onSelect={() => onMove(moveTo)} className={MENU_ITEM}>
+            <ContextMenu.Item
+              onSelect={() => {
+                moved.current = true;
+                onMove(moveTo);
+              }}
+              className={MENU_ITEM}
+            >
               {moveTo === 'lower' ? COPY.moveBelow : COPY.moveAbove}
             </ContextMenu.Item>
           )}
