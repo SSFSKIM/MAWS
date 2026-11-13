@@ -204,7 +204,7 @@ describe('a terminal session’s file change', () => {
     useSessions.setState((s) => ({ records: new Map(s.records).set(LANE_A, record(LANE_A, { directory: FOLDER, holder: { kind: 'terminal', pid: 4242 } })), recordsVersion: s.recordsVersion + 1 }));
     fake = fakeClient({ 'laneA.answer': { outcome: 'delivered' }, 'laneA.catalog': null });
     window.maws = fake.client as unknown as PreloadBridge;
-    const raised: LaneARaised = { request: REQ, session: 'eng-1', tool: 'Write', input: writeRequest().input };
+    const raised: LaneARaised = { request: REQ, session: 'eng-1', tool: 'Write', input: { file_path: `${FOLDER}/notes.md`, content: '# Notes\n\nFirst entry\n' } };
     applyLaneAState(LANE_A, laneAState(LANE_A, { pending: [raised] }));
   });
 
