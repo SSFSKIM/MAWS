@@ -36,7 +36,7 @@ import { clearToasts, closeScene, scratchProject, show, type Scratch } from './s
 import { REPO_ROOT } from './support/launch';
 import { latencyBudgets } from './support/latency';
 import { seedTranscript, SideJournal, solidPng, transcript } from './support/side-replay';
-import { sideColumn, sideTab } from './support/shell';
+import { hideSurface, sideColumn, sideTab } from './support/shell';
 
 test.describe.configure({ timeout: 180_000 });
 
