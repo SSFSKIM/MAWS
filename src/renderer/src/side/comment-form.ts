@@ -17,13 +17,16 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
 import type { Anchor, AnchorScreenshot } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { SessionRecord } from '@shared/graph/session';
 import { isAddress, machineOf } from '@shared/machine/address';
-import { ARCHIVED, STARTS } from '../composer/submit/submit-state'; // P2-A
+import { ARCHIVED, STARTS, submitState, type SubmitInput } from '../composer/submit/submit-state'; // P2-A; UX wave U5a: submitState
 import { ipc } from '../ipc/client';
 import { useIsRemoteLaneB } from '../lane-b/remote-session';
 import { heldWords, screenshotRoom, useSessionControls } from '../session/controls/controls-for';
 import { displayTitle, listedTitle } from '../sessions/title';
 import { useAvailability } from '../sessions/availability'; // P2-A
+import { holderWords } from '../sessions/holder-words';
+import { useReaderClosed } from '../sessions/share/reader';
 import { useMachines } from '../stores/machines';
 import { toast } from '../stores/notices';
 import { machineName } from '../stores/org-projects';
@@ -89,6 +92,14 @@ function tellWhere(place: string | undefined, thread: string | undefined, parent
   else if (outcome.disposition === 'queued') toast({ level: 'info', text, actions: [], dismissible: true });
 }
 
+// UX wave U5a (decision 6): the composer's submit table asked for a typed message (Send, the box not empty, no setup
+// intent: a card's session has its record), its reason when it may not go.
+function refusalOfTable(i: { status: SubmitInput['status']; availability: SubmitInput['availability']; holder: SessionRecord['holder'] | null; closed: string | null; driven: SubmitInput['driven'] }): string | null {
+  const heldBy = i.holder !== null && (i.holder.kind === 'terminal' || i.holder.kind === 'background_job') ? holderWords(i.holder) : null;
+  const decision = submitState({ status: i.status, intent: null, queue: { entries: [], paused: false }, empty: false, mode: 'send', availability: i.availability, heldBy, driven: i.driven ?? null, closed: i.closed });
+  return decision.enabled ? null : (decision.reason ?? COPY.notSent);
+}
+
 // P4-B3: the sends on their way by `sendKey`, and their answers until a mounted form takes them.
 type Answer = { ok: true; sent: { child?: AppSessionId; text: string } } | { ok: false; destination: CommentDestination; error: string };
 interface Flight {
@@ -145,10 +156,13 @@ export function useCommentForm({ anchor, parent, gone, onSent, reveal, onSending
   const forkable = useSessions((s) => s.records.get(parent)?.engineSessionId !== null); // no record: the machine side says
   const threadRemote = useRemoteUnavailable(parent, 'side.thread.open'); // P5 O7 M8: not on another machine yet
   const machine = useMachines((s) => (isAddress(parent) ? machineName(s.machines, machineOf(parent), ipc.localMachine) : ''));
-  const sendable = controls ? controls.capability('send') : { available: false as const, reason: heldWords(parent) };
-  // archived, as availability reads it (a ready process answers first), refuses main as the composer does, whatever the
-  // port's own answer (decision 6)
-  const mainRefusal = availability === 'archived' ? ARCHIVED : sendable.available ? null : sendable.reason;
+  const holder = useSessions((s) => s.records.get(parent)?.holder ?? null);
+  const closed = useReaderClosed(parent); // board 525: another member's session that refused the member's words
+  const turn = controls?.turn() ?? null; // a bridged session's own turn; null where the status says it (lane B)
+  // decision 6: whether a tick can send is the composer's own decision, its submit table over the inputs the composer
+  // reads (a session another process drives first, then the availability of one with no ready process), for a typed
+  // message; with no port, nothing sends, as the composer's Enter does nothing
+  const mainRefusal = controls ? refusalOfTable({ status, availability, holder, closed, driven: turn && { running: turn.running, send: controls.capability('send'), stop: controls.capability('interrupt') } }) : heldWords(parent);
   const threadRefusal = threadRemote !== null ? COPY.threadRemote(machine) : availability === 'archived' ? ARCHIVED : forkable ? null : COPY.noConversation;
   const refusalOf = (to: CommentDestination) => (to === 'main' ? mainRefusal : threadRefusal);
   // ticked and locked for another machine's session (no side thread there yet, whatever its port says meanwhile);
@@ -157,7 +171,6 @@ export function useCommentForm({ anchor, parent, gone, onSent, reveal, onSending
   const destination: CommentDestination = toMain ? 'main' : 'thread';
   const otherRefusal = refusalOf(toMain ? 'thread' : 'main');
   const ready = status?.process === 'ready';
-  const turn = controls?.turn() ?? null; // a bridged session's own turn; null where the status says it (lane B)
   const running = turn ? turn.running : ready && Boolean(status?.turn);
   const starts = turn === null && !remoteLaneB && !ready; // the send acquires it first (lane B on this Mac)
   const room = toMain ? screenshotRoom(parent, controls) : null;
