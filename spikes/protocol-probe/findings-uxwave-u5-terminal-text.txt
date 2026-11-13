@@ -93,6 +93,6 @@ Runs: v1 (the earlier form, the scenario's first version), r1 and r2 (the framed
 Fixtures, all reduced (the raw transcripts, panes and event streams carry the owner's plugins' hook output and stayed
 on the VM under /tmp): fixtures/uxwave/u5-terminal-text-{r1,r2,v1}.json (each step: the text sent, or its head, tail
 and hash for the long one; the post's answer; the fates; the kept row's line, type, isMeta, origin, shape, hash,
-equality; the reader over both; other rows with the marker; the model's quote) and .rows.jsonl (every transcript row
+equality; the reader over both; other rows with the marker; the model's quote) and .rows.ndjson (every transcript row
 reduced to type, origin and shape; text kept only for the probe's prompts and the model's short answers; two answers
 in r1 that restate the plugin's wake text are replaced by a note saying so).

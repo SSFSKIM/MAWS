@@ -51,6 +51,6 @@ slack.com, notion.so, example.com, iana.org; invented: no-such-site-p7k2q9.com, 
 nonexistent-icon-test-31415.net. Plus github.com and one invented name at size=64 and through the older address. Every
 site's name fits the draft's pattern (two labels, the last at least two letters: notion.so included).
 Runs: two, a minute apart, the same 22 answers (status and bytes) in both.
-Fixtures: fixtures/uxwave/u11-favicon-r1.jsonl and -r2.jsonl, one JSON object per answer (site, size or the older
+Fixtures: fixtures/uxwave/u11-favicon-r1.ndjson and -r2.ndjson, one JSON object per answer (site, size or the older
 address, status, redirect, content type, bytes, png, pixels, a sha256 prefix of the body, the cache headers,
 set-cookie present or not).

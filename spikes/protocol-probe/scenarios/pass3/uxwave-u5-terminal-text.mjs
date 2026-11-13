@@ -21,7 +21,7 @@
 // model is asked to quote the last line of what it read.
 //
 // Written: fixtures/uxwave/<tag>.json, a reduced record (the invented texts, hashes, fates, row shapes, the plugins'
-// names and versions); fixtures/uxwave/<tag>.rows.jsonl, the transcript reduced to each row's type, origin and shape,
+// names and versions); fixtures/uxwave/<tag>.rows.ndjson, the transcript reduced to each row's type, origin and shape,
 // with text kept only for the probe's own invented prompts and the model's text answers. The raw transcript, the panes
 // and the event stream stay under $PROBE_ROOT/raw (outside the repository): the owner's plugins' hook output is in them.
 import {execFileSync} from 'node:child_process';
@@ -164,7 +164,7 @@ export default async()=>{
    return {line,type:r.type,...(r.subtype&&{subtype:r.subtype}),...(r.isMeta!==undefined&&{isMeta:r.isMeta}),...(r.origin&&{origin:{kind:r.origin.kind,...(r.origin.name&&{name:r.origin.name}),...(r.origin.asUser!==undefined&&{asUser:r.origin.asUser})}}),...(r.attachment?.type&&{attachment:r.attachment.type}),
     ...(r.message?{shape:t.shape}:{}),...(r.type==='user'&&mine?{text:t.text.length<2000?t.text:{utf16:t.text.length,sha256:sha(t.text)}}:{}),...(r.type==='user'&&t.text!==null&&!mine?{textSha256:sha(t.text)}:{}),
     ...(r.type==='assistant'?{text:(r.message?.content??[]).filter(b=>b.type==='text').map(b=>b.text).join('')||undefined,tools:(r.message?.content??[]).filter(b=>b.type==='tool_use').map(b=>b.name)}:{})};});
-  writeFileSync(FIXTURES+TAG+'.rows.jsonl',reduced.map(r=>redact(JSON.stringify(r))).join('\n')+'\n');
+  writeFileSync(FIXTURES+TAG+'.rows.ndjson',reduced.map(r=>redact(JSON.stringify(r))).join('\n')+'\n');
   writeFileSync(FIXTURES+TAG+'.json',redact(JSON.stringify(record,null,1))+'\n');
   try{tmux('kill-server');}catch{}
   console.log(TAG,JSON.stringify({session,transcript:t,raw:RAW,fixture:FIXTURES+TAG+'.json'}));
