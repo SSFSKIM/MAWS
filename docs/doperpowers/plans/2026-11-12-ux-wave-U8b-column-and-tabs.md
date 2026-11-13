@@ -22,7 +22,7 @@ How to see it working, on the wave's build: open a session with nothing running 
 - [x] M1 — what is stored, its readers, the side column's acts, and the two widths. (2026-11-12) Built at `d316535b0`; its boundary review found the first read unsafe after a failed read and after work in a deferred launch, fixed in `e9f91cd18..cd1fafe75` (Decision Log 3) and reviewed clean at `cd1fafe75`.
 - [x] M2 — one strip, one tab in view. (2026-11-13) Built at `7a4fab635`, with the Question sheet's ruling (option 3) in `8f400df94`; its boundary review found F6 lost from the controls at a strip's end, fixed in `7a4fab635..fddf1c0fb` (Decision Log 6) and reviewed clean at `fddf1c0fb`. The rewrite of U6's two files is recorded under Constraint 3.
 - [x] M3 — the second group. (2026-11-13) Built at `522c7c8d7`; its boundary review found a pane chosen from the lower group's "+" going above when the upper group held a pane, and the bar's reset doing nothing in a short column; fixed in `522c7c8d7..39a7cf10b` (Decision Log 7) and reviewed clean at `39a7cf10b`. The commit `a2be4dd45` (a temporary debug line, removed in `8a0014e1e`) lacks the session line; it stays, as the wave never rewrites a pushed branch.
-- [ ] M4 — the card column
+- [x] M4 — the card column. (2026-11-13) Built at `48fa3029f` (Decision Log 8, with the architect's ruling on `cardColumnShown`) and reviewed clean at once.
 - [ ] M5 — who started a task, and the graph's readings
 - [ ] M6 — the exit a gone terminal leaves
 - [ ] M7 — the two panels
