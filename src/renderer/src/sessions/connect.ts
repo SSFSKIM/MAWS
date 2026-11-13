@@ -70,18 +70,21 @@ function watchUnstartedTitles(): () => void {
 // C5's retention: a tab is kept while its id has a persisted intent, a failed one included.
 export const retainsTab = (appSessionId: string): boolean => useSetup.getState().intents.has(appSessionId as AppSessionId);
 
-// The chats this page made (U13a's relaunch sweep leaves them alone: they are this run's, not an earlier run's).
-const madeThisRun = new Set<AppSessionId>();
+// U13a (its plan's Decision Log, 2026-11-13): no chat is created before the relaunch sweep below has run, so none of
+// this run's is among its candidates (main announces a new intent before it answers the create). Set by
+// `connectSessions` while it is wired; it settles once the sweep has run or is known not to run (launch mode
+// `scenario`, a disconnect). Null: nothing to wait for.
+let sweepRun: Promise<void> | null = null;
 
 // "+" and ⌘N: an app session id with a setup intent; C5 opens its tab.
 export async function createUnstartedSession(projectId: ProjectId | null, client: MawsBridge = ipc, location: Location | null = null): Promise<AppSessionId | null> {
+  if (sweepRun !== null) await sweepRun;
   // P5 O6 M4: the project's machine; with none, this machine's (the setup intent's, until O7's machine picker)
   const result = await client.invoke('session.create', { projectId, location }, { machine: projectId === null ? client.localMachine : machineOf(projectId) });
   if (!result.ok) {
     console.error('[sessions] session.create failed', result.error);
     return null;
   }
-  madeThisRun.add(result.value.appSessionId as AppSessionId); // before its intent is in the store
   useSetup.getState().setIntent(result.value.intent);
   return result.value.appSessionId as AppSessionId;
 }
@@ -89,9 +92,8 @@ export async function createUnstartedSession(projectId: ProjectId | null, client
 // UX wave U13a (its plan's Interfaces §E; the owner, 2026-11-12: "No, only chats with content"): a New chat with nothing
 // in it does not come back after a relaunch. Its intent is discarded once the snapshot holds the intents, before the
 // retention lets the layout hydrate, so hydration finds no intent and drops its tab without a word; one main refuses
-// stays, and its tab comes back as before. A relaunch's cleanup: only the chats an earlier run left (the snapshot's,
-// less this run's, which can be in the strip and typed into before the snapshot answers), and none whose tab is open.
-const leftByEarlierRun = (): AppSessionId[] => [...useSetup.getState().intents.keys()].filter((id) => !madeThisRun.has(id));
+// stays, and its tab comes back as before. A relaunch's cleanup: the candidates are what an earlier run left (no chat
+// of this run exists before the sweep has run: `sweepRun`), and none whose tab is open is discarded.
 
 async function discardEmptyIntents(client: MawsBridge, candidates: readonly AppSessionId[]): Promise<void> {
   await Promise.all(
@@ -117,9 +119,16 @@ export function connectSessions(client: MawsBridge = ipc): () => void {
   // the candidates are taken as the snapshot lands (it is applied just before `known` resolves), the discards once the
   // mode is known
   const emptied = setup.known.then(() => {
-    const candidates = leftByEarlierRun();
+    const candidates = [...useSetup.getState().intents.keys()];
     return mode.then((m) => (live && m === 'index' ? discardEmptyIntents(client, candidates) : undefined));
   });
+  let disconnected!: () => void;
+  const gone = new Promise<void>((resolve) => (disconnected = resolve));
+  const sweep = Promise.race([mode.then((m) => (m === 'index' ? emptied : undefined)), gone]).then(
+    () => undefined,
+    () => undefined,
+  );
+  sweepRun = sweep;
   const ready = setup.ready.then((held) => (held ? emptied.then(() => held) : held));
   const offs: (() => void)[] = [registerTabRetention({ ready, known: emptied, retains: retainsTab })];
   // 2026-10-31: asked until main answers, so an upgrade's mawsd restart no longer leaves New chat disabled (launch-mode.ts)
@@ -143,6 +152,8 @@ export function connectSessions(client: MawsBridge = ipc): () => void {
   }, client);
   return () => {
     live = false;
+    disconnected();
+    if (sweepRun === sweep) sweepRun = null;
     stopAsking();
     setup.disconnect();
     offs.forEach((off) => off());
