@@ -22,7 +22,7 @@ How to see it working: the unit tests named under each milestone fail before its
 - [x] (2026-11-12) The drawn example of the regrouped Settings built and measured by the architect; its findings decided.
 - [x] (2026-11-12) Adversarial review of the document: needs-attention, three findings, all accepted.
 - [x] (2026-11-12) One revision: the architect's rulings on the twelve points, the review's three findings and its note on rows made at run time, and the decisions on the drawing's findings, folded in (Decision Log).
-- [ ] The owner's look at the drawn page: three answers (the order, Org's heading, the section's name). It blocks M9 and M10 and nothing else.
+- [x] (2026-11-12) The owner's look at the drawn page: three answers, each the one the document was written to (Decision Log). M9 and M10 are released, after M8.
 - [x] (2026-11-12) Master `6e8c72738` merged into the branch (`eb0290ce8`). U6a is not on master yet (no `BUILD_F_ACTION_IDS`), so M5 waits; U13a's `sessionRow` is not there either; master still holds the `settings` tab kind. Of the files this document names, the merge changed `composer/Composer.tsx` and `ipc/events.ts` (U8a's working folder, `useWorkingFolder`): M5 and M7 read them again before building.
 - [x] (2026-11-12 01:40Z) M1 — the sign-in probe's two questions written (`bf946d2bc`), reviewed clean; handed to the architect for the gate job on the mini.
 - [x] (2026-11-12 02:10Z) M1's follow-up at the architect's request: a refused custom callback or reconnect is followed by a sign-in through the engine's own listener, reported as `fallback` (`2aac33196`), reviewed clean. P1 runs at `2aac33196`.
@@ -1158,6 +1158,10 @@ Found while checking the sections against the code at `48619c824`, then by the a
 - Decision (M3's second review, fixed): a person's directed message is a `words` entry (it names a member, with no session title or machine chip), not one of §E's say, exchange or to-human rows, so it keeps its layout and the e2e names check finds its rows by their alias part; a row that names a session without the `Names` group is still a fault, and the scene asserts a directed person's message is present at each width.
   Rationale: §E's order governs the rows that name a session.
   Date/Author: 2026-11-12, M3's executor on the task review; folded by the controller.
+
+- Decision: the owner's three answers on the drawn Settings page (P5). (1) Settings begins with the everyday preferences, the engine last ("Preferences first"). (2) Org has no group heading of its own in the index ("No heading"). (3) The section that holds the supervisor and the memory budget is named "Supervisor". Each is the answer §G and M9 were written to, so nothing in §G changes.
+  Rationale: the owner's call on the page the architect drew and measured (The owner's look).
+  Date/Author: 2026-11-12, the owner (relayed by the wave's architect); folded by the controller.
 
 ## Outcomes & Retrospective
 
