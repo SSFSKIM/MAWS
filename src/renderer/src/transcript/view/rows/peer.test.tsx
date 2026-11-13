@@ -15,7 +15,7 @@ import { useSessions } from '../../../stores/sessions';
 import { rowsOf, withAllExpanded } from '../../model/derive';
 import { applyEvents, createState } from '../../model/reduce';
 import type { Row } from '../../model/rows';
-import { builder, uuid } from '../../model/test-events';
+import { builder, task, tool, uuid } from '../../model/test-events';
 import type { PeerReply, PeerReplies, TranscriptActions } from '../context';
 import { renderRow, spyActions } from './test-support';
 
@@ -177,10 +177,31 @@ describe('a message from another session', () => {
     expect(screen.getByText(/second line/).textContent).toBe('first line\nsecond line');
   });
 
-  it('is no control when the line shows the whole body but for surrounding whitespace', () => {
+  // The architect's ruling of 2026-11-13 (the M2 review's finding 1): a line drawn in the one-line ellipsis style is the
+  // control whether or not its words fit, since a narrower column cuts it
+  it('is the control even when its words are the whole message, and opened shows the whole text', () => {
     const { container } = renderRow(inbound('  just this  \n'), { storeKey: A });
-    expect(screen.getByText('just this')).toBeTruthy();
-    expect(container.querySelector('[aria-expanded]:not(.transcript-peer-reply)')).toBeNull();
+    const line = screen.getByRole('button', { name: /^Message from @repo-b/ });
+    expect(line.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(line);
+    expect(container.querySelector('.transcript-peer-body')?.textContent).toBe('  just this  \n');
+  });
+
+  it('draws a subagent’s message and a send to it as the same control, each opening to its whole message', () => {
+    const rows = derived((b) => {
+      b.turn('u1');
+      b.toolUse('ag1', 'Agent', { description: 'Survey notes', subagent_type: 'general-purpose', prompt: 'go' });
+      b.emit('subagent.started', { taskId: task('a1'), toolUseId: tool('ag1'), description: 'Survey notes', subagentType: 'general-purpose', isBackground: true, spawnDepth: 1, prompt: 'go' });
+      b.toolUse('s1', 'SendMessage', { to: 'a1', message: 'look again' });
+      b.emit('subagent.message', { direction: 'from_child', fromAgentId: 'a1' as never, toAgentId: null, text: 'found it' });
+    }).filter((row): row is Message => row.kind === 'agent_message');
+    expect(rows.map((row) => row.direction)).toEqual(['to_child', 'from_child']);
+    for (const [row, whole] of [[rows[0]!, 'look again'], [rows[1]!, 'found it']] as const) {
+      const { container } = renderRow(row, { storeKey: A });
+      fireEvent.click(screen.getByRole('button', { name: row.text }));
+      expect(container.querySelector('.transcript-peer-body')?.textContent).toBe(whole);
+      cleanup();
+    }
   });
 });
 

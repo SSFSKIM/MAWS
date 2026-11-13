@@ -40,6 +40,10 @@ const peerTurn = (b: Builder, text = 'hello from the docs session', synthetic = 
   b.emit('peer.message', { messageUuid: uuid('p1'), from: B, fromSession: null, fromName: 'docs', fromMode: null, fromPlugin: null, hopChain: [], text, midTurn: false, lineage: 'peer', replyable: true });
 };
 const divider = (list: Row[], n = 0) => of(list, 'divider')[n]!;
+const hook = (b: Builder, id: string, hookEvent = 'SessionStart', finish: { outcome: 'success' | 'error'; exitCode: number | null; stderr?: string } = { outcome: 'success', exitCode: 0 }) => {
+  b.emit('hook.started', { hookId: id, hookName: `${hookEvent}:startup`, hookEvent });
+  b.emit('hook.finished', { hookId: id, hookName: `${hookEvent}:startup`, hookEvent, outcome: finish.outcome, exitCode: finish.exitCode, stdout: '', stderr: finish.stderr ?? '' });
+};
 
 describe('where an arrival’s row sits (decision 5)', () => {
   it('a task’s end that opened the engine’s turn stands above its divider, drawn as soon as the turn opens', () => {
@@ -201,6 +205,44 @@ describe('one arrival per uuid (decision 8)', () => {
       [rowId.notice(null, uuid('n2'), 1), FAILED], // its place in the carrier counts the unknown entry
     ]);
   });
+
+  // M2 review, finding 2: a message kept under the uuid that drew nothing is not the one a withdrawal takes out
+  it('a withdrawal takes out the line that was placed, not an earlier message under the uuid that drew nothing', () => {
+    const b = builder();
+    engineTurn(b);
+    carry(b, 'n1', [{ class: 'command', run: null }], '');
+    carry(b, 'n1', [task()], '');
+    let state = reduce(b.events);
+    expect(of(rowsOf(state), 'notice')).toHaveLength(1);
+    const from = b.events.length;
+    carry(b, 'n1', [], '');
+    state = applyEvents(state, b.events.slice(from));
+    expect(of(rowsOf(state), 'notice')).toEqual([]);
+    const again = b.events.length;
+    carry(b, 'n1', [task()], '');
+    state = applyEvents(state, b.events.slice(again));
+    expect(of(rowsOf(state), 'notice').map((row) => row.id)).toEqual([rowId.notice('run-1', uuid('n1'), 0)]);
+  });
+
+  it('replacing and withdrawing under two uuids, with unknown lists between, leaves each uuid its last line or none', () => {
+    const b = builder();
+    engineTurn(b);
+    let state = reduce(b.events);
+    const step = (emit: () => void) => {
+      const from = b.events.length;
+      emit();
+      state = applyEvents(state, b.events.slice(from));
+      return of(rowsOf(state), 'notice').map((row) => row.text);
+    };
+    expect(step(() => carry(b, 'n1', [task({ runId: null })], ''))).toEqual([OK]);
+    expect(step(() => carry(b, 'n2', [task({ runId: null, summary: FAILED, outcome: 'failed' })], ''))).toEqual([OK, FAILED]);
+    expect(step(() => carry(b, 'n1', [{ class: 'command', run: null }], ''))).toEqual([OK, FAILED]); // decision 20: nothing
+    expect(step(() => carry(b, 'n1', [task({ runId: null, summary: STOPPED, outcome: 'stopped' })], ''))).toEqual([FAILED, STOPPED]); // replaced, where it arrives
+    expect(step(() => carry(b, 'n2', [], ''))).toEqual([STOPPED]);
+    expect(step(() => carry(b, 'n2', [{ class: 'command', run: null }], ''))).toEqual([STOPPED]);
+    expect(step(() => carry(b, 'n1', [], ''))).toEqual([]);
+    expect(step(() => carry(b, 'n2', [], ''))).toEqual([]); // nothing left to take out
+  });
 });
 
 describe('a provisional line needs its turn’s end (decision 21)', () => {
@@ -238,6 +280,34 @@ describe('a provisional line needs its turn’s end (decision 21)', () => {
     expect(lines(rowsOf(state))).toEqual([]);
   });
 
+  // M2 review, finding 3: what stands before the line and is not work (a hook, a notice, what a plugin said) leaves
+  // it at the head, as the derivation places it
+  const afterQuiet = (b: Builder) => {
+    engineTurn(b);
+    hook(b, 'k1');
+    b.emit('notice.posted', { level: 'notice', key: null, text: 'A notice for the session' });
+    b.emit('plugin.log', { plugin: 'notes', text: 'loaded' });
+    carry(b, 'h1', [task({ runId: 'run-h' })], '');
+  };
+  it('a turn the process’s exit closes loses the host’s task line after the hooks, notices and plugin lines before it', () => {
+    const b = builder();
+    afterQuiet(b);
+    b.text('m1', 0, 'Reading.');
+    const before = rowsOf(reduce(b.events));
+    expect(of(before, 'notice').map((row) => row.id)).toEqual([rowId.notice('run-h', uuid('h1'), 0)]);
+    expect(shown(before).findIndex((row) => row.kind === 'notice')).toBeLessThan(shown(before).findIndex((row) => row.kind === 'divider')); // at the head
+    b.emit('process.exited', { code: null, signal: null, reason: 'unknown', lostAttentionCount: 0, budget: null });
+    expect(lines(rowsOf(reduce(b.events)))).toEqual([]);
+  });
+
+  it('so does one a later turn’s start closes', () => {
+    const b = builder();
+    afterQuiet(b);
+    b.text('m1', 0, 'Reading.');
+    b.turn('u1');
+    expect(lines(rowsOf(reduce(b.events)))).toEqual([]);
+  });
+
   it('a turn the interrupt marker closed keeps both: its result still comes', () => {
     const b = builder();
     provisional(b);
@@ -263,6 +333,33 @@ describe('an engine turn that held nothing is no turn (decision 6)', () => {
     endEngine(kept, 0);
     expect(kinds(rowsOf(reduce(kept.events)))).toEqual(['divider']);
     expect(reduce(kept.events).order).toHaveLength(1);
+  });
+
+  // M2 review, finding 4: a hook that ran and let things go on draws nothing, so a turn of them alone held nothing
+  it('one that held only hooks that let things go on is no turn on an end that says it ran nothing, or under a later start', () => {
+    const ended = builder();
+    engineTurn(ended);
+    hook(ended, 'k1');
+    hook(ended, 'k2', 'Stop');
+    endEngine(ended, 0);
+    expect(reduce(ended.events).order).toEqual([]);
+    expect(kinds(rowsOf(reduce(ended.events)))).toEqual([]);
+    const replaced = builder();
+    engineTurn(replaced);
+    hook(replaced, 'k1');
+    replaced.turn('u1', 'go on');
+    const state = reduce(replaced.events);
+    expect(state.order).toEqual([turnId.ofMessage(uuid('u1'))]);
+    expect(kinds(rowsOf(state))).toEqual(['user']);
+  });
+
+  it('one that holds a hook that got in the way holds its notice, and is kept', () => {
+    const b = builder();
+    engineTurn(b);
+    hook(b, 'k1', 'Stop', { outcome: 'error', exitCode: 1, stderr: 'the check broke' });
+    endEngine(b, 0);
+    expect(reduce(b.events).order).toHaveLength(1);
+    expect(kinds(rowsOf(reduce(b.events)))).toContain('error');
   });
 
   it('a turn’s start over an empty engine turn replaces it: the owner’s own send is the person’s turn alone', () => {
@@ -352,11 +449,15 @@ describe('the words of the lines (Interfaces D)', () => {
     b.end(['u1']);
     engineTurn(b);
     b.emit('subagent.message', { direction: 'from_child', fromAgentId: 'a1' as never, toAgentId: null, text: '[Subagent hand-back] Framed. The report follows:\n  Found three notes.\n  Two are stale.' });
+    b.emit('subagent.message', { direction: 'from_child', fromAgentId: 'a1' as never, toAgentId: null, text: 'one more thing' });
     endEngine(b);
-    expect(of(expanded(b.events), 'agent_message').map((row) => [row.text, row.body ?? row.report ?? null])).toEqual([
+    // the architect's ruling of 2026-11-13: every message line opens to the whole message, so a subagent's message keeps
+    // its whole text as `body` even when its line holds all of it
+    expect(of(expanded(b.events), 'agent_message').map((row) => [row.text, row.body ?? row.report ?? row.peer?.body ?? null])).toEqual([
       ['Sent to Survey notes: look at the index first', 'look at the index first\nthen the notes'],
-      ['Sent to @docs: done here', null],
+      ['Sent to @docs: done here', 'done here'],
       ['Report from Survey notes: Found three notes.', 'Found three notes.\nTwo are stale.'],
+      ['Message from Survey notes: one more thing', 'one more thing'],
     ]);
   });
 

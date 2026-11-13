@@ -33,12 +33,15 @@ const mark = (container: HTMLElement) => container.querySelector('.transcript-li
 afterEach(cleanup);
 
 describe('a notice', () => {
-  it('is one line led by a dot in its outcome’s colour, the engine’s sentence verbatim, and no control when nothing opens', () => {
-    const { container } = renderRow(taskEnd(), { storeKey: A });
+  // The architect's ruling of 2026-11-13: a line in the one-line ellipsis style is the control even when nothing more
+  // came with it, and opened shows its whole sentence
+  it('is one line led by a dot in its outcome’s colour, the engine’s sentence verbatim, and the control that shows the whole sentence', () => {
+    const { container } = renderRow(taskEnd({ durationMs: 65_000 }), { storeKey: A });
     expect(mark(container).textContent).toBe('●');
     expect(container.querySelector('.transcript-notice')?.getAttribute('data-outcome')).toBe('completed');
-    expect(container.querySelector('.transcript-line-text')?.textContent).toBe('Background command "count files" completed (exit code 0)');
-    expect(screen.queryByRole('button')).toBeNull();
+    expect(container.querySelector('.transcript-line-text')?.textContent).toBe('Background command "count files" completed (exit code 0) · 1m 05s');
+    fireEvent.click(screen.getByRole('button', { name: /^Background command/ }));
+    expect(container.querySelector('.transcript-notice-detail')?.textContent).toBe('Background command "count files" completed (exit code 0) · 1m 05s');
     for (const outcome of ['failed', 'stopped'] as const) {
       cleanup();
       const { container: next } = renderRow(taskEnd({ outcome }), { storeKey: A });
@@ -69,12 +72,14 @@ describe('a notice', () => {
   it('draws no “Open output” where the mount gives no act, and calls the act the mount gave with the path, the task and the line’s words', () => {
     const named = taskEnd({ outputFile: '/tmp/work/bt1.output' });
     renderRow(named, { storeKey: A }); // the row tests' actions give no outputAction
-    expect(screen.queryByRole('button')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /^Background command/ }));
+    expect(screen.queryByRole('button', { name: 'Open output' })).toBeNull();
     cleanup();
     const none = vi.fn(() => null);
     renderRow(named, { storeKey: A, actions: { ...spyActions(), outputAction: none } });
     expect(none).toHaveBeenCalledWith(A);
-    expect(screen.queryByRole('button')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /^Background command/ }));
+    expect(screen.queryByRole('button', { name: 'Open output' })).toBeNull();
     cleanup();
     const open = vi.fn<(output: TaskOutput) => void>();
     const actions: TranscriptActions = { ...spyActions(), outputAction: vi.fn(() => open) };
