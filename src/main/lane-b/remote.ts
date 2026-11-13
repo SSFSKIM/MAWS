@@ -71,6 +71,15 @@
 //   with step-up (signed before its first copy goes; unasked on a machine the member owns, ../device/step-up.ts), not
 //   through the spawn table, so two forks from one tab are two forks; its answer comes once the fork is `launching` on
 //   the machine, waited for within the fork's command budget past the pending bound.
+// - The UX wave (U9, M5, "The settled word"; Interfaces §9): one round per machine and generation of its link. At each
+//   `up` the round settles, saying `remote.settled {machine, generation}` once, when none of the machine's lanes is
+//   placing or awaiting (./remote-session.ts' `standing`), evaluated at the `up` and at every change of a lane's
+//   standing, which the lane tells after what it said for it; at a `down` after `up` every subscription a lane keeps is
+//   marked awaiting and the round ends, unsaid if it had not settled. The generation is counted here as the roster counts
+//   it (src/main/machines/manager.ts: each reported `up`, per machine, never reset), a round attached at the roster's
+//   word of the link (as the attention feed's is), or with the machine's first lane. A page that just subscribed is told
+//   the settled generation again (`replay`). M5's three timing lines (./remote-timing.ts): a tab's open, here; a history
+//   read, ./remote-history.ts; New chat's chooser, its two reads timed where the router routes them (`routeLaneB`).
 import type { Socket } from 'node:net';
 import type { MessageChannelMain } from 'electron';
 import type { OpenAnswer } from '@shared/client/port';
@@ -90,6 +99,7 @@ import { OPERATION_COMMANDS, type OperationCommand } from '@shared/engine/operat
 import { listenLoopback, type LocalListener } from '../forwards';
 import type { MainContext, RemoteDispatch } from '../ipc/router';
 import type { LayoutFileStore } from '../layout/store';
+import type { LinkState } from '../machines/manager';
 import { budgetedMs } from '../machines/budgets'; // U9 (M2): a fork's answer within its command's budget
 import { peerLists } from '../machines/remote/capabilities';
 import { needsProjectActs } from '../machines/project-acts-peer';
@@ -109,6 +119,7 @@ import { readEventsInPages } from './remote-history';
 import { createRemoteInterest } from './remote-interest';
 import { outcomeAsResult, pendingResult, refusalResult } from './remote-outcomes';
 import { RemoteSession, type RemoteSessionTiming } from './remote-session';
+import { chooserTimings, openTiming, type ChooserRead, type OpenTiming } from './remote-timing';
 import { createSpawnAttempts } from './remote-spawn';
 import { readFileInPages } from './remote-files-read';
 import { createRemoteForwards, REMOTE_FORWARDS_TIMING, type RemoteForwards, type RemoteForwardsTiming } from './remote-forward';
@@ -226,6 +237,8 @@ export interface RemoteLaneB {
   stop(): void;
   /** M4c fix wave 2: the spawn attempts kept, by tab (tests): an act out, or its answer. */
   spawnsKept(): Array<{ key: string; state: 'out' | 'said' | 'unresolved' }>;
+  /** The UX wave, U9 (M5): one of New chat's chooser reads of a machine answered (`routeLaneB` times them), for its timing line. */
+  chooserRead(machine: MachineRef, read: ChooserRead, startedAt: number, answeredAt: number): void;
 }
 
 /** The engine-host acts §L offers for lane B, each sealed for the session's live launch. */
@@ -325,7 +338,7 @@ export function standInForMachines(standIn: MachineStandIn): () => void {
  * the adapter says that session's state again, so a reloaded page or a second window has what was said before it listened.
  */
 export function routeLaneB(base: RemoteDispatch, remote: (machine: MachineRef) => RemoteLink | null, laneB: RemoteLaneB): RemoteDispatch {
-  return async (machine, name, input, ctx) => {
+  const routed: RemoteDispatch = async (machine, name, input, ctx) => {
     const stood = machineStandIn?.(machine, name, input); // a harness build's fixture alone (above)
     if (stood !== undefined) return stood;
     const link = laneB.handles(name) ? remote(machine) : null;
@@ -340,6 +353,23 @@ export function routeLaneB(base: RemoteDispatch, remote: (machine: MachineRef) =
     }
     return result;
   };
+  // the UX wave, U9 (M5): New chat's chooser reads a machine's projects and its home's first page together
+  return async (machine, name, input, ctx) => {
+    const read = chooserReadOf(name, input);
+    if (read === null || remote(machine) === null) return routed(machine, name, input, ctx);
+    const startedAt = Date.now();
+    const result = await routed(machine, name, input, ctx);
+    laneB.chooserRead(machine, read, startedAt, Date.now());
+    return result;
+  };
+}
+
+/** The read of New chat's chooser a command is (its projects, or its home's first page of folders), or null. */
+function chooserReadOf(name: CommandName, input: unknown): ChooserRead | null {
+  if (name === 'session.projects.list') return name;
+  if (name !== 'machine.folders.list') return null;
+  const fields = record(input) ?? {};
+  return fields.path === undefined && fields.cursor === undefined && fields.open === undefined ? name : null;
 }
 
 type Fields = Record<string, unknown>;
@@ -449,8 +479,78 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     if (held !== undefined) for (const [app, lane] of held.lanes) end(link.machine, app, lane, 'closed');
     const lanes = new Map<string, Lane>();
     machines.set(link.machine, { link, lanes });
+    roundOf(link, false); // the machine's first lane: the lane's start evaluates
     return lanes;
   }
+
+  // ---- The settled word (the UX wave, U9, M5) ------------------------------------------------------------------------------
+
+  /** One machine's round: its link, the state last read, and the generation settling or settled. */
+  type Round = { link: RemoteLink; state: LinkState | null; settling: number | null; settled: number | null; off(): void };
+  const rounds = new Map<MachineRef, Round>();
+  /** Each machine's `up`s in this run, by its ref and never reset, as the roster's `generation` counts them. */
+  const ups = new Map<MachineRef, number>();
+
+  /** The machine's round under `link`; a link made again goes on counting the machine's `up`s. */
+  function roundOf(link: RemoteLink, evaluateNow: boolean): Round {
+    const held = rounds.get(link.machine);
+    if (held?.link === link) return held;
+    held?.off();
+    const round: Round = { link, state: null, settling: null, settled: null, off: () => {} };
+    rounds.set(link.machine, round);
+    round.off = link.onState(() => roundMoved(round, true));
+    roundMoved(round, evaluateNow);
+    return round;
+  }
+
+  function roundMoved(round: Round, evaluateNow: boolean): void {
+    const state = round.link.state();
+    if (state === round.state) return; // a carrier or a refusal moved: the same generation
+    const was = round.state;
+    round.state = state;
+    const machine = round.link.machine;
+    if (state === 'up') {
+      const generation = (ups.get(machine) ?? 0) + 1;
+      ups.set(machine, generation);
+      round.settling = generation;
+      round.settled = null;
+      for (const app of machines.get(machine)?.lanes.keys() ?? []) opens.get(`${machine}/${app}`)?.up();
+      if (evaluateNow) settle(round);
+      return;
+    }
+    if (was !== 'up') return;
+    // main's word of the loss: a subscription kept across it awaits its next answer, before any `up` can be evaluated
+    const held = machines.get(machine);
+    if (held?.link === round.link) for (const lane of held.lanes.values()) lane.session.lost();
+    round.settling = null;
+    round.settled = null;
+  }
+
+  /** The round settles once no lane of its machine is placing or awaiting: said once for its generation. */
+  function settle(round: Round): void {
+    if (round.settling === null || rounds.get(round.link.machine) !== round) return;
+    const held = machines.get(round.link.machine);
+    if (held?.link === round.link) {
+      for (const lane of held.lanes.values()) {
+        const standing = lane.session.standing();
+        if (standing === 'placing' || standing === 'awaiting') return;
+      }
+    }
+    round.settled = round.settling;
+    round.settling = null;
+    deps.emit(round.link.machine, 'remote.settled', { machine: round.link.machine, generation: round.settled });
+  }
+
+  /** A lane's standing changed (told after what it said for it): its record had, for the open's line; its machine's round. */
+  function standingChanged(machine: MachineRef, app: string): void {
+    if (sessionOf(machine, app)?.state.record != null) opens.get(`${machine}/${app}`)?.record();
+    const round = rounds.get(machine);
+    if (round !== undefined) settle(round);
+  }
+
+  /** The UX wave, U9 (M5): each remote tab's open, from the moment its interest opened the session, for its timing line. */
+  const opens = new Map<string, OpenTiming>();
+  const chooser = chooserTimings(deps.log);
 
   function open(machine: MachineRef, app: string): void {
     const link = deps.remote(machine);
@@ -471,9 +571,11 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
         attentionChanged: () => attention.streamsChanged(machine, app), // fix wave 4: the badge and the notifier hear them
         othersSession: () => deps.othersOf?.(machine, app) ?? false, // board #525: a refused read is a reader's grade only there
         nextAnswer: () => countAnswer(machine, app), // P5 O15 M2b
+        standingChanged: () => standingChanged(machine, app), // the UX wave, U9 (M5): the settled word
         log: deps.log,
       });
       lanes.set(app, (lane = { session, open: false, sends: [], sending: false, acquiring: null }));
+      opens.set(`${machine}/${app}`, openTiming(link.name, app, link.state() === 'up', now, deps.log));
     }
     lane.open = true;
     lane.session.start();
@@ -500,6 +602,9 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     const lanes = machines.get(machine)?.lanes;
     if (lanes?.get(app) !== lane) return;
     lanes.delete(app);
+    opens.delete(`${machine}/${app}`);
+    const round = rounds.get(machine);
+    if (round !== undefined) settle(round); // a lane let go waits for nothing
     if (lane.session.attentionItems().length > 0) attention.streamsChanged(machine, app); // fix wave 4: its items leave the streams'
   }
 
@@ -512,7 +617,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     open,
     close,
   });
-  const offRemote = deps.onRemote(() => {
+  const offRemote = deps.onRemote((refs) => {
     for (const link of [...follows.keys()]) if (deps.remote(link.machine) !== link) follows.delete(link);
     spawns.linksChanged(deps.remote); // M4c fix wave 2: a spawn out on a link that ended can't be known
     ptys.linksChanged(); // P5 O7 M3: a terminal or a forward on a link that ended ends
@@ -521,6 +626,16 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       if (deps.remote(machine) === link) continue;
       for (const [app, lane] of lanes) end(machine, app, lane, 'closed');
       machines.delete(machine);
+    }
+    // the UX wave, U9 (M5): a round per machine the roster lists, a machine with no lane at all included
+    for (const [machine, round] of [...rounds]) {
+      if (refs.includes(machine) && deps.remote(machine) !== null) continue; // its link, or the one made again below
+      round.off();
+      rounds.delete(machine);
+    }
+    for (const machine of refs) {
+      const link = deps.remote(machine);
+      if (link !== null) roundOf(link, true);
     }
     interest.refresh();
   });
@@ -782,13 +897,17 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     if (name === 'files.read') return readFileInPages(link, fields, deps.log); // an answer past the channel, in ranged reads
     if (name === 'session.events') {
       const app = String(fields.appSessionId);
-      return readEventsInPages(link, fields, {
+      const opened = fields.before === undefined && fields.seek === undefined ? opens.get(`${link.machine}/${app}`) : undefined; // M5: the open's history read
+      opened?.asked();
+      const read = await readEventsInPages(link, fields, {
         budget: peerLists(link, 'rl2.events-budget'), // P5 O7 M4: the architect's ruling, the field only to a peer that reads it
         launch: () => lanesOf(link).get(app)?.session.state.launch ?? null,
         gap: (launchId, at) => deps.emit(link.machine, 'remote.gap', { appSessionId: app as EventPayload<'remote.gap'>['appSessionId'], launchId, at }),
         tooLarge: (window) => deps.emit(link.machine, 'remote.historyTooLarge', { appSessionId: app as EventPayload<'remote.historyTooLarge'>['appSessionId'], window }),
         log: deps.log,
       });
+      if (read.ok) opened?.rows();
+      return read;
     }
     if (connectors.handles(name)) return connectors.dispatch(link, name, fields, ctx.client); // P5 O7 M5c
     if (MACHINE_CALLS.has(name)) return callOverLink(link, name, fields); // P5 O7 M9: the remote setup's two reads
@@ -826,12 +945,18 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       at: (localPort) => forwards.at(localPort),
     },
     spawnsKept: () => spawns.kept(),
+    chooserRead(machine, read, startedAt, answeredAt) {
+      chooser(deps.remote(machine)?.name ?? machine, read, startedAt, answeredAt);
+    },
     artifacts: { openCopy: (input) => artifacts.openCopy(input), files: (machine) => artifacts.files(machine), scheme: artifacts.scheme, assets: (machine) => artifacts.assets(machine) },
     attention: { machines: () => attention.machines(), machine: (machine) => attention.machine(machine), onChange: (listener) => attention.onChange(listener), sayAgain: () => attention.sayAgain() },
     replay(machine, app) {
       const lane = machines.get(machine)?.lanes.get(app);
       if (lane?.open === true) lane.session.replay();
       attention.replay(machine, app); // fix waves 1, 5: the feed's items, which the stream's replay leaves out while it is fed
+      // the UX wave, U9 (M5): the generation settled, for the page that has just subscribed
+      const round = rounds.get(machine);
+      if (round?.settled != null && round.link.state() === 'up') deps.emit(machine, 'remote.settled', { machine, generation: round.settled });
     },
     stop() {
       interest.stop();
@@ -848,6 +973,8 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       for (const { lanes } of machines.values()) for (const lane of lanes.values()) lane.session.stop();
       machines.clear();
       follows.clear();
+      for (const round of rounds.values()) round.off();
+      rounds.clear();
     },
   };
 }

@@ -54,8 +54,8 @@ describe('the timing line', () => {
   it('names one call that answered whole, with its bytes', async () => {
     const rows = [[event(1)], [event(2), event(2, 1)]];
     const { link } = machine(rows);
-    const { timing } = await timed(link);
-    const bytes = Buffer.byteLength(JSON.stringify({ events: rows.flat(), lastSeq: 2, complete: true }));
+    const { answer, timing } = await timed(link);
+    const bytes = Buffer.byteLength(JSON.stringify((answer as { value: unknown }).value)); // the one page is the answer
     expect(timing).toEqual([`lane B: timing history mini/${APP}: whole, 1 pages, ${bytes} bytes, 0 ms`]);
   });
 
