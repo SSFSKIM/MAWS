@@ -276,17 +276,38 @@ describe('edit prompt restores the initiating prompt', () => {
     act(() => useTranscriptStore.getState().detach(APP));
   };
 
-  it('a turn opened by a message of several comments: no Edit prompt, only Retry and Cancel', async () => {
+  // Decision Log 52 (3): the render-time answer reads only rows a holder follows now; a kept entry nobody follows (the
+  // overview's and the hover card's hosts attach none) may be older than the session, so the button is offered and
+  // the click reads again
+  it('a followed transcript whose turn was opened by a message of several comments: no Edit prompt, only Retry and Cancel; offered again once nobody follows it', async () => {
     const b = builder();
     b.turn('u-1', 'an earlier prompt');
     b.end(['u-1']);
     b.turn('u-2', SEVERAL);
     transcript(b.events);
-    await held();
+    await act(() => useTranscriptStore.getState().attach(APP, ipcSource(APP))); // a view follows the session
     mount(refusal, 'inline');
     expect(screen.queryByRole('button', { name: 'Edit prompt' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Retry with claude-sonnet-5' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeTruthy();
+    act(() => useTranscriptStore.getState().detach(APP)); // the view closes while the card is mounted
+    expect(screen.getByRole('button', { name: 'Edit prompt' })).toBeTruthy();
+  });
+
+  it('a kept entry nobody follows, whose last prompt was several comments: Edit prompt is offered, and a click on a current plain prompt edits it', async () => {
+    const b = builder();
+    b.turn('u-1', 'an earlier prompt');
+    b.end(['u-1']);
+    b.turn('u-2', SEVERAL);
+    b.end(['u-2']);
+    transcript([...b.events]);
+    await held(); // the kept entry ends on the several comments
+    b.turn('u-3', 'a newer plain prompt');
+    transcript([...b.events]);
+    mount(refusal, 'inline');
+    fireEvent.click(screen.getByRole('button', { name: 'Edit prompt' }));
+    await waitFor(() => expect(answers()).toEqual([{ kind: 'dialog', behavior: 'completed', result: 'edit_prompt' }]));
+    await waitFor(() => expect(useComposerStore.getState().inlineEdits.get(APP)).toMatchObject({ text: 'a newer plain prompt', messageUuid: 'u-3', kind: 'edit' }));
   });
 
   it('a prompt that became a message of several comments between the render and the click: no edit_prompt, Retry and Cancel stay', async () => {

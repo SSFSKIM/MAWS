@@ -10,6 +10,8 @@ import type { Anchor, AnchorScreenshot } from '@shared/anchor/anchor';
 import { artifactUrl } from '@shared/artifacts/scheme';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
+import { MESSAGE_COMMENTS_MAX } from '@shared/anchor/message'; // Decision Log 52
+import { THREAD_FROM_ONE_COMMENT } from '@shared/side/copy'; // Decision Log 52
 import { record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
 import { at } from '../../../../../test/support/machine';
@@ -206,6 +208,98 @@ describe('several comments in one pass', () => {
     type('Align it left');
     fireEvent.click(sendButton());
     expect(fake.invoked('side.thread.open')).toEqual([{ appSessionId: PARENT_ID, from: { kind: 'comment', anchor: page(1), text: 'Make it bolder', screenshot: null, more: [{ anchor: page(2), text: 'Align it left', screenshot: null }] } }]);
+  });
+});
+
+// Decision Log 52 (2): a message carries at most MESSAGE_COMMENTS_MAX comments, and both destinations refuse more, so a
+// pass never holds more: a pick at the bound adds nothing, the card opening on the newest comment with one line that says
+// so; every comment counts, with text or without, so a discard makes room
+describe('a pass at the most a message carries', () => {
+  const LIMIT_LINE = 'A message carries at most 20 comments: send these first';
+  const limitLine = () => card()?.querySelector<HTMLElement>('[data-pass-limit]') ?? null;
+  const fill = () => {
+    render(<Host />);
+    for (let n = 1; n <= MESSAGE_COMMENTS_MAX; n++) {
+      pick(n);
+      type(`Comment ${n}`);
+    }
+  };
+
+  it('the 21st pick adds nothing: the card opens on the newest comment and says the limit in one line', () => {
+    fill();
+    expect(limitLine()).toBeNull();
+    pick(21);
+    expect(pass()?.comments).toHaveLength(MESSAGE_COMMENTS_MAX);
+    expect(pass()?.comments.at(-1)?.text).toBe('Comment 20');
+    expect(field().value).toBe('Comment 20');
+    expect(limitLine()?.textContent).toBe(LIMIT_LINE);
+  });
+
+  it('after a discard a pick adds again', () => {
+    fill();
+    pick(21);
+    expect(limitLine()?.textContent).toBe(LIMIT_LINE);
+    fireEvent.click(within(card()!).getAllByRole('button', { name: 'Remove comment' })[0]!);
+    expect(pass()?.comments.map((c) => c.text)).not.toContain('Comment 1');
+    expect(pass()?.comments).toHaveLength(MESSAGE_COMMENTS_MAX - 1);
+    expect(limitLine()).toBeNull();
+    pick(22);
+    expect(pass()?.comments).toHaveLength(MESSAGE_COMMENTS_MAX);
+    expect(pass()?.comments.at(-1)?.anchor).toEqual(page(22));
+    expect(field().value).toBe('');
+    expect(limitLine()).toBeNull();
+  });
+
+  it('a pass of exactly 20 opens one side thread: the first comment and 19 as `more`', () => {
+    fill();
+    expect(sendButton().textContent).toBe('Send 20 comments');
+    expect(sendButton().disabled).toBe(false);
+    fireEvent.click(sendButton());
+    const [sent] = fake.invoked('side.thread.open') as { from: { text: string; more: { text: string }[] } }[];
+    expect([sent!.from.text, ...sent!.from.more.map((c) => c.text)]).toEqual(Array.from({ length: MESSAGE_COMMENTS_MAX }, (_, i) => `Comment ${i + 1}`));
+  });
+
+  it('a pass of exactly 20 goes to the main conversation as one message', async () => {
+    fill();
+    fireEvent.click(box());
+    fireEvent.click(sendButton());
+    const [built] = fake.invoked('side.comment.content') as { comments: { text: string }[] }[];
+    expect(built!.comments.map((c) => c.text)).toEqual(Array.from({ length: MESSAGE_COMMENTS_MAX }, (_, i) => `Comment ${i + 1}`));
+    await fake.reply('side.comment.content', { content: BUILT });
+    await fake.reply('session.send', { messageUuid: null, disposition: 'sent', queueId: 'q0' });
+    await settle();
+    expect(pass()).toBeNull();
+  });
+
+  it('a pass holding more than a message carries, with text, cannot be sent', () => {
+    fill();
+    const held = pass()!;
+    const extra = { ...held.comments.at(-1)!, id: 'extra', text: 'One too many' };
+    act(() => useCommentCard.setState((s) => ({ passes: new Map(s.passes).set(KEY, { ...held, comments: [...held.comments, extra] }) })));
+    expect(sendButton().disabled).toBe(true);
+    fireEvent.click(sendButton());
+    expect(fake.invoked('side.thread.open')).toEqual([]);
+  });
+});
+
+// Decision Log 52 (1): this Mac's older MAWS service refuses a side thread of several comments before it goes (main's
+// hook); the card shows the refusal as it shows any, and the pass stays whole
+describe('a side thread of several comments refused by an older service', () => {
+  it('every comment stays in the pass, the card on the newest showing the words with Retry', async () => {
+    render(<Host />);
+    pick(1);
+    type('Make it bolder');
+    pick(2);
+    type('Align it left');
+    fireEvent.click(sendButton());
+    await fake.fail('side.thread.open', THREAD_FROM_ONE_COMMENT, 'internal', { refusal: 'not-offered' });
+    await settle();
+    expect(pass()?.comments.map((c) => [c.text, c.flight, c.refused?.error])).toEqual([
+      ['Make it bolder', null, THREAD_FROM_ONE_COMMENT],
+      ['Align it left', null, THREAD_FROM_ONE_COMMENT],
+    ]);
+    expect(within(card()!).getByRole('alert').textContent).toContain(THREAD_FROM_ONE_COMMENT);
+    expect(within(card()!).getByRole('button', { name: 'Retry' })).toBeTruthy();
   });
 });
 
