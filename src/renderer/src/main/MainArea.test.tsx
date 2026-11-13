@@ -173,10 +173,13 @@ describe('tab strip reorders, closes, reopens', () => {
     expect(tabNames()).toEqual(['Fix sidebar drag', 'Charter + research']);
   });
 
-  it('shows the session glyph on its tab and the project as its secondary text', () => {
+  // U13a (A9): in a strip that mixes projects, a session tab names its place as its secondary text
+  it('shows the session glyph on its tab and, in a strip of two projects, its project as its secondary text', () => {
+    useMachines.setState({ loaded: new Set([TEST_MACHINE]) }); // a session's row is known once its machine has answered
+    offs.push(() => useMachines.setState({ loaded: new Set() }));
     render(<Shell />);
     openThree();
-    const fix = tab('Fix sidebar drag');
+    const fix = tab('Fix sidebar drag · MAWS');
     expect(within(fix).getByRole('img', { name: 'Needs approval' }).textContent).toBe('◐');
     expect(within(fix).getByText('MAWS').tagName).toBe('SMALL');
   });

@@ -313,6 +313,7 @@ describe('sidebar recovery routes', () => {
   });
 
   it('the title bar chip reveals a machine’s own row: the sidebar shown, the row expanded and focused', async () => {
+    fillStores(nine);
     useMachines.setState({ loaded: new Set([TEST_MACHINE]) });
     offs.push(() => useMachines.setState({ loaded: new Set() }));
     useLayout.getState().openSession(idOf('Terminal workflow notes'), { how: 'tab' }); // a session in no project
