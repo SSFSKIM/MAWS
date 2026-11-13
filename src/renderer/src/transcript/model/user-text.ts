@@ -138,9 +138,12 @@ export function userTextOf(content: string | ContentBlock[]): UserText {
 // route left screenshots out) no comment claims one, and the bubble draws the images after the comments.
 function commentsOf(comments: MessageComment[], attachments: Attachment[]): UserComment[] {
   const images = attachments.flatMap((attachment, index) => (attachment.kind === 'image' ? [index] : []));
-  const paired = images.length === comments.filter((comment) => comment.screenshot).length;
-  let next = 0;
-  return comments.map(({ anchor, text, screenshot }) => (paired && screenshot ? { anchor, text, attachment: images[next++]! } : { anchor, text }));
+  const announcing = comments.flatMap((comment, index) => (comment.screenshot ? [index] : []));
+  const paired = images.length === announcing.length;
+  return comments.map(({ anchor, text }, index) => {
+    const k = paired ? announcing.indexOf(index) : -1;
+    return k < 0 ? { anchor, text } : { anchor, text, attachment: images[k]! };
+  });
 }
 
 // E11 (scale-review C scalpel-2#1): `userTextOf`'s parse inverted, a comment put back in the framing it was sent in, so
