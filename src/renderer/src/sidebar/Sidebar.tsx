@@ -269,14 +269,19 @@ function SidebarBody() {
   const selectedNode = selected === null ? null : sessionNodeId(selected);
   const tabStop = nodes.some((n) => n.id === focused) ? focused : nodes.some((n) => n.id === selectedNode) ? selectedNode : (nodes[0]?.id ?? null);
 
-  const itemElement = (id: string) => scroller.current?.querySelector<HTMLElement>(`[data-tree-id="${CSS.escape(id)}"]`) ?? null;
-  const focusItem = (id: string) => {
-    const element = itemElement(id);
-    if (element) element.focus();
-    else pendingFocus.current = id;
-  };
+  // Stable (they read refs alone), so an effect can name `focusItem` among its dependencies.
+  const itemElement = useCallback((id: string) => scroller.current?.querySelector<HTMLElement>(`[data-tree-id="${CSS.escape(id)}"]`) ?? null, []);
+  const focusItem = useCallback(
+    (id: string) => {
+      const element = itemElement(id);
+      if (element) element.focus();
+      else pendingFocus.current = id;
+    },
+    [itemElement],
+  );
   // UX wave U7, O-16 (M3, decision 6): after a Hide the keyboard goes to the row that took the hidden row's place, else to
-  // the Hidden row, once the render without it is on screen.
+  // the Hidden row, once the render without it is on screen. A Hide that places the keyboard (`hideAct`) always changes
+  // `shown` (its row leaves its group), so the effect runs after that render.
   useEffect(() => {
     const place = placeAfterHide.current;
     if (place === null) return;
@@ -287,7 +292,7 @@ function SidebarBody() {
     const id = next !== undefined ? sessionNodeId(rowId(next)) : hiddenNodeId(place.key);
     setFocused(id);
     focusItem(id);
-  });
+  }, [shown, focusItem]);
   // An item not on screen yet (the first row a "Show more" revealed, a revealed project) takes focus, and with it the
   // scroll, after the render that shows it.
   useEffect(() => {
