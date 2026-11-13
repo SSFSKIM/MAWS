@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AppSessionId } from '@shared/graph/ids';
 import { endableClientRef } from '@shared/ipc/client';
+import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
+import { PLAN_MODE_OTHER_HOST } from '@shared/sessions/plan-next-mode';
 import { digest, item } from '../../../test/support/builders';
 import { fakeBus, type FakeBus } from '../../../test/support/fake-bus';
 import { summary, tempDir } from '../../../test/support/index-fixture';
@@ -100,6 +102,61 @@ describe('answers cannot outlive attention', () => {
     hosts.dispatch.mockResolvedValueOnce({ ok: false, error: { code: 'host_unavailable', message: 'engine-host is not running' } } as never);
     const input = { appSessionId: id, requestId: pending.request.requestId, answer: { kind: 'permission', decision: 'deny', message: 'No' } };
     expect(await bus.invoke('session.answer', input)).toEqual({ ok: false, error: { code: 'host_unavailable', message: 'engine-host is not running' } });
+    sessions.stop();
+  });
+});
+
+// UX wave U1a §F, the panel's ruling: a plan answer that names a mode is never forwarded to an engine host that would drop
+// the mode (one of another wire reads its inputs tolerantly and implements in the earlier mode). The boundary reads the
+// serving host's own status (`host.supervisorStatus`) and applies the shared rule, `hostAppliesPlanMode`, against this
+// build's wire; the refusal is the renderer's words, and the request stays pending and unanswered.
+describe('a plan answer that names a mode, at the forwarding boundary', () => {
+  const id = 'app' as AppSessionId;
+  const plan = item(id, 'plan', '2026-10-02T00:00:00Z');
+  const named = { appSessionId: id, requestId: plan.request.requestId, answer: { kind: 'plan', outcome: 'implement', feedback: null, mode: 'default' } };
+  const plain = { appSessionId: id, requestId: plan.request.requestId, answer: { kind: 'plan', outcome: 'implement', feedback: null } };
+  // The engine host's status answers with `wire`; every other command it answers delivered
+  const servedBy = (wire: string | null) => {
+    const dispatch = vi.fn(async (_owner: string, name: string) => {
+      if (name !== 'host.supervisorStatus') return { ok: true as const, value: { outcome: 'delivered' as const } };
+      return wire === null ? { ok: false as const, error: { code: 'host_unavailable' as const, message: 'engine-host is not running' } } : { ok: true as const, value: { wire, pid: 7 } };
+    });
+    return { ...hosts, dispatch };
+  };
+  const answered = (dispatch: ReturnType<typeof servedBy>['dispatch']) => dispatch.mock.calls.filter(([, name]) => name === 'session.answer').map(([, , input]) => input);
+  const startWith = (served: ReturnType<typeof servedBy>) => {
+    const sessions = start({ env: {}, hosts: served as never });
+    sessions.model.register({ start: (writer) => (writer.observeAttention(id, [plan]), () => {}) });
+    return sessions;
+  };
+  const stillPending = (sessions: ReturnType<typeof start>) => sessions.model.allAttention().get(id)?.map((i) => [i.request.requestId, i.state]);
+
+  it.each([
+    ['an engine host of another wire', 'w-older'],
+    ['no engine host answering', null],
+  ])('is refused under %s: nothing is dispatched and the request still waits', async (_name, wire) => {
+    const served = servedBy(wire);
+    const sessions = startWith(served);
+    expect(await bus.invoke('session.answer', named)).toEqual({ ok: false, error: { code: 'invalid_input', message: PLAN_MODE_OTHER_HOST } });
+    expect(answered(served.dispatch)).toEqual([]);
+    expect(stillPending(sessions)).toEqual([[plan.request.requestId, 'pending']]);
+    sessions.stop();
+  });
+
+  it('is dispatched as sent to an engine host of this build’s wire', async () => {
+    const served = servedBy(wireFingerprint());
+    const sessions = startWith(served);
+    expect(await bus.invoke('session.answer', named)).toEqual({ ok: true, value: { outcome: 'delivered' } });
+    expect(answered(served.dispatch)).toEqual([named]);
+    sessions.stop();
+  });
+
+  it('naming no mode, goes to an engine host of another wire as today, without asking its status', async () => {
+    const served = servedBy('w-older');
+    const sessions = startWith(served);
+    expect(await bus.invoke('session.answer', plain)).toEqual({ ok: true, value: { outcome: 'delivered' } });
+    expect(served.dispatch.mock.calls.map(([, name]) => name)).toEqual(['session.answer']);
+    expect(answered(served.dispatch)).toEqual([plain]);
     sessions.stop();
   });
 });
