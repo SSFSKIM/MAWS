@@ -722,6 +722,12 @@ export class PlaneTranscript {
       }
     }
     if (!fresh) return;
+    // X-168: a row after the supplied exit (presence travels outside the ordered rows, so the last ones can follow it): the
+    // rows are rebuilt with the kept exit after them, staged, so what it brings ends too and nothing is drawn twice
+    if (this.exit !== null) {
+      this.rebuild();
+      return this.publish();
+    }
     this.source.live(row);
     if (this.treeContext !== null) this.setTree(withEvents(this.heldTasks, this.drawnEventsOf(row, this.treeContext)));
     this.publish();
