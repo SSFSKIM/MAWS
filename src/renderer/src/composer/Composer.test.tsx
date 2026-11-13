@@ -2178,7 +2178,7 @@ describe('a Stop that fails says so (S-01)', () => {
   const notices = () => useNotices.getState().notices.map((n) => n.text);
   const focusOn = (id: AppSessionId) =>
     useLayout.setState((s) => ({
-      main: { ...s.main, current: 'none', sets: { none: { panes: [{ tabs: [{ id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false }], activeTabId: `session:${id}` }], focusedPane: 0, splitRatio: 0.5 } } },
+      main: { ...s.main, panes: [{ tabs: [{ id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false }], activeTabId: `session:${id}` }], focusedPane: 0, splitRatio: 0.5 }, // UX wave U13a: one strip
     }));
   beforeEach(() => {
     resetStops();

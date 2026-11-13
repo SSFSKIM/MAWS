@@ -1947,6 +1947,7 @@ describe('listed rows from another machine', () => {
     };
     beforeEach(() => {
       for (const id of ['rename', 'fork', 'archive'] as const) offs.push(registerSessionAction(id, vi.fn()));
+      offs.push(registerRemoteOpener('B', vi.fn())); // the chain merge: a listing's opens (U7a) take lane B's opener
     });
     afterEach(async () => {
       // a menu left open would hold its layer past the test
@@ -1955,14 +1956,15 @@ describe('listed rows from another machine', () => {
       await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
     });
 
-    it('names the session in data-menu on every lane B row, none on a terminal session’s', () => {
+    // the chain merge: U7a names every listed row's menu (its opens and Hide), a terminal session's included
+    it('names the session in data-menu on every listed row, a terminal session’s included', () => {
       studioIs({ capabilities: [SESSION_ACTS_CAPABILITY], owner: true });
       fill([listedOn('b1', { title: 'Studio build' }), listedOn('a1', { title: 'Studio terminal', lane: 'A' })]);
       useSessions.setState({ listedMachines: new Set([OTHER_MACHINE]) });
       expandAll();
       render(<Sidebar />);
       expect(row('Studio build').getAttribute('data-menu')).toBe(`session:${studio('b1')}`);
-      expect(row('Studio terminal').getAttribute('data-menu')).toBe('none');
+      expect(row('Studio terminal').getAttribute('data-menu')).toBe(`session:${studio('a1')}`);
     });
 
     it('offers Rename…, Fork and Archive for a session you own, enabled on a machine that serves them', async () => {
@@ -1972,8 +1974,8 @@ describe('listed rows from another machine', () => {
       expandAll();
       render(<Sidebar />);
       const items = await menuOf('Studio build');
-      expect(items.map((m) => m.textContent)).toEqual(['Rename…', 'Fork', 'Archive']);
-      expect(items.map((m) => m.hasAttribute('data-disabled'))).toEqual([false, false, false]);
+      expect(items.map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Rename…', 'Fork', 'Archive', 'Hide']);
+      expect(items.map((m) => m.hasAttribute('data-disabled'))).toEqual([false, false, false, false, false, false]);
     });
 
     it('draws each disabled with the update sentence on a machine whose build doesn’t list the capability (A14)', async () => {
@@ -1984,9 +1986,12 @@ describe('listed rows from another machine', () => {
       render(<Sidebar />);
       const items = await menuOf('Studio build');
       expect(items.map((m) => [m.textContent, m.hasAttribute('data-disabled'), m.getAttribute('title')])).toEqual([
+        ['Open', false, null],
+        ['Open in new tab', false, null],
         ['Rename…', true, 'Can’t rename on Studio yet. Update MAWS on Studio and try again.'],
         ['Fork', true, 'Can’t fork on Studio yet. Update MAWS on Studio and try again.'],
         ['Archive', true, 'Can’t archive on Studio yet. Update MAWS on Studio and try again.'],
+        ['Hide', false, null],
       ]);
     });
 
@@ -1998,7 +2003,7 @@ describe('listed rows from another machine', () => {
       expandAll();
       render(<Sidebar />);
       const items = await menuOf('Studio build (record)');
-      expect(items.map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Open in split', 'Pin', 'Rename…', 'Fork', 'Archive']);
+      expect(items.map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Open in split', 'Pin', 'Hide', 'Rename…', 'Fork', 'Archive']); // U7a's Hide after Pin
       const fork = items.find((m) => m.textContent === 'Fork')!;
       expect(fork.hasAttribute('data-disabled')).toBe(true);
       expect(fork.getAttribute('title')).toBe('Only Studio’s owners can fork a session there.');
@@ -2254,7 +2259,9 @@ describe('listed rows from another machine', () => {
     const tabsBefore = useLayout.getState().main;
     fireEvent.contextMenu(row('Studio build'));
     const menu = await screen.findByRole('menu');
-    expect(within(menu).getAllByRole('menuitem').map((m) => [m.textContent, m.hasAttribute('data-disabled')])).toEqual([['Open', false], ['Open in new tab', false], ['Hide', false]]);
+    // the chain merge (U7a with U9): the opens, U9's acts over the link (disabled here: this case registers no handler for
+    // them), then Hide, the order ruled on 2026-11-13
+    expect(within(menu).getAllByRole('menuitem').map((m) => [m.textContent, m.hasAttribute('data-disabled')])).toEqual([['Open', false], ['Open in new tab', false], ['Rename…', true], ['Fork', true], ['Archive', true], ['Hide', false]]);
     await userEvent.click(within(menu).getByRole('menuitem', { name: 'Open' }));
     fireEvent.contextMenu(row('Studio build'));
     await userEvent.click(await screen.findByRole('menuitem', { name: 'Open in new tab' }));
@@ -2278,7 +2285,8 @@ describe('listed rows from another machine', () => {
     act(() => useLayout.getState().setSidebar({ expandedProjects: [ORG] as ProjectKey[] }));
     render(<Sidebar />);
     await user.click(within(row('Studio build')).getByRole('button', { name: 'Actions for Studio build' }));
-    expect(within(await screen.findByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Hide']);
+    // a listing you own: the opens, U9's acts, Hide (the chain merge's order, ruled on 2026-11-13)
+    expect(within(await screen.findByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Rename…', 'Fork', 'Archive', 'Hide']);
     expect(row('Studio build').getAttribute('aria-selected')).not.toBe('true'); // the dots open the menu, not the session
     await user.keyboard('{Escape}');
     await user.click(within(row('Terminal pass')).getByRole('button', { name: 'Actions for Terminal pass' }));

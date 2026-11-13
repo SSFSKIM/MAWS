@@ -218,8 +218,9 @@ describe('Add owner beside Share', () => {
     render(<Sidebar />);
     expect(row('Theirs').getAttribute('data-menu')).toBe(`session:${studio('t')}`);
     expect(await itemsOf('Theirs')).toEqual([]);
-    // its menu holds the two opens (UX wave U7, O-38) and Fork, the one act over the link for a session another member owns (the UX wave, U9)
-    expect(within(await menuOf('Theirs')).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open', 'Open in new tab', 'Fork']);
+    // its menu holds the two opens (UX wave U7, O-38), Fork, the one act over the link for a session another member owns
+    // (the UX wave, U9), then Hide (U7a): the order ruled on 2026-11-13, with no Share or Add owner for a row not yours
+    expect(within(await menuOf('Theirs')).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open', 'Open in new tab', 'Fork', 'Hide']);
     await userEvent.keyboard('{Escape}');
   });
 });
