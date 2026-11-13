@@ -14,6 +14,8 @@ import { parseTranscriptRecord } from '@shared/wire/transcript';
 import { createBackfillContext, recordToEvents } from '../../../../engine-host/fs/backfill';
 import { journalToEvents } from '../dev/journal';
 import { rowsOf, withAllExpanded } from './derive';
+import { turnContextOf } from './cells';
+import { continuedAfter } from './classify';
 import { applyEvents, createState } from './reduce';
 import { builder, tool, type Builder } from './test-events';
 import type { Cell, Row } from './rows';
@@ -56,17 +58,28 @@ describe('a rejected call the model went on from (denials.jsonl, its first turn)
   const REJECTED = 'toolu_synth_deny_1';
   const NEXT_MESSAGE = 'msg_denials_024'; // the model's next message after the rejected result
 
-  it('on the wire, by prefixes: stopped from its result until the next message’s first block, denied from then on', () => {
+  it('on the wire, by prefixes: stopped from its result until the next message’s first event, its call’s first input delta, denied from then on', () => {
     const result = events.findIndex((e) => e.kind === 'tool.result' && e.toolUseId === REJECTED);
-    // the next message's first block the reducer keeps: a text or thinking block's first delta, a completion or a call (a
-    // call's input deltas are not kept, so its block arrives at its completion)
-    const reducerHolds = (e: SessionEvent) => e.kind === 'assistant.block.complete' || e.kind === 'tool.use' || (e.kind === 'assistant.block.delta' && (e.blockType === 'text' || e.blockType === 'thinking'));
     const ofNextMessage = (e: SessionEvent) => 'apiMessageId' in e && e.apiMessageId === NEXT_MESSAGE;
-    const next = events.findIndex((e, i) => i > result && reducerHolds(e) && ofNextMessage(e));
+    const next = events.findIndex((e, i) => i > result && ofNextMessage(e));
     expect(result).toBeGreaterThan(0);
     expect(next).toBeGreaterThan(result);
+    // the next message opens with a call: its first event is that call's first input delta, long before it completes
+    expect(events[next]).toMatchObject({ kind: 'assistant.block.delta', blockType: 'tool_use' });
+    const completes = events.findIndex((e, i) => i > next && e.kind === 'assistant.block.complete' && ofNextMessage(e));
+    expect(completes).toBeGreaterThan(next + 1);
     for (let n = result + 1; n <= next; n += 1) expect(reading(callOf(drawn(events.slice(0, n)), REJECTED)), `prefix ${n}`).toMatchObject({ status: 'stopped', disposition: 'stopped' });
-    for (const n of [next + 1, events.length]) expect(reading(callOf(drawn(events.slice(0, n)), REJECTED)), `prefix ${n}`).toMatchObject({ status: 'denied', disposition: 'denied', label: expect.stringMatching(/^Denied: `/) });
+    for (let n = next + 1; n <= events.length; n += 1) expect(reading(callOf(drawn(events.slice(0, n)), REJECTED)), `prefix ${n}`).toMatchObject({ status: 'denied', disposition: 'denied', label: expect.stringMatching(/^Denied: `/) });
+  });
+
+  it('a process that exits after the next message’s first input delta closes the turn as no Stop: the call reads denied', () => {
+    const result = events.findIndex((e) => e.kind === 'tool.result' && e.toolUseId === REJECTED);
+    const next = events.findIndex((e, i) => i > result && 'apiMessageId' in e && e.apiMessageId === NEXT_MESSAGE);
+    const at = events[next]!;
+    const exit = { id: 'exit-after-delta', sessionId: at.sessionId, at: at.at, seq: at.seq, agentId: null, parentToolUseId: null, kind: 'process.exited', code: 0, signal: null, reason: 'unknown', lostAttentionCount: 0, budget: null } as SessionEvent;
+    const drawing = drawn([...events.slice(0, next + 1), exit]);
+    expect(reading(callOf(drawing, REJECTED))).toMatchObject({ status: 'denied', disposition: 'denied' });
+    expect(linesOf(drawing)[0]).toMatchObject({ state: 'completed', denied: 1 });
   });
 
   it('on the wire, at rest: the call reads denied and the turn’s line `Worked for … · 1 denied`', () => {
@@ -166,5 +179,34 @@ describe('an ask the person’s Stop interrupted', () => {
     b.result('toolu_ask', REFUSED, { isError: true, denial: 'user-rejected' });
     b.text('msg_2', 0, 'I will pick the palette myself.');
     expect(askOf(b)).toMatchObject({ state: 'error', cancelReason: null, error: REFUSED });
+  });
+});
+
+// The review of M1: the turn's context is made once per revision of a turn, and `continuedAfter` settles every rejected
+// call of one message at the next message's first block, in one pass
+describe('the turn’s context, once per revision', () => {
+  it('the same turn revision gives the same context; a new event gives a new one', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('toolu_a', 'Bash', { command: 'make lint' }, 'msg_1', 0);
+    const state = applyEvents(createState(null, null), b.events);
+    const turn = state.turns.get(state.order[0]!)!;
+    expect(turnContextOf(turn)).toBe(turnContextOf(turn));
+    b.result('toolu_a', 'The user doesn’t want to proceed with this tool use.', { isError: true, denial: 'user-rejected' });
+    const after = applyEvents(state, b.events.slice(-1));
+    const next = after.turns.get(after.order[0]!)!;
+    expect(turnContextOf(next)).not.toBe(turnContextOf(turn));
+    expect(turnContextOf(next).continued.size).toBe(0);
+  });
+
+  it('several rejected calls of one message wait together and are settled together by the next message', () => {
+    const b = builder();
+    b.turn('u1');
+    for (const [i, id] of ['toolu_a', 'toolu_b', 'toolu_c'].entries()) b.toolUse(id, 'Bash', { command: `step ${i}` }, 'msg_1', i);
+    for (const id of ['toolu_a', 'toolu_b', 'toolu_c']) b.result(id, 'The user doesn’t want to proceed with this tool use.', { isError: true, denial: 'user-rejected' });
+    b.toolUse('toolu_d', 'Read', { file_path: 'notes.md' }, 'msg_1', 3); // the same message: no work after them
+    expect(continuedAfter(b.events).size).toBe(0);
+    b.text('msg_2', 0, 'Going another way.');
+    expect([...continuedAfter(b.events)].sort()).toEqual(['toolu_a', 'toolu_b', 'toolu_c']);
   });
 });

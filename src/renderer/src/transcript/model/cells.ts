@@ -41,9 +41,15 @@ export const closedAsStopped = (turn: TurnState): boolean =>
   turn.state === 'closed' && (turn.closedBy !== null ? turn.closedBy === 'stopped' : turn.ended === null || isAbortedReason(turn.ended.terminalReason));
 
 // The one place a turn's context is made, for its derivation and for the mods' asks (surface/adapters.ts), so the two
-// cannot read a call differently.
+// cannot read a call differently. Made once per revision of the turn: the reducer clones a turn on its first change in a
+// batch and bumps its version on every structural one, and a mounted cell's ask must not pass over the turn's events again
+const contexts = new WeakMap<TurnState, { version: number; events: number; state: TurnState['state']; closedBy: TurnState['closedBy']; ended: TurnState['ended']; context: TurnContext }>();
 export function turnContextOf(turn: TurnState): TurnContext {
-  return { closed: turn.state === 'closed', stopped: closedAsStopped(turn), continued: continuedAfter(turn.events), lastAt: turn.events.at(-1)?.at ?? turn.startedAt };
+  const known = contexts.get(turn);
+  if (known && known.version === turn.version && known.events === turn.events.length && known.state === turn.state && known.closedBy === turn.closedBy && known.ended === turn.ended) return known.context;
+  const context = { closed: turn.state === 'closed', stopped: closedAsStopped(turn), continued: continuedAfter(turn.events), lastAt: turn.events.at(-1)?.at ?? turn.startedAt };
+  contexts.set(turn, { version: turn.version, events: turn.events.length, state: turn.state, closedBy: turn.closedBy, ended: turn.ended, context });
+  return context;
 }
 
 export const TRUNCATE_OVER = 64 * 1024;

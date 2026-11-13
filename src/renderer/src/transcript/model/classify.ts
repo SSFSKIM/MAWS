@@ -177,21 +177,25 @@ export function denialDisposition(kind: DenialKind, turn: DenialTurn, continued:
 // subagent's block or the turn's end.
 export function continuedAfter(events: readonly SessionEvent[]): ReadonlySet<ToolUseId> {
   const messageOf = new Map<ToolUseId, ApiMessageId | null>();
-  const waiting = new Map<ToolUseId, ApiMessageId | null>(); // rejected results no work has followed yet, by the call's message
+  // the rejected results no work has followed yet, grouped by the message that made their call: a block of another
+  // message settles a whole group at once, so each result is visited once and the pass stays linear
+  const waiting = new Map<ApiMessageId | null, ToolUseId[]>();
   const continued = new Set<ToolUseId>();
   for (const event of events) {
     if (event.parentToolUseId !== null) continue;
     if (event.kind === 'tool.result') {
-      if (event.denial === 'user-rejected') waiting.set(event.toolUseId, messageOf.get(event.toolUseId) ?? null);
+      if (event.denial !== 'user-rejected') continue;
+      const of = messageOf.get(event.toolUseId) ?? null;
+      waiting.set(of, [...(waiting.get(of) ?? []), event.toolUseId]);
       continue;
     }
     const message = event.kind === 'tool.use' || event.kind === 'assistant.block.delta' || (event.kind === 'assistant.block.complete' && event.isApiErrorMessage !== true) ? event.apiMessageId : null;
     if (event.kind === 'tool.use') messageOf.set(event.toolUseId, event.apiMessageId);
     if (message === null || waiting.size === 0) continue;
-    for (const [call, of] of waiting) {
+    for (const [of, calls] of waiting) {
       if (of === message) continue;
-      continued.add(call);
-      waiting.delete(call);
+      for (const call of calls) continued.add(call);
+      waiting.delete(of);
     }
   }
   return continued;
