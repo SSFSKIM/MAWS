@@ -42,7 +42,17 @@ How to see it working, on the wave's build: open a session with nothing running 
   - The whole `pnpm test`: 2,504 files passed and 7 failed. Six are the known master failures. The seventh, `src/main/org/rows.test.ts`, is a time-out under load and passes alone.
   - `src/shared/machine`: 129 of 131 tests passed; the two failures are the known `git-reads` ones.
   - No scene has run.
-- [ ] The proof an executor does not run: the cross-build run with F, the e2e groups, the branch review, class 1a on the final head.
+- [x] The branch review and its fix wave. (2026-11-13) The panel review (`wf_39cec22e-722`) over `9df6b4493..0e0458b77` found eight findings: seven were fixed, and one was ruled out of the edge into U6b's reveal (Decision Log 19). Eight addenda from the architect's first pass of the scene groups on the Mac followed (Decision Logs 20 to 25). The wave runs `0e0458b77..5617ad998`, and each step of it was reviewed clean by the task reviewer:
+  - findings 1 to 8 in `51512adb5..f4fee8cdf`;
+  - Addenda 1 and 3, scene changes, in `324462045..0732323e7`;
+  - Addendum 4 A, the header's fold threshold, in `d675d5004`;
+  - the wave review's fix, the keyboard after a move that empties a group and the remote pause, in `5583e8262`;
+  - Addendum 5, three scenes stating their rule at any width, plus a one-shot focus suppression, in `a3e03fe4e`;
+  - Addendum 6, a terminal opening wide (the owner's answer) and wrapped rows joined on the wrap flag, in `c464f653c`;
+  - Addendum 7, a drag over a frame of another origin staying the resizer's, in `23b5bb968`;
+  - Addendum 8, the resizing mark as a count of live drags and the two-build scenes' widths, in `77f55952c..5617ad998`.
+  - On the Mac before the chain merge: part A's groups green after the addenda; `e2e:panel` green at `23b5bb968` and at `77f55952c` (run 43465761224); part B's default group green at `25ebf4a9b`. The architect folded the rest into the one Mac run on the merged head.
+- [ ] The proof an executor does not run on the chain-merged head: class 1a, the whole Mac set, the round trip with build F and the paid agents group.
 
 ## The landing's edge
 
@@ -965,17 +975,17 @@ Found while writing this document, against master `48619c824`, and reported to t
 
 ## Outcomes & Retrospective
 
-(2026-11-13, the controller, at the hand-back to the architect. The run of the e2e groups on the Mac, the cross-build gate, class 1a and the branch review are not yet run and are not in this account.)
+(2026-11-13, the controller, after the branch review's fix wave and before the chain merge with `ux-wave/U11a`. Class 1a, the whole Mac set and the round trip with build F on the merged head are not yet run, and are not in this account.)
 
-**What landed.** All nine milestones, each reviewed clean at its boundary, on `ux-wave/U8b` from `78d343799`. Masters merged: `7e5f2016c` (U8a), `5c9cfa0c5` (the probes), `e71334239` (U6a), `d7ca414ae`, `80dcc59af` (spec batches 5 and 6), `c0e7b2ae8` (U10a) and `9df6b4493` (U13a, whose five conflicts were resolved as both and reviewed).
-- **The side column.** One strip with one tab in view per group, two groups at most, two remembered widths, and a first read that prunes at most once per profile.
+**What landed.** All nine milestones, each reviewed clean at its boundary, on `ux-wave/U8b` from `78d343799`; then the branch review's fix wave (`0e0458b77..5617ad998`). Masters merged: `7e5f2016c` (U8a), `5c9cfa0c5` (the probes), `e71334239` (U6a), `d7ca414ae`, `80dcc59af` (spec batches 5 and 6), `c0e7b2ae8` (U10a) and `9df6b4493` (U13a, whose five conflicts were resolved as both and reviewed).
+- **The side column.** One strip with one tab in view per group, two groups at most, and two remembered widths: a terminal is wide like Review (the owner's answer, Decision Log 23). The first read prunes at most once per profile.
 - **The card column.** Three cards with their folds remembered, two slots, and one pure predicate (`cardColumnShown`).
-- **The graph's readings.** Who started a task, with wire minor 37, and both vocabularies of a task's type read through `kindOf`.
+- **The graph's readings.** Who started a task, with wire minor 37 (40 after the chain merge), and both vocabularies of a task's type read through `kindOf`.
 - **The exit a gone terminal leaves.** On this Mac, and on another machine through its presence.
 - **The two panels and the two cards for running work.**
-- **M9's scenes**, written but not run.
+- **M9's scenes.** The Mac has run them in part, and the addenda corrected them.
 
-**Against the purpose.** The acceptance items have unit proof, and the e2e scenes wait for the Mac. What is stored stays readable by build F (UC-14): a frozen copy of F's schemas is tested, and the cross-build scenes cross both directions.
+**Against the purpose.** The acceptance items have unit proof, and part of the e2e set has passed on the Mac. What is stored stays readable by build F (UC-14): a frozen copy of F's schemas is tested, and the cross-build scenes cross both directions, now drawing the widths they claim.
 
 **What the boundary reviews caught.** Every finding below was real, and most were reproduced on the VM before they were fixed. Each would have shipped without a review at its boundary.
 - The first read could delete tabs: after a failed read, after a failed listing, and after work done in a deferred launch.
@@ -987,14 +997,22 @@ Found while writing this document, against master `48619c824`, and reported to t
 - "Nothing running" was missing on the route read from disk.
 - The reverse crossing of `panel.pinned` and `panelTools.activeNoSession` was not proved.
 
+**What the branch review and the Mac found after that.** The panel's eight findings showed what one task at a time could not see: acts made before the first read were lost, and the keyboard was lost after a move between groups. The Mac's scenes found faults no unit test could reach:
+- the header folding its actions at the default width;
+- a drag lost over a frame of another origin;
+- scene premises that the narrower automatic width (360) and the wide terminal had moved.
+Each later task review caught a fault in the previous round's fix: the one-shot focus flag, the paste helper's padding, and the unmount that left its drag set.
+
 **Where the document was wrong about the code, and was corrected in place.**
 - `setSurfaceStack` had a caller in U1's file (Decision Log 6).
 - The Stop callback names labels, not task types (Decision Log 10).
 - `end {session-ended}` cannot fire for a process that has gone, since DC8 (Decision Log 13).
 - M7 broke desk web's typecheck (Decision Log 18).
+- A frame takes pointer events away from a drag that crosses it (Decision Log 24).
 
 **Lessons**
-- A boundary review that may run code finds the faults that reading misses. Four of M6's five findings were shown by a probe on the VM, not by the diff.
+- A boundary review that may run code finds the faults that reading misses. Four of M6's five findings, and the paste helper's padding, were shown by a probe on the VM, not by the diff.
+- A scene that asserts a width carries a premise about which tools are in view. When the product's widths move, every such scene has to be swept, not only the one that failed.
 - A test log belongs in a file on the VM. A pipe into `head`, and a full disk on this Mac, each cost a proof run.
 - The guards read text. The tokens guard took "#359" for a colour twice, and a number is now written in words.
 - One reading in one place (`kindOf`, `cardColumnShown`, the panel's merge of jobs read by the card) settled three questions before they could become three mappings.
@@ -1003,5 +1021,6 @@ Found while writing this document, against master `48619c824`, and reported to t
 - The tracker row: a folded parent does not say that a nested agent waits.
 - No e2e fixture has a failed agent.
 - No scene shows the ask sheet giving back its place.
-- The stderr of 75 files in the whole suite: 73 are untouched by this branch, and 2 are traced to other tests.
+- `Resizer.test.tsx`'s late-end case reads a React-internal property of the DOM node (`__reactProps$`), and may need rewriting at a React upgrade.
+- The stderr of 75 files in the whole suite: 73 are untouched by this branch, and 2 are traced to other tests (one of them `PushState.test.tsx`, which registers no terminal).
 - The test-timing residue listed in the report.
