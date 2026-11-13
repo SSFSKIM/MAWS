@@ -1473,6 +1473,12 @@ describe('listed rows from another machine', () => {
     beforeEach(() => {
       for (const id of ['rename', 'fork', 'archive'] as const) offs.push(registerSessionAction(id, vi.fn()));
     });
+    afterEach(async () => {
+      // a menu left open would hold its layer past the test
+      if (screen.queryByRole('menu') === null) return;
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+      await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+    });
 
     it('names the session in data-menu on every lane B row, none on a terminal session’s', () => {
       studioIs({ capabilities: [SESSION_ACTS_CAPABILITY], owner: true });
