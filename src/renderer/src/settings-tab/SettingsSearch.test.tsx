@@ -42,7 +42,7 @@ function renderView(initial: Settings = SETTINGS_DEFAULTS_V21, answers: Settings
 }
 const index = () => screen.getByRole('navigation', { name: 'Settings sections' });
 const field = () => screen.getByRole('combobox', { name: 'Search settings' }) as HTMLInputElement;
-const options = () => screen.queryAllByRole('option');
+const options = () => within(index()).queryAllByRole('option'); // the index's results, not a select's options in the body
 const optionTexts = () => options().map((o) => [...o.children].map((line) => line.textContent).join(' · '));
 const row = (label: string) => screen.getByRole('group', { name: label });
 const type = (query: string) => fireEvent.change(field(), { target: { value: query } });
