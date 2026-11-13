@@ -252,7 +252,7 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
   }),
   event('task.notification', {
     taskId: TaskIdSchema, toolUseId: ToolUseIdSchema.nullable(), status: TaskOutcomeSchema, summary: z.string(), outputFile: nullableString(), reason: nullableString(),
-    // UX wave U3 (the whole-branch review's finding 3; minor 38): set by a normaliser that reads arrivals, whose task's
+    // UX wave U3 (the whole-branch review's finding 3; minor 42): set by a normaliser that reads arrivals, whose task's
     // end is told by an arrival, so the event draws no line of its own; absent on an older host's, whose event is the
     // end's one telling
     arrivals: z.literal(true).optional(),
