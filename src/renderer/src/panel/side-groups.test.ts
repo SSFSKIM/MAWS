@@ -240,6 +240,23 @@ describe('the acts that change what is in view (Interfaces §B)', () => {
     expectFReads(store.getState());
   });
 
+  it('a ref written for the lower group joins it, and is in view there only when the same call activates it (M3)', () => {
+    const notes = ref('notes:aaaa0008');
+    const store = withTabs([review, files, t1], [review.id, files.id]);
+    store.getState().updatePanelTabs(A, (refs) => [...refs, t2], { group: 'lower' });
+    expect(view(sideGroups(store.getState(), A))).toEqual({ upper: [review.id, t1.id], upperShown: review.id, lower: [files.id, t2.id], lowerShown: files.id, hidden: false });
+    store.getState().updatePanelTabs(A, (refs) => [...refs, info], { group: 'lower', activate: info.id });
+    expect(view(sideGroups(store.getState(), A))).toEqual({ upper: [review.id, t1.id], upperShown: review.id, lower: [files.id, t2.id, info.id], lowerShown: info.id, hidden: false });
+    expectFReads(store.getState());
+    store.getState().hideSurfaces(A);
+    store.getState().updatePanelTabs(A, (refs) => [...refs, notes], { group: 'lower' });
+    expect(view(sideGroups(store.getState(), A))).toEqual({ upper: [review.id, t1.id], upperShown: review.id, lower: [files.id, t2.id, info.id, notes.id], lowerShown: info.id, hidden: true });
+    expectFReads(store.getState());
+    const one = withTabs([review], [review.id]); // one group: there is no lower group to join
+    one.getState().updatePanelTabs(A, (refs) => [...refs, files], { group: 'lower' });
+    expect(view(sideGroups(one.getState(), A))).toEqual({ upper: [review.id, files.id], upperShown: review.id, lower: null, lowerShown: null, hidden: false });
+  });
+
   it('a share is set inside 0.2..0.8, and only with a lower group', () => {
     const store = withTabs([review, files], [review.id, files.id]);
     store.getState().setGroupShare(A, 0.95);

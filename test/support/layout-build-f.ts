@@ -45,3 +45,17 @@ export function buildFSchemaOf(key: string): z.ZodType | null {
   if (key === 'panelTools.surfaces') return F_PanelSurfacesSchema;
   return null;
 }
+
+// F's reading of what a scope has in view (`surfaceTabs` and `normalizeSurfaceStack` of `panel/surface-model.ts` at
+// `f1852de3a`), over the values it parsed: the stored stack, else the selection; ids that are no ref dropped, one tab
+// per tool, two at most. Its two ids are F's two stacked surfaces, upper first.
+export function F_surfaceTabIds(refs: readonly { id: string; toolId: string }[], stack: readonly string[] | undefined, activeTabId: string | null): string[] {
+  const ids = stack ?? (activeTabId === null ? [] : [activeTabId]);
+  const tools = new Set<string>();
+  return ids.filter((id) => {
+    const ref = refs.find((tab) => tab.id === id);
+    if (!ref || tools.has(ref.toolId)) return false;
+    tools.add(ref.toolId);
+    return true;
+  }).slice(0, 2);
+}
