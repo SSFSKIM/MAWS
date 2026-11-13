@@ -2,7 +2,8 @@
 // "The action"): the ⌘K palette's "<project> · channel" entries with what waits in each, and View › Project channel.
 // The action's handler is registered exactly while the tab in front names a project that has a channel: a Channel tab's
 // own project, or a session tab's row (a New chat's by its intent), as `ipc/events.ts` files the session's tabs
-// (`sessionSetKey`). Unregistered, the menu item is greyed and the palette's row says why. Both open the tab, or bring it
+// (`sessionSetKey`); a session this Mac knows only by another machine's listing (a lane A one has no record) by that
+// listing's row, as the sidebar files it, or its project's key when every checkout of that project here is hidden. Unregistered, the menu item is greyed and the palette's row says why. Both open the tab, or bring it
 // forward, through the layout's `openTab`.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { LayoutMain } from '@shared/ipc/schema/layout';
@@ -12,7 +13,7 @@ import { currentTabRetention, registerAction, unstartedProjectOf } from '../keym
 import { useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
-import { selectOrgIndex, sessionSetKey } from '../stores/org-projects';
+import { rowOfListed, selectOrgIndex, sessionSetKey, type RowKey } from '../stores/org-projects';
 import { useSessions } from '../stores/sessions';
 import { channelOfRow, channelProjects, waitingFor } from './project';
 
@@ -30,8 +31,10 @@ export function frontChannel(main: LayoutMain, state: SessionsState, local: Mach
   const tab = activeTab(main);
   if (tab?.kind === 'channel') return tab.project;
   if (tab?.kind !== 'session') return null;
-  const row = sessionSetKey(state, local, tab.appSessionId, intentOf(state, tab.appSessionId));
-  return row === null || row === undefined ? null : channelOfRow(row, selectOrgIndex(state, local));
+  const index = selectOrgIndex(state, local);
+  const listing = state.records.has(tab.appSessionId) ? undefined : state.listed.get(tab.appSessionId);
+  const row: RowKey | null | undefined = listing === undefined ? sessionSetKey(state, local, tab.appSessionId, intentOf(state, tab.appSessionId)) : (rowOfListed(index, listing) ?? listing.orgKey);
+  return row === null || row === undefined ? null : channelOfRow(row, index);
 }
 
 /** Opens the project's Channel tab, or brings it forward. */
