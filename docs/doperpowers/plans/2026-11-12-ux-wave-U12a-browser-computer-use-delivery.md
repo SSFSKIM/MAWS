@@ -894,6 +894,16 @@ The pull request carries the dated lines of the two records this landing amends,
     7. The tool opens by the agent only once this window's list of tabs holds the selection main answered with; `browser.agent.show`'s answer names the session's selected tab. When the agent's tab did not come forward, the opening is as before.
   Date/Author: 2026-11-13, the architect's rulings on the panel's findings.
 
+- **2026-11-13 · The panel's fix wave as built** (the executor's decisions, folded by the controller).
+  - Item 1 took the first form. At the plugin's pin `9020bb18`, every answer given without running a cell is an error result: `src/mcp/results.mjs` makes each sentence answer an error by default, the empty-source answer in `src/repl-host/supervisor.mjs` is returned before the queue, and `rejectionResult`, `noMoreWork` and "Unknown tool" in `src/mcp/server.mjs` are errors. The answers that are not errors (`js_reset`, `end_task`) come after the earlier cell has settled. The reading gains a state `failed` beside `done`; only `done` is evidence. No plugin sentence is copied into MAWS. Not probed: that an MCP JSON-RPC error reaches the transcript as an error result; either way such a call cannot read `done`.
+  - Item 2: a marker withdraws the unbroken run of tool results right before it; in a subagent's list, its trailing run when the turn holds a marker. Checked against `spikes/protocol-probe/fixtures/queue-and-interrupt.jsonl` and `pass3/p1-maws-ask-interrupt.jsonl`, by a test that replays both through the normalizer and the reducer.
+  - Item 3: at each look the tracker re-reads the state of each call after the withdrawn one. Kept for good: the process exited, the server gone, Dismiss, and a later shown call that is itself withdrawn (which becomes the unresolved call, as before). Rejected: a rebuild from the current reading alone, under which a next turn with no computer-use call would bring the line back for a cell that is over.
+  - Item 4: the datum is `processGoneOf`: the session's engine status says `process: 'exited'`, or its digest phase is `exited`. `failed`, `foreign` and the transcript's `ticks` are left out. So a turn the store says has stopped ticking now turns a shown call's line into the lingering one instead of clearing it.
+  - Item 5: `agentTabComesForward` takes the session's tabs as a fourth parameter, built in the handler; `tabs.ts` is not edited.
+  - Item 6: the window watches the layout store while the answer is out. Rejected: a value compared at the answer, which cannot see an open-then-close.
+  - Item 7: `browser.agent.show` answers `{ selected: BrowserTab | null }`, and the window writes that selection into its own list (`agentTabSelected`) before it opens the tool. Rejected: waiting for main's list to arrive, which can leave a wait that opens the Browser minutes later. The command is between main and the windows only, so no `WIRE_MINOR` moves.
+  - Nothing under `e2e/` changed. The scenes these reach: the three of `e2e/computer-use.spec.ts` and the A9 scene of `e2e/browser-cua.spec.ts`.
+
 ## Outcomes & Retrospective
 
 **2026-11-13, at the executors' end (before the architect's runs).** The five milestones are built and each was reviewed clean at its boundary; the branch review, the Mac runs and class 1a are the architect's and are not in this entry.
