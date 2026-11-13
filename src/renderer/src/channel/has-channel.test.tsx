@@ -85,10 +85,13 @@ async function menuAnswer(key: RowKey): Promise<string | null> {
     cleanup();
     return null;
   }
+  const items = within(menu).getAllByRole('menuitem').map((i) => `${i.textContent}${i.getAttribute('data-disabled') !== null ? '(d)' : ''}`);
   act(() => fireEvent.click(item));
+  const connected = item.isConnected;
+  const menuStill = screen.queryByRole('menu') !== null;
   const tab = activeTab(useLayout.getState().main);
   cleanup();
-  return tab?.kind === 'channel' ? tab.project : `not a channel tab: ${tab?.kind ?? 'none'} ${JSON.stringify(useLayout.getState().main)}`;
+  return tab?.kind === 'channel' ? tab.project : `not a channel tab: ${tab?.kind ?? 'none'} items=${items.join('|')} connected=${connected} menu=${menuStill}`;
 }
 
 describe('has a channel: one rule, the sidebar menus’ answer', () => {
