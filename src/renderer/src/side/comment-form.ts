@@ -19,6 +19,7 @@
 // nothing typed or sent depends on what is mounted. The sheet keeps its own state, as before.
 import { useState, type KeyboardEvent } from 'react';
 import type { Anchor, AnchorScreenshot } from '@shared/anchor/anchor';
+import { MESSAGE_COMMENTS_MAX } from '@shared/anchor/message'; // Decision Log 52
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { isAddress, machineOf } from '@shared/machine/address';
@@ -116,7 +117,8 @@ function formOf(route: ReturnType<typeof useRoute>, state: { wantsMain: boolean;
     showScreenshot: state.screenshot !== null && room?.max !== 0,
     leftOut: room !== null && state.screenshots > room.max ? { count: state.screenshots - room.max, reason: room.reason } : null,
     ready: route.ready,
-    canSend: (to: CommentDestination) => state.withText > 0 && !busy && refusalOf(to) === null,
+    // Decision Log 52 (2): never more comments than a message carries, which both destinations would refuse
+    canSend: (to: CommentDestination) => state.withText > 0 && state.withText <= MESSAGE_COMMENTS_MAX && !busy && refusalOf(to) === null,
     // P2-A: a send that starts its session (a side thread, or main on a session that is not running) reads Starting…;
     // UX wave U5a: a pass of several comments with text reads how many go
     submitLabel: busy ? (state.flightTo === 'thread' || starts ? COPY.starting : COPY.sending) : state.withText > 1 ? COPY.sendMany(state.withText) : COPY.send,

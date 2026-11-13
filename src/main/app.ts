@@ -38,6 +38,7 @@ import { registerMachineHandler, registerMainHandler } from './ipc/router'; // P
 import { bindLocalMachine } from './machine/local'; // P5 O6 M2
 import { startMachines } from './machines'; // P5 O6 M3: the connection manager (P5 O3-D M6: the stand-in gone)
 import { localProjectActsSource, PROJECT_ACT_COMMANDS, refuseUnservedProjectActs } from './machines/project-acts-peer'; // panel scalpel-3#2
+import { refuseUnservedSideThreads, SIDE_THREAD_COMMANDS } from './machines/side-thread-peer'; // UX wave U5a, Decision Log 52
 import { createRecordSigner, createStateSigner, createStepUp, promptTouchIDConfirmation } from './device/step-up'; // P5 O7 M1: the development org session's signer; P5 O8 M1: the production session's; M3: its state signer; M4b: its record signer
 import { harnessConfirmation, sheetConfirmation } from './device/step-up-sheet'; // P5 O7 M2: the step-up sheet before Touch ID
 import { createDevOrgSession } from './org/dev-session'; // P5 O7 M1
@@ -548,6 +549,9 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
   // panel scalpel-3#2: an act the attached daemon predates is refused `not-offered`, never sent to have its `into`
   // passed by as an unknown field (./machines/project-acts-peer.ts)
   beforeCommand(PROJECT_ACT_COMMANDS, refuseUnservedProjectActs(() => hosts.peer('machine'), localName));
+  // UX wave U5a (Decision Log 52): a side thread of several comments the attached daemon predates is refused in the
+  // card's words, never sent to be opened from its first comment alone (./machines/side-thread-peer.ts)
+  beforeCommand(SIDE_THREAD_COMMANDS, refuseUnservedSideThreads(() => hosts.peer('machine'), localName));
   installRouter({ appUrl, local, dispatchToHost, remote: routeLaneB(routeLaneA(machines.dispatch, (ref) => machines.remote(ref), remoteLaneA), (ref) => machines.remote(ref), remoteLaneB), machine: { kind: 'host', daemonRenders, daemonDelivers } });
   // P5 O3-C (Interfaces §A): the services bus, bound here to the router and `emit`, so every tap main's own code holds
   // (the menu's) hears mawsd's events, and main's own calls take main's own route. P5 O15 M2: no library registers its

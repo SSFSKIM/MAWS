@@ -15,6 +15,7 @@
 // independently of the pass, which may end meanwhile (its subject closed); it settles through `landFlight`.
 import { create } from 'zustand';
 import type { Anchor, AnchorScreenshot } from '@shared/anchor/anchor';
+import { MESSAGE_COMMENTS_MAX } from '@shared/anchor/message'; // Decision Log 52: the most a pass holds
 import type { AppSessionId } from '@shared/graph/ids';
 import { parseDeliverableUrl } from '@shared/maws/deliverable'; // P3-L (M6b): a legacy anchor's page URL
 import { parseArtifactUrl, type ArtifactUrlRevision } from '@shared/artifacts/scheme'; // P3-L (M5b)
@@ -51,6 +52,7 @@ export interface OpenCard {
   target: CardTarget | null; // targetOf(anchor); null when the anchor names none
   rect: CardRect | null; // null: locate, else the corner
   phase: CardPhase;
+  limit?: true; // Decision Log 52: opened by a pick its pass had no room for (the card says the limit)
 }
 
 export const CLAIM_DEADLINE_MS = 5_000;
@@ -165,7 +167,9 @@ export function targetOf(anchor: Anchor): CardTarget | null {
 // artifact card host's. UX wave U5a (§C): a composing open adds a comment to the pass of the placement's host (made with
 // the checkbox at the surface's default) and opens the card on it; where the host keeps one unsent comment and its pass
 // holds one with text, the card opens on that one instead and nothing is added. The card it replaces leaves its comment
-// in its pass.
+// in its pass. Decision Log 52 (2): a pass holds at most the comments one message carries (MESSAGE_COMMENTS_MAX, which
+// both destinations take at most), every comment counted, with text or without; a pick on a full pass adds nothing and
+// opens the card on its newest comment, marked `limit`, so a refused send never restores a pass no Retry could send.
 export function openCard(anchor: Anchor, context: CommentContext & { phase?: CardPhase; claimMode?: CardHostMode }): void {
   const given = context.placement;
   const placement: Extract<CommentPlacement, { kind: 'card' }> | null = given?.kind === 'card' ? given : given?.kind === 'margin' ? { kind: 'card', host: 'artifact', hostId: given.hostId } /* P4-B1 */ : null;
@@ -196,6 +200,13 @@ export function openCard(anchor: Anchor, context: CommentContext & { phase?: Car
       left.dropped.push([pass, kept]);
       pass = { ...pass, comments: pass.comments.filter((comment) => comment !== kept) };
     }
+  }
+  if (pass.comments.length >= MESSAGE_COMMENTS_MAX) {
+    const newest = { ...cardOn(key, pass, pass.comments.at(-1)!, hostId), claimMode: context.claimMode ?? null, limit: true as const };
+    useCommentCard.setState({ passes, open: newest });
+    left.told();
+    claimBy(newest.serial, hostId);
+    return;
   }
   const comment: PassComment = { id: String(++comments), anchor: withoutScreenshot(anchor), text: '', screenshot: anchor.screenshot ?? null, rect: placement?.rect ?? null, flight: null, refused: null };
   const next = { ...pass, comments: [...pass.comments, comment] };

@@ -75,6 +75,21 @@ describe('transcript store', () => {
     expect(store.getState().rows(KEY).length).toBeGreaterThan(0);
   });
 
+  // UX wave U5a (Decision Log 52): a selector over `attached` (the refusal dialog's) hears the last holder go
+  it('the last detach tells the store’s subscribers that the key is no longer attached; an earlier one tells nothing', async () => {
+    const store = createTranscriptStore();
+    const fake = pushSource(twoTurns().events);
+    await store.getState().attach(KEY, fake.source);
+    await store.getState().attach(KEY, fake.source); // a second holder of the same source
+    const heard: boolean[] = [];
+    const off = store.subscribe((state) => heard.push(state.attached(KEY)));
+    store.getState().detach(KEY);
+    expect(heard).toEqual([]);
+    store.getState().detach(KEY);
+    expect(heard).toEqual([false]);
+    off();
+  });
+
   it('toggles a turn, a group and a cell, and later batches still apply (the lineage is kept)', async () => {
     const b = twoTurns();
     const store = createTranscriptStore();

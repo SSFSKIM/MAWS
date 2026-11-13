@@ -1,6 +1,7 @@
 // Every string E3's renderer shows (E3 execution document, Constraints: copy through `SIDE_COPY`): the comment
 // composer's sheet, the Side pane and its question view, the `/btw` widget, the transcript's side-thread row (its view
 // and its markdown export), and the sidebar's lineage captions.
+import { SEND_TO_MAIN_LABEL } from '@shared/side/copy'; // UX wave U5a (Decision Log 52): main's refusal names the box by it
 import { SENDS_AT_NEXT_STEP } from '../composer/submit/submit-state';
 
 const turnsSuffix = (turns: number) => (turns > 1 ? ` (${turns} turns)` : '');
@@ -12,7 +13,7 @@ export const SIDE_COPY = {
     placeholder: 'What should the agent look at or change here?',
     // UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, §E): one checkbox in place of the two
     // destinations; its title says what ticking does now, or why it can't change
-    main: 'Send to main',
+    main: SEND_TO_MAIN_LABEL,
     mainBusy: SENDS_AT_NEXT_STEP, // the composer's own wording for a `next` steer
     mainIdle: 'Sent now',
     threadRemote: (machine: string) => `A side thread is not available on ${machine} yet`,
@@ -52,6 +53,8 @@ export const SIDE_COPY = {
     // UX wave U5a (§E): the pass's other comments in the card, and the chip of a pass with no card open
     removeComment: 'Remove comment',
     unsent: (count: number) => (count === 1 ? '1 unsent comment' : `${count} unsent comments`),
+    // Decision Log 52 (2): a pick on a pass that holds as many comments as a message carries adds nothing
+    limit: (max: number) => `A message carries at most ${max} comments: send these first`,
     // the thread phase
     replyField: 'Reply',
     replyPlaceholder: 'Reply to this thread',

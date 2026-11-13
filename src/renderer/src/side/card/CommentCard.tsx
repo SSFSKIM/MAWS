@@ -20,6 +20,7 @@
 // the route can never carry is not drawn. A send to main that went tells the host's place where it went. The card names
 // the receiving session ("Session: <title>") on every host exactly when it is not the session the main area shows.
 import { useEffect, useLayoutEffect, useRef, type FocusEvent, type KeyboardEvent, type MouseEvent } from 'react';
+import { MESSAGE_COMMENTS_MAX } from '@shared/anchor/message'; // Decision Log 52
 import type { AppSessionId } from '@shared/graph/ids';
 import { GlyphMark } from '../../attention/GlyphMark';
 import { glyphFor } from '../../attention/glyph';
@@ -246,6 +247,11 @@ function CardComposer({ card, passKey, commentId, restoreFocus }: { card: OpenCa
         </button>
       </div>
       <CommentFormLines form={form} />
+      {card.limit && form.others.length + 1 >= MESSAGE_COMMENTS_MAX && ( /* Decision Log 52: a pick its full pass did not take */
+        <p data-pass-limit="" className="m-0 text-ui-sm text-fg-muted">
+          {COPY.limit(MESSAGE_COMMENTS_MAX)}
+        </p>
+      )}
       <CommentRefusal form={form} onSend={send} />
     </form>
   );
