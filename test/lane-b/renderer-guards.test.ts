@@ -62,7 +62,7 @@ const GUARDED_ELSEWHERE: Readonly<Record<string, Entries>> = {
   },
   'widgets/SkillsWidget.tsx': { commands: ['session.reloadSkills'], guard: 'through widgets/operation.ts’ useOperation, which reads the helper and greys the control' },
   'widgets/plugins/reload.tsx': { commands: ['session.reloadSkills'], guard: 'through widgets/operation.ts’ useOperation, which reads the helper; its controls take that answer' },
-  'side/actions.ts': { commands: ['side.thread.open', 'side.sendToMain'], guard: 'called only behind side/comment-form.ts’ canSend and side/BtwView.tsx’s canPromote, which read the helper' },
+  'side/actions.ts': { commands: ['side.thread.open'] /* UX wave U5a: side.sendToMain has no window caller (charter X10) */, guard: 'called only behind side/comment-form.ts’ canSend and side/BtwView.tsx’s canPromote, which read the helper' },
   // what acts on this window, branched before the command
   'session/visibility.ts': { commands: ['session.setVisible'], guard: 'a lane B session on another machine goes to showRemote; only ids with a record are sent, and a terminal session there has none' },
   'stores/replay-diagnostics.ts': { commands: ['session.replay.control'], guard: 'replays this Mac starts (machine: the local one) and its own progress events' },
