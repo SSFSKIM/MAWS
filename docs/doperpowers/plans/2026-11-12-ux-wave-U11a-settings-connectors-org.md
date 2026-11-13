@@ -40,7 +40,8 @@ How to see it working: the unit tests named under each milestone fail before its
 - [x] (2026-11-13 08:17Z) M9 — Settings regrouped, a note on one line (`17042eac0`, `21e5af652`, `c4b948405`, `3a1fc191d`, `85b190c73`), reviewed clean (law 8, UC-14 and A6's table read against the diff).
 - [x] (2026-11-13 09:09Z) M10 — Search settings (`ab103d6be`, `94042a370`, `3e5648236`, `fdc9436ed`, `cfd86e288`, `52d1be5d6`), reviewed clean. The architect accepted its two behaviour choices: every Settings row a focus stop outside the Tab order, ⌘F only from the view's own DOM.
 - [x] (2026-11-13 09:09Z) P6 and P7 on the Mac (the architect's): e2e:settings green at `85b190c73` (run 43391255930: M9's three-width measure holds at 18.5 px and 22.5 px); e2e:discover green at `e186cb343` (run 43392298473: M8's scene, a plugin's connector and two of MAWS's own list signed in, with no Keychain prompt).
-- [ ] M11 — the record, master merged again and the wire's files made again, the whole checks, the hand-back.
+- [x] (2026-11-13 10:20Z) M11 — master `c0e7b2ae8` merged (`1672fa149`, no conflict; none of U4a, U13a, U7 or U9 is on master yet); the wire's files made again with master's manifest restored, no diff (minor 37 over master's 36: the command, `pluginName`, `revision`, one route and one address path, fingerprint `86fd1f8530531e00`, nothing under the event); the record's five amendments (`0baf35b74`). At `0baf35b74`: `pnpm typecheck` clean over the six projects, eslint clean, the app scan 8 of 8, `pnpm test` once: the brief's known files and one real failure, `src/main/machines/remote/boundary.test.ts`, whose text guard read M5's tab opener `openChannel(` as the remote module's call; ruled a rename, `openProjectChannel` (`2f0fe04a8`, with the scene fix of Mac run 43400320662), and at `2f0fe04a8` the guard, `channel`, `palette` and `settings-tab` pass, 855 of 855.
+- [ ] P7's second half: U13a's cross-build settings scene, once it is on master (the architect's word); this landing then makes it find the idle-time row on the regrouped page.
 - [ ] The architect's: the e2e runs, class 1a, the xhigh panel, the pull request.
 
 ## The landing's edge
@@ -1216,6 +1217,20 @@ Found while checking the sections against the code at `48619c824`, then by the a
   Rationale: §G's four rules; a search that reads the page's own drawn rows finds only words the page shows now.
   Date/Author: 2026-11-13, M10's executor; folded by the controller.
 
+- Decision: in the record, the child's sentence "UX wave U11 (#505): …" is written "board 505", and M5's tab opener is `openProjectChannel`.
+  Rationale: the token guard reads `#` and three hex digits as a colour (the architect's rule); the RL2 boundary guard (`src/main/machines/remote/boundary.test.ts`) scans main and the renderer for `openChannel(`, the remote module's call, and its allow-list is for real machine paths, so the name moved, not the guard (the architect's ruling).
+  Date/Author: 2026-11-13, M11's executor and the wave's architect; folded by the controller.
+
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+(2026-11-13, the controller, at hand-back; the branch review and class 1a are the architect's and refresh this.)
+
+**What exists.** All ten items are built on `ux-wave/U11a`, M1 to M10 each reviewed clean at its boundary, M11's record, merge and whole checks done. A connector a plugin brings or one of MAWS's own list offers Sign in from the Connectors dialog of a session MAWS runs on this Mac, and Customize's own-list row signs in the configuration it showed or nothing (§A; P1 promoted both kinds as designed). The Connectors dialog is one line per connector with the switch's reach said once; a New chat lists its plugins, connectors and skills before the first message; Settings is regrouped with one line per note and has a search; the Org sheets name their next steps; one scrim dims the window however many layers stack; the Channel lines up, cuts names in one order, says offline or refused, and opens from the palette and the View menu.
+
+**Proved on a Mac (the architect's runs).** e2e:settings at `9412a40e1` and `85b190c73` (the Channel's scenes; M9's three-width measure at 18.5 and 22.5 px); e2e:widgets 30/30 and e2e:composer 26/26 at `0be74a6ea`; e2e:discover at `e186cb343` (M8's real-engine sign-ins, no Keychain prompt). Open: e2e:settings for M10's search at `2f0fe04a8`; P4 (offline Channel); P7's cross-build half (U13a not on master); the `c11-live` step at a live sitting.
+
+**Against the purpose.** The four surfaces stop getting in the way in the ways Purpose names; the Mac runs found five scene faults and three product faults the unit tests had missed (focus after a sheet over a dialog, the attached session's init-only server list, a refusal cleared by a second tab's open, the last found by review). Each became a rule in one place rather than a patch at one caller.
+
+**Lessons.** A Mac run caught what jsdom could not every time it ran a new scene; scenes written blind need their selectors exact and their locators relative from the start. A text guard (`boundary.test.ts`, `tokens-guard.test.ts`) is invisible to a milestone's scoped proof; the one whole-suite run per landing is where they surface, so a landing's names and ids should be chosen with the repository's guards in mind. Holding one builder at a time in a shared checkout cost some waiting and no collisions.
+
+**Residue** is Concrete Steps 6's list; ticket 619 holds the card's "Not reported" and a non-attached session before its first turn.
