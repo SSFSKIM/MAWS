@@ -1,6 +1,6 @@
 # UX wave · U1a · requests: UC-1, and the request work that does not draw in the transcript (2026-11-12)
 
-> **Parent:** `docs/doperpowers/specs/2026-11-12-ux-wave-design.md` (the UX wave's composite spec, its root), child **U1**, first landing (**U1a**), parent pin `06727e32a`.
+> **Parent:** `docs/doperpowers/specs/2026-11-12-ux-wave-design.md` (the UX wave's composite spec, its root), child **U1**, first landing (**U1a**), parent pin `5f1972a30` (re-pinned from `06727e32a` at execution, Decision Log 2026-11-13).
 > **The design** is the child's file, `docs/doperpowers/specs/2026-11-12-ux-wave/U1-requests.md`: Edges → Pull requests (which names this landing as "the first pull request, before the placement work lands"); Contracts → "UC-1 (owned)", UC-6, UC-7; acceptance A1, A3, A5, A10 to A14, A16 to A18; the items #358, S-04, S-07, O-22, l4-approvals-02, -05, -11, -13, O-23, l4-approvals-09, #333, and "Dismiss" under l4-approvals-08; "Probes and checks"; "Rulings reversed". In the root: Purpose, the wave's laws, UC-1, UC-3, UC-4, UC-6, UC-7, UC-8, UC-10, UC-11, UC-14, "Ordering and dependency map" ("U1a, UC-1 and the request work that does not draw in the transcript"), and the Decision Log's table "Rulings reversed". Where the child's file and the root differ, the root binds.
 > This document holds what the design does not: the landing's edge, what the code holds, the decisions the section left open, the interfaces siblings read, and the execution. The architect's rulings of 2026-11-12 on the seven points reported at authoring, and the adversarial review's findings of the same day, are folded in ("Reported to the architect, and ruled"; Decision Log). The architect writes the corrections into the spec's files, so where the child's file at the pin and a ruling differ, the ruling is the later word. Two points found while the findings were verified are reported in the same section for a ruling, each with the default this document builds and the one place a ruling changes. **Branch:** `ux-wave/U1a`, from master `48619c824`; master (`6e8c72738` at this revision, which holds U8a and the engine probes) is merged in before anything is built, and no executor starts before U6a is on master (Concrete Steps, 1). **Board:** #577 (the wave's epic is #573).
 
@@ -24,8 +24,8 @@ How to see it working: the unit suite (each reader of "what waits" handed one an
 
 - [x] (2026-11-12) The section checked against the code at `48619c824`; this document written; seven points reported to the architect.
 - [x] (2026-11-12) The architect's rulings on the seven points (every default stands) and the adversarial review's six findings and three smaller points folded in; two points found while verifying them reported for a ruling.
-- [ ] The rulings on the two points reported at the revision (8 and 9) folded in.
-- [ ] U6a is on master (`src/shared/keymap/build-f.ts`; it is built and under its branch review at this revision, and its files are frozen until it lands). U8a is on master since `6e8c72738`. Master merged into the branch.
+- [x] (2026-11-13) The rulings on the two points reported at the revision (8 and 9) folded in.
+- [x] (2026-11-13) U6a is on master (`be663d261`, pull request #604) and U8a since `6e8c72738`; master merged into the branch at `64c13746a`; step 0's two files are present.
 - [ ] M1 — One predicate, the publisher and every reader.
 - [ ] M2 — Questions: the terminal's asynchronous question, Dismiss, double-click.
 - [ ] M3 — The permission card: three buttons, the hints and the keys.
@@ -969,6 +969,9 @@ Row 6's sentence is not the child's: the child's says "a skip of every question 
   - Point 9: the mirror's loss of its cards at a feed snapshot is repaired in M1. Rejected: a ticket.
   - The plan button's two labels where no menu is offered stand.
   Date/Author: 2026-11-13 (UTC), the wave's architect.
+
+- 2026-11-13: refresh at execution. Master `be663d261` (U6a, U8a) merged at `64c13746a`. The interfaces this document consumes were read again there: U6a's `effectiveChord`, `isRebindable`, `BUILD_F_ACTION_IDS` (neither new id in it) and its test's `WAVE_DEFAULTS` (the four request chords present), `dispatchKey` and `owner` in `keymap/dispatcher.ts`, `useKeyChord`'s options (`within`, `enabled`, `onRelease`), and U8a's `useWorkingFolder` (`src/renderer/src/sessions/working-folder.ts`) all stand as §M names them. The parent is re-pinned from `06727e32a` to `5f1972a30` (branch `ux-wave-spec`): its changes since bring U1's file, UC-1, UC-4, UC-6 and UC-8 to this document and contradict nothing here; UC-8 now also lets U3 change one tool name in `request-card/tools.ts`.
+  Date/Author: 2026-11-13, the executing controller.
 
 ## Outcomes & Retrospective
 
