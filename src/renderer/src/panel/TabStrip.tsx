@@ -44,7 +44,7 @@ export function TabStrip({ appSessionId, group, tabs, activeTabId, bodyId, trail
   const move = (tabId: string, to: SideGroupName) => {
     handKeyboardTo(tabId, to);
     useLayout.getState().moveSurfaceTab(appSessionId, tabId, to);
-    if (groupOf(sideGroups(useLayout.getState(), appSessionId), tabId) !== to) keyboardFor = null; // the move was refused
+    if (groupOf(sideGroups(useLayout.getState(), appSessionId), tabId) !== to) takesKeyboard(tabId, to); // refused: the hand-off is dropped
   };
   // Arrow keys move focus along the tabs (the WAI-ARIA tabs pattern, manual activation).
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
