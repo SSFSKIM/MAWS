@@ -560,6 +560,12 @@ async function main() {
   // dynamic: a server of the launch's own list, shaped as appMcpConfig shapes MAWS's (src/shared/engine/app-mcp-servers.ts)
   await dynamicQuestion('dynamic', { launch: { mcpConfig: { mcpServers: { 'fx-own': { type: 'http', url: resourceUrl } } } }, expectedName: 'fx-own', matches: (server) => server.name === 'fx-own' });
 
+  // The engine drops a plugin's server whose address a file-configured server already names ("Suppressing plugin MCP
+  // server … duplicates manually-configured …", gate run 43357272365: the plugin's server was never listed), so the
+  // file-configured servers leave the configuration before the plugin is asked.
+  result.removes = {};
+  for (const name of [...NAMES, 'fx-dynamic']) result.removes[name] = cli(['mcp', 'remove', name, '--scope', 'user']);
+
   // plugin: a plugin's server; found by its own name's end, so a name form other than the expected one is still asked
   await dynamicQuestion('plugin', { launch: { pluginDirs: [scratchPlugin()] }, expectedName: 'plugin:fx-plugin:fx-oauth', matches: (server) => server.name.startsWith('plugin:') && server.name.endsWith(':fx-oauth') });
 
