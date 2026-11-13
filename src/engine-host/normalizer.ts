@@ -197,11 +197,12 @@ export class Normalizer {
   private pushIn(row: JournalRow, out: Emitter): void {
     const frame = parseStdoutFrame(row.frame);
     const lane = laneOf(frame);
-    // UX wave U3 (UC-2): the reader is given every main-lane frame in order, as the engine wrote it (rule 5); a child
+    // UX wave U3 (UC-2): the reader is given every main-lane frame in order, as the engine wrote it (rule 5), but for one
+    // whose record a gap's reseed read: the reseed read it into the live reader's state, so it is read once; a child
     // lane's frames map as today
-    const arrivals = lane === null ? readFrame(this.state.arrivals, row.frame) : [];
     const uuid = (frame as { uuid?: unknown }).uuid;
     if ((frame.type === 'assistant' || frame.type === 'user') && typeof uuid === 'string' && this.state.reseeded.has(uuid)) return; // P5 O16 M3: shown by its reseed
+    const arrivals = lane === null ? readFrame(this.state.arrivals, row.frame) : [];
     const sessionId = (frame as { session_id?: unknown }).session_id;
     if (typeof sessionId === 'string' && sessionId.length > 0) this.state.sessionId = sessionId as SessionId;
     const agentId = lane === null ? null : (this.state.toolUseToAgent.get(lane as unknown as ToolUseId) ?? null);
@@ -785,9 +786,10 @@ export class Normalizer {
       // earlier reseed showed yields nothing again. The lanes' streaming state is reset, but for a lane streaming a
       // message the reseed showed, whose surviving deltas are dropped by its id; the next message start re-anchors it.
       case 'transcript_reseed': {
-        // UX wave U3 (the whole-branch review's finding 2): the rows are read on from what the live reader already read
-        // (the tasks it knows, the completions a hand-back claimed), so an arrival the live wire told is not told again;
-        // the live reader goes on from its own state, since it still reads the frames of rows a reseed showed
+        // UX wave U3 (the whole-branch review's finding 2 and the wave review's): the rows are read on from what the live
+        // reader already read (the tasks it knows, the completions a hand-back claimed), so an arrival the live wire told
+        // is not told again, and what they told is the live reader's state after them, for the frames that follow and
+        // the next reseed; a frame of a record read here is not read again (pushIn). The gap's frames never come
         const ctx = createBackfillContext({ sessionId: this.state.sessionId ?? ('unknown' as SessionId), agent: null, arrivals: this.state.arrivals.open });
         for (const raw of Array.isArray(meta.rows) ? meta.rows : []) {
           const parsed = TranscriptRecordSchema.safeParse(raw);
@@ -801,6 +803,7 @@ export class Normalizer {
             out.emit(payload as EventPayload, { agentId: event.agentId, parentToolUseId: event.parentToolUseId }, { at: event.at, reseeded: true });
           }
         }
+        this.state.arrivals.open = ctx.arrivals; // UX wave U3
         for (const [lane, current] of this.state.streaming) if (current.apiMessageId === null || !this.state.reseededMessages.has(current.apiMessageId)) this.state.streaming.delete(lane);
         return;
       }
