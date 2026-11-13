@@ -24,7 +24,7 @@ import type { AskSheetParams } from '../actions';
 import { SHEET } from './copy';
 import { canSubmit, EMPTY_DRAFT } from './draft';
 import { AnsweredSection, QuestionSection } from './QuestionSection';
-import { askSheet, chooseOption, dismissAsk, editDraft, ensureLoaded, loadAsks, selectAsk, shownAsk, submitAsk, type AskSheetState as SheetStore, type SheetAsk } from './store';
+import { askSheet, canRetry, chooseOption, dismissAsk, editDraft, ensureLoaded, loadAsks, retryAsk, selectAsk, shownAsk, submitAsk, type AskSheetState as SheetStore, type SheetAsk } from './store';
 
 export interface AskSheetState {
   appSessionId: AppSessionId | null;
@@ -163,7 +163,11 @@ function LiveAsk({ appSessionId, ask, state, directory }: { appSessionId: AppSes
             <span className="flex-1" title={failed.detail ?? undefined}>
               {SHEET.failed}
             </span>
-            <CardButton disabled={busy || !ready || unavailable !== null} title={why} onClick={submit}>
+            <CardButton
+              disabled={busy || !canRetry(failed, ask.questions, drafts) || unavailable !== null}
+              title={failed.dismiss ? (unavailable ?? undefined) : why}
+              onClick={() => void retryAsk(appSessionId, ask.askId, ipc, projects)}
+            >
               {SHEET.retry}
             </CardButton>
           </div>

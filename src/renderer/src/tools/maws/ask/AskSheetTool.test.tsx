@@ -287,6 +287,33 @@ describe('Dismiss and the double-click', () => {
     expect(await screen.findByText('No open questions')).toBeTruthy();
   });
 
+  // The review of M2 (I1): a refused Dismiss is retried as a Dismiss, by its own rule (the drafts ignored), on both forms
+  const retried = async (form: 'sheet' | 'hover', setUp: () => void, refuse: () => Promise<void>) => {
+    if (form === 'sheet') await mountWithAsk();
+    else {
+      render(<HoverAsk appSessionId={A} askId={ASK.askId} />);
+      await fake.reply('maws.asks.list', { asks: [ASK] });
+    }
+    setUp();
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    await refuse();
+    expect(await screen.findByText("Couldn't deliver the answers")).toBeTruthy();
+    const retry = screen.getByRole('button', { name: 'Retry' }) as HTMLButtonElement;
+    expect(retry.disabled).toBe(false);
+    fireEvent.click(retry);
+    expect(fake.invoked('maws.ask.answer')).toEqual([{ appSessionId: A, askId: 'toolu_a', answers: allSkipped }, { appSessionId: A, askId: 'toolu_a', answers: allSkipped }]);
+  };
+  const pickRed = () => fireEvent.click(within(section('q1')).getByRole('radio', { name: 'Red' }));
+  const halfOther = () => fireEvent.click(within(section('q2')).getByRole('checkbox', { name: 'Other…' }));
+  const writeFailed = () => fake.reply('maws.ask.answer', { outcome: 'write_failed' });
+  const ipcFailed = () => fake.fail('maws.ask.answer', 'the engine host is gone');
+  it.each([
+    ['sheet', 'a pick held', pickRed, writeFailed], ['sheet', 'a half-typed Other', halfOther, ipcFailed],
+    ['hover', 'a pick held', pickRed, ipcFailed], ['hover', 'a half-typed Other', halfOther, writeFailed],
+  ] as const)('in the %s, Retry after a refused Dismiss with %s dismisses again', async (form, _held, setUp, refuse) => {
+    await retried(form, setUp, refuse);
+  });
+
   it('the in-place form has the same Dismiss', async () => {
     render(<HoverAsk appSessionId={A} askId={ASK.askId} />);
     await fake.reply('maws.asks.list', { asks: [ASK] });

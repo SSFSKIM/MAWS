@@ -15,7 +15,7 @@ import { openFile } from '../../code/open-file';
 import { SHEET } from './copy';
 import { canSubmit, EMPTY_DRAFT } from './draft';
 import { QuestionSection } from './QuestionSection';
-import { askSheet, chooseOption, editDraft, ensureLoaded, loadAsks, submitAsk } from './store';
+import { askSheet, canRetry, chooseOption, editDraft, ensureLoaded, loadAsks, retryAsk, submitAsk } from './store';
 
 export function HoverAsk({ appSessionId, askId }: { appSessionId: AppSessionId; askId: string }) {
   const state = useStore(askSheet(appSessionId));
@@ -55,7 +55,7 @@ export function HoverAsk({ appSessionId, askId }: { appSessionId: AppSessionId; 
     <div className="flex shrink-0 flex-col gap-2 border-t border-border pt-2">
       {failed && <div role="alert" className="flex items-center gap-2 text-danger">
         <span className="flex-1" title={failed.detail ?? undefined}>{SHEET.failed}</span>
-        <CardButton disabled={busy || !ready} onClick={submit}>{SHEET.retry}</CardButton>
+        <CardButton disabled={busy || unavailable !== null || !canRetry(failed, ask.questions, drafts)} onClick={() => void retryAsk(appSessionId, askId, ipc, projects)}>{SHEET.retry}</CardButton>
       </div>}
       <div className="flex items-center justify-end gap-2">
         <CardButton disabled={busy || unavailable !== null} title={unavailable ?? undefined} onClick={dismiss} className="mr-auto">{SHEET.dismiss}</CardButton>
