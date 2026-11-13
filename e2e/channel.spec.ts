@@ -226,11 +226,15 @@ function overflowing(root: Element): string[] {
 // board 505 (UX wave U11a M3; the execution document's Interfaces §E): a Channel row's names, measured in the page. A
 // part's whole width is its text's, under its own ceiling where it has one (the chip's 24 characters), so a chip cut at
 // that ceiling holds its whole width and has not given way; its least width is twelve characters for an alias (or its
-// whole, where less), the recipients' floor for a label, and nothing for the others.
+// whole, where less), the recipients' floor for a label, and nothing for the others. The rows §E's order governs are the
+// rows that name a session (say rows, exchange rows and their lines, host rows, to-human headers): each holds an alias.
+// A person's words (a `words` row) name a member, not a session: its header is no row of names, though its recipients
+// are drawn as the same label, so it is left out, and a row that names a session without its `Names` group is a fault.
 function measureNames(root: Element) {
   const RANK: Record<string, number> = { title: 0, label: 1, chip: 2, alias: 3 };
   const ROW = 'header, button, li > div';
-  const rows = new Set(Array.from(root.querySelectorAll('[data-name-part]')).map((part) => part.closest(ROW)).filter((row): row is Element => row !== null));
+  const rows = new Set(Array.from(root.querySelectorAll('[data-name-part="alias"]')).map((part) => part.closest(ROW)).filter((row): row is Element => row !== null));
+  const people = Array.from(root.querySelectorAll('[data-channel-entry="words"] header')).filter((row) => row.querySelector('[data-name-part="label"]') !== null).length;
   const text = (el: HTMLElement) => el.querySelector<HTMLElement>('[data-machine-chip]') ?? el;
   const width = (el: Element) => el.getBoundingClientRect().width;
   const ceiling = (el: HTMLElement) => {
@@ -287,7 +291,7 @@ function measureNames(root: Element) {
     for (const child of moved) if (child.querySelector('[data-name-part]') !== null) lines.push(`${name}: a name is outside its group`);
     if (moved.length > 0) wrapped.push(`${name}: ${moved.map((child) => `"${(child.textContent ?? '').trim().slice(0, 24)}" ${child.getBoundingClientRect().top < names.getBoundingClientRect().top ? 'above' : 'under'}`).join(', ')} the names`);
   }
-  return { order, lines, wrapped, cappedBesideTitle };
+  return { order, lines, wrapped, cappedBesideTitle, people };
 }
 
 /** A box's left and right edges, in CSS pixels. */
@@ -405,6 +409,8 @@ test('channel: a seeded project channel offline, its exchange of 40 opened, its 
 
       expect(await channel.evaluate(overflowing), 'nothing in the Channel tab is wider than its box').toEqual([]);
       const atDefault = await channel.evaluate(measureNames);
+      // a person's directed words (the seed's refused word to the second session) beside the agents' rows: not a row of names
+      expect(atDefault.people, "a person's directed words are in the stream beside the agents' rows").toBeGreaterThan(0);
       expect(atDefault.order, "every row's names give way in §E's order").toEqual([]);
       expect(atDefault.lines, "every row's names stay on one line").toEqual([]);
       expect(await channel.getByRole('button').count(), 'the seeded channel offers its actions').toBeGreaterThan(0);
