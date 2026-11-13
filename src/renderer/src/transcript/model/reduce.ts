@@ -71,6 +71,9 @@ export interface TurnState {
   // made from the events before it ended with the process, though no finish of theirs came (derive.ts); ordered by
   // arrival, never by time, since a synthesised exit and the engine's events carry different clocks.
   agentsEndedAt?: number;
+  // UX wave U4a (decision 12): its prompt was written while another turn ran or an earlier prompt had not started;
+  // derive.ts marks the prompt's row unread while the turn is open, not accepted and not dropped.
+  waited?: true;
 }
 
 export interface TranscriptUi {
@@ -708,7 +711,9 @@ function apply(batch: Batch, event: SessionEvent): void {
       // (a `now` prompt never folds; a `next` prompt folds at its `started`); with no turn running it is current, so a
       // disk turn that never carries a `turn.started` still gathers its answer.
       const id = event.messageUuid === null ? turnIdOf.ofEvent(event.id) : turnIdOf.ofMessage(event.messageUuid);
+      const waited = runningTurn(state) !== null || state.order.some((other) => state.turns.get(other)!.state === 'open' && !state.turns.get(other)!.accepted); // UX wave U4a
       const turn = batch.open(id, 'human', event.at, false);
+      if (waited) turn.waited = true; // UX wave U4a
       if (event.messageUuid !== null) index.messages.set(event.messageUuid, id);
       batch.push(turn, event);
       return;
