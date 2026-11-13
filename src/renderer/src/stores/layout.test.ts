@@ -1,9 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
-import { EMPTY_STRIP, EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, storedMain, type LayoutMainV1 } from '@shared/ipc/schema/layout';
+import { EMPTY_STRIP, EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, storedMain, type LayoutMainV1, type Strip, type TabSet } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { addressOf } from '@shared/machine/address';
-import { machineKey } from '@shared/machine/org-key';
 import { at, OTHER_MACHINE, TEST_MACHINE as M } from '../../../../test/support/machine';
 import { createLayoutStore, frontOf, registerReplaceGuard, type ReplaceVerdict } from './layout';
 import { surfaceSession } from '../panel/surface-model';
@@ -47,7 +46,7 @@ describe('layout and settings migrate', () => {
     const overview = { id: 'overview', kind: 'overview', pinned: true };
     const saved = { ...persistedMain, panes: [{ tabs: [overview, session('app-a'), session('b')], activeTabId: 'overview' }], closedTabs: [overview] };
     const { store } = await hydrate({ 'main.tabs': saved }, () => true);
-    expect(store.getState().main).toEqual({ ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [lifted('app-a'), lifted('b')], activeTabId: `session:${A}` }] } } });
+    expect(store.getState().main).toEqual({ ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [lifted('app-a'), lifted('b')], activeTabId: `session:${A}` }] });
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
   });
@@ -228,18 +227,16 @@ describe('layout store actions', () => {
     expect(keys.at(-1)).toBe('m69');
   });
 
-  // P4-B3 (its Decision Log 10): the split card's size over a main tab is kept as `main:<tab id>`, in any tab set, and
-  // goes with the tab at the next write
-  it('keeps the split card’s size per open main tab, in any set, and drops a closed tab’s', () => {
+  // P4-B3 (its Decision Log 10): the split card's size over a main tab is kept as `main:<tab id>`, and goes with the tab
+  // at the next write
+  it('keeps the split card’s size per open main tab, and drops a closed tab’s', () => {
     const store = createLayoutStore();
     store.getState().openTab({ kind: 'diagnostics' });
     store.getState().openTab({ kind: 'settings', section: null });
     store.getState().setFloatingCardSize('main:diagnostics', { w: 400, h: 300 });
     store.getState().setFloatingCardSize('main:settings', { w: 440, h: 320 });
-    store.getState().setCurrentProject('elsewhere' as ProjectId);
     store.getState().setFloatingCardSize('main:gone', { w: 500, h: 400 });
     expect(Object.keys(store.getState().regions.floatingCard)).toEqual(['main:diagnostics', 'main:settings', 'main:gone']);
-    store.getState().setCurrentProject(null);
     store.getState().closeTab('settings');
     store.getState().setFloatingCardSize('summary', { w: 420, h: 380 });
     expect(Object.keys(store.getState().regions.floatingCard)).toEqual(['main:diagnostics', 'summary']);
@@ -329,7 +326,7 @@ describe('replacing an unstarted tab', () => {
     const discard = vi.fn(async () => true);
     const off = registerReplaceGuard({ unstarted: (id) => id === NEW, discard });
     try {
-      const saved = { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [session(A), session(NEW)], activeTabId: `session:${NEW}` }] } } };
+      const saved = storedMain({ ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [session(A), session(NEW)], activeTabId: `session:${NEW}` }] } as Strip);
       const fake = fakeClient({ 'layout.list': { keys: ['main.tabs'] } });
       const store = createLayoutStore();
       const hydrating = store.getState().hydrate(fake.client, () => true);
@@ -352,7 +349,7 @@ describe('replacing an unstarted tab', () => {
     const announce = vi.fn();
     const off = registerReplaceGuard({ unstarted: (id) => id === NEW, discard, verdict: (tab) => (tab.id === `session:${NEW}` ? { aside: 'kept' } : null), announce });
     try {
-      const saved = { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [session(A), session(NEW)], activeTabId: `session:${NEW}` }] } } };
+      const saved = storedMain({ ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [session(A), session(NEW)], activeTabId: `session:${NEW}` }] } as Strip);
       const fake = fakeClient({ 'layout.list': { keys: ['main.tabs'] } });
       const store = createLayoutStore();
       const hydrating = store.getState().hydrate(fake.client, () => true);
@@ -474,10 +471,10 @@ describe('one strip', () => {
   const tab = (id: AppSessionId, pinned = false) => ({ id: `session:${id}`, kind: 'session' as const, appSessionId: id, pinned });
   const diagnostics = { id: 'diagnostics' as const, kind: 'diagnostics' as const, pinned: false };
   const notes = { id: `file:${M}:/w/notes.md`, kind: 'file' as const, path: '/w/notes.md', line: null, appSessionId: null, machine: M, pinned: false };
-  const one = (tabs: object[], activeTabId = (tabs[0] as { id: string }).id) => ({ panes: [{ tabs, activeTabId }], focusedPane: 0, splitRatio: 0.5 });
+  const one = (tabs: object[], activeTabId = (tabs[0] as { id: string }).id) => ({ panes: [{ tabs, activeTabId }], focusedPane: 0, splitRatio: 0.5 }) as TabSet;
   // as build F leaves it: the set that was showing (X), the no-project set and another project's
   const sets = { version: 3, current: X, sets: { [X]: one([tab(A), notes]), [NO_PROJECT]: one([diagnostics]), [Y]: one([tab(B)]) }, closedTabs: [] };
-  const merged = { panes: [{ tabs: [tab(A), notes, diagnostics, tab(B)], activeTabId: `session:${A}` }], focusedPane: 0, splitRatio: 0.5, closedTabs: [] };
+  const merged: Strip = { panes: [{ tabs: [tab(A), notes, diagnostics, tab(B)], activeTabId: `session:${A}` }], focusedPane: 0, splitRatio: 0.5, closedTabs: [] };
   const writes = (fake: ReturnType<typeof fakeClient>, key: string) => fake.invoked('layout.set').filter((input) => (input as { key: string }).key === key).map((input) => (input as { value: unknown }).value);
   async function read(values: Record<string, unknown>, opts: { early?: (store: ReturnType<typeof createLayoutStore>) => void } = {}) {
     const fake = fakeClient({ 'layout.list': { keys: Object.keys(values) }, 'layout.get': ({ key }: { key: string }) => ({ value: values[key] ?? null }), 'layout.set': undefined });
@@ -515,14 +512,14 @@ describe('one strip', () => {
   });
 
   it('a strip written and read back is the same strip: order, pins, split and ratio, floating card, each pane’s tab in front, focus, history', async () => {
-    const strip = {
+    const strip: Strip = {
       panes: [{ tabs: [{ ...diagnostics, pinned: true }, tab(A), notes], activeTabId: `session:${A}` }, { tabs: [tab(B), tab(C)], activeTabId: `session:${C}` }],
       focusedPane: 1,
       splitRatio: 0.3,
       floating: { sessionTabId: `session:${C}` },
       closedTabs: [tab(at('app-d' as AppSessionId))],
-    } as const;
-    const { store, fake, result } = await read({ 'main.tabs': storedMain(strip as never) });
+    };
+    const { store, fake, result } = await read({ 'main.tabs': storedMain(strip) });
     expect(result).toEqual({ merged: false });
     expect(store.getState().main).toEqual(strip);
     expect(writes(fake, 'main.tabs')).toEqual([]);
@@ -646,12 +643,7 @@ describe('region changes before hydration', () => {
 // this machine's.
 describe('settling a machine’s tabs', () => {
   const onB = (id: string) => addressOf(OTHER_MACHINE, id as AppSessionId);
-  const main = (...ids: string[]) => ({
-    version: 3,
-    current: NO_PROJECT,
-    sets: { [NO_PROJECT]: { panes: [{ tabs: ids.map(session), activeTabId: `session:${ids[0]}` }], focusedPane: 0, splitRatio: 0.5 } },
-    closedTabs: [],
-  });
+  const main = (...ids: string[]) => storedMain({ ...EMPTY_STRIP, panes: [{ tabs: ids.map(session), activeTabId: `session:${ids[0]}` }] } as Strip);
   const tabIds = (store: ReturnType<typeof createLayoutStore>) => shown(store).panes.flatMap((p) => p.tabs.map((t) => t.id));
 
   it('drops that machine’s tabs it does not list, and no other machine’s', async () => {
@@ -673,60 +665,27 @@ describe('settling a machine’s tabs', () => {
   });
 });
 
-// P5 O6 M5 ("Migrating project-keyed state"): the sets, expanded rows and panel contexts keyed by a project's address (a
-// key from before M5) move to its org project's key at hydration, and again as each machine's projects arrive.
-describe('rekeying project-keyed state to org keys', () => {
+// P5 O6 M5 ("Migrating project-keyed state"): the sidebar's expanded rows keyed by a project's address (a key from before
+// M5) move to its org project's key at hydration, and again as each machine's projects arrive (U13a: the tabs hold no
+// project key any more).
+describe('rekeying the expanded rows to org keys', () => {
   const P1 = at('p1' as ProjectId);
   const P2 = addressOf(OTHER_MACHINE, 'p2' as ProjectId);
   const ORG = 'repo:maws' as never;
-  const set = (...ids: string[]) => ({ panes: [{ tabs: ids.map(session), activeTabId: `session:${ids[0]}` }], focusedPane: 0, splitRatio: 0.5 });
-  const B1 = addressOf(OTHER_MACHINE, 'b1' as AppSessionId);
-  const values = {
-    'main.tabs': { version: 3, current: P1, sets: { [P1]: set(A), [P2]: set(B1) }, closedTabs: [] },
-    regions: { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, expandedProjects: [P1, P2, 'other'] } },
-  };
-  let otherLoaded = false;
-  const projectOf = (id: AppSessionId) => (id === A ? ORG : id === B1 ? (otherLoaded ? ORG : undefined) : null); // B's records come with its snapshot
+  const values = { regions: { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, expandedProjects: [P1, P2, 'other'] } } };
 
   it('moves what it can at hydration, leaves a machine not loaded yet, and moves its keys on its arrival', async () => {
+    let otherLoaded = false;
     const rekeyOf: RekeyOf = (key) => (key === P1 ? ORG : otherLoaded ? ORG : 'wait');
     const fake = fakeClient({ 'layout.list': { keys: Object.keys(values) }, 'layout.get': ({ key }: { key: string }) => ({ value: (values as Record<string, unknown>)[key] ?? null }) });
     const store = createLayoutStore();
-    await store.getState().hydrate(fake.client, () => true, { projectOf, rekeyOf });
-    expect(Object.keys(store.getState().main.sets).sort()).toEqual([P2, ORG].sort());
-    expect(store.getState().main.current).toBe(ORG); // current follows its set
+    await store.getState().hydrate(fake.client, () => true, { rekeyOf });
     expect(store.getState().regions.sidebar.expandedProjects).toEqual([ORG, P2, `machine:${M}`]);
+    const before = store.getState().main;
     otherLoaded = true;
     store.getState().rekeyProjects();
-    expect(Object.keys(store.getState().main.sets)).toEqual([ORG]);
-    expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual([`session:${A}`, `session:${B1}`]); // merged into the current set
     expect(store.getState().regions.sidebar.expandedProjects).toEqual([ORG, `machine:${M}`]);
-  });
-
-  it('keeps a set waiting for its key whole, session tabs too, and migrates it whole once the key is known', async () => {
-    // a folder nobody opened, not derived yet: its sessions already file under the machine's row, its set waits
-    const PD = at('pd' as ProjectId);
-    const OWN = machineKey(M);
-    const notes = { id: `file:${M}:/d/notes.md`, kind: 'file', path: '/d/notes.md', line: null, appSessionId: null, machine: M, pinned: false };
-    const split = {
-      panes: [{ tabs: [session(A)], activeTabId: `session:${A}` }, { tabs: [notes], activeTabId: notes.id }],
-      focusedPane: 1,
-      splitRatio: 0.3,
-    };
-    const stored = { 'main.tabs': { version: 3, current: PD, sets: { [PD]: split }, closedTabs: [] } };
-    let derived = false;
-    const rekeyOf: RekeyOf = (key) => (key === PD && derived ? OWN : 'wait');
-    const fake = fakeClient({ 'layout.list': { keys: Object.keys(stored) }, 'layout.get': ({ key }: { key: string }) => ({ value: (stored as Record<string, unknown>)[key] ?? null }) });
-    const store = createLayoutStore();
-    await store.getState().hydrate(fake.client, () => true, { projectOf: (id) => (id === A ? OWN : null), rekeyOf });
-    expect(store.getState().main.current).toBe(PD);
-    expect(store.getState().main.sets).toEqual({ [PD]: split });
-    store.getState().refileTabs(); // a records change meanwhile moves nothing out of it either
-    expect(store.getState().main.sets).toEqual({ [PD]: split });
-    derived = true;
-    store.getState().rekeyProjects();
-    expect(store.getState().main.current).toBe(OWN);
-    expect(store.getState().main.sets).toEqual({ [OWN]: split });
+    expect(store.getState().main).toBe(before);
   });
 });
 
@@ -754,7 +713,7 @@ describe('a session tab’s last-known title', () => {
 
   it('reads a tab saved before the title was kept, and a saved title back', async () => {
     const titled = { ...lifted('app-a'), title: 'Saved title' };
-    const saved = { version: 3, current: NO_PROJECT, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [titled, lifted('app-b')], activeTabId: titled.id }] } }, closedTabs: [] };
+    const saved = storedMain({ ...EMPTY_STRIP, panes: [{ tabs: [titled, lifted('app-b')], activeTabId: titled.id }] } as Strip);
     const { store } = await hydrate({ 'main.tabs': saved }, () => true);
     expect(allTabs(store.getState().main)).toEqual([titled, lifted('app-b')]);
   });

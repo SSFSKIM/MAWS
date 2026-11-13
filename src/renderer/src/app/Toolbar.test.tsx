@@ -1,17 +1,19 @@
-// The title bar's project chip (P3-F wave S, F17; the owner's obs 8): the project whose tab set the strips show, named
+// The title bar's project chip (P3-F wave S, F17; the owner's obs 8): the project of the session in front (U13a), named
 // left of the chrome’s tab strips, out of their crowded row. A click is the sidebar's "+" (a new unstarted session tab in that
 // project); its context menu reveals the project in the sidebar.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { registerSessionCreator } from '../keymap/actions-runtime';
 import { projectReveal } from '../sidebar/reveal';
 import { useLayout } from '../stores/layout';
+import { useMachines } from '../stores/machines';
 import { activeTab } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
-import { at } from '../../../../test/support/machine';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { PROJECT_CHIP_COPY, Toolbar } from './Toolbar';
 
 const nine = scenarioFile('nine-sessions');
@@ -26,8 +28,7 @@ const chip = () => toolbar().querySelector<HTMLElement>('[data-toolbar-project]'
 beforeEach(() => {
   resetShellStores();
   fillStores(nine);
-  // the shell's hydration files a session's tabs under its record's project, else its unstarted intent's (ipc/events.ts)
-  useLayout.setState({ projectOf: (id) => useSessions.getState().records.get(id)?.projectId ?? useSessions.getState().unstarted.get(id)?.projectId ?? null });
+  useMachines.setState({ loaded: new Set([TEST_MACHINE]) }); // the current project is known once the session's machine has answered
 });
 afterEach(() => {
   cleanup();
@@ -35,9 +36,9 @@ afterEach(() => {
 });
 
 describe('the title bar’s project chip', () => {
-  it('names the project left of the chrome tab strips, outside the drag region; the no-project set shows none', () => {
+  it('names the project left of the chrome tab strips, outside the drag region; no session in front shows none', () => {
     render(<Toolbar />);
-    expect(chip()).toBeNull(); // nothing open: the no-project set
+    expect(chip()).toBeNull(); // nothing open: no session in front
     act(() => useLayout.getState().openSession(idOf('Charter + research'), { how: 'tab' }));
     expect(chip()!.textContent).toBe('MAWS');
     expect(chip()!.className).toContain('[-webkit-app-region:no-drag]');
@@ -46,7 +47,9 @@ describe('the title bar’s project chip', () => {
     expect(within(toolbar()).queryByText('Charter + research')).toBeNull(); // title comes from the shell’s portaled tab strip, never a duplicate title row
     act(() => useLayout.getState().openSession(idOf('Quota reset recovery'), { how: 'tab' }));
     expect(chip()!.textContent).toBe('codex_somersault');
-    act(() => useLayout.getState().setCurrentProject(null));
+    act(() => useLayout.getState().openTab({ kind: 'diagnostics' }));
+    expect(chip()!.textContent).toBe('codex_somersault'); // a page in front changes no project
+    act(() => useLayout.setState({ main: LAYOUT_DEFAULTS.main }));
     expect(chip()).toBeNull();
   });
 
@@ -61,7 +64,6 @@ describe('the title bar’s project chip', () => {
     await user.click(button);
     expect(creator).toHaveBeenCalledWith(MAWS);
     expect(useSessions.getState().unstarted.get(NEW)?.projectId).toBe(MAWS);
-    expect(useLayout.getState().main.current).toBe(MAWS);
     expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: NEW });
   });
 

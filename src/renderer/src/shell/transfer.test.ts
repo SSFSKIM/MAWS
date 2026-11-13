@@ -6,7 +6,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
-import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, tabId, type LayoutMain, type TabRef, type TabSet } from '@shared/ipc/schema/layout';
+import { LAYOUT_DEFAULTS, tabId, type Strip, type TabRef, type TabSet } from '@shared/ipc/schema/layout';
 import {
   artifactEditorFor, heldArtifactEditorState, holdArtifactEditorState, registerArtifactEditor, releaseArtifactEditorState, resetArtifactEditors, type ArtifactEditorHold, type ArtifactEditorTarget,
 } from '../artifacts/registry';
@@ -14,7 +14,10 @@ import { registerEditorHost, type EditorHostScope } from '../panel/editor-host';
 import type { LibraryRow } from '@shared/ipc/schema/library';
 import { library, resetLibrary, rowKey } from '../library/store';
 import { instanceIds, instanceOf, panelHost, registerPanelTool, usePanelHost } from '../panel/host';
-import { NO_PROJECT_OF, useLayout } from '../stores/layout';
+import { useLayout } from '../stores/layout';
+import { useMachines } from '../stores/machines';
+import { useSessions } from '../stores/sessions';
+import { project, record } from '../../../../test/support/builders';
 import { activeTab, allTabs, currentSet } from '../stores/layout-model';
 import { fail, installFakeMain, ok } from '../test-support/code';
 import { A, B, panelOf, resetPanelStores, sessionTab } from '../test-support/panel';
@@ -37,10 +40,21 @@ function metadata(artifactId: string, projectId?: ProjectId): void {
   library.setState((state) => ({ reads: new Map(state.reads).set(rowKey(artifactId), { status: 'ready', value: row, error: null }) }));
 }
 
+// UX wave U13a: the sessions sit under these projects' rows (a project on this Mac each), as the current project reads
+// them (`sessionRow`): their records name the project, and this machine has answered.
+function sessionsIn(projects: Record<AppSessionId, ProjectId>): void {
+  const ids = [...new Set(Object.values(projects))];
+  useSessions.setState({
+    records: new Map([A, B, C].map((id) => [id, record(id, projects[id] === undefined ? {} : { projectId: projects[id] })])),
+    projects: new Map(ids.map((id, order) => [id, project(id, order)])),
+  });
+  useMachines.setState({ loaded: new Set([TEST_MACHINE]) });
+}
+
 // One pane of these tabs (the last active), or two.
-const panes = (...pieces: TabRef[][]): LayoutMain => ({
+const panes = (...pieces: TabRef[][]): Strip => ({
   ...LAYOUT_DEFAULTS.main,
-  sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: pieces.map((tabs) => ({ tabs, activeTabId: tabs.at(-1)!.id })) as TabSet['panes'], focusedPane: 0 } },
+  panes: pieces.map((tabs) => ({ tabs, activeTabId: tabs.at(-1)!.id })) as TabSet['panes'], focusedPane: 0,
 });
 
 const offs: (() => void)[] = [];
@@ -49,7 +63,8 @@ let editor: ReturnType<typeof makeEditor>;
 
 beforeEach(() => {
   resetPanelStores();
-  useLayout.setState({ projectOf: NO_PROJECT_OF });
+  useSessions.setState({ projects: new Map() });
+  useMachines.setState({ loaded: new Set() });
   resetArtifactEditors();
   resetLibrary();
   metadata(DOC);
@@ -105,13 +120,13 @@ async function move(run: () => Promise<boolean>): Promise<boolean> {
 }
 
 describe('main → panel', () => {
-  it.each([true, false])('uses the artifact metadata project rather than the containing set (target chat open: %s)', async (open) => {
+  it.each([true, false])('uses the artifact metadata project rather than the chat in front (target chat open: %s)', async (open) => {
     const containing = at('project-x' as ProjectId);
     const actual = at('project-y' as ProjectId);
-    useLayout.setState({ main: LAYOUT_DEFAULTS.main, projectOf: (id) => id === A ? containing : actual });
-    useLayout.getState().openSession(A, { how: 'tab' });
+    sessionsIn({ [A]: containing, [B]: actual });
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main });
     if (open) useLayout.getState().openSession(B, { how: 'tab' });
-    useLayout.getState().setCurrentProject(containing);
+    useLayout.getState().openSession(A, { how: 'tab' }); // the chat in front is of another project
     useLayout.getState().openTab({ kind: 'artifacts' });
     useLayout.getState().openTab({ kind: 'artifact', artifactId: DOC, machine: TEST_MACHINE });
     metadata(DOC, actual);
@@ -120,7 +135,6 @@ describe('main → panel', () => {
     expect(transferRefusal({ to: 'panel', mainTabId: DOC_TAB.id })).toBe(open ? null : TRANSFER_COPY.noProjectSession);
     expect(await move(() => moveArtifactToPanel(DOC_TAB.id))).toBe(open);
     if (open) {
-      expect(useLayout.getState().main.current).toBe(actual);
       expect(activeTab(useLayout.getState().main)?.id).toBe(sessionTab(B).id);
       expect(recordOf(artifactsTab(B))).toEqual({ kind: 'record', artifactId: DOC, machine: TEST_MACHINE });
       expect(panelOf(A)).toBeUndefined();
@@ -143,8 +157,9 @@ describe('main → panel', () => {
   });
 
   it.each([false, true])('Library → artifact → Show in panel targets and activates the remembered session (existing record: %s)', async (existing) => {
-    const project = at('project-x' as ProjectId);
-    useLayout.setState({ main: LAYOUT_DEFAULTS.main, projectOf: () => project });
+    const shared = at('project-x' as ProjectId);
+    sessionsIn({ [A]: shared, [B]: shared });
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main });
     useLayout.getState().openSession(A, { how: 'tab' });
     useLayout.getState().openSession(B, { how: 'tab' });
     useLayout.getState().activateTab(sessionTab(A).id); // most recently active, not the neighbour of Library
@@ -156,7 +171,6 @@ describe('main → panel', () => {
 
     expect(transferRefusal({ to: 'panel', mainTabId: DOC_TAB.id })).toBeNull();
     expect(await move(() => moveArtifactToPanel(DOC_TAB.id))).toBe(true);
-    expect(useLayout.getState().main.current).toBe(project);
     expect(activeTab(useLayout.getState().main)?.id).toBe(sessionTab(A).id);
     expect(allTabs(useLayout.getState().main).some((tab) => tab.kind === 'artifacts')).toBe(true);
     expect(recordOf(artifactsTab(A))).toEqual({ kind: 'record', artifactId: DOC, machine: TEST_MACHINE });
@@ -168,11 +182,12 @@ describe('main → panel', () => {
   it('refuses Show in panel with the project-specific reason when only another project has a session, even with a pin', async () => {
     const otherProject = at('project-y' as ProjectId);
     const project = at('project-x' as ProjectId);
-    useLayout.setState({ main: LAYOUT_DEFAULTS.main, projectOf: () => otherProject });
+    sessionsIn({ [A]: otherProject, [B]: project });
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main });
     useLayout.getState().openSession(A, { how: 'tab' });
-    useLayout.getState().setCurrentProject(project);
     useLayout.getState().openTab({ kind: 'artifacts' });
     useLayout.getState().openTab({ kind: 'artifact', artifactId: DOC, machine: TEST_MACHINE });
+    metadata(DOC, project);
     addArtifacts(null);
     mounted(mainScope());
     const before = surfaces();

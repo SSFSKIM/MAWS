@@ -3,6 +3,7 @@
 // makes main say a held session's record, parts and state again (a reload, a second window), goes only once the page
 // listens for what it says.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { storedMain } from '@shared/ipc/schema/layout';
 import type { AppSessionId } from '@shared/graph/ids';
 import { addressOf } from '@shared/machine/address';
 import { record, remoteRow, status } from '../../../../test/support/builders';
@@ -50,7 +51,7 @@ describe('connectRemoteLaneB', () => {
     expect(fake.invoked('layout.set')).toEqual([]); // still opening: the tab's interest is enough
     applyRemoteSession(remoteSessionState(REMOTE, { stream: 'ended', reason: 'mini can’t place this session' }));
     remoteOpenerFor('B')!(listed);
-    expect(fake.invoked('layout.set')).toEqual([{ key: 'main.tabs', value: useLayout.getState().main }]);
+    expect(fake.invoked('layout.set')).toEqual([{ key: 'main.tabs', value: storedMain(useLayout.getState().main) }]);
     useLayout.setState({ hydrated: false });
   });
 

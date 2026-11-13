@@ -1,20 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentId, AppSessionId, ProjectId } from '@shared/graph/ids';
-import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, type LayoutMain, type LayoutRegions, type PanelSurfaces, type TabRef } from '@shared/ipc/schema/layout';
+import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, storedMain, stripOf, type LayoutMain, type LayoutRegions, type PanelSurfaces, type Strip, type TabRef } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { addressOf } from '@shared/machine/address';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
-import { createLayoutStore, LAYOUT_WRITE_DELAY_MS, persistLayout, type ProjectOf } from './layout';
-import { currentSet } from './layout-model';
+import { createLayoutStore, LAYOUT_WRITE_DELAY_MS, persistLayout } from './layout';
 
 const A = at('app-a' as AppSessionId);
 const B = at('app-b' as AppSessionId);
 const surfaceState = (contexts: PanelSurfaces['contexts'] = {}): PanelSurfaces => ({ version: 2, stacks: {}, pinnedTools: [], contexts });
+// UX wave U13a: `main.tabs` holds the strip's stored form (`storedMain`); a written value read back as the strip it holds.
+const stripIn = (value: unknown): Strip => stripOf(value as LayoutMain).strip;
 
 // A store persisting through a fake main whose layout.json holds the three fixed keys at their defaults, then `values`
 // (an `undefined` value leaves that key out).
 function setup(given: Record<string, unknown> = {}) {
-  const values: Record<string, unknown> = { regions: LAYOUT_DEFAULTS.regions, 'main.tabs': LAYOUT_DEFAULTS.main, 'panel.pinned': [], ...given };
+  const values: Record<string, unknown> = { regions: LAYOUT_DEFAULTS.regions, 'main.tabs': storedMain(LAYOUT_DEFAULTS.main), 'panel.pinned': [], ...given };
   const fake = fakeClient({
     'layout.list': { keys: Object.keys(values) },
     'layout.get': ({ key }: { key: string }) => ({ value: values[key] ?? null }),
@@ -23,8 +24,8 @@ function setup(given: Record<string, unknown> = {}) {
   const store = createLayoutStore();
   const stop = persistLayout(fake.client, store);
   running.push(stop);
-  const hydrate = async (known: (id: AppSessionId) => boolean = () => true, projectOf?: ProjectOf) => {
-    const hydrating = store.getState().hydrate(fake.client, known, { projectOf });
+  const hydrate = async (known: (id: AppSessionId) => boolean = () => true) => {
+    const hydrating = store.getState().hydrate(fake.client, known);
     await vi.runAllTimersAsync();
     await hydrating;
   };
@@ -51,7 +52,7 @@ describe('layout persistence', () => {
     vi.advanceTimersByTime(1000);
     // W5: the change is replayed over the persisted regions (as a tab opened early is over the tabs) and written once
     const replayed = { ...regions, sidebar: { ...regions.sidebar, width: 260 } };
-    expect(sets()).toEqual([{ key: 'main.tabs', value: LAYOUT_DEFAULTS.main }, { key: 'regions', value: replayed }]); // a first launch materialises the default
+    expect(sets()).toEqual([{ key: 'main.tabs', value: storedMain(LAYOUT_DEFAULTS.main) }, { key: 'regions', value: replayed }]); // a first launch materialises the default
     expect(store.getState().regions).toEqual(replayed);
   });
 
@@ -65,7 +66,7 @@ describe('layout persistence', () => {
     expect(written()).toEqual([]); // no session joined: the delay as before
     store.getState().openTab({ kind: 'session', appSessionId: A });
     expect(written()).toHaveLength(1);
-    expect(written()[0]).toBe(store.getState().main);
+    expect(written()[0]).toEqual(storedMain(store.getState().main));
     vi.advanceTimersByTime(LAYOUT_WRITE_DELAY_MS * 2);
     expect(written()).toHaveLength(1); // the pending diagnostics write went out with it
     store.getState().openTab({ kind: 'agent', appSessionId: 'app-b' as AppSessionId, agentId: 'agent-1' as AgentId });
@@ -74,28 +75,26 @@ describe('layout persistence', () => {
     expect(written()).toHaveLength(2);
     vi.advanceTimersByTime(LAYOUT_WRITE_DELAY_MS);
     expect(written()).toHaveLength(3);
-    expect(written()[2]).toBe(store.getState().main);
+    expect(written()[2]).toEqual(storedMain(store.getState().main));
   });
 
   it('writes tabs opened before hydration over an existing main.tabs, before any later change and on beforeunload', async () => {
     const tabs: TabRef[] = [{ id: 'diagnostics', kind: 'diagnostics', pinned: false }, { id: 'settings', kind: 'settings', section: null, pinned: false }];
-    const saved: LayoutMain = { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs, activeTabId: 'diagnostics' }] } } };
+    const saved = storedMain({ ...LAYOUT_DEFAULTS.main, panes: [{ tabs, activeTabId: 'diagnostics' }] });
     const { store, hydrate, sets } = setup({ 'main.tabs': saved });
     store.getState().openSession(A); // a sidebar click or a notification navigation racing the first layout.get
     await hydrate((id) => id === A);
     window.dispatchEvent(new Event('beforeunload'));
     const written = sets().filter((s) => s.key === 'main.tabs');
     expect(written).toHaveLength(1);
-    expect(currentSet(written[0].value as LayoutMain).panes[0].tabs.map((t) => t.id)).toEqual(['diagnostics', `session:${A}`, 'settings']); // opened after the saved active tab, over the saved tabs
-    expect(written[0].value).toBe(store.getState().main);
+    expect(stripIn(written[0].value).panes[0].tabs.map((t) => t.id)).toEqual(['diagnostics', `session:${A}`, 'settings']); // opened after the saved active tab, over the saved tabs
+    expect(written[0].value).toEqual(storedMain(store.getState().main));
   });
 
-  // W12: a version-1 main.tabs is filed by project at hydration (`projectOf`: the record's project, else the unstarted
-  // intent's) and written back as the current version at once; an unknown session's tab is dropped. P5 O6 M2: its bare
-  // ids, from before O6, read as the local machine's addresses.
-  it('reads a version-1 main.tabs into a tab set per project and writes version 3 back', async () => {
-    const X = at('proj-x' as ProjectId);
-    const Y = at('proj-y' as ProjectId);
+  // U13a: a version-1 main.tabs is the strip it already is (it held one pane layout), written back at once as version
+  // 3's stored form; an unknown session's tab is dropped. P5 O6 M2: its bare ids, from before O6, read as the local
+  // machine's addresses.
+  it('reads a version-1 main.tabs as the strip it holds and writes the stored form back', async () => {
     const bare = (id: string) => ({ id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false });
     const tab = (id: string): TabRef => ({ id: `session:${at(id)}`, kind: 'session', appSessionId: at(id as AppSessionId), pinned: false });
     const diagnostics: TabRef = { id: 'diagnostics', kind: 'diagnostics', pinned: false };
@@ -109,24 +108,23 @@ describe('layout persistence', () => {
       splitRatio: 0.4,
       closedTabs: [bare('x3')],
     };
-    // x1, x2, x3 in X and y1 in Y have records; `new` is an unstarted chat whose intent chose Y; `gone` is unknown
-    const projects: Record<string, ProjectId | null> = { [at('x1')]: X, [at('x2')]: X, [at('x3')]: X, [at('y1')]: Y, [at('new')]: Y };
+    const known = new Set([at('x1'), at('x2'), at('x3'), at('y1'), at('new')]); // `gone` is unknown
     const { store, hydrate, sets } = setup({ 'main.tabs': v1 });
-    await hydrate((id) => id in projects, (id) => projects[id] ?? null);
+    await hydrate((id) => known.has(id));
     const main = store.getState().main;
-    expect(main.current).toBe(Y); // the shown tab's project
-    expect(main.sets).toEqual({
-      [Y]: { panes: [{ tabs: [tab('y1'), diagnostics], activeTabId: tab('y1').id }, { tabs: [tab('new')], activeTabId: tab('new').id }], focusedPane: 0, splitRatio: 0.4 },
-      [X]: { panes: [{ tabs: [tab('x1')], activeTabId: tab('x1').id }, { tabs: [tab('x2')], activeTabId: tab('x2').id }], focusedPane: 0, splitRatio: 0.4 },
+    expect(main).toEqual({
+      panes: [{ tabs: [tab('x1'), tab('y1'), diagnostics], activeTabId: tab('y1').id }, { tabs: [tab('new'), tab('x2')], activeTabId: tab('new').id }],
+      focusedPane: 0,
+      splitRatio: 0.4,
+      closedTabs: [tab('x3')],
     });
-    expect(main.closedTabs).toEqual([tab('x3')]);
     expect(sets()).toEqual([
-      { key: 'main.tabs', value: main },
-      { key: 'panelTools.surfaces', value: surfaceState({ [Y]: at('y1' as AppSessionId) }) },
+      { key: 'main.tabs', value: storedMain(main) },
+      { key: 'panelTools.surfaces', value: surfaceState({ [NO_PROJECT]: at('y1' as AppSessionId) }) },
     ]);
-    // the next launch reads version 3 and the remembered surface context as they are and writes nothing
-    const again = setup({ 'main.tabs': main, 'panelTools.surfaces': store.getState().panelSurfaces });
-    await again.hydrate((id) => id in projects, (id) => projects[id] ?? null);
+    // the next launch reads the stored form and the remembered surface context as they are and writes nothing
+    const again = setup({ 'main.tabs': storedMain(main), 'panelTools.surfaces': store.getState().panelSurfaces });
+    await again.hydrate((id) => known.has(id));
     expect(again.store.getState().main).toEqual(main);
     vi.advanceTimersByTime(1000);
     expect(again.sets()).toEqual([]);
@@ -141,10 +139,10 @@ describe('layout persistence', () => {
     store.getState().togglePinned(`artifact:${TEST_MACHINE}:${artifactId}`);
     vi.advanceTimersByTime(1000);
     const written = sets().filter((s) => s.key === 'main.tabs').at(-1)!.value as LayoutMain;
-    expect(currentSet(written).panes[0]).toEqual({ tabs: [{ id: `artifact:${TEST_MACHINE}:${artifactId}`, kind: 'artifact', artifactId, machine: TEST_MACHINE, pinned: true }], activeTabId: `artifact:${TEST_MACHINE}:${artifactId}` });
+    expect(stripIn(written).panes[0]).toEqual({ tabs: [{ id: `artifact:${TEST_MACHINE}:${artifactId}`, kind: 'artifact', artifactId, machine: TEST_MACHINE, pinned: true }], activeTabId: `artifact:${TEST_MACHINE}:${artifactId}` });
     const again = setup({ 'main.tabs': JSON.parse(JSON.stringify(written)) });
     await again.hydrate();
-    expect(again.store.getState().main).toEqual(written);
+    expect(again.store.getState().main).toEqual(stripIn(written));
   });
 
   // P4-B3 (X37; its Decision Log 1): a floating split is written beside its ratio and comes back floating at the next
@@ -161,10 +159,10 @@ describe('layout persistence', () => {
     store.getState().floatSplit(`session:${A}`);
     vi.advanceTimersByTime(1000);
     const floating = sets().at(-1)!.value as LayoutMain;
-    expect(currentSet(floating)).toMatchObject({ floating: { sessionTabId: `session:${A}` }, splitRatio: 0.4 });
+    expect(stripIn(floating)).toMatchObject({ floating: { sessionTabId: `session:${A}` }, splitRatio: 0.4 });
     const again = setup({ 'main.tabs': JSON.parse(JSON.stringify(floating)) });
     await again.hydrate();
-    expect(again.store.getState().main).toEqual(floating); // relaunch restores the float
+    expect(again.store.getState().main).toEqual(stripIn(floating)); // relaunch restores the float
     store.getState().dockSplit();
     vi.advanceTimersByTime(1000);
     expect(JSON.stringify(sets().at(-1)!.value)).toBe(before);
@@ -192,16 +190,16 @@ describe('layout persistence', () => {
 
     it('writes the fold on the float and the folded panel, reads both back, and leaving Expand then opens the panel', async () => {
       const { main, regions } = await expanded();
-      expect(currentSet(main).floating).toEqual({ sessionTabId: S, foldedPanel: true });
+      expect(stripIn(main).floating).toEqual({ sessionTabId: S, foldedPanel: true });
       expect(regions.panel).toEqual({ ...LAYOUT_DEFAULTS.regions.panel, collapsed: true });
       const again = setup({ 'main.tabs': clone(main), regions: clone(regions) });
       await again.hydrate();
-      expect([again.store.getState().main, again.store.getState().regions]).toEqual([main, regions]);
+      expect([again.store.getState().main, again.store.getState().regions]).toEqual([stripIn(main), regions]);
       expect(again.sets(), 'only the additive surface context is materialized').toEqual([{ key: 'panelTools.surfaces', value: surfaceState({ [NO_PROJECT]: A }) }]);
       again.store.getState().dockSplit();
       vi.advanceTimersByTime(1000);
       expect((last(again.sets(), 'regions') as LayoutRegions).panel).toEqual(LAYOUT_DEFAULTS.regions.panel);
-      expect(currentSet(last(again.sets(), 'main.tabs') as LayoutMain).floating).toBeUndefined();
+      expect(stripIn(last(again.sets(), 'main.tabs')).floating).toBeUndefined();
     });
 
     it('a stored fold whose float the reader drops (its session gone) opens the panel, both written back', async () => {
@@ -209,10 +207,10 @@ describe('layout persistence', () => {
       const held = { 'main.tabs': clone(main), regions: clone(regions) };
       const again = setup(held);
       await again.hydrate(() => false);
-      expect(currentSet(again.store.getState().main).floating).toBeUndefined();
+      expect(again.store.getState().main.floating).toBeUndefined();
       expect(again.store.getState().regions.panel).toEqual(LAYOUT_DEFAULTS.regions.panel);
       expect((last(again.sets(), 'regions') as LayoutRegions).panel).toEqual(LAYOUT_DEFAULTS.regions.panel);
-      expect(last(again.sets(), 'main.tabs'), 'main.tabs written back without the fold').toEqual(again.store.getState().main);
+      expect(last(again.sets(), 'main.tabs'), 'main.tabs written back without the fold').toEqual(storedMain(again.store.getState().main));
       // the owner closes the panel and quits with no tab change: the launch after keeps it closed
       const written = after(held, again.sets());
       const third = setup(written);
@@ -231,8 +229,8 @@ describe('layout persistence', () => {
       again.store.getState().setPanel({ maximized: true }); // Maximize, then the toggle, racing the first layout.get
       again.store.getState().setPanel({ collapsed: true });
       await again.hydrate();
-      expect(currentSet(again.store.getState().main).floating).toEqual({ sessionTabId: S });
-      expect(last(again.sets(), 'main.tabs'), 'main.tabs written back without the fold').toEqual(again.store.getState().main);
+      expect(again.store.getState().main.floating).toEqual({ sessionTabId: S });
+      expect(last(again.sets(), 'main.tabs'), 'main.tabs written back without the fold').toEqual(storedMain(again.store.getState().main));
       again.store.getState().dockSplit();
       expect(again.store.getState().regions.panel.collapsed).toBe(true);
       // with its session gone the reader drops the float too, and the panel stays as the owner left it
@@ -247,8 +245,8 @@ describe('layout persistence', () => {
       const { main } = await expanded();
       const again = setup({ 'main.tabs': clone(main) }); // regions at their default: the panel open
       await again.hydrate();
-      expect(currentSet(again.store.getState().main).floating).toEqual({ sessionTabId: S });
-      expect(currentSet(last(again.sets(), 'main.tabs') as LayoutMain).floating).toEqual({ sessionTabId: S });
+      expect(again.store.getState().main.floating).toEqual({ sessionTabId: S });
+      expect(stripIn(last(again.sets(), 'main.tabs')).floating).toEqual({ sessionTabId: S });
       again.store.getState().dockSplit();
       expect(again.store.getState().regions.panel).toEqual(LAYOUT_DEFAULTS.regions.panel);
     });
@@ -453,7 +451,7 @@ describe('the reader’s write-back of main.tabs', () => {
     vi.useRealTimers();
   });
   const session = { id: `session:${A}`, kind: 'session', appSessionId: A, pinned: false };
-  const stored = (tabs: unknown[], closedTabs: unknown[] = []) => ({ ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs, activeTabId: session.id }] } }, closedTabs });
+  const stored = (tabs: unknown[], closedTabs: unknown[] = []) => ({ version: 3, current: NO_PROJECT, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs, activeTabId: session.id }] } }, closedTabs });
 
   it.each([
     ['a later build’s kind', stored([session, { id: 'canvas:1', kind: 'canvas', pinned: false }]), 1],
@@ -466,7 +464,7 @@ describe('the reader’s write-back of main.tabs', () => {
     await hydrate((id) => id === A);
     expect(warn).toHaveBeenCalledTimes(warnings);
     const written = sets().filter((s) => s.key === 'main.tabs');
-    expect(written).toEqual([{ key: 'main.tabs', value: store.getState().main }]);
+    expect(written).toEqual([{ key: 'main.tabs', value: storedMain(store.getState().main) }]);
     vi.advanceTimersByTime(1000);
     expect(sets()).toEqual([
       ...written,
@@ -525,17 +523,18 @@ describe('a layout written before O6', () => {
       'panel.app-a': { tabs: [{ id: 'files:1', toolId: 'files', pinned: false }], activeTabId: 'files:1' },
     };
     const { store, hydrate, sets } = setup(held);
-    await hydrate((id) => id === A, () => X);
+    await hydrate((id) => id === A);
     vi.advanceTimersByTime(1000);
     const fileTab = { ...file, id: `file:${TEST_MACHINE}:/w/x.ts`, appSessionId: A, machine: TEST_MACHINE };
-    const main = { version: 3, current: X, sets: { [X]: { panes: [{ tabs: [fileTab, { id: `session:${A}`, kind: 'session', appSessionId: A, pinned: false }], activeTabId: `session:${A}` }], focusedPane: 0, splitRatio: 0.5 } }, closedTabs: [] };
+    // U13a: its one project-keyed set is the strip, written in the stored form, its remembered session under `none`
+    const main = { panes: [{ tabs: [fileTab, { id: `session:${A}`, kind: 'session', appSessionId: A, pinned: false }], activeTabId: `session:${A}` }], focusedPane: 0, splitRatio: 0.5, closedTabs: [] } as Strip;
     expect(store.getState().main).toEqual(main);
     expect(store.getState().regions.sidebar.expandedProjects).toEqual([X, `machine:${TEST_MACHINE}`]); // P5 O6 M5: the machine's own row
     expect(store.getState().panelBySession.get(A)).toEqual(held['panel.app-a']);
     expect(Object.fromEntries(sets().map(({ key, value }) => [key, value]))).toEqual({
-      'main.tabs': main,
+      'main.tabs': storedMain(main),
       regions: { ...held.regions, version: 5, sidebar: { ...held.regions.sidebar, expandedProjects: [X, `machine:${TEST_MACHINE}`] } },
-      'panelTools.surfaces': { version: 2, stacks: { [A]: ['files:1'] }, pinnedTools: [], contexts: { [X]: A } },
+      'panelTools.surfaces': { version: 2, stacks: { [A]: ['files:1'] }, pinnedTools: [], contexts: { [NO_PROJECT]: A } },
       [`panel.${A}`]: held['panel.app-a'],
       'panel.app-a': null, // deleted, once its address's key is written
     });
@@ -543,7 +542,7 @@ describe('a layout written before O6', () => {
     // layout.json after the launch: the writes applied, the bare key gone
     const written = Object.fromEntries(Object.entries({ ...held, ...Object.fromEntries(sets().map(({ key, value }) => [key, value])) }).filter(([, value]) => value !== null));
     const again = setup(JSON.parse(JSON.stringify(written)) as Record<string, unknown>);
-    await again.hydrate((id) => id === A, () => X);
+    await again.hydrate((id) => id === A);
     vi.advanceTimersByTime(1000);
     expect(again.store.getState().main).toEqual(main);
     expect(again.sets()).toEqual([]);

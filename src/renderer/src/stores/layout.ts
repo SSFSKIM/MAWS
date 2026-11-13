@@ -404,7 +404,7 @@ export function createLayoutStore() {
         // under `none` alone, which `surfaceSession` reads.
         const showing = persistedMain.version === 1 ? NO_PROJECT : persistedMain.current;
         const remembered = Object.hasOwn(storedSurfaces.contexts, showing) ? storedSurfaces.contexts[showing] : undefined;
-        const contexts = remembered === undefined ? {} : { [NO_PROJECT]: remembered };
+        const contexts: PanelSurfaces['contexts'] = remembered === undefined ? {} : { [NO_PROJECT]: remembered };
         let panelSurfaces = rememberSurfaceContext({ panelSurfaces: { ...storedSurfaces, contexts }, knownSession: known }, repaired);
         const repairedMain = replayed.reduce((m, change) => {
           const next = change(m);

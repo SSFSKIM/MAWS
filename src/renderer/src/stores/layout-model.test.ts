@@ -2,19 +2,19 @@ import { describe, expect, it } from 'vitest';
 import type { AgentId, AppSessionId, ProjectId } from '@shared/graph/ids';
 import { OTHER_MACHINE, TEST_MACHINE as M } from '../../../../test/support/machine';
 import type { OrgKey } from '@shared/machine/org-key';
-import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, LayoutMainSchema, NO_PROJECT, type LayoutMain, type LayoutMainV1, type ProjectKey, type TabRef, type TabSet, type TabSetKey, type TabTarget } from '@shared/ipc/schema/layout';
+import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, LayoutMainSchema, storedMain, type ProjectKey, type Strip, type TabRef, type TabSet, type TabTarget } from '@shared/ipc/schema/layout';
 import {
-  activateTab, activeTab, closeTab, currentSet, cycleTab, dockSplit, dropSession, floatingPane, floatSplit, focusPane, fromV1, moveTab, openSession, openTab,
-  refile, rekeyContexts, rekeyExpanded, rekeySets, reopenClosed, repairMain, replaceActive, retargetTab, selectTab, sessionOfTab, setSplitRatio, splitWithActive, switchSet, togglePinned, type RekeyOf, type SetOfTab,
+  activateTab, activeTab, closeTab, currentSet, cycleTab, dockSplit, dropSession, floatingPane, floatSplit, focusPane, moveTab, openSession, openTab,
+  rekeyExpanded, reopenClosed, repairMain, replaceActive, retargetTab, selectTab, sessionOfTab, setSplitRatio, splitWithActive, togglePinned, type RekeyOf,
 } from './layout-model';
 
 const S = (id: string) => ({ kind: 'session' as const, appSessionId: id as AppSessionId });
-const ids = (main: LayoutMain) => currentSet(main).panes.map((p) => p.tabs.map((t) => t.id));
-const active = (main: LayoutMain) => currentSet(main).panes.map((p) => p.activeTabId);
+const ids = (main: Strip) => currentSet(main).panes.map((p) => p.tabs.map((t) => t.id));
+const active = (main: Strip) => currentSet(main).panes.map((p) => p.activeTabId);
 const cur = currentSet;
 const base = LAYOUT_DEFAULTS.main;
-// A layout whose only set is the no-project one, holding `set`.
-const one = (set: TabSet): LayoutMain => ({ ...base, sets: { [NO_PROJECT]: set } });
+// The strip holding `set`, with no closed tabs.
+const one = (set: TabSet): Strip => ({ ...set, closedTabs: [] });
 const A_ID = 'a' as AppSessionId;
 // a, b, c in pane 0 with c active (the default is one empty pane: W5's Overview is no tab).
 const abc = () => [S('a'), S('b'), S('c')].reduce((m, t) => openTab(m, t), base);
@@ -87,7 +87,7 @@ describe('layout store transitions', () => {
   it('closeTab: the last tab leaves the only pane empty, and reopenClosed brings it back there', () => {
     const m = closeTab(openTab(base, S('a')), 'session:a');
     expect(m).toEqual({ ...base, closedTabs: [{ id: 'session:a', ...S('a'), pinned: false }] });
-    expect(LayoutMainSchema.safeParse(m).success).toBe(true);
+    expect(LayoutMainSchema.safeParse(storedMain(m)).success).toBe(true);
     const all = ['session:d', 'session:a', 'session:b', 'session:c'].reduce((m, id) => closeTab(m, id), split());
     expect(cur(all)).toMatchObject({ panes: [{ tabs: [], activeTabId: '' }], focusedPane: 0 });
     const back = reopenClosed(m, 0);
@@ -224,13 +224,11 @@ describe('retargeting a tab', () => {
     expect(currentSet(pinned).panes[0].tabs[0]).toMatchObject({ id: 'browser:a:page', pinned: true });
   });
 
-  it('in whichever pane and set holds it, the strip and the focus staying where they are', () => {
+  it('in whichever pane holds it, the focus staying where it is', () => {
     const m = focusPane(openTab(split(), W('opt'), { pane: 1 }), 0); // pane 1: d, opt
     const r = retargetTab(m, 'browser:a:opt', W('page'));
     expect(ids(r)).toEqual([['session:a', 'session:b', 'session:c'], ['session:d', 'browser:a:page']]);
     expect(currentSet(r).focusedPane).toBe(0);
-    const other = { ...m, current: 'proj-z' as TabSetKey, sets: { ...m.sets, ['proj-z' as TabSetKey]: EMPTY_TAB_SET } };
-    expect(retargetTab(other, 'browser:a:opt', W('page')).current).toBe('proj-z');
   });
 
   it('a tab not open anywhere, or a target already open, leaves the layout as it was', () => {
@@ -317,7 +315,7 @@ describe('the settings tab', () => {
     const m = openTab(base, settings(null));
     expect(togglePinned(m, 'settings')).toBe(m);
     expect(ids(closeTab(m, 'settings'))).toEqual([[]]);
-    expect(LayoutMainSchema.safeParse(m).success).toBe(true);
+    expect(LayoutMainSchema.safeParse(storedMain(m)).success).toBe(true);
   });
 });
 
@@ -331,7 +329,7 @@ describe('file tabs and the panel’s session (C8’s tenth ask)', () => {
     const m = openTab(activateTab(togglePinned(openTab(abc(), first), FILE_ID), 'session:a'), again);
     expect(ids(m)[0].filter((id) => id === FILE_ID)).toHaveLength(1);
     expect(active(m)).toEqual([FILE_ID]);
-    expect(LayoutMainSchema.safeParse(m).success).toBe(true);
+    expect(LayoutMainSchema.safeParse(storedMain(m)).success).toBe(true);
     return cur(m).panes[0].tabs.find((t) => t.id === FILE_ID);
   };
 
@@ -367,183 +365,10 @@ describe('file tabs and the panel’s session (C8’s tenth ask)', () => {
 });
 
 
-// W12 (I3, §5.2 as amended 2026-10-01): a tab set per project; the strip shows the current one.
-describe('tab sets per project', () => {
-  const X = 'proj-x' as ProjectId;
-  const Y = 'proj-y' as ProjectId;
-  const project: Record<string, ProjectId | null> = { a: X, b: X, c: X, y1: Y, y2: Y, n1: null, new: Y };
-  const keyOf = (id: AppSessionId): TabSetKey => project[id] ?? NO_PROJECT;
-  const setOf: SetOfTab = (tab) => {
-    const id = sessionOfTab(tab);
-    return id === null ? null : keyOf(id);
-  };
-  // the store's opens: a session's tab in its project's set
-  const open = (m: LayoutMain, id: string, how: 'replace' | 'tab' = 'tab') => openSession(m, id as AppSessionId, { how, set: keyOf(id as AppSessionId) });
-  const setIds = (m: LayoutMain, key: TabSetKey) => m.sets[key]?.panes.map((p) => p.tabs.map((t) => t.id));
-  // X's set holds a, b; Y's holds y1, y2 and is current.
-  const two = () => ['a', 'b', 'y1', 'y2'].reduce((m, id) => open(m, id), base);
-
-  it('a session of another project opens in its project’s set, which the strip then shows; the emptied set it left goes', () => {
-    const m = open(base, 'a');
-    expect(m.current).toBe(X);
-    expect(Object.keys(m.sets)).toEqual([X]); // the empty 'none' set went
-    const both = two();
-    expect(both.current).toBe(Y);
-    expect(setIds(both, X)).toEqual([['session:a', 'session:b']]);
-    expect(ids(both)).toEqual([['session:y1', 'session:y2']]);
-    expect(LayoutMainSchema.safeParse(both).success).toBe(true);
-  });
-
-  it('a session open in another set is activated there, the strip moving to it', () => {
-    const m = open(two(), 'a', 'replace');
-    expect(m.current).toBe(X);
-    expect(active(m)).toEqual(['session:a']);
-    expect(m.sets[Y]).toEqual(two().sets[Y]); // nothing replaced
-    expect(activateTab(two(), 'session:b').current).toBe(X);
-  });
-
-  it('a replace works in the session’s set: it switches first, then swaps that set’s active session tab', () => {
-    const m = replaceActive(two(), 'c' as AppSessionId, X); // X's active tab is b
-    expect(m.current).toBe(X);
-    expect(ids(m)).toEqual([['session:a', 'session:c']]);
-    expect(setIds(m, Y)).toEqual([['session:y1', 'session:y2']]);
-    expect(m.closedTabs.map((t) => t.id)).toEqual(['session:b']);
-  });
-
-  it('setCurrentProject switches the strip; an emptied set stays current and shows the empty pane', () => {
-    const m = switchSet(two(), X);
-    expect(ids(m)).toEqual([['session:a', 'session:b']]);
-    const emptied = ['session:a', 'session:b'].reduce((acc, id) => closeTab(acc, id), m);
-    expect(emptied.current).toBe(X);
-    expect(ids(emptied)).toEqual([[]]);
-    expect(Object.keys(emptied.sets).sort()).toEqual([X, Y].sort());
-    expect(Object.keys(switchSet(emptied, Y).sets)).toEqual([Y]); // leaving it, it goes
-    const fresh = switchSet(two(), 'proj-z' as ProjectId);
-    expect(ids(fresh)).toEqual([[]]);
-    expect(switchSet(fresh, fresh.current)).toBe(fresh);
-  });
-
-  it('⌘1–9, ⌃Tab, split and the split ratio work on the current set alone', () => {
-    const m = two();
-    expect(active(selectTab(m, 1))).toEqual(['session:y1']);
-    expect(selectTab(m, 3)).toBe(m); // X's tabs do not count
-    expect(active(cycleTab(m, 1))).toEqual(['session:y1']);
-    const splitY = splitWithActive(m);
-    expect(ids(splitY)).toEqual([['session:y1'], ['session:y2']]);
-    expect(splitY.sets[X]).toBe(m.sets[X]);
-    expect(cur(setSplitRatio(splitY, 0.3)).splitRatio).toBe(0.3);
-    expect(setSplitRatio(splitY, 0.3).sets[X]?.splitRatio).toBe(0.5);
-  });
-
-  it('a tab id lives in one set: Settings opened from another set moves to the current one, a file tab too', () => {
-    let m = openTab(switchSet(two(), X), { kind: 'settings', section: null });
-    expect(setIds(m, X)).toEqual([['session:a', 'session:b', 'settings']]);
-    m = openTab(switchSet(m, Y), { kind: 'settings', section: 'keyboard' });
-    expect(setIds(m, X)).toEqual([['session:a', 'session:b']]);
-    expect(ids(m)).toEqual([['session:y1', 'session:y2', 'settings']]);
-    expect(activeTab(m)).toMatchObject({ id: 'settings', section: 'keyboard' });
-    const file = (appSessionId: AppSessionId | null) => ({ kind: 'file' as const, path: '/r/f.ts', line: null, appSessionId, machine: M });
-    const filed = openTab(switchSet(two(), X), file('a' as AppSessionId), { set: X });
-    const moved = openTab(switchSet(filed, Y), file('y1' as AppSessionId), { set: Y });
-    expect(setIds(moved, X)).toEqual([['session:a', 'session:b']]);
-    expect(ids(moved)).toEqual([['session:y1', 'session:y2', `file:${M}:/r/f.ts`]]);
-  });
-
-  // P3-L (M3): an artifact's tab is the workspace's, not a session's: it follows the strip as Settings does, keeps its
-  // pin, and one artifact has one tab, opened again only activated.
-  it('an artifact tab follows the current set, keeps its pin, and opening it again activates its one tab', () => {
-    const artifact = { kind: 'artifact' as const, artifactId: '00000000-0000-4000-8000-000000000001', machine: M };
-    const id = `artifact:${M}:${artifact.artifactId}`;
-    expect(sessionOfTab(artifact)).toBeNull();
-    let m = togglePinned(openTab(switchSet(two(), X), artifact), id);
-    expect(setIds(m, X)).toEqual([[id, 'session:a', 'session:b']]);
-    m = openTab(m, { kind: 'diagnostics' });
-    m = openTab(m, artifact);
-    expect(activeTab(m)).toEqual({ id, ...artifact, pinned: true });
-    m = openTab(switchSet(m, Y), artifact);
-    expect(setIds(m, X)).toEqual([['diagnostics', 'session:a', 'session:b']]);
-    expect(ids(m), 'pinned first').toEqual([[id, 'session:y1', 'session:y2']]);
-    expect(activeTab(m)).toMatchObject({ id, pinned: true });
-    expect(LayoutMainSchema.safeParse(m).success).toBe(true);
-  });
-
-  it('closing, ⌘⇧T and session.removed find a tab in whichever set holds it', () => {
-    const closed = closeTab(two(), 'session:a');
-    expect(setIds(closed, X)).toEqual([['session:b']]);
-    expect(closed.current).toBe(Y);
-    const back = reopenClosed(closed, 0, X);
-    expect(back.current).toBe(X);
-    expect(ids(back)).toEqual([['session:a', 'session:b']]);
-    const dropped = dropSession(dropSession(two(), 'a' as AppSessionId), 'b' as AppSessionId);
-    expect(Object.keys(dropped.sets)).toEqual([Y]); // X's set emptied and went
-    expect(togglePinned(two(), 'session:a').sets[X]?.panes[0].tabs[0]).toMatchObject({ id: 'session:a', pinned: true });
-  });
-
-  it('refile: a tab whose session’s project changed moves to its set, and the strip follows the one it shows', () => {
-    let m = open(base, 'new'); // an unstarted chat, filed under Y
-    project.new = null; // … whose project is unchosen again
-    try {
-      m = refile(m, setOf);
-      expect(m.current).toBe(NO_PROJECT);
-      expect(ids(m)).toEqual([['session:new']]);
-      expect(Object.keys(m.sets)).toEqual([NO_PROJECT]);
-    } finally {
-      project.new = Y;
-    }
-    const chosen = refile(m, setOf);
-    expect(chosen.current).toBe(Y);
-    expect(ids(chosen)).toEqual([['session:new']]);
-    expect(refile(chosen, setOf)).toBe(chosen); // nothing moves, nothing changes
-    // a tab in the background moves without moving the strip
-    const withC: LayoutMain = { ...two(), sets: { ...two().sets, [Y]: { ...EMPTY_TAB_SET, panes: [{ tabs: [...cur(two()).panes[0].tabs, { id: 'session:c', ...S('c'), pinned: false }], activeTabId: 'session:y2' }] } } };
-    const background = refile(withC, setOf);
-    expect(background.current).toBe(Y);
-    expect(setIds(background, X)).toEqual([['session:a', 'session:b', 'session:c']]);
-    expect(ids(background)).toEqual([['session:y1', 'session:y2']]);
-  });
-
-  it('repairMain keeps a tab id once across every set, the current set’s copy first', () => {
-    const dup: LayoutMain = { ...two(), sets: { ...two().sets, [X]: { ...EMPTY_TAB_SET, panes: [{ tabs: [{ id: 'session:y1', ...S('y1'), pinned: false }, { id: 'session:a', ...S('a'), pinned: false }], activeTabId: 'session:y1' }] } } };
-    const repaired = repairMain(dup, () => true);
-    expect(setIds(repaired, X)).toEqual([['session:a']]);
-    expect(active(switchSet(repaired, X))).toEqual(['session:a']);
-    expect(ids(repaired)).toEqual([['session:y1', 'session:y2']]);
-    const gone = repairMain(two(), (id) => project[id] === Y);
-    expect(Object.keys(gone.sets)).toEqual([Y]);
-  });
-
-  // The v1 → v2 transform at hydration (`fromV1`): each tab filed by its session's project.
-  it('fromV1 files tabs by project, keeping panes, order, active tabs and the focused pane; the shown tab’s set is current', () => {
-    const tab = (id: string): TabRef => ({ id: `session:${id}`, ...S(id), pinned: false });
-    const settings: TabRef = { id: 'settings', kind: 'settings', section: null, pinned: false };
-    const v1: LayoutMainV1 = {
-      version: 1,
-      panes: [
-        { tabs: [tab('a'), tab('y1'), settings, tab('n1'), tab('zz')], activeTabId: 'session:y1' },
-        { tabs: [tab('y2'), tab('b')], activeTabId: 'session:b' },
-      ],
-      focusedPane: 0,
-      splitRatio: 0.4,
-      closedTabs: [tab('c')],
-    };
-    const m = fromV1(v1, setOf); // zz: an unknown session, filed under none (hydration's repair drops it)
-    expect(m.current).toBe(Y);
-    expect(m.sets[Y]).toEqual({ panes: [{ tabs: [tab('y1'), settings], activeTabId: 'session:y1' }, { tabs: [tab('y2')], activeTabId: 'session:y2' }], focusedPane: 0, splitRatio: 0.4 });
-    expect(m.sets[X]).toEqual({ panes: [{ tabs: [tab('a')], activeTabId: 'session:a' }, { tabs: [tab('b')], activeTabId: 'session:b' }], focusedPane: 0, splitRatio: 0.4 });
-    expect(m.sets[NO_PROJECT]).toEqual({ panes: [{ tabs: [tab('n1'), tab('zz')], activeTabId: 'session:n1' }], focusedPane: 0, splitRatio: 0.4 });
-    expect(m.closedTabs).toEqual([tab('c')]);
-    expect(LayoutMainSchema.safeParse(m).success).toBe(true);
-    expect(Object.keys(repairMain(m, (id) => id !== 'zz' && id !== 'n1').sets).sort()).toEqual([X, Y].sort());
-    // nothing open: the no-project set, one empty pane
-    expect(fromV1({ version: 1, ...EMPTY_TAB_SET, closedTabs: [] }, setOf)).toEqual(base);
-  });
-});
-
 // P4-B3 M1 (parent §4.5, X37; Decision Log 1, 2, 6): the split's float state beside `splitRatio`, which a float never
 // writes, and the one validity rule every transition and hydration applies.
 describe('the split’s float', () => {
   const ART: TabTarget = { kind: 'artifact', artifactId: 'doc-1', machine: M };
-  const X = 'proj-x' as ProjectId;
   // Pane 0: the document; pane 1: sessions d (active) and e; the ratio 0.4 (r0).
   const docked = () => setSplitRatio(openTab(openTab(openTab(base, ART), S('d'), { pane: 1 }), S('e'), { pane: 1, activate: false }), 0.4);
   const floated = () => floatSplit(docked(), 'session:d');
@@ -554,11 +379,11 @@ describe('the split’s float', () => {
     expect(cur(m).splitRatio).toBe(0.4);
     expect(floatingPane(cur(m))).toBe(1);
     expect(floatingPane(cur(docked()))).toBeNull();
-    expect(LayoutMainSchema.safeParse(m).success).toBe(true);
+    expect(LayoutMainSchema.safeParse(storedMain(m)).success).toBe(true);
     expect(floatSplit(m, 'session:d')).toBe(m); // already floating
   });
 
-  it('floats nothing unless the current set is a split with that session tab active in a pane', () => {
+  it('floats nothing unless the strip is a split with that session tab active in a pane', () => {
     const m = docked();
     expect(floatSplit(m, 'session:e')).toBe(m); // not active
     expect(floatSplit(m, `artifact:${M}:doc-1`)).toBe(m); // not a session
@@ -619,17 +444,9 @@ describe('the split’s float', () => {
     expect('floating' in cur(dropSession(floated(), 'd' as AppSessionId))).toBe(false);
   });
 
-  it('belongs to its set: another set shows no float, and the float is there again on return', () => {
-    const away = openTab(switchSet(floated(), X), S('x'), { set: X });
-    expect(away.current).toBe(X);
-    expect(floatingPane(cur(away))).toBeNull();
-    expect(away.sets[NO_PROJECT]?.floating).toEqual({ sessionTabId: 'session:d' });
-    expect(floatingPane(cur(switchSet(away, NO_PROJECT)))).toBe(1);
-  });
-
   it('hydration keeps a valid float and drops one that no longer names a floating session pane', () => {
     expect(cur(repairMain(floated(), () => true)).floating).toEqual({ sessionTabId: 'session:d' });
-    const at = (floating: TabSet['floating']): LayoutMain => ({ ...floated(), sets: { [NO_PROJECT]: { ...cur(floated()), floating } } });
+    const at = (floating: TabSet['floating']): Strip => ({ ...floated(), floating });
     expect('floating' in cur(repairMain(at({ sessionTabId: 'session:e' }), () => true))).toBe(false); // not active
     expect('floating' in cur(repairMain(at({ sessionTabId: `artifact:${M}:doc-1` }), () => true))).toBe(false); // not a session
     expect('floating' in cur(repairMain(floated(), (id) => id !== 'd'))).toBe(false); // its session is gone
@@ -637,213 +454,20 @@ describe('the split’s float', () => {
   });
 });
 
-// P5 O6 M5 (docs/doperpowers/plans/2026-10-27-p5-o6-machine-dimension.md, "Migrating project-keyed state"): an M2
-// version-3 layout keys its sets by project address; each migrates whole to its org project's key once its machine's
-// projects are known, sets landing on one key merge, a set whose project is gone re-homes its tabs, and a set of a
-// machine not loaded yet waits for it.
-describe('rekeying project sets to org keys', () => {
+// P5 O6 M5 (docs/doperpowers/plans/2026-10-27-p5-o6-machine-dimension.md, "Migrating project-keyed state"): the
+// sidebar's expanded rows keyed by a project's address migrate to its org project's key once its machine's projects are
+// known (U13a: the tabs hold no project key any more; this is what is left of the migration).
+describe('rekeying the expanded rows to org keys', () => {
   const B = OTHER_MACHINE;
   const PA = `${M}/proj-a` as ProjectId; // A's checkout of the shared repository
-  const PB = `${B}/proj-b` as ProjectId; // B's checkout of it
   const PG = `${M}/proj-gone` as ProjectId; // a project A no longer has
-  const PF = `${M}/proj-files` as ProjectId;
   const PL = `${B}/proj-late` as ProjectId; // B's, before B has loaded
   const SHARED = 'remote:example.org/team/shared' as OrgKey;
-  const FILES = `folder:${M}:proj-files` as OrgKey;
-  const LATE = 'remote:example.org/team/late' as OrgKey;
   const OWN = `machine:${M}` as OrgKey;
-  const session = (id: string): TabRef => ({ id: `session:${id}`, kind: 'session', appSessionId: id as AppSessionId, pinned: false });
-  const file = (path: string, machine = M): TabRef => ({ id: `file:${machine}:${path}`, kind: 'file', path, line: null, appSessionId: null, machine, pinned: false });
-  const set = (panes: TabRef[][], focusedPane: 0 | 1 = 0, splitRatio = 0.5): TabSet => ({
-    panes: panes.map((tabs) => ({ tabs, activeTabId: tabs.at(-1)?.id ?? '' })) as TabSet['panes'],
-    focusedPane,
-    splitRatio,
-  });
-  const sA1 = session(`${M}/a1`);
-  const sA2 = session(`${M}/a2`);
-  const sB1 = session(`${B}/b1`);
-  const sG = session(`${M}/g1`);
-  const sL = session(`${B}/l1`);
-  // B loads later: until then its keys wait
-  let bLoaded = false;
-  const rekeyOf: RekeyOf = (key) => {
-    if (key === PA) return SHARED;
-    if (key === PB) return bLoaded ? SHARED : 'wait';
-    if (key === PF) return FILES;
-    if (key === PG) return 'gone';
-    if (key === PL) return bLoaded ? LATE : 'wait';
-    return 'wait';
-  };
-  // where a session tab files now: g1's record sits under A's machine row
-  const setOf: SetOfTab = (tab) => (sessionOfTab(tab) === `${M}/g1` ? OWN : null);
-  const v3 = (): LayoutMain => ({
-    version: 3,
-    current: PB,
-    sets: {
-      [PA]: set([[sA1], [sA2]], 1, 0.3),
-      [PB]: set([[sB1, file('/b/readme.md', B)]]),
-      [PG]: set([[sG, file('/g/notes.md')]]),
-      [PF]: set([[file('/f/one.md'), file('/f/two.md')]]),
-      [PL]: set([[sL]]),
-      [NO_PROJECT]: set([[file('/loose.md')]]),
-    },
-    closedTabs: [],
-  });
-  const loaded = <T,>(fn: () => T): T => {
-    bLoaded = true;
-    try {
-      return fn();
-    } finally {
-      bLoaded = false;
-    }
-  };
-
-  it('merges two checkouts’ sets on one key into the current one’s panes, the other’s tabs after its focused pane’s', () => {
-    const { main } = loaded(() => rekeySets(v3(), rekeyOf, setOf));
-    expect(main.current).toBe(SHARED);
-    // PB was current: its panes, focus and ratio; PA's tabs (both panes) follow in its focused pane
-    expect(main.sets[SHARED]).toEqual({ panes: [{ tabs: [sB1, file('/b/readme.md', B), sA1, sA2], activeTabId: file('/b/readme.md', B).id }], focusedPane: 0, splitRatio: 0.5 });
-    expect(main.sets[PA]).toBeUndefined();
-    expect(main.sets[PB]).toBeUndefined();
-    expect(LayoutMainSchema.safeParse(main).success).toBe(true);
-  });
-
-  it('with no current set among them, the first set in key order is the base, whatever order the sets were stored in', () => {
-    expect(PB < PA).toBe(true); // B's machine ref sorts first
-    const reversed = (main: LayoutMain): LayoutMain => ({ ...main, sets: Object.fromEntries(Object.entries(main.sets).reverse()) });
-    const contexts = { [PA]: `${M}/a1`, [PB]: `${B}/b1` } as unknown as Record<string, AppSessionId>;
-    const stored: LayoutMain[] = [{ ...v3(), current: NO_PROJECT }, reversed({ ...v3(), current: NO_PROJECT })];
-    for (const main of stored) {
-      const { main: rekeyed, bases } = loaded(() => rekeySets(main, rekeyOf, setOf));
-      expect(rekeyed.current).toBe(NO_PROJECT);
-      expect(rekeyed.sets[SHARED]).toEqual({ panes: [{ tabs: [sB1, file('/b/readme.md', B), sA1, sA2], activeTabId: file('/b/readme.md', B).id }], focusedPane: 0, splitRatio: 0.5 });
-      expect(loaded(() => rekeyContexts(contexts, rekeyOf, bases))).toEqual({ [SHARED]: `${B}/b1` });
-    }
-  });
-
-  it('moves a set of file tabs alone to its key, and re-homes a gone project’s tabs: sessions where they file, the rest to none', () => {
-    const { main } = rekeySets(v3(), rekeyOf, setOf);
-    expect(main.sets[FILES]).toEqual(v3().sets[PF]);
-    expect(main.sets[PG]).toBeUndefined();
-    expect(main.sets[OWN]?.panes[0].tabs).toEqual([sG]);
-    expect(main.sets[NO_PROJECT]?.panes[0].tabs).toEqual([file('/loose.md'), file('/g/notes.md')]);
-    expect(LayoutMainSchema.safeParse(main).success).toBe(true);
-  });
-
-  it('re-homes a gone project’s tabs in their order, onto a set there or a new one', () => {
-    const files = [file('/g/1.md'), file('/g/2.md'), file('/g/3.md')];
-    const gone = (sets: LayoutMain['sets']): LayoutMain => ({ version: 3, current: PA, sets: { [PA]: set([[sA1]]), [PG]: set([files]), ...sets }, closedTabs: [] });
-    expect(rekeySets(gone({}), rekeyOf, setOf).main.sets[NO_PROJECT]?.panes[0].tabs).toEqual(files);
-    expect(rekeySets(gone({ [NO_PROJECT]: set([[file('/loose.md')]]) }), rekeyOf, setOf).main.sets[NO_PROJECT]?.panes[0].tabs).toEqual([file('/loose.md'), ...files]);
-  });
-
-  it('a gone project’s set that was current hands the strip to where its shown tab went', () => {
-    const { main } = rekeySets({ ...v3(), current: PG }, rekeyOf, setOf);
-    expect(main.current).toBe(NO_PROJECT); // its active tab, the notes file
-  });
-
-  it('leaves a set of a machine not loaded as it is, and migrates it once the machine has loaded', () => {
-    const before = rekeySets(v3(), rekeyOf, setOf).main;
-    expect(before.current).toBe(PB); // B's checkout waits, the strip with it
-    expect(before.sets[PL]).toEqual(v3().sets[PL]);
-    expect(before.sets[PA]).toBeUndefined(); // A's migrated meanwhile
-    expect(before.sets[SHARED]?.panes.map((p) => p.tabs)).toEqual([[sA1], [sA2]]);
-    const after = loaded(() => rekeySets(before, rekeyOf, setOf).main);
-    expect(after.sets[LATE]).toEqual(v3().sets[PL]);
-    expect(after.current).toBe(SHARED);
-    expect(after.sets[SHARED]?.panes.map((p) => p.tabs)).toEqual([[sB1, file('/b/readme.md', B), sA1, sA2]]); // B's set was current
-    expect(loaded(() => rekeySets(after, rekeyOf, setOf).main)).toBe(after); // nothing left to migrate: the same value
-  });
-
-  it('rekeys the panel’s remembered contexts by the same map, a merge keeping the current set’s entry', () => {
-    const contexts = { [PA]: `${M}/a1`, [PB]: `${B}/b1`, [PG]: `${M}/g1`, [PL]: `${B}/l1`, [NO_PROJECT]: `${M}/x` } as unknown as Record<string, AppSessionId>;
-    const { bases } = loaded(() => rekeySets(v3(), rekeyOf, setOf));
-    expect(loaded(() => rekeyContexts(contexts, rekeyOf, bases))).toEqual({ [SHARED]: `${B}/b1`, [LATE]: `${B}/l1`, [NO_PROJECT]: `${M}/x` });
-    // a machine not loaded: kept under the address
-    expect(rekeyContexts({ [PB]: `${B}/b1` } as Record<string, AppSessionId>, rekeyOf, new Map())).toEqual({ [PB]: `${B}/b1` });
-  });
-
-  it('a current set that migrates late brings its context over the one its key already held', () => {
-    // B's set is current and shows its readme, a sessionless tab: its context is the session the panel last showed there
-    const first = rekeySets(v3(), rekeyOf, setOf);
-    const held = rekeyContexts({ [PA]: `${M}/a1`, [PB]: `${B}/b1` } as unknown as Record<string, AppSessionId>, rekeyOf, first.bases);
-    expect(held).toEqual({ [SHARED]: `${M}/a1`, [PB]: `${B}/b1` });
-    const { bases } = loaded(() => rekeySets(first.main, rekeyOf, setOf));
-    expect(bases.get(SHARED)).toBe(PB);
-    expect(loaded(() => rekeyContexts(held, rekeyOf, bases))).toEqual({ [SHARED]: `${B}/b1` });
-    expect(loaded(() => rekeyContexts({ [PB]: `${B}/b1`, [SHARED]: `${M}/a1` } as unknown as Record<string, AppSessionId>, rekeyOf, bases))).toEqual({ [SHARED]: `${B}/b1` });
-  });
+  const rekeyOf: RekeyOf = (key) => (key === PA ? SHARED : key === PG ? 'gone' : 'wait');
 
   it('rekeys the expanded rows: an address to its org key once, a gone one dropped, a waiting one kept, Other sessions to this machine’s row', () => {
     const list = [PA, PG, PL, 'other', SHARED] as ProjectKey[];
     expect(rekeyExpanded(list, rekeyOf, M)).toEqual([SHARED, PL, OWN]);
-  });
-});
-
-// The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §J.2; design §2): a tab set,
-// panel context or expanded row under a key that is no row's any more moves whole to its successor, the answer
-// `stores/org-projects.ts`'s `successorOf` gives through `RekeyOf`: a label key whose project took a key of the table, and
-// an `id:` key whose project's locations were linked into another. Its file and artifact tabs move with its sessions.
-describe('the project registry: a set whose key is no row’s moves whole', () => {
-  const LABEL = 'remote:example.org/team/app' as OrgKey; // this Mac's label, before its project took the table's key
-  const GONE = 'id:11111111-2222-4333-8444-555555555555' as OrgKey; // a project whose locations were linked into ROW's
-  const ROW = 'id:66666666-7777-4888-9999-aaaaaaaaaaaa' as OrgKey;
-  const STAYS = 'smns:a-hidden-project' as OrgKey; // no successor: it stays
-  const session = (id: string): TabRef => ({ id: `session:${id}`, kind: 'session', appSessionId: id as AppSessionId, pinned: false });
-  const file = (path: string): TabRef => ({ id: `file:${M}:${path}`, kind: 'file', path, line: null, appSessionId: null, machine: M, pinned: false });
-  const artifact = (artifactId: string): TabRef => ({ id: `artifact:${M}:${artifactId}`, kind: 'artifact', artifactId, machine: M, pinned: false });
-  const set = (tabs: TabRef[]): TabSet => ({ panes: [{ tabs, activeTabId: tabs.at(-1)?.id ?? '' }], focusedPane: 0, splitRatio: 0.5 });
-  const s1 = session(`${M}/s1`);
-  const s2 = session(`${M}/s2`);
-  const notes = file('/app/notes.md');
-  const plan = artifact('00000000-0000-4000-8000-0000000000a1');
-  const report = artifact('00000000-0000-4000-8000-0000000000a2');
-  const rekeyOf: RekeyOf = (key) => (key === LABEL || key === GONE ? ROW : key);
-  const setOf: SetOfTab = () => null; // no session tab is filed elsewhere: only the sets move
-  const main = (): LayoutMain => ({
-    version: 3,
-    current: LABEL,
-    sets: { [LABEL]: set([s1, notes, plan]), [GONE]: set([s2, report]), [STAYS]: set([file('/hidden/readme.md')]), [NO_PROJECT]: set([file('/loose.md')]) },
-    closedTabs: [],
-  });
-
-  it('moves a label key’s set and an id: key’s set onto their row, file and artifact tabs with them, the current set’s panes standing', () => {
-    const { main: moved, bases } = rekeySets(main(), rekeyOf, setOf);
-    expect(moved.current).toBe(ROW);
-    expect(moved.sets[ROW]?.panes[0].tabs).toEqual([s1, notes, plan, s2, report]);
-    expect(moved.sets[LABEL]).toBeUndefined();
-    expect(moved.sets[GONE]).toBeUndefined();
-    expect(moved.sets[STAYS]).toEqual(main().sets[STAYS]); // no successor: it stays, as a hidden project's set does
-    expect(moved.sets[NO_PROJECT]).toEqual(main().sets[NO_PROJECT]);
-    expect(bases.get(ROW)).toBe(LABEL);
-    expect(LayoutMainSchema.safeParse(moved).success).toBe(true);
-    expect(rekeySets(moved, rekeyOf, setOf).main).toBe(moved); // nothing left to move: the same value
-  });
-
-  it('asks nothing of a machine’s row or the no-project set', () => {
-    const asked: string[] = [];
-    const own = `machine:${M}` as OrgKey;
-    const watching: RekeyOf = (key) => {
-      asked.push(key);
-      return key;
-    };
-    rekeySets({ ...main(), sets: { ...main().sets, [own]: set([file('/own.md')]) } }, watching, setOf);
-    expect(asked.sort()).toEqual([GONE, LABEL, STAYS].sort());
-    expect(rekeyExpanded([own, 'other' as ProjectKey], watching, M)).toEqual([own]);
-    expect(asked).not.toContain(own);
-  });
-
-  it('moves the panel’s contexts and the expanded rows by the same answer, the base set’s context kept', () => {
-    const { bases } = rekeySets(main(), rekeyOf, setOf);
-    const contexts = { [LABEL]: `${M}/s1`, [GONE]: `${M}/s2`, [STAYS]: `${M}/x`, [NO_PROJECT]: `${M}/y` } as unknown as Record<string, AppSessionId>;
-    expect(rekeyContexts(contexts, rekeyOf, bases)).toEqual({ [ROW]: `${M}/s1`, [STAYS]: `${M}/x`, [NO_PROJECT]: `${M}/y` });
-    expect(rekeyExpanded([GONE, LABEL, STAYS, ROW], rekeyOf, M)).toEqual([ROW, STAYS]);
-  });
-
-  it('leaves every set where it is while the answer waits (this Mac’s own projects not in yet)', () => {
-    const waiting: RekeyOf = () => 'wait';
-    const before = main();
-    expect(rekeySets(before, waiting, setOf).main).toBe(before);
-    expect(rekeyExpanded([LABEL, GONE], waiting, M)).toEqual([LABEL, GONE]);
   });
 });

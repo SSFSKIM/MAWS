@@ -27,7 +27,7 @@ import { activeTab, currentSet } from '../stores/layout-model';
 import { useSessions, type ListedSession } from '../stores/sessions';
 import { usePeople } from '../stores/people'; // P5 O8 M5
 import { connectRemoteReadMarks, resetRemoteReadMarks } from '../lane-b/read-marks'; // P5 O7 M2
-import { fileTabsByProject, fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
+import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { formatAge, type ProjectKey } from './derive';
 import { registerProjectAction } from './project-actions';
 import { useResumeChooser } from '../resume/host'; // P2-D
@@ -286,7 +286,9 @@ describe('sidebar recovery routes', () => {
   it('the title bar chip’s Show in sidebar restores a hidden project before revealing and focusing its sidebar row', async () => {
     const project = nine.projects.find((p) => p.name === 'MAWS')!;
     fillStores({ ...nine, projects: nine.projects.map((p) => ({ ...p, hidden: p.id === project.id })) });
-    useLayout.getState().setCurrentProject(at(project.id));
+    useMachines.setState({ loaded: new Set([TEST_MACHINE]) }); // U13a: the chip's project is the session in front's
+    offs.push(() => useMachines.setState({ loaded: new Set() }));
+    useLayout.getState().openSession(idOf('Charter + research'), { how: 'tab' });
     useLayout.getState().setSidebar({ collapsed: true });
     const fake = fakeClient();
     window.maws = fake.client as unknown as PreloadBridge;
@@ -336,7 +338,6 @@ describe('Needs you across projects', () => {
 
   it('has one tab stop before the project controls; arrows and Home/End navigate, Enter opens without answering', async () => {
     fillStores(nine);
-    fileTabsByProject();
     const fake = fakeClient({ 'attention.request': () => ({ event: null }) });
     window.maws = fake.client as unknown as PreloadBridge;
     const user = userEvent.setup();
@@ -353,7 +354,6 @@ describe('Needs you across projects', () => {
     await user.keyboard('{End}{ArrowUp}{Home}{ArrowDown}{Enter}');
     expect(document.activeElement).toBe(buttons()[1]);
     expect(activeTab(useLayout.getState().main)).toMatchObject({ appSessionId: idOf('Sidebar interaction pass') });
-    expect(useLayout.getState().main.current).toBe(at('proj-maws'));
     expect(fake.invoked('session.answer')).toEqual([]);
     await user.tab();
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Filter projects' }));
@@ -860,7 +860,7 @@ describe('the resume chooser from the sidebar', () => {
     expect(options()).toContain('Quota reset recovery');
     expect(options()).toContain('Terminal workflow notes');
     await user.keyboard('quota{Meta>}{Enter}{/Meta}');
-    const panes = currentSet(useLayout.getState().main).panes; // W12: the strip's tab set (one here: no projectOf given)
+    const panes = currentSet(useLayout.getState().main).panes;
     expect(panes[0].tabs.map((t) => (t.kind === 'session' ? t.appSessionId : t.id))).toEqual([idOf('Charter + research'), idOf('Quota reset recovery')]);
     expect(activeTab(useLayout.getState().main)).toMatchObject({ appSessionId: idOf('Quota reset recovery') });
     await openFromRow(user);
@@ -986,7 +986,6 @@ describe('sidebar keyboard', () => {
     expect(document.activeElement).toBe(row('This Mac'));
     await user.keyboard('{ArrowUp}{Enter}');
     expect(expanded()).toEqual([at('proj-maws')]);
-    expect(useLayout.getState().main.current, 'W12: Enter shows the project’s tab set, as a click does').toBe(at('proj-maws'));
     expect(document.activeElement).toBe(row('MAWS'));
     await user.keyboard('{ArrowRight}');
     expect(document.activeElement).toBe(row('Workstation north star'));
@@ -1011,30 +1010,27 @@ describe('sidebar keyboard', () => {
     expect(expanded()).toEqual([at('proj-maws')]);
   });
 
-  // W12 (I3) on W11's tree: a project's activation is one path for the pointer and the keys, and it shows the project's
-  // tab set, so a project reached by keyboard switches the strip as a click does.
-  it('a click, Enter, ArrowRight or Space on a project row shows its tab set; a machine’s row shows its own set', async () => {
+  // W12 (I3) on W11's tree: a project's activation is one path for the pointer and the keys. UX wave U13a: it expands or
+  // collapses the row and changes nothing else; the one strip shows the same tabs before and after.
+  it('a click, Enter, ArrowRight or Space on a project row or a machine’s row leaves the strip as it was', async () => {
     const user = userEvent.setup();
-    fileTabsByProject();
     act(() => useLayout.getState().openSession(idOf('Fix sidebar drag')));
-    const current = () => useLayout.getState().main.current;
-    const shown = () => activeTab(useLayout.getState().main);
-    expect(current()).toBe(at('proj-maws'));
+    const strip = useLayout.getState().main;
     render(<Sidebar />);
     await toggle(user, 'codex_somersault');
-    expect(current()).toBe(at('proj-codex-somersault'));
-    expect(shown(), 'the other project’s set is empty').toBeNull();
+    expect(useLayout.getState().main).toBe(strip);
     row('MAWS').focus();
     await user.keyboard('{Enter}');
-    expect(current()).toBe(at('proj-maws'));
-    expect(shown()).toMatchObject({ kind: 'session', appSessionId: idOf('Fix sidebar drag') });
+    expect(useLayout.getState().main).toBe(strip);
     row('claude-usage-menubar').focus();
     await user.keyboard('{ArrowRight}');
-    expect(current()).toBe(at('proj-claude-usage-menubar'));
+    expect(useLayout.getState().main).toBe(strip);
     expect(expanded()).toEqual([at('proj-codex-somersault'), at('proj-maws'), at('proj-claude-usage-menubar')]);
     row('This Mac').focus();
     await user.keyboard(' ');
-    expect(current()).toBe(machineKey(TEST_MACHINE));
+    expect(expanded()).toContain(machineKey(TEST_MACHINE));
+    expect(useLayout.getState().main).toBe(strip);
+    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: idOf('Fix sidebar drag') });
   });
 
   it('the selected session is the tree’s stop when it is on screen', () => {

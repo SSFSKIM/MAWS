@@ -13,10 +13,11 @@ import { registerSlot, resetSlots } from '../app/slots';
 import { createSession, registerCloseGuard, registerSessionCreator, registerUnstartedTitle, runAction } from '../keymap/actions-runtime';
 import { connectKeys } from '../keymap/dispatcher';
 import { useLayout } from '../stores/layout';
+import { useMachines } from '../stores/machines';
 import { activeTab, currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { installResizeObserver } from '../test-support/resize';
-import { fileTabsByProject, fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
+import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { PINNED_HINT } from './Tab';
 import { TAB_DRAG_TYPE } from './TabStrip';
 
@@ -731,8 +732,9 @@ describe('unstarted sessions', () => {
     expect(within(screen.getByRole('banner')).getByText('New chat')).toBeTruthy();
   });
 
-  it('the strip’s "+" opens an unstarted tab in its pane, in the project whose tab set the strip shows', async () => {
-    fileTabsByProject();
+  it('the strip’s "+" opens an unstarted tab in its pane, in the current project', async () => {
+    useMachines.setState({ loaded: new Set([TEST_MACHINE]) }); // U13a: the current project is the session in front's
+    offs.push(() => useMachines.setState({ loaded: new Set() }));
     const asked: (ProjectId | null)[] = [];
     offs.push(registerSessionCreator(async (projectId) => (asked.push(projectId), NEW)));
     const user = userEvent.setup();
@@ -939,68 +941,6 @@ describe('⌃Tab follows DOM focus', () => {
     act(() => screen.getByLabelText('terminal input').focus());
     act(() => runAction('tab.next'));
     expect(activeOf(0)).toBe(`session:${idOf('Charter + research')}`); // wraps from the last tab, once
-  });
-});
-
-// W12 (I3, §5.2 as amended 2026-10-01): each project has its own tab set; the strip shows the current one. P3-F wave S
-// (F17, the owner's obs 8): its project is named by the title bar's chip, and the strip carries no project item.
-describe('tab sets per project', () => {
-  beforeEach(() => fileTabsByProject());
-  const label = () => document.querySelector<HTMLElement>('[data-toolbar] [data-toolbar-project]');
-  // W11: a project row's line, which a click activates (the row toggles and the strip shows the project's set)
-  const projectRow = (name: string) =>
-    within(document.querySelector<HTMLElement>('[data-region="sidebar"]')!).getByRole('treeitem', { name }).querySelector<HTMLElement>('[data-project-line]')!;
-
-  it('a session of another project shows that project’s set, a project click shows its set again, and ⌘1–9 count in the set', async () => {
-    const user = userEvent.setup();
-    render(<Shell />);
-    expect(label()).toBeNull(); // nothing open: the no-project set, unlabelled
-    act(() => {
-      useLayout.getState().openSession(idOf('Charter + research'), { how: 'tab' });
-      useLayout.getState().openSession(idOf('Fix sidebar drag'), { how: 'tab' });
-    });
-    expect(tabNames()).toEqual(['Charter + research', 'Fix sidebar drag']);
-    expect(label()?.textContent).toBe('MAWS');
-    await user.click(sidebarRow('Quota reset recovery'));
-    expect(tabNames()).toEqual(['Quota reset recovery']);
-    expect(label()?.textContent).toBe('codex_somersault');
-    await act(async () => runAction('tab.select', 2));
-    expect(selected()).toBe('Quota reset recovery'); // MAWS's tabs are not counted
-    await user.click(projectRow('MAWS'));
-    expect(tabNames()).toEqual(['Charter + research', 'Fix sidebar drag']);
-    expect(selected()).toBe('Fix sidebar drag');
-    await act(async () => runAction('tab.select', 1));
-    expect(selected()).toBe('Charter + research');
-    expect(chrome().querySelector('[data-strip-project]')).toBeNull(); // the strip names no project
-    // the chip's context menu reveals its project in the sidebar
-    act(() => useLayout.getState().setSidebar({ expandedProjects: [] }));
-    fireEvent.contextMenu(label()!);
-    await user.click(await screen.findByRole('menuitem', { name: 'Reveal in sidebar' }));
-    expect(useLayout.getState().regions.sidebar.expandedProjects).toEqual([at('proj-maws')]);
-  });
-
-  it('a project with nothing open shows the empty pane under its name; the machine’s own row shows its unlabelled set', async () => {
-    const user = userEvent.setup();
-    render(<Shell />);
-    await user.click(projectRow('claude-usage-menubar'));
-    expect(tabNames()).toEqual([]);
-    expect(within(within(main()).getByRole('tabpanel')).getByText('No open tabs')).toBeTruthy();
-    expect(label()?.textContent).toBe('claude-usage-menubar');
-    await user.click(projectRow('This Mac'));
-    expect(useLayout.getState().main.current).toBe(`machine:${TEST_MACHINE}`); // P5 O6 M5
-    expect(label()).toBeNull();
-  });
-
-  it('Settings opened from another project’s set moves to the current one', async () => {
-    render(<Shell />);
-    act(() => useLayout.getState().openSession(idOf('Charter + research')));
-    act(() => useLayout.getState().openTab({ kind: 'settings', section: null }));
-    expect(tabNames()).toEqual(['Charter + research', 'Settings']);
-    act(() => useLayout.getState().openSession(idOf('Quota reset recovery')));
-    act(() => useLayout.getState().openTab({ kind: 'settings', section: null }));
-    expect(tabNames()).toEqual(['Quota reset recovery', 'Settings']);
-    act(() => useLayout.getState().setCurrentProject(at('proj-maws' as ProjectId)));
-    expect(tabNames()).toEqual(['Charter + research']);
   });
 });
 

@@ -145,11 +145,10 @@ export function Toolbar() {
 }
 
 // P3-F wave S (F17, the owner's obs 8; W12's label, which named the set at the strip's left edge until the owner moved it
-// out of the crowded strip): the project whose tab set the strips show, left of the title, so a strip that changed with
-// a project is never a surprise. A click is the sidebar's "+" (a New chat in that project: a new unstarted session tab
-// in its set); the context menu reveals the project in the sidebar, the one way a hidden project's row comes back. The
-// no-project set (and a project the index no longer lists) shows none. UX wave U13a: the project is the current
-// project's folder here (`useCurrentRow`), until the chip names and reveals the row itself.
+// out of the crowded strip), left of the title. A click is the sidebar's "+" (a New chat in that project: a new unstarted
+// session tab); the context menu reveals the project in the sidebar, the one way a hidden project's row comes back. UX
+// wave U13a: the project is the current project's folder here (`useCurrentRow`: the row of the session in front), until
+// the chip names and reveals the row itself; no session in front (or a project the index no longer lists) shows none.
 export const PROJECT_CHIP_COPY = {
   newChat: (name: string) => `New chat in ${name}`,
   reveal: 'Reveal in sidebar',
