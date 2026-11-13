@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandResult } from '@shared/ipc/schema';
 import { addressOf } from '@shared/machine/address';
-import { item, status, T0 } from '../../../../test/support/builders';
+import { digest, item, status, T0 } from '../../../../test/support/builders';
 import { OTHER_MACHINE } from '../../../../test/support/machine';
 import type { Capability, SessionControls } from '../session/controls/types';
 import { useAttention } from '../stores/attention';
@@ -61,7 +61,7 @@ beforeEach(() => {
   port.unavailable = null;
   useTranscriptStore.setState({ entries: {}, live: {} });
   useAttention.setState({ bySession: new Map(), version: useAttention.getState().version + 1 });
-  useSessions.setState({ engine: new Map() });
+  useSessions.setState({ engine: new Map(), digests: new Map() });
   useNotices.setState({ notices: [] });
 });
 afterEach(() => {
@@ -93,7 +93,8 @@ describe('the computer-use strip', () => {
     expect(line()!.textContent).toContain(COMPUTER_USE_COPY.running);
   });
 
-  it('is not drawn while the controls port says no turn runs, nor once the store says the process is gone', () => {
+  it('is not drawn while the controls port says no turn runs; once the store says the turn does not tick, the running line gives way to the lingering one', () => {
+    withStatus(CONNECTED);
     port.controls = fakePort({ turn: { running: false } }).controls;
     const { rerender } = render(<ComputerUseStrip appSessionId={ID} />);
     show(running());
@@ -102,9 +103,9 @@ describe('the computer-use strip', () => {
     port.controls = fakePort({ turn: { running: true } }).controls;
     rerender(<ComputerUseStrip appSessionId={ID} />);
     advance(COMPUTER_USE_SETTLE_MS);
-    expect(line()).not.toBeNull();
-    act(() => useTranscriptStore.getState().setLive(ID, false));
-    expect(line()).toBeNull();
+    expect(line()!.textContent).toContain(COMPUTER_USE_COPY.running);
+    act(() => useTranscriptStore.getState().setLive(ID, false)); // no running turn any more, and no word that the process exited
+    expect(line()!.textContent).toContain(COMPUTER_USE_COPY.lingering);
   });
 });
 
@@ -241,14 +242,118 @@ describe('the lingering line', () => {
     expect(line()).toBeNull();
   });
 
-  it('leaves when the store says the session’s process is gone', () => {
+  it('leaves when the session’s status says its process exited', () => {
     withStatus(CONNECTED);
     render(<ComputerUseStrip appSessionId={ID} />);
     show(running());
     advance(COMPUTER_USE_SETTLE_MS);
     show(withdrawn());
     expect(line()).not.toBeNull();
-    act(() => useTranscriptStore.getState().setLive(ID, false));
+    act(() => useSessions.setState({ engine: new Map([[ID, { ...status(ID, { process: 'exited' }), mcpServers: CONNECTED }]]) })); // its last server list, as it stood
     expect(line()).toBeNull();
+  });
+
+  it('leaves when the session’s digest says it exited', () => {
+    withStatus(CONNECTED);
+    render(<ComputerUseStrip appSessionId={ID} />);
+    show(running());
+    advance(COMPUTER_USE_SETTLE_MS);
+    show(withdrawn());
+    expect(line()).not.toBeNull();
+    act(() => useSessions.setState({ digests: new Map([[ID, digest(ID, { phase: 'exited' })]]) }));
+    expect(line()).toBeNull();
+  });
+});
+
+// The branch review's findings (2026-11-13), each as its own sequence through the stores: what is evidence that the
+// withdrawn call's cell is over, read as the rule has it ("where two readings are possible, the line stays").
+describe('the evidence the lingering line reads', () => {
+  const MARKER = '[Request interrupted by user for tool use]';
+  const marker = (b: Builder) => b.emit('user.message', { messageUuid: uuid(`marker-${b.events.length}`), content: [{ type: 'text', text: MARKER }], isReplay: false, isSynthetic: false, origin: null, bash: null });
+  const lingeringAfterStop = () => {
+    const b = running();
+    b.result('j1', 'The user doesn’t want to proceed with this tool use.', { isError: true, denial: 'user-rejected' });
+    b.end(['u1']);
+    withStatus(CONNECTED);
+    render(<ComputerUseStrip appSessionId={ID} />);
+    show(running());
+    advance(COMPUTER_USE_SETTLE_MS);
+    show(b);
+    expect(line()!.textContent).toContain(COMPUTER_USE_COPY.lingering);
+    return b;
+  };
+  const failing = () =>
+    act(() => {
+      useSessions.setState({ digests: new Map([[ID, digest(ID, { phase: 'failed' })]]) });
+      useTranscriptStore.getState().setLive(ID, false); // what the shell tells the store for the phase `failed`
+    });
+
+  it('stays after a later call the plugin answered before queuing a cell (an empty source), an error result', () => {
+    const b = lingeringAfterStop();
+    b.turn('u2');
+    b.toolUse('j2', JS, { code: '' });
+    b.result('j2', 'js expects non-empty JavaScript source', { isError: true });
+    b.end(['u2']);
+    show(b);
+    expect(line()!.textContent).toContain(COMPUTER_USE_COPY.lingering);
+  });
+
+  it('stays after a later call that ran and threw', () => {
+    const b = lingeringAfterStop();
+    b.turn('u2');
+    b.toolUse('j2', JS, { code: 'await page.click("#go")' });
+    b.result('j2', 'ReferenceError: page is not defined', { isError: true });
+    b.end(['u2']);
+    show(b);
+    expect(line()!.textContent).toContain(COMPUTER_USE_COPY.lingering);
+  });
+
+  it('leaves at a later call’s ordinary result', () => {
+    const b = lingeringAfterStop();
+    b.turn('u2');
+    b.toolUse('j2', JS, { code: 'await cua.screenshot()' });
+    b.result('j2', 'ok');
+    show(b);
+    expect(line()).toBeNull();
+  });
+
+  it('never lingers for a js call that ended with an error when a later Bash call of the turn is interrupted', () => {
+    withStatus(CONNECTED);
+    render(<ComputerUseStrip appSessionId={ID} />);
+    const b = running();
+    show(b);
+    advance(COMPUTER_USE_SETTLE_MS);
+    b.result('j1', 'ReferenceError: page is not defined', { isError: true });
+    b.toolUse('b1', 'Bash', { command: 'sleep 30' });
+    show(b);
+    advance(2_000); // inside the pause
+    b.result('b1', 'The user doesn’t want to proceed with this tool use.', { isError: true }); // as a transcript file gives it
+    marker(b);
+    b.end(['u1'], { isError: true, terminalReason: 'aborted_tools' });
+    show(b);
+    expect(line()).toBeNull();
+  });
+
+  it('stays when a later, unrelated turn fails while the process and its computer-use server live on', () => {
+    const b = lingeringAfterStop();
+    b.turn('u2');
+    b.toolUse('r1', 'Read', { file_path: '/work/notes.txt' });
+    b.result('r1', 'notes');
+    b.end(['u2'], { isError: true, terminalReason: 'error_during_execution' });
+    show(b);
+    failing();
+    expect(line()!.textContent).toContain(COMPUTER_USE_COPY.lingering);
+  });
+
+  it('stays when the turn the call was withdrawn in fails while the process lives', () => {
+    withStatus(CONNECTED);
+    render(<ComputerUseStrip appSessionId={ID} />);
+    const b = running();
+    show(b);
+    advance(COMPUTER_USE_SETTLE_MS);
+    b.end(['u1'], { isError: true, terminalReason: 'error_during_execution' }); // closed with the call unanswered
+    show(b);
+    failing();
+    expect(line()!.textContent).toContain(COMPUTER_USE_COPY.lingering);
   });
 });

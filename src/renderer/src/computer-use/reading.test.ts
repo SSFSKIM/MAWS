@@ -3,9 +3,12 @@
 // wire and from a terminal session's transcript file alike.
 import type { JsonObject } from 'desk-hub/protocol';
 import { describe, expect, it } from 'vitest';
+import type { SessionEvent } from '@shared/graph/events';
 import type { ToolUseId } from '@shared/graph/ids';
+import { loadJournal, type FixturePass } from '../../../../test/support/fixtures';
 import { freshSource, subagentLookupOf } from '../lane-a/plane-transcript';
 import { createTranscriptStore } from '../stores/transcript';
+import { journalToEvents } from '../transcript/dev/journal';
 import { applyEvents, createState, type TranscriptState } from '../transcript/model/reduce';
 import { builder, parent, tool, uuid, type Builder } from '../transcript/model/test-events';
 import { readComputerUse } from './reading';
@@ -100,15 +103,58 @@ describe('the computer-use calls of a session', () => {
     expect(calls(state)).toEqual([['j1', 'js', 'withdrawn']]);
   });
 
-  it('reads an error result with no marker after it as done', () => {
+  it('reads an error result with no marker after it as failed, apart from an ordinary result, which is done', () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('j1', JS, { code: 'throw 1' });
     b.result('j1', 'Error: 1', { isError: true });
     b.toolUse('j2', JS, { code: '2' });
     b.result('j2', 'ok');
+    b.toolUse('j3', JS, { code: '' });
+    b.result('j3', 'js expects non-empty JavaScript source', { isError: true }); // the plugin's answer before it queues a cell
     b.end(['u1']);
-    expect(calls(stateOf(b))).toEqual([['j1', 'js', 'done'], ['j2', 'js', 'done']]);
+    expect(calls(stateOf(b))).toEqual([['j1', 'js', 'failed'], ['j2', 'js', 'done'], ['j3', 'js', 'failed']]);
+  });
+
+  it('withdraws only the calls an interruption cut: a js call that ended with an error before an interrupted Bash call stays failed', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('j1', JS, { code: 'page.click()' });
+    b.result('j1', 'ReferenceError: page is not defined', { isError: true });
+    b.toolUse('b1', 'Bash', { command: 'sleep 30' });
+    b.result('b1', REJECTED, { isError: true }); // a transcript file's row: no denial
+    marker(b);
+    b.end(['u1']);
+    expect(calls(stateOf(b))).toEqual([['j1', 'js', 'failed']]);
+  });
+
+  it('withdraws every error result the interruption wrote together, up to the last event before them that is not a result', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('j0', JS, { code: '0' });
+    b.result('j0', 'Error: 0', { isError: true });
+    b.toolUse('j1', JS, { code: '1' }, 'msg-pair', 0);
+    b.toolUse('j2', JS, { code: '2' }, 'msg-pair', 1);
+    b.result('j1', REJECTED, { isError: true });
+    b.result('j2', REJECTED, { isError: true });
+    marker(b);
+    expect(calls(stateOf(b))).toEqual([['j0', 'js', 'failed'], ['j1', 'js', 'withdrawn'], ['j2', 'js', 'withdrawn']]);
+  });
+
+  it('in a subagent’s list, the turn’s marker withdraws only the trailing error results, not one an event of another kind follows', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('a1', 'Agent', { description: 'act', prompt: 'act' });
+    const inChild = { parentToolUseId: parent('a1') };
+    const childUse = (id: string) => b.emit('tool.use', { toolUseId: tool(id), toolName: JS, input: { code: id }, apiMessageId: null, messageUuid: null }, inChild);
+    const childError = (id: string, content: string) => b.emit('tool.result', { toolUseId: tool(id), content, isError: true, structured: null, spillPath: null, denial: null, safeguard: 'not_evaluated', messageUuid: null }, inChild);
+    childUse('j1');
+    childError('j1', 'ReferenceError: page is not defined'); // over: the child's next call follows it
+    childUse('j2');
+    childError('j2', REJECTED); // the interruption's
+    b.result('a1', REJECTED, { isError: true });
+    marker(b);
+    expect(calls(stateOf(b))).toEqual([['j1', 'js', 'failed'], ['j2', 'js', 'withdrawn']]);
   });
 
   it('reads no running turn when the store or the controls port says the turn is not running: the open turn reads closed', () => {
@@ -205,4 +251,49 @@ describe('a terminal session’s transcript file', () => {
     expect(calls(stateOf(live))).toEqual(expected);
     expect(readComputerUse(fromFile, NONE, true).running).toBe(readComputerUse(stateOf(live), NONE, true).running);
   });
+});
+
+// The interruption's shape on the wire (project rule: a wire claim is checked against a recorded journal): the engine
+// writes the cut calls' error results and then its marker, with nothing between, and every call answered before the
+// interrupt keeps the result it had. Recorded calls are Bash and MAWS's own tools, so the check renames them to the
+// plugin's `js` and drops their denials (as a transcript file's rows carry none): the marker alone must then withdraw
+// exactly the cut calls.
+describe('an interruption as the engine records it', () => {
+  const isMarkerEvent = (e: SessionEvent) => e.kind === 'user.message' && JSON.stringify(e.content).includes('[Request interrupted by user');
+  const recorded = (pass: FixturePass, name: string) => {
+    const state = applyEvents(createState(null, null), journalToEvents(loadJournal(pass, name)));
+    const turn = state.order.map((id) => state.turns.get(id)!).find((t) => t.events.some(isMarkerEvent))!;
+    return { state, turn };
+  };
+  const cutBy = (events: readonly SessionEvent[]) => {
+    const at = events.findIndex(isMarkerEvent);
+    let start = at;
+    while (start > 0 && events[start - 1]!.kind === 'tool.result') start--;
+    return { at, results: events.slice(start, at).map((e) => (e.kind === 'tool.result' ? e.toolUseId : null)) };
+  };
+
+  for (const [pass, name, cut, answered] of [
+    ['pass1', 'queue-and-interrupt', 4, 0],
+    ['pass3', 'p1-maws-ask-interrupt', 1, 1],
+  ] as const) {
+    it(`${pass}/${name}: the cut calls' error results stand right before the marker, and the marker withdraws them alone`, () => {
+      const { state, turn } = recorded(pass, name);
+      const { at, results } = cutBy(turn.events);
+      expect(at).toBeGreaterThan(0);
+      const uses = turn.events.flatMap((e) => (e.kind === 'tool.use' ? [e.toolUseId] : []));
+      const resultIndex = (id: ToolUseId) => turn.events.findIndex((e) => e.kind === 'tool.result' && e.toolUseId === id);
+      expect(results).toHaveLength(cut);
+      expect(new Set(results)).toEqual(new Set(uses.filter((id) => resultIndex(id) >= at - cut))); // every call with no result before the interrupt, and no other
+      expect(uses.length - cut).toBe(answered);
+
+      const asJs = (event: SessionEvent): SessionEvent =>
+        event.kind === 'tool.use' ? { ...event, toolName: JS } : event.kind === 'tool.result' ? { ...event, denial: null } : event;
+      const renamed = { ...state, turns: new Map([...state.turns].map(([id, t]) => [id, { ...t, events: t.events.map(asJs) }])) };
+      const read = readComputerUse(renamed, NONE, false);
+      expect(read.turn).toBe(turn.id);
+      const byId = new Map(read.calls.map((c) => [c.toolUseId, c.state]));
+      for (const id of results) expect(byId.get(id!), id!).toBe('withdrawn');
+      for (const id of uses.filter((u) => !results.includes(u))) expect(byId.get(id), id).not.toBe('withdrawn');
+    });
+  }
 });

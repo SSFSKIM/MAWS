@@ -11,6 +11,7 @@ const A = 'app-cu-a' as AppSessionId;
 const B = 'app-cu-b' as AppSessionId;
 const T1 = 't1' as TurnId;
 const T2 = 't2' as TurnId;
+const T3 = 't3' as TurnId;
 const id = (s: string) => s as ToolUseId;
 const js = (toolUseId: string, state: ComputerUseCall['state']): ComputerUseCall => ({ toolUseId: id(toolUseId), tool: 'js', state });
 const reset = (toolUseId: string, state: ComputerUseCall['state']): ComputerUseCall => ({ toolUseId: id(toolUseId), tool: 'reset', state });
@@ -207,6 +208,31 @@ describe('the lingering line', () => {
     see(reading(T1, false, js('j0', 'done'), js('j1', 'withdrawn')));
     expect(state()).toEqual(lingering('j1'));
     see(reading(T1, false, js('j0', 'done'), js('j1', 'withdrawn'), reset('r1', 'withdrawn')));
+    expect(state()).toEqual(lingering('j1'));
+  });
+
+  it('is not resolved for good by a result that is then read differently: a later call read done and then withdrawn brings the line back', () => {
+    withdrawnAfterShowing('j1', T1);
+    see(reading(T2, true, js('j2', 'flight'))); // queued behind the withdrawn cell
+    vi.advanceTimersByTime(COMPUTER_USE_SETTLE_MS - 1); // never shown
+    see(reading(T2, true, js('j2', 'done')));
+    expect(kind()).toBe('absent');
+    see(reading(T2, false, js('j2', 'withdrawn'))); // the marker's row arrived after the result's
+    expect(state()).toEqual(lingering('j1'));
+  });
+
+  it('keeps a later call’s result as evidence while the reading moves on to a turn with no call', () => {
+    withdrawnAfterShowing('j1', T1);
+    see(reading(T2, false, js('j2', 'done')));
+    expect(kind()).toBe('absent');
+    see(reading(T3, true));
+    see(reading(T3, false));
+    expect(kind()).toBe('absent');
+  });
+
+  it('is not resolved by a later call’s error result (a call the plugin answered before queuing a cell, or one that ran and threw)', () => {
+    withdrawnAfterShowing('j1', T1);
+    see(reading(T2, false, js('j2', 'failed'), reset('r1', 'failed'), end('e1', 'failed')));
     expect(state()).toEqual(lingering('j1'));
   });
 

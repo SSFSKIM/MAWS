@@ -13,10 +13,11 @@ import { fakeClient, type FakeClient } from '../../../../../../test/support/fake
 import { panelHost, registerPanelTool } from '../../../panel/host';
 import { useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
-import { T1, T2 } from '../../../test-support/browser';
+import { browserTab, T1, T2, T3 } from '../../../test-support/browser';
 import { installFakeMain, ok } from '../../../test-support/code';
 import { A, B, mainShowing, panelOf, probeTool, resetPanelStores } from '../../../test-support/panel';
 import { browserTool } from '../BrowserTool';
+import { browser, resetBrowser, sessionTabs } from '../store';
 import { connectBrowserAgent } from './connect';
 
 let fake: FakeClient;
@@ -41,12 +42,19 @@ const holdingMain = () => {
 const busy = (id: AppSessionId, value: boolean) =>
   useSessions.setState((s) => ({ engine: new Map(s.engine).set(id, { appSessionId: id, busy: value } as unknown as EngineSessionStatus) }));
 
+// main's answer: the session's selected tab after the ask, whole (the agent's tab when it came forward)
+const answer = (tabId: string | null) => ({ selected: tabId === null ? null : browserTab(tabId, A) });
+const listedSelection = () => sessionTabs(browser.getState(), A).selected;
+
 beforeEach(() => {
   resetPanelStores();
+  resetBrowser();
+  browser.setState({ sessions: new Map([[A, { tabs: [browserTab(T1, A), browserTab(T2, A)], selected: T1 }]]) }); // this window's list
+
   main = installFakeMain(() => ok());
   registerPanelTool(browserTool);
   busy(A, true);
-  fake = fakeClient({ 'browser.agent.show': { selected: true } });
+  fake = fakeClient({ 'browser.agent.show': answer(T1) });
   disconnect = connectBrowserAgent(fake.client);
 });
 afterEach(() => {
@@ -176,14 +184,14 @@ describe("the window's sequence while main's answer is awaited", () => {
     await settle();
     expect(fake.pending('browser.agent.show')).toBe(1);
     expect(browserTabs(A)).toHaveLength(0);
-    await fake.reply('browser.agent.show', { selected: true });
+    await fake.reply('browser.agent.show', answer(T1));
     expect(browserTabs(A)).toHaveLength(1);
     expect(panelOf(A)!.activeTabId).toBe(browserTabs(A)[0]!.id);
   });
 
   it('opens the tool as today whatever main answers: the agent’s tab not selected, or a refusal', async () => {
     acting(A);
-    await fake.reply('browser.agent.show', { selected: false });
+    await fake.reply('browser.agent.show', answer(T2)); // the person's tab stays selected
     expect(browserTabs(A)).toHaveLength(1);
     await panelHost.closeTab(browserTabs(A)[0]!.id);
     busy(A, false);
@@ -198,7 +206,7 @@ describe("the window's sequence while main's answer is awaited", () => {
     acting(A, T2);
     await settle();
     expect(shows()).toEqual([{ tabId: T1 }]);
-    await fake.reply('browser.agent.show', { selected: true });
+    await fake.reply('browser.agent.show', answer(T1));
     expect(browserTabs(A)).toHaveLength(1);
   });
 
@@ -208,7 +216,7 @@ describe("the window's sequence while main's answer is awaited", () => {
     acting(A, T2);
     await settle();
     expect(shows()).toEqual([{ tabId: T1 }]);
-    await fake.reply('browser.agent.show', { selected: true });
+    await fake.reply('browser.agent.show', answer(T1));
     expect(browserTabs(A)).toHaveLength(1);
   });
 
@@ -218,7 +226,7 @@ describe("the window's sequence while main's answer is awaited", () => {
     acting(A);
     panelHost.addTool(browserTool.id, { appSessionId: A, params: { appSessionId: A }, activate: true }); // the person's own open
     const terminal = panelHost.addTool('terminal', { appSessionId: A, activate: true }); // and they move on
-    await fake.reply('browser.agent.show', { selected: true });
+    await fake.reply('browser.agent.show', answer(T1));
     expect(browserTabs(A)).toHaveLength(1);
     expect(panelOf(A)!.activeTabId).toBe(terminal);
   });
@@ -226,9 +234,25 @@ describe("the window's sequence while main's answer is awaited", () => {
   it('the shown session changing during the wait opens nothing', async () => {
     acting(A);
     useLayout.setState({ main: mainShowing(B) });
-    await fake.reply('browser.agent.show', { selected: true });
+    await fake.reply('browser.agent.show', answer(T1));
     expect(browserTabs(A)).toHaveLength(0);
     expect(browserTabs(B)).toHaveLength(0);
+  });
+
+  it('the person opening the Browser and closing it again during the wait drops the opening', async () => {
+    acting(A);
+    const opened = panelHost.addTool(browserTool.id, { appSessionId: A, params: { appSessionId: A }, activate: true });
+    await panelHost.closeTab(opened);
+    await fake.reply('browser.agent.show', answer(T1));
+    expect(browserTabs(A)).toHaveLength(0);
+  });
+
+  it('the shown session changing and coming back during the wait drops the opening', async () => {
+    acting(A);
+    useLayout.setState({ main: mainShowing(B) });
+    useLayout.setState({ main: mainShowing(A) });
+    await fake.reply('browser.agent.show', answer(T1));
+    expect(browserTabs(A)).toHaveLength(0);
   });
 
   it('no answer, no tool; a disconnect during the wait opens nothing when the answer comes', async () => {
@@ -236,7 +260,50 @@ describe("the window's sequence while main's answer is awaited", () => {
     await settle();
     expect(browserTabs(A)).toHaveLength(0);
     disconnect();
-    await fake.reply('browser.agent.show', { selected: true });
+    await fake.reply('browser.agent.show', answer(T1));
     expect(browserTabs(A)).toHaveLength(0);
+  });
+});
+
+// U12a (the branch review's ruling 7): the Browser opens by the agent only once this window's list of tabs names the
+// selection main answered with, so its panel never mounts on the previous tab and claims that page's placement.
+describe("the window's list holds main's selection before the tool opens", () => {
+  beforeEach(holdingMain);
+
+  // the session's selected tab, as this window lists it, at the moment its Browser tool appears
+  const selectionAtOpen = () => {
+    let seen: string | null | undefined;
+    const off = useLayout.subscribe(() => {
+      if (seen === undefined && browserTabs(A).length > 0) seen = listedSelection();
+    });
+    return { seen: () => seen, off };
+  };
+
+  it("names the agent's tab main selected when the tool opens, before main's own event, and the window sends no select", async () => {
+    const watch = selectionAtOpen();
+    acting(A, T2);
+    await fake.reply('browser.agent.show', answer(T2));
+    watch.off();
+    expect(browserTabs(A)).toHaveLength(1);
+    expect(watch.seen()).toBe(T2);
+    expect(fake.invoked('browser.tabs.select')).toEqual([]);
+  });
+
+  it("lists the agent's tab with the selection when this window had not listed it yet", async () => {
+    const watch = selectionAtOpen();
+    acting(A, T3);
+    await fake.reply('browser.agent.show', answer(T3));
+    watch.off();
+    expect(watch.seen()).toBe(T3);
+    expect(sessionTabs(browser.getState(), A).tabs.map((tab) => tab.tabId)).toEqual([T1, T2, T3]);
+  });
+
+  it("opens as before, on the list as it is, when main answers that the agent's tab did not come forward", async () => {
+    const watch = selectionAtOpen();
+    acting(A, T2);
+    await fake.reply('browser.agent.show', answer(T1));
+    watch.off();
+    expect(browserTabs(A)).toHaveLength(1);
+    expect(watch.seen()).toBe(T1);
   });
 });

@@ -95,23 +95,38 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
     const selectedOf = (call: (name: CommandName, input: unknown) => unknown, appSessionId: AppSessionId) =>
       (call('browser.tabs.list', { appSessionId }) as { selected: Record<string, string | null> }).selected[appSessionId];
 
-    it("selects the agent's tab in the session that owns it and answers that it is the selected one", () => {
+    // the answer names the session's selected tab, whole, so the window can list the selection before its panel mounts
+    const answeredTab = (answer: unknown) => (answer as { selected: { tabId: string } | null }).selected?.tabId ?? null;
+
+    it("selects the agent's tab in the session that owns it and answers with it as the session's selected tab", () => {
       const { call } = setup();
       const theirs = opened(call, A, 'https://a.test/', true);
       const agents = opened(call, A, 'https://b.test/', false);
       expect(selectedOf(call, A)).toBe(theirs);
-      expect(call('browser.agent.show', { tabId: agents })).toEqual({ selected: true });
+      const answer = call('browser.agent.show', { tabId: agents });
+      expect(answer).toEqual({ selected: expect.objectContaining({ tabId: agents, appSessionId: A, url: 'https://b.test/' }) });
       expect(selectedOf(call, A)).toBe(agents);
-      expect(call('browser.agent.show', { tabId: agents })).toEqual({ selected: true }); // already selected: still the one
+      expect(answeredTab(call('browser.agent.show', { tabId: agents }))).toBe(agents); // already selected: still the one
     });
 
-    it('leaves the selection while the person uses the selected tab, and answers that the agent’s tab is not selected', () => {
+    it('leaves the selection while the person uses the selected tab, and answers with the person’s tab', () => {
       const { call, store } = setup();
       const theirs = opened(call, A, 'https://a.test/', true);
       const agents = opened(call, A, 'https://b.test/', false);
       store.require(theirs).input.emit({ kind: 'key', source: 'human', at: Date.now() });
-      expect(call('browser.agent.show', { tabId: agents })).toEqual({ selected: false });
+      expect(answeredTab(call('browser.agent.show', { tabId: agents }))).toBe(theirs);
       expect(selectedOf(call, A)).toBe(theirs);
+    });
+
+    it('leaves the selection the person has just made while another window’s panel still shows the tab it had', () => {
+      const { call, store } = setup();
+      const shown = opened(call, A, 'https://a.test/', true);
+      store.update(shown, { placedIn: { paneId: 'pane-other-window', surface: 'panel' } });
+      const chosen = opened(call, A, 'https://c.test/', false);
+      const agents = opened(call, A, 'https://b.test/', false);
+      call('browser.tabs.select', { appSessionId: A, tabId: chosen }); // the notice and the view's move follow
+      expect(answeredTab(call('browser.agent.show', { tabId: agents }))).toBe(chosen);
+      expect(selectedOf(call, A)).toBe(chosen);
     });
 
     it("a side thread's acting tab, which is its parent's, is selected in the parent's session", () => {
@@ -119,7 +134,7 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
       const threads = opened(call, THREAD, 'https://t.test/', true);
       opened(call, A, 'https://a.test/', true);
       const agents = opened(call, A, 'https://b.test/', false);
-      expect(call('browser.agent.show', { tabId: agents })).toEqual({ selected: true });
+      expect(answeredTab(call('browser.agent.show', { tabId: agents }))).toBe(agents);
       expect(selectedOf(call, A)).toBe(agents);
       expect(selectedOf(call, THREAD)).toBe(threads);
     });

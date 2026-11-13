@@ -1745,12 +1745,21 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandOutput('browser.agent.activities.list', { activities: Array(501).fill(kept) }).ok).toBe(false);
     });
 
-    it("U12a: validates the window's ask for the agent's tab: a tab alone, answered whether it is selected", () => {
+    it("U12a: validates the window's ask for the agent's tab: a tab alone, answered with the session's selected tab, whole, or null", () => {
+      const selected = {
+        tabId: TAB_ID, appSessionId: 'a', partition: 'persist:maws-browser', url: 'https://example.com/', title: 'Example', favicon: null,
+        loading: false, canGoBack: false, canGoForward: false, zoom: 1, control: 'agent', controlSince: 't', suspended: false,
+        loadError: null, crashed: null, failed: null, unresponsive: false, blockedPopups: 0, find: null, denied: [], download: null,
+        memoryKiB: null, placedIn: null, covered: false, createdAt: 't', lastShownAt: 't', agentBadge: null, internal: null, viewport: null,
+      };
       expect(commands['browser.agent.show'].owner).toBe('main');
       expect(validateCommandInput('browser.agent.show', { tabId: TAB_ID }).ok).toBe(true);
       expect(validateCommandInput('browser.agent.show', { tabId: 'nope' }).ok).toBe(false);
       expect(validateCommandInput('browser.agent.show', { tabId: TAB_ID, appSessionId: 'a' }).ok).toBe(false); // the tab's record names the session
-      expect(validateCommandOutput('browser.agent.show', { selected: false }).ok).toBe(true);
+      expect(validateCommandOutput('browser.agent.show', { selected }).ok).toBe(true);
+      expect(validateCommandOutput('browser.agent.show', { selected: null }).ok).toBe(true);
+      expect(validateCommandOutput('browser.agent.show', { selected: TAB_ID }).ok).toBe(false); // the tab itself, so the window can list it
+      expect(validateCommandOutput('browser.agent.show', { selected: false }).ok).toBe(false);
       expect(validateCommandOutput('browser.agent.show', {}).ok).toBe(false);
     });
 
