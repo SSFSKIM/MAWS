@@ -17,7 +17,7 @@
 // UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, decision 22): a tab's unsent comments are
 // its pass's, which ends with the tab: every tab id a change or a full list of this window's mirror no longer holds ends
 // its pass here, where the comment code is connected once for the window, so an end received while no pane is mounted
-// is seen. M4 (X-216): the tab's page is told here whenever its card opens on a comment (`page-card.ts`).
+// is seen. M4 (X-216): the tab's page is told here whenever its card opens on a comment, and when it closes (`page-card.ts`).
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../../../ipc/client';

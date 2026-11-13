@@ -187,17 +187,19 @@ describe('connectBrowserComment', () => {
 });
 
 // UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, M4, §G): connected once for the window,
-// the comment code tells a tab's page whenever its card opens on a comment (`page-card.ts` holds the cases).
-describe('the page is told its card opened', () => {
-  it('tells a tab’s page when a card opens on its comment, until disconnected', () => {
+// the comment code tells a tab's page whenever its card opens on a comment and when it closes (`page-card.ts` holds the
+// cases).
+describe('the page is told its card opened and closed', () => {
+  it('tells a tab’s page when a card opens on its comment and when it closes, until disconnected', () => {
     const off = registerCardHost('pane-1', { kind: 'browser', subject: T1, holds: 'many' });
     try {
       openCard(ANCHOR, { appSessionId: A, placement: { kind: 'card', host: 'browser', hostId: 'pane-1' } });
       expect(fake.invoked('browser.comment.card')).toEqual([{ tabId: T1, open: { css: '#increment' } }]);
       useCommentCard.setState({ open: null });
+      expect(fake.invoked('browser.comment.card').at(-1)).toEqual({ tabId: T1, open: null });
       disconnect();
       openCard(ANCHOR, { appSessionId: A, placement: { kind: 'card', host: 'browser', hostId: 'pane-1' } });
-      expect(fake.invoked('browser.comment.card')).toHaveLength(1);
+      expect(fake.invoked('browser.comment.card')).toHaveLength(2);
     } finally {
       off();
       useCommentCard.setState({ open: null, passes: new Map() });
