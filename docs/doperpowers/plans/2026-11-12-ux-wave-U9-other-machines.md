@@ -23,8 +23,8 @@ Sibling children code against what this landing exposes: U7 mounts on the listed
 - [x] (2026-11-13) M2 — Fork over the link, and the sheet's words: `38ac6a398`..`740df5e4b`, reviewed clean
 - [x] (2026-11-13) M3 — The link's phases and the pane that stays: `89e9ed067`..`7e18e9184`, reviewed clean after two fix rounds (one guard for every Stop; the registry row and the location card by phase; a ready that overtakes a retry's failure; A4's scenes widened)
 - [x] (2026-11-13) M4 — The session acts in the window: `251a93adc`..`dceedb019`, reviewed clean after one fix round; `e2e:remote` green on the Mac at `dceedb019` (run 43418845727). The last-session Unarchive gap the review found is ruled into M5 (way (A))
-- [ ] M5 — A link's return, the live row, the chooser and the measurement
-- [ ] The whole unit suite on the build VM (M5's executor). Then, none of them an executor's: class 1a on GitHub Actions (the architect); the `doperpowers:review-code` xhigh panel on the whole branch (the session that keeps master, on the range the architect hands it once class 1a is green); the architect's runs T2 to T7 and, after the landing, the look T1; the pull request.
+- [x] (2026-11-13) M5 — A link's return, the live row, the chooser and the measurement: `1dec9f9aa`..`f0f841e02`, reviewed clean after two fix rounds (the hold in main's order; the live word at an unarchive; A5's reader failing closed)
+- [x] (2026-11-13) The whole unit suite on the build VM (M5's executor), once, at `543b0e457`: 36,423 tests pass; the 44 failures are the files build-common lists as failing on master, one load timeout (passes alone) and the colour guard on ticket numbers (fixed in `767eb4a43`; Surprises). Then, none of them an executor's: class 1a on GitHub Actions (the architect); the `doperpowers:review-code` xhigh panel on the whole branch (the session that keeps master, on the range the architect hands it once class 1a is green); the architect's runs T2 to T7 and, after the landing, the look T1; the pull request.
 
 What this document reported to the architect, and how each point was ruled, is under "Reported to the architect, and ruled". Nothing is open. The owner answered "End session" with no (section 1), and the session that keeps master ruled that a stored answer is not projected again when it is replayed (R9).
 
@@ -600,6 +600,8 @@ At landing the architect updates the register's rows and closes the tickets and 
   Evidence: `[remote-beside] restore at +159123 ms after the stall; no whole-launch read beside the resume`, then `cleanupAll` past the test's 621 s timeout ("Worker teardown timeout of 60000ms exceeded"), board ticket 617. The run of record is T4 on CI's mini; were 617 not at play there, the timeout leaves 10 s for clean-up inside a two-minute margin.
 - Observation (M5's fix round, 2026-11-13): the one whole-suite run of this landing, at `543b0e457` on the build VM, ended 1 with 2,515 files and 36,423 tests passed and 8 files, 44 tests failed: the six files build-common lists as failing on master too (desk-hub's `test/deploy/{hub-reads,production-scripts,staging-scripts}`, `src/services/machine/setup.test.ts`, `src/shared/machine/git-reads.test.ts`, `test/artifacts/portability.test.ts`), `src/main/org/rows.test.ts` by a load timeout (36/36 alone with `--testTimeout=60000`), and `test/support/tokens-guard.test.ts`, which read U9's "#563" and "#565" as hex colours (fixed in `767eb4a43`).
   Evidence: `~/u9-full.log` on the VM; the fix round's runs in the run's report. A second finding: vitest workers of a killed run survive their parent on the VM and spin; the executor logged it in the friction tracker.
+- Observation (M5's second fix round, 2026-11-13): A5's check stands on each pane's first read, start and end, between the launch and the stall, and only on an observation that completed (`historySeen`, `besideOutcome` in `test/support/remote-wake.ts`), so a disconnected timing log or a wait that timed out fails it rather than passing silently.
+  Evidence: `a5f716da5` (red: 2 failed), `f0f841e02` (green: `test/support/` 1,078 of 1,080, 2 skipped); A5's body passed again under xvfb at `f0f841e02`, its close timing out under ticket 617.
 
 ## Decision Log
 
@@ -667,4 +669,42 @@ At landing the architect updates the register's rows and closes the tickets and 
 
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+**What landed** (2026-11-13, branch `ux-wave/U9`, before the chain merge). All five milestones, each reviewed clean at its boundary by a task reviewer, with M1 to M4's Electron groups run on the Mac.
+- M1: seven offers at both ends under `rl2.session-acts` (Archive, Unarchive, Rename, the archived read, Dismiss, taking back a waiting message, a pane's answer), the device's gate on `REMOTE_NEEDS`, UC-7.5's words in `disabledWords`, `refusalWords` and `failureWords`, the roster's `owner`, R9's reader answers with the fifth amendment, and the listing rule on both of the endpoint's listing paths. The listing test ran first on the merged base and failed on both halves, so the rule was built for both. A pane answer from another machine now settles through an update's handover drain by the completion route, and it waits for a raiser that reconnects. The changes to P5's supervisor are commits of their own (`80de9471e`, `5f2186319`).
+- M2: Fork over the link, in place, from the owners only. The fork needs `view` on its source, is held to the ceiling on the snapshot it is allocated from, answers at `launching`, is signed unasked on an owned machine, and its sheet names the machine.
+- M3: the link's phases (O-39), the pane kept mounted through an outage for both kinds of session, "Loading…" at 300 ms, O-11b's heal at the host's ready, and one guard for every Stop.
+- M4: the session menus of section 6 on a record's row, a listed row and the title bar. M4 also built:
+  - `forkSession`'s remote branch;
+  - the store's notes;
+  - the sheets gated by the helper;
+  - the project-wide archives kept local;
+  - the renderer coverage rule.
+  Nine unguarded routes in other children's files became one board ticket.
+- M5: the settled word and its reads, the live word, the chooser hook, the timing lines, the Needs you greying by phase, and the footer's "Archived sessions…" on every machine.
+
+**Verified.**
+- The one whole-suite run at `543b0e457` passed 36,423 tests. Its 44 failures are the files build-common lists as failing on master, plus two of this landing's: a load timeout, and the colour guard reading ticket numbers as hex colours, fixed in `767eb4a43`.
+- Each milestone's typecheck, eslint and focused vitest ran on the build VM.
+- On the Mac: e2e:machines is green at `cb30ec679`, and e2e:remote is green at `0b4411c8b` and at `dceedb019`.
+- Under xvfb on the VM: the acts scene, the footer step included, and A5's body.
+
+**Not verified here.**
+- The chain merge, the wire and RL2 minors re-taken against it, and class 1a.
+- On the Mac, after M5: e2e:remote (the M6 step, which cannot run on Linux; the acts scene's footer step; A4 and A11) and e2e:machines.
+- A5 on CI's mini (T4); its close times out on the VM under ticket 617.
+- T1 and T3, and T5 to T7.
+
+**Retrospective.**
+- Four statements of the document were wrong against the code, and each surfaced only when something ran:
+  - the listing did not follow its record (the failing-first test);
+  - two readers greyed by `selectOffline` directly (M3);
+  - a record's fallback title is its first prompt (T2);
+  - main greyed a Needs you item at the link's down (T2's second run).
+  Running the Mac scenes early, while M4 was still building, found two of these a milestone sooner than the end of the landing would have.
+- Reviews earned their rounds on concurrency:
+  - the pane answer through a drain took three rounds, each case pinned by the supervisor's own tests;
+  - the transcript hold under main's real event order;
+  - A5's reader, twice, until it could not pass by seeing nothing.
+- Bridging the window's helper until M4 (`ACTS_UNTIL_M4`) kept every milestone green at the cost of one short-lived list. It was cheaper than letting tests fail across milestones.
+- The work met the owners of the files it touched by naming insertions, and every one is listed in section 12. A shared menu order, ruled once with U7a, left nothing to re-decide at merge.
+
