@@ -369,6 +369,42 @@ describe('the host’s frame (§C)', () => {
   });
 });
 
+describe('onClosed, the checks of several mounts (M3’s re-review)', () => {
+  // no await between the mounts and the close: every mount's deferred check is still queued when the card goes
+  it('a card closed at once after StrictMode’s render is told once', async () => {
+    const closed: string[] = [];
+    const frame: CardFrame = { ...FRAME, onClosed: (gone) => closed.push(gone.anchor.locator) };
+    pick(1);
+    render(
+      <StrictMode>
+        <Host frame={frame} />
+      </StrictMode>,
+    );
+    fireEvent.click(within(card()!).getByRole('button', { name: 'Close' }));
+    await settle();
+    expect(closed).toEqual(['#e1']);
+  });
+
+  it('a card closed at once after a remount under the same id is told once', async () => {
+    const closed: string[] = [];
+    const frame: CardFrame = { ...FRAME, onClosed: (gone) => closed.push(gone.anchor.locator) };
+    pick(1);
+    const view = render(
+      <StrictMode>
+        <Host key="a" frame={frame} />
+      </StrictMode>,
+    );
+    view.rerender(
+      <StrictMode>
+        <Host key="b" frame={frame} />
+      </StrictMode>,
+    );
+    fireEvent.click(within(card()!).getByRole('button', { name: 'Close' }));
+    await settle();
+    expect(closed).toEqual(['#e1']);
+  });
+});
+
 describe('the card’s structure (decision 23)', () => {
   it('the header and the row with the checkbox and Send are outside the scrolling region, which holds the list, capped at three lines', () => {
     render(<Host />);
