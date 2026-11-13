@@ -483,6 +483,19 @@ Found for revision 2. "Measured" here means run on the same VM over the same mas
 - Observation: U5a edits six files that UC-8 gives to U10, none of which this landing edits.
   Evidence: U5a's execution document (branch `ux-wave/U5a`), its rulings R2 and R4 and its M6 and M7.
 
+Found while M1 was built (2026-11-13, M1's executor; measured on the VM through `vmcheck.sh ux-wave/U10a`).
+
+- Observation: the red baseline matches S1 as this document states it. With the bold landing first, the deleter's frame is refused and the document evicted. With the deletion landing first, the rows are `['session:app-1', 'human', 'human']`.
+  Evidence: `service.test.ts` at `565b14d86`, the red commit; the whole red run reported `Tests 13 failed | 239 passed | 4 expected fail (256)`, each red case failing as M1's list expects. At the fix (`49481565e`) and after: no "expected fail".
+- Observation: a setup through the real store can pass on master for the wrong reason, by being refused. In the promoted keyframe's case the deleter's frame was refused, the doc evicted and reloaded from the bold row alone, and every later assertion held over a state without the deletion. Every S1-shaped setup now asserts the rows that landed before what it measures.
+  Evidence: the case passed at `565b14d86`; with the setup's assertion added (`fd1b8f398`) it fails on master at that assertion (rows `[human, human]`).
+- Observation: the restore's measured effect reproduces with S1's own shape (a version after the bold, the deletion after the version), with no flag-off writer. With the listener on the live doc and today's scratch the restore inserts one marker (three live); with both from the constructors none (two live), and the restored text is the same.
+  Evidence: a script on the VM over the branch; `revert.test.ts` pins it, failing on master at its precondition because the live doc tidies at the deletion.
+- Observation: a doc with Yjs's defaults also runs a transaction of origin `null` when the deletion lands before the bold, but that transaction deletes nothing and emits no update. Only the bold-then-deletion order makes the clean-up write.
+  Evidence: the pin's construction in `doc.test.ts`: `trs ["remote", null], ups ["remote"]`.
+- Observation: in the check's control, two agent edits write two rows of the agent's, but the live doc runs three transactions of the agent's origin. The extra one writes no row and is no clean-up. Its source is traced in M1's review (below).
+  Evidence: at `49481565e` the exact form got three entries `{origin: session:app-format, cleanup: false}`. The control now asserts the agent's two rows and that every transaction on the live doc has the agent's origin and none is a clean-up.
+
 ## Decision Log
 
 - **2026-11-13 · Verification** (the one entry written at authoring). This document gets an adversarial review before any executor starts; the architect dispatches it. Each milestone is reviewed at its boundary by the controller's reviewer before the next starts. The branch gets `doperpowers:review-code` at the **xhigh panel**, not for its size (about 32 files and about 1,800 changed lines since revision 2, of which some ninety are product code and the rest tests, e2e scenes and this record) but because root UC-10 and the section both name this landing delicate: every document and deck write is applied to docs it changes. The lenses the panel is given:
@@ -521,6 +534,17 @@ Found for revision 2. "Measured" here means run on the same VM over the same mas
     Date/Author: 2026-11-13, the document's author.
   - The ten points, each where it stands: the pin is behavioural, with a doc built with Yjs's defaults as its positive control (§A; M1); what lint really holds (§A; decision 2); docs the library makes itself carry no listener (§A); undo and redo are the binding's and carry no repair (decision 12; the write path's table); the claim that no reading rises is dropped and growth is in the tracker row (decision 18; the proof's table); "Show editors" does see the markers (the Purpose; decision 18); §D says how far its measurement goes and loses its closing sentence; a version's promoted keyframe gets a regression that compares structs, deletions, rendering and the diff, and the first revision's reading of `canonicalV2` is corrected by a measurement (decision 2; M1); U5a's M6 and M7 are named (§E; constraint 5); the red baseline of Concrete Steps 2 runs every file whose new cases must be seen red.
   - Without a change of decision: the size is now about 32 files and about 1,800 changed lines, some ninety of them product code; the panel's fourth lens takes the gap caret with it.
+
+- **2026-11-13 · M1 as built** (the executor's decisions, folded by the controller).
+  - Decision: `src/artifacts/yjs/format-cleanup.fixture.ts` holds `newDocAsF` (a doc built with Yjs's defaults: §D's "built as F" and the pin's positive control), `liveMarkers` and `deletionsOf`. The new rule `maws-docs/one-doc` ignores `src/**/*.fixture.ts` beside `doc.ts` and tests, as decision 2 reads ("outside doc.ts, tests and fixtures").
+    Rationale: tests outside the binding module may not import `@y/y`, and the marker count and delete set are what S1 and §D compare. Whether a product module could reach that exemption is checked in M1's review.
+  - Decision: S1 and §D drive real `PortProvider`s through `src/engine-host/documents/provided-replica.fixture.ts`: a provider on its own doc, attached by `service.attach` over an in-memory pair that moves frames only when the test delivers them, with a hold on the replica's outbound side. The cross-build file is `src/engine-host/documents/cross-build-format.test.ts`. There, "built as F" mocks the `newDoc` of `@artifacts/yjs`, which is the service's import, and takes this build's from `@artifacts/yjs/doc`, which the mock does not reach.
+    Rationale: `unsaved` is the provider's own, and a provider forwards what its doc emits, as the editor's replica does. Hand-written ends were rejected because they restate that behaviour.
+  - Decision: the promoted keyframe's case is in `store.test.ts` beside "folds a dropped delta…", over document-shaped content, so that `documentChanges` gives the history's diff. The restart case uses a new `reopen()` on the document world (with an optional `dir` for `openDocumentWorld`).
+  - Decision: the control asserts the agent's two rows and that every transaction on the live doc has the agent's origin and none is a clean-up. It does not assert an exact transaction count (Surprises, M1). The A1, accept and restore cases also watch the live doc, and each assertion of a reader is its own case.
+  - Decision (decision 5 applied): in `suggest.test.ts`, `revert.test.ts` and `versions.test.ts` every doc that stands for a product doc comes from the constructors, and no case changed its result. `revert.test.ts`'s check that the empty answer decodes into `new Y.Doc()` stays, since its subject is Yjs's decoding.
+  - Decision: the red commit carries the check's file with its `it.fails` and "today" cases as they were, plus the rewritten control and the new cases. The flips, the deletions and the header went with the fix (Concrete Steps 2).
+    Date/Author: 2026-11-13, M1's executor; folded by the controller.
 
 ## Outcomes & Retrospective
 
