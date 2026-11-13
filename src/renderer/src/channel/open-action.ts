@@ -38,7 +38,7 @@ export function frontChannel(main: LayoutMain, state: SessionsState, local: Mach
 }
 
 /** Opens the project's Channel tab, or brings it forward. */
-export const openChannel = (project: string) => useLayout.getState().openTab({ kind: 'channel', project });
+export const openProjectChannel = (project: string) => useLayout.getState().openTab({ kind: 'channel', project });
 
 /** Keeps `channel.open` registered while the tab in front has a channel; returns its removal. */
 export function connectChannelAction(): () => void {
@@ -49,7 +49,7 @@ export function connectChannelAction(): () => void {
     if (has && unregister === null) {
       unregister = registerAction('channel.open', () => {
         const project = front();
-        if (project !== null) openChannel(project);
+        if (project !== null) openProjectChannel(project);
       });
     } else if (!has && unregister !== null) {
       unregister();

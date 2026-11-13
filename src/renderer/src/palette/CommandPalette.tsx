@@ -38,7 +38,7 @@ import type { MachineRef } from '@shared/machine/ref';
 import { conversationSnippet } from './snippet';
 import { searchConversations, searchedMachines, type ConversationSearch } from './search'; // P5 O7 M6
 import { CHANNEL } from '../channel/copy'; // U11a M5
-import { openChannel, usePaletteChannels } from '../channel/open-action'; // U11a M5
+import { openProjectChannel, usePaletteChannels } from '../channel/open-action'; // U11a M5
 
 export const usePalette = create<{ open: boolean; scope: 'all' | 'sessions'; query: string }>()(() => ({ open: false, scope: 'all', query: '' }));
 export const openPalette = (query = '') => usePalette.setState({ open: true, scope: 'all', query });
@@ -193,7 +193,7 @@ function Palette({ run }: { run(id: ActionId): void }) {
   };
   const openChannelTab = (project: string) => { // U11a M5
     close();
-    openChannel(project);
+    openProjectChannel(project);
   };
   // ⌘⏎ on a session opens it in the split; cmdk leaves a key whose default is already taken.
   const onKeyDown = (event: KeyboardEvent) => {

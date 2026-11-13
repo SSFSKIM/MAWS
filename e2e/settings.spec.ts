@@ -569,15 +569,22 @@ test('settings: Search settings finds rows by their words; a choice lands under 
     expect((await pane.boundingBox())!.width, 'a view under 32rem').toBeLessThan(512);
     const paneNav = pane.getByRole('navigation', { name: 'Settings sections' });
     const paneField = paneNav.getByRole('combobox', { name: 'Search settings' });
-    const fieldBox = (await paneNav.locator('label').filter({ has: paneField }).boundingBox())!; // the field's box, its icon in it
+    // the field's box, its icon in it (a `has` locator is read inside each label, so it is built from the page, not the nav)
+    const fieldBox = (await paneNav.locator('label').filter({ has: page.getByRole('combobox', { name: 'Search settings' }) }).boundingBox())!;
     const navBox = (await paneNav.boundingBox())!;
     expect(fieldBox.width, 'the field takes the row').toBeGreaterThanOrEqual(navBox.width - 24);
     expect(fieldBox.y + fieldBox.height, 'the field over the links').toBeLessThanOrEqual((await paneNav.getByRole('button', { name: 'Appearance', exact: true }).boundingBox())!.y + 1);
-    await paneField.fill('mcp');
+    // a query with more results than 12rem holds: the list stops there and scrolls
     const paneList = paneNav.locator('[data-settings-index]');
+    const paneListbox = paneNav.getByRole('listbox', { name: 'Search settings' });
+    await paneField.fill('session');
+    await expect(paneListbox).toBeVisible();
     expect((await paneList.boundingBox())!.height, 'at most 12rem').toBeLessThanOrEqual(192.5);
+    expect(await paneList.evaluate((el) => el.scrollHeight > el.clientHeight), 'the narrow list scrolls').toBe(true);
     expect((await paneList.boundingBox())!.y, 'under the field').toBeGreaterThanOrEqual(fieldBox.y + fieldBox.height - 1);
     await page.screenshot({ path: test.info().outputPath('settings-search-330.png') });
+    await paneField.fill('mcp');
+    await expect(paneListbox.getByRole('option').first()).toBeVisible();
     await paneNav.getByRole('option').filter({ has: page.getByText('MCP servers', { exact: true }) }).click();
     const servers = pane.getByRole('region', { name: 'Sessions', exact: true }).getByRole('group', { name: 'MCP servers', exact: true });
     await expect(servers).toBeFocused();
