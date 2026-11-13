@@ -310,7 +310,10 @@ describe('the editor mounts over its draft, takes prefills and submits through t
       const content = contentOf(container);
       await waitFor(() => expect(content.textContent).toBe('kept'));
       content.focus();
+      // ProseMirror reads Mod as ⌘ only where navigator.platform names a Mac, which jsdom's does not: both chords are
+      // pressed, so the case holds wherever it runs
       await act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true })));
+      await act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true })));
       await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 20))));
       expect(onSubmit).not.toHaveBeenCalled();
       expect(handle.current?.doc().content?.[0]?.content?.some((node) => node.type === 'hardBreak')).toBe(false);
