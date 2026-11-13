@@ -92,7 +92,7 @@ describe('transcript surface adapters', () => {
     expect(rewritten.summary).toBeUndefined();
     const row = find(rows, 'cell');
     const { container } = renderRow({ ...row, ...rewritten, id: row.id, expanded: true });
-    expect(container.querySelector('.transcript-cell-label')?.textContent).toBe('Ran Bash');
+    expect(container.querySelector('.transcript-cell-label')?.textContent).toBe('Ran pwd');
     expect(container.querySelector('pre')?.textContent).toBe('/rewritten');
     expect(container.textContent).not.toContain('Checked the working directory');
     const changed = withToolProps(input, { ...input.props, input: { command: 'echo changed' } });

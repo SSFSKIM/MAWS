@@ -208,7 +208,7 @@ describe('the artifact row of a publish (P3-A)', () => {
 describe('the artifact_list and artifact_screenshot cells', () => {
   const cells = (b: Builder) => allCells(expandedRows(b.events)).map((cell) => [cell.toolUseId, cell.status, cell.label, cell.category, cell.classification.groupable]);
 
-  it('read what the result says, or why it failed; running before it', () => {
+  it('read what the result says, or that it failed (why is the row’s reason); running before it', () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('toolu_l1', LIST, {});
@@ -225,10 +225,11 @@ describe('the artifact_list and artifact_screenshot cells', () => {
       ['toolu_l1', 'done', 'Listed no artifacts', 'other', true],
       ['toolu_l2', 'done', 'Listed 2 artifacts', 'other', true],
       ['toolu_s1', 'done', 'Screenshot of Dashboard v2 (1280 × 800)', 'other', false],
-      ['toolu_s2', 'error', 'Could not screenshot: no artifact "gone" in this session', 'other', false],
+      ['toolu_s2', 'error', 'Could not screenshot ‹gone›', 'other', false], // UX wave U2: its reason is the row's (`error`)
       ['toolu_s3', 'running', 'Taking a screenshot of dash', 'other', false],
       ['toolu_l3', 'running', 'Listing artifacts', 'other', true],
     ]);
+    expect(allCells(expandedRows(b.events)).find((cell) => cell.toolUseId === 'toolu_s2')?.error).toBe('no artifact "gone" in this session');
   });
 });
 

@@ -37,9 +37,9 @@ describe('group row', () => {
     const store = await storeWith(twoCommands());
     useTranscriptStore.getState().toggleTurn(store.key, useTranscriptStore.getState().entries[store.key].state.order[0]);
     const view = renderRow(rowOf(store.rows(), 'group'), { storeKey: store.key });
-    expect(screen.getAllByRole('button', { name: 'Ran Bash', expanded: false })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: /^Ran pnpm (test|lint)$/, expanded: false }).map((button) => button.textContent)).toEqual(['Ran pnpm test', 'Ran pnpm lint']);
     expect(view.container.querySelector('[data-cell-count]')?.getAttribute('data-cell-count')).toBe('2');
-    expect(view.container.textContent).not.toContain('pnpm test');
+    expect(view.container.textContent).not.toContain('$ pnpm test'); // the input stays folded; the row reads its short form
     expect(view.container.querySelector('.transcript-group-header')).toBeNull();
   });
 
@@ -72,7 +72,7 @@ describe('standalone cell row', () => {
     expect(ofKind(store.rows(), 'group')).toHaveLength(0);
     const view = renderRow(rowOf(store.rows(), 'cell'), { storeKey: store.key });
     expect(view.container.querySelector('[data-cell-count]')).toBeNull();
-    expect(view.container.querySelector('[data-cell-id="cell:t1"] > button')?.textContent).toBe('Ran Bash');
+    expect(view.container.querySelector('[data-cell-id="cell:t1"] > button')?.textContent).toBe('Ran git status…');
   });
 
   it('pass1/permission-roundtrip: the denied call is a standalone, focusable cell row, never inside a group', async () => {

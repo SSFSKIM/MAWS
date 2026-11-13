@@ -166,7 +166,7 @@ describe('live thinking label', () => {
     expect(group.state).toBe('active');
     expect(rowOf(store.rows(), 'divider').state).toBe('working');
     const { container } = renderRow(group, { storeKey: store.key, effort: 'high' });
-    expect(screen.getByRole('button', { name: 'Ran Bash', expanded: false })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Ran ls', expanded: false })).toBeTruthy();
     expect(container.querySelector('.transcript-group-header')).toBeNull();
     expect(shimmer()).toBeNull();
   });
@@ -198,7 +198,7 @@ describe('group and cell disclosure', () => {
     const view = renderRow(group, { storeKey: store.key });
     expect(view.container.querySelector('[data-cell-count]')?.getAttribute('data-cell-count')).toBe('2');
     expect(view.container.querySelector('.transcript-group-header')).toBeNull();
-    expect(screen.getAllByRole('button', { name: 'Ran Bash', expanded: false })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: /^Ran (ls|pwd)$/, expanded: false }).map((button) => button.textContent)).toEqual(['Ran ls', 'Ran pwd']);
     const cells = view.container.querySelectorAll('[data-cell-id]');
     expect(Array.from(cells, (cell) => cell.getAttribute('data-cell-id'))).toEqual(['cell:t1', 'cell:t2']);
     expect(view.container.textContent).not.toContain('a.txt');

@@ -68,7 +68,7 @@ describe('mounted transcript surface integration', () => {
     const store = await mounted(b); act(() => useTranscriptStore.getState().expandAll(store.key));
     const row = rowOf(store.rows(), 'cell'); const view = renderRow(row, { storeKey: store.key });
     await act(() => fake.reply('session.ui.render', { ...answer({}), hooked: false }));
-    fireEvent.click(screen.getByRole('button', { name: 'Ran Bash' })); view.rerenderRow(rowOf(store.rows(), 'cell'));
+    fireEvent.click(screen.getByRole('button', { name: 'Ran pwd' })); view.rerenderRow(rowOf(store.rows(), 'cell'));
     await waitFor(() => expect(asks().some((x) => x.component === 'ToolResult')).toBe(true));
     const props = asks().find((x) => x.component === 'ToolResult')!.props;
     await act(() => fake.reply('session.ui.render', answer({ ...props, output: BASH_RESULT('rewritten output') }, engine, true)));

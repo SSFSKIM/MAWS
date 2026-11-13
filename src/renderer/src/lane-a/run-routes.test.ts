@@ -21,6 +21,8 @@ import { rowsOf, withAllExpanded } from '../transcript/model/derive';
 import { applyEvents, createState } from '../transcript/model/reduce';
 import type { Cell, Row } from '../transcript/model/rows';
 import { freshSource, subagentLookupOf } from './plane-transcript';
+import { descriptionLabel } from '../transcript/model/copy';
+import { shellLabel } from '../transcript/view/cells/CellLine';
 
 const SESSION = '0f0e0d0c-0000-4000-8000-00000000c0de';
 
@@ -232,5 +234,43 @@ describe('a stopped member of its run is the same row in the same run by every r
       expect({ denied: line.denied, caption: line.caption, firstDeniedCell: line.firstDeniedCell, denials: line.summary.denials.map((d) => [d.kind, d.disposition]) }, route)
         .toEqual({ denied: 1, caption: '', firstDeniedCell: send!.id, denials: [['permission-rule', 'denied']] });
     }
+  });
+});
+
+// UX wave U2, M3 (O-49, l6-artifacts-12; acceptance 10 and 11): what a row reads is the same by every route. A shell call
+// that gave a description reads it live, from the file and through the file's rows, and the test fails if any row falls
+// back to the command; an artifact call reads the same words, and its run the same caption, from the journal and from
+// the file.
+describe('what a row reads is the same by every route (M3)', () => {
+  it('u3-tasks-r1: every shell row reads its description, by each route', async () => {
+    const text = readFileSync(join(FIXTURE_DIR, 'uxwave', 'u3-tasks-r1.transcript.jsonl'), 'utf8');
+    const routes = { live: drawn(fromJournal(loadUxwaveJournal('u3-tasks-r1'))), file: drawn(await fromFile(text)), link: drawn(await fromRows(text)) };
+    const described = (rows: Row[]) => callsOf(rows).filter((cell) => cell.toolName === 'Bash').map((cell) => {
+      const description = cell.detail.kind === 'shell' ? cell.detail.description : null;
+      return { call: cell.toolUseId, description, reads: shellLabel(cell) === descriptionLabel(description ?? '', cell.status) };
+    });
+    const live = described(routes.live);
+    expect(live.length).toBeGreaterThan(0);
+    for (const [route, rows] of Object.entries(routes)) {
+      const shell = described(rows);
+      expect(shell.every((row) => row.description !== null && row.description.trim() !== '' && row.reads), route).toBe(true);
+      expect(shell.map(({ call, description }) => ({ call, description })), route).toEqual(live.map(({ call, description }) => ({ call, description })));
+    }
+  });
+
+  it('p1-maws-artifacts: the artifact calls read the same words, and their runs the same captions, from the journal and from the file', async () => {
+    const text = readFileSync(join(TRANSCRIPT_FIXTURE_DIR, 'p1-maws-artifacts.jsonl'), 'utf8');
+    const routes = { live: drawn(fromJournal(loadJournal('pass3', 'p1-maws-artifacts'))), file: drawn(await fromFile(text)), link: drawn(await fromRows(text)) };
+    const read = (rows: Row[]) => ({
+      calls: callsOf(rows).filter((cell) => cell.toolName.startsWith('mcp__maws__')).map((cell) => [cell.toolName, cell.status, cell.label, cell.error ?? null]),
+      runs: rows.flatMap((row) => (row.kind === 'group' ? [row.summary] : [])),
+    });
+    const live = read(routes.live);
+    expect(live.calls).toEqual([
+      ['mcp__maws__artifact_screenshot', 'done', 'Screenshot of Dashboard v1 (64 × 64)', null],
+      ['mcp__maws__artifact_list', 'done', 'Listed 1 artifact', null],
+    ]);
+    expect(read(routes.file), 'the file').toEqual(live);
+    expect(read(routes.link), 'the file’s rows').toEqual(live);
   });
 });

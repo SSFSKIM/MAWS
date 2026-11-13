@@ -1261,7 +1261,8 @@ describe('the stopped form', () => {
     ['a skill', 'Skill', { skill: 'release-notes' }, 'Stopped: `Skill`'],
     ['a bookkeeping call', 'TodoWrite', { todos: [] }, 'Stopped: `TodoWrite`'],
     ['an MCP call', 'mcp__github__create_issue', { title: 'Flaky test' }, 'Stopped: `github · create_issue`'],
-    ['an artifact call (the MCP row’s form until M3)', 'mcp__maws__artifact_read', { artifact: 'q3-memo' }, 'Stopped: `maws · artifact_read`'],
+    ['a shell call the short form’s rule refuses', 'Bash', { command: './deploy.sh production' }, 'Stopped a command'],
+    ['an artifact call (M3: its artifact, by the handle no result named)', 'mcp__maws__artifact_read', { artifact: 'q3-memo' }, 'Stopped: ‹q3-memo›'],
   ])('%s', (_family, name, input, label) => {
     expect(stopped(name, input)).toBe(label);
   });
