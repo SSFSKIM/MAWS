@@ -326,7 +326,9 @@ export function createSessionsStore() {
         const nextActed = new Map(acted);
         if (prior?.title != null) nextActed.set(appSessionId, { ...prior, archived: false, hidden: null });
         else nextActed.delete(appSessionId);
-        const back = prior?.hidden != null && !listed.has(appSessionId) ? { listed: new Map(listed).set(appSessionId, prior.title === null ? prior.hidden : { ...prior.hidden, title: prior.title }) } : {};
+        // the listing as it was at the archive, with the live word the window holds now (the one kept is stale)
+        const restored = prior?.hidden == null ? null : withLive(prior.title === null ? prior.hidden : { ...prior.hidden, title: prior.title }, get().liveWords.get(appSessionId));
+        const back = restored !== null && !listed.has(appSessionId) ? { listed: new Map(listed).set(appSessionId, restored) } : {};
         set({ acted: nextActed, ...back, ...heldAs(records, appSessionId, (r) => (r.archived ? { ...r, archived: false } : r)) });
       },
       applyList({ sessions, revision }, machine) {
