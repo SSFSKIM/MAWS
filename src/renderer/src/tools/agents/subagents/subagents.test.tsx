@@ -301,7 +301,8 @@ describe('subagents lists', () => {
     expect(section('done')).toBeNull();
   });
 
-  // #359 (M7 decision 5): a task the agent started keeps it under Running, said in words; the heading counts agents only.
+  // Item 359 (M7 decision 5): a task the agent started keeps it under Running, said in words; the heading counts
+  // agents only.
   it('keeps an ended agent under Running by its shell: finished · 1 background task running, the heading with no number, until the shell ends', async () => {
     await mount({ events: [started('p', 1), shellOf('s1', 'p', 2), finished('p', 3, {}, at(30))] });
     expect(heading('running')).toBe('Running'); // no agent runs: no number, never "Running 0"

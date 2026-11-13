@@ -4,7 +4,7 @@
 // its press. Its disclosure, drawn while agents are under the row, opens or closes them beneath it: `(+N)` while it is
 // closed and N agents run under it at any depth, then an arrow, turned while open, at the row's right end before the
 // elapsed time, as tall as the row. The line under the title is the agent's own state and says nothing of what runs
-// under it, except for an agent whose own run has ended while a task it started still runs (#359): its outcome word
+// under it, except for an agent whose own run has ended while a task it started still runs (item 359): its outcome word
 // without a time, then how many background tasks run under it, the part of the line that is never cut.
 import { useId } from 'react';
 import type { AgentId, TaskId } from '@shared/graph/ids';

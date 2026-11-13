@@ -662,6 +662,26 @@ describe('background work', () => {
       expect(within(row('bsleep01')!).queryByRole('button')).toBeNull();
     });
 
+    // M7 fix round 1: a deep link is placed in the list on screen, which holds the jobs, not the engine's graph.
+    it('a deep link to an ended job unfolds Done and selects its row', async () => {
+      const state = create(undefined);
+      render(<Mounted state={state} />);
+      await watched();
+      plane('snapshot', [job('bsleep01'), job('bbuild02', { status: 'completed', endedAt: T })]);
+      act(() => backgroundTool.open!(state, { taskId: 'bbuild02' }));
+      expect(state.snapshot().expanded.has('done')).toBe(true);
+      expect(row('bbuild02')?.dataset.selected).toBe('true');
+    });
+
+    it('reads Nothing running once its jobs are read and none runs', async () => {
+      render(<Mounted state={create(undefined)} />);
+      await watched();
+      expect(screen.queryByText('Nothing running')).toBeNull(); // not read yet
+      plane('snapshot', [job('bbuild02', { status: 'completed', endedAt: T })]);
+      expect(screen.getByText('Nothing running')).toBeTruthy();
+      expect(heading('done')).toBe('Done 1 · 1 shell');
+    });
+
     it('the summary counts its running jobs', async () => {
       render(<BackgroundSummary appSessionId={A} open={() => {}} />);
       await watched();
@@ -671,11 +691,11 @@ describe('background work', () => {
     });
   });
 
-  it('a disk-only session reads the shells sentence and lists the runs on disk with their state and summary', async () => {
+  it('a disk-only session reads the shells sentence, Nothing running, and lists the runs on disk with their state and summary', async () => {
     await mount({ status: null, sidecars: sidecarsOf('pass2/workflow-disk', 'wf_7cacbb2d-902'), runs: workflowRunsOf() });
     expect(screen.getByText('Shells and monitors are known only while the session runs here')).toBeTruthy();
-    expect(section('running')).toBeNull(); // its past runs are in Done, and nothing is said to run
-    expect(screen.queryByText('Nothing running')).toBeNull();
+    expect(section('running')).toBeNull(); // its past runs are in Done
+    expect(screen.getByText('Nothing running').compareDocumentPosition(section('done')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(heading('done')).toBe('Done 1 · 1 workflow');
     toggleSection('done');
     const [run] = workflowRunsOf();
@@ -809,6 +829,18 @@ describe('background work', () => {
       expect(handle.snapshot().view).toEqual({ kind: 'list' });
       expect([...handle.snapshot().expanded].sort()).toEqual(['done', 'running', 'tasks']);
       expect(ids('done')).toEqual(['sh1']);
+    });
+
+    // M7 fix round 1: a task opened before it is listed has its section settled once it is, by where it is listed.
+    it('open({ taskId }) of a task not listed yet unfolds Done once it loads ended, and selects it', async () => {
+      const { handle } = await mount({ events: [] });
+      act(() => backgroundTool.open!(handle, { taskId: 'sh1' }));
+      expect(handle.snapshot().expanded.has('done')).toBe(false);
+      push([startedTask('sh1', 'local_bash', 'Build the site', 1), ends('sh1', 'completed', 1)]);
+      expect(handle.snapshot().expanded.has('done')).toBe(true);
+      expect(document.querySelector<HTMLElement>('[data-shell="sh1"]')?.dataset.selected).toBe('true');
+      toggleSection('done'); // settled once: the fold is the person's again
+      expect(ids('done')).toEqual([]);
     });
 
     it('a narrow row cuts a shell’s description, never its state and time', async () => {
