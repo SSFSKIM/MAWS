@@ -372,6 +372,27 @@ const SECTION_ORDER = ['Appearance', 'Notifications', 'Keyboard', 'Voice', 'Brow
 const NOTE_LINE = 18; // 12 px type at the normal leading
 const NOTE_LINE_WITH_BUTTON = 22; // the box of More, or of a button on the line
 
+// How far the body scrolls sideways, and each element that reaches past its content box unclipped (by tag, test id and
+// class, with its width and how far it reaches, in px): what a failure names. No text and no other attribute is read, as a row may
+// draw the machine's own values.
+function sidewaysOverflow(body: Element): { overflow: number; content: number; past: string[] } {
+  const style = getComputedStyle(body);
+  const box = body.getBoundingClientRect();
+  const left = box.left + body.clientLeft + parseFloat(style.paddingLeft);
+  const right = box.left + body.clientLeft + body.clientWidth - parseFloat(style.paddingRight);
+  const past: string[] = [];
+  for (const el of Array.from(body.querySelectorAll('*'))) {
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 || r.right <= right + 0.5) continue;
+    let clipped = false; // inside a box that clips it (a truncated path), it scrolls nothing
+    for (let up = el.parentElement; up !== null && up !== body && !clipped; up = up.parentElement) clipped = getComputedStyle(up).overflowX !== 'visible';
+    if (clipped) continue;
+    const testId = el.getAttribute('data-testid');
+    past.push(`${el.tagName.toLowerCase()}${testId === null ? '' : ` [data-testid=${testId}]`} .${(el.getAttribute('class') ?? '').trim().split(/\s+/).join('.')} width ${r.width.toFixed(1)}, ${(r.right - right).toFixed(1)} past`);
+  }
+  return { overflow: body.scrollWidth - body.clientWidth, content: Math.round(right - left), past: past.slice(0, 12) };
+}
+
 type Stacking = { row: string; controlUnderLabel: boolean; noteUnderControl: boolean };
 // Each drawn row of the table: whether its control starts under its label and its note under its control.
 const stackingOf = (column: Locator): Promise<Stacking[]> =>
@@ -438,10 +459,20 @@ test('settings: the regrouped page; each note one line where the body has its 76
     const pane = page.locator('[data-region="main"] [data-pane="1"]').getByRole('tabpanel');
     const split = pane.locator('[data-settings-column]');
     const splitNav = pane.getByRole('navigation', { name: 'Settings sections' });
-    const sizePane = async (target: number) => {
-      const now = (await pane.boundingBox())!.width;
-      await resize(Math.max(600, Math.round(1440 + 2 * (target - now))));
+    // The split's columns follow the window a render after it (MainArea measures the region with a ResizeObserver and
+    // sets the left column in pixels from the stored ratio, here the new split's even one), so a pane read as soon as the
+    // window has its size can still be laid out for the last one. Each read waits until the two panes are even again.
+    const otherPane = page.locator('[data-region="main"] [data-pane="0"]').getByRole('tabpanel');
+    const evenPanes = async () => {
+      await expect
+        .poll(async () => Math.abs((await pane.boundingBox())!.width - (await otherPane.boundingBox())!.width), { message: 'the split has followed the window' })
+        .toBeLessThanOrEqual(1);
       return (await pane.boundingBox())!.width;
+    };
+    const sizePane = async (target: number) => {
+      const now = await evenPanes();
+      await resize(Math.max(600, Math.round(1440 + 2 * (target - now))));
+      return evenPanes();
     };
 
     // 2. a view about 520 px wide: the index is still a column; every row is stacked
@@ -472,7 +503,8 @@ test('settings: the regrouped page; each note one line where the body has its 76
       expect(row.controlUnderLabel, `${row.row}: its control under its label`).toBe(true);
       expect(row.noteUnderControl, `${row.row}: its note under its control`).toBe(true);
     }
-    expect(await pane.locator('[data-settings-body]').evaluate((el) => el.scrollWidth - el.clientWidth), 'nothing scrolls sideways').toBeLessThanOrEqual(0);
+    const sideways = await pane.locator('[data-settings-body]').evaluate(sidewaysOverflow);
+    expect(sideways.overflow, `nothing scrolls sideways; past the body's ${sideways.content} px: ${sideways.past.join('; ') || 'nothing'}`).toBeLessThanOrEqual(0);
     expect(maws.consoleErrors()).toEqual([]);
   } finally {
     await maws.cleanup();

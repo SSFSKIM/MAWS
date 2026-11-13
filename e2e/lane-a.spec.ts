@@ -590,17 +590,15 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect(background.getByRole('button', { name: 'Background tasks 1 running', exact: true })).toBeVisible();
     await expect(sessionCard(page, 'Subagents'), 'no Subagents card on this route').toHaveCount(0);
     const above = sessionCard(page, 'Connectors');
-    // Read once two reads a moment apart agree: the Environment card's own reads (git's, the pull request's) may still
-    // land and grow it (as e2e/agent-tools.spec.ts's `settledBoxes` waits for), which is no move the card's leaving made.
-    let lastBox = '';
-    await expect
-      .poll(async () => {
-        const now = JSON.stringify(await above.boundingBox());
-        const same = now === lastBox;
-        lastBox = now;
-        return same;
-      }, { intervals: [250], message: 'the cards above settle' })
-      .toBe(true);
+    // Read once the Environment card's own reads have answered, since each that lands grows it, which is no move the
+    // card's leaving made: git's (its branch and push rows), then the pull request's, whose row is drawn only once
+    // `scm.status` answers. That answer waits for gh's probe (`gh auth status`, which may ask GitHub) even for a folder not
+    // trusted, so it can land well after the rest; this checkout is not trusted, so the row then says so and nothing more
+    // is asked.
+    await expect(sessionCard(page, 'Environment').getByTestId('pr-line'), 'the Environment card’s last read has answered').toHaveText(
+      'Trust this folder to see PR state',
+      { timeout: 40_000 },
+    );
     const before = await above.boundingBox();
     expect(before, 'the card above it is drawn').not.toBeNull();
 

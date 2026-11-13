@@ -46,21 +46,15 @@ const exitAt = (at: string): Partial<EngineSessionStatus> => ({ process: 'exited
 const SIBLING = listed('e2e-sibling-agent', 'local_agent', 'A sibling the main loop dispatched');
 const STOP_TASK = { shell: 'ba3cr5gnx', agent: 'ac2bd8a00d8e492f4', workflow: 'wkmzd07jp' };
 // The card column: the record's three cards, above the two for running work; the cards by title in order (the column's
-// scrolling list); the three's boxes, read once two reads a moment apart agree (a card's own reads, git's, may still land).
+// scrolling list); the three's boxes, read once the Environment card's own read has answered (a read that lands redraws
+// the card, which is no move a card below it made). Session A's directory is no repository, so git's answer says so in
+// the card's heading and no push or pull request row follows it.
 const ABOVE = ['Environment', 'Context', 'Connectors'] as const;
 const cardTitles = (page: Page) => sessionCards(page).locator('div[aria-label="Session cards"] > section').evaluateAll((cards) => cards.map((card) => card.getAttribute('aria-label')));
 const boxesOf = (page: Page) => Promise.all(ABOVE.map((name) => sessionCard(page, name).boundingBox()));
 async function settledBoxes(page: Page): Promise<Awaited<ReturnType<typeof boxesOf>>> {
-  let last = '';
-  await expect
-    .poll(async () => {
-      const now = JSON.stringify(await boxesOf(page));
-      const same = now === last;
-      last = now;
-      return same;
-    }, { intervals: [250], message: 'the cards above settle' })
-    .toBe(true);
-  return JSON.parse(last) as Awaited<ReturnType<typeof boxesOf>>;
+  await expect(sessionCard(page, 'Environment').locator('h3'), 'the Environment card’s git read has answered').toHaveText(/Not a git repository|Git unavailable/);
+  return boxesOf(page);
 }
 // The UX wave's U8b end
 
