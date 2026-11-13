@@ -190,7 +190,7 @@ function Configured({ servers, readAt, cwd, place, attached, askIn }: { servers:
 function ServerRow({ server, askIn, shadow, cwd, place, session, live, liveRead, posture, fingerprint, revision }: { server: CustomizationServer; askIn: AskIn; shadow: CustomizationServer['scope'] | null; cwd: string | null; place: string | null; session: string | null; live: SignInFacts['live']; liveRead: SignInFacts['liveRead']; posture: AuthPosture | null; fingerprint: string | null; revision: string | null }) {
   const { ops } = useManage();
   const own = server.scope === 'app';
-  const target = own ? null : { name: server.name, scope: server.scope, cwd, path: server.path };
+  const target = server.scope === 'app' ? null : { name: server.name, scope: server.scope, cwd, path: server.path };
   const kept: Omit<SignInServer, 'machine'> | null = own ? (signsInDynamic(server.name) ? { name: server.name, scope: 'dynamic', cwd: null } : null) : target;
   // P5 O7 M5c: the result of the machine its Sign in runs on (a session's address names it; none, this Mac)
   const machine = signInMachineOf(session);
