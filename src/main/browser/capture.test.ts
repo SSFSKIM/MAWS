@@ -93,7 +93,7 @@ describe('copyTabScreenshot (U12a): browser.view.copyScreenshot for a tab this w
   it('captures the whole view (no rect) and writes that image, uncapped, once', async () => {
     const asked: unknown[][] = [];
     const captured = image(3200, 2400); // larger than the comment crop's 1568: the clipboard takes it as it is
-    const write = vi.fn();
+    const write = vi.fn<(image: CropImage) => Promise<void>>(async () => {});
     const answer = await copyTabScreenshot(
       target({
         contents: contents(async (...args: unknown[]) => {
@@ -111,7 +111,7 @@ describe('copyTabScreenshot (U12a): browser.view.copyScreenshot for a tab this w
   });
 
   it('refuses a tab placed in another window, or in none, and a sender with no app window, writing nothing', async () => {
-    const write = vi.fn();
+    const write = vi.fn<(image: CropImage) => Promise<void>>(async () => {});
     await expect(copyTabScreenshot(target({ window: { id: 2 } }), win, write)).rejects.toBeInstanceOf(CommandFailure);
     await expect(copyTabScreenshot(target({ window: null }), win, write)).rejects.toMatchObject({ error: { code: 'invalid_input' } });
     await expect(copyTabScreenshot(target(), null, write)).rejects.toBeInstanceOf(CommandFailure);
@@ -119,7 +119,7 @@ describe('copyTabScreenshot (U12a): browser.view.copyScreenshot for a tab this w
   });
 
   it('answers copied: false and writes nothing for a tab not on show, no live view, an empty image, a failed capture or write', async () => {
-    const write = vi.fn();
+    const write = vi.fn<(image: CropImage) => Promise<void>>(async () => {});
     const never = contents(() => Promise.reject(new Error('should not capture')));
     expect(await copyTabScreenshot(target({ shown: false, contents: never }), win, write)).toEqual({ copied: false });
     expect(await copyTabScreenshot(target({ contents: null }), win, write)).toEqual({ copied: false });
@@ -127,9 +127,7 @@ describe('copyTabScreenshot (U12a): browser.view.copyScreenshot for a tab this w
     expect(await copyTabScreenshot(target({ contents: contents(async () => image(0, 0)) }), win, write)).toEqual({ copied: false });
     expect(await copyTabScreenshot(target({ contents: contents(() => Promise.reject(new Error('gone'))) }), win, write)).toEqual({ copied: false });
     expect(write).not.toHaveBeenCalled();
-    const failing = vi.fn(() => {
-      throw new Error('clipboard unavailable');
-    });
+    const failing = vi.fn<(image: CropImage) => Promise<void>>(() => Promise.reject(new Error('clipboard unavailable')));
     const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       expect(await copyTabScreenshot(target(), win, failing)).toEqual({ copied: false });

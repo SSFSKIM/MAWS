@@ -48,11 +48,11 @@ export async function captureTabView(target: CaptureTarget, senderWindow: unknow
 }
 
 // U12a: the capture written to the clipboard as it is; `copied: false`, with nothing written, when there is no picture.
-export async function copyTabScreenshot<I extends CropImage>(target: CaptureTarget<I>, senderWindow: unknown, write: (image: I) => void): Promise<{ copied: boolean }> {
+export async function copyTabScreenshot<I extends CropImage>(target: CaptureTarget<I>, senderWindow: unknown, write: (image: I) => Promise<void>): Promise<{ copied: boolean }> {
   const image = await captureFor(target, senderWindow);
   if (image === null || image.isEmpty()) return { copied: false };
   try {
-    write(image);
+    await write(image);
     return { copied: true };
   } catch (error) {
     console.warn('[browser] writing the screenshot to the clipboard failed:', error instanceof Error ? error.message : error);

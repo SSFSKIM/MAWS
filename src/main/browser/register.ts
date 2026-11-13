@@ -47,7 +47,7 @@ export interface BrowserHandlerDeps {
   sessions?: Pick<SessionMachines, 'keyOf' | 'machineOf' | 'bareOf'>;
   forwarded?: Pick<ForwardedTabs, 'opened'>;
   now?(): number; // U12a: the clock `browser.agent.show` reads the person's input against
-  writeImage(image: NativeImage): void; // U12a: Copy screenshot's write, to this Mac's clipboard
+  writeImage(image: NativeImage): Promise<void>; // U12a: Copy screenshot's write, to this Mac's clipboard
 }
 
 // A handler whose unknown tab is the caller's mistake, not main's fault.

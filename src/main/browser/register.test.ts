@@ -39,7 +39,7 @@ function setup(makeViews?: (store: InstanceType<typeof TabStore>) => Views) {
   const window = { id: 3 };
   const windowOf = vi.fn((): unknown => window);
   const favicons = { forOrigins: vi.fn(() => ({ 'https://a.test': 'data:image/png;base64,QQ==' })) };
-  const writeImage = vi.fn(); // U12a: Copy screenshot's clipboard
+  const writeImage = vi.fn<(image: unknown) => Promise<void>>(async () => {}); // U12a: Copy screenshot's clipboard
   registerBrowserHandlers({
     store,
     views: makeViews?.(store) ?? views,
@@ -204,7 +204,7 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
       profiles: () => [],
       avatars: { list: () => [] },
       register: (name, handler) => void handlers.set(name, handler as (input: unknown, context: unknown) => unknown),
-      writeImage: vi.fn(),
+      writeImage: vi.fn(async () => {}),
     });
     const tabId = 'b_ffffffffffff';
     const inputs: [string, unknown][] = [
