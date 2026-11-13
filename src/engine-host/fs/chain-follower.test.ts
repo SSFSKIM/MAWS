@@ -876,6 +876,41 @@ describe('the exit a gone terminal leaves (X-168)', () => {
     expect(exits(out)).toEqual([[EXIT, at(10), 'unknown', null, null]]);
   });
 
+  // The follower review (M6 round 3): a final drain that could not read the file keeps the decision owed, and the next
+  // read that completes makes it, the registry asked again then.
+  it('a final drain that finds no file keeps the decision owed; the next complete read makes it', async () => {
+    const live = { n: 1 };
+    const { reader, out, follower } = await terminal(live);
+    reader.remove(); // the transcript away for a moment (a move, a rewrite under way)
+    live.n = 0;
+    await follower.refold();
+    expect(exits(out)).toEqual([]);
+    reader.append('');
+    await follower.poke();
+    expect(exits(out)).toEqual([[EXIT, at(4), 'unknown', null, null]]);
+    expect(agentsInView(out.events())).toEqual([[false, 'stopped']]);
+    await follower.poke(); // decided: a later read makes no second one
+    expect(exits(out)).toHaveLength(1);
+  });
+
+  it('an owed decision made when a holder has returned makes no exit, and a plain poke decides none', async () => {
+    const live = { n: 1 };
+    const { reader, out, follower } = await terminal(live);
+    await follower.poke(); // nothing owed: no decision
+    reader.remove();
+    live.n = 0;
+    await follower.refold();
+    live.n = 1; // back before the file is
+    reader.append('');
+    await follower.poke();
+    expect(exits(out)).toEqual([]);
+    live.n = 0;
+    await follower.poke(); // the decision was made, with a holder live; a poke decides nothing more
+    expect(exits(out)).toEqual([]);
+    await follower.refold(); // its going is told: now the exit
+    expect(exits(out)).toEqual([[EXIT, at(4), 'unknown', null, null]]);
+  });
+
   it('a session read from disk after its terminal closed ends its agents alike', async () => {
     const { out } = await terminal({ n: 0 }, new MemoryFileReader(joined([...TURN_ONE, ...TURN_TWO])));
     expect(exits(out)).toEqual([[EXIT, at(14), 'unknown', null, null]]);
