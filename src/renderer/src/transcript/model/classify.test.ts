@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { classifyTool, presentationOf, type ClassifyContext } from './classify';
+import { classifyTool, continuedAfter, denialDisposition, presentationOf, type ClassifyContext } from './classify';
+import { api, builder, MODEL, parent, tool, uuid } from './test-events';
 
-const base: ClassifyContext = { denial: null, terminalReason: null, turnClosed: false, humanDecision: false, safeguard: 'not_evaluated', imageResult: false, isError: false };
+const base: ClassifyContext = { denial: null, turn: { closed: false, stopped: false }, continued: false, humanDecision: false, safeguard: 'not_evaluated', imageResult: false, isError: false };
 
 describe('classification table', () => {
   it.each([
@@ -104,25 +105,95 @@ describe('classification overrides', () => {
 });
 
 describe('denial disposition', () => {
-  const dispose = (kind: Parameters<typeof classifyTool>[2]['denial'] extends infer D ? (D extends { kind: infer K } ? K : never) : never, terminalReason: string | null, turnClosed = true) =>
-    classifyTool('Bash', {}, { ...base, denial: { kind, reason: null }, terminalReason, turnClosed }).denial!;
+  type Kind = Parameters<typeof denialDisposition>[0];
+  const OPEN = { closed: false, stopped: false };
+  const COMPLETED = { closed: true, stopped: false };
+  const STOPPED = { closed: true, stopped: true };
+  const dispose = (kind: Kind, turn: { closed: boolean; stopped: boolean }, continued = false) =>
+    classifyTool('Bash', {}, { ...base, denial: { kind, reason: null }, turn, continued }).denial!;
 
   it.each([
-    ['user-rejected', 'completed', 'denied', false],
-    ['user-rejected', 'aborted_streaming', 'stopped', true],
-    ['user-rejected', 'aborted_tools', 'stopped', true],
-    ['permission-rule', 'completed', 'denied', false],
-    ['permission-rule', 'aborted_streaming', 'denied', false],
-    ['automode-blocked', 'completed', 'auto_denied', false],
-    ['automode-parsing-error', 'completed', 'auto_denied', false],
-    ['automode-unavailable', 'completed', 'stopped', false],
-    ['interrupted', 'completed', 'stopped', false],
-    ['cancelled', 'completed', 'stopped', false],
-  ] as const)('%s with terminal reason %s → %s (interruption %s)', (kind, reason, disposition, interruption) => {
-    expect(dispose(kind, reason)).toMatchObject({ kind, disposition, interruption });
+    ['permission-rule', COMPLETED, 'denied', false],
+    ['permission-rule', STOPPED, 'denied', false],
+    ['automode-blocked', COMPLETED, 'auto_denied', false],
+    ['automode-parsing-error', COMPLETED, 'auto_denied', false],
+    ['automode-unavailable', COMPLETED, 'stopped', false],
+    ['interrupted', COMPLETED, 'stopped', false],
+    ['cancelled', COMPLETED, 'stopped', false],
+  ] as const)('%s in a turn %o → %s (interruption %s)', (kind, turn, disposition, interruption) => {
+    expect(dispose(kind, turn)).toMatchObject({ kind, disposition, interruption });
   });
 
-  it('interruption pairing waits for the turn to close: a user-rejected denial in an open turn is denied for now', () => {
-    expect(dispose('user-rejected', null, false).disposition).toBe('denied');
+  // UX wave U2 (decision 23, the architect's ruling R1): a rejected call reads stopped from its result on, on every route;
+  // denied only once the model went on after it, or once its turn closed otherwise than stopped
+  it.each([
+    ['open, nothing after it', OPEN, false, 'stopped', true],
+    ['closed as stopped', STOPPED, false, 'stopped', true],
+    ['closed otherwise (completed, failed)', COMPLETED, false, 'denied', false],
+    ['open, the model went on', OPEN, true, 'denied', false],
+    ['closed as stopped after the model went on', STOPPED, true, 'denied', false],
+  ] as const)('user-rejected, its turn %s → %s (interruption %s)', (_, turn, continued, disposition, interruption) => {
+    expect(dispose('user-rejected', turn, continued)).toMatchObject({ kind: 'user-rejected', disposition, interruption });
+    expect(denialDisposition('user-rejected', turn, continued)).toEqual({ disposition, interruption });
+  });
+});
+
+// UX wave U2 (decision 23): which rejected calls the model went on after, over constructed events (invented content)
+describe('continuedAfter', () => {
+  const REJECTED = { isError: true, denial: 'user-rejected' as const };
+  const rejectedCall = () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('toolu_a', 'Bash', { command: 'make lint' }, 'msg_1', 0);
+    b.result('toolu_a', 'The user doesn’t want to proceed with this tool use.', REJECTED);
+    return b;
+  };
+
+  it('a block of the next API message counts: its delta, its completion or its call', () => {
+    const delta = rejectedCall();
+    delta.emit('assistant.block.delta', { apiMessageId: api('msg_2'), blockIndex: 0, blockType: 'thinking', textDelta: null, thinkingDelta: '', inputJsonDelta: null, userMessageUuid: null, toolUseId: null, toolName: null });
+    expect([...continuedAfter(delta.events)]).toEqual([tool('toolu_a')]);
+    const text = rejectedCall();
+    text.text('msg_2', 0, 'Understood, leaving the linter for now.');
+    expect([...continuedAfter(text.events)]).toEqual([tool('toolu_a')]);
+    const call = rejectedCall();
+    call.emit('tool.use', { toolUseId: tool('toolu_b'), toolName: 'Read', input: {}, apiMessageId: api('msg_2'), messageUuid: null });
+    expect([...continuedAfter(call.events)]).toEqual([tool('toolu_a')]);
+  });
+
+  it('a later call of the call’s own message does not count: the engine starts a call before its message is whole', () => {
+    const b = rejectedCall();
+    b.toolUse('toolu_b', 'Read', { file_path: 'notes.md' }, 'msg_1', 1);
+    b.result('toolu_b', 'The user doesn’t want to proceed with this tool use.', REJECTED);
+    expect(continuedAfter(b.events).size).toBe(0);
+  });
+
+  it('another call’s result, the interrupt marker, an API error envelope, a subagent’s block and the turn’s end do not count', () => {
+    const b = rejectedCall();
+    b.result('toolu_z', 'ok');
+    b.emit('user.message', { messageUuid: uuid('marker'), content: '[Request interrupted by user for tool use]', isReplay: false, isSynthetic: true, origin: 'interrupt-marker', bash: null });
+    b.text('msg_err', 0, 'API Error: 500 upstream', { isApiErrorMessage: true });
+    b.emit('assistant.block.complete', { messageUuid: uuid('child-1'), apiMessageId: api('msg_child'), blockIndex: 0, block: { type: 'text', text: 'child output' }, model: MODEL, supersedes: [], aborted: false, userMessageUuids: [] }, { parentToolUseId: parent('toolu_agent') });
+    b.end(['u1'], { terminalReason: 'aborted_tools', isError: true, result: 'error_during_execution' });
+    expect(continuedAfter(b.events).size).toBe(0);
+  });
+
+  it('work before the result is not work after it, and a block with no message id counts for nothing', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('toolu_a', 'Bash', { command: 'make lint' }, 'msg_1', 0);
+    b.text('msg_2', 0, 'Running the linter meanwhile.');
+    b.emit('assistant.block.delta', { apiMessageId: null, blockIndex: 0, blockType: 'text', textDelta: 'x', thinkingDelta: null, inputJsonDelta: null, userMessageUuid: null, toolUseId: null, toolName: null });
+    b.result('toolu_a', 'The user doesn’t want to proceed with this tool use.', REJECTED);
+    expect(continuedAfter(b.events).size).toBe(0);
+  });
+
+  it('only user-rejected results are read', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('toolu_a', 'Bash', { command: 'make lint' }, 'msg_1', 0);
+    b.result('toolu_a', 'Permission to use Bash has been denied.', { isError: true, denial: 'permission-rule' });
+    b.text('msg_2', 0, 'Trying another way.');
+    expect(continuedAfter(b.events).size).toBe(0);
   });
 });

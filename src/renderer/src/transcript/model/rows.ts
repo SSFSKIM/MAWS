@@ -81,7 +81,7 @@ export type Row = RowBase &
         peer?: PeerMessage; report?: string; // E7: a message between sessions (`between`); an in-process agent's hand-back report
         body?: string; // E7: an in-process agent's whole message; U3 (O-12): of every message to or from a subagent, which its line opens to
       }
-    | { kind: 'thinking'; messageUuid: MessageUuid | null; text: string; live: boolean; durationMs: number | null; clock?: 'wall' } // clock (P5 O7 M10): a terminal session's streamed block (lane A's overlay), its `at` this window's time when first drawn, not an event's
+    | { kind: 'thinking'; messageUuid: MessageUuid | null; text: string; live: boolean; durationMs: number | null; recordedMs: number | null; clock?: 'wall' } // clock (P5 O7 M10): a terminal session's streamed block (lane A's overlay), its `at` this window's time when first drawn, not an event's
     | { kind: 'plan'; toolUseId: ToolUseId; plan: string; outcome: (typeof PLAN_OUTCOMES)[number] | null; feedback: string | null }
     | { kind: 'question'; toolUseId: ToolUseId; questions: Question[]; answers: Record<string, string> | null; error: string | null } // E1 (A-17): error, the engine's refusal of the call, tags stripped
     | {
@@ -278,7 +278,7 @@ export type CellDetail =
   | { kind: 'web'; url: string | null; query: string | null; output: string; truncated: Truncation | null }
   | { kind: 'mcp'; server: string; tool: string; input: unknown; result: string | ContentBlock[]; structured: unknown; spill: Spill | null }
   | { kind: 'image'; images: { dataUrl: string; mediaType: string; alt: string | null }[]; caption: string | null }
-  | { kind: 'thinking'; text: string; durationMs: number | null }
+  | { kind: 'thinking'; text: string; durationMs: number | null; recordedMs: number | null }
   | { kind: 'generic'; input: unknown; result: string | ContentBlock[]; structured: unknown; isError: boolean; spill: Spill | null; truncated: Truncation | null };
 
 export interface Hunk {

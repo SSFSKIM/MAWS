@@ -7,10 +7,11 @@ import type { TaskId, ToolUseId } from '@shared/graph/ids';
 import { ShowPaneResultSchema } from '@shared/maws/tools'; // E1
 import { ArtifactScreenshotResultSchema } from '@shared/maws/tools'; // E2
 import * as z from 'zod'; // P3-A
-import { classifyTool, MAWS_TOOL_USE, MCP_TOOL, tableRowOf, type ClassifyContext } from './classify';
+import { classifyTool, continuedAfter, isAbortedReason, MAWS_TOOL_USE, MCP_TOOL, tableRowOf, type ClassifyContext } from './classify';
 import { baseName, cellLabel, descriptionLabel, hostOf, PANE_CELL, thinkingLabel } from './copy';
 import { ARTIFACT_CELL } from './copy'; // E2
 import { cellId } from './keys';
+import type { TurnState } from './reduce';
 import type { Cell, CellDetail, ChangedFile, Hunk, Spill, ToolCategory, Truncation } from './rows';
 
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
@@ -28,8 +29,21 @@ export interface ToolRecord {
 
 export interface TurnContext {
   closed: boolean;
-  terminalReason: string | null;
+  stopped: boolean; // closed as stopped (`closedAsStopped`)
+  continued: ReadonlySet<ToolUseId>; // the rejected calls the model went on after (`continuedAfter`)
   lastAt: string; // the turn's latest event time, for running durations
+}
+
+// UX wave U2 (decision 23): a closed turn whose line reads stopped (derive.ts's divider state): closed as stopped by the
+// reader (a file's interrupt marker, a process's exit), else by an aborted terminal reason (the wire's, and the end
+// another machine's rows get synthesised), else closed with no recorded end.
+export const closedAsStopped = (turn: TurnState): boolean =>
+  turn.state === 'closed' && (turn.closedBy !== null ? turn.closedBy === 'stopped' : turn.ended === null || isAbortedReason(turn.ended.terminalReason));
+
+// The one place a turn's context is made, for its derivation and for the mods' asks (surface/adapters.ts), so the two
+// cannot read a call differently.
+export function turnContextOf(turn: TurnState): TurnContext {
+  return { closed: turn.state === 'closed', stopped: closedAsStopped(turn), continued: continuedAfter(turn.events), lastAt: turn.events.at(-1)?.at ?? turn.startedAt };
 }
 
 export const TRUNCATE_OVER = 64 * 1024;
@@ -295,7 +309,7 @@ export function cellOf(rec: ToolRecord, turn: TurnContext, expanded: boolean, di
   const { use, result } = rec;
   const denial = result?.denial ? { kind: result.denial, reason: resultText(result.content).trim() || null } : null;
   const context: ClassifyContext = {
-    denial, terminalReason: turn.terminalReason, turnClosed: turn.closed, humanDecision: rec.humanDecision,
+    denial, turn, continued: turn.continued.has(use.toolUseId), humanDecision: rec.humanDecision,
     safeguard: result && result.safeguard !== 'not_evaluated' ? result.safeguard : rec.safeguard, imageResult: isImageResult(result), isError: result?.isError ?? false,
   };
   const classification = classifyTool(use.toolName, use.input, context);
@@ -329,10 +343,10 @@ export function mergeReads(into: Cell, next: Cell): Cell {
   return merged;
 }
 
-export function thinkingCell(id: string, text: string, live: boolean, at: string, durationMs: number | null, expanded: boolean): Cell {
-  const classification = classifyTool('thinking', null, { denial: null, terminalReason: null, turnClosed: false, humanDecision: false, safeguard: 'not_evaluated', imageResult: false, isError: false });
+export function thinkingCell(id: string, text: string, live: boolean, at: string, durationMs: number | null, recordedMs: number | null, expanded: boolean): Cell {
+  const classification = classifyTool('thinking', null, { denial: null, turn: { closed: false, stopped: false }, continued: false, humanDecision: false, safeguard: 'not_evaluated', imageResult: false, isError: false });
   return {
     id: id as Cell['id'], toolUseId: null, toolName: 'thinking', category: 'other', classification: { ...classification, hidden: true }, status: live ? 'running' : 'done',
-    label: thinkingLabel(live, durationMs), paths: [], startedAt: at, endedAt: live ? null : at, detail: { kind: 'thinking', text, durationMs }, expanded, agent: null,
+    label: thinkingLabel(live, durationMs), paths: [], startedAt: at, endedAt: live ? null : at, detail: { kind: 'thinking', text, durationMs, recordedMs }, expanded, agent: null,
   };
 }

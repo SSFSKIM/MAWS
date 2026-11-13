@@ -80,7 +80,7 @@ export function groupItems(items: WorkItem[], turn: TurnState, ui: TranscriptUi 
       const id = `cell:${item.row.id}`;
       thinkingRows.set(id, item.row);
       if (!open) open = [];
-      open.push(thinkingCell(id, item.row.text, item.row.live, item.row.at, item.row.durationMs, ui?.expandedCells.has(id) ?? false));
+      open.push(thinkingCell(id, item.row.text, item.row.live, item.row.at, item.row.durationMs, item.row.recordedMs, ui?.expandedCells.has(id) ?? false));
       continue;
     }
     flush(false);

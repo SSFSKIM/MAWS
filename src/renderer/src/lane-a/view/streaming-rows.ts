@@ -55,7 +55,7 @@ export function streamingRows(blocks: readonly StreamBlock[], since: (block: Str
       if (!live || (closed !== undefined && block.text.trim() === '')) continue; // W1, as lane B: a closed textless block has no row
       const at = since(block);
       const durationMs = typeof closed === 'string' ? Date.parse(closed) - Date.parse(at) : null;
-      rows.push({ id: rowId(block), turnId, at, kind: 'thinking', messageUuid: null, text: '', live: closed === undefined, durationMs, clock: 'wall' });
+      rows.push({ id: rowId(block), turnId, at, kind: 'thinking', messageUuid: null, text: '', live: closed === undefined, durationMs, recordedMs: null, clock: 'wall' });
     } else if (isMessageTool(block.toolName) && block.toolUseId !== null) {
       const text = streamingMessageText(block.text);
       if (text !== null) rows.push(live ? { id: rowId(block), turnId, at: since(block), kind: 'to_human', toolUseId: block.toolUseId as ToolUseId, text, pending: true } : cut(block, text));

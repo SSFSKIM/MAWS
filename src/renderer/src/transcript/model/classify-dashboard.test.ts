@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { classifyTool, presentationOf, type ClassifyContext } from './classify';
 
-const base: ClassifyContext = { denial: null, terminalReason: null, turnClosed: false, humanDecision: false, safeguard: 'not_evaluated', imageResult: false, isError: false };
+const base: ClassifyContext = { denial: null, turn: { closed: false, stopped: false }, continued: false, humanDecision: false, safeguard: 'not_evaluated', imageResult: false, isError: false };
 
 describe('artifact_dataset in the transcript', () => {
   it('is a cell of its own, never folded into a group of MCP calls', () => {

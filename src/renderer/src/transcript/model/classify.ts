@@ -2,6 +2,8 @@
 // overrides, total over MCP, plugin and future tools. The table is the contract; `presentationOf` says which tool
 // names are rows of another kind rather than cells.
 import type { DenialKind, SafeguardVerdict } from '@shared/graph/enums';
+import type { SessionEvent } from '@shared/graph/events';
+import type { ApiMessageId, ToolUseId } from '@shared/graph/ids';
 import { MAWS_SERVER_NAME, MAWS_TOOL_NAMES, type MawsToolName } from '@shared/maws/tools'; // E1
 import { HISTORICAL_ARTIFACT_UPDATE } from '@shared/maws/artifact-update'; // P3-A
 import type { BrowserToolName } from '@shared/maws/browser'; // E4c
@@ -130,8 +132,8 @@ export function tableRowOf(toolName: string): TableRow {
 
 export interface ClassifyContext {
   denial: { kind: DenialKind; reason: string | null } | null;
-  terminalReason: string | null; // the turn's, once it closed
-  turnClosed: boolean;
+  turn: DenialTurn;
+  continued: boolean; // work of the model followed the call's result in its turn (`continuedAfter`)
   humanDecision: boolean;
   safeguard: SafeguardVerdict;
   imageResult: boolean;
@@ -140,12 +142,21 @@ export interface ClassifyContext {
 
 export const isAbortedReason = (terminalReason: string | null) => terminalReason !== null && terminalReason.startsWith('aborted');
 
-// The denial table under Derivation, one row per DENIAL_KINDS member. The interruption case needs the terminal reason,
-// so it is decided when the turn closes; until then a user-rejected denial reads as denied.
-export function denialDisposition(kind: DenialKind, terminalReason: string | null, turnClosed: boolean): { disposition: 'denied' | 'auto_denied' | 'stopped'; interruption: boolean } {
+// How a refused call's turn stands: whether it closed, and whether it closed as stopped, the state its line reads
+// (`closedAsStopped` in cells.ts), by the evidence each route has.
+export interface DenialTurn {
+  closed: boolean;
+  stopped: boolean;
+}
+
+// The denial table under Derivation, one row per DENIAL_KINDS member. UX wave U2 (decision 23, the architect's ruling R1
+// of 2026-11-13): a call the person rejected reads stopped from its result on, the same on every route; it reads denied
+// only once work of the model followed its result in the same turn (`continued`) or its turn closed otherwise than
+// stopped. A Stop and "Deny and stop the turn" leave exactly this; a Deny that lets the turn go on is `permission-rule`.
+export function denialDisposition(kind: DenialKind, turn: DenialTurn, continued: boolean): { disposition: 'denied' | 'auto_denied' | 'stopped'; interruption: boolean } {
   switch (kind) {
     case 'user-rejected':
-      return turnClosed && isAbortedReason(terminalReason) ? { disposition: 'stopped', interruption: true } : { disposition: 'denied', interruption: false };
+      return continued || (turn.closed && !turn.stopped) ? { disposition: 'denied', interruption: false } : { disposition: 'stopped', interruption: true };
     case 'permission-rule':
       return { disposition: 'denied', interruption: false };
     case 'automode-blocked':
@@ -158,6 +169,34 @@ export function denialDisposition(kind: DenialKind, terminalReason: string | nul
   }
 }
 
+// UX wave U2 (decision 23): the turn's `user-rejected` results after which work of the model follows, in one pass over
+// the turn's events. Work of the model is an assistant block of the main loop that belongs to another API message than
+// the one that made the call: a block's delta or completion, or a call, whose message id is set and is not the call's.
+// The engine starts a call before its message is whole, so a later call of the same message is no such work; nor is
+// another call's result, the interrupt marker, a steer, a hook's or a task's event, the engine's API error envelope, a
+// subagent's block or the turn's end.
+export function continuedAfter(events: readonly SessionEvent[]): ReadonlySet<ToolUseId> {
+  const messageOf = new Map<ToolUseId, ApiMessageId | null>();
+  const waiting = new Map<ToolUseId, ApiMessageId | null>(); // rejected results no work has followed yet, by the call's message
+  const continued = new Set<ToolUseId>();
+  for (const event of events) {
+    if (event.parentToolUseId !== null) continue;
+    if (event.kind === 'tool.result') {
+      if (event.denial === 'user-rejected') waiting.set(event.toolUseId, messageOf.get(event.toolUseId) ?? null);
+      continue;
+    }
+    const message = event.kind === 'tool.use' || event.kind === 'assistant.block.delta' || (event.kind === 'assistant.block.complete' && event.isApiErrorMessage !== true) ? event.apiMessageId : null;
+    if (event.kind === 'tool.use') messageOf.set(event.toolUseId, event.apiMessageId);
+    if (message === null || waiting.size === 0) continue;
+    for (const [call, of] of waiting) {
+      if (of === message) continue;
+      continued.add(call);
+      waiting.delete(call);
+    }
+  }
+  return continued;
+}
+
 // Total over tool names; `startsGroup` is the group state machine's (derive.ts) and starts false here.
 export function classifyTool(toolName: string, _input: unknown, context: ClassifyContext): ToolClassification {
   const row = tableRowOf(toolName);
@@ -165,7 +204,7 @@ export function classifyTool(toolName: string, _input: unknown, context: Classif
   let denial: ToolClassification['denial'] = null;
   if (context.denial) {
     groupable = false;
-    denial = { kind: context.denial.kind, reason: context.denial.reason, ...denialDisposition(context.denial.kind, context.terminalReason, context.turnClosed) };
+    denial = { kind: context.denial.kind, reason: context.denial.reason, ...denialDisposition(context.denial.kind, context.turn, context.continued) };
   }
   if (context.humanDecision) groupable = false;
   if (context.imageResult) groupable = false;

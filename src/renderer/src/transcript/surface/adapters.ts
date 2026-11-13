@@ -5,7 +5,7 @@ import { handbackReport, messageText, parsePeerMessage, peerLabel } from '@share
 import { engineQuestionsOf, type TranscriptProps, type TranscriptSite } from '@shared/engine/surface-rows';
 import type { ContentBlock, SessionEvent } from '@shared/graph/events';
 import type { ToolUseId } from '@shared/graph/ids';
-import { cellOf, type ToolRecord, type TurnContext } from '../model/cells';
+import { cellOf, turnContextOf, type ToolRecord, type TurnContext } from '../model/cells';
 import { rowId } from '../model/keys';
 import type { TranscriptState, TurnState } from '../model/reduce';
 import type { Cell, CellId, Row, RowId } from '../model/rows';
@@ -64,7 +64,6 @@ function toolRecords(turn: TurnState): Map<ToolUseId, ToolRecord> {
   toolCache.set(turn.events, records);
   return records;
 }
-const turnContext = (turn: TurnState): TurnContext => ({ closed: turn.state === 'closed', terminalReason: turn.ended?.terminalReason ?? null, lastAt: turn.events.at(-1)?.at ?? turn.startedAt });
 
 export interface ToolInput extends RowInput<'ToolUse'> { cell: Cell; record: ToolRecord; context: TurnContext }
 export function toolInputs(cell: Cell, turn: TurnState | undefined, revealed?: RowId | CellId): ToolInput[] {
@@ -75,7 +74,7 @@ export function toolInputs(cell: Cell, turn: TurnState | undefined, revealed?: R
   if (at < 0) return [];
   // X3 mergeReads merges consecutive Read/NotebookRead/LS calls, one file per call, under the first tool id.
   const count = cell.id.startsWith('cell:reads:') && cell.detail.kind === 'read' ? cell.detail.files.length : 1;
-  const context = turnContext(turn);
+  const context = turnContextOf(turn); // UX wave U2: the turn's derivation's own context
   return all.slice(at, at + count).map((rec) => {
     const native = count === 1 ? cell : cellOf(rec, context, cell.expanded);
     return { instanceId: rec.use.toolUseId, cell: native, record: rec, context, props: callProps(rec, native) };
@@ -242,7 +241,7 @@ export function sentInput(row: RowOf<'agent_message'>, turn: TurnState | undefin
   if (!turn || row.id === revealed || (row.peer !== undefined && row.peer.sender !== null)) return null;
   const toolUseId = row.peer?.toolUseId ?? turn.events.find((e): e is Extract<SessionEvent, { kind: 'tool.use' }> => e.kind === 'tool.use' && rowId.agentMessage(e.id) === row.id)?.toolUseId;
   const rec = toolUseId == null ? undefined : toolRecords(turn).get(toolUseId);
-  return rec === undefined ? null : { instanceId: rec.use.toolUseId, props: callProps(rec, cellOf(rec, turnContext(turn), false)) };
+  return rec === undefined ? null : { instanceId: rec.use.toolUseId, props: callProps(rec, cellOf(rec, turnContextOf(turn), false)) };
 }
 
 /**

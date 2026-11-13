@@ -14,7 +14,7 @@ import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
 import { HISTORICAL_BROWSER_TOOL_USE, MAWS_TOOL_USE } from './classify'; // E2, E4c
 import { isAskModTool } from './classify'; // DC9
 import { askModAnswers } from './ask-mod'; // DC9
-import { cellOf, editCounts, engineRefusalOf, filePathOf, resultJson, resultText, toolErrorText, type ToolRecord, type TurnContext } from './cells';
+import { cellOf, editCounts, engineRefusalOf, filePathOf, resultJson, resultText, toolErrorText, turnContextOf, type ToolRecord, type TurnContext } from './cells';
 import { firstJsonBlock, jsonObjectOf } from './cells'; // E2, E4c
 import { hookNotice, type HookRecord } from './hooks';
 import { agentMessageCopy, baseName, boundaryCopy, BRANCH_HISTORY_DETAIL, groupSummary, PLUGIN, processExitCopy, reconnectCopy, retryCopy, subagentSentence } from './copy';
@@ -371,7 +371,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   turnDerivations.count += 1;
   const ui = state?.ui;
   const expanded = ui ? ui.expandedTurns.has(turn.id) || (turn.state === 'open' && !ui.collapsedTurns.has(turn.id)) : false;
-  const context: TurnContext = { closed: turn.state === 'closed', terminalReason: turn.ended?.terminalReason ?? null, lastAt: turn.events.at(-1)?.at ?? turn.startedAt };
+  const context: TurnContext = turnContextOf(turn); // UX wave U2: shared with the mods' asks
   const items: Item[] = [];
   const tools = new Map<ToolUseId, ToolRecord>();
   const hooks = new Map<string, HookRecord>();
@@ -483,8 +483,11 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     if (block.blockType === 'thinking') {
       // A completed thinking block with no text (a signature-only block) has nothing to disclose: no row (W1).
       if (!live && block.buffer.trim() === '') return null;
-      const durationMs = block.completedAt !== null && block.markerEventId !== null ? Date.parse(block.completedAt) - Date.parse(at) : null;
-      return { kind: 'thinking', row: { id: block.rowId, turnId: turn.id, at, kind: 'thinking', messageUuid: block.messageUuid, text: block.buffer, live, durationMs } };
+      // UX wave U2 (X1, decision 2): the engine's recorded duration when one came; else, for a block that streamed, the
+      // time MAWS measured from its first delta to its completion
+      const recordedMs = block.recordedMs ?? null;
+      const durationMs = recordedMs ?? (block.completedAt !== null && block.markerEventId !== null ? Date.parse(block.completedAt) - Date.parse(at) : null);
+      return { kind: 'thinking', row: { id: block.rowId, turnId: turn.id, at, kind: 'thinking', messageUuid: block.messageUuid, text: block.buffer, live, durationMs, recordedMs } };
     }
     return null;
   };
@@ -1565,7 +1568,7 @@ function browserActionRow(rec: BrowserActionRecord, turnId: TurnId, context: Tur
   let stopped = false;
   let error: string | null = null;
   if (result) {
-    if (result.denial !== null && denialDisposition(result.denial, context.terminalReason, context.closed).disposition === 'stopped') stopped = true;
+    if (result.denial !== null && denialDisposition(result.denial, context, context.continued.has(use.toolUseId)).disposition === 'stopped') stopped = true;
     else if (result.isError) error = toolErrorText(resultText(result.content));
     else {
       const read = browserToolResultSchemaOf(tool).safeParse(firstJsonBlock(result.content));

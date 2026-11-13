@@ -136,7 +136,7 @@ describe('the classification of a cua_repl js call', () => {
     for (const name of CUA_JS_TOOLS) {
       expect(isCuaJsTool(name)).toBe(true);
       expect(presentationOf(name)).toBe('cell');
-      const c = classifyTool(name, {}, { denial: null, terminalReason: null, turnClosed: false, humanDecision: false, safeguard: 'not_evaluated', imageResult: false, isError: false });
+      const c = classifyTool(name, {}, { denial: null, turn: { closed: false, stopped: false }, continued: false, humanDecision: false, safeguard: 'not_evaluated', imageResult: false, isError: false });
       expect(c.groupable).toBe(false);
       expect(c.category).toBe('mcp');
     }

@@ -14,7 +14,7 @@ import { parseAskSteer } from '@shared/maws/ask'; // E1
 import type { AskAnswer } from '@shared/maws/tools'; // E1
 import { isInterruptionMarker, isLocalCommand } from './user-text';
 import { INTERRUPT_CUT } from '@shared/lane-a/interrupt-cut'; // P5 O9
-import { presentationOf } from './classify'; // P5 O9
+import { continuedAfter, presentationOf } from './classify'; // P5 O9; UX wave U2: continuedAfter
 import { isUnseenTurnEnd } from './gap'; // P5 O7 M8
 import { carriedOf } from '@shared/engine/arrival-schema'; // UX wave U3
 import { headRole } from './head'; // UX wave U3
@@ -36,6 +36,7 @@ export interface LiveBlock {
   completedAt: string | null;
   messageUuid: MessageUuid | null;
   model: string | null;
+  recordedMs?: number; // UX wave U2 (X1): a thinking block's duration as the engine recorded it, when its completion carried one
 }
 
 export type TurnOrigin = 'human' | 'engine' | 'peer';
@@ -1051,9 +1052,15 @@ const makesAgentsRow = (event: SessionEvent) =>
   event.kind === 'subagent.started' ||
   (event.kind === 'task.started' && (event.taskType === 'local_agent' || event.taskType === 'local_workflow'));
 
-// Interrupt evidence a turn retains: the engine's interrupt marker, or a call the human rejected.
-const wasInterrupted = (turn: TurnState) =>
-  turn.events.some((event) => (event.kind === 'user.message' && isInterruptionMarker(event.origin, event.content)) || (event.kind === 'tool.result' && event.denial === 'user-rejected'));
+// Interrupt evidence a turn retains: the engine's interrupt marker, or a call the human rejected that the model did not go
+// on after (UX wave U2, decision 23: a rejected call the turn went on from reads denied, so it is no Stop).
+const wasInterrupted = (turn: TurnState) => {
+  if (turn.events.some((event) => event.kind === 'user.message' && isInterruptionMarker(event.origin, event.content))) return true;
+  const rejected = turn.events.filter((event) => event.kind === 'tool.result' && event.denial === 'user-rejected');
+  if (rejected.length === 0) return false;
+  const continued = continuedAfter(turn.events);
+  return rejected.some((event) => event.kind === 'tool.result' && !continued.has(event.toolUseId));
+};
 
 // P5 O7 M8: the source's unseen turn end (model/gap.ts): every turn still open and accepted closes as a turn whose end
 // nobody saw (stopped on interrupt evidence, else completed); a prompt waiting for its turn stays pending.
@@ -1095,7 +1102,7 @@ function completeBlock(turn: TurnState, event: Event<'assistant.block.complete'>
   }
   if (entry) {
     const key = blockIdentityOf(entry.apiMessageId!, entry.blockIndex);
-    turn.live.set(key, { ...entry, buffer: type === 'tool_use' ? entry.buffer : blockContent(event.block), ...(type === 'text' && { sourceText: String(event.block.text ?? '') }), completed: true, isApiErrorMessage: event.isApiErrorMessage, completeEventId: event.id, completedAt: event.at, messageUuid: event.messageUuid, model: event.model });
+    turn.live.set(key, { ...entry, buffer: type === 'tool_use' ? entry.buffer : blockContent(event.block), ...(type === 'text' && { sourceText: String(event.block.text ?? '') }), completed: true, isApiErrorMessage: event.isApiErrorMessage, completeEventId: event.id, completedAt: event.at, messageUuid: event.messageUuid, model: event.model, ...(event.thinkingDurationMs !== undefined && { recordedMs: event.thinkingDurationMs }) });
     return;
   }
   if (type === 'tool_use') return;
@@ -1104,6 +1111,7 @@ function completeBlock(turn: TurnState, event: Event<'assistant.block.complete'>
   turn.live.set(blockIdentityOf(event.apiMessageId, blockIndex), {
     apiMessageId: event.apiMessageId, blockIndex, blockType: type, buffer: blockContent(event.block), ...(type === 'text' && { sourceText: String(event.block.text ?? '') }), rowId: liveRowId(type, event.apiMessageId, blockIndex),
     completed: true, isApiErrorMessage: event.isApiErrorMessage, markerEventId: null, completeEventId: event.id, completedAt: event.at, messageUuid: event.messageUuid, model: event.model,
+    ...(event.thinkingDurationMs !== undefined && { recordedMs: event.thinkingDurationMs }),
   });
 }
 
