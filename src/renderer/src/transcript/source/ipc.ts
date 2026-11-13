@@ -141,23 +141,33 @@ function readyAfter(after: number, ms: number, ended: AbortSignal | null): Promi
   });
 }
 
-// After a read the host's absence failed for good: the key is read again at the next ready newer than `after`, if it is
-// still failed then; nothing is asked once the key is let go or whole.
+// After a read the host's absence failed for good: once the key has failed, it is read again at a ready newer than
+// `after` (the ready the failed read was made at, or the revision when the wait ran out), one already in the hosts store
+// when the key fails included (a ready that overtook the read), so each ready is taken once. Nothing is asked once the
+// key is let go, whole, or read again by someone else (a Retry), whose read waits for its own ready.
 function readAgainAtReady(key: string, after: number): void {
   const transcripts = () => useTranscriptStore.getState();
+  let failed = false;
+  let done = false;
   const stop = () => {
+    done = true;
     offHosts();
     offTranscripts();
   };
-  const offHosts = useHosts.subscribe(() => {
+  const check = () => {
+    if (done) return;
+    const phase = transcripts().entries[key]?.phase;
+    if (!transcripts().attached(key) || phase === 'live' || (failed && phase !== 'failed')) return stop();
+    if (phase !== 'failed') return;
+    failed = true;
     const host = engineHost();
     if (host?.state !== 'ready' || host.revision <= after) return;
     stop();
-    if (transcripts().entries[key]?.phase === 'failed') void transcripts().retry(key);
-  });
-  const offTranscripts = useTranscriptStore.subscribe(() => {
-    if (!transcripts().attached(key) || transcripts().entries[key]?.phase === 'live') stop();
-  });
+    void transcripts().retry(key);
+  };
+  const offHosts = useHosts.subscribe(check);
+  const offTranscripts = useTranscriptStore.subscribe(check);
+  check();
 }
 
 async function eventsOnceHostIsBack(client: MawsBridge, appSessionId: AppSessionId, watch: KnownWatch | null): Promise<CommandResult<'session.events'>> {

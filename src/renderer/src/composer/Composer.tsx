@@ -403,9 +403,9 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
 
   // The plain stop (the Stop button): nothing runs after it (W1). The UX wave, U9 (S-01): followed, so a failed one says so
   // and one on its way past 300 ms reads "Stopping…"
-  const stop = () => followStop(appSessionId, controls?.interrupt({ cancelEngineQueued: false, holdEngineQueued: true }));
+  const stop = () => followStop(appSessionId, () => controls?.interrupt({ cancelEngineQueued: false, holdEngineQueued: true }));
   // Esc's interrupt: a waiting `next` steer runs right after it (W1)
-  const interrupt = () => followStop(appSessionId, controls?.interrupt({ cancelEngineQueued: false }));
+  const interrupt = () => followStop(appSessionId, () => controls?.interrupt({ cancelEngineQueued: false }));
   // P5 O16 M3b fix wave 1: the re-attaching session's Stop ends the session (its ladder), as the slow notice says
   const end = () =>
     void client.invoke('session.stop', { appSessionId, reason: 'stop' }).then((result) => {

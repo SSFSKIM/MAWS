@@ -37,7 +37,7 @@ export function stopFocused(client: MawsBridge = ipc): void {
     const entries = useQueueStore.getState().bySession.get(appSessionId)?.entries ?? [];
     if (status?.process !== 'ready' || !isBusy(status, entries)) return;
   }
-  followStop(appSessionId, controls?.interrupt({ cancelEngineQueued: false, holdEngineQueued: true })); // the UX wave, U9 (S-01): a failed one says so
+  followStop(appSessionId, () => controls?.interrupt({ cancelEngineQueued: false, holdEngineQueued: true })); // the UX wave, U9 (S-01): one decision closes it (offline, one out), and a failed one says so
 }
 
 export function focusFocused(): void {
