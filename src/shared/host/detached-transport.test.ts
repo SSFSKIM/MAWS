@@ -688,6 +688,7 @@ describe('the detached transport: early exits and the crash ladder', () => {
     await until(() => old.emit('maws.pane.show', PANE as never)).finally(() => early.mockRestore());
     await until(() => emit.mock.calls.some(([name]) => name === 'maws.pane.show'));
     await old.die(); // SIGKILL while its show_pane call waits on the answer
+    await until(() => state().state !== 'ready'); // its link's close heard: no request goes to it any more
     const whileRestarting = supervisor.dispatch('engine-host', 'host.op', OP('op-pane-answer-while-restarting') as never);
     await until(() => state().state === 'ready' && state().pid !== old.pid);
     const counted = { restarts: state().restarts, lastExit: supervisor.facts('engine-host').lastExit, spawned: spawn.mock.calls.length };
