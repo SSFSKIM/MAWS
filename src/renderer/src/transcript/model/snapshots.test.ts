@@ -108,7 +108,8 @@ describe('presentation model snapshots', () => {
     const events = journalToEvents(loadJournal('pass1', 'permission-roundtrip')).filter((event) => event.seq !== null && event.seq <= 47);
     const rows = await snapshot('paused/pass1-permission-roundtrip-47', events);
     const group = rows.find((row) => row.kind === 'group');
-    expect(group).toMatchObject({ state: 'active', activeLabel: expect.stringMatching(/^Running `.+` for /) });
+    expect(group).toMatchObject({ state: 'active', summary: 'Ran a command' }); // UX wave U2: the caption so far; the running line is M4's
+    expect(group).not.toHaveProperty('activeLabel');
     expect(group?.kind === 'group' && group.cells.map((cell) => [cell.toolName, cell.status])).toEqual([['thinking', 'done'], ['Bash', 'running']]);
     expect(rows.filter((row) => row.kind === 'cell')).toEqual([]);
   });
