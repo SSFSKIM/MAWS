@@ -27,10 +27,15 @@ export interface DockedCardFrameProps {
   children: ReactNode;
 }
 
-// Sessions whose frame is unmounting with focus inside it, in the commit that unmounts it. A frame that mounts for the
+// Sessions whose frame unmounted with focus inside it, each with the mark of that hand-over. A frame that mounts for the
 // same session in that commit (the next docked request, behind the `1 more waiting` pager) takes the focus instead
 // of the editor, which stays hidden behind it: its own mount sees focus on the body by then, never in its pane.
-const handingOver = new Set<AppSessionId>();
+// UX wave U1a (decision 17; the ruling of 2026-11-13): the next request can also dock a commit later, the engine asking
+// about its next call once the first is answered. The mark then lives until the animation frame in which the editor's
+// deferred focus has had its turn, and a frame mounting meanwhile claims it when the focus is on the body or inside its
+// own pane; anywhere else the person moved it, and the mark is dropped. After that frame, the editor holds the focus
+// inside the pane and the next frame takes it by `before`, or nothing does. No timer: the frame order bounds it.
+const handingOver = new Map<AppSessionId, object>();
 
 export function DockedCardFrame({ appSessionId, title, titleAlone = false, onAccept, onDecline, onAllowOnce = null, onAllowLasting = null, children }: DockedCardFrameProps) {
   const frameRef = useRef<HTMLDivElement>(null);
@@ -44,21 +49,28 @@ export function DockedCardFrame({ appSessionId, title, titleAlone = false, onAcc
     const pane = frame.closest('[data-pane]');
     const active = document.activeElement;
     const before = pane !== null && active instanceof HTMLElement && active !== document.body && pane.contains(active) ? active : null;
-    const handedOver = handingOver.delete(appSessionId);
+    // A mark claimed with the focus elsewhere than the body or this pane (`before`) is dropped: the person moved it.
+    const handedOver = handingOver.delete(appSessionId) && (active === null || active === document.body);
     if (before || handedOver) frame.focus();
     return () => {
       // Still in the document here (effect cleanups run before the host node is removed).
       const now = document.activeElement;
       if (now !== null && now !== document.body && !frame.contains(now)) return;
       // Layout effects of this commit run before its microtasks: a frame mounting for the session now claims focus.
-      handingOver.add(appSessionId);
+      const mark = {};
+      handingOver.set(appSessionId, mark);
+      const ours = () => handingOver.get(appSessionId) === mark;
       queueMicrotask(() => {
-        if (!handingOver.delete(appSessionId)) return;
+        if (!ours()) return;
         const target = useComposerStore.getState().focusTargets.get(appSessionId);
         // The composer's editor is visible again: its Frame's `hidden` cleared in the commit this frame unmounted in,
         // and `focusEditor` is Tiptap's `commands.focus()`, which defers to the next frame besides.
         if (target) target.focusEditor();
         else if (before?.isConnected && !frame.contains(before)) before.focus();
+        // Registered after the editor's own deferred focus, so it runs once that has had its turn in the same frame.
+        requestAnimationFrame(() => {
+          if (ours()) handingOver.delete(appSessionId);
+        });
       });
     };
   }, [appSessionId]);

@@ -347,9 +347,12 @@ test("gate.yml's proven-VM groups run on Solo Mac, or the named VM lane alone; e
   // The mini's own placement, as with no group on HOSTED_MAC_E2E; the list's waiters are pinned by their own test below.
   const own = { ...Object.fromEntries(names.map((name) => [name, workflowList(workflow, name)])), HOSTED_MAC_E2E: '' };
   assert.equal(own.MAC_SHARED_E2E, '');
-  assert.equal(own.MAC_VM_E2E, 'document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations deliverables browser browser-comment browser-import agents c12 available design-systems browser-chrome composer layout delivery connectors-oauth artifacts browser-cua connectors connectors-direct');
+  assert.equal(own.MAC_VM_E2E, 'document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations deliverables browser browser-comment browser-import agents c12 available design-systems browser-chrome composer layout delivery connectors-oauth artifacts browser-cua connectors connectors-direct default');
   const proven = ['document-app', 'widgets', 'to-human', 'transcript', 'panel', 'c7', 'code', 'scm', 'library', 'document', 'settings', 'tools', 'dashboard', 'side', 'presentations',
-    'deliverables', 'browser', 'browser-comment', 'browser-import', 'agents', 'c12', 'available', 'design-systems', 'browser-chrome', 'composer', 'layout', 'delivery', 'connectors-oauth', 'artifacts', 'browser-cua', 'connectors', 'connectors-direct'];
+    'deliverables', 'browser', 'browser-comment', 'browser-import', 'agents', 'c12', 'available', 'design-systems', 'browser-chrome', 'composer', 'layout', 'delivery', 'connectors-oauth', 'artifacts', 'browser-cua', 'connectors', 'connectors-direct', 'default'];
+  // default's own 45 minutes (E2E_MINUTES), the solo wait and the uplink's margin on top; 30 and the margin on the guest's own label.
+  const solo = (group) => (group === 'default' ? 90 : 75);
+  const guestOnly = (group) => (group === 'default' ? 80 : 65);
   // The repository's variables as they stand, and the default set: class 1a on the pool, unit:darwin and every class-1
   // group on the Mac but desk-web.
   const { outputs, summary } = plan({ ...own, GATE_RUNNER: 'pool', GATE_E2E_RUNNER: 'macos', HEAD_MESSAGE: 'ci-gate: test' });
@@ -358,21 +361,21 @@ test("gate.yml's proven-VM groups run on Solo Mac, or the named VM lane alone; e
   assert.deepEqual(home, ['discover']);
   const groups = Object.entries(placement(outputs));
   assert.ok(groups.length > 30, `the class-1 set (${groups.length} groups)`);
-  for (const [group, where] of groups) assert.deepEqual(where, offMac.includes(group) ? [box, 30] : home.includes(group) ? [homeMac, 40] : group === 'daemon-unit' ? [ec2Mac, 40] : proven.includes(group) ? [soloMac, 75] : [mac, 40], group);
+  for (const [group, where] of groups) assert.deepEqual(where, offMac.includes(group) ? [box, 30] : home.includes(group) ? [homeMac, 40] : group === 'daemon-unit' ? [ec2Mac, 40] : proven.includes(group) ? [soloMac, solo(group)] : [mac, 40], group);
   assert.equal(outputs.unit_darwin, 'true');
   assert.equal(outputs.unit_darwin_runner, JSON.stringify(mac));
   assert.deepEqual(JSON.parse(outputs.timeouts), { static: 30, unit: 30, probes: 30, unit_darwin: 40 });
   assert.doesNotMatch(summary, /Shared Mac|MAC_SHARED_E2E|MAC_VM_E2E|Lane/);
-  assert.match(summary, /\. Solo Mac \(the exclusive instance or the guest, whichever is free\): e2e:artifacts, e2e:library, e2e:side, e2e:tools, e2e:to-human, e2e:deliverables, e2e:panel, e2e:browser, e2e:browser-comment, e2e:browser-import, e2e:settings, e2e:transcript, e2e:code, e2e:agents, e2e:widgets, e2e:c7, e2e:scm, e2e:c12, e2e:available, e2e:document, e2e:document-app, e2e:presentations, e2e:design-systems, e2e:browser-cua, e2e:browser-chrome, e2e:dashboard, e2e:connectors, e2e:connectors-direct, e2e:connectors-oauth, e2e:delivery\. Out\/ built on the pool \(e2e-build\) for the guest-eligible jobs: harness, plain\.\n$/);
+  assert.match(summary, /\. Solo Mac \(the exclusive instance or the guest, whichever is free\): e2e:default, e2e:artifacts, e2e:library, e2e:side, e2e:tools, e2e:to-human, e2e:deliverables, e2e:panel, e2e:browser, e2e:browser-comment, e2e:browser-import, e2e:settings, e2e:transcript, e2e:code, e2e:agents, e2e:widgets, e2e:c7, e2e:scm, e2e:c12, e2e:available, e2e:document, e2e:document-app, e2e:presentations, e2e:design-systems, e2e:browser-cua, e2e:browser-chrome, e2e:dashboard, e2e:connectors, e2e:connectors-direct, e2e:connectors-oauth, e2e:delivery\. Out\/ built on the pool \(e2e-build\) for the guest-eligible jobs: harness, plain\.\n$/);
   for (const [lane, guest] of [['vm', vmMac], ['vm-trial', vmTrialMac]]) {
     const laned = plan({ ...own, GATE_RUNNER: 'pool', GATE_E2E_RUNNER: 'macos', HEAD_MESSAGE: `ci-gate: test\n\nLane: ${lane}` });
-    const expected = Object.fromEntries(groups.map(([group, where]) => [group, proven.includes(group) ? [guest, 65] : where]));
+    const expected = Object.fromEntries(groups.map(([group, where]) => [group, proven.includes(group) ? [guest, guestOnly(group)] : where]));
     assert.deepEqual(placement(laned.outputs), expected, lane);
     assert.equal(laned.outputs.unit_darwin_runner, JSON.stringify(mac), lane);
     assert.deepEqual(JSON.parse(laned.outputs.timeouts), JSON.parse(outputs.timeouts), lane);
     for (const job of ['static', 'unit', 'probes']) assert.equal(laned.outputs[`${job}_runner`], outputs[`${job}_runner`], `${lane} ${job}`);
     assert.doesNotMatch(laned.summary, /Shared Mac|Solo Mac/);
-    assert.match(laned.summary, new RegExp(`\\. Lane: ${lane}, on \\[${guest[0]}\\] alone: e2e:artifacts, e2e:library, e2e:side, e2e:tools, e2e:to-human, e2e:deliverables, e2e:panel, e2e:browser, e2e:browser-comment, e2e:browser-import, e2e:settings, e2e:transcript, e2e:code, e2e:agents, e2e:widgets, e2e:c7, e2e:scm, e2e:c12, e2e:available, e2e:document, e2e:document-app, e2e:presentations, e2e:design-systems, e2e:browser-cua, e2e:browser-chrome, e2e:dashboard, e2e:connectors, e2e:connectors-direct, e2e:connectors-oauth, e2e:delivery\\. Out/ built on the pool \\(e2e-build\\) for the guest-eligible jobs: harness, plain\\.\\n$`), lane);
+    assert.match(laned.summary, new RegExp(`\\. Lane: ${lane}, on \\[${guest[0]}\\] alone: e2e:default, e2e:artifacts, e2e:library, e2e:side, e2e:tools, e2e:to-human, e2e:deliverables, e2e:panel, e2e:browser, e2e:browser-comment, e2e:browser-import, e2e:settings, e2e:transcript, e2e:code, e2e:agents, e2e:widgets, e2e:c7, e2e:scm, e2e:c12, e2e:available, e2e:document, e2e:document-app, e2e:presentations, e2e:design-systems, e2e:browser-cua, e2e:browser-chrome, e2e:dashboard, e2e:connectors, e2e:connectors-direct, e2e:connectors-oauth, e2e:delivery\\. Out/ built on the pool \\(e2e-build\\) for the guest-eligible jobs: harness, plain\\.\\n$`), lane);
   }
   // composer and layout, outside the class-1 set, take the guest's labels when a run names them.
   const named = { ...own, GATE_RUNNER: 'pool', GATE_E2E_RUNNER: 'macos' };
@@ -381,7 +384,7 @@ test("gate.yml's proven-VM groups run on Solo Mac, or the named VM lane alone; e
   // The measured groups, which only a run naming them takes; class 1a on the Mac carries the wait too.
   const measured = plan({ ...own, HEAD_MESSAGE: `ci-gate: test\n\nGates: ${own.MEASURED_E2E.split(/\s+/).filter((group) => !own.LIVE_E2E.includes(group)).map((group) => `e2e:${group}`).join(',')}\nRunner: macos\nClass1a: macos` }).outputs;
   // daemon-idle-render's three windows take its own 90 minutes (E2E_MINUTES, P5 O17 M7), the home Mac's wait on top.
-  assert.equal(own.E2E_MINUTES, 'daemon-idle-render=90 p1-live=45');
+  assert.equal(own.E2E_MINUTES, 'daemon-idle-render=90 p1-live=45 default=45');
   for (const [group, where] of Object.entries(placement(measured))) assert.deepEqual(where, [homeMac, group === 'daemon-idle-render' ? 100 : UNBUILT_MEASURED.has(group) ? 55 : 70], group);
   assert.deepEqual(JSON.parse(measured.timeouts), { static: 40, unit: 40, probes: 40, unit_darwin: 40 });
   // A live run of every live group: all on the home Mac; p1-live, every sitting in one invocation, its own 45 minutes.
@@ -552,9 +555,11 @@ test('every MAC_VM_E2E name is unit:darwin or an e2e group that runs on the Mac,
   const { scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
   for (const name of list('MAC_VM_E2E')) {
     if (name === 'unit:darwin') continue;
-    assert.ok(name !== 'default' && !list('POOL_E2E').includes(name) && !list('LIVE_E2E').includes(name), `${name} is an e2e group that runs on the Mac`);
+    assert.ok(!list('POOL_E2E').includes(name) && !list('LIVE_E2E').includes(name), `${name} is an e2e group that runs on the Mac`);
     assert.ok(!list('MEASURED_E2E').includes(name), `${name} is not measured`);
-    assert.match(scripts[`e2e:${name}`], /^scripts\/e2e-build\.sh (harness|plain) && /, `${name} restores an e2e-build variant in the guest`);
+    // default's script builds nothing: its job runs `pnpm build` on the host and restores the plain out/ in the guest.
+    if (name === 'default') assert.doesNotMatch(scripts.e2e, /e2e-build|electron-vite/, 'default builds in its job, not its script');
+    else assert.match(scripts[`e2e:${name}`], /^scripts\/e2e-build\.sh (harness|plain) && /, `${name} restores an e2e-build variant in the guest`);
   }
 });
 
@@ -588,22 +593,46 @@ test("a job on the guest's labels is guest-eligible: e2e_vm with its variant, e2
   assert.deepEqual([unitOnly.unit_darwin_runner, unitOnly.e2e_vm, unitOnly.e2e_build, unitOnly.pool], [JSON.stringify(soloMac), '[]', '[]', 'false']);
 });
 
-// default's out/ is the e2e job's own `pnpm build` (the whole build, desk-web and desk-hub with it), and a group like
-// desk-web-hub builds and runs in another package: neither restores an e2e-build variant.
+// A group like desk-web-hub builds and runs in another package: it restores no e2e-build variant.
 test("a MAC_VM_E2E group not built through scripts/e2e-build.sh stays off the guest's labels, whatever the Lane:, and the summary says so", () => {
-  const gates = 'Gates: e2e:default,e2e:desk-web-hub,e2e:widgets\nRunner: macos';
-  const { outputs, summary } = plan({ MAC_VM_E2E: 'default desk-web-hub widgets', HEAD_MESSAGE: `ci-gate: test\n\n${gates}` });
-  assert.deepEqual(placement(outputs), { default: [mac, 40], 'desk-web-hub': [mac, 40], widgets: [soloMac, 75] });
+  const gates = 'Gates: e2e:desk-web-hub,e2e:widgets\nRunner: macos';
+  const { outputs, summary } = plan({ MAC_VM_E2E: 'desk-web-hub widgets', HEAD_MESSAGE: `ci-gate: test\n\n${gates}` });
+  assert.deepEqual(placement(outputs), { 'desk-web-hub': [mac, 40], widgets: [soloMac, 75] });
   assert.deepEqual(matrix(outputs.e2e_vm), [['widgets', 'harness', soloMac]]);
-  assert.deepEqual(JSON.parse(outputs.e2e_host).map((entry) => entry.group), ['default', 'desk-web-hub']);
-  assert.match(summary, /\. Solo Mac \(the exclusive instance or the guest, whichever is free\): e2e:widgets\. On MAC_VM_E2E but not built through scripts\/e2e-build\.sh, so off the guest: e2e:default, e2e:desk-web-hub\. Out\/ built on the pool \(e2e-build\) for the guest-eligible jobs: harness\.\n$/);
-  const laned = plan({ MAC_VM_E2E: 'default desk-web-hub widgets', MAC_SHARED_E2E: 'desk-web-hub', HEAD_MESSAGE: `ci-gate: test\n\n${gates}\nLane: vm` });
+  assert.deepEqual(JSON.parse(outputs.e2e_host).map((entry) => entry.group), ['desk-web-hub']);
+  assert.match(summary, /\. Solo Mac \(the exclusive instance or the guest, whichever is free\): e2e:widgets\. On MAC_VM_E2E but not built through scripts\/e2e-build\.sh, so off the guest: e2e:desk-web-hub\. Out\/ built on the pool \(e2e-build\) for the guest-eligible jobs: harness\.\n$/);
+  const laned = plan({ MAC_VM_E2E: 'desk-web-hub widgets', MAC_SHARED_E2E: 'desk-web-hub', HEAD_MESSAGE: `ci-gate: test\n\n${gates}\nLane: vm` });
   // On both lists, it runs shared, as a group off MAC_VM_E2E would.
-  assert.deepEqual(placement(laned.outputs), { default: [mac, 40], 'desk-web-hub': [sharedMac, 90], widgets: [vmMac, 65] });
-  assert.match(laned.summary, / On MAC_VM_E2E but not built through scripts\/e2e-build\.sh, so off the guest: e2e:default, e2e:desk-web-hub\./);
+  assert.deepEqual(placement(laned.outputs), { 'desk-web-hub': [sharedMac, 90], widgets: [vmMac, 65] });
+  assert.match(laned.summary, / On MAC_VM_E2E but not built through scripts\/e2e-build\.sh, so off the guest: e2e:desk-web-hub\./);
   // Nothing guest-eligible, nothing built.
-  const none = plan({ MAC_VM_E2E: 'default', HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:default\nRunner: macos\nLane: vm' }).outputs;
+  const none = plan({ MAC_VM_E2E: 'desk-web-hub', HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:desk-web-hub\nRunner: macos\nLane: vm' }).outputs;
   assert.deepEqual([none.e2e_host, none.e2e_vm, none.e2e_build, none.pool], [none.e2e, '[]', '[]', 'false']);
+});
+
+// default's out/ is the plain variant: on the host its job runs the whole `pnpm build` (desk-web and desk-hub with it,
+// which none of its specs reads), and on the guest's labels it restores e2e-build's plain out/ and builds nothing. Its
+// own specs are derived from the run's group names alone (e2e-default-specs.mjs, which its test pins on this tree for
+// both placements), so the plan hands the derivation the same groups and DefaultBeside wherever default goes.
+test("default on MAC_VM_E2E is guest-eligible on the plain variant, builds only on the host, and its derivation's inputs are the same either way", () => {
+  const gates = 'Gates: e2e:default,e2e:widgets,e2e:artifacts-perf\nRunner: macos\nDefaultBeside: library';
+  const lists = { MEASURED_E2E: 'artifacts-perf', MAC_VM_E2E: 'widgets artifacts-perf' };
+  const host = plan({ ...lists, HEAD_MESSAGE: `ci-gate: test\n\n${gates}` }).outputs;
+  const solo = plan({ ...lists, MAC_VM_E2E: 'widgets artifacts-perf default', HEAD_MESSAGE: `ci-gate: test\n\n${gates}` }).outputs;
+  const vm = plan({ ...lists, MAC_VM_E2E: 'widgets artifacts-perf default', HEAD_MESSAGE: `ci-gate: test\n\n${gates}\nLane: vm` }).outputs;
+  const entry = (outputs) => JSON.parse(outputs.e2e).find((job) => job.group === 'default');
+  assert.deepEqual([entry(host).build, entry(host).variant, JSON.parse(entry(host).runner)], [true, undefined, mac]);
+  assert.deepEqual([entry(solo).build, entry(solo).variant, JSON.parse(entry(solo).runner)], [false, 'plain', soloMac]);
+  assert.deepEqual([entry(vm).build, entry(vm).variant, JSON.parse(entry(vm).runner)], [false, 'plain', vmMac]);
+  assert.deepEqual(matrix(host.e2e_vm), [['widgets', 'harness', soloMac]]);
+  assert.deepEqual(matrix(solo.e2e_vm), [['default', 'plain', soloMac], ['widgets', 'harness', soloMac]]);
+  assert.deepEqual([JSON.parse(host.e2e_build), JSON.parse(solo.e2e_build)], [['harness'], ['harness', 'plain']]);
+  // The measured group keeps the home Mac in all three.
+  for (const outputs of [host, solo, vm]) assert.deepEqual(JSON.parse(JSON.parse(outputs.e2e).find((job) => job.group === 'artifacts-perf').runner), homeMac);
+  // What e2e-default-specs.mjs reads: the e2e matrix's group names and default_beside.
+  const read = (outputs) => [JSON.parse(outputs.e2e).map((job) => job.group), outputs.default_beside];
+  assert.deepEqual(read(solo), read(host));
+  assert.deepEqual(read(vm), read(host));
 });
 
 // The workflow's proven-VM groups build only the variants this run needs, even when a solo job lands on the host.
@@ -612,7 +641,7 @@ test("gate.yml's proven-VM groups split into e2e_vm with just their build varian
   const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'POPPLER_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E', 'HOSTED_MAC_E2E', 'MAC_SECRET_E2E', 'MAC_HOME_E2E', 'LAUNCHD_E2E', 'E2E_MINUTES'];
   // The mini's own placement, as with no group on HOSTED_MAC_E2E; the list's waiters are pinned by their own test below.
   const own = { ...Object.fromEntries(names.map((name) => [name, workflowList(workflow, name)])), HOSTED_MAC_E2E: '' };
-  assert.equal(own.MAC_VM_E2E, 'document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations deliverables browser browser-comment browser-import agents c12 available design-systems browser-chrome composer layout delivery connectors-oauth artifacts browser-cua connectors connectors-direct');
+  assert.equal(own.MAC_VM_E2E, 'document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations deliverables browser browser-comment browser-import agents c12 available design-systems browser-chrome composer layout delivery connectors-oauth artifacts browser-cua connectors connectors-direct default');
   const variants = {
     'document-app': 'plain', widgets: 'harness', 'to-human': 'harness', transcript: 'harness', panel: 'harness',
     c7: 'harness', code: 'harness', scm: 'plain', library: 'plain', document: 'harness',
@@ -620,15 +649,15 @@ test("gate.yml's proven-VM groups split into e2e_vm with just their build varian
     deliverables: 'harness', browser: 'harness', 'browser-comment': 'harness', 'browser-import': 'harness',
     agents: 'harness', c12: 'plain', available: 'harness', 'design-systems': 'plain', 'browser-chrome': 'harness',
     composer: 'harness', layout: 'plain', delivery: 'plain', 'connectors-oauth': 'plain', artifacts: 'plain',
-    'browser-cua': 'harness', connectors: 'plain', 'connectors-direct': 'plain',
+    'browser-cua': 'harness', connectors: 'plain', 'connectors-direct': 'plain', default: 'plain',
   };
   const { scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-  for (const [group, variant] of Object.entries(variants)) assert.ok(scripts[`e2e:${group}`].startsWith(`scripts/e2e-build.sh ${variant} && `), group);
+  for (const [group, variant] of Object.entries(variants)) if (group !== 'default') assert.ok(scripts[`e2e:${group}`].startsWith(`scripts/e2e-build.sh ${variant} && `), group);
   const today = { ...own, GATE_RUNNER: 'pool', GATE_E2E_RUNNER: 'macos' };
   const linuxGroups = own.LINUX_E2E.split(/\s+/);
   const linuxGates = `Gates: static,unit,probes,${linuxGroups.map((group) => `e2e:${group}`).join(',')}\nRunner: linux`;
   const defaultHost = own.CLASS1_E2E.split(/\s+/).filter((group) => !(group in variants) && (group === 'default' ? 'e2e' : `e2e:${group}`) in scripts).map((group) => [group, undefined, own.POOL_E2E.split(/\s+/).includes(group) ? box : own.MAC_HOME_E2E.split(/\s+/).includes(group) ? homeMac : group === 'daemon-unit' ? ec2Mac : mac]);
-  const defaultGuests = ['artifacts', 'library', 'side', 'tools', 'to-human', 'deliverables', 'panel', 'browser', 'browser-comment', 'browser-import', 'settings', 'transcript', 'code',
+  const defaultGuests = ['default', 'artifacts', 'library', 'side', 'tools', 'to-human', 'deliverables', 'panel', 'browser', 'browser-comment', 'browser-import', 'settings', 'transcript', 'code',
     'agents', 'widgets', 'c7', 'scm', 'c12', 'available', 'document', 'document-app', 'presentations', 'design-systems', 'browser-cua', 'browser-chrome', 'dashboard', 'connectors', 'connectors-direct', 'connectors-oauth', 'delivery'];
   const runs = [
     ['the default macOS set', 'ci-gate: test', defaultHost, defaultGuests, ['harness', 'plain'], 'true'],
@@ -776,8 +805,8 @@ test("Lane: hosted hosts every eligible group of the run, gate.yml's whole defau
   assert.deepEqual(placement(laned.outputs), Object.fromEntries(groups.map((group) => [group, group in kept ? was[group] : [waiter, 100]])));
   // unit:darwin and class 1a are where they were.
   for (const key of ['unit_darwin', 'unit_darwin_runner', 'static_runner', 'unit_runner', 'probes_runner', 'timeouts']) assert.equal(laned.outputs[key], before.outputs[key], key);
-  // e2e-build makes only the variant of the one guest-eligible job left, connectors-oauth on MAC_VM_E2E.
-  assert.deepEqual(matrix(laned.outputs.e2e_vm), [['connectors-oauth', 'plain', soloMac]]);
+  // e2e-build makes only the variant of the guest-eligible jobs left, default and connectors-oauth on MAC_VM_E2E.
+  assert.deepEqual(matrix(laned.outputs.e2e_vm), [['default', 'plain', soloMac], ['connectors-oauth', 'plain', soloMac]]);
   assert.deepEqual(JSON.parse(laned.outputs.e2e_build), ['plain']);
   const hostedGroups = groups.filter((group) => !(group in kept));
   assert.deepEqual(JSON.parse(laned.outputs.e2e_hosted).map((entry) => entry.group), hostedGroups);

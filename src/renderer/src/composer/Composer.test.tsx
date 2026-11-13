@@ -440,6 +440,29 @@ describe("composer DOM under C5's dispatcher", () => {
     await waitFor(() => expect(invoked('session.answer').at(-1)).toEqual({ appSessionId: A_ID, requestId: 'req-2', answer: { kind: 'permission', decision: 'allow', scope: 'once' } }));
   });
 
+  // UX wave U1a (decision 17, the ruling of 2026-11-13): the next request can be listed a commit after the answered one
+  // left, before the editor's deferred focus has had its turn; its frame takes the focus all the same
+  it('gives the focus to a docked request listed a commit after the answered one left', async () => {
+    live(A);
+    mount([{ index: 0, id: A }]);
+    act(() => editorOf().focus());
+    const first = permission({ requestId: 'req-1' as never, at: '2026-09-29T09:00:00.000Z' });
+    const second = permission({ requestId: 'req-2' as never, at: '2026-09-29T09:01:00.000Z' });
+    const [one, two] = [pageItem(itemFor(first, A_ID)), pageItem(itemFor(second, A_ID))];
+    const requests = new Map([
+      [one.id, first],
+      [two.id, second],
+    ]);
+    act(() => useAttention.setState({ bySession: new Map([[A, [one]]]), requests, version: 1 }));
+    await waitFor(() => expect(document.activeElement?.getAttribute('data-docked-frame')).toBe(A));
+    act(() => useAttention.setState({ bySession: new Map([[A, []]]), version: 2 })); // answered: the list lets it go
+    await Promise.resolve(); // the frame's microtask has asked the editor for the focus, which it takes a frame later
+    act(() => useAttention.setState({ bySession: new Map([[A, [two]]]), version: 3 })); // the engine's next request
+    const next = composerOf(0).querySelector<HTMLElement>('[data-docked-frame]')!;
+    expect(next.querySelector('[data-request-card]')?.getAttribute('data-request-card')).toBe(two.id);
+    expect(document.activeElement).toBe(next);
+  });
+
   it('docks a foreign card ahead of any request, hides the editor the same way, and answers Enter through its own onAccept', async () => {
     live(A);
     mount([{ index: 0, id: A }]);
