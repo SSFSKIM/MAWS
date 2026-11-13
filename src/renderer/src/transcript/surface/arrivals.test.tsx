@@ -82,8 +82,10 @@ describe('the arrival rows with a mods surface attached', () => {
   it('opening the line asks again with the message expanded', async () => {
     const store = await mounted(inbound());
     renderRow(of(store.rows(), 'agent_message'), { storeKey: store.key });
+    await act(() => fake.reply('session.ui.render', answer(asks('UserMessage')[0]!.props)));
     fireEvent.click(screen.getByRole('button', { name: /^Message from @docs/ }));
-    expect(asks('UserMessage').at(-1)?.props).toMatchObject({ isExpanded: true });
+    expect(asks('UserMessage')).toHaveLength(2);
+    expect(asks('UserMessage')[1]?.props).toMatchObject({ isExpanded: true });
   });
 
   it('a task’s end from a replayed frame asks UserMessage with its <summary> and the task’s fields', async () => {
