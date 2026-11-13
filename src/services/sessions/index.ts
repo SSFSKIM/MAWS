@@ -8,6 +8,11 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { ClientId } from '@shared/ipc/client';
 import type { CommandOutput, EventName, EventPayload } from '@shared/ipc/schema';
 import { HostCommandError } from '@shared/host/runtime';
+import { waits } from '@shared/attention/kinds';
+import { ipcError } from '@shared/ipc/errors';
+import type { HostStatus, SupervisorStatus } from '@shared/ipc/schema/host';
+import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
+import { hostAppliesPlanMode, namesPlanMode, PLAN_MODE_OTHER_HOST } from '@shared/sessions/plan-next-mode';
 import type { ServicesBus } from '@shared/spine/bus';
 import { isAppSynthesised } from '@shared/sessions/app-events';
 import type { HostSupervisor } from '@shared/host/host-supervisor';
@@ -179,6 +184,13 @@ function appEventsOf(model: SessionReadModel, appSessionId: AppSessionId, extra:
   return events.filter((event) => !seen.has(event.id) && (seen.add(event.id), true));
 }
 
+// What the plan-mode rule reads of the engine host a `session.answer` would reach: its own status, asked now, beside this
+// build's wire. A host that answers is serving (`ready`); one that does not gives nothing, and the rule does not hold.
+async function servingHostStatus(hosts: SessionsHosts): Promise<Pick<HostStatus, 'state' | 'supervisor' | 'appWire'> | null> {
+  const answer = await hosts.dispatch('engine-host', 'host.supervisorStatus', undefined);
+  return answer.ok ? { state: 'ready', supervisor: answer.value as SupervisorStatus, appWire: wireFingerprint() } : null;
+}
+
 export function startSessions({ env, packaged, appRoot, hosts, bus, indexSource, appEventsExtra, restoredCost }: SessionsOptions): Sessions {
   const mode = launchMode(env, packaged);
   const model = new SessionReadModel(mode, restoredCost);
@@ -224,9 +236,14 @@ export function startSessions({ env, packaged, appRoot, hosts, bus, indexSource,
   const stops: (() => void)[] = [];
   if (mode === 'index') {
     // The renderer may still have an approval card after host loss. Never forward its stale answer.
+    // UX wave U1a §F (the panel's ruling, 2026-11-13): nor a plan answer that names a mode to an engine host that would
+    // drop it (one of another wire reads its inputs tolerantly and implements in the earlier mode). The renderer's port
+    // refuses it first; this is the guard for every caller, by the same rule over the serving host's own status. Refused
+    // with the port's words; nothing is dispatched, and the request still waits.
     stops.push(bus.intercept('session.answer', async (input) => {
-      const pending = model.allAttention().get(input.appSessionId as AppSessionId)?.some((item) => item.state === 'pending' && item.request.requestId === input.requestId);
+      const pending = model.allAttention().get(input.appSessionId as AppSessionId)?.some((item) => waits(item) && item.request.requestId === input.requestId);
       if (!pending) return { outcome: 'not_pending' };
+      if (namesPlanMode(input.answer) && !hostAppliesPlanMode(await servingHostStatus(hosts))) throw new HostCommandError(ipcError('invalid_input', PLAN_MODE_OTHER_HOST));
       const result = await hosts.dispatch('engine-host', 'session.answer', input);
       if (!result.ok) throw new HostCommandError(result.error);
       return result.value as CommandOutput<'session.answer'>;

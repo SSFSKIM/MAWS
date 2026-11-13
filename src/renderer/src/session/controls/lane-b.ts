@@ -13,7 +13,8 @@
 // UX wave U1a §F: a plan answer that names a mode is carried only for a session on this Mac whose engine host has this
 // build's wire (`hostAppliesPlanMode`, read from main's `host.status` when asked): another build's host would drop the key
 // and implement in the earlier mode, and a session on another machine is never sent one (its endpoint refuses it, and a
-// machine on an older build would refuse the whole answer). Closed in `answerCapability`, and refused again in `answer`.
+// machine on an older build would refuse the whole answer). Closed in `answerCapability`, and refused again in `answer`; the services refuse it once more where
+// they forward it to the engine host (src/services/sessions/index.ts), for a caller that does not come through this port.
 import type { RequestAnswer } from '@shared/engine/answers';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId, TaskId } from '@shared/graph/ids';
@@ -29,7 +30,7 @@ import { availabilityIn, availabilityRefusal } from '../../sessions/availability
 import { beginRemoteSend } from '../../lane-b/remote-session'; // P5 O7 M2
 import { READER } from '../../sessions/share/copy'; // board 525
 import { learnReaderGrade, whomToAsk } from '../../sessions/share/reader'; // board 525
-import { hostAppliesPlanMode } from '@shared/sessions/plan-next-mode';
+import { hostAppliesPlanMode, namesPlanMode, PLAN_MODE_OTHER_HOST } from '@shared/sessions/plan-next-mode';
 import { useHosts } from '../../stores/hosts';
 import { useSessions } from '../../stores/sessions';
 import type { Capability, ControlKey, ControlResult, SessionControls } from './types';
@@ -64,10 +65,9 @@ const NEEDS_PROCESS = new Set<ControlKey>(['interrupt', 'stop-task']);
 const AVAILABLE: Capability = { available: true };
 // U1a §F: why a plan answer that names a mode is not carried
 export const PLAN_MODE_WORDS = {
-  otherHost: 'The engine host serving this session isn’t this build’s, so it can’t apply a chosen mode',
+  otherHost: PLAN_MODE_OTHER_HOST, // the services' forwarding boundary refuses in the same words
   elsewhere: 'A mode for after the plan isn’t chosen for a session on another machine',
 } as const;
-const namesMode = (answer: RequestAnswer): boolean => answer.kind === 'plan' && answer.mode !== undefined;
 // P5 O7 M2: `session.applyFlagSettings` and the rules read are not offered over a machine's link (O7's Interfaces §L)
 const REMOTE_DIRECTORIES = 'Adding a directory isn’t offered for a session on another machine';
 const refusedWith = (error: string) => async () => ({ ok: false as const, error });
@@ -132,7 +132,7 @@ export function laneBControls(record: SessionRecord | null, { appSessionId, clie
   const capability = (key: ControlKey): Capability => (remote?.state ? remoteCapability(key, remote.state) : ownCapability(key));
   // U1a §F: why this answer's named mode can't go, or null (none named, or this Mac's host of this build applies it)
   const modeRefusal = (answer: RequestAnswer): string | null => {
-    if (!namesMode(answer)) return null;
+    if (!namesPlanMode(answer)) return null;
     if (remote) return PLAN_MODE_WORDS.elsewhere;
     return hostAppliesPlanMode(useHosts.getState().supervisor) ? null : PLAN_MODE_WORDS.otherHost;
   };
