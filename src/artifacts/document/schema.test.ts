@@ -1,11 +1,15 @@
 // The schema module (D2 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md) in Node: its node and mark set, the
-// frozen comment mark, ids on every block, and S1's parity check: a document with every stored node and mark goes
-// through `pmnodeToDelta` → a Y.Doc → `ynodeToPmnode` unchanged.
-import { describe, expect, it } from 'vitest';
+// frozen comment mark, ids on every block, S1's parity check (a document with every stored node and mark goes
+// through `pmnodeToDelta` → a Y.Doc → `ynodeToPmnode` unchanged), and what the document-repairing plugins answer.
+import { Editor, type JSONContent } from '@tiptap/core';
+import { NodeSelection, Plugin, TextSelection, type EditorState, type Transaction } from '@tiptap/pm/state';
+import { CellSelection } from '@tiptap/pm/tables';
+import { afterEach, describe, expect, it } from 'vitest';
 import { newDoc, stateV2, applyV2 } from '../yjs';
 import { pmnodeToDelta, ynodeToPmnode } from '../yjs/prosemirror';
 import { everyKindJSON } from './fixtures';
-import { ATTRIBUTION_MARKS, BLOCK_TYPES, attributedNodes, nanoid8, schemaFor } from './schema';
+import { coreExtensionOptions } from './ids';
+import { ATTRIBUTION_MARKS, BLOCK_TYPES, attributedNodes, extensions, nanoid8, schemaFor } from './schema';
 
 const schema = schemaFor();
 
@@ -112,5 +116,118 @@ describe('S1’s parity check', () => {
     const again = newDoc();
     again.get('default').applyDelta(pmnodeToDelta(back));
     expect(JSON.stringify(again.get('default').toDelta().toJSON())).toBe(JSON.stringify(reloaded.get('default').toDelta().toJSON()));
+  });
+});
+
+// X-141 (docs/doperpowers/plans/2026-11-12-ux-wave-U10a-unmade-writes.md, decisions 6 to 8, §B): a repair changes the
+// document only in answer to a change of the person's to the content, read at the batch's root; the trailing paragraph
+// also waits out a composition. Over the schema module's extension list in a headless editor, with no binding: each
+// transaction is applied to the state as the view would, and what the plugins appended is read from the result.
+describe('the document-repairing plugins', () => {
+  const editors: Editor[] = [];
+  afterEach(() => {
+    for (const editor of editors.splice(0)) editor.destroy();
+  });
+
+  const para = (id: string, text: string): JSONContent => ({ type: 'paragraph', attrs: { id }, content: text ? [{ type: 'text', text }] : [] });
+  const chart = (id: string): JSONContent => ({ type: 'chart', attrs: { id, source: 'sales', spec: null } });
+  const table = (id: string, rows: string[][]): JSONContent => ({
+    type: 'table',
+    attrs: { id },
+    content: rows.map((cells, r) => ({ type: 'tableRow', attrs: { id: `${id}r${r}` }, content: cells.map((text, c) => ({ type: 'tableCell', attrs: { id: `${id}r${r}c${c}` }, content: [para(`${id}r${r}c${c}p`, text)] })) })),
+  });
+  function stateOf(...blocks: JSONContent[]): EditorState {
+    let n = 0;
+    const editor = new Editor({ element: null, coreExtensionOptions, extensions: extensions({ generateID: () => `n${++n}` }), content: { type: 'doc', content: blocks } });
+    editors.push(editor);
+    return editor.state;
+  }
+  /** The state after `tr`, and how many transactions the plugins appended to it. */
+  const apply = (state: EditorState, tr: Transaction) => {
+    const { state: next, transactions } = state.applyTransaction(tr);
+    return { state: next, appended: transactions.length - 1 };
+  };
+  const shape = (state: EditorState) => {
+    const out: string[] = [];
+    state.doc.forEach((block) => out.push(`${block.type.name}:${block.textContent}`));
+    return out;
+  };
+  const endOf = (state: EditorState, id: string): number => {
+    let at = -1;
+    state.doc.descendants((node, pos) => {
+      if (at < 0 && node.attrs.id === id && node.isTextblock) at = pos + 1 + node.content.size;
+      return at < 0;
+    });
+    return at;
+  };
+  const remote = (tr: Transaction) => tr.setMeta('y-sync-transaction', true); // the meta the binding's own dispatches carry
+
+  it('append nothing to a transaction that carries only a meta, or only sets the selection', () => {
+    const state = stateOf(para('p1', 'Quarterly sales.'), chart('c1'));
+    const redraw = apply(state, state.tr.setMeta('presence', true).setMeta('addToHistory', false));
+    expect([redraw.appended, shape(redraw.state)]).toEqual([0, ['paragraph:Quarterly sales.', 'chart:']]);
+    const caret = apply(state, state.tr.setSelection(TextSelection.create(state.doc, 3)));
+    expect([caret.appended, shape(caret.state)]).toEqual([0, ['paragraph:Quarterly sales.', 'chart:']]);
+  });
+
+  it('append the trailing paragraph to a change of the person’s elsewhere, in the same batch', () => {
+    const state = stateOf(para('p1', 'Quarterly sales.'), chart('c1'));
+    const typed = apply(state, state.tr.insertText('y', endOf(state, 'p1')));
+    expect(shape(typed.state)).toEqual(['paragraph:Quarterly sales.y', 'chart:', 'paragraph:']);
+  });
+
+  it('hold the trailing paragraph through a composition and append it to the next change outside one', () => {
+    const state = stateOf(para('p1', 'Quarterly sales.'), chart('c1'));
+    const composed = apply(state, state.tr.insertText('한', endOf(state, 'p1')).setMeta('composition', 1));
+    expect(shape(composed.state)).toEqual(['paragraph:Quarterly sales.한', 'chart:']);
+    const plain = apply(composed.state, composed.state.tr.insertText(' ', endOf(composed.state, 'p1')));
+    expect(shape(plain.state)).toEqual(['paragraph:Quarterly sales.한 ', 'chart:', 'paragraph:']);
+  });
+
+  it('answer neither the binding’s transaction nor what another plugin appends to it', () => {
+    const state = stateOf(para('p1', 'Quarterly sales.'), chart('c1'));
+    const bound = apply(state, remote(state.tr.insertText('!', endOf(state, 'p1'))));
+    expect(shape(bound.state)).toEqual(['paragraph:Quarterly sales.!', 'chart:']);
+    // a fix-up of the caret appended to a remote write, as `caretFollowsId` makes one: not marked as the binding's
+    // itself, only by its root; and a change of the document appended the same way
+    const caretFix = new Plugin({ appendTransaction: (trs, _old, next) => (trs.some((tr) => tr.getMeta('y-sync-transaction') != null) ? next.tr.setSelection(TextSelection.create(next.doc, 2)) : null) });
+    const withFix = state.reconfigure({ plugins: [...state.plugins, caretFix] });
+    const fixed = apply(withFix, remote(withFix.tr.insertText('!', endOf(withFix, 'p1'))));
+    expect([fixed.appended, shape(fixed.state)]).toEqual([1, ['paragraph:Quarterly sales.!', 'chart:']]);
+    const contentFix = new Plugin({ appendTransaction: (trs, _old, next) => (trs.some((tr) => tr.getMeta('y-sync-transaction') != null) ? next.tr.insertText('?', 1) : null) });
+    const withContentFix = state.reconfigure({ plugins: [...state.plugins, contentFix] });
+    const changed = apply(withContentFix, remote(withContentFix.tr.insertText('!', endOf(withContentFix, 'p1'))));
+    expect(shape(changed.state)).toEqual(['paragraph:?Quarterly sales.!', 'chart:']);
+  });
+
+  // decision 7: ProseMirror marks an appended transaction with its root and with nothing else of the root's, so the
+  // table's repair of composed input does not carry `composition` itself
+  it('repair a ragged table under composed input but hold the trailing paragraph, then append it to the next plain change', () => {
+    const state = stateOf(para('p1', 'Intro.'), table('tb', [['a', 'b'], ['c']]), chart('c1'));
+    const cells = (s: EditorState) => {
+      const out: number[] = [];
+      s.doc.descendants((node) => {
+        if (node.type.name === 'tableRow') out.push(node.childCount);
+        return true;
+      });
+      return out;
+    };
+    expect(cells(state)).toEqual([2, 1]);
+    const composed = apply(state, state.tr.insertText('한', endOf(state, 'tbr0c0p')).setMeta('composition', 1));
+    expect([cells(composed.state), shape(composed.state)]).toEqual([[2, 2], ['paragraph:Intro.', 'table:a한bc', 'chart:']]);
+    const plain = apply(composed.state, composed.state.tr.insertText(' ', endOf(composed.state, 'p1')));
+    expect(shape(plain.state)).toEqual(['paragraph:Intro. ', 'table:a한bc', 'chart:', 'paragraph:']);
+  });
+
+  it('let the table put a selection right, a cell selected as a node becoming a cell selection, and change nothing', () => {
+    const state = stateOf(para('p1', 'Intro.'), table('tb', [['alpha', 'beta']]), chart('c1'));
+    let cell = -1;
+    state.doc.descendants((node, pos) => {
+      if (cell < 0 && node.type.name === 'tableCell') cell = pos;
+      return cell < 0;
+    });
+    const selected = apply(state, state.tr.setSelection(NodeSelection.create(state.doc, cell)));
+    expect(selected.state.selection).toBeInstanceOf(CellSelection);
+    expect(selected.state.doc.eq(state.doc)).toBe(true);
   });
 });
