@@ -243,10 +243,13 @@ export function startSpine(deps: SpineDeps): SpineRoot {
     registerLaneA(laneA, bus.register);
     settling.push(laneA.probes);
     // M6: each bridged session's pending requests are attention items, and its digest reads its live phase from the
-    // bridge while the bridge is live (today's `foreign` otherwise)
+    // bridge while the bridge is live (today's `foreign` otherwise). UX wave U7 (the architect's ruling of 2026-11-13): only
+    // from a current snapshot; before a bridge's first, the digest keeps its seed, and inside a reconnect, the last snapshot's
+    // phase.
     const laneAItems = laneAAttention({ set: (appId, entries) => attention.setLaneAItems(appId, entries) });
     const offLaneAView = laneA.onChange((appId, view) => {
       laneAItems.update(appId, view);
+      if (view?.state.bridge === 'live' && !view.fresh) return; // no current snapshot: the digest keeps what it had (UX wave U7, M3)
       indexSource.setBridged(appId, view?.state.bridge === 'live' ? { running: view.state.turn.running, pending: view.state.pending.length, tool: view.tool } : null);
     });
     parts.push(['lane A attention', () => {
