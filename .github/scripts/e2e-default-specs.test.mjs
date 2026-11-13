@@ -20,15 +20,17 @@ const { name: rootName, scripts } = JSON.parse(readFileSync(join(root, 'package.
 const workflow = readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8');
 const class1 = /^ {2}CLASS1_E2E: >-\n((?: {4}.*\n)+)/m.exec(workflow)[1].replace(/\s+/g, ' ').trim();
 
+const vmList = /^ {2}MAC_VM_E2E: >-\n((?: {4}.*\n)+)/m.exec(workflow)[1].replace(/\s+/g, ' ').trim();
+
 // The plan job's outputs for a push on the macOS lane, CLASS1_E2E read from the workflow: the e2e matrix and the
-// DefaultBeside groups, for a commit carrying `trailers` (none: the default set).
-function plan(trailers = '') {
+// DefaultBeside groups, for a commit carrying `trailers` (none: the default set), with `lists` over the env.
+function plan(trailers = '', lists = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'maws-default-specs-'));
   try {
     const output = join(dir, 'output');
     execFileSync(process.execPath, [join(root, '.github/scripts/gate-plan.mjs')], {
       cwd: root,
-      env: { ...process.env, EVENT: 'push', HEAD_MESSAGE: trailers && `ci-gate: test\n\n${trailers}`, GATE_RUNNER: '', GATE_E2E_RUNNER: 'macos', CLASS1_E2E: class1, LINUX_E2E: '', LIBREOFFICE_E2E: '', GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: join(dir, 'summary') },
+      env: { ...process.env, EVENT: 'push', HEAD_MESSAGE: trailers && `ci-gate: test\n\n${trailers}`, GATE_RUNNER: '', GATE_E2E_RUNNER: 'macos', CLASS1_E2E: class1, LINUX_E2E: '', LIBREOFFICE_E2E: '', ...lists, GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: join(dir, 'summary') },
     });
     const outputs = readFileSync(output, 'utf8');
     return { e2e: /^e2e=(.*)$/m.exec(outputs)[1], defaultBeside: /^default_beside=(.*)$/m.exec(outputs)[1] };
@@ -65,7 +67,10 @@ const relaunchGates = 'Gates: e2e:default,e2e:side,e2e:library\nRunner: macos';
 const whole = derive(plan());
 const relaunch = derive(plan(`${relaunchGates}\nDefaultBeside: ${class1}`));
 const widened = deriveStep(plan(relaunchGates));
-for (const derivation of [whole, relaunch, widened]) derivation.catch(() => {}); // a failure is the awaiting test's
+// default on the guest's labels, as gate.yml's MAC_VM_E2E puts it: on either desktop, and on the guest alone.
+const guestPlans = [plan('', { MAC_VM_E2E: vmList }), plan('Lane: vm', { MAC_VM_E2E: vmList })];
+const onGuest = guestPlans.map(derive);
+for (const derivation of [whole, relaunch, widened, ...onGuest]) derivation.catch(() => {}); // a failure is the awaiting test's
 
 test("this tree: beside the macOS lane's other groups, default runs its own specs", async () => {
   const { specs, total } = await whole;
@@ -122,6 +127,19 @@ test("this tree: beside the macOS lane's other groups, default runs its own spec
     'e2e/ux2-shell.spec.ts',
     'e2e/voice.spec.ts',
   ]);
+});
+
+// The derivation reads the run's group names alone, so where the plan puts default (the host's `pnpm build`, or the
+// guest's restored plain out/) leaves its own specs as they are.
+test("this tree: default's own specs are the same whether it runs on the host or the guest", async () => {
+  const entry = (outputs) => JSON.parse(outputs.e2e).find((job) => job.group === 'default');
+  assert.equal(entry(plan()).variant, undefined);
+  for (const outputs of guestPlans) assert.equal(entry(outputs).variant, 'plain');
+  const all = await whole;
+  for (const derivation of onGuest) {
+    const guest = await derivation;
+    assert.deepEqual([guest.specs, guest.total], [all.specs, all.total]);
+  }
 });
 
 test("this tree: a relaunch of default and two groups, DefaultBeside naming the whole class-1 set, runs exactly the whole set's own specs", async () => {
