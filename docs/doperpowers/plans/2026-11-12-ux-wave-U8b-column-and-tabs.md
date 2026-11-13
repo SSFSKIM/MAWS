@@ -36,7 +36,12 @@ How to see it working, on the wave's build: open a session with nothing running 
   - `withJobs` is shared from `BackgroundTool.tsx`;
   - `agentGlyphs` and `backgroundCounts` lose their last reader and go in M9, their proof moved first (Decision Log 10);
   - another machine's Background card lists what the panel lists.
-- [ ] M9 — the e2e scenes, the record, and the acceptance run
+- [x] M9 — the e2e scenes, the record, and the acceptance run. (2026-11-13) Opened with master `9df6b4493` (U13a) merged at `4a9591cb0`, its five conflicts resolved as both and reviewed clean. Built at `136f62dd3` (Decision Log 17). Desk web's two files are the one exception to Constraint 3 (Decision Log 18).
+  - Boundary review: the reverse crossing of `panel.pinned` and `panelTools.activeNoSession` was unproved. Fixed in `4d64bde6e..a283b47c8` together with three Minors, and reviewed clean.
+  - Acceptance on the VM: the e2e typecheck and `eslint e2e` are clean; the gate's script tests pass 556 of 556; `pnpm typecheck` is clean.
+  - The whole `pnpm test`: 2,504 files passed and 7 failed. Six are the known master failures. The seventh, `src/main/org/rows.test.ts`, is a time-out under load and passes alone.
+  - `src/shared/machine`: 129 of 131 tests passed; the two failures are the known `git-reads` ones.
+  - No scene has run.
 - [ ] The proof an executor does not run: the cross-build run with F, the e2e groups, the branch review, class 1a on the final head.
 
 ## The landing's edge
