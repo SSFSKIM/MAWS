@@ -387,8 +387,9 @@ test('--peer and --peer-exact are mutually exclusive, whatever --peer names', (t
   assert.deepEqual(peerAt(tested, ['--gates', 'e2e:cross-build', '--peer', base, '--peer-exact', draft]), { status: 2, trailers: [], notes: said });
 });
 
-test('the launcher passes --peer-exact through, refuses it beside --peer, and pins an override or relaunch to the exact peer', (t) => {
-  const { tree, env, git, draft, tested } = middleOfMergedBranch(t);
+// ci-gate.sh on `tree` with a `gh` that answers the repository's variables and one open ci-kit alert on the only Mac
+// runner, so a run with a Mac job is refused before any push, with its override command.
+function alertedLauncher(tree, env) {
   const bin = join(tree, 'bin');
   mkdirSync(bin);
   writeFileSync(join(bin, 'gh'), `#!/bin/sh
@@ -403,10 +404,15 @@ case "$*" in
 esac
 `);
   chmodSync(join(bin, 'gh'), 0o755);
-  const before = git('ls-remote', 'origin');
-  const launch = (...args) => spawnSync('bash', [join(dirname(script), 'ci-gate.sh'), tree, ...args], {
+  return (...args) => spawnSync('bash', [join(dirname(script), 'ci-gate.sh'), tree, ...args], {
     encoding: 'utf8', timeout: 10000, env: { ...env, PATH: `${bin}:${env.PATH}`, MAWS_GATE_IGNORE_ALERTS: '', MAWS_GATE_RUNNER: '' },
   });
+}
+
+test('the launcher passes --peer-exact through, refuses it beside --peer, and pins an override or relaunch to the exact peer', (t) => {
+  const { tree, env, git, draft, tested } = middleOfMergedBranch(t);
+  const before = git('ls-remote', 'origin');
+  const launch = alertedLauncher(tree, env);
   // refused by the resolver, in its words, before any push: the flag reached it
   const outside = launch('--gates', 'e2e:cross-build', '--peer-exact', tested, '--label', 'exact-test');
   assert.equal(outside.status, 2, outside.stdout + outside.stderr);
@@ -431,4 +437,19 @@ esac
   });
   assert.match(summary, new RegExp(` --peer-exact ${draft} --gates e2e:cross-build `));
   assert.doesNotMatch(summary, / --peer [0-9a-f]/);
+});
+
+// With no peer trailer (the exact peer is the tested commit itself) the override still repeats --peer-exact: --peer none
+// beside the call's own --peer-exact would be refused as the two flags together.
+test('an exact peer that is the tested commit itself stays --peer-exact in the override command, never beside --peer none', (t) => {
+  const { tree, env, git, base } = repository(t, { master: { [MANIFEST]: manifest(3, 1) } });
+  git('checkout', '--quiet', '--detach', base);
+  git('tag', 'machines', base);
+  const run = alertedLauncher(tree, env)('--gates', 'e2e:document', '--peer-exact', 'machines', '--label', 'self-test');
+  assert.equal(run.status, 2, run.stdout + run.stderr);
+  assert.doesNotMatch(run.stdout + run.stderr, /UNEXPECTED_GITHUB_CALL/);
+  const override = run.stderr.split('\n').find((line) => line.includes('to push anyway'));
+  assert.ok(override, run.stderr);
+  assert.match(override, new RegExp(` --peer-exact machines .* --peer-exact ${base}$`));
+  assert.doesNotMatch(override, / --peer (none|[0-9a-f])/);
 });
