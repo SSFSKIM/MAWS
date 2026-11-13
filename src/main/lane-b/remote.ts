@@ -954,9 +954,9 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       const lane = machines.get(machine)?.lanes.get(app);
       if (lane?.open === true) lane.session.replay();
       attention.replay(machine, app); // fix waves 1, 5: the feed's items, which the stream's replay leaves out while it is fed
-      // the UX wave, U9 (M5): the generation settled, for the page that has just subscribed
+      // the UX wave, U9 (M5): the generation settled, for the page that has just subscribed to a session held here
       const round = rounds.get(machine);
-      if (round?.settled != null && round.link.state() === 'up') deps.emit(machine, 'remote.settled', { machine, generation: round.settled });
+      if (lane?.open === true && round?.settled != null && round.link.state() === 'up') deps.emit(machine, 'remote.settled', { machine, generation: round.settled });
     },
     stop() {
       interest.stop();

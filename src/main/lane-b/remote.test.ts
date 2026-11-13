@@ -428,7 +428,7 @@ describe('the tabs and the links', () => {
     const said = l.emitted.length;
     expect(await l.cmd('session.get', { appSessionId: APP })).toEqual({ ok: true, value: 'base' }); // the read itself is the manager's
     expect(l.emitted.slice(said).map((e) => e.name)).toEqual(['session.changed', 'session.status', 'session.queue', 'session.catalogChanged', 'attention.changed', 'remote.session', 'remote.settled']); // U9 M5: the generation settled
-    expect(l.emitted.at(-1)!.payload).toMatchObject({ address: APP, stream: 'live', reason: null });
+    expect(l.emitted.at(-2)!.payload).toMatchObject({ address: APP, stream: 'live', reason: null });
     // Nothing for a session this app doesn't hold, or another machine's.
     const before = l.emitted.length;
     await l.cmd('session.get', { appSessionId: 'app-elsewhere' });
