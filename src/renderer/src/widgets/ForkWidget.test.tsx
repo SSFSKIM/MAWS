@@ -16,8 +16,9 @@ import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { applyFork, ForkWidget } from './ForkWidget';
 
-const fork = vi.hoisted(() => ({ answer: { ok: true, appSessionId: 'fork' } as { ok: true; appSessionId: string } | { ok: false; error: string } }));
-const forkSession = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => fork.answer));
+type Answer = { ok: true; appSessionId: string } | { ok: false; error: string };
+const fork = vi.hoisted(() => ({ answer: { ok: true, appSessionId: 'fork' } as Answer }));
+const forkSession = vi.hoisted(() => vi.fn<(...args: unknown[]) => Promise<Answer>>(async () => fork.answer));
 vi.mock('../sessions/record-ops', () => ({ forkSession }));
 
 const LOCAL = at('app-here' as AppSessionId);
