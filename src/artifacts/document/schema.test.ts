@@ -2,7 +2,7 @@
 // frozen comment mark, ids on every block, S1's parity check (a document with every stored node and mark goes
 // through `pmnodeToDelta` → a Y.Doc → `ynodeToPmnode` unchanged), and what the document-repairing plugins answer.
 import { Editor, type JSONContent } from '@tiptap/core';
-import { NodeSelection, Plugin, TextSelection, type EditorState, type Transaction } from '@tiptap/pm/state';
+import { EditorState, NodeSelection, Plugin, TextSelection, type Transaction } from '@tiptap/pm/state';
 import { CellSelection } from '@tiptap/pm/tables';
 import { afterEach, describe, expect, it } from 'vitest';
 import { newDoc, stateV2, applyV2 } from '../yjs';
@@ -121,8 +121,8 @@ describe('S1’s parity check', () => {
 
 // X-141 (docs/doperpowers/plans/2026-11-12-ux-wave-U10a-unmade-writes.md, decisions 6 to 8, §B): a repair changes the
 // document only in answer to a change of the person's to the content, read at the batch's root; the trailing paragraph
-// also waits out a composition. Over the schema module's extension list in a headless editor, with no binding: each
-// transaction is applied to the state as the view would, and what the plugins appended is read from the result.
+// also waits out a composition. Over the schema module's extension list (an editor's plugins, no view and no binding):
+// each transaction is applied to the state as the view would, and what the plugins appended is read from the result.
 describe('the document-repairing plugins', () => {
   const editors: Editor[] = [];
   afterEach(() => {
@@ -140,7 +140,8 @@ describe('the document-repairing plugins', () => {
     let n = 0;
     const editor = new Editor({ element: null, coreExtensionOptions, extensions: extensions({ generateID: () => `n${++n}` }), content: { type: 'doc', content: blocks } });
     editors.push(editor);
-    return editor.state;
+    // an unmounted editor's state holds no plugins until a view takes them; the view's own state is made the same way
+    return EditorState.create({ doc: editor.state.doc, plugins: editor.extensionManager.plugins });
   }
   /** The state after `tr`, and how many transactions the plugins appended to it. */
   const apply = (state: EditorState, tr: Transaction) => {
