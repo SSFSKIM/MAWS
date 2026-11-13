@@ -27,7 +27,7 @@ How to see it working: the table test of the reader over the probes' recorded ca
 - [x] (2026-11-13) M1 — the reader, the fixtures it is tested on, X1's field (`8bd6d223a`..`462e0675e`; `WIRE_MINOR` 37; reviewed clean).
 - [x] (2026-11-13) M2 — the arrival rows: the model and the lines (`e49e50118`..`d2d0117f4`, two fix rounds; reviewed clean).
 - [x] (2026-11-13) M3 — the transcript file and another machine's rows ask the reader (`6f9573b2d`..`28e0caa1e`, two fix rounds; review converged, one bounded finding left as debt, Decision Log).
-- [ ] M4 — the live wire asks the reader.
+- [x] (2026-11-13) M4 — the live wire asks the reader (`022a4ae89`..`6db129829`, one fix round; reviewed clean).
 - [ ] M5 — the rows ask the mods, and a jump's target is revealed.
 - [ ] M6 — no alarm for a failed background task; the e2e edits; the record; the acceptance run on the VM; hand-back. Class 1a, the review panel and the pull request are the architect's, after the hand-back.
 
