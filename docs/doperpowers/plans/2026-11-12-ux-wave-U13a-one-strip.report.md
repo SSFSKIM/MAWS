@@ -44,8 +44,8 @@ The plan estimated about 520. The rehearsal's leak tests account for the rest.
 | `pnpm typecheck` (whole, all six stages) | `d07608d6c` | exit 0, taken without a pipe |
 | `pnpm exec tsc --noEmit -p tsconfig.node.json --tsBuildInfoFile /dev/null` | `0c147f02f` | exit 0 (the executor's run after the review fix, which touched only `layout.ts` and the test files) |
 | `node --test .github/scripts/maws-app-scan.test.mjs` | `d07608d6c` | 8 passed. M1 adds no fixture file; this was a precaution. |
-| `pnpm test` (whole), on the loaded VM dc-uxwave-6506 (load 12 to 19) | `486980b20` | exit 1: 25 files failed (65 tests), 2462 files passed. See below. |
-| the 18 files outside the known set, rerun with `--testTimeout=60000 --hookTimeout=60000` on the quiet VM dc-uxwave3-38fa (load under 5) | `486980b20` | 24 of 26 file runs passed. The other two, `src/pty-host/detached.test.ts` and `src/shared/host/detached-transport.test.ts`, failed in the group run. |
+| `pnpm test` (whole), on the loaded build VM (load 12 to 19) | `486980b20` | exit 1: 25 files failed (65 tests), 2462 files passed. See below. |
+| the 18 files outside the known set, rerun with `--testTimeout=60000 --hookTimeout=60000` on a second, quiet build VM (load under 5) | `486980b20` | 24 of 26 file runs passed. The other two, `src/pty-host/detached.test.ts` and `src/shared/host/detached-transport.test.ts`, failed in the group run. |
 | those two alone, at the base `7fbf15772` and at `486980b20` | both | exit 0: 108 tests passed at each commit |
 
 The whole suite, outside the known set:
