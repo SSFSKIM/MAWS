@@ -8,8 +8,9 @@
 // Docked, that is the `DockedCardFrame` around the card; in an Overview card, the nearest ancestor with a `tabindex` (C5's
 // article), since the article, not the card, holds focus there; hover and inline bind no key. Digits pick a question's
 // option from the same owner. U1a §D: a permission prompt opens on one line saying what is asked (`askedLine`), where the
-// other kinds have their title; the hover placement keeps its heading, its "wants to" line and the folder line. E1 M4b: a blocking `maws` ask's item (originating in `maws.ask.opened`) renders compact
-// (`variants/Ask.tsx`), its one action opening the Question sheet; the card never answers it. P5 O8 M7a: a placement
+// other kinds have their title; the hover placement keeps its heading, its "wants to" line and the folder line. E1 M4b: a
+// blocking `maws` ask's item (originating in `maws.ask.opened`) renders compact (`variants/Ask.tsx`), its one action
+// opening the Question sheet; the card never answers it. P5 O8 M7a: a placement
 // that asks for it (`askInPlace`: the project channel's waiting cards) draws the sheet's body inline instead, which
 // answers through `maws.ask.answer` as the sheet does; the sheet stays the session pane's.
 //
