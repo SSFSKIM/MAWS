@@ -1010,6 +1010,9 @@ Found while checking the sections against the code at `48619c824`, then by the a
 - Observation: results worded "<row> in <section>" wrap to two and three lines in 148 px, some read badly ("For in Notifications"), a group's name floods the list, and the first control of several rows acts on Enter (the drawing, findings 10 to 17).
   Evidence: "Stateful MCP servers in Background" is 204 px; "engine" matched 21 rows and 4 sections through the group's name; MCP servers' first control is a server's Remove.
 
+- Observation: the `discover` group provisions and verifies engine 2.1.309, not the 2.1.322 P1 names; and 2.1.322's `mcp_authenticate` falls back to the engine's own `localhost` listener when the authorization server rejects a custom redirect, so P1 may legitimately answer `localhost` for a kind (M1).
+  Evidence: `.github/workflows/gate.yml` provisions `scripts/provision-engine.sh 2.1.309`; `REAL_ENGINE_VERSION` in `e2e/support/real-engine.ts`; the fallback in `mcp_authenticate`'s handler of `~/claude-code-bundle/2.1.322/cli.pretty.js` (about line 614259); MAWS sends no `redirectUriOnly`.
+
 ## Decision Log
 
 - Decision: verification for this landing. This document gets an adversarial review before an executor starts (done on 2026-11-12: needs-attention, three findings, all accepted and folded in below). Each milestone is reviewed at its boundary by the controller's reviewer before a milestone that consumes it starts. The branch gets `doperpowers:review-code` at the xhigh panel: it is expected to change about 112 files and 7,000 lines (about 60 product files, 40 unit-test files, 8 e2e files, 5 documents), well past the mark of twenty files or two thousand lines. The root calls nothing in U11 delicate; four parts still want a lens of their own: the sign-in's check, the configuration's revision and the wire (M8, §A and §H); the channel's reach and refusal (M4, §F's table); the backdrop where layers stack (M3, §E); and the regrouped Settings against the three `keep` items (M9). Class 1a on GitHub Actions (`static,unit,probes`) is the gate of record, run by the architect on the head handed back and again on the final head if the panel changed the branch. The pull request's body names its class 1a run, its review verdict and its residue, and carries the dated amendments of the five rulings this landing reverses.
@@ -1099,6 +1102,10 @@ Found while checking the sections against the code at `48619c824`, then by the a
 - Decision: the drawing's findings 21 to 24 are noted where they change a stated height or width (§G, "The measure"; "The owner's look"); nothing is built for them.
   Rationale: the waiting supervisor's five lines are a state that stays whole; "More" alone on a line in a narrow pane is accepted; the dialog has twelve sections once Usage is there; the narrow width is 330 px and holds only beside a side surface. Rejected: cutting the state's lines.
   Date/Author: 2026-11-12, the wave's architect, on the drawn page's findings; the author of this document (the fold).
+
+- Decision: M1's plugin question gives the scratch plugin with `--plugin-dir`, not a marketplace install; the two questions run after the seven with names of their own (`fx-own`, `plugin:fx-plugin:fx-oauth`); each reconnects at once after an accepted callback, as MAWS's operation does; the spike case alone can run another engine through `MAWS_SIGNIN_SPIKE_ENGINE_BIN`, and `scripts/engine-checksums.txt` gains the 2.1.322 darwin-arm64 line so `provision-engine.sh 2.1.322` can fetch it; the case's timeouts rise to 900 s and 840 s.
+  Rationale: in 2.1.322 both plugin routes name the server `plugin:<plugin>:<server>` with scope `dynamic` and key its credential the same way, and `--plugin-dir` has fewer steps that can fail before the question; P1 must read 2.1.322 without moving the group's 2.1.309 pin for its other cases. Rejected: changing the group's engine pin; a marketplace install.
+  Date/Author: 2026-11-12, M1's executor; folded by the controller.
 
 ## Outcomes & Retrospective
 
