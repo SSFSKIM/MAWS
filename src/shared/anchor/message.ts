@@ -60,7 +60,7 @@ const ARTIFACT_COMMENT_LEADS: { document: CommentLead } & Partial<Record<Artifac
 
 // `Comment on "<label>" (<parts>):`, or `Comment:` for the anchorless kind; with a screenshot the final colon becomes
 // `. A screenshot of it is attached:`. The label is always quoted, so it is never read as part of the sentence.
-// A persisted-format contract: the engine's transcripts keep these leads, and `parseAnchoredText` strips one only when it
+// A persisted-format contract: the engine's transcripts keep these leads, and `readOneComment` strips one only when it
 // equals the lead this function writes now, so a change of wording leaves every older transcript's lead as text.
 export function anchorLead(anchor: Anchor, screenshot: boolean): string {
   const parts = leadParts(anchor);
@@ -133,7 +133,10 @@ const isBlank = (line: string) => line.trim() === '';
 // independently, the paragraph before the tag only when it is the preamble, which is what says the destination was a
 // side thread. A lead that does not match stays in the text; without the preamble the destination is then unknown
 // (null): a `/btw` promotion.
-export function parseAnchoredText(text: string): { anchor: Anchor; text: string; destination: Destination | null } | null {
+// UX wave U5a (decision 15): the one-comment rule, renamed in M8 and unchanged in behaviour. A caller
+// reads a message by `readAnchoredMessage`, which takes this rule for every message that is not framed; it stays exported
+// because it is also build F's reader to the byte (§J), which the tests pin against framed messages.
+export function readOneComment(text: string): { anchor: Anchor; text: string; destination: Destination | null } | null {
   const lines = text.split('\n');
   while (lines.length > 0 && isBlank(lines.at(-1)!)) lines.pop();
   const tagLine = lines.pop();
@@ -187,10 +190,10 @@ export function readAnchoredMessage(text: string): { comments: MessageComment[];
   return readFramed(text) ?? readOne(text);
 }
 
-// A message of one comment, by `parseAnchoredText`'s rule exactly; its lead carried the screenshot sentence when the
-// message's first line is that lead (the line `parseAnchoredText` strips, the tag being the last)
+// A message of one comment, by `readOneComment`'s rule exactly; its lead carried the screenshot sentence when the
+// message's first line is that lead (the line `readOneComment` strips, the tag being the last)
 function readOne(text: string): { comments: MessageComment[]; destination: Destination | null } | null {
-  const read = parseAnchoredText(text);
+  const read = readOneComment(text);
   if (read === null) return null;
   const screenshot = text.split('\n')[0] === anchorLead(read.anchor, true);
   return { comments: [{ anchor: read.anchor, text: read.text, screenshot }], destination: read.destination };

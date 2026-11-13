@@ -3,7 +3,7 @@
 // shortened then omitted past X10's cap, and nothing built that X10 or E4c's locator schema would refuse.
 import { describe, expect, it } from 'vitest';
 import { AnchorSchema } from '../anchor/anchor';
-import { anchoredMessage, parseAnchoredText } from '../anchor/message';
+import { anchoredMessage, readAnchoredMessage } from '../anchor/message';
 import {
   browserElementAnchor,
   CROP_FILES_MAX,
@@ -110,7 +110,7 @@ describe('browserElementAnchor', () => {
   it('round-trips through the agent-facing text', () => {
     const anchor = build(report({ css: '#\\37  > a', role: 'link', name: 'local link', tag: 'a', a11y: 'main > paragraph > link “local link”' }))!;
     expect(AnchorSchema.parse(anchor)).toEqual(anchor);
-    expect(parseAnchoredText(anchoredMessage({ anchor, text: 'Where to?', destination: 'thread', screenshot: false }))).toEqual({ anchor, text: 'Where to?', destination: 'thread' });
+    expect(readAnchoredMessage(anchoredMessage({ anchor, text: 'Where to?', destination: 'thread', screenshot: false }))).toEqual({ comments: [{ anchor, text: 'Where to?', screenshot: false }], destination: 'thread' });
   });
 });
 

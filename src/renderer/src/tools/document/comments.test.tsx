@@ -10,7 +10,7 @@ import { addThread, discardThread, getThread, reply, resolve as resolveThread, t
 import type { CommentOverlayProps, DocumentComments } from '@artifacts/document/editor/comments/surface'; // P4-B1: DocumentComments
 import { newDoc, type Doc } from '@artifacts/yjs';
 import { AnchorSchema } from '@shared/anchor/anchor';
-import { anchoredMessage, parseAnchoredText } from '@shared/anchor/message';
+import { anchoredMessage, readAnchoredMessage } from '@shared/anchor/message';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { bareOf } from '@shared/machine/address';
@@ -103,7 +103,7 @@ describe('the artifact-comment anchor', () => {
     await sent;
     expect(fake.invoked('side.thread.open')).toEqual([{ appSessionId: bareOf(PARENT), from: { kind: 'comment', anchor, text: 'Should this be monthly?', screenshot: null } }]);
     for (const destination of ['thread', 'main'] as const) {
-      expect(parseAnchoredText(anchoredMessage({ anchor, text: 'Should this be monthly?', destination, screenshot: false }))).toEqual({ anchor, text: 'Should this be monthly?', destination });
+      expect(readAnchoredMessage(anchoredMessage({ anchor, text: 'Should this be monthly?', destination, screenshot: false }))).toEqual({ comments: [{ anchor, text: 'Should this be monthly?', screenshot: false }], destination });
     }
   });
 });
