@@ -973,8 +973,8 @@ describe('cross-session rows (E7)', () => {
     const list = messages(rows(b.events));
     expect(list.map((row) => [row.direction, row.text, row.from?.taskId ?? null, row.report, row.body])).toEqual([
       ['from_child', 'Report from Survey src: line one', 'a1', 'line one\n\nline two', undefined],
-      ['from_child', 'Message from Survey src: a plain note', 'a1', undefined, undefined],
-      ['from_child', 'Message from a9: from a stranger', null, undefined, undefined],
+      ['from_child', 'Message from Survey src: a plain note', 'a1', undefined, 'a plain note'], // U3 (the ruling of 2026-11-13): the whole message the line opens to
+      ['from_child', 'Message from a9: from a stranger', null, undefined, 'from a stranger'],
       ['from_child', 'Message from Survey src: first line', 'a1', undefined, 'first line\nsecond line'], // the preview, the body behind it
     ]);
     expect(messages(rowsOf(reduce(b.events))).map((row) => row.text)).toEqual([]);

@@ -350,7 +350,7 @@ describe('an engine turn that held nothing is no turn (decision 6)', () => {
     replaced.turn('u1', 'go on');
     const state = reduce(replaced.events);
     expect(state.order).toEqual([turnId.ofMessage(uuid('u1'))]);
-    expect(kinds(rowsOf(state))).toEqual(['user']);
+    expect(of(rowsOf(state), 'divider').map((row) => row.origin)).toEqual(['human']);
   });
 
   it('one that holds a hook that got in the way holds its notice, and is kept', () => {
