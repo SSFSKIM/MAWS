@@ -46,7 +46,7 @@ export interface ProvisionalState {
   drawn: number;
 }
 
-// the key the schema's repairs know a redraw by (../provisional-key.ts), typed with this plugin's state
+// the layer's key (../provisional-key.ts), which a redraw of the layer carries as its meta, typed with this plugin's state
 export const provisionalKey: PluginKey<ProvisionalState> = layerKey;
 
 const NO_IDS: ReadonlySet<string> = new Set();

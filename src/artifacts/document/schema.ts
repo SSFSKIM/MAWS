@@ -33,7 +33,6 @@ import { customAlphabet } from 'nanoid';
 import { isBindingTransaction } from '../yjs';
 import { ySyncPluginKey } from '../yjs/prosemirror';
 import { uniqueId } from './ids';
-import { provisionalKey } from './provisional-key'; // P4-A2 (X35)
 
 // ── the four reserved attribution marks (names fixed by the binding; history and suggestions render through them) ──
 export const ATTRIBUTION_MARKS = ['y-attributed-insert', 'y-attributed-delete', 'y-attributed-format', 'y-attributed-attrs'] as const;
@@ -222,29 +221,39 @@ function parseOptions(json: string | null): string[] {
   }
 }
 
-// ── guard document-repairing plugins against the binding's own dispatches (S1; upstream's CAVEATS) ──
-// A plugin whose appendTransaction repairs the document (tables, the trailing node, autolink) must not answer the
-// binding's remote writes or an attribution render, or every peer writes the same repair. P4-A2 (X35, rule 1): nor the
-// provisional layer's redraws, a decoration change alone, or an agent's streaming frame would write the person's doc
-// (a remote write that left a chart last, then a frame: the trailing paragraph). The person's next transaction repairs.
+// ── the document-repairing plugins answer only a change of the person's to the content (S1; upstream's CAVEATS; X-141) ──
+// A plugin whose appendTransaction repairs the document (tables, the trailing node, autolink, the link repair) must not
+// answer the binding's remote writes or an attribution render, or every peer writes the same repair; nor anything that
+// only looks (a presence or provisional-layer redraw, a focus, the undo manager's swap at a mount, a click, a selection),
+// or opening a document would write a revision credited to the person at the window (X-141; U10a's decision 6). Each
+// transaction is read at the batch's root, since ProseMirror marks an appended one with its root and copies nothing
+// else of it (decision 7): the caret fix-up appended to a remote write is not itself marked as the binding's, nor a
+// table repair appended to composed input as a composition's. A plugin may still put the selection right in answer to
+// anything but the binding's (the table's cell selection). The trailing paragraph alone also waits out a composition and
+// comes with the person's next change outside one (decision 8); nothing is written when a composition ends.
 const renderingAttribution = (state: EditorState): boolean => (ySyncPluginKey.getState(state) as { renderer?: unknown } | undefined)?.renderer != null;
-const isLayerRedraw = (tr: Transaction): boolean => tr.getMeta(provisionalKey) !== undefined;
-const guard = (plugin: Plugin): Plugin => {
+const rootOf = (tr: Transaction): Transaction => (tr.getMeta('appendedTransaction') as Transaction | undefined) ?? tr;
+/** A change of the person's to the content: the batch's root changes the document and is not the binding's. */
+const isPersonsChange = (tr: Transaction): boolean => rootOf(tr).docChanged && !isBindingTransaction(rootOf(tr));
+const inComposition = (tr: Transaction): boolean => rootOf(tr).getMeta('composition') !== undefined;
+const guard = (plugin: Plugin, waitsOutComposition = false): Plugin => {
   const append = plugin.spec.appendTransaction;
   if (append == null) return plugin;
   return new Plugin({
     ...plugin.spec,
     appendTransaction(trs, oldState, newState) {
-      if (renderingAttribution(newState) || trs.some(isBindingTransaction) || trs.every(isLayerRedraw)) return null;
-      return append.call(this, trs, oldState, newState);
+      if (renderingAttribution(newState) || trs.some((tr) => isBindingTransaction(rootOf(tr)))) return null;
+      const answer = append.call(this, trs, oldState, newState);
+      if (!answer || !answer.docChanged) return answer ?? null; // a selection put right writes nothing
+      return trs.some((tr) => isPersonsChange(tr) && !(waitsOutComposition && inComposition(tr))) ? answer : null;
     },
   });
 };
 // Tiptap's `extend` config is typed per extension; the override reads only `parent`.
-const guarded = <E extends AnyExtension>(ext: E): E =>
+const guarded = <E extends AnyExtension>(ext: E, waitsOutComposition = false): E =>
   (ext as unknown as { extend(config: object): E }).extend({
     addProseMirrorPlugins(this: { parent?: () => Plugin[] }) {
-      return (this.parent?.() ?? []).map(guard);
+      return (this.parent?.() ?? []).map((plugin) => guard(plugin, waitsOutComposition));
     },
   });
 
@@ -461,7 +470,7 @@ export const extensions = ({ generateID = (): string => nanoid8() }: { generateI
   DateChip,
   Mention,
   Dropdown,
-  guarded(TrailingNode),
+  guarded(TrailingNode, true), // the trailing paragraph waits out a composition (U10a's decision 8)
   ...variants,
   ...AttributionMarks,
   uniqueId({ types: ID_TYPES, generateID }),

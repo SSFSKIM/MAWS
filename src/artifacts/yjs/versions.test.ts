@@ -1,10 +1,11 @@
 import * as Y from '@y/y';
 import { describe, expect, it } from 'vitest';
+import { newDoc } from './doc';
 import { canonicalV2, mergeV2, versionDelta } from './versions';
 
 // A doc edited in steps, each step's state captured as a version would be.
 function history(): Uint8Array[] {
-  const doc = new Y.Doc({ gc: true });
+  const doc = newDoc();
   const states: Uint8Array[] = [];
   const step = (edit: () => void) => {
     doc.transact(edit);

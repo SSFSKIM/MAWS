@@ -29,8 +29,8 @@ export {
 export type { Transaction } from '@y/y'; // a suggestion replica's update, read by `proposesOver`
 
 // History's throwaway docs (a version's state and the state it is compared with) keep deleted content, so the diff
-// renderer can show what a change removed; the live doc is gc on (index.ts's `newDoc`).
-export const newDocGcOff = (): Y.Doc => new Y.Doc({ gc: false });
+// renderer can show what a change removed; the live doc is gc on (index.ts's `newDoc`). Made in doc.ts with the rest.
+export { newDocGcOff } from './doc';
 
 // The clock after the last struct `store` holds of `client` (0 when it holds none).
 const stateOf = (store: Y.Doc['store'], client: number): number => {

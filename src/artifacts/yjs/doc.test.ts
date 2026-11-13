@@ -3,7 +3,8 @@ import { Schema } from '@tiptap/pm/model';
 import * as Y from '@y/y';
 import { ySyncPluginKey } from '@y/prosemirror';
 import { describe, expect, it } from 'vitest';
-import { adoptClientId, applyV1, applyV2, bindingVersion, diffV1, isBindingTransaction, newDoc, onUpdate, stateV2, stateVector, transact } from './doc';
+import { adoptClientId, applyV1, applyV2, bindingVersion, diffV1, isBindingTransaction, newDoc, newDocGcOff, newSuggestionDoc, onUpdate, stateV2, stateVector, transact, type Doc } from './doc';
+import { liveMarkers, newDocAsF } from './format-cleanup.fixture';
 
 describe('the binding module’s docs and encodings', () => {
   it('round-trips a schema-agnostic doc through the wire (V1), a version state (V2) and a reload, identically', () => {
@@ -86,5 +87,68 @@ describe('isBindingTransaction', () => {
   it('is false for a user’s transaction', () => {
     expect(isBindingTransaction(tr().insertText('typed'))).toBe(false);
     expect(isBindingTransaction(tr().setMeta('addToHistory', false))).toBe(false);
+  });
+});
+
+// l6-artifacts-07 (a), the pin: no doc MAWS builds runs Yjs's post-apply formatting clean-up, which would be a write of
+// that doc's own that no caller started. One writer bolds a word while another, not having seen the bold, deletes it:
+// the deletion, applied after the bold, leaves the bold's two markers around nothing, which is what the clean-up acts on.
+describe('a doc from the constructors writes nothing after an apply (l6-artifacts-07 (a))', () => {
+  function boldThenDeletion(make: () => Doc) {
+    const base = make();
+    base.get('t').insert(0, 'one word two');
+    const bolder = make();
+    const deleter = make();
+    applyV1(bolder, diffV1(base));
+    applyV1(deleter, diffV1(base));
+    const sv = stateVector(bolder);
+    bolder.get('t').format(4, 4, { bold: true });
+    deleter.get('t').delete(4, 4);
+    return { base: diffV1(base), bold: diffV1(bolder, sv), deletion: diffV1(deleter, stateVector(base)) };
+  }
+  // A doc holding the base and the bold, and every transaction and update it runs while `apply` applies the deletion.
+  function receive(make: () => Doc, apply: (doc: Doc, deletion: Uint8Array) => void) {
+    const updates = boldThenDeletion(make);
+    const doc = make();
+    applyV1(doc, updates.base);
+    applyV1(doc, updates.bold);
+    const transactions: unknown[] = [];
+    const emitted: unknown[] = [];
+    doc.on('beforeTransaction', (transaction) => transactions.push(transaction.origin));
+    onUpdate(doc, (_update, origin) => emitted.push(origin));
+    apply(doc, updates.deletion);
+    return { transactions, emitted, markers: liveMarkers(doc.get('t')), text: doc.get('t').toString() };
+  }
+  const plain = (doc: Doc, deletion: Uint8Array) => applyV1(doc, deletion, 'remote');
+  const nested = (doc: Doc, deletion: Uint8Array) => transact(doc, () => applyV1(doc, deletion, 'remote'), 'outer'); // a restore's, an accept's shape
+
+  it('the control: a doc built with Yjs’s defaults deletes a marker after the apply, in a transaction of no origin', () => {
+    expect(receive(newDocAsF, plain)).toEqual({ transactions: ['remote', null], emitted: ['remote', null], markers: 1, text: 'one  two' });
+    expect(receive(newDocAsF, nested)).toEqual({ transactions: ['outer', null], emitted: ['outer', null], markers: 1, text: 'one  two' });
+  });
+
+  for (const [name, make] of [['newDoc', newDoc], ['newSuggestionDoc', newSuggestionDoc], ['newDocGcOff', newDocGcOff]] as const) {
+    it(`${name}: runs the apply’s transaction alone and emits only its update, also when the apply joins an open transaction`, () => {
+      expect(receive(make, plain)).toEqual({ transactions: ['remote'], emitted: ['remote'], markers: 2, text: 'one  two' });
+      expect(receive(make, nested)).toEqual({ transactions: ['outer'], emitted: ['outer'], markers: 2, text: 'one  two' });
+    });
+  }
+
+  it('keeps the writer’s own clean-up: deleting a whole bold word removes its markers in the same transaction, one update', () => {
+    const doc = newDoc();
+    transact(doc, () => {
+      doc.get('t').insert(0, 'one word two');
+      doc.get('t').format(4, 4, { bold: true });
+    });
+    expect(liveMarkers(doc.get('t'))).toBe(2);
+    const emitted: unknown[] = [];
+    onUpdate(doc, (_update, origin) => emitted.push(origin));
+    let deleted = 0;
+    doc.on('afterTransaction', (transaction) => transaction.deleteSet.clients.forEach((ranges) => ranges.getIds().forEach((range) => (deleted += range.len))));
+    transact(doc, () => doc.get('t').delete(4, 4), 'writer');
+    expect(emitted).toEqual(['writer']);
+    expect(deleted).toBe(6); // the four characters and the two markers
+    expect(liveMarkers(doc.get('t'))).toBe(0);
+    expect(doc.get('t').toString()).toBe('one  two');
   });
 });
