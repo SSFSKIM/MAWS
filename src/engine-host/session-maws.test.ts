@@ -163,7 +163,7 @@ describe('the maws server on an EngineSession (scripted)', () => {
       const page = run.call('show_pane', { pane: 'browser', target: 'http://localhost:4173/' }, 'toolu_page');
       await until(() => run.shows.length === 1, 'the pane request');
       run.session.answerPane(page, { ok: true, opened, page: 'reloaded' });
-      expect((await run.answered(page)).result!.content![0]!.text).toBe(JSON.stringify({ status: 'shown', pane: 'browser', opened, page: 'reloaded', note: SHOW_PANE_NOTES.browser }));
+      expect((await run.answered(page)).result!.content![0]!.text).toBe(JSON.stringify({ status: 'shown', pane: 'browser', opened, page: 'reloaded', note: SHOW_PANE_NOTES.browser }, null, 2)); // the key order the agent reads
       const terminal = run.call('show_pane', { pane: 'terminal' }, 'toolu_term');
       await until(() => run.shows.length === 2, 'the second pane request');
       const term = { kind: 'panel-tool', toolId: 'terminal', tabId: 'terminal:1', title: 'Terminal' } as const;
