@@ -155,6 +155,26 @@ describe('transcript store', () => {
     expect(store.getState().entries[KEY].jump).toBeNull();
   });
 
+  // UX wave U3 (O-12): a message from another session folds with its turn now, so a jump to it opens that turn
+  it('jumpTo a message line inside a folded turn opens the turn and lands on the line', async () => {
+    const b = builder();
+    b.emit('turn.started', { userMessageUuid: null, origin: 'peer' });
+    const message = b.emit('peer.message', { messageUuid: uuid('p1'), from: 'uds:/tmp/socks/9.sock', fromSession: null, fromName: 'docs', fromMode: null, fromPlugin: null, hopChain: [], text: 'the index is stale', midTurn: false, lineage: 'peer', replyable: true });
+    b.toolUse('t1', 'Bash', { command: 'ls' });
+    b.result('t1', 'a', { structured: BASH_RESULT('a') });
+    b.end([], { origin: 'peer' });
+    b.turn('u2');
+    b.text('m2', 0, 'Done');
+    b.end(['u2']);
+    const store = createTranscriptStore();
+    await store.getState().attach(KEY, pushSource(b.events).source);
+    const target = rowId.agentMessage(message.id);
+    expect(store.getState().rows(KEY).some((row) => row.id === target)).toBe(false);
+    store.getState().jumpTo(KEY, target);
+    expect(store.getState().rows(KEY).some((row) => row.id === target)).toBe(true);
+    expect(store.getState().entries[KEY].jump).toMatchObject({ rowId: target });
+  });
+
   it('jumpTo with the owning turn named locates the cell in that turn alone, and falls back when the hint misses', async () => {
     for (const hint of [turnId.ofMessage(uuid('u1')), turnId.ofMessage(uuid('u2'))]) {
       const store = createTranscriptStore();

@@ -1,6 +1,8 @@
 // E7 (M2): the rows of messages between sessions and agents and of a listing, and the Reply composer under them (E7
-// execution document, Design §4): real rows from the model, a spy `replyToPeer`, a hand-held `peerReplies` source.
+// execution document, Design §4): real rows from the model, a spy `replyToPeer`, a hand-held `peerReplies` source. UX
+// wave U3 (O-12; the U3a document, Acceptance 3): every message is one line, the line itself opens the whole message.
 import { act, cleanup, fireEvent, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
@@ -58,13 +60,14 @@ beforeEach(() => useSessions.setState({ engine: new Map(), records: new Map(), d
 afterEach(cleanup);
 
 describe('a message from another session', () => {
-  it('reads @ sender with the address as its tooltip and the preview; Reply opens the composer, which sends through replyToPeer', async () => {
+  it('reads Message from @sender, the address as its tooltip, and the preview; Reply opens the composer, which sends through replyToPeer', async () => {
     live();
     const { source } = replies();
     const actions: TranscriptActions = { ...spyActions(), peerReplies: source };
-    renderRow(inbound(), { storeKey: A, actions });
-    expect(screen.getByText('@ repo-b').getAttribute('title')).toBe(B);
+    const { container } = renderRow(inbound(), { storeKey: A, actions });
+    expect(screen.getByText('@repo-b').getAttribute('title')).toBe(B);
     expect(screen.getByText('hello from B')).toBeTruthy();
+    expect(container.querySelector('.transcript-line-text')?.textContent).toBe('Message from @repo-b: hello from B');
     fireEvent.click(screen.getByRole('button', { name: 'Reply' }));
     const box = screen.getByRole('textbox', { name: 'Reply via Session A' });
     expect(box.getAttribute('placeholder')).toBe('Reply to repo-b…');
@@ -165,19 +168,72 @@ describe('a message from another session', () => {
     expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('on it');
   });
 
-  it('shows the whole message behind its disclosure when the preview cut it, and offers no Reply when the sender cannot be reached', () => {
+  it('shows the whole message under the line when the line is clicked, and offers no Reply when the sender cannot be reached', () => {
     const row = inbound('first line\nsecond line');
     renderRow({ ...row, peer: { ...row.peer!, replyTo: null } }, { storeKey: A });
     expect(screen.queryByRole('button', { name: 'Reply' })).toBeNull();
     expect(screen.queryByText(/second line/)).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Show the whole message' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Message from @repo-b/ }));
     expect(screen.getByText(/second line/).textContent).toBe('first line\nsecond line');
   });
 
-  it('offers no disclosure when the preview is the whole body but for surrounding whitespace', () => {
-    renderRow(inbound('  just this  \n'), { storeKey: A });
+  it('is no control when the line shows the whole body but for surrounding whitespace', () => {
+    const { container } = renderRow(inbound('  just this  \n'), { storeKey: A });
     expect(screen.getByText('just this')).toBeTruthy();
+    expect(container.querySelector('[aria-expanded]:not(.transcript-peer-reply)')).toBeNull();
+  });
+});
+
+// UX wave U3 (O-12; the U3a document, Acceptance 3): the one message line.
+describe('the message line', () => {
+  it('is one line that never wraps: the preview is one text node inside the container that clips it with an ellipsis', () => {
+    const { container } = renderRow(inbound(`${'x'.repeat(200)}\nmore`), { storeKey: A });
+    const preview = container.querySelector('[data-part="preview"]')!;
+    expect(preview.childNodes).toHaveLength(1);
+    expect(preview.firstChild?.nodeType).toBe(Node.TEXT_NODE);
+    expect(preview.closest('.transcript-line-text')).not.toBeNull();
+    expect(container.querySelector('.transcript-peer')!.querySelectorAll('.transcript-line')).toHaveLength(1);
+  });
+
+  it('leaves a leading @address token out of the preview and keeps it in the opened message', () => {
+    const { container } = renderRow(inbound('@notes-main please rerun the build'), { storeKey: A });
+    expect(container.querySelector('[data-part="preview"]')?.textContent).toBe('please rerun the build');
+    fireEvent.click(screen.getByRole('button', { name: /^Message from @repo-b/ }));
+    expect(container.querySelector('.transcript-peer-body')?.textContent).toBe('@notes-main please rerun the build');
+  });
+
+  it('opens and closes on a click, on Enter and on Space, and has no “Show the whole message” button', async () => {
+    const user = userEvent.setup();
+    const { container } = renderRow(inbound('first line\nsecond line'), { storeKey: A });
+    const line = screen.getByRole('button', { name: /^Message from @repo-b/ });
+    const body = () => container.querySelector('.transcript-peer-body');
     expect(screen.queryByRole('button', { name: 'Show the whole message' })).toBeNull();
+    await user.click(line);
+    expect(body()).not.toBeNull();
+    expect(line.getAttribute('aria-expanded')).toBe('true');
+    await user.click(line);
+    expect(body()).toBeNull();
+    line.focus();
+    await user.keyboard('{Enter}');
+    expect(body()).not.toBeNull();
+    await user.keyboard('{Enter}');
+    expect(body()).toBeNull();
+    await user.keyboard(' ');
+    expect(body()).not.toBeNull();
+    await user.keyboard(' ');
+    expect(body()).toBeNull();
+  });
+
+  it('offers Reply at the line’s end where the sender can be answered, and keeps it shown while its composer is open', () => {
+    const { container } = renderRow(inbound(), { storeKey: A });
+    const reply = screen.getByRole('button', { name: 'Reply' });
+    const root = container.querySelector('.transcript-peer')!;
+    expect(reply.closest('.transcript-line')).not.toBeNull();
+    expect(reply.closest('.transcript-line-words')).toBeNull(); // outside the words, so a cut line keeps it
+    expect(root.hasAttribute('data-replying')).toBe(false);
+    fireEvent.click(reply);
+    expect(root.hasAttribute('data-replying')).toBe(true);
+    expect(screen.getByRole('textbox')).toBeTruthy();
   });
 });
 
@@ -203,7 +259,7 @@ describe('the owners of a message from another session', () => {
 
   it('draws nothing when you alone own the sender’s session, nor for a frame that names no owner', () => {
     renderRow(labelled('sam@example.com'), { storeKey: A });
-    expect(screen.getByText('@ repo-b')).toBeTruthy();
+    expect(screen.getByText('@repo-b')).toBeTruthy();
     expect(owners()).toBeNull();
     cleanup();
     renderRow(inbound(), { storeKey: A });
@@ -211,8 +267,9 @@ describe('the owners of a message from another session', () => {
   });
 
   it('names you first when you share it, the member when you don’t own it, and a name the store doesn’t hold as written', () => {
-    renderRow(labelled('ana@example.com, sam@example.com'), { storeKey: A });
+    const { container } = renderRow(labelled('ana@example.com, sam@example.com'), { storeKey: A });
     expect(owners()?.textContent).toBe('you, Ana');
+    expect(container.querySelector('.transcript-line-text')?.textContent).toBe('Message from @repo-b (you, Ana): hello from B'); // after the name, in parentheses
     expect(owners()?.getAttribute('title')).toBe('you <sam@example.com>, Ana <ana@example.com>');
     cleanup();
     renderRow(labelled('ana@example.com'), { storeKey: A });
@@ -225,16 +282,17 @@ describe('the owners of a message from another session', () => {
 });
 
 describe('a message sent to another session, and a subagent’s report', () => {
-  it('reads To @ recipient with the send’s state, and the engine’s reason when it could not send', () => {
+  it('reads Sent to @recipient with the send’s state at the line’s end, and the engine’s reason when it could not send', () => {
     const rows = derived((b) => {
       b.turn('u1');
       b.toolUse('s1', 'SendMessage', { to: 'nobody', message: 'hi' });
       b.result('s1', '{}', { structured: { success: false, message: "No agent named 'nobody' is reachable." } });
       b.toolUse('s2', 'SendMessage', { to: 'peer-c', message: 'waiting' });
     }).filter((row): row is Message => row.kind === 'agent_message');
-    renderRow(rows[0]!, { storeKey: A });
-    expect(screen.getByText('To @ nobody')).toBeTruthy();
-    expect(screen.getByText('Not sent')).toBeTruthy();
+    const { container } = renderRow(rows[0]!, { storeKey: A });
+    expect(container.querySelector('.transcript-line-text')?.textContent).toBe('Sent to @nobody: hi');
+    expect(screen.getByText('Not sent').closest('.transcript-line-words')).toBeNull(); // at the end, outside the cut words
+    expect(container.querySelector('.transcript-line')?.lastElementChild?.textContent).toBe('Not sent');
     expect(screen.getByText("No agent named 'nobody' is reachable.")).toBeTruthy();
     cleanup();
     renderRow(rows[1]!, { storeKey: A });
@@ -242,16 +300,16 @@ describe('a message sent to another session, and a subagent’s report', () => {
     expect(screen.queryByRole('button', { name: 'Reply' })).toBeNull();
   });
 
-  it('folds a hand-back’s report under Report from its agent', () => {
+  it('reads a hand-back as Report from its agent and the report’s first line; the line opens the whole report', () => {
     const [row] = derived((b) => {
       b.emit('turn.started', { userMessageUuid: null, origin: 'peer' });
-      b.emit('subagent.message', { direction: 'from_child', fromAgentId: 'a1' as never, toAgentId: null, text: '[Subagent hand-back] Framed. The report follows:\n  all done' });
+      b.emit('subagent.message', { direction: 'from_child', fromAgentId: 'a1' as never, toAgentId: null, text: '[Subagent hand-back] Framed. The report follows:\n  all done\n  and checked' });
     }).filter((row): row is Message => row.kind === 'agent_message');
-    renderRow(row!, { storeKey: A });
-    expect(screen.getByText('Report from a1')).toBeTruthy();
-    expect(screen.queryByText('all done')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Show the report' }));
-    expect(screen.getByText('all done')).toBeTruthy();
+    const { container } = renderRow(row!, { storeKey: A });
+    expect(screen.getByText('Report from a1: all done')).toBeTruthy();
+    expect(container.querySelector('.transcript-peer-body')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /^Report from a1/ }));
+    expect(container.querySelector('.transcript-peer-body')?.textContent).toBe('all done\nand checked');
   });
 
   it('reads a plain agent message as its first line, the whole of it behind the disclosure', () => {
@@ -262,7 +320,7 @@ describe('a message sent to another session, and a subagent’s report', () => {
     renderRow(row!, { storeKey: A });
     expect(screen.getByText('Message from a1: first line')).toBeTruthy();
     expect(screen.queryByText(/second line/)).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Show the whole message' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Message from a1/ }));
     expect(screen.getByText(/second line/).textContent).toBe('first line\nsecond line');
   });
 });
