@@ -283,22 +283,25 @@ function SidebarBody() {
   // under it, the keyboard goes to the row that returned, else to the project's row; a row under it that left alone
   // hands it to the Hidden row. Only a keyboard the sidebar held is placed: its focus owner, which this commit removed.
   // Before the reconcile below, which releases that owner.
-  const nodesBefore = useRef(nodes);
+  const drawnBefore = useRef({ nodes, hidden: hiddenSessions });
   useLayoutEffect(() => {
-    const before = nodesBefore.current;
-    nodesBefore.current = nodes;
+    const before = drawnBefore.current;
+    drawnBefore.current = { nodes, hidden: hiddenSessions };
     const owner = focusOwner.current;
     if (!(owner instanceof Element) || owner.isConnected) return;
     const id = owner.closest('[data-tree-id]')?.getAttribute('data-tree-id');
-    const node = before.find((n) => n.id === id);
-    const disclosure = node?.kind === 'hidden' ? node : before.find((n) => n.kind === 'hidden' && node !== undefined && 'parent' in node && n.id === node.parent);
-    if (node === undefined || disclosure?.kind !== 'hidden') return;
-    const under = new Set(before.flatMap((n) => ('parent' in n && n.parent === disclosure.id ? [n.id] : [])));
-    const returned = nodes.find((n) => under.has(n.id));
+    const node = before.nodes.find((n) => n.id === id);
+    if (node === undefined || node.kind === 'project') return;
+    const parent = node.parent;
+    const disclosure = node.kind === 'hidden' ? node : before.nodes.find((n) => n.kind === 'hidden' && n.id === parent);
+    if (disclosure?.kind !== 'hidden') return;
     const has = (target: string) => nodes.some((n) => n.id === target);
-    const target = node.kind !== 'hidden' && has(node.id) ? node.id : has(disclosure.id) ? disclosure.id : (returned?.id ?? projectNodeId(disclosure.key));
+    const project = disclosure.parent;
+    const inProject = (n: TreeNode): boolean => n.kind !== 'project' && (n.parent === project || nodes.some((m) => m.id === n.parent && inProject(m)));
+    const returned = nodes.find((n) => (n.kind === 'session' || n.kind === 'listed') && before.hidden.has(n.appSessionId) && !hiddenSessions.has(n.appSessionId) && inProject(n));
+    const target = node.kind !== 'hidden' && has(node.id) ? node.id : has(disclosure.id) ? disclosure.id : (returned?.id ?? project);
     if (has(target)) focusItem(target);
-  }, [nodes, focusItem]);
+  }, [nodes, hiddenSessions, focusItem]);
   useLayoutEffect(() => {
     // Removing a row can omit leave/blur and move focus to BODY without focusin. Reconcile after this
     // sidebar's commit; surviving targets and focus transfers performed by children keep their ownership.
