@@ -26,7 +26,7 @@ The build on the owner's machines today, build F (commit `f1852de3a`), reads the
 - [x] (2026-11-13 04:20Z) M2 — One strip in the store, and the current project. Commits `67c8ba4bf..4cf52c4dc`, review fix `0041b10cc..1d744f9cd`; task review clean on its second round.
 - [x] (2026-11-13) Q1 answered by the owner (2026-11-12): "No, only chats with content": an empty New chat does not come back after a relaunch. M3 builds §E's last paragraph; M5 records the amendment (Decision Log, 2026-11-13).
 - [x] (2026-11-13 05:36Z) M3 — New chat, with Q1's relaunch discard. Commits `fd5f60831..275685451`, review fixes `7e00e152b..c9e5b9d25` and `97adaff64..9cecb61bc`; task review clean on its third round.
-- [ ] M4 — What the tabs and the title bar show.
+- [x] (2026-11-13 06:14Z) M4 — What the tabs and the title bar show. Commits `02ed34550..04e4b080b`; task review clean on its first round (one Minor, a pinned tab to the right of the menu's tab, given to M5 as a unit case).
 - [ ] M5 — The e2e scenes, the record, and the acceptance run.
 - [ ] The proof an executor does not run: the branch review, the rehearsal, the cross-build run with F, the e2e groups, the owner's look, class 1a on the final head.
 - [ ] Pull request opened on the architect's word.
