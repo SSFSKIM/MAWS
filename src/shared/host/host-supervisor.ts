@@ -1131,8 +1131,10 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
 
   // UX wave U9 (docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, M1): the remote endpoint carries another
   // machine's completion (its pane answer) as an act, `host.op` naming it, the request it answers in the op's `input`. It
-  // goes by that completion's route, so a drain's pane answer from another machine settles the call the draining host
-  // holds; one whose raiser is gone goes as any `host.op` does, to the served host, whose ledger answers it.
+  // goes by that completion's route while its raiser's link is open, so a drain's pane answer from another machine settles
+  // the call the draining host holds. Else it goes as any `host.op` does, to the served host, whose ledger answers it: its
+  // raiser gone, or reconnecting (held for the next host served, never bound to a process that may be gone, as a bare
+  // completion is).
   const completionOf = (name: string, input: unknown): { answers: unknown; op: boolean } | null => {
     if (DRAIN_REPLIES.has(name)) return { answers: input, op: false };
     if (name !== 'host.op' || typeof input !== 'object' || input === null) return null;
@@ -1162,10 +1164,10 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
     const budgetMs = budget ?? host.spec.requestBudgetsMs?.[name] ?? REQUEST_TIMEOUT_MS;
     // P5 O16 M3b fix wave 2: a completion goes to the engine host that raised its request, never waits for another (one
     // carried by the machine link is an ordinary request of that link's, routed again by `mawsd`); UX wave U9: an op
-    // carrying one goes by its route too, and as an ordinary op once its raiser is gone (`completionOf`, above)
+    // carrying one goes on its raiser's open link, else as an ordinary op (`completionOf`, above)
     const carried = owner === 'engine-host' ? completionOf(name, input) : null;
     const routed = carried === null ? undefined : completionRoute(host, carried.answers);
-    const completion = routed === null && carried?.op === true ? undefined : routed;
+    const completion = carried?.op === true && !(routed && 'link' in routed) ? undefined : routed;
     // main's daemon shape: with no open link here, `mawsd` routes it (its own record of the raiser is the one that counts)
     if (completion !== undefined && (completion === null || 'hold' in completion) && viaMachine(host)) return request('machine', name, input, client, forwarded, budgetMs);
     if (completion === null) return Promise.resolve({ ok: false, error: ipcError('host_unavailable', `the ${owner} that raised request ${requestIdOf(input) ?? '(none)'} is gone; ${name} not sent`) });
