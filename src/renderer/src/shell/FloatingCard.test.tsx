@@ -189,7 +189,7 @@ describe('the floating card in the Shell', () => {
 
   it('Dock restores the column at its width and the main pane’s composer takes the keyboard', async () => {
     const user = userEvent.setup();
-    useLayout.getState().setPanel({ width: 444 });
+    useLayout.getState().setPanelWidth(444); // UX wave U8b: the width in use (this column's class)
     render(<Shell />);
     act(() => useLayout.getState().setPanel({ floating: true }));
     focused.splice(0);
