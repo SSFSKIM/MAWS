@@ -21,6 +21,7 @@ import type { BrowserProfile } from './partition';
 import { UnknownTabError, type TabStore } from './tabs';
 import { shown, type ViewManager } from './view';
 import { captureTabView } from './capture'; // P3-G
+import { agentTabComesForward } from './agent/control'; // U12a
 // cua #90 start
 import { UnknownBookmarkError, type BookmarkBar } from './bookmarks/bar';
 import type { Favicons } from './favicon';
@@ -45,6 +46,7 @@ export interface BrowserHandlerDeps {
   // P5 O7 M3: a session of another machine's tabs (machines.ts), and a tab opened at a forward's listener (forwarded.ts)
   sessions?: Pick<SessionMachines, 'keyOf' | 'machineOf' | 'bareOf'>;
   forwarded?: Pick<ForwardedTabs, 'opened'>;
+  now?(): number; // U12a: the clock `browser.agent.show` reads the person's input against
 }
 
 // A handler whose unknown tab is the caller's mistake, not main's fault.
@@ -84,7 +86,7 @@ function suggestionsOr(read: () => BrowserSuggestion[], what: string): BrowserSu
   }
 }
 
-export function registerBrowserHandlers({ store, views, navigator, downloads, history, bookmarks, bar, windowOf, favicons, avatars, profiles, register, sessions, forwarded }: BrowserHandlerDeps): void {
+export function registerBrowserHandlers({ store, views, navigator, downloads, history, bookmarks, bar, windowOf, favicons, avatars, profiles, register, sessions, forwarded, now = Date.now }: BrowserHandlerDeps): void {
   // P5 O7 M3: the three that name a session are answered for a session of any machine (the router's
   // BROWSER_TOOL_HERE_FOR_ANY_MACHINE): the store keys it by its session key (machines.ts: the bare id here, the address
   // for another machine's), and the answer says the bare id again for the invoke's machine; a list of every session is
@@ -147,6 +149,18 @@ export function registerBrowserHandlers({ store, views, navigator, downloads, hi
   );
   // The chrome's Hand back: the page returns to idle from any state (E4c moves it everywhere else).
   register('browser.control.handBack', knownTabs(({ tabId }) => store.setControl(tabId, 'idle')));
+  // U12a (Interfaces §C; ruling R2): the window about to open the Browser by itself asks for the acting tab. The session
+  // is the tab's own (a side thread's acting tab is its parent's), and the tab is selected there when
+  // `agentTabComesForward` says so; the answer is whether it is then the session's selected tab. The only selection made
+  // for the agent: cua's acting command selects nothing (cua/connection.ts).
+  register('browser.agent.show', knownTabs(({ tabId }) => {
+    const acting = store.require(tabId);
+    const { appSessionId } = acting.tab;
+    const selectedOf = () => store.list(appSessionId).selected[appSessionId] ?? null;
+    const selected = selectedOf();
+    if (agentTabComesForward(selected === null ? null : (store.entry(selected) ?? null), acting, now())) store.select(appSessionId, tabId);
+    return { selected: selectedOf() === tabId };
+  }));
   // cua #90 start: the bookmarks bar (bookmarks/bar.ts): a chip's click, a native menu on the sender's window, the icons
   register('browser.bookmarks.open', knownTabs(({ tabId, nodeId, how }) => bar.open(tabId, nodeId, how)));
   register(

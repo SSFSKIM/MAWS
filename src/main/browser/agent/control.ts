@@ -53,6 +53,18 @@ export function personUses(entry: TabEntry, now: number): boolean {
   return entry.tab.control === 'human' || personHolds(entry, now);
 }
 
+// U12a (Interfaces §C; ruling R2): whether the Browser's opening by itself selects `acting` in its session
+// (`browser.agent.show`, register.ts): not when it is the selected tab already, not when the person uses the selected
+// tab, and not when a panel is showing the selected tab (a second window with this session's Browser in view, whose
+// selection is this one: a session's selected tab is one value for every window). A main tab showing it holds nothing
+// back, since a main tab shows its own tab whatever is selected. `selected` is the session's selected tab's entry, or null
+// when it has none.
+export function agentTabComesForward(selected: TabEntry | null, acting: TabEntry, now: number): boolean {
+  if (selected === null) return true;
+  if (selected.tab.tabId === acting.tab.tabId) return false;
+  return !personUses(selected, now) && selected.tab.placedIn?.surface !== 'panel';
+}
+
 // Told after every control transition (`from`: the state it left).
 export type ControlListener = (entry: TabEntry, from: BrowserControl) => void;
 

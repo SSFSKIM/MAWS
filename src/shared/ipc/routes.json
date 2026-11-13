@@ -4,6 +4,7 @@
   "attention.pendingNavigate",
   "attention.viewing",
   "browser.agent.activities.list",
+  "browser.agent.show",
   "browser.bookmarks.favicons",
   "browser.bookmarks.menu",
   "browser.bookmarks.open",
