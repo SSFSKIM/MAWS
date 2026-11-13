@@ -25,7 +25,7 @@ it('keeps factual edit titles, counts and inline content when a batch summary ar
   const store = await storeWith(b.events); useTranscriptStore.getState().expandAll(store.key);
   expect(store.rows().some((row) => row.kind === 'receipt')).toBe(false);
   const view = renderRow(rowOf(store.rows(), 'group'), { storeKey: store.key });
-  expect(view.container.textContent).toContain('Edited 1 file, created 1 file');
+  expect(view.container.textContent).toContain('Edited a file, created a file'); // UX wave U2: Desktop's caption
   expect(view.container.textContent).not.toContain('Opaque batch summary');
   const create = screen.getByRole('button', { name: /^Created notes\.txt.*\+1$/ });
   expect(create.querySelector('.transcript-counts')?.textContent).toBe('+1');

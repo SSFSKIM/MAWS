@@ -130,7 +130,7 @@ describe('the rows of a js call', () => {
     expect(activityRows(view.container)).toEqual(ACTION_ROWS);
     expect(folded.indexOf('divider')).toBeLessThan(folded.indexOf(ACTION_ROWS[0]));
     expect(folded.indexOf(ACTION_ROWS.at(-1)!)).toBeLessThan(folded.indexOf('assistant_text')); // the call's place, before the answer
-    expect(view.container.querySelector('[data-kind="divider"]')!.textContent).toContain('2 tool calls'); // the folded js call still counts
+    expect(view.container.querySelector('[data-kind="divider"]')!.textContent).toMatch(/ · Read a, used /); // the folded js call is still a part of the turn's caption (UX wave U2)
   });
 
   it('come back from main’s list when the transcript mounts again, as after a reload', async () => {
