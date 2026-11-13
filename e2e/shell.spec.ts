@@ -602,7 +602,7 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     expect((await foreign.boundingBox())!.height, 'a 30px row').toBe(30);
     await foreign.click({ button: 'right' });
     await expect(page.getByRole('menu')).toBeVisible();
-    expect(await page.getByRole('menuitem').allTextContents(), 'a foreign-live session offers only the opens (I2)').toEqual(['Open', 'Open in new tab']);
+    expect(await page.getByRole('menuitem').allTextContents(), 'a foreign-live session offers only the opens (I2), then Hide (UX wave U7, O-16)').toEqual(['Open', 'Open in new tab', 'Hide']);
     await page.keyboard.press('Escape');
     await expect(page.getByRole('menu')).toHaveCount(0);
     expect(await noLeftovers(page, tokens.dark), 'no dark colour in the light theme').toEqual([]);

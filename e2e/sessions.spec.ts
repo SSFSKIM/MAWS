@@ -529,7 +529,7 @@ test.describe('sessions', () => {
     await expect.poll(async () => value(await invoke(page, 'session.get', { appSessionId: id }))!.holder, { timeout: 2_000, message: 'foreign-live in the sidebar within two seconds' }).toEqual(job);
 
     await (await sidebarRow(page, { appSessionId: id })).click({ button: 'right' }); // W11: in its expanded project
-    await expect(page.getByRole('menuitem')).toHaveText(['Open', 'Open in new tab', 'Attach in a terminal tab']); // W12 I2: Open in new tab beside Open
+    await expect(page.getByRole('menuitem')).toHaveText(['Open', 'Open in new tab', 'Attach in a terminal tab', 'Hide']); // W12 I2: Open in new tab beside Open; UX wave U7, O-16: Hide after the opens
     await page.keyboard.press('Escape');
     await (await row(page, id)).click();
     const notice = page.locator('[data-region="main"]').getByRole('note');
@@ -562,7 +562,7 @@ test.describe('sessions', () => {
     await expect(notice.getByRole('button', { name: 'Attach in a terminal tab' })).toHaveCount(0);
     await expect(notice.getByRole('button', { name: 'Fork a copy' })).toBeVisible();
     await (await sidebarRow(page, { appSessionId: id })).click({ button: 'right' });
-    await expect(page.getByRole('menuitem')).toHaveText(['Open', 'Open in new tab']);
+    await expect(page.getByRole('menuitem')).toHaveText(['Open', 'Open in new tab', 'Hide']); // UX wave U7, O-16
     await page.keyboard.press('Escape');
     await store.removeRegistryRecord(pid);
     expect(launched.maws.consoleErrors()).toEqual([]);
