@@ -13,6 +13,7 @@ import {
   BrowserPartitionSchema,
   BrowserTabIdSchema,
   BrowserTabSchema,
+  BrowserViewportSchema, // U12a
 } from '../../browser/tab';
 import { validateBrowserUrl } from '../../browser/url';
 // E4c start
@@ -304,6 +305,12 @@ export const commands = {
   // record, selects the tab there unless the person uses the selected tab or a panel shows it, and answers whether the tab
   // is then the session's selected one. Named by tab, as `browser.tabs.zoom` is.
   'browser.agent.show': { input: TabOnly, output: z.strictObject({ selected: z.boolean() }), owner: 'main' },
+  // U12a (Interfaces §D, §K): the Browser options' Viewport, the tab's device size (null: Responsive), set by any window
+  // by tab id as `browser.tabs.zoom` is and told back in the tab list; refused for an extension's options tab. Copy
+  // screenshot: the view captured at device pixels and written to this Mac's clipboard whole, for the window the tab is
+  // placed in only (as `browser.view.capture`); `copied: false` when no picture could be taken.
+  'browser.tabs.setViewport': { input: z.strictObject({ tabId: BrowserTabIdSchema, viewport: BrowserViewportSchema.nullable() }), output: z.void(), owner: 'main' },
+  'browser.view.copyScreenshot': { input: TabOnly, output: z.strictObject({ copied: z.boolean() }), owner: 'main' },
   // cua #90 start: an imported profile's bookmarks (cua board #90's spec, Interfaces "IPC"). `tree` answers the rows the
   // index holds for the partition (empty roots when none, or when the index is read-only); `sync` re-reads the profile's
   // `Bookmarks` file now and answers what it wrote, or why it wrote nothing (`refused`: an import or a removal is

@@ -130,6 +130,12 @@ describe('copyTabScreenshot (U12a): browser.view.copyScreenshot for a tab this w
     const failing = vi.fn(() => {
       throw new Error('clipboard unavailable');
     });
-    expect(await copyTabScreenshot(target(), win, failing)).toEqual({ copied: false });
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      expect(await copyTabScreenshot(target(), win, failing)).toEqual({ copied: false });
+      expect(warned).toHaveBeenCalledWith('[browser] writing the screenshot to the clipboard failed:', 'clipboard unavailable');
+    } finally {
+      warned.mockRestore();
+    }
   });
 });

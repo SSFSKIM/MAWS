@@ -8,7 +8,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandName } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
-import type { BrowserWindow, WebContents } from 'electron';
+import type { BrowserWindow, NativeImage, WebContents } from 'electron';
 import type { BrowserBookmarksStore } from './data/bookmarks';
 import type { BrowserHistoryStore, BrowserSuggestion } from './data/history';
 import { pageOf } from '../ipc/clients';
@@ -20,7 +20,7 @@ import type { SessionMachines } from './machines';
 import type { BrowserProfile } from './partition';
 import { UnknownTabError, type TabStore } from './tabs';
 import { shown, type ViewManager } from './view';
-import { captureTabView } from './capture'; // P3-G
+import { captureTabView, copyTabScreenshot } from './capture'; // P3-G; U12a: copyTabScreenshot
 import { agentTabComesForward } from './agent/control'; // U12a
 // cua #90 start
 import { UnknownBookmarkError, type BookmarkBar } from './bookmarks/bar';
@@ -47,6 +47,7 @@ export interface BrowserHandlerDeps {
   sessions?: Pick<SessionMachines, 'keyOf' | 'machineOf' | 'bareOf'>;
   forwarded?: Pick<ForwardedTabs, 'opened'>;
   now?(): number; // U12a: the clock `browser.agent.show` reads the person's input against
+  writeImage(image: NativeImage): void; // U12a: Copy screenshot's write, to this Mac's clipboard
 }
 
 // A handler whose unknown tab is the caller's mistake, not main's fault.
@@ -86,7 +87,7 @@ function suggestionsOr(read: () => BrowserSuggestion[], what: string): BrowserSu
   }
 }
 
-export function registerBrowserHandlers({ store, views, navigator, downloads, history, bookmarks, bar, windowOf, favicons, avatars, profiles, register, sessions, forwarded, now = Date.now }: BrowserHandlerDeps): void {
+export function registerBrowserHandlers({ store, views, navigator, downloads, history, bookmarks, bar, windowOf, favicons, avatars, profiles, register, sessions, forwarded, now = Date.now, writeImage }: BrowserHandlerDeps): void {
   // P5 O7 M3: the three that name a session are answered for a session of any machine (the router's
   // BROWSER_TOOL_HERE_FOR_ANY_MACHINE): the store keys it by its session key (machines.ts: the bare id here, the address
   // for another machine's), and the answer says the bare id again for the invoke's machine; a list of every session is
@@ -112,6 +113,10 @@ export function registerBrowserHandlers({ store, views, navigator, downloads, hi
   register('browser.tabs.select', knownTabs(({ appSessionId, tabId }, { target }) => store.select(keyOf(appSessionId, target), tabId)));
   register('browser.tabs.navigate', knownTabs(({ tabId, to }) => ({ accepted: navigator.navigate(tabId, to) })));
   register('browser.tabs.zoom', knownTabs(({ tabId, action }) => ({ zoom: navigator.zoom(tabId, action) })));
+  // U12a (Interfaces §D, §K): the tab's device size, from any window by tab id, as zoom; an extension's options tab has none
+  register('browser.tabs.setViewport', knownTabs(({ tabId, viewport }) => {
+    if (!store.setViewport(tabId, viewport)) throw new CommandFailure(ipcError('invalid_input', `browser tab ${tabId} is an extension's page, which has no device size`));
+  }));
   register('browser.tabs.find', knownTabs(({ tabId, ...request }) => navigator.find(tabId, request)));
   register('browser.tabs.dismiss', knownTabs(({ tabId, notice }) => navigator.dismiss(tabId, notice)));
   register('browser.tabs.devtools', knownTabs(({ tabId }) => navigator.devtools(tabId)));
@@ -145,6 +150,16 @@ export function registerBrowserHandlers({ store, views, navigator, downloads, hi
       const contents = entry.view?.webContents ?? null;
       const page = pageOf(client);
       return captureTabView({ tabId, window: entry.placement?.window ?? null, shown: shown(entry), contents }, page && windowOf(page));
+    }),
+  );
+  // U12a (Interfaces §D, §K): Copy screenshot, under the same rule, written whole to the clipboard here (capture.ts)
+  register(
+    'browser.view.copyScreenshot',
+    knownTabs(({ tabId }, { client }) => {
+      const entry = store.require(tabId);
+      const contents = entry.view?.webContents ?? null;
+      const page = pageOf(client);
+      return copyTabScreenshot({ tabId, window: entry.placement?.window ?? null, shown: shown(entry), contents }, page && windowOf(page), writeImage);
     }),
   );
   // The chrome's Hand back: the page returns to idle from any state (E4c moves it everywhere else).

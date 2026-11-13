@@ -9,7 +9,7 @@
 // starts and told here the sessions the spine knows. P5 O3-C (readers R6, R7): the spine is read through its view.
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { app, BrowserWindow, session } from 'electron';
+import { app, BrowserWindow, clipboard, session } from 'electron';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SpineView } from '@shared/spine/view';
 import type { EngineSessionStatus } from '@shared/engine/status';
@@ -188,6 +188,7 @@ export function startBrowser({ userData, settings, view, data, register, emit: e
     bookmarks: data.bookmarks, bar, windowOf, favicons, avatars: new ProfileAvatars(userData), // cua #90
     ...(machines && { sessions: machines }), // P5 O7 M3
     ...(forwarded && { forwarded }),
+    writeImage: (image) => clipboard.writeImage(image), // U12a: Copy screenshot
   });
   // cua #90: the extensions action bar (its list, popups, options tabs and menus)
   const extensionUi = startExtensionUi({ store, views, partitions, leaveInternal: (entry, url) => void navigator.leaveInternal(entry, url), records: profiles, menus, windowOf, emit, register, linkTarget: () => settings().linkTarget, seam, env });

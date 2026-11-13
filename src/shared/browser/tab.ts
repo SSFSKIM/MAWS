@@ -44,6 +44,16 @@ const port = z.number().int().min(1).max(65535);
 export const BrowserTabForwardSchema = z.strictObject({ machine: MachineRefSchema, port, localPort: port });
 export type BrowserTabForward = z.infer<typeof BrowserTabForwardSchema>;
 
+// U12a (the UX wave's U12, l9-browser-delivery-06; Interfaces §D): the Browser's device sizes, in the page's CSS pixels.
+// A device size is drawn by sizing the page's view, never by emulation (the section's "Why this, not that"); Responsive is
+// no size (`viewport: null`), the pane's own.
+export const BROWSER_VIEWPORTS = [
+  { id: 'mobile', width: 375, height: 812 },
+  { id: 'tablet', width: 768, height: 1024 },
+] as const;
+export const BrowserViewportSchema = z.strictObject({ width: z.number().int().min(1).max(8192), height: z.number().int().min(1).max(8192) });
+export type BrowserViewport = z.infer<typeof BrowserViewportSchema>;
+
 export const BrowserTabSchema = z.strictObject({
   tabId: BrowserTabIdSchema,
   appSessionId: AppSessionIdSchema,
@@ -91,6 +101,10 @@ export const BrowserTabSchema = z.strictObject({
   // listener (src/main/browser/forwarded.ts). Absent for every other tab. The tab shows a page of the forward while its
   // URL is `127.0.0.1:<localPort>`.
   forward: BrowserTabForwardSchema.optional(),
+  // U12a additive (Interfaces §D): the device size the person chose for the tab (`browser.tabs.setViewport`), the same in
+  // every pane that shows it; null for Responsive. Never persisted: `PersistedTabSchema` picks its fields by name, so a
+  // relaunch returns every tab to Responsive, and a build that reads tabs.json strictly never meets it.
+  viewport: BrowserViewportSchema.nullable(),
 });
 export type BrowserTab = z.infer<typeof BrowserTabSchema>;
 

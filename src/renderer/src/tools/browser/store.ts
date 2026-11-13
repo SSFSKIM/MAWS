@@ -31,9 +31,10 @@ export interface SessionTabs {
   selected: string | null;
 }
 
-// `urlCopied` is the chrome's own (Copy URL is the renderer's clipboard write; Decision Log 37); every other kind is
-// main's, which the chrome may also raise itself (the address field's refused scheme).
-export type ChromeNoticeKind = BrowserNotice['kind'] | 'urlCopied' | CommentNoticeKind /* E4d */;
+// `urlCopied` is the chrome's own (Copy URL is the renderer's clipboard write; Decision Log 37), as are (U12a) Copy
+// screenshot's two outcomes, from main's answer; every other kind is main's, which the chrome may also raise itself (the
+// address field's refused scheme).
+export type ChromeNoticeKind = BrowserNotice['kind'] | 'urlCopied' | 'screenshotCopied' | 'screenshotFailed' /* U12a */ | CommentNoticeKind /* E4d */;
 // E4d start: comment mode's own lines (E4d execution document, Decision Log 35): an arm the page never confirmed, and a
 // pick main refused, said where the person is looking with no sheet over the page.
 export type CommentNoticeKind =

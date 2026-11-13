@@ -18,7 +18,7 @@ import { randomBytes } from 'node:crypto';
 import type { BrowserWindow, LoadURLOptions, WebContents, WebContentsView } from 'electron';
 import type { AppSessionId } from '@shared/graph/ids';
 import { classifyLoadError } from '@shared/browser/errors';
-import { BROWSER_LOADED_TABS_MAX, UNKNOWN_BROWSER_TAB, type BrowserControl, type BrowserOpenPage, type BrowserTab } from '@shared/browser/tab';
+import { BROWSER_LOADED_TABS_MAX, UNKNOWN_BROWSER_TAB, type BrowserControl, type BrowserOpenPage, type BrowserTab, type BrowserViewport } from '@shared/browser/tab';
 import { hostOf, validateBrowserUrl } from '@shared/browser/url';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { personHolds, personUses } from './agent/control';
@@ -417,6 +417,16 @@ export class TabStore {
     this.deps.emit('browser.control.changed', { tabId, control, controlSince });
   }
 
+  // U12a (Interfaces §D): the tab's device size (null: Responsive), the same in every pane that shows it, told in the next
+  // tab list; never persisted (`snapshot` writes its own fields) and kept while the tab is suspended. False, with nothing
+  // set, for an extension's options tab, whose page has no device size.
+  setViewport(tabId: string, viewport: BrowserViewport | null): boolean {
+    const entry = this.require(tabId);
+    if (entry.tab.internal !== null) return false;
+    this.patch(entry, { viewport });
+    return true;
+  }
+
   // The one way a tab changes (Design §2).
   update(tabId: string, patch: TabPatch): BrowserTab {
     return this.patch(this.require(tabId), patch);
@@ -689,6 +699,7 @@ export class TabStore {
       lastShownAt: at,
       agentBadge: null, // E13: an agent's badge is live, never restored
       internal: null, // cua #90: an extension's page is opened by MAWS only, never restored
+      viewport: null, // U12a: Responsive; a device size is never restored
     };
   }
 
