@@ -8,12 +8,12 @@ import type { ProjectRecord } from '@shared/ipc/schema';
 import { addressOf } from '@shared/machine/address';
 import type { OrgKey } from '@shared/machine/org-key';
 import { ACTIONS, ACTION_IDS, isRebindable } from '@shared/keymap/actions';
-import { project, record } from '../../../../test/support/builders';
-import { TEST_MACHINE } from '../../../../test/support/machine';
+import { project, record, remoteRow } from '../../../../test/support/builders';
+import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { isActionEnabled, runAction } from '../keymap/actions-runtime';
 import { useLayout } from '../stores/layout';
 import { activeTab, allTabs } from '../stores/layout-model';
-import { useSessions } from '../stores/sessions';
+import { useSessions, type ListedSession } from '../stores/sessions';
 import { resetShellStores } from '../test-support/shell-stores';
 import { connectChannelAction } from './open-action';
 
@@ -101,6 +101,34 @@ describe('channel.open: registered while the tab in front has a project with a c
     expect(isActionEnabled('channel.open')).toBe(true);
     runAction('channel.open');
     expect(activeTab(layout().main)).toMatchObject({ kind: 'channel', project: 'joined' });
+  });
+
+  // The review of M5: another machine's terminal session that this Mac knows only by its listing (lane A, no record) is
+  // filed as the sidebar files its row, by the listing's project.
+  it('reads a session known only by its listing, lane A, by the listing’s project: a hub registry row', () => {
+    const HUB = '2a3b4c5d-6e7f-4081-9293-a4b5c6d7e8f9';
+    const KEY = `id:${HUB}` as OrgKey;
+    const terminal = addressOf(OTHER_MACHINE, 'term-a') as AppSessionId;
+    const listing: ListedSession = { ...remoteRow(OTHER_MACHINE, 'term-a', { lane: 'A', orgKey: KEY, project: HUB }), appId: terminal };
+    useSessions.setState({
+      registry: { projects: [{ id: HUB, name: 'Orchard', hub: true, renamable: false, locations: [] }], keys: { [HUB]: KEY }, moved: {}, removals: [], seen: {} },
+      listed: new Map([[terminal, listing]]),
+    });
+    layout().openTab({ kind: 'session', appSessionId: terminal });
+    expect(isActionEnabled('channel.open')).toBe(true);
+    runAction('channel.open');
+    expect(activeTab(layout().main)).toMatchObject({ kind: 'channel', project: HUB });
+  });
+
+  it('reads a listing whose project’s checkouts here are all hidden by that project, as a hidden project’s session is read', () => {
+    const terminal = addressOf(OTHER_MACHINE, 'term-h') as AppSessionId;
+    const hidden = { ...NORTH, hidden: true };
+    const listing: ListedSession = { ...remoteRow(OTHER_MACHINE, 'term-h', { lane: 'A', orgKey: `smns:${SMNS}` as OrgKey, project: SMNS }), appId: terminal };
+    useSessions.setState({ projects: new Map([hidden, SCRATCH].map((p) => [p.id, p])), listed: new Map([[terminal, listing]]) });
+    layout().openTab({ kind: 'session', appSessionId: terminal });
+    expect(isActionEnabled('channel.open')).toBe(true);
+    runAction('channel.open');
+    expect(activeTab(layout().main)).toMatchObject({ kind: 'channel', project: SMNS });
   });
 
   it('leaves nothing registered once disconnected', () => {
