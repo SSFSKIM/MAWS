@@ -1247,6 +1247,26 @@ describe('files admission of named files', () => {
     expect(fs.existsSync(log)).toBe(false);
   });
 
+  // Decision Log 14(b): a session none of whose folders resolve still reads a file its transcript links, and nothing else
+  it('admits a named file for a session whose folders no longer resolve, and nothing else at that point', async () => {
+    write(at('gone-repo', 'a.ts'), 'x');
+    write(at('gone-worktree', 'a.ts'), 'x');
+    records.set(A, record(at('gone-repo'), [], at('gone-worktree')));
+    rmSync(at('gone-repo'), { recursive: true });
+    rmSync(at('gone-worktree'), { recursive: true });
+    await transcriptOf(A, [said(link(out('notes.txt')))]);
+    const files = namedService();
+    const spy = opens();
+    expect(await files.read({ appSessionId: A, path: out('notes.txt'), named: true })).toMatchObject({ content: 'outside notes\n', named: true });
+    located.length = 0;
+    await expect(files.read({ appSessionId: A, path: out('notes.txt'), named: true }, true)).rejects.toThrow(new Error(OUT));
+    expect(located, 'a remote caller never reaches the transcript').toEqual([]);
+    await expect(files.read({ appSessionId: A, path: out('notes.txt') })).rejects.toThrow(new Error(OUT));
+    expect(located, 'nor does a request without the key').toEqual([]);
+    await expect(files.read({ appSessionId: A, path: out('unnamed.txt'), named: true })).rejects.toThrow(new Error(OUT));
+    expect(openedAt(spy, out('unnamed.txt'))).toBe(0);
+  });
+
   it('answers `named` with every chunk and with the hashed read', async () => {
     write(out('long.txt'), 'abcdefghij');
     await transcriptOf(A, [said(link(out('long.txt')))]);
