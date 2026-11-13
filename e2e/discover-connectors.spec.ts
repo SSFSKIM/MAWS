@@ -44,7 +44,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { invoke, value } from './support/c7-replay';
 import { firstRead } from './support/discover-read';
 import { launchMaws, type MawsLaunch } from './support/launch';
-import { openAppDestination } from './support/shell';
+import { mainTabById, openAppDestination } from './support/shell';
 import { addressed } from './support/address';
 import { engineKeychainCustody, readOAuthLog, startOAuthFixture, summarizeOAuthLog, type OAuthFixture } from './support/connector-oauth';
 import { assertEngineProcessKeychainEnv, guardKeychain, killTree } from './support/keychain-guard';
@@ -501,11 +501,17 @@ test('dynamic: a plugin’s connector and one of MAWS’s own list signed in fro
       return opened().at(-1)!;
     };
 
-    await test.step('before a session runs, Customize’s row of MAWS’s own list says to open one', async () => {
+    // Customize › Connectors › My items for the scratch project, chosen each time: the page is left for the session's tab
+    const customizeProject = async () => {
       await openAppDestination(page, 'Customize');
       const select = page.getByRole('combobox', { name: 'Project', exact: true });
-      await select.selectOption((await select.locator('option', { hasText: 'project-a' }).getAttribute('value'))!);
+      const wanted = (await select.locator('option', { hasText: 'project-a' }).getAttribute('value'))!;
+      if ((await select.inputValue()) !== wanted) await select.selectOption(wanted);
       await openConnectors(page, 'My items');
+    };
+
+    await test.step('before a session runs, Customize’s row of MAWS’s own list says to open one', async () => {
+      await customizeProject();
       await expect(row(page, 'fx-own-2').locator('[data-sign-in-needs-session]')).toHaveText('Open a session, then sign in');
       await expect(row(page, 'fx-own-2').getByRole('button', { name: 'Sign in to fx-own-2' })).toHaveCount(0);
     });
@@ -524,12 +530,24 @@ test('dynamic: a plugin’s connector and one of MAWS’s own list signed in fro
     for (const name of [PLUGIN, 'fx-own', 'fx-own-2']) await expect.poll(() => statusIn(session, name), { timeout: 60_000, message: `${name} in the session’s status` }).toBe('needs-auth');
 
     await test.step('the Connectors dialog signs the plugin’s connector and one of MAWS’s own list in: Connected, with its tool count', async () => {
-      await page.locator(`[role="treeitem"][data-menu="session:${await addressed(page, session)}"]`).click();
+      // the session's tab, from its row in the sidebar: the project's row is expanded first, since a project the person
+      // has not opened draws no session rows (P7 run 43384468214: the row was not in the tree while it was collapsed)
+      const sessionAddress = await addressed(page, session);
+      const projectRow = page.locator(`[data-region="sidebar"] [data-kind="project"][data-menu="project:${await addressed(page, project.id)}"]`);
+      await expect(projectRow).toBeVisible({ timeout: 15_000 });
+      if ((await projectRow.getAttribute('aria-expanded')) !== 'true') await projectRow.locator('[data-project-line]').click();
+      await expect(projectRow).toHaveAttribute('aria-expanded', 'true');
+      const sessionRow = projectRow.locator(`[role="treeitem"][data-menu="session:${sessionAddress}"]`);
+      await expect(sessionRow, 'the started session is listed under its project').toBeVisible({ timeout: 15_000 });
+      await sessionRow.click();
+      await expect(mainTabById(page, `session:${sessionAddress}`)).toHaveAttribute('aria-selected', 'true', { timeout: 15_000 });
       const main = page.locator('[data-region="main"]');
       await main.getByRole('button', { name: 'Add files, photos or commands' }).click();
       await page.getByRole('menuitem', { name: 'Connectors', exact: true }).hover();
       await page.getByRole('menuitem', { name: /^Connectors in this chat…/ }).click();
-      const dialog = page.locator('[data-widget="mcp"]');
+      // the floating dialog's, not Customize's live list kept mounted in its own tab
+      const dialog = page.locator('[data-widget-dialog="mcp"] [data-widget="mcp"]');
+      await expect(dialog).toBeVisible();
       for (const name of [PLUGIN, 'fx-own']) {
         const server = dialog.locator(`[data-mcp-server="${name}"]`);
         await expect(server.locator('[data-connector-state]')).toHaveText('Sign in needed');
@@ -540,12 +558,13 @@ test('dynamic: a plugin’s connector and one of MAWS’s own list signed in fro
       }
       await test.info().attach('dynamic-dialog.png', { body: await page.screenshot(), contentType: 'image/png' });
       await page.keyboard.press('Escape');
+      await expect(dialog).toBeHidden();
     });
 
     await test.step('Customize’s row of MAWS’s own list signs the second in through that session', async () => {
-      await openAppDestination(page, 'Customize');
-      await openConnectors(page, 'My items');
+      await customizeProject();
       const own = row(page, 'fx-own-2');
+      await expect(own.getByRole('button', { name: 'Sign in to fx-own-2' }), 'offered once a ready session lists it').toBeVisible({ timeout: 30_000 });
       await consent(await press(own, 'fx-own-2'));
       await expect(own.locator('[data-sign-in-state]')).toHaveText('Signed in · connected here', { timeout: 60_000 });
       expect(await statusIn(session, 'fx-own-2')).toBe('connected');
