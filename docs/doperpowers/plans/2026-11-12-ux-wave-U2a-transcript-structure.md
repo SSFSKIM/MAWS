@@ -24,7 +24,7 @@ The to-human view (the report bar, "Working record", "To you", the advertisement
 ## Progress
 
 - [x] The re-check pass (2026-11-13): every statement of "To check again once U3a and U1a are on master", by this document's author, on a tree that holds master `310417fc6` (U1a) and U3a's branch at `2b4869864` (U3a is not on master yet). Fourteen statements hold, five are restated (C5, C7, C9, C12, C13), and M4 gains one rule (the run's ask and a jump's target). No executor starts before U3a is on master.
-- [ ] M1 — What a file must say as the wire does: a thought's recorded duration (X1) and a refused call's kind.
+- [x] M1 — What a file must say as the wire does: a thought's recorded duration (X1) and a refused call's kind. (2026-11-13, reviewed clean: `7773a2e23..d029fceb0`, the stopped ask and the review's fixes `a0c3cf447..ce823c433`.)
 - [ ] M2 — What joins a run, its caption, and the turn's line.
 - [ ] M3 — What a row reads: a shell call with no description, an artifact call, a failed call.
 - [ ] M4 — The run's row: one line, folded; thoughts in order; the running, the waiting and the thinking line.
