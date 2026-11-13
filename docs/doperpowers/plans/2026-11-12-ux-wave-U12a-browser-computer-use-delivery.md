@@ -342,12 +342,12 @@ Working directory for every command: the worktree of branch `ux-wave/U12a`. `vmc
 
 3. **M1, the wire's generated files.** After the merge of step 1, read `WIRE_MINOR` in `src/shared/ipc/wire.ts` and take the next number, with its comment naming `maws.pane.answer`'s `page`. After the schema is edited and pushed:
 
-       vmcheck 'pnpm wire:manifest >/dev/null; git diff -- src/shared/ipc/wire-manifest.json src/shared/ipc/wire-fingerprint.json' > /tmp/u12a-wire.patch
+       vmcheck 'pnpm wire:manifest >/dev/null; git diff -- src/shared/ipc/wire-manifest.json src/shared/ipc/wire-fingerprint.json; git checkout -- src/shared/ipc/wire-manifest.json src/shared/ipc/wire-fingerprint.json' > /tmp/u12a-wire.patch
        sed -n '/^diff --git/,$p' /tmp/u12a-wire.patch | git apply
 
    Expect a patch that touches those two files only, with one added optional property under `commands.maws.pane.answer`. Commit them with the change and push; `wire.test.ts` and `wire-fingerprint.test.ts` pass only with them. If another landing has taken the same minor on master by the time this branch merges it again, take the next and regenerate.
 
-4. **At each milestone's end:** `vmcheck 'pnpm typecheck'` and `vmcheck 'pnpm test'` (the whole unit suite). Expect no error and no failed file beyond build-common's list. M1 changed a recorded file, so it also runs `vmcheck 'node --test .github/scripts/maws-app-scan.test.mjs'`; M5 runs it again for its e2e support. The controller then has the milestone reviewed and ticks Progress.
+4. **At each milestone's end:** `vmcheck 'pnpm typecheck'` and, at M5 only, `vmcheck 'pnpm test'` (the whole unit suite; M1 to M4 run vitest over the directories they touched and the test folders that import what they changed, named in the report: the build rule of 2026-11-13, Decision Log). Expect no error and no failed file beyond build-common's list. M1 changed a recorded file, so it also runs `vmcheck 'node --test .github/scripts/maws-app-scan.test.mjs'`; M5 runs it again for its e2e support. The controller then has the milestone reviewed and ticks Progress.
 
 5. **The acceptance run** (M5), on the pushed head:
 
@@ -765,6 +765,10 @@ The pull request carries the dated lines of the two records this landing amends,
   Evidence: `src/engine-host/fs/backfill.ts` writes `denial: null` for rows read from a transcript file ("denial kinds are not recorded on disk in a parseable form"); the live wire carries `tool_result_meta[].non_execution_kind` (`pass3/p1-maws-ask-interrupt`, the row after the interrupt). §E reads the interruption marker as well.
 - Observation: `maws.pane.answer` is on the wire between the app and the engine host, so `page` moves the wire's minor.
   Evidence: `src/shared/ipc/wire-manifest.json`, `commands.maws.pane.answer`; `src/shared/ipc/wire.ts`'s rule that an added optional key is additive and bumps `WIRE_MINOR`.
+- Observation: Concrete Steps 3's regeneration leaves the VM's checkout of the branch dirty, so the next `vmcheck` aborts at its checkout.
+  Evidence: M1's executor, 2026-11-13; it reset the two files over `devcloud vm ssh`. The recipe now ends with a `git checkout` of the two files.
+- Observation: the `maws` server writes a tool's result as indented JSON (`toolText`, `JSON.stringify(value, null, 2)`); the key order `status`, `pane`, `opened`, `page`, `note` holds in it.
+  Evidence: M1's executor, 2026-11-13; `src/engine-host/session-maws.test.ts` reads it so.
 
 ## Decision Log
 
@@ -819,6 +823,18 @@ The pull request carries the dated lines of the two records this landing amends,
   - Without a change of decision: M5's debt rows are five, and the rows the tickets resolve are 1, 2 and 5. The review panel's first lens reads `personUses` beside `personHolds`, the reload that is not the person's input, and the window's sequence for the agent's tab.
 
 - **2026-11-13 · Execution begins (the controller).** The plan runs under subagent-driven execution: a fresh executor per milestone, each milestone reviewed clean before the next is dispatched, as the Plan of Work asks. The reviews run one after another and never beside an executor, because two `vmcheck.sh` calls on one branch collide on the VM checkout's git lock. The branch merged master `be663d261` (step 0) at `e1c92a4dc`; nothing in the files this landing touches moved since `6e8c72738`, so the statements under "What the code holds today" stand and no interface needed re-pinning. The two tickets' numbers are written where this document names them (Progress, the Hand-off headings, M5's debt rows 1, 2 and 5). The whole-branch review and the pull request stay the architect's, as the Decision Log's first entry says.
+
+- **2026-11-13 · The build rule changes (the architect).** The whole unit suite runs once per landing, at M5, before the hand-back; M1 to M4 prove themselves by the typecheck of each project changed, eslint on the files changed, and vitest over the directories touched plus the test folders that import what changed, named in the milestone's report. Nine landings share three build VMs, and two whole-suite runs on one VM time out every other check there. Concrete Steps 4 is amended to match.
+  Date/Author: 2026-11-13, the architect's rule (`~/.local/share/maws-ux-wave/briefs/build-common.md`).
+
+- **2026-11-13 · M1's executor decisions** (folded by the controller; each the means the document left open).
+  - A store with no `reloadForAgent` (the daemon's tab engine) answers `kept` for a loaded tab under `reload`, so it never says `reloaded` for a reload it cannot make. Nothing sends `reload` there today.
+  - A repeated request id answers the first call's `page` when the first call had one.
+  - After the window's own open, the Browser tool is opened with params `{ appSessionId }` and no `requestId`: the dedup by request id is the open's, and the session is kept so a pinned Browser switches to the session.
+  - The backend test is `hasInAppBrowser` in `src/engine-host/session.ts`: only a non-empty string `CUA_BROWSER_BACKENDS` counts.
+  - `MawsToolServerDeps.instructions` is required, as §A writes it; tests that build the server pass it.
+  - `reloaded` means the reload was commanded: the store does not read `reloadForAgent`'s boolean, as for the suspended-tab row.
+  - The test of the wire addition against build F's schema is `src/shared/ipc/pane-answer-page.test.ts`.
 
 ## Outcomes & Retrospective
 
