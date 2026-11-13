@@ -1460,10 +1460,17 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await b.stop();
       // main greys a machine's items at its link's `down`: drawn after the live rows, out of the count and the badge
       await quoting(expect(row, 'greyed once B is gone').toHaveAttribute('data-greyed', 'true', { timeout: 60_000 }), async () => `B on A: ${JSON.stringify(await machineOf(again, b.ref))}\n${mainSaid(again)}`);
-      await expect(row).toHaveAccessibleName(/ · Approval needed, machine offline$/);
+      // The UX wave, U9 (O-39, A2): one rule for every row of a machine: for the minute the link reconnects, the row says
+      // so (sidebar/NeedsYou.tsx's word for a greyed row whose machine is not offline), and only past it "machine offline"
+      await expect(row, 'while B reconnects').toHaveAccessibleName(/ · Approval needed, reconnecting$/);
       await expect(needsYouCount(again, 0)).toBeVisible();
       await expect.poll(() => dockBadge(againApp), { timeout: 30_000, message: 'a greyed item leaves the dock badge' }).toBe('');
       console.log(`[e2e:remote] M6: B's item greyed and out of the badge ${Date.now() - stoppedAt} ms after B's daemon was told to stop`);
+      const down = await machineOf(again, b.ref);
+      const offlineAt = Date.parse(down?.since ?? new Date(stoppedAt).toISOString()) + REMOTE_ACT_PENDING_MS;
+      await quoting(expect(row, 'past the minute, offline').toHaveAccessibleName(/ · Approval needed, machine offline$/, { timeout: Math.max(0, offlineAt - Date.now()) + 15_000 }), async () => `B on A: ${JSON.stringify(await machineOf(again, b.ref))}`);
+      await expect(needsYouCount(again, 0), 'still out of the count').toBeVisible();
+      expect(await dockBadge(againApp), 'and of the badge').toBe('');
     });
   } finally {
     await a?.cleanup();
