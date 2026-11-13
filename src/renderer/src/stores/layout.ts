@@ -68,6 +68,9 @@ export interface LayoutState {
   panelGroups: PanelGroups;
   panelWidths: PanelWidths;
   cardsOpen: CardId[];
+  // UX wave U8b (Decision Log 3): the profile's first read was deferred (a read failed) and this build has not yet written
+  // the side column's state; persistence's first such write also writes `panelTools.groups`, which ends it (transient).
+  firstReadPending: boolean;
   // Hydration's live record/intent resolver; derivation ignores stale contexts without deleting saved preferences.
   knownSession(appSessionId: AppSessionId): boolean;
   hydrated: boolean;
@@ -498,6 +501,7 @@ export function createLayoutStore() {
       panelGroups: PANEL_GROUPS_DEFAULT, // UX wave U8b
       panelWidths: PANEL_WIDTHS_DEFAULT,
       cardsOpen: [...CARDS_OPEN_DEFAULT],
+      firstReadPending: false,
       knownSession: () => true,
       hydrated: false,
       dragging: null,
@@ -532,7 +536,12 @@ export function createLayoutStore() {
         // P4-B3's keys are read only when layout.json holds them (as a session's panel key is), so a layout without them
         // costs no read.
         const held = new Set<string>(listed.ok ? listed.value.keys : []);
-        const readHeld = <T>(key: LayoutKey, schema: z.ZodType<T>, fallback: T): Promise<T> => (held.has(key) ? read(key, schema, fallback) : Promise.resolve(fallback));
+        // UX wave U8b: a key not read because the listing failed counts as failed, so hydration writes nothing over it.
+        const readHeld = <T>(key: LayoutKey, schema: z.ZodType<T>, fallback: T): Promise<T> => {
+          if (held.has(key)) return read(key, schema, fallback);
+          if (!listed.ok) failed.push(key);
+          return Promise.resolve(fallback);
+        };
         // P5 O6 M2 (OX2): a session's panel key is its address's; a bare one is from before O6, the local machine's, renamed
         // below once read. Every other key from before O6 reads lifted with the local machine (`storedMainSchema` and the rest).
         const local = client.localMachine;
@@ -631,7 +640,8 @@ export function createLayoutStore() {
         // no-session selection is read back if it still names a pin.
         const live = livePanelTabIds(hydratedPanels.panelPinned, hydratedPanels.panelBySession);
         const panelParams = Object.fromEntries(Object.entries(storedParams.params).filter(([id]) => live.has(id)));
-        set({ regions, main: hydratedMain, ...hydratedPanels, panelParams, panelWidths, cardsOpen, hydrated: true });
+        const firstReadPending = !complete && !held.has('panelTools.groups');
+        set({ regions, main: hydratedMain, ...hydratedPanels, panelParams, panelWidths, cardsOpen, firstReadPending, hydrated: true });
         // A first launch writes the defaults of the keys it lacks, so layout.json always holds the renderer's three
         // fixed keys (acceptance item 6 lists them). Tabs replayed over the saved ones differ from what layout.json holds,
         // and persistence takes the hydrated state as its baseline, so they are written here too. Everything after this
@@ -1022,9 +1032,11 @@ export function persistLayout(client: MawsBridge, store = useLayout): () => void
   const unsubscribe = store.subscribe((state) => {
     if (!state.hydrated) return;
     const now = persistedKeys(state);
+    let marks = false; // UX wave U8b: this change writes the side column's state while the first read is pending
     if (written) {
       for (const [key, value] of now) {
         if (written.get(key) === value) continue;
+        if (state.firstReadPending && (key === 'panelTools.surfaces' || key === 'panelTools.groups' || PANEL_KEY.test(key))) marks = true;
         if (key === 'main.tabs' && openSessionsOf(state.main).some((id) => !published.has(id))) {
           clearTimeout(pending.get(key)?.timer);
           pending.delete(key);
@@ -1042,6 +1054,12 @@ export function persistLayout(client: MawsBridge, store = useLayout): () => void
     // P5 O6 M4: main deletes the panel key of its own removed session, never another machine's, so the page deletes that.
     for (const key of written?.keys() ?? []) if (!now.has(key) && otherMachinePanelKey(key, client.localMachine)) write(key, null);
     written = now;
+    // UX wave U8b (Decision Log 3): after a deferred first read, this build's first write of a list, the stacks or the
+    // groups marks the profile read, so no later launch prunes a tab this build may have shown.
+    if (marks) {
+      if (!pending.has('panelTools.groups')) schedule('panelTools.groups', state.panelGroups);
+      store.setState({ firstReadPending: false });
+    }
   });
   window.addEventListener('beforeunload', flush);
   return () => {
