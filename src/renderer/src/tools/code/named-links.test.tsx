@@ -105,6 +105,30 @@ describe('what is not clickable today yields no path chip', () => {
   });
 });
 
+// The branch review's finding 1: text shaped like a link inside a link's destination or title, an image's resource or a
+// reference definition is no link in the window, and the rule names nothing from it; a link after a resource is one.
+describe('a resource is read once: nothing inside it is a link', () => {
+  const S = '/secret';
+  it.each([
+    '[r](</vault/[x](/secret).txt>)',
+    '[r](/work/out/report.md "see [x](/secret)")',
+    '![i](</vault/[x](/secret).png>)',
+    '[r][ref]\n\n[ref]: </vault/[x](/secret).txt>',
+    '[r][ref]\n\n[ref]: /vault/a.txt "see [x](/secret)"',
+  ])('%j', (markdown) => {
+    const clicked = clickedPaths(markdown);
+    expect(clicked).not.toContain(S);
+    const named = linkPaths(markdown);
+    for (const asked of clicked) expect(named).toContain(asked);
+    expect(named).not.toContain(S);
+  });
+
+  it.each(['[a](/work/a.md "t") [b](/secret)', '![i](/work/i.png) [b](/secret)'])('%j: the link after it names its path', (markdown) => {
+    expect(clickedPaths(markdown)).toContain(S);
+    expect(linkPaths(markdown)).toContain(S);
+  });
+});
+
 // Refused by the rule, and drawn as a chip by the window (§A, "Not recognised, and so refused"): the window's URL parse
 // reads a host, a port, a user or a query or fragment boundary into each, so the click asks for a path the transcript
 // did not write; and a destination that already carries the chip's scheme. Each fails towards the refusal.

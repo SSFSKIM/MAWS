@@ -172,6 +172,15 @@ describe('names: what the transcript names', () => {
     expect(await paths().names(S, P)).toBe(false);
   });
 
+  // the branch review's finding 1, through the search: a link inside a link's destination or title names nothing
+  it('a path written inside another link’s destination or title is not named; the outer destination is', async () => {
+    const outer = '/vault/[x](/secret).txt';
+    await writeTranscript([...filler(4), assistant(text('[r](</vault/[x](/secret).txt>)')), assistant(text('[r](/work/out/a.md "see [x](/secret)")')), ...filler(4)]);
+    const named = paths();
+    expect(await named.names(S, '/secret')).toBe(false);
+    expect(await named.names(S, outer)).toBe(true);
+  });
+
   it('a hit before a compaction boundary still names the path', async () => {
     await writeTranscript([linkTo(P), ...filler(4), { type: 'system', subtype: 'compact_boundary', content: 'Conversation compacted' }, user('Summary of the conversation so far', { isCompactSummary: true }), ...filler(4)]);
     expect(await paths().names(S, P)).toBe(true);

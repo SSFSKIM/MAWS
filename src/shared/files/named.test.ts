@@ -103,6 +103,40 @@ describe('the link form: linkPaths', () => {
     expect(linkPaths('[a](/a/one.md) then [b](/b/two.md "t") and ![c](/c.png) [d](https://example.com/d)')).toEqual(['/a/one.md', '/b/two.md']);
   });
 
+  // The branch review's finding 1: a path is named only as the destination of a link, so the scan reads a link's or an
+  // image's resource once and goes on after it, and passes over a reference definition's destination and title; text
+  // shaped like a link inside any of them names nothing.
+  const S = '/secret';
+  it.each([
+    ['[r](</vault/[x](/secret).txt>)', ['/vault/[x](/secret).txt']],
+    ['[r](/work/out/report.md "see [x](/secret)")', [P]],
+    ["[r](/work/out/report.md 'see [x](/secret)')", [P]],
+    ['[r](/work/out/report.md\n"see [x](/secret)")', [P]],
+    ['![i](</vault/[x](/secret).png>)', []],
+    ['![i](/work/out/i.png "see [x](/secret)")', []],
+    ['[r][ref]\n\n[ref]: </vault/[x](/secret).txt>', []],
+    ['[ref]: /vault/[x](/secret).txt', []],
+    ['[ref]: /vault/a.txt "see [x](/secret)"', []],
+    ['[ref]:\n  </vault/[x](/secret).txt>', []],
+    ['> [ref]: </vault/[x](/secret).txt>', []],
+    ['- [ref]: </vault/[x](/secret).txt>', []],
+    [`[r](</vault/${'a'.repeat(20_000)}[x](/secret).txt>)`, []], // past the bound a resource's end is not known: nothing in it is read
+  ])('%j: nothing inside a resource or a definition is a link', (text, named) => {
+    expect(linkPaths(text)).toEqual(named);
+  });
+
+  it.each([
+    '[a](/work/a.md "t") [b](/secret)', // after a link with a title
+    '![i](/work/i.png) [b](/secret)', // after an image
+    '[ref]: /work/a.md\n[b](/secret)', // after a definition
+    'Note [1]: [b](/secret)', // a label in the middle of a line is no definition
+    '[^1]: [b](/secret)', // a footnote's text is Markdown, not a destination
+    '[a](<unclosed [b](/secret)', // no resource: what follows its `(` is text
+    `[r](</vault/${'a'.repeat(20_000)}>)\n\n[b](/secret)`, // a resource past the bound ends before the next blank line
+  ])('%j: a link after a resource, or where none is, still names its path', (text) => {
+    expect(linkPaths(text)).toContain(S);
+  });
+
   it('takes nesting of parentheses to the depth the window parses, and no deeper', () => {
     const deep = (n: number) => `[r](/work/${'('.repeat(n)}x${')'.repeat(n)})`;
     expect(linkPaths(deep(32))).toEqual([`/work/${'('.repeat(32)}x${')'.repeat(32)}`]);
