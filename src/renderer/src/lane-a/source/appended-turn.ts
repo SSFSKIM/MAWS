@@ -1,6 +1,8 @@
-// The turn a row the bridge appended belongs to. A steer, or a delivery the bridge appends into a running turn
-// (doperpowers PR 233: every Send to a busy session), is drawn as the owner's prompt queued there (`bridge-rows.ts`,
-// `conversation/delivery-frame.ts`): MAWS's reducer folds it into the turn that runs. One that lands while no turn runs
+// The turn a row the bridge appended belongs to. A steer an older bridge appended with no steer line is drawn as the
+// owner's prompt queued into the running turn (`bridge-rows.ts`): MAWS's reducer folds it into the turn that runs. (A
+// marked steer and a delivery the bridge appends into a running turn, doperpowers PR 233's every Send to a busy session,
+// are the arrivals reader's, UX wave U3, UC-2: MAWS's backfill places them, holding one appended while no turn ran for
+// the turn that starts next, as this module does for the older steer.) One that lands while no turn runs
 // has no turn to fold into, and MAWS's reducer keeps it as a prompt waiting for its own: appended while its turn was
 // ending, after the turn's `turn_duration` (a race the bridge answers with its wake), or after an Esc stopped the turn
 // (doperpowers PR 238: the owner's message after an Esc goes in as such a row, and only the bridge's wake goes through the
@@ -19,17 +21,14 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { JsonObject } from 'desk-hub/protocol';
 import { eventBase, type BackfillContext } from '../../../../engine-host/fs/backfill';
 import { isBridgeWake } from '../conversation/delivery-frame';
-import { bridgeRowKind } from './bridge-rows';
+import { bridgeRowKind, markedSteerWords } from './bridge-rows';
 
 type Track = { running: boolean; waiting: string[] };
 
 /** Per mapping context: whether a turn runs, and the appended rows waiting for one, oldest first. */
 const tracks = new WeakMap<BackfillContext, Track>();
 
-const isAppendedPrompt = (row: JsonObject) => {
-  const kind = bridgeRowKind(row);
-  return kind === 'steer' || kind === 'delivery';
-};
+const isAppendedPrompt = (row: JsonObject) => bridgeRowKind(row) === 'steer' && markedSteerWords(row) === null;
 
 const RUNS = new Set<SessionEvent['kind']>(['turn.started', 'assistant.block.delta', 'assistant.block.complete', 'tool.use']);
 

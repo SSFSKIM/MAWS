@@ -31,11 +31,13 @@
 // The notes are read as DX4 reads them (`sminos_jobs.STOP_NOTE`; the vendored vectors' case 18): by the row's whole
 // text, never by a line found in it, so a steer that quotes a note is a steer; a steer with its line can be no note.
 //
-// A steer is drawn as the owner's prompt queued into the running turn ("Sent during this turn"), as a delivery appended
-// there is, under its row's own uuid, without its steer line (the bubble says who wrote it); the held row stays
-// verbatim. Words MAWS's backfill would read as an interrupt marker keep the line, as a delivery's keep its frame: alone,
-// the bubble would be read as the marker. One appended while no turn ran is taken by the turn that starts next
-// (`appended-turn.ts`). The bridge's mirror of a steer or a delivery, a system notice for the terminal, is not drawn.
+// A marked steer, like a delivery, is the arrivals reader's (`@shared/engine/arrival`, class `own`; UX wave U3, UC-2):
+// MAWS's backfill draws it from the row as held, as the owner's prompt queued into the running turn ("Sent during this
+// turn"), under its row's own uuid, without its steer line (the bubble says who wrote it). A steer an older bridge
+// appended with no line is drawn the same way here (`steerAsDrawn`), the held row verbatim: words MAWS's backfill would
+// read as an interrupt marker keep the line, as a delivery's keep its frame, for alone the bubble would be read as the
+// marker. One appended while no turn ran is taken by the turn that starts next (`appended-turn.ts`). The bridge's mirror
+// of a steer or a delivery, a system notice for the terminal, is not drawn.
 import type { JsonObject } from 'desk-hub/protocol';
 import { INTERRUPT_MARKER } from '@shared/engine/engine-markers';
 import { markedSteerWords } from '@shared/engine/sminos-delivery';
@@ -85,8 +87,13 @@ export function steerContent(row: JsonObject): string | JsonObject[] | null {
   return typeof content === 'string' || Array.isArray(content) ? (content as string | JsonObject[]) : null;
 }
 
-/** The row as the session view draws it: a steer as the owner's prompt queued into the running turn; any other as it is. */
+/**
+ * The row as the session view draws it: a steer an older bridge appended with no steer line as the owner's prompt queued
+ * into the running turn; any other as it is. A marked steer is the arrivals reader's (class `own`, UX wave U3, UC-2),
+ * which MAWS's backfill maps from the row as held.
+ */
 export function steerAsDrawn(row: JsonObject): JsonObject {
+  if (markedSteerWords(row) !== null) return row;
   const content = steerContent(row);
   return content === null ? row : asQueuedPrompt(row, content);
 }

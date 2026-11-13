@@ -2,7 +2,8 @@
 // reads them (UX wave U3, UC-2, rules 3 and 6). Copied from the backfill's reader (`engine-host/fs/backfill.ts`,
 // `parseTaskNotifications`) with UC-2's reading of the outcome: a block with no `<status>` reports no end (a monitor's
 // event, the engine's notice that a command seems to wait for input, a check-in on a quiet command) and a status word
-// the rule does not list claims none, where the backfill reads both as `completed`. Pure.
+// the rule does not list claims none, where the backfill read both as `completed`. The backfill reads its task state
+// from these blocks too (the U3a document, M3: decision 13). Pure.
 
 export interface TaskNotificationBlock {
   taskId: string | null;
@@ -11,6 +12,7 @@ export interface TaskNotificationBlock {
   summary: string; // the block's <summary>, else its first line
   durationMs: number | null; // the <duration_ms> an agent's and a workflow's <usage> carry
   outputFile: string | null;
+  result: string | null; // the block's <result>, the task's own outcome text (an agent's report, a workflow's result)
   detail: string | null; // what came with it: the result, the note, the event's text, the lines after the block
 }
 
@@ -63,6 +65,7 @@ function readBlock(inner: string, after: string): TaskNotificationBlock {
     summary,
     durationMs: duration !== null && /^\d+$/.test(duration) ? Number(duration) : null,
     outputFile: outputFile === null || outputFile === '' ? null : outputFile,
+    result: element('result'),
     detail: detail === '' ? null : detail,
   };
 }

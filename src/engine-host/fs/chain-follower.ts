@@ -203,8 +203,10 @@ class FollowerCore {
       noResponse: isNoResponseMarker(record),
       localTurnUuid: null,
       localCaveat: localCommandKind(record) === 'caveat',
+      // UX wave U3: a command a terminal wrote as a `system` row is its echo now (backfill's `localCommandKind`), and as
+      // engine-written local history as when it read as an output, under no caveat
       localCommand: localCommandKind(record) === 'caveat' || localCommandKind(record) === 'output'
-        || (localCommandKind(record) === 'echo' && typeof record.parentUuid === 'string' && this.skeletons.get(record.parentUuid as MessageUuid)?.localCaveat === true)
+        || (localCommandKind(record) === 'echo' && (record.type === 'system' || (typeof record.parentUuid === 'string' && this.skeletons.get(record.parentUuid as MessageUuid)?.localCaveat === true)))
         || (record.type === 'user' && singleText(record) === '/compact'),
       isProgress: record.type === 'progress',
       startsTurn: startsTurn(record),

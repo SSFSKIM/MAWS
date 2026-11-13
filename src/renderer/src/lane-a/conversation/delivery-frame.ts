@@ -2,21 +2,16 @@
 // Which rows are deliveries, their frame and whose they are, is read in `@shared/engine/sminos-delivery` (moved there
 // for the arrivals reader, UX wave U3, UC-2); this module keeps what the drawing and the tail do with them.
 //
-// The tail matches a send by its frame (`tail.ts`). The session view draws a delivered row without its frame line: the
-// owner's own send (`from human`) needs none, its bubble says who wrote it. One that came through the inbox is drawn as
-// the owner's own words too, not as the peer message the engine made of it: the envelope is only the channel. A peer's
-// in an envelope is left to MAWS's peer drawing (a message between agents, its frame and reply line cut from the body
-// by `parsePeerMessage`, the row naming its sender); one through the bridge or queued raw draws its frame as a label, the
-// sender's name in its own first paragraph. The label is in the text, not beside the bubble, because a delivery that entered a
-// running turn — one the engine queued there, or one the bridge appended — is drawn as MAWS draws any prompt queued
-// there: a bubble in the turn, under the message's own uuid (a queued one's `source_uuid`, an appended row's own),
-// captioned "Sent during this turn", and that caption is MAWS's alone. MAWS's backfill would otherwise draw no body for
-// either (a queued delivery is a synthetic peer message to it, its peer parser reading MAWS's own envelope, not sminos's
-// frame; an appended row is meta), so its drawing's copy takes the shape MAWS gives a prompt queued at the terminal
-// (`humanQueuedPrompt`). The text the session read is otherwise unchanged; only the drawing's copy of the row changes,
-// the held row stays verbatim for the tail. The owner's send whose words MAWS's backfill would read as an interrupt
-// marker (`[Request interrupted by user…]` whole) keeps its frame line: without it the bubble would be read as the
-// marker, drawing nothing and stopping the turn.
+// The tail matches a send by its frame (`tail.ts`). How a delivered row draws is the arrivals reader's (UX wave U3,
+// UC-2: `@shared/engine/arrival`, which MAWS's backfill asks): the owner's own send (`from human`) is their bubble
+// without the frame line, through whichever route it came, and a peer's is the peer's message line, never the owner's
+// bubble (O-41: the "From <name>" label this module drew is gone). What this module still draws is the owner's own send
+// the session never read (`depth/source/off-chain.ts`, an input drawn as undone): its drawing's copy of the row
+// (`deliveryAsDrawn`), without its frame line, in the shape of a prompt queued into a running turn where it entered one
+// (MAWS's `humanQueuedPrompt`), under the message's own uuid (a queued one's `source_uuid`, an appended row's own); the
+// held row stays verbatim for the tail. The owner's send whose words MAWS's backfill would read as an interrupt marker
+// (`[Request interrupted by user…]` whole) keeps its frame line: without it the bubble would be read as the marker,
+// drawing nothing and stopping the turn.
 //
 // A delivered row can be on disk twice. An Esc before the model answers hands the human's prompt back to the input box,
 // and the prompt sent next goes in under the same parent: a row the bridge appended after the first one is left on a
@@ -70,9 +65,6 @@ export function supersededDeliveries(rows: readonly JsonObject[]): Set<string> {
   return superseded;
 }
 
-/** A sender's name as Markdown text: every character Markdown could read as syntax escaped, math's `$` included. */
-const literal = (text: string) => text.replace(/[\\`*_{}[\]()#+\-.!|<>~$]/g, '\\$&');
-
 /**
  * A user row the bridge appended into the running turn, as MAWS draws a prompt queued there: the shape the engine
  * writes for a prompt typed mid-turn (`queued_command`, origin `human`, MAWS's `humanQueuedPrompt`), its words
@@ -87,19 +79,16 @@ export function asQueuedPrompt(row: JsonObject, prompt: string | JsonObject[]): 
 }
 
 /**
- * The row as the session view draws it: a delivered row with its frame line dropped (the owner's own send) or drawn as
- * a label naming the peer who sent it, and a delivery that entered a running turn (queued there, or appended by the
- * bridge) in the shape of a prompt queued there, under the message's own uuid. The owner's send that came through the
- * inbox is drawn as their own prompt; a peer's, and any other row, as it is.
+ * The owner's own delivered send as an input drawn undone draws it (`off-chain.ts`): with its frame line dropped, and,
+ * where it entered a running turn (queued there, or appended by the bridge), in the shape of a prompt queued there,
+ * under the message's own uuid; through the inbox, as their own prompt. A peer's delivery, and any other row, as it is.
  */
 export function deliveryAsDrawn(row: JsonObject): JsonObject {
   const frame = deliveryFrame(row);
-  if (frame === null) return row;
-  const drawnWords = (line: string, words: string) => {
+  if (frame === null || !frame.own) return row;
+  const drawnWords = (line: string, words: string) =>
     // Words MAWS's backfill would read as an interrupt marker (its rule, the renderer's two markers among them): kept framed.
-    if (frame.own && INTERRUPT_MARKER.test(words.trim())) return `${line}\n${words}`;
-    return (frame.own ? '' : `*From ${literal(frame.from)}*\n\n`) + words;
-  };
+    INTERRUPT_MARKER.test(words.trim()) ? `${line}\n${words}` : words;
   const cut = (text: string) => drawnWords(firstLine(text), text.slice(text.indexOf('\n') + 1));
   const asQueued = (prompt: string): JsonObject => {
     const attachment = { ...object(row.attachment)! };
@@ -109,7 +98,6 @@ export function deliveryAsDrawn(row: JsonObject): JsonObject {
   };
   const prompts = deliveredPrompts(row)!;
   if (prompts.kind === 'enveloped') {
-    if (!frame.own) return row; // a peer's: MAWS draws it as a message between agents
     const words = drawnWords(prompts.frame, prompts.words);
     if (prompts.queued) return asQueued(words);
     const drawn: JsonObject = { ...row, message: { ...object(row.message)!, content: words } };

@@ -10,6 +10,9 @@ import { slashCommandLine } from '@shared/wire/local-command';
 import { INTERRUPT_MARKER } from '../normalizer-support';
 import { apiRetryOfApiError } from '../normalizer-system';
 import { messageText, parsePeerMessage, peerEventsOf } from '@shared/engine/peer-envelope'; // E7
+import { nothingOpen, readNext, type Arrival, type OpenArrivals } from '@shared/engine/arrival'; // UX wave U3 (UC-2)
+import { isBridgeRow, isMirrorLine } from '@shared/engine/sminos-delivery';
+import { notificationText, taskNotificationBlocks, type TaskNotificationBlock } from '@shared/engine/task-notification';
 import { isMadeUpFinalAnswer } from '@shared/owner/message-call';
 import { INTERRUPT_CUT, parseInterruptCut } from '@shared/lane-a/interrupt-cut';
 
@@ -50,13 +53,23 @@ export interface BackfillContext {
   // says which of them were the owner's words delivered into a running turn (sminosDelivery, below)
   readonly bridgeRows: Map<string, { uuid: MessageUuid; content: string }>;
   // P5 O9 (the fix wave): whether a turn runs, from its `turn.started` to its `turn.ended` or an interrupt marker, and
-  // the owner's words the bridge delivered while none did, waiting for the turn that answers them (withWaitingWords)
+  // what the bridge delivered while none did, waiting for the turn that answers it (withWaitingWords): the owner's
+  // words, and (UX wave U3) a peer's delivery the bridge appended, as the events it maps to
   running: boolean;
-  readonly waitingWords: { uuid: MessageUuid; content: string }[];
+  readonly waitingWords: Waiting[];
   // P5 O9 (the M10 sitting): the latest `<local-command-caveat>` record, whose child is a command the terminal ran
   // (localCommandTurn, below)
   localCaveat: MessageUuid | null;
+  // UX wave U3 (UC-2; the U3a document, M3): what the arrivals reader left open after the records mapped so far, which
+  // it reads in order (rule 5); a terminal's scheduled fire, held for the meta row after it, which opens the turn it
+  // stands in; and whether the last record was a delivery the bridge appended, whose mirror line then draws nothing
+  arrivals: OpenArrivals;
+  heldFire: SessionEvent | null;
+  appendedLast: boolean;
 }
+
+// What the bridge delivered while no turn ran (withWaitingWords): the owner's words, or a peer's delivery's events.
+type Waiting = { kind: 'own'; uuid: MessageUuid; content: string } | { kind: 'peer'; events: SessionEvent[] };
 
 export function createBackfillContext(init: {
   sessionId: SessionId;
@@ -81,6 +94,9 @@ export function createBackfillContext(init: {
     running: false,
     waitingWords: [],
     localCaveat: null,
+    arrivals: nothingOpen,
+    heldFire: null,
+    appendedLast: false,
   };
 }
 
@@ -93,6 +109,13 @@ export function recordToEvents(record: TranscriptRecord, ctx: BackfillContext): 
   if (typeof record.uuid !== 'string') return [];
   const uuid = record.uuid as MessageUuid;
   if (typeof record.timestamp === 'string') ctx.lastAt = record.timestamp;
+  // UX wave U3 (UC-2): what this record carries from elsewhere, read in order, so an arrival with two carriers is read
+  // once (rule 5). The reader says what a carrier is and whose; where its events go stays here.
+  const read = readNext(record, ctx.arrivals);
+  ctx.arrivals = read.open;
+  const arrivals = read.arrivals;
+  const afterAppended = ctx.appendedLast;
+  ctx.appendedLast = false;
   const events: SessionEvent[] = [];
   let ordinal = 0;
   const base = (): EventBase => {
@@ -114,21 +137,30 @@ export function recordToEvents(record: TranscriptRecord, ctx: BackfillContext): 
     });
   }
 
+  // A terminal's fire row waits for the meta row after it, whose turn it stands in; any other row next places it where
+  // it stood (UX wave U3, the U3a document, M3).
+  const fire = ctx.heldFire;
+  ctx.heldFire = null;
+  const tiedFire = fire !== null && arrivals.length === 0 && isScheduledPrompt(record) ? fire : null;
+  if (fire !== null && tiedFire === null) events.push(fire);
+
   switch (record.type) {
     case 'user':
-      noteBridgeRow(record, uuid, ctx);
-      userEvents(record, uuid, ctx, base, events);
+      if (arrivals.length === 0) noteBridgeRow(record, uuid, ctx);
+      if (tiedFire !== null) firedTurn(uuid, tiedFire, ctx, base, events);
+      else userEvents(record, uuid, arrivals, ctx, base, events);
       break;
     case 'assistant':
       assistantEvents(record, uuid, ctx, base, events);
       break;
     case 'system':
-      systemEvents(record, ctx, base, events);
+      systemEvents(record, arrivals, afterAppended, ctx, base, events);
       break;
-    case 'attachment': // context injections: on the chain, nothing to show, except a relay's receipt in a child and a prompt taken mid-turn (W1)
-      if (taskNotificationAttachment(record, uuid, ctx, base, events)) break;
-      if (peerQueuedMessage(record, uuid, base, events)) break; // E7
-      if (ctx.agentId === null) steeredPrompt(record, base, events);
+    case 'attachment': // context injections: on the chain, nothing to show, except a relay's receipt in a child, a prompt taken mid-turn (W1) and what arrived from elsewhere (UC-2)
+      if (taskNotificationAttachment(record, uuid, arrivals, ctx, base, events)) break;
+      if (peerQueuedMessage(record, uuid, arrivals, ctx, base, events)) break; // E7
+      if (arrivalAttachment(record, uuid, arrivals, base, events)) break;
+      if (ctx.agentId === null) steeredPrompt(record, arrivals, base, events);
       else coordinatorMessage(record, uuid, ctx, base, events);
       break;
     case 'progress': // never on the chain; the follower keeps only its skeleton
@@ -136,7 +168,7 @@ export function recordToEvents(record: TranscriptRecord, ctx: BackfillContext): 
     default:
       events.push({ ...base(), kind: 'frame.unknown', frameType: `transcript:${record.type}`, subtype: null });
   }
-  return withWaitingWords(record, events, ctx, base);
+  return withWaitingWords(record.type === 'user' && arrivals.some((arrival) => arrival.class === 'wake'), events, ctx, base);
 }
 
 type Base = () => EventBase;
@@ -171,12 +203,19 @@ function humanQueuedPrompt(record: TranscriptRecord): { messageUuid: MessageUuid
   return content === null ? null : { messageUuid: attachment.source_uuid as MessageUuid, content };
 }
 
-function steeredPrompt(record: TranscriptRecord, base: Base, events: SessionEvent[]): void {
+function steeredPrompt(record: TranscriptRecord, arrivals: Arrival[], base: Base, events: SessionEvent[]): void {
   const prompt = humanQueuedPrompt(record);
   if (prompt === null) return;
   const { messageUuid, content } = prompt;
-  events.push({ ...base(), kind: 'user.message', messageUuid, content, isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+  events.push({ ...base(), kind: 'user.message', messageUuid, content, isReplay: false, isSynthetic: false, origin: 'human', bash: null, ...consentOf(arrivals) });
   events.push({ ...base(), kind: 'command.lifecycle', commandUuid: messageUuid, state: 'started' });
+}
+
+// UX wave U3 (UC-2, class `consent`; the U3a document, decision 10): MAWS's own "Approve and retry" message keeps the
+// events the person's prompt or steer makes, and carries the arrival on its message, which draws it as one line.
+function consentOf(arrivals: Arrival[]): { arrival?: Extract<Arrival, { class: 'consent' }>[] } {
+  const consent = arrivals.filter((arrival): arrival is Extract<Arrival, { class: 'consent' }> => arrival.class === 'consent');
+  return consent.length > 0 ? { arrival: consent } : {};
 }
 
 // E7 start: a message from another session, or an in-process agent's SendMessage to this conversation (E7 execution
@@ -187,19 +226,39 @@ function steeredPrompt(record: TranscriptRecord, base: Base, events: SessionEven
 // bare envelope the live frame carries, under that frame's uuid (`source_uuid`), and whose `rendered` text adds the
 // header and reply suffix the model read. Each becomes the live stream's synthetic peer `user.message` and the parsed
 // event beside it, from the parser the live normaliser uses.
-function peerMessage(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillContext, base: Base, events: SessionEvent[]): void {
+//
+// UX wave U3 (UC-2; the U3a document, decision 4): a record the arrivals reader claims as a peer's or a subagent's
+// message (`arrival`) is synthetic whatever its own flag, so it never opens a pending turn of the person's beside its
+// own; its turn is a peer's, or the engine's for a subagent's (a hand-back's turn reads "Continued for"). A delivery
+// sminos framed (the bridge's row, a background session's prompt, an inbox delivery an old engine queued raw) has no
+// envelope, so its companion is the arrival's. A peer text no class claims keeps the flag and the bubble it has.
+function peerMessage(record: TranscriptRecord, uuid: MessageUuid, arrival: PeerArrival | null, ctx: BackfillContext, base: Base, events: SessionEvent[]): void {
   const raw = messageContent(record) as string | unknown[];
   const content = typeof raw === 'string' ? raw : raw.filter(isContentBlock);
   // Inside a tool loop the engine takes it into the running turn, as it does a task notification there
-  // (taskNotificationAttachment): no turn of its own.
-  if (!ctx.inToolLoop) {
+  // (taskNotificationAttachment): no turn of its own. Nor does a delivery the bridge appended into the running turn.
+  if (!ctx.inToolLoop && !isBridgeRow(record)) {
     ctx.lastTurnUserUuid = null;
     ctx.lastAssistantWasApiError = false;
-    events.push({ ...base(), kind: 'turn.started', userMessageUuid: null, origin: 'peer' });
+    events.push({ ...base(), kind: 'turn.started', userMessageUuid: null, origin: arrival?.class === 'subagent' ? 'task-notification' : 'peer' });
   }
-  events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content, isReplay: false, isSynthetic: record.isMeta === true || isTeammateMessage(record), origin: 'peer', bash: null });
-  const companion = peerEventsOf(messageText(content), uuid, record.origin);
+  const isSynthetic = arrival !== null || record.isMeta === true || isTeammateMessage(record);
+  events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content, isReplay: false, isSynthetic, origin: 'peer', bash: null });
+  const companion = companionOf(peerEventsOf(messageText(content), uuid, record.origin), arrival, uuid);
   if (companion) events.push({ ...base(), ...companion });
+}
+
+type PeerArrival = Extract<Arrival, { class: 'peer' | 'subagent' }>;
+type Companion = NonNullable<ReturnType<typeof peerEventsOf>>;
+
+// The parsed event beside a peer's message: the envelope's, else, for a delivery sminos framed, the arrival's own
+// (Interfaces C: the sender's alias from the frame line, the words after it, no address, so never replyable).
+function companionOf(parsed: Companion | null, arrival: PeerArrival | null, messageUuid: MessageUuid): Companion | null {
+  if (parsed !== null || arrival?.class !== 'peer') return parsed;
+  return {
+    kind: 'peer.message', messageUuid, from: arrival.sender.address, fromSession: arrival.sender.session, fromName: arrival.sender.name, fromMode: null, fromPlugin: null,
+    hopChain: [], text: arrival.body, midTurn: arrival.midTurn, lineage: arrival.lineage, replyable: false,
+  };
 }
 
 // E11 S2(d): a teammate's message to the lead of a team an interactive terminal formed (2.1.293; pass3/e7-team-terminal,
@@ -223,50 +282,65 @@ function isPeerPrompt(record: TranscriptRecord): boolean {
 
 // Shared with the follower's unended-turn rule: a record that opens a turn on this mapping, `startsTurn`'s human prompts
 // (the boundary the rewind rules read) and a peer message, which opens its own (E7). A peer record inside a tool loop
-// opens none, but the turn it joins was already open, so the rule's answer is the same.
+// opens none, but the turn it joins was already open, so the rule's answer is the same. UX wave U3: a scheduled fire's
+// meta row opens the engine's turn too, and so does a command a terminal wrote as a `system` row (whose turn ends where
+// it starts). The bridge's wake and its answer prompt are `startsTurn`'s already.
 export function opensTurn(record: TranscriptRecord): boolean {
-  return startsTurn(record) || (isPeerPrompt(record) && !isInterruptMarker(record));
+  return startsTurn(record) || (isPeerPrompt(record) && !isInterruptMarker(record)) || isScheduledPrompt(record) || (record.type === 'system' && localCommandKind(record) === 'echo');
 }
 
-function peerQueuedMessage(record: TranscriptRecord, uuid: MessageUuid, base: Base, events: SessionEvent[]): boolean {
+function peerQueuedMessage(record: TranscriptRecord, uuid: MessageUuid, arrivals: Arrival[], ctx: BackfillContext, base: Base, events: SessionEvent[]): boolean {
   const attachment = record.attachment as { type?: unknown; prompt?: unknown; source_uuid?: unknown; origin?: { kind?: unknown } } | undefined;
   if (attachment?.type !== 'queued_command' || attachment.origin?.kind !== 'peer' || typeof attachment.prompt !== 'string') return false;
-  const messageUuid = typeof attachment.source_uuid === 'string' && attachment.source_uuid.length > 0 ? (attachment.source_uuid as MessageUuid) : uuid;
+  const messageUuid = queuedUuid(record, uuid);
+  // UX wave U3 (UC-2): the owner's own send or steer through the inbox, and the bridge's wake through it, taken into
+  // the running turn, are not a peer's (rule 2)
+  if (arrivals[0]?.class === 'own' || arrivals[0]?.class === 'wake') return arrivalAttachment(record, uuid, arrivals, base, events);
   events.push({ ...base(), kind: 'user.message', messageUuid, content: attachment.prompt, isReplay: false, isSynthetic: true, origin: 'peer', bash: null });
   const rendered = Array.isArray(record.rendered) ? (record.rendered as { content?: unknown }[]).find((part) => typeof part?.content === 'string')?.content as string | undefined : undefined;
-  const companion = (rendered === undefined ? null : peerEventsOf(rendered, messageUuid, attachment.origin)) ?? peerEventsOf(attachment.prompt, messageUuid, attachment.origin);
+  const parsed = (rendered === undefined ? null : peerEventsOf(rendered, messageUuid, attachment.origin)) ?? peerEventsOf(attachment.prompt, messageUuid, attachment.origin);
+  const companion = companionOf(parsed, peerArrivalOf(arrivals), messageUuid);
   if (companion) events.push({ ...base(), ...companion });
   return true;
+}
+
+const peerArrivalOf = (arrivals: Arrival[]): PeerArrival | null => {
+  const [first] = arrivals;
+  return first?.class === 'peer' || first?.class === 'subagent' ? first : null;
+};
+
+// A queued command's message uuid: the one it was written with (`source_uuid`), else the attachment's own.
+function queuedUuid(record: TranscriptRecord, uuid: MessageUuid): MessageUuid {
+  const source = (record.attachment as { source_uuid?: unknown } | undefined)?.source_uuid;
+  return typeof source === 'string' && source.length > 0 ? (source as MessageUuid) : uuid;
 }
 // E7 end
 
 // Desktop's history adapter unwraps queued task notifications as user records. At a tool boundary they are synthetic
 // context for the running turn, not a new prompt; outside the loop they can trigger an engine follow-up. Old records
 // lack source_uuid; their tool-use identity is the only stable delivery identity available.
-function taskNotificationAttachment(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillContext, base: Base, events: SessionEvent[]): boolean {
+function taskNotificationAttachment(record: TranscriptRecord, uuid: MessageUuid, arrivals: Arrival[], ctx: BackfillContext, base: Base, events: SessionEvent[]): boolean {
   const attachment = record.attachment as { type?: unknown; commandMode?: unknown; prompt?: unknown; source_uuid?: unknown; isMeta?: unknown } | undefined;
   if (attachment?.type !== 'queued_command' || attachment.commandMode !== 'task-notification') return false;
   if (attachment.isMeta === true || typeof attachment.prompt !== 'string') return true;
   const source = typeof attachment.source_uuid === 'string' && attachment.source_uuid ? attachment.source_uuid as MessageUuid : null;
-  userEvents({ ...record, type: 'user', isMeta: record.isMeta === true || ctx.inToolLoop, message: { role: 'user', content: attachment.prompt } }, source ?? uuid, ctx, base, events, source);
+  userEvents({ ...record, type: 'user', isMeta: record.isMeta === true || ctx.inToolLoop, origin: { kind: 'task-notification' }, message: { role: 'user', content: attachment.prompt } }, source ?? uuid, arrivals, ctx, base, events, source);
   return true;
 }
 
-function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillContext, base: Base, events: SessionEvent[], sourceUuid: MessageUuid | null = uuid): void {
+function userEvents(record: TranscriptRecord, uuid: MessageUuid, arrivals: Arrival[], ctx: BackfillContext, base: Base, events: SessionEvent[], sourceUuid: MessageUuid | null = uuid): void {
   const content = messageContent(record);
   if (isNoContent(content)) return; // P5 O9: the engine's word for a message with none: no prompt, no turn
   // W1 (A5): the summary `/compact` writes after its boundary (`isCompactSummary`, w1-compact.jsonl line 29) is the
   // engine's context for the model, which the live stream sends as a synthetic frame: no bubble and no turn, like meta.
   const isMeta = record.isMeta === true || record.isCompactSummary === true;
-  const humanOrigin = (record.origin as { kind?: unknown } | undefined)?.kind === 'human' ? 'human' : null;
+  const originKind = (record.origin as { kind?: unknown } | undefined)?.kind;
+  const humanOrigin = originKind === 'human' ? 'human' : null;
   const marker = isInterruptMarker(record);
   const local = isLocalCommandOutput(record);
   const turn = (origin: string | null): void => {
     if (isMeta || marker || local) return; // the marker belongs to the turn it interrupted, a command's output to the command's turn (W1)
-    ctx.lastTurnUserUuid = uuid;
-    ctx.inToolLoop = false;
-    ctx.lastAssistantWasApiError = false;
-    events.push({ ...base(), kind: 'turn.started', userMessageUuid: uuid, origin });
+    openTurn(uuid, origin, ctx, base, events);
   };
   if (marker) ctx.inToolLoop = false; // an interrupt ends the loop: no model call follows
   // P5 O9 (the M10 sitting): the reply an interrupt cut off, as the sminos bridge records it after the interrupt's marker
@@ -276,9 +350,15 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
     events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content: cut, isReplay: false, isSynthetic: true, origin: INTERRUPT_CUT, bash: null });
     return;
   }
+  // UX wave U3 (UC-2): what the record carries from elsewhere becomes the same events on every route (the U3a document,
+  // Interfaces C); MAWS's own answer envelope and consent message are the person's prompt, as below
+  if (arrivals.some((arrival) => arrival.class !== 'consent' && !(arrival.class === 'answer' && arrival.tool === 'maws'))) {
+    arrivalEvents(record, uuid, arrivals, ctx, base, events, sourceUuid);
+    return;
+  }
   // E7 start
   if (!marker && isPeerPrompt(record)) {
-    peerMessage(record, uuid, ctx, base, events);
+    peerMessage(record, uuid, null, ctx, base, events);
     return;
   }
   // E7 end
@@ -287,41 +367,20 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
     return;
   }
   if (typeof content === 'string') {
-    const notifications = parseTaskNotifications(record, content);
+    // UX wave U3 (rule 5): the second carrier of an agent's end, the task notification its hand-back claimed, yields no
+    // row and no turn, but still ends its task (decision 13); a typed prompt is never one, whatever its text (rule 1)
+    const notifications = humanOrigin === null ? notificationText(content, originKind) : null;
     if (notifications !== null) {
-      const tools = notifications.flatMap((n) => (n.toolUseId === null ? [] : [n.toolUseId]));
-      const duplicate = sourceUuid !== null ? ctx.notificationSources.has(sourceUuid) : tools.length > 0 && tools.every((tool) => ctx.notificationTools.has(tool));
-      if (duplicate) return;
-      if (sourceUuid !== null) ctx.notificationSources.add(sourceUuid);
-      for (const tool of tools) ctx.notificationTools.add(tool);
+      const blocks = taskNotificationBlocks(notifications);
+      if (!seenNotification(blocks, sourceUuid, ctx)) taskState(blocks, ctx, base, events);
+      return;
     }
-    const origin = notifications === null ? humanOrigin : 'task-notification'; // preserve typed provenance; notifications are engine-initiated
     const bash = parseBash(content);
     const command = localCommandTurn(record, ctx);
-    turn(origin);
-    events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content: bashStripped(content, bash), isReplay: false, isSynthetic: isMeta, origin, bash });
+    turn(humanOrigin);
+    events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content: bashStripped(content, bash), isReplay: false, isSynthetic: isMeta, origin: humanOrigin, bash, ...consentOf(arrivals) });
     if (command) events.push(endedOf(base, uuid, null));
     if (record.isMeta === true) hookFeedback(content, uuid, base, events);
-    // The real completion of a background agent: the notification naming the tool use that started it.
-    for (const notification of notifications ?? []) {
-      if (notification.toolUseId === null) continue;
-      const started = ctx.seenToolUses.get(notification.toolUseId) ?? startPendingSubagent(ctx, notification.toolUseId, base, events);
-      if (started !== undefined) {
-        const summary = notification.result ?? notification.summary;
-        events.push({
-          ...base(),
-          kind: 'subagent.finished',
-          taskId: notification.taskId === null ? started : (notification.taskId as TaskId),
-          status: notification.status,
-          summary: summary === null ? null : summary.slice(0, TEXT_CAP),
-          outputFile: notification.outputFile,
-          reason: null,
-        });
-      } else if (notification.taskId !== null) {
-        // Like the live normaliser, an outcome without a known task type is a task.notification.
-        events.push({ ...base(), kind: 'task.notification', taskId: notification.taskId as TaskId, toolUseId: notification.toolUseId as ToolUseId, status: notification.status, summary: notification.result ?? notification.summary ?? '', outputFile: notification.outputFile, reason: null });
-      }
-    }
     return;
   }
   if (!Array.isArray(content)) return;
@@ -330,7 +389,7 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
   const others = blocks.filter((block) => block.type !== 'tool_result');
   if (others.length > 0) {
     turn(humanOrigin);
-    events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content: others, isReplay: false, isSynthetic: isMeta, origin: marker ? 'interrupt-marker' : humanOrigin, bash: null });
+    events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content: others, isReplay: false, isSynthetic: isMeta, origin: marker ? 'interrupt-marker' : humanOrigin, bash: null, ...consentOf(arrivals) });
   }
   const structured = record.toolUseResult ?? null;
   const persisted = (structured as { persistedOutputPath?: unknown } | null)?.persistedOutputPath;
@@ -372,6 +431,160 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
     }
   }
 }
+
+// UX wave U3 start (UC-2; the U3a document, Interfaces C, and M3). What each class the reader gives a `user` record
+// becomes, the same events every caller makes of it: the turn it opens, when it opens one, and its message.
+function arrivalEvents(record: TranscriptRecord, uuid: MessageUuid, arrivals: Arrival[], ctx: BackfillContext, base: Base, events: SessionEvent[], sourceUuid: MessageUuid | null): void {
+  const [first] = arrivals as [Arrival, ...Arrival[]];
+  const content = messageContent(record) as string | unknown[];
+  const written = typeof content === 'string' ? content : content.filter(isContentBlock);
+  const isMeta = record.isMeta === true || record.isCompactSummary === true;
+  switch (first.class) {
+    case 'peer':
+    case 'subagent': {
+      if (isBridgeRow(record)) {
+        // a delivery the bridge appended into the running turn: at its row while a turn runs, else held for the turn
+        // that starts next, as the owner's words are (withWaitingWords)
+        ctx.appendedLast = true;
+        const delivered: SessionEvent[] = [];
+        peerMessage(record, uuid, first, ctx, base, delivered);
+        if (ctx.running) events.push(...delivered);
+        else ctx.waitingWords.push({ kind: 'peer', events: delivered });
+        return;
+      }
+      peerMessage(record, uuid, first, ctx, base, events);
+      return;
+    }
+    case 'own': {
+      if (isBridgeRow(record)) {
+        ctx.appendedLast = true;
+        if (ctx.running) steered(uuid, first.words, base, events);
+        else ctx.waitingWords.push({ kind: 'own', uuid, content: first.words });
+        return;
+      }
+      if (ctx.inToolLoop) return steered(uuid, first.words, base, events);
+      openTurn(uuid, 'human', ctx, base, events);
+      events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content: first.words, isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+      return;
+    }
+    case 'command': {
+      localCommandTurn(record, ctx); // the caveat's command is behind it
+      events.push(commandOutput(uuid, arrivals, base));
+      return;
+    }
+    case 'task': {
+      const blocks = taskNotificationBlocks(notificationText(typeof content === 'string' ? content : messageText(written as ContentBlock[]), (record.origin as { kind?: unknown } | undefined)?.kind) ?? '');
+      if (seenNotification(blocks, sourceUuid, ctx)) return;
+      if (!isMeta) openTurn(uuid, 'task-notification', ctx, base, events);
+      events.push(carried(uuid, written, arrivals, base));
+      taskState(blocks, ctx, base, events);
+      return;
+    }
+    default: {
+      // `schedule` (a headless session's meta row), `wake`, and an `answer` by the plugin's prompt: the engine's turn
+      if (!ctx.inToolLoop) openTurn(uuid, 'task-notification', ctx, base, events);
+      events.push(carried(uuid, written, arrivals, base));
+    }
+  }
+}
+
+// What an attachment carries from elsewhere, taken into the running turn (UX wave U3, UC-2): the owner's own words
+// queued there (through the inbox, or the bridge's submission before doperpowers PR 233), a peer's delivery the bridge
+// queued, the bridge's wake through the inbox, and answers a hook's context gave a tool's result or the next prompt.
+// False when it carries none of these, for the readers after it.
+function arrivalAttachment(record: TranscriptRecord, uuid: MessageUuid, arrivals: Arrival[], base: Base, events: SessionEvent[]): boolean {
+  const [first] = arrivals;
+  const attachment = record.attachment as { type?: unknown; prompt?: unknown; content?: unknown } | undefined;
+  if (first === undefined) return false;
+  if (attachment?.type === 'hook_additional_context') {
+    const text = Array.isArray(attachment.content) ? attachment.content.filter((part): part is string => typeof part === 'string').join('\n') : '';
+    events.push(carried(uuid, text, arrivals, base));
+    return true;
+  }
+  if (attachment?.type !== 'queued_command' || typeof attachment.prompt !== 'string') return false;
+  const messageUuid = queuedUuid(record, uuid);
+  if (first.class === 'own') {
+    steered(messageUuid, first.words, base, events);
+    return true;
+  }
+  if (first.class === 'wake') {
+    events.push(carried(messageUuid, attachment.prompt, arrivals, base));
+    return true;
+  }
+  if (first.class !== 'peer') return false;
+  events.push({ ...base(), kind: 'user.message', messageUuid, content: attachment.prompt, isReplay: false, isSynthetic: true, origin: 'peer', bash: null });
+  events.push({ ...base(), ...companionOf(null, first, messageUuid)! });
+  return true;
+}
+
+// A turn that opens at a record: the person's, a peer's or the engine's, named by its prompt's uuid.
+function openTurn(uuid: MessageUuid, origin: string | null, ctx: BackfillContext, base: Base, events: SessionEvent[]): void {
+  ctx.lastTurnUserUuid = uuid;
+  ctx.inToolLoop = false;
+  ctx.lastAssistantWasApiError = false;
+  events.push({ ...base(), kind: 'turn.started', userMessageUuid: uuid, origin });
+}
+
+// A terminal's fire row, held until the meta row after it (rule 5's second pair): the row opens the engine's turn and
+// the fire's line stands in it; the meta row itself, the arrival's second carrier, makes no message.
+function firedTurn(uuid: MessageUuid, fire: SessionEvent, ctx: BackfillContext, base: Base, events: SessionEvent[]): void {
+  openTurn(uuid, 'task-notification', ctx, base, events);
+  events.push(fire);
+}
+
+const isScheduledPrompt = (record: TranscriptRecord) => record.type === 'user' && record.turnOrigin === 'scheduled';
+
+// The synthetic message of an arrival of the carried classes (Interfaces C): the carrier's text, never a prompt.
+function carried(messageUuid: MessageUuid, content: string | ContentBlock[], arrivals: Arrival[], base: Base): SessionEvent {
+  const arrival = arrivals.filter((entry): entry is Extract<Arrival, { class: 'task' | 'schedule' | 'answer' | 'wake' }> => entry.class === 'task' || entry.class === 'schedule' || entry.class === 'answer' || entry.class === 'wake');
+  return { ...base(), kind: 'user.message', messageUuid, content, isReplay: false, isSynthetic: true, origin: 'task-notification', bash: null, arrival };
+}
+
+// The owner's words taken into the running turn: what the live stream shows for a prompt folded in there.
+function steered(messageUuid: MessageUuid, words: string, base: Base, events: SessionEvent[]): void {
+  events.push({ ...base(), kind: 'user.message', messageUuid, content: words, isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+  events.push({ ...base(), kind: 'command.lifecycle', commandUuid: messageUuid, state: 'started' });
+}
+
+// A slash command's output (class `command`): the engine's own tag around it, its terminal escapes removed, in the turn
+// that runs, which is its command's.
+function commandOutput(messageUuid: MessageUuid, arrivals: Arrival[], base: Base): SessionEvent {
+  const tagged = arrivals.flatMap((arrival) => {
+    if (arrival.class !== 'command') return [];
+    const out = arrival.stdout !== '' || arrival.stderr === '' ? [`<local-command-stdout>${arrival.stdout}</local-command-stdout>`] : [];
+    return arrival.stderr !== '' ? [...out, `<local-command-stderr>${arrival.stderr}</local-command-stderr>`] : out;
+  });
+  return { ...base(), kind: 'user.message', messageUuid, content: tagged.join('\n'), isReplay: false, isSynthetic: false, origin: 'local-command', bash: null };
+}
+
+// A notification already mapped (the same delivery in a queued command and in a row): nothing again. Old records lack a
+// source uuid; their tool-use identity is the only stable delivery identity available.
+function seenNotification(blocks: TaskNotificationBlock[], sourceUuid: MessageUuid | null, ctx: BackfillContext): boolean {
+  const tools = blocks.flatMap((block) => (block.toolUseId === null ? [] : [block.toolUseId]));
+  const duplicate = sourceUuid !== null ? ctx.notificationSources.has(sourceUuid) : tools.length > 0 && tools.every((tool) => ctx.notificationTools.has(tool));
+  if (duplicate) return true;
+  if (sourceUuid !== null) ctx.notificationSources.add(sourceUuid);
+  for (const tool of tools) ctx.notificationTools.add(tool);
+  return false;
+}
+
+// Task state is not an arrival (decision 13): every block of a notification that ends its task ends it, whether or not
+// the reader made an arrival of it; a block that claims no end (`outcome: null`) ends nothing. The real completion of a
+// background agent is the notification naming the tool use that started it.
+function taskState(blocks: TaskNotificationBlock[], ctx: BackfillContext, base: Base, events: SessionEvent[]): void {
+  for (const block of blocks) {
+    if (block.outcome === null || block.toolUseId === null) continue;
+    const started = ctx.seenToolUses.get(block.toolUseId) ?? startPendingSubagent(ctx, block.toolUseId, base, events);
+    if (started !== undefined) {
+      const summary = block.result ?? block.summary;
+      events.push({ ...base(), kind: 'subagent.finished', taskId: block.taskId === null ? started : (block.taskId as TaskId), status: block.outcome, summary: summary.slice(0, TEXT_CAP), outputFile: block.outputFile, reason: null });
+    } else if (block.taskId !== null) {
+      // Like the live normaliser, an outcome without a known task type is a task.notification.
+      events.push({ ...base(), kind: 'task.notification', taskId: block.taskId as TaskId, toolUseId: block.toolUseId as ToolUseId, status: block.outcome, summary: block.result ?? block.summary, outputFile: block.outputFile, reason: null });
+    }
+  }
+}
+// UX wave U3 end
 
 function assistantEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillContext, base: Base, events: SessionEvent[]): void {
   const message = record.message as { id?: unknown; model?: unknown; content?: unknown } | undefined;
@@ -437,7 +650,7 @@ function startPendingSubagent(ctx: BackfillContext, toolUseId: string, base: Bas
   return taskId;
 }
 
-function systemEvents(record: TranscriptRecord, ctx: BackfillContext, base: Base, events: SessionEvent[]): void {
+function systemEvents(record: TranscriptRecord, arrivals: Arrival[], afterAppended: boolean, ctx: BackfillContext, base: Base, events: SessionEvent[]): void {
   const subtype = typeof record.subtype === 'string' ? record.subtype : null;
   switch (subtype) {
     case 'compact_boundary': {
@@ -494,18 +707,37 @@ function systemEvents(record: TranscriptRecord, ctx: BackfillContext, base: Base
         fallbackModel: subtype === 'model_refusal_fallback' && typeof record.fallbackModel === 'string' ? record.fallbackModel : null,
       });
       return;
+    case 'scheduled_task_fire':
+      // UX wave U3 (UC-2, rule 5): a terminal's fire is the arrival, held for the meta row after it, which opens the turn
+      // it stands in (recordToEvents); one with no such row after it is placed where it stood
+      if (arrivals.length > 0) ctx.heldFire = carried(record.uuid as MessageUuid, typeof record.content === 'string' ? record.content : '', arrivals, base);
+      return;
     case 'stop_hook_summary':
     case 'away_summary':
-    case 'scheduled_task_fire':
     case 'bridge_status':
     case 'permission_retry':
       return;
     case 'local_command':
-    case 'local_command_output':
+    case 'local_command_output': {
       if (isNoContent(record.content)) return; // P5 O9: a command that said nothing (`/reload-plugins`)
-      events.push({ ...base(), kind: 'user.message', messageUuid: record.uuid as MessageUuid, content: typeof record.content === 'string' ? record.content : '', isReplay: false, isSynthetic: record.isMeta === true, origin: 'local-command', bash: null });
+      const uuid = record.uuid as MessageUuid;
+      // UX wave U3 (UC-2, class `command`): a command's output, in the engine's tag, its escapes removed
+      if (arrivals.length > 0) return void events.push(commandOutput(uuid, arrivals, base));
+      // the command itself, written by a terminal as this row (the U3a document, M3): the person's command, mapped as
+      // the user row of one is (its bubble, its turn, and the turn's end where it starts: a local command runs no model)
+      if (localCommandKind(record) === 'echo') {
+        ctx.inToolLoop = false;
+        openTurn(uuid, null, ctx, base, events);
+        events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content: record.content as string, isReplay: false, isSynthetic: false, origin: null, bash: null });
+        events.push(endedOf(base, uuid, null));
+        return;
+      }
+      events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content: typeof record.content === 'string' ? record.content : '', isReplay: false, isSynthetic: record.isMeta === true, origin: 'local-command', bash: null });
       return;
+    }
     case 'informational': {
+      // UX wave U3 (UC-2, rule 5): the bridge's mirror of a delivery it appended is that delivery's second carrier
+      if (afterAppended && isMirrorLine(record)) return;
       if (sminosDelivery(record, ctx, base, events)) return;
       const blocked = blockedPrompt(record);
       if (blocked === null) {
@@ -604,7 +836,7 @@ function sminosDelivery(record: TranscriptRecord, ctx: BackfillContext, base: Ba
   if (row === undefined) return false;
   ctx.bridgeRows.delete(key);
   if (!ctx.running) {
-    ctx.waitingWords.push(row);
+    ctx.waitingWords.push({ kind: 'own', ...row });
     return true;
   }
   events.push({ ...base(), kind: 'user.message', messageUuid: row.uuid, content: row.content, isReplay: false, isSynthetic: false, origin: 'human', bash: null });
@@ -620,43 +852,27 @@ function sminosDelivery(record: TranscriptRecord, ctx: BackfillContext, base: Ba
 // (the wake's own text the model's context, no bubble) and any others sent during it; any other turn that starts first
 // takes them all as sent during it. A turn the interrupt left open on this mapping (the marker opens and ends nothing
 // here) is not one that runs: the next turn's start closes it, stopped.
-const BRIDGE_WAKE_LINE = '[sminos bridge]'; // doperpowers `sminos/hooks/mods/bridge.tsx`, `WAKE_LINE`
-
-function withWaitingWords(record: TranscriptRecord, events: SessionEvent[], ctx: BackfillContext, base: Base): SessionEvent[] {
+// (UX wave U3: the wake is the reader's class `wake`, its line the wake's notice in that turn; a peer's delivery the
+// bridge appended while no turn ran waits alike, its message and companion taken at the turn's start.)
+function withWaitingWords(wake: boolean, events: SessionEvent[], ctx: BackfillContext, base: Base): SessionEvent[] {
   const start = events.findIndex((event) => event.kind === 'turn.started');
   let out = events;
   if (start >= 0 && ctx.waitingWords.length > 0) {
-    const [first, ...rest] = ctx.waitingWords.splice(0);
+    const waiting = ctx.waitingWords.splice(0);
     const said = (row: { uuid: MessageUuid; content: string }): SessionEvent => ({ ...base(), kind: 'user.message', messageUuid: row.uuid, content: row.content, isReplay: false, isSynthetic: false, origin: 'human', bash: null });
-    const sentDuring = (rows: { uuid: MessageUuid; content: string }[]) => rows.flatMap((row): SessionEvent[] => [said(row), { ...base(), kind: 'command.lifecycle', commandUuid: row.uuid, state: 'started' }]);
-    if (isBridgeWake(record)) {
+    const sentDuring = (rows: Waiting[]) => rows.flatMap((row): SessionEvent[] => (row.kind === 'peer' ? row.events : [said(row), { ...base(), kind: 'command.lifecycle', commandUuid: row.uuid, state: 'started' }]));
+    const first = wake ? waiting.find((row) => row.kind === 'own') : undefined;
+    if (first !== undefined) {
       ctx.lastTurnUserUuid = first.uuid;
       const opened = { ...events[start], userMessageUuid: first.uuid, origin: null } as SessionEvent;
-      const wake = events.slice(start + 1).map((event) => (event.kind === 'user.message' && event.messageUuid === record.uuid ? { ...event, isSynthetic: true } : event));
-      out = [...events.slice(0, start), opened, said(first), ...sentDuring(rest), ...wake];
-    } else out = [...events, ...sentDuring([first, ...rest])];
+      out = [...events.slice(0, start), opened, said(first), ...sentDuring(waiting.filter((row) => row !== first)), ...events.slice(start + 1)];
+    } else out = [...events, ...sentDuring(waiting)];
   }
   for (const event of out) {
     if (event.kind === 'turn.started') ctx.running = true;
     else if (event.kind === 'turn.ended' || (event.kind === 'user.message' && event.origin === 'interrupt-marker')) ctx.running = false;
   }
   return out;
-}
-
-// The bridge's wake, by its first line: its prompt as the user, or its inbox message, kept as a peer's (the line opens
-// the envelope's body). Desk-web reads it alike (`renderer/src/lane-a/conversation/delivery-frame.ts`, `isBridgeWake`).
-function isBridgeWake(record: TranscriptRecord): boolean {
-  if (record.type !== 'user') return false;
-  const origin = record.origin as { kind?: unknown; asUser?: unknown } | undefined;
-  const content = messageContent(record);
-  const text = typeof content === 'string' ? content : Array.isArray(content) ? messageText(content.filter(isContentBlock)) : '';
-  let body: string | null = null;
-  if (origin?.kind === 'plugin' && origin.asUser === true) body = text;
-  else if (origin?.kind === 'peer') {
-    const envelope = parsePeerMessage(text);
-    body = envelope?.kind === 'cross-session' && envelope.frame === null ? envelope.body : null;
-  }
-  return body !== null && body.split('\n', 1)[0] === BRIDGE_WAKE_LINE;
 }
 
 // P5 O9 (the M10 sitting): the sminos bridge's mirror of an interrupt's rows for the terminal (`<plugin>: interrupt: …`)
@@ -763,9 +979,14 @@ function isLocalCommandOutput(record: TranscriptRecord): boolean {
 }
 
 // Shared with the follower: engine-tagged local history, not arbitrary slash-prefixed human/skill prompts.
-// A user command echo also needs a preceding caveat to distinguish it from a skill invocation.
+// A user command echo also needs a preceding caveat to distinguish it from a skill invocation. UX wave U3: a terminal
+// writes a command itself as a `system` row too (`u3-terminal-commands-r1`, lines 56, 70 and 77), its whole text the
+// command's tags: that row is the command's echo, and every other such row its output.
 export function localCommandKind(record: TranscriptRecord): 'caveat' | 'echo' | 'output' | null {
-  if (record.type === 'system') return record.subtype === 'local_command' || record.subtype === 'local_command_output' ? 'output' : null;
+  if (record.type === 'system') {
+    if (record.subtype !== 'local_command' && record.subtype !== 'local_command_output') return null;
+    return typeof record.content === 'string' && slashCommandLine(record.content) !== null ? 'echo' : 'output';
+  }
   if (record.type !== 'user') return null;
   const text = singleText(record);
   if (text === null) return null;
@@ -819,58 +1040,9 @@ function bashStripped(content: string, bash: Bash): string {
   return bash.stderr.length > 0 ? `${bash.stdout}\n${bash.stderr}` : bash.stdout;
 }
 
-interface TaskNotification {
-  taskId: string | null;
-  toolUseId: string | null;
-  status: 'completed' | 'failed' | 'stopped';
-  summary: string | null;
-  result: string | null;
-  outputFile: string | null;
-}
-
-// The same disk shape used by the follower's response-delivery classification.
+// The same disk shape used by the follower's response-delivery classification: a user record whose text is the engine's
+// `<task-notification>` blocks (SPEC 20.9), read as the arrivals reader reads them (`@shared/engine/task-notification`).
 export function isTaskNotification(record: TranscriptRecord): boolean {
   const content = messageContent(record);
-  return record.type === 'user' && typeof content === 'string' && parseTaskNotifications(record, content) !== null;
-}
-
-const NOTIFICATION_OPENING = '<task-notification>';
-const NOTIFICATION_BLOCK = /<task-notification>[\s\S]*?<\/task-notification>/g;
-const NOTIFICATION_PREAMBLE = '[SYSTEM NOTIFICATION - NOT USER INPUT]\n';
-
-// The engine's `<task-notification>` blocks (SPEC 20.9), each the outcome of a background task, delivered as a user
-// record: null for a text that is no notification. A subagent's transcript writes them after the engine's preamble and
-// a blank line, on a record the engine marked `origin.kind: task-notification` (DX4's reading rule: a person can type
-// the preamble's words). The engine joins the notifications it delivers at once into one record, each block after a
-// blank line (DX4's vectors, "several notifications in one row"): each block is read alone.
-function parseTaskNotifications(record: TranscriptRecord, content: string): TaskNotification[] | null {
-  const text = notificationText(record, content);
-  return text === null ? null : (text.match(NOTIFICATION_BLOCK) ?? []).map(parseTaskNotification);
-}
-
-function notificationText(record: TranscriptRecord, content: string): string | null {
-  if (content.trimStart().startsWith(NOTIFICATION_OPENING)) return content;
-  if ((record.origin as { kind?: unknown } | undefined)?.kind !== 'task-notification' || !content.startsWith(NOTIFICATION_PREAMBLE)) return null;
-  const cut = content.indexOf(`\n\n${NOTIFICATION_OPENING}`);
-  return cut < 0 ? null : content.slice(cut + 2);
-}
-
-function parseTaskNotification(block: string): TaskNotification {
-  const element = (name: string): string | null => {
-    const match = new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(block);
-    return match === null ? null : match[1].trim();
-  };
-  const status = element('status');
-  const outcome: TaskNotification['status'] =
-    status === 'failed' || status === 'error' ? 'failed'
-    : status === 'stopped' || status === 'killed' || status === 'cancelled' || status === 'interrupted' ? 'stopped'
-    : 'completed';
-  return {
-    taskId: element('task-id'),
-    toolUseId: element('tool-use-id'),
-    status: outcome,
-    summary: element('summary'),
-    result: element('result'),
-    outputFile: element('output-file'),
-  };
+  return record.type === 'user' && typeof content === 'string' && notificationText(content, (record.origin as { kind?: unknown } | undefined)?.kind) !== null;
 }
