@@ -223,6 +223,16 @@ describe('the bar between the groups (decision 2)', () => {
     expect(group('lower')!.style.height).toBe('400px');
   });
 
+  // Addendum 1 of the branch review's fix wave: the bar follows a pointer drag, as the two-build scene drags it.
+  it('a pointer drag moves the share: 48 px up gives the lower group 6 % more', async () => {
+    const bar = await splitColumn();
+    act(() => void fireEvent.pointerDown(bar, { pointerId: 1, button: 0, clientY: 400 }));
+    for (const y of [388, 376, 364, 352]) act(() => void fireEvent.pointerMove(bar, { pointerId: 1, clientY: y }));
+    act(() => void fireEvent.pointerUp(bar, { pointerId: 1, clientY: 352 }));
+    expect(share()).toBeCloseTo(0.56);
+    expect(bar.getAttribute('aria-valuenow')).toBe('56');
+  });
+
   it('its keys move the share, 8 px a step and 32 with Shift, and it stops at the bounds', async () => {
     const user = userEvent.setup();
     const bar = await splitColumn();
