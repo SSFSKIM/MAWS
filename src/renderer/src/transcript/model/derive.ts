@@ -1403,7 +1403,7 @@ function agentMessageRow(event: Event<'subagent.message'>, turnId: TurnId, agent
 // UX wave U3 (UC-2, "The rows"; the U3a document, Interfaces D): one arrival a synthetic message carries, as its notice. A
 // task's line is the engine's sentence; a scheduled fire's names the prompt's first line where the carrier holds it; an
 // answer's is worded from its summary and the questions of the call that asked (decision 9); the wake's is today's.
-function noticeOf(event: Event<'user.message'>, arrival: Exclude<CarriedArrival, { class: 'consent' }>, index: number, turnId: TurnId, questionsOf: CallQuestions): RowOf<'notice'> {
+function noticeOf(event: Event<'user.message'>, arrival: Exclude<CarriedArrival, { class: 'consent' }>, index: number, turnId: TurnId | null, questionsOf: CallQuestions): RowOf<'notice'> {
   const id = rowId.notice(arrival.class === 'task' ? arrival.runId : null, event.messageUuid ?? event.id, index);
   const base = { id, turnId, at: event.at, kind: 'notice' as const, class: arrival.class, outcome: null, durationMs: null, detail: null, taskId: null, toolUseId: null, outputFile: null };
   switch (arrival.class) {
@@ -1424,8 +1424,8 @@ function noticeOf(event: Event<'user.message'>, arrival: Exclude<CarriedArrival,
 }
 
 // The questions an ask call put, read from the call itself: in this turn, else in the turn the state files it under.
-function callQuestions(turn: TurnState, state: TranscriptState | null, call: ToolUseId): { question: string; header: string }[] | null {
-  const owner = turn.events.some((event) => event.kind === 'tool.use' && event.toolUseId === call) ? turn : state?.turns.get(state.index.toolUses.get(call) ?? ('' as TurnId));
+function callQuestions(turn: TurnState | null, state: TranscriptState | null, call: ToolUseId): { question: string; header: string }[] | null {
+  const owner = turn?.events.some((event) => event.kind === 'tool.use' && event.toolUseId === call) ? turn : state?.turns.get(state.index.toolUses.get(call) ?? ('' as TurnId));
   const use = owner?.events.find((event): event is Event<'tool.use'> => event.kind === 'tool.use' && event.toolUseId === call);
   if (use === undefined) return null;
   const questions = record(use.input).questions;
@@ -1645,7 +1645,12 @@ function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
   for (const event of events) {
     switch (event.kind) {
       case 'user.message': {
-        if (event.origin === INTERRUPT_CUT) { // P5 O9: a recorded cut whose turn is not loaded (a page starting at its marker)
+        if (event.isSynthetic && event.arrival !== undefined) { // UX wave U3: an arrival no turn was open for (reduce.ts, placeArrival)
+          for (const [n, entry] of event.arrival.entries()) {
+            const known = carriedOf([entry])[0];
+            if (known !== undefined && known.class !== 'consent') rows.push(noticeOf(event, known, n, null, (call) => callQuestions(null, state, call as ToolUseId)));
+          }
+        } else if (event.origin === INTERRUPT_CUT) { // P5 O9: a recorded cut whose turn is not loaded (a page starting at its marker)
           const row = cutRowOf(event, null);
           if (row) rows.push(row);
         } else if (event.bash?.part === 'input') rows.push(bashRowOf(event, null));

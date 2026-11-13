@@ -177,8 +177,9 @@ export interface TranscriptState {
   // `pluginIssues` (R1): the load issues already retained, by plugin, level and message, so an issue every init repeats
   // makes one notice per session.
   // `arrivals` (UX wave U3, decision 8): the arrival-bearing synthetic message placed under each uuid (the one whose
-  // line is drawn) and the turn holding it, so a later one under the same uuid takes that one out (one arrival per uuid)
-  index: { toolUses: Map<ToolUseId, TurnId>; tasks: Map<TaskId, TurnId>; requests: Map<RequestId, TurnId>; hooks: Map<string, TurnId>; messages: Map<MessageUuid, TurnId>; pluginIssues: Set<string>; arrivals: Map<MessageUuid, { turn: TurnId; event: EventId }> };
+  // line is drawn) and the turn holding it, or null when it is kept loose (no turn was open for it), so a later one under
+  // the same uuid takes that one out (one arrival per uuid).
+  index: { toolUses: Map<ToolUseId, TurnId>; tasks: Map<TaskId, TurnId>; requests: Map<RequestId, TurnId>; hooks: Map<string, TurnId>; messages: Map<MessageUuid, TurnId>; pluginIssues: Set<string>; arrivals: Map<MessageUuid, { turn: TurnId | null; event: EventId }>};
   memo: Map<TurnId, MemoEntry>;
   lineage: { latest: TranscriptState | null };
   // E3 start: where each side thread's row lives (Design §5): the turn its first event landed in, or, for one that
@@ -324,12 +325,16 @@ class Batch {
   }
 
   loose(event: SessionEvent, placed = true): void {
+    this.looseList().push(event);
+    if (placed) this.state.placement.set(event.id, this.state.order.at(-1) ?? null);
+  }
+
+  private looseList(): SessionEvent[] {
     if (!this.owned.loose) {
       this.state.loose = [...this.state.loose];
       this.owned.loose = true;
     }
-    this.state.loose.push(event);
-    if (placed) this.state.placement.set(event.id, this.state.order.at(-1) ?? null);
+    return this.state.loose;
   }
 
   // The turn receiving an event that names nothing routable: the current turn, else a turn opened for it.
@@ -421,12 +426,18 @@ class Batch {
   }
 
   // UX wave U3 (decision 8): the arrival-bearing synthetic message placed under `uuid` leaves the turn holding it, which
-  // derives again; one kept under the same uuid that drew nothing (decision 20) stays. A count of the turn's events
-  // taken at the process's exit keeps its meaning.
+  // derives again, or the loose events; one kept under the same uuid that drew nothing (decision 20) stays. A count of
+  // the turn's events taken at the process's exit keeps its meaning.
   takeOutArrival(uuid: MessageUuid): void {
     const placed = this.state.index.arrivals.get(uuid);
     this.state.index.arrivals.delete(uuid);
-    if (placed === undefined || !this.state.turns.has(placed.turn)) return;
+    if (placed === undefined) return;
+    if (placed.turn === null) {
+      const loose = this.state.loose.findIndex((event) => event.id === placed.event);
+      if (loose >= 0) this.looseList().splice(loose, 1);
+      return;
+    }
+    if (!this.state.turns.has(placed.turn)) return;
     const at = this.state.turns.get(placed.turn)!.events.findIndex((event) => event.id === placed.event);
     if (at < 0) return;
     const turn = this.touch(placed.turn);
@@ -926,7 +937,9 @@ function recordAskSteer(batch: Batch, event: Event<'user.message'>): void {
 // with a list is another form of it (the file's and the live wire's, when a session is read in both), which changes
 // nothing; one whose list is empty withdraws it, and the next carrier with a list then places it anew. A list that
 // holds only entries of classes this build does not know does neither (decision 20): it is kept as any synthetic
-// message is, drawing nothing and taking nothing out.
+// message is, drawing nothing and taking nothing out. One that comes with no turn open (a window of history that begins
+// at it, the whole-branch review's finding 1) is kept loose where it stands, as other loose events are, never dropped: an
+// older page rebuilds the view from the whole history, where it joins its turn.
 function placeArrival(batch: Batch, event: Event<'user.message'>): void {
   const arrival = event.arrival ?? [];
   const known = carriedOf(arrival).length > 0;
@@ -939,15 +952,18 @@ function placeArrival(batch: Batch, event: Event<'user.message'>): void {
   if (event.messageUuid !== null) batch.takeOutArrival(event.messageUuid);
   if (!known) return; // an empty list: the withdrawal
   const turn = batch.current();
-  if (!turn) return;
-  batch.push(turn, event);
-  if (event.messageUuid !== null) batch.state.index.arrivals.set(event.messageUuid, { turn: turn.id, event: event.id });
+  if (turn) batch.push(turn, event);
+  else batch.loose(event);
+  if (event.messageUuid !== null) batch.state.index.arrivals.set(event.messageUuid, { turn: turn?.id ?? null, event: event.id });
 }
 
-// Whether an arrival placed under the uuid still stands: its turn kept (a turn removed for holding nothing takes it along).
+// Whether an arrival placed under the uuid still stands: its turn kept (a turn removed for holding nothing takes it
+// along), or, kept loose, among the loose events.
 function stands(state: TranscriptState, messageUuid: MessageUuid): boolean {
   const placed = state.index.arrivals.get(messageUuid);
-  return placed !== undefined && (state.turns.get(placed.turn)?.events.some((event) => event.id === placed.event) ?? false);
+  if (placed === undefined) return false;
+  const events = placed.turn === null ? state.loose : state.turns.get(placed.turn)?.events;
+  return events?.some((event) => event.id === placed.event) ?? false;
 }
 
 // A message the engine host made itself (a task's end it kept until the model was told, a scheduled fire): no frame or
