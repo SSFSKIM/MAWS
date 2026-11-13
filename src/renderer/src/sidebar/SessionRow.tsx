@@ -1,12 +1,12 @@
 // UX1 D7: titles own the row; worktree at left, status and age at right, detail in the hover card. P5 O6 M5 (P5 Decision
 // Log 28): another machine's row carries `@<name>` after its title (T1); an offline machine's greys in place, "offline"
 // where the chip was (T2). P5 O8 M5: a record at a listed address names the listing's owners after its title when they
-// aren't you alone. P5 O8 M6b: its reach mark (a lock for Private, a people mark for wider access or shares).
+// aren't you alone. P5 O8 M6b: its reach mark (a lock for Private, a people mark for wider access or shares). UX wave U7
+// (O-16, O-38): every row's three dots, where only a row that could be renamed had them.
 import type { SessionRecord } from '@shared/graph/session';
 import { PinIcon } from '../app/IconButton';
 import { MachineChip } from '../app/MachineChip';
 import { greyWords, useMachineMark } from '../app/machine-mark';
-import { sessionActionsFor } from '../app/session-actions';
 import { SessionOverflow } from './menus';
 import { useNow } from '../app/use-now';
 import { GlyphMark } from '../attention/GlyphMark';
@@ -22,7 +22,6 @@ import { RowTitle, useOwnersLabel } from './RowTitle'; // P5 O8 M5
 import { ReachMark } from './ReachMark'; // P5 O8 M6b
 import { setSessionUnread } from '../keymap/session-navigation';
 import { displayTitle } from '../sessions/title';
-import { isRemoteLaneB } from '../lane-b/remote-session'; // P5 O7 M2
 
 export const SESSION_DRAG_TYPE = 'application/x-maws-session';
 
@@ -48,7 +47,6 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: nu
   const glyph = glyphFor(record, digest ?? null, pending, listing);
   const selected = tree.selected === id;
   const title = displayTitle(record);
-  const hasActions = sessionActionsFor(record, { remote: isRemoteLaneB(id) /* P5 O7 M2 */ }).includes('rename');
   const machine = useMachineMark(id);
   const owners = useOwnersLabel(id);
 
@@ -102,8 +100,8 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: nu
         <GlyphMark glyph={glyph} className="w-[12px] shrink-0" />
         {/* Approved mockup: overflow replaces age in one fixed slot, never the title or unread target. */}
         <span className="relative flex h-[22px] w-[26px] shrink-0 items-center justify-end [&:has([data-state=open])>[data-session-age]]:invisible">
-          <span data-session-age className={`text-ui-sm text-fg-muted tabular-nums ${hasActions ? 'group-hover/session:invisible group-focus-within/session:invisible' : ''}`}>{sessionAge(record, digest, now, seenAt, listing)}</span>
-          {hasActions && <span className="absolute inset-0 flex items-center justify-end"><SessionOverflow appSessionId={id} title={title} /></span>}
+          <span data-session-age className="text-ui-sm text-fg-muted tabular-nums group-hover/session:invisible group-focus-within/session:invisible">{sessionAge(record, digest, now, seenAt, listing)}</span>
+          <span className="absolute inset-0 flex items-center justify-end"><SessionOverflow appSessionId={id} title={title} /></span>
         </span>
         <button type="button" tabIndex={-1} aria-label={record.unread ? 'Mark read' : 'Mark unread'}
           onClick={(event) => { event.stopPropagation(); void setSessionUnread(id, !record.unread); }}

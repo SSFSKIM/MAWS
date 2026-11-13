@@ -5,8 +5,9 @@
 // carry the row's People toggle where the row offers it (its `data-people`: others to show, or the toggle on), checked
 // while it draws other people's sessions. P5 O8 M7a (Q5): an org project's row whose sminos id the index knows offers
 // Channel, the project's one channel tab. P5 O8 M6b: a session's menu offers Share for a session you own, a listed row's
-// with no record here included (its row's `data-menu` names it only then). P5 O8 M5b: Add owner… after Share, for the
-// session's owners (sessions/share/target.ts' `useCanAddOwner`). The project registry (docs/doperpowers/plans/
+// with no record here included. P5 O8 M5b: Add owner… after Share, for the
+// session's owners (sessions/share/target.ts' `useCanAddOwner`). UX wave U7 (O-38, #559): a listed row's menu opens with
+// Open and Open in new tab, through its lane's opener. The project registry (docs/doperpowers/plans/
 // 2026-11-10-project-registry.md, Interfaces §J): a registry project's row offers Add location… (Add project with the
 // project filled) and, unless a `.smns` names it, Rename…; Channel for a hub project only; and a row of a project you see
 // only through its sessions (`registry:<id>`) offers Channel alone.
@@ -26,7 +27,8 @@ import { useLayout } from '../stores/layout'; // P5 O8 M7a
 import { CHANNEL } from '../channel/copy'; // P5 O8 M7a
 import { useLaneAState } from '../stores/lane-a'; // P5 O9 M5
 import { usePeople } from '../stores/people'; // P5 O8 M5
-import { useSessions } from '../stores/sessions';
+import { useSessions, type ListedSession } from '../stores/sessions';
+import { openListed, remoteOpenerFor } from '../sessions/remote-openers'; // UX wave U7
 import { useMachines } from '../stores/machines'; // the project registry
 import { locationAddress, type OrgProjectLocation } from '../stores/registry'; // the project registry
 import { REGISTRY } from './registry-copy'; // the project registry
@@ -93,7 +95,7 @@ export function SidebarMenuContent({ target }: { target: MenuTarget | null }) {
 }
 
 // P5 O8 M6b: the listing-capable session menu. A record's actions, then Share for a session you own (sessions/share/
-// target.ts); another machine's listed session with no record here offers Share alone.
+// target.ts); another machine's listed session with no record here offers its two opens (UX wave U7), then Share.
 function SessionItems({ appSessionId, dropdown = false }: { appSessionId: AppSessionId; dropdown?: boolean }) {
   const record = useSessions((s) => s.records.get(appSessionId));
   const bridged = useLaneAState(appSessionId)?.bridge === 'live'; // P5 O9 M5
@@ -101,12 +103,14 @@ function SessionItems({ appSessionId, dropdown = false }: { appSessionId: AppSes
   const remoteReading = useReaderRowsOf(appSessionId) !== 'refused'; // P5 O8 M6a
   const shareable = useCanShare(appSessionId); // P5 O8 M6b
   const ownable = useCanAddOwner(appSessionId); // P5 O8 M5b
+  const listed = useSessions((s) => (record === undefined ? s.listed.get(appSessionId) : undefined)); // UX wave U7
   const reach = (
     <>
       {shareable && <ShareItem appSessionId={appSessionId} dropdown={dropdown} />}
       {ownable && <AddOwnerItem appSessionId={appSessionId} dropdown={dropdown} />}
     </>
   );
+  if (!record && listed !== undefined) return <><ListedOpenItems listed={listed} dropdown={dropdown} />{reach}</>;
   if (!record) return shareable ? reach : null;
   const foreign = record.holder.kind === 'terminal' || record.holder.kind === 'background_job'; // D-12: the opens only
   return (
@@ -114,6 +118,22 @@ function SessionItems({ appSessionId, dropdown = false }: { appSessionId: AppSes
       {sessionActionsFor(record, { bridged, remote: isRemoteLaneB(appSessionId) /* P5 O7 M2 */, remoteReading }).map((id) => <SessionItem key={id} id={id} record={record} dropdown={dropdown} />)}
       {kept !== undefined && !foreign && <KeepItem appSessionId={appSessionId} kept={kept} dropdown={dropdown} />}
       {reach}
+    </>
+  );
+}
+
+// UX wave U7 (O-38, #559): a listing's two opens, each through its lane's opener, never the session actions' handlers,
+// whose layout-store `openSession` skips the opener and its retry; drawn disabled where its lane has registered none.
+function ListedOpenItems({ listed, dropdown }: { listed: ListedSession; dropdown: boolean }) {
+  const enabled = remoteOpenerFor(listed.lane) !== null;
+  return (
+    <>
+      <Item dropdown={dropdown} enabled={enabled} onSelect={() => openListed(listed.appId)}>
+        {SESSION_ACTIONS.open}
+      </Item>
+      <Item dropdown={dropdown} enabled={enabled} onSelect={() => openListed(listed.appId, { newTab: true })}>
+        {SESSION_ACTIONS.openInNewTab}
+      </Item>
     </>
   );
 }

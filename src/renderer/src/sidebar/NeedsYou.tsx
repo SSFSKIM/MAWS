@@ -107,11 +107,12 @@ function NeedsYouItem({ row, labels, selected, tabStop, onFocus, onBlur, onKeyDo
   const reason = anchor !== null ? row.oldest.summary : ATTENTION_HEADINGS[row.oldest.kind].text;
   // every activation opens the session its way (a click takes the focused pane's place; ⌘-click and a middle click give
   // it a tab of its own), and an owner item's lands on its mark (P2-C); P5 O7 M6: a plain click on another machine's
-  // listed session goes through its lane's opener (M2's pane, which tries a session it could not place again)
+  // listed session goes through its lane's opener (M2's pane, which tries a session it could not place again); UX wave U7
+  // (#559): a ⌘-click and a middle click too, with the opener's new-tab request
   const open = (how: OpenSessionOptions) => {
     const openSession = (id: AppSessionId) => useLayout.getState().openSession(id, how);
     if (anchor !== null) openAnchor(row.appSessionId, anchor, openSession);
-    else if (how.how !== 'tab' && openListed(row.appSessionId)) return;
+    else if (openListed(row.appSessionId, how.how === 'tab' ? { newTab: true } : undefined)) return;
     else openSession(row.appSessionId);
   };
   const label = `${project} · ${title} · ${reason}`;
@@ -123,7 +124,7 @@ function NeedsYouItem({ row, labels, selected, tabStop, onFocus, onBlur, onKeyDo
         <button
           type="button"
           data-needs-you={row.appSessionId}
-          data-menu={record !== undefined ? `session:${row.appSessionId}` : 'none'} // a listed row has no menu (ListedRow's rule)
+          data-menu={record !== undefined ? `session:${row.appSessionId}` : 'none'} // a listed session's menu is its tree row's (UX wave U7)
           data-offline={machine.offline || undefined}
           data-greyed={greyed || undefined}
           aria-label={why === null ? label : `${label}, ${why}`}
