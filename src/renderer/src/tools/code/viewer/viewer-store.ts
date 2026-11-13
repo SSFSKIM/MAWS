@@ -220,8 +220,8 @@ const isNotFound = (message: string) => message.startsWith('not found:');
 const sameSource = (a: ArtifactRead | null, b: ArtifactRead | null) => a?.artifactId === b?.artifactId && a?.revision === b?.revision;
 
 // What a load read, committed whole at its end (a `change` load) or patched as it goes (an `open` load). `utf8` (E5) is
-// the read's answer about the hashed bytes, which decides `editable` and is not kept on the entry; `named` (U6c) is the
-// first chunk's answer.
+// the read's answer about the hashed bytes, which decides `editable` and is not kept on the entry; `named` (U6c) is set
+// when any read of the load answers it (the branch review's finding 3: the roots can change between two chunks).
 type LoadedFile = Pick<ViewerEntry, 'kind' | 'mime' | 'encoding' | 'bytes' | 'text' | 'base64' | 'loaded' | 'complete' | 'hash' | 'named'> & { utf8: boolean | null };
 
 // What made a load: an event (`files.changed`, or one left for the next showing), or the person asking again (U6c's
@@ -417,13 +417,14 @@ export function createViewerStore(client: MawsBridge) {
           whole = all.value;
         }
         const utf8 = whole.encoding === 'utf8';
-        return commit({ ...file, text: utf8 ? whole.content : '', base64: utf8 ? null : whole.content, loaded: whole.length, complete: true, hash: null, utf8: null });
+        return commit({ ...file, named: file.named || whole.named === true, text: utf8 ? whole.content : '', base64: utf8 ? null : whole.content, loaded: whole.length, complete: true, hash: null, utf8: null });
       }
 
       const hash = kind === 'head' ? null : head.hash;
       const utf8 = hash === null ? null : head.utf8; // the whole hashed file's, so every chunk of one hash answers the same
       let text = head.content;
       let loaded = head.offset + head.length;
+      let { named } = file;
       const wanted = () => kind !== 'head' || loaded < extent;
       let more = head.truncated && wanted();
       if (reason === 'open') patch(tabId, { ...opened, ...file, text, base64: null, loaded, complete: !head.truncated, hash: null, editable: false, ...(sourceView ? { sourceView } : {}) });
@@ -437,12 +438,13 @@ export function createViewerStore(client: MawsBridge) {
         // which would otherwise commit the old file's partial text with its whole-file hash, as editable.
         if (hash !== null && next.value.hash !== hash) return;
         if (next.value.length === 0) break; // the file shrank under an unhashed read (a head)
+        if (next.value.named === true) named = true;
         text += next.value.content;
         loaded = next.value.offset + next.value.length;
         more = next.value.truncated && wanted();
         if (reason === 'open') patch(tabId, { text, loaded, complete: !more });
       }
-      commit({ ...file, text, base64: null, loaded, complete: kind !== 'head', hash, utf8 });
+      commit({ ...file, named, text, base64: null, loaded, complete: kind !== 'head', hash, utf8 });
     };
 
     // E5: a load is `pending` from its issue and counted in `loads` once it is over, however it ended (it replaced the
@@ -594,7 +596,7 @@ export function createViewerStore(client: MawsBridge) {
           if (generations.get(tabId) !== generation || get().entries.get(tabId)?.epoch !== entry.epoch) return;
           if (!next.ok) return fail(tabId, next.error.message, 'open');
           const current = get().entries.get(tabId)!;
-          patch(tabId, { text: current.text + next.value.content, loaded: next.value.offset + next.value.length, loadingMore: false });
+          patch(tabId, { text: current.text + next.value.content, loaded: next.value.offset + next.value.length, loadingMore: false, ...(next.value.named === true ? { named: true } : {}) });
         });
       },
 
