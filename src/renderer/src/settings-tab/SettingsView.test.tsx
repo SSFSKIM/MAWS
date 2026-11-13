@@ -46,6 +46,8 @@ const region = (name: string) => screen.getByRole('region', { name });
 // U11a M9: a section's rows in the page's order, by their labels (the supervisor's group is named, not labelled, and holds rows)
 const labelsIn = (section: HTMLElement) => [...section.querySelectorAll('[role="group"][aria-labelledby]')].map((g) => document.getElementById(g.getAttribute('aria-labelledby')!)!.textContent);
 const more = (of: HTMLElement) => within(of).getByRole('button', { name: /^(More|Less)$/ });
+// the machine's settings answered (by a daemon before the machine route), so the Gateway section's read does not fail
+const ANSWERED = { 'machineSettings.get': () => ({ settings: machineSettingsDefaults(), version: 1 }) };
 
 beforeEach(() => {
   useGateway.setState({ relay: null, directLogin: new Map() });
@@ -63,7 +65,7 @@ describe('settings tab writes one field per row', () => {
   // U11a M9 (l8-settings-06, A5): everyday preferences first, the engine last; Org under the rule with no heading of its own
   const ORDER = ['Appearance', 'Notifications', 'Keyboard', 'Voice', 'Browser', 'Artifacts', 'Sessions', 'Gateway', 'Engine', 'Supervisor', 'Org'];
   it('groups the index under App and Sessions & engine, Org and Customize after them, the footer kept; the body in the same order', () => {
-    renderView();
+    renderView(SETTINGS_DEFAULTS_V21, null, ANSWERED);
     expect(within(index()).getAllByRole('button').map((x) => x.textContent)).toEqual([...ORDER, 'Customize ›']);
     // the headings stand before their sections, and nothing heads Org
     expect([...index().querySelectorAll('[data-settings-group], button')].map((el) => el.textContent)).toEqual(['App', ...ORDER.slice(0, 6), 'Sessions & engine', ...ORDER.slice(6, 10), 'Org', 'Customize ›']);
@@ -76,14 +78,14 @@ describe('settings tab writes one field per row', () => {
   });
 
   it('opens at Appearance when no section is asked for', () => {
-    renderView();
+    renderView(SETTINGS_DEFAULTS_V21, null, ANSWERED);
     expect(within(index()).getByRole('button', { name: 'Appearance' }).getAttribute('aria-current')).toBe('true');
     expect(within(index()).getAllByRole('button').filter((x) => x.getAttribute('aria-current') === 'true')).toHaveLength(1);
   });
 
   // U11a M9 (A5): each section's rows, in the order of the child's table; Engine's three; no Plugins paragraph
   it('each section holds the rows of the table, in its order; Engine holds Binary, Update and Config home, and the Plugins paragraph is gone', async () => {
-    renderView();
+    renderView(SETTINGS_DEFAULTS_V21, null, ANSWERED);
     await within(row('Binary')).findByText('~/.local/share/claude/versions/2.1.287');
     expect(labelsIn(region('Appearance'))).toEqual(['Theme', 'Transcript width', 'Monospace font']);
     expect(labelsIn(region('Notifications'))).toEqual(['Messages to you', 'When a session finishes or needs you', 'For', 'Sound']);
@@ -104,7 +106,7 @@ describe('settings tab writes one field per row', () => {
   });
 
   it('says once under the Sessions heading what every one of its rows would otherwise repeat', () => {
-    renderView();
+    renderView(SETTINGS_DEFAULTS_V21, null, ANSWERED);
     const sessions = region('Sessions');
     const line = within(sessions).getByText('For sessions MAWS runs. Terminal sessions and your Claude Code settings files are not changed.');
     expect(line.closest('h3')).toBeNull(); // under the heading, not in it
@@ -114,7 +116,7 @@ describe('settings tab writes one field per row', () => {
 
   // U11a M9 (A6): a note is one line; More opens the rest in place, under it, and Less closes it again
   it('a note is one line, and More opens the rest in place and closes it; a closed More is not in the page', async () => {
-    renderView();
+    renderView(SETTINGS_DEFAULTS_V21, null, ANSWERED);
     const update = row('Update');
     const button = more(update);
     expect(button.textContent).toBe('More');
@@ -132,7 +134,7 @@ describe('settings tab writes one field per row', () => {
   });
 
   it('a state line stays whole: the supervisor waiting on an older version says all of it, with no More', async () => {
-    renderView(SETTINGS_DEFAULTS_V21, null, { 'host.status': () => waitingStatus(2) });
+    renderView(SETTINGS_DEFAULTS_V21, null, { ...ANSWERED, 'host.status': () => waitingStatus(2) });
     const status = row('Status');
     await vi.waitFor(() => expect(status.querySelector('[data-settings-note="state"]')).not.toBeNull());
     expect(status.querySelector('[data-settings-note="state"]')!.textContent).toBe("This version of MAWS cannot use it. Restart now stops those sessions and starts this version's supervisor; Send resumes each from its transcript.");
@@ -140,7 +142,7 @@ describe('settings tab writes one field per row', () => {
   });
 
   it('Direct login keeps its sign-in instruction and its Copy on the row’s line, before More', () => {
-    renderView();
+    renderView(SETTINGS_DEFAULTS_V21, null, ANSWERED);
     const note = row('Direct login').querySelector('[data-settings-note]')! as HTMLElement;
     expect(note.textContent).toBe('Only Direct sessions use it. Sign in: run claude /login in a terminalCopyMore');
     expect(within(note).getAllByRole('button').map((x) => x.textContent)).toEqual(['Copy', 'More']);

@@ -1,5 +1,5 @@
-// Settings › Supervisor's memory budget rows (Engine's until U11a M9; C12 execution document, Interfaces "Settings, version 4" and "Surfaces of the
-// budget"; charter §4.4 as amended by D1): the budget in GB with one decimal (stored in MiB; empty is the default, 25%
+// Settings › Supervisor's memory budget rows (Engine's until U11a M9; C12 execution document, Interfaces "Settings,
+// version 4" and "Surfaces of the budget"; charter §4.4 as amended by D1): the budget in GB with one decimal (stored in MiB; empty is the default, 25%
 // of physical memory), and the MCP servers whose state dies with their process, by name as system/init reports them.
 // Each writes its one field through `settings.set`; main pushes the policy to the engine host. W7: a switch above them
 // (settings version 7, on by default); off, the two rows hide and no session is released for memory.

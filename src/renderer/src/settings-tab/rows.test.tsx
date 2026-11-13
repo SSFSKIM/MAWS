@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PreloadBridge, Settings } from '@shared/ipc/schema';
 import { ARTIFACT_KINDS } from '@shared/artifacts/entity';
 import type { LibraryRow } from '@shared/ipc/schema/library';
-import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
+import { machineSettingsDefaults, SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { resetLibrary } from '../library/store';
 import { useHosts } from '../stores/hosts';
 import { useNotices } from '../stores/notices';
@@ -31,6 +31,8 @@ const counts = Object.fromEntries(ARTIFACT_KINDS.map((kind) => [kind, kind === '
 let disconnect = () => {};
 async function renderPage(initial: Settings, populated: boolean) {
   const b = importBridge(initial);
+  // the machine's own route on a daemon that knows it, or the two legacy routes on one before it
+  b.answers['machineSettings.get'] = () => ({ settings: machineSettingsDefaults(), version: 1, ...(populated && { defaultRoute: 'machine' as const }) });
   if (populated) {
     b.answers['browser.import.list'] = () => ({ profiles: [RECORD], fileBroken: false, running: null });
     b.answers['library.list'] = () => ({ rows: [SYSTEM], counts });
@@ -116,6 +118,7 @@ describe('every row drawn from the table', () => {
       expect(document.querySelectorAll('[data-settings-row="browser.extension"]')).toHaveLength(RECORD.extensions.length);
       expect(shows('supervisor.status', 'waiting')).not.toBeNull();
       expect(shows('artifacts.bySpace', 'spaces')).not.toBeNull();
+      expect(shows('gateway.defaultRoute', 'machine')).not.toBeNull();
     });
     const drawn = expectEveryRowDeclaredAndEveryDeclarationDrawn();
     for (const declared of SETTINGS_ROWS) expect(drawn.map((row) => row.id), declared.id).toContain(declared.id);
@@ -125,6 +128,7 @@ describe('every row drawn from the table', () => {
     expect(drawn.find((row) => row.id === 'engine.update')?.state).toBe('chosen');
     expect(drawn.find((row) => row.id === 'supervisor.status')?.state).toBe('waiting');
     expect(drawn.find((row) => row.id === 'artifacts.bySpace')?.state).toBe('spaces');
+    expect(drawn.find((row) => row.id === 'gateway.defaultRoute')?.state).toBe('machine');
   });
 
   it('with the page empty, every declared row not drawn is revealed by one that is', async () => {

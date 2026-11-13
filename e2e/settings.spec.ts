@@ -5,12 +5,12 @@
 // relaunch over the same profile. The monospace-font case needs the harness's `#probe` page (`pnpm e2e:settings` builds
 // one; under a plain build it skips): a terminal of the product registry drawing Nerd Font private-use glyphs once
 // `appearance.monoFont` names an installed Nerd Font, and boxes again when it is cleared.
-import { mainTab, openAppDestination } from './support/shell';
+import { hideSurfaces, mainTab, openAppDestination } from './support/shell';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { scratchMarketplace, writePluginCliStub } from '../test/support/plugin-cli-stub';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
+import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import { TESTED_ENGINE_VERSION } from '../src/engine-host/engine-compat';
 import { launchMaws, REPO_ROOT } from './support/launch';
 import { invoke, value } from './support/c7-replay'; // P5 O3-D M5b: the shape flip's raw reads
@@ -252,13 +252,15 @@ test('settings: Engine shows the resolved binary, its version and the tested one
     const binary = panel(page).getByRole('group', { name: 'Binary' });
     await expect(binary).toContainText(realpathSync(stub));
     await expect(binary).toContainText('2.1.290');
-    await expect(binary).toContainText(`MAWS was verified against Claude Code ${TESTED_ENGINE_VERSION}`); // E11 2.8: the verified release, not the fixtures' pin
+    await binary.getByRole('button', { name: 'More' }).click(); // U11a M9: the tested version is information, behind More
+    await expect(binary).toContainText(`MAWS was verified against Claude Code ${TESTED_ENGINE_VERSION}.`); // E11 2.8: the verified release, not the fixtures' pin
     await expect(binary.locator('.text-warning')).toHaveCount(0);
     await expect(binary.getByRole('button', { name: 'Use installed' })).toHaveCount(0);
     const update = panel(page).getByRole('group', { name: 'Update' });
     await expect(update.getByRole('button', { name: 'Update Claude Code…' })).toBeVisible();
+    await update.getByRole('button', { name: 'More' }).click();
     await expect(update).toContainText('New sessions start on the new version; running sessions keep theirs.');
-    await expect(panel(page).getByRole('group', { name: 'Plugins', exact: true })).toContainText('Plugin hooks run in MAWS sessions as in the terminal'); // R1
+    await expect(panel(page).getByRole('group', { name: 'Plugins', exact: true })).toHaveCount(0); // U11a M9: R1's paragraph row is gone
     expect(maws.consoleErrors()).toEqual([]);
   } finally {
     await maws.cleanup();
@@ -317,7 +319,7 @@ test('settings: in a 50/50 split the view stacks inside its pane, and in one pan
     const settings = pane.getByRole('tabpanel');
     const engine = settings.getByRole('region', { name: 'Engine' });
     const change = engine.getByRole('group', { name: 'Binary' }).getByRole('button', { name: 'Change…' });
-    const fallback = engine.getByRole('combobox', { name: 'When auto mode is unavailable' });
+    const fallback = settings.getByRole('region', { name: 'Sessions' }).getByRole('combobox', { name: 'When auto mode is unavailable' }); // U11a M9: Sessions' row
     await expect(change).toBeVisible();
     await page.screenshot({ path: test.info().outputPath('settings-split.png') });
 
@@ -354,6 +356,123 @@ test('settings: in a 50/50 split the view stacks inside its pane, and in one pan
     expect(wideLabel.x + wideLabel.width, 'wide: the label column sits left of the control').toBeLessThanOrEqual(wideChange.x);
     const wideNav = (await whole.getByRole('navigation', { name: 'Settings sections' }).boundingBox())!;
     expect(wideNav.x + wideNav.width, 'wide: the index is a column at the left').toBeLessThanOrEqual(wideChange.x);
+    expect(maws.consoleErrors()).toEqual([]);
+  } finally {
+    await maws.cleanup();
+  }
+});
+
+// U11a M9 (l8-settings-06, A5 and A6; the execution document's Interfaces §G, "The measure"): the regrouped page, and
+// each note at three widths. Where the body has its full 760 px (the default window with no side surface) every note
+// is one line: 18 px, or 22 px where it ends in More or carries a button; a state line is not measured. A view about
+// 520 px wide (a 50/50 split with no side surface) keeps its index a column and stacks every row; a view about 330 px
+// wide (a split beside a side surface) makes the index a row of links without headings. The index's list scrolls by
+// itself and its footer stays.
+const SECTION_ORDER = ['Appearance', 'Notifications', 'Keyboard', 'Voice', 'Browser', 'Artifacts', 'Sessions', 'Gateway', 'Engine', 'Supervisor', 'Org'];
+const NOTE_LINE = 18; // 12 px type at the normal leading
+const NOTE_LINE_WITH_BUTTON = 22; // the box of More, or of a button on the line
+
+type Stacking = { row: string; controlUnderLabel: boolean; noteUnderControl: boolean };
+// Each drawn row of the table: whether its control starts under its label and its note under its control.
+const stackingOf = (column: Locator): Promise<Stacking[]> =>
+  column.locator('[data-settings-row][role="group"]').evaluateAll((rows) =>
+    rows
+      .filter((row) => row.getBoundingClientRect().height > 0)
+      .map((row) => {
+        const [label, control, note] = Array.from(row.children, (child) => child.getBoundingClientRect());
+        return { row: row.getAttribute('data-settings-row')!, controlUnderLabel: control!.top >= label!.bottom - 1, noteUnderControl: note === undefined || note.top >= control!.bottom - 1 };
+      }),
+  );
+
+test('settings: the regrouped page; each note one line where the body has its 760 px; rows stack in a 520 px view and the index is a row at 330 px', async () => {
+  test.setTimeout(150_000);
+  const maws = await launchMaws();
+  try {
+    const { app, page } = maws;
+    const resize = async (width: number, height = 900) => {
+      await app.evaluate(({ BrowserWindow }, [width, height]) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setContentSize(width, height), [width, height] as const);
+      await page.waitForFunction(([width, height]) => window.innerWidth === width && window.innerHeight === height, [width, height] as const);
+    };
+    await resize(1440); // the default window
+    await hideSurfaces(page);
+    await menu(app, 'session.new'); // a second tab, so ⌘\ has one to leave behind
+    await expect(mainTab(page, /New chat/)).toBeVisible();
+    await menu(app, 'settings.open');
+    const view = panel(page);
+    const nav = view.getByRole('navigation', { name: 'Settings sections' });
+    const column = view.locator('[data-settings-column]');
+
+    // the regrouped index: App, then Sessions & engine, then Org with no heading, and Customize; it opens at Appearance
+    await expect(nav.getByRole('button')).toHaveText([...SECTION_ORDER, 'Customize ›']);
+    await expect(nav.locator('[data-settings-group]')).toHaveText(['App', 'Sessions & engine']);
+    await expect(nav.getByRole('button', { name: 'Appearance', exact: true })).toHaveAttribute('aria-current', 'true');
+    await expect(view.locator('section[aria-labelledby^="settings-"] > h3')).toHaveText(SECTION_ORDER.map((name) => new RegExp(`^${name}`)));
+    await expect(view.getByRole('region', { name: 'Engine' }).locator('[data-settings-row]')).toHaveCount(3);
+
+    // 1. the body at 760 px: every note one line
+    expect((await column.boundingBox())!.width, 'the body has its full 760 px').toBe(760);
+    await page.screenshot({ path: test.info().outputPath('settings-760.png') });
+    const notes = await column.locator('[data-settings-row] [data-settings-note="line"]').evaluateAll((nodes) =>
+      nodes.map((node) => ({ row: node.closest('[data-settings-row]')!.getAttribute('data-settings-row')!, text: node.textContent ?? '', height: node.getBoundingClientRect().height, button: node.querySelector('button') !== null })),
+    );
+    expect(notes.length, 'the page draws its notes').toBeGreaterThan(20);
+    for (const note of notes) expect(note.height, `${note.row}: ${note.text}`).toBeLessThanOrEqual((note.button ? NOTE_LINE_WITH_BUTTON : NOTE_LINE) + 0.5);
+    // More opens the rest in place, under the line, and Less closes it
+    const update = column.getByRole('group', { name: 'Update' });
+    await update.getByRole('button', { name: 'More' }).click();
+    await expect(update.getByRole('button', { name: 'Less' })).toHaveAttribute('aria-expanded', 'true');
+    await expect(update.locator('[data-settings-note]')).toContainText('New sessions start on the new version; running sessions keep theirs.');
+    await update.getByRole('button', { name: 'Less' }).click();
+    await expect(update).not.toContainText('New sessions start on the new version');
+    // a short window: the index's list scrolls by itself, its footer in place at the bottom
+    await resize(1440, 600);
+    const list = nav.locator('[data-settings-index]');
+    expect(await list.evaluate((el) => el.scrollHeight > el.clientHeight), 'the list scrolls by itself').toBe(true);
+    const footer = nav.getByText("Stored in MAWS's own Application Support folder.", { exact: false });
+    await expect(footer).toBeInViewport();
+    expect((await footer.boundingBox())!.y, 'the footer under the list').toBeGreaterThanOrEqual((await list.boundingBox())!.y + (await list.boundingBox())!.height - 1);
+    await resize(1440);
+
+    // the split: Settings in the right pane, sized by the window to about 520 px, then about 330 px
+    await menu(app, 'pane.split');
+    const pane = page.locator('[data-region="main"] [data-pane="1"]').getByRole('tabpanel');
+    const split = pane.locator('[data-settings-column]');
+    const splitNav = pane.getByRole('navigation', { name: 'Settings sections' });
+    const sizePane = async (target: number) => {
+      const now = (await pane.boundingBox())!.width;
+      await resize(Math.max(600, Math.round(1440 + 2 * (target - now))));
+      return (await pane.boundingBox())!.width;
+    };
+
+    // 2. a view about 520 px wide: the index is still a column; every row is stacked
+    await resize(1440);
+    const wide = await sizePane(540);
+    expect(wide, 'a view between 32rem and the body’s 760 px').toBeGreaterThanOrEqual(512);
+    expect(wide).toBeLessThan(700);
+    await page.screenshot({ path: test.info().outputPath('settings-520.png') });
+    expect((await splitNav.boundingBox())!.x + (await splitNav.boundingBox())!.width, 'the index is a column at the left').toBeLessThanOrEqual((await split.boundingBox())!.x);
+    await expect(splitNav.locator('[data-settings-group]').first()).toBeVisible();
+    for (const row of await stackingOf(split)) {
+      expect(row.controlUnderLabel, `${row.row}: its control under its label`).toBe(true);
+      expect(row.noteUnderControl, `${row.row}: its note under its control`).toBe(true);
+    }
+    const keyRow = split.getByRole('table', { name: 'Key bindings' }).getByRole('row', { name: 'Next Needs-you', exact: true });
+    expect((await keyRow.getByRole('cell').first().boundingBox())!.y + 1, 'a key binding stacks its title over its chord').toBeLessThanOrEqual((await keyRow.locator('kbd').boundingBox())!.y + 1);
+
+    // 3. a view about 330 px wide: the index is a row of links without headings, in the same order; rows stacked
+    await resize(1440);
+    const narrow = await sizePane(330);
+    expect(narrow, 'a view under 32rem').toBeLessThan(512);
+    await page.screenshot({ path: test.info().outputPath('settings-330.png') });
+    expect((await splitNav.boundingBox())!.y + (await splitNav.boundingBox())!.height, 'the index is a row above the body').toBeLessThanOrEqual((await split.boundingBox())!.y + 1);
+    await expect(splitNav.locator('[data-settings-group]')).toHaveCount(2);
+    for (const heading of await splitNav.locator('[data-settings-group]').all()) await expect(heading).toBeHidden();
+    await expect(splitNav.getByRole('button')).toHaveText([...SECTION_ORDER, 'Customize ›']);
+    for (const row of await stackingOf(split)) {
+      expect(row.controlUnderLabel, `${row.row}: its control under its label`).toBe(true);
+      expect(row.noteUnderControl, `${row.row}: its note under its control`).toBe(true);
+    }
+    expect(await pane.locator('[data-settings-body]').evaluate((el) => el.scrollWidth - el.clientWidth), 'nothing scrolls sideways').toBeLessThanOrEqual(0);
     expect(maws.consoleErrors()).toEqual([]);
   } finally {
     await maws.cleanup();
