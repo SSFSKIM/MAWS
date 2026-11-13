@@ -29,7 +29,7 @@ How to see it working: the unit tests named under each milestone fail before its
 - [x] (2026-11-12) P2 and P3 answered by the architect's probes (branch `ux-wave/probe3-u11` at `7f3f6c692`); the rulings are written into §C's `<place>`, §D's Skills, §H and the Decision Log, and M6 and M7 are built to them.
 - [x] (2026-11-12 02:08Z) M2 — Org sheets: refusals that name a next step; the grant sheet's read; the paused live query (`18bf9a01b`, `dd6626fd5`), reviewed clean.
 - [ ] M3 — one scrim, also where dialogs stack; the Channel's gutter and names.
-- [ ] M4 — the Channel says it is offline, or refused.
+- [x] (2026-11-12 03:41Z) M4 — the Channel says it is offline, or refused (`d3c3fa456`, `e1d925148`, `0adbfd07c`; the review's fix, a refusal that stands through another tab's open, `3ffc6dd65`, `8a6a631c2`), reviewed clean. P4 waits for a Mac.
 - [ ] M5 — the Channel from the palette and the View menu.
 - [ ] M6 — the Connectors dialog.
 - [ ] M7 — Plugins, Connectors and Skills before the first message.
