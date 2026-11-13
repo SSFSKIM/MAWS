@@ -856,6 +856,15 @@ The pull request carries the dated lines of the two records this landing amends,
   - Copy screenshot writes one `image/png` `ClipboardItem` from `toPNG()` (Electron 44 has no `writeImage`; Surprises); `writeImage` is a required dependency of the handler.
   - The surround of a sized page is the `bg-bg-active` token.
 
+- **2026-11-13 · M4's executor decisions** (folded by the controller; the third to fifth are readings of §E's words).
+  - The strip's states are a `StripTracker` behind `useComputerUse`, read through `useSyncExternalStore`, with one timer, cleared at unmount.
+  - The running turn is the session's last turn, and only while it is open and neither the store nor the controls port says it is not running; any other open turn is read as closed, so its unanswered calls read `withdrawn`.
+  - A turn's own calls and its subagents' calls are merged by their start, which is used only to tell which call came later (the evidence's "started after it").
+  - A subagent's error result is `withdrawn` when the interruption marker follows it in its own list or appears anywhere in the turn's own events.
+  - When several calls the strip showed are withdrawn, the latest is the unresolved one and the earlier count as resolved; a call withdrawn while the strip is `absent` never makes the line linger. An accepted limit: a withdrawal and a new turn's start in one event batch leave no lingering line.
+  - "Used computer use" is written in `transcript/model/copy.ts` itself, so the transcript model imports nothing from `computer-use/`.
+  - The cursor label drops control characters, trims, and is cut at 64 code points. The launch tests not about the label (E13's socket case, P4-A2's profile block) now resume an untitled record and keep their meaning; the label has its own block.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
