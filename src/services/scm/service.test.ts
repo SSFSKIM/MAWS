@@ -471,7 +471,9 @@ describe('scm service', () => {
 
     it('admits an act whose capture ends within the deadline, the deadline counted from the call', async () => {
       const scm = service({ admitMs: ADMIT_MS });
-      const late: FolderGuard = () => wait(ADMIT_MS / 3);
+      const late: FolderGuard = async () => {
+        await wait(ADMIT_MS / 3);
+      };
       expect(await scm.stage({ appSessionId: ID, paths: ['a.txt'] }, late)).toMatchObject({ ok: true });
     });
 
