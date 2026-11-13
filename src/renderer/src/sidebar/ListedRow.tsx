@@ -5,7 +5,8 @@
 // the title when they aren't you alone. P5 O8 M6b: its reach mark, and Share for a session you own in its menu (the
 // listing-capable session menu, menus.tsx). UX wave U7 (O-38, #559): it opens like a local row, through its lane's opener
 // (`openListed`): its menu (always named) and its three dots offer Open and Open in new tab, and a ⌘-click or a middle click
-// asks for a tab of its own; with no opener each of them selects the row and shows its card, as a click does.
+// asks for a tab of its own; with no opener each of them selects the row and shows its card, as a click does. UX wave U7
+// (O-16): under its project's Hidden row it is `indented` one step.
 import { useState } from 'react';
 import { MachineChip } from '../app/MachineChip';
 import { greyWords, useMachineMark } from '../app/machine-mark';
@@ -18,13 +19,14 @@ import type { ListedSession } from '../stores/sessions';
 import { formatAge, listedTitle } from './derive';
 import { ListedHoverCard } from './HoverCard';
 import { SessionOverflow } from './menus';
+import { rowInset } from './SessionRow';
 import { RowTitle, useOwnersLabel } from './RowTitle'; // P5 O8 M5
 import { ReachMark } from './ReachMark'; // P5 O8 M6b
 import { sessionNodeId, useTree } from './tree';
 
 const NEW_TAB = { newTab: true };
 
-export function ListedRow({ listed, level }: { listed: ListedSession; level: number }) {
+export function ListedRow({ listed, level, indented = false }: { listed: ListedSession; level: number; indented?: boolean }) {
   const id = listed.appId;
   const tree = useTree();
   const nodeId = sessionNodeId(id);
@@ -54,6 +56,7 @@ export function ListedRow({ listed, level }: { listed: ListedSession; level: num
         data-tree-id={nodeId}
         data-kind="listed"
         data-menu={`session:${id}`}
+        data-indented={indented || undefined}
         onFocus={(event) => event.target === event.currentTarget && tree.onFocusItem(nodeId)}
         onClick={(event) => activate(event.metaKey ? NEW_TAB : undefined)}
         onAuxClick={(event) => event.button === 1 && activate(NEW_TAB)}
@@ -62,7 +65,7 @@ export function ListedRow({ listed, level }: { listed: ListedSession; level: num
           event.preventDefault();
           activate();
         }}
-        className={`group/session relative flex h-(--row-h) cursor-default items-center gap-[5px] rounded-sm px-[7px] outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2 ${tree.selected === id ? 'bg-bg-active' : ''}`}
+        className={`group/session relative flex h-(--row-h) cursor-default items-center gap-[5px] rounded-sm ${rowInset(false, indented)} outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2 ${tree.selected === id ? 'bg-bg-active' : ''}`}
       >
         <RowTitle title={title} owners={owners} offline={machine.offline} />
         <MachineChip address={id} className="max-w-[35%]" />

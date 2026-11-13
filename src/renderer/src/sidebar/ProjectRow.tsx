@@ -20,6 +20,9 @@
 // on another machine names its machines after its name (` · `, this Mac's first; a row on this Mac alone, and every row
 // signed out, still names none, T4), faint, giving way to the hover actions as the counts do; a row of a project you see only through its
 // sessions has no actions and no card, and its menu is `registry:<id>`'s.
+// UX wave U7, O-16 (docs/doperpowers/plans/2026-11-12-ux-wave-U7-sidebar-title-bar-destinations.md, Interfaces §D): after
+// "Show more", "Hidden · N" with its chevron, while any of its sessions is hidden; open, its hidden sessions follow it as
+// ordinary rows one level deeper, each indented one step, so they read as its contents.
 import { useState } from 'react';
 import type { ProjectId } from '@shared/graph/ids';
 import { machineOf } from '@shared/machine/address';
@@ -27,7 +30,7 @@ import { MACHINE_OFFLINE } from '../app/machine-mark';
 import { ipc } from '../ipc/client';
 import { selectOffline, useMachines } from '../stores/machines';
 import { usePeople } from '../stores/people'; // P5 O8 M5
-import { FolderIcon, Icon, PlusIcon, SearchIcon } from '../app/IconButton';
+import { ChevronDownIcon, FolderIcon, Icon, PlusIcon, SearchIcon } from '../app/IconButton';
 import { createSession, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { DisclosureBody } from '../ui/disclosure';
 import { isListedRow, type ProjectEntry, type ProjectKey, type SidebarTreeRow } from './derive';
@@ -41,7 +44,8 @@ import { useLocationView } from './location-view'; // the project registry
 import { runProjectAction, useProjectActionEnabled } from './project-actions';
 import { openResumeChooser } from '../resume/host'; // P2-D
 import { SessionRow } from './SessionRow';
-import { moreNodeId, projectNodeId, useTree } from './tree';
+import { HIDDEN } from './copy'; // UX wave U7, O-16
+import { hiddenNodeId, moreNodeId, projectNodeId, useTree } from './tree';
 
 export interface ProjectRowProps {
   entry: ProjectEntry;
@@ -49,11 +53,21 @@ export interface ProjectRowProps {
   sessions: SidebarTreeRow[]; // the rows shown while open (ordered, capped by trees, E3's nested under their parent; P5 O8 M2's listed rows among them); empty while closed
   matchCount?: number;
   more: number; // how many more "Show more" reveals; 0: no Show more row
+  hidden?: HiddenRows; // UX wave U7, O-16: its hidden sessions; none while closed or searching
   onToggle(key: ProjectKey): void;
   onShowMore(key: ProjectKey): void;
+  onToggleHidden?(key: ProjectKey): void;
 }
 
-export function ProjectRow({ entry, open, sessions, more, matchCount, onToggle, onShowMore }: ProjectRowProps) {
+// UX wave U7, O-16: a project's Hidden row and, while it is open, the rows under it (nested among themselves by lineage).
+export interface HiddenRows {
+  count: number; // 0: no Hidden row
+  open: boolean;
+  rows: SidebarTreeRow[]; // empty while closed
+}
+const NO_HIDDEN: HiddenRows = { count: 0, open: false, rows: [] };
+
+export function ProjectRow({ entry, open, sessions, more, hidden = NO_HIDDEN, matchCount, onToggle, onShowMore, onToggleHidden }: ProjectRowProps) {
   const { key, project, name, rollup } = entry;
   const people = usePeople((s) => (s.on.has(key) || entry.others > 0 ? s.on.has(key) : null)); // null: no toggle offered
   const offline = useMachines((s) => {
@@ -65,9 +79,9 @@ export function ProjectRow({ entry, open, sessions, more, matchCount, onToggle, 
   const tree = useTree();
   const nodeId = projectNodeId(key);
   // The rows stay as they were through the close, so the body folds over what it showed.
-  const [kept, setKept] = useState({ sessions, more });
-  if (open && (kept.sessions !== sessions || kept.more !== more)) setKept({ sessions, more });
-  const shown = open ? { sessions, more } : kept;
+  const [kept, setKept] = useState({ sessions, more, hidden });
+  if (open && (kept.sessions !== sessions || kept.more !== more || kept.hidden !== hidden)) setKept({ sessions, more, hidden });
+  const shown = open ? { sessions, more, hidden } : kept;
   // The hover card (I6) hangs on the line, so a pointer over the expanded sessions does not open it; keyboard focus sits
   // on the treeitem, which opens it (a focus the pointer caused does not, as on every card).
   const [card, setCard] = useState(false);
@@ -151,10 +165,18 @@ export function ProjectRow({ entry, open, sessions, more, matchCount, onToggle, 
           isListedRow(row) ? (
             <ListedRow key={row.listed.appId} listed={row.listed} level={2} />
           ) : (
-            <SessionRow key={row.record.appId} record={row.record} level={2 + row.depth} /* E3: under its lineage parent, at its real depth */ />
+            <SessionRow key={row.record.appId} record={row.record} level={2 + row.depth} nested={row.depth > 0} /* E3: under its lineage parent, at its real depth */ />
           ),
         )}
         {shown.more > 0 && <ShowMoreRow id={moreNodeId(key)} level={2} onShow={() => onShowMore(key)} />}
+        {shown.hidden.count > 0 && <HiddenRow id={hiddenNodeId(key)} count={shown.hidden.count} open={shown.hidden.open} onToggle={() => onToggleHidden?.(key)} />}
+        {shown.hidden.rows.map((row) =>
+          isListedRow(row) ? (
+            <ListedRow key={row.listed.appId} listed={row.listed} level={3} indented />
+          ) : (
+            <SessionRow key={row.record.appId} record={row.record} level={3 + row.depth} nested={row.depth > 0} indented />
+          ),
+        )}
       </DisclosureBody>
     </div>
   );
@@ -267,6 +289,30 @@ export function ShowMoreRow({ id, level, onShow }: { id: string; level: 1 | 2; o
       className="flex h-(--row-h) cursor-default items-center rounded-sm pr-[9px] pl-[30px] text-ui-sm text-fg-muted outline-accent select-none hover:bg-bg-hover hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-2"
     >
       Show more
+    </div>
+  );
+}
+
+// UX wave U7, O-16: "Hidden · N", aligned with "Show more", and the chevron the app's other folds use, right while it is
+// closed and down while it is open. A tree item that acts as a button (Enter and Space toggle it, `tree.ts`).
+export function HiddenRow({ id, count, open, onToggle }: { id: string; count: number; open: boolean; onToggle(): void }) {
+  const tree = useTree();
+  return (
+    <div
+      role="treeitem"
+      aria-level={2}
+      aria-selected={false}
+      aria-expanded={open}
+      aria-label={HIDDEN.label(count)}
+      tabIndex={tree.tabStop === id ? 0 : -1}
+      data-tree-id={id}
+      data-kind="hidden"
+      onFocus={(event) => event.target === event.currentTarget && tree.onFocusItem(id)}
+      onClick={onToggle}
+      className="flex h-(--row-h) cursor-default items-center gap-[5px] rounded-sm pr-[9px] pl-[30px] text-ui-sm text-fg-muted outline-accent select-none hover:bg-bg-hover hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-2"
+    >
+      {HIDDEN.row(count)}
+      <ChevronDownIcon className={`size-[11px] shrink-0 transition-transform motion-reduce:transition-none ${open ? '' : '-rotate-90'}`} />
     </div>
   );
 }

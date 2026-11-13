@@ -2,7 +2,8 @@
 // Log 28): another machine's row carries `@<name>` after its title (T1); an offline machine's greys in place, "offline"
 // where the chip was (T2). P5 O8 M5: a record at a listed address names the listing's owners after its title when they
 // aren't you alone. P5 O8 M6b: its reach mark (a lock for Private, a people mark for wider access or shares). UX wave U7
-// (O-16, O-38): every row's three dots, where only a row that could be renamed had them.
+// (O-16, O-38): every row's three dots, where only a row that could be renamed had them. UX wave U7 (O-16): whether it is
+// nested under its lineage parent is a prop (`nested`), and a row under its project's Hidden row is `indented` one step.
 import type { SessionRecord } from '@shared/graph/session';
 import { PinIcon } from '../app/IconButton';
 import { MachineChip } from '../app/MachineChip';
@@ -25,7 +26,10 @@ import { displayTitle } from '../sessions/title';
 
 export const SESSION_DRAG_TYPE = 'application/x-maws-session';
 
-export function SessionRow({ record, level }: { record: SessionRecord; level: number }) {
+// The left inset: one step for each of nested under its lineage parent and indented under the Hidden row (UX wave U7).
+export const rowInset = (nested: boolean, indented: boolean): string => ['px-[7px]', 'pr-[7px] pl-[30px]', 'pr-[7px] pl-[53px]'][Number(nested) + Number(indented)];
+
+export function SessionRow({ record, level, nested, indented = false }: { record: SessionRecord; level: number; nested: boolean; indented?: boolean }) {
   const id = record.appId;
   const digest = useSessions((s) => s.digests.get(id));
   const seenAt = useSessions((s) => selectSeenAt(s, id)); // P5 O7 M10: a remote record's activity past the record
@@ -33,7 +37,6 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: nu
   // E3 start: a side thread or fork nested under its parent (level 3 and deeper, its real depth for assistive tech) is
   // indented one step whatever its depth, marked `↳` and captioned by its anchor's label; one listed as a root says
   // whose it is (the parent's title when the store holds it)
-  const nested = level >= 3;
   const parentTitle = useSessions((s) => {
     const parent = record.lineage === null ? undefined : s.records.get(record.lineage.parentAppSessionId);
     return parent === undefined ? null : displayTitle(parent);
@@ -62,6 +65,7 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: nu
         data-tree-id={nodeId}
         data-kind="session"
         data-menu={`session:${id}`}
+        data-indented={indented || undefined}
         draggable
         onDragStart={(event) => {
           event.dataTransfer.setData(SESSION_DRAG_TYPE, id);
@@ -71,7 +75,7 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: nu
         // I2: a click replaces the focused pane's session; ⌘-click and a middle-click open a tab of its own (Chrome's rule)
         onClick={(event) => useLayout.getState().openSession(id, event.metaKey ? { how: 'tab' } : {})}
         onAuxClick={(event) => event.button === 1 && useLayout.getState().openSession(id, { how: 'tab' })}
-        className={`group/session relative flex h-(--row-h) cursor-default items-center gap-[5px] rounded-sm ${nested ? 'pr-[7px] pl-[30px]' : 'px-[7px]'} outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2 ${selected ? 'bg-bg-active' : ''}`}
+        className={`group/session relative flex h-(--row-h) cursor-default items-center gap-[5px] rounded-sm ${rowInset(nested, indented)} outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2 ${selected ? 'bg-bg-active' : ''}`}
       >
         {record.worktree !== null && <span data-testid="row-branch" role="img" aria-label="Worktree" className="shrink-0 text-ui-sm text-fg-faint">⎇</span>}
         {/* E3 */}

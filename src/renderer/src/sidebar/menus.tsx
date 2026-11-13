@@ -7,7 +7,8 @@
 // Channel, the project's one channel tab. P5 O8 M6b: a session's menu offers Share for a session you own, a listed row's
 // with no record here included. P5 O8 M5b: Add owner… after Share, for the
 // session's owners (sessions/share/target.ts' `useCanAddOwner`). UX wave U7 (O-38, #559): a listed row's menu opens with
-// Open and Open in new tab, through its lane's opener. The project registry (docs/doperpowers/plans/
+// Open and Open in new tab, through its lane's opener. UX wave U7 (O-16): Hide, or Unhide for a hidden session, in every
+// session's menu, where `withHide` places it among a record's actions, and after a listing's opens. The project registry (docs/doperpowers/plans/
 // 2026-11-10-project-registry.md, Interfaces §J): a registry project's row offers Add location… (Add project with the
 // project filled) and, unless a `.smns` names it, Rename…; Channel for a hub project only; and a row of a project you see
 // only through its sessions (`registry:<id>`) offers Channel alone.
@@ -35,12 +36,14 @@ import { REGISTRY } from './registry-copy'; // the project registry
 import { newChatElsewhere, registrySpawnTarget } from './registry-new-chat'; // the project registry
 import { PROJECT_ACTION_IDS, PROJECT_ACTIONS, runProjectAction, useProjectActionEnabled, type ProjectActionId } from './project-actions';
 import { openResumeChooser } from '../resume/host'; // P2-D
-import { KEEP_RUNNING } from './copy'; // P5 O2 M2
+import { HIDDEN, KEEP_RUNNING } from './copy'; // P5 O2 M2; UX wave U7, O-16: HIDDEN
 import { isRemoteLaneB } from '../lane-b/remote-session'; // P5 O7 M2
 import { setRemoteReading } from '../lane-b/remote-reading'; // P5 O8 M6a
 import { useReaderRowsOf } from '../lane-b/reader-rows'; // P5 O8 M6a
 import { openAddOwner, openShare, useCanAddOwner, useCanShare } from '../sessions/share/target'; // P5 O8 M6b, M5b
 import { OWNER, SHARE } from '../sessions/share/copy'; // P5 O8 M6b, M5b
+import { useHidden } from '../stores/hidden'; // UX wave U7, O-16
+import { useTree } from './tree'; // UX wave U7, O-16
 
 // P5 O8 M5: a project's or machine's `people` says whether its row offers the People toggle.
 export type MenuTarget =
@@ -77,7 +80,7 @@ function Item({ enabled, onSelect, children, dropdown = false }: { dropdown?: bo
 export function SidebarMenuContent({ target }: { target: MenuTarget | null }) {
   return (
     <ContextMenu.Portal>
-      <ContextMenu.Content className="z-50 min-w-48 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
+      <ContextMenu.Content onCloseAutoFocus={keepMovedFocus} className="z-50 min-w-48 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
         {target?.kind === 'machine' && (
           <>
             <Item enabled onSelect={() => openDialog({ kind: 'archived', projectId: null, machine: target.machine })}>
@@ -110,12 +113,12 @@ function SessionItems({ appSessionId, dropdown = false }: { appSessionId: AppSes
       {ownable && <AddOwnerItem appSessionId={appSessionId} dropdown={dropdown} />}
     </>
   );
-  if (!record && listed !== undefined) return <><ListedOpenItems listed={listed} dropdown={dropdown} />{reach}</>;
+  if (!record && listed !== undefined) return <><ListedOpenItems listed={listed} dropdown={dropdown} /><HideItem appSessionId={appSessionId} dropdown={dropdown} />{reach}</>;
   if (!record) return shareable ? reach : null;
   const foreign = record.holder.kind === 'terminal' || record.holder.kind === 'background_job'; // D-12: the opens only
   return (
     <>
-      {sessionActionsFor(record, { bridged, remote: isRemoteLaneB(appSessionId) /* P5 O7 M2 */, remoteReading }).map((id) => <SessionItem key={id} id={id} record={record} dropdown={dropdown} />)}
+      {withHide(sessionActionsFor(record, { bridged, remote: isRemoteLaneB(appSessionId) /* P5 O7 M2 */, remoteReading })).map((id) => (id === 'hide' ? <HideItem key={id} appSessionId={appSessionId} dropdown={dropdown} /> : <SessionItem key={id} id={id} record={record} dropdown={dropdown} />))}
       {kept !== undefined && !foreign && <KeepItem appSessionId={appSessionId} kept={kept} dropdown={dropdown} />}
       {reach}
     </>
@@ -135,6 +138,40 @@ function ListedOpenItems({ listed, dropdown }: { listed: ListedSession; dropdown
         {SESSION_ACTIONS.openInNewTab}
       </Item>
     </>
+  );
+}
+
+// UX wave U7, O-16 (Interfaces §C): where Hide stands among a record's actions. Both Pin and Hide arrange the list, so
+// Hide follows Pin; with no Pin, it follows the opening items, so Archive and the deletes keep the end of the menu.
+const OPENING: readonly SessionActionId[] = ['open', 'openInNewTab', 'resume', 'openInSplit', 'attach'];
+/** Where Hide stands among a record's actions: directly after `pin`; with no `pin`, after the last of `open`, `openInNewTab`, `resume`, `openInSplit` and `attach`. */
+export function withHide(ids: readonly SessionActionId[]): (SessionActionId | 'hide')[] {
+  const pin = ids.indexOf('pin');
+  const at = pin !== -1 ? pin + 1 : Math.max(-1, ...OPENING.map((id) => ids.lastIndexOf(id))) + 1;
+  return [...ids.slice(0, at), 'hide', ...ids.slice(at)];
+}
+
+// A Hide or an Unhide moves the keyboard to a row of the sidebar's choosing (its row is gone, or has moved); the menu then
+// closes without taking the focus back to its trigger.
+let focusMoved = false;
+const keepMovedFocus = (event: Event) => {
+  if (focusMoved) event.preventDefault();
+  focusMoved = false;
+};
+
+// UX wave U7, O-16: Hide, or Unhide for a hidden session; an act on this window's view alone, so it never waits for a handler.
+function HideItem({ appSessionId, dropdown }: { appSessionId: AppSessionId; dropdown: boolean }) {
+  const hidden = useHidden((s) => s.hidden.has(appSessionId));
+  const tree = useTree();
+  const act = () => {
+    if (tree.onHideAct) focusMoved = tree.onHideAct(appSessionId, !hidden, dropdown); // the three dots are a tree row's own
+    else if (hidden) useHidden.getState().unhide(appSessionId);
+    else useHidden.getState().hide(appSessionId);
+  };
+  return (
+    <Item dropdown={dropdown} enabled onSelect={act}>
+      {hidden ? HIDDEN.unhide : HIDDEN.hide}
+    </Item>
   );
 }
 
@@ -312,7 +349,7 @@ export function SessionOverflow({ appSessionId, title }: { appSessionId: AppSess
         <svg viewBox="0 0 16 16" aria-hidden className="size-[13px] fill-current"><circle cx="3" cy="8" r="1" /><circle cx="8" cy="8" r="1" /><circle cx="13" cy="8" r="1" /></svg>
       </button>
     </DropdownMenu.Trigger>
-    <DropdownMenu.Portal><DropdownMenu.Content align="end" sideOffset={4} onClick={(e) => e.stopPropagation()}
+    <DropdownMenu.Portal><DropdownMenu.Content align="end" sideOffset={4} onClick={(e) => e.stopPropagation()} onCloseAutoFocus={keepMovedFocus}
       className="z-50 min-w-48 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
       <SessionItems appSessionId={appSessionId} dropdown />
     </DropdownMenu.Content></DropdownMenu.Portal>
