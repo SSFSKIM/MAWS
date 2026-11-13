@@ -25,7 +25,7 @@
   - Needs from U1: the rule that a new request opens a floated conversation stays while the bar shows, read through UC-1's predicate; nothing of a request is docked into the bar. While the chat is hidden a new request does not open it (O-43; the root's UC-1). Whenever a request waits and the conversation is folded to the bar or hidden, the bar shows U1's one line, "Waiting for you · N", which reopens the conversation, and "Show chat" carries the waiting mark (UC-1).
   - Needs from U9: one control inserted in the main pane's header (`src/renderer/src/main/Pane.tsx`, U9's file).
   - Needs from the architect (UC-3): the transcript's existing `artifact` row gains a third action, `delete`, as a small insertion made on whichever of U3 and U2 has landed.
-  - Shares with U5: `src/shared/maws/document-tools.ts` and `src/artifacts/document/edit-plan.ts` (U5 changes how an edit answers a comment; this child adds one op). Whoever lands second rebases.
+  - Shares with U5: `src/shared/maws/document-tools.ts` and `src/artifacts/document/edit-plan.ts` (U5 changes how an edit answers a comment; this child adds one op). Whoever lands second merges master first.
   - Outside conditions: the failing test of l6-artifacts-07 (a) is written and seen to fail before the fix (Probes and checks); the owner's look at a memo at standard and compact density, at the component cards, and at the bar.
 
 - **Contracts:** This child owns none of UC-1 to UC-11.
