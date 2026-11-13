@@ -25,11 +25,14 @@ import { ChromePill } from './FloatingPill'; // P3-F (F-shell)
 import { MARKUP_COPY, resetMarkup, useMarkup } from '../markup/session'; // P3-G (M4)
 import { resetMarkupSurfaces, useRegionMarkupSurface } from '../markup/surface'; // P3-G (M4)
 import { EditorHostScopeContext } from '../panel/editor-host'; // P3-G (M4)
-import { PanelHeader } from '../panel/PanelHeader';
+import { RegionControls } from '../panel/PanelHeader';
 import { CommentCardHost } from '../side/card/CardHost'; // P3-G (M4)
 import { fail, installFakeMain, ok } from '../test-support/code'; // P3-G (M4)
 
 vi.mock('../app/Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
+
+// The region's controls as the side column's first strip draws them (UX wave U8b, M2), in a header row as before.
+const PanelControls = () => <div data-editor-header><RegionControls hide={() => {}} /></div>;
 
 const A = at('app-a' as AppSessionId); // P5 O6 M2: the page's ids are addresses
 const B = at('app-b' as AppSessionId);
@@ -78,7 +81,7 @@ beforeEach(() => {
   useSessions.setState({ records: new Map([[A, { ...record(A), title: { text: 'Alpha session', source: 'user' } }], [B, record(B)]]) });
   // A real open surface earns the panel column; absent stacks derive these legacy selections.
   useLayout.setState({ main: mainShowing(A), panelPinned: [SURFACE], panelActiveNoSession: SURFACE.id, panelBySession: new Map([[A, { tabs: [], activeTabId: SURFACE.id }]]) });
-  registerSlot('panelHost', (props) => <PanelHeader tabs={props.tabs} activeTabId={props.activeTabId} />);
+  registerSlot('panelHost', () => <PanelControls />);
   useFloatingCard.setState({ closed: false, column: null, columnDrag: null, pillHost: null });
   useComposerStore.setState({ focusTargets: new Map(), focusOnMount: new Set() });
   focused.splice(0);
@@ -491,9 +494,9 @@ describe('a mark-up still taken under the open card', () => {
   }
 
   it('hides the card’s layer and the comment card’s host while main takes the still, keeps both mounted, and shows them after', async () => {
-    registerSlot('panelHost', (props) => (
+    registerSlot('panelHost', () => (
       <>
-        <PanelHeader tabs={props.tabs} activeTabId={props.activeTabId} />
+        <PanelControls />
         <EditorHostScopeContext.Provider value={{ surface: 'panel', tabId: TAB }}>
           <ViewerProbe />
         </EditorHostScopeContext.Provider>
@@ -531,9 +534,9 @@ describe('a mark-up still taken under the open card', () => {
   });
 
   it('shows them again when the capture fails', async () => {
-    registerSlot('panelHost', (props) => (
+    registerSlot('panelHost', () => (
       <>
-        <PanelHeader tabs={props.tabs} activeTabId={props.activeTabId} />
+        <PanelControls />
         <EditorHostScopeContext.Provider value={{ surface: 'panel', tabId: TAB }}>
           <ViewerProbe />
         </EditorHostScopeContext.Provider>
@@ -565,9 +568,9 @@ describe('a mark-up still taken under the open card', () => {
   // P3-F (F-shell, scalpel-4#3): the toasts sit at the shell's bottom right, over the panel. A retry right after a
   // refused capture would otherwise take the refusal's own toast into the still and the picture sent to chat.
   it('hides a showing toast while main takes the still: the retry’s still holds no “Couldn’t capture” toast', async () => {
-    registerSlot('panelHost', (props) => (
+    registerSlot('panelHost', () => (
       <>
-        <PanelHeader tabs={props.tabs} activeTabId={props.activeTabId} />
+        <PanelControls />
         <EditorHostScopeContext.Provider value={{ surface: 'panel', tabId: TAB }}>
           <ViewerProbe />
         </EditorHostScopeContext.Provider>

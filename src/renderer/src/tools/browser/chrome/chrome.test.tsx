@@ -371,6 +371,7 @@ describe('the address field', () => {
     useLayout.setState({ main: mainShowing(A), panelPinned: [], panelBySession: new Map(), panelSurfaces: { version: 2, stacks: {}, pinnedTools: [], contexts: {} } });
     // UX2 opens the region only for an actual surface; floating alone does not create a panel column.
     useLayout.getState().setPanelTabs(A, { tabs: [{ id: 'browser:chrome', toolId: 'browser', pinned: false }], activeTabId: 'browser:chrome' });
+    useLayout.getState().showSurfaceTab(A, 'browser:chrome'); // UX wave U8b: a write of refs shows nothing
     useLayout.getState().setPanel({ collapsed: false, floating: true });
     render(<PanelRegion />);
     const region = document.querySelector('[data-region="panel"]')!;

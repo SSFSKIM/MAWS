@@ -43,7 +43,7 @@ import { addressOf, isAddress, machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import type * as z from 'zod';
 import * as model from './layout-model';
-import { normalizeSurfaceStack, rememberSurfaceContext, stackAfterSelection, surfaceRefs, surfaceScope, surfaceSession, surfaceTabs } from '../panel/surface-model';
+import { rememberSurfaceContext, surfaceRefs, surfaceScope, surfaceSession, surfaceTabs } from '../panel/surface-model';
 import { clampShare, groupOf, repairScope, scopeValues, sideGroups, valuesOf, type ScopeValues, type SideGroup, type SideGroups } from '../panel/surface-model'; // UX wave U8b
 import { isWideColumn } from '../app/shell-geometry'; // UX wave U8b
 
@@ -149,19 +149,19 @@ export interface LayoutState {
   setOverviewRect(rect: LayoutRegions['overview']): void;
   setPanelTabPinned(appSessionId: AppSessionId, tabId: string, pinned: boolean): void;
   // The panel host's `onChange` (PanelHostProps): pinned refs go to `panel.pinned` (D-10), the rest to the session's own
-  // key; with no session only the pins are kept, and the selection goes to `panelActiveNoSession`.
+  // key; with no session only the pins are kept. UX wave U8b (M2): maintenance of the refs only. `next.tabs` is the
+  // scope's whole list and `next.activeTabId` is not read: what is in view changes by `showSurfaceTab` and its kin alone,
+  // and every scope the change reaches is repaired (`repairScope`).
   setPanelTabs(appSessionId: AppSessionId | null, next: PanelSessionState): void;
-  // Visible tools only; hiding a surface does not close its refs or clear its params. The last slot is active.
-  setSurfaceStack(appSessionId: AppSessionId | null, ids: string[]): void;
   toggleSurfacePin(toolId: string): void; // the icon-row preference, separate from keep-across-session tab pins
   effectivePanelTabs(appSessionId: AppSessionId | null): PanelTabRef[]; // panelPinned first, then the session's own
   // A session's panel refs whichever session or the Overview is on screen (C8's eleventh ask: C10's Attach adds a
   // Terminal tab to session A from a sidebar row while B is shown). Read as the host reads them (the pins first) and
-  // written as `setPanelTabs` splits them: pinned refs to `panel.pinned`, the rest to `panel.<appSessionId>`. The
-  // session's selection becomes `opts.activeTabId` when given and present, else stays if its tab survives, else moves
-  // as the no-session selection does (`pinSelection`).
+  // written as `setPanelTabs` splits them: pinned refs to `panel.pinned`, the rest to `panel.<appSessionId>`. UX wave
+  // U8b (M2, decision 2): the refs are maintained as `setPanelTabs` maintains them, then `opts.activate`, when given, comes
+  // into view (`showSurfaceTab`); without it nothing in view changes and a hidden column stays hidden.
   panelTabsOf(appSessionId: AppSessionId): PanelTabRef[];
-  updatePanelTabs(appSessionId: AppSessionId, fn: (refs: PanelTabRef[]) => PanelTabRef[], opts?: { activeTabId?: string }): void;
+  updatePanelTabs(appSessionId: AppSessionId, fn: (refs: PanelTabRef[]) => PanelTabRef[], opts?: { activate?: string }): void;
   // P4-B3 (Decision Log 22): a tool's persistable params for one of its tabs, null clearing them. Every write keeps only
   // the params of panel tabs some list holds, and the tab written (whose instance exists before its ref is written).
   setPanelParams(tabId: string, params: unknown): void;
@@ -268,9 +268,9 @@ function sameJson(a: unknown, b: unknown): boolean {
 const livePanelTabIds = (pinned: PanelTabRef[], bySession: Map<AppSessionId, PanelSessionState>): Set<string> =>
   new Set([...pinned.map((t) => t.id), ...[...bySession.values()].flatMap((s) => s.tabs.map((t) => t.id))]);
 
-// A panel selection once its tabs go from `before` to `after` (the pins, for the no-session selection; a session's
-// effective tabs, for `updatePanelTabs`): the requested id if it is still there, else the current one if it is, else
-// the tab that took the removed one's place (the next surviving tab to its right, or the last one), else null.
+// A panel selection once its tabs go from `before` to `after` (the pins, for the no-session selection): the requested
+// id if it is still there, else the current one if it is, else the tab that took the removed one's place (the next
+// surviving tab to its right, or the last one), else null.
 export function pinSelection(before: PanelTabRef[], after: PanelTabRef[], current: string | null, requested: string | null = current): string | null {
   const isPin = (id: string | null) => id !== null && after.some((t) => t.id === id);
   if (isPin(requested)) return requested;
@@ -361,27 +361,18 @@ const withStacks = (surfaces: PanelSurfaces, stacks: Record<string, string[] | u
 };
 
 // Decision 5 of M1: after a writer changed refs (`prev` to `next`), every scope whose refs changed has its values repaired
-// (`repairScope`), each session with a list and `@none`. `settled`: the scope whose stack and selection the writer set
-// itself (`setPanelTabs`'s stacking rule, until M2), whose lower entry only follows its refs.
-function repairedScopes(prev: Scoped, next: Scoped, opts: { settled?: string; renamed?: ReadonlyMap<string, string> } = {}): [AppSessionId | null, ScopeValues][] {
+// (`repairScope`), each session with a list and `@none`; the writer's own scope among them (M2: no writer of refs sets
+// what is in view).
+function repairedScopes(prev: Scoped, next: Scoped, renamed?: ReadonlyMap<string, string>): [AppSessionId | null, ScopeValues][] {
   const repaired: [AppSessionId | null, ScopeValues][] = [];
   const pinsSame = prev.panelPinned === next.panelPinned || sameRefs(prev.panelPinned, next.panelPinned);
   for (const session of [null, ...next.panelBySession.keys()]) {
-    const scope = surfaceScope(session);
     const refs = surfaceRefs(next, session);
-    if (scope === opts.settled) {
-      const values = scopeValues(next, session);
-      if (values.lower === undefined) continue;
-      const alive = new Set(refs.map((t) => t.id));
-      const tabs = values.lower.tabs.map((id) => opts.renamed?.get(id) ?? id).filter((id) => alive.has(id));
-      if (!sameJson(tabs, values.lower.tabs)) repaired.push([session, { ...values, lower: tabs.length > 0 ? { ...values.lower, tabs } : undefined }]);
-      continue;
-    }
     const own = (s: Scoped) => (session === null ? undefined : s.panelBySession.get(session)?.tabs);
     if (pinsSame && own(prev) === own(next)) continue;
     const before = surfaceRefs(prev, session);
     if (sameRefs(before, refs)) continue;
-    const values = repairScope({ refs: before, ...scopeValues(prev, session) }, refs, opts.renamed);
+    const values = repairScope({ refs: before, ...scopeValues(prev, session) }, refs, renamed);
     if (!sameJson(values, scopeValues(next, session))) repaired.push([session, values]);
   }
   return repaired;
@@ -853,38 +844,16 @@ export function createLayoutStore() {
       },
       setPanelTabs(appSessionId, next) {
         const prev = get();
-        const refsBefore = get().effectivePanelTabs(appSessionId);
-        const activeBefore = appSessionId === null ? get().panelActiveNoSession : (get().panelBySession.get(appSessionId)?.activeTabId ?? null);
+        const refsBefore = prev.effectivePanelTabs(appSessionId);
         const pinned = next.tabs.filter((t) => t.pinned);
-        const panelBySession = new Map(get().panelBySession);
-        if (appSessionId !== null) panelBySession.set(appSessionId, { tabs: next.tabs.filter((t) => !t.pinned), activeTabId: next.activeTabId });
-        const selection = pins(pinned, appSessionId === null ? next.activeTabId : undefined);
-        const active = appSessionId === null ? selection.panelActiveNoSession : next.activeTabId;
-        const refs = surfaceRefs({ panelPinned: selection.panelPinned, panelBySession }, appSessionId);
-        const scope = surfaceScope(appSessionId);
-        const panelSurfaces = surfaces((state) => {
-          const before = normalizeSurfaceStack(state.stacks[scope] ?? (activeBefore === null ? [] : [activeBefore]), refsBefore);
-          const ids = stackAfterSelection(before.map((id) => refsBefore.find((tab) => tab.id === id)!), refs, active);
-          if (sameJson(state.stacks[scope] ?? before, ids)) return state;
-          return { ...state, stacks: { ...state.stacks, [scope]: ids } };
-        });
-        // UX wave U8b (M1, decision 5): every other scope whose refs this changed (a pin closed, added or replaced) is
-        // repaired; this one's stack and selection are the stacking rule's above until M2.
-        const patch = { ...selection, ...(appSessionId === null ? {} : { panelBySession }), panelSurfaces };
+        const panelPinned = samePins(prev.panelPinned, pinned) ? prev.panelPinned : pinned;
+        const panelBySession = new Map(prev.panelBySession);
+        if (appSessionId !== null) panelBySession.set(appSessionId, { tabs: next.tabs.filter((t) => !t.pinned), activeTabId: prev.panelBySession.get(appSessionId)?.activeTabId ?? null });
+        // UX wave U8b (M1, decision 5; M2, decision 2): the refs are written as they come and every scope they reach is
+        // repaired from what it stored, the writer's own included; `next.activeTabId` is no request.
+        const patch = { panelPinned, ...(appSessionId === null ? {} : { panelBySession }) };
         const after = { ...prev, ...patch };
-        set({ ...patch, ...withScopes(after, repairedScopes(prev, after, { settled: scope, renamed: renamedIn(refsBefore, next.tabs) })) });
-      },
-      setSurfaceStack(appSessionId, requested) {
-        const ids = normalizeSurfaceStack(requested, get().effectivePanelTabs(appSessionId));
-        const activeTabId = ids.at(-1) ?? null;
-        const panelBySession = new Map(get().panelBySession);
-        if (appSessionId !== null) {
-          const own = panelBySession.get(appSessionId) ?? { tabs: [], activeTabId: null };
-          panelBySession.set(appSessionId, { ...own, activeTabId });
-        }
-        const scope = surfaceScope(appSessionId);
-        const panelSurfaces = surfaces((state) => sameJson(state.stacks[scope], ids) ? state : { ...state, stacks: { ...state.stacks, [scope]: ids } });
-        set({ ...(appSessionId === null ? { panelActiveNoSession: activeTabId } : { panelBySession }), panelSurfaces });
+        set({ ...patch, ...withScopes(after, repairedScopes(prev, after, renamedIn(refsBefore, next.tabs))) });
       },
       toggleSurfacePin(toolId) {
         set({ panelSurfaces: surfaces((state) => ({
@@ -898,10 +867,9 @@ export function createLayoutStore() {
       },
       panelTabsOf: (appSessionId) => get().effectivePanelTabs(appSessionId),
       updatePanelTabs(appSessionId, fn, opts) {
-        const before = get().effectivePanelTabs(appSessionId);
-        const after = fn(before);
-        const current = get().panelBySession.get(appSessionId)?.activeTabId ?? null;
-        get().setPanelTabs(appSessionId, { tabs: after, activeTabId: pinSelection(before, after, current, opts?.activeTabId ?? current) });
+        const after = fn(get().effectivePanelTabs(appSessionId));
+        get().setPanelTabs(appSessionId, { tabs: after, activeTabId: get().panelBySession.get(appSessionId)?.activeTabId ?? null });
+        if (opts?.activate !== undefined) get().showSurfaceTab(appSessionId, opts.activate);
       },
       setPanelParams(tabId, params) {
         const held = get().panelParams;

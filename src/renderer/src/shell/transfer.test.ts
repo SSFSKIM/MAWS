@@ -238,7 +238,7 @@ describe('main → panel', () => {
   it('T5: a panel already showing the artifact is activated, its view kept, and the tab closes through its own guard', async () => {
     useLayout.setState({ main: panes([sessionTab(A), DOC_TAB]) });
     const dest = addArtifacts(A, DOC);
-    act(() => useLayout.getState().setPanelTabs(A, { tabs: panelOf(A)!.tabs, activeTabId: null }));
+    act(() => useLayout.getState().hideSurfaces(A));
     const panelHold = mounted(panelScope(dest));
     const mainHold = mounted(mainScope());
     const asked = guard(mainScope(), () => true);

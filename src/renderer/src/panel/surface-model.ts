@@ -31,34 +31,17 @@ export function surfaceRefs(state: Pick<SurfaceState, 'panelPinned' | 'panelBySe
 }
 
 // Invalid/stale ids are ignored without rewriting saved scopes, so a temporarily unavailable context never resets it.
+// UX wave U8b (§A, rule 1): a repeated id is dropped, two tabs of one tool may both be in view, and two ids at most.
 export function normalizeSurfaceStack(ids: readonly string[], refs: readonly PanelTabRef[]): string[] {
-  const tools = new Set<string>();
-  return ids.filter((id) => {
-    const ref = refs.find((tab) => tab.id === id);
-    if (!ref || tools.has(ref.toolId)) return false;
-    tools.add(ref.toolId);
-    return true;
-  }).slice(0, 2);
+  return [...new Set(ids)].filter((id) => refs.some((tab) => tab.id === id)).slice(0, 2);
 }
 
+// The tabs in view: none while the column is hidden, one, or two (one per group).
 export function surfaceTabs(state: SurfaceState, session: AppSessionId | null): PanelTabRef[] {
   const refs = surfaceRefs(state, session);
   const active = session === null ? state.panelActiveNoSession : (state.panelBySession.get(session)?.activeTabId ?? null);
   const ids = state.panelSurfaces.stacks[surfaceScope(session)] ?? (active === null ? [] : [active]);
   return normalizeSurfaceStack(ids, refs).map((id) => refs.find((tab) => tab.id === id)!);
-}
-
-// Selecting another tab of an open tool stays in its slot. A new tool fills the second slot, replacing only that
-// bottom slot once both are occupied. Closing refs removes their slots; choosing summary clears both.
-export function stackAfterSelection(before: readonly PanelTabRef[], refs: readonly PanelTabRef[], activeTabId: string | null): string[] {
-  if (activeTabId === null) return [];
-  const active = refs.find((tab) => tab.id === activeTabId);
-  const stack = normalizeSurfaceStack(before.flatMap((tab) => {
-    const replacement = active?.toolId === tab.toolId ? active : (refs.find((ref) => ref.id === tab.id) ?? refs.findLast((ref) => ref.toolId === tab.toolId));
-    return replacement ? [replacement.id] : [];
-  }), refs);
-  if (!active || stack.includes(activeTabId)) return stack;
-  return stack.length < 2 ? [...stack, activeTabId] : [stack[0], activeTabId];
 }
 
 // ---- the side column's groups (UX wave U8b, docs/doperpowers/plans/2026-11-12-ux-wave-U8b-column-and-tabs.md, Interfaces

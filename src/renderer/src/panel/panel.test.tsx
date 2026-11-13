@@ -2,9 +2,11 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
-import { useLayout } from '../stores/layout';
+import { fakeClient } from '../../../../test/support/fake-client';
+import { storedLayout, useLayout } from '../stores/layout';
 import { A, B, mainShowing, panelOf, pinIds, probeTool, ref, resetPanelStores, TestHost, type ProbeState } from '../test-support/panel';
-import { panelHost, registerPanelTool } from './host';
+import { connectPanelHost, panelHost, registerPanelTool } from './host';
+import { sideGroups, surfaceTabs } from './surface-model';
 import { SurfaceRow } from './SurfaceRow';
 import type { PanelTool } from './tool';
 
@@ -46,7 +48,7 @@ describe('surface icons and same-tool tabs', () => {
     expect(only.getAttribute('aria-disabled')).toBe('true');
   });
 
-  it('primary tools have icons and More lists other menu tools; opening a singleton makes it an open icon, not another tab', async () => {
+  it('primary tools have icons and More lists other menu tools; opening a singleton shows it as the strip’s one tab', async () => {
     const user = userEvent.setup();
     register(
       probeTool('extra', { title: 'Extra' }).tool,
@@ -65,12 +67,12 @@ describe('surface icons and same-tool tabs', () => {
     expect(panelOf(A)!.activeTabId).toBe(added.id);
     expect(icon('Session info').getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByRole('tabpanel', { name: 'Session info' })).toBeTruthy();
-    expect(tabs()).toEqual([]); // no single-instance strip, and no tabs between unlike tools
+    expect(tabs()).toEqual([['Session info', true]]); // one strip, its one tab in view
     await user.click(icon('More surfaces'));
     expect((await menuItems()).map((i) => i.textContent)).toEqual(['Extra']);
     await user.keyboard('{Escape}');
     await user.click(icon('Session info'));
-    expect(panelOf(A)!.tabs).toEqual([added]); // hiding a surface keeps its tool instance
+    expect(panelOf(A)!.tabs).toEqual([added]); // hiding the column keeps the tool's tab
     expect(screen.queryByRole('tabpanel')).toBeNull();
   });
 
@@ -85,7 +87,7 @@ describe('surface icons and same-tool tabs', () => {
     await user.keyboard('{Escape}');
     await user.click(icon('Terminal'));
     expect(useLayout.getState().panelActiveNoSession).toBe('terminal:pin00000');
-    expect((screen.getByRole('button', { name: 'New terminal tab' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Open a session to add a tool' }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByTestId('body:terminal:pin00000').textContent).toContain('no session · pinned');
     let id = '';
     act(() => void (id = panelHost.addTool('terminal', { appSessionId: null, pin: true })));
@@ -93,7 +95,7 @@ describe('surface icons and same-tool tabs', () => {
     expect(tabs()).toEqual([['Terminal', false], ['Terminal', true]]);
   });
 
-  it('on the Overview, clicking an open pinned surface clears its selection without removing the pin', async () => {
+  it('on the Overview, clicking an open pinned surface hides the column, keeping the pin and what it showed', async () => {
     const user = userEvent.setup();
     register(probeTool('terminal', { title: 'Terminal' }).tool);
     useLayout.setState({ main: LAYOUT_DEFAULTS.main, panelPinned: [ref('terminal:pin00000', true)] });
@@ -101,12 +103,13 @@ describe('surface icons and same-tool tabs', () => {
     await user.click(icon('Terminal'));
     expect(useLayout.getState().panelActiveNoSession).toBe('terminal:pin00000');
     await user.click(icon('Terminal'));
-    expect(useLayout.getState().panelActiveNoSession).toBeNull();
+    expect(surfaceTabs(useLayout.getState(), null)).toEqual([]);
+    expect(useLayout.getState().panelActiveNoSession).toBe('terminal:pin00000'); // shown again on the next click
     expect(screen.queryByRole('tabpanel')).toBeNull();
     expect(pinIds()).toEqual(['terminal:pin00000']);
   });
 
-  it('a same-tool tab click selects it; closing the surface preserves every tab for reopening', async () => {
+  it('two terminals are two tabs of the one strip; a tab click shows it, and hiding the column keeps every tab for showing again', async () => {
     const user = userEvent.setup();
     register(probeTool('terminal', { title: 'Terminal' }).tool);
     renderHost();
@@ -114,11 +117,12 @@ describe('surface icons and same-tool tabs', () => {
     act(() => void (first = panelHost.addTool('terminal', { appSessionId: A })));
     act(() => void panelHost.addTool('terminal', { appSessionId: A }));
     const inventory = panelOf(A)!.tabs;
+    expect(screen.getAllByRole('tablist').map((list) => list.getAttribute('aria-label'))).toEqual(['Panel tools']);
+    expect(document.querySelector('[data-editor-header]')).toBeNull(); // no strip, and no row, drawn inside a header
     await user.click(screen.getAllByRole('tab')[0]);
     expect(panelOf(A)!.activeTabId).toBe(first);
     expect(screen.getByTestId(`body:${first}`).textContent).toMatch(/focus 2$/);
     await user.click(icon('Terminal'));
-    expect(panelOf(A)!.activeTabId).toBeNull();
     expect(panelOf(A)!.tabs).toEqual(inventory);
     expect(tabs()).toEqual([]);
     expect(screen.queryByRole('tabpanel')).toBeNull();
@@ -126,7 +130,7 @@ describe('surface icons and same-tool tabs', () => {
     expect(tabs()).toEqual([['Terminal', true], ['Terminal', false]]);
   });
 
-  it('plain icon clicks stack two surfaces, a third replaces only the lower slot, and closing an icon leaves the other open', async () => {
+  it('an icon shows its tool in place of the one in view; the icon of the tool in view hides the column and closes nothing', async () => {
     const user = userEvent.setup();
     const terminal = probeTool('terminal', { title: 'Terminal' });
     const review = probeTool('review', { title: 'Review', multiInstance: false });
@@ -135,22 +139,23 @@ describe('surface icons and same-tool tabs', () => {
     renderHost();
     await user.click(icon('Terminal'));
     await user.click(icon('Review'));
-    expect(surfaces()).toEqual(['terminal', 'review']);
+    expect(surfaces()).toEqual(['review']);
+    expect(tabs()).toEqual([['Terminal', false], ['Review', true]]);
+    expect(icon('Terminal').getAttribute('aria-pressed')).toBe('false');
     const reviewId = panelOf(A)!.activeTabId;
     await user.click(icon('Files'));
-    expect(surfaces()).toEqual(['terminal', 'files']);
-    expect(icon('Review').getAttribute('aria-pressed')).toBe('false');
-    expect(panelOf(A)!.tabs.some((tab) => tab.id === reviewId)).toBe(true);
-    expect(review.probe.disposed).toEqual([]); // replacement hides; it does not close the tool’s ref
-    expect(screen.getAllByRole('tablist').map((list) => list.getAttribute('aria-label'))).toEqual(['terminal tabs', 'files tabs']);
-    await user.click(icon('Terminal'));
     expect(surfaces()).toEqual(['files']);
-    expect(icon('Files').getAttribute('aria-pressed')).toBe('true');
+    expect(panelOf(A)!.tabs.some((tab) => tab.id === reviewId)).toBe(true);
+    expect(review.probe.disposed).toEqual([]); // a tab out of view keeps its tool's state
     await user.click(icon('Files'));
     expect(surfaces()).toEqual([]);
-    expect(panelOf(A)!.activeTabId).toBeNull();
+    expect(icon('Session cards').getAttribute('aria-pressed')).toBe('true'); // the cards show where the column was
     expect(panelOf(A)!.tabs).toHaveLength(3);
     expect(terminal.probe.beforeClose).toEqual([]);
+    await user.click(icon('Files'));
+    expect(surfaces()).toEqual(['files']); // the tab that was in view
+    await user.click(icon('Review'));
+    expect(surfaces()).toEqual(['review']);
   });
 
   it('the close-tab glyph asks the tool; a veto keeps the tab and a pass removes and disposes it', async () => {
@@ -237,7 +242,7 @@ describe('surface icons and same-tool tabs', () => {
     await chooseSaved('Keep open for every session');
     expect(pinIds()).toEqual([saved.id]);
     expect(panelOf(A)!).toEqual({ tabs: [], activeTabId: saved.id });
-    await user.click(screen.getByRole('button', { name: 'Close surface' }));
+    await user.click(screen.getByRole('button', { name: 'Hide side column' }));
     expect(screen.queryByRole('tabpanel')).toBeNull();
     expect(pinIds()).toEqual([saved.id]);
     await chooseSaved('Keep with this session only');
@@ -268,3 +273,98 @@ describe('surface icons and same-tool tabs', () => {
     expect(screen.getByRole('tab', { selected: true }).textContent).toBe('Tee · zsh');
   });
 });
+
+// UX wave U8b, M2 (its execution document's "What it proves"): one strip, one tab in view, whoever opens a tool; a tab
+// added without being asked for replaces nothing; the icons' rule.
+describe('one strip, one tab in view', () => {
+  const inView = () => surfaceTabs(useLayout.getState(), A).map((tab) => tab.id);
+
+  it.each(['an icon', 'addTool', 'selectTab'] as const)('opening a second tool by %s shows it in place of the first, whose state stays', async (how) => {
+    const user = userEvent.setup();
+    const terminal = probeTool('terminal', { title: 'Terminal' });
+    register(terminal.tool, probeTool('review', { title: 'Review', multiInstance: false }).tool);
+    renderHost();
+    let first = '';
+    act(() => void (first = panelHost.addTool('terminal', { appSessionId: A })));
+    const state = terminal.probe.rendered.at(-1);
+    if (how === 'an icon') await user.click(icon('Review'));
+    else if (how === 'addTool') act(() => void panelHost.addTool('review', { appSessionId: A }));
+    else {
+      let review = '';
+      act(() => void (review = panelHost.addTool('review', { appSessionId: A, activate: false })));
+      expect(surfaces()).toEqual(['terminal']); // joined the strip, replaced nothing
+      act(() => panelHost.selectTab(review));
+    }
+    expect(surfaces()).toEqual(['review']);
+    expect(document.querySelectorAll('[data-surface]')).toHaveLength(1);
+    expect(tabs()).toEqual([['Terminal', false], ['Review', true]]);
+    expect(terminal.probe.created).toHaveLength(1);
+    expect(terminal.probe.disposed).toEqual([]);
+    await user.click(screen.getAllByRole('tab')[0]);
+    expect(terminal.probe.rendered.at(-1)).toBe(state); // the same state object, mounted again
+    expect(inView()).toEqual([first]);
+  });
+
+  it('closing the tab in view asks the tool, and on a pass shows its right-hand neighbour', async () => {
+    const user = userEvent.setup();
+    const { tool, probe } = probeTool('t', { title: 'Tee' });
+    register(tool);
+    renderHost();
+    const ids: string[] = [];
+    act(() => void ['a', 'b', 'c'].forEach(() => ids.push(panelHost.addTool('t', { appSessionId: A }))));
+    act(() => panelHost.selectTab(ids[1]));
+    const closeShown = () => within(screen.getByRole('tab', { selected: true }).parentElement!).getByRole('button', { name: 'Close Tee' });
+    probe.veto = () => true;
+    await user.click(closeShown());
+    expect(inView()).toEqual([ids[1]]);
+    probe.veto = () => false;
+    await user.click(closeShown());
+    expect(probe.beforeClose).toEqual([ids[1], ids[1]]);
+    expect(inView()).toEqual([ids[2]]);
+  });
+
+  it('a ref added without activation, or removed elsewhere, leaves what is in view, and a hidden column hidden (decision 2)', () => {
+    register(probeTool('review', { title: 'Review', multiInstance: false }).tool, probeTool('t', { title: 'Tee' }).tool);
+    renderHost();
+    let review = '';
+    act(() => void (review = panelHost.addTool('review', { appSessionId: A })));
+    let other = '';
+    act(() => void (other = panelHost.addTool('t', { appSessionId: A, activate: false })));
+    expect(inView()).toEqual([review]);
+    act(() => useLayout.getState().updatePanelTabs(A, (refs) => refs.filter((tab) => tab.id !== other)));
+    expect(inView()).toEqual([review]);
+    act(() => panelHost.showSummary());
+    act(() => void (other = panelHost.addTool('t', { appSessionId: A, activate: false })));
+    act(() => useLayout.getState().updatePanelTabs(A, (refs) => refs.filter((tab) => tab.id !== other)));
+    expect(inView()).toEqual([]);
+    expect(sideGroups(useLayout.getState(), A)).toMatchObject({ hidden: true, upper: { shown: { id: review } } });
+  });
+
+  it('the Terminal icon brings back the terminal that was in view, after a relaunch too; a gone one is passed over (decision 3)', async () => {
+    const user = userEvent.setup();
+    register(probeTool('terminal', { title: 'Terminal' }).tool, probeTool('review', { title: 'Review', multiInstance: false }).tool);
+    renderHost();
+    const t: string[] = [];
+    act(() => void [1, 2, 3].forEach(() => t.push(panelHost.addTool('terminal', { appSessionId: A }))));
+    act(() => panelHost.selectTab(t[0]));
+    await user.click(icon('Terminal')); // hides
+    // a relaunch: the store hydrates from what it would write, and the run's memory is empty
+    const values = Object.fromEntries(storedLayout(useLayout.getState()));
+    const fake = fakeClient({ 'layout.list': { keys: Object.keys(values) }, 'layout.get': ({ key }: { key: string }) => ({ value: values[key] ?? null }), 'layout.set': undefined });
+    await act(() => useLayout.getState().hydrate(fake.client, () => true));
+    await user.click(icon('Terminal'));
+    expect(inView()).toEqual([t[0]]); // not the last in the strip
+
+    const off = connectPanelHost(); // the run's memory of what each tool last showed
+    offs.push(off);
+    act(() => panelHost.selectTab(t[1]));
+    await user.click(icon('Review'));
+    await user.click(icon('Terminal'));
+    expect(inView()).toEqual([t[1]]);
+    await user.click(icon('Review'));
+    await act(() => panelHost.closeTab(t[1]));
+    await user.click(icon('Terminal'));
+    expect(inView()).toEqual([t[2]]); // the gone one passed over: the last terminal in the strip
+  });
+});
+

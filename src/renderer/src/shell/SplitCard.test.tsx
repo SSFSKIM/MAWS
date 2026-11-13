@@ -18,7 +18,7 @@ import { Shell } from '../app/Shell';
 import { registerSlot, resetSlots } from '../app/slots';
 import { runAction } from '../keymap/actions-runtime';
 import { resetEditorHosts, useEditorHost, useEditorHostScope } from '../panel/editor-host';
-import { PanelHeader } from '../panel/PanelHeader';
+import { RegionControls } from '../panel/PanelHeader';
 import { useAttention } from '../stores/attention';
 import { registerFocusTarget, useComposerStore } from '../stores/composer';
 import { useLayout } from '../stores/layout';
@@ -33,6 +33,9 @@ import { useTranscriptStore } from '../stores/transcript'; // M2 review: the rou
 import { builder } from '../transcript/model/test-events';
 import type { TranscriptSource } from '../transcript/source/types';
 import { Transcript } from '../transcript/view/Transcript';
+
+// The region's controls as the side column's first strip draws them (UX wave U8b, M2), in a header row as before.
+const PanelControls = () => <div data-editor-header><RegionControls hide={() => {}} /></div>;
 
 vi.mock('../app/Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
 
@@ -379,7 +382,8 @@ describe('the split’s floating card in the Shell', () => {
     const user = userEvent.setup();
     const tab = { id: 'probe:1', toolId: 'probe', pinned: false };
     useLayout.getState().setPanelTabs(A, { tabs: [tab], activeTabId: tab.id });
-    registerSlot('panelHost', (props) => <PanelHeader tabs={props.tabs} activeTabId={props.activeTabId} />);
+    useLayout.getState().showSurfaceTab(A, tab.id);
+    registerSlot('panelHost', () => <PanelControls />);
     shell();
     dragTo(150);
     const panelHeader = document.querySelector<HTMLElement>('[data-region="panel"] [data-editor-header]')!;

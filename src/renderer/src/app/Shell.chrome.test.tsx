@@ -41,7 +41,7 @@ describe('the chrome yields to the tab strip', () => {
   it.each([1440, 900])('keeps collapsed-sidebar navigation clear of the native traffic lights at %ipx', (width) => {
     setWidth(width);
     useLayout.getState().setSidebar({ collapsed: true });
-    if (width === 900) useLayout.getState().setPanelTabs(A, { tabs: [ref('review:aaaaaaaa')], activeTabId: 'review:aaaaaaaa' });
+    if (width === 900) { useLayout.getState().setPanelTabs(A, { tabs: [ref('review:aaaaaaaa')], activeTabId: 'review:aaaaaaaa' }); useLayout.getState().showSurfaceTab(A, 'review:aaaaaaaa'); }
     renderShell();
     const navigation = within(chrome()).getByRole('button', { name: 'Toggle sidebar' }).parentElement!;
     const leading = navigation.parentElement!;
@@ -137,7 +137,7 @@ describe('the chrome yields to the tab strip', () => {
 
 it('dismisses a narrow sheet with Escape or its backdrop without forgetting its tools', async () => {
   setWidth(620);
-  useLayout.getState().setPanelTabs(A, { tabs: [ref('review:aaaaaaaa')], activeTabId: 'review:aaaaaaaa' });
+  { useLayout.getState().setPanelTabs(A, { tabs: [ref('review:aaaaaaaa')], activeTabId: 'review:aaaaaaaa' }); useLayout.getState().showSurfaceTab(A, 'review:aaaaaaaa'); }
   renderShell();
   await userEvent.keyboard('{Escape}');
   await act(nextFrame);
@@ -160,7 +160,7 @@ it.each([
   offs.push(registerPanelTool(probeTool('focus', { render: () => <input aria-label="Sheet editor" autoFocus /> }).tool));
   render(<>
     <button onClick={() => {
-      useLayout.getState().setPanelTabs(A, { tabs: [ref('focus:aaaaaaaa')], activeTabId: 'focus:aaaaaaaa' });
+      { useLayout.getState().setPanelTabs(A, { tabs: [ref('focus:aaaaaaaa')], activeTabId: 'focus:aaaaaaaa' }); useLayout.getState().showSurfaceTab(A, 'focus:aaaaaaaa'); }
       useLayout.getState().setPanel({ collapsed: false });
     }}>Open test sheet</button>
     <QueryClientProvider client={queryClient}><Shell /></QueryClientProvider>
@@ -190,7 +190,7 @@ it.each([
 it('leaves composing Escape and keyboard focus in a narrow sheet field', async () => {
   setWidth(620);
   offs.push(registerPanelTool(probeTool('ime', { render: () => <input aria-label="Korean sheet field" defaultValue="한" /> }).tool));
-  useLayout.getState().setPanelTabs(A, { tabs: [ref('ime:aaaaaaaa')], activeTabId: 'ime:aaaaaaaa' });
+  { useLayout.getState().setPanelTabs(A, { tabs: [ref('ime:aaaaaaaa')], activeTabId: 'ime:aaaaaaaa' }); useLayout.getState().showSurfaceTab(A, 'ime:aaaaaaaa'); }
   renderShell();
   const field = screen.getByRole('textbox', { name: 'Korean sheet field' });
   field.focus();
@@ -215,7 +215,7 @@ it('does not show Session cards as pressed for an unstarted New chat', () => {
 
 it('keeps Overview reachable at 900 with a surface', async () => {
   setWidth(900);
-  useLayout.getState().setPanelTabs(A, { tabs: [ref('review:aaaaaaaa')], activeTabId: 'review:aaaaaaaa' });
+  { useLayout.getState().setPanelTabs(A, { tabs: [ref('review:aaaaaaaa')], activeTabId: 'review:aaaaaaaa' }); useLayout.getState().showSurfaceTab(A, 'review:aaaaaaaa'); }
   renderShell();
   await userEvent.click(within(chrome()).getByRole('button', { name: 'Overview' }));
   expect(useLayout.getState().overviewOpen).toBe(true);

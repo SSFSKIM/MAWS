@@ -56,7 +56,7 @@ describe('visible surface lifecycle', () => {
     const terminal = add('terminal');
     layout().setPanelParams(terminal, { attach: 'pty-1' });
     layout().setPanel({ [mode]: true, width: 444 });
-    layout().setSurfaceStack(A, []);
+    layout().hideSurfaces(A);
 
     expect(layout().regions.panel).toMatchObject({ floating: false, maximized: false, width: 444 });
     expect(cardSession(layout())).toBeNull();

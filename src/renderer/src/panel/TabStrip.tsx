@@ -1,39 +1,36 @@
-// The panel's strip (C8a execution document, M1): the home glyph, the tabs in `PanelHostProps.tabs` order (pins first),
-// and "+". One row that scrolls and never wraps; each tab is `icon · title · suffix`, truncated at a 72 px minimum,
-// with its pin and close glyphs revealed on hover, focus and selection (Codex §3). The shown session's own
-// interactions write through `onChange`; closing goes through the host so `beforeClose` runs. P4-B3 (X38; its Decision
-// Log 17, 21): a tab whose tool moves to main (the Artifacts tool) drags while it shows a record, and its context menu
-// offers "Move to main area", disabled with the reason a drag of it would be refused.
+// The panel's strip (C8a execution document, M1): the tabs in `PanelHostProps.tabs` order (pins first), and "+". One row
+// that never wraps; each tab is `icon · title · suffix`, at most 192 px, with its pin and close glyphs revealed on hover,
+// focus and selection (Codex §3). A tab is chosen by id (`panelHost.selectTab`) and closed through the host, so
+// `beforeClose` runs; the strip never submits its tabs as a list. UX wave U8b (M2): the side column's strip, one per
+// group, with the region's controls at the first one's end (`trailing`); while its tabs do not fit, the tabs not in view
+// stand as their icons alone, the rightmost first, then the tab in view is cut down to 72 px, and only then does the row
+// scroll (`fitTabs`, the owner's "Shrink to icons" of 2026-11-12). P4-B3 (X38; its Decision Log 17, 21): a tab whose
+// tool moves to main (the Artifacts tool) drags while it shows a record, and its context menu offers "Move to main
+// area", disabled with the reason a drag of it would be refused.
 import { ContextMenu, DropdownMenu } from 'radix-ui';
-import { useEffect, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PanelTabRef } from '@shared/ipc/schema/layout';
 import { Icon, IconButton } from '../app/IconButton';
+import { useLayout } from '../stores/layout';
 import { COPY } from './copy';
 import { openPaneTab, usePanes } from '../engine-surface/panes'; // R2
 import { PANE_COPY } from '../engine-surface/PaneTool'; // R2
 import { beginDrag, endDragFrom, moveArtifactToTab, panelTabMoves, usePanelRecord, useTransferRefusal } from '../shell/transfer'; // P4-B3
 import { TRANSFER_COPY } from '../tools/artifacts/copy'; // P4-B3
-import { panelHost, requestFocus, togglePinned, usePanelHost, useTabLabel, type PanelHostState } from './host';
-import type { PanelHostProps } from './host-slot';
+import { panelHost, togglePinned, usePanelHost, useTabLabel, type PanelHostState } from './host';
 
 interface TabStripProps {
   appSessionId: AppSessionId | null;
-  tabs: PanelTabRef[];
-  activeTabId: string | null;
-  onChange: PanelHostProps['onChange'];
+  tabs: PanelTabRef[]; // the group's tabs, in strip order
+  activeTabId: string | null; // the group's tab in view
   bodyId: string;
-  toolId?: string;
-  inline?: boolean;
+  trailing?: ReactNode; // after "+": the region's controls on the column's first strip
 }
 
-export function TabStrip({ appSessionId, tabs, activeTabId, onChange, bodyId, toolId, inline = false }: TabStripProps) {
-  const tool = usePanelHost((s) => toolId ? s.tools.get(toolId) : undefined);
-  const canAdd = tool?.multiInstance && tool.menu !== false;
-  const select = (id: string) => {
-    if (id !== activeTabId) onChange({ tabs, activeTabId: id });
-    requestFocus(id);
-  };
+export function TabStrip({ appSessionId, tabs, activeTabId, bodyId, trailing }: TabStripProps) {
+  const list = useRef<HTMLDivElement>(null);
+  const fit = useTabFit(list, tabs, activeTabId);
   // Arrow keys move focus along the tabs (the WAI-ARIA tabs pattern, manual activation).
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
@@ -45,25 +42,84 @@ export function TabStrip({ appSessionId, tabs, activeTabId, onChange, bodyId, to
   };
 
   return (
-    <div className={`flex min-w-0 items-center gap-1 ${inline ? 'flex-1' : 'h-9 shrink-0 border-b border-border px-1'}`}>
-      {!toolId && <IconButton label={COPY.home} pressed={activeTabId === null} onClick={() => activeTabId !== null && onChange({ tabs, activeTabId: null })}>
-        <HomeIcon />
-      </IconButton>}
-      <div role="tablist" aria-label={toolId ? `${toolId} tabs` : 'Panel tools'} onKeyDown={onKeyDown} className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none]">
-        {tabs.map((tab) => (
-          <Tab key={tab.id} tab={tab} selected={tab.id === activeTabId} canPin={appSessionId !== null} bodyId={bodyId} onSelect={() => select(tab.id)} />
-        ))}
+    <div className="flex h-9 min-w-0 shrink-0 items-center gap-1 border-b border-border px-1">
+      <div ref={list} role="tablist" aria-label="Panel tools" onKeyDown={onKeyDown} className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none]">
+        {tabs.map((tab) => {
+          const selected = tab.id === activeTabId;
+          const shape: TabShape = fit.icons.has(tab.id) ? 'icon' : selected && fit.shownMax !== null ? 'cut' : 'whole';
+          return <Tab key={tab.id} tab={tab} selected={selected} shape={shape} maxWidth={shape === 'cut' ? fit.shownMax : null} canPin={appSessionId !== null} bodyId={bodyId} onSelect={() => panelHost.selectTab(tab.id)} />;
+        })}
       </div>
-      {toolId ? canAdd && <IconButton label={`New ${toolId} tab`} disabled={!appSessionId} onClick={() => appSessionId && panelHost.addTool(toolId, { appSessionId })}><PlusIcon /></IconButton> : <AddMenu appSessionId={appSessionId} tabs={tabs} />}
+      <AddMenu appSessionId={appSessionId} />
+      {trailing}
     </div>
   );
 }
 
-function Tab({ tab, selected, canPin, bodyId, onSelect }: { tab: PanelTabRef; selected: boolean; canPin: boolean; bodyId: string; onSelect(): void }) {
+// ---- a strip too narrow for its tabs (UX wave U8b, M2, decision 5) ------------------------------------------------------
+
+export const ICON_TAB_PX = 28; // a tab drawn as its icon alone
+export const MIN_TAB_PX = 72; // the tab in view is never cut below this (the strip scrolls instead)
+const TAB_GAP_PX = 2; // the tablist's gap-0.5
+
+export interface TabFit { icons: ReadonlySet<string>; shownMax: number | null }
+const WHOLE: TabFit = { icons: new Set(), shownMax: null };
+
+// What fits in `room` px of tabs whose whole widths are given in strip order: the tabs not in view become icons, the
+// rightmost first, until the row fits; with all of them icons, the tab in view is cut to what is left, down to
+// MIN_TAB_PX, below which the row scrolls.
+export function fitTabs(room: number, tabs: readonly { id: string; whole: number }[], shownId: string | null): TabFit {
+  let total = tabs.reduce((sum, tab) => sum + tab.whole, 0) + TAB_GAP_PX * Math.max(0, tabs.length - 1);
+  if (total <= room) return WHOLE;
+  const icons = new Set<string>();
+  for (const tab of [...tabs].reverse()) {
+    if (total <= room) break;
+    if (tab.id === shownId || tab.whole <= ICON_TAB_PX) continue;
+    icons.add(tab.id);
+    total -= tab.whole - ICON_TAB_PX;
+  }
+  const shown = tabs.find((tab) => tab.id === shownId);
+  if (total <= room || shown === undefined) return { icons, shownMax: null };
+  return { icons, shownMax: Math.max(MIN_TAB_PX, Math.floor(shown.whole - (total - room))) };
+}
+
+const sameFit = (a: TabFit, b: TabFit) => a.shownMax === b.shownMax && a.icons.size === b.icons.size && [...a.icons].every((id) => b.icons.has(id));
+
+// The strip's fit, followed through resizes of the row and of its tabs. A tab's whole width is read while it is drawn
+// whole and kept for when it is not; a tab not measured yet is drawn whole first. A row not laid out (0 px) fits all.
+function useTabFit(list: RefObject<HTMLDivElement | null>, tabs: readonly PanelTabRef[], shownId: string | null): TabFit {
+  const [fit, setFit] = useState<TabFit>(WHOLE);
+  const whole = useRef(new Map<string, number>());
+  useLayoutEffect(() => {
+    const element = list.current;
+    if (!element) return;
+    const measure = () => {
+      for (const node of element.querySelectorAll<HTMLElement>('[data-tab-id]')) {
+        if (node.dataset.tabShape === 'whole') whole.current.set(node.dataset.tabId!, node.offsetWidth);
+      }
+      const room = element.clientWidth;
+      const next = room === 0 ? WHOLE : fitTabs(room, tabs.map((tab) => ({ id: tab.id, whole: whole.current.get(tab.id) ?? MIN_TAB_PX })), shownId);
+      setFit((previous) => (sameFit(previous, next) ? previous : next));
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    for (const node of element.children) observer.observe(node);
+    return () => observer.disconnect();
+  }, [list, tabs, shownId, fit]);
+  return fit;
+}
+
+type TabShape = 'whole' | 'icon' | 'cut';
+
+function Tab({ tab, selected, shape, maxWidth, canPin, bodyId, onSelect }: { tab: PanelTabRef; selected: boolean; shape: TabShape; maxWidth: number | null; canPin: boolean; bodyId: string; onSelect(): void }) {
   const { tool, title, suffix } = useTabLabel(tab); // the header reads the same label (P3-G)
   const closing = usePanelHost((s) => s.closing.has(tab.id));
   const pinnable = tool ? tool.pinnable : true;
   const ToolIcon = tool?.icon;
+  const label = suffix ? `${title} · ${suffix}` : title;
+  const iconOnly = shape === 'icon';
   const revealed = selected ? '' : 'hidden group-hover:inline-flex group-focus-within:inline-flex'; // unrevealed glyphs take no width
   const record = usePanelRecord(tab.id); // P4-B3: the artifact it shows, which a drag moves to main
   useEffect(() => () => endDragFrom('panel', tab.id), [tab.id]); // INV-5: a tab unmounting mid-drag ends its drag
@@ -71,26 +127,32 @@ function Tab({ tab, selected, canPin, bodyId, onSelect }: { tab: PanelTabRef; se
   const element = (
     <div
       data-tab-id={tab.id}
+      data-tab-shape={shape}
       draggable={record !== null || undefined}
       onDragStart={record === null ? undefined : (event) => beginDrag(event, { source: 'panel', tabId: tab.id, toolId: tab.toolId, artifactId: record })}
-      className={`group flex h-7 max-w-48 min-w-18 shrink-0 items-center rounded-sm ${selected ? 'bg-bg-active text-fg' : 'text-fg-muted hover:bg-bg-hover hover:text-fg'}`}
+      style={maxWidth === null ? undefined : { maxWidth }}
+      className={`group flex h-7 shrink-0 items-center rounded-sm ${iconOnly ? 'w-7' : 'max-w-48 min-w-18'} ${selected ? 'bg-bg-active text-fg' : 'text-fg-muted hover:bg-bg-hover hover:text-fg'}`}
     >
       <button
         type="button"
         role="tab"
         aria-selected={selected}
         aria-controls={selected ? bodyId : undefined}
+        aria-label={iconOnly ? label : undefined}
+        title={iconOnly ? label : undefined}
         tabIndex={selected ? 0 : -1}
         onClick={onSelect}
-        className="flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-sm pr-1 pl-2 text-ui outline-accent focus-visible:outline-2"
+        className={`flex h-full min-w-0 flex-1 items-center rounded-sm text-ui outline-accent focus-visible:outline-2 ${iconOnly ? 'justify-center' : 'gap-1.5 pr-1 pl-2'}`}
       >
-        {ToolIcon && <ToolIcon className="size-3.5 shrink-0" />}
-        <span className="truncate">
-          {title}
-          {suffix && <span className="text-fg-faint"> · {suffix}</span>}
-        </span>
+        {ToolIcon ? <ToolIcon className="size-3.5 shrink-0" /> : iconOnly && <span aria-hidden>{title.slice(0, 1).toUpperCase()}</span>}
+        {!iconOnly && (
+          <span className="truncate">
+            {title}
+            {suffix && <span className="text-fg-faint"> · {suffix}</span>}
+          </span>
+        )}
       </button>
-      {pinnable && (
+      {!iconOnly && pinnable && (
         <GlyphButton
           label={tab.pinned ? COPY.unpin(title) : COPY.pin(title)}
           pressed={tab.pinned}
@@ -101,9 +163,11 @@ function Tab({ tab, selected, canPin, bodyId, onSelect }: { tab: PanelTabRef; se
           <PinIcon />
         </GlyphButton>
       )}
-      <GlyphButton label={COPY.close(title)} disabled={closing} className={revealed} onClick={() => void panelHost.closeTab(tab.id)}>
-        <CloseIcon />
-      </GlyphButton>
+      {!iconOnly && (
+        <GlyphButton label={COPY.close(title)} disabled={closing} className={revealed} onClick={() => void panelHost.closeTab(tab.id)}>
+          <CloseIcon />
+        </GlyphButton>
+      )}
     </div>
   );
   if (!panelTabMoves(tab)) return element;
@@ -163,8 +227,12 @@ export function menuTools(tools: PanelHostState['tools'], tabs: PanelTabRef[]) {
     .sort((a, b) => rank(a.id) - rank(b.id));
 }
 
-function AddMenu({ appSessionId, tabs }: { appSessionId: AppSessionId | null; tabs: PanelTabRef[] }) {
+// "+" reads the scope's whole list (the pins, then the session's own), whichever group's strip it ends.
+function AddMenu({ appSessionId }: { appSessionId: AppSessionId | null }) {
   const tools = usePanelHost((s) => s.tools);
+  const pinned = useLayout((s) => s.panelPinned);
+  const own = useLayout((s) => (appSessionId === null ? undefined : s.panelBySession.get(appSessionId)?.tabs));
+  const tabs = [...pinned, ...(own ?? [])];
   const panes = usePanes(appSessionId); // R2: the session's plugin panes, listed under their own heading
   if (appSessionId === null) {
     return (
@@ -225,12 +293,6 @@ function AddMenu({ appSessionId, tabs }: { appSessionId: AppSessionId | null; ta
 }
 
 // The strip's glyphs, drawn like the shell's 16 px stroke icons.
-const HomeIcon = () => (
-  <Icon>
-    <rect x="2.5" y="2.5" width="11" height="11" rx="1.5" />
-    <path d="M5 6h6M5 8.5h6M5 11h3.5" />
-  </Icon>
-);
 const PinIcon = () => (
   <Icon className="size-3">
     <path d="M6 2.5h4M7 2.5v4L4.5 9h7L9 6.5v-4M8 9v4.5" />

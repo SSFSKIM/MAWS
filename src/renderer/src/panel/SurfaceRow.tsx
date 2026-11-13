@@ -9,8 +9,9 @@ import { Icon, IconButton } from '../app/IconButton';
 import { useLayout } from '../stores/layout';
 import { activeTab, sessionOfTab } from '../stores/layout-model';
 import { usePanes, openPaneTab } from '../engine-surface/panes';
-import { panelHost, usePanelHost } from './host';
-import { surfaceSession, surfaceTabs } from './surface-model';
+import { lastInViewOf, panelHost, usePanelHost } from './host';
+import { COPY } from './copy';
+import { sideGroups, surfaceRefs, surfaceSession, surfaceTabs } from './surface-model';
 import { useShellGeometry, useShellView } from '../app/shell-view';
 import { useWindowWidth } from '../app/regions';
 import { shellGeometry } from '../app/shell-geometry';
@@ -20,24 +21,23 @@ const PRIMARY = ['terminal', 'review', 'browser', 'files'];
 const ITEM = 'flex h-8 cursor-default items-center gap-2 rounded-sm px-2 text-ui outline-none data-highlighted:bg-bg-hover data-disabled:text-fg-faint';
 const MENU = 'z-50 min-w-48 rounded-md border border-border-strong bg-bg-overlay p-1 text-fg shadow-float';
 
-export function closeSurface(toolId: string) {
-  const state = useLayout.getState();
-  const session = surfaceSession(state);
-  state.setSurfaceStack(session, surfaceTabs(state, session).filter((tab) => tab.toolId !== toolId).map((tab) => tab.id));
-}
-
+// The one entry of a tool's icon, its menu rows and its `surface.*` action (UX wave U8b, M2, decision 3). The tool in
+// view on an open right side: the column hides, closing nothing. Else its tab comes into view: the one of that tool last
+// in view in this run, else the one a group remembers as shown (what a relaunch restores), else its last in the strip;
+// a tool with no tab is added. Nothing is ever placed under another by it.
 export function toggleSurface(toolId: string) {
   const state = useLayout.getState();
   const session = surfaceSession(state);
-  const visible = surfaceTabs(state, session);
-  if (!state.regions.panel.collapsed && visible.some((tab) => tab.toolId === toolId)) {
-    closeSurface(toolId);
+  if (!state.regions.panel.collapsed && surfaceTabs(state, session).some((tab) => tab.toolId === toolId)) {
+    state.hideSurfaces(session);
     return;
   }
   if (toolId === ASK_SHEET_TOOL_ID && session) settleWaitingAsks(session);
-  const held = state.effectivePanelTabs(session).find((tab) => tab.toolId === toolId);
+  const groups = sideGroups(state, session);
+  const remembered = [groups.upper.shown, groups.lower?.shown].find((tab) => tab?.toolId === toolId);
+  const held = lastInViewOf(session, toolId) ?? remembered ?? surfaceRefs(state, session).findLast((tab) => tab.toolId === toolId);
   if (!held && (!session || !usePanelHost.getState().tools.has(toolId))) return;
-  if (held) state.setPanelTabs(session, { tabs: state.effectivePanelTabs(session), activeTabId: held.id });
+  if (held) state.showSurfaceTab(session, held.id);
   else if (session) panelHost.addTool(toolId, { appSessionId: session });
   state.setPanel({ collapsed: false });
 }
@@ -50,7 +50,7 @@ export function toggleSessionCards() {
   const geometry = shellGeometry(state.regions, window.innerWidth, visible.length > 0, false, state.panelWidths);
   const cards = !state.regions.panel.collapsed && visible.length === 0 && (window.innerWidth - geometry.sidebar >= 960 || useShellView.getState().cardsOverlay);
   if (cards) state.setPanel({ collapsed: true });
-  else { state.setSurfaceStack(session, []); state.setPanel({ collapsed: false, maximized: false, floating: false }); useShellView.setState({ cardsOverlay: true }); }
+  else { state.hideSurfaces(session); state.setPanel({ collapsed: false, maximized: false, floating: false }); useShellView.setState({ cardsOverlay: true }); }
 }
 
 const SURFACE_ACTIONS: Readonly<Record<string, ActionId>> = {
@@ -131,7 +131,7 @@ function SurfaceContext({ toolId, children }: { toolId: string; children: ReactE
     <ContextMenu.Portal><ContextMenu.Content className={MENU}>
       {!PRIMARY.includes(toolId) && <ContextMenu.Item className={ITEM} onSelect={() => state.toggleSurfacePin(toolId)}>{pinned ? 'Unpin from toolbar' : 'Pin to toolbar'}</ContextMenu.Item>}
       {tab && tool?.pinnable && session && <ContextMenu.Item className={ITEM} onSelect={() => state.setPanelTabPinned(session, tab.id, !tab.pinned)}>{tab.pinned ? 'Keep with this session only' : 'Keep open for every session'}</ContextMenu.Item>}
-      <ContextMenu.Item className={ITEM} onSelect={() => toggleSurface(toolId)}>{opened ? 'Close surface' : 'Open surface'}</ContextMenu.Item>
+      <ContextMenu.Item className={ITEM} onSelect={() => toggleSurface(toolId)}>{opened ? COPY.hideSurface : COPY.openSurface}</ContextMenu.Item>
     </ContextMenu.Content></ContextMenu.Portal>
   </ContextMenu.Root>;
 }

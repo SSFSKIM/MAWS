@@ -1,7 +1,6 @@
 // Every sentence the panel host shows (C8a execution document, Interfaces *Copy*; the exact strings are decisions).
 // M2 adds the summary's section copy here.
 export const COPY = {
-  home: 'Session overview',
   add: 'Add a tool',
   addNoSession: 'Open a session to add a tool',
   noTools: 'No tools registered yet',
@@ -10,6 +9,10 @@ export const COPY = {
   pin: (title: string) => `Pin ${title}`,
   unpin: (title: string) => `Unpin ${title}`,
   close: (title: string) => `Close ${title}`,
+  // UX wave U8b (its execution document, Interfaces §F): the control at the strip's right end, and an icon's context menu
+  hideColumn: 'Hide side column',
+  openSurface: 'Open surface',
+  hideSurface: 'Hide surface',
 } as const;
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;

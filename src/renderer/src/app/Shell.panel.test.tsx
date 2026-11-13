@@ -79,7 +79,7 @@ afterEach(() => {
 });
 
 describe('shell renders the panel host in the region', () => {
-  it('keeps pins first in the inventory, shows only the selected tool’s tabs, and the pin glyph moves its ref', async () => {
+  it('keeps pins first in the inventory, shows every tab in one strip with the selected one in view, and the pin glyph moves its ref', async () => {
     const user = userEvent.setup();
     register(probeTool('terminal').tool, probeTool('files').tool);
     useLayout.setState({
@@ -89,8 +89,8 @@ describe('shell renders the panel host in the region', () => {
     renderShell();
     expect(effectiveIds()).toEqual(['terminal:pin00000', 'files:aaaaaaaa']);
     expect(selectedId()).toBe('files:aaaaaaaa');
-    expect(within(panel()).getByRole('tablist', { name: 'files tabs' })).toBeTruthy();
-    expect(within(panel()).queryByRole('tablist', { name: 'terminal tabs' })).toBeNull();
+    expect(within(panel()).getAllByRole('tablist')).toHaveLength(1);
+    expect(within(panel()).getAllByRole('tab').map((tab) => [tab.textContent, tab.getAttribute('aria-selected')])).toEqual([['terminal', 'false'], ['files', 'true']]);
     expect(screen.getByTestId('body:files:aaaaaaaa').textContent).toContain(`${A} · unpinned · visible`);
     expect(screen.queryByRole('complementary', { name: 'Session cards' })).toBeNull();
 

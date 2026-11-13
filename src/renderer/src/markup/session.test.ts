@@ -60,6 +60,7 @@ describe('startMarkup', () => {
     const terminal = { id: 'terminal:1', toolId: 'terminal', pinned: false };
     const tabs = [...useLayout.getState().effectivePanelTabs(A), terminal];
     useLayout.getState().setPanelTabs(A, { tabs, activeTabId: terminal.id });
+    useLayout.getState().moveSurfaceTab(A, terminal.id, 'lower'); // the browser above, the terminal below
     const s = surface();
     registerMarkupSurface(scope, s);
 
@@ -68,7 +69,7 @@ describe('startMarkup', () => {
     expect(s.end).not.toHaveBeenCalled();
     useLayout.getState().setPanelTabs(A, { tabs, activeTabId: terminal.id });
     expect(useMarkup.getState().session).not.toBeNull();
-    useLayout.getState().setSurfaceStack(A, [terminal.id]);
+    useLayout.getState().moveSurfaceTab(A, terminal.id, 'upper'); // the terminal alone in view
     expect(useMarkup.getState().session).toBeNull();
     expect(s.end).toHaveBeenCalledTimes(1);
   });
