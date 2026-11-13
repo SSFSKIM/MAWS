@@ -53,13 +53,15 @@ describe('a rejected call the model went on from (denials.jsonl, its first turn)
   const rows = journal('test/fixtures/transcript/denials.jsonl');
   const events = journalToEvents(rows);
   const REJECTED = 'toolu_synth_deny_1';
+  const NEXT_MESSAGE = 'msg_denials_024'; // the model's next message after the rejected result
 
   it('on the wire, by prefixes: stopped from its result until the next message’s first block, denied from then on', () => {
     const result = events.findIndex((e) => e.kind === 'tool.result' && e.toolUseId === REJECTED);
     // the next message's first block the reducer keeps: a text or thinking block's first delta, a completion or a call (a
     // call's input deltas are not kept, so its block arrives at its completion)
-    const keeps = (e: SessionEvent) => e.kind === 'assistant.block.complete' || e.kind === 'tool.use' || (e.kind === 'assistant.block.delta' && (e.blockType === 'text' || e.blockType === 'thinking'));
-    const next = events.findIndex((e, i) => i > result && keeps(e) && 'apiMessageId' in e && e.apiMessageId === 'msg_denials_024');
+    const reducerHolds = (e: SessionEvent) => e.kind === 'assistant.block.complete' || e.kind === 'tool.use' || (e.kind === 'assistant.block.delta' && (e.blockType === 'text' || e.blockType === 'thinking'));
+    const ofNextMessage = (e: SessionEvent) => 'apiMessageId' in e && e.apiMessageId === NEXT_MESSAGE;
+    const next = events.findIndex((e, i) => i > result && reducerHolds(e) && ofNextMessage(e));
     expect(result).toBeGreaterThan(0);
     expect(next).toBeGreaterThan(result);
     for (let n = result + 1; n <= next; n += 1) expect(reading(callOf(drawn(events.slice(0, n)), REJECTED)), `prefix ${n}`).toMatchObject({ status: 'stopped', disposition: 'stopped' });
