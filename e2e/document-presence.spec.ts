@@ -16,7 +16,7 @@ import { openArtifactReplicaInPanel } from './support/shell';
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { PerfSeam, type ReadResult } from './support/document-scale';
+import { blocksIn, PerfSeam, type ReadResult } from './support/document-scale';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
 
@@ -57,9 +57,9 @@ async function selectPanelSession(page: Page): Promise<void> {
   await (await sidebarRow(page, 'Harness A')).click();
 }
 
-// The owner's document, opened from the library in an `artifact` main tab.
-async function openInMain(page: Page, title: string): Promise<{ id: string; main: Locator }> {
-  const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'document', title });
+// The owner's document, opened from the library in an `artifact` main tab; made here unless `made` names it (U10a).
+async function openInMain(page: Page, title: string, made?: string): Promise<{ id: string; main: Locator }> {
+  const artifact = made ? { id: made } : (await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'document', title })).artifact;
   await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
   await page.locator('[data-library]').getByRole('article', { name: title, exact: true }).click({ timeout: 15_000 });
   const main = page.locator(`[data-artifact-tab="${artifact.id}"]`);
@@ -262,14 +262,6 @@ async function holds(page: Page, artifactId: string, revision: number, message: 
   }
 }
 
-/** The editor's top-level blocks as its state holds them: what it shows, apart from the widgets drawn over it. */
-const blocksIn = (editor: Locator): Promise<{ type: string; text: string }[]> =>
-  editor.evaluate((el) => {
-    const blocks: { type: string; text: string }[] = [];
-    type Top = { type: { name: string }; textContent: string };
-    (el as HTMLElement & { editor: { state: { doc: { forEach(fn: (node: Top) => void): void } } } }).editor.state.doc.forEach((node) => blocks.push({ type: node.type.name, text: node.textContent }));
-    return blocks;
-  });
 const typesIn = async (editor: Locator) => (await blocksIn(editor)).map((block) => block.type);
 
 /** Each list item's text and the runs of it in bold, as the editor's state holds them. */
@@ -298,11 +290,13 @@ test('an agent’s document the owner only looks at gains no revision: the re-cu
   const seam = new PerfSeam(join(userData!, 'document-perf'));
   await expect.poll(() => existsSync(join(seam.dir, 'in')), { message: 'the host seam is up' }).toBe(true);
   await selectPanelSession(page);
-  // a new document, open in a main tab and in the panel; nobody types in it
-  const { id, main } = await openInMain(page, 'Launch checklist');
+  // a new document, its revision read before any editor opens it, then open in a main tab and in the panel; nobody
+  // types in it
+  const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'document', title: 'Launch checklist' });
+  const created = await revisionOf(page, artifact.id);
+  const { id, main } = await openInMain(page, 'Launch checklist', artifact.id);
   const record = await openInPanel(page, id);
   const editors = [main.locator(LIVE), record.locator(LIVE)] as const;
-  const created = await revisionOf(page, id);
 
   // the agent writes into it: list items that begin with bold text, then a table, which is the last block
   const agent = 'document-unmade-writes-agent';
@@ -320,7 +314,7 @@ test('an agent’s document the owner only looks at gains no revision: the re-cu
     ],
   });
   expect(inserted.isError, inserted.text).toBe(false);
-  expect(inserted.result!.revision, 'the open of a new document wrote nothing').toBe(created + 1);
+  expect(inserted.result!.revision, 'opening the new document in two editors wrote nothing').toBe(created + 1);
   await test.step('both editors show the list and the table, the revision is the insert’s, and neither shows a paragraph under the table', async () => {
     for (const editor of editors) {
       await expect.poll(() => typesIn(editor), { timeout: 10_000 }).toEqual(['bulletList', 'table']);

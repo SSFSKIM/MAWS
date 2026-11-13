@@ -17,7 +17,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type CDPSession, type Locator, type Page } from '@playwright/test';
 import { pieces, recordDrawing, swapOffenders } from './support/document-provisional';
-import { imeStep, PerfSeam, type ReadResult } from './support/document-scale';
+import { blocksIn, imeStep, PerfSeam, type ReadResult } from './support/document-scale';
 import { keystrokes } from './support/hangul';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
@@ -262,14 +262,6 @@ test('a layer aimed at the block the owner is composing in stays out of that blo
 // syllable composed in a paragraph writes no paragraph under the table while it is open or when it ends; the owner's next
 // plain keystroke writes exactly one.
 
-/** The editor's top-level blocks as its state holds them: what it shows, apart from the widgets drawn over it. */
-const blocksIn = (editor: Locator): Promise<{ type: string; text: string }[]> =>
-  editor.evaluate((el) => {
-    const blocks: { type: string; text: string }[] = [];
-    type Top = { type: { name: string }; textContent: string };
-    (el as HTMLElement & { editor: { state: { doc: { forEach(fn: (node: Top) => void): void } } } }).editor.state.doc.forEach((node) => blocks.push({ type: node.type.name, text: node.textContent }));
-    return blocks;
-  });
 const lastType = async (editor: Locator) => (await blocksIn(editor)).at(-1)?.type;
 const revisionOf = async (page: Page, artifactId: string): Promise<number> => (await ok<{ artifact: { revision: number } }>(page, 'artifacts.get', { artifactId })).artifact.revision;
 
@@ -289,6 +281,7 @@ test('a syllable composed in an agent’s document that ends with a table writes
   await expect(editor).toBeFocused();
   const cdp: CDPSession = await page.context().newCDPSession(page);
   const steps = keystrokes('한');
+  let composing = -1; // the revision once the open composition's input is durable
   try {
     for (const step of steps.filter((s) => s.kind !== 'commit')) await imeStep(cdp, step, steps);
     await expect(editor.locator(`[data-id="${kickoff}"]`)).toHaveText('The kickoff is on Monday.한');
@@ -298,14 +291,18 @@ test('a syllable composed in an agent’s document that ends with a table writes
         await page.waitForTimeout(100);
       }
     });
+    // the composed input so far is at the host: what the composition's end writes, if anything, is after this revision
+    await durable(editor);
+    composing = await revisionOf(page, id);
     await cdp.send('Input.insertText', { text: '한' }); // the composition ends
   } finally {
     await cdp.detach();
   }
-  await test.step('when it ends the syllable is intact and there is still none, in the editor and at the host', async () => {
+  await test.step('when it ends the syllable is intact and nothing is written: still no paragraph, in the editor and at the host', async () => {
     await expect(editor.locator(`[data-id="${kickoff}"]`)).toHaveText('The kickoff is on Monday.한');
     await durable(editor);
     for (const until = Date.now() + 1_500; Date.now() < until; ) {
+      expect(await revisionOf(page, id), 'nothing written at the composition’s end').toBe(composing);
       expect(await lastType(editor)).toBe('table');
       await page.waitForTimeout(250);
     }
@@ -314,13 +311,12 @@ test('a syllable composed in an agent’s document that ends with a table writes
     expect(read.result!.markdown.trimEnd(), 'the host’s copy ends with the table').toMatch(/\n\^[0-9a-z]+$/); // a table's marker stands on a line of its own
   });
   await test.step('the owner’s next plain keystroke brings exactly one paragraph under the table, in the same write', async () => {
-    const before = await revisionOf(page, id);
     await page.keyboard.type('.');
     // the table, then one empty paragraph and nothing after it
     await expect.poll(async () => (await blocksIn(editor)).slice(-2).map((block) => `${block.type}:${block.text}`), { timeout: 10_000 }).toEqual(['table:RiskOwnerVendor delayDana', 'paragraph:']);
     await durable(editor);
     await expect(editor.locator(`[data-id="${kickoff}"]`)).toHaveText('The kickoff is on Monday.한.');
-    expect(await revisionOf(page, id), 'the keystroke and its paragraph are one revision').toBe(before + 1);
+    expect(await revisionOf(page, id), 'the keystroke and its paragraph are one revision').toBe(composing + 1);
   });
   expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
 });
