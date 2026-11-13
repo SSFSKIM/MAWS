@@ -149,8 +149,23 @@ function Configured({ servers, readAt, cwd, place, attached, askIn }: { servers:
   const engine = useSessions((s) => s.engine);
   // P5 O7 M5c: this Mac's ready sessions alone (the architect's ruling): a sign-in keeps its credential on the machine it
   // runs on, and this Mac's Customize signs in on this Mac; another machine's are configured from its Connectors sheet
-  const ready = useMemo<HoldingSession[]>(() => [...engine.values()].filter((status) => status.process === 'ready' && machineOf(status.appSessionId) === ipc.localMachine).map((status) => ({ appSessionId: status.appSessionId, cwd: status.cwd, servers: status.mcpServers.map((server) => server.name) })), [engine]);
   const read = useEngineRead('session.mcpStatus', { appSessionId: attached ?? ('' as AppSessionId) }, { enabled: attached !== null });
+  // U11a M8 (§A): the servers each ready session holds, for a row of MAWS's own list. The store's list is the engine's
+  // init frame's, which a session started with no message has not sent (P7 run 43386195217); for the attached session
+  // the page's own mcp_status read says it too. A ready session that is not the attached one and has had no first turn
+  // is still not found (ticket 619).
+  const attachedServers = read.data?.mcpServers;
+  const ready = useMemo<HoldingSession[]>(
+    () =>
+      [...engine.values()]
+        .filter((status) => status.process === 'ready' && machineOf(status.appSessionId) === ipc.localMachine)
+        .map((status) => {
+          const listed = status.mcpServers.map((server) => server.name);
+          const answered = status.appSessionId === attached && attachedServers ? attachedServers.map((server) => server.name) : [];
+          return { appSessionId: status.appSessionId, cwd: status.cwd, servers: [...new Set([...listed, ...answered])] };
+        }),
+    [engine, attached, attachedServers],
+  );
   const liveOf = (name: string) => {
     if (attached === null || !read.data) return undefined;
     const entry = read.data.mcpServers.find((server) => server.name === name);
