@@ -7,7 +7,9 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { deliverableUrl } from '@shared/maws/deliverable';
 import { artifactUrl } from '@shared/artifacts/scheme'; // P3-L (M5b)
 import { fileLineAnchor } from '../../tools/code/anchor/anchor';
-import { CLAIM_DEADLINE_MS, cardGone, claimCard, closeCard, openCard, targetOf, useCommentCard } from './store';
+import { laneAState } from '../../lane-a/test-support/lane-a-state';
+import { applyLaneAState, dismissPendingSend, holdPendingSend, resetLaneAStore } from '../../stores/lane-a';
+import { CLAIM_DEADLINE_MS, cardGone, claimCard, closeCard, notePlace, openCard, resetPlaceNotes, SENT_NOTE_MS, targetOf, useCommentCard } from './store';
 
 const PARENT = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
 const RECORD = '00000000-0000-4000-8000-000000000001';
@@ -130,5 +132,65 @@ describe('an unhosted card', () => {
     redock();
     vi.advanceTimersByTime(CLAIM_DEADLINE_MS / 2);
     expect(open()).not.toBeNull();
+  });
+});
+
+// UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, §C and decision 8): the line a host draws
+// in its card's place after a send to the main conversation, by the place it belongs to
+describe('the place’s note', () => {
+  const KEY = { writer: 'maws/m', seq: 4 };
+  const AT = '2026-11-12T10:00:00.000Z';
+  const note = (place: string) => useCommentCard.getState().notes.get(place) ?? null;
+  const pending = { kind: 'pending', appSessionId: PARENT, key: KEY, title: 'Q3 plan' } as const;
+
+  beforeEach(() => {
+    resetPlaceNotes();
+    resetLaneAStore();
+  });
+
+  it('a sent line leaves after SENT_NOTE_MS; a newer line at the place is not taken by the older one’s timer', () => {
+    vi.useFakeTimers();
+    notePlace('h1', { kind: 'sent', text: 'Sent to Q3 plan', at: Date.now() });
+    vi.advanceTimersByTime(SENT_NOTE_MS - 1);
+    expect(note('h1')).toMatchObject({ kind: 'sent', text: 'Sent to Q3 plan' });
+    notePlace('h1', { kind: 'sent', text: 'Sent to Q4 plan', at: Date.now() });
+    vi.advanceTimersByTime(1);
+    expect(note('h1')).toMatchObject({ text: 'Sent to Q4 plan' });
+    vi.advanceTimersByTime(SENT_NOTE_MS);
+    expect(note('h1')).toBeNull();
+    expect(SENT_NOTE_MS).toBe(4_000);
+  });
+
+  it('a pending line follows its pending send by key: it stays through every fate but entry, then is the sent line', () => {
+    vi.useFakeTimers();
+    holdPendingSend(PARENT, KEY, 'the words');
+    notePlace('h1', pending);
+    vi.advanceTimersByTime(60_000);
+    expect(note('h1')).toEqual(pending); // never leaves by itself
+    applyLaneAState(PARENT, laneAState(PARENT, { deliveries: [{ key: KEY, at: AT, state: 'refused', reason: 'too busy' }] }));
+    expect(note('h1')).toEqual(pending);
+    applyLaneAState(PARENT, laneAState(PARENT, { deliveries: [{ key: KEY, at: AT, state: 'entered' }] }));
+    expect(note('h1')).toMatchObject({ kind: 'sent', text: 'Sent to Q3 plan' });
+    vi.advanceTimersByTime(SENT_NOTE_MS);
+    expect(note('h1')).toBeNull();
+  });
+
+  it('a pending line leaves with its pending send when the person dismisses or resends it, and follows no other key', () => {
+    const other = { writer: 'maws/m', seq: 3 };
+    holdPendingSend(PARENT, other, 'the words'); // the same text, an older send
+    holdPendingSend(PARENT, KEY, 'the words');
+    notePlace('h1', pending);
+    dismissPendingSend(PARENT, other);
+    applyLaneAState(PARENT, laneAState(PARENT, { deliveries: [{ key: other, at: AT, state: 'entered' }] }));
+    expect(note('h1')).toEqual(pending);
+    dismissPendingSend(PARENT, KEY);
+    expect(note('h1')).toBeNull();
+  });
+
+  it('a pending send whose words entered before its line was set makes the line the sent one at once', () => {
+    holdPendingSend(PARENT, KEY, 'the words');
+    applyLaneAState(PARENT, laneAState(PARENT, { deliveries: [{ key: KEY, at: AT, state: 'entered' }] }));
+    notePlace('h1', pending);
+    expect(note('h1')).toMatchObject({ kind: 'sent', text: 'Sent to Q3 plan' });
   });
 });

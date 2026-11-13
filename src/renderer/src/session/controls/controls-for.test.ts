@@ -17,7 +17,8 @@ import { laneACatalog, laneAState } from '../../lane-a/test-support/lane-a-state
 import { useSessions } from '../../stores/sessions';
 import { applyRemoteSession, resetRemoteLaneBStore } from '../../lane-b/remote-session';
 import { ALL_OPEN, remoteSessionState } from '../../lane-b/test-support/remote-session';
-import { answerSession, askSession, compactSession, controlsFor, drivenByBridge, sendToSession, sessionControls, stopSessionTask, useSessionControls } from './controls-for';
+import { answerSession, askSession, compactSession, controlsFor, drivenByBridge, screenshotRoom, sendToSession, sessionControls, stopSessionTask, useSessionControls } from './controls-for';
+import { FILES_MAX, LANE_A_WORDS } from './lane-a'; // UX wave U5a
 import { READER } from '../../sessions/share/copy'; // board 525
 import { readerGradeOf, resetReader, useReader } from '../../sessions/share/reader'; // board 525
 
@@ -319,5 +320,26 @@ describe('a caller outside the pane', () => {
     expect(await compactSession(APP, undefined, none.client)).toEqual({ state: 'refused', code: 'held', message: held });
     expect(await stopSessionTask(APP, 'task-1', none.client)).toEqual({ state: 'refused', code: 'held', message: held });
     expect(none.calls).toEqual([]);
+  });
+});
+
+// UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, decision 9): how many screenshots a message
+// to the session can carry, and the sentence the composer says when it can't carry more
+describe('screenshotRoom', () => {
+  it('is unbounded for a session MAWS runs', () => {
+    useSessions.setState({ records: new Map([[APP, record(APP)]]) });
+    expect(screenshotRoom(APP)).toBeNull();
+  });
+
+  it('is the bridge’s four files for a terminal session on this Mac, and none for one on another machine', () => {
+    useSessions.setState({ records: new Map([[APP, record(APP, { holder: terminal })]]) });
+    applyLaneAState(APP, laneAState(APP));
+    expect(FILES_MAX).toBe(4);
+    expect(screenshotRoom(APP)).toEqual({ max: 4, reason: LANE_A_WORDS.tooManyFiles });
+
+    const remote = addressOf(OTHER_MACHINE, 'eng-r' as AppSessionId);
+    useSessions.setState({ listed: new Map([[remote, { ...remoteRow(OTHER_MACHINE, 'eng-r', { lane: 'A', availability: 'foreign_held' }), appId: remote }]]) });
+    applyLaneAState(remote, laneAState(remote, { link: { state: 'up', refusal: null, carrier: 'direct', member: 'm', clientClass: 'native-mac', rights: [], reason: null }, acts: [] }));
+    expect(screenshotRoom(remote)).toEqual({ max: 0, reason: LANE_A_WORDS.remoteMedia });
   });
 });

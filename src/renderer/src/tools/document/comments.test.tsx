@@ -18,7 +18,7 @@ import { record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
 import { at } from '../../../../../test/support/machine';
 import type { sendHumanPrompt } from '../../composer/submit/send-human-prompt'; // P3-F (L154)
-import { sendComment } from '../../side/actions';
+import { sendComments } from '../../side/actions';
 import { useCommentCard } from '../../side/card/store';
 import { openComment } from '../../side/register';
 import { useNotices } from '../../stores/notices';
@@ -52,7 +52,8 @@ afterAll(() => {
 beforeEach(() => {
   resetShellStores();
   useNotices.setState({ notices: [] });
-  fake = fakeClient({ 'side.sendToMain': { messageUuid: null, disposition: 'sent' }, 'session.intent.get': null });
+  // UX wave U5a: a ticked comment's content is main's, sent through the session's port as a typed message is
+  fake = fakeClient({ 'side.comment.content': { content: [{ type: 'text', text: 'the built message' }] }, 'session.queue.list': { entries: [], paused: false }, 'session.send': { messageUuid: null, disposition: 'sent', queueId: null }, 'session.intent.get': null });
   window.maws = fake.client as unknown as PreloadBridge;
   offComposer = registerCommentComposer(openComment);
   const s = useSessions.getState();
@@ -90,9 +91,9 @@ describe('the artifact-comment anchor', () => {
 
   it('goes to the agent by both routes unchanged, its tag round-tripping', async () => {
     const anchor = artifactCommentAnchor({ artifactId: ARTIFACT, title: 'Q3 plan', ...passage });
-    await expect(sendComment('main', { parent: PARENT, anchor, text: 'Should this be monthly?', screenshot: null })).resolves.toEqual({ ok: true, disposition: 'sent' });
-    expect(fake.invoked('side.sendToMain')).toEqual([{ appSessionId: bareOf(PARENT), anchor, text: 'Should this be monthly?', screenshot: null }]);
-    const sent = sendComment('thread', { parent: PARENT, anchor, text: 'Should this be monthly?', screenshot: null }, { reveal: () => false });
+    await expect(sendComments(PARENT, [{ anchor, text: 'Should this be monthly?', screenshot: null }], true)).resolves.toEqual({ ok: true, to: 'main', disposition: 'sent' });
+    expect(fake.invoked('side.comment.content')).toEqual([{ comments: [{ anchor, text: 'Should this be monthly?', screenshot: null }] }]);
+    const sent = sendComments(PARENT, [{ anchor, text: 'Should this be monthly?', screenshot: null }], false, { reveal: () => false });
     await act(() => fake.reply('side.thread.open', { status: 'starting', appSessionId: 'c3333333-3333-4333-8333-333333333333' }));
     await sent;
     expect(fake.invoked('side.thread.open')).toEqual([{ appSessionId: bareOf(PARENT), from: { kind: 'comment', anchor, text: 'Should this be monthly?', screenshot: null } }]);
@@ -166,7 +167,7 @@ describe('the card on a document', () => {
     const { reach, comment } = mount();
     comment();
     await act(async () => {});
-    await userEvent.click(screen.getByRole('radio', { name: 'Send to main' }));
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Send to main' }));
     await userEvent.type(field(), 'Should this be monthly?{Enter}');
     expect(reach.record).toHaveBeenCalledWith(passage.threadId, 'Should this be monthly?');
     expect(card()).toBeNull();
@@ -408,7 +409,7 @@ describe('the compose card in the margin and the draft rule', () => {
   it('⌘Enter posts beside Enter (C3)', async () => {
     const m = mountMargin();
     await opened(m);
-    await userEvent.click(screen.getByRole('radio', { name: 'Send to main' }));
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Send to main' }));
     await userEvent.type(field(), 'Should this be monthly?');
     await userEvent.keyboard('{Meta>}{Shift>}{Enter}{/Shift}{/Meta}');
     expect(m.reach.record).toHaveBeenCalledWith(passage.threadId, 'Should this be monthly?');

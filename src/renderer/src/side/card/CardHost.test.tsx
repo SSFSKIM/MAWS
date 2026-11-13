@@ -14,7 +14,9 @@ import { resetPanelStores } from '../../test-support/panel';
 import type { CardRect } from '../../tools/code/anchor/anchor';
 import { hideSideChild, showSideChild, useSidePane } from '../store';
 import { CommentCardHost, type CardFrame } from './CardHost';
-import { CLAIM_DEADLINE_MS, openCard, useCommentCard } from './store';
+import { CLAIM_DEADLINE_MS, closeCard, notePlace, openCard, resetPlaceNotes, useCommentCard } from './store';
+import { holdPendingSend, resetLaneAStore } from '../../stores/lane-a'; // UX wave U5a
+import { shownSession } from '../../panel/host'; // UX wave U5a
 
 const PARENT = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
 const CHILD = 'c5555555-5555-4555-8555-000000000001' as AppSessionId;
@@ -379,5 +381,75 @@ describe('the margin layout', () => {
     HOST_BOX.width = 220;
     act(() => resized?.());
     expect(card()!.style.width).toBe('220px');
+  });
+});
+
+// UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, §C "What the host draws"): after a send to
+// the main conversation the host draws its note in the card's place: the strip's line under a page, the top right corner
+// of an HTML page's box, where the card was over a document. A host draws only its own place's note, and the open card
+// before it.
+describe('the place’s note', () => {
+  beforeEach(() => {
+    resetPlaceNotes();
+    resetLaneAStore();
+  });
+  afterEach(() => resetPlaceNotes());
+  const sent = () => document.querySelector<HTMLElement>('[data-sent-note]');
+
+  it('docked, the line is in the strip, one line in flow; an open card is drawn in its stead', () => {
+    render(
+      <div data-column="">
+        <CommentCardHost hostId="h1" host="browser" mode="tab" layout="docked" accepts={() => true} frame={frameOf('k1')} visible />
+      </div>,
+    );
+    act(() => notePlace('h1', { kind: 'sent', text: 'Sent to Q3 plan', at: Date.now() }));
+    expect(sent()!.textContent).toBe('Sent to Q3 plan');
+    expect(sent()!.closest('[data-card-dock]')).not.toBeNull();
+    expect(sent()!.className).toContain('text-ui-sm');
+    expect(sent()!.className).toContain('text-fg-muted');
+    expect(sent()!.getAttribute('role')).toBe('status');
+    act(() => openCard(ANCHOR, { appSessionId: PARENT, placement: { kind: 'card', host: 'browser', hostId: 'h1' } }));
+    expect(card()).not.toBeNull();
+    expect(sent()).toBeNull();
+    act(() => closeCard());
+    expect(sent()!.textContent).toBe('Sent to Q3 plan');
+  });
+
+  it('anchored over an HTML page, the line is in the box’s top right corner; another host’s note is not drawn', () => {
+    render(<Host frame={frameOf('k1')} />);
+    act(() => notePlace('h2', { kind: 'sent', text: 'Sent to elsewhere', at: Date.now() }));
+    expect(sent()).toBeNull();
+    act(() => notePlace('h1', { kind: 'sent', text: 'Sent to Q3 plan', at: Date.now() }));
+    expect(sent()!.className).toMatch(/\btop-2\b/);
+    expect(sent()!.className).toMatch(/\bright-2\b/);
+    expect(sent()!.className).toContain('pointer-events-auto');
+  });
+
+  it('anchored over a document, the line is where the card was', async () => {
+    render(
+      <div className="relative">
+        <CommentCardHost hostId="h1" host="artifact" mode="panel" layout="anchored" accepts={() => true} frame={frameOf('k1')} visible />
+      </div>,
+    );
+    act(() => openCard(ANCHOR, { appSessionId: PARENT, placement: { kind: 'card', host: 'artifact', hostId: 'h1', rect: HERO } }));
+    const where = { left: card()!.style.left, top: card()!.style.top };
+    act(() => {
+      closeCard();
+      notePlace('h1', { kind: 'sent', text: 'Sent to Q3 plan', at: Date.now() });
+    });
+    expect({ left: sent()!.style.left, top: sent()!.style.top }).toEqual(where);
+  });
+
+  it('a pending line names its state in the session’s words, and Show brings that session’s tab to the front', () => {
+    const key = { writer: 'maws/m', seq: 1 };
+    useSessions.setState({ records: new Map() });
+    holdPendingSend(PARENT, key, 'the words');
+    render(<Host frame={frameOf('k1')} />);
+    act(() => notePlace('h1', { kind: 'pending', appSessionId: PARENT, key, title: 'Q3 plan' }));
+    const line = document.querySelector<HTMLElement>('[data-pending-note]')!;
+    expect(line.textContent).toContain('Not confirmed yet in Q3 plan');
+    expect(sent()).toBeNull();
+    act(() => line.querySelector<HTMLButtonElement>('button')!.click());
+    expect(shownSession()).toBe(PARENT);
   });
 });
