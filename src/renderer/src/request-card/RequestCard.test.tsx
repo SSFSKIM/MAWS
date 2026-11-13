@@ -567,7 +567,8 @@ describe('request card placements and delivery states', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Deny' }));
     expect(await screen.findByText('Already answered elsewhere')).toBeTruthy();
     act(() => vi.advanceTimersByTime(2_000));
-    expect(second.view.container.querySelector('[data-request-card]')).toBeNull();
+    // its closing timer is set in an effect React may still have queued under load: the card goes by then
+    await waitFor(() => expect(second.view.container.querySelector('[data-request-card]')).toBeNull());
     second.view.unmount();
     vi.useRealTimers();
 
