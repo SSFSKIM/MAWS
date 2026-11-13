@@ -12,9 +12,11 @@
 // Before Touch ID, main may bring the machine up to date (push the org's head to it) and read its ledger again, so from
 // the press until the answer the sheet says so: never a dead button. Main offers no cancel for either, so none is shown:
 // the sheet's own button reads Close meanwhile, and an answer that comes after it closed lands nowhere. Every refusal reads in its own words,
-// `ineligible` with each problem `grantProblems` named, `ledger-unread` with main's detail (through this Mac's own door:
-// its endpoint hasn't seen the person yet, so try again shortly). Once this Mac may no longer sign a grant there (its
-// grants record damaged, or no longer an owner's device), Save is withdrawn and the sheet says why.
+// and names what to do next or who can act (U11a board 540): main's detail follows only where it says what the line does not
+// (`ledger-unread`'s which ledger, `storage`'s what could not be written, `refused`'s verdict code), and `ineligible`
+// lists each problem `grantProblems` names, once. Once this Mac may no longer sign a grant there (its grants record
+// damaged, or no longer an owner's device), Save is withdrawn and the sheet says why. With nobody to grant to, the sheet
+// still says its read's state: reading, or why the read failed with Retry, and that everyone owns it only once known.
 import { useState } from 'react';
 import { GRANT_RIGHTS, type GrantRegrantResult, type GrantSetResult, type GrantsView } from '@shared/ipc/schema/org';
 import { ipc } from '../../ipc/client';
@@ -42,8 +44,13 @@ function savedOutcome(machine: string, version: number, delivered: Extract<Grant
   return { text: `${ORG.grantedRefused(version, machine, ORG.grantVerdicts[delivered.refused])} · ${delivered.refused}`, refused: true };
 }
 
+// U11a board 540 (§B): the reasons whose detail main words as the line already says it (`ineligible`'s is its list, drawn
+// below); any other reason's detail, one main gains later included, follows the line
+const REPEATS = new Set<Refused['reason']>(['busy', 'invalid', 'no-change', 'stale', 'none', 'ineligible']);
+
 function RefusedLine({ refused }: { refused: Refused }) {
-  const text = [ORG.notSigned, ORG.grantRefusals[refused.reason], refused.detail].filter((part) => part !== undefined && part !== '').join(' · ');
+  const detail = REPEATS.has(refused.reason) ? undefined : refused.detail;
+  const text = [ORG.notSigned, ORG.grantRefusals[refused.reason], detail].filter((part) => part !== undefined && part !== '').join(' · ');
   return (
     <div role="alert" className="text-warning">
       <p className="m-0">{text}</p>
@@ -56,6 +63,11 @@ function RefusedLine({ refused }: { refused: Refused }) {
       )}
     </div>
   );
+}
+
+/** While the machine's grants are unknown: a read still out, or why the last failed, with Retry. */
+function ReadState({ machine, unread, retry }: { machine: string; unread: string | null; retry(): void }) {
+  return unread === null ? <p className="m-0 text-fg-muted">{ORG.grantReading(machine)}</p> : <Unread line={unread} retry={retry} />;
 }
 
 type GrantProps = {
@@ -139,7 +151,8 @@ export function GrantSheet({ machine, members, grants, unread, onRetry, may, dra
       >
         <div className="flex flex-col gap-3 text-ui-sm leading-normal">
           {choices.length === 0 ? (
-            <p className="m-0 text-fg-muted">{ORG.grantNobody}</p>
+            // nobody to grant to, as far as is known: until the grants are, the read's own state
+            reading ? <ReadState machine={name} unread={unread} retry={onRetry} /> : <p className="m-0 text-fg-muted">{ORG.grantNobody}</p>
           ) : (
             <>
               <label className="flex items-center gap-3">
@@ -164,7 +177,7 @@ export function GrantSheet({ machine, members, grants, unread, onRetry, may, dra
                   </label>
                 ))}
               </fieldset>
-              {reading && (unread === null ? <p className="m-0 text-fg-muted">{ORG.grantReading(name)}</p> : <Unread line={unread} retry={onRetry} />)}
+              {reading && <ReadState machine={name} unread={unread} retry={onRetry} />}
               {noLonger && <p className="m-0 text-warning">{ORG.grantNoLonger}</p>}
               {withdraws && <p className="m-0 text-fg-muted">{ORG.grantWithdrawLine(email, name)}</p>}
               <p className="m-0 text-fg-muted">{ORG.grantIntro}</p>
@@ -213,11 +226,7 @@ export function RegrantSheet({ machine, members, grants, unread, onRetry, may, o
       <SheetForm submitLabel={!offered ? undefined : saving ? ORG.saving : ORG.regrantConfirm} submitClass={PRIMARY} canSubmit={!saving} onSubmit={confirm} focusSubmit cancelLabel={saving ? ORG.close : ORG.cancel}>
         <div className="flex flex-col gap-2 text-ui-sm leading-normal">
           {grants === null ? (
-            unread === null ? (
-              <p className="m-0 text-fg-muted">{ORG.grantReading(name)}</p>
-            ) : (
-              <Unread line={unread} retry={onRetry} />
-            )
+            <ReadState machine={name} unread={unread} retry={onRetry} />
           ) : missing.length === 0 ? (
             <p className="m-0 text-fg-muted">{ORG.grantRefusals.none}</p>
           ) : (

@@ -1560,6 +1560,7 @@ The door adds no authority. An act through it is authenticated by its step-up si
   - A sent message shows "sending" until `human-ack`. A refusal shows under it ("not reachable" for a session hidden from you, P5 Decision Log 224).
   - B3 has moved the last machine (P5 Decision Log 154), so words no longer wait.
 - **Offline.** With the hub unreachable or signed out, the tab draws the cached stream with "As of <time>", the time of its last `caught-up`, and the composer is withdrawn.
+  - Amended 2026-11-13: UX wave U11 (S-09): the Channel's footer reads the channel's own reach first.
 - **What it leaves out.** Withheld tombstones, `unlisted` notices and lifecycle events draw nothing. Lifecycle events give the stream its sessions' titles and machines. An event that doesn't verify draws nothing and is counted ("2 events didn't verify"), then tried again at the next head.
 
 **Touches.**

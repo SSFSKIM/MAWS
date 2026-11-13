@@ -162,6 +162,9 @@ export function dispatchKey(event: KeyboardEvent, keymap: KeymapOverrides, table
     const binding = owner(id, target, table);
     if (!binding) continue;
     event.preventDefault();
+    // UX wave U1a (§D, decision 17): a binding that answers a request acts on a fresh press only, so a chord held through
+    // one answer cannot answer the request that takes its place; its repeat is taken here and runs nothing
+    if (binding.fresh && event.repeat) return true;
     // E9: a hold action latches before it runs, so a release its handler causes finds the latch
     if (table[id].hold) {
       releaseHold('lost');

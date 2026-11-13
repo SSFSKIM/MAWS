@@ -22,6 +22,8 @@ import { item } from '../../test/support/builders';
 import { summary, tempDir } from '../../test/support/index-fixture';
 import { GitService } from './git/service';
 import { Index } from './index/index';
+import { IndexSessionSource } from './index/source';
+import { STREAM_GRACE_MS } from './lane-a/attention';
 import { ScmService } from './scm/service';
 import { openSpineData, startSpine, type SpineData, type SpineRoot } from './spine-root';
 import { takeSpineLock } from './settings/spine-lock';
@@ -292,6 +294,166 @@ describe('the spine and the checkouts composed under plain Node', () => {
     const digests = await bus.invoke('session.digests', undefined);
     if (!digests.ok) throw new Error(digests.error.message);
     expect(digests.value.digests.find((d) => d.appSessionId === appSessionId)).toMatchObject({ phase: 'waiting', pendingRequests: 1 });
+  });
+
+  // UX wave U1a (UC-1, Interfaces §B, "One holder"; the review of M1): an answer the bridge took leaves the machine's list,
+  // its attention.changed and the session's digest through the root's own wiring, while the bridge still lists it (it
+  // settles nothing here). The badge is main's count over these same items (`src/main/attention/notifier.ts`, whose test
+  // holds that count to `waits`); at the spine, attention.list and attention.changed stand in for it.
+  it.each([
+    // main-only: a window's invoke is refused it; the endpoint's dispatch reaches the front's table as `main` does here
+    ['this machine’s endpoint says it took (laneA.accepted)', (bus: FakeBus, _appSessionId: AppSessionId, engineSessionId: string) => bus.main('laneA.accepted', { session: engineSessionId, request: 'req-1' })],
+    ['the driver’s own answer is taken (the bridge’s 200)', (bus: FakeBus, appSessionId: AppSessionId) => bus.invoke('laneA.answer', { appSessionId, request: 'req-1', answer: { kind: 'permission', decision: 'allow', scope: 'once' } })],
+  ])('holds back a request %s: gone from attention and the digest while the bridge still lists it', async (_how, take) => {
+    const engineSessionId = '0e5b1c0d-0000-4000-8000-0000000000a2';
+    const seeded = new Index(join(profile, 'index.sqlite'));
+    const appSessionId = seeded.sessions.upsertFromSummary(summary({ sessionId: engineSessionId as SessionId })).record.appId;
+    seeded.sessions.setHolder(engineSessionId as SessionId, { kind: 'terminal', pid: 4242 });
+    seeded.close();
+    const bridge = await startFakeBridge({ home: sminos, session: engineSessionId });
+    bridges.push(bridge);
+    const bus = fakeBus();
+    compose(await openSpineData(profile, { build: BUILD }), new FakeSpineHost(), bus);
+    await expect.poll(async () => bus.invoke('laneA.state', { appSessionId }), { timeout: 5000 }).toMatchObject({ ok: true, value: { bridge: 'live' } });
+    bridge.raise({ request: 'req-1', tool: 'Bash', input: { command: 'echo made-up' } });
+    await expect.poll(async () => bus.invoke('attention.list', undefined), { timeout: 5000 }).toMatchObject({ ok: true, value: [expect.objectContaining({ id: `lane-a:${engineSessionId}:req-1` })] });
+    const digestOf = async () => {
+      const digests = await bus.invoke('session.digests', undefined);
+      if (!digests.ok) throw new Error(digests.error.message);
+      return digests.value.digests.find((d) => d.appSessionId === appSessionId);
+    };
+    expect(await digestOf()).toMatchObject({ phase: 'waiting', pendingRequests: 1 });
+    const changesBefore = bus.emittedOf('attention.changed').length;
+
+    expect(await take(bus, appSessionId, engineSessionId)).toMatchObject({ ok: true });
+    await expect.poll(async () => bus.invoke('attention.list', undefined)).toEqual({ ok: true, value: [] });
+    const changes = bus.emittedOf('attention.changed').slice(changesBefore).filter((c) => c.appSessionId === appSessionId);
+    expect(changes.at(-1)?.items).toEqual([]);
+    const digest = await digestOf();
+    expect(digest?.pendingRequests).toBe(0);
+    expect(digest?.phase).not.toBe('waiting');
+    expect(await bus.invoke('laneA.state', { appSessionId })).toMatchObject({ ok: true, value: { bridge: 'live', pending: [expect.objectContaining({ request: 'req-1' })] } });
+  });
+
+  // UX wave U7 (the architect's ruling of 2026-11-13 on the M3 review's finding 3): a bridge's phase reaches the digest only
+  // from a current snapshot. A live bridge's view before its first snapshot is an empty fold, which would read idle.
+  describe('a bridged digest from current snapshots only', () => {
+    const terminalSession = async (engineSessionId: string) => {
+      const seeded = new Index(join(profile, 'index.sqlite'));
+      const appSessionId = seeded.sessions.upsertFromSummary(summary({ sessionId: engineSessionId as SessionId })).record.appId;
+      seeded.sessions.setHolder(engineSessionId as SessionId, { kind: 'terminal', pid: 4242 });
+      seeded.close();
+      return appSessionId;
+    };
+    const digestOf = async (bus: FakeBus, appSessionId: AppSessionId) => {
+      const digests = await bus.invoke('session.digests', undefined);
+      if (!digests.ok) throw new Error(digests.error.message);
+      return digests.value.digests.find((d) => d.appSessionId === appSessionId);
+    };
+
+    it('before its first snapshot a live bridge leaves the digest as it was; the first snapshot sets the phase', async () => {
+      const engineSessionId = '0e5b1c0d-0000-4000-8000-0000000000a4';
+      const appSessionId = await terminalSession(engineSessionId);
+      const bridge = await startFakeBridge({ home: sminos, session: engineSessionId });
+      bridges.push(bridge);
+      bridge.emit({ type: 'turn', phase: 'start', turnId: 'turn-1', agentId: null }); // mid-turn when MAWS finds it
+      const bridged = vi.spyOn(IndexSessionSource.prototype, 'setBridged');
+      const bus = fakeBus();
+      compose(await openSpineData(profile, { build: BUILD }), new FakeSpineHost(), bus);
+
+      await expect.poll(async () => (await digestOf(bus, appSessionId))?.phase, { timeout: 5000 }).toBe('working');
+      const told = bridged.mock.calls.filter(([id]) => id === appSessionId).map(([, phase]) => phase?.running ?? null);
+      expect(told[0]).toBe(true); // never the empty fold's idle first
+      expect(told).not.toContain(false);
+    });
+
+    it('inside a reconnect the digest keeps the last snapshot’s phase and pending count; a bridge that leaves `live` clears it', async () => {
+      const engineSessionId = '0e5b1c0d-0000-4000-8000-0000000000a5';
+      const appSessionId = await terminalSession(engineSessionId);
+      const bridge = await startFakeBridge({ home: sminos, session: engineSessionId });
+      bridges.push(bridge);
+      const bus = fakeBus();
+      compose(await openSpineData(profile, { build: BUILD }), new FakeSpineHost(), bus);
+      await expect.poll(() => bridge.subscribers(), { timeout: 5000 }).toBe(1);
+      bridge.raise({ request: 'req-1', tool: 'Bash', input: { command: 'ls' } });
+      await expect.poll(async () => digestOf(bus, appSessionId), { timeout: 5000 }).toMatchObject({ phase: 'waiting', pendingRequests: 1 });
+
+      bridge.reset(); // the stream ends; the driver resubscribes after its backoff (0.5 s at first)
+      await expect.poll(() => bridge.subscribers(), { timeout: 5000 }).toBe(0);
+      expect(await digestOf(bus, appSessionId)).toMatchObject({ phase: 'waiting', pendingRequests: 1 });
+
+      await bridge.close(); // the socket goes: the next probe finds no bridge
+      bridges.splice(bridges.indexOf(bridge), 1);
+      await expect.poll(async () => (await digestOf(bus, appSessionId))?.phase, { timeout: 5000 }).toBe('foreign');
+      expect(await digestOf(bus, appSessionId)).toMatchObject({ pendingRequests: 0 });
+    });
+
+    // The chain merge of U1a (the architect's ruling of 2026-11-13): phase and tool from the last current view, the waiting
+    // count from the attention list, at all times
+    const busyAndAsking = async (engineSessionId: string) => {
+      const appSessionId = await terminalSession(engineSessionId);
+      const bridge = await startFakeBridge({ home: sminos, session: engineSessionId });
+      bridges.push(bridge);
+      const bridged = vi.spyOn(IndexSessionSource.prototype, 'setBridged');
+      const bus = fakeBus();
+      compose(await openSpineData(profile, { build: BUILD }), new FakeSpineHost(), bus);
+      await expect.poll(() => bridge.subscribers(), { timeout: 5000 }).toBe(1);
+      bridge.emit({ type: 'turn', phase: 'start', turnId: 'turn-1', agentId: null });
+      bridge.emit({ type: 'tool', phase: 'call', tool: 'Bash', input: { command: 'ls' }, toolUseId: 'tool-1', agentId: null });
+      bridge.raise({ request: 'req-1', tool: 'Bash', input: { command: 'ls' } });
+      await expect.poll(async () => digestOf(bus, appSessionId), { timeout: 5000 }).toMatchObject({ phase: 'waiting', pendingRequests: 1, activity: expect.any(String) });
+      const activity = (await digestOf(bus, appSessionId))!.activity;
+      bridge.holdStreams(true); // the reconnect finds the bridge live and gets no snapshot while held
+      bridge.reset();
+      await expect.poll(() => bridge.subscribers(), { timeout: 5000 }).toBe(0);
+      return { appSessionId, bridge, bridged, bus, activity };
+    };
+    const told = (bridged: { mock: { calls: unknown[][] } }, appSessionId: AppSessionId) => bridged.mock.calls.filter(([id]) => id === appSessionId).map(([, phase]) => phase);
+
+    it('inside a reconnect an accepted answer lowers the count, while running and the tool stay the last snapshot’s', async () => {
+      const engineSessionId = '0e5b1c0d-0000-4000-8000-0000000000a6';
+      const { appSessionId, bus, activity } = await busyAndAsking(engineSessionId);
+      expect(await digestOf(bus, appSessionId)).toMatchObject({ phase: 'waiting', pendingRequests: 1, activity });
+      expect(await bus.main('laneA.accepted', { session: engineSessionId, request: 'req-1' })).toMatchObject({ ok: true });
+      await expect.poll(async () => digestOf(bus, appSessionId), { timeout: 2000 }).toMatchObject({ phase: 'working', pendingRequests: 0, activity }); // before the grace's end
+    });
+
+    it(`past the list's grace (${STREAM_GRACE_MS} ms) inside a reconnect the count reads 0, as the list does, while running and the tool stay`, async () => {
+      const engineSessionId = '0e5b1c0d-0000-4000-8000-0000000000a7';
+      const { appSessionId, bus, activity } = await busyAndAsking(engineSessionId);
+      expect(await digestOf(bus, appSessionId)).toMatchObject({ phase: 'waiting', pendingRequests: 1, activity }); // inside the grace
+      await expect.poll(async () => bus.invoke('attention.list', undefined), { timeout: STREAM_GRACE_MS + 5000 }).toEqual({ ok: true, value: [] });
+      expect(await digestOf(bus, appSessionId)).toMatchObject({ phase: 'working', pendingRequests: 0, activity });
+    }, STREAM_GRACE_MS + 15_000);
+
+    it('a bridge held from its first snapshot sets nothing: the digest keeps its seed', async () => {
+      const engineSessionId = '0e5b1c0d-0000-4000-8000-0000000000a8';
+      const appSessionId = await terminalSession(engineSessionId);
+      const bridge = await startFakeBridge({ home: sminos, session: engineSessionId });
+      bridges.push(bridge);
+      bridge.holdStreams(true);
+      bridge.emit({ type: 'turn', phase: 'start', turnId: 'turn-1', agentId: null });
+      const bridged = vi.spyOn(IndexSessionSource.prototype, 'setBridged');
+      const bus = fakeBus();
+      compose(await openSpineData(profile, { build: BUILD }), new FakeSpineHost(), bus);
+      await expect.poll(async () => bus.invoke('laneA.state', { appSessionId }), { timeout: 5000 }).toMatchObject({ ok: true, value: { bridge: 'live' } });
+      expect(told(bridged, appSessionId)).toEqual([]);
+      expect(await digestOf(bus, appSessionId)).toMatchObject({ phase: 'foreign' });
+      bridge.holdStreams(false);
+      await expect.poll(async () => (await digestOf(bus, appSessionId))?.phase, { timeout: 5000 }).toBe('working');
+    });
+
+    it('a null view after a stored one sets null once, the list emptying with nothing stored setting nothing', async () => {
+      const engineSessionId = '0e5b1c0d-0000-4000-8000-0000000000a9';
+      const { appSessionId, bridge, bridged, bus } = await busyAndAsking(engineSessionId);
+      await bridge.close(); // the socket goes: the next probe finds no bridge, and the driver's view is null
+      bridges.splice(bridges.indexOf(bridge), 1);
+      await expect.poll(async () => (await digestOf(bus, appSessionId))?.phase, { timeout: 5000 }).toBe('foreign');
+      const calls = told(bridged, appSessionId);
+      expect(calls.filter((phase) => phase === null)).toHaveLength(1);
+      expect(calls.at(-1)).toBeNull();
+      expect(await digestOf(bus, appSessionId)).toMatchObject({ pendingRequests: 0 });
+    });
   });
 
   // P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, acceptance 1 and 7): the checkouts answer from

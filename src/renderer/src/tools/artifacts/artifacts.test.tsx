@@ -8,7 +8,7 @@ import { useEffect } from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ARTIFACT_KINDS } from '@shared/artifacts/entity';
 import type { AppSessionId } from '@shared/graph/ids';
-import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
+import { LAYOUT_DEFAULTS, storedMain } from '@shared/ipc/schema/layout';
 import { bareOf } from '@shared/machine/address';
 import { TEST_MACHINE } from '../../../../../test/support/machine';
 import type { LibraryFilter, LibraryRow } from '@shared/ipc/schema/library';
@@ -627,7 +627,7 @@ describe('restore', () => {
   const overview = () => document.querySelector('[role="tabpanel"][aria-label="Session overview"]');
 
   it.each([
-    ['a pinned tab, with no session in view', null, LAYOUT_DEFAULTS.main],
+    ['a pinned tab, with no session in view', null, storedMain(LAYOUT_DEFAULTS.main)],
     ['a session’s tab', A, persisted({})['main.tabs']],
   ])('%s shows the same record after a relaunch, never the Session overview or the list; after Back, the list', async (_, appSessionId, shown) => {
     testEditor();

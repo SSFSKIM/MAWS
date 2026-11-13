@@ -3,8 +3,11 @@
 # signed release manifest publishes, https://downloads.claude.ai/claude-code-releases/<version>/manifest.json
 # (`platforms.<platform>.checksum`), and the one the binary the installer placed on this MacBook hashes to.
 # 2.1.312 (TESTED_ENGINE_VERSION) is the probe lane's (P5 O7 M8, spikes/protocol-probe/p5-o7-m8-pdf-mention.test.mjs),
-# its lines read from that manifest alone, 2026-11-04.
+# its lines read from that manifest alone, 2026-11-04. 2.1.322 is the UX wave's engine, for the sign-in spike's case of
+# e2e/discover-connectors.spec.ts (MAWS_SIGNIN_SPIKE_ENGINE_BIN; the U11a document's Proof, P1); its line read from that
+# manifest and matched against the installed binary, 2026-11-12.
 2.1.309 darwin-arm64 5eadc0009cdcdbc0d06e58110d7b2baf88ced6088b1c33a60a21217fe410619c
 2.1.312 darwin-arm64 6b5ec691195e551b02c41df9f7d723f4ea61eaa03c2df90acefe3736f1aeb620
 2.1.312 linux-x64 4f4178ce41d83e23341ebfbaecdbcf8ea6bf7baea0690025abe49eeec3a5d01d
 2.1.312 linux-arm64 dc4af28917455e009d26704b82a438353a06149e825b6cdf782908b2d28661f5
+2.1.322 darwin-arm64 a9d237949db816a0b7afd88a9a8e1df36b3a597a30f5a41d1c0539eb180a3450

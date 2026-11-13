@@ -1,5 +1,6 @@
 // One lane A request as an attention item and the request view a card reads (P5 O9 M6, "The item"; M9: the same for a
-// remote session's request, which its pane docks): the item of the kind the bridge's own rule names (`requestKind`), and
+// remote session's request, which its pane docks): the item of the kind the bridge's own rule names (`requestKind`; UX
+// wave U1a, A5: an asynchronous question, which does not block the agent, is `async_input`, "Question waiting"), and
 // the request built from the raised record (tool, input, questions, suggestions) in the shape of the engine's own request
 // event, so the card, the hover preview and the docked swap read it as they read a broker item's. Both halves read it:
 // the local spine's list (src/services/lane-a/attention.ts) and the renderer's remote pane
@@ -32,7 +33,7 @@ const questionsOf = (input: Record<string, unknown>): Question[] =>
   });
 
 // The one line Needs you shows, in the broker's words (`engine-host/broker.ts` `shapeOf`).
-function summaryOf(raised: LaneARaised, kind: AttentionItem['kind']): string {
+function summaryOf(raised: LaneARaised, kind: ReturnType<typeof requestKind>): string {
   if (kind === 'question') return questionsOf(raised.input)[0]?.question || 'Question';
   if (kind === 'plan') return 'Plan ready for review';
   const detail = str(raised.input.command) ?? str(raised.input.description) ?? '';
@@ -41,7 +42,7 @@ function summaryOf(raised: LaneARaised, kind: AttentionItem['kind']): string {
 
 /** The request `raised` of session `appId` as an attention item and its request view, first seen at `createdAt`. */
 export function laneAEntryOf(appId: AppSessionId, raised: LaneARaised, createdAt: string): LaneAEntry {
-  const kind = requestKind(raised);
+  const kind = requestKind(raised); // the shape of the answer, and of the request view
   const requestId = raised.request as RequestId;
   const toolUseId = (raised.toolUseId ?? raised.request) as ToolUseId;
   const agentId = (raised.agentId ?? null) as AgentId | null;
@@ -50,7 +51,7 @@ export function laneAEntryOf(appId: AppSessionId, raised: LaneARaised, createdAt
     id: id as AttentionId,
     appSessionId: appId,
     sessionId: raised.session as SessionId,
-    kind,
+    kind: raised.async === true ? 'async_input' : kind, // U1a (A5): no anchor, so it opens its session, never a mark
     request: { requestId, toolUseId, taskId: null, agentId },
     summary: summaryOf(raised, kind),
     createdAt,

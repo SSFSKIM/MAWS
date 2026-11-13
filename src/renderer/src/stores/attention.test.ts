@@ -6,7 +6,7 @@ import { ev } from '../../../../test/support/events';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { swapOf } from '../composer/docked/swap';
-import { createAttentionStore, REQUEST_RETRY_MS, selectGreyedNeedsYou, selectNeedsYou, selectPendingOf } from './attention';
+import { createAttentionStore, REQUEST_RETRY_MS, selectGreyedNeedsYou, selectNeedsYou, selectPendingOf, selectWaitingAgents, selectWaitingByCall } from './attention';
 
 const M = TEST_MACHINE; // the store reads no machine from ids, so the one-machine cases keep bare ids
 
@@ -250,13 +250,13 @@ describe('the originating request of an item, fetched once', () => {
 
 // W4: the question stepper's draft lives beside the request until the item is no longer open.
 describe('a question card’s draft', () => {
-  it('is kept while its item is open (pending or delivered) and dropped once it retires or leaves', () => {
+  it('is kept while its item waits and dropped once it is answered, retires or leaves (UC-1)', () => {
     const store = createAttentionStore();
     store.getState().applySnapshot([older, newer], M);
     const draft = { step: 1, reached: 1, selected: { q: ['Red'] }, other: {} };
     store.getState().setDraft(newer.id, draft);
     store.getState().setDraft(older.id, draft);
-    store.getState().applyChanged({ appSessionId: S, items: [older, { ...newer, state: 'delivered' }] }, M);
+    store.getState().applyChanged({ appSessionId: S, items: [older, newer] }, M);
     expect(store.getState().drafts.get(newer.id)).toBe(draft);
     store.getState().applyChanged({ appSessionId: S, items: [older, { ...newer, state: 'retired' }] }, M);
     expect(store.getState().drafts.has(newer.id)).toBe(false);
@@ -264,6 +264,75 @@ describe('a question card’s draft', () => {
     store.getState().beginSnapshot(M);
     store.getState().applySnapshot([], M);
     expect(store.getState().drafts.size).toBe(0);
+  });
+});
+
+// UC-1 (A17): the session's list every in-session surface reads holds what waits, and a form's draft goes at the answer.
+describe('an answered request in the store', () => {
+  it('is not in the session’s list, and its question’s draft is dropped', () => {
+    const store = createAttentionStore();
+    store.getState().applySnapshot([older, newer], M);
+    store.getState().setDraft(newer.id, { step: 1, reached: 1, selected: { q: ['Red'] }, other: {} });
+    store.getState().applyChanged({ appSessionId: S, items: [older, { ...newer, state: 'delivered' }] }, M);
+    expect(selectPendingOf(store.getState(), S)).toEqual([older]);
+    expect(store.getState().drafts.has(newer.id)).toBe(false);
+  });
+
+  it('is in neither the waiting calls nor the waiting agents, each the same object until the session’s list changes', () => {
+    const store = createAttentionStore();
+    const call = item('s1', 'permission', '2026-09-28T09:00:00Z', { id: 'att-call' as never, request: { requestId: 'req-c' as never, toolUseId: 'toolu_c' as never, taskId: 'task-c' as never, agentId: 'agent-c' as never } });
+    const answered = item('s1', 'permission', '2026-09-28T09:01:00Z', { id: 'att-answered' as never, state: 'delivered', request: { requestId: 'req-d' as never, toolUseId: 'toolu_d' as never, taskId: null, agentId: 'agent-d' as never } });
+    store.getState().applySnapshot([call, answered], M);
+    const calls = selectWaitingByCall(store.getState(), S);
+    expect([...calls.keys()]).toEqual(['toolu_c']);
+    expect([...selectWaitingAgents(store.getState(), S)].sort()).toEqual(['agent-c', 'task-c']);
+    expect(selectWaitingByCall(store.getState(), S)).toBe(calls);
+    expect(selectWaitingAgents(store.getState(), S)).toBe(selectWaitingAgents(store.getState(), S));
+    store.getState().applyChanged({ appSessionId: S, items: [call] }, M);
+    expect(selectWaitingByCall(store.getState(), S)).not.toBe(calls);
+  });
+});
+
+// UX wave U1a (Interfaces §B, Reported 9): a list the machine's feed and lists never carry (lane A's mirror of a remote
+// terminal session) stands through that machine's snapshots, its question's draft with it.
+describe('a mirrored session of another machine', () => {
+  const T = addressOf(OTHER_MACHINE, 'eng-t' as AppSessionId);
+  const fed = item(addressOf(OTHER_MACHINE, 'b1' as AppSessionId), 'permission', '2026-09-28T08:00:00Z');
+  const asked = item(T, 'question', '2026-09-28T09:00:00Z', { id: addressOf(OTHER_MACHINE, 'lane-a:eng-t:toolu_q') as never });
+  const draft = { step: 1, reached: 1, selected: { q: ['Red'] }, other: { q: 'made-up text' } };
+
+  it('stands, with its draft, through the machine’s feed snapshot, which replaces the rest of its partition', () => {
+    const store = createAttentionStore();
+    store.getState().applyRemote({ machine: OTHER_MACHINE, items: [fed], greyed: false });
+    store.getState().applyMirrored({ appSessionId: T, items: [asked] }, OTHER_MACHINE);
+    store.getState().setDraft(asked.id, draft);
+    const list = store.getState().bySession.get(T);
+    store.getState().applyRemote({ machine: OTHER_MACHINE, items: [], greyed: false });
+    expect(store.getState().bySession.get(T)).toBe(list);
+    expect(store.getState().bySession.has(fed.appSessionId)).toBe(false);
+    expect(store.getState().drafts.get(asked.id)).toBe(draft);
+  });
+
+  it('stands through the machine’s listed snapshot, written at once while that snapshot is outstanding', () => {
+    const store = createAttentionStore();
+    store.getState().beginSnapshot(OTHER_MACHINE);
+    store.getState().applyMirrored({ appSessionId: T, items: [asked] }, OTHER_MACHINE);
+    expect(store.getState().bySession.get(T)).toEqual([asked]);
+    store.getState().setDraft(asked.id, draft);
+    store.getState().applySnapshot([], OTHER_MACHINE);
+    expect(store.getState().bySession.get(T)).toEqual([asked]);
+    expect(store.getState().drafts.get(asked.id)).toBe(draft);
+  });
+
+  it('is the machine’s again once the mirror empties it: the next snapshot removes it, and its draft went at the empty write', () => {
+    const store = createAttentionStore();
+    store.getState().applyMirrored({ appSessionId: T, items: [asked] }, OTHER_MACHINE);
+    store.getState().setDraft(asked.id, draft);
+    store.getState().applyMirrored({ appSessionId: T, items: [] }, OTHER_MACHINE);
+    expect(store.getState().bySession.get(T)).toEqual([]);
+    expect(store.getState().drafts.has(asked.id)).toBe(false);
+    store.getState().applyRemote({ machine: OTHER_MACHINE, items: [], greyed: false });
+    expect(store.getState().bySession.has(T)).toBe(false);
   });
 });
 

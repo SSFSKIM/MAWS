@@ -16,7 +16,7 @@ import { SnapshotReader } from '../snapshots';
 import { DATASET_STATES, utcTime } from '../states';
 import { createChartRenderer } from './chart-view';
 import { queryIdentity } from '../query';
-import { type LiveDatasets, type LiveQueryStatus, type LiveSnapshot } from './live';
+import { notOfferedPause, type LiveDatasets, type LiveQueryStatus, type LiveSnapshot } from './live';
 import { SourceSheet } from './SourceSheet';
 import { SourceSheetState } from './sheet';
 
@@ -263,6 +263,26 @@ describe('the source sheet’s live query after a refusal (E3 M3 fix)', () => {
     expect(within(block()).getByText('The last refresh did not reach the dashboard.')).toBeTruthy();
     act(() => live.set({}, { permission: 'none', pause: 'watchLimit' }));
     expect(within(block()).getByText(/Too many live tools are open in MAWS/)).toBeTruthy();
+  });
+
+  // U11a board 456: a machine that doesn't offer connectors is a concrete pause: no grant would make it refresh
+  it('paused because its machine does not offer connectors, says why, offers no Allow and disables Refresh; a failed refresh keeps Allow', async () => {
+    const live = new FakeLive({ permission: 'none', pause: notOfferedPause('build-vm') });
+    const m = mountSheet(live);
+    act(() => m.sheet.open([{ id: 'sales', descriptor: fetched() }]));
+    await settle();
+    expect(within(block()).getByText('Connectors on build-vm need its app')).toBeTruthy();
+    expect(within(block()).queryByText('Allow it to read before this dashboard can refresh it.')).toBeNull();
+    expect(within(block()).queryByRole('button', { name: /^Allow/ })).toBeNull();
+    expect(within(block()).getByRole('button', { name: 'Refresh Live sales' }).hasAttribute('disabled')).toBe(true);
+    act(() => live.set({}, { permission: 'read', pause: notOfferedPause('build-vm') })); // a grant held from before: still no refresh
+    expect(within(block()).getByText('Connectors on build-vm need its app')).toBeTruthy();
+    expect(within(block()).getByRole('button', { name: 'Refresh Live sales' }).hasAttribute('disabled')).toBe(true);
+    act(() => live.set({}, { permission: 'none', pause: 'failed' }));
+    expect(within(block()).getByText('The last refresh did not reach the dashboard.')).toBeTruthy();
+    expect(within(block()).getByRole('button', { name: 'Allow fixture · rows to read' }).hasAttribute('disabled')).toBe(false);
+    act(() => live.set({}, { permission: 'read', pause: 'watchLimit' }));
+    expect(within(block()).getByRole('button', { name: 'Refresh Live sales' }).hasAttribute('disabled')).toBe(false);
   });
 
   it('a history preview or suggestion review begun while the sheet is open takes its controls away until it ends', async () => {

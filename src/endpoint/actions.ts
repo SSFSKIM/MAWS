@@ -40,7 +40,8 @@
 // field this build sends (`action`, an upload's `part`, `session.spawn`) is one they read.
 //
 // Lane A's copies go through lane-a.ts, which asks sminos whose an op is before a first copy goes down and routes each
-// result by the nonce it answers.
+// result by the nonce it answers, and (UX wave U1a, UC-1) tells this machine's spine `laneA.accepted` when an answer's
+// result is `done`.
 //
 // P5 O7 M5a (M5 "Artifact writes are engine-host acts with no session"): an artifact's write (an engine-host row whose
 // target rule is `artifact`) names no session and is sealed with no context, so it goes to the engine host's ledger as
@@ -161,7 +162,17 @@ export class Actions {
   readonly #pending = new WeakSet<ActMessage>();
 
   constructor(private readonly ctx: ActionsContext) {
-    this.#laneA = new LaneA({ rl10: ctx.rl10, hold: (reason) => ctx.hold(reason), now: () => ctx.now() });
+    this.#laneA = new LaneA({
+      rl10: ctx.rl10,
+      hold: (reason) => ctx.hold(reason),
+      now: () => ctx.now(),
+      // UX wave U1a (UC-1, Interfaces §B): this machine's lane A list hides an answer sminos took, before its settlement
+      accepted: async (session, request) => {
+        const told = await ctx.dispatch('machine', 'laneA.accepted', { session, request });
+        if (!told.ok) throw new Error(`${told.error.code}: ${told.error.message}`);
+      },
+      log: (line) => ctx.log(line),
+    });
   }
 
   /** The channel's `act` route: freshness and replay, then `authorized` (the gate, which calls `execute`). */

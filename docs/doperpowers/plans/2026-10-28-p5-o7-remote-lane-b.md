@@ -855,6 +855,7 @@ Rejected: keying the device's records by engine id, and treating an engine id as
 - The widget offers Sign in on `needs-auth`, beside Reconnect.
 - Show on the remote Connectors sheet is meant to ask for Touch ID, and does: M5c's sheet is "Show, then Touch ID, then Refresh for any re-read" (M5c's Outcomes), because `connectors.servers` is `machine-admin` (A13 and A14 keep credential and grant management there; F17), and `stepUpRequired` asks for every `machine-admin` act whoever owns the machine (`src/endpoint/step-up.ts`; asserted by `test/endpoint/artifact-rows.test.ts`). The owner saw no Touch ID because they were on the MCP widget, whose read is `session.mcpStatus`, a `view` call that asks nothing. No fix.
 - Red first: `src/renderer/src/widgets/McpWidget.test.tsx`, `src/services/connectors/sign-in.test.ts`.
+- Amended 2026-11-13: UX wave U11 (l8-settings-01): a server the engine reports in scope `dynamic` (a plugin's, or one of MAWS's own list) is signed in from a session that holds it; its identity is its machine and its name.
 
 *Untracked files.* Review lists untracked rows with no hunks and says "not in the diff" (`tools/code/review/ReviewShell.tsx`, asserted by `review.test.tsx`). Source control already asks `git.diff {scope: 'untracked', path}`, served by the git service with `--no-index /dev/null <path>`.
 - Review's `loadFile` asks the same, so an untracked file shows as added. One path serves local and remote (`git.diff` is offered under `checkout`).

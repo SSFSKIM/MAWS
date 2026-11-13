@@ -4,6 +4,7 @@
 // out, which the engine reads as unanswered); a dialog answers only with a result its declared kind has (an undeclared
 // kind has none). Pure.
 import { RequestAnswerSchema, type RequestAnswer } from '@shared/engine/answers';
+import type { PermissionMode } from '@shared/graph/enums';
 import type { Question } from '@shared/graph/events';
 import { DIALOG_RESULTS, isDeclaredDialogKind } from './variants/dialog-kinds';
 import type { Scope } from './scope';
@@ -12,7 +13,8 @@ export type VariantState =
   | { kind: 'permission'; decision: 'allow'; scope: Scope }
   | { kind: 'permission'; decision: 'deny' | 'deny_and_stop'; message: string }
   | { kind: 'question'; questions: Question[]; selected: Record<string, string[]>; other: Record<string, string> }
-  | { kind: 'plan'; outcome: 'implement' | 'clear_and_implement' }
+  | { kind: 'plan'; outcome: 'implement'; mode?: PermissionMode } // U1a §F: the mode chosen from the plan's menu
+  | { kind: 'plan'; outcome: 'clear_and_implement' }
   | { kind: 'plan'; outcome: 'keep_planning'; feedback: string }
   | { kind: 'dialog'; dialogKind: string; result: string }
   | { kind: 'elicitation'; action: 'accept'; content: Record<string, unknown> | null } // null: a url-mode accept, no content
@@ -62,7 +64,8 @@ function build(state: VariantState): RequestAnswer {
     case 'question':
       return { kind: 'question', answers: questionAnswers(state) };
     case 'plan':
-      return state.outcome === 'keep_planning' ? { kind: 'plan', outcome: 'keep_planning', feedback: blank(state.feedback) ? null : state.feedback } : { kind: 'plan', outcome: state.outcome, feedback: null };
+      if (state.outcome === 'keep_planning') return { kind: 'plan', outcome: 'keep_planning', feedback: blank(state.feedback) ? null : state.feedback };
+      return state.outcome === 'implement' && state.mode !== undefined ? { kind: 'plan', outcome: 'implement', feedback: null, mode: state.mode } : { kind: 'plan', outcome: state.outcome, feedback: null };
     case 'dialog': {
       if (!isDeclaredDialogKind(state.dialogKind)) throw new Error(`MAWS did not declare the dialog kind ${state.dialogKind} and never answers it`);
       if (!(DIALOG_RESULTS[state.dialogKind] as readonly string[]).includes(state.result)) throw new Error(`${state.result} is not a result of ${state.dialogKind}`);

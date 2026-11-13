@@ -40,6 +40,28 @@ describe('WidgetFrame', () => {
     expect(frame.textContent).not.toContain('Read with');
   });
 
+  // UX wave U11a (§C): the head may carry a muted subtitle after the title and one line of note with its tooltip; the
+  // dialog keeps the title alone as its name
+  it('draws a subtitle after the title and a note in the head, and neither when not given', () => {
+    const { rerender } = render(
+      <WidgetFrame appSessionId={ID} title="Connectors" command="mcp" subtitle="MCP servers" note={{ text: 'A sentence about the switch.', tooltip: 'Where it is kept.' }} state="ready" error={null} close={() => {}}>
+        <p>the body</p>
+      </WidgetFrame>,
+    );
+    const header = document.querySelector<HTMLElement>('[data-widget="mcp"] header')!;
+    expect(header.querySelector('h3')?.textContent).toBe('Connectors');
+    expect(header.querySelector('[data-widget-subtitle]')?.textContent).toBe('MCP servers');
+    const note = header.querySelector<HTMLElement>('[data-widget-note]')!;
+    expect(note.textContent).toBe('A sentence about the switch.');
+    expect(note.title).toBe('Where it is kept.');
+    rerender(
+      <WidgetFrame appSessionId={ID} title="Hooks" command="hooks" state="ready" error={null} close={() => {}}>
+        <p>the body</p>
+      </WidgetFrame>,
+    );
+    expect(document.querySelector('[data-widget-subtitle], [data-widget-note]')).toBeNull();
+  });
+
   it('shows the loading line and the error in place of the body', () => {
     const { rerender } = render(
       <WidgetFrame appSessionId={ID} title="Hooks" command="hooks" state="loading" error={null} close={() => {}}>

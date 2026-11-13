@@ -1,4 +1,4 @@
-import { chmod, mkdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionId } from '@shared/graph/ids';
@@ -11,6 +11,8 @@ import { HEAD_TAIL_BYTES } from './summarize';
 const S1 = '11111111-1111-4111-8111-111111111111';
 const S2 = '22222222-2222-4222-8222-222222222222';
 const S3 = '33333333-3333-4333-8333-333333333333';
+const S4 = '44444444-4444-4444-8444-444444444444';
+const S5 = '55555555-5555-4555-8555-555555555555';
 
 const user = (uuid: string, parentUuid: string | null, cwd: string, content: string) => ({
   type: 'user',
@@ -131,5 +133,35 @@ describe('discovery lists and summarises the store', () => {
       [S2 as SessionId, { size: s2.size + 1, mtimeMs: s2.mtimeMs }], // stale: summarised again
     ]);
     expect((await collect(discovery.scan(known))).map((s) => s.sessionId).sort()).toEqual([S2, S3]);
+  });
+  // U8c-1 (M1 decision 4): the look a removal waits for. One readdir per project folder, the names alone.
+  describe('find looks a session’s transcript up under every project folder', () => {
+    it('answers the path of each transcript asked for, wherever it lies, and nothing for one that is nowhere', async () => {
+      const p1 = await fixture.addTranscript('/work/a', S1, [user('u1', null, '/work/a', 'one')]);
+      const p3 = await fixture.addTranscript('/work/b', S3, [user('u1', null, '/work/b', 'three')]);
+      await fixture.addTranscript('/work/b', S2, [user('u1', null, '/work/b', 'not asked for')]);
+      await fixture.addSidecar(S3, 'subagents/agent-a1.jsonl', ''); // a session's folder is no transcript
+      await mkdir(join(fixture.paths.projects, '-work-c', `${S4}.jsonl`), { recursive: true }); // nor is a folder named like one
+      const found = await new Discovery(fixture.paths).find(new Set([S1, S3, S4, S5] as SessionId[]));
+      expect(found).toEqual(new Map([[S1, p1], [S3, p3]]));
+    });
+
+    it('answers the one written last when a transcript lies under two project folders', async () => {
+      const older = await fixture.addTranscript('/work/a', S1, [user('u1', null, '/work/a', 'one')]);
+      const newer = await fixture.addTranscript('/work/b', S1, [user('u1', null, '/work/b', 'one, moved')]);
+      await utimes(older, new Date('2026-11-13T10:00:00Z'), new Date('2026-11-13T10:00:00Z'));
+      await utimes(newer, new Date('2026-11-13T10:00:05Z'), new Date('2026-11-13T10:00:05Z'));
+      const discovery = new Discovery(fixture.paths);
+      expect(await discovery.find(new Set([S1 as SessionId]))).toEqual(new Map([[S1, newer]]));
+      await utimes(older, new Date('2026-11-13T10:00:09Z'), new Date('2026-11-13T10:00:09Z'));
+      expect(await discovery.find(new Set([S1 as SessionId]))).toEqual(new Map([[S1, older]]));
+    });
+
+    it('answers nothing, without failing, when projects/ does not exist or nothing is asked for', async () => {
+      const paths = resolveStorePaths({ CLAUDE_CONFIG_DIR: join(fixture.configHome, 'absent') });
+      expect(await new Discovery(paths).find(new Set([S1 as SessionId]))).toEqual(new Map());
+      await fixture.addTranscript('/work/a', S1, [user('u1', null, '/work/a', 'one')]);
+      expect(await new Discovery(fixture.paths).find(new Set())).toEqual(new Map());
+    });
   });
 });

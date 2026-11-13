@@ -13,7 +13,7 @@ export const WIDGET_COMMANDS = [
   { name: 'usage', description: 'Plan usage and what counts against it' },
   { name: 'config', description: 'Settings for this session' },
   { name: 'plugins', description: 'Browse and manage plugins' },
-  { name: 'mcp', description: 'Manage MCP servers' },
+  { name: 'mcp', description: 'Connectors in this chat (MCP servers)' }, // UX wave U11a (§C); items.ts lets it win over the engine's
   { name: 'sandbox', description: 'Sandbox settings' },
   { name: 'hooks', description: 'Review configured hooks' },
   { name: 'memory', description: 'Edit memory files' },

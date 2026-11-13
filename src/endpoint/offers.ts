@@ -140,6 +140,16 @@ const isRenameArgs = (input: unknown): boolean =>
   isFields(input, ['id', 'patch']) && isFields(input.patch, ['name']) && typeof (input.patch as { name?: unknown }).name === 'string';
 /** P5 O7 M8: `fs.unfollow` from another machine names the agent whose follow it lets go of. */
 const namesAnAgent = (input: unknown): boolean => typeof input === 'object' && input !== null && typeof (input as { agentId?: unknown }).agentId === 'string';
+/**
+ * UX wave U1a §F (Reported 2, ruled): a plan's answer from another machine names no mode. An answer is graded `approve`
+ * and a mode change `manage` (by-effect.ts, the registry's grades), so a mode inside an answer would let a caller set a
+ * mode it may not; it is refused here, on the input the engine host would act on. Carrying it is a debt row: a by-effect
+ * grade of `manage` held to the ceiling, behind a capability.
+ */
+const answersWithoutMode = (input: unknown): boolean => {
+  const answer = typeof input === 'object' && input !== null ? (input as { answer?: unknown }).answer : undefined;
+  return !(typeof answer === 'object' && answer !== null && (answer as { kind?: unknown }).kind === 'plan' && Object.hasOwn(answer, 'mode'));
+};
 /** `forward.open`'s args: exactly a port. */
 const isForwardArgs = (input: unknown): boolean =>
   typeof input === 'object' && input !== null && !Array.isArray(input) && Object.keys(input).length === 1 && Number.isInteger((input as { port?: unknown }).port) && (input as { port: number }).port >= 1 && (input as { port: number }).port <= 65535;
@@ -193,7 +203,7 @@ export const OFFERS: Offers = {
     'session.send': laneB('act'),
     'session.steer': laneB('act'),
     'session.interrupt': laneB('act'),
-    'session.answer': laneB('act'),
+    'session.answer': { ...laneB('act'), accepts: answersWithoutMode },
     'session.queue.edit': laneB('act'),
     'session.queue.promote': laneB('act'),
     'session.queue.setPaused': laneB('act'),

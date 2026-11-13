@@ -16,7 +16,7 @@ import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { resetSetupStore, trustState } from '../test-support/setup-intents';
 import { useSetup } from './store';
-import { fileTabsByProject, resetShellStores } from '../test-support/shell-stores';
+import { resetShellStores } from '../test-support/shell-stores';
 import { registerSessionActions } from './actions';
 import { resubmitProvider } from './record-ops';
 import { closeDialog, useDialogs } from './dialogs';
@@ -73,26 +73,40 @@ describe('the session and project entries', () => {
     expect(Object.values(PROJECT_ACTIONS)).not.toContain('Add directory…');
   });
 
-  // New chat (2026-10-01): ⌘N comes with the session creator, and preselects only a focused project; W12: the project
-  // whose tab set the strip shows (a project row in the sidebar switches it); W11: never one gone or hidden from the
-  // sidebar, and an expanded project is not by itself the current one
-  it('⌘N creates in the strip’s project, else in none', async () => {
+  // New chat (2026-10-01): ⌘N comes with the session creator, and preselects only the current project; UX wave U13a: the
+  // row of the session in front, which a page in front keeps and a sidebar row does not change; W11: never one gone or
+  // hidden from the sidebar, nor a machine's own row
+  it('⌘N creates in the current project, else in none', async () => {
     const P3 = at('p3' as ProjectId);
-    useSessions.setState({ projects: new Map([[P2, project(P2, 1)], [P1, project(P1, 0)], [P3, project(P3, 2, { hidden: true })]]), records: new Map([[A, record(A, { projectId: P2 })]]) });
-    fileTabsByProject();
-    expect(focusedProject(), 'the no-project set with nothing open: no project').toBeNull();
+    const [B, HIDDEN, GONE, LOOSE] = ['b', 'hidden', 'gone', 'loose'].map((id) => at(`${id}-session` as AppSessionId));
+    useMachines.setState({ loaded: new Set([TEST_MACHINE]) });
+    offs.push(() => useMachines.setState({ loaded: new Set() }));
+    useSessions.setState({
+      projects: new Map([[P2, project(P2, 1)], [P1, project(P1, 0)], [P3, project(P3, 2, { hidden: true })]]),
+      records: new Map([
+        [A, record(A, { projectId: P2 })],
+        [B, record(B, { projectId: P1 })],
+        [HIDDEN, record(HIDDEN, { projectId: P3 })],
+        [GONE, record(GONE, { projectId: at('proj-gone' as ProjectId) })],
+        [LOOSE, record(LOOSE)],
+      ]),
+    });
+    const front = (id: AppSessionId) => useLayout.getState().openTab({ kind: 'session', appSessionId: id });
+    expect(focusedProject(), 'nothing open: no project').toBeNull();
     useLayout.getState().setSidebar({ expandedProjects: [P1] });
-    expect(focusedProject(), 'an expanded project is not the strip’s').toBeNull();
-    useLayout.getState().setCurrentProject(P1);
-    expect(focusedProject(), 'the project a row switched the strip to').toBe(P1);
-    for (const gone of [P3, at('proj-gone' as ProjectId)]) {
-      useLayout.getState().setCurrentProject(gone);
-      expect(focusedProject(), `a hidden or removed project is no project (${gone})`).toBeNull();
+    expect(focusedProject(), 'an expanded project is not the current one').toBeNull();
+    front(B);
+    expect(focusedProject(), 'the project of the session in front').toBe(P1);
+    for (const id of [HIDDEN, GONE]) {
+      front(id);
+      expect(focusedProject(), `a hidden or removed project is no project (${id})`).toBeNull();
     }
-    useLayout.getState().setCurrentProject(null);
-    expect(focusedProject(), 'Other sessions: no project').toBeNull();
-    useLayout.getState().openTab({ kind: 'session', appSessionId: A });
-    expect(focusedProject(), 'opening a session shows its project’s set').toBe(P2);
+    front(LOOSE);
+    expect(focusedProject(), 'a machine’s own row: no project').toBeNull();
+    front(A);
+    expect(focusedProject(), 'opening a session makes its project current').toBe(P2);
+    useLayout.getState().openTab({ kind: 'diagnostics' });
+    expect(focusedProject(), 'a page in front keeps the current project').toBe(P2);
     const created: (ProjectId | null)[] = [];
     offs.push(registerSessionCreator(async (projectId) => (created.push(projectId), null)));
     runAction('session.new');

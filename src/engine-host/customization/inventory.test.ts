@@ -7,7 +7,7 @@ import { commands, type CommandOutput } from '@shared/ipc/schema';
 import { isBridgedCommandName } from '@shared/ipc/names';
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
 import { clientSettingsDefaults, machineSettingsDefaults, SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
-import { INVENTORY_BOUNDS, readCustomizationInventory, readServerEndpoints, registerCustomizationInventory } from './inventory';
+import { configurationRevision, INVENTORY_BOUNDS, readCustomizationInventory, readServerEndpoints, registerCustomizationInventory } from './inventory';
 
 // P5 O3-A: a machine-settings.json holding these app MCP servers
 const appServers = (mcpServers: { name: string; type: 'http'; url: string }[]) => ({ ...machineSettingsDefaults(), engine: { ...machineSettingsDefaults().engine, mcpServers } });
@@ -121,13 +121,60 @@ describe('cold customization inventory', () => {
     } });
     const answer = await read(cwd);
     expect(answer.skills).toEqual([
-      { name: 'Shared', description: 'One line continued', source: 'plugin', path: standard, plugin: 'example@market' },
-      { name: 'Extra', description: 'Declared', source: 'plugin', path: declared, plugin: 'example@market' },
-      { name: 'Shared', description: 'One line continued', source: 'plugin', path: standard, plugin: 'project@market' },
-      { name: 'Extra', description: 'Declared', source: 'plugin', path: declared, plugin: 'project@market' },
+      { name: 'Shared', description: 'One line continued', source: 'plugin', path: standard, plugin: 'example@market', pluginName: 'example' },
+      { name: 'Extra', description: 'Declared', source: 'plugin', path: declared, plugin: 'example@market', pluginName: 'example' },
+      { name: 'Shared', description: 'One line continued', source: 'plugin', path: standard, plugin: 'project@market', pluginName: 'example' },
+      { name: 'Extra', description: 'Declared', source: 'plugin', path: declared, plugin: 'project@market', pluginName: 'example' },
     ]);
     expect(answer.warnings.join(' ')).toMatch(/Plugin.*MCP.*not inventoried/);
     expect((await read()).skills.every((row) => row.plugin === 'example@market')).toBe(true);
+  });
+
+  // UX wave U11a, §D "Skills" (P3, spikes/protocol-probe/findings-uxwave-u11-skill-names.txt): the engine names a plugin
+  // by its manifest's `name`, so `/<key up to @>:<skill>` runs nothing when the marketplace entry is named otherwise
+  it('names each plugin skill by its manifest’s name, which may differ from the installed key, and gives no other skill one', async () => {
+    const cwd = join(home, 'repo');
+    await mkdir(join(cwd, '.git'), { recursive: true });
+    await skill(join(configHome, 'skills'), 'mine');
+    await skill(join(cwd, '.claude', 'skills'), 'ours');
+    const pluginRoot = join(root, 'plugin');
+    await skill(join(pluginRoot, 'skills'), 'folder-skill');
+    await skill(pluginRoot, 'declared', '---\nname: Declared\n---\n');
+    await json(join(pluginRoot, '.claude-plugin', 'plugin.json'), { name: 'fx-manifest', skills: ['./declared'] });
+    await json(join(configHome, 'plugins', 'installed_plugins.json'), { version: 2, plugins: { 'fx-entry@fx-market': [{ scope: 'user', installPath: pluginRoot }] } });
+    const answer = await read(cwd);
+    expect(answer.skills.filter((row) => row.source === 'plugin').map((row) => [row.name, row.plugin, row.pluginName])).toEqual([
+      ['Shared', 'fx-entry@fx-market', 'fx-manifest'],
+      ['Declared', 'fx-entry@fx-market', 'fx-manifest'],
+    ]);
+    const others = answer.skills.filter((row) => row.source !== 'plugin');
+    expect(others.map((row) => row.source)).toEqual(['user', 'project']);
+    expect(others.every((row) => !('pluginName' in row))).toBe(true);
+    expect(validateCommandOutput('customization.inventory', answer).ok).toBe(true);
+  });
+
+  it('gives a plugin skill a null pluginName where the manifest’s name cannot be read or is not one the engine loads', async () => {
+    const plugins: Record<string, { scope: 'user'; installPath: string }[]> = {};
+    const manifests: [string, unknown][] = [
+      ['absent', undefined],
+      ['unnamed', { description: 'no name' }],
+      ['numbered', { name: 7 }],
+      ['empty', { name: '' }],
+      ['spaced', { name: 'two words' }],
+      ['long', { name: 'x'.repeat(257) }],
+      ['broken', '{"name": "half'],
+    ];
+    for (const [key, manifest] of manifests) {
+      const installPath = join(root, 'plugins', key);
+      await skill(join(installPath, 'skills'), `${key}-skill`, `---\nname: ${key}-skill\n---\n`);
+      if (typeof manifest === 'string') await file(join(installPath, '.claude-plugin', 'plugin.json'), manifest);
+      else if (manifest !== undefined) await json(join(installPath, '.claude-plugin', 'plugin.json'), manifest);
+      plugins[`${key}@fx-market`] = [{ scope: 'user', installPath }];
+    }
+    await json(join(configHome, 'plugins', 'installed_plugins.json'), { version: 2, plugins });
+    const answer = await read();
+    expect(answer.skills.map((row) => [row.name, row.pluginName])).toEqual(manifests.map(([key]) => [`${key}-skill`, null]).sort());
+    expect(validateCommandOutput('customization.inventory', answer).ok).toBe(true);
   });
 
   it('follows disk skill symlinks but refuses plugin declarations and links that escape their installation', async () => {
@@ -241,13 +288,45 @@ describe('cold customization inventory', () => {
     await json(global, { mcpServers: { linear: { type: 'http', url: 'https://mcp.linear.app/mcp?token=QUERY_SECRET' }, process: { command: 'run' } } });
     const appFile = await json(join(userData, 'machine-settings.json'), appServers([{ name: 'app', type: 'http', url: 'https://app.test/' }]));
     expect(await readServerEndpoints(null, { userData, captureEnv: environment })).toEqual({ servers: [
-      { name: 'app', scope: 'app', path: appFile, transport: 'http', url: 'https://app.test/' },
-      { name: 'linear', scope: 'user', path: global, transport: 'http', url: 'https://mcp.linear.app/mcp?token=QUERY_SECRET' },
-      { name: 'process', scope: 'user', path: global, transport: 'stdio', url: null },
+      { name: 'app', scope: 'app', path: appFile, transport: 'http', url: 'https://app.test/', revision: expect.stringMatching(/^[0-9a-f]{32}$/) },
+      { name: 'linear', scope: 'user', path: global, transport: 'http', url: 'https://mcp.linear.app/mcp?token=QUERY_SECRET', revision: expect.stringMatching(/^[0-9a-f]{32}$/) },
+      { name: 'process', scope: 'user', path: global, transport: 'stdio', url: null, revision: null },
     ] });
     expect(JSON.stringify(await read())).not.toMatch(/SECRET|linear\.app/);
     expect(isBridgedCommandName('customization.serverEndpoints')).toBe(false);
     expect(commands['customization.serverEndpoints'].owner).toBe('engine-host');
+  });
+
+  // UX wave U11a M8 (§A, "The configuration's revision"): each endpoint's configuration stands as an opaque revision, an
+  // HMAC of its name, transport and address under a key the host makes at its start and never writes or sends, so a
+  // press from Customize can name the configuration its row showed without the window holding an address.
+  it('stamps each endpoint with its configuration’s revision: the same within one run for the same name, transport and address, another for any change, none without an address', async () => {
+    const global = join(configHome, '.claude.json');
+    const revisions = async () => Object.fromEntries((await readServerEndpoints(null, { userData, captureEnv: environment })).servers.map((server) => [`${server.scope}:${server.name}`, server.revision]));
+    await json(global, { mcpServers: { linear: { type: 'http', url: 'https://linear.example.test/mcp?token=QUERY_SECRET' }, same: { type: 'http', url: 'https://linear.example.test/mcp?token=QUERY_SECRET' }, process: { command: 'run' } } });
+    await json(join(userData, 'machine-settings.json'), appServers([{ name: 'linear', type: 'http', url: 'https://linear.example.test/mcp?token=QUERY_SECRET' }]));
+    const first = await revisions();
+    expect(await revisions()).toEqual(first); // within one run of the host
+    expect(first['user:linear']).toMatch(/^[0-9a-f]{32}$/);
+    expect(first['app:linear']).toBe(first['user:linear']); // the configuration is its name, transport and address, not its file
+    expect(first['user:same']).not.toBe(first['user:linear']); // another name
+    expect(first['user:process']).toBeNull();
+    await json(global, { mcpServers: { linear: { type: 'http', url: 'https://linear.example.test/mcp?token=OTHER_SECRET' } } });
+    expect((await revisions())['user:linear']).not.toBe(first['user:linear']); // another address
+    await json(global, { mcpServers: { linear: { type: 'sse', url: 'https://linear.example.test/mcp?token=QUERY_SECRET' } } });
+    expect((await revisions())['user:linear']).not.toBe(first['user:linear']); // another transport
+    expect(JSON.stringify(first)).not.toMatch(/SECRET|linear\.example/);
+  });
+
+  it('makes a revision that says nothing of the address: keyed, so a known address cannot be confirmed from it', () => {
+    const configuration = { name: 'linear', transport: 'http', url: 'https://linear.example.test/mcp?token=QUERY_SECRET' } as const;
+    const revisionOf = configurationRevision(Buffer.alloc(32, 7));
+    const revision = revisionOf(configuration)!;
+    expect(revision).toMatch(/^[0-9a-f]{32}$/);
+    expect(revisionOf(configuration)).toBe(revision);
+    expect(configurationRevision(Buffer.alloc(32, 8))(configuration)).not.toBe(revision); // another run, another key
+    expect(revisionOf({ ...configuration, url: null })).toBeNull();
+    expect(revision).not.toContain('linear');
   });
 
   it('registers a read-only host command with null-cwd support and strict metadata-only IPC output', async () => {

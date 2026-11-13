@@ -8,7 +8,8 @@
 // a rename made in MAWS is an override kept apart (`title_override`), together with the engine's custom title at the
 // moment it was set, and a later summary whose custom title differs from that clears the override: the later explicit
 // act wins in either direction. Projection: override, else custom title (`user`), else AI title (`generated`), else first
-// prompt (`none`) less the engine's slash-command wrappers (`promptTitle`), else an empty title.
+// prompt (`none`) less the engine's slash-command wrappers (`promptTitle`) and cut to six words (`cutPrompt`), else an
+// empty title.
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import type { AppSessionId, MessageUuid, ProjectId, SessionId } from '@shared/graph/ids';
@@ -152,12 +153,39 @@ export function promptTitle(raw: string): string | null {
   return text === '' ? null : text;
 }
 
+// UX wave U7, S-11 (Interfaces §A): a session with no title yet is named by Claude Desktop's cut of its first prompt
+// (`di`, readable/app-5.1231.2/web/app/v1/cef1e6037-C_l5Pvir.js:2017-2034): the file mentions at its very start taken off,
+// each one's file name kept, then the first six words, or the kept names when the mentions were all; 60 code points at
+// most. MAWS adds the bare form its composer writes (`@path`, its trailing sentence punctuation outside the path as the
+// composer's reader leaves it), and counts a pasted block's or an attachment's placeholder as one word. An agent mention
+// is a word. The cut is made at every projection, so the stored prompt, which the conversation search reads, stays whole.
+const QUOTED_MENTION = /^@"([^"\n]+)"( |$)/;
+const BARE_MENTION = /^@(?!agent-)([^\s"]+?)[,.;:!?)\]]*( |$)/;
+const PROMPT_WORD = /\[(?:Pasted text|Image|PDF) #\d+(?: \+\d+ lines)?\]|\S+/g;
+const PROMPT_TITLE_WORDS = 6;
+const PROMPT_TITLE_POINTS = 60;
+
+/** The name of a session that has no title yet: Claude Desktop's cut of its first prompt (S-11). `prompt` is `promptTitle`'s result. */
+export function cutPrompt(prompt: string): string {
+  const mentionAt = (text: string) => QUOTED_MENTION.exec(text) ?? BARE_MENTION.exec(text);
+  const files: string[] = [];
+  let rest = prompt;
+  for (let mention = mentionAt(rest); mention; mention = mentionAt(rest)) {
+    const path = mention[1];
+    files.push(path.split('/').filter(Boolean).pop() ?? path);
+    rest = rest.slice(mention[0].length);
+  }
+  const words = rest.match(PROMPT_WORD)?.slice(0, PROMPT_TITLE_WORDS) ?? [];
+  const points = Array.from(words.length > 0 ? words.join(' ') : files.join(', '));
+  return points.length > PROMPT_TITLE_POINTS ? `${points.slice(0, PROMPT_TITLE_POINTS - 1).join('')}…` : points.join('');
+}
+
 function titleOf(row: SessionRow): SessionRecord['title'] {
   if (row.title_override !== null) return JSON.parse(row.title_override) as SessionRecord['title'];
   if (row.custom_title) return { text: row.custom_title, source: 'user' };
   if (row.ai_title) return { text: row.ai_title, source: 'generated' };
   const prompt = row.first_prompt ? promptTitle(row.first_prompt) : null;
-  if (prompt) return { text: prompt, source: 'none' };
+  if (prompt) return { text: cutPrompt(prompt), source: 'none' };
   return { text: '', source: 'none' };
 }
 

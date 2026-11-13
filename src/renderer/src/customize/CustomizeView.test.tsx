@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ConnectorSignInChanged } from '@shared/ipc/schema/connectors';
-import { heard, resetSignIns } from './connectors/sign-in';
+import { heard, resetSignIns, startSignInDynamic } from './connectors/sign-in';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { REGISTRY } from '@shared/ipc/registry';
@@ -13,6 +13,7 @@ import { createWidgetBackend, type WidgetBackend } from '../../../../test/suppor
 import { project, record, status } from '../../../../test/support/builders';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { useLayout } from '../stores/layout';
+import { useMachines } from '../stores/machines';
 import { useSessions } from '../stores/sessions';
 import { useLibraryStore } from '../widgets/plugins/library-store';
 import { CustomizeView } from './CustomizeView';
@@ -29,6 +30,7 @@ import { forgetKeptOperations } from '../widgets/plugins/operation';
 // `window.maws`, stands for main and is asked, answers and emits with the bare ids (`bareOf`).
 const P = at('project-one' as ProjectId);
 const Q = at('project-two' as ProjectId);
+const IN_FRONT = at('session-in-front' as AppSessionId);
 const addressing = addressingOf(REGISTRY);
 const lifted = (main: EngineSessionStatus) => addressing.output('engine.sessions').lift([main], TEST_MACHINE)[0]!;
 const pageStatus = (bare: string) => lifted(status(bare));
@@ -42,8 +44,11 @@ beforeEach(() => {
   }); });
   backend.script('plugins.env', () => ({ binary: null, binaryError: 'Unavailable', configHome: '/config', globalConfig: '/config/.claude.json' }));
   window.maws = backend.bridge();
-  useSessions.setState({ projects: new Map([[P, project(P, 0, { name: 'One', directory: '/one' })], [Q, project(Q, 1, { name: 'Two', directory: '/two' })]]), records: new Map(), engine: new Map() });
-  useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, current: P, sets: { [P]: LAYOUT_DEFAULTS.main.sets.none } } });
+  // U13a: the page's project is the current project, the row of the session in front (a session of P's)
+  useSessions.setState({ projects: new Map([[P, project(P, 0, { name: 'One', directory: '/one' })], [Q, project(Q, 1, { name: 'Two', directory: '/two' })]]), records: new Map([[IN_FRONT, record(IN_FRONT, { projectId: P })]]), engine: new Map() });
+  useMachines.setState({ loaded: new Set([TEST_MACHINE]) });
+  useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+  useLayout.getState().openTab({ kind: 'session', appSessionId: IN_FRONT });
 });
 afterEach(() => {
   cleanup();
@@ -52,6 +57,7 @@ afterEach(() => {
   useReadLoads.setState({ loads: new Map() });
   useSessions.setState({ projects: new Map(), records: new Map(), engine: new Map() });
   useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+  useMachines.setState({ loaded: new Set() });
   useLibraryStore.setState(useLibraryStore.getInitialState());
   useCustomizeProject.setState({ projectId: undefined });
   delete (window as { maws?: PreloadBridge }).maws;
@@ -63,7 +69,7 @@ it('keeps the plugin session picker with its library controls and reloads the se
   const second = { ...pageStatus('live-b'), cwd: '/one', pluginsObservedAt: '2026-10-24T12:00:00.000Z' };
   useSessions.setState({
     engine: new Map([[first.appSessionId, first], [second.appSessionId, second]]),
-    records: new Map([[first.appSessionId, pageRecord(first.appSessionId, { title: { text: 'Review notes', source: 'user' } })], [second.appSessionId, pageRecord(second.appSessionId, { title: { text: 'Prepare release', source: 'user' } })]]),
+    records: new Map([...useSessions.getState().records, [first.appSessionId, pageRecord(first.appSessionId, { title: { text: 'Review notes', source: 'user' } })], [second.appSessionId, pageRecord(second.appSessionId, { title: { text: 'Prepare release', source: 'user' } })]]),
   });
   backend.script('plugins.list', () => ({ plugins: [] }));
   backend.script('marketplaces.list', () => ({ marketplaces: [] }));
@@ -253,7 +259,7 @@ it('shows a session directory no project has as its directory as itself, its pat
 
 it('opens the connector Manage footer for the composer project even when no session exists', async () => {
   const user = userEvent.setup();
-  render(<PlusMenu cwd="/two" editor={{ current: null }} />);
+  render(<QueryClientProvider client={new QueryClient()}><PlusMenu cwd="/two" editor={{ current: null }} /></QueryClientProvider>); // U11a: the menu's rows come from a hook over the query client
   await user.click(screen.getByRole('button', { name: 'Add files, photos or commands' }));
   const connectors = screen.getByRole('menuitem', { name: 'Connectors' });
   act(() => connectors.focus());
@@ -313,7 +319,7 @@ describe('Connectors', () => {
   // main's posture for each configured server, by the record its endpoint matches; unscripted, it is unknown
   // with its configuration's fingerprint (`print`, read at each answer: an endpoint replaced under the same name changes it)
   let print = 'print-1';
-  const posture = (_client: QueryClient, name: string, authPosture: 'auth_required' | 'no_auth', scope = 'user', path = '/config/.claude.json') => backend.script('catalog.postures', () => ({ servers: [{ name, scope, path, authPosture, fingerprint: print }] }));
+  const posture = (_client: QueryClient, name: string, authPosture: 'auth_required' | 'no_auth', scope = 'user', path = '/config/.claude.json') => backend.script('catalog.postures', () => ({ servers: [{ name, scope, path, authPosture, fingerprint: print, revision: null }] }));
   const mountWith = (client: QueryClient) => render(<QueryClientProvider client={client}><CustomizeView section="mcp" /></QueryClientProvider>);
   const fresh = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
   afterEach(() => {
@@ -388,7 +394,7 @@ describe('Connectors', () => {
 
   it('a name configured in two scopes: the entry the engine uses offers Sign in, the other says it is shadowed and offers none', async () => {
     const client = fresh();
-    backend.script('catalog.postures', () => ({ servers: [{ name: 'notion', scope: 'user', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-user' }, { name: 'notion', scope: 'local', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-local' }] }));
+    backend.script('catalog.postures', () => ({ servers: [{ name: 'notion', scope: 'user', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-user', revision: null }, { name: 'notion', scope: 'local', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-local', revision: null }] }));
     backend.script('customization.inventory', () => ({ skills: [], servers: [{ name: 'notion', scope: 'user', path: '/config/.claude.json', transport: 'http' }, { name: 'notion', scope: 'local', path: '/config/.claude.json', transport: 'http' }], warnings: [], serversRead: true }));
     const here = { ...pageStatus('here'), cwd: '/one' };
     useSessions.setState({ engine: new Map([[here.appSessionId, here]]) });
@@ -418,8 +424,8 @@ describe('Connectors', () => {
     const innerFile = '/one/.mcp.json';
     let innerPrint = 'print-inner';
     backend.script('catalog.postures', () => ({ servers: [
-      { name: 'notion', scope: 'project', path: outerFile, authPosture: 'no_auth', fingerprint: 'print-outer' },
-      { name: 'notion', scope: 'project', path: innerFile, authPosture: 'auth_required', fingerprint: innerPrint },
+      { name: 'notion', scope: 'project', path: outerFile, authPosture: 'no_auth', fingerprint: 'print-outer', revision: null },
+      { name: 'notion', scope: 'project', path: innerFile, authPosture: 'auth_required', fingerprint: innerPrint, revision: null },
     ] }));
     backend.script('customization.inventory', () => ({ skills: [], servers: [{ name: 'notion', scope: 'project', path: outerFile, transport: 'http' }, { name: 'notion', scope: 'project', path: innerFile, transport: 'http' }], warnings: [], serversRead: true }));
     backend.script('connectors.signIn', () => ({ opId: 'op-inner' }));
@@ -441,6 +447,92 @@ describe('Connectors', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
     expect(await within(rows()[1]!).findByText('Sign in needed')).toBeTruthy();
     expect(within(rows()[1]!).queryByText('Signed in · connected here')).toBeNull();
+  });
+
+  // UX wave U11a M8 (§A, "Who offers Sign in"): a row of MAWS's own list signs in through a ready session on this Mac whose
+  // status lists the name, sending the revision of the configuration the row was drawn with; with no revision (an engine
+  // host of an earlier build) it offers nothing, and with no such session it says to open one.
+  describe('a row of MAWS’s own list', () => {
+    const OWN = { name: 'fx-own', scope: 'app', path: '/maws/machine-settings.json', transport: 'http' } as const;
+    const ownPosture = (revision: string | null) => backend.script('catalog.postures', () => ({ servers: [{ name: 'fx-own', scope: 'app', path: OWN.path, authPosture: 'auth_required', fingerprint: 'print-own', revision }] }));
+    const holding = (bare: string, cwd: string, names: string[]) => ({ ...pageStatus(bare), cwd, mcpServers: names.map((name) => ({ name, status: 'needs-auth', source: null })) });
+    // the disk row, not the live list's line of the same name below it
+    const ownRow = () => waitFor(() => {
+      const found = document.querySelector<HTMLElement>('[data-connector="fx-own"][data-connector-scope="app"]');
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    beforeEach(() => {
+      backend.script('customization.inventory', () => ({ skills: [], servers: [OWN], warnings: [], serversRead: true }));
+      backend.script('connectors.signInDynamicServer', () => ({ opId: 'op-own' }));
+    });
+
+    it('offers Sign in while a ready session holds the server, and sends the revision the row was drawn with to that session', async () => {
+      const bare = holding('bare', '/one', []); // the page's attached session, which does not list it
+      const holder = holding('holder', '/two', ['fx-own']);
+      useSessions.setState({ engine: new Map([[bare.appSessionId, bare], [holder.appSessionId, holder]]) });
+      ownPosture('rev-1');
+      mountWith(fresh());
+      const row = await ownRow();
+      fireEvent.click(await within(row).findByRole('button', { name: 'Sign in to fx-own' }));
+      await waitFor(() => expect(backend.calls.filter((call) => call.command === 'connectors.signInDynamicServer').map((call) => call.input)).toEqual([{ name: 'fx-own', appSessionId: 'holder', entry: { revision: 'rev-1' } }]));
+      act(() => heard({ opId: 'op-own', name: 'fx-own', state: 'waiting_callback', reason: null, message: null, where: null }));
+      expect(within(row).getByText('Finish signing in in your browser…')).toBeTruthy();
+      act(() => heard({ opId: 'op-own', name: 'fx-own', state: 'done', reason: null, message: null, where: 'here' }));
+      expect(within(row).getByText('Signed in · connected here')).toBeTruthy();
+    });
+
+    // P7 run 43386195217: a session started with no message has had no init frame, so its status in the sessions store
+    // lists no server; its mcp_status, which the page reads for its attached session, lists it
+    it('offers Sign in through the attached session whose mcp_status lists the server, before its first turn', async () => {
+      const idle = holding('idle', '/one', []); // the page's attached session: no first turn, so the store lists nothing
+      useSessions.setState({ engine: new Map([[idle.appSessionId, idle]]) });
+      backend.script('session.mcpStatus', () => ({ mcpServers: [{ name: 'fx-own', status: 'needs-auth', scope: 'dynamic' }] }));
+      ownPosture('rev-1');
+      mountWith(fresh());
+      const row = await ownRow();
+      fireEvent.click(await within(row).findByRole('button', { name: 'Sign in to fx-own' }));
+      await waitFor(() => expect(backend.calls.filter((call) => call.command === 'connectors.signInDynamicServer').map((call) => call.input)).toEqual([{ name: 'fx-own', appSessionId: 'idle', entry: { revision: 'rev-1' } }]));
+      expect(row.querySelector('[data-sign-in-needs-session]')).toBeNull();
+    });
+
+    it('offers no Sign in while the row has no revision', async () => {
+      const holder = holding('holder', '/two', ['fx-own']);
+      useSessions.setState({ engine: new Map([[holder.appSessionId, holder]]) });
+      ownPosture(null);
+      mountWith(fresh());
+      const row = await ownRow();
+      expect(await within(row).findByText('Sign in needed')).toBeTruthy();
+      expect(within(row).queryByRole('button', { name: 'Sign in to fx-own' })).toBeNull();
+      expect(row.querySelector('[data-sign-in-needs-session]')).toBeNull();
+    });
+
+    it('with no ready session on this Mac holding it, says to open one and sends nothing', async () => {
+      const other = holding('other', '/one', ['notion']);
+      const remote = { ...holding('on-mini', '/one', ['fx-own']), appSessionId: addressOf(OTHER_MACHINE, 'on-mini' as AppSessionId) };
+      useSessions.setState({ engine: new Map([[other.appSessionId, other], [remote.appSessionId, remote]]) });
+      ownPosture('rev-1');
+      mountWith(fresh());
+      const row = await ownRow();
+      expect(await within(row).findByText('Open a session, then sign in')).toBeTruthy();
+      expect(within(row).queryByRole('button', { name: 'Sign in to fx-own' })).toBeNull();
+      expect(backend.calls.filter((call) => call.command === 'connectors.signInDynamicServer')).toEqual([]);
+    });
+
+    it('shows a sign-in the dialog runs while it runs, and not its finished result', async () => {
+      const holder = holding('holder', '/two', ['fx-own']);
+      useSessions.setState({ engine: new Map([[holder.appSessionId, holder]]) });
+      ownPosture('rev-1');
+      mountWith(fresh());
+      const row = await ownRow();
+      await within(row).findByRole('button', { name: 'Sign in to fx-own' });
+      await act(() => startSignInDynamic({ name: 'fx-own' }, null, holder.appSessionId)); // the dialog's press: no revision, no fingerprint
+      act(() => heard({ opId: 'op-own', name: 'fx-own', state: 'waiting_callback', reason: null, message: null, where: null }));
+      expect(within(row).getByText('Finish signing in in your browser…')).toBeTruthy();
+      act(() => heard({ opId: 'op-own', name: 'fx-own', state: 'done', reason: null, message: null, where: 'here' }));
+      expect(within(row).queryByText('Signed in · connected here')).toBeNull();
+      expect(within(row).getByText('Sign in needed')).toBeTruthy();
+    });
   });
 
   it('an authless server reads No sign-in needed and offers no sign-in', async () => {

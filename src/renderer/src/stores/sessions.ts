@@ -28,6 +28,9 @@ import { EMPTY_REGISTRY, registryRecords } from './registry';
 
 export interface SessionsState {
   loaded: boolean;
+  // UX wave U7, ticket 407 (Interfaces §B): a read of this Mac's sessions was refused (its daemon restarting) and none has
+  // succeeded since; set and cleared only by the local snapshot's reads (`ipc/events.ts`), never timed out.
+  reconnecting: boolean;
   revision: number; // the highest record-side revision seen
   projects: Map<ProjectId, ProjectRecord>;
   records: Map<AppSessionId, SessionRecord>;
@@ -60,6 +63,7 @@ export interface SessionsState {
   // machine by is forgotten; its records, projects, digests and statuses stay shown until its next snapshot replaces them.
   resetMachine(machine: MachineRef): void;
   setLoaded(): void; // the local machine's snapshot is in
+  setReconnecting(on: boolean): void;
   // P5 O8 M2 (Interfaces §G): other machines' sessions as their signed listings say them, by address, and the RL2
   // roster the rows cover (those machines take no record snapshot). Replaced whole by each `org.rows` answer or event.
   listed: ReadonlyMap<AppSessionId, ListedSession>;
@@ -252,6 +256,7 @@ export function createSessionsStore() {
 
     return {
       loaded: false,
+      reconnecting: false,
       revision: 0,
       projects: new Map(),
       records: new Map(),
@@ -419,6 +424,9 @@ export function createSessionsStore() {
       },
       setLoaded() {
         set({ loaded: true });
+      },
+      setReconnecting(on) {
+        if (get().reconnecting !== on) set({ reconnecting: on });
       },
       addUnstarted(appSessionId, entry) {
         set({ unstarted: new Map(get().unstarted).set(appSessionId, entry) });

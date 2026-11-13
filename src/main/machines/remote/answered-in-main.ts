@@ -43,4 +43,5 @@ export const ANSWERED_IN_MAIN: Readonly<Partial<Record<CommandName, string>>> = 
   'laneA.tell': LANE_A,
   'laneA.stopTask': 'lane A’s adapter refuses it `unsupported`: `stop` isn’t offered remotely (P5 Decision Log 51)',
   'laneA.media': 'lane A’s adapter refuses it `unsupported`: uploads across machines are lane B’s',
+  'laneA.accepted': 'lane A’s adapter refuses it: the session machine’s endpoint tells its own spine, inside its daemon (the UX wave’s U1a, UC-1)',
 };

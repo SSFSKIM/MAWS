@@ -9,13 +9,20 @@ export const CUSTOMIZATION_INVENTORY_COVERAGE = 'Plugin MCP servers and marketpl
 const AbsolutePath = z.string().min(1).max(4096).refine((path) => path.startsWith('/') && !path.includes('\0'), 'expected an absolute path');
 export const CustomizationSkillSchema = z.strictObject({
   name: z.string(), description: z.string(), source: z.enum(['user', 'project', 'plugin']), path: AbsolutePath, plugin: z.string().nullable(),
+  // UX wave U11a (§D "Skills", P3): a plugin skill's plugin as the engine names it, the `name` of the plugin's
+  // .claude-plugin/plugin.json, which `/<pluginName>:<name> ` runs; null when that name could not be read; absent on a
+  // person's or a project's skill, and from an engine host of an earlier build
+  pluginName: z.string().max(256).nullable().optional(),
 });
 export const CustomizationServerSchema = z.strictObject({
   name: z.string(), scope: z.enum(['app', 'user', 'project', 'local']), path: AbsolutePath, transport: z.enum(['stdio', 'http', 'sse', 'ws', 'unknown']),
 });
 // P4-AGG M4: a configured server's endpoint, main's alone (a configured URL may carry a token, so it never reaches the
 // renderer): the catalog matches it against the directory's connectors for Connectors' sign-in posture.
-export const CustomizationEndpointSchema = z.strictObject({ name: z.string(), scope: z.enum(['app', 'user', 'project', 'local']), path: AbsolutePath, transport: CustomizationServerSchema.shape.transport, url: z.string().max(4096).nullable() });
+// UX wave U11a M8 (§A): `revision`, an opaque stand-in for the configuration (its name, transport and address) that the
+// engine host keys per run, so a press from Customize can name the configuration its row showed; null: no address;
+// absent from an engine host of an earlier build.
+export const CustomizationEndpointSchema = z.strictObject({ name: z.string(), scope: z.enum(['app', 'user', 'project', 'local']), path: AbsolutePath, transport: CustomizationServerSchema.shape.transport, url: z.string().max(4096).nullable(), revision: z.string().max(64).nullable().optional() });
 export const CustomizationInventorySchema = z.strictObject({
   skills: z.array(CustomizationSkillSchema), servers: z.array(CustomizationServerSchema), warnings: z.array(z.string()),
   // P4-AGG M4: every MCP configuration file that applies (app, user, local, each project `.mcp.json`) read without a

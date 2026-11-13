@@ -23,4 +23,5 @@ export const grades = {
   'laneA.tell': 'converse',
   'laneA.stopTask': 'converse',
   'laneA.media': 'converse', // P5 O9 M7: an image or a PDF goes with a person's words
+  'laneA.accepted': 'internal', // UX wave U1a: main-only, the endpoint's word to its own spine that an answer was taken (as machine.op)
 } as const satisfies CommandGrades<'laneA'>;

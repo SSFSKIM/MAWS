@@ -1,12 +1,13 @@
 // One tab of a pane's strip (§5.2; mockup 01 `.tab`; residue *Tab strip*): the status glyph of a session, the title,
-// the project as `small`, and a close control revealed on hover and focus. It is a `div role="tab"` rather than a
-// button because it holds that inner button and native drag attributes. A middle-click closes it; its context menu
-// pins it, moves it to the other pane (an artifact's also into the panel, P3-F wave S) and closes it or the others. (The
-// Overview is no tab since W5: it floats over the main area.)
+// its place as `small` in a strip that mixes places (UX wave U13a, `tab-place.ts`), and a close control revealed on
+// hover and focus. It is a `div role="tab"` rather than a button because it holds that inner button and native drag
+// attributes. A middle-click closes it; its context menu pins it, moves it to the other pane (an artifact's also into
+// the panel, P3-F wave S) and closes it, the others or those to its right. (The Overview is no tab since W5: it floats
+// over the main area.)
 import { ContextMenu } from 'radix-ui';
 import { useEffect, type KeyboardEvent, type MouseEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
-import { UNPINNABLE_KINDS, type TabRef } from '@shared/ipc/schema/layout';
+import { UNPINNABLE_KINDS, type Strip, type TabRef } from '@shared/ipc/schema/layout';
 import { PinIcon, useChordHint } from '../app/IconButton';
 import { BRIDGED_LINE, holderLine } from '../attention/derive'; // P5 O9
 import { GlyphMark } from '../attention/GlyphMark';
@@ -18,10 +19,8 @@ import { useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { machineOf } from '@shared/machine/address';
-import { ipc } from '../ipc/client';
 import { useMachines } from '../stores/machines';
 import { selectShownOffline, usePhaseClock } from '../app/machine-mark'; // the UX wave, U9
-import { sessionSetKey } from '../stores/org-projects';
 import { displayTitle } from '../sessions/title';
 // E5 start
 import { EDITOR_COPY } from '../tools/code/copy';
@@ -58,30 +57,19 @@ const extension = (path: string) => {
   return dot > 0 ? name.slice(dot + 1).toUpperCase() : null;
 };
 
-function useProjectName(appSessionId: AppSessionId | null): string | null {
-  return useSessions((s) => {
-    const projectId = appSessionId ? s.records.get(appSessionId)?.projectId : null;
-    return projectId ? (s.projects.get(projectId)?.name ?? null) : null;
-  });
-}
-
-// A session tab's label: the record's title, project and glyph; with no record, its listed row's title (P5 O9 M9: another
+// A session tab's label: the record's title and glyph; with no record, its listed row's title (P5 O9 M9: another
 // machine's terminal session, which has its row alone), the title the tab last knew (P5 O6 M2: a
 // session of a machine not loaded in this run), else an unstarted session's, titled through `registerUnstartedTitle`,
-// without a glyph. The project is named when the session's set is not the strip's (P5 O6 M5: sets are keyed by org
-// project, `sessionSetKey`).
+// without a glyph. Where the session sits is its place, which the strip decides (U13a, `tab-place.ts`).
 function useSessionLabel(appSessionId: AppSessionId, lastKnown?: string): TabLabel {
   const record = useSessions((s) => s.records.get(appSessionId));
   const listedTitle = useSessions((s) => s.listed.get(appSessionId)?.title.trim() || null); // P5 O9 M9
   const digest = useSessions((s) => s.digests.get(appSessionId));
   const listing = useSessions((s) => s.listed.get(appSessionId)); // P5 O7 M10: a remote lane B record's state (`listedStateOf`)
   const pending = useAttention((s) => selectPendingOf(s, appSessionId));
-  const project = useProjectName(appSessionId);
   const unstarted = useUnstartedTitle(appSessionId);
-  const current = useLayout((s) => s.main.current);
-  const set = useSessions((s) => (s.records.has(appSessionId) ? sessionSetKey(s, ipc.localMachine, appSessionId, () => undefined) : undefined));
   if (!record) return { title: listedTitle ?? lastKnown ?? unstarted.title, secondary: null, glyph: null, fileType: null };
-  return { title: displayTitle(record), secondary: set === current ? null : project, glyph: glyphFor(record, digest ?? null, pending, listing), fileType: null };
+  return { title: displayTitle(record), secondary: null, glyph: glyphFor(record, digest ?? null, pending, listing), fileType: null };
 }
 
 export function useTabLabel(tab: TabRef): TabLabel {
@@ -136,6 +124,13 @@ function useSessionOffline(tab: TabRef): boolean {
   return useMachines((s) => appSessionId !== null && selectShownOffline(s, machineOf(appSessionId), now));
 }
 
+// A tab's full name, its accessible name, tooltip and All tabs line (U13a, §G): the title, then its place when the strip
+// draws one, else its secondary mark (an agent's).
+export const tabName = (label: TabLabel, place: string | null): string => {
+  const after = place ?? label.secondary;
+  return after ? `${label.title} · ${after}` : label.title;
+};
+
 // E11 F2b (plan 2.5; owner decision 2): opening a session replaces the shown tab unless it is pinned.
 export const PINNED_HINT = 'Pinned: stays open when you open another session';
 
@@ -144,18 +139,20 @@ export interface TabProps {
   pane: 0 | 1;
   domId: string;
   active: boolean;
+  place?: string | null; // where its session sits, while the strip draws places (`useStripPlaces`); none outside a strip
   stop: boolean; // the strip's one tab stop
   onKeyDown(event: KeyboardEvent<HTMLDivElement>): void;
 }
 
-export function Tab({ tab, pane, domId, active, stop, onKeyDown }: TabProps) {
+export function Tab({ tab, pane, domId, active, place = null, stop, onKeyDown }: TabProps) {
   const label = useTabLabel(tab);
   const offline = useSessionOffline(tab); // P5 O6 M5 (T5): an offline machine's kept tab, its title in the disabled token
-  const name = label.secondary ? `${label.title} · ${label.secondary}` : label.title;
+  const name = tabName(label, place);
   const closeChord = useChordHint('tab.close');
   const dirty = useFileTabDirty(tab); // E5
   const holderMark = useHolderMark(tab); // P5 O9
-  // Keep plain tabs compact, but reserve each nonshrinking mark plus its gap before truncating the title.
+  // Keep plain tabs compact, but reserve each nonshrinking mark plus its gap before truncating the title. The place
+  // reserves nothing: it gives way first (U13a).
   const minWidth = Math.max(active ? 24 : 16, 16 + (label.glyph ? 4 : 0) + (label.fileType ? 8 : 0) + (tab.pinned ? 4 : 0) + (dirty ? 4 : 0) + (label.secondary ? 20 : 0) + (holderMark ? 16 : 0));
 
   const onAuxClick = (event: MouseEvent) => {
@@ -194,7 +191,14 @@ export function Tab({ tab, pane, domId, active, stop, onKeyDown }: TabProps) {
         </span>
       )}
       {dirty && <DirtyMark />}{/* E5 */}
-      <span className={`truncate ${offline ? 'text-fg-faint' : ''}`}>{label.title}</span>
+      {/* U13a: the place gives way before the title, and is drawn readable or not at all. The box is one line high and
+          clips what wraps. The title keeps its width up to the whole box. The place asks the line for its whole text or
+          5em, whichever is less (four characters and an ellipsis are never wider), and grows to its whole text from there;
+          a line with less room wraps it out of sight, with its gap, and the title takes the room. */}
+      <span className="flex h-[1lh] min-w-0 flex-wrap items-baseline gap-x-1.5 overflow-hidden">
+        <span className={`max-w-full shrink-0 truncate ${offline ? 'text-fg-faint' : ''}`}>{label.title}</span>
+        {place && <small data-tab-place className="max-w-max min-w-0 grow basis-[5em] truncate text-fg-muted">{place}</small>}
+      </span>
       {holderMark && ( // P5 O9 (Q1)
         <small data-holder-marker title={holderMark.title} className="shrink-0 text-fg-muted">
           {holderMark.text}
@@ -232,6 +236,7 @@ export function Tab({ tab, pane, domId, active, stop, onKeyDown }: TabProps) {
           <ContextMenu.Separator className="my-1 h-px bg-border" />
           <TabMenuItem onSelect={() => void requestCloseTab(tab.id)}>Close tab</TabMenuItem>
           <TabMenuItem onSelect={() => void closeOthers(tab.id, pane)}>Close other tabs</TabMenuItem>
+          <CloseToRightItem id={tab.id} pane={pane} />
         </ContextMenu.Content>
       </ContextMenu.Portal>
     </ContextMenu.Root>
@@ -275,6 +280,28 @@ function moveToOtherPane(id: string, pane: 0 | 1) {
 async function closeOthers(id: string, pane: 0 | 1) {
   const others = currentSet(useLayout.getState().main).panes[pane]?.tabs.filter((t) => t.id !== id && !t.pinned) ?? [];
   for (const other of others) await requestCloseTab(other.id);
+}
+
+// U13a (A10): the pane's unpinned tabs to the right of this one, in order, each through its close guard as "Close other
+// tabs" closes them; disabled when there is none.
+const CLOSE_TO_RIGHT = 'Close tabs to the right';
+const tabsRightOf = (main: Strip, id: string, pane: 0 | 1): TabRef[] => {
+  const tabs = currentSet(main).panes[pane]?.tabs ?? [];
+  const at = tabs.findIndex((t) => t.id === id);
+  return at === -1 ? [] : tabs.slice(at + 1).filter((t) => !t.pinned);
+};
+
+function CloseToRightItem({ id, pane }: { id: string; pane: 0 | 1 }) {
+  const none = useLayout((s) => tabsRightOf(s.main, id, pane).length === 0);
+  return (
+    <TabMenuItem disabled={none} onSelect={() => void closeToRight(id, pane)}>
+      {CLOSE_TO_RIGHT}
+    </TabMenuItem>
+  );
+}
+
+async function closeToRight(id: string, pane: 0 | 1) {
+  for (const right of tabsRightOf(useLayout.getState().main, id, pane)) await requestCloseTab(right.id);
 }
 
 // E5 start: a file tab with unsaved edits (E5 execution document, M2's decisions): a dot before the title and

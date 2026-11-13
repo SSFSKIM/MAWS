@@ -2,8 +2,8 @@
 // M6b's "At its end": a row's mark, Share from the row's menu and the session's header, hub projects only; Proves'
 // renderer line: the marks and menus on listed rows). The mark: a lock for Private, a people mark for wider access or
 // shares, read from the machine's policy for your own sessions and from the listing's audience for another's private one
-// shared with you, with its access in the hover card. Share: a listed row you own in a hub project has a menu holding it,
-// any other listed row none; a record of this Mac's in a hub project that its policy read names offers it while you are
+// shared with you, with its access in the hover card. Share: a listed row you own in a hub project has it in its menu
+// (UX wave U7, O-38: after the two opens every listed row's menu holds), any other listed row not; a record of this Mac's in a hub project that its policy read names offers it while you are
 // this Mac's one owner (P5 O8 M5b: its read names every session any of its owners owns, and the door takes the act from
 // the session's owners alone; the Decision Log's "M5b Task 1, the renderer", item 6); one in a local-only project, or
 // while signed out, doesn't; it opens the Share sheet. P5 O8 M5b: Add owner sits beside Share wherever Share is.
@@ -15,7 +15,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import type { RecordPolicyEntry } from '@shared/ipc/schema/endpoint';
-import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, type TabRef } from '@shared/ipc/schema/layout';
+import { LAYOUT_DEFAULTS, type TabRef } from '@shared/ipc/schema/layout';
 import type { OrgPolicy } from '@shared/ipc/schema/org';
 import { addressOf } from '@shared/machine/address';
 import { machineKey, type OrgKey } from '@shared/machine/org-key';
@@ -124,8 +124,9 @@ describe('the reach mark', () => {
 });
 
 describe('Share on a row', () => {
-  // The UX wave, U9 (Interfaces §6): every lane B listed row has the session menu now, its acts over the link before Share
-  it('gives a listed row you own in a hub project a menu holding Share after its acts, which opens the sheet; one in no hub project its acts alone', async () => {
+  // UX wave U7 (O-38, O-16): every listed row's menu opens with its two opens; the UX wave, U9 (Interfaces §6): the acts over
+  // the link follow them, before Hide, Share and Add owner
+  it('gives a listed row you own in a hub project Share after its opens, its acts and Hide, which opens the sheet; one in no hub project no Share', async () => {
     fill([mine('m', { title: 'Mine' }), mine('n', { title: 'No project', project: null, orgKey: null })]);
     render(
       <>
@@ -134,12 +135,11 @@ describe('Share on a row', () => {
       </>,
     );
     expect(row('Mine').getAttribute('data-menu')).toBe(`session:${studio('m')}`);
-    expect(row('No project').getAttribute('data-menu')).toBe(`session:${studio('n')}`);
-    const none = await menuOf('No project');
-    expect(within(none).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Rename…', 'Fork', 'Archive']);
+    expect(row('No project').getAttribute('data-menu')).toBe(`session:${studio('n')}`); // UX wave U7, O-38: every listed row's menu
+    expect(within(await menuOf('No project')).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open', 'Open in new tab', 'Rename…', 'Fork', 'Archive', 'Hide']);
     await userEvent.keyboard('{Escape}');
     const menu = await menuOf('Mine');
-    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Rename…', 'Fork', 'Archive', SHARE.menuItem, OWNER.menuItem]);
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open', 'Open in new tab', 'Rename…', 'Fork', 'Archive', 'Hide', SHARE.menuItem, OWNER.menuItem]);
     fireEvent.click(within(menu).getByRole('menuitem', { name: SHARE.menuItem }));
     expect(await screen.findByRole('dialog', { name: SHARE.title })).toBeTruthy();
   });
@@ -218,7 +218,8 @@ describe('Add owner beside Share', () => {
     render(<Sidebar />);
     expect(row('Theirs').getAttribute('data-menu')).toBe(`session:${studio('t')}`);
     expect(await itemsOf('Theirs')).toEqual([]);
-    expect(within(await menuOf('Theirs')).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Fork']);
+    // its menu holds the two opens (UX wave U7, O-38) and Fork, the one act over the link for a session another member owns (the UX wave, U9)
+    expect(within(await menuOf('Theirs')).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open', 'Open in new tab', 'Fork']);
     await userEvent.keyboard('{Escape}');
   });
 });
@@ -228,7 +229,7 @@ describe('Share in the session header', () => {
   it("holds Share in the Toolbar's session actions for a session you own", async () => {
     const user = userEvent.setup();
     fill([mine('m', { title: 'Mine', lane: 'A', availability: 'foreign_held' })]);
-    act(() => useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [tab(studio('m'))], activeTabId: tab(studio('m')).id }] } } } }));
+    act(() => useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [tab(studio('m'))], activeTabId: tab(studio('m')).id }] } }));
     render(
       <QueryClientProvider client={queryClient}>
         <Toolbar />
@@ -246,7 +247,7 @@ describe('Share in the session header', () => {
   it("holds Add owner beside Share in the Toolbar's session actions", async () => {
     const user = userEvent.setup();
     fill([mine('m', { title: 'Mine', lane: 'A', availability: 'foreign_held' })]);
-    act(() => useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [tab(studio('m'))], activeTabId: tab(studio('m')).id }] } } } }));
+    act(() => useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [tab(studio('m'))], activeTabId: tab(studio('m')).id }] } }));
     render(
       <QueryClientProvider client={queryClient}>
         <Toolbar />

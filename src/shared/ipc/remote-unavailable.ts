@@ -79,6 +79,8 @@ export const REMOTE_UNAVAILABLE: Readonly<Partial<Record<CommandName, string>>> 
   'side.sendToMain': notYet('sending a side answer to the main conversation'),
   'mods.list': notYet('the mods that machine runs'),
   'mods.setSessionOverride': notYet('turning a mod on or off for one session'),
+  // UX wave U11a M8 (docs/doperpowers/plans/2026-11-12-ux-wave-U11a-settings-connectors-org.md, §A): until U11f
+  'connectors.signInDynamicServer': notYet('signing in to a connector from a plugin or from MAWS’s own list'),
 };
 
 /** The capability an endpoint lists once it serves the session acts the UX wave offers (UC-7.4). */

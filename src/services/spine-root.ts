@@ -18,7 +18,7 @@
 import { rm } from 'node:fs/promises';
 import { hostname, totalmem } from 'node:os';
 import { join } from 'node:path';
-import { isActionable as archiveActionable, isOpen as archiveOpen } from '@shared/attention/kinds';
+import { isActionable as archiveActionable, waits as archiveWaits } from '@shared/attention/kinds';
 import type { ClientPort } from '@shared/client/port';
 import { claudeConfigDir } from '@shared/engine/config-dir';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
@@ -56,7 +56,7 @@ import { appRoot, seedReplayFixtures } from './index/replay-fixtures';
 import { IndexSessionSource } from './index/source';
 import { laneAAttention } from './lane-a/attention';
 import { sminosHome } from './lane-a/discovery';
-import { createLaneADriver, registerLaneA } from './lane-a/driver';
+import { createLaneADriver, registerLaneA, type LaneAView } from './lane-a/driver';
 import { startLibrary } from './library';
 import { registerLibraryReads } from './library/files';
 import { registerMachineOps } from './machine-ops';
@@ -246,15 +246,35 @@ export function startSpine(deps: SpineDeps): SpineRoot {
     });
     registerLaneA(laneA, bus.register);
     settling.push(laneA.probes);
-    // M6: each bridged session's pending requests are attention items, and its digest reads its live phase from the
-    // bridge while the bridge is live (today's `foreign` otherwise)
-    const laneAItems = laneAAttention({ set: (appId, entries) => attention.setLaneAItems(appId, entries) });
-    const offLaneAView = laneA.onChange((appId, view) => {
-      laneAItems.update(appId, view);
-      indexSource.setBridged(appId, view?.state.bridge === 'live' ? { running: view.state.turn.running, pending: view.state.pending.length, tool: view.tool } : null);
+    // M6: each bridged session's pending requests are attention items, and its digest reads its live state from the bridge
+    // while the bridge is live (today's `foreign` otherwise). UX wave U7 (finding 3) and U1a (UC-1): the digest's phase and
+    // tool come only from the session's last current view, so before a bridge's first snapshot the digest keeps its seed
+    // and inside a reconnect the last snapshot's; its waiting count is, at all times, what the attention list holds as
+    // waiting that stops the session (the list is the one holder of an answer the bridge took and has not settled).
+    const views = new Map<AppSessionId, LaneAView>(); // each session's last current view
+    const bridged = (appId: AppSessionId) => {
+      const view = views.get(appId);
+      if (view === undefined) return; // no current snapshot yet: the digest keeps what it had
+      indexSource.setBridged(appId, { running: view.state.turn.running, pending: laneAItems.stopping(appId), tool: view.tool });
+    };
+    const laneAItems = laneAAttention({
+      set: (appId, entries) => {
+        attention.setLaneAItems(appId, entries);
+        bridged(appId); // an acceptance or a grace's end changes the list with no new view
+      },
     });
+    const offLaneAView = laneA.onChange((appId, view) => {
+      const live = view !== null && view.state.bridge === 'live';
+      if (!live) views.delete(appId);
+      else if (view.fresh) views.set(appId, view);
+      laneAItems.update(appId, view); // may call `set`, whose `bridged` reads what this view left stored
+      if (live) bridged(appId);
+      else indexSource.setBridged(appId, null);
+    });
+    const offLaneAAccepted = laneA.onAccepted((appId, request) => laneAItems.accepted(appId, request));
     parts.push(['lane A attention', () => {
       offLaneAView();
+      offLaneAAccepted();
       laneAItems.stop();
     }]);
     if (index.unavailable === null) {
@@ -405,7 +425,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
     // The sweep keeps the machine's interest union (D11): on the embedded shape main's interest report's set
     const inactiveArchive = new InactiveArchive({
       index, git: createGitRunner(), status: (id) => sessions.model.engineStatus(id),
-      waiting: (id) => sessions.model.attention(id).some((item) => archiveOpen(item) && archiveActionable(item)),
+      waiting: (id) => sessions.model.attention(id).some((item) => archiveWaits(item) && archiveActionable(item)),
       archive: (id, eligible, stillEligible) => service.archive(id, { onlyIfIdle: true, eligible, stillEligible }),
       discovered: (engineSessionId) => indexSource.discoveryCurrent(engineSessionId), // a closed app's CLI use is read first
       interest: deps.interest,

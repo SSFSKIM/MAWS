@@ -7,3 +7,6 @@ export const commands = [
 ] as const;
 
 export const events = ['laneA.changed', 'laneA.plane'] as const;
+
+// UX wave U1a (UC-1): the endpoint's word to its own spine that sminos took an answer; no window sends it
+export const mainOnlyCommands = ['laneA.accepted'] as const;

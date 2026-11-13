@@ -366,7 +366,9 @@ export const CONNECTOR_ALREADY_CONNECTED = 'already connected';
 export const CONNECTOR_SIGN_IN_REASONS = ['no_session', 'timeout', 'denied', 'engine', 'session_exited', 'other_entry'] as const; // other_entry: the session uses another entry of the name (its words in `message`)
 export const ConnectorSignInChangedSchema = z.strictObject({
   opId: z.string(),
-  name: McpServerNameSchema,
+  // UX wave U11a (§A): any name the session's mcp_status reports, up to the bound it always had: a dynamic connector's
+  // (`plugin:<plugin>:<server>`) fails the configured-name rule, which the wire's manifest never showed
+  name: z.string().max(128),
   state: z.enum(CONNECTOR_SIGN_IN_STATES),
   reason: z.enum(CONNECTOR_SIGN_IN_REASONS).nullable(), // failed only
   message: z.string().max(2000).nullable(), // the engine's words, when it gave some
@@ -451,6 +453,18 @@ export const commands = {
   // operation as `connectors.signIn`, for a caller that knows a server by its name and scope alone. Its own command, since
   // a `path` made optional would be a breaking change to the wire
   'connectors.signInServer': machine(z.strictObject({ name: McpServerNameSchema, scope: PluginsScopeSchema, cwd: PluginsCwdSchema.nullable(), appSessionId: AppSessionIdSchema, ...Callback }), OperationReceiptSchema),
+  // UX wave U11a (docs/doperpowers/plans/2026-11-12-ux-wave-U11a-settings-connectors-org.md, §A): the same operation for a
+  // dynamic connector, one a plugin brings or one of MAWS's own list, which the session's mcp_status lists with scope
+  // `dynamic` and no configuration file names. The services sign in the session's own server of the name; a press from a
+  // row of MAWS's own list also names that entry by the revision of the configuration the row was drawn with
+  // (`customization.serverEndpoints`' `revision`), refused if the entry is no longer that one. No remote caller sends
+  // `callback` until U11f.
+  'connectors.signInDynamicServer': machine(z.strictObject({
+    name: z.string().min(1).max(128), // as the session's mcp_status reports it
+    appSessionId: AppSessionIdSchema,
+    entry: z.strictObject({ revision: z.string().min(1).max(64) }).optional(), // the press came from a row of MAWS's own list: the revision that row was drawn with
+    ...Callback, // a remote asker's port: no caller sends it until U11f
+  }), OperationReceiptSchema),
   // P4-AGG M4 end
   // P5 O4 M2 start (Interfaces §C, §F; D8, D23): main's alone, never bridged.
   // The window that shows the asking page (its `ClientRef`), shown and not minimized or not, as the app reads it; a page

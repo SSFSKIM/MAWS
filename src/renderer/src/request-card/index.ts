@@ -8,7 +8,7 @@ import { RequestCard } from './RequestCard';
 
 export { RequestCard, type Placement, type RequestCardProps } from './RequestCard';
 export { scopeOptions, isDowngraded, type Scope, type ScopeOption } from './scope';
-export { quickApproval, hoverApproval, type QuickApproval } from './quick-approval';
+export { quickApproval, type QuickApproval } from './quick-approval';
 export { toAnswer, type VariantState } from './answers';
 export { renderInlineRequest, renderSessionRequest, type RequestRenderer } from './inline';
 
