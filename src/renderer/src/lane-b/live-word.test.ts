@@ -4,7 +4,7 @@
 // those fails. The listing entry is where every reader of the session's state already reads it (sessions/listed-state.ts).
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, type TabRef } from '@shared/ipc/schema/layout';
+import { LAYOUT_DEFAULTS, type TabRef } from '@shared/ipc/schema/layout';
 import { addressOf } from '@shared/machine/address';
 import { remoteRow, status } from '../../../../test/support/builders';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
@@ -18,7 +18,7 @@ import { remoteSessionState } from './test-support/remote-session';
 const B1 = addressOf(OTHER_MACHINE, 'b1' as AppSessionId);
 const PRIVATE = addressOf(OTHER_MACHINE, 'p1' as AppSessionId);
 const tab = (id: AppSessionId): TabRef => ({ id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false });
-const tabs = (...ids: AppSessionId[]) => useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: ids.map(tab), activeTabId: ids[0] === undefined ? '' : tab(ids[0]).id }] } } } });
+const tabs = (...ids: AppSessionId[]) => useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: ids.map(tab), activeTabId: ids[0] === undefined ? '' : tab(ids[0]).id }] } }); // UX wave U13a: one strip
 const roster = (state: 'up' | 'down') =>
   useMachines.getState().applyRoster([
     { ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: new Date().toISOString(), generation: 0 },
