@@ -27,6 +27,7 @@ import { currentTabRetention, unstartedProjectOf } from '../keymap/actions-runti
 import { useAttention } from '../stores/attention';
 import { createFreshness, type Freshness } from '../stores/freshness';
 import { useLayout } from '../stores/layout';
+import { usePanelHost } from '../panel/host'; // UX wave U8b
 import { useMachines } from '../stores/machines';
 import { useSessions } from '../stores/sessions';
 import { applyRemoteSession, holdsRemoteStatus, keepsRemoteStatus } from '../lane-b/remote-session'; // P5 O7 M2
@@ -446,7 +447,10 @@ export function connectShell(
     const intents = retention ? await retention.ready : true;
     if (!connected) return;
     if (applied && intents) loadLocal();
-    await stores.layout.getState().hydrate(client, knownTab, { settle: flushNow, projectOf, rekeyOf, titleOf });
+    // UX wave U8b (its M1, decision 1): the first read of a profile asks which tools take several tabs. Every built-in
+    // tool registers in App's effects, which run in the same commit as this connection's, before any read answers.
+    const multiInstance = (toolId: string) => usePanelHost.getState().tools.get(toolId)?.multiInstance;
+    await stores.layout.getState().hydrate(client, knownTab, { settle: flushNow, projectOf, rekeyOf, titleOf, multiInstance });
   });
 
   return () => {

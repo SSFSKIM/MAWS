@@ -526,6 +526,28 @@ export const storedPanelSurfacesSchema = (local: MachineRef) => {
   ]);
 };
 
+// UX wave U8b start (docs/doperpowers/plans/2026-11-12-ux-wave-U8b-column-and-tabs.md, Interfaces §A; the wave's UC-14):
+// three keys beside the schemas above, which stay as build F reads them (F keeps a key it does not know and never reads
+// it). Each is outside the `panel.` namespace, which hydration reads as one session's list.
+// Key `cards.open`: which of the three folding cards are open, per device. Absent: `CARDS_OPEN_DEFAULT`.
+export const CARD_IDS = ['environment', 'context', 'connectors'] as const;
+export type CardId = (typeof CARD_IDS)[number];
+export const CardsOpenSchema = z.strictObject({ version: z.literal(1), open: z.array(z.enum(CARD_IDS)) });   // key `cards.open`
+export const CARDS_OPEN_DEFAULT: readonly CardId[] = ['environment'];
+// Key `panelTools.widths`: the side column's two remembered widths, for a column showing Review, Files or the browser
+// (`wide`) and for any other (`narrow`); null: never dragged, the automatic width applies.
+export const PanelWidthsSchema = z.strictObject({ version: z.literal(1), wide: z.number().int().nullable(), narrow: z.number().int().nullable() });   // key `panelTools.widths`
+export type PanelWidths = z.infer<typeof PanelWidthsSchema>;
+// Key `panelTools.groups`: the lower group of each scope that has one, keyed as `panelTools.surfaces.stacks` is. `tabs`:
+// the lower group's tab ids, the one in view (or last in view, while the column is hidden) first; never empty. `share`:
+// the lower group's part of the column's height. `stacks` decides which tabs are in view (Interfaces §A's reading rule).
+export const LowerGroupSchema = z.strictObject({ tabs: z.array(z.string()).min(1), share: z.number().min(0.2).max(0.8) });
+export type LowerGroup = z.infer<typeof LowerGroupSchema>;
+export const PanelGroupsSchema = z.strictObject({ version: z.literal(1), lower: z.record(z.string(), LowerGroupSchema) });   // key `panelTools.groups`
+export type PanelGroups = z.infer<typeof PanelGroupsSchema>;
+export const PANEL_GROUPS_DEFAULT: PanelGroups = { version: 1, lower: {} };
+// UX wave U8b end
+
 export const LayoutKeySchema = z.union([
   z.literal('regions'), z.literal('main.tabs'), z.literal('panel.pinned'), z.string().regex(/^panel\.[^.]+$/), z.literal('window.main'),
   // P4-B3 start
@@ -541,6 +563,7 @@ export const LayoutKeySchema = z.union([
   z.literal('sessions.attachTabs'),
   // C10 end
   z.literal('sidebar.people'), // P5 O8 M5: SidebarPeopleSchema
+  z.literal('cards.open'), z.literal('panelTools.widths'), z.literal('panelTools.groups'), // UX wave U8b: the three above
 ]);
 // P5 O8 M5 (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, "The People toggle"): the sidebar rows (org projects'
 // and machines' row keys) whose People toggle is on, written by `stores/people.ts`; an absent key means every toggle off.

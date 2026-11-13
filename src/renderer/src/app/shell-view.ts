@@ -1,14 +1,15 @@
 import { create } from 'zustand';
 import { useLayout, type LayoutState } from '../stores/layout';
 import { surfaceSession, surfaceTabs } from '../panel/surface-model';
-import { shellGeometry } from './shell-geometry';
+import { isWideColumn, shellGeometry } from './shell-geometry';
 import { useWindowWidth } from './regions';
 
 export const useShellView = create<{ sidebarOverlay: boolean; cardsOverlay: boolean }>(() => ({ sidebarOverlay: false, cardsOverlay: false }));
-export const WIDE_SURFACES = new Set(['review', 'files', 'browser']);
+export { WIDE_SURFACES } from './shell-geometry';
+// A column is wide while a reading tool is among the tabs in view; its width is the one remembered for that class.
 export function shellGeometryOf(state: LayoutState, width: number) {
   const tabs = surfaceTabs(state, surfaceSession(state));
-  return shellGeometry(state.regions, width, tabs.length > 0, tabs.some((tab) => WIDE_SURFACES.has(tab.toolId)));
+  return shellGeometry(state.regions, width, tabs.length > 0, isWideColumn(tabs), state.panelWidths);
 }
 export function useShellGeometry() {
   const width = useWindowWidth();

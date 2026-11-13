@@ -6,15 +6,19 @@ import { addressOf } from '@shared/machine/address';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { createLayoutStore, LAYOUT_WRITE_DELAY_MS, persistLayout, type ProjectOf } from './layout';
 import { currentSet } from './layout-model';
+import { sideGroups } from '../panel/surface-model'; // UX wave U8b
 
 const A = at('app-a' as AppSessionId);
 const B = at('app-b' as AppSessionId);
 const surfaceState = (contexts: PanelSurfaces['contexts'] = {}): PanelSurfaces => ({ version: 2, stacks: {}, pinnedTools: [], contexts });
 
-// A store persisting through a fake main whose layout.json holds the three fixed keys at their defaults, then `values`
-// (an `undefined` value leaves that key out).
+// The keys a launch of this build has written once (UX wave U8b): after them, a launch is not the first read of a profile.
+const SIDE_COLUMN_KEYS = { 'panelTools.groups': { version: 1, lower: {} }, 'panelTools.widths': { version: 1, wide: null, narrow: null }, 'cards.open': { version: 1, open: ['environment'] } };
+
+// A store persisting through a fake main whose layout.json holds the three fixed keys at their defaults and the side
+// column's three keys, then `values` (an `undefined` value leaves that key out).
 function setup(given: Record<string, unknown> = {}) {
-  const values: Record<string, unknown> = { regions: LAYOUT_DEFAULTS.regions, 'main.tabs': LAYOUT_DEFAULTS.main, 'panel.pinned': [], ...given };
+  const values: Record<string, unknown> = { regions: LAYOUT_DEFAULTS.regions, 'main.tabs': LAYOUT_DEFAULTS.main, 'panel.pinned': [], ...SIDE_COLUMN_KEYS, ...given };
   const fake = fakeClient({
     'layout.list': { keys: Object.keys(values) },
     'layout.get': ({ key }: { key: string }) => ({ value: values[key] ?? null }),
@@ -268,7 +272,8 @@ describe('layout persistence', () => {
     const failing = { ...fake.client, invoke: (name: never, input: never, ...rest: unknown[]) => (name === 'layout.get' && (input as { key: string }).key === 'main.tabs' ? Promise.resolve({ ok: false, error: { code: 'internal', message: 'x' } }) : (fake.client.invoke as unknown as (...a: unknown[]) => Promise<never>)(name, input, ...rest)) } as typeof fake.client;
     const store = createLayoutStore();
     await store.getState().hydrate(failing, () => true);
-    expect(fake.invoked('layout.set')).toEqual([]);
+    // UX wave U8b: an empty listing is a first read, which writes the side column's three keys and nothing else
+    expect((fake.invoked('layout.set') as { key: string }[]).map((write) => write.key)).toEqual(['panelTools.groups', 'panelTools.widths', 'cards.open']);
     error.mockRestore();
   });
 
@@ -677,5 +682,88 @@ describe('the panel keys of another machine’s sessions', () => {
     store.getState().dropSession(A);
     vi.advanceTimersByTime(LAYOUT_WRITE_DELAY_MS);
     expect(sets().filter((s) => s.key.startsWith('panel.') && s.key !== 'panel.pinned')).toEqual([{ key: `panel.${onB}`, value: null }]);
+  });
+});
+
+// UX wave U8b (docs/doperpowers/plans/2026-11-12-ux-wave-U8b-column-and-tabs.md, M1; Interfaces §A, §G): a profile build F
+// wrote, read by this build the first time and again.
+describe('the side column’s first read of a profile', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    running.splice(0).forEach((stop) => stop());
+    vi.useRealTimers();
+  });
+  const pin = { id: 'terminal:ffff0001', toolId: 'terminal', pinned: true };
+  const files = { id: 'files:ffff0002', toolId: 'files', pinned: false };
+  const info = { id: 'session-info:ffff0003', toolId: 'session-info', pinned: false };
+  const review = { id: 'review:ffff0004', toolId: 'review', pinned: false };
+  const t1 = { id: 'terminal:ffff0005', toolId: 'terminal', pinned: false };
+  const t2 = { id: 'terminal:ffff0006', toolId: 'terminal', pinned: false };
+  const pane = { id: 'plugin-pane:ffff0007', toolId: 'plugin-pane', pinned: false }; // its plugin not loaded yet
+  const multiInstance = (toolId: string) => (toolId === 'plugin-pane' ? undefined : toolId === 'terminal');
+  const fixed = { regions: LAYOUT_DEFAULTS.regions, 'main.tabs': LAYOUT_DEFAULTS.main, 'panel.pinned': [] };
+
+  // A launch over `file`; `file()` after it is layout.json as its writes left it.
+  async function launch(file: Record<string, unknown>) {
+    const fake = fakeClient({
+      'layout.list': { keys: Object.keys(file) },
+      'layout.get': ({ key }: { key: string }) => ({ value: file[key] ?? null }),
+      'layout.set': undefined,
+    });
+    const store = createLayoutStore();
+    const stop = persistLayout(fake.client, store);
+    running.push(stop);
+    const hydrating = store.getState().hydrate(fake.client, () => true, { multiInstance });
+    await vi.runAllTimersAsync();
+    await hydrating;
+    const sets = () => fake.invoked('layout.set') as { key: string; value: unknown }[];
+    const after = () => ({ ...file, ...Object.fromEntries(sets().map(({ key, value }) => [key, value])) });
+    return { store, sets, after };
+  }
+
+  it('reads F’s two stacked surfaces as two groups and drops the tabs F never closed, the pins and terminals kept', async () => {
+    const f = {
+      ...fixed,
+      'panel.pinned': [pin],
+      [`panel.${A}`]: { tabs: [files, info, review, t1, t2, pane], activeTabId: review.id },
+      'panelTools.surfaces': { version: 2, stacks: { [A]: [files.id, review.id] }, pinnedTools: [], contexts: {} },
+    };
+    const first = await launch(f);
+    const state = first.store.getState();
+    expect(state.effectivePanelTabs(A)).toEqual([pin, files, review, t1, t2, pane]);
+    expect(sideGroups(state, A)).toMatchObject({ upper: { shown: files }, lower: { tabs: [review], shown: review }, hidden: false });
+    expect(first.sets().map((write) => write.key).sort()).toEqual(['cards.open', `panel.${A}`, 'panelTools.groups', 'panelTools.widths']);
+    // a second launch is not a first read: nothing is pruned, nothing written
+    const again = await launch(first.after());
+    expect(again.store.getState().effectivePanelTabs(A)).toEqual([pin, files, review, t1, t2, pane]);
+    expect(again.sets()).toEqual([]);
+    // a pruned tool opened again on purpose is a tab again, and stays one
+    again.store.getState().setPanelTabs(A, { tabs: [...again.store.getState().effectivePanelTabs(A), info], activeTabId: info.id });
+    await vi.advanceTimersByTimeAsync(LAYOUT_WRITE_DELAY_MS);
+    const third = await launch(again.after());
+    expect(third.store.getState().effectivePanelTabs(A)).toContainEqual(info);
+  });
+
+  it('takes F’s one width as the wide width, 380 as automatic, and keeps 380 once dragged to it', async () => {
+    const at = (width: number) => ({ ...fixed, regions: { ...LAYOUT_DEFAULTS.regions, panel: { ...LAYOUT_DEFAULTS.regions.panel, width } } });
+    expect((await launch(at(380))).store.getState().panelWidths).toEqual({ version: 1, wide: null, narrow: null });
+    const dragged = await launch(at(512));
+    expect(dragged.store.getState().panelWidths).toEqual({ version: 1, wide: 512, narrow: null });
+    expect(dragged.sets()).toContainEqual({ key: 'panelTools.widths', value: { version: 1, wide: 512, narrow: null } });
+    dragged.store.getState().setPanelWidth(380); // nothing in view: the narrow width
+    await vi.advanceTimersByTimeAsync(LAYOUT_WRITE_DELAY_MS);
+    const later = await launch(dragged.after());
+    expect(later.store.getState().panelWidths).toEqual({ version: 1, wide: 512, narrow: 380 });
+    later.store.getState().setPanelWidth(null);
+    await vi.advanceTimersByTimeAsync(LAYOUT_WRITE_DELAY_MS);
+    expect(later.after()).toMatchObject({ 'panelTools.widths': { version: 1, wide: 512, narrow: null }, regions: { panel: { width: 380 } } });
+  });
+
+  it('reads cards.open absent, or holding a card it does not know, as Environment open', async () => {
+    expect((await launch({ ...fixed, ...SIDE_COLUMN_KEYS, 'cards.open': undefined })).store.getState().cardsOpen).toEqual(['environment']);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect((await launch({ ...fixed, ...SIDE_COLUMN_KEYS, 'cards.open': { version: 1, open: ['context', 'artifacts'] } })).store.getState().cardsOpen).toEqual(['environment']);
+    warn.mockRestore();
+    expect((await launch({ ...fixed, ...SIDE_COLUMN_KEYS, 'cards.open': { version: 1, open: ['context'] } })).store.getState().cardsOpen).toEqual(['context']);
   });
 });

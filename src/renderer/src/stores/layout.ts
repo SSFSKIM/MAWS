@@ -9,8 +9,14 @@ import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import {
+  CARD_IDS,
+  CARDS_OPEN_DEFAULT,
+  CardsOpenSchema,
   LAYOUT_DEFAULTS,
   NO_PROJECT,
+  PANEL_GROUPS_DEFAULT,
+  PanelGroupsSchema,
+  PanelWidthsSchema,
   PanelActiveNoSessionSchema,
   PanelParamsSchema,
   PanelPinnedSchema,
@@ -19,12 +25,15 @@ import {
   storedMainSchema,
   storedPanelSurfacesSchema,
   storedRegionsSchema,
+  type CardId,
   type FloatingCardSize,
   type LayoutKey,
   type LayoutMain,
   type LayoutRegions,
+  type PanelGroups,
   type PanelSessionState,
   type PanelSurfaces,
+  type PanelWidths,
   type PanelTabRef,
   type TabRef,
   type TabSetKey,
@@ -35,6 +44,8 @@ import type { MachineRef } from '@shared/machine/ref';
 import type * as z from 'zod';
 import * as model from './layout-model';
 import { normalizeSurfaceStack, rememberSurfaceContext, stackAfterSelection, surfaceRefs, surfaceScope, surfaceSession, surfaceTabs } from '../panel/surface-model';
+import { clampShare, groupOf, repairScope, scopeValues, sideGroups, valuesOf, type ScopeValues, type SideGroup, type SideGroups } from '../panel/surface-model'; // UX wave U8b
+import { isWideColumn } from '../app/shell-geometry'; // UX wave U8b
 
 type Pane = 0 | 1;
 
@@ -51,6 +62,12 @@ export interface LayoutState {
   // (`panelTools.params`), handed back as the restored instance's `init.params`.
   panelParams: Record<string, unknown>;
   panelSurfaces: PanelSurfaces;
+  // UX wave U8b (its execution document, Interfaces §A and §B): the lower group of each scope that has one
+  // (`panelTools.groups`), the side column's two remembered widths (`panelTools.widths`), and the open folding cards
+  // (`cards.open`).
+  panelGroups: PanelGroups;
+  panelWidths: PanelWidths;
+  cardsOpen: CardId[];
   // Hydration's live record/intent resolver; derivation ignores stale contexts without deleting saved preferences.
   knownSession(appSessionId: AppSessionId): boolean;
   hydrated: boolean;
@@ -71,7 +88,9 @@ export interface LayoutState {
   // P5 O6 M5: `rekeyOf` answers what a project key from before M5 (a project's address) becomes (`model.RekeyOf`); every
   // set, expanded row and panel context keyed by one migrates at hydration and again at `rekeyProjects`.
   // P5 O6 M2 (M6's scene): `titleOf` answers a held session's title, which its tabs keep (`refreshTabTitles`).
-  hydrate(client: MawsBridge, known: (appSessionId: AppSessionId) => boolean, opts?: { settle?: () => void; projectOf?: ProjectOf; rekeyOf?: model.RekeyOf; titleOf?: TitleOf }): Promise<void>;
+  // UX wave U8b: `multiInstance` answers whether a tool takes several tabs (undefined: not registered now), which the
+  // first read of a profile (no `panelTools.groups` yet) needs to drop the tabs that were never closed (Interfaces §A).
+  hydrate(client: MawsBridge, known: (appSessionId: AppSessionId) => boolean, opts?: { settle?: () => void; projectOf?: ProjectOf; rekeyOf?: model.RekeyOf; titleOf?: TitleOf; multiInstance?: (toolId: string) => boolean | undefined }): Promise<void>;
   // A tab of a session opens in its project's set, which the strip shows first when it is activated (W12).
   openTab(ref: TabTarget, opts?: { pane?: model.PaneTarget; activate?: boolean }): void;
   // I2: replaces the focused pane's session unless `how: 'tab'` or `split` asks otherwise (`model.openSession`); W12:
@@ -144,6 +163,14 @@ export interface LayoutState {
   // the params of panel tabs some list holds, and the tab written (whose instance exists before its ref is written).
   setPanelParams(tabId: string, params: unknown): void;
   setDragging(dragging: LayoutState['dragging']): void;
+  // UX wave U8b (Interfaces §B): the acts that change what the side column has in view, these and only these. Each reads
+  // the scope through `sideGroups` and writes `stacks`, the selection and the lower entry together.
+  showSurfaceTab(appSessionId: AppSessionId | null, tabId: string): void; // in view in its own group; a hidden column is shown, each group with its remembered tab
+  hideSurfaces(appSessionId: AppSessionId | null): void; // stacks[scope] = []; the selection and the lower entry kept
+  moveSurfaceTab(appSessionId: AppSessionId | null, tabId: string, to: 'upper' | 'lower'): void;
+  setGroupShare(appSessionId: AppSessionId | null, share: number): void; // clamped to 0.2..0.8
+  setPanelWidth(px: number | null): void; // the width in use (wide or narrow) and regions.panel.width; null: automatic again
+  setCardOpen(card: CardId, open: boolean): void;
 }
 
 const PANEL_KEY = /^panel\.([^.]+)$/;
@@ -258,6 +285,134 @@ function surfaceRegions(state: LayoutState): LayoutRegions {
   return { ...regions, panel: { ...regions.panel, floating: false, maximized: false } };
 }
 
+// ---- the side column's stored groups (UX wave U8b, docs/doperpowers/plans/2026-11-12-ux-wave-U8b-column-and-tabs.md) ----
+
+// Build F's automatic width, which `regions.panel.width` holds while this build's width in use is automatic (Interfaces §G).
+export const F_AUTOMATIC_WIDTH = LAYOUT_DEFAULTS.regions.panel.width;
+export const PANEL_WIDTHS_DEFAULT: PanelWidths = { version: 1, wide: null, narrow: null };
+// The class of the side column's width now: wide while a reading tool is among the tabs in view (`shellGeometryOf`).
+export const panelWidthClass = (state: Pick<LayoutState, 'main' | 'knownSession' | 'panelPinned' | 'panelBySession' | 'panelActiveNoSession' | 'panelSurfaces'>): 'wide' | 'narrow' =>
+  isWideColumn(surfaceTabs(state, surfaceSession(state))) ? 'wide' : 'narrow';
+
+type Scoped = Pick<LayoutState, 'panelPinned' | 'panelBySession' | 'panelActiveNoSession' | 'panelSurfaces' | 'panelGroups'>;
+type ScopePatch = Pick<LayoutState, 'panelBySession' | 'panelActiveNoSession' | 'panelGroups'> & { stacks: Record<string, string[] | undefined> };
+
+const sameRefs = (a: readonly PanelTabRef[], b: readonly PanelTabRef[]) =>
+  a.length === b.length && a.every((t, i) => t.id === b[i].id && t.toolId === b[i].toolId && t.pinned === b[i].pinned);
+
+// The ids one write of a list replaced in place (the host's barrier gives a restored ref a new id where it stands): at a
+// position of the writer's list, a ref of the same tool under an id the list did not hold, the old id gone from it.
+function renamedIn(before: readonly PanelTabRef[], after: readonly PanelTabRef[]): Map<string, string> | undefined {
+  if (before.length !== after.length) return undefined;
+  const was = new Set(before.map((t) => t.id));
+  const is = new Set(after.map((t) => t.id));
+  const renamed = new Map<string, string>();
+  before.forEach((tab, i) => {
+    const next = after[i];
+    if (tab.id !== next.id && tab.toolId === next.toolId && !is.has(tab.id) && !was.has(next.id)) renamed.set(tab.id, next.id);
+  });
+  return renamed.size > 0 ? renamed : undefined;
+}
+
+// Decision 7 of M1: `panelTools.groups` keeps the entries of scopes some list holds (`@none`, and each session with a list).
+function liveGroups(lower: PanelGroups['lower'], bySession: ReadonlyMap<AppSessionId, PanelSessionState>): PanelGroups['lower'] {
+  const kept = Object.entries(lower).filter(([scope]) => scope === surfaceScope(null) || bySession.has(scope as AppSessionId));
+  return kept.length === Object.keys(lower).length ? lower : Object.fromEntries(kept);
+}
+
+// Writes scopes' values into a state: the stacks to set (undefined: the key removed), each selection, each lower entry.
+function scopePatch(state: Scoped, entries: Iterable<[AppSessionId | null, ScopeValues]>): ScopePatch {
+  let panelBySession = state.panelBySession;
+  let panelActiveNoSession = state.panelActiveNoSession;
+  let lower = state.panelGroups.lower;
+  const stacks: Record<string, string[] | undefined> = {};
+  for (const [session, values] of entries) {
+    const scope = surfaceScope(session);
+    const now = scopeValues(state, session);
+    if (!sameJson(now.stack, values.stack)) stacks[scope] = values.stack;
+    if (session === null) panelActiveNoSession = values.activeTabId;
+    else if (now.activeTabId !== values.activeTabId || !panelBySession.has(session)) {
+      if (panelBySession === state.panelBySession) panelBySession = new Map(panelBySession);
+      const own = panelBySession.get(session) ?? { tabs: [], activeTabId: null };
+      panelBySession.set(session, { ...own, activeTabId: values.activeTabId });
+    }
+    if (!sameJson(now.lower, values.lower)) {
+      lower = { ...lower };
+      if (values.lower === undefined) delete lower[scope];
+      else lower[scope] = values.lower;
+    }
+  }
+  lower = liveGroups(lower, panelBySession);
+  const panelGroups = lower === state.panelGroups.lower ? state.panelGroups : { version: 1 as const, lower };
+  return { stacks, panelBySession, panelActiveNoSession, panelGroups };
+}
+
+const withStacks = (surfaces: PanelSurfaces, stacks: Record<string, string[] | undefined>): PanelSurfaces => {
+  if (Object.keys(stacks).length === 0) return surfaces;
+  const next = { ...surfaces.stacks };
+  for (const [scope, ids] of Object.entries(stacks)) {
+    if (ids === undefined) delete next[scope];
+    else next[scope] = ids;
+  }
+  return { ...surfaces, stacks: next };
+};
+
+// Decision 5 of M1: after a writer changed refs (`prev` to `next`), every scope whose refs changed has its values repaired
+// (`repairScope`), each session with a list and `@none`. `settled`: the scope whose stack and selection the writer set
+// itself (`setPanelTabs`'s stacking rule, until M2), whose lower entry only follows its refs.
+function repairedScopes(prev: Scoped, next: Scoped, opts: { settled?: string; renamed?: ReadonlyMap<string, string> } = {}): [AppSessionId | null, ScopeValues][] {
+  const repaired: [AppSessionId | null, ScopeValues][] = [];
+  const pinsSame = prev.panelPinned === next.panelPinned || sameRefs(prev.panelPinned, next.panelPinned);
+  for (const session of [null, ...next.panelBySession.keys()]) {
+    const scope = surfaceScope(session);
+    const refs = surfaceRefs(next, session);
+    if (scope === opts.settled) {
+      const values = scopeValues(next, session);
+      if (values.lower === undefined) continue;
+      const alive = new Set(refs.map((t) => t.id));
+      const tabs = values.lower.tabs.map((id) => opts.renamed?.get(id) ?? id).filter((id) => alive.has(id));
+      if (!sameJson(tabs, values.lower.tabs)) repaired.push([session, { ...values, lower: tabs.length > 0 ? { ...values.lower, tabs } : undefined }]);
+      continue;
+    }
+    const own = (s: Scoped) => (session === null ? undefined : s.panelBySession.get(session)?.tabs);
+    if (pinsSame && own(prev) === own(next)) continue;
+    const before = surfaceRefs(prev, session);
+    if (sameRefs(before, refs)) continue;
+    const values = repairScope({ refs: before, ...scopeValues(prev, session) }, refs, opts.renamed);
+    if (!sameJson(values, scopeValues(next, session))) repaired.push([session, values]);
+  }
+  return repaired;
+}
+
+// A group's tab that takes the place of `tabId` leaving it: the next tab to its right that stays, else the last one.
+function neighbour(group: SideGroup, tabId: string, left: readonly PanelTabRef[]): PanelTabRef | null {
+  const ids = new Set(left.map((t) => t.id));
+  return group.tabs.slice(group.tabs.findIndex((t) => t.id === tabId) + 1).find((t) => ids.has(t.id)) ?? left.at(-1) ?? null;
+}
+
+// `moveSurfaceTab`'s groups: the tab joins the other group and is in view there, the group it left shows its neighbour;
+// moving a group's only tab leaves one group; moving below with one group makes the second group with that tab alone,
+// refused (null) when the group has one tab.
+export function groupsAfterMove(groups: SideGroups, refs: readonly PanelTabRef[], tabId: string, to: 'upper' | 'lower'): SideGroups | null {
+  const from = groupOf(groups, tabId);
+  const tab = refs.find((t) => t.id === tabId);
+  if (from === null || from === to || tab === undefined) return null;
+  if (groups.lower === null) {
+    const left = groups.upper.tabs.filter((t) => t.id !== tabId);
+    if (left.length === 0) return null;
+    const shown = groups.upper.shown !== null && groups.upper.shown.id !== tabId ? groups.upper.shown : neighbour(groups.upper, tabId, left);
+    return { upper: { tabs: left, shown }, lower: { tabs: [tab], shown: tab, share: 0.5 }, hidden: false };
+  }
+  const source = from === 'upper' ? groups.upper : groups.lower;
+  const target = from === 'upper' ? groups.lower : groups.upper;
+  const left = source.tabs.filter((t) => t.id !== tabId);
+  if (left.length === 0) return { upper: { tabs: [...refs], shown: tab }, lower: null, hidden: false };
+  const moved: SideGroup = { tabs: refs.filter((t) => t.id === tabId || target.tabs.includes(t)), shown: tab };
+  const stayed: SideGroup = { tabs: left, shown: source.shown !== null && source.shown.id !== tabId ? source.shown : neighbour(source, tabId, left) };
+  const [upper, lower] = from === 'upper' ? [stayed, moved] : [moved, stayed];
+  return { upper, lower: { ...lower, share: groups.lower.share }, hidden: false };
+}
+
 export function createLayoutStore() {
   // Where each closed tab stood, so ⌘⇧T puts it back there (transient: `closedTabs` persists refs only).
   const closedAt = new Map<string, number>();
@@ -285,9 +440,21 @@ export function createLayoutStore() {
       set({ ...next, panelSurfaces: rememberSurfaceContext(get(), next.main) });
     };
     const earlySurfaces: ((state: PanelSurfaces) => PanelSurfaces)[] = [];
-    const surfaces = (change: (state: PanelSurfaces) => PanelSurfaces) => {
+    const surfaces = (change: (state: PanelSurfaces) => PanelSurfaces, from = get().panelSurfaces) => {
       if (!get().hydrated) earlySurfaces.push(change);
-      return change(get().panelSurfaces);
+      return change(from);
+    };
+    // UX wave U8b: a state with scopes' values written in (`scopePatch`), the stacks through `surfaces` as every write of
+    // them goes.
+    const withScopes = (state: Scoped, entries: Iterable<[AppSessionId | null, ScopeValues]>) => {
+      const { stacks, ...patch } = scopePatch(state, entries);
+      return { ...patch, panelSurfaces: Object.keys(stacks).length === 0 ? state.panelSurfaces : surfaces((s) => withStacks(s, stacks), state.panelSurfaces) };
+    };
+    // One scope's groups written as §A stores them (an act's result: the stack is always written).
+    const showGroups = (appSessionId: AppSessionId | null, groups: SideGroups) => {
+      const state = get();
+      const values = valuesOf(groups, false, state.panelGroups.lower[surfaceScope(appSessionId)]?.tabs);
+      set(withScopes(state, [[appSessionId, values]]));
     };
     const early: ((m: LayoutMain) => LayoutMain)[] = [];
     const main = (next: (m: LayoutMain) => LayoutMain) => {
@@ -328,6 +495,9 @@ export function createLayoutStore() {
       panelActiveNoSession: null,
       panelParams: {},
       panelSurfaces: NO_SURFACES,
+      panelGroups: PANEL_GROUPS_DEFAULT, // UX wave U8b
+      panelWidths: PANEL_WIDTHS_DEFAULT,
+      cardsOpen: [...CARDS_OPEN_DEFAULT],
       knownSession: () => true,
       hydrated: false,
       dragging: null,
@@ -372,6 +542,13 @@ export function createLayoutStore() {
               return [{ key: key as LayoutKey, id: isAddress(stored) ? stored : addressOf(local, stored), bare: !isAddress(stored) }];
             })
           : [];
+        // UX wave U8b (Interfaces §A): the three keys of the side column; a profile without `panelTools.groups` is read
+        // for the first time by this build (below).
+        const [storedGroups, storedWidths, storedCards] = await Promise.all([
+          readHeld('panelTools.groups', PanelGroupsSchema, PANEL_GROUPS_DEFAULT),
+          readHeld('panelTools.widths', PanelWidthsSchema.nullable(), null),
+          readHeld('cards.open', CardsOpenSchema, { version: 1, open: [...CARDS_OPEN_DEFAULT] }),
+        ]);
         const [persistedRegions, persistedMain, panelPinned, storedParams, storedNoSession, storedSurfaces, ...panels] = await Promise.all([
           read('regions', storedRegionsSchema(local), LAYOUT_DEFAULTS.regions), // W5: a version-1 value is migrated
           read('main.tabs', storedMainSchema(local), LAYOUT_DEFAULTS.main), // W5: an Overview tab is dropped; W12: version 1 is filed by project
@@ -417,12 +594,38 @@ export function createLayoutStore() {
         // and one stored beside an open panel is dropped (both written back below).
         const { main: hydratedMain, regions: foldedRegions } = reconcileFold(restored, { main: model.titleTabs(repairedMain, titleOf), regions: replayedRegions });
         const hydratedPins = pins(panelPinned, get().panelActiveNoSession ?? storedNoSession.activeTabId);
-        const regions = surfaceRegions({ ...get(), main: hydratedMain, regions: foldedRegions, ...hydratedPins, panelBySession, panelSurfaces, hydrated: true });
+        // UX wave U8b (Interfaces §A, "The first read"): once per profile, each session's tabs of a single-instance tool
+        // that are not in view by §A's reading are dropped (the old rule never removed a tool's tab), the pins and the
+        // tabs of a multi-instance or unregistered tool kept; each scope whose list that changed is repaired.
+        const firstRead = listed.ok && !held.has('panelTools.groups');
+        const asRead: Scoped = { ...hydratedPins, panelBySession, panelSurfaces, panelGroups: { version: 1, lower: liveGroups(storedGroups.lower, panelBySession) } };
+        let hydratedPanels: Scoped = asRead;
+        const prunedPanels: AppSessionId[] = [];
+        if (firstRead && opts.multiInstance) {
+          const multiInstance = opts.multiInstance;
+          const pruned = new Map(panelBySession);
+          for (const [id, own] of panelBySession) {
+            const groups = sideGroups(asRead, id);
+            const shown = new Set([groups.upper.shown?.id, groups.lower?.shown?.id]);
+            const tabs = own.tabs.filter((tab) => shown.has(tab.id) || multiInstance(tab.toolId) !== false);
+            if (tabs.length === own.tabs.length) continue;
+            pruned.set(id, { ...own, tabs });
+            prunedPanels.push(id);
+          }
+          const after = { ...asRead, panelBySession: pruned };
+          const { stacks, ...repaired } = scopePatch(after, repairedScopes(asRead, after));
+          hydratedPanels = { ...after, ...repaired, panelSurfaces: withStacks(after.panelSurfaces, stacks) };
+        }
+        // F's one width is this build's wide width once; 380, F's automatic, is automatic here too (X-165).
+        const fromRegions = persistedRegions.panel.width === F_AUTOMATIC_WIDTH ? null : persistedRegions.panel.width;
+        const panelWidths = storedWidths ?? { version: 1 as const, wide: fromRegions, narrow: null };
+        const cardsOpen = storedCards.open;
+        const regions = surfaceRegions({ ...get(), main: hydratedMain, regions: foldedRegions, ...hydratedPanels, hydrated: true });
         // P4-B3: the params of panel tabs no list holds now (closed, or a session's not kept) are not read; the
         // no-session selection is read back if it still names a pin.
-        const live = livePanelTabIds(panelPinned, panelBySession);
+        const live = livePanelTabIds(hydratedPanels.panelPinned, hydratedPanels.panelBySession);
         const panelParams = Object.fromEntries(Object.entries(storedParams.params).filter(([id]) => live.has(id)));
-        set({ regions, main: hydratedMain, ...hydratedPins, panelBySession, panelParams, panelSurfaces, hydrated: true });
+        set({ regions, main: hydratedMain, ...hydratedPanels, panelParams, panelWidths, cardsOpen, hydrated: true });
         // A first launch writes the defaults of the keys it lacks, so layout.json always holds the renderer's three
         // fixed keys (acceptance item 6 lists them). Tabs replayed over the saved ones differ from what layout.json holds,
         // and persistence takes the hydrated state as its baseline, so they are written here too. Everything after this
@@ -440,8 +643,16 @@ export function createLayoutStore() {
         const titled = model.titleTabs(repairedMain, titleOf) !== repairedMain; // P5 O6 M2: a title learnt at hydration is kept
         if (persistedMain.version === 1 || rewritten || unfolded || migrated || titled || (replayed.length > 0 && JSON.stringify(hydratedMain) !== JSON.stringify(persistedMain))) unsaved.add('main.tabs');
         if (regions !== persistedRegions || (readAs.has('regions') && !sameJson(readAs.get('regions'), persistedRegions))) unsaved.add('regions'); // P5 O6 M2: a migrated version too
-        if (!sameJson(panelSurfaces, storedSurfaces) || (readAs.has('panelTools.surfaces') && !sameJson(readAs.get('panelTools.surfaces'), storedSurfaces))) unsaved.add('panelTools.surfaces');
-        const values: Partial<Record<LayoutKey, unknown>> = { regions, 'main.tabs': get().main, 'panel.pinned': panelPinned, 'panelTools.surfaces': panelSurfaces };
+        if (!sameJson(get().panelSurfaces, storedSurfaces) || (readAs.has('panelTools.surfaces') && !sameJson(readAs.get('panelTools.surfaces'), storedSurfaces))) unsaved.add('panelTools.surfaces');
+        // UX wave U8b: the three keys are written at a first read (so the next launch is not one), and each session list
+        // the first read pruned.
+        if (listed.ok) for (const key of ['panelTools.groups', 'panelTools.widths', 'cards.open'] as const) if (!held.has(key)) unsaved.add(key);
+        for (const id of prunedPanels) unsaved.add(`panel.${id}`);
+        const values: Partial<Record<LayoutKey, unknown>> = {
+          regions, 'main.tabs': get().main, 'panel.pinned': panelPinned, 'panelTools.surfaces': get().panelSurfaces,
+          'panelTools.groups': get().panelGroups, 'panelTools.widths': panelWidths, 'cards.open': storedValue('cards.open', cardsOpen),
+          ...Object.fromEntries(prunedPanels.map((id) => [`panel.${id}`, get().panelBySession.get(id)])),
+        };
         for (const key of unsaved) {
           if (!(key in values)) continue;
           void client.invoke('layout.set', { key, value: values[key] }).then((result) => {
@@ -451,7 +662,7 @@ export function createLayoutStore() {
         // P5 O6 M2: a bare panel key is written under its address, then deleted, so layout.json keeps one key per session.
         for (const bare of renamedPanels) {
           const id = panelKeys.find((entry) => entry.key === bare)!.id;
-          const state = panelBySession.get(id);
+          const state = get().panelBySession.get(id); // UX wave U8b: as the first read left it
           if (state === undefined) continue;
           void client.invoke('layout.set', { key: `panel.${id}`, value: state }).then(async (written) => {
             if (!written.ok) return console.error(`[layout] layout.set panel.${id} failed`, written.error);
@@ -572,7 +783,8 @@ export function createLayoutStore() {
         if (get().panelBySession.has(appSessionId)) {
           const panelBySession = new Map(get().panelBySession);
           panelBySession.delete(appSessionId);
-          set({ panelBySession });
+          const lower = liveGroups(get().panelGroups.lower, panelBySession); // UX wave U8b: its lower entry goes with it
+          set({ panelBySession, ...(lower === get().panelGroups.lower ? {} : { panelGroups: { version: 1, lower } }) });
         }
       },
       settleMachine(machine) {
@@ -601,21 +813,27 @@ export function createLayoutStore() {
       },
       setOverviewRect: (overview) => regions((r) => ({ ...r, overview })),
       setPanelTabPinned(appSessionId, tabId, pinned) {
-        const own = get().panelBySession.get(appSessionId) ?? { tabs: [], activeTabId: null };
-        const panelBySession = new Map(get().panelBySession);
+        const prev = get();
+        const own = prev.panelBySession.get(appSessionId) ?? { tabs: [], activeTabId: null };
+        const panelBySession = new Map(prev.panelBySession);
+        let patch: Pick<LayoutState, 'panelPinned' | 'panelActiveNoSession' | 'panelBySession'>;
         if (pinned) {
           const tab = own.tabs.find((t) => t.id === tabId);
           if (!tab) return;
           panelBySession.set(appSessionId, { ...own, tabs: own.tabs.filter((t) => t.id !== tabId) });
-          set({ ...pins([...get().panelPinned, { ...tab, pinned: true }]), panelBySession });
+          patch = { ...pins([...prev.panelPinned, { ...tab, pinned: true }]), panelBySession };
         } else {
-          const tab = get().panelPinned.find((t) => t.id === tabId);
+          const tab = prev.panelPinned.find((t) => t.id === tabId);
           if (!tab) return;
           panelBySession.set(appSessionId, { ...own, tabs: [...own.tabs, { ...tab, pinned: false }] });
-          set({ ...pins(get().panelPinned.filter((t) => t.id !== tabId)), panelBySession });
+          patch = { ...pins(prev.panelPinned.filter((t) => t.id !== tabId)), panelBySession };
         }
+        // UX wave U8b (M1, decision 5): a pin that moves leaves or joins every scope's strip, which each repairs.
+        const next = { ...prev, ...patch };
+        set({ ...patch, ...withScopes(next, repairedScopes(prev, next)) });
       },
       setPanelTabs(appSessionId, next) {
+        const prev = get();
         const refsBefore = get().effectivePanelTabs(appSessionId);
         const activeBefore = appSessionId === null ? get().panelActiveNoSession : (get().panelBySession.get(appSessionId)?.activeTabId ?? null);
         const pinned = next.tabs.filter((t) => t.pinned);
@@ -631,7 +849,11 @@ export function createLayoutStore() {
           if (sameJson(state.stacks[scope] ?? before, ids)) return state;
           return { ...state, stacks: { ...state.stacks, [scope]: ids } };
         });
-        set({ ...selection, ...(appSessionId === null ? {} : { panelBySession }), panelSurfaces });
+        // UX wave U8b (M1, decision 5): every other scope whose refs this changed (a pin closed, added or replaced) is
+        // repaired; this one's stack and selection are the stacking rule's above until M2.
+        const patch = { ...selection, ...(appSessionId === null ? {} : { panelBySession }), panelSurfaces };
+        const after = { ...prev, ...patch };
+        set({ ...patch, ...withScopes(after, repairedScopes(prev, after, { settled: scope, renamed: renamedIn(refsBefore, next.tabs) })) });
       },
       setSurfaceStack(appSessionId, requested) {
         const ids = normalizeSurfaceStack(requested, get().effectivePanelTabs(appSessionId));
@@ -670,6 +892,40 @@ export function createLayoutStore() {
         set({ panelParams: Object.fromEntries(params === null ? kept : [...kept, [tabId, params]]) });
       },
       setDragging: (dragging) => set({ dragging }),
+
+      // ---- UX wave U8b (Interfaces §B): the acts that change what is in view ----
+      showSurfaceTab(appSessionId, tabId) {
+        const groups = sideGroups(get(), appSessionId);
+        const group = groupOf(groups, tabId);
+        if (group === null) return;
+        const tab = (group === 'upper' ? groups.upper : groups.lower!).tabs.find((t) => t.id === tabId)!;
+        showGroups(appSessionId, group === 'upper'
+          ? { ...groups, upper: { ...groups.upper, shown: tab }, hidden: false }
+          : { ...groups, lower: { ...groups.lower!, shown: tab }, hidden: false });
+      },
+      hideSurfaces(appSessionId) {
+        showGroups(appSessionId, { ...sideGroups(get(), appSessionId), hidden: true });
+      },
+      moveSurfaceTab(appSessionId, tabId, to) {
+        const moved = groupsAfterMove(sideGroups(get(), appSessionId), surfaceRefs(get(), appSessionId), tabId, to);
+        if (moved !== null) showGroups(appSessionId, moved);
+      },
+      setGroupShare(appSessionId, share) {
+        const groups = sideGroups(get(), appSessionId);
+        if (groups.lower !== null) showGroups(appSessionId, { ...groups, lower: { ...groups.lower, share: clampShare(share) } });
+      },
+      setPanelWidth(px) {
+        const state = get();
+        const width = px === null ? null : Math.round(px);
+        const key = panelWidthClass(state);
+        if (state.panelWidths[key] !== width) set({ panelWidths: { ...state.panelWidths, [key]: width } });
+        state.setPanel({ width: width ?? F_AUTOMATIC_WIDTH });
+      },
+      setCardOpen(card, open) {
+        const now = get().cardsOpen;
+        if (now.includes(card) === open) return;
+        set({ cardsOpen: CARD_IDS.filter((id) => (id === card ? open : now.includes(id))) });
+      },
     };
   });
 }
@@ -690,6 +946,9 @@ function persistedKeys(state: LayoutState): Map<LayoutKey, unknown> {
     ['panelTools.params', state.panelParams], // P4-B3
     ['panelTools.activeNoSession', state.panelActiveNoSession], // P4-B3
     ['panelTools.surfaces', state.panelSurfaces], // UX2-L
+    ['panelTools.groups', state.panelGroups], // UX wave U8b
+    ['panelTools.widths', state.panelWidths],
+    ['cards.open', state.cardsOpen],
   ]);
   for (const [id, panel] of state.panelBySession) keys.set(`panel.${id}`, panel);
   return keys;
@@ -706,9 +965,15 @@ function otherMachinePanelKey(key: LayoutKey, local: MachineRef): boolean {
   return id !== undefined && key !== 'panel.pinned' && isAddress(id) && machineOf(id) !== local;
 }
 
+// Every key as `persistLayout` writes it from this state (UX wave U8b: what the suites hold against build F's reader).
+export function storedLayout(state: LayoutState): Map<LayoutKey, unknown> {
+  return new Map([...persistedKeys(state)].map(([key, slice]) => [key, storedValue(key, slice)]));
+}
+
 function storedValue(key: LayoutKey, slice: unknown): unknown {
   if (key === 'panelTools.params') return { version: 1, params: slice };
   if (key === 'panelTools.activeNoSession') return { version: 1, activeTabId: slice };
+  if (key === 'cards.open') return { version: 1, open: slice }; // UX wave U8b
   return slice;
 }
 

@@ -28,6 +28,7 @@ export interface ResizerProps {
   onCollapse?(restore: number): void; // `restore`: the value the drag started from, for reopening at that size
   expandThreshold?: number | null; // P3-G
   onExpand?(restore: number): void; // P3-G: as `onCollapse`, past the maximum
+  onReset?(): void; // UX wave U8b: Enter and a double-click call this in place of restoring `defaultValue`, when given
   className?: string;
 }
 
@@ -48,6 +49,7 @@ export function Resizer({
   onCollapse,
   expandThreshold = null,
   onExpand,
+  onReset,
   className = '',
 }: ResizerProps) {
   const drag = useRef<{ pointerId: number; from: number; start: number; restore: number } | null>(null);
@@ -67,7 +69,11 @@ export function Resizer({
     else if (event.key === less) next = value - grow * step;
     else if (event.key === 'Home') next = min;
     else if (event.key === 'End') next = max;
-    else if (event.key === 'Enter') next = defaultValue;
+    else if (event.key === 'Enter' && onReset) {
+      event.preventDefault();
+      onReset();
+      return;
+    } else if (event.key === 'Enter') next = defaultValue;
     if (next === null) return;
     event.preventDefault();
     set(next);
@@ -90,7 +96,7 @@ export function Resizer({
       aria-valuemin={min}
       aria-valuemax={max}
       onKeyDown={onKeyDown}
-      onDoubleClick={() => set(defaultValue)}
+      onDoubleClick={() => (onReset ? onReset() : set(defaultValue))}
       onPointerDown={(event) => {
         if (event.button !== 0) return;
         event.preventDefault(); // no text selection while dragging

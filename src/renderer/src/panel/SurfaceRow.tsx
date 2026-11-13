@@ -47,7 +47,7 @@ export function toggleSessionCards() {
   const session = sessionOfTab(activeTab(state.main));
   if (session === null || !useSessions.getState().records.has(session)) return;
   const visible = surfaceTabs(state, surfaceSession(state));
-  const geometry = shellGeometry(state.regions, window.innerWidth, visible.length > 0, false);
+  const geometry = shellGeometry(state.regions, window.innerWidth, visible.length > 0, false, state.panelWidths);
   const cards = !state.regions.panel.collapsed && visible.length === 0 && (window.innerWidth - geometry.sidebar >= 960 || useShellView.getState().cardsOverlay);
   if (cards) state.setPanel({ collapsed: true });
   else { state.setSurfaceStack(session, []); state.setPanel({ collapsed: false, maximized: false, floating: false }); useShellView.setState({ cardsOverlay: true }); }

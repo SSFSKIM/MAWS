@@ -126,7 +126,7 @@ describe('shell frame', () => {
     const user = userEvent.setup();
     offs.push(registerShellActions(fakeBridge()));
     openSurface('review');
-    useLayout.getState().setPanel({ width: 444 });
+    useLayout.getState().setPanelWidth(444); // UX wave U8b: the wide width, Review being in view
     renderShell();
     await user.click(screen.getByRole('button', { name: 'Expand surface' }));
     expect(region('main').inert).toBe(true);
@@ -161,7 +161,7 @@ describe('shell frame', () => {
     renderShell();
     expect(grid().style.gridTemplateColumns).toBe('240px minmax(0, 1fr) 0px');
     act(() => useLayout.getState().setSidebar({ width: 280 }));
-    act(() => useLayout.getState().setPanel({ width: 320 }));
+    act(() => useLayout.getState().setPanelWidth(320)); // UX wave U8b: the narrow width, nothing in view
     expect(grid().style.gridTemplateColumns).toBe('280px minmax(0, 1fr) 0px');
     act(() => openSurface());
     expect(grid().style.gridTemplateColumns).toBe('280px minmax(0, 1fr) 320px');
@@ -171,7 +171,7 @@ describe('shell frame', () => {
     openSurface();
     renderShell();
     act(() => useLayout.getState().setSidebar({ collapsed: true }));
-    expect(grid().style.gridTemplateColumns).toBe('0px minmax(0, 1fr) 420px');
+    expect(grid().style.gridTemplateColumns).toBe('0px minmax(0, 1fr) 360px');
     expect(region('sidebar').inert).toBe(true);
     act(() => useLayout.getState().setPanel({ collapsed: true }));
     expect(grid().style.gridTemplateColumns).toBe('0px minmax(0, 1fr) 0px');
@@ -196,7 +196,12 @@ describe('shell frame', () => {
     renderShell();
     screen.getAllByRole('separator')[1].focus();
     await user.keyboard('{ArrowLeft}');
-    expect(useLayout.getState().regions.panel.width).toBe(428);
+    // UX wave U8b: from the narrow automatic 360, written as the narrow width and as build F's one width
+    expect(useLayout.getState().panelWidths).toMatchObject({ wide: null, narrow: 368 });
+    expect(useLayout.getState().regions.panel.width).toBe(368);
+    await user.keyboard('{Enter}'); // a reset is automatic again, which F reads as 380
+    expect(useLayout.getState().panelWidths).toMatchObject({ wide: null, narrow: null });
+    expect(useLayout.getState().regions.panel.width).toBe(380);
     screen.getAllByRole('separator')[0].focus();
     await user.keyboard('{Home}');
     expect(useLayout.getState().regions.sidebar.width).toBe(200);
@@ -211,7 +216,7 @@ describe('shell frame', () => {
   it('temporarily sets the sidebar aside below 1100 while a surface is open and uses a sheet below 700', () => {
     openSurface('review');
     const regions = LAYOUT_DEFAULTS.regions;
-    useLayout.setState({ regions: { ...regions, sidebar: { ...regions.sidebar, width: 480 }, panel: { ...regions.panel, width: 640 } } });
+    useLayout.setState({ regions: { ...regions, sidebar: { ...regions.sidebar, width: 480 }, panel: { ...regions.panel, width: 640 } }, panelWidths: { version: 1, wide: 640, narrow: null } });
     renderShell();
     expect(grid().style.gridTemplateColumns).toBe('480px minmax(0, 1fr) 600px');
     act(() => setWindowWidth(960));
@@ -234,7 +239,7 @@ describe('shell frame', () => {
   it('a drag-collapse of a clamped region keeps its remembered width for reopening', () => {
     openSurface('review');
     const regions = LAYOUT_DEFAULTS.regions;
-    useLayout.setState({ regions: { ...regions, sidebar: { ...regions.sidebar, width: 900 }, panel: { ...regions.panel, width: 1000 } } });
+    useLayout.setState({ regions: { ...regions, sidebar: { ...regions.sidebar, width: 900 }, panel: { ...regions.panel, width: 1000 } }, panelWidths: { version: 1, wide: 1000, narrow: null } });
     renderShell();
     const dragBy = (handle: HTMLElement, dx: number) => {
       act(() => void fireEvent.pointerDown(handle, { pointerId: 1, button: 0, clientX: 500 }));
