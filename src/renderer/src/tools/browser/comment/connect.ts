@@ -17,7 +17,7 @@
 // UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, decision 22): a tab's unsent comments are
 // its pass's, which ends with the tab: every tab id a change or a full list of this window's mirror no longer holds ends
 // its pass here, where the comment code is connected once for the window, so an end received while no pane is mounted
-// is seen.
+// is seen. M4 (X-216): the tab's page is told here whenever its card opens on a comment (`page-card.ts`).
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../../../ipc/client';
@@ -27,6 +27,7 @@ import { openCommentComposer } from '../../code/anchor/anchor';
 import { browser, raiseNotice, type CommentNoticeKind } from '../store';
 import { COMMENT_COPY } from './copy';
 import { dockOf } from './dock';
+import { watchPageCard } from './page-card';
 import { setCommentArmed } from './store';
 
 const warn = (text: string) => void toast({ level: 'warning', text, actions: [], dismissible: true });
@@ -69,9 +70,11 @@ export function connectBrowserComment(client: MawsBridge = ipc): () => void {
     for (const { tabs } of state.sessions.values()) for (const tab of tabs) live.add(tab.tabId);
     for (const { tabs } of previous.sessions.values()) for (const tab of tabs) if (!live.has(tab.tabId)) dropSubject('browser', tab.tabId);
   });
+  const offCard = watchPageCard(client); // UX wave U5a M4
   return () => {
     offChanged();
     offPicked();
     offTabs();
+    offCard();
   };
 }

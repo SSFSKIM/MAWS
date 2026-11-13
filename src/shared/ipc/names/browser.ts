@@ -6,6 +6,7 @@ export const commands = [
   'browser.view.cover', 'browser.control.handBack', 'browser.history.suggest', 'browser.profiles.list',
   // E4d start
   'browser.comment.set',
+  'browser.comment.card', // UX wave U5a
   // E4d end
   // E4b start
   'browser.import.profiles', 'browser.import.chooseUserData', 'browser.import.inspect', 'browser.import.discard', 'browser.import.start',

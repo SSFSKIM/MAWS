@@ -35,6 +35,7 @@ import { useLayout } from '../../stores/layout';
 import { place } from './actions';
 import { BROWSER_COPY } from './copy';
 import { registerDock } from './comment/dock';
+import { tellPageCardClosed } from './comment/page-card'; // UX wave U5a
 import { coverPane } from './covering';
 import { useBrowserMarkupSurface } from './markup'; // P3-G
 import { CrashPage, ViewFailedPage } from './pages/CrashPage';
@@ -137,7 +138,8 @@ function PlacedPane({ tab, surface, onOwns }: { tab: BrowserTab; surface: 'panel
   // P2-E2: the card's dock, registered for the tab while this pane holds its view (where main sends its picks)
   const hostId = useId();
   useEffect(() => (mode === 'owner' ? registerDock(tabId, hostId) : undefined), [mode, tabId, hostId]);
-  const frame = useMemo<CardFrame>(() => ({ scale: 1, offset: { x: 0, y: 0 }, key: tabId }), [tabId]);
+  // UX wave U5a (M4, X-216): its card going tells the tab's page, which then stops keeping the element in view
+  const frame = useMemo<CardFrame>(() => ({ scale: 1, offset: { x: 0, y: 0 }, key: tabId, onClosed: () => tellPageCardClosed(tabId) }), [tabId]);
   const accepts = (card: OpenCard) => card.target?.kind === 'browser' && card.target.pageUrl === tab.url;
   // after Close, Escape or a send: the Comment toggle of the chrome over this pane, which armed the pick, or its address
   // field while the toggle is disabled (the agent took the page)

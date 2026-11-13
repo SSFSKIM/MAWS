@@ -212,6 +212,16 @@ export class CommentMode {
     sendPicked(owner, away ? { ...payload, appSessionId: away.bare } : payload, away?.machine ?? null);
   }
 
+  // ---- the card (UX wave U5a, X-216; Interfaces §B.4) --------------------------------------------------------------------
+
+  // The window's word that the tab's comment card opened on a comment (the css of its element) or closed, forwarded to
+  // the tab's own page, which keeps that element in view only while the card is open; nothing for a tab main does not
+  // hold or whose view is gone. It arms, disarms and tells nothing.
+  card(tabId: string, open: { css: string } | null): void {
+    const view = this.deps.store.entry(tabId)?.view;
+    if (view) this.toPreload(view, open === null ? { type: 'card', open: false } : { type: 'card', open: true, css: open.css });
+  }
+
   // ---- reads (the e2e seam) ----------------------------------------------------------------------------------------------
 
   state(tabId: string): CommentTabState | null {
