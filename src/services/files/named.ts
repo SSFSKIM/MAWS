@@ -22,6 +22,7 @@ export const NAMED_WAITING_MAX = 8; // distinct jobs waiting behind the running 
 export const NAMED_WAIT_MS = 8_000; // a waiter's patience, inside a host request's ten seconds
 export const NAMED_FINGERPRINT_BYTES = 4096; // as the engine host's search (`fingerprint`, src/engine-host/fs/search-text.ts)
 export const NAMED_PENDING_MAX = 256; // results waiting for their calls in one search; an older one past it is not waited for
+export const NAMED_PATH_MAX = 4096; // bytes of an asked path at most (the largest PATH_MAX of the platforms); a longer one is not named
 export const NAMED_CLAIM_STEPS = 64; // steps of the rule on one row between two turns of the event loop (the branch review's finding 2)
 
 // How a transcript is opened: read-only and without blocking (`O_RDONLY | O_NONBLOCK`), so a FIFO with no writer, or any
@@ -367,6 +368,9 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
     // transcript, a locator that throws, a full queue, a waiter that leaves: not named.
     names(appSessionId, path, signal) {
       if (signal?.aborted) return Promise.resolve(false);
+      // `files.read` asks for a missing file's path too, which no `realpath` has bounded: past the bound, not named at
+      // once, and no transcript looked for (the work meter's fix pass, item 2; the needles' pattern runs on the path)
+      if (Buffer.byteLength(path) > NAMED_PATH_MAX) return Promise.resolve(false);
       return new Promise<boolean>((resolve) => {
         let joined: Job | null = null;
         let answered = false;

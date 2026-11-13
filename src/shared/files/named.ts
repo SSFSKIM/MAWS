@@ -146,6 +146,11 @@ function pauseAt(m: Meter): typeof PAUSE {
   m.pause = m.work + SCAN_STEP_CHARS;
   return PAUSE;
 }
+// A cap passed: the work spent reaching it is counted (past the budget too), and the text is refused from here.
+function refuseAfter(m: Meter, spent: number): never {
+  m.work += spent;
+  throw new ScanRefused();
+}
 // The end of a line-level test that read up to `limit`: when that was the cap and not the line's end, it could not decide.
 function decided(i: number, limit: number, end: number): void {
   if (i >= limit && limit < end) throw new ScanRefused();
@@ -386,7 +391,7 @@ function tailOf(text: string, start: number, end: number, m: Meter): { marker: n
   let count = 0;
   let i = end;
   for (; i > start; i -= 1) {
-    if (end - i >= LINE_TEST_MAX) throw new ScanRefused();
+    if (end - i >= LINE_TEST_MAX) refuseAfter(m, end - i);
     const code = text.charCodeAt(i - 1);
     if (isSpaceOrTab(code) || code === 13) continue;
     if (code !== marker && (marker !== 0 || (code !== 45 && code !== 42 && code !== 95))) break;
@@ -426,7 +431,7 @@ function lineAt(text: string, start: number, end: number, m: Meter): Line {
     if (columns >= 4) break;
     const code = text.charCodeAt(j);
     if (code === 62) {
-      if (++markers > BLOCK_MARKERS_MAX) throw new ScanRefused();
+      if (++markers > BLOCK_MARKERS_MAX) refuseAfter(m, j - start + 16);
       quote += 1;
       i = j + 1;
       if (isSpaceOrTab(text.charCodeAt(i))) i += 1;
@@ -443,7 +448,7 @@ function lineAt(text: string, start: number, end: number, m: Meter): Line {
       if (close > 0 && text.charCodeAt(close + 1) === 58) marker = close + 2;
     }
     if (marker < 0 || (marker < end && !isSpaceOrTab(text.charCodeAt(marker)) && text.charCodeAt(marker) !== 13)) break;
-    if (++markers > BLOCK_MARKERS_MAX) throw new ScanRefused();
+    if (++markers > BLOCK_MARKERS_MAX) refuseAfter(m, marker - start + 16);
     opens = true;
     if (code === 91) footnote = true;
     // one to four spaces after the marker belong to it; past four, one does, and the rest is the content's indentation
@@ -838,7 +843,12 @@ function* linkSteps(text: string, m: Meter = meterFor(text)): Generator<string |
   const defined = new Set<string>();
   try {
     yield* blocksOf(text, contexts, defined, m);
-    for (const { start, end } of contexts) yield* contextLinks(text, start, end, defined, m);
+    for (const { start, end } of contexts) {
+      // each context is a dispatch, an empty one too (a table's empty cells): charged, and a point to pause at
+      charge(m, 1);
+      if (m.work >= m.pause) yield pauseAt(m);
+      yield* contextLinks(text, start, end, defined, m);
+    }
   } catch (error) {
     if (!(error instanceof ScanRefused)) throw error;
   }
