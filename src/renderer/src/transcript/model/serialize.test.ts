@@ -31,8 +31,8 @@ describe('serializeRows', () => {
       '### Today 10:00 AM',
       '**You**',
       'Fix the tests',
-      '*Worked for 2m 14s · 4 tool calls · 1 denied*',
-      ['- Edited 1 file, read 1 file, ran 1 command', '  - Thought', '    > Look first.', '  - Read a.ts', '  - Ran `pnpm test` in 0s', '    ```', '    $ pnpm test', '    1 passed', '    ```', '  - Edited /p/a.ts +1 −1'].join('\n'),
+      '*Worked for 2m 14s · Read and edited a.ts, ran a command +1 −1 · 1 denied*', // UX wave U2: the turn's line (O-15)
+      ['- Read and edited a.ts, ran a command', '  - Thought', '    > Look first.', '  - Read a.ts', '  - Ran `pnpm test` in 0s', '    ```', '    $ pnpm test', '    1 passed', '    ```', '  - Edited /p/a.ts +1 −1'].join('\n'),
       '- Denied: `rm -rf x` · Denied by rule',
       'Done: **one** edit.\n\n```ts\nconst y = 1;\n```',
     ].join('\n\n'));

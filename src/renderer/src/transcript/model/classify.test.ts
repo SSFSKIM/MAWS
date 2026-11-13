@@ -1,62 +1,61 @@
 import { describe, expect, it } from 'vitest';
-import { classifyTool, continuedAfter, denialDisposition, presentationOf, type ClassifyContext } from './classify';
+import { classifyTool, continuedAfter, denialDisposition, presentationOf, stoppedMember, type ClassifyContext } from './classify';
+import { DENIAL_KINDS } from '@shared/graph/enums';
 import { api, builder, MODEL, parent, tool, uuid } from './test-events';
 
 const base: ClassifyContext = { denial: null, turn: { closed: false, stopped: false }, continued: false, humanDecision: false, safeguard: 'not_evaluated', imageResult: false, isError: false };
 
 describe('classification table', () => {
   it.each([
-    ['mcp__docs__search', 'mcp', 'grouped', false],
-    ['Skill', 'skills', 'grouped', false],
-    ['ToolSearch', 'skills', 'grouped', false],
-    ['Read', 'exploration', 'grouped', false],
-    ['Glob', 'exploration', 'grouped', false],
-    ['LS', 'exploration', 'grouped', false],
-    ['LSP', 'exploration', 'grouped', false],
-    ['NotebookRead', 'exploration', 'grouped', false],
-    ['Grep', 'exploration', 'grouped', false],
-    ['Edit', 'files', 'grouped', false],
-    ['MultiEdit', 'files', 'grouped', false],
-    ['Write', 'files', 'grouped', false],
-    ['NotebookEdit', 'files', 'grouped', false],
-    ['Bash', 'commands', 'grouped', false],
-    ['BashOutput', 'commands', 'grouped', false],
-    ['KillShell', 'commands', 'grouped', false],
-    ['Monitor', 'commands', 'grouped', false],
-    ['WebFetch', 'web', 'grouped', false],
-    ['WebSearch', 'web', 'grouped', false],
-    ['EnterPlanMode', 'other', 'grouped', true],
-    ['EnterWorktree', 'other', 'grouped', true],
-    ['ExitWorktree', 'other', 'grouped', true],
-    ['TodoWrite', 'other', 'grouped', true],
-    ['TaskCreate', 'other', 'grouped', true],
-    ['TaskUpdate', 'other', 'grouped', true],
-    ['TaskList', 'other', 'grouped', true],
-    ['TaskGet', 'other', 'grouped', true],
-    ['TaskOutput', 'other', 'grouped', true],
-    ['TaskStop', 'other', 'grouped', true],
-    ['SomeFutureTool', 'other', 'grouped', false],
-  ] as const)('%s → %s, %s%s', (name, category, presentation, hidden) => {
+    ['mcp__docs__search', 'mcp', 'grouped'],
+    ['Skill', 'skills', 'grouped'],
+    ['ToolSearch', 'skills', 'grouped'],
+    ['Read', 'exploration', 'grouped'],
+    ['Glob', 'exploration', 'grouped'],
+    ['LS', 'exploration', 'grouped'],
+    ['LSP', 'exploration', 'grouped'],
+    ['NotebookRead', 'exploration', 'grouped'],
+    ['Grep', 'exploration', 'grouped'],
+    ['Edit', 'files', 'grouped'],
+    ['MultiEdit', 'files', 'grouped'],
+    ['Write', 'files', 'grouped'],
+    ['NotebookEdit', 'files', 'grouped'],
+    ['Bash', 'commands', 'grouped'],
+    ['BashOutput', 'commands', 'grouped'],
+    ['KillShell', 'commands', 'grouped'],
+    ['Monitor', 'commands', 'grouped'],
+    ['WebFetch', 'web', 'grouped'],
+    ['WebSearch', 'web', 'grouped'],
+    ['EnterPlanMode', 'other', 'grouped'],
+    ['EnterWorktree', 'other', 'grouped'],
+    ['ExitWorktree', 'other', 'grouped'],
+    ['TodoWrite', 'other', 'grouped'],
+    ['TaskCreate', 'other', 'grouped'],
+    ['TaskUpdate', 'other', 'grouped'],
+    ['TaskList', 'other', 'grouped'],
+    ['TaskGet', 'other', 'grouped'],
+    ['TaskOutput', 'other', 'grouped'],
+    ['TaskStop', 'other', 'grouped'],
+    ['SomeFutureTool', 'other', 'grouped'],
+  ] as const)('%s → %s, %s', (name, category, presentation) => {
     const c = classifyTool(name, {}, base);
     expect(c.category).toBe(category);
     expect(c.groupable).toBe(presentation === 'grouped');
-    expect(c.hidden).toBe(hidden);
+    expect(c).not.toHaveProperty('hidden'); // UX wave U2 (decision 10): nothing inside a run is hidden
     expect(c.subagentLifecycle).toBeNull();
     expect(c.denial).toBeNull();
   });
 
-  // P3-B (M7)
-  it.each(['artifact_edit', 'artifact_comments', 'artifact_reply', 'artifact_resolve'])('the document tool %s is a cell of its own, never folded into a group of MCP calls', (tool) => {
+  // UX wave U2 (l6-artifacts-12): the `maws` server's plain artifact calls join runs, as every other call does (P3-B M7
+  // and P4-B4 had made each a cell of its own); a screenshot stays one, its result an image
+  it.each(['artifact_list', 'artifact_describe_type', 'artifact_read', 'artifact_upload_asset', 'artifact_list_assets', 'artifact_export', 'artifact_edit', 'artifact_comments', 'artifact_reply', 'artifact_resolve', 'artifact_dataset', 'artifact_search'])('the artifact tool %s is a step of its run', (tool) => {
     const c = classifyTool(`mcp__maws__${tool}`, {}, base);
-    expect([c.category, c.groupable, c.hidden]).toEqual(['other', false, false]);
+    expect([c.category, c.groupable]).toEqual(['other', true]);
     expect(presentationOf(`mcp__maws__${tool}`)).toBe('cell');
   });
 
-  // P4-B4: the library search is a cell of its own, as the namespace's other readers (artifact_list, artifact_read) are
-  it('artifact_search is a cell of its own, never folded into a group of MCP calls', () => {
-    const c = classifyTool('mcp__maws__artifact_search', {}, base);
-    expect([c.category, c.groupable, c.hidden]).toEqual(['other', false, false]);
-    expect(presentationOf('mcp__maws__artifact_search')).toBe('cell');
+  it('an artifact screenshot, the pane-opening call and the computer-use call stay cells of their own', () => {
+    for (const name of ['mcp__maws__artifact_screenshot', 'mcp__maws__show_pane', 'mcp__plugin_cua_cua_repl__js', 'mcp__cua_repl__js']) expect(classifyTool(name, {}, base).groupable, name).toBe(false);
   });
 
   it('routes the row-kind tools out of the cell table', () => {
@@ -74,18 +73,45 @@ describe('classification table', () => {
 });
 
 describe('classification overrides', () => {
-  it('a denial makes any cell standalone, with the disposition from the denial table', () => {
+  it('a denial makes a cell standalone, with the disposition from the denial table', () => {
     const denied = classifyTool('Bash', {}, { ...base, denial: { kind: 'permission-rule', reason: 'nope' } });
     expect(denied.groupable).toBe(false);
     expect(denied.denial).toEqual({ kind: 'permission-rule', disposition: 'denied', interruption: false, reason: 'nope' });
-    const hidden = classifyTool('TodoWrite', {}, { ...base, denial: { kind: 'automode-blocked', reason: null } });
-    expect(hidden.groupable).toBe(false);
-    expect(hidden.denial?.disposition).toBe('auto_denied');
+    const todo = classifyTool('TodoWrite', {}, { ...base, denial: { kind: 'automode-blocked', reason: null } });
+    expect(todo.groupable).toBe(false);
+    expect(todo.denial?.disposition).toBe('auto_denied');
   });
 
-  it('a human decision makes the cell standalone', () => {
+  // UX wave U2 (decision 23): a refused call stands alone unless it reads stopped by the person's Stop or the engine's
+  // interrupt or cancel; automode-unavailable reads stopped and stands alone
+  it.each([
+    ['permission-rule', { closed: true, stopped: false }, false],
+    ['automode-blocked', { closed: true, stopped: false }, false],
+    ['automode-parsing-error', { closed: true, stopped: false }, false],
+    ['automode-unavailable', { closed: true, stopped: false }, false],
+    ['interrupted', { closed: true, stopped: false }, true],
+    ['cancelled', { closed: true, stopped: false }, true],
+    ['user-rejected', { closed: false, stopped: false }, true],
+    ['user-rejected', { closed: true, stopped: true }, true],
+    ['user-rejected', { closed: true, stopped: false }, false],
+  ] as const)('a %s call in a turn %o joins its run: %s', (kind, turn, member) => {
+    const c = classifyTool('Bash', {}, { ...base, denial: { kind, reason: null }, turn });
+    expect(c.groupable).toBe(member);
+    expect(stoppedMember(c.denial!)).toBe(member);
+  });
+
+  it('every denial kind has an answer for whether it joins its run', () => {
+    for (const kind of DENIAL_KINDS) expect(typeof stoppedMember({ kind, ...denialDisposition(kind, { closed: true, stopped: true }, false) })).toBe('boolean');
+  });
+
+  it('a stopped member of a tool that stands alone stays alone', () => {
+    expect(classifyTool('mcp__maws__show_pane', {}, { ...base, denial: { kind: 'interrupted', reason: null } }).groupable).toBe(false);
+  });
+
+  // UX wave U2 (O-29): only the live route knows who allowed a call, so it no longer decides membership
+  it('a call the person allowed joins its run, and the fact stays on its classification', () => {
     const c = classifyTool('Bash', {}, { ...base, humanDecision: true });
-    expect(c.groupable).toBe(false);
+    expect(c.groupable).toBe(true);
     expect(c.humanDecision).toBe(true);
   });
 

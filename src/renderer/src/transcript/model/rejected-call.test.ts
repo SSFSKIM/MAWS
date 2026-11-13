@@ -14,9 +14,10 @@ import { parseTranscriptRecord } from '@shared/wire/transcript';
 import { createBackfillContext, recordToEvents } from '../../../../engine-host/fs/backfill';
 import { journalToEvents } from '../dev/journal';
 import { rowsOf, withAllExpanded } from './derive';
+import { dividerCopy } from './copy';
 import { turnContextOf } from './cells';
 import { continuedAfter } from './classify';
-import { applyEvents, createState } from './reduce';
+import { applyEvents, createState, withUi } from './reduce';
 import { builder, tool, type Builder } from './test-events';
 import type { Cell, Row } from './rows';
 
@@ -42,13 +43,62 @@ describe('a Stop with four commands in flight (queue-and-interrupt), on the wire
     for (let n = first + 1; n <= events.length; n += 1) {
       const rows = drawn(events.slice(0, n));
       const arrived = new Set(events.slice(0, n).flatMap((e) => (e.kind === 'tool.result' && e.denial === 'user-rejected' ? [e.toolUseId] : [])));
-      for (const id of arrived) expect(reading(callOf(rows, id)), `${id} at prefix ${n}`).toMatchObject({ status: 'stopped', disposition: 'stopped', label: expect.stringMatching(/^Stopped: `/) });
+      for (const id of arrived) expect(reading(callOf(rows, id)), `${id} at prefix ${n}`).toMatchObject({ status: 'stopped', disposition: 'stopped', label: expect.stringMatching(/^Stopped: \S/) }); // R2: the description as written, else the command in marks
       for (const line of linesOf(rows)) expect(line.denied, `the denied count at prefix ${n}`).toBe(0);
     }
     // the turn the Stop cut (the queued prompt after it opens a turn of its own)
     const rows = drawn(events);
     const cut = rows.find((row) => callsOf([row]).some((cell) => cell.toolUseId === rejected[0]!.toolUseId))!.turnId;
     expect(linesOf(rows).find((line) => line.turnId === cut)).toMatchObject({ state: 'stopped', denied: 0 });
+  });
+
+  // UX wave U2, M2 (decision 23): the four calls are stopped members of their run, which the Stop does not split, unwrap
+  // or re-key, applied event by event, in two batches or in one
+  const ids = rejected.map((e) => e.toolUseId as string);
+  const runsOf = (rows: Row[]) => rows.filter((row): row is Extract<Row, { kind: 'group' }> => row.kind === 'group' && row.cells.some((cell) => ids.includes(cell.toolUseId ?? '')));
+
+  it('one run of four: before the Stop active; from the first rejected result on one group row with one key, its caption counting the stopped calls', () => {
+    const first = events.indexOf(rejected[0]!);
+    const before = runsOf(drawn(events.slice(0, first)));
+    expect(before.map((run) => [run.state, run.cells.filter((cell) => cell.toolUseId !== null).map((cell) => cell.toolUseId)])).toEqual([['active', ids]]);
+    const key = before[0]!.id;
+    for (let n = first + 1; n <= events.length; n += 1) {
+      const rows = drawn(events.slice(0, n));
+      const runs = runsOf(rows);
+      expect(runs.map((run) => run.id), `the run's key at prefix ${n}`).toEqual([key]);
+      expect(runs[0]!.cells.filter((cell) => cell.toolUseId !== null).map((cell) => cell.toolUseId), `prefix ${n}`).toEqual(ids);
+      expect(rows.some((row) => row.kind === 'cell' && ids.includes(row.toolUseId ?? '')), `no cell row at prefix ${n}`).toBe(false);
+      const stopped = events.slice(0, n).filter((e) => rejected.includes(e as never)).length;
+      expect(runs[0]!.summary, `prefix ${n}`).toBe(`Ran 4 commands (${stopped} stopped)`);
+    }
+  });
+
+  it('applied as two batches split between two results, and as one batch, the rows are the same', () => {
+    const split = events.indexOf(rejected[2]!);
+    const twice = applyEvents(applyEvents(createState(null, null), events.slice(0, split)), events.slice(split));
+    expect(rowsOf(withAllExpanded(twice))).toEqual(drawn(events));
+    const once = applyEvents(createState(null, null), events);
+    expect(rowsOf(withAllExpanded(once))).toEqual(drawn(events));
+  });
+
+  it('at rest: `Ran 4 commands (4 stopped)`, each row stopped, the turn’s line `You stopped after …` with the caption and no denied count, the run as open as before the Stop', () => {
+    const rows = drawn(events);
+    const run = runsOf(rows)[0]!;
+    expect(run.summary).toBe('Ran 4 commands (4 stopped)');
+    expect(run.cells.filter((cell) => cell.toolUseId !== null).map((cell) => cell.status)).toEqual(['stopped', 'stopped', 'stopped', 'stopped']);
+    for (const cell of run.cells.filter((c) => c.toolUseId !== null)) expect(cell.label).toMatch(/^Stopped: \S/);
+    const line = linesOf(rows).find((d) => d.turnId === run.turnId)!;
+    expect(line).toMatchObject({ state: 'stopped', denied: 0, caption: 'Ran 4 commands (4 stopped)' });
+    expect(dividerCopy({ ...line, durationMs: line.summary.durationMs ?? 0 })).toMatch(/^You stopped after .+ · Ran 4 commands \(4 stopped\)$/);
+    // the person opened the run before the Stop: it stays open after it, under the same key
+    const first = events.indexOf(rejected[0]!);
+    let state = applyEvents(createState(null, null), events.slice(0, first));
+    const opened = withUi(state, { ...state.ui, expandedGroups: new Set([run.id]), global: state.ui.global + 1, version: state.ui.version + 1 });
+    expect(runsOf(rowsOf(opened)).map((r) => r.expanded)).toEqual([true]);
+    state = applyEvents(opened, events.slice(first));
+    const turn = run.turnId!;
+    const atRest = withUi(state, { ...state.ui, expandedTurns: new Set([turn]), global: state.ui.global + 1, version: state.ui.version + 1 });
+    expect(runsOf(rowsOf(atRest)).map((r) => [r.id, r.expanded])).toEqual([[run.id, true]]);
   });
 });
 

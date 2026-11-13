@@ -2,92 +2,72 @@ import type { BrowserActivity } from '@shared/browser/activity'; // E13
 import { describe, expect, it } from 'vitest';
 import type { CellId, ToolCategory } from './rows';
 import {
-  activeGroupLabel, boundaryCopy, cellLabel, dividerCopy, groupSummary, liveThinkingLabel, plural, subagentSentence, thinkingLabel, thinkingTier, thinkingWarmth, turnSummaryCopy, type GroupPhraseInput,
+  boundaryCopy, cellLabel, dividerCopy, dividerHead, lineCountsCopy, liveThinkingLabel, plural, stoppedLabel, subagentSentence, thinkingLabel, thinkingTier, thinkingWarmth, turnSummaryCopy,
 } from './copy';
 import { browserActivityLine } from './copy'; // E13
 
 const cell = (id: string) => id as CellId;
+const NONE = { added: 0, removed: 0 };
+const line = (input: Partial<Parameters<typeof dividerCopy>[0]> & Pick<Parameters<typeof dividerCopy>[0], 'state' | 'durationMs'>) =>
+  dividerCopy({ origin: 'human', caption: '', counts: NONE, denied: 0, autoDenied: 0, ...input });
+const NO_SAFEGUARD = { reviewed: 0, flagged: 0, notEvaluated: 0 };
 
 describe('divider and summary copy', () => {
-  it('reads Working under a second and Working for {t} after', () => {
-    expect(dividerCopy({ state: 'working', origin: 'human', durationMs: 400, toolCalls: 0, denied: 0, autoDenied: 0 })).toBe('Working');
-    expect(dividerCopy({ state: 'working', origin: 'human', durationMs: 134_000, toolCalls: 3, denied: 0, autoDenied: 0 })).toBe('Working for 2m 14s');
+  it('reads Working under a second and Working for {t} after, with no caption', () => {
+    expect(line({ state: 'working', durationMs: 400 })).toBe('Working');
+    expect(line({ state: 'working', durationMs: 134_000, caption: 'Ran 3 commands' })).toBe('Working for 2m 14s');
   });
 
-  it('reads Worked, Continued, You stopped and Failed with the tool-call count, pluralised, omitted at zero', () => {
-    expect(dividerCopy({ state: 'completed', origin: 'human', durationMs: 134_000, toolCalls: 12, denied: 0, autoDenied: 0 })).toBe('Worked for 2m 14s · 12 tool calls');
-    expect(dividerCopy({ state: 'completed', origin: 'human', durationMs: 5_000, toolCalls: 1, denied: 0, autoDenied: 0 })).toBe('Worked for 5s · 1 tool call');
-    expect(dividerCopy({ state: 'completed', origin: 'human', durationMs: 5_000, toolCalls: 0, denied: 0, autoDenied: 0 })).toBe('Worked for 5s');
-    expect(dividerCopy({ state: 'completed', origin: 'engine', durationMs: 5_000, toolCalls: 2, denied: 0, autoDenied: 0 })).toBe('Continued for 5s · 2 tool calls');
-    expect(dividerCopy({ state: 'stopped', origin: 'human', durationMs: 5_000, toolCalls: 4, denied: 0, autoDenied: 0 })).toBe('You stopped after 5s · 4 tool calls');
-    expect(dividerCopy({ state: 'failed', origin: 'human', durationMs: 5_000, toolCalls: 1, denied: 0, autoDenied: 0 })).toBe('Failed after 5s · 1 tool call');
+  // UX wave U2 (O-15; acceptance 7): the turn's line says what the turn did, in the caption's words; no count of calls
+  it('reads Worked, Continued, You stopped and Failed with what the turn did, omitted when it did nothing', () => {
+    expect(line({ state: 'completed', durationMs: 192_000, caption: 'Edited 2 files, ran 2 agents, ran 5 commands', counts: { added: 33, removed: 5 } })).toBe('Worked for 3m 12s · Edited 2 files, ran 2 agents, ran 5 commands +33 −5');
+    expect(line({ state: 'completed', durationMs: 5_000, caption: 'Ran a command' })).toBe('Worked for 5s · Ran a command');
+    expect(line({ state: 'completed', durationMs: 5_000 })).toBe('Worked for 5s');
+    expect(line({ state: 'completed', origin: 'engine', durationMs: 5_000, caption: 'Read 2 files' })).toBe('Continued for 5s · Read 2 files');
+    expect(line({ state: 'completed', origin: 'peer', durationMs: 5_000, caption: 'Read 2 files' })).toBe('Peer session worked for 5s · Read 2 files');
+    expect(line({ state: 'stopped', durationMs: 5_000, caption: 'Ran 3 commands (2 stopped)' })).toBe('You stopped after 5s · Ran 3 commands (2 stopped)');
+    expect(line({ state: 'failed', durationMs: 5_000, caption: 'Ran a command (1 failed)' })).toBe('Failed after 5s · Ran a command (1 failed)');
+    for (const text of [line({ state: 'completed', durationMs: 5_000, caption: 'Ran a command' }), line({ state: 'working', durationMs: 5_000 })]) expect(text).not.toContain('tool call');
+  });
+
+  it('reads a running turn’s lines so far after its verb, and a closed turn’s after its caption, a zero side left out', () => {
+    expect(line({ state: 'working', durationMs: 72_000, counts: { added: 12, removed: 3 } })).toBe('Working for 1m 12s +12 −3');
+    expect(line({ state: 'completed', durationMs: 5_000, caption: 'Created a file', counts: { added: 4, removed: 0 } })).toBe('Worked for 5s · Created a file +4');
+    expect(line({ state: 'completed', durationMs: 5_000, caption: 'Edited a file', counts: { added: 0, removed: 2 } })).toBe('Worked for 5s · Edited a file −2');
+    expect(lineCountsCopy({ added: 33, removed: 5 })).toBe('+33 −5');
+    expect(lineCountsCopy(NONE)).toBe('');
+    expect(dividerHead({ state: 'completed', origin: 'human', durationMs: 5_000, caption: 'Edited a file' })).toBe('Worked for 5s · Edited a file');
+  });
+
+  // UX wave U2 (l2-transcript-04; C2): a turn the answer to an asynchronous question opened is the person's
+  it('reads Worked for a turn an answer opened, whatever its origin; every other opener keeps the origin’s verb', () => {
+    expect(line({ state: 'completed', origin: 'engine', opener: { class: 'answer' }, durationMs: 5_000, caption: 'Ran a command' })).toBe('Worked for 5s · Ran a command');
+    expect(line({ state: 'completed', origin: 'engine', opener: { class: 'subagent' }, durationMs: 5_000, caption: 'Ran a command' })).toBe('Continued for 5s · Ran a command');
+    expect(line({ state: 'completed', origin: 'peer', opener: { class: 'peer' }, durationMs: 5_000, caption: 'Ran a command' })).toBe('Peer session worked for 5s · Ran a command');
   });
 
   // E11 (W-C): a turn its engine process ended (a crash, or a supervisor's death) is not the reader's stop
   it('reads a crash-closed turn in the engine’s words, and keeps You stopped for a stop', () => {
-    expect(dividerCopy({ state: 'stopped', cause: 'crash', origin: 'human', durationMs: 5_000, toolCalls: 4, denied: 0, autoDenied: 0 })).toBe('Stopped after 5s (engine process exited) · 4 tool calls');
-    expect(dividerCopy({ state: 'stopped', cause: null, origin: 'human', durationMs: 5_000, toolCalls: 0, denied: 0, autoDenied: 0 })).toBe('You stopped after 5s');
-    expect(turnSummaryCopy({ state: 'stopped', cause: 'crash', origin: 'human', durationMs: 5_000, toolCalls: 0, model: 'haiku', phrases: '', denied: [], safeguard: { reviewed: 0, flagged: 0, notEvaluated: 0 }, costUsd: null, tokens: null, childAgents: 0 })).toBe('Stopped after 5s (engine process exited) on haiku');
+    expect(line({ state: 'stopped', cause: 'crash', durationMs: 5_000, caption: 'Ran 4 commands' })).toBe('Stopped after 5s (engine process exited) · Ran 4 commands');
+    expect(line({ state: 'stopped', cause: null, durationMs: 5_000 })).toBe('You stopped after 5s');
+    expect(turnSummaryCopy({ state: 'stopped', cause: 'crash', origin: 'human', durationMs: 5_000, model: 'haiku', parts: [], denied: [], safeguard: NO_SAFEGUARD, costUsd: null, tokens: null })).toBe('Stopped after 5s (engine process exited) on haiku');
   });
 
   it('suffixes the denied and auto-denied counts', () => {
-    expect(dividerCopy({ state: 'completed', origin: 'human', durationMs: 134_000, toolCalls: 12, denied: 1, autoDenied: 0 })).toBe('Worked for 2m 14s · 12 tool calls · 1 denied');
-    expect(dividerCopy({ state: 'completed', origin: 'human', durationMs: 134_000, toolCalls: 12, denied: 1, autoDenied: 2 })).toBe('Worked for 2m 14s · 12 tool calls · 1 denied · 2 auto-denied');
+    expect(line({ state: 'completed', durationMs: 134_000, caption: 'Ran 12 commands', denied: 1 })).toBe('Worked for 2m 14s · Ran 12 commands · 1 denied');
+    expect(line({ state: 'completed', durationMs: 134_000, caption: 'Ran 12 commands', counts: { added: 1, removed: 1 }, denied: 1, autoDenied: 2 })).toBe('Worked for 2m 14s · Ran 12 commands +1 −1 · 1 denied · 2 auto-denied');
   });
 
+  // UX wave U2 (O-15): the popover lists every part, uncapped; the count of subagents goes, the agent part says it
   it('composes the summary popover, omitting zero and unknown segments', () => {
     const summary = turnSummaryCopy({
-      state: 'completed', origin: 'human', durationMs: 134_000, model: 'claude-opus-5-5', toolCalls: 12, phrases: 'Edited 3 files, ran 2 commands',
-      denied: [{ kind: 'permission-rule' }], safeguard: { reviewed: 4, flagged: 1, notEvaluated: 8 }, costUsd: 0.1234, tokens: 12_345, childAgents: 2,
+      state: 'completed', origin: 'human', durationMs: 134_000, model: 'claude-opus-5-5', parts: ['edited 3 files', 'ran 2 agents', 'ran 2 commands', 'read a file', 'searched code', 'updated todos'],
+      denied: [{ kind: 'permission-rule' }], safeguard: { reviewed: 4, flagged: 1, notEvaluated: 8 }, costUsd: 0.1234, tokens: 12_345,
     });
-    expect(summary).toBe('Worked for 2m 14s on claude-opus-5-5 · 12 tool calls: Edited 3 files, ran 2 commands · 1 denied (permission-rule) · Auto mode reviewed 4 actions, 1 flagged · $0.12 · 12,345 tokens · 2 subagents');
-    expect(turnSummaryCopy({ state: 'completed', origin: 'engine', durationMs: 5_000, model: null, toolCalls: 0, phrases: '', denied: [], safeguard: { reviewed: 0, flagged: 0, notEvaluated: 0 }, costUsd: null, tokens: null, childAgents: 0 }))
-      .toBe('Continued for 5s');
-  });
-});
-
-describe('group phrases', () => {
-  const input = (partial: Partial<GroupPhraseInput>): GroupPhraseInput => ({
-    mcpServers: [], skills: [], toolsLoaded: 0, editedFiles: [], readFiles: [], searches: [], commands: [], webQueries: [], fetchedHosts: [], other: 0, ...partial,
-  });
-
-  it('phrases in category order, joined by commas, first letter capitalised', () => {
-    expect(groupSummary(input({ editedFiles: ['a.ts', 'b.ts', 'c.ts'], commands: ['pnpm test', 'pnpm lint'] }))).toBe('Edited 3 files, ran 2 commands');
-    expect(groupSummary(input({ readFiles: ['src/a.ts', 'src/b.ts'], searches: ['useSidebarDrag'], mcpServers: ['docs'] }))).toBe('Used docs, read 2 files, searched for `useSidebarDrag`');
-  });
-
-  it('counts even a single file or command, and names a single host or skill', () => {
-    expect(groupSummary(input({ editedFiles: ['src/useSidebarDrag.ts'] }))).toBe('Edited 1 file');
-    expect(groupSummary(input({ readFiles: ['src/app.ts'] }))).toBe('Read 1 file');
-    expect(groupSummary(input({ commands: ['pnpm test'] }))).toBe('Ran 1 command');
-    expect(groupSummary(input({ fetchedHosts: ['example.com'] }))).toBe('Fetched example.com');
-    expect(groupSummary(input({ fetchedHosts: ['a.com', 'b.com'] }))).toBe('Fetched 2 pages');
-    expect(groupSummary(input({ webQueries: ['tanstack virtual chat'] }))).toBe('Searched the web for tanstack virtual chat');
-    expect(groupSummary(input({ skills: ['test-driven-development'] }))).toBe('Loaded test-driven-development skill');
-    expect(groupSummary(input({ skills: ['a', 'b'] }))).toBe('Loaded 2 skills');
-    expect(groupSummary(input({ toolsLoaded: 3 }))).toBe('Loaded 3 tools');
-  });
-
-  it('names up to three MCP servers, else counts sources', () => {
-    expect(groupSummary(input({ mcpServers: ['a', 'b', 'c'] }))).toBe('Used a, b and c');
-    expect(groupSummary(input({ mcpServers: ['a', 'b', 'c', 'd'] }))).toBe('Used 4 sources');
-  });
-
-  it('phrases other only when it is the sole category, and falls back to Worked', () => {
-    expect(groupSummary(input({ other: 2 }))).toBe('Used 2 tools');
-    expect(groupSummary(input({ other: 2, commands: ['ls'] }))).toBe('Ran 1 command');
-    expect(groupSummary(input({}))).toBe('Worked');
-  });
-
-  it('labels an active group by what is running, else Thinking', () => {
-    expect(activeGroupLabel({ toolName: 'Bash', input: { command: 'pnpm test' }, elapsedMs: 3_000 })).toBe('Running `pnpm test` for 3s');
-    expect(activeGroupLabel({ toolName: 'Read', input: { file_path: '/x/y.ts' }, elapsedMs: 0 })).toBe('Reading y.ts');
-    expect(activeGroupLabel({ toolName: 'Edit', input: { file_path: '/x/y.ts' }, elapsedMs: 0 })).toBe('Editing y.ts');
-    expect(activeGroupLabel({ toolName: 'Grep', input: { pattern: 'TODO' }, elapsedMs: 0 })).toBe('Searching for `TODO`');
-    expect(activeGroupLabel({ toolName: 'WebFetch', input: { url: 'https://example.com/docs' }, elapsedMs: 0 })).toBe('Fetching example.com');
-    expect(activeGroupLabel({ toolName: 'mcp__docs__search', input: {}, elapsedMs: 0 })).toBe('Using docs');
-    expect(activeGroupLabel({ toolName: 'Skill', input: { skill: 'tdd' }, elapsedMs: 0 })).toBe('Loading tdd');
-    expect(activeGroupLabel(null)).toBe('Thinking');
+    expect(summary).toBe('Worked for 2m 14s on claude-opus-5-5 · Edited 3 files, ran 2 agents, ran 2 commands, read a file, searched code, updated todos · 1 denied (permission-rule) · Auto mode reviewed 4 actions, 1 flagged · $0.12 · 12,345 tokens');
+    expect(summary).not.toContain('tool call');
+    expect(turnSummaryCopy({ state: 'completed', origin: 'engine', durationMs: 5_000, model: null, parts: [], denied: [], safeguard: NO_SAFEGUARD, costUsd: null, tokens: null })).toBe('Continued for 5s');
+    expect(turnSummaryCopy({ state: 'completed', origin: 'engine', opener: { class: 'answer' }, durationMs: 5_000, model: null, parts: ['ran a command'], denied: [], safeguard: NO_SAFEGUARD, costUsd: null, tokens: null })).toBe('Worked for 5s · Ran a command');
   });
 });
 
@@ -117,9 +97,17 @@ describe('cell lines', () => {
     expect(cellLabel({ kind: 'denied', subject: 'ls', disposition: 'stopped', denialKind: 'automode-unavailable', reason: 'x' })).toBe('Stopped: `ls` · auto mode unavailable');
   });
 
+  // UX wave U2 (decision 23, R2): one form for every stopped call, with no duration
+  it('the stopped form: the subject in code marks, a shell description as written', () => {
+    expect(stoppedLabel('pnpm test', true)).toBe('Stopped: `pnpm test`');
+    expect(stoppedLabel('Run the tests', false)).toBe('Stopped: Run the tests');
+  });
+
   it('other cells', () => {
     expect(cellLabel({ kind: 'generic', toolName: 'mcp__docs__search', category: 'mcp' as ToolCategory })).toBe('Used docs · search');
-    expect(cellLabel({ kind: 'generic', toolName: 'Skill', category: 'skills', detail: 'tdd' })).toBe('Loaded tdd skill');
+    expect(cellLabel({ kind: 'generic', toolName: 'Skill', category: 'skills', detail: 'tdd' })).toBe('Ran /tdd'); // UX wave U2 (decision 5): the row's words, once the view's
+    expect(cellLabel({ kind: 'generic', toolName: 'Skill', category: 'skills', detail: '/release-notes' })).toBe('Ran /release-notes');
+    expect(cellLabel({ kind: 'generic', toolName: 'Skill', category: 'skills', detail: null })).toBe('Ran a skill');
     expect(cellLabel({ kind: 'generic', toolName: 'ToolSearch', category: 'skills', detail: '2' })).toBe('Loaded 2 tools');
     expect(cellLabel({ kind: 'generic', toolName: 'Grep', category: 'exploration', detail: 'TODO', scope: 'src' })).toBe('Searched for `TODO` in src');
     expect(cellLabel({ kind: 'generic', toolName: 'WebFetch', category: 'web', detail: 'example.com' })).toBe('Fetched example.com');

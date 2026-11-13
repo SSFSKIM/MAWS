@@ -1,6 +1,6 @@
 import type { SessionEvent } from '@shared/graph/events';
 import { describe, expect, it } from 'vitest';
-import { rowsOf, turnPhrases, turnSummary, withAllExpanded } from './derive';
+import { rowsOf, turnSummary, withAllExpanded } from './derive';
 import { rowId, turnId } from './keys';
 import { applyEvents, createState } from './reduce';
 import { api, builder, parent, tool, uuid } from './test-events';
@@ -44,7 +44,7 @@ describe('revision regressions', () => {
     expect(rowsOf(before).filter((row) => row.kind === 'assistant_text')).toHaveLength(3);
   });
 
-  it('excludes a retracted completed Bash call from rows, summary and phrases', () => {
+  it('excludes a retracted completed Bash call from rows, summary and caption', () => {
     const b = builder();
     b.turn('one');
     b.toolUse('bash', 'Bash', { command: 'pwd' });
@@ -55,7 +55,8 @@ describe('revision regressions', () => {
     const state = reduce(b.events);
     const turn = state.turns.get(state.order[0])!;
     expect(turnSummary(turn).toolCalls).toBe(0);
-    expect(turnPhrases(turn)).not.toContain('command');
+    // UX wave U2: the turn's caption is its line's data
+    expect(rowsOf(withAllExpanded(state)).flatMap((row) => (row.kind === 'divider' ? [...row.parts, row.caption] : [])).join(' ')).not.toContain('command');
     expect(rowsOf(withAllExpanded(state)).filter((row) => row.kind === 'cell' || row.kind === 'group')).toEqual([]);
   });
 

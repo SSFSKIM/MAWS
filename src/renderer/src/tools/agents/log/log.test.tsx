@@ -273,7 +273,7 @@ describe('log tool: openLog and openFullLog', () => {
 
   const cell = (detail: CellDetail, label = 'Ran npm test'): Cell => ({
     id: 'cell-1' as CellId, toolUseId: 'toolu_1' as ToolUseId, toolName: 'Bash', category: 'shell' as Cell['category'], classification: {} as Cell['classification'], status: 'done', label, paths: [],
-    startedAt: '2026-09-29T10:00:00.000Z', endedAt: null, detail, expanded: true, agent: null,
+    startedAt: '2026-09-29T10:00:00.000Z', endedAt: null, detail, expanded: true, agent: null, background: false,
   });
   const spillOf = (path: string) => ({ path, bytes: 3_000_000, state: 'partial' as const, content: null });
   const shell = (over: Partial<Extract<CellDetail, { kind: 'shell' }>> = {}): CellDetail => ({

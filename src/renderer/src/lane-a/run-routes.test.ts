@@ -98,3 +98,94 @@ describe('a thought’s recorded duration is the same by every route (Acceptance
     expect(recordedDurations(drawn(await fromRows(text)))).toEqual([10_192]);
   });
 });
+
+// UX wave U2, M2 (decision 23, R2, and the revision's point 13): a call a Stop left unfinished is one stopped member of
+// one run by every route. The journal holds the call with no result in a turn its process's exit closed; the file holds
+// the same call with the result the engine repairs such a call with on its next load (`toolDenialKind: 'interrupted'`,
+// its words as `cli.pretty.js:426583-426660` of 2.1.322 write them), read from the file and from the file's rows. Every
+// command, path and name is invented.
+describe('a stopped member of its run is the same row in the same run by every route', () => {
+  const at = (ms: number) => new Date(Date.parse('2026-09-28T11:00:00.000Z') + ms).toISOString();
+  const REPAIRED = '[Tool call interrupted: the session ended before this call’s result was recorded, so its outcome is unknown. Check whether it took effect before relying on it or running it again.]';
+  const PROMPT = 'Tidy the workspace.';
+  type Call = { id: string; name: string; input: Record<string, unknown> };
+
+  const journalOf = (done: Call, cut: Call): JournalRow[] => {
+    let seq = 0;
+    const row = (direction: JournalRow['direction'], ms: number, frame: unknown): JournalRow => ({ seq: (seq += 1), direction, at: at(ms), frame });
+    const assistant = (ms: number, id: string, call: Call) => row('in', ms, {
+      type: 'assistant', message: { model: 'claude-test', id, type: 'message', role: 'assistant', content: [{ type: 'tool_use', ...call }], stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 1 } },
+      parent_tool_use_id: null, uuid: `a-${id}`, timestamp: at(ms), session_id: SESSION,
+    });
+    return [
+      row('meta', 0, { event: 'spawn', pid: 4100, cwd: '/tmp/maws-synth-routes', bin: 'claude', args: ['-p'] }),
+      row('out', 10, { type: 'user', uuid: 'u-routes-1', message: { role: 'user', content: PROMPT }, parent_tool_use_id: null, origin: { kind: 'human' } }),
+      row('in', 20, { type: 'command_lifecycle', command_uuid: 'u-routes-1', state: 'started', uuid: 'cl-routes-1', session_id: SESSION }),
+      row('in', 30, { type: 'system', subtype: 'init', cwd: '/tmp/maws-synth-routes', model: 'claude-test', permissionMode: 'default', tools: [], slash_commands: [], agents: [], skills: [], plugins: [], mcp_servers: [], capabilities: [], claude_code_version: '2.1.322', output_style: 'default', uuid: 'sys-routes-1', session_id: SESSION }),
+      assistant(40, 'msg_routes_1', done),
+      row('in', 50, { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: done.id, content: 'ok' }] }, parent_tool_use_id: null, uuid: 't-routes-1', timestamp: at(50), session_id: SESSION }),
+      assistant(60, 'msg_routes_2', cut),
+      row('meta', 70, { event: 'exit', code: null, signal: 'SIGKILL', peakRSSKiB: 1, peakTreeRSSKiB: 1 }),
+    ];
+  };
+
+  const fileOf = (records: unknown[]) => records.map((record) => JSON.stringify(record)).join('\n') + '\n';
+  const prompt = (uuid: string, parentUuid: string | null, ms: number, text: string) => ({ type: 'user', uuid, parentUuid, timestamp: at(ms), sessionId: SESSION, message: { role: 'user', content: text } });
+  const assistantRecord = (uuid: string, parentUuid: string, ms: number, id: string, call: Call) => ({ type: 'assistant', uuid, parentUuid, timestamp: at(ms), sessionId: SESSION, message: { id, role: 'assistant', model: 'claude-test', content: [{ type: 'tool_use', ...call }] } });
+  const resultRecord = (uuid: string, parentUuid: string, ms: number, toolUseId: string, content: string, kind?: string) => ({
+    type: 'user', uuid, parentUuid, timestamp: at(ms), sessionId: SESSION, ...(kind !== undefined && { toolDenialKind: kind, toolUseResult: content }),
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content, ...(kind !== undefined && { is_error: true }) }] },
+  });
+  const transcriptOf = (done: Call, cut: Call) => fileOf([
+    prompt('f-1', null, 10, PROMPT),
+    assistantRecord('f-2', 'f-1', 40, 'msg_routes_1', done),
+    resultRecord('f-3', 'f-2', 50, done.id, 'ok'),
+    assistantRecord('f-4', 'f-3', 60, 'msg_routes_2', cut),
+    resultRecord('f-5', 'f-4', 70, cut.id, REPAIRED, 'interrupted'),
+    prompt('f-6', 'f-5', 90_000, 'Carry on.'),
+  ]);
+
+  /** The run that holds the cut call: its calls and caption, and the cut call's row. */
+  const reading = (rows: Row[], cut: string) => {
+    const run = rows.find((row): row is Extract<Row, { kind: 'group' }> => row.kind === 'group' && row.cells.some((cell) => cell.toolUseId === cut));
+    const call = callsOf(rows).find((cell) => cell.toolUseId === cut);
+    return { run: run && { calls: run.cells.filter((cell) => cell.toolUseId !== null).map((cell) => cell.toolUseId), caption: run.summary }, call: call && { status: call.status, label: call.label } };
+  };
+
+  it.each([
+    ['a shell call', { id: 'toolu_routes_1', name: 'Bash', input: { command: 'ls build' } }, { id: 'toolu_routes_2', name: 'Bash', input: { command: 'pnpm clean' } }, 'Ran 2 commands (1 stopped)', 'Stopped: `pnpm clean`'],
+    ['an edit', { id: 'toolu_routes_1', name: 'Read', input: { file_path: '/tmp/maws-synth-routes/notes.md' } }, { id: 'toolu_routes_2', name: 'Edit', input: { file_path: '/tmp/maws-synth-routes/todo.md', old_string: 'a', new_string: 'b' } }, 'Read a file, edited a file (1 stopped)', 'Stopped: `/tmp/maws-synth-routes/todo.md`'],
+    ['an MCP call', { id: 'toolu_routes_1', name: 'mcp__notes__list_pages', input: {} }, { id: 'toolu_routes_2', name: 'mcp__notes__create_page', input: { title: 'Plan' } }, null, 'Stopped: `notes · create_page`'],
+  ] as const)('%s', async (_family, done, cut, caption, label) => {
+    const text = transcriptOf(done, cut);
+    const routes = { live: drawn(fromJournal(journalOf(done, cut))), file: drawn(await fromFile(text)), link: drawn(await fromRows(text)) };
+    const live = reading(routes.live, cut.id);
+    expect(live.call).toEqual({ status: 'stopped', label });
+    expect(live.run?.calls).toEqual([done.id, cut.id]);
+    if (caption !== null) expect(live.run?.caption).toBe(caption);
+    expect(live.run?.caption).toMatch(/\(1 stopped\)$/);
+    expect(reading(routes.file, cut.id), 'the file').toEqual(live);
+    expect(reading(routes.link, cut.id), 'the file’s rows').toEqual(live);
+  });
+
+  // The revision's point 7 (R5): a run of three, one finished and two in flight at the Stop, as the file of a session MAWS
+  // ran holds it (the keys the recorded pair's file rows carry: `toolDenialKind`, the interrupt marker; no turn end)
+  it('a run of three with two in flight at the Stop: `Ran 3 commands (2 stopped)` from the file and from its rows', async () => {
+    const bash = (n: number, command: string): Call => ({ id: `toolu_routes_3${n}`, name: 'Bash', input: { command } });
+    const REJECTED = 'The user doesn’t want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.';
+    const text = fileOf([
+      prompt('g-1', null, 10, 'Check the three packages.'),
+      assistantRecord('g-2', 'g-1', 20, 'msg_routes_3', bash(1, 'pnpm -F a test')),
+      assistantRecord('g-3', 'g-2', 21, 'msg_routes_3', bash(2, 'pnpm -F b test')),
+      assistantRecord('g-4', 'g-3', 22, 'msg_routes_3', bash(3, 'pnpm -F c test')),
+      resultRecord('g-5', 'g-4', 3_000, 'toolu_routes_31', '1 passed'),
+      resultRecord('g-6', 'g-5', 5_000, 'toolu_routes_32', REJECTED, 'user-rejected'),
+      resultRecord('g-7', 'g-6', 5_001, 'toolu_routes_33', REJECTED, 'user-rejected'),
+      { type: 'user', uuid: 'g-8', parentUuid: 'g-7', timestamp: at(5_002), sessionId: SESSION, message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user for tool use]' }] } },
+      prompt('g-9', 'g-8', 60_000, 'Just the first, then.'),
+    ]);
+    for (const [route, rows] of [['file', drawn(await fromFile(text))], ['link', drawn(await fromRows(text))]] as const) {
+      expect(reading(rows, 'toolu_routes_33').run, route).toEqual({ calls: ['toolu_routes_31', 'toolu_routes_32', 'toolu_routes_33'], caption: 'Ran 3 commands (2 stopped)' });
+    }
+  });
+});

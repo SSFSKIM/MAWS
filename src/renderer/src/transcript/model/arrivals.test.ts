@@ -6,7 +6,7 @@ import type { ArrivalEntry, CarriedArrival } from '@shared/engine/arrival-schema
 import { describe, expect, it } from 'vitest';
 import { consentMessage } from '@shared/engine/arrival';
 import { isPersistentRow, rowsOf, turnRows, withAllExpanded } from './derive';
-import { NOTICE } from './copy';
+import { dividerCopy, NOTICE } from './copy';
 import { rowId, turnId } from './keys';
 import { applyEvents, createState, type TranscriptState } from './reduce';
 import type { Row } from './rows';
@@ -54,7 +54,7 @@ describe('where an arrival’s row sits (decision 5)', () => {
     b.text('m1', 0, 'The count is done.');
     endEngine(b);
     const list = rowsOf(reduce(b.events));
-    expect(kinds(list)).toEqual(['notice', 'divider', 'assistant_text']);
+    expect(kinds(list)).toEqual(['notice', 'assistant_text']); // UX wave U2 (O-15): at rest, a turn that only answers has no line
     expect(of(list, 'notice')[0]).toMatchObject({ id: rowId.notice('run-1', uuid('n1'), 0), class: 'task', outcome: 'completed', text: OK, taskId: 'bt1', toolUseId: 'tu-bt1', outputFile: '/tmp/work/bt1.output', durationMs: null, detail: null });
   });
 
@@ -214,7 +214,7 @@ describe('one arrival per uuid (decision 8)', () => {
     step(() => carry(b, 'n1', [task()], '')); // placed again, on the later turn
     expect(of(turnRows(state, first)!, 'notice')).toEqual([]);
     expect(of(turnRows(state, second)!, 'notice').map((row) => row.id)).toEqual([rowId.notice('run-1', uuid('n1'), 0)]);
-    expect(shown(rowsOf(state)).map((row) => `${row.kind}:${row.turnId === first ? 1 : 2}`)).toEqual(['divider:1', 'assistant_text:1', 'notice:2', 'divider:2']);
+    expect(shown(rowsOf(state)).map((row) => `${row.kind}:${row.turnId === first ? 1 : 2}`)).toEqual(['assistant_text:1', 'notice:2', 'divider:2']); // UX wave U2 (O-15): the first only answered
     step(() => carry(b, 'n1', [task()], '')); // and again on the same turn: still one line
     expect(of(rowsOf(state), 'notice')).toHaveLength(1);
   });
@@ -379,7 +379,7 @@ describe('a provisional line needs its turn’s end (decision 21)', () => {
     b.turn('u1');
     const list = rowsOf(reduce(b.events));
     expect(lines(list)).toEqual([rowId.notice('run-f', uuid('f1'), 0)]);
-    expect(of(list, 'divider').map((row) => row.state)).toEqual(['completed', 'working']);
+    expect(of(list, 'divider').map((row) => row.state)).toEqual(['working']); // UX wave U2 (O-15): the closed turn did nothing
   });
 
   it('a turn whose only line was provisional and that a later start closes is no turn at all', () => {
@@ -505,7 +505,8 @@ describe('an engine turn that held nothing is no turn (decision 6)', () => {
     b.turn('u2');
     const state = reduce(b.events);
     expect(state.order).toHaveLength(2);
-    expect(of(rowsOf(state), 'divider').map((row) => [row.origin, row.state])).toEqual([['engine', 'completed'], ['human', 'working']]);
+    expect(state.turns.get(state.order[0])!.state).toBe('closed');
+    expect(of(rowsOf(state), 'divider').map((row) => [row.origin, row.state])).toEqual([['human', 'working']]); // UX wave U2 (O-15): the closed one only answered
   });
 });
 
@@ -624,5 +625,35 @@ describe('the consent line (decision 10)', () => {
     expect(user).toMatchObject({ messageUuid: 'c1', consent: { kind: 'command', subject: 'git push origin notes' } });
     expect(isPersistentRow(user!)).toBe(true);
     expect(kinds(folded)).toEqual(['user', 'divider']);
+  });
+});
+
+// UX wave U2, M2 (C2, C5; O-15): a turn an answer's notice opened reads `Worked for` where it did work, and has no line
+// where it only answers; the notice stays in view through a fold either way
+describe('the line of a turn an answer opened', () => {
+  const ANSWER: CarriedArrival = { class: 'answer', tool: 'sminos', call: 'tu-q7', summary: 'Your questions have been answered: "Which colour?"="Teal". You can now continue with these answers in mind.', answers: null, dismissed: false };
+  const opened = (work: boolean) => {
+    const b = builder();
+    engineTurn(b);
+    carry(b, 'a1', [ANSWER], 'The human responded to your async AskUserQuestion (call tu-q7): Teal');
+    if (work) {
+      b.toolUse('t1', 'Bash', { command: 'make theme' });
+      b.result('t1', 'ok');
+    }
+    b.text('m1', 0, 'Teal it is.');
+    endEngine(b);
+    return rowsOf(reduce(b.events)); // at rest: folded
+  };
+
+  it('that only answers has no line, and its notice and answer stay', () => {
+    expect(kinds(opened(false))).toEqual(['notice', 'assistant_text']);
+  });
+
+  it('with one call reads `Worked for …` and keeps its notice in view when folded', () => {
+    const list = opened(true);
+    expect(kinds(list)).toEqual(['divider', 'notice', 'assistant_text']);
+    const line = divider(list);
+    expect(line.opener).toMatchObject({ class: 'answer' });
+    expect(dividerCopy({ ...line, durationMs: line.summary.durationMs ?? 0 })).toBe('Worked for 1s · Ran a command');
   });
 });
