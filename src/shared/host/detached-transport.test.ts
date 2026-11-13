@@ -669,6 +669,39 @@ describe('the detached transport: early exits and the crash ladder', () => {
     expect(errors.mock.calls.flat().join(' ')).toContain('unexpectedly');
   });
 
+  // UX wave U9 (M1): another machine's pane answer, the remote endpoint's `host.op` carrying it, that arrives after the
+  // host that raised the pane's request exited in the middle of that call (the call dies with it). Whether it comes while
+  // the supervisor restarts or once the successor serves, it is an ordinary op: held for and answered by the served
+  // host's ledger, never refused as the stale completion itself is. And it counts nothing: the exit's count is the one
+  // an exit with a call in flight takes today (one restart; board ticket 473, open, counts that exit as a crash), and the
+  // op adds no restart, spawn or exit of its own.
+  it('a pane answer’s op after its raiser exited mid-call goes to the served host’s ledger and adds nothing to the exit’s count', async () => {
+    const PANE = { appSessionId: 'app-1', requestId: 'req-1', pane: 'terminal', target: null, line: null };
+    const ANSWER = { appSessionId: 'app-1', requestId: 'req-1', result: { ok: false, error: 'closed' } };
+    const OP = (opId: string) => ({ opId, opCreated: '2026-11-13T00:00:00.000Z', member: 'member-b', device: 'device-b1', fingerprint: 'f'.repeat(64), name: 'maws.pane.answer', input: ANSWER, context: { launchId: 'launch-1', engineSessionId: 'engine-1' } });
+    const ops: unknown[] = [];
+    const LEDGER = { state: 'done' as const, result: { ok: true as const, value: { outcome: 'not_pending' } } }; // the successor's: it holds no such request
+    onSpawn = (candidate) => void startFake({ pid: candidate.pid!, register: (on) => on('host.op', async (input) => (ops.push(input), LEDGER)) });
+    const old = await startFake();
+    await supervisor.start();
+    const early = vi.spyOn(console, 'info').mockImplementation(() => {});
+    await until(() => old.emit('maws.pane.show', PANE as never)).finally(() => early.mockRestore());
+    await until(() => emit.mock.calls.some(([name]) => name === 'maws.pane.show'));
+    await old.die(); // SIGKILL while its show_pane call waits on the answer
+    const whileRestarting = supervisor.dispatch('engine-host', 'host.op', OP('op-pane-answer-while-restarting') as never);
+    await until(() => state().state === 'ready' && state().pid !== old.pid);
+    const counted = { restarts: state().restarts, lastExit: supervisor.facts('engine-host').lastExit, spawned: spawn.mock.calls.length };
+    expect(counted.restarts).toBe(1); // the exit's own count (473), as any exit with a call in flight takes it
+    expect(counted.lastExit).not.toBeNull();
+    await expect(whileRestarting).resolves.toEqual({ ok: true, value: LEDGER });
+    await expect(supervisor.dispatch('engine-host', 'host.op', OP('op-pane-answer-once-served') as never)).resolves.toEqual({ ok: true, value: LEDGER });
+    expect(ops).toEqual([OP('op-pane-answer-while-restarting'), OP('op-pane-answer-once-served')]);
+    await expect(supervisor.dispatch('engine-host', 'maws.pane.answer', ANSWER)).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } }); // the bare completion, refused
+    await sleep(BACKOFF[2] * 2); // room for any restart the ops would have caused
+    expect({ restarts: state().restarts, lastExit: supervisor.facts('engine-host').lastExit, spawned: spawn.mock.calls.length }).toEqual(counted);
+    expect(state()).toMatchObject({ state: 'ready', restarts: 1 });
+  });
+
   it('backs off on repeated early exits and stays crashed after three within the window', async () => {
     const exitedAt: number[] = [];
     onSpawn = (candidate) => {
