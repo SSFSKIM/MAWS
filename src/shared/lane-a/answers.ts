@@ -6,7 +6,13 @@
 //
 // A scope follows `sminos_rpc.py` `scoped_rule`: only when the request carries exactly one suggestion, an `addRules` or
 // `addDirectories` one, and the destination is `session` (any) or `localSettings` (only where the suggestion names it),
-// and only while `controls['decide.scope']` is available. Never `setMode`, never another rule list.
+// and only while `controls['decide.scope']` is available. Never `setMode`, never another rule list, and never a plan's
+// named mode (U1a §F).
+//
+// UX wave U1a §G: a plain deny of an asynchronous question is the bridge's dismissal (sminos 1.47.0's `behavior:
+// 'dismiss'`: the question closes unanswered, as the terminal's own dismiss closes it), while the bridge declares
+// `controls['decide.dismiss']` available; refused with why otherwise. The card decides which gesture sends it (Dismiss,
+// never Esc). `requestKind` names the shape of the answer a request takes, so an asynchronous question stays a question.
 import { inputSha256, type JsonValue } from 'desk-hub/protocol';
 import type { RequestAnswer } from '@shared/engine/answers';
 
@@ -16,7 +22,8 @@ export type AnswerIntent =
   | { kind: 'allow' }
   | { kind: 'allow-scoped'; suggestion: Record<string, unknown>; destination: 'session' | 'localSettings' }
   | { kind: 'deny'; message?: string }
-  | { kind: 'answers'; answers: Record<string, string> };
+  | { kind: 'answers'; answers: Record<string, string> }
+  | { kind: 'dismiss' }; // an asynchronous question closed unanswered (U1a §G)
 export type AnswerRefusal = { ok: false; code: 'unsupported' | 'bad-args'; message: string };
 
 const SCOPED_TYPES = new Set(['addRules', 'addDirectories']);
@@ -49,13 +56,14 @@ export function answerIntent({ raised, answer, controls }: { raised: Raised; ans
     case 'plan': {
       if (kind === 'question') return misfit(answer, kind);
       if (answer.outcome === 'clear_and_implement') return refused('unsupported', '/clear runs in the terminal');
+      if (answer.mode !== undefined) return refused('unsupported', 'the mode after a plan is chosen in the terminal'); // U1a §F: the bridge carries allow and deny, never a mode
       if (answer.outcome === 'implement') return ok({ kind: 'allow' });
       return ok({ kind: 'deny', ...(typeof answer.feedback === 'string' && answer.feedback !== '' && { message: answer.feedback }) });
     }
     case 'permission': {
       if (kind === 'question') {
         if (answer.decision !== 'deny') return misfit(answer, kind);
-        if (raised.async === true) return refused('unsupported', 'an async question is answered, never declined');
+        if (raised.async === true) return dismissal(answer, controls);
         return ok({ kind: 'deny' });
       }
       if (answer.decision === 'deny_and_stop') return refused('unsupported', unavailable(controls, 'decide.interrupt', 'deny-and-interrupt is answered in the terminal'));
@@ -65,6 +73,14 @@ export function answerIntent({ raised, answer, controls }: { raised: Raised; ans
       return scoped(raised, answer.scope === 'session' ? 'session' : 'localSettings', controls);
     }
   }
+}
+
+// An asynchronous question's deny, as the bridge's dismissal: only where it declares one, and with no message (the
+// model is told only that no answer will come).
+function dismissal(answer: Extract<RequestAnswer, { kind: 'permission' }>, controls: Controls): { ok: true; intent: AnswerIntent } | AnswerRefusal {
+  if (controls['decide.dismiss']?.available !== true) return refused('unsupported', unavailable(controls, 'decide.dismiss', 'dismiss it in the terminal'));
+  if (typeof answer.message === 'string' && answer.message !== '') return refused('bad-args', 'a dismissal carries no message');
+  return ok({ kind: 'dismiss' });
 }
 
 function scoped(raised: Raised, destination: 'session' | 'localSettings', controls: Controls): { ok: true; intent: AnswerIntent } | AnswerRefusal {

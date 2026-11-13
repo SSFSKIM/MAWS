@@ -39,6 +39,7 @@ describe('toAnswer validates against RequestAnswerSchema for every variant', () 
     [{ kind: 'permission', decision: 'deny', message: 'not that file' }, { kind: 'permission', decision: 'deny', message: 'not that file' }],
     [{ kind: 'permission', decision: 'deny_and_stop', message: 'stop here' }, { kind: 'permission', decision: 'deny_and_stop', message: 'stop here' }],
     [{ kind: 'plan', outcome: 'implement' }, { kind: 'plan', outcome: 'implement', feedback: null }],
+    [{ kind: 'plan', outcome: 'implement', mode: 'acceptEdits' }, { kind: 'plan', outcome: 'implement', feedback: null, mode: 'acceptEdits' }], // U1a §F
     [{ kind: 'plan', outcome: 'clear_and_implement' }, { kind: 'plan', outcome: 'clear_and_implement', feedback: null }],
     [{ kind: 'plan', outcome: 'keep_planning', feedback: 'split step 2' }, { kind: 'plan', outcome: 'keep_planning', feedback: 'split step 2' }],
     [{ kind: 'plan', outcome: 'keep_planning', feedback: '  ' }, { kind: 'plan', outcome: 'keep_planning', feedback: null }],

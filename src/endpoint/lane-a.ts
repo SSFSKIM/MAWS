@@ -16,6 +16,11 @@
 // freshness window is each device's). A closed channel frees nothing. At most LANE_A_MAX copies are held (`busy`), a
 // reseal's included, the count met again after sminos was asked. A copy hears a failure or a refusal by its code alone,
 // a `done` whole (`outcomeFor`); the whole outcome is the sender's by `query`.
+//
+// UX wave U1, UC-1 (U1a's Interfaces §B, "One holder"): the bridge publishes nothing when it takes an answer, so a copy of
+// a `sminos.answer` or a `sminos.decide` keeps the session and the request its digest names, and when sminos's result
+// for the op says `done` the endpoint tells its own spine once (`accepted`: `laneA.accepted`), so this machine's lane A
+// list stops counting the request before the bridge's settlement. A telling that fails is logged; the `done` still goes.
 import { KEPT_S, type Action, type RefusalReason } from 'org-protocol';
 import type { RemoteChannel } from './channels';
 import type { DrawRefusal, QueryAnswer, Rl10, RpcResult } from './rl10/link';
@@ -33,11 +38,27 @@ export type LaneAContext = {
   now(): number;
   /** The cap on held copies (LANE_A_MAX). */
   max?: number;
+  /** UC-1: this machine's spine told that sminos took an answer to `request` of the engine session `session`. */
+  accepted?(session: string, request: string): Promise<void>;
+  log?(line: string): void;
 };
 
 type Sender = { member: string; fingerprint: string };
-/** A copy handed down: its op, its sender, its channel (and that channel's close listener), the hold while awaited. */
-type Copy = Sender & { opId: string; channel: RemoteChannel; until: number; off(): void; release: (() => void) | null };
+/** A copy handed down: its op, its sender, its channel (and that channel's close listener), the hold while awaited; for
+ * an answer, the request its digest names (UC-1). */
+type Copy = Sender & { opId: string; channel: RemoteChannel; until: number; off(): void; release: (() => void) | null; answers: Answered | null };
+type Answered = { session: string; request: string };
+
+/** The ops that answer a request: their copies tell the spine when sminos's result is `done` (UC-1). */
+const ANSWERS: ReadonlySet<string> = new Set(['sminos.answer', 'sminos.decide']);
+/** The session and request an answer's digest names, or null for an op that answers nothing. */
+function answeredBy(action: Action): Answered | null {
+  if (!ANSWERS.has(action.action)) return null;
+  const digest = (action.args as { digest?: unknown }).digest;
+  if (typeof digest !== 'object' || digest === null) return null;
+  const { session, request } = digest as { session?: unknown; request?: unknown };
+  return isText(session) && isText(request) ? { session, request } : null;
+}
 
 const isText = (value: unknown): value is string => typeof value === 'string' && value !== '';
 const same = (a: Sender, b: Sender) => a.member === b.member && a.fingerprint === b.fingerprint;
@@ -91,6 +112,7 @@ export class LaneA {
   result(result: RpcResult): void {
     const copy = this.#copies.get(result.nonce);
     if (copy === undefined || copy.opId !== result.opId) return;
+    if (copy.answers !== null && (result.outcome as { state?: unknown } | null)?.state === 'done') this.#accepted(copy.answers);
     const told = new Set<RemoteChannel>();
     for (const [nonce, held] of this.#copies) {
       if (held.opId !== copy.opId || !same(held, copy)) continue;
@@ -103,6 +125,15 @@ export class LaneA {
 
   stop(): void {
     for (const [nonce, copy] of this.#copies) this.#letGo(nonce, copy);
+  }
+
+  /** UC-1: the spine told an answer was taken, once per op (the copies of an op are let go with their result). */
+  #accepted({ session, request }: Answered): void {
+    const tell = this.ctx.accepted;
+    if (tell === undefined) return;
+    void tell(session, request).catch((error: unknown) => {
+      this.ctx.log?.(`endpoint: the spine could not be told that sminos took an answer to ${request}: ${(error as Error).message}; it leaves the list at its settlement`);
+    });
   }
 
   async #hand(channel: RemoteChannel, action: Action, who: { member: string; device: string }, fingerprint: string, stands: () => boolean, target: SessionTarget | undefined): Promise<HandRefusal | null | typeof DECISION_MOVED> {
@@ -128,7 +159,7 @@ export class LaneA {
     // Sent through `rpc`, which checks the launch again: it may have moved while sminos was asked.
     const sent = this.ctx.rl10.rpc(action, who, fingerprint, target);
     if (!sent.ok) return sent.reason;
-    const copy: Copy = { ...sender, opId: action.opId, channel, until: now + KEPT_S * 1000, off: () => {}, release: this.ctx.hold('op') };
+    const copy: Copy = { ...sender, opId: action.opId, channel, until: now + KEPT_S * 1000, off: () => {}, release: this.ctx.hold('op'), answers: answeredBy(action) };
     copy.off = channel.onClose(() => {
       copy.release?.();
       copy.release = null;

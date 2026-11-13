@@ -487,6 +487,7 @@
   "host.opQuery",
   "host.stopAll",
   "host.supervisorStatus",
+  "laneA.accepted",
   "laneA.list",
   "library.content",
   "library.entry",

@@ -74,16 +74,17 @@ export interface QuestionSectionProps {
   edit(change: (draft: Draft) => Draft): void;
   directory: string | null; // where the file and folder picker opens
   projects: readonly ProjectRecord[];
+  choose?: (label: string) => void; // a double-click on a single-choice option (U1a §E)
 }
 
-export function QuestionSection({ question, draft, disabled, edit, directory, projects }: QuestionSectionProps) {
+export function QuestionSection({ question, draft, disabled, edit, directory, projects, choose }: QuestionSectionProps) {
   const set = draft.decide || draft.skip;
   const [focusNote, setFocusNote] = useState(false); // the field opened by the button, not one restored with the draft
   const props = { question, draft, disabled, edit };
   let control: ReactNode;
   switch (question.modality) {
     case 'choice':
-      control = <Choice {...props} />;
+      control = <Choice {...props} choose={choose} />;
       break;
     case 'text':
       control = <Text {...props} />;

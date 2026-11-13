@@ -4,7 +4,7 @@
 // fixture did not record, so a matching `*.resolved` event is the journal's own witness. Probe fixtures replay as
 // recorded; the SPEC-derived synthetic requests (test/fixtures/requests) replay behind the handshake prelude
 // (test/fixtures/engine/replay-handshake.jsonl), each followed by the response the card must write. One case runs the
-// real shell on C5's stub scenario: a card on the floating Overview (⌘0) answers with Enter on its article.
+// real shell on C5's stub scenario: a card on the floating Overview (⌘0) answers with ⌘Enter on its article.
 // The real composer's case (M4's gate) runs in the shell too. The card page needs a harness build: `pnpm e2e:requests`
 // builds one and runs this file; under a plain `pnpm build && pnpm e2e` the card-page cases skip and the two shell
 // cases run.
@@ -18,7 +18,8 @@ import type { CardsHarnessApi, HarnessPane } from '../src/renderer/src/harness/c
 import { addressed } from './support/address';
 import { invoke, launchReady, queueInterruptJournal, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
-import { sidebarRow } from './support/sidebar';
+import { ALLOW_LASTING_KEY, ALLOW_ONCE_KEY, answerByKey, armEarlyPress, DENY_KEY, earlyPress, pastGrace, watchPrompts } from './support/request-keys';
+import { sidebarOf, sidebarRow } from './support/sidebar';
 
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now.
 const HARNESS_BUILT = !process.env.MAWS_E2E_EXECUTABLE && existsSync(join(REPO_ROOT, 'out/renderer/harness.html'));
@@ -52,6 +53,7 @@ async function openCards(page: Page): Promise<void> {
     location.hash = 'composer';
   });
   await page.waitForFunction(() => (window as unknown as Partial<CardsWindow>).__maws_cards !== undefined);
+  await watchPrompts(page);
 }
 
 const show = (page: Page, panes: [HarnessPane, HarnessPane]) => page.evaluate((p) => (window as unknown as CardsWindow).__maws_cards.show(p), panes);
@@ -105,7 +107,7 @@ const DIALOGS = 'spikes/protocol-probe/fixtures/pass2/dialogs.jsonl';
 const GRANT = 'spikes/protocol-probe/fixtures/pass2/grant-reapply-start.jsonl';
 const unflag = (request: Record<string, unknown>) => delete request.requires_user_interaction;
 
-test('a replayed permission renders in the docked frame on the card page, Enter answers it in the focused pane only', async ({ cards }) => {
+test('a replayed permission renders in the docked frame on the card page, ⌘Enter answers it in the focused pane only', async ({ cards }) => {
   const { page } = cards;
   await openCards(page);
   await launchReady(page, 'c7-permission', PERMISSION);
@@ -114,19 +116,34 @@ test('a replayed permission renders in the docked frame on the card page, Enter 
   const pane0 = page.getByRole('region', { name: 'pane 0' });
   const frame = pane0.getByRole('group', { name: 'Approval needed' });
   await expect(frame).toBeVisible();
-  await expect(frame.getByRole('heading', { name: 'Bash' })).toBeVisible();
+  // U1a §D: the card opens on what is asked, in place of the tool's name
+  await expect(frame.getByRole('heading', { name: 'Run a command' })).toBeVisible();
+  await expect(frame.getByRole('heading', { name: 'Bash' })).toHaveCount(0);
   await expect(frame.getByTestId('request-input')).toHaveText('git log --oneline');
-  expect(await frame.getByRole('radio').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label'))), 'decision_reason_type rule: once only').toEqual(['Allow once']);
+  // decision_reason_type rule: once only, so two answer buttons
+  const allow = frame.getByRole('button', { name: 'Allow once', exact: true });
+  await expect(frame.getByRole('button', { name: 'Deny', exact: true })).toBeVisible();
+  await expect(allow).toBeVisible();
+  await expect(frame.getByRole('button', { name: 'Allow for this session' })).toHaveCount(0);
+  await expect(frame.getByRole('button', { name: /^Always allow/ })).toHaveCount(0);
 
-  // Enter in the other pane's region is that region's; the card's frame answers only from itself.
+  // Past the prompt's first 400 ms, so a key that answers nothing is unbound rather than early: the other pane's keys
+  // are that region's (its Enter counts there, and ⌘Enter pressed there answers nothing here), and Enter on the frame
+  // answers nothing (a permission prompt is allowed with ⌘Enter).
+  await pastGrace(page, frame.locator('[data-request-card]'));
   await page.getByRole('region', { name: 'pane 1' }).getByLabel('counter').focus();
   await page.keyboard.press('Enter');
   expect(await counted(page)).toBe(1);
-  expect(await resolved(page, 'c7-permission', 'permission.resolved')).toEqual([]);
+  await page.keyboard.press(ALLOW_ONCE_KEY);
+  await page.waitForTimeout(300);
+  expect(await resolved(page, 'c7-permission', 'permission.resolved'), "the other pane's ⌘Enter allows nothing").toEqual([]);
   await frame.focus();
   await page.keyboard.press('Enter');
+  await page.waitForTimeout(300);
+  expect(await resolved(page, 'c7-permission', 'permission.resolved'), 'Enter allows nothing').toEqual([]);
+  await answerByKey(page, { focus: frame, control: allow, key: ALLOW_ONCE_KEY, answered: async () => (await resolved(page, 'c7-permission', 'permission.resolved')).length > 0, what: 'c7-permission' });
   await expect.poll(async () => (await resolved(page, 'c7-permission', 'permission.resolved')).map((e) => [e.behavior, e.updatedPermissions])).toEqual([['allow', []]]); // seq 50
-  expect(await counted(page), 'the counting pane never saw that Enter').toBe(1);
+  expect(await counted(page), 'the counting pane never saw a key of the card').toBe(1);
   await expect(pane0.getByText('No request for c7-permission')).toBeVisible(); // confirmed at the tool result (seq 53), then retired
   expect(cards.consoleErrors()).toEqual([]);
 });
@@ -209,6 +226,9 @@ test("an elicitation form accepts the fixture's content", async ({ cards }) => {
   expect(cards.consoleErrors()).toEqual([]);
 });
 
+// U1a §D: the request offers a project rule (the engine's localSettings suggestion), so its buttons are Deny, the rule's
+// "Always allow in <project>" and Allow once, the file the rule is written to named under them, and "Allow for this
+// session" the one entry of the menu on Allow once. Each key is printed on its button and is not part of its name.
 test("a session-scoped allow carries the fixture's updatedPermissions", async ({ cards }) => {
   const { page } = cards;
   await openCards(page);
@@ -216,14 +236,94 @@ test("a session-scoped allow carries the fixture's updatedPermissions", async ({
   await show(page, [{ appSessionId: 'c7-grant', placement: 'docked' }, null]);
   await sendFirstPrompt(page, 'c7-grant', GRANT); // seq 5; the request is seq 30
   const frame = page.getByRole('group', { name: 'Approval needed' });
-  await expect(frame.getByRole('radio', { name: 'Allow for this session' })).toContainText('Matching touch granted.txt commands');
+  const deny = frame.getByRole('button', { name: 'Deny', exact: true });
+  const always = frame.getByRole('button', { name: 'Always allow in this project', exact: true }); // the harness's session has no project
+  const once = frame.getByRole('button', { name: 'Allow once', exact: true });
+  await expect(once).toBeVisible();
+  await expect(deny).toBeVisible();
+  await expect(always).toBeVisible();
+  await expect(frame.getByRole('button', { name: 'Allow for this session' }), 'the session scope is the menu’s entry, not a button').toHaveCount(0);
+  await expect(frame.getByText('Always allow adds touch granted.txt to .claude/settings.local.json in the project.')).toBeVisible();
+  for (const [button, keys, hint] of [[deny, 'Escape', '⎋'], [always, 'Meta+Shift+Enter', '⌘⇧↩'], [once, 'Meta+Enter', '⌘↩']] as const) {
+    await expect(button).toHaveAttribute('aria-keyshortcuts', keys);
+    await expect(button.locator('kbd')).toHaveText(hint);
+  }
+  await expect(frame.getByText('Matching touch granted.txt commands'), 'a session scope draws no rule text').toHaveCount(0);
+
+  // a digit picks nothing: there is no scope list
+  await pastGrace(page, frame.locator('[data-request-card]'));
   await frame.focus();
-  await page.keyboard.press('2'); // digits pick a scope
-  await expect(frame.getByRole('radio', { name: 'Allow for this session' })).toHaveAttribute('aria-checked', 'true');
-  await page.keyboard.press('Enter');
+  await page.keyboard.press('2');
+  await page.waitForTimeout(300);
+  expect(await resolved(page, 'c7-grant', 'permission.resolved'), 'a digit answers nothing').toEqual([]);
+
+  await frame.getByRole('button', { name: 'More allow options' }).click();
+  await page.getByRole('menuitem', { name: 'Allow for this session' }).click();
   await expect
     .poll(async () => (await resolved(page, 'c7-grant', 'permission.resolved')).map((e) => [e.behavior, e.updatedPermissions]))
     .toEqual([['allow', [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'touch granted.txt' }], behavior: 'allow', destination: 'session' }]]]); // seq 32
+  expect(cards.consoleErrors()).toEqual([]);
+});
+
+// U1a §D (A3): a Read the engine flags nothing on offers the session scope as its third button. ⌘Enter sent inside the
+// prompt's first 400 ms answers nothing; ⇧⌘Enter after them gives the scope the third button names.
+test('the three keys on their buttons; ⌘Enter inside the first 400 ms answers nothing, ⇧⌘Enter then allows for the session', async ({ cards }) => {
+  const { page } = cards;
+  await openCards(page);
+  await armEarlyPress(page, { frame: '[aria-label="pane 0"] [data-docked-frame]', key: 'Enter', meta: true, after: 100 });
+  await launchReady(page, 'c7-keys', syntheticJournal('flagged-read', [{ patch: unflag, response: { behavior: 'allow' } }]));
+  await show(page, [{ appSessionId: 'c7-keys', placement: 'docked' }, null]);
+  const frame = page.getByRole('region', { name: 'pane 0' }).getByRole('group', { name: 'Approval needed' });
+  await expect(frame.getByRole('heading', { name: 'Read a file' })).toBeVisible();
+  const lasting = frame.getByRole('button', { name: 'Allow for this session', exact: true });
+  for (const [name, keys, hint] of [['Deny', 'Escape', '⎋'], ['Allow for this session', 'Meta+Shift+Enter', '⌘⇧↩'], ['Allow once', 'Meta+Enter', '⌘↩']] as const) {
+    const button = frame.getByRole('button', { name, exact: true });
+    await expect(button).toHaveAttribute('aria-keyshortcuts', keys);
+    await expect(button.locator('kbd')).toHaveText(hint);
+  }
+  const early = await earlyPress(page);
+  expect(early.focused, 'the early ⌘Enter went to the frame holding the focus').toBe(true);
+  expect(early.after, 'the early ⌘Enter went inside the prompt’s first 400 ms').toBeLessThan(400);
+  await page.waitForTimeout(300);
+  expect(await resolved(page, 'c7-keys', 'permission.resolved'), 'a key inside the first 400 ms answers nothing').toEqual([]);
+  await answerByKey(page, { focus: frame, control: lasting, key: ALLOW_LASTING_KEY, answered: async () => (await resolved(page, 'c7-keys', 'permission.resolved')).length > 0, what: 'c7-keys' });
+  await expect
+    .poll(async () => (await resolved(page, 'c7-keys', 'permission.resolved')).map((e) => [e.behavior, e.updatedPermissions]))
+    .toEqual([['allow', [{ type: 'addRules', rules: [{ toolName: 'Read' }], behavior: 'allow', destination: 'session' }]]]);
+  expect(cards.consoleErrors()).toEqual([]);
+});
+
+// U1a §D (A3, decision 17): a chord held down answers the prompt it was pressed at and not the one that takes its place,
+// however long it is held: its key repeats reach no request handler. Released and pressed again, it answers the second.
+test('a held ⌘Enter answers the first of two queued prompts and never the second; pressed again, it answers the second', async ({ cards }) => {
+  const { page } = cards;
+  await openCards(page);
+  const allowed = { patch: unflag, response: { behavior: 'allow' } };
+  await launchReady(page, 'c7-held', syntheticJournal('flagged-read', [allowed, allowed]));
+  await show(page, [{ appSessionId: 'c7-held', placement: 'docked' }, null]);
+  const frame = page.getByRole('region', { name: 'pane 0' }).getByRole('group', { name: 'Approval needed' });
+  const answers = async () => (await resolved(page, 'c7-held', 'permission.resolved')).length;
+  const first = frame.locator('[data-request-card]');
+  await pastGrace(page, first);
+  const firstId = await first.getAttribute('data-request-card');
+  await frame.focus();
+  await page.keyboard.down('Meta');
+  await page.keyboard.down('Enter');
+  await expect.poll(answers, { message: 'the held chord answered the first prompt' }).toBe(1);
+  const second = frame.locator(`[data-request-card]:not([data-request-card="${firstId}"])`);
+  await expect(second.getByRole('button', { name: 'Allow once', exact: true })).toBeEnabled();
+  await expect(frame).toBeFocused(); // the next prompt's frame takes the focus
+  await pastGrace(page, second);
+  for (let k = 0; k < 10; k++) {
+    await page.keyboard.down('Enter'); // a key repeat: Playwright marks every down of a key already held as one
+    await page.waitForTimeout(50);
+  }
+  expect(await answers(), 'a key repeat answers nothing, past the second prompt’s 400 ms').toBe(1);
+  await page.keyboard.up('Enter');
+  await page.keyboard.down('Enter');
+  await page.keyboard.up('Enter');
+  await page.keyboard.up('Meta');
+  await expect.poll(answers, { message: 'a fresh press answers the second prompt' }).toBe(2);
   expect(cards.consoleErrors()).toEqual([]);
 });
 
@@ -238,19 +338,56 @@ test('the Overview card answers with focus on its article and the hover card ans
   ]);
   const article = page.getByRole('article', { name: 'card c7-read-card' });
   await expect(article.getByTestId('request-input')).toHaveText('/tmp/maws-c7-scratch/README.md');
-  await article.focus();
-  await page.keyboard.press('Enter');
+  await answerByKey(page, {
+    focus: article,
+    control: article.getByRole('button', { name: 'Allow once', exact: true }),
+    key: ALLOW_ONCE_KEY,
+    answered: async () => (await resolved(page, 'c7-read-card', 'permission.resolved')).length > 0,
+    what: 'c7-read-card',
+  });
   await expect.poll(async () => (await resolved(page, 'c7-read-card', 'permission.resolved')).map((e) => e.behavior)).toEqual(['allow']);
-  await expect(article.getByRole('status')).toHaveText('Answered · Allowed once');
+  // U1a §C: an answered request is drawn nowhere, and no "Answered" line stands in its place
+  await expect(article.locator('[data-request-card]')).toHaveCount(0);
+  await expect(article.getByText('Answered')).toHaveCount(0);
 
   const hover = page.getByRole('dialog', { name: 'hover c7-read-hover' });
-  const approve = hover.getByRole('button', { name: 'Approve' });
-  await approve.focus();
+  const allow = hover.getByRole('button', { name: 'Allow once', exact: true });
+  await allow.focus();
   await page.keyboard.press('Enter'); // a key-synthesised click answers nothing
   await page.waitForTimeout(300);
   expect(await resolved(page, 'c7-read-hover', 'permission.resolved')).toEqual([]);
-  await approve.click();
+  await allow.click();
   await expect.poll(async () => (await resolved(page, 'c7-read-hover', 'permission.resolved')).map((e) => e.behavior)).toEqual(['allow']);
+  expect(cards.consoleErrors()).toEqual([]);
+});
+
+// U1a §H (A14): away from its pane a waiting permission may always be denied, and allowed once only when it is a
+// read-only tool or a shell command the surface shows whole. On the hover card, a file change offers Deny alone and a
+// short command both, each answered by a click.
+test('the hover card denies a file change and allows a short command once, by click', async ({ cards }) => {
+  const { page } = cards;
+  await openCards(page);
+  const command = (request: Record<string, unknown>) => {
+    unflag(request);
+    Object.assign(request, { tool_name: 'Bash', display_name: 'Bash', input: { command: 'ls docs' }, description: 'List the notes folder' });
+  };
+  await launchReady(page, 'c7-hover-edit', syntheticJournal('edit-permission', [{ response: { behavior: 'deny' } }]));
+  await launchReady(page, 'c7-hover-command', syntheticJournal('flagged-read', [{ patch: command, response: { behavior: 'allow' } }]));
+  await show(page, [
+    { appSessionId: 'c7-hover-edit', placement: 'hover' },
+    { appSessionId: 'c7-hover-command', placement: 'hover' },
+  ]);
+  const edit = page.getByRole('dialog', { name: 'hover c7-hover-edit' });
+  const shell = page.getByRole('dialog', { name: 'hover c7-hover-command' });
+  await expect(edit.getByRole('button', { name: 'Deny', exact: true })).toBeVisible();
+  expect(await edit.getByRole('button').allTextContents(), 'a file change: Deny alone').toEqual(['Open session', 'Deny']);
+  await expect(shell.getByRole('button', { name: 'Allow once', exact: true })).toBeVisible();
+  expect(await shell.getByRole('button').allTextContents(), 'a short command: Allow once and Deny').toEqual(['Open session', 'Deny', 'Allow once']);
+
+  await edit.getByRole('button', { name: 'Deny', exact: true }).click();
+  await expect.poll(async () => (await resolved(page, 'c7-hover-edit', 'permission.resolved')).map((e) => e.behavior)).toEqual(['deny']);
+  await shell.getByRole('button', { name: 'Allow once', exact: true }).click();
+  await expect.poll(async () => (await resolved(page, 'c7-hover-command', 'permission.resolved')).map((e) => [e.behavior, e.updatedPermissions])).toEqual([['allow', []]]);
   expect(cards.consoleErrors()).toEqual([]);
 });
 
@@ -265,18 +402,20 @@ test('a Read request flagged requires_user_interaction offers no quick approval 
   // pane 0 holds the docked frame; the hover card in pane 1 is a group named for the kind too ("Approval needed: Read", or the kind alone while unread)
   const frame = page.getByRole('region', { name: 'pane 0' }).getByRole('group', { name: 'Approval needed', exact: true });
   await expect(frame.getByText(/Read needs its own approval surface, which MAWS does not have/)).toBeVisible();
-  await expect(frame.getByRole('button', { name: 'Allow' })).toHaveCount(0);
-  await expect(frame.getByRole('radiogroup')).toHaveCount(0);
+  await expect(frame.getByRole('button', { name: /^Allow/ })).toHaveCount(0);
   const hover = page.getByRole('dialog', { name: 'hover c7-flagged' });
-  expect(await hover.getByRole('button').allTextContents()).toEqual(['Open session']);
+  // U1a §H: a flagged request can be denied from outside its pane, never allowed
+  await expect(hover.getByRole('button', { name: 'Deny', exact: true })).toBeVisible();
+  expect(await hover.getByRole('button').allTextContents()).toEqual(['Open session', 'Deny']);
   await expect(hover.getByRole('group', { name: 'Approval needed: Read' })).toBeVisible();
 
+  await pastGrace(page, frame.locator('[data-request-card]'));
   await frame.focus();
-  await page.keyboard.press('Enter');
-  await page.keyboard.press('1');
+  for (const key of [ALLOW_ONCE_KEY, ALLOW_LASTING_KEY, 'Enter', '1']) await page.keyboard.press(key);
   await page.waitForTimeout(300);
-  expect(await resolved(page, 'c7-flagged', 'permission.resolved'), 'Enter and digits approve nothing').toEqual([]);
-  await page.keyboard.press('Escape'); // Esc denies as usual
+  expect(await resolved(page, 'c7-flagged', 'permission.resolved'), '⌘Enter, ⇧⌘Enter, Enter and digits approve nothing').toEqual([]);
+  // Esc denies as usual
+  await answerByKey(page, { focus: frame, control: frame.getByRole('button', { name: 'Deny', exact: true }), key: DENY_KEY, answered: async () => (await resolved(page, 'c7-flagged', 'permission.resolved')).length > 0, what: 'c7-flagged' });
   await expect.poll(async () => (await resolved(page, 'c7-flagged', 'permission.resolved')).map((e) => e.behavior)).toEqual(['deny']);
   expect(cards.consoleErrors()).toEqual([]);
 });
@@ -380,9 +519,9 @@ test('an undeclared dialog kind stays pending and unanswered', async ({ cards })
   expect(cards.consoleErrors()).toEqual([]);
 });
 
-// The real shell on C5's stub scenario: the Overview (⌘0) shows the card, whose article holds focus, and Enter answers
+// The real shell on C5's stub scenario: the Overview (⌘0) shows the card, whose article holds focus, and ⌘Enter answers
 // the card's request there (the stub delivers it, and the card's request and the dock badge's count go).
-test('the Overview card answers with Enter on its article', async () => {
+test('the Overview card answers with ⌘Enter on its article', async () => {
   const shell = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_SESSION_SOURCE: 'stub:test/fixtures/shell/nine-sessions.json', MAWS_SCENARIO_CLOCK: 'manual' } });
   try {
     const { app, page } = shell;
@@ -399,12 +538,12 @@ test('the Overview card answers with Enter on its article', async () => {
     await expect.poll(openOverview, { message: 'View › Overview is enabled' }).toBe(true);
     await expect(page.locator('[data-region="main"]').getByRole('dialog', { name: 'Overview' })).toBeVisible();
     const card = page.locator('[data-region="main"]').getByRole('article', { name: fix });
-    await expect(card.getByRole('radio', { name: 'Allow once' })).toBeVisible(); // C7's card, not C5's preview
+    const allow = card.getByRole('button', { name: 'Allow once', exact: true });
+    await expect(allow).toBeVisible(); // C7's card, not C5's preview
     const badge = () => app.evaluate(({ app }) => app.dock?.getBadge());
     expect(await badge()).toBe('3');
-    await card.focus();
-    await page.keyboard.press('Enter');
-    await expect(card.getByRole('radio', { name: 'Allow once' })).toHaveCount(0);
+    await answerByKey(page, { focus: card, control: allow, key: ALLOW_ONCE_KEY, answered: async () => (await card.locator('[data-request-card]').count()) === 0, what: fix });
+    await expect(card.locator('[data-request-card]')).toHaveCount(0);
     await expect.poll(badge).toBe('2');
     expect(shell.consoleErrors()).toEqual([]);
   } finally {
@@ -475,28 +614,36 @@ test('the real composer gives way to the card and returns with focus in the edit
     await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: countingId })).turn).not.toBeNull();
 
     // the left one sends the fixture's prompt from its composer, and the editor gives way to the permission card
+    await watchPrompts(page);
     await message(left).click();
     await page.keyboard.type(firstPrompt(PERMISSION));
     await page.keyboard.press('Enter');
     const frame = left.getByRole('group', { name: 'Approval needed' });
     await expect(frame).toBeVisible();
     await expect(frame.getByTestId('request-input')).toHaveText('git log --oneline');
-    expect(await frame.getByRole('radio').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label')))).toEqual(['Allow once']);
+    // decision_reason_type rule: two answer buttons
+    const allow = frame.getByRole('button', { name: 'Allow once', exact: true });
+    await expect(frame.getByRole('button', { name: 'Deny', exact: true })).toBeVisible();
+    await expect(allow).toBeVisible();
+    await expect(frame.getByRole('button', { name: 'Allow for this session' })).toHaveCount(0);
+    await expect(frame.getByRole('button', { name: /^Always allow/ })).toHaveCount(0);
     await expect(message(left)).toBeHidden();
     await expect(frame).toBeFocused(); // the pane held focus
 
-    // Enter and ⌘. in the other pane's editor are that pane's: the card is not answered, the counting turn stops
+    // Enter, ⌘Enter and ⌘. in the other pane's editor are that pane's: the card is not answered, the counting turn stops
+    // (pressed past the prompt's first 400 ms, so a ⌘Enter that reached the card would answer it)
+    await pastGrace(page, frame.locator('[data-request-card]'));
     await message(right).click();
     await page.keyboard.press('Enter');
+    await page.keyboard.press(ALLOW_ONCE_KEY);
     await page.keyboard.type('typing when I stop');
     await page.keyboard.press('Meta+.');
     await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: countingId })).turn).toBeNull();
     expect(await resolved(page, permissionId, 'permission.resolved')).toEqual([]);
     expect(value(await invoke(page, 'session.status', { appSessionId: permissionId })).process, 'no interrupt reached the permission session').toBe('ready');
 
-    // Enter with focus in the card answers it; the composer returns with focus in the editor
-    await frame.focus();
-    await page.keyboard.press('Enter');
+    // ⌘Enter with focus in the card answers it; the composer returns with focus in the editor
+    await answerByKey(page, { focus: frame, control: allow, key: ALLOW_ONCE_KEY, answered: async () => (await resolved(page, permissionId, 'permission.resolved')).length > 0, what: 'the gate permission session' });
     await expect.poll(async () => (await resolved(page, permissionId, 'permission.resolved')).map((e) => [e.behavior, e.updatedPermissions])).toEqual([['allow', []]]); // seq 50
     await expect(message(left)).toBeVisible();
     await expect(message(left)).toBeFocused();
@@ -512,4 +659,295 @@ test('the real composer gives way to the card and returns with focus in the edit
     await shell.cleanup();
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// ---- UX wave U1a: the scenes of M7 ---------------------------------------------------------------------------------
+
+// A plan the replay raises behind the handshake prelude, from a session the prelude starts in Auto: a status frame moves
+// it into Plan, so the engine host knows the mode before the plan (`prePlanMode`). The plan's answer is matched by its
+// behaviour (the replay's rule), whatever mode it names.
+function planJournal(): string {
+  const handshake = readFileSync(join(REPO_ROOT, 'test/fixtures/engine/replay-handshake.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { seq: number });
+  let seq = handshake.at(-1)!.seq;
+  const at = '2026-11-13T12:00:00.000Z';
+  const requestId = 'req-plan-next-mode-1';
+  const rows: unknown[] = [
+    ...handshake,
+    { seq: ++seq, direction: 'in', at, frame: { type: 'system', subtype: 'status', status: null, permissionMode: 'plan', uuid: randomUUID() } },
+    { seq: ++seq, direction: 'in', at, frame: { type: 'control_request', request_id: requestId, request: { subtype: 'can_use_tool', tool_name: 'ExitPlanMode', display_name: 'ExitPlanMode', input: { plan: '1. Add the release note.\n2. Bump the version.' }, tool_use_id: 'toolu_plan_next_mode_1' } } },
+    { seq: seq + 1, direction: 'out', at, frame: { type: 'control_response', response: { subtype: 'success', request_id: requestId, response: { behavior: 'allow' } } } },
+  ];
+  const path = join(scratch, `plan-next-mode-${Date.now()}.jsonl`);
+  writeFileSync(path, rows.map((row) => JSON.stringify(row)).join('\n') + '\n');
+  return path;
+}
+
+// U1a §F (A12): the plan's primary button names the mode the session goes back to (the one before Plan), and its menu
+// the other modes an approved plan may name, each sending its own.
+test('a replayed plan: Implement names the mode before Plan, and its menu implements in another mode', async ({ cards }) => {
+  const { page } = cards;
+  await openCards(page);
+  await launchReady(page, 'c7-plan', planJournal());
+  await show(page, [{ appSessionId: 'c7-plan', placement: 'docked' }, null]);
+  const frame = page.getByRole('group', { name: 'Plan review' });
+  await expect(frame.getByRole('button', { name: 'Implement · Auto', exact: true }), 'the mode before Plan, under this build’s engine host').toBeVisible();
+  await frame.getByRole('button', { name: 'More implement options' }).click();
+  await expect(page.getByRole('menuitem')).toHaveText(['Implement · Manual', 'Implement · Accept edits']); // PLAN_NEXT_MODES, never Plan or the button's own
+  await page.getByRole('menuitem', { name: 'Implement · Accept edits' }).click();
+  await expect.poll(async () => (await resolved(page, 'c7-plan', 'plan.resolved')).map((e) => e.outcome)).toEqual(['implement']);
+  // The replay matches an answer by its request and behaviour alone, so the mode is read where the host wrote it: the
+  // session's journal holds the allow as sent, with the terminal's own setMode update naming the mode picked
+  const { journalPath } = value(await invoke(page, 'session.status', { appSessionId: 'c7-plan' }));
+  const sent = () =>
+    readFileSync(journalPath, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { direction: string; frame: { type: string; response?: { request_id?: string; response?: Record<string, unknown> } } })
+      .filter((row) => row.direction === 'out' && row.frame.type === 'control_response' && row.frame.response?.request_id === 'req-plan-next-mode-1')
+      .map((row) => row.frame.response!.response);
+  await expect
+    .poll(sent, { message: 'the plan answer as written' })
+    .toEqual([expect.objectContaining({ behavior: 'allow', updatedPermissions: [{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }] })]);
+  expect(cards.consoleErrors()).toEqual([]);
+});
+
+// U1a §E (A10): a double-click on a single-choice option picks it and goes on, as Next does.
+test('a double-click on a single-choice option of the stepper picks it and goes to the next question', async ({ cards }) => {
+  const { page } = cards;
+  await openCards(page);
+  const journal = questionWithoutPreviews();
+  await launchReady(page, 'c7-double', journal);
+  await show(page, [{ appSessionId: 'c7-double', placement: 'docked' }, null]);
+  await sendFirstPrompt(page, 'c7-double', journal);
+  const frame = page.getByRole('group', { name: 'Question' });
+  await expect(frame).toContainText('1 of 2');
+  await frame.getByRole('radio', { name: 'Blue' }).dblclick();
+  await expect(frame).toContainText('2 of 2');
+  expect(await resolved(page, 'c7-double', 'question.answered'), 'nothing leaves before the last question').toEqual([]);
+  expect(cards.consoleErrors()).toEqual([]);
+});
+
+// The real shell over C3's replay with `titles` sessions in one scratch repository, each discovered as a record from a
+// scratch transcript under the launch's own CLAUDE_CONFIG_DIR (the gate's way, above), so the files service knows the
+// session's folder and the sidebar, Needs you and the dock badge read it as any session's.
+async function discoveredShell(titles: string[], files: Record<string, string> = {}) {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-u1a-requests-')));
+  const repo = join(root, 'repo');
+  const config = join(root, 'claude-config');
+  mkdirSync(join(repo, 'src'), { recursive: true });
+  for (const [path, text] of Object.entries(files)) writeFileSync(join(repo, path), text);
+  const project = join(config, 'projects', repo.replace(/[^a-zA-Z0-9]/g, '-'));
+  mkdirSync(project, { recursive: true });
+  const engineIds = titles.map((title) => {
+    const sessionId = randomUUID();
+    const row = { parentUuid: null, isSidechain: false, type: 'user', message: { role: 'user', content: title }, uuid: randomUUID(), timestamp: '2026-11-13T10:00:00.000Z', cwd: repo, sessionId, version: '2.1.283' };
+    writeFileSync(join(project, `${sessionId}.jsonl`), `${JSON.stringify(row)}\n`);
+    return sessionId;
+  });
+  const shell = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config } });
+  const { page } = shell;
+  await page.evaluate(() => {
+    const log = { batches: [] as unknown[] };
+    (window as unknown as { __c7: typeof log }).__c7 = log;
+    window.maws.on('session.eventBatch', (payload) => log.batches.push(payload));
+  });
+  let ids: string[] = [];
+  await expect
+    .poll(async () => {
+      const { sessions } = value(await invoke(page, 'session.list', {}));
+      ids = engineIds.map((engineId) => sessions.find((s) => s.engineSessionId === engineId)?.appId ?? '');
+      return ids.every((id) => id !== '');
+    })
+    .toBe(true);
+  const left = page.locator('[data-region="main"] [data-pane="0"]');
+  const open = async (id: string) => {
+    await (await sidebarRow(page, { appSessionId: id })).click();
+    await expect(left.locator(`[data-composer="${await addressed(page, id)}"]`)).toBeVisible();
+  };
+  const dispose = async () => {
+    await shell.cleanup();
+    rmSync(root, { recursive: true, force: true });
+  };
+  return { shell, repo, ids, left, open, dispose };
+}
+
+// The permission round trip cut before the command's result: the replay holds there as an engine whose command runs on.
+function resultNeverComes(): string {
+  const rows = readFileSync(join(REPO_ROOT, PERMISSION), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { direction: string; frame: { type: string } });
+  const answer = rows.findIndex((r) => r.direction === 'out' && r.frame.type === 'control_response');
+  const result = rows.findIndex((r, i) => i > answer && r.direction === 'in' && r.frame.type === 'user');
+  expect(answer, 'the fixture records the permission’s answer').toBeGreaterThan(0);
+  expect(result, 'and the command’s result after it').toBeGreaterThan(answer);
+  const path = join(scratch, `permission-result-never-comes-${Date.now()}.jsonl`);
+  writeFileSync(path, rows.slice(0, result).map((row) => JSON.stringify(row)).join('\n') + '\n');
+  return path;
+}
+
+// U1a A1: a request stops waiting at its answer. Allowed once, a command whose result never comes leaves nothing to
+// answer anywhere, while the session works on.
+test('an allowed command whose result never comes: no card, no "Answered", the composer and Stop back, the session Working, out of Needs you and the badge', async () => {
+  const scene = await discoveredShell(['a command that runs on']);
+  try {
+    const { shell, left, open, ids } = scene;
+    const { app, page } = shell;
+    const [id] = ids as [string];
+    const journal = resultNeverComes();
+    await launchReady(page, id, journal, { cwd: scene.repo });
+    await open(id);
+    const message = left.getByRole('textbox', { name: 'Message' });
+    await message.click();
+    await page.keyboard.type(firstPrompt(PERMISSION));
+    await page.keyboard.press('Enter');
+    const frame = left.getByRole('group', { name: 'Approval needed' });
+    await expect(frame).toBeVisible();
+    const badge = () => app.evaluate(({ app }) => app.dock?.getBadge() ?? '');
+    await expect.poll(badge, { message: 'the dock badge counts the waiting request' }).not.toBe('');
+    const before = Number(await badge());
+    await expect(sidebarOf(page).getByRole('list', { name: 'Needs you' }).locator(`[data-needs-you="${await addressed(page, id)}"]`)).toHaveCount(1);
+
+    await frame.getByRole('button', { name: 'Allow once', exact: true }).click();
+    await expect.poll(async () => (await resolved(page, id, 'permission.resolved')).map((e) => e.behavior)).toEqual(['allow']);
+    await expect(left.locator('[data-request-card]'), 'no card from the click').toHaveCount(0);
+    await expect(frame).toHaveCount(0);
+    await expect(left.getByText(/^Answered/), 'no "Answered" line in the pane').toHaveCount(0);
+    await expect(message, 'the composer is back').toBeVisible();
+    await expect(left.locator('[data-composer]').getByRole('button', { name: 'Stop', exact: true }), 'and Stop, the turn running on').toBeVisible();
+    expect(value(await invoke(page, 'session.status', { appSessionId: id as never })).turn, 'the command’s result never came').not.toBeNull();
+    await expect((await sidebarRow(page, { appSessionId: id })).getByRole('img', { name: 'Working' }), 'the row reads Working').toBeVisible();
+    await expect(sidebarOf(page).getByRole('list', { name: 'Needs you' }).locator(`[data-needs-you="${await addressed(page, id)}"]`), 'Needs you does not list it').toHaveCount(0);
+    await expect.poll(badge, { message: 'the badge is one lower' }).toBe(before - 1 === 0 ? '' : String(before - 1));
+    expect(shell.consoleErrors()).toEqual([]);
+  } finally {
+    await scene.dispose();
+  }
+});
+
+// A synthetic file prompt behind the handshake prelude (the edit fixture's frame, its input replaced); the replay holds
+// at its answer, which no scene here gives.
+function filePromptJournal(name: string, tool: 'Edit' | 'Write', input: Record<string, unknown>): string {
+  const handshake = readFileSync(join(REPO_ROOT, 'test/fixtures/engine/replay-handshake.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { seq: number });
+  const { frame } = JSON.parse(readFileSync(join(REPO_ROOT, 'test/fixtures/requests/edit-permission.json'), 'utf8')) as { frame: { request_id: string; request: Record<string, unknown> } };
+  Object.assign(frame.request, { tool_name: tool, display_name: tool, input, tool_use_id: `toolu_${name}` });
+  const path = join(scratch, `${name}-${Date.now()}.jsonl`);
+  writeFileSync(path, [...handshake, { seq: handshake.at(-1)!.seq + 1, direction: 'in', at: '2026-11-13T12:00:00.000Z', frame: { ...frame, request_id: `req-${name}` } }].map((row) => JSON.stringify(row)).join('\n') + '\n');
+  return path;
+}
+
+// The notes file the prompts below change (invented content), forty numbered lines.
+const NOTES = Array.from({ length: 40 }, (_, i) => `note ${i + 1}: the release checklist entry`);
+const notesText = NOTES.join('\n') + '\n';
+
+// U1a §I (A11): a file prompt says Create or Edit as the file read from the session's folder says, shows the path
+// relative to the working folder and the change as the transcript draws an edit; a change past twelve lines is clipped
+// to twelve, and "Show all" lifts the card's bound and the diff's own, within 60vh.
+test('a file change as a diff: Edit with numbered lines, Create for a missing file, Show all past twelve lines', async () => {
+  test.setTimeout(150_000);
+  const scene = await discoveredShell(['an edit', 'a new file', 'a long change', 'twelve lines'], { 'src/notes.ts': notesText });
+  try {
+    const { shell, left, open, ids, repo } = scene;
+    const { page } = shell;
+    const [edit, create, long, twelve] = ids as [string, string, string, string];
+    const notes = join(repo, 'src/notes.ts');
+    const prompt = async (id: string, journal: string) => {
+      await open(id);
+      await launchReady(page, id, journal, { cwd: repo });
+      const frame = left.getByRole('group', { name: 'Approval needed' });
+      await expect(frame).toBeVisible({ timeout: 20_000 });
+      return frame;
+    };
+    const lines = (region: Locator, kind?: 'add' | 'del') => region.locator(kind === undefined ? '.transcript-diff-line' : `.transcript-diff-line[data-diff="${kind}"]`);
+
+    // an edit of a file that exists: "Edit <name>", the path relative to the working folder, numbered lines with three of context
+    let frame = await prompt(edit, filePromptJournal('u1a-edit', 'Edit', { file_path: notes, old_string: NOTES[19], new_string: 'note 20: the checklist entry, reworded', replace_all: false }));
+    let region = frame.locator('[data-proposed-diff]');
+    await expect(region, 'the diff drawn against the file as read').toBeVisible();
+    await expect(frame.getByRole('heading', { name: 'Edit notes.ts' })).toBeVisible();
+    await expect(frame.getByTestId('request-input')).toHaveText('src/notes.ts');
+    await expect(lines(region)).toHaveCount(8); // three of context, the line removed, the line added, three of context
+    await expect(lines(region, 'del')).toHaveText([/note 20: the release checklist entry/]);
+    await expect(lines(region, 'add')).toHaveText([/note 20: the checklist entry, reworded/]);
+    expect(await lines(region).first().locator('[data-line-number]').allTextContents(), 'numbered against the file').toEqual(['17']);
+    await expect(frame.getByRole('button', { name: 'Show all' })).toHaveCount(0);
+
+    // a write of a file that does not exist: "Create <name>", every line added
+    frame = await prompt(create, filePromptJournal('u1a-create', 'Write', { file_path: join(repo, 'src/fresh.ts'), content: 'export const fresh = true;\nexport const count = 2;\n' }));
+    region = frame.locator('[data-proposed-diff]');
+    await expect(region).toBeVisible();
+    await expect(frame.getByRole('heading', { name: 'Create fresh.ts' })).toBeVisible();
+    await expect(lines(region, 'add')).toHaveCount(2);
+    await expect(lines(region, 'del')).toHaveCount(0);
+
+    // exactly twelve lines (three of context, three removed, three added, three of context): all shown, no "Show all"
+    frame = await prompt(twelve, filePromptJournal('u1a-twelve', 'Edit', { file_path: notes, old_string: NOTES.slice(9, 12).join('\n'), new_string: ['note 10: first', 'note 11: second', 'note 12: third'].join('\n'), replace_all: false }));
+    region = frame.locator('[data-proposed-diff]');
+    await expect(lines(region)).toHaveCount(12);
+    await expect(frame.getByRole('button', { name: 'Show all' })).toHaveCount(0);
+    expect(await region.evaluate((e) => e.scrollHeight <= e.clientHeight), 'twelve lines fit the collapsed bound').toBe(true);
+    expect(await region.locator('.transcript-diff').evaluate((e) => e.scrollHeight <= e.clientHeight + 1), 'and the diff inside it does not scroll').toBe(true);
+
+    // a longer change: collapsed to twelve lines, the region alone holding the bound; Show all lifts it within 60vh
+    const added = Array.from({ length: 20 }, (_, i) => `note 30: the rewritten entry, part ${i + 1}`);
+    frame = await prompt(long, filePromptJournal('u1a-long', 'Edit', { file_path: notes, old_string: NOTES.slice(29, 33).join('\n'), new_string: added.join('\n'), replace_all: false }));
+    region = frame.locator('[data-proposed-diff]');
+    const inner = region.locator('.transcript-diff');
+    await expect(region).toHaveAttribute('data-proposed-diff', 'collapsed');
+    await expect(lines(region)).toHaveCount(30);
+    const style = (target: Locator) => target.evaluate((e) => {
+      const s = getComputedStyle(e);
+      return { maxHeight: s.maxHeight, overflow: s.overflow, overflowY: s.overflowY, height: e.getBoundingClientRect().height, scrolls: e.scrollHeight > e.clientHeight };
+    });
+    expect(await style(inner), 'collapsed, the diff inside lifts its own 240 px').toMatchObject({ maxHeight: 'none', overflowY: 'visible' });
+    expect(await style(region), 'and the region clips').toMatchObject({ overflowY: 'hidden', scrolls: true });
+    const shown = await region.evaluate((e) => {
+      const bottom = e.getBoundingClientRect().top + e.clientHeight + 1;
+      return Array.from(e.querySelectorAll('.transcript-diff-line')).filter((line) => line.getBoundingClientRect().bottom <= bottom).length;
+    });
+    expect(shown, 'the collapsed region holds twelve lines').toBe(12);
+    await frame.getByRole('button', { name: 'Show all' }).click();
+    await expect(region).toHaveAttribute('data-proposed-diff', 'whole');
+    const whole = await style(region);
+    const vh60 = await page.evaluate(() => 0.6 * window.innerHeight);
+    expect(whole.overflow, 'expanded, the region scrolls').toBe('auto');
+    expect(Math.abs(parseFloat(whole.maxHeight) - vh60), 'under 60vh').toBeLessThanOrEqual(1);
+    expect(whole.height).toBeLessThanOrEqual(vh60 + 1);
+    const wholeInner = await style(inner);
+    expect(wholeInner, 'the diff inside is drawn whole, and does not scroll on its own').toMatchObject({ maxHeight: 'none', overflowY: 'visible', scrolls: false });
+    expect(wholeInner.height, 'taller than the transcript’s 240 px').toBeGreaterThan(240);
+    await expect(region.locator('[data-omitted]')).toHaveCount(0);
+
+    // the transcript's own diff keeps its bound: the card's utilities are scoped to its region (M4's fix). The scene's
+    // transcripts hold no edit row, so the transcript's class is read on an element of the pane outside the card.
+    const transcriptDiff = await left.evaluate((pane) => {
+      const probe = document.createElement('div');
+      probe.className = 'transcript-diff';
+      pane.append(probe);
+      const s = getComputedStyle(probe);
+      const read = { maxHeight: s.maxHeight, overflowY: s.overflowY };
+      probe.remove();
+      return read;
+    });
+    expect(transcriptDiff).toEqual({ maxHeight: '240px', overflowY: 'auto' });
+    expect(shell.consoleErrors()).toEqual([]);
+  } finally {
+    await scene.dispose();
+  }
+});
+
+// U1a l4-approvals-02: a one-line command with no description is a compact card: its own box is at most 200 px tall at
+// the docked width.
+test('a one-line command with no description: the card is at most 200 px tall', async ({ cards }) => {
+  const { page } = cards;
+  await openCards(page);
+  const bare = (request: Record<string, unknown>) => {
+    unflag(request);
+    delete request.description;
+    Object.assign(request, { tool_name: 'Bash', display_name: 'Bash', input: { command: 'make lint' } });
+  };
+  await launchReady(page, 'c7-compact', syntheticJournal('flagged-read', [{ patch: bare, response: { behavior: 'deny' } }]));
+  await show(page, [{ appSessionId: 'c7-compact', placement: 'docked' }, null]);
+  const card = page.getByRole('region', { name: 'pane 0' }).locator('[data-request-card]');
+  await expect(card.getByRole('button', { name: 'Allow once', exact: true })).toBeVisible();
+  const height = (await card.boundingBox())!.height;
+  expect(height, `the card's box is ${height} px tall`).toBeLessThanOrEqual(200);
+  expect(cards.consoleErrors()).toEqual([]);
 });

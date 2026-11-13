@@ -8,6 +8,7 @@
 // shows what happened (the session's own last-seen mark usually retires it first; the dwell remains for when it has not).
 import { useEffect } from 'react';
 import type { AttentionItem } from '@shared/graph/attention';
+import { waits } from '@shared/attention/kinds';
 import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels';
 import { useNow } from '../../app/use-now';
 import { ipc } from '../../ipc/client';
@@ -60,7 +61,7 @@ export function NoticeBody({ item, seenHere = false }: { item: AttentionItem; se
   // P5 O7 M8: an error of a session on another machine can't be acknowledged from here yet (lane-b/remote-unavailable.ts):
   // it isn't counted as seen, and Dismiss is greyed, saying why
   const unavailable = useRemoteUnavailable(item.appSessionId, 'attention.acknowledge');
-  useSeenWhileInFront(item, seenHere && isError && unavailable === null && (item.state === 'pending' || item.state === 'delivered'));
+  useSeenWhileInFront(item, seenHere && isError && unavailable === null && waits(item));
   return (
     <div className="flex flex-col gap-2">
       <p className="m-0 text-fg">{item.summary}</p>

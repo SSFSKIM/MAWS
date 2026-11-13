@@ -377,16 +377,27 @@ describe('the fallback toast', () => {
     const toasted = () => useNotices.getState().notices.map((n) => n.id);
     const notify = (item: AttentionItem) => fake.event('attention.notified', { appSessionId: item.appSessionId, attentionId: item.id, delivery: 'fallback', at: item.createdAt });
 
-    // W-C review m2: main lists only pending and delivered items (attention/service.ts drops the rest), so an answered
-    // request reaches the page as its item leaving the session's list
-    it('a permission request answered: its item, held in the list, leaves it and the toast is dismissed', () => {
+    // W-C review m2, UC-1: main lists only the items that wait (attention/service.ts drops the rest, an answered one
+    // included), so an answered request reaches the page as its item leaving the session's list
+    it('a permission request answered: its item leaves the list and the toast is dismissed', () => {
       const item = fix();
       expect(item.kind).toBe('permission');
       notify(item);
       expect(toasted()).toEqual([`attention:${item.id}`]);
-      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [{ ...item, state: 'delivered' }] }, TEST_MACHINE));
-      expect(toasted()).toEqual([`attention:${item.id}`]); // delivered is still open
       act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [] }, TEST_MACHINE)); // answered: main lists it no more
+      expect(toasted()).toEqual([]);
+    });
+
+    // UC-1 (A17): an answered request waits nowhere, so its notice is not raised, and one standing goes at the answer
+    it('an answered request: no toast is raised for it, and a standing one is dismissed at the answer', () => {
+      const item = fix();
+      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [{ ...item, state: 'delivered' }] }, TEST_MACHINE));
+      notify(item);
+      expect(toasted()).toEqual([]);
+      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [item] }, TEST_MACHINE));
+      notify(item);
+      expect(toasted()).toEqual([`attention:${item.id}`]);
+      act(() => useAttention.getState().applyChanged({ appSessionId: item.appSessionId, items: [{ ...item, state: 'delivered' }] }, TEST_MACHINE));
       expect(toasted()).toEqual([]);
     });
 

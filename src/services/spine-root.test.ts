@@ -295,6 +295,45 @@ describe('the spine and the checkouts composed under plain Node', () => {
     expect(digests.value.digests.find((d) => d.appSessionId === appSessionId)).toMatchObject({ phase: 'waiting', pendingRequests: 1 });
   });
 
+  // UX wave U1a (UC-1, Interfaces §B, "One holder"; the review of M1): an answer the bridge took leaves the machine's list,
+  // its attention.changed and the session's digest through the root's own wiring, while the bridge still lists it (it
+  // settles nothing here). The badge is main's count over these same items (`src/main/attention/notifier.ts`, whose test
+  // holds that count to `waits`); at the spine, attention.list and attention.changed stand in for it.
+  it.each([
+    // main-only: a window's invoke is refused it; the endpoint's dispatch reaches the front's table as `main` does here
+    ['this machine’s endpoint says it took (laneA.accepted)', (bus: FakeBus, _appSessionId: AppSessionId, engineSessionId: string) => bus.main('laneA.accepted', { session: engineSessionId, request: 'req-1' })],
+    ['the driver’s own answer is taken (the bridge’s 200)', (bus: FakeBus, appSessionId: AppSessionId) => bus.invoke('laneA.answer', { appSessionId, request: 'req-1', answer: { kind: 'permission', decision: 'allow', scope: 'once' } })],
+  ])('holds back a request %s: gone from attention and the digest while the bridge still lists it', async (_how, take) => {
+    const engineSessionId = '0e5b1c0d-0000-4000-8000-0000000000a2';
+    const seeded = new Index(join(profile, 'index.sqlite'));
+    const appSessionId = seeded.sessions.upsertFromSummary(summary({ sessionId: engineSessionId as SessionId })).record.appId;
+    seeded.sessions.setHolder(engineSessionId as SessionId, { kind: 'terminal', pid: 4242 });
+    seeded.close();
+    const bridge = await startFakeBridge({ home: sminos, session: engineSessionId });
+    bridges.push(bridge);
+    const bus = fakeBus();
+    compose(await openSpineData(profile, { build: BUILD }), new FakeSpineHost(), bus);
+    await expect.poll(async () => bus.invoke('laneA.state', { appSessionId }), { timeout: 5000 }).toMatchObject({ ok: true, value: { bridge: 'live' } });
+    bridge.raise({ request: 'req-1', tool: 'Bash', input: { command: 'echo made-up' } });
+    await expect.poll(async () => bus.invoke('attention.list', undefined), { timeout: 5000 }).toMatchObject({ ok: true, value: [expect.objectContaining({ id: `lane-a:${engineSessionId}:req-1` })] });
+    const digestOf = async () => {
+      const digests = await bus.invoke('session.digests', undefined);
+      if (!digests.ok) throw new Error(digests.error.message);
+      return digests.value.digests.find((d) => d.appSessionId === appSessionId);
+    };
+    expect(await digestOf()).toMatchObject({ phase: 'waiting', pendingRequests: 1 });
+    const changesBefore = bus.emittedOf('attention.changed').length;
+
+    expect(await take(bus, appSessionId, engineSessionId)).toMatchObject({ ok: true });
+    await expect.poll(async () => bus.invoke('attention.list', undefined)).toEqual({ ok: true, value: [] });
+    const changes = bus.emittedOf('attention.changed').slice(changesBefore).filter((c) => c.appSessionId === appSessionId);
+    expect(changes.at(-1)?.items).toEqual([]);
+    const digest = await digestOf();
+    expect(digest?.pendingRequests).toBe(0);
+    expect(digest?.phase).not.toBe('waiting');
+    expect(await bus.invoke('laneA.state', { appSessionId })).toMatchObject({ ok: true, value: { bridge: 'live', pending: [expect.objectContaining({ request: 'req-1' })] } });
+  });
+
   // UX wave U7 (the architect's ruling of 2026-11-13 on the M3 review's finding 3): a bridge's phase reaches the digest only
   // from a current snapshot. A live bridge's view before its first snapshot is an empty fold, which would read idle.
   describe('a bridged digest from current snapshots only', () => {
@@ -312,7 +351,7 @@ describe('the spine and the checkouts composed under plain Node', () => {
     };
 
     it('before its first snapshot a live bridge leaves the digest as it was; the first snapshot sets the phase', async () => {
-      const engineSessionId = '0e5b1c0d-0000-4000-8000-0000000000a2';
+      const engineSessionId = '0e5b1c0d-0000-4000-8000-0000000000a4';
       const appSessionId = await terminalSession(engineSessionId);
       const bridge = await startFakeBridge({ home: sminos, session: engineSessionId });
       bridges.push(bridge);
@@ -328,7 +367,7 @@ describe('the spine and the checkouts composed under plain Node', () => {
     });
 
     it('inside a reconnect the digest keeps the last snapshot’s phase and pending count; a bridge that leaves `live` clears it', async () => {
-      const engineSessionId = '0e5b1c0d-0000-4000-8000-0000000000a3';
+      const engineSessionId = '0e5b1c0d-0000-4000-8000-0000000000a5';
       const appSessionId = await terminalSession(engineSessionId);
       const bridge = await startFakeBridge({ home: sminos, session: engineSessionId });
       bridges.push(bridge);

@@ -19,7 +19,11 @@
 //   its running jobs `exited` before it ends. A stop is refused for a job the transcript holds ended.
 // - Controls post `POST /command?wait=10000` carrying the launch `/status` named. A 504 or a closed socket is `unknown`:
 //   the op may have run. Nothing is retried on its own but `deliver` (./deliveries.ts). Decisions are built from typed
-//   fields (./decisions.ts) after a fresh `GET /requests/<id>`, with `by: 'maws'`. `from` is never sent.
+//   fields (./decisions.ts) after a fresh `GET /requests/<id>`, with `by: 'maws'`. `from` is never sent. A decision the
+//   bridge refuses with a 409 that names no winner is read again (UX wave U1a, decision 8; §G's result table).
+// - An answer the bridge took (UX wave U1's UC-1, U1a's Interfaces §B): the bridge says nothing on its stream until its
+//   `settled`, so the driver tells its `onAccepted` listeners (the lane A list) at its own decision's 200, and when this
+//   machine's endpoint says sminos took one over the link (`laneA.accepted`, naming the engine session it drives).
 // - Media (M7): an upload is checked, saved under the session's own directory and handed to the bridge's `media` op
 //   (./media.ts), retried under its upload id; the roots it wrote are swept once no upload went to them for a day.
 // - The uid boundary (RL §5.11): the driver authenticates nothing and is authorized by the uid, as `sminos steer` is, so
@@ -102,6 +106,8 @@ export interface LaneAView {
   tool: MainTool | null;
 }
 export type LaneAListener = (appId: AppSessionId, view: LaneAView | null) => void;
+/** The bridge took an answer to `request` of the session (UC-1): its 200, heard here or by this machine's endpoint. */
+export type LaneAAcceptedListener = (appId: AppSessionId, request: string) => void;
 
 type ReadKind = 'usage' | 'config' | 'settings' | 'mcp' | 'status' | 'rows' | 'diff' | 'output';
 type ReadOutput = { ok: true; result: unknown } | { ok: false; code: 'no-bridge' | 'unsupported' | 'timeout' | 'busy' | 'failed'; message: string };
@@ -185,6 +191,10 @@ export interface LaneADriver {
   stopTask(appId: AppSessionId, taskId: string): Promise<ControlResult>;
   media(appId: AppSessionId, files: readonly { name: string; mediaType: string; data: string }[]): Promise<ControlResult>;
   onChange(listener: LaneAListener): () => void; // M6: each session's view as it changes, from now on
+  /** UC-1: this machine's endpoint heard sminos take an answer to `request` of the engine session `engineSessionId`. A
+   * session the driver does not drive (or whose bridge is not live) changes nothing. */
+  accepted(engineSessionId: string, request: string): void;
+  onAccepted(listener: LaneAAcceptedListener): () => void; // UC-1: each answer the bridge took, from now on
   readonly probes: Settling; // P5 O3-D M2 (Interfaces §A, D27): the probes in flight, which a release waits for
   stop(): void;
 }
@@ -201,6 +211,10 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
   let stopped = false;
   const warned = new Set<string>();
   const listeners = new Set<LaneAListener>();
+  const acceptedListeners = new Set<LaneAAcceptedListener>();
+  const tellAccepted = (appId: AppSessionId, request: string) => {
+    for (const listener of acceptedListeners) listener(appId, request);
+  };
   const probing = new Work(); // P5 O3-D M2
   const uploads = uploadRecords(join(deps.userData, 'lane-a', 'uploads.json'), { log });
   let git: GitRun | null = deps.git ?? null;
@@ -614,6 +628,26 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     message,
   });
 
+  // A request the bridge answers 410 or 404 for: settled (its settlement, as the bridge or the fold names it), or gone.
+  function settledAnswer(s: Session, request: string, read: BridgeAnswer): LaneAAnswerOutput {
+    const settled = record(read.body?.settled) ?? s.fold.settledOf(request);
+    return notPending(settled, settled ? `already answered: ${String(settled.outcome)} by ${String(settled.by)}` : 'it is no longer pending');
+  }
+
+  // A decision refused with a bare 409, read again: still pending, refused with the bridge's sentence (the card stays);
+  // settled meanwhile, its settlement; no answer, unknown.
+  async function reread(s: Session, request: string, path: string, message: string): Promise<LaneAAnswerOutput> {
+    let again: BridgeAnswer;
+    try {
+      again = await call(s.socket.path, 'GET', path, undefined, timing.requestMs);
+    } catch (error) {
+      return { outcome: 'unknown', why: error instanceof BridgeUnreachable ? error.why : 'gone' };
+    }
+    if (again.status === 200) return { outcome: 'refused', code: 'refused', message };
+    if (again.status === 410 || again.status === 404) return settledAnswer(s, request, again);
+    return { outcome: 'unknown', why: 'gone' };
+  }
+
   async function answer(appId: AppSessionId, request: string, given: RequestAnswer): Promise<LaneAAnswerOutput> {
     const s = sessions.get(appId);
     if (!s || s.bridge?.bridge !== 'live') return { outcome: 'refused', code: 'no-bridge', message: s?.bridge?.reason ?? NO_BRIDGE };
@@ -625,10 +659,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     } catch {
       return { outcome: 'refused', code: 'no-bridge', message: 'the session’s bridge did not answer; nothing was sent' };
     }
-    if (current.status === 410 || current.status === 404) {
-      const settled = record(current.body?.settled) ?? s.fold.settledOf(request);
-      return notPending(settled, settled ? `already answered: ${String(settled.outcome)} by ${String(settled.by)}` : 'it is no longer pending');
-    }
+    if (current.status === 410 || current.status === 404) return settledAnswer(s, request, current);
     if (current.status !== 200 || current.body === null) return { outcome: 'refused', code: 'failed', message: `the bridge answered ${current.status} for the request` };
     const controls = (record(record(s.status?.capabilities)?.controls) ?? {}) as Record<string, { available: boolean; reason?: string }>;
     const decision = await decisionFor({ current: current.body, held: s.fold.raised(request), answer: given, controls });
@@ -641,12 +672,18 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     }
     const body = posted.body ?? {};
     const message = typeof body.error === 'string' ? body.error : `the bridge answered ${posted.status}`;
-    if (posted.status === 200) return { outcome: 'delivered' };
+    if (posted.status === 200) {
+      tellAccepted(appId, request); // UC-1: the bridge took it; its settlement follows on the stream
+      return { outcome: 'delivered' };
+    }
     if (posted.status === 409 && (body.code === 'launch' || body.code === 'lane-b')) return { outcome: 'refused', code: body.code, message };
     if (posted.status === 409) {
       // another answer won: its settlement, as the child names it (or follows)
       const settled = record(body.settled) ?? (typeof body.winner === 'string' || typeof body.by === 'string' ? { ...(typeof body.winner === 'string' && { winner: body.winner }), ...(typeof body.by === 'string' && { by: body.by }) } : null);
-      return notPending(settled, message, body.terminalOnly === true);
+      if (settled !== null || body.terminalOnly === true) return notPending(settled, message, body.terminalOnly === true);
+      // U1a's decision 8: a 409 naming no winner (the mod refused a relayed answer or dismissal) leaves the request
+      // pending at the bridge, so it is read again before anything is said
+      return reread(s, request, path, message);
     }
     if (posted.status === 404) return notPending(s.fold.settledOf(request), message);
     // An async question's answer is relayed to the mod as an `answer` command, whose wait can run out after it went: the
@@ -771,6 +808,13 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
       listeners.add(listener);
       return () => void listeners.delete(listener);
     },
+    accepted(engineSessionId, request) {
+      for (const s of sessions.values()) if (s.engine === engineSessionId && !s.gone && s.bridge?.bridge === 'live') tellAccepted(s.appId, request);
+    },
+    onAccepted(listener) {
+      acceptedListeners.add(listener);
+      return () => void acceptedListeners.delete(listener);
+    },
     probes: probing,
     stop() {
       stopped = true;
@@ -811,5 +855,6 @@ export function registerLaneA(driver: LaneADriver, register: Register): void {
   register('laneA.tell', ({ appSessionId, agentId, text }) => driver.tell(id(appSessionId), agentId, text));
   register('laneA.stopTask', ({ appSessionId, taskId }) => driver.stopTask(id(appSessionId), taskId));
   register('laneA.media', ({ appSessionId, files }) => driver.media(id(appSessionId), files));
+  register('laneA.accepted', ({ session, request }) => driver.accepted(session, request)); // UC-1: this machine's endpoint's word
 }
 

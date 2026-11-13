@@ -15,7 +15,7 @@ const B = 'app-b' as AppSessionId;
 // A card another child docks (C10's trust card, here a stub): its own content and outcome, the frame's rules.
 function ForeignCard({ appSessionId, onAccept, onDecline }: { appSessionId: AppSessionId; onAccept: () => void; onDecline: (() => void) | null }) {
   return (
-    <DockedCardFrame appSessionId={appSessionId} title="Trust this folder" onAccept={onAccept} onDecline={onDecline}>
+    <DockedCardFrame appSessionId={appSessionId} title="Trust this folder" titleAlone onAccept={onAccept} onDecline={onDecline}>
       <p>Do you trust the files in this folder?</p>
       <textarea aria-label={`note ${appSessionId}`} />
       <button type="button">Trust</button>
@@ -54,7 +54,9 @@ describe('docked frame hosts a foreign card', () => {
       </Pane>,
     );
     const frame = screen.getByRole('group', { name: 'Trust this folder' });
-    expect(frame.textContent).toContain('Trust this folder · Composer paused · draft preserved');
+    // UX wave U1a §J: a card another child docks reads its title alone; a request's frame keeps the composer's words
+    expect(frame.querySelector(':scope > p')?.textContent).toBe('Trust this folder');
+    expect(frame.textContent).not.toContain('Composer paused');
     const user = userEvent.setup();
 
     act(() => screen.getByLabelText(`note ${A}`).focus());
@@ -160,6 +162,72 @@ describe('docked frame hosts a foreign card', () => {
   });
 });
 
+// UX wave U1a (§D): the frame binds the permission prompt's two allow keys beside Enter and Esc, within itself, and every
+// key it binds acts on a fresh press only, a card another child docks included.
+describe('the frame’s request keys', () => {
+  const key = (target: HTMLElement, init: KeyboardEventInit) => {
+    const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+    target.dispatchEvent(event);
+    return event;
+  };
+  const CMD_ENTER = { key: 'Enter', code: 'Enter', metaKey: true };
+  const SHIFT_CMD_ENTER = { key: 'Enter', code: 'Enter', metaKey: true, shiftKey: true };
+
+  it('runs Allow once on ⌘↩ and the lasting allow on ⇧⌘↩ from the frame itself, and neither from a button inside it', () => {
+    const once = vi.fn();
+    const lasting = vi.fn();
+    render(
+      <Pane index={0}>
+        <DockedCardFrame appSessionId={A} title="Approval needed" onAccept={null} onDecline={null} onAllowOnce={once} onAllowLasting={lasting}>
+          <button type="button">Allow once</button>
+        </DockedCardFrame>
+      </Pane>,
+    );
+    act(() => screen.getByRole('button', { name: 'Allow once' }).focus());
+    key(document.activeElement as HTMLElement, CMD_ENTER);
+    key(document.activeElement as HTMLElement, SHIFT_CMD_ENTER);
+    expect(once).not.toHaveBeenCalled();
+    expect(lasting).not.toHaveBeenCalled();
+    const frame = screen.getByRole('group', { name: 'Approval needed' });
+    act(() => frame.focus());
+    expect(key(frame, CMD_ENTER).defaultPrevented).toBe(true);
+    expect(key(frame, SHIFT_CMD_ENTER).defaultPrevented).toBe(true);
+    expect(once).toHaveBeenCalledTimes(1);
+    expect(lasting).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the allow keys unbound for a card that passes none', () => {
+    render(
+      <Pane index={0}>
+        <ForeignCard appSessionId={A} onAccept={() => {}} onDecline={null} />
+      </Pane>,
+    );
+    const frame = screen.getByRole('group', { name: 'Trust this folder' });
+    act(() => frame.focus());
+    expect(key(frame, CMD_ENTER).defaultPrevented).toBe(false);
+  });
+
+  it('acts on a fresh press only, for a card another child docks too: a repeat is taken and runs nothing', () => {
+    const accept = vi.fn();
+    const decline = vi.fn();
+    render(
+      <Pane index={0}>
+        <ForeignCard appSessionId={A} onAccept={accept} onDecline={decline} />
+      </Pane>,
+    );
+    const frame = screen.getByRole('group', { name: 'Trust this folder' });
+    act(() => frame.focus());
+    expect(key(frame, { key: 'Enter', code: 'Enter', repeat: true }).defaultPrevented).toBe(true);
+    expect(key(frame, { key: 'Escape', code: 'Escape', repeat: true }).defaultPrevented).toBe(true);
+    expect(accept).not.toHaveBeenCalled();
+    expect(decline).not.toHaveBeenCalled();
+    key(frame, { key: 'Enter', code: 'Enter' });
+    key(frame, { key: 'Escape', code: 'Escape' });
+    expect(accept).toHaveBeenCalledTimes(1);
+    expect(decline).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('dockCard', () => {
   function Docked({ appSessionId }: { appSessionId: AppSessionId }) {
     const cards = useDockedCards(appSessionId);
@@ -186,5 +254,22 @@ describe('dockCard', () => {
     act(() => undockTrust()); // twice is harmless
     act(() => undockRelay());
     expect(screen.getByRole('list', { name: `docked ${A}` }).textContent).toBe('');
+  });
+});
+
+describe('the frame’s title line (UX wave U1a §J)', () => {
+  it('says the composer is paused for a request, and nothing more for a card that passes its title alone', () => {
+    render(
+      <Pane index={0}>
+        <DockedCardFrame appSessionId={A} title="Approval needed" onAccept={null} onDecline={null}>
+          <p>a request</p>
+        </DockedCardFrame>
+        <DockedCardFrame appSessionId={B} title="Trust this folder?" titleAlone onAccept={null} onDecline={null}>
+          <p>a setup card</p>
+        </DockedCardFrame>
+      </Pane>,
+    );
+    expect(screen.getByRole('group', { name: 'Approval needed' }).querySelector(':scope > p')?.textContent).toBe('Approval needed · Composer paused · draft preserved');
+    expect(screen.getByRole('group', { name: 'Trust this folder?' }).querySelector(':scope > p')?.textContent).toBe('Trust this folder?');
   });
 });

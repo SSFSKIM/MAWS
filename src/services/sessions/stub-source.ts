@@ -5,6 +5,7 @@
 // production, emits the events those siblings would emit, and plays the scenario's timeline on the wall clock or, for
 // the smoke, on a manual clock driven through `globalThis.__maws_scenario` in main (no test-only IPC command exists).
 import type { AttentionItem } from '@shared/graph/attention';
+import { waits } from '@shared/attention/kinds';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
@@ -34,8 +35,6 @@ declare global {
 }
 
 export type StubSource = SessionSource & ScenarioControl;
-
-const OPEN = new Set<AttentionItem['state']>(['pending', 'delivered']);
 
 export function stubSource(scenario: string | Scenario, clock: ScenarioClock, deps: StubSourceDeps): StubSource {
   const wallNow = deps.now ?? Date.now;
@@ -127,7 +126,7 @@ export function stubSource(scenario: string | Scenario, clock: ScenarioClock, de
   // `session.answer` for a scenario item: C3's broker would deliver it and the engine would carry on.
   function answer(appSessionId: AppSessionId, requestId: string): { outcome: 'delivered' | 'not_pending' } {
     const items = attention.get(appSessionId) ?? [];
-    const target = items.find((i) => i.request.requestId === requestId && OPEN.has(i.state));
+    const target = items.find((i) => i.request.requestId === requestId && waits(i));
     if (!target) return { outcome: 'not_pending' };
     setAttention(appSessionId, items.filter((i) => i !== target), {});
     const digest = digests.get(appSessionId);
@@ -183,7 +182,7 @@ export function stubSource(scenario: string | Scenario, clock: ScenarioClock, de
           else drafts.set(appSessionId as AppSessionId, draft);
         }),
         deps.intercept('session.projects.list', () => s.projectsList()),
-        deps.intercept('attention.list', () => [...attention.values()].flat().filter((i) => OPEN.has(i.state))),
+        deps.intercept('attention.list', () => [...attention.values()].flat().filter(waits)),
         deps.intercept('attention.request', ({ appSessionId, requestId }) => ({ event: requests.get(requestKey(appSessionId, requestId)) ?? null })),
         deps.intercept('session.answer', ({ appSessionId, requestId }) => answer(appSessionId as AppSessionId, requestId)),
         // C6: a stub session has no journal and no transcript, so its history is empty (the transcript hydrates to

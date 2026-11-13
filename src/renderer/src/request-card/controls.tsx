@@ -1,5 +1,6 @@
 // The card's buttons and small shared pieces, in tokens only (X7), so every variant's controls look the same.
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
+import { formatChord, parseChord } from '@shared/keymap/chord';
 
 const TONES = {
   primary: 'border-fg bg-fg text-bg hover:bg-fg-muted disabled:border-fg-faint disabled:bg-fg-faint',
@@ -7,8 +8,29 @@ const TONES = {
   danger: 'border-border-strong text-danger hover:bg-bg-hover disabled:text-fg-faint',
 } as const;
 
-export function CardButton({ tone = 'secondary', className = '', ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { tone?: keyof typeof TONES }) {
-  return <button type="button" {...props} className={`rounded-sm border px-2.5 py-1 whitespace-nowrap outline-accent focus-visible:outline-2 ${TONES[tone]} ${className}`} />;
+// UX wave U1a (§D): `chord`, an accelerator (a row's effective chord), is the key that answers this button. It is printed
+// inside the button in the keymap's formatting and hidden from the accessibility tree, and the button carries it in
+// `aria-keyshortcuts`, so the button's name stays its words ("Allow once", not "Allow once ⌘↩"). Null or absent: no hint.
+export function CardButton({ tone = 'secondary', className = '', chord = null, children, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { tone?: keyof typeof TONES; chord?: string | null }) {
+  return (
+    <button type="button" aria-keyshortcuts={chord === null ? undefined : ariaKeys(chord)} {...props} className={`rounded-sm border px-2.5 py-1 whitespace-nowrap outline-accent focus-visible:outline-2 ${TONES[tone]} ${className}`}>
+      {children}
+      {chord !== null && (
+        <kbd aria-hidden="true" className="ml-1.5 font-ui opacity-70">
+          {formatChord(chord)}
+        </kbd>
+      )}
+    </button>
+  );
+}
+
+// An accelerator in `aria-keyshortcuts`'s words: the modifiers as a KeyboardEvent names them, then the key ('Cmd+Shift+Enter'
+// → 'Meta+Shift+Enter'); a one-character key as written, any other by the name the chord matches (`Enter`, `Escape`, `F6`).
+function ariaKeys(accelerator: string): string {
+  const chord = parseChord(accelerator);
+  const last = accelerator.split('+').at(-1) ?? '';
+  const modifiers = [chord.meta && 'Meta', chord.ctrl && 'Control', chord.alt && 'Alt', chord.shift && 'Shift'].filter(Boolean);
+  return [...modifiers, last.length === 1 ? last : chord.key].join('+');
 }
 
 export function Controls({ children }: { children: ReactNode }) {

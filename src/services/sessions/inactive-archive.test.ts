@@ -40,6 +40,18 @@ it('archives only old safe sessions and keeps pinned, waiting, live, background-
   expect(h.host.calledWith('session.stop')).toEqual([]);
 });
 
+// UC-1 (A17): a session whose one request was answered waits on nothing, so it is not held back from the sweep
+it('archives an old session whose one request was answered (delivered)', async () => {
+  const old = '2026-09-01T00:00:00.000Z';
+  const record = h.index.sessions.upsertFromSummary(summary({ directory: h.work, lastRecordAt: old })).record;
+  await h.index.attention.replaceForSession(record.appId, [item(record.appId, 'permission', old, { state: 'delivered' })]);
+  const archiver = new InactiveArchive({ discovered: () => true, interest: () => new Set(), index: h.index, status: () => null, waiting: () => false,
+    git: async () => '', archive: (id, eligible, stillEligible) => h.service.archive(id, { onlyIfIdle: true, eligible, stillEligible }),
+    now: () => Date.parse('2026-10-24T00:00:00.000Z'),
+  });
+  expect(await archiver.run(7, null)).toEqual({ archived: 1, skipped: 0 });
+});
+
 it('rechecks eligibility inside archive after a worktree read, leaving newly pinned work untouched', async () => {
   const record = h.index.sessions.upsertFromSummary(summary({ directory: h.work, lastRecordAt: '2026-09-01T00:00:00.000Z' })).record;
   h.index.sessions.update(record.appId, { worktree: { path: '/clean', branch: 'feature' } });

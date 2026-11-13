@@ -32,8 +32,13 @@ describe('engine.pendingItems’s answer', () => {
       row('app-2', [item('app-2', 1, 'pending', { kind: 'error', request: { requestId: null, toolUseId: null, taskId: null, agentId: null } })]),
       row('app-3', []),
     ]);
-    expect(answer).toEqual({ sessions: [{ appSessionId: 'app-1', waiting: 2 }] });
+    expect(answer).toEqual({ sessions: [{ appSessionId: 'app-1', waiting: 1 }] }); // UC-1: the delivered one waits on nothing
     expect(commands['engine.pendingItems'].output.parse(answer)).toEqual(answer);
+  });
+
+  // UC-1 (A17): a phone or a desk client is told what waits, so an answered request counts zero
+  it('counts no item whose answer was delivered', () => {
+    expect(pendingCounts([row('app-1', [item('app-1', 1, 'delivered')])])).toEqual({ sessions: [] });
   });
 
   it('stays small whatever the items carry: 65 sessions, each a 1 MiB question, answer in under 4 KiB', () => {
