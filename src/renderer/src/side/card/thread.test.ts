@@ -48,6 +48,14 @@ describe('threadStartOf', () => {
     expect(start(rows, true)).toBe(3);
   });
 
+  it('a thread opened from several comments starts at its prompt of several comments, by its first comment’s anchor (UX wave U5a, M5)', () => {
+    const several = (first: Anchor) => user({ comments: [{ anchor: first, text: 'a' }, { anchor: { ...ANCHOR, locator: 'p.lead', label: 'Lead' }, text: 'b' }], editable: false });
+    expect(start([user(), answer(), several(ANCHOR), answer()], true)).toBe(2);
+    expect(start([several(ANCHOR), answer(), several(ANCHOR), answer()], true)).toBe(2);
+    expect(start([several({ ...ANCHOR, locator: 'p.lead' }), answer()], false)).toBeNull();
+    expect(start([user({ comments: [{ anchor: { ...ANCHOR, label: 'Lead' }, text: 'a' }, { anchor: ANCHOR, text: 'b' }] }), answer()], false)).toBeNull(); // only the first comment's anchor is the lineage's
+  });
+
   it('a promotion (no lineage anchor) starts at 0', () => {
     expect(threadStartOf(lineage({ anchor: undefined, openedBy: 'btw' }))([user(), answer()], true)).toBe(0);
     expect(threadStartOf(null)([user()], false)).toBe(0);
