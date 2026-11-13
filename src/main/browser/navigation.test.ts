@@ -52,7 +52,7 @@ function harness(options: { historyThrows?: boolean } = {}) {
   const contents: FakeWebContents[] = [];
   let ids = 0;
   let clock = 1_000_000;
-  const store = new TabStore({
+  const store: TabStore = new TabStore({
     emit,
     createView: () => {
       const webContents = new FakeWebContents();
