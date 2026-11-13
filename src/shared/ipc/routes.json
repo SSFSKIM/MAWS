@@ -117,6 +117,7 @@
   "remote.forward.close",
   "remote.forward.open",
   "remote.openCopy",
+  "side.comment.content",
   "voice.cancel",
   "voice.openPrivacySettings",
   "voice.start",

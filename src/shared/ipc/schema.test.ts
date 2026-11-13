@@ -1156,9 +1156,9 @@ describe('ipc schema validates both directions', () => {
   // E3 start: anchored comments and side questions (P1 ledger §5)
   describe('E3 entries', () => {
     const anchor = { kind: 'file-line', locator: '/r/a.ts#L3', label: 'a.ts:3', path: '/r/a.ts', line: 3 };
-    it('adds the side namespace: three main commands (E11 F2b: the screenshot preview; machine since P5 O3-D), two engine-host commands, no event', () => {
+    it('adds the side namespace: three machine commands (E11 F2b: the screenshot preview; machine since P5 O3-D), one of main (UX wave U5a), two engine-host commands, no event', () => {
       expect(Object.fromEntries(Object.entries(side.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({
-        'side.thread.open': 'machine', 'side.sendToMain': 'machine', 'side.screenshot.preview': 'machine', 'side.question.list': 'engine-host', 'side.question.clear': 'engine-host',
+        'side.thread.open': 'machine', 'side.sendToMain': 'machine', 'side.comment.content': 'main' /* UX wave U5a */, 'side.screenshot.preview': 'machine', 'side.question.list': 'engine-host', 'side.question.clear': 'engine-host',
       });
       expect([...NAMES.side.commands]).toEqual(Object.keys(side.commands));
       expect(Object.keys(side.events)).toEqual([]);
@@ -1175,6 +1175,30 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('side.thread.open', { appSessionId: 'a', from: { kind: 'comment', anchor, text: 'x'.repeat(20_001), screenshot: null } }).ok).toBe(false);
       expect(validateCommandInput('side.thread.open', { appSessionId: 'a', from: { kind: 'comment', anchor: { ...anchor, label: 'a\nb' }, text: 'x', screenshot: null } }).ok).toBe(false);
       expect(validateCommandOutput('side.thread.open', { status: 'starting', appSessionId: 'child' }).ok).toBe(true);
+    });
+
+    // UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, Interfaces §B.1 and §B.2)
+    it('opens a side thread from one to twenty comments, the others in `more`', () => {
+      const comment = { anchor, text: 'why?', screenshot: null };
+      const from = (more: unknown[]) => ({ appSessionId: 'a', from: { kind: 'comment', ...comment, more } });
+      expect(validateCommandInput('side.thread.open', from([comment])).ok).toBe(true);
+      expect(validateCommandInput('side.thread.open', from(Array.from({ length: 19 }, () => ({ ...comment, screenshot: { path: '/u/s.png', width: 2, height: 2 } })))).ok).toBe(true);
+      expect(validateCommandInput('side.thread.open', from(Array.from({ length: 20 }, () => comment))).ok, 'twenty-one comments').toBe(false);
+      expect(validateCommandInput('side.thread.open', from([])).ok, 'an empty `more` is absent').toBe(false);
+      expect(validateCommandInput('side.thread.open', from([{ ...comment, kind: 'comment' }])).ok, 'a comment of `more` is strict').toBe(false);
+      expect(validateCommandInput('side.thread.open', from([{ ...comment, text: 'x'.repeat(20_001) }])).ok).toBe(false);
+      expect(validateCommandInput('side.thread.open', { appSessionId: 'a', from: { kind: 'btw', exchanges: [{ question: 'q', response: 'r' }], text: null, more: [comment] } }).ok, 'a promotion has none').toBe(false);
+    });
+
+    it('builds the content of a send to the main conversation from one to twenty comments, naming no session', () => {
+      const comment = { anchor, text: 'why?', screenshot: { path: '/u/s.png', width: 2, height: 2 } };
+      expect(validateCommandInput('side.comment.content', { comments: [comment] }).ok).toBe(true);
+      expect(validateCommandInput('side.comment.content', { comments: Array.from({ length: 20 }, () => ({ ...comment, screenshot: null })) }).ok).toBe(true);
+      expect(validateCommandInput('side.comment.content', { comments: Array.from({ length: 21 }, () => comment) }).ok).toBe(false);
+      expect(validateCommandInput('side.comment.content', { comments: [] }).ok).toBe(false);
+      expect(validateCommandInput('side.comment.content', { appSessionId: 'a', comments: [comment] }).ok, 'no session').toBe(false);
+      expect(validateCommandOutput('side.comment.content', { content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AA==' } }, { type: 'text', text: 'x' }] }).ok).toBe(true);
+      expect(validateCommandOutput('side.comment.content', { content: 'x' }).ok).toBe(false);
     });
 
     it('sends to main with its disposition, and lists the host’s side questions', () => {

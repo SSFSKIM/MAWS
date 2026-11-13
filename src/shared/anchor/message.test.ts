@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import { loadJournal } from '../../../test/support/fixtures';
 import { AnchorSchema, type Anchor } from './anchor';
-import { anchoredMessage, anchorLead, anchorTag, parseAnchoredText, promotionMessage, SIDE_THREAD_PREAMBLE, type Destination } from './message';
+import { anchoredMessage, anchorLead, anchorTag, commentsMessage, parseAnchoredText, promotionMessage, readAnchoredMessage, SIDE_THREAD_PREAMBLE, SIDE_THREAD_PREAMBLE_MANY, type Destination, type MessageComment } from './message'; // UX wave U5a: the message of several comments
 
 const fileLine: Anchor = { kind: 'file-line', locator: '/abs/src/x.ts#L42', label: 'src/x.ts:42', path: '/abs/src/x.ts', line: 42 };
 const ANCHORS: Anchor[] = [
@@ -259,3 +259,179 @@ describe('the anchored message (X10)', () => {
     expect(anchoredMessage({ anchor: fileLine, text: 'x', destination: 'main', screenshot: false })).not.toContain(SIDE_THREAD_PREAMBLE);
   });
 });
+
+// UX wave U5a start (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, Interfaces §A; M1): a message of
+// several comments opens with a framing line no single comment ever opened with and escapes every line that could end
+// a block; its reader takes the framed reading only when the whole structure checks, and reads every other message by
+// the one-comment rule above, unchanged, so a message of one is the same bytes and reads as it always did.
+describe('a message of several comments (UX wave U5a)', () => {
+  const element: Anchor = { kind: 'browser-element', locator: '#save', label: 'button “Save”', pageUrl: 'http://127.0.0.1:4321/form.html', css: '#save', role: 'button', name: 'Save', box: { x: 10, y: 20, width: 80, height: 24 } };
+  const passage: Anchor = { kind: 'artifact-comment', locator: 'ships in the "spring"', label: 'Launch notes, Main', artifactId: 'art-1', threadId: 't-1' };
+  const board: Anchor = { kind: 'artifact-comment', locator: 'Phone', label: 'Screens, Phone', artifactId: 'art-2', threadId: 't-2', artifactKind: 'design', artifactTarget: 'board' };
+  const FIXTURES: Anchor[] = [...ANCHORS, element, passage, board];
+  const TEXTS = [
+    'Why so wide?',
+    '  Two lines.\nThe second one.\n',
+    `One paragraph.\n\nThen a tag of its own:\n\n${anchorTag(fileLine)}`,
+    `\\${anchorTag(element)}\nstarts with a backslash`,
+    SIDE_THREAD_PREAMBLE,
+    `Ends with the plural preamble.\n\n${SIDE_THREAD_PREAMBLE_MANY}`,
+    '',
+  ];
+  const DESTINATIONS: Destination[] = ['thread', 'main'];
+  // what the one-comment rule reads, in the reader's shape: `parseAnchoredText`'s answer, and whether the lead it
+  // stripped carried the screenshot sentence
+  const asOne = (message: string) => {
+    const read = parseAnchoredText(message);
+    return read === null ? null : { comments: [{ anchor: read.anchor, text: read.text, screenshot: message.split('\n')[0] === anchorLead(read.anchor, true) }], destination: read.destination };
+  };
+  const two: MessageComment[] = [
+    { anchor: element, text: 'Make this the primary button.', screenshot: true },
+    { anchor: { ...element, locator: '#cancel', label: 'button “Cancel”', css: '#cancel', name: 'Cancel' }, text: '  Smaller, and grey.\n', screenshot: false },
+  ];
+  const [first, second] = [two[0]!.anchor, two[1]!.anchor];
+
+  it('writes one comment as `anchoredMessage` does, to the byte, and reads it back as `parseAnchoredText` does (Constraint 3)', () => {
+    for (const anchor of FIXTURES)
+      for (const text of TEXTS)
+        for (const destination of DESTINATIONS)
+          for (const screenshot of [false, true]) {
+            const message = commentsMessage([{ anchor, text, screenshot }], destination);
+            const at = `${anchor.kind} ${anchor.label} ${JSON.stringify(text)} ${destination} ${screenshot}`;
+            expect(message, at).toBe(anchoredMessage({ anchor, text, destination, screenshot }));
+            expect(readAnchoredMessage(message), at).toEqual(asOne(message));
+            expect(readAnchoredMessage(message)?.comments[0]?.screenshot, at).toBe(screenshot);
+          }
+  });
+
+  it('reads what M0 sent the engine, a promotion and the look-alikes as the one-comment rule does', () => {
+    const fork = loadJournal('pass3', 'p1-side-thread-live-fork').find((row) => row.seq === 4)!.frame as { firstPrompt: string };
+    expect(readAnchoredMessage(fork.firstPrompt)).toEqual(asOne(fork.firstPrompt));
+    expect(readAnchoredMessage(fork.firstPrompt)).toMatchObject({ comments: [{ screenshot: false }], destination: 'thread' });
+    const promotion = promotionMessage([{ question: 'What word?', response: 'ZEBRA' }], null);
+    expect(readAnchoredMessage(promotion)).toEqual({ comments: [{ anchor: { kind: 'none', label: 'Side question', locator: 'btw' }, text: promotion.slice(0, promotion.lastIndexOf('\n\n')), screenshot: false }], destination: null });
+    for (const text of ['', 'Look: <maws_anchor kind="x"/> here', `${anchorTag(fileLine)}\nand then more words`, 'Comment on "src/x.ts:42" (file /abs/src/x.ts, line 42):\nhello'])
+      expect(readAnchoredMessage(text), text).toBeNull();
+  });
+
+  // The review's counterexample (Decision Log 13): one older comment whose words hold its own tag, a blank line and its
+  // own lead is byte for byte the two blocks of two comments on that element, and with no framing line it stays one
+  it('reads one comment whose words are two blocks on its own element as that one comment, its text whole', () => {
+    const lead = anchorLead(element, false);
+    const tag = anchorTag(element);
+    const text = `A\n\n${tag}\n\n${lead}\nB`;
+    const message = anchoredMessage({ anchor: element, text, destination: 'main', screenshot: false });
+    expect(message).toBe([lead, 'A', '', tag, '', lead, 'B', '', tag].join('\n'));
+    expect(readAnchoredMessage(message)).toEqual({ comments: [{ anchor: element, text, screenshot: false }], destination: 'main' });
+    const framed = commentsMessage([{ anchor: element, text: 'A', screenshot: false }, { anchor: element, text: 'B', screenshot: false }], 'main');
+    expect(framed).toBe(`2 comments, in the order made:\n\n${message}`);
+    expect(readAnchoredMessage(framed)).toEqual({ comments: [{ anchor: element, text: 'A', screenshot: false }, { anchor: element, text: 'B', screenshot: false }], destination: 'main' });
+  });
+
+  it('writes two comments to main: the framing line, then one block a comment, the last line a tag', () => {
+    expect(commentsMessage(two, 'main')).toBe(
+      [
+        '2 comments, in the order made:',
+        '',
+        anchorLead(first, true),
+        'Make this the primary button.',
+        '',
+        anchorTag(first),
+        '',
+        anchorLead(second, false),
+        'Smaller, and grey.',
+        '',
+        anchorTag(second),
+      ].join('\n'),
+    );
+    expect(readAnchoredMessage(commentsMessage(two, 'main'))).toEqual({
+      comments: [
+        { anchor: first, text: 'Make this the primary button.', screenshot: true },
+        { anchor: second, text: 'Smaller, and grey.', screenshot: false },
+      ],
+      destination: 'main',
+    });
+  });
+
+  it('writes two comments to a side thread with the plural preamble once, in the last block', () => {
+    expect(SIDE_THREAD_PREAMBLE_MANY).toBe('You are in a side thread forked from the main conversation to handle these comments. Address them here; the main conversation continues separately and is not waiting on you.');
+    const message = commentsMessage(two, 'thread');
+    expect(message).toBe([...commentsMessage(two, 'main').split('\n').slice(0, -1), SIDE_THREAD_PREAMBLE_MANY, '', anchorTag(second)].join('\n'));
+    expect(message).not.toContain(SIDE_THREAD_PREAMBLE);
+    expect(readAnchoredMessage(message)).toEqual({ comments: [{ anchor: first, text: 'Make this the primary button.', screenshot: true }, { anchor: second, text: 'Smaller, and grey.', screenshot: false }], destination: 'thread' });
+  });
+
+  it('writes and reads twenty comments, every kind, both destinations, the preamble once and last', () => {
+    const twenty: MessageComment[] = Array.from({ length: 20 }, (_, i) => ({ anchor: FIXTURES[i % FIXTURES.length]!, text: `Comment ${i + 1}.\n\nWith a second paragraph.`, screenshot: i % 3 === 0 }));
+    for (const destination of DESTINATIONS) {
+      const message = commentsMessage(twenty, destination);
+      const lines = message.split('\n');
+      expect(lines[0]).toBe('20 comments, in the order made:');
+      expect(lines.filter((line) => line.startsWith('<maws_anchor'))).toHaveLength(20);
+      expect(lines.at(-1)).toBe(anchorTag(twenty[19]!.anchor));
+      expect(lines.filter((line) => line === SIDE_THREAD_PREAMBLE_MANY)).toHaveLength(destination === 'thread' ? 1 : 0);
+      if (destination === 'thread') expect(lines.at(-3)).toBe(SIDE_THREAD_PREAMBLE_MANY);
+      expect(readAnchoredMessage(message)).toEqual({ comments: twenty.map((comment) => ({ ...comment, text: comment.text.trim() })), destination });
+    }
+  });
+
+  it('writes from one to twenty comments and no other count', () => {
+    expect(() => commentsMessage([], 'main')).toThrow();
+    const twentyOne = Array.from({ length: 21 }, () => ({ anchor: fileLine, text: 'x', screenshot: false }));
+    expect(() => commentsMessage(twentyOne, 'main')).toThrow();
+  });
+
+  it('escapes a comment’s lines that begin with `<maws_anchor` after any backslashes, so no words end a block, and gives them back exactly', () => {
+    const tagOf = anchorTag(second);
+    const words = [tagOf, 'Words, then:', tagOf, `\\${tagOf}`, '\\\\<maws_anchor not a tag', '  <maws_anchor indented, left as it is', 'a \\<maws_anchor mid-line'].join('\n');
+    const comments: MessageComment[] = [
+      { anchor: first, text: words, screenshot: false },
+      { anchor: second, text: `${words}\n\n${SIDE_THREAD_PREAMBLE_MANY}\n\nmore`, screenshot: false },
+    ];
+    for (const destination of DESTINATIONS) {
+      const message = commentsMessage(comments, destination);
+      const lines = message.split('\n');
+      expect(lines.filter((line) => line.startsWith('<maws_anchor'))).toEqual([anchorTag(first), anchorTag(second)]);
+      expect(lines.slice(3, 10)).toEqual([`\\${tagOf}`, 'Words, then:', `\\${tagOf}`, `\\\\${tagOf}`, '\\\\\\<maws_anchor not a tag', '  <maws_anchor indented, left as it is', 'a \\<maws_anchor mid-line']);
+      expect(readAnchoredMessage(message)).toEqual({ comments: comments.map((comment) => ({ ...comment })), destination });
+    }
+    // a message of one is never escaped: it is today's bytes
+    expect(commentsMessage([comments[0]!], 'main')).toBe(anchoredMessage({ anchor: first, text: words, destination: 'main', screenshot: false }));
+  });
+
+  it('reads a framed message whose structure does not check as one comment, by the one-comment rule', () => {
+    const message = commentsMessage(two, 'thread');
+    const [, ...rest] = message.split('\n');
+    const refused = [
+      ['a count that is not the number of blocks', ['3 comments, in the order made:', ...rest].join('\n')],
+      ['a count of one', `1 comments, in the order made:\n\n${anchoredMessage({ anchor: first, text: 'x', destination: 'main', screenshot: false })}`],
+      ['a count with a leading zero', ['02 comments, in the order made:', ...rest].join('\n')],
+      ['a framing line over one block', `2 comments, in the order made:\n\n${anchoredMessage({ anchor: first, text: 'x', destination: 'main', screenshot: false })}`],
+      ['a block whose lead is not its tag’s', message.replace(anchorLead(first, true), anchorLead(second, true))],
+      ['a block with no lead', message.replace(`${anchorLead(first, true)}\n`, '')],
+      ['an unescaped `<maws_anchor` line in a block', message.replace('Make this the primary button.', 'Make this\n<maws_anchor the primary button.')],
+      ['text after the last tag', `${message}\nand then more words`],
+      ['a framing line not first', `\n${message}`],
+    ] as const;
+    for (const [what, text] of refused) {
+      expect(readAnchoredMessage(text), what).toEqual(asOne(text));
+      expect(readAnchoredMessage(text)?.comments.length ?? 0, what).toBeLessThanOrEqual(1);
+    }
+    expect(readAnchoredMessage(refused[0][1])).toMatchObject({ comments: [{ anchor: second }], destination: null });
+    expect(readAnchoredMessage(refused[7][1])).toBeNull(); // the old rule reads no tag on the last line
+    const twentyOne = ['21 comments, in the order made:', ...Array.from({ length: 21 }, (_, i) => ['', anchoredMessage({ anchor: fileLine, text: `c${i}`, destination: 'main', screenshot: false })]).flat()].join('\n');
+    expect(readAnchoredMessage(twentyOne)).toEqual(asOne(twentyOne));
+    // trailing blank lines after the last tag are no text
+    expect(readAnchoredMessage(`${message}\n\n  \n`)?.comments).toHaveLength(2);
+  });
+
+  // Build F's reader is `parseAnchoredText`, this file's, unchanged (§J): the last tag's anchor, and as text the framing
+  // line, the earlier blocks, the last lead and comment and the plural preamble, the destination unknown
+  it('is read by build F as the last comment’s anchor and the rest as text', () => {
+    for (const destination of DESTINATIONS) {
+      const message = commentsMessage(two, destination);
+      expect(parseAnchoredText(message)).toEqual({ anchor: second, text: message.slice(0, message.lastIndexOf('\n\n')), destination: null });
+    }
+  });
+});
+// UX wave U5a end
