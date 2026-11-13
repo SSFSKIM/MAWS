@@ -16,7 +16,7 @@ import { isAskModTool } from './classify'; // DC9
 import { askModAnswers } from './ask-mod'; // DC9
 import { cellOf, editCounts, engineRefusalOf, filePathOf, resultJson, resultText, toolErrorText, turnContextOf, type ToolRecord, type TurnContext } from './cells';
 import { firstJsonBlock, jsonObjectOf } from './cells'; // E2, E4c
-import { artifactTitlesOf } from './cells'; // UX wave U2
+import { artifactTitlesOf, type ArtifactTitles } from './cells'; // UX wave U2
 import { hookNotice, type HookRecord } from './hooks';
 import { agentMessageCopy, baseName, boundaryCopy, BRANCH_HISTORY_DETAIL, PLUGIN, processExitCopy, reconnectCopy, retryCopy, subagentSentence } from './copy';
 import { HANDOVER_REINIT_COPY /* P5 O16 M3b */, RESUMED_COPY, RESUMING_COPY } from './copy'; // C12
@@ -418,11 +418,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     const looked = state.agents?.get(key);
     return looked?.kind === 'agent' ? looked : null;
   };
-  // UX wave U2 (l6-artifacts-12): an artifact by the title the transcript's results gave it, this turn's then the earlier
-  // turns' (latest first), read once a call asks
-  let earlierTitles: ReadonlyMap<string, string>[] | null = null;
-  const titleOf = (ref: string): string | null =>
-    titlesOfTurn(turn).get(ref) ?? (earlierTitles ??= state === null ? [] : earlierTurns(state, turn).map(titlesOfTurn)).find((titles) => titles.has(ref))?.get(ref) ?? null;
+  const titleOf = artifactTitlesIn(state, turn); // UX wave U2 (l6-artifacts-12)
 
   // *Turn boundaries on this engine*: the reducer retains a `command.lifecycle` on a turn only when it dropped that
   // turn's pending prompt, so its presence is the dropped mark. A prompt the engine folded into this turn
@@ -1393,6 +1389,13 @@ function titlesOfTurn(turn: TurnState): ReadonlyMap<string, string> {
   const titles = artifactTitlesOf(turn.events);
   titlesByTurn.set(turn, { version: turn.version, events: turn.events.length, titles });
   return titles;
+}
+// An artifact by the title the transcript's results gave it, this turn's then the earlier turns' (latest first), the
+// earlier turns read once a call asks; the derivation's lookup, and the mods' asks' (surface/adapters.ts)
+export function artifactTitlesIn(state: TranscriptState | null, turn: TurnState): ArtifactTitles {
+  let earlier: ReadonlyMap<string, string>[] | null = null;
+  return (ref) =>
+    titlesOfTurn(turn).get(ref) ?? (earlier ??= state === null ? [] : earlierTurns(state, turn).map(titlesOfTurn)).find((titles) => titles.has(ref))?.get(ref) ?? null;
 }
 
 

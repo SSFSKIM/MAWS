@@ -5,7 +5,8 @@ import { handbackReport, messageText, parsePeerMessage, peerLabel } from '@share
 import { engineQuestionsOf, type TranscriptProps, type TranscriptSite } from '@shared/engine/surface-rows';
 import type { ContentBlock, SessionEvent } from '@shared/graph/events';
 import type { ToolUseId } from '@shared/graph/ids';
-import { cellOf, turnContextOf, type ToolRecord, type TurnContext } from '../model/cells';
+import { cellOf, turnContextOf, type ArtifactTitles, type ToolRecord, type TurnContext } from '../model/cells';
+import { artifactTitlesIn } from '../model/derive'; // UX wave U2
 import { rowId } from '../model/keys';
 import type { TranscriptState, TurnState } from '../model/reduce';
 import type { Cell, CellId, Row, RowId } from '../model/rows';
@@ -65,8 +66,10 @@ function toolRecords(turn: TurnState): Map<ToolUseId, ToolRecord> {
   return records;
 }
 
-export interface ToolInput extends RowInput<'ToolUse'> { cell: Cell; record: ToolRecord; context: TurnContext }
-export function toolInputs(cell: Cell, turn: TurnState | undefined, revealed?: RowId | CellId): ToolInput[] {
+// UX wave U2: `titles` names an artifact as the derivation does, from the session's loaded turns (`state`), so a
+// rewritten call keeps the title its row read
+export interface ToolInput extends RowInput<'ToolUse'> { cell: Cell; record: ToolRecord; context: TurnContext; titles: ArtifactTitles }
+export function toolInputs(cell: Cell, turn: TurnState | undefined, revealed?: RowId | CellId, state?: TranscriptState): ToolInput[] {
   if (!turn || cell.toolUseId === null || cell.id === revealed) return [];
   const records = toolRecords(turn);
   const all = [...records.values()];
@@ -75,9 +78,10 @@ export function toolInputs(cell: Cell, turn: TurnState | undefined, revealed?: R
   // X3 mergeReads merges consecutive Read/NotebookRead/LS calls, one file per call, under the first tool id.
   const count = cell.id.startsWith('cell:reads:') && cell.detail.kind === 'read' ? cell.detail.files.length : 1;
   const context = turnContextOf(turn); // UX wave U2: the turn's derivation's own context
+  const titles = artifactTitlesIn(state ?? null, turn); // UX wave U2
   return all.slice(at, at + count).map((rec) => {
-    const native = count === 1 ? cell : cellOf(rec, context, cell.expanded);
-    return { instanceId: rec.use.toolUseId, cell: native, record: rec, context, props: callProps(rec, native) };
+    const native = count === 1 ? cell : cellOf(rec, context, cell.expanded, undefined, titles);
+    return { instanceId: rec.use.toolUseId, cell: native, record: rec, context, titles, props: callProps(rec, native) };
   });
 }
 
@@ -107,7 +111,7 @@ function sameValue(left: unknown, right: unknown): boolean {
 
 export function withToolProps(input: ToolInput, props: TranscriptProps['ToolUse']): Cell {
   if (sameValue(props, input.props)) return input.cell;
-  const { record, cell, context } = input;
+  const { record, cell, context, titles } = input;
   const output = props.output;
   const replacedOutput = !sameValue(output, input.props.output);
   // This record exists only for drawing, including output supplied for a still-unresolved call. Never attach it
@@ -120,7 +124,7 @@ export function withToolProps(input: ToolInput, props: TranscriptProps['ToolUse'
     ...(replacedOutput && { spillPath: null }),
   };
   const status = props.isInterrupted ? 'stopped' : props.isErrored ? cell.status === 'denied' ? 'denied' : 'error' : props.isRunning ? 'running' : 'done';
-  const drawn = cellOf({ ...record, use: { ...record.use, toolName: props.tool, input: props.input }, result }, context, cell.expanded, status);
+  const drawn = cellOf({ ...record, use: { ...record.use, toolName: props.tool, input: props.input }, result }, context, cell.expanded, status, titles);
   // Reader state lives on the native cell, not the historical event. It remains applicable only to the same output/spill.
   if (!replacedOutput && 'spill' in drawn.detail && 'spill' in cell.detail && cell.detail.spill !== null && drawn.detail.spill?.path === cell.detail.spill.path) {
     drawn.detail = { ...drawn.detail, spill: cell.detail.spill };
