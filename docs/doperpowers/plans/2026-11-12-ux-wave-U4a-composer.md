@@ -1,0 +1,770 @@
+# UX wave · U4a · the composer's own work (2026-11-12)
+
+> **Parent:** `docs/doperpowers/specs/2026-11-12-ux-wave-design.md` (the UX wave's composite spec, its root), child **U4**, first landing (**U4a**), parent pin `06727e32a`.
+> **The design** is the child's file, `docs/doperpowers/specs/2026-11-12-ux-wave/U4-composer.md`: all of it except the item X-049's wording and the three integrations the root's ordering gives to U4b. In the root: Purpose, the wave's laws, UC-3, UC-6, UC-7, UC-8, UC-9, UC-10, UC-11, UC-14, "Ordering and dependency map" (the lines U4a and U4b) and, in the Decision Log, "Rulings reversed". Where the child's file and the root differ, the root binds.
+> This document holds what the design does not: the landing's edge, what the code holds today, the decisions the section left open, and the execution. Sixteen points are reported to the wave's architect for a ruling ("Reported to the architect"); each has a default written here so that a ruling changes one named place. **Branch:** `ux-wave/U4a`, from master `48619c824`; master is merged in before anything is built (Concrete Steps, 1) and must by then hold U6a, U8a and the probe fixtures. **Board:** #581 (the wave's epic is #573).
+
+## Purpose
+
+After this landing the owner sends without thinking about modes. Enter sends whatever the draft's line count. While the agent works, Enter hands the message to the running turn and ⌘Enter keeps it for after the turn. A message the agent has not read yet is drawn once, in a stack above the composer, where it can be sent now, taken back with ↑, edited or deleted, and it is no longer drawn a second time as a dimmed bubble in the transcript. Send now no longer kills the command the agent was running: the engine moves the command to the background, the turn ends reading "Ended for your message", and the message is answered at once. Stop still stops and holds what was waiting.
+
+Around the box: the button is one small round icon; `/` lists command names, with the description beside the highlighted one, and has `/fork`; the mode menu sets Bypass permissions apart; the model chip reads "Opus 5.5 High"; fast mode is a row with a switch and the effort track can be hit anywhere; a paste stays text; the New chat chooser tells two projects of one name apart; ↑ through history says where it is, Ctrl+R searches it, and ⇧⌘I, ⇧⌘E and ⇧⌘M open the model list, the effort control and the mode menu; `/btw` answers in a small card at the bottom right that says how long it has been thinking.
+
+Three things the child's file promises are not in this landing, because they wait for other landings (the root's ordering, U4b): the three controls of a waiting message that need a new offer are drawn refused for a session on another machine, the `/btw` card always lies over the pane's corner, and a waiting answer to a question keeps today's wording. "The landing's edge" says what each of these looks like to a person until U4b.
+
+How to see it working: the unit tests named under Acceptance replay the probe's recorded sessions and the composer's own cases; in a running build under a scratch config home, the scenes of Acceptance 16.
+
+## Progress
+
+- [x] (2026-11-12) Execution document written; the section checked against the code at `48619c824`, against U6a's branch for the keymap's shape, and against probe P1's findings and fixtures on `origin/ux-wave/probes`; sixteen points reported to the wave's architect.
+- [ ] The architect's rulings folded in; the adversarial review of this document; its findings folded in.
+- [ ] The owner's look at the drawn example (the button's glyphs, the stack, the controls around the box, the `/btw` card in its interim place); its answers recorded in the Decision Log. The architect's. M7 does not start before it; M2's glyphs and M3's icons are one file each, so a look that comes after they are built changes those files alone.
+- [ ] Master merged into the branch (Concrete Steps, 1): it holds U6a, U8a and `spikes/protocol-probe/fixtures/uxwave/u4p1-*.jsonl`.
+- [ ] M1: Send now in the engine host, and what its end reads as.
+- [ ] M2: sending from the box: Enter, ⌘Enter, the line breaks, the button.
+- [ ] M3: the stack, its acts, ↑ and Esc; the transcript draws no waiting message.
+- [ ] M4: the slash palette, with `/fork`.
+- [ ] M5: the chips and their menus: the mode menu, the model's name, fast mode and the effort track, the three chords and the digits.
+- [ ] M6: the box's helpers: the history line and Ctrl+R, the paste, the project chooser.
+- [ ] M7: the `/btw` card.
+- [ ] M8: the e2e edits written and typechecked; the record; the debt rows; on the VM, typecheck, lint on the changed paths, the whole unit suite. Hand-back: the executor stops here.
+- [ ] The architect's: class 1a on the head handed back; the xhigh panel; its findings settled; the new and reworked e2e scenes alone on a Mac, then their groups; C1's check of a 20,000-character paste; class 1a again on the final head if the branch changed; the pull request.
+
+## The landing's edge
+
+The root gives this landing "the composer's own work: the keys, the stack, Send now on this Mac, the controls around the box" and gives U4b three integrations: the wording of a waiting answer (after U3a), the card's place at the column's foot (after U8b), and the new command's row in U9's files (after U9). The table says, per part of the child's file, what this landing satisfies, what a person sees in the meantime, and what U4b changes. "On another machine" means a session MAWS runs there, reached over the machine link.
+
+| part of U4 | in this landing | what a person sees until U4b | what U4b changes |
+|---|---|---|---|
+| Enter always sends; Shift+Enter and Option+Enter break the line (l3-input-08; A1) | in full, on every route and in an unstarted New chat | nothing differs | nothing |
+| ⌘Enter queues for after the turn (l3-input-03; A2) | in full. On another machine it is the offered `session.send`, which that machine's queue holds whatever its build. On a terminal session it is refused while a turn runs, with the sentence | nothing differs | nothing |
+| Send now without a kill (l3-input-01; A3, A5), and Esc | in full on this Mac: the host command `session.steer.sendNow`. On another machine, a row that waits after the turn or that a Stop held is sent now through today's offered `session.queue.promote` at `now`, and that machine's engine moves the command as this Mac's does | **Control 1.** On a row that waits at the next step of a session on another machine, Send now is drawn disabled while a turn runs, with "Not on another machine yet: sending a waiting message now while the agent works". Esc in the composer, when that row is the first, shows the same sentence in the stack and stops nothing; ⌘. and the square still stop. The row's "…" menu still offers "Queue for after the turn" (the offered `session.queue.hold`), after which Send now works on it. Today that Send now and that Esc interrupt and kill; in the meantime they are refused (Reported, 7) | U4b inserts the offer of `session.steer.sendNow` with a capability of its own in U9's files (U9's document, Interfaces 2) and removes the declared row; the control is enabled where the machine lists the capability and reads U9's "update MAWS on `<machine>`" sentence elsewhere. A turn's end there reads "Ended for your message" once that machine runs a build with this landing |
+| Stop holds what waited; the paused queue says so (l3-input-02; A6) | in full | nothing differs | nothing |
+| Taking a message back: ↑, Edit, Delete (l3-input-04; A7) | in full on this Mac. On another machine, in full for a row that waits after the turn or is held (`session.queue.remove` is offered). For a row at the next step there, the three read U9's helper for `session.steer.cancel` | **Controls 2 and 3.** While master does not hold U9: on a next-step row of a session on another machine, Edit and Delete are drawn disabled with "Not on another machine yet: taking back a message the agent hasn’t started", and ↑, when that row is the newest, shows that sentence in the stack and takes nothing back. From the master that holds U9 they work on a machine that lists `rl2.session-acts` with no further code of U4's (U9 offers `session.steer.cancel`), and read U9's sentence on a machine that does not | U4b adds the act's words in U9's table (`ACT_WORDS`, which U9 left to "U4 with its mount"), reads the labels through U9's `useRemoteUnavailableAs`, and proves the scene on another machine |
+| One drawing, in the stack (l3-input-05, X-050; A8) | in full for a session MAWS runs, here and on another machine. A terminal session has no rows, as the routes table says | nothing differs | nothing |
+| The button is an icon (l3-input-15; A10) | in full, at the shapes the owner's look settles | nothing differs | nothing |
+| A waiting answer (X-049; A9) | the row's acts: an answer's row offers Send now only, and ↑ skips it. It is recognised by today's `parseAskSteer` | the row reads the envelope's opening words, "[MAWS ask …", clamped to two lines, as its one line reads today | the words "Answer to `<question>`: `<choice>`" from U3a's `readAnswerEnvelope` |
+| The slash palette (l3-input-06; A11) and `/fork` (O-48; A20) | in full on this Mac, `/fork` through today's `forkSession` | `/fork` in a session on another machine: the row is greyed with "Not on another machine yet: forking a session" while master does not hold U9; from the master that holds U9 the same helper answers U9's sentence or nothing, and the row forks there through U9's branch of `forkSession` | U4b reads `useForkUnavailable` (which adds "Wait for the turn to end, or stop it first") and takes whatever is ruled on whether the fork's tab opens (Reported, 11) |
+| The chooser, the paste, the mode menu, history and the three chords, the model's name, fast mode and the effort track (l3-input-07, -09, -10, -12, -14, O-32; A12 to A17, A19) | in full | nothing differs | nothing |
+| The `/btw` card (O-20; A18) | the card, its waiting line, the fold to a chip, close, and the Side pane without its question view. It is drawn from the session's pane, over the pane's bottom right corner, in every state of the card column | With the card column shown, the card lies over the transcript's bottom right corner, to the left of the column, while the foot of the column beside it stands empty. With the column not shown it is where the child's file puts it. It covers neither the composer nor the jump-to-latest control in either case | U4b registers the card in U8b's slot `sessionCardFoot` and reads `useCardColumnShown()`: while the column is drawn the card is the column's foot, at the column's width, and the pane's corner is free |
+| The keys in the action table (UC-6) | every row: five `fixed`, five dispatched, one retitled (Interfaces H) | none of them can be rebound while build F can be gone back to (U6a's guard) | nothing |
+| Rulings reversed | all ten amendments ("The record") | | none: X-049 reverses nothing |
+| The next-prompt suggestion | the one row in `docs/tech-debt-tracker.md` | nothing is built | nothing |
+| C1 (a 20,000-character paste), C2 (the drawn example), C4 (new scenes alone) | written here as steps handed to the architect ("Proof that an executor does not run") | | |
+
+Not in this landing and not in U4b: everything the child's file lists under "Not in this child".
+
+## Words used here
+
+The child's file defines a *waiting message*, *at the next step*, *after the turn*, *the stack* and *Send now*; they are used here as defined there. This document adds:
+
+- **A pending steer:** the code's name for a message that waits at the next step: written to the engine at priority `next`, not yet started (`PendingSteer`, the `steers` of the queue's state).
+- **The host:** the engine host, the process that launches and drives the engine for a session MAWS runs (`src/engine-host/`). **The journal:** its record of every frame written to and read from the engine, per launch; **the normaliser** turns the journal's rows into X1 events (`src/engine-host/normalizer.ts`).
+- **A marked end:** a `turn.ended` event that carries `endedForMessage` (Interfaces B): the turn was ended by a message sent now, not by a Stop.
+- **The seam:** `sendHumanPrompt`, the one path a typed message takes. **The port:** the session's controls object (`session/controls/`), which hides whether a session is run by MAWS (lane B in code) or by a terminal (lane A).
+- **The helper:** `useRemoteUnavailable` in `lane-b/remote-unavailable.ts` (U9's), which answers the sentence a control is disabled with for a session on another machine, or null.
+- **Build F:** `f1852de3a`, the build on the owner's machines, which may be gone back to (UC-14).
+
+## Today, and what each part needs
+
+Read at `48619c824`; the keymap's shape on `origin/ux-wave/U6a` (`8bc3f5176`), the probe's files on `origin/ux-wave/probes` (`d562c5e47`). The executor reads the code itself; this table says where the work is and what the section's "Today" got wrong. Paths without a root are under `src/renderer/src/`.
+
+| part | today | needs |
+|---|---|---|
+| The engine host's queue, `src/engine-host/queue.ts`, and `interrupt` in `src/engine-host/session.ts` | Every interrupt pauses the queue (`queue.pause('interrupt')`) and writes `interrupt { reason: 'user-cancel', cancel_queued }`. The Stop also holds every pending steer first (`holdAll`). A row's Send now on a next-step message is that interrupt without the hold. `cancelSteer` withdraws a pending steer and drops it; only the owner channel's service calls `session.steer.cancel` today, and the renderer's port has no member for it. `InterruptRequest` has no `send_now`; `background_tasks` is declared and unused, and stays so | Interfaces A. Nothing in `interrupt`, `holdAll`, `hold`, `cancelSteer`, `promote` or the release rule changes |
+| The normaliser, `src/engine-host/normalizer.ts` | Reads the journal's `out` rows too (`pushOut` keeps each control request's subtype and payload until its answer). `turn.ended` carries the engine's `terminal_reason`; every reader takes `aborted_*` as the person's stop | Interfaces B |
+| Readers of an aborted end | the turn's line (`transcript/model/derive.ts`, `copy.ts`: "You stopped after …"); the digest (`src/services/sessions/digest.ts`: idle, and `lastTurnEndedAt` moves, on which main's notifier posts "Turn finished"); the attention service (no failure item for `aborted_*`, unchanged) | Interfaces B, C |
+| The submit table, `composer/submit/submit-state.ts`, and the seam, `composer/submit/send-human-prompt.ts` | Three states and a label. While a turn runs a Send is a `next` steer; nothing sends "after the turn" but a remote message that names uploaded PDFs. The seam decides steer or send from the session's state; lane B's port calls it, lane A's port has its own `send` | Interfaces D, E |
+| The editor's keys, `composer/editor/controller.ts` (`keyDown`) and `composer/editor/Editor.tsx` | Enter sends a one-line draft and is handed back to the editor once the draft is multi-line; ⌘Enter reaches `controller.submit()` through the dispatcher as `composer.send`, bound in `Editor.tsx`; Shift+Enter is the editor library's line break; ⌥Enter does nothing; a composing key never sends; ↑ and ↓ walk history; Esc is the composer's `onEscape`. `Editor` is mounted by the composer alone (and a harness) | M2, M3 |
+| The button, `composer/submit/SubmitControl.tsx` | A text pill; its word is its text content, which about twenty unit cases and several e2e specs read (`textContent`, `toHaveText`) | M2; decision 9 |
+| The list above the composer, `composer/queue/QueueList.tsx`, `QueueEdit.tsx`, `entry-text.ts` | As the section says. `PAUSED_COPY` is also read by `widgets/CompactWidget.tsx`, and `SENDS_AT_NEXT_STEP` by `side/copy.ts`; both exports stay | M3 |
+| The waiting message in the transcript | `transcript/view/TranscriptSlot.tsx` appends a `heldRow` per held entry to the tail, and `derive.ts` marks a not-yet-read steer's row `pending: 'next'`. **Not in the section:** the side thread's card (`side/card/`) mounts the same slot with no composer and no list, and the held bubble is its only drawing of a reply that waits (`side/card/CardThread.test.tsx` pins it) | M3; decision 12 |
+| The keymap | On master at the pin `ActionSpec` has no `fixed`; U6a's branch adds it with `isRebindable`, `effectiveChord`'s rules, `BUILD_F_ACTION_IDS` and the test's `WAVE_DEFAULTS` and `LANDED` | Interfaces H; U6a must be on master first |
+| The slash palette, `composer/mentions/` and `src/shared/composer/slash-rank.ts` | As the section says, with four differences (Reported, 12): the engine marks its own commands and its bundled skills alike (`builtin: true`), so `originOf` reads both as engine commands; `/agents` is listed by the engine as "(removed) …" and is also a panel MAWS draws; a name chosen earlier in the run comes first even with nothing typed; and the list is cut to 40 rows before it is drawn. Ties are broken by kind and name, never by list order, and two tests pin that the result does not depend on input order. The ranker has two consumers, this palette and desk web's. A pick from the palette opens a panel with no arguments; a typed `/name args` reaches the panel's `apply`. No `/fork` exists | M4 |
+| The chooser, `composer/frame/ProjectRow.tsx`, and `sidebar/project-labels.ts` | As the section says. `projectLabels` answers the joined label only | M6 |
+| The paste, `composer/editor/paste.ts`, `nodes/Pasted.tsx` | As the section says. A dropped text file with no path becomes a chip by another route and is not this item's. Drafts are stored whole with no schema for the document and no size bound on its text | M6 |
+| The mode menu, `statusline/mode-menu.ts`, `ModeMenu.tsx` | As the section says. One component already serves every place. `CYCLE` is a separate list. The chip's open state is local to `composer/frame/ModeChip.tsx` | M5 |
+| The model's name, `src/shared/sessions/model-label.ts` | As the section says. Its callers are `composer/frame/bindings.ts` (three), `session/controls/lane-a.ts`, `panel/summary/Environment.tsx` and `widgets/ModelSelector.tsx`. **Differences:** Session info (`tools/session-info/model.ts`) prints the raw model id and does not go through this file; a terminal session's catalogue has no display names (each row's is its alias); fast mode's state is on the engine's status alone, so a place that reads only the record has none; a display name can end in a qualifier that is not a context size ("… (OpenRouter)") | M5 |
+| The selector, `widgets/ModelSelector.tsx` | As the section says, except that the lightning is drawn, disabled, for a model without fast mode ("Fast mode is for Opus"), and the caption shows only while pending or while there is a reason. The model chip's popover is opened through the composer store (`requestChipWidget`), on its `model` or `effort` view | M5 |
+| History, `composer/editor/history.ts`, `recall.ts`, `controller.ts` | As the section says. The list ↑ walks is this session's prompts and then the 200 newest prompts of the project's history, MAWS's and the terminal's. The navigation's place is private to the controller, and the frame has no line under the text | M6 |
+| `/btw`, `side/btw.ts`, `actions.ts`, `BtwView.tsx`, `SideTool.tsx`, `store.ts`, `BtwWidget.tsx` | As the section says, with these differences (Reported, 13 and 14): `liveThinkingLabel` reads "Thinking" only under ten seconds, so the section's "Thinking · 12s" cannot occur; a terminal session's exchanges live in the window alone, not in a host's log; a remote exchange's `askedAt` is on the other machine's clock; the small dialog is also what a pick from the palette and a bare `/btw` open today; nothing records whether an answer was seen. `BtwView` is also drawn under a side thread for that thread's own questions, which stays. The session's pane has no positioned box to hang a layer from, and the floating session card's pane is a scroll container |  M7 |
+| The card column, `app/Shell.tsx` | With room it reserves 304 px at the right of the main area and draws the cards in an absolute column 280 px wide, so the pane's corner is beside the column, not under it | "The landing's edge"; nothing in `app/` is edited by this landing |
+
+## Decisions settled at authoring
+
+Each is a means the section left open, with its reason and what lost. Where a decision is also a point for the architect's ruling it says so, and "Reported to the architect" gives the one place a ruling changes.
+
+1. **Eight milestones, in this order.** M1 to M3 are the one design of sending, cut where the state's owner changes: the engine host and what its events mean (M1), the box and its one decision table (M2), the stack that reads both (M3). M4 to M7 are the controls around the box, grouped by the files they share: the palette (M4), the two chips' menus (M5), the editor's helpers and the chooser (M6), the `/btw` card (M7). M8 is the record, the e2e edits and the last run. Each leaves the tree green: a unit test that pins what a milestone changes is edited in that milestone; the e2e specs, which no executor runs, are edited together in M8, so that the architect's runs have one list. Lost: one milestone per item, sixteen boundaries for parts that cannot be told apart in a diff; and two milestones, each past what one reviewer reads in a pass.
+2. **The host's record of a send-now is the journal's own rows.** The section says "the host records each send-now it sends". The journal already holds every frame the host writes, the normaliser already reads those rows, and it is the one place that is the same after a reload, in a second window and on a page cursor. So the rule is a fold over rows that exist (Interfaces B) and nothing new is journaled or stored. Lost: a new `meta queue` row (a second record of the same fact, and a new action name that the strict `queue.transition` enum must never see); a flag held by the session object (it is gone for a page that reads the launch's journal again). Reported, 1: the fold surfaces as one optional field on X1's `turn.ended`.
+3. **The request is written exactly as the probe recorded it:** `{ subtype: 'interrupt', send_now: true, message_uuid }`, with no `reason` and no `cancel_queued` (law 6: what was probed is what is sent, and a replay of the fixture then matches the host's write without an edit).
+4. **The command is graded `converse`.** The section says it takes "the grade `session.steer` has", which is `converse` as a floor with a rule that reads the message's content. This command carries no content: the words were graded when they were written, and what it adds is ending the running turn, which `session.interrupt` and `session.steer.cancel` already allow at `converse`. Reported, 8, for U9's review when U4b adds the offer.
+5. **An answer without `send_now` reads `stopped`.** An engine that does not know the key takes the request for a plain interrupt: the turn ends, the command is killed, and the waiting message starts the next turn, since nothing held it. That is today's Send now without the pause, and `stopped` is the truthful word for it. By the bundles' text the key is read from engine 2.1.287 on; P1 ran 2.1.322 (Reported, 5).
+6. **The digest keeps `lastTurnEndedAt` at a marked end and goes idle.** The notice "Turn finished" and the unread mark both hang on that time moving, so neither fires for the cut turn and both fire once, when the message's own turn ends. The phase goes to `idle` rather than staying `working`, so that a session whose next turn never starts cannot read as working for ever. Lost: an edit in main's notifier (U1's file) for a rule the digest can hold in one branch.
+7. **Two strings the section does not word** (Reported, 3). The turn's line keeps its shape and reads "Ended for your message after 13s", then the counts: the section quotes "Ended for your message", and a line without its duration would be the only one of its kind. The moved command's row reads "Moved `<command>` to the background after 13s": A3 says the row "reads as moved to the background", and today it would read "Ran … in 13s" while the command still runs.
+8. **⌘Enter is an option on the one seam.** `when: 'after'` rides `HumanPromptOptions` through the port to `sendHumanPrompt`, which then never chooses the steer; the host's queue does the holding, as the section says ("no new host code"). With no turn running the option changes nothing, so ⌘Enter sends as Enter does by the seam's own rule and not by a second test of "is a turn running" in the editor.
+9. **The button's word stays its text.** The word is drawn as visually hidden text inside the button, beside a glyph hidden from assistive technology, and not as an `aria-label`. The accessible name, `textContent` and Playwright's `toHaveText` then all stay the word, which is what the section's "tests and screen readers keep finding it" needs: about twenty unit cases and the e2e helpers read the text, not the name. Lost: `aria-label` alone, which keeps the name and breaks every one of them for nothing.
+10. **The rows, their ids and their order** (Interfaces H). Five `fixed` rows for the editor's own keys, under ids that name what the key does. `composer.queue` is the only chord the main editor binds; `composer.send` keeps its id and its chord for the three reply fields and is retitled. The three menu chords are app-scoped and registered once in `ComposerAppKeys`. Rows are added where the composer's rows stand, the two rows on ⌘Enter in the order `composer.queue`, `composer.send`: the dispatcher tries rows in table order, and each is delivered only to a binding whose element holds the focus, so the order is not a priority between them.
+11. **A fixed key cannot be captured for another action** (U6a's decision 7 left this to "the landing that adds the first fixed row"; Reported, 10). From this landing Enter, Shift+Enter, Option+Enter and ↑ are listed in Settings ▸ Keyboard as the composer's fixed keys, and the capture would still let "Cycle permission mode" take Enter, after which the composer could not send and nothing would say why. So `conflictOf` (`settings-tab/keymap.ts`, U6's) counts a fixed row as a holder of its chord against any row that could take that key from the fixed row's surface: a row of the same scope, an `app`-scoped row, or a `menu` row. A `pane`-scoped row is never delivered from a text field (the dispatcher's `refused`), so `request.accept` and `request.decline` keep Enter and Esc and can be given them back. The refusal is one new sentence, `KEYBOARD.fixedKey` (Interfaces I), because the existing one ends "unbind it first" and a fixed key cannot be unbound. Nothing stored is read differently: a rebinding a profile already holds on such a key keeps winning at dispatch, as U6a's decision 10 has it for every stored rebinding. Lost: leaving it as residue (the list in Settings would name a key as fixed that the same page lets the person take away); refusing at dispatch (it would silently change what a stored binding does).
+12. **The transcript's filter reads the row's own mark, and only a mount with a stack asks for it.** `TranscriptSlot` gains an optional prop, `waiting?: 'stacked'`, which the session's pane passes. With it the slot appends no held rows to the tail and `withQueueTail` drops the user rows that carry a `pending` mark; without it everything is as today. The side thread's card and every other mount pass nothing, so the card keeps its held bubble, its only drawing of a waiting reply. The filter reads the row's mark and not the queue's list of pending steers, because the row and the queue's snapshot arrive on different channels and a filter by list would let a dimmed bubble show for a frame at every Enter. Lost: removing the tail for every mount (the side card would show nothing for a reply that waits); a filter by the queue's uuids in the slot alone (the flash). Reported, 2: this needs one optional prop on `Transcript` and one parameter on `withQueueTail`, beyond the insertion UC-3 names.
+13. **Taking a message back is "withdraw, then fill", owned outside the component.** One module (`composer/queue/take-back.ts`) runs it for ↑ and for Edit: it asks the host (`session.steer.cancel` for a next-step message, `session.queue.remove` for the others), and only on the host's yes does the message's document go to the box (`entryDoc`, then `EditorHandle.load`). While the answer is awaited that session's editor is read-only with the reason "Taking the message back…", so the box is still empty when the document arrives, which is the section's "only from an empty box" held over the wait. If the composer is no longer mounted when the answer arrives (the tab was closed or switched), the document is written as the session's stored draft, so the message is in the box when the person returns; a message the host gave back is never dropped. A second take-back while one is in flight does nothing. Lost: filling first and restoring on a refusal (Desktop's order, which the section rejects); letting the person type meanwhile (the reply would have to be merged into text typed after it).
+14. **A refused act says its sentence and does nothing else** (UC-7). On a session on another machine, where taking back or sending now a next-step message is not offered, ↑ (when that message is the newest) and Esc (when it is the first) show the helper's sentence in the stack's notice line; ↑ does not fall through to the prompt history and Esc does not fall back to a Stop. Falling through would end the act without its effect and without a reason; ⌘. and the square remain the Stop. Reported, 7.
+15. **The stack's details.** A row's mark is "Next step" for a pending steer, "Held" for a queued entry in a paused queue and "After the turn" for any other queued entry. "Send at the next step" is in a row's menu only while a turn runs. Send now's title is "Sends this now; what the agent is running keeps running" while a turn runs and today's "Sends this now" otherwise. The row that may not have been delivered keeps today's shape, and its Edit, like every Edit, puts the message back in the box: `QueueEdit.tsx` is deleted, and the host's `session.queue.edit` stays (another machine's build still calls it) with no caller in this window. The notice line ("The agent has already read this message", "The box holds a draft", a refused act's sentence) is one `role="status"` line where the stack stands, drawn even when no row is left, and cleared at the next change of the queue or the next key in the box. Whether a folded stack is open is kept per session in the composer's store for the window's life.
+16. **The held bubble's derivation is left in place.** `heldRow`, the `pending` field and its two captions stay in the transcript's model: the side card still draws them (decision 12), and removing code from the model is not an insertion. The false caption "Sends when this turn ends" for a message a Stop held is then still what the side card reads; a tracker row says so (M8).
+17. **The palette, where the code and the section differ** (Reported, 12). (a) *Kinds* are today's `originOf`: the engine's flag is the only evidence, so a bundled skill is listed among the engine's commands, with their icon; a row MAWS draws a panel for takes the first icon whatever the engine calls it. (b) *"(removed)"* hides an entry MAWS draws no panel for. `/agents`, which the engine lists so and MAWS draws, is listed once, as MAWS's, and its popover reads the panel's own title, not the engine's "(removed) …". (c) *The boost* stays exactly as it is, so a name chosen earlier in this run still comes first with nothing typed; the section's order is the order of everything else. (d) *The cut to 40 rows* stays, applied to the list in its new order. (e) *Ties in list order* is an option of the shared ranker (`createSlashRanker(origins, { ties: 'list' })`), which this palette passes and desk web does not. (f) *A row that cannot run from here* is left out while nothing is typed and listed greyed once the typed text matches its name; its reason moves from the row's text to the popover. (g) *The popover* is positioned beside the list in a portal and changes no layout: `e2e/support/palette-geometry.ts` walks every row and fails if anything outside the list moves.
+18. **`/fork` is a panel MAWS draws with nothing to draw.** It is added to `WIDGET_COMMANDS` with an argument hint, "[prompt]" (a new optional field there, which the popover reads), and follows two patterns the registry already has: with a prompt it acts through its `apply`, as `/btw <question>` does; without one, picked from the palette or typed bare, its component acts and closes, as `/rename`'s does. Either way it calls today's `forkSession(appSessionId, { kind: 'inPlace' }, { message, rewindTo: null })`, which opens the fork's tab, with the prompt as the fork's first message when there is one. A refusal is shown in the host's words, as the session menu's Fork shows it. The row is greyed where `useRemoteUnavailable(appSessionId, 'session.fork')` answers a sentence; on a terminal session it is a row that cannot run from there (decision 17, f), since the bridge backs no such panel. Reported, 11.
+19. **The model's name is one function** (Interfaces I gives its words). `modelName(id, rows, { effort, fast })` in `model-label.ts` answers the parts: the name, whether "Fast" shows, the effort in words, the whole display name and the alias for the tooltip. The name is the row's display name without one parenthesised qualifier at its end; a row whose display name is its own value, or empty, keeps today's alias (which is every row of a terminal session); `default` is named by the row it runs (`defaultTarget`) and reads "Model" when the catalogue cannot say, as today. The effort is shown when the session reports one, as today, in `EFFORT_WORDS`' words, and a value outside that table as it is. "Fast" shows while the engine's status says fast mode is `on`; a place that has no status (the Environment card of a session with no live process) shows none. Session info's first row reads the same name, with the raw id as its title. `chipLabel` goes when its last caller does.
+20. **Fast mode's row and the track.** The row is drawn where today's switch can be turned or is pending, on or cooling down, and where it is closed for a session on another machine (with that sentence); where today's lightning is disabled because the model has no fast mode, there is no row. Its muted line is today's pending word while a change is on its way, today's reason when there is one, and otherwise "On" or "Off". The switch keeps the name "Fast mode" and the confirmation. The track is 28 px tall and takes the pointer itself: a press picks the nearest level and a drag follows it, committing where it is released; the dots stay marks and keep `data-level`.
+21. **The three chords and the digits.** The model chip's popover is already opened through the composer's store (`requestChipWidget`); ⇧⌘I asks for its `model` view and ⇧⌘E for its `effort` view, and the effort view then puts the keyboard on the slider. The mode chip gains the same kind of request in that store, which ⇧⌘M makes. All three are registered once in `ComposerAppKeys`, act on the focused pane's session, and do nothing when that pane shows no session or a card holds the composer's place. In the open model list and the open mode menu a digit 1 to 9 picks the row at that place among the rows drawn; a disabled row is not picked; Bypass still asks first. A chord pressed while its menu is open closes it.
+22. **History's line and its search.** The editor's root gains one muted line under the text, drawn only while recalling or searching. The controller publishes the place through its view (`setHistory`), as it publishes the mode. The search follows Desktop's handler (`web/app/v1/c82492f2c-B1kvcJEb.js:16080-16210`), including its rule for an input-method composition: a composing key ends the search, the match stays in the box, and the composition goes on in the box. In "match 2 of 40", 40 is how many prompts hold the typed text and 2 the place among them, newest first. The list searched is the one ↑ walks, read when the search starts.
+23. **The paste.** `classifyText` answers `atom` only above 20,000 characters, whatever the line count. A chip's popover shows its text and "Show in text field", which replaces the chip with its text as one undoable step; a chip whose text was not kept (recalled from a history row without its body) shows that it is unavailable and offers nothing. A chip made from a dropped text file is the same node and gets the same popover. Nothing reclassifies a stored draft.
+24. **The chooser.** `sidebar/project-labels.ts` gains one export, `projectSuffixes(projects)`, the map from a project's id to the part of its path that tells it apart, or null; `projectLabels` is written over it. Both menus read it over the projects they list, show it dimmed in the folder name's place, and set every row's title to its whole path.
+25. **The mode menu.** `MODE_OPTIONS` takes the new order and a `separatorBefore` mark on Bypass; `CYCLE` is untouched. The warning mark is drawn after Bypass's label, so the label stays the row's first element.
+26. **The `/btw` card** (Reported, 13 and 14). (a) One component, `side/BtwCard.tsx`, drawn from the session's pane: one mount in `session/SessionPane.tsx`, in a positioned box around the transcript, so it is a layer of the pane and not of the scroller. Its bottom edge stands 56 px above the transcript's bottom, which clears the jump-to-latest control whether or not that control is drawn; its right inset is 12 px; it is 320 px wide or the pane's width less 24 px, and as tall as its content up to 360 px. (b) Its state per session (closed, open, folded, and whether an answer arrived unseen) is kept for the window's life and not stored; after a reload the card is closed until the next `/btw`, when the host's log returns with it. (c) The waiting line is `liveThinkingLabel(elapsed, null)`, so it reads "Thinking · 8s" and, from ten seconds, "Still thinking · 12s", as the transcript's does. It counts from the exchange's `askedAt`, never below zero; for a session on another machine, whose `askedAt` is that machine's clock, it counts from when this window first held the exchange pending. (d) A pick of `/btw` from the palette and a bare `/btw` open the card with its field focused; the small dialog remains for a session that cannot take a question (its port's refusal). (e) `BtwView` stays as the list of a side thread's own questions under that thread; the Side pane's chip and question view go, with `revealSideQuestions`' use for the session itself. (f) A terminal session's exchanges are the window's, as today, and do not return after a reload.
+27. **Nothing new is stored** (Interfaces J). The stack's fold and the card's state live in the window; no switch is added; the new action ids take no rebinding. The one thing another build meets is the event's optional key and the request's two keys in the journal.
+28. **The record.** Each sentence goes where the child's file says, as written there; `<date>` is the day the record is committed, and the architect corrects it if the pull request lands on a later day. The charter's Decision log gets one new entry that names the root, the child and the ten items; its entries of 2026-10-01 that the child's file names get the sentence appended, as U3a appends to the entry of 2026-10-30.
+29. **The e2e edits.** The specs that cross the change are edited and typechecked, not run (M8). Three gated live specs already describe the composer before W10 (`e2e/composer-live.spec.ts` at its queue cases, `e2e/c12-prerun.spec.ts`, `e2e/c12-live.spec.ts`: they expect "Queue", "Steer" and "1 queued"); they are not repaired here and the hand-back names them.
+
+## Reported to the architect
+
+Sixteen points where the code contradicts the section, a contract or another child's file is touched beyond what the section names, or the owner would see something the section does not say. Each has the default this document is written to, and the one place a ruling changes. None is resolved by the author.
+
+| # | the point, with its evidence | default written here | a ruling changes |
+|---|---|---|---|
+| 1 | **X1 gains a field.** "The host records each send-now" has to reach three readers in two processes (the turn's line, the digest, a second window). The only form that survives a reload is a field on the event: `turn.ended.endedForMessage?: true`. The section names no amendment of X1 | built; additive and optional, so another build drops it (`readTolerant`); the X1 entry of charter §13 gets a dated line ("The record") | Interfaces B and the X1 line of "The record" |
+| 2 | **More insertions in the transcript's files than UC-3 names.** UC-3 gives U4 "the view-level filter that removes the held tail (`TranscriptSlot.tsx`)". The work needs: an optional prop on `Transcript` (`transcript/view/Transcript.tsx`, U3's) and a parameter on `withQueueTail` (`transcript/model/derive.ts`), because the filter must read the row's own `pending` mark (decision 12); the divider's `cause: 'message'` (`derive.ts`, `rows.ts`, `schema.ts`, `copy.ts`: the turn's line is U2's); the shell cell's label (`cells.ts`, `copy.ts`); and a second insertion in `session/SessionPane.tsx` (U1's), the slot's prop, beside the card's mount | made, each one branch or one field, each rebased onto its owner's landing | Interfaces K, the rows for `transcript/` and `SessionPane.tsx` |
+| 3 | **Words the owner will read that the section does not give.** "Ended for your message after 13s" (the section quotes it without the duration); "Moved `<command>` to the background after 13s" (A3 says the row "reads as moved to the background" and gives no words; today it would read "Ran … in 13s"); Send now's title while a turn runs; the capture's "`<title>` keeps this key"; the remote sentence for the new command | as Interfaces I writes them | Interfaces I |
+| 4 | **Read back from the engine's transcript file, the end reads otherwise.** Once a session's launch is gone its rows come from the engine's transcript file (`src/engine-host/fs/backfill.ts`), which holds no terminal reason. A turn that a send-now cut behind a command then reads as an ordinary end ("Worked for …"), and one cut while the agent wrote reads "You stopped", because the engine writes the same marker for both (P1: `u4p1-c-seeded-1.jsonl` and `u4p1-c0-seeded-1.jsonl` are identical from the response on). A3 and A5 hold while the launch's journal serves the rows | accepted as a limit; a tracker row (M8). Closing it needs a durable record per session, which is a stored value build F would have to read | the tracker row; a new item if it is to be closed |
+| 5 | **Engines other than 2.1.322.** `TESTED_ENGINE_VERSION` is `2.1.312` and the product "never refuses a version" (`src/engine-host/engine-compat.ts`). The bundles under `~/claude-code-bundle/` hold the wire's `send_now` handler from 2.1.287 on and not at 2.1.283. P1 ran 2.1.322 only. An engine without the handler performs a plain interrupt and kills the command | decision 5: the answer without `send_now` reads `stopped`; no floor, no notice | decision 5 |
+| 6 | **Cases the landing meets that P1 did not run.** (a) `nothing_waiting`. (b) A second message waiting at the next step when one is sent now: the request names one uuid, and the engine's handler lets only that one go (`cli.pretty.js:600167-600182`), by reading. (c) A Stop while a send-now is in flight: case (h) stopped two seconds after the message had started. (d) Whether the engine sends `session_state_changed: idle` between the cut turn's result and the message's start: the fixtures hold no such frame. (e) The direct route. (f) Any engine but 2.1.322 | (a) nothing is shown and the row leaves at the engine's `started`, as the section says. (b) the others stay rows until the engine starts them. (c) the Stop's holds and its plain interrupt are written after the request, the end then reads as a stop (Interfaces B), and what the engine does with the message is whatever it answers the hold. (d) the digest's rule does not depend on it (decision 6). (b), (c) and (d) are scenes of Acceptance 16 on a live engine | Acceptance 16 |
+| 7 | **Until U4b, a session on another machine loses a Send now it has today.** Today a next-step row's Send now and Esc there are the offered `session.interrupt`: they work, by killing. The root's ordering has them "drawn refused" until U4b, and they are (decision 14). A two-step route remains: the row's "Queue for after the turn", then Send now | as the root says | decision 14: the alternative is to keep today's interrupt on that route until U4b, which is one branch where the port's `sendNow` is refused |
+| 8 | **One row in U9's file now, and the grade.** `test/lane-b/offer-coverage.test.ts` fails unless a new session command is offered, answered by main or declared. So this landing inserts the declared row for `session.steer.sendNow` in `src/shared/ipc/remote-unavailable.ts` (U9's), which the root's ordering lists under U4b alone; U4b replaces it with the offer. The grade is `converse` (decision 4) where the section says "the grade `session.steer` has" | the row and the grade as written | Interfaces K; decision 4 |
+| 9 | **Files with another owner, or none, that the section does not list.** Under `widgets/`, which UC-8 gives to U11: `ModelSelector.tsx` (O-32, the digits, the slider's focus), `index.ts`, `copy.ts` and `typed.ts` (the registration of `/fork`). With no owner in UC-8: `session/controls/` (the port's two members and one option), `statusline/` (the mode menu), `stores/composer.ts` (the mode chip's request, the stack's fold), `tools/session-info/model.ts` (one call), `src/services/sessions/digest.ts` (one branch), the engine host and the shared wire and IPC files of Interfaces A and B. In U6's `palette/CommandPalette.tsx`: two entries in its table of keyboard-only actions | edited as Interfaces K lists; the selector is O-32's own subject and cannot be changed from outside its file | Interfaces K |
+| 10 | **U6a's residue on fixed keys.** A fixed key can still be captured for another action (U6a's document, decision 7) | closed at the capture (decision 11): one condition in U6's `conflictOf`, one string in U11's `settings-tab/copy.ts` | decision 11; struck, it is residue again and the hand-back says so |
+| 11 | **`/fork`: where it lands, and whether the tab opens.** The root's line for U4b names three integrations and does not place `/fork`, which calls U9's act. U9's document gives `/fork` `open: false` ("the person stays where they are"); A20 says it "forks the conversation into a new tab" | built here on today's `forkSession`, which opens the fork's tab; on another machine it reads `session.fork`'s helper sentence and starts working when U9 lands. U4b takes `useForkUnavailable` and the ruling on `open` | decision 18 |
+| 12 | **The palette, where the catalogue is not what the section assumes** (`composer/mentions/items.ts`, the fixture `spikes/protocol-probe/fixtures/pass2/auto-routed.jsonl`). (a) Bundled skills are `builtin: true`, as the engine's commands are, so "then skills" can only mean skills the engine does not mark so. (b) `/agents` is both "(removed)" in the engine's list and a panel MAWS draws. (c) "The boost stays" and "the order with nothing typed" collide: today a chosen name comes first with nothing typed, and a test pins it. (d) The list is cut to 40 rows, which the section does not mention; the engine alone lists 52 | decision 17 (a) to (d) | decision 17 |
+| 13 | **A18's "Thinking · 12s" cannot occur.** `liveThinkingLabel` reads "Thinking" under ten seconds and "Still thinking" from ten (`transcript/model/copy.ts`; `copy.test.ts` pins the tiers) | the function's words: "Still thinking · 12s" | decision 26 (c) |
+| 14 | **The card's state is not stored, and a terminal session's exchanges are not in a host's log.** After a reload the card is closed until the next `/btw`. A terminal session's exchanges are kept by the window alone today (`side/store.ts`) and are gone after a reload; the section says they "stay in the engine host's log" on every route | decision 26 (b) and (f). Storing the card's state would be a layout key (UC-14) | decision 26 |
+| 15 | **Sentences in the spec to correct.** The root's ordering says U4b inserts "its two new commands" and the child's UC-8 bullet "the two new commands' rows": since the owner's "Only on Send now" there is one, `session.steer.sendNow`. The child's UC-8 bullet says "five actions" in `actions.ts`: there are five dispatched rows, five fixed rows and one retitled. The child's list of tests says `e2e/lane-a.spec.ts` "finds the model chip by its text": it finds it by the start of its accessible name, and `e2e/widgets.spec.ts` asserts the whole name. The child's A16 has Session info reading "opus high" today: it prints the raw model id. The child's O-32 says the lightning is where the model offers fast mode: it is drawn, disabled, where the model does not | none needed in this document | the spec's files |
+| 16 | **Two small consequences of rules this landing follows.** (a) By U6a's decision 10, `composer.queue` yields ⌘Enter to a stored rebinding of another action on that chord, and it cannot be rebound yet; in such a profile ⌘Enter does nothing in the main editor until the person frees the key. (b) The history search follows Desktop's handler, which ends the search at an input-method composition, so the typed text of a search cannot be Korean or Japanese | both stand; the hand-back lists them as residue | decision 22 for (b) |
+
+## Acceptance
+
+The child's acceptance A1 to A20 binds, less A4 (withdrawn there) and A9 (U4b). The items below say how each is shown. 1 to 15 and 17 to 21 are the executor's, by tests that fail before the milestone's code and pass at the head; 16 is the architect's run and then the owner's sitting.
+
+1. **A1.** `composer/editor/Editor.test.tsx`: with a three-line draft a plain Enter sends it; Shift+Enter and Option+Enter each add a line and send nothing; a composing Enter sends nothing; an open `@` or `/` list keeps Enter. `composer/Composer.test.tsx`: the same Enter starts an unstarted New chat. `session/controls/lane-a.test.ts`: a terminal session's send is the same call.
+2. **A2.** `composer/submit/send-human-prompt.test.ts`: with `when: 'after'` a busy session gets `session.send` and never a steer, on this Mac and on another machine; an idle one is unchanged. `session/controls/lane-a.test.ts`: during a turn it is refused with `TERMINAL_KEEPS_NO_QUEUE` and nothing is sent; idle, it sends. `composer/Composer.test.tsx`: ⌘Enter during a turn dispatches `session.send` and clears the draft; the placeholder reads `PLACEHOLDER_BOTH` during a turn and `PLACEHOLDER_ENTER` on a terminal session; a refused ⌘Enter leaves the draft and shows the sentence. `composer/submit/submit-state.test.ts`: `queues` and `glyph` over the table's states.
+3. **A3, A5, in the host.** M1's tests: the table of Interfaces B over the fixtures; the session's request, exactly; no pause, no owed mark; the four rows of Interfaces A; the two insertions' words over `u4p1-a-seeded-1.jsonl` ("Ended for your message after …", "Moved … to the background after …"); over `u4p1-c-seeded-1.jsonl`, whose turn the interrupt marker closes before its result, "Ended for your message after …" and no row that reads "You stopped"; over `u4p1-c0-seeded-1.jsonl`, "You stopped after …"; no "Not sent" for the cut turn's prompt; the queue's head held at the cut turn's end and released at the message's; the digest's `lastTurnEndedAt` unmoved and no notice posted.
+4. **A3, A5, in the window.** The stack's tests: Send now on a next-step row invokes `session.steer.sendNow` and never `session.interrupt`; on an after-the-turn or held row, `session.queue.promote` with `now`. `composer/Composer.test.tsx`: Esc during a turn does the first row's Send now; with nothing waiting it is the plain stop with `holdEngineQueued: true`; idle it is not the composer's.
+5. **A6.** `src/engine-host/conformance/queue.test.ts`'s three interrupt cases stay green untouched (Stop still pauses and holds). The stack's tests: in a paused queue each row reads "Held", the header is the reason with Resume, the stack is open, and no text reads "when this turn ends"; Resume calls `setPaused(false)`. That a message sent with no turn running goes past a Stop's pause while the held ones stay is the queue's existing case, unchanged.
+6. **A7.** The take-back's tests: ↑ in an empty box on a next-step message calls `session.steer.cancel`; `cancelled` fills the box with the text and its attachments and the row is gone; `already_started` leaves the box empty and shows "The agent has already read this message"; a held message is removed, then fills the box; with text in the box, or while recalling, ↑ is history's; an answer is skipped; Edit with text in the box says "The box holds a draft"; Delete withdraws or removes. The sequences of M3's "What it proves".
+7. **A8.** The stack's tests: two lines, the whole text as title, open and close by a click and by Enter on the focused row without changing the draft or the queue; the marks; the fold at three and the scroll past five. `transcript/view/TranscriptSlot.test.tsx`: with `waiting="stacked"` neither a held entry nor a pending steer draws a `[data-pending]` row, and a started steer draws at its place reading "Sent during this turn"; without the prop, today's bubbles.
+8. **A10.** `composer/submit/SubmitControl.test.tsx`: for each state of the child's table the glyph (`data-glyph`), the word as the button's text, the tooltip.
+9. **A11, A20.** `composer/mentions/items.test.ts`, `SlashPalette.test.tsx`, `src/shared/composer/slash-rank.test.ts`: no heading, no `__` name, no "(removed)" row but `/agents` as MAWS's, no window action; the order of decision 17 over the fixture `spikes/protocol-probe/fixtures/pass2/auto-routed.jsonl`; a row that cannot run is absent with nothing typed and greyed once typed, its reason in the popover; the popover follows the pointer and the arrow keys; the shared ranker's default order unchanged. `/fork` and `/fork <prompt>` each call `forkSession` once; the row is greyed with the helper's sentence for a session on another machine.
+10. **A12.** `sidebar/project-labels.test.ts` (the export) and `composer/frame/ProjectRow.test.tsx`: both menus show the suffix dimmed in the folder name's place for a shared name, and every row's title is its whole path.
+11. **A13.** `composer/editor/paste.test.ts` and `Editor.test.tsx`: 5,000 characters over 200 lines land as text; 20,001 characters make a chip; the chip's popover shows its text and "Show in text field" replaces it with text.
+12. **A14, A19.** `statusline/mode-menu.test.ts`, `ModeMenu.test.tsx`: the order, the separator, the warning tone and line on Bypass, the confirmation with the focus on Cancel; "cycles default → acceptEdits → plan → auto → default…" unchanged. `composer/editor/Editor.test.tsx`'s `!` and `#` cases unchanged.
+13. **A15.** The controller's and the editor's tests: the history line's words at the newest, a middle and the oldest entry; the search's line, its keys, "— no match", the restore. `composer/Composer.test.tsx`, beside its describe "one Stop handler for every pane": each chord asks for its menu on the focused pane's session, and for nothing when that pane shows none. `widgets/ModelSelector.test.tsx`, `statusline/ModeMenu.test.tsx`: a digit picks the row at that place; Bypass still asks.
+14. **A16, A17.** `src/shared/sessions/model-label.test.ts`: the names of Interfaces I. `composer/frame/bindings.test.ts`, `session/controls/lane-a.test.ts`, the Environment card's and Session info's tests: each reads that function. `widgets/ModelSelector.test.tsx`: no lightning; the row and its switch where decision 20 puts it; a press between two dots; a drag.
+15. **A18.** The card's tests (`side/`): `/btw <question>` opens the card and reveals no Side pane; the waiting line at 8 s and at 12 s; the answer; fold, the chip's waiting line and dot, close; "Continue as a side thread"; the three routes' asks; the Side pane has no question chip.
+16. **In a running build** (the architect's, on a Mac under a scratch config home with engine 2.1.322, then the owner's sitting; "Proof that an executor does not run", 5): the child's A1 to A3, A5 to A8, A10 to A18 and A20 as written, with A18 at its interim place, and these, which no fixture holds: (a) Send now on a message whose `started` has just arrived (the engine's `nothing_waiting`, or the host's own); (b) two messages at the next step, Send now on the second; (c) Stop pressed within a second of Send now; (d) after a Send now behind a command, the moved command's end starts a turn of the engine's own and its row reads finished; (e) the same session reopened after its process is gone, to record what Reported, 4 says; (f) a session on another machine: ⌘Enter, the stack over the link, the three refused controls and their sentences, Send now on an after-the-turn row.
+17. **UC-6.** `src/shared/keymap/actions.test.ts` with `WAVE_DEFAULTS` and `LANDED` as Interfaces H amends them: every row of H exists with its chord; the five fixed rows pass the row rules; the sharing rule passes with two rows on ⌘Enter. `settings-tab/keymap.test.ts`: decision 11's cases. `palette/CommandPalette.test.tsx`: the fixed rows are not listed; `composer.queue` and `composer.historySearch` read "Keyboard only, in the composer".
+18. **UC-7.** `test/lane-b/offer-coverage.test.ts` passes with the one declared row. The stack's tests with the helper answering a sentence: the three controls are disabled with it as their title, and ↑ and Esc show it and call nothing.
+19. **Builds apart (UC-14).** Beside the tolerant reader's cases in `src/shared/ipc/`: a `turn.ended` that carries `endedForMessage`, read with `readTolerant` against the member as build F has it (a literal copy, valid because `src/shared/graph/events.ts` and `src/shared/ipc/tolerant.ts` are the same at `f1852de3a` and at the pin), is accepted with the key dropped; this build's schema accepts the event without the key. `src/shared/wire/`: an `out` row holding `interrupt` with `send_now` and `message_uuid` parses as a stdin frame (the request's schema is loose, and the same at F). A test over `QueueStateSchema` holds a snapshot taken after a `sendNow`: no key F does not know. `src/shared/ipc/wire.test.ts` passes at the new minor.
+20. **The record.** "The record"'s places hold their sentences; the tracker holds its three rows.
+21. **Nothing gated got worse.** On the VM: `pnpm typecheck`, eslint on the changed paths and `pnpm test` pass. Class 1a is the architect's.
+
+## Constraints that bind every milestone
+
+- **The design binds.** The child's file and the root, at the places the header names. Stop and hand the point back to the architect, with the evidence, when the code contradicts a statement this document or the section rests on; when the work needs an edit in another child's file beyond the insertions "Insertions in files other children own" lists; when a contract would have to change; or when the owner would see something neither the section nor this document says. Everything else is decided in the spirit of the section and recorded in the Decision Log.
+- **Law 5, three routes.** Each behaviour is built and tested for a session MAWS runs here, for one on another machine and for a terminal session, as the child's routes table and "The landing's edge" say. "Not on this route" is always a stated reason on screen, never a silent nothing (UC-7).
+- **Law 6, the engine.** Every statement about what the engine sends is one of probe P1's, cited by fixture and `seq` in Interfaces A and B. The cases P1 did not run are listed under "Reported to the architect", 6; no code path may depend on one of them behaving a particular way beyond what that entry says.
+- **Law 7.** Today's tokens and shapes only: no new colour, radius or shadow. The glyphs are drawn with the tokens the pill uses today (`bg-accent`, `bg-fg`, `text-bg`, `bg-bg-hover`, `text-fg-faint`) and the warning tone of the mode menu is the existing warning token.
+- **Law 8, keep.** `!` and `#` still switch the box to the shell and memory modes, and ⇧Tab cycles Manual, Accept edits, Plan, Auto in that order (l3-input-13; A19). The names "Send", "Stop", "Resume", "Run", "Save to memory", "Starting…" and "Re-attaching…" stay the button's accessible names.
+- **The owner's W10 words stand:** one button, no send menu, no second Stop beside it.
+- **UC-14: nothing new is stored.** This landing adds no key to either settings file or to the layout, no field to the stored queue (`QueueStateSchema`, `QueueEntrySchema`, `PendingSteerSchema` in `src/shared/engine/session-state-store.ts` are strict and build F reads them), no value to `QUEUE_PAUSE_REASONS` or `QUEUE_TRANSITION_ACTIONS`, and no new event kind. A state that would be remembered is kept for the window's life (the stack's fold, the card's fold) and Interfaces J says what build F does with everything this landing writes or sends. A milestone that finds it needs a stored value stops and reports.
+- **UC-6.** A key is written in `ACTIONS` and nowhere else; the ten new ids take no rebinding while build F can be gone back to, which U6a's guard does without code here. No existing chord moves and no existing id changes.
+- **UC-8, ownership.** `src/renderer/src/composer/` except `composer/docked/` is this child's. Every edit outside it is listed under "Insertions in files other children own"; each is the smallest that does it and is rebased onto its owner's landing when that lands first.
+- **UC-11, the repository is public.** Nothing of the owner's enters code, tests, fixtures, comments, commit messages, this document or pull-request text. Test content is invented.
+- **Where checks run (UC-10).** On the MacBook the worktree carries no `node_modules`, and nothing is installed, typechecked, linted, tested, built or launched there. Every check runs on the wave's build VM in a checkout of the pushed head (Concrete Steps). The executor starts no `scripts/ci-gate.sh`, opens no pull request and starts no Electron e2e.
+- **Git.** Commit as you go and push `ux-wave/U4a`. Merge master, never rebase or force-push. Never commit to master or to `ux-wave-spec`, and never edit the spec's files. No attribution trailer but the `Sminos-Session:` line the dispatch gives, which ends every commit message.
+
+## Plan of Work
+
+Eight milestones, in order (decision 1). Every executor reads this whole document, the child's file and the code; a milestone entry points and does not restate. A milestone's tests are written before the code they test where the behaviour is new, and its red run's summary lines go into Progress.
+
+### M1 — Send now in the engine host, and what its end reads as
+
+**What exists at its end.** The engine host takes `session.steer.sendNow` and writes the engine's own send-now request for a message that waits at the next step, without pausing the queue. A turn that a sent-now message ended is known as such in the events, reads "Ended for your message after …" in the transcript, raises no "Turn finished" notice and moves no unread mark; the command the engine moved reads "Moved … to the background after …". No control calls the command yet: the window is wired in M3. Acceptance 3.
+
+**What it touches.** `src/shared/wire/control.ts`; `src/shared/ipc/names/session.ts`, `src/shared/ipc/schema/session.ts`, `src/shared/ipc/grades/session.ts`, `src/shared/ipc/remote-unavailable.ts`; `src/shared/ipc/wire.ts` with `wire-manifest.json` and `wire-fingerprint.json`; `src/shared/graph/events.ts`; `src/engine-host/queue.ts`, `session.ts`, `ipc.ts`, `normalizer.ts`; `src/services/sessions/digest.ts`; `src/renderer/src/transcript/model/derive.ts`, `rows.ts`, `schema.ts`, `copy.ts`, `cells.ts`; `test/support/fixtures.ts` (a loader for `spikes/protocol-probe/fixtures/uxwave/`, on the pattern of `loadP5Journal`, unless a landed sibling has added one); the tests beside each, and `src/engine-host/conformance/`.
+
+**Interfaces.** Exposes A, B and C. Consumes nothing of another milestone.
+
+**Decisions that belong here.**
+
+- *The wire's minor.* A new host command and a new optional key on an event are an additive change to the wire: `WIRE_MINOR` in `src/shared/ipc/wire.ts` goes up by one from what master holds at the merge, with its comment, and the manifest and the fingerprint are rewritten by `pnpm wire:manifest`, which runs on the VM (Concrete Steps, 3). A sibling that lands first takes the number; after a later merge of master the step is run again.
+- *Tests, at three levels.* (1) The normaliser over the recorded journals: each row of the table in Interfaces B, by pushing the fixture's rows through a fresh `Normalizer` and reading the `turn.ended` at the `result`'s seq. (2) The session over a scripted engine (`scriptedSession` with `handshakeResponder`, `src/engine-host/conformance/session-harness.ts`, as `conformance/queue.test.ts` scripts an interrupt): `session.sendNow` writes exactly the request of decision 3; the queue is not paused before or after; no owed-interrupt mark is saved; the three answers and the answer without the key map as Interfaces A says; a timeout leaves the steer pending and the queue as it was. (3) The queue with stub dependencies: the four rows of Interfaces A's table. A replay of a `u4p1` journal through a whole session is not required: those journals were recorded by the probe's own launcher, and its handshake may not line up with the app's.
+- *The sequences held open.* A Stop while the send-now's answer is withheld: the queue pauses, the pending steers are claimed, the plain interrupt is written after the send-now request, and the end that follows carries no `endedForMessage`. A send-now while a hold or a cancel of the same message is withheld: rejected, nothing written. Two send-nows of one message: both written, neither pauses.
+- *What must not change, each pinned where it is not already.* The cut turn's own prompt is reported `cancelled` after `started` (`u4p1-a-seeded-1.jsonl` seq 47): the queue retires nothing and posts no notice for it (`src/engine-host/queue.test.ts`, "a cancelled lifecycle after the submission started retires nothing", stays green), and the transcript draws no "Not sent" for it (a new case over that fixture through `reduce` and `derive`). At the cut turn's end the app queue's head is not released while the sent message has not started, and is released at the end of the message's own turn (a new case; the rule itself is `turnOpen`, unchanged).
+- *The digest and the notifier.* One branch in the `turn.ended` case of `foldDigest` (decision 6). The proof that no notice is posted is a case in `src/main/attention/notifier.test.ts` fed the digests of the fixture's events; the notifier's source is not edited.
+- *Pitfalls seen while reading.* `InterruptResponseSchema` is loose today, which is why a recorded answer already parses; type the key anyway, as a string (Interfaces A). The normaliser's state is copied for page cursors (`src/engine-host/session-stream.ts`, `serialize` and `deserialize`): `sentNow` is a `Set` of strings and must be in the constructor's default state. `src/engine-host/conformance/fixtures.test.ts` checks every event strictly, so the key must be declared in `events.ts` before any fixture produces it. `src/engine-host/normalizer-fidelity.test.ts` walks every fixture under `spikes/protocol-probe/fixtures/`, the `uxwave/` ones included once master holds them. A new session command must also satisfy the registry-wide tests: `test/lane-b/offer-coverage.test.ts`, `src/main/machines/link-surface.test.ts`, `src/mawsd/front.test.ts`, `src/services/command-budgets.test.ts`, `test/endpoint/by-effect.test.ts`, `src/shared/machine/address.test.ts`, `src/engine-host/ipc.test.ts` (the deadline shapes). The handover to a successor engine host disposes of outstanding control requests by its own table (`session.ts`, the adoption path): read it, and leave a send-now request to the rule its class already has. The desk web app draws transcripts through the same model and so reads the two new strings; it is not deployed by this landing, and its own e2e reads "You stopped after" from recordings of real stops, which stay. `BackgroundTasksRequest` in `control.ts` does not match the engine (the child's file says how); nothing here calls it, and it is left as it is.
+
+**What it does not touch.** `Session.interrupt`, `holdAll`, `hold`, `cancelSteer`, `promote`, the release rule. The stored queue's schema. `QUEUE_TRANSITION_ACTIONS` and `QUEUE_PAUSE_REASONS`. `src/main/attention/notifier.ts` and the attention service. `src/endpoint/` (the offer is U4b's). `TESTED_ENGINE_VERSION`. The transcript's model beyond the two insertions (the divider's cause, the cell's label). Any control in the window.
+
+**What it proves.** Acceptance 3 and 19, and of 18 the coverage test. Beyond what acceptance states, its tests pin: the request's exact payload; that an end is marked only when it is aborted (the same-turn cases are not); that a Stop written after a send-now clears the mark.
+
+### M2 — Sending from the box: Enter, ⌘Enter, the line breaks, the button
+
+**What exists at its end.** Enter sends a draft of any line count on every route and in an unstarted New chat; Shift+Enter and Option+Enter break the line; ⌘Enter while a turn runs queues the message for after the turn, and on a terminal session is refused there with its sentence; the empty box says which key does what while a turn runs; the button is the round icon with its seven states. Five rows of the action table are new and one is retitled, and a fixed key can no longer be captured. Acceptance 1, 2, 8, and of 17 these rows.
+
+**What it touches.** `composer/editor/controller.ts`, `Editor.tsx`; `composer/Composer.tsx`; `composer/editor/submit.ts`; `composer/submit/submit-state.ts`, `send-human-prompt.ts`, `SubmitControl.tsx`, and a new `composer/submit/glyphs.tsx`; `session/controls/types.ts`, `lane-a.ts`, `lane-b.ts`; `src/shared/keymap/actions.ts` and `actions.test.ts`; `palette/CommandPalette.tsx`; `settings-tab/keymap.ts`, `settings-tab/copy.ts`; the tests beside each. `sessions/retained-tab.test.tsx` and the e2e helpers that read the button's text stay green untouched (decision 9).
+
+**Interfaces.** Exposes D (the option `when`), E, F (`submit(when)`, `onSubmit`, `placeholder`) and the rows of H marked M2. Consumes U6a's table shape.
+
+**Decisions that belong here.**
+
+- *Keys.* In `keyDown` a plain Enter always submits (the `isMultiline` branch goes); ⌥Enter inserts the line break Shift+Enter inserts; a composing key and an open `@` or `/` list keep the key, as today. `Editor.tsx` binds `composer.queue` in place of `composer.send`, and its handler submits with `when: 'after'`. The option applies to a message: in the `!` and `#` modes, and in an unstarted New chat, ⌘Enter does what Enter does.
+- *The decision.* `submitState` gains `glyph` and `queues` (Interfaces E). The placeholder is the composer's to compute and hand to the editor: while a turn runs, `PLACEHOLDER_BOTH` where `decision.queues`, `PLACEHOLDER_ENTER` on a terminal session, nothing otherwise (Interfaces I); a plugin's suggestion still wins.
+- *The button.* `SubmitControl` draws `decision.glyph` from `glyphs.tsx`, one function per glyph, so the owner's look changes that file alone; it carries `data-glyph` beside today's `data-submit-state`; its word is hidden text (decision 9); its tooltip is Interfaces I's. The `multiline` prop goes with the rule it explained. The box's height and radius do not change (`e2e/composer.spec.ts`, "W2", pins 44 px and 22 px).
+- *The seam and the ports.* `when: 'after'` as Interfaces D. In lane B it also covers the remote path (`sendWithoutAcquiring`); a remote message that names uploaded PDFs already goes as a send, and stays so.
+- *The rows.* Interfaces H, M2's rows, with `WAVE_DEFAULTS` and `LANDED` amended in `actions.test.ts`; `composer.queue` gets its line in the palette's table of keyboard-only actions.
+- *The capture.* Decision 11, with its tests in `settings-tab/keymap.test.ts`: Enter, Shift+Enter, Option+Enter are refused for `composer.cycleMode` and for an app-scoped or menu row with `KEYBOARD.fixedKey`; `request.accept` can be given Enter again; U6a's cases over its sample fixed row are rewritten to the new rule.
+- *Tests that pin today and change:* `composer/editor/Editor.test.tsx` ("sends on a plain Enter in a one-line document, and breaks the line with it once the document has more lines"; "sends nothing on ⌥Enter: the hold chord is gone (W10)"); `composer/submit/submit-state.test.ts` ("decides only Send, Stop and Resume…", which pins the decision's exact keys; "reads busy from the open turn…"; the lane A case "sends while idle, and while a turn runs says the words are read at its next step…"); `composer/submit/SubmitControl.test.tsx` (all three); `composer/Composer.test.tsx` ("is one Send: idle it sends, during a turn Enter and the button steer with priority next…", "reads Stop with an empty editor and Send with text while a first entry is submitting…", "resumes a paused queue from the control…", the `!` case's title, "says a send carrying a PDF while a turn runs goes after the turn…"); `palette/CommandPalette.test.tsx` (the count of actions and `composer.send`'s title).
+
+**What it does not touch.** The stack, ↑ and Esc (M3). The peer reply field, the two subagent relay fields and the in-place edit of a sent bubble, which keep ⌘Enter to send and Enter for a new line. `composer/docked/`. Desk web's composer.
+
+**What it proves.** Acceptance 1, 2 and 8. Beyond acceptance: with no turn running ⌘Enter and Enter dispatch the same command; a ⌘Enter on a terminal session during a turn leaves the draft in the box; the decision for an unstarted session, a starting one and a re-attaching one is unchanged but for `glyph`.
+
+### M3 — The stack, its acts, ↑ and Esc; the transcript draws no waiting message
+
+**What exists at its end.** A waiting message is drawn once, in the stack above the composer, as the child's file describes it: two lines that open in place, when it will go, Send now, Delete and a menu on hover or focus, a fold from three rows, the pause's reason with Resume. Send now and Esc deliver without stopping the agent's work; ↑, Edit and Delete take a message back; the session's transcript shows no dimmed bubble for a message the agent has not read. On another machine the controls that have no offer are drawn refused. Acceptance 4, 5, 6, 7, and of 17 and 18 their parts.
+
+**What it touches.** `composer/queue/QueueList.tsx` (rewritten; the file may be renamed), `QueueEdit.tsx` (deleted), `entry-text.ts`, new `stack.ts` and `take-back.ts`; `composer/Composer.tsx`, `ComposerAppKeys.tsx` (unchanged in behaviour; read it), `composer/editor/controller.ts`; `stores/composer.ts`; `session/controls/types.ts`, `lane-b.ts`; `transcript/view/TranscriptSlot.tsx`, `Transcript.tsx`, `transcript/model/derive.ts`; `session/SessionPane.tsx`; `src/shared/keymap/actions.ts` and its test; `widgets/CompactWidget.tsx` only if `PAUSED_COPY` moves; the tests beside each.
+
+**Interfaces.** Exposes G. Consumes A (the command), D (`cancelSteer`, `sendNow`), F (`load`, `onTakeBack`), and from U9's file as it stands on master `useRemoteUnavailable` (`lane-b/remote-unavailable.ts`).
+
+**Decisions that belong here.**
+
+- *The acts, one function each, used by the row's control and by the key.* Send now: a `next` row → `queue().sendNow`; an `after` or `held` row → `queue().promote` with `now`. Take back: decision 13. Delete: a `next` row → `cancelSteer`; another → `remove`. Move: a `next` row → `hold`; an `after` row while a turn runs → `promote` with `next`. Resume: `setPaused(false)`. A failure keeps the row and shows the host's words, as today; `nothing_waiting` and `already_started` show the notice line (decision 15).
+- *Refused on another machine.* For a `next` row, `useRemoteUnavailable(appSessionId, 'session.steer.sendNow')` closes Send now while a turn runs, and `useRemoteUnavailable(appSessionId, 'session.steer.cancel')` closes Edit and Delete; each control is drawn disabled with the sentence as its title, and ↑ and Esc follow decision 14. For a session on this Mac both answer null.
+- *Esc.* While a turn runs: `firstToSend(rows)` → Send now on it; no such row → the plain stop the square makes (`holdEngineQueued: true`). A terminal session and an idle session keep today's Esc, the double Esc for the rewind picker included. *↑.* The controller calls `onTakeBack` when the box is empty and no recall is under way; the composer answers true when `newestToTake(rows)` exists (the take-back began, or was refused with its sentence) and false to let history walk.
+- *The filter.* Decision 12: `TranscriptSlot`'s prop, passed by `SessionPane`; `Transcript`'s pass-through; `withQueueTail`'s parameter, whose default is today's behaviour, so `lane-a/view/drawn-rows.ts` needs no edit.
+- *The rows of H marked M3*, with the test's lists.
+- *Tests that pin today and change:* `composer/queue/QueueList.test.tsx` (seven of its cases: the header's counts, the text buttons, "Hold until the turn ends", the inline editor, Send now as an interrupt; "keeps a row whose action the host refused…", the two "Sending…" cases and "renders nothing when nothing waits" stay); `composer/queue/entry-text.test.ts` (the one-line display); `composer/Composer.test.tsx` ("Esc while a turn runs interrupts and sends the held head now, or stops when nothing is held…"); `session/controls/lane-b.test.ts` ("passes Stop's held queue and Esc's plain interrupt through unchanged", "promotes now and next, holds, removes, edits and resumes with today's inputs", which gains the two members); `transcript/view/TranscriptSlot.test.tsx` ("attaches the session's queue itself: mounted alone, its held tail follows the queue's events", "draws no held bubble for an ask's answer held back into the queue…": each keeps its case without the prop and gains one with it); `transcript/model/derive.test.ts` ("appends held messages as dimmed tail bubbles and hides a withdrawn steer's dropped bubble, nothing else": the default stays, the new parameter gains a case). `side/card/CardThread.test.tsx`, `transcript/model/journals.test.ts`, `transcript/view/rows/User.test.tsx` and `lane-a/view/report-stream.test.ts` must stay green untouched: they are the proof that only a mount with a stack lost its bubbles.
+
+**What it does not touch.** The host (M1). The words of a waiting answer (U4b). Reordering by drag; a preview popover; a queue for a terminal session. The transcript's model beyond `withQueueTail`'s parameter. `src/endpoint/`, `src/main/lane-b/`.
+
+**What it proves.** Acceptance 4 to 7. Beyond acceptance, each with a test that holds the sequence open: a take-back whose answer is withheld keeps the editor read-only and fills the box only at the answer; the same with the composer unmounted writes the stored draft; a second ↑ during the wait does nothing; a Send now whose answer is withheld disables that row's controls and no other row's; the queue's snapshot changing under an open row menu closes nothing and acts on the row's own id.
+
+
+### M4 — The slash palette, with `/fork`
+
+**What exists at its end.** `/` lists names with an icon per kind and no headings, in the engine's order, without `__` names, "(removed)" entries or MAWS's window actions; the highlighted row, by pointer or by arrow key, shows its description, argument hint and origin or reason in a popover beside the list; a command that cannot run from here appears, greyed, only once the typed text matches it. `/fork` and `/fork <prompt>` fork the conversation. ⌘K is unchanged. Acceptance 9.
+
+**What it touches.** `composer/mentions/items.ts`, `SlashPalette.tsx`, `rank.ts`, `widgets.ts`; `src/shared/composer/slash-rank.ts`; `widgets/index.ts`, `widgets/copy.ts`, `widgets/typed.ts` and a small new component for `/fork` beside them; the tests beside each; `widgets/index.test.tsx` and `sessions/resource.test.tsx`, which render every registered panel.
+
+**Interfaces.** Consumes today's `forkSession` (`sessions/record-ops.ts`) and `useRemoteUnavailable`. Exposes nothing.
+
+**Decisions that belong here.** Decisions 17 and 18. Also:
+
+- *The order with nothing typed.* One pass over the engine's catalogue in its order: rows whose kind is "MAWS draws it" or "engine" in the order the engine reports them, then the other kinds, each in the engine's order; a panel MAWS declares that the engine does not list (`WIDGET_COMMANDS`) stands where the declaration list puts it, after the engine's rows of the first group. The catalogue is already kept in the engine's order (`src/engine-host/session-status.ts`, `stores/catalog.ts`); nothing sorts it. A terminal session's catalogue is its bridge's, in the bridge's order, as today.
+- *The shared ranker.* `createSlashRanker` takes an options argument; `ties: 'list'` breaks a tie by the order the items came in. The default is unchanged and `slash-rank.test.ts` passes as it is. Desk web (`apps/desk-web/src/views/composer/rank.ts`) is not edited.
+- *The reason's place.* A greyed row's reason is in its popover, and the row keeps `aria-disabled` and gains `aria-describedby` on the popover, so a reader of the row still gets the reason.
+- *Tests that pin today and change:* `composer/mentions/items.test.ts` ("marks origins and applies one dispatch rule…", "orders exact, prefix, substring…; ties by origin then name", "boosts a recently chosen name by one tier"; "keeps the whole list for an empty query, recently chosen first" stays, by decision 17 c); `composer/mentions/SlashPalette.test.tsx` ("enables a MAWS row once its action gains a handler…", "puts each origin under its heading…", "starts on the best match wherever its group sits…", "keeps the chosen row in view…", "applies the 40-row cap before grouping"); `widgets/index.test.tsx` (the panel list gains `fork`).
+
+**What it does not touch.** `palette/CommandPalette.tsx` (⌘K). `lane-a/conversation/catalog.ts` and desk web's palette. Aliases. The `@` menu.
+
+**What it proves.** Acceptance 9. Beyond acceptance: the popover moves nothing outside the list; a row hidden while nothing is typed is found by typing its name; `/fork` with a prompt calls `forkSession` once with that prompt as the first message, and without one with none.
+
+### M5 — The chips and their menus
+
+**What exists at its end.** The mode menu reads Auto, Manual, Accept edits, Plan, a separator, then Bypass permissions in the warning tone with its line. The model chip, the Environment card and Session info read the model's name ("Opus 5.5 High", "Opus 5.5 Fast High"). The selector has no lightning: fast mode is a row with a switch, and the effort track takes a click or a drag anywhere. ⇧⌘I, ⇧⌘E and ⇧⌘M open the model list, the effort view and the mode menu of the focused pane's composer, and a digit picks a row in the open model list and the open mode menu. Acceptance 12, 13 (its chords), 14.
+
+**What it touches.** `statusline/mode-menu.ts`, `ModeMenu.tsx`; `src/shared/sessions/model-label.ts`; `composer/frame/bindings.ts`, `ModelChip.tsx`, `ModeChip.tsx`; `session/controls/lane-a.ts`; `panel/summary/Environment.tsx`; `tools/session-info/model.ts`; `widgets/ModelSelector.tsx`, `widgets/copy.ts`; `composer/ComposerAppKeys.tsx`; `stores/composer.ts`; `src/shared/keymap/actions.ts` and its test; the tests beside each.
+
+**Interfaces.** Exposes the rows of H marked M5 and `modelName` (Interfaces I gives its words). Consumes nothing of M1 to M4.
+
+**Decisions that belong here.** Decisions 19, 20, 21 and 25. Also:
+
+- *`MODE_OPTIONS` has readers that only look a mode up* (`bindings.ts`, `lane-a.ts`, `widgets/typed.ts`, `widgets/PermissionsWidget.tsx`): the new order changes none of them. `mode-menu.ts`'s comment cites the charter's W3 sentence; it is rewritten to cite the amendment of "The record".
+- *The chip.* `FrameBindings.model` keeps `label` as the whole text (the chip's accessible name stays "Model " and then that text) and gains the parts the chip draws muted. The tooltip is the whole display name and the alias.
+- *Tests that pin today and change:* `statusline/mode-menu.test.ts` ("lists default, acceptEdits, plan, auto and bypassPermissions, the last behind a confirm"), `statusline/ModeMenu.test.tsx` ("lists the modes with the effective one checked…", which also clicks a row by its index); `src/shared/sessions/model-label.test.ts` ("joins the effort, leaves it out when there is none, and never says Default"); `composer/frame/bindings.test.ts` (the two cases that expect `'opus xhigh'`, `'opus high'`, `'opus max'`); `composer/Composer.test.tsx` (the seven cases that read the chip's name, "Model sonnet" and the like); `session/controls/lane-a.test.ts` (the two that name the model); `tools/session-info/SessionInfoView.test.tsx` (the cases that expect the raw id in "Main"); `widgets/ModelSelector.test.tsx` ("the lightning asks first…", "greys the lightning for a session on another machine…": the switch keeps its name, so they change in words only). Kept: "cycles default → acceptEdits → plan → auto → default…", "bypassPermissions asks first…" with the focus on Cancel.
+
+**What it does not touch.** `CYCLE` and ⇧Tab. The confirmation of Bypass and of fast mode. Effort as rows. `widgets/typed.ts`'s `/fast`. `settings-tab/EngineSection.tsx` and `gateway/DirectModelSheet.tsx`, which name models in lists of their own.
+
+**What it proves.** Acceptance 12, 14 and the chords of 13. Beyond acceptance: a press on the track between two dots picks the nearer; a drag commits once, at release; the keyboard on the slider works as before; a chord with no session in the focused pane does nothing; a digit on a disabled row picks nothing.
+
+### M6 — The box's helpers: the history line and Ctrl+R, the paste, the project chooser
+
+**What exists at its end.** While recalling, a muted line under the text reads "History 3/12 · ↓ to restore your draft"; Ctrl+R searches the prompt history. A paste of any length up to 20,000 characters lands as text; a larger one becomes a chip that can be opened and turned into text. In New chat, two projects of one name each show the part of their path that tells them apart, on this Mac and in the chooser of another machine's projects. Acceptance 10, 11, 13 (history).
+
+**What it touches.** `composer/editor/history.ts`, `controller.ts`, `Editor.tsx`, `paste.ts`, `nodes/Pasted.tsx`; `composer/frame/ProjectRow.tsx`; `sidebar/project-labels.ts`; `src/shared/keymap/actions.ts` and its test; `palette/CommandPalette.tsx` (one entry); the tests beside each.
+
+**Interfaces.** Exposes the row of H marked M6. Consumes F.
+
+**Decisions that belong here.** Decisions 22, 23 and 24. Also:
+
+- *The search is a state of the controller,* beside the recall's, and the two exclude each other: Ctrl+R while recalling starts a search from the recalled entry's place; an edit ends either. While searching, the keys are the search's (Desktop's handler names them); Enter takes the match and does not send.
+- *`composer.historySearch`* is dispatched, composer-scoped, bound in `Editor.tsx`, and gets its line in the palette's table of keyboard-only actions.
+- *`RemoteMenu` is also edited by U9* (it moves the menu's read to a hook). The suffix is computed over whatever list the menu holds; whoever lands second rebases.
+- *Tests that pin today and change:* `composer/editor/paste.test.ts` ("keeps a paste inline up to 1,024 characters and 10 lines, and makes an atom beyond"); `composer/frame/ProjectRow.test.tsx` ("lists the projects most recently active first, the folder beside a name it differs from…": its titles, and the row of a colliding name); `sidebar/project-labels.test.ts` gains the new export's cases. `composer/editor/history.test.ts` stays green: `historyNavigation` keeps its signature.
+
+**What it does not touch.** Files, images and PDFs. The sent bubble's collapse. The chooser's order, search and scrolling. `projectLabels`' readers in the sidebar.
+
+**What it proves.** Acceptance 10, 11 and the history half of 13. Beyond acceptance: a stored draft that holds an old chip loads as that chip and can be opened; "Show in text field" is one undo step; a search with no match shows "— no match" and leaves the draft; a composing key ends the search with the match in the box.
+
+### M7 — The `/btw` card
+
+Starts after the owner's look is recorded (Progress).
+
+**What exists at its end.** `/btw <question>` opens a small card over the bottom right of the session's pane; while the answer is awaited it reads the transcript's own waiting words, counting; the answer appears in the card; the card folds to a chip that shows the waiting line or a dot for an unseen answer, and closes. The Side pane shows side threads only. Acceptance 15.
+
+**What it touches.** `side/BtwCard.tsx` (new), `side/BtwView.tsx`, `SideTool.tsx`, `btw.ts`, `actions.ts`, `store.ts`, `copy.ts`, `BtwWidget.tsx`; `session/SessionPane.tsx`; the tests beside each.
+
+**Interfaces.** Consumes `liveThinkingLabel` (`transcript/model/copy.ts`) and the ticker the transcript uses (`transcript/view/rows/parts.tsx`). Exposes `BtwCard` as U4b will register it: a component that takes `{ appSessionId }` and draws nothing while its session's card is closed.
+
+**Decisions that belong here.** Decision 26. Also:
+
+- *What the card holds* is the child's list: the header "Side chat" with fold and close; the exchanges (the substituted-answer notice, a failure's reason with Retry, as `BtwView` draws them today); the field, "Ask a quick question…" before the first exchange and "Follow up…" after, where Enter asks and Shift+Enter breaks the line; Clear; "Continue as a side thread". On another machine "Continue as a side thread" is drawn disabled with today's sentence (`REMOTE_UNAVAILABLE['side.thread.open']`), and Clear by the helper, as today.
+- *Asking.* `askSideQuestion` opens the session's card in place of revealing the Side pane; asked from a session that is not the one shown, the card is that session's and is there when its tab is shown, and today's toast still says where the question went. A question typed in a side thread drawn in its parent's pane is still answered under the thread.
+- *Unseen.* An answer that arrives while the card is folded or its session is not shown sets the dot; opening the card clears it.
+- *Layers.* The card is above the transcript and its jump-to-latest control and below a menu, a dialog and the toasts. Every pane that mounts a composer draws its session's card above that composer: the floating session card as a pane does; the compact pill, which shows no transcript, directly above its frame. Where the pane is narrower than 344 px the card takes the pane's width less 24 px.
+- *Tests that pin today and change:* `side/SideTool.test.tsx` (the describe "the Side pane's question view": its six cases move to the card's tests or go); `side/btw.test.ts` ("answers true at once with one: the question view opens on the shown session…", "asked from a session that is not the shown one…", "answers true at once on an exited session: the view opens…"); `side/BtwView-remote.test.tsx` (both, re-pointed at the card). Kept: "a `/btw` typed in a side thread drawn in its parent's pane…", the side-question store's describe, `lane-a-btw.test.ts`, `BtwWidget.test.tsx`, the promotion tests of `actions.test.ts`, "a thread's side questions show under its thread view".
+
+**What it does not touch.** `app/Shell.tsx`, `app/slots.ts`, `panel/` (the column's foot is U4b's, on U8b's slot). The comment card and side threads (`side/card/`, U5's). The host's side-question log and its commands. Streaming.
+
+**What it proves.** Acceptance 15. Beyond acceptance, with the sequence held open: the waiting line counts while the operation is withheld and stops at the answer or the failure; closing the card while an answer is awaited loses nothing (the exchange is there at the next open, with the dot); an operation that never answers ends as the host's own timeout makes it fail, with Retry.
+
+### M8 — The e2e edits, the record, the debt rows, the last run
+
+**What exists at its end.** Every e2e spec that crosses this landing reads the new composer; the new scenes are written; the ten amendments, the charter's dated entry and X1's line are in; the tracker has its rows; the whole unit suite is green on the VM. The executor stops and hands back.
+
+**What it touches.** `e2e/composer.spec.ts`, `e2e/side.spec.ts`, `e2e/widgets.spec.ts`, `e2e/lane-a.spec.ts`, `e2e/remote.spec.ts`, `e2e/p1-live.spec.ts`, `e2e/composer-live.spec.ts` (its paste and history cases only); `docs/charter.md`, `docs/doperpowers/plans/2026-10-06-e3-side-threads.md`, `docs/tech-debt-tracker.md`; this document's Progress.
+
+**Decisions that belong here.**
+
+- *e2e edits, by spec.* `e2e/composer.spec.ts`: "the editor sends as typed…" (Enter now sends the two-line draft; ⌘Enter while idle still sends), "the composer sends, steers, stops and resumes as labelled" (the stack's rows and marks in place of the header's counts; the tooltip; the paused header), "@ and / menus with the widget union" (no group headings, no MAWS rows, the reasons in the popover), "paste and drop attach with the terminal's tag framing" (a 40-line paste is text; the chip case pastes more than 20,000 characters). `e2e/lane-a.spec.ts`: the two palette rows whose reason was the row's text. `e2e/widgets.spec.ts`: "the model chip says sonnet high…" (the chip's whole name) and the fast-mode text. `e2e/side.spec.ts`, `e2e/p1-live.spec.ts`, `e2e/remote.spec.ts`: the question view's locators move to the card; the assertion in `e2e/side.spec.ts` that the answer's text is nowhere in the main region is re-scoped to the transcript, since the card is in the main region and holds the answer. `e2e/composer-live.spec.ts`: "a 40-line paste renders as a chip…".
+- *New scenes, in `e2e/composer.spec.ts`* (C4; each runs alone on a Mac before its group, by the architect): (1) *the stack*: during a turn, Enter adds a "Next step" row and ⌘Enter an "After the turn" row; the transcript holds no dimmed bubble; a third message folds the stack to "3 queued · Next: …"; a click opens it. (2) *Send now*: on the next-step row it writes `interrupt` with `send_now` and the row's message uuid and the queue does not pause; on the after-the-turn row it promotes at `now`. If the e2e engine can answer as `u4p1-a-seeded-1.jsonl` does, the scene also reads "Ended for your message" and the moved command's row; if it cannot, it stops at the request and the hand-back says so. (3) *take back*: ↑ in the empty box returns the newest waiting message to the box and removes its row. (4) *Stop*: the square holds both messages, the stack reads "Held" under "Queue paused because you interrupted", and Resume sends the oldest.
+- *The record and the rows:* "The record", below.
+- *The last run:* Concrete Steps, 5.
+
+**What it does not touch.** The gated live specs of decision 29. `scripts/ci-gate.sh`. Any e2e run.
+
+**What it proves.** Acceptance 20 and 21, and that every earlier milestone's acceptance still holds on the final head.
+
+### The record (in the same pull request, UC-10)
+
+Each sentence is the child's file's, under "Rulings reversed", word for word, with `<date>` as decision 28 says. The places:
+
+| item | the sentence is appended to |
+|---|---|
+| l3-input-03 | `docs/charter.md` §4.2, the bullet "Queue ownership" (the paragraph that holds "there is no hold option, no ⌥Enter and no send menu"); §5.4, the paragraph that holds "⌥Enter holds the message to the turn's end"; §19, the entries "2026-10-01 (owner's notes on the composer, after the sitting)" and "2026-10-01 (architect, W10 landed)" |
+| l3-input-05 | §4.2, the same bullet |
+| l3-input-01 | §4.2, the same bullet |
+| l3-input-08 | §5.8, the end of its paragraph, after U6a's two sentences |
+| l3-input-10 | §5.1, the paragraph that ends "the picker lists auto and bypass first" |
+| l3-input-14 | §5.4, the paragraph that holds "the model chip reads `<alias> <effort>`" |
+| l3-input-06 | §5.4, the paragraph that holds "app commands then engine commands with their hints" |
+| l3-input-15 | §5.4, the paragraph that holds "the submit control's label follows state"; §19, the entry "2026-10-01 (architect, W10 landed)" |
+| l3-input-09 | §5.4, the paragraph that holds "Pasted text beyond a threshold becomes an attachment" |
+| O-20 | `docs/doperpowers/plans/2026-10-06-e3-side-threads.md`, Design, "7. `/btw`: the slash widget, the host's log and the round trip", at its end |
+
+One new entry at the end of the charter's §19: the date; "UX wave, U4, first landing (`docs/doperpowers/specs/2026-11-12-ux-wave-design.md`; the child's file `…/2026-11-12-ux-wave/U4-composer.md`)"; the ten items by id, each with the section it amends; and that the measurement of 2026-09-28 on `priority: 'now'` held on engine 2.1.283 and is superseded on 2.1.322 by probe `spikes/protocol-probe/findings-uxwave-u4-send-now.txt`.
+
+X1 (Reported, 1), a dated line appended to the X1 entry of charter §13:
+
+> Amended `<date>` (UX wave, U4), additive: `turn.ended` gains one optional field, `endedForMessage: true`, set by the engine host's normaliser when the end was caused by a message sent now (the control request `interrupt` with `send_now`, or a `user` frame at priority `now` written during a turn) and not by a Stop. A build that does not know the key drops it and reads the end as a stop. The reader of the engine's transcript file never sets it.
+
+`docs/tech-debt-tracker.md` gains three rows, in the table's five columns:
+
+- *The next-prompt suggestion* (the owner's answer of 2026-11-12, question `prompt-suggestion`: not now). Owner: "UX wave U4 · the owner's ask". Item: the engine's suggestion for the next prompt is not shown (register items l2-transcript-13, l3-input-11, l6-artifacts-11, one feature marked three ways); building it takes the engine host asking for suggestions at initialize and mapping the `prompt_suggestion` frame, which it reads and drops today; the composer already has the display (a plugin's suggestion fills the empty box's placeholder and Tab takes it), and a plugin's suggestion wins over the engine's; a probe of the frame on engine 2.1.322 comes first; it reaches a session on another machine through that machine's event stream and does not exist for a terminal session, whose terminal shows its own; a switch for it, if it is built with one, is a layout key while build F can be gone back to (UC-14). Evidence: `src/shared/wire/frames.ts` (`PromptSuggestionFrameSchema`), `src/engine-host/normalizer.ts` (the `prompt_suggestion` case), `src/renderer/src/composer/Composer.tsx` (`suggestion`). Closes when: the owner asks for it.
+- *A send-now end read from the transcript file* (Reported, 4), with the two fixtures as evidence; closes when a durable record exists or the engine's file tells the two ends apart.
+- *The held bubble's derivation* (decision 16): `heldRow`, the `pending` field and its two captions serve the side thread's card alone, and the caption "Sends when this turn ends" is still false there for a message a Stop held; owner U3 or U5; closes when the side card draws its waiting reply some other way.
+
+The register's rows, the board ticket, the tracker rows this landing closes (X-049 stays open for U4b; X-050 closes) and the tracking map are updated at landing by the sessions that keep them, not by the executor.
+
+## Concrete Steps
+
+From the worktree of branch `ux-wave/U4a`. On the VM `<paths>` are repository paths; `vmcheck.sh` is `~/.local/share/maws-ux-wave/tools/vmcheck.sh`.
+
+1. **Master first.**
+
+       git fetch origin master && git merge origin/master
+
+   Merge, never rebase or force-push. Then check what this landing stands on:
+
+       git grep -n "fixed?: true" -- src/shared/keymap/actions.ts
+       ls spikes/protocol-probe/fixtures/uxwave/u4p1-a-seeded-1.jsonl spikes/protocol-probe/findings-uxwave-u4-send-now.txt
+       ls src/shared/sessions/working-folder.ts
+
+   Each prints a match or the path: U6a, the probe's files and U8a are on master. If one prints nothing, stop and report: no milestone starts without all three. For every file this document names that the merge changed (`git diff --name-only 48619c824 HEAD`), read it again against "Today, and what each part needs" before building on it; a sibling that landed first (U3a, U9, U8b, U13a) is taken as it is (Interfaces K). Merge master again before M8's last run.
+
+2. **The checks**, on the VM. Push before every check: the VM sees only what is on origin.
+
+       git push -u origin ux-wave/U4a
+       vmcheck.sh ux-wave/U4a -- 'pnpm exec vitest run <the milestone's test files>'
+       vmcheck.sh ux-wave/U4a -- 'pnpm exec tsc --noEmit -p tsconfig.web.json --tsBuildInfoFile /dev/null'     # the renderer
+       vmcheck.sh ux-wave/U4a -- 'pnpm exec tsc --noEmit -p tsconfig.node.json --tsBuildInfoFile /dev/null'    # main, services, the engine host, shared
+       vmcheck.sh ux-wave/U4a -- 'pnpm exec eslint <the paths changed>'
+
+   The first call for the branch installs dependencies on the VM and takes a few minutes. Each call prints `vmcheck: ux-wave/U4a at <short sha>` and then the command's output; its exit status is the command's, so it is never piped into `tail` or `head` without `set -o pipefail`. At a milestone's tests-first commit the vitest run fails on the new assertions (for M1, lines such as `expected undefined to be true` for `endedForMessage`); at its head it prints `Test Files … passed` with no failure, `tsc` prints nothing and eslint prints nothing. The milestone's test files are those beside the files its "What it touches" names, and for M1 also `src/engine-host/conformance`, `src/engine-host/normalizer-fidelity.test.ts`, `src/shared/ipc/wire.test.ts`, `src/shared/ipc/wire-fingerprint.test.ts`, `test/lane-b/offer-coverage.test.ts`, `src/main/machines/link-surface.test.ts`, `src/mawsd/front.test.ts`, `src/services/command-budgets.test.ts`, `test/endpoint/by-effect.test.ts`, `src/shared/machine/address.test.ts`, `src/services/sessions/digest.test.ts`.
+
+3. **The wire's manifest** (M1, and again after any merge of master that moved `WIRE_MINOR`). With `WIRE_MINOR` raised by one in `src/shared/ipc/wire.ts`, committed and pushed, the manifest and the fingerprint are rewritten on the VM and brought back as a patch:
+
+       set -o pipefail
+       vmcheck.sh ux-wave/U4a -- 'pnpm wire:manifest > /tmp/wire.log 2>&1 || { cat /tmp/wire.log; exit 1; }; git diff -- src/shared/ipc/wire-manifest.json src/shared/ipc/wire-fingerprint.json; git checkout -- src/shared/ipc/wire-manifest.json src/shared/ipc/wire-fingerprint.json' | sed 1d > /tmp/u4a-wire.patch
+       git apply /tmp/u4a-wire.patch && git add src/shared/ipc/wire-manifest.json src/shared/ipc/wire-fingerprint.json
+
+   The patch adds the entry of `session.steer.sendNow` and changes the entries that carry `turn.ended`; it removes no entry. After the commit and a push, `vmcheck.sh ux-wave/U4a -- 'pnpm exec vitest run src/shared/ipc/wire.test.ts src/shared/ipc/wire-fingerprint.test.ts'` passes. If `wire.test.ts` calls the change breaking, a schema was narrowed: stop and report.
+
+4. **A recorded file.** This landing adds no fixture. If a milestone does add or edit a recorded file, also run `vmcheck.sh ux-wave/U4a -- 'node --test .github/scripts/maws-app-scan.test.mjs'`, and report any value that needs an entry in `.github/maws-app/gitleaks.toml`.
+
+5. **The last run** (M8), after a fresh merge of master and a push:
+
+       vmcheck.sh ux-wave/U4a -- 'pnpm typecheck'
+       vmcheck.sh ux-wave/U4a -- 'pnpm exec eslint <every path the branch changed: git diff --name-only origin/master...HEAD>'
+       vmcheck.sh ux-wave/U4a -- 'pnpm test'
+
+   `pnpm typecheck` takes about five minutes and covers the e2e specs' project. On the VM these fail on master too and are not this landing's: the desk-hub `test/deploy/{hub-reads,production-scripts,staging-scripts}.test.ts`, `src/services/machine/setup.test.ts`, `src/shared/machine/git-reads.test.ts`, `test/artifacts/portability.test.ts`; `src/renderer/src/sidebar/Sidebar.test.tsx` can fail under the whole suite's load and pass alone. Any other failure is this landing's.
+
+6. **Stop and hand back.** The executor runs no `scripts/ci-gate.sh`, opens no pull request and starts no Electron e2e. The hand-back says: what exists, with the command and result that showed it; what is not verified (Acceptance 16; every e2e spec M8 edited or added, by file and scene, written and typechecked but not run, with its group: `e2e:composer` and `e2e:c7` for `e2e/composer.spec.ts`, `e2e:side`, `e2e:widgets`, `e2e:lane-a`, `e2e:remote`, `e2e:p1-live`; and, unedited but crossed by M4's popover through `e2e/support/palette-geometry.ts`, `e2e:layout` for `e2e/shell.spec.ts` and the default group for `e2e/sessions.spec.ts`); whether scene 2 of M8 reads the turn's end or stops at the request; the decisions made; anything that contradicts the spec; and the residue. Residue known at authoring: Reported 4, 5, 7 and 16; the three stale live specs of decision 29; the held bubble's derivation (decision 16); and that `TESTED_ENGINE_VERSION` stays `2.1.312` while the probe ran `2.1.322`.
+
+7. **The architect's, after the hand-back.** "Proof that an executor does not run", in its order.
+
+## Proof that an executor does not run
+
+| # | the proof | when | what it needs | what comes back |
+|---|---|---|---|---|
+| 1 | **The owner's look** at a drawn example (C2; the root, "Looks the owner is asked for before a landing") | before M7 starts, and before the pull request in any case | the example of "The owner's look", drawn by this document's author with invented content (UC-11), put to the owner by the architect | the owner's answers, written into the Decision Log; a changed glyph changes `composer/submit/glyphs.tsx` alone, a changed icon of the stack its one file, a changed place for the card decision 26 (a) alone |
+| 2 | **Class 1a** on GitHub Actions | on the head the executor hands back, and again on the final head if the review changed the branch | `scripts/ci-gate.sh "$PWD" --gates static,unit,probes --label u4a`, started in the background; it waits for its run, up to half an hour | each job's conclusion and the run's URL; the pull request's body names the run on the final head |
+| 3 | **The branch's review** | once class 1a is green | the xhigh panel of `doperpowers:review-code` (Decision Log), given the base sha, the head sha and the worktree | its verdict and findings; the findings are settled by a fix wave, never inline |
+| 4 | **The new and reworked e2e scenes alone, then their groups** (C4; UC-10) | after the review's findings are settled | a Mac under the load rule; M8's four new scenes one at a time, then the groups step 6 names | each scene and group named as run and green; a skipped scene is not evidence |
+| 5 | **Acceptance 16** on a live engine | with 4 | a Mac, a scratch config home, engine 2.1.322, and for scene (f) a second machine with a session MAWS runs there, on this build and, if one is at hand, on build F | each scene's outcome, with (a) to (e) recorded as findings: they are the cases probe P1 did not run (Reported, 6) and the limit of Reported, 4 |
+| 6 | **C1, a 20,000-character paste** | with 5 | the owner's machines, or an agent on the mini: 20,000 characters pasted as text, then typing in the box | "typing stays responsive", or the largest size at which it does: then `classifyText`'s one number drops to it and nothing else changes |
+| 7 | **The owner's sitting** on the wave's build (the root's Parent-level acceptance, 2) | at the wave's recomposition | the scene script's composer scenes, from Acceptance 16 | each scene called a clear improvement, or reworked |
+
+No cross-build run is needed for this landing by itself: it stores nothing new (Interfaces J). If a run with F as the peer is made for a sibling, one scene is worth adding to it: F's window on a session of this build whose turn a send-now ended draws "You stopped" and no gap row.
+
+## The pull request
+
+The architect's to open, after class 1a. Its body opens with the root's path, "U4, first landing (U4a)" and the parent pin `06727e32a`; names its class 1a run, the panel's verdict and the residue of step 6; lists the sixteen points of "Reported to the architect" with their rulings; and says that it carries the dated amendments of the ten rulings of "The record", the X1 line, and the three tracker rows.
+
+## Interfaces and Dependencies
+
+What a later milestone or a sibling codes against is defined here, once. Names and signatures in A to G are fixed; how each is built is its milestone's.
+
+### A. Send now in the engine host (M1)
+
+The engine's control request and its answer, as probe P1 recorded them (`spikes/protocol-probe/fixtures/uxwave/u4p1-a-seeded-1.jsonl`, seq 39 and 40):
+
+    // src/shared/wire/control.ts
+    export interface InterruptRequest { reason?: string; cancel_queued?: boolean; send_now?: boolean; message_uuid?: string }
+    export const InterruptResponseSchema = z.looseObject({ still_queued: z.array(z.string()), cancelled: z.array(z.string()).optional(), send_now: z.string().optional() });
+
+The host command, one round trip, bounded as `session.steer.cancel` is:
+
+    // src/shared/ipc/schema/session.ts, in a block of its own, as P2-C's two commands are
+    'session.steer.sendNow': host(input({ messageUuid: MessageUuidSchema }), z.strictObject({ outcome: z.enum(['delivering', 'stopped', 'nothing_waiting']) })),
+
+It is named in `src/shared/ipc/names/session.ts`, graded `converse` in `src/shared/ipc/grades/session.ts` (decision 4), given the deadline shape `bounded` and handled in `src/engine-host/ipc.ts`, and declared in `REMOTE_UNAVAILABLE` (Interfaces K).
+
+    // src/engine-host/queue.ts
+    async sendNow(messageUuid: MessageUuid): Promise<{ outcome: 'delivering' | 'stopped' | 'nothing_waiting' }>;
+    // MessageQueueDeps gains: sendNow: (messageUuid: MessageUuid) => Promise<string | undefined>;   // the engine's `send_now`, undefined when the answer has none
+    // src/engine-host/session.ts
+    async sendNow(messageUuid: MessageUuid): Promise<{ outcome: 'delivering' | 'stopped' | 'nothing_waiting' }>;
+
+| the message, when the command arrives | answer | written to the engine |
+|---|---|---|
+| a hold, a Stop or a cancel is withdrawing it (`withdrawing`) | rejects, "This message is already being withdrawn" | nothing |
+| not a pending steer: the engine started or dropped it, or it never was one | `nothing_waiting` | nothing |
+| a pending steer, the process not ready | rejects, "the session is not ready" | nothing |
+| a pending steer | the engine's answer, read as below | `interrupt { send_now: true, message_uuid }` |
+
+The engine's `send_now` is read so: `stopped` and `nothing_waiting` as themselves; an answer with no `send_now` key as `stopped` (decision 5); any other string as `delivering`. The command pauses nothing, holds nothing, removes nothing from the pending steers (the engine's `started` for the message does, as today), and does not mark an interrupt as owed (the mark of `Session.interrupt` exists so that a Stop survives a host crash; a send-now that is lost leaves the message waiting, which is the safe side). A timeout is the bounded command's (`timeout`, "interrupt unanswered after … s") and leaves everything as it was.
+
+*Who may call it, and on what.* On this Mac the window calls it for its own session; over the machine link nobody can, in this landing: the endpoint has no row for it (a caller is answered `not-offered`), main refuses it before any round trip, and the control is disabled by the declared row. The check that matters is where the act runs: the queue acts only on a uuid that is one of this session's own pending steers, by its own list, so a call can hasten nothing but a message that session already holds, and can name no other session's. What a caller on another machine can read is unchanged: the queue's state through `session.queue.list`, and the events.
+
+Sending now a message that waits after the turn, or one a Stop held, is today's `session.queue.promote` with `priority: 'now'`, unchanged: P1 showed that a `now` frame does what the request does (`u4p1-f-seeded-1.jsonl` seq 38 to 48, `u4p1-f-text-seeded-1.jsonl` seq 96 to 105, `u4p1-f-agent-seeded-1.jsonl` seq 46 to 53).
+
+### B. X1: the end a sent-now message caused (M1)
+
+    // src/shared/graph/events.ts, the member 'turn.ended' gains
+    endedForMessage: z.literal(true).optional(),
+
+The normaliser (`src/engine-host/normalizer.ts`) is the one writer. Its state gains `sentNow: Set<MessageUuid>`, empty at the start of a launch, a plain value that the page cursors' copies of the state carry. The journal's own rows are the host's record of each send-now, so no new row is journaled:
+
+| row | effect on `sentNow` |
+|---|---|
+| out, `control_request` with `subtype: 'interrupt'` and `send_now: true` | adds its `message_uuid` |
+| out, `user` frame with `priority: 'now'`, written while a turn is open or an earlier prompt has not started | adds its `uuid` |
+| in, the `control_response` to such an interrupt, an error or `send_now: 'nothing_waiting'` | removes that uuid |
+| in, `command_lifecycle` `started` naming a member while a turn is open (the message was read in the same turn; `u4p1-b-seeded-1.jsonl` seq 47 to 54) | removes it |
+| out, `control_request` with `subtype: 'interrupt'` and no `send_now` (a Stop, from any caller) | empties it |
+| in, a main-lane `result` that is not an echo receipt | the event carries `endedForMessage: true` when the set is not empty and `terminal_reason` starts with `aborted`; then the set is emptied |
+
+The cases, each a test over its fixture (the event at the `result`'s seq):
+
+| fixture, `spikes/protocol-probe/fixtures/uxwave/` | the `result` | `endedForMessage` |
+|---|---|---|
+| `u4p1-a-seeded-1.jsonl` (send-now behind a command) | seq 46: `success`, `aborted_tools` | true |
+| `u4p1-c-seeded-1.jsonl` (send-now while the model writes) | seq 134: `error_during_execution`, `aborted_streaming` | true |
+| `u4p1-d-seeded-1.jsonl` (a permission request pending) | seq 45: `success`, `aborted_tools` | true |
+| `u4p1-f-seeded-1.jsonl`, `u4p1-f-text-seeded-1.jsonl` (a `now` frame) | seq 46; seq 103 | true |
+| `u4p1-b-seeded-1.jsonl`, `u4p1-f-agent-seeded-1.jsonl` (read in the same turn) | the turn's own end | absent |
+| `u4p1-c0-seeded-1.jsonl`, `u4p1-s0-seeded-1.jsonl` (a Stop) | seq 140; seq 43 | absent |
+| `u4p1-h-seeded-2.jsonl` (a Stop after a send-now) | seq 45, the send-now's end; seq 61, the Stop's | true; absent |
+
+Three readers, and no other change to a reader of `turn.ended`:
+
+- *The turn's line* (`src/renderer/src/transcript/model/`; an insertion in the transcript's files, Interfaces K). The divider row's `cause` gains `'message'`: a closed turn whose state is `stopped` and whose `turn.ended` carries the field reads **"Ended for your message after 13s"** in place of "You stopped after 13s", with the same counts after it. A turn the interrupt marker closed before its result arrived (`closedBy: 'stopped'`) takes the cause when the result lands.
+- *The session's digest* (`src/services/sessions/digest.ts`). A marked end leaves `lastTurnEndedAt` where it was; the phase goes to `idle` as for any end that is no failure. Main's notifier raises "Turn finished" only when `lastTurnEndedAt` moves, so the cut turn raises none and the message's own turn, when it ends, raises one. `src/main/attention/notifier.ts` (U1's) is not edited.
+- *The host's queue.* Nothing: `Session.sendNow` never pauses, and at the cut turn's end the sent message is a prompt written and not started, which already keeps the queue from releasing its head (`turnOpen` in `src/engine-host/session.ts`); the head goes when the message's own turn ends.
+
+A build that does not know the key drops it and keeps the event (`readTolerant`, `src/shared/ipc/tolerant.ts`), so such a window reads the end as a stop, as it does today. The reader of the engine's transcript file (`src/engine-host/fs/backfill.ts`) never sets the field: that file holds no terminal reason (Reported, 4).
+
+### C. The command's row (M1)
+
+A shell call whose result the engine marks `backgroundedToDeliverMessage: true` in its structured result (`u4p1-a-seeded-1.jsonl` seq 45) reads **"Moved `<command>` to the background after 13s"**: one field on the shell input of `cellLabel` (`transcript/model/copy.ts`) and its one reader in `transcript/model/cells.ts`. Without it the row reads "Ran `<command>` in 13s" the moment its turn closes, while the command is still running. A foreground subagent call the engine moved (`u4p1-b-seeded-1.jsonl` seq 51, 52) needs nothing: its result is the engine's ordinary "Async agent launched" and its row is a running agent's.
+
+### D. The session's controls port (M2, M3)
+
+    // src/renderer/src/composer/submit/send-human-prompt.ts
+    export interface HumanPromptOptions { /* as today, and */ when?: 'after' }   // keep it for after the running turn
+
+    // src/renderer/src/session/controls/types.ts
+    export interface QueueControls { /* promote, hold, remove, edit, setPaused as today, and */
+      cancelSteer(args: Args<'session.steer.cancel'>): Promise<CommandResult<'session.steer.cancel'>>;
+      sendNow(args: Args<'session.steer.sendNow'>): Promise<CommandResult<'session.steer.sendNow'>>;
+    }
+
+`when: 'after'`, by route:
+
+| route | no turn runs | a turn runs |
+|---|---|---|
+| a session MAWS runs, here (`sendHumanPrompt`) and on another machine (`sendWithoutAcquiring`) | as without it | `session.send`, never a steer: the host's queue holds it (`disposition: 'queued'`) |
+| a terminal session (`lane-a.ts`) | as without it | `{ disposition: 'refused', started: false, reason: TERMINAL_KEEPS_NO_QUEUE }`, nothing sent; the caller shows the reason through its existing refusal notice, with no Retry |
+
+A caller that omits `when` behaves as today. Lane A's `queue()` stays null.
+
+### E. The submit decision (M2)
+
+    // src/renderer/src/composer/submit/submit-state.ts
+    export interface SubmitDecision { /* primary, label, enabled, reason, detail, steer as today, and */
+      glyph: 'arrow' | 'square' | 'queue' | 'play' | 'spinner';
+      queues: boolean;   // ⌘Enter differs from Enter now: a turn runs, the mode is send, and the session keeps MAWS's queue
+    }
+
+`glyph` follows the child's table (l3-input-15): `square` for `stop` and `end`; `play` for `resume`; `spinner` where the label is "Starting…" or "Re-attaching…"; `queue` for a `send` while a turn runs and the box has text (a steer, a remote send that names documents, and a terminal session's send during its turn); `arrow` otherwise. `label` stays the control's accessible name, word for word as today. The table stays the one place the button is decided: `SubmitControl` draws `glyph` and reads nothing else of the session.
+
+### F. The editor's handle and inputs (M2, M3, M6)
+
+    // src/renderer/src/composer/editor/controller.ts
+    export interface EditorHandle { /* as today, and */
+      submit(when?: 'after'): void;
+      load(doc: ComposerDoc): boolean;   // an empty box takes the document, the caret at its end; false when the box holds text, is disabled, or a submission is in flight
+    }
+    export interface ControllerInputs { /* as today, and */
+      onSubmit?(s: Serialized, when?: 'after'): Promise<boolean>;
+      onTakeBack?(): boolean;            // ↑ in an empty box, not recalling: true when the composer took the key (M3)
+      placeholder?: string | null;       // the empty box's words while a turn runs; a plugin's suggestion still wins
+    }
+
+### G. The stack's model (M3)
+
+    // src/renderer/src/composer/queue/stack.ts (new), pure
+    export type StackRow =
+      | { kind: 'next'; key: string; messageUuid: MessageUuid; content: SendContent; createdAt: string; answer: boolean }
+      | { kind: 'after' | 'held'; key: string; queueId: string; content: SendContent; createdAt: string; answer: boolean }
+      | { kind: 'uncertain' | 'sending'; key: string; queueId: string; content: SendContent; createdAt: string };
+    export function stackRows(queue: SessionQueue, lasting: ReadonlySet<string>): StackRow[];
+    export function firstToSend(rows: readonly StackRow[]): StackRow | null;    // Esc: the first row of kind next, after or held
+    export function newestToTake(rows: readonly StackRow[]): StackRow | null;   // ↑: the newest by `createdAt` of kind next, after or held that is no answer
+
+`stackRows` orders as the child's file says: the pending steers in write order, then the queue's entries in their order. An entry `queued` is `held` while the queue is paused and `after` otherwise; `uncertain` and a submission that has lasted 300 ms (`lasting`) keep today's rows. `answer` is true when the content is an answer's envelope, by today's `parseAskSteer` (`src/shared/maws/ask.ts`). The row's two lines of text are `entryDisplay`'s, with line breaks kept.
+
+
+### H. The action rows, and UC-6's list (M2, M3, M5, M6)
+
+Added to `ACTIONS` (`src/shared/keymap/actions.ts`) beside the composer's rows, in this order where two share a chord. All are `sink: 'renderer'`, `menu: null`.
+
+| id | title | chord | scope | | milestone |
+|---|---|---|---|---|---|
+| `composer.submit` | Send | `Enter` | composer | `fixed` | M2 |
+| `composer.newLine` | New line | `Shift+Enter` | composer | `fixed` | M2 |
+| `composer.newLineOption` | New line | `Alt+Enter` | composer | `fixed` | M2 |
+| `composer.queue` | Queue for after the turn | `Cmd+Enter` | composer | | M2 |
+| `composer.send` (exists) | Send (reply fields), was "Send (multi-line editor)" | `Cmd+Enter` | composer | | M2 |
+| `composer.takeBack` | Take back the newest waiting message | `Up` | composer | `fixed` | M3 |
+| `composer.sendNowOrStop` | Send the first waiting message now, or stop | `Escape` | composer | `fixed` | M3 |
+| `composer.modelMenu` | Model menu | `Cmd+Shift+I` | app | | M5 |
+| `composer.effortMenu` | Effort | `Cmd+Shift+E` | app | | M5 |
+| `composer.modeMenu` | Permission mode menu | `Cmd+Shift+M` | app | | M5 |
+| `composer.historySearch` | Search prompt history | `Ctrl+R` | composer | | M6 |
+
+A `fixed` row is listed in the shortcut sheet and in Settings ▸ Keyboard under "In the composer" and is otherwise absent (U6a's document, decision 7): the dispatcher never runs it and the palette does not list it; the editor handles the key. The five dispatched rows are not rebindable while build F can be gone back to, by U6a's `isRebindable`, with no code here. No chord of a menu role is taken (`src/shared/keymap/menu-roles.ts`: ⌘M is Minimize, ⌥⌘I the developer tools, ⇧⌘R Force Reload).
+
+U6a's test holds UC-6's table once (`src/shared/keymap/actions.test.ts`; U6a's document, Interfaces E, which leaves the ids of U4's fixed rows to this document). This landing amends it:
+
+    // added to WAVE_DEFAULTS
+    'composer.submit': 'Enter', 'composer.newLine': 'Shift+Enter', 'composer.newLineOption': 'Alt+Enter',
+    'composer.takeBack': 'Up', 'composer.sendNowOrStop': 'Escape',
+    // added to LANDED, each with the milestone that adds its row
+    'composer.submit', 'composer.newLine', 'composer.newLineOption', 'composer.queue', 'composer.takeBack', 'composer.sendNowOrStop',
+    'composer.modelMenu', 'composer.effortMenu', 'composer.modeMenu', 'composer.historySearch',
+
+`WAVE_DEFAULTS` already holds `composer.queue`, `composer.send`, the three menu rows and `composer.historySearch` at these chords.
+
+### I. Words
+
+Each is a decision; a string not listed is the executor's, in the manner of its neighbours. Where a constant is named, the string lives there once.
+
+The model's name has one source, which `panel/summary/Environment.tsx` (U8's) and Session info call as the chip does (decision 19):
+
+    // src/shared/sessions/model-label.ts
+    export interface ModelName { name: string; fast: boolean; effort: string | null; text: string; display: string; alias: string | null }
+    export function modelName(id: string | null, rows: readonly Row[], state?: { effort?: string | null; fast?: boolean }): ModelName | null;
+
+`text` is the parts joined by a space ("Opus 5.5 Fast High"); `display` is the row's whole display name; the answer is null when the model is not known, and the chip then reads "Model", as today.
+
+| where | the words |
+|---|---|
+| the empty box while a turn runs, a session MAWS runs (`PLACEHOLDER_BOTH`) | Enter to send, ⌘Enter to queue for later |
+| the same on a terminal session (`PLACEHOLDER_ENTER`) | Enter to send |
+| ⌘Enter on a terminal session during a turn (`TERMINAL_KEEPS_NO_QUEUE`) | A terminal session takes a message at its next step; MAWS cannot hold one for after the turn |
+| the button's tooltips | "Send (Enter)"; the reason, when it is disabled for one; "Stop the running turn (⌘.)"; "Sends at the next step (Enter) · ⌘Enter queues for later" (on a terminal session "Sends at the next step (Enter)"); "Resume the paused queue"; for `!` and `#` and a starting session, today's |
+| a row's mark | Next step · After the turn · Held |
+| the folded stack | N queued · Next: `<the first row's text>` |
+| a row's controls | "Send now" and "Delete" (icon buttons, these their names); "More" (the menu's name), holding "Edit" and "Queue for after the turn" or "Send at the next step" |
+| Send now's title | while a turn runs, "Sends this now; what the agent is running keeps running"; otherwise "Sends this now" |
+| the stack's notice line | "The agent has already read this message"; "The box holds a draft"; a refused act's sentence |
+| the editor while a take-back is awaited | Taking the message back… |
+| the paused header | today's `PAUSED_COPY`, then Resume |
+| the turn's line | Ended for your message after `<duration>` |
+| the moved command's row | Moved \``<command>`\` to the background after `<duration>` |
+| `REMOTE_UNAVAILABLE['session.steer.sendNow']` | Not on another machine yet: sending a waiting message now while the agent works |
+| the capture (`KEYBOARD.fixedKey(title)`) | `<title>` keeps this key |
+| the mode menu's Bypass row | "Bypass permissions", with today's line, "Every tool runs without asking" |
+| the model's name | `<name>`, then muted "Fast" while fast mode is on, then the effort in `EFFORT_WORDS`' words: "Opus 5.5 High", "Opus 5.5 Fast High", "Fable 5.1 Extra high", "astra High", "Haiku"; the chip's accessible name is "Model " and that text; the tooltip is the whole display name and the alias |
+| the fast-mode row | "Fast mode"; its muted line: today's pending word, today's reason, or "On" or "Off" |
+| the history line | History 3/12 · ↓ to restore your draft |
+| the search line | Search history: `<typed>` — match 2 of 40 · Search history: `<typed>` — no match |
+| a chip's popover | its text, and "Show in text field" |
+| the card | header "Side chat"; the field "Ask a quick question…", then "Follow up…"; "Clear"; "Continue as a side thread"; the folded chip "Side chat"; the waiting line `liveThinkingLabel(elapsed, null)` |
+
+### J. What is stored or sent, against build F (UC-14)
+
+Build F is `f1852de3a`. This landing adds no key to the layout or to either settings file, so it adds no row and no scene to the cross-build coverage table U13a's M5 holds.
+
+| what | where | what this build writes | what F does with it | what this build does with F's | this build, then F, then this build |
+|---|---|---|---|---|---|
+| the stored queue (`QueueStateSchema`, strict) | the session's state file, through `SessionStateStore` | the same shape as today: entries, the pause and its reason, pending steers, withdrawn uuids. A ⌘Enter is an ordinary queued entry; a send-now changes nothing stored | reads it as its own | reads it as its own | the queue as it stood; nothing dropped |
+| the journal | the launch's journal files | an `out` row whose `interrupt` request holds `send_now` and `message_uuid`; no new `meta` row | the request's schema is loose (`ControlRequestFrameSchema`, the same at F) and F's normaliser keeps only its subtype: the row reads as an interrupt, and a turn it ended reads "You stopped" | F's journals hold no such row: every aborted end is a stop | each launch's journal reads by the build that reads it; nothing is rewritten |
+| `turn.ended.endedForMessage` | X1 events: engine host to main to the window; another machine's host to this Mac's main (`src/main/lane-b/remote-session.ts`, `readTolerant`) | the optional key on a marked end | drops the key and keeps the event (Acceptance 19); the end reads "You stopped" | F's events never carry it: every aborted end is a stop | nothing is stored |
+| `session.steer.sendNow` | host IPC; declared unavailable over the machine link | sent only for a session on this Mac | F's host does not know the command; no route from this build reaches F's host with it: over the link the control is disabled and main refuses it before any round trip | F never sends it | nothing is stored |
+| `session.send` for ⌘Enter, `session.queue.promote` at `now`, `session.steer.cancel` | host IPC and the offered commands of today | the same inputs as today | F's host queues, promotes and cancels as today | the same | nothing is stored |
+| the wire's minor | `src/shared/ipc/wire.ts`, the manifest, the fingerprint | one higher (M1) | a peer of the same major reads the minor as "knows more"; F is at 33 and master already at 36 | the same | nothing is stored |
+| a draft that holds a long pasted paragraph as text | the drafts store (`session.drafts.set`; no schema for the document, no bound on its text) | text where today's build would have stored a chip | loads it as text and sends it as typed text, with no pasted framing | F's stored chips load as chips, which can be opened and turned into text | a draft written by either build opens in the other |
+| a prompt-history row | `<userData>/prompt-history.jsonl` | the same shape; a long paste sent as text has no `pastedContents` entry | recalls it as text | recalls F's chips as chips | nothing is rewritten |
+| the stack's fold, the card's state, the palette's recent names, the history search | the window's memory | nothing | nothing | nothing | gone at a reload, by design |
+| the ten new action ids | `settings.keymap` | nothing: none is rebindable (U6a's guard), and the schema's keys are build F's ids | reads the file as before | a rebinding F stored on ⌘Enter for another action leaves `composer.queue` unbound (Reported, 16) | the file is never written with a new id |
+
+### K. Insertions in files other children own (UC-8)
+
+| file | owner | the insertion | milestone |
+|---|---|---|---|
+| `src/shared/keymap/actions.ts`, `actions.test.ts` | U6 | the rows of H; the test's two lists | M2, M3, M5, M6 |
+| `palette/CommandPalette.tsx` | U6 | two entries in its table of keyboard-only actions (`composer.queue`, `composer.historySearch`) | M2, M6 |
+| `settings-tab/keymap.ts` | U6 | `conflictOf`: one condition (decision 11) | M2 |
+| `settings-tab/copy.ts` | U11 | one string, `KEYBOARD.fixedKey` | M2 |
+| `widgets/ModelSelector.tsx`, `widgets/copy.ts`, `widgets/index.ts`, `widgets/typed.ts` | U11 by UC-8's table (Reported, 9) | O-32 and the digits; `/fork`'s registration | M4, M5 |
+| `sidebar/project-labels.ts` | U7 | one export, `projectSuffixes` | M6 |
+| `panel/summary/Environment.tsx` | U8 | one call, to `modelName` | M5 |
+| `transcript/view/TranscriptSlot.tsx`, `transcript/view/Transcript.tsx` | UC-3 (U3) | the prop `waiting`, passed through | M3 |
+| `transcript/model/derive.ts` | UC-3 | `withQueueTail`'s parameter (M3); the divider's cause (M1) | M1, M3 |
+| `transcript/model/rows.ts`, `schema.ts`, `copy.ts`, `cells.ts` | UC-3 (the turn's line and the cells: U2) | `cause: 'message'` and its words; the moved command's label | M1 |
+| `session/SessionPane.tsx` | U1 | the slot's prop (M3); the card's mount and the positioned box it needs (M7) | M3, M7 |
+| `side/` (`BtwView.tsx`, `SideTool.tsx`, `btw.ts`, `actions.ts`, `store.ts`, `copy.ts`, `BtwWidget.tsx`, the new `BtwCard.tsx`) | U5; the `/btw` files are U4's by UC-8 | the card; the Side pane without its question view | M7 |
+| `src/shared/ipc/remote-unavailable.ts` | U9 | one row, `session.steer.sendNow` | M1 |
+| `session/controls/types.ts`, `lane-a.ts`, `lane-b.ts`; `stores/composer.ts`; `statusline/`; `tools/session-info/model.ts`; `src/services/sessions/digest.ts`; `src/engine-host/`; `src/shared/wire/`, `src/shared/ipc/` (names, schema, grades, wire); `src/shared/graph/events.ts`; `src/shared/sessions/model-label.ts`; `src/shared/composer/slash-rank.ts` | none in UC-8's table | as each milestone says | M1 to M6 |
+
+U6a and U8a are on master before this branch is built. U3a, U9, U8b and U13a land in parallel: where one of them has edited a file of this table first, the insertion is made on its version (U9 edits `composer/Composer.tsx`, `composer/submit/submit-state.ts`, `composer/frame/ProjectRow.tsx` and `composer/InlineEdit.tsx`, which are this child's files; U8a edited one line each of `composer/Composer.tsx`, `session/controls/lane-a.ts` and `TranscriptSlot.tsx`).
+
+### L. What a sibling reads from this landing
+
+| sibling | reads |
+|---|---|
+| U4b | `QueueControls.sendNow` and the declared row it replaces with its offer; the stack's refusals, which already read U9's helper; `StackRow.answer`, whose row it rewords with U3a's `readAnswerEnvelope`; `BtwCard`, which it registers in U8b's `sessionCardFoot`; the `/fork` row's greying, which it moves to `useForkUnavailable` |
+| U1 | the composer's keys as rows (`composer.submit`, `composer.sendNowOrStop`, `composer.queue`), ahead of which its permission keys act under their guards (the root's Decision Log, "Settled between sections", 2); `TranscriptSlot`'s `waiting` prop, which its placement keeps passing |
+| U2 | `turn.ended.endedForMessage` and the divider's `cause: 'message'`, which its rewrite of the turn's line keeps wording; the shell cell's `moved` input |
+| U3b | the dead held-bubble derivation of decision 16 |
+| U6b | the fixed rows in the sheet and Settings; `KEYBOARD.fixedKey` |
+| U9 | the one declared row; `session.steer.cancel` now has a caller in the window (`QueueControls.cancelSteer`) |
+
+### M. What this landing consumes
+
+- **U6a** (`docs/doperpowers/plans/2026-11-12-ux-wave-U6a-keymap.md`, branch `ux-wave/U6a`): `ActionSpec.fixed`, the row rules, `isRebindable`, `effectiveChord`'s rules, `conflictOf` and `KEYBOARD` as they stand there, the test's `WAVE_DEFAULTS` and `LANDED`, and Interfaces G ("for a child that adds a key after this landing").
+- **U8a** (`…-U8a-working-folder.md`): nothing by name. It moved the composer's fallback folder onto `workingFolder(record)`; this landing leaves that line alone.
+- **U9** (`…-U9-other-machines.md`): `useRemoteUnavailable(appSessionId, ...commands)` and `REMOTE_UNAVAILABLE`, as they are on master today and as U9 keeps them (its Interfaces 3 and 4: the signatures do not change). Nothing U9 adds is called here: `useRemoteUnavailableAs`, `useForkUnavailable`, `ACT_WORDS` and the four-argument `forkSession` are U4b's.
+- **U3a** (`…-U3a-arrivals.md`): nothing. `readAnswerEnvelope` is U4b's; this landing recognises an answer by today's `parseAskSteer`. If U3a has landed, its loader for the `uxwave/` fixtures is reused.
+- **U8b** (`…-U8b-column-and-tabs.md`): nothing. `sessionCardFoot` and `useCardColumnShown()` are U4b's.
+- **U13a** (`…-U13a-one-strip.md`): nothing; no row is added to its coverage table (J).
+- **The probe:** `spikes/protocol-probe/findings-uxwave-u4-send-now.txt` and `spikes/protocol-probe/fixtures/uxwave/u4p1-*.jsonl`, from master.
+- **Code reused, not rewritten:** `MessageQueue.cancelSteer`, `hold`, `promote`, `setPaused` (`src/engine-host/queue.ts`); `entryDisplay`, `entryDoc` (`composer/queue/entry-text.ts`); `parseAskSteer` (`src/shared/maws/ask.ts`); `forkSession` (`sessions/record-ops.ts`); `liveThinkingLabel` (`transcript/model/copy.ts`); `defaultTarget`, `rowFor`, `EFFORT_WORDS` (`src/shared/sessions/model-label.ts`); `readTolerant` (`src/shared/ipc/tolerant.ts`); `scriptedSession`, `handshakeResponder` (`src/engine-host/conformance/session-harness.ts`).
+
+## The owner's look: what the drawn example must show
+
+One page, light theme first (the default) and the same in dark, with invented names, paths and text (UC-11). It is a drawing of states, not a mock of the whole window: each state at its real size and once enlarged, with its name beside it.
+
+**The send control.** The seven states of the child's table, side by side in the composer's corner as they will sit: the arrow on the accent fill; the same greyed; the square on the strong fill; the queue mark (the arrow under a short bar, outlined); the play triangle; the spinner; the arrow for `!` and `#`. Beside each, its tooltip. One strip shows a turn from start to end: arrow, square as the box empties, queue mark as text is typed, square again, arrow.
+
+**The stack.** Above the composer frame: one row; two rows with no header; three or more folded to "3 queued · Next: …" and the same opened, scrolling past five; a row on hover with Send now, the bin and the "…" menu open on each kind (Edit and "Queue for after the turn"; Edit and "Send at the next step"); a row opened to its whole text; the paused stack, "Queue paused because you interrupted" with Resume and every row "Held"; the row that may not have been delivered; an answer's row in today's wording, with Send now alone; the notice line; and, for a session on another machine, the three controls drawn refused with their sentence.
+
+**Around the box.** The empty box during a turn ("Enter to send, ⌘Enter to queue for later"). The slash palette: names with their five kinds of icon, the popover beside a highlighted row, a greyed row with its reason, `/fork [prompt]`. The mode menu with Bypass apart. The model chip as "Opus 5.5 High" and "Opus 5.5 Fast High", and its tooltip. The selector's effort view with the fast-mode row and the 28 px track. The history line and the search line under the text. A paste chip with its popover. The chooser with two projects of one name.
+
+**The `/btw` card, at its interim place.** With the card column shown: the card over the transcript's bottom right corner, to the left of the column, the column's foot empty, and a note that U4b moves it there. With the column hidden: the same card at the pane's corner. In both, the composer and the jump-to-latest control uncovered. The card waiting ("Thinking · 8s", "Still thinking · 12s"), answered, with a failure and Retry; folded to its chip, idle, waiting and with the dot; inside the floating session card. And the turn's line "Ended for your message after 13s" with the command's row "Moved `npm test` to the background after 13s" above it.
+
+**What the owner's words do not settle,** and the look is asked to:
+
+1. The queue mark's shape. The owner asked for "other markers that indicate that message will be queued"; the arrow under a bar is the section's. The drawing shows it beside two others (a clock; two stacked bars) so that one is chosen and not merely accepted.
+2. Fill and weight: the queue mark outlined against the filled arrow; the square on the strong fill and not the accent; the play triangle and the spinner.
+3. The stack's small icons (Send now, the bin, "…") and where a row's mark sits; the folded line's wording.
+4. The palette's five icons.
+5. The card: its place 56 px above the transcript's bottom, clear of the jump-to-latest control, and its width; the header "Side chat" and the field's two placeholders, which are new words; the folded chip and where its dot sits.
+6. The two sentences of Reported, 3 as they read in place: "Ended for your message after 13s" and "Moved … to the background after 13s".
+7. Bypass's warning mark and tone, and the separator above it; "Fast" muted in the chip.
+
+## Surprises & Discoveries
+
+Found while checking the section against the code, before any building. The points that need a ruling are under "Reported to the architect"; these shaped the plan and need none.
+
+1. Observation: the journal already is the host's record of every send-now, and the normaliser already reads the rows the host writes.
+   Evidence: `pushOut` in `src/engine-host/normalizer.ts` keeps each `control_request`'s subtype and payload in `state.outbound` until its answer; `u4p1-a-seeded-1.jsonl` seq 39 is such a row. Hence decision 2: no new journal row and nothing stored.
+2. Observation: the probe wrote every session's first prompt at priority `now`, which the product never does at idle (the queue's ordinary submission writes no priority).
+   Evidence: seq 12 of each `u4p1-*` fixture; `write` in `src/engine-host/queue.ts`. Hence the rule of Interfaces B counts a `now` frame only while a turn is open or an earlier prompt has not started; without that condition every fixture's first prompt would set the mark.
+3. Observation: the queue already holds its head while a prompt the host wrote has not started, so a sent-now message runs before anything that waits after the turn with no change to the release rule.
+   Evidence: `turnOpen` in `src/engine-host/session.ts` (`currentTurn !== null || unstartedPrompts.size > 0 || …`); `u4p1-a-seeded-1.jsonl` seq 46 (the result), 48 (the message's `started`).
+4. Observation: the side thread's card draws a waiting reply only as the held bubble this child removes from the session's transcript.
+   Evidence: `side/card/CardThread.test.tsx`, "queued: the host queue's held bubble at the thread's tail, replaced by the user row once the host submits it"; the card mounts `TranscriptSlot` and no composer. Hence decision 12.
+5. Observation: the button's word is read as text, not as a name, by most of what finds it.
+   Evidence: `composer/Composer.test.tsx` (its `primary()` finds `[data-submit-state]` and its cases then read `textContent`), `composer/submit/SubmitControl.test.tsx`, `sessions/retained-tab.test.tsx`, and `toHaveText('Send')` in `e2e/sessions.spec.ts`, `e2e/sessions-available.spec.ts` and `e2e/remote.spec.ts`. Hence decision 9.
+6. Observation: a change to the wire is gated by a committed manifest.
+   Evidence: `src/shared/ipc/wire.test.ts`, whose verdict for an additive change asks for `WIRE_MINOR` up by one and `pnpm wire:manifest`; `WIRE_MINOR` is 36 on master and 33 at build F. Hence M1's step. A sibling that adds an optional key to an event meets the same gate; U3a's document adds `arrival` to `user.message` and does not mention the minor, which its author may want to check.
+7. Observation: of the five fixed keys, the capture can reach four, and for few rows.
+   Evidence: `captureChord` in `settings-tab/keymap.ts` (U6a's branch): a bare Esc cancels the capture, Backspace unbinds, and a menu or app-scoped row is refused any chord without ⌘, ⌃ or ⌥. So Enter, Shift+Enter, Option+Enter and ↑ can be captured for the two composer-scoped rows build F knows (`composer.send`, `composer.cycleMode`), and Option+Enter for a menu or app row. Decision 11 closes exactly these.
+8. Observation: with room, the card column reserves its width, so the pane's corner is beside the column and not under it.
+   Evidence: `app/Shell.tsx`: `paddingRight: 304` on the main area and an absolute `aside` 280 px wide. Hence the interim place of the `/btw` card as "The landing's edge" describes it, and why U4b's move matters.
+9. Observation: the cut turn's own prompt is reported `cancelled` after it `started`, on a Stop today as on a send-now.
+   Evidence: `u4p1-a-seeded-1.jsonl` seq 47; `u4p1-s0-seeded-1.jsonl` seq 44. The reducer drops only a prompt whose turn was never accepted (`transcript/model/reduce.ts`, the `command.lifecycle` case), and the queue retires nothing for a submission that started; M1 pins both over the new fixture.
+10. Observation: `session.steer.cancel` has no caller in the window today.
+    Evidence: its one caller is `src/services/owner/service.ts`; the port (`session/controls/types.ts`) has no member for it. M3 adds the member the section assumed.
+
+## Decision Log
+
+- Decision: verification for this landing. This document is reviewed adversarially before any executor starts; the wave's architect dispatches the review. Each milestone is reviewed at its boundary before the next starts, as the execution loop does. The branch is reviewed by the xhigh panel of `doperpowers:review-code`: it is of panel size (about 130 files and 8,000 to 10,000 changed lines against the mark of twenty files or two thousand lines), and although the root's list of delicate changes does not name it, it changes the engine host's queue and an X1 event, where a mistake loses a message, sends one twice or calls a Stop something else. A new or reworked e2e scene runs alone on a Mac before its group. Class 1a on GitHub Actions is the gate of record, on the head the pull request carries; it, the panel, the e2e runs and the pull request are the architect's. The owner looks at a drawn example before the button, the stack and the `/btw` card are built.
+  Rationale: the root's UC-10 and its Decision Log, "Verification"; the common brief for a landing's execution document.
+  Date/Author: 2026-11-12, the author of this document at authoring; the wave's architect settles the review rung.
+
+## Outcomes & Retrospective
+
+Pending — written at finish.
