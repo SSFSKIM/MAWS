@@ -5,7 +5,7 @@
 // edge), and a small detail in place of the list (Back and ⌘[ return to it with its search and scroll). The badge is plain
 // text: in MAWS it would open another widget. "Use in chat" closes the dialog and puts `/<name> ` at the composer's caret,
 // sending nothing (§5.10; Desktop's local Code library has no such action, §11).
-import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Icon, SortIcon } from '../../app/IconButton';
 import { LIBRARY as L, PLUGIN_MANAGEMENT, SKILLS_LIBRARY as S } from '../copy';
 import { BackButton, backOnChord } from '../plugins/PluginDetail';
@@ -141,19 +141,14 @@ export function SkillsLibrary({ groups, shown, onUse, onDetail }: { groups: read
   const selected = useMemo(() => (selectedKey === null ? null : (groups.flatMap((g) => g.rows).find((row) => rowKey(row) === selectedKey) ?? null)), [groups, selectedKey]);
   const pane = useRef<HTMLDivElement>(null);
   const left = useRef<{ name: string; scrollTop: number } | null>(null);
+  if (selectedKey !== null && selected === null) setSelectedKey(null); // its skill is gone: the list again
   const open = (row: SkillRow) => {
     left.current = { name: row.name, scrollTop: pane.current?.scrollTop ?? 0 };
     setSelectedKey(rowKey(row));
-    onDetail(true);
   };
-  const back = useCallback(() => {
-    setSelectedKey(null);
-    onDetail(false);
-  }, [onDetail]);
-  const gone = selectedKey !== null && selected === null;
-  useLayoutEffect(() => {
-    if (gone) back();
-  }, [gone, back]);
+  const back = () => setSelectedKey(null);
+  const inDetail = selected !== null;
+  useLayoutEffect(() => onDetail(inDetail), [inDetail, onDetail]);
   useLayoutEffect(() => {
     const from = left.current;
     if (selectedKey !== null || from === null || pane.current === null) return;

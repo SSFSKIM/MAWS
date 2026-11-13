@@ -81,7 +81,7 @@ async function withBackend(harness: '0' | '1' | 'index', use: (maws: BackendLaun
   const cli = writePluginCliStub(userData, stubStart(scratchMarketplace(join(userData, 'market'), { name: MARKET, plugins: MARKET_PLUGINS })));
   try {
     const source = harness === '0' ? scenarioHere(userData, project) : SCENARIO;
-    const env = harness === 'index' ? { MAWS_HARNESS: '0', MAWS_E2E_ENGINE_BIN: cli.bin } : { MAWS_HARNESS: harness, MAWS_SESSION_SOURCE: source, MAWS_SCENARIO_CLOCK: 'manual', MAWS_WIDGET_BACKEND: 'fixtures', MAWS_E2E_ENGINE_BIN: cli.bin };
+    const env: Record<string, string> = harness === 'index' ? { MAWS_HARNESS: '0', MAWS_E2E_ENGINE_BIN: cli.bin } : { MAWS_HARNESS: harness, MAWS_SESSION_SOURCE: source, MAWS_SCENARIO_CLOCK: 'manual', MAWS_WIDGET_BACKEND: 'fixtures', MAWS_E2E_ENGINE_BIN: cli.bin };
     const maws = await launchMaws({ userData, env });
     try {
       await use(Object.assign(maws, { cli, project }));
