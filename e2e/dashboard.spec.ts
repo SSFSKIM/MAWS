@@ -694,9 +694,14 @@ interface Board {
   tab: Locator;
   editor: Locator;
 }
-/** A board the agent writes from `content`, with `sales` bound by the agent too, opened in a main tab, every chart drawn. */
+/**
+ * A board the agent writes from `content`, with `sales` bound by the agent too, opened in a main tab, every chart drawn.
+ * The content goes without its final newlines: `chartFence` ends each fence with an empty line, and a block's `^id` line
+ * followed by a line ending reads as an empty paragraph after that block (the agent's own row), which is not the board
+ * these scenes are about.
+ */
 async function agentBoard(app: DashboardApp, title: string, content: string): Promise<Board> {
-  const { artifactId: id, revision } = await app.agent.ok<Created>('A', 'artifact_create', { kind: 'dashboard', title, content });
+  const { artifactId: id, revision } = await app.agent.ok<Created>('A', 'artifact_create', { kind: 'dashboard', title, content: content.replace(/\n+$/, '') });
   const bound = await app.agent.ok<Bound>('A', 'artifact_dataset', { artifact: id, baseRevision: revision, id: 'sales', title: 'Sales', path: await app.agent.write('A', 'sales.csv', AGENT_CSV) });
   const tab = await openInMain(app.page, id);
   const charts = (content.match(/^:::chart/gm) ?? []).length;

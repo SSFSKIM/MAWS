@@ -331,7 +331,9 @@ test('an agent’s document the owner only looks at gains no revision: the re-cu
   const read = await seam.call<ReadResult>(agent, 'artifact_read', { artifact: id });
   expect(read.isError, read.text).toBe(false);
   expect(read.result!.revision).toBe(inserted.result!.revision);
-  const table = /^\^([0-9a-z]+)$/m.exec(read.result!.markdown)?.[1]; // a table's marker stands on a line of its own
+  // a table's marker stands on a line of its own, right after its last row's `<!-- ^id -->` (the list's own marker line
+  // comes first in the document, so the first such line is the list's)
+  const table = /-->\n\^([0-9a-z]+)$/m.exec(read.result!.markdown)?.[1];
   expect(table, `the table's id: ${read.result!.markdown}`).toBeDefined();
   const recut = await seam.call<{ revision: number }>(agent, 'artifact_edit', { artifact: id, baseRevision: read.result!.revision, ops: [{ op: 'replace_text', old: '**Vendor contract** signed', new: 'contract signed' }] });
   expect(recut.isError, `the re-cut lands at the first call: ${recut.text}`).toBe(false);
