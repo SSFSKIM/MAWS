@@ -1,4 +1,4 @@
-// A session tab's word on its machine's link (the UX wave, U9: #563 and O-39; docs/doperpowers/plans/2026-11-12-ux-wave-
+// A session tab's word on its machine's link (the UX wave, U9: the ticket on a pane kept through a link's loss and O-39; docs/doperpowers/plans/2026-11-12-ux-wave-
 // U9-other-machines.md, M3). While the link is not up the tab says the phase's words (app/machine-mark.ts): in one thin
 // status line above a pane that has something to keep, which stays mounted whatever the phase, or in the pane's middle
 // for a tab that has never had such a pane in this run. The line takes the shape of the transcript's "older messages

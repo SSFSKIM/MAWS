@@ -114,7 +114,7 @@ async function eventsOnceKnown(client: MawsBridge, appSessionId: AppSessionId, w
 // already there when the failure is processed is that ready, taken at once. With no ready within HOST_RETURN_WAIT_MS, or a
 // second failure, the read fails as before ("Couldn’t load this conversation", with Retry), and a later ready still reads
 // it again. No timer retries: one read per ready cannot loop against a host that keeps failing. Another machine's session
-// heals at its link's return instead (#565), and any other failure fails at once.
+// heals at its link's return instead (the ticket on history read after a link's return), and any other failure fails at once.
 export const HOST_RETURN_WAIT_MS = 15_000;
 const engineHost = () => useHosts.getState().hosts.engine;
 const engineRevision = () => engineHost()?.revision ?? -1;
@@ -610,7 +610,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
       if (events === null) {
         stale = false; // this read follows the transcript again
         tooLarge.delete('newest');
-        // the UX wave, U9 (M5, #565): another machine's history is read once main settled that machine's generation, or
+        // the UX wave, U9 (M5, the ticket on history read after a link's return): another machine's history is read once main settled that machine's generation, or
         // at the backstop, never beside its live sessions' resumes; at once when either has passed or it is not up
         const machine = machineOf(appSessionId);
         if (machine !== client.localMachine && isRemoteLaneB(appSessionId) && !historyReadsNow(machine)) await whenHistoryReads(machine);

@@ -189,7 +189,7 @@ function TabContent({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
 // pane's session the main area no longer renders, so this holds there with nothing to hide.)
 // P5 O15 M2b: a remote lane B session's tab holds its transcript while it is mounted, so a pane that unmounts and mounts
 // again rejoins it rather than reading the whole history again (lane-b/transcript-hold.ts).
-// The UX wave, U9 (#563, O-39; amending P5 Decision Log 28's T5): a pane that has something to keep stays mounted whatever
+// The UX wave, U9 (the ticket on a pane kept through a link's loss, O-39; amending P5 Decision Log 28's T5): a pane that has something to keep stays mounted whatever
 // its machine's link does, one status line above it carrying the phase's words; only a tab that has never had such a pane
 // in this run says them in its middle, until the link is up (lane-b/link-status.tsx). The pane sits in the same place of
 // the tree whether or not the line shows, so the line coming and going never remounts it.

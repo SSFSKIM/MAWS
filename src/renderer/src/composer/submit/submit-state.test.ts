@@ -278,7 +278,7 @@ describe('a send carrying documents while a turn runs', () => {
   });
 });
 
-// The UX wave, U9 (S-01 and #563; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, M3): a Stop out for
+// The UX wave, U9 (S-01 and the ticket on a pane kept through a link's loss; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, M3): a Stop out for
 // more than 300 ms reads "Stopping…" and is disabled until it settles, whatever the draft; in its machine's offline phase
 // Send and Stop are disabled with UC-7.5's sentence (while it connects or reconnects nothing here changes: main holds the act).
 describe('Stopping…, and the offline phase of another machine', () => {

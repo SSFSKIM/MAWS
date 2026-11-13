@@ -1437,7 +1437,7 @@ describe('a lane B session on another machine', () => {
   });
 
   // The overlay rule: a link down closes nothing for a minute (A4 holds the act), so while the machine reconnects a running
-  // turn keeps its Stop, and Stop reaches main's hold. The UX wave (U9, M3; #563): once the machine is offline, Send and Stop
+  // turn keeps its Stop, and Stop reaches main's hold. The UX wave (U9, M3; the ticket on a pane kept through a link's loss): once the machine is offline, Send and Stop
   // are disabled with UC-7.5's sentence, and nothing is sent.
   const runningWithLinkDown = (roster: Pick<MachineState, 'since' | 'generation'>) =>
     act(() => {

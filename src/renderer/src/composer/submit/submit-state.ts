@@ -45,7 +45,7 @@ export interface SubmitInput {
   closed?: string | null;
   // The UX wave, U9 (S-01): a Stop for the session has been out for more than 300 ms and has not settled
   stopping?: boolean;
-  // The UX wave, U9 (#563): the session's machine is in its offline phase, with UC-7.5's sentences for Send and Stop;
+  // The UX wave, U9 (the ticket on a pane kept through a link's loss): the session's machine is in its offline phase, with UC-7.5's sentences for Send and Stop;
   // absent or null: it is not (while it connects or reconnects main holds the act, and nothing here changes)
   offline?: { send: string; stop: string } | null;
 }
@@ -126,7 +126,7 @@ export function submitState(i: SubmitInput): SubmitDecision {
   if ((i.closed ?? null) !== null) return decide('send', 'Send', false, i.closed); // board 525: Stop too, whatever the turn
   // The UX wave, U9 (S-01): a Stop on its way for more than 300 ms reads so, disabled, until it settles, whatever the draft
   if (i.stopping) return decide('stop', STOPPING, false, STOPPING);
-  // The UX wave, U9 (#563): in the machine's offline phase Send and Stop are closed with the phase's sentence
+  // The UX wave, U9 (the ticket on a pane kept through a link's loss): in the machine's offline phase Send and Stop are closed with the phase's sentence
   const offline = i.offline ?? null;
   if (offline !== null && mode === 'send') {
     const running = i.driven ? i.driven.running : isBusy(status, queue.entries);

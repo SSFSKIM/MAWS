@@ -1,7 +1,7 @@
 // The tab's hold on a remote lane B session's transcript (P5 O15 M2b, Decision Log 39; ./transcript-hold.ts): over the
 // real stores and a session source on a fake X2 client, the pane's own attach and detach played as its mount and its
 // unmount while its tab stays (the floating card taking the session; before the UX wave's U9 M3, the offline placeholder,
-// which no longer replaces a pane that has something to keep). The UX wave, U9 (M5, #565): a history read of the
+// which no longer replaces a pane that has something to keep). The UX wave, U9 (M5, the ticket on history read after a link's return): a history read of the
 // machine's session waits, from the roster's `up`, for main's settled word of that generation or SETTLE_BACKSTOP_MS,
 // whichever is first; a held key not whole at the return is decided there.
 import type { SessionEvent } from '@shared/graph/events';
@@ -234,7 +234,7 @@ describe('the hold', () => {
     hold.unmount();
   });
 
-  // The UX wave, U9 (M3; #563): a pane that has something to keep stays mounted through the outage, its attachment its own
+  // The UX wave, U9 (M3; the ticket on a pane kept through a link's loss): a pane that has something to keep stays mounted through the outage, its attachment its own
   it('reads nothing again at up for a pane kept mounted through the loss', async () => {
     roster('up');
     settledWord();
@@ -461,7 +461,7 @@ describe('a held key not whole at the return', () => {
   });
 });
 
-// The UX wave, U9 (M5, #565's first case): a pane's first read with nothing held, of a tab restored at launch or opened
+// The UX wave, U9 (M5, the first case of the ticket on history read after a link's return): a pane's first read with nothing held, of a tab restored at launch or opened
 // while the machine was away, is made once the machine settled, not beside the live sessions' resumes
 describe('a first read with nothing held', () => {
   it('waits from the roster’s up for the settled word of its generation, and a pane mounted after it reads at once', async () => {

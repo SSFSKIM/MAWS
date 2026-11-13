@@ -1,4 +1,4 @@
-// A session tab across its machine's link going down and coming back (the UX wave, U9, M3: #563 and O-39; docs/doperpowers/
+// A session tab across its machine's link going down and coming back (the UX wave, U9, M3: the ticket on a pane kept through a link's loss and O-39; docs/doperpowers/
 // plans/2026-11-12-ux-wave-U9-other-machines.md): a pane that has something to keep stays mounted whatever the phase, one
 // status line above it carrying the phase's words, and only a tab that has never had such a pane says the words in its
 // middle. Each kept pane is held across down and up and checked for the mounted node, its scroll position and its draft.
@@ -90,7 +90,7 @@ function holdAcross(appSessionId: AppSessionId) {
   expect(document.querySelector('[data-machine-offline]'), 'no full-pane placeholder at any point').toBeNull();
 }
 
-describe('a session tab of another machine through an outage (#563)', () => {
+describe('a session tab of another machine through an outage', () => {
   it('keeps a pane with a record mounted across down and up: the same node, the scroll position and the draft', () => {
     useSessions.setState({
       listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, 'app-r'), appId: REMOTE }]]),
