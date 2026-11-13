@@ -231,7 +231,7 @@ export function arrivalInput(row: ArrivalRow, turn: TurnState | undefined, { rev
 /** The ToolUse ask of a message the agent sent: its call's props, as a cell's call asks; null for any other message line. */
 export function sentInput(row: RowOf<'agent_message'>, turn: TurnState | undefined, revealed: RowId | CellId | undefined): RowInput<'ToolUse'> | null {
   if (!turn || row.id === revealed || (row.peer !== undefined && row.peer.sender !== null)) return null;
-  const toolUseId = row.peer?.toolUseId ?? turn.events.find((e) => e.kind === 'tool.use' && rowId.agentMessage(e.id) === row.id)?.toolUseId;
+  const toolUseId = row.peer?.toolUseId ?? turn.events.find((e): e is Extract<SessionEvent, { kind: 'tool.use' }> => e.kind === 'tool.use' && rowId.agentMessage(e.id) === row.id)?.toolUseId;
   const rec = toolUseId == null ? undefined : toolRecords(turn).get(toolUseId);
   return rec === undefined ? null : { instanceId: rec.use.toolUseId, props: callProps(rec, cellOf(rec, turnContext(turn), false)) };
 }
