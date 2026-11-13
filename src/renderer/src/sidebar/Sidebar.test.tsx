@@ -12,6 +12,7 @@ import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machin
 import { machineKey, type OrgKey } from '@shared/machine/org-key';
 import type { MachineState } from '@shared/ipc/schema/machines'; // the UX wave, U9
 import { REMOTE_ACT_PENDING_MS } from '@shared/machine/remote-pending'; // the UX wave, U9
+import { SESSION_ACTS_CAPABILITY } from '@shared/ipc/remote-unavailable'; // the UX wave, U9 (M4)
 import { useMachines } from '../stores/machines';
 import { registerSessionAction } from '../app/session-actions';
 import { registerSessionCreator } from '../keymap/actions-runtime';
@@ -1453,6 +1454,87 @@ describe('listed rows from another machine', () => {
     expect(offline.dataset.offline).toBe('true');
     expect(chip('Studio build, machine offline')).toBe('offline');
     expect(offline.querySelector('[data-session-title]')!.className).toContain('text-fg-faint');
+  });
+
+  // The UX wave, U9 (S-02, O-48; Interfaces §6): every lane B listed row opens the session menu, with its acts over the link
+  // from the listing alone: Rename… and Archive for a session you own, Fork for any; a terminal session's listed row has
+  // none. Each is drawn disabled with the helper's sentence where the act can't work: on a machine whose build doesn't
+  // list `rl2.session-acts`, the update sentence (A14).
+  describe('the session menu of a listed row', () => {
+    const studioIs = (over: Partial<MachineState>) =>
+      useMachines.getState().applyRoster([
+        { ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-10-28T10:00:00Z', generation: 0 },
+        { ref: OTHER_MACHINE, name: 'Studio', local: false, state: 'up', since: '2026-10-28T10:00:00Z', generation: 1, ...over },
+      ]);
+    const menuOf = async (title: string) => {
+      fireEvent.contextMenu(row(title));
+      return within(await screen.findByRole('menu')).getAllByRole('menuitem');
+    };
+    beforeEach(() => {
+      for (const id of ['rename', 'fork', 'archive'] as const) offs.push(registerSessionAction(id, vi.fn()));
+    });
+
+    it('names the session in data-menu on every lane B row, none on a terminal session’s', () => {
+      studioIs({ capabilities: [SESSION_ACTS_CAPABILITY], owner: true });
+      fill([listedOn('b1', { title: 'Studio build' }), listedOn('a1', { title: 'Studio terminal', lane: 'A' })]);
+      useSessions.setState({ listedMachines: new Set([OTHER_MACHINE]) });
+      expandAll();
+      render(<Sidebar />);
+      expect(row('Studio build').getAttribute('data-menu')).toBe(`session:${studio('b1')}`);
+      expect(row('Studio terminal').getAttribute('data-menu')).toBe('none');
+    });
+
+    it('offers Rename…, Fork and Archive for a session you own, enabled on a machine that serves them', async () => {
+      studioIs({ capabilities: [SESSION_ACTS_CAPABILITY], owner: true });
+      fill([listedOn('b1', { title: 'Studio build' })]);
+      useSessions.setState({ listedMachines: new Set([OTHER_MACHINE]) });
+      expandAll();
+      render(<Sidebar />);
+      const items = await menuOf('Studio build');
+      expect(items.map((m) => m.textContent)).toEqual(['Rename…', 'Fork', 'Archive']);
+      expect(items.map((m) => m.hasAttribute('data-disabled'))).toEqual([false, false, false]);
+    });
+
+    it('draws each disabled with the update sentence on a machine whose build doesn’t list the capability (A14)', async () => {
+      studioIs({ capabilities: ['rl2.project-acts'], owner: true });
+      fill([listedOn('b1', { title: 'Studio build' })]);
+      useSessions.setState({ listedMachines: new Set([OTHER_MACHINE]) });
+      expandAll();
+      render(<Sidebar />);
+      const items = await menuOf('Studio build');
+      expect(items.map((m) => [m.textContent, m.hasAttribute('data-disabled'), m.getAttribute('title')])).toEqual([
+        ['Rename…', true, 'Can’t rename on Studio yet. Update MAWS on Studio and try again.'],
+        ['Fork', true, 'Can’t fork on Studio yet. Update MAWS on Studio and try again.'],
+        ['Archive', true, 'Can’t archive on Studio yet. Update MAWS on Studio and try again.'],
+      ]);
+    });
+
+    it('offers a record of another machine’s Rename… and Archive when its listing says it is yours, and Fork disabled for a member who doesn’t own the machine', async () => {
+      studioIs({ capabilities: [SESSION_ACTS_CAPABILITY], owner: false });
+      const recorded = record(studio('b1'), { projectId: null, title: { text: 'Studio build (record)', source: 'user' } });
+      fill([listedOn('b1', { title: 'Studio build' })], [here, recorded]);
+      useSessions.setState({ listedMachines: new Set([OTHER_MACHINE]) });
+      expandAll();
+      render(<Sidebar />);
+      const items = await menuOf('Studio build (record)');
+      expect(items.map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Open in split', 'Pin', 'Rename…', 'Fork', 'Archive']);
+      const fork = items.find((m) => m.textContent === 'Fork')!;
+      expect(fork.hasAttribute('data-disabled')).toBe(true);
+      expect(fork.getAttribute('title')).toBe('Only Studio’s owners can fork a session there.');
+    });
+
+    it('leaves the row at once when this window archives it, and it stays gone', async () => {
+      studioIs({ capabilities: [SESSION_ACTS_CAPABILITY], owner: true });
+      fill([listedOn('b1', { title: 'Studio build' }), listedOn('b2', { title: 'Studio chores' })]);
+      useSessions.getState().applyRows({ machines: [OTHER_MACHINE], rows: [...useSessions.getState().listed.values()], complete: true, pending: [], members: [], member: 'member-1' });
+      expandAll();
+      render(<Sidebar />);
+      act(() => useSessions.getState().noteArchived(studio('b1')));
+      expect(screen.queryByRole('treeitem', { name: 'Studio build' })).toBeNull();
+      act(() => useSessions.getState().applyRows({ machines: [OTHER_MACHINE], rows: [listedOn('b1', { title: 'Studio build' }), listedOn('b2', { title: 'Studio chores' })], complete: true, pending: [], members: [], member: 'member-1' }));
+      expect(screen.queryByRole('treeitem', { name: 'Studio build' })).toBeNull();
+      expect(row('Studio chores')).toBeTruthy();
+    });
   });
 
   // P5 O7 M2: the record stands where its listing was filed (its project is not known here), so the row doesn't move

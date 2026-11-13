@@ -7,11 +7,12 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { REGISTRY } from '@shared/ipc/registry';
 import { addressingOf } from '@shared/machine/address';
-import { digest, record, status } from '../../../../test/support/builders';
+import { digest, record, remoteRow, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { resetComposerStore, resubmitRecordOf, setResubmit, useComposerStore } from '../stores/composer';
 import { useLayout } from '../stores/layout';
+import { useMachines } from '../stores/machines';
 import { useNotices } from '../stores/notices';
 import { resetQueueStore } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
@@ -200,6 +201,33 @@ describe('Edit turns the bubble into an editor in its place', () => {
       await waitFor(() => expect(useComposerStore.getState().inlineEdits.size).toBe(0));
     } finally {
       off();
+    }
+  });
+
+  // The UX wave, U9 (O-48, A8; Interfaces §4): the edit's Fork reads the one helper for a session on another machine, so a
+  // fork that can't work there is drawn disabled with its sentence. The page is made another machine's (its own is not the
+  // session's), the session's machine listed over RL2 by a build that doesn't serve the acts.
+  it('draws Fork disabled with the helper’s sentence for a session on another machine that can’t fork it', async () => {
+    const forkFrom = vi.fn(async () => ({ appSessionId: at('app-fork' as AppSessionId) }));
+    const off = registerResubmitProvider({ forkFrom });
+    try {
+      renderRow(rowOf('u-1'), { storeKey: A });
+      act(() => editAndResubmitRow(rowOf('u-1')));
+      expect((within(editor()).getByRole('button', { name: 'Fork' }) as HTMLButtonElement).disabled).toBe(false);
+      (fake.client as { localMachine: string }).localMachine = OTHER_MACHINE;
+      act(() => {
+        useMachines.getState().applyRoster([{ ref: TEST_MACHINE, name: 'Studio', local: false, state: 'up', since: '2026-11-13T10:00:00Z', generation: 1, capabilities: [], owner: true }]);
+        useSessions.setState({ listed: new Map([[A, { ...remoteRow(TEST_MACHINE, A_ID), appId: A }]]), listedMachines: new Set([TEST_MACHINE]) });
+      });
+      const fork = within(editor()).getByRole('button', { name: 'Fork' }) as HTMLButtonElement;
+      expect(fork.disabled).toBe(true);
+      expect(fork.title).toBe('Can’t fork on Studio yet. Update MAWS on Studio and try again.');
+      fireEvent.click(fork);
+      expect(forkFrom).not.toHaveBeenCalled();
+    } finally {
+      off();
+      (fake.client as { localMachine: string }).localMachine = TEST_MACHINE;
+      useMachines.setState({ roster: 'unread', machines: new Map() });
     }
   });
 
