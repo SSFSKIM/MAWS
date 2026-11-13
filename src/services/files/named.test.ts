@@ -1,6 +1,7 @@
 // The search for a file the transcript names, its memory and its queue (UX wave U6c,
 // docs/doperpowers/plans/2026-11-12-ux-wave-U6c-linked-file.md, Interfaces §B and the sequences S4 to S15). Every
 // transcript here is made of invented records, written into a scratch store.
+import { readdirSync, readFileSync } from 'node:fs';
 import { open as fsOpen, rename, writeFile, mkdir, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,7 +9,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { OpenFile } from '@shared/fs/read-tail';
 import { callClass, rowClaim } from '@shared/files/named';
 import { StoreFixture } from '../../../test/support/store-fixture';
-import { createNamedPaths, NAMED_CHUNK_BYTES, NAMED_FINGERPRINT_BYTES, NAMED_ROW_BYTES, NAMED_SCAN_BYTES, NAMED_WAIT_MS, NAMED_WAITING_MAX, NAMED_CACHE_ENTRIES, type NamedPathsOptions } from './named';
+import { createNamedPaths, NAMED_CHUNK_BYTES, NAMED_FINGERPRINT_BYTES, NAMED_ROW_BYTES, NAMED_SCAN_BYTES, NAMED_WAIT_MS, NAMED_WAITING_MAX, NAMED_CACHE_ENTRIES, NAMED_PENDING_MAX, type NamedPathsOptions } from './named';
 
 const S = 'app-named' as AppSessionId;
 const P = '/work/out/report.md';
@@ -107,7 +108,7 @@ afterEach(async () => {
 
 describe('the bounds', () => {
   it('are the document’s', () => {
-    expect({ NAMED_SCAN_BYTES, NAMED_CHUNK_BYTES, NAMED_ROW_BYTES, NAMED_CACHE_ENTRIES, NAMED_WAITING_MAX, NAMED_WAIT_MS, NAMED_FINGERPRINT_BYTES }).toEqual({
+    expect({ NAMED_SCAN_BYTES, NAMED_CHUNK_BYTES, NAMED_ROW_BYTES, NAMED_CACHE_ENTRIES, NAMED_WAITING_MAX, NAMED_WAIT_MS, NAMED_FINGERPRINT_BYTES, NAMED_PENDING_MAX }).toEqual({
       NAMED_SCAN_BYTES: 1024 ** 3,
       NAMED_CHUNK_BYTES: 1024 * 1024,
       NAMED_ROW_BYTES: 4 * 1024 * 1024,
@@ -115,6 +116,7 @@ describe('the bounds', () => {
       NAMED_WAITING_MAX: 8,
       NAMED_WAIT_MS: 8_000,
       NAMED_FINGERPRINT_BYTES: 4096,
+      NAMED_PENDING_MAX: 256,
     });
   });
 });
@@ -510,6 +512,60 @@ describe('the queue (S14, S15)', () => {
     expect(await named.names(S, P)).toBe(true);
     done = true;
     expect(ticks).toBeGreaterThanOrEqual(stats.reads);
+  });
+});
+
+// The results waiting for their calls (Decision Log 13): a line is checked against them in one pass, however many wait,
+// and at most NAMED_PENDING_MAX of them wait; an older result past the cap is not waited for.
+describe('the results waiting for their calls', () => {
+  const unresolved = (n: number, tag: string) => Array.from({ length: n }, (_, i) => result(`toolu_${tag}${i}`, `Saved to [r](${P})`));
+
+  it('a call is found by the bytes the engine writes for its id: `"id":"<id>"` in its tool_use block', () => {
+    const fixtures = join(__dirname, '../../../test/fixtures/transcripts');
+    let checked = 0;
+    for (const name of readdirSync(fixtures).filter((entry) => entry.endsWith('.jsonl'))) {
+      for (const line of readFileSync(join(fixtures, name), 'utf8').split('\n')) {
+        let row: { type?: string; message?: { content?: unknown } };
+        try {
+          row = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (row.type !== 'assistant' || !Array.isArray(row.message?.content)) continue;
+        for (const block of row.message.content as { type?: string; id?: string }[]) {
+          if (block.type !== 'tool_use') continue;
+          expect(line).toContain(`"id":${JSON.stringify(block.id)}`);
+          checked += 1;
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(20);
+  });
+
+  it('many results whose calls are never found cost one pass per line, not one search per waiting id', async () => {
+    const n = 1000;
+    await writeTranscript(unresolved(n, 'never'));
+    const searches = vi.spyOn(Buffer.prototype, 'indexOf');
+    try {
+      expect(await paths({ bounds: { pending: n } }).names(S, P)).toBe(false);
+      expect(searches.mock.calls.length).toBeLessThan(10 * n);
+    } finally {
+      searches.mockRestore();
+    }
+  });
+
+  it('at the cap: the 256 newest waiting results still resolve, the 257th-newest is not waited for', async () => {
+    const resolved = result('toolu_resolved', `Saved to [r](${P})`);
+    await writeTranscript([call('toolu_resolved', 'mcp__docs__save', {}), resolved, ...unresolved(NAMED_PENDING_MAX - 1, 'a')]);
+    expect(await paths().names(S, P)).toBe(true);
+    await writeTranscript([call('toolu_resolved', 'mcp__docs__save', {}), resolved, ...unresolved(NAMED_PENDING_MAX, 'b')]);
+    expect(await paths().names(S, P)).toBe(false);
+  });
+
+  it('the cap is a bound the suite can set', async () => {
+    await writeTranscript([call('toolu_resolved', 'mcp__docs__save', {}), result('toolu_resolved', `Saved to [r](${P})`), ...unresolved(3, 'c')]);
+    expect(await paths({ bounds: { pending: 4 } }).names(S, P)).toBe(true);
+    expect(await paths({ bounds: { pending: 3 } }).names(S, P)).toBe(false);
   });
 });
 

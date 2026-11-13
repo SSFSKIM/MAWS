@@ -20,11 +20,12 @@ export const NAMED_CACHE_ENTRIES = 256;
 export const NAMED_WAITING_MAX = 8; // distinct jobs waiting behind the running one
 export const NAMED_WAIT_MS = 8_000; // a waiter's patience, inside a host request's ten seconds
 export const NAMED_FINGERPRINT_BYTES = 4096; // as the engine host's search (`fingerprint`, src/engine-host/fs/search-text.ts)
+export const NAMED_PENDING_MAX = 256; // results waiting for their calls in one search; an older one past it is not waited for
 
 export interface NamedPathsOptions {
   transcript: (appSessionId: AppSessionId) => Promise<string | null>; // decision 13; null: the session has no transcript
   open?: OpenFile; // tests (`@shared/fs/read-tail`'s type, as `readRestoredCost` takes): the suite counts the bytes read
-  bounds?: { scan?: number; chunk?: number; row?: number; entries?: number; waiting?: number; waitMs?: number }; // tests
+  bounds?: { scan?: number; chunk?: number; row?: number; entries?: number; waiting?: number; waitMs?: number; pending?: number }; // tests
   hooks?: { at?(point: 'opened' | 'searched', appSessionId: AppSessionId): Promise<void> }; // tests: after a job has opened the file and read its size; after a search, before its answer is proven and remembered
 }
 export interface NamedPaths {

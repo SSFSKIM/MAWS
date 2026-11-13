@@ -67,6 +67,11 @@ describe('a path chip asks for a path the rule names', () => {
     ['- one\n- [r](/work/out/report.md)', P, '/work/out/report'],
     ['| a | b |\n|---|---|\n| [r](/work/out/report.md) | x |', P, '/work/out/report'],
     ['> quoted [r](/work/out/report.md)', P, '/work/out/report'],
+    // the URL step compares paths, not strings: these serialise to other strings and stay named
+    ['[r](/a/b/../d)', '/a/d', '/a/b/../d'],
+    ['[r](/a/%2e%2e/b)', '/b', '/a/%2e%2e/b'],
+    ['[r](//work/out/report.md)', P, '//work/out/report.md'],
+    ['[r](/work/notes#1.md)', '/work/notes#1.md', '/work/notes'],
   ])('%j', (markdown, path, counter) => {
     const clicked = clickedPaths(markdown);
     expect(clicked).toContain(path);
@@ -97,6 +102,26 @@ describe('what is not clickable today yields no path chip', () => {
   it.each(['`[r](/work/out/report.md)`', '```\n[r](/work/out/report.md)\n```'])('%j: no chip, and the rule names the path', (markdown) => {
     expect(clickedPaths(markdown)).toEqual([]);
     expect(linkPaths(markdown)).toEqual([P]);
+  });
+});
+
+// Refused by the rule, and drawn as a chip by the window (§A, "Not recognised, and so refused"): the window's URL parse
+// reads a host, a port, a user or a query or fragment boundary into each, so the click asks for a path the transcript
+// did not write; and a destination that already carries the chip's scheme. Each fails towards the refusal.
+describe('listed refusals: what the click asks for, and the rule names nothing', () => {
+  it.each([
+    ['[r](/a/b/..#c/../d)', ['/a/d']],
+    ['[r](/a/b/..?c/../d)', ['/a/d']],
+    ['[r](//x:/y)', ['/x/y']],
+    ['[r](//x:0080/y)', ['/x:80/y']],
+    ['[r](//:@x/y)', ['/x/y']],
+    ['[r](//work:99999/x)', []],
+    ['[r](//a:b:c@x/y)', ['/a:b%3Ac@x/y']],
+    ['[r](//u@@h/x)', ['/u%40@h/x']],
+    ['[r](maws-path:/work/out/report.md)', [P]],
+  ])('%j', (markdown, asked) => {
+    expect(clickedPaths(markdown)).toEqual(asked);
+    expect(linkPaths(markdown)).toEqual([]);
   });
 });
 

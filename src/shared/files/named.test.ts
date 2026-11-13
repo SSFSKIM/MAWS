@@ -117,6 +117,30 @@ describe('the link form: linkPaths', () => {
   });
 });
 
+// §A, clickPath step 7 (Decision Log 12): the window parses `maws-path:<href>` as a URL before the click reads it; a
+// destination is named only when the rule's reading of that serialisation gives the same path. The two paths are
+// compared, not the two strings.
+describe('the window’s URL step: a parse that can only take a name away', () => {
+  it.each([
+    ['[r](/a/b/../d)', '/a/d'],
+    ['[r](/a/%2e%2e/b)', '/b'],
+    ['[r](//work/out/report.md)', P],
+    ['[r](/work/notes#1.md)', '/work/notes#1.md'],
+    ['[r](/work/out/report.md:12)', P],
+  ])('%j still names %j', (text, path) => {
+    expect(linkPaths(text)).toEqual([path]);
+  });
+
+  it.each(['[r](/a/b/..#c/../d)', '[r](/a/b/..?c/../d)', '[r](//x:/y)', '[r](//x:0080/y)', '[r](//:@x/y)', '[r](//work:99999/x)', '[r](//a:b:c@x/y)', '[r](//u@@h/x)'])('%j names nothing', (text) => {
+    expect(linkPaths(text)).toEqual([]);
+  });
+
+  it('a destination the URL parser refuses is null, and nothing is thrown', () => {
+    expect(() => clickPath('//work:99999/x')).not.toThrow();
+    expect(clickPath('//work:99999/x')).toBeNull();
+  });
+});
+
 describe('clickPath and hrefOf', () => {
   it('reads a destination as the click does', () => {
     expect(clickPath('/work/out/report.md')).toBe(P);
