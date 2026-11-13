@@ -2,7 +2,7 @@
 // to a document comment arrives at the first of two signals, a message by a session in the comment's thread or the end
 // of the turn of the card's side thread. The host asks the editor once per answer to tint the passage, only while the
 // document is on screen, and in a body under 720 px closes the floating card on that thread unless the keyboard is in it.
-import { act, cleanup, render } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommentOverlayProps } from '@artifacts/document/editor/comments/surface';
 import { addThread, reply } from '@artifacts/document/threads';
@@ -75,6 +75,7 @@ function Surface({ reach, visible = true, slot = 'a' }: { reach: CommentOverlayP
       <div key={slot} className="relative">
         {comments.overlay(reach)}
       </div>
+      <button type="button">Elsewhere</button>
     </div>
   );
 }
@@ -100,6 +101,8 @@ const sideThread = (over: Parameters<typeof digest>[1]) => act(() => useSessions
 const turnRuns = (start: number) => sideThread({ phase: 'working', turnStartedAt: iso(start), lastTurnEndedAt: null });
 const turnEnds = (start: number, end: number) => sideThread({ phase: 'idle', turnStartedAt: iso(start), lastTurnEndedAt: iso(end) });
 const card = () => document.querySelector<HTMLElement>('[data-comment-card]');
+// the thread card takes the keyboard as it becomes the thread; the person puts it back in the page
+const keyboardElsewhere = () => act(() => screen.getByRole('button', { name: 'Elsewhere' }).focus());
 
 describe('the answer’s arrival (decision 20)', () => {
   it('asks the editor to tint the passage when a session’s message reaches the thread, once per message', () => {
@@ -157,6 +160,7 @@ describe('the floating card at the answer (A17)', () => {
     const m = mount();
     threadCard();
     expect(card()).not.toBeNull();
+    keyboardElsewhere();
     agentSays(m.doc, 'agent-1', S);
     expect(m.flashed()).toEqual([T]);
     expect(useCommentCard.getState().open).toBeNull();
@@ -166,8 +170,7 @@ describe('the floating card at the answer (A17)', () => {
   it('stays with the keyboard in it, in a wider body, and in the margin', () => {
     const narrow = mount();
     threadCard();
-    act(() => card()!.focus());
-    expect(card()!.contains(document.activeElement)).toBe(true);
+    expect(card()!.contains(document.activeElement), 'as it became the thread').toBe(true);
     agentSays(narrow.doc, 'agent-1', S);
     expect(narrow.flashed()).toEqual([T]);
     expect(useCommentCard.getState().open, 'the keyboard is in it').not.toBeNull();
@@ -177,6 +180,7 @@ describe('the floating card at the answer (A17)', () => {
     bodyWidth = 800;
     const wide = mount();
     threadCard();
+    keyboardElsewhere();
     agentSays(wide.doc, 'agent-2', S);
     expect(useCommentCard.getState().open, 'a wider body').not.toBeNull();
     cleanup();
@@ -185,6 +189,7 @@ describe('the floating card at the answer (A17)', () => {
     bodyWidth = 600;
     const margin = mount({ placement: 'margin' });
     threadCard();
+    keyboardElsewhere();
     agentSays(margin.doc, 'agent-3', S);
     expect(margin.flashed()).toEqual([T]);
     expect(useCommentCard.getState().open, 'in the margin').not.toBeNull();
