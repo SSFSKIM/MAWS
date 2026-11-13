@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readTolerant } from '../tolerant';
-import { commands, FilesReadOutputSchema, FilesReadResolvedInputSchema, opensExternally } from './files';
+import { commands, FilesOpenExternalInputSchema, FilesReadInputSchema, FilesReadOutputSchema, FilesReadResolvedInputSchema, opensExternally } from './files';
 
 describe('files opensExternally', () => {
   it('is true for the document and media kinds MAWS hands to the OS on purpose', () => {
@@ -44,9 +44,10 @@ describe('files named', () => {
   });
 
   it('is dropped by a reader that does not know it, which reads the plain request', () => {
-    for (const name of ['files.read', 'files.openExternal'] as const) {
-      const before = commands[name].input.omit({ named: true }); // the schema of a build without the key
-      expect(readTolerant(before, { ...asked, named: true }), name).toEqual({ ok: true, value: asked, dropped: ['named'] });
+    // each command's input as a build without the key has it
+    const before = { 'files.read': FilesReadInputSchema.omit({ named: true }), 'files.openExternal': FilesOpenExternalInputSchema.omit({ named: true }) };
+    for (const [name, schema] of Object.entries(before)) {
+      expect(readTolerant(schema, { ...asked, named: true }), name).toEqual({ ok: true, value: asked, dropped: ['named'] });
     }
   });
 });
