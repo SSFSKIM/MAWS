@@ -1,5 +1,8 @@
 // The Settings tab's words (C11 execution document, Interfaces "Settings tab"; mockup 06 vignette 04). Every row says
 // where its value comes from and what MAWS will not touch.
+// Amended 2026-11-13, UX wave U11 (l8-settings-06): a Settings row's note is one line; where its value comes from and
+// what MAWS will not touch sit behind the row's More, and what a whole section shares is said once under its heading.
+// Engine is split into Sessions, Engine and Supervisor, and the index is grouped.
 import { MAX_IDLE_MINUTES } from '@shared/ipc/schema/settings'; // E10
 import { MAX_APP_MCP_SERVERS } from '@shared/engine/app-mcp-servers'; // P4-R8
 
