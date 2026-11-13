@@ -591,7 +591,7 @@ describe('the checkbox and the one send path', () => {
     await userEvent.type(field(), 'Look here{Enter}');
     expect(fake.pending('side.comment.content')).toBe(1);
     expect(field().disabled).toBe(true);
-    expect(box().disabled).toBe(true);
+    expect(box().disabled, 'M3 (§D): the checkbox may change during a flight; it keeps the destination it set out with').toBe(false);
     fireEvent.keyDown(field(), { key: 'Enter' });
     await act(async () => {});
     expect(fake.invoked('side.comment.content')).toHaveLength(1);
