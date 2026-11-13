@@ -3,6 +3,7 @@
 // because the hook's rewritten props are refused or its drawing fails, every notice of the carrier is drawn. The cases
 // a mod's answer replaces or keeps are in arrivals.test.tsx. Every word is invented.
 import { act, cleanup } from '@testing-library/react';
+import type { ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ArrivalEntry } from '@shared/engine/arrival-schema';
 import type { CommandInput } from '@shared/ipc/schema';
@@ -20,9 +21,10 @@ vi.mock('../../ipc/client', () => ({ ipc: { invoke: (...args: Parameters<ReturnT
 // A fault downstream of the tree's parser, as a mod's drawing can fail: the transcript's markdown throws on "fault".
 vi.mock('../index', async (original) => {
   const actual = await original<typeof import('../index')>();
-  return { ...actual, Markdown: (props: Parameters<typeof actual.Markdown>[0]) => {
+  const Markdown = actual.Markdown;
+  return { ...actual, Markdown: (props: ComponentProps<typeof Markdown>) => {
     if (props.markdown === 'fault') throw new Error('drawing failed');
-    return actual.Markdown(props);
+    return <Markdown {...props} />;
   } };
 });
 let fake: ReturnType<typeof fakeClient>;
