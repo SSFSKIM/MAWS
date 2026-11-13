@@ -20,7 +20,6 @@ import { present as presentMcp } from '../../widgets/McpWidget';
 import { CONTEXT, MODEL } from '../../widgets/copy';
 import type { ModelRow } from '../../widgets/model';
 import { DEFAULT_ROW, modelAsk, modelName, type HeldAsk } from '@shared/sessions/model-label';
-import type { ModelCatalogueEntry } from '@shared/sessions/models';
 import { num } from '../../widgets/parts';
 import { INFO, LANE } from './copy';
 import { contestLine, holderLine } from '../../attention/derive'; // W7
@@ -41,6 +40,8 @@ import { FRESHNESS } from '../../sessions/observed';
 // tooltip (the Main row's raw model id).
 export type InfoRow = { label: string; value: string; title?: string; note?: string; action?: 'permissions' | 'route'; targets?: SwitchTarget[] };
 export type InfoSection = { title: string; rows: InfoRow[] };
+// A catalogue row as the model's name reads it (the listed models' and the route catalogue's alike).
+type NamingRow = { value: string; displayName: string; resolvedModel?: string };
 
 export interface SessionInfoInput {
   record: SessionRecord;
@@ -52,7 +53,7 @@ export interface SessionInfoInput {
   models: readonly ModelRow[] | null; // the session's listed catalogue, when C7 read one (an alias matched to its resolved id)
   // UX wave U4a (decision 19): the route's catalogue (`engine.models`), which the composer's chip names the model from
   // while no list has been read; the listed catalogue wins where there is one, as in the chip's binding
-  modelNames?: readonly ModelCatalogueEntry[] | null;
+  modelNames?: readonly NamingRow[] | null;
   held: HeldAsk | null; // the model request this renderer holds for the session (widgets/model.ts `heldModel`), as the chip reads it
   windows: SessionWindows;
   budget: BudgetState | null; // C12: the engine host's memory budget, null before it answered
@@ -157,7 +158,7 @@ function modelSection(input: SessionInfoInput): InfoSection {
   // pending in the model widget's words; explicit Default names what the catalogue's `default` row runs. Without the
   // catalogue an alias cannot be matched to its resolved id, so a request this renderer does not hold reads confirmed
   // and the resolved one shows (a set_model from this app always listed the catalogue first).
-  const catalogue: readonly Pick<ModelCatalogueEntry, 'value' | 'displayName' | 'resolvedModel'>[] = models && models.length > 0 ? models : (input.modelNames ?? []); // the chip's rule (frame/bindings.ts)
+  const catalogue: readonly NamingRow[] = models && models.length > 0 ? models : (input.modelNames ?? []); // the chip's rule (frame/bindings.ts)
   const ask = status === null ? null : modelAsk(held ?? undefined, status.model, catalogue);
   const pending = ask !== null && ask.pending;
   const id = ask !== null && ask.pending ? (ask.asked ?? catalogue.find((r) => r.value === DEFAULT_ROW)?.resolvedModel ?? DEFAULT_ROW) : (model.resolved ?? model.requested);
