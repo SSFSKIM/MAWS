@@ -107,8 +107,8 @@ const COPY = SIDE_COPY.composer;
 const failed = (error: unknown): SendOutcome => ({ ok: false, error: error instanceof Error ? error.message : String(error) });
 
 /**
- * Sends `comments` (1 to 20, oldest first) to one destination, replacing `sendComment`. Unchecked, a side thread forks
- * the parent with all of them (the later ones as `more`), adopted as C10's fork is (its setup followed, its card docked)
+ * Sends `comments` (1 to 20, oldest first) to one destination, for the card and the sheet alike. Unchecked, a side
+ * thread forks the parent with all of them (the later ones as `more`), adopted as C10's fork is (its setup followed, its card docked)
  * and revealed in the parent's pane unless `reveal`, asked when the fork answers, says no (a card that still holds the
  * thread shows it itself). Ticked, main builds the content and the session's port sends it.
  */

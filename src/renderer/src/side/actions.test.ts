@@ -129,7 +129,7 @@ describe('a promotion’s exchanges', () => {
 
 // P2-E1 (M1): the card's sends (P2-E1 document, D5): the same payloads as the sheet's; `reveal`, asked when the fork
 // answers, says whether the new thread is revealed as E3 does (the default) or left to the card that sent it. UX wave
-// U5a: `sendComments` replaces `sendComment`; unchecked it is the side thread as before.
+// U5a: `sendComments` is the one send of a comment, of one or several; unchecked it is the side thread as before.
 describe('sendComments, unchecked: the side thread', () => {
   const starting = () => fakeClient({ 'side.thread.open': { status: 'starting', appSessionId: CHILD_ID }, 'session.intent.get': null });
 
