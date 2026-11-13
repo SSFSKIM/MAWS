@@ -145,6 +145,19 @@ describe('the computer-use calls of a session', () => {
     expect(readComputerUse(state, NONE, true)).toEqual({ turn: state.order[1], running: true, calls: [] });
   });
 
+  it('keeps the running turn’s call in flight when a prompt queued behind it is cancelled, discarded or refused', () => {
+    for (const dropped of ['cancelled', 'discarded', 'refused'] as const) {
+      const b = builder();
+      b.turn('u1');
+      b.toolUse('j1', JS, { code: '1' });
+      b.emit('user.message', { messageUuid: uuid('u2'), content: 'queued', isReplay: false, isSynthetic: false, origin: 'human', bash: null }); // written, not started
+      b.emit('command.lifecycle', { commandUuid: uuid('u2'), state: dropped }); // its turn closes, never accepted
+      const state = stateOf(b);
+      expect(state.turns.get(state.order[1])!, dropped).toMatchObject({ state: 'closed', accepted: false });
+      expect(readComputerUse(state, NONE, true), dropped).toEqual({ turn: state.order[0], running: true, calls: [{ toolUseId: 'j1', tool: 'js', state: 'flight' }] });
+    }
+  });
+
   it('is memoised on its inputs, and a batch that leaves the turn alone keeps its calls by reference', () => {
     const b = builder();
     b.turn('u1');

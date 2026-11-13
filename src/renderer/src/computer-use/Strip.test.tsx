@@ -15,7 +15,7 @@ import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { useTranscriptStore } from '../stores/transcript';
 import { applyEvents, createState } from '../transcript/model/reduce';
-import { builder, tool, type Builder } from '../transcript/model/test-events';
+import { builder, tool, uuid, type Builder } from '../transcript/model/test-events';
 import { COMPUTER_USE_COPY } from './copy';
 import { ComputerUseStrip } from './Strip';
 import { COMPUTER_USE_SETTLE_MS } from './strip-state';
@@ -105,6 +105,36 @@ describe('the computer-use strip', () => {
     expect(line()).not.toBeNull();
     act(() => useTranscriptStore.getState().setLive(ID, false));
     expect(line()).toBeNull();
+  });
+});
+
+describe('a prompt queued behind the running call and then dropped', () => {
+  const queuedThenCancelled = () => {
+    const b = running();
+    b.emit('user.message', { messageUuid: uuid('u2'), content: 'queued', isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    b.emit('command.lifecycle', { commandUuid: uuid('u2'), state: 'cancelled' });
+    return b;
+  };
+
+  it('leaves the running line and its Stop as they are, and never turns it to the lingering line', () => {
+    withStatus(CONNECTED);
+    render(<ComputerUseStrip appSessionId={ID} />);
+    show(running());
+    advance(COMPUTER_USE_SETTLE_MS);
+    show(queuedThenCancelled());
+    advance(60 * 60_000);
+    expect(line()!.textContent).toContain(COMPUTER_USE_COPY.running);
+    expect((stop() as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByRole('button', { name: COMPUTER_USE_COPY.dismiss })).toBeNull();
+  });
+
+  it('still shows the line when the drop comes inside the 250 ms wait', () => {
+    render(<ComputerUseStrip appSessionId={ID} />);
+    show(running());
+    advance(100);
+    show(queuedThenCancelled());
+    advance(COMPUTER_USE_SETTLE_MS - 100);
+    expect(line()!.textContent).toContain(COMPUTER_USE_COPY.running);
   });
 });
 
