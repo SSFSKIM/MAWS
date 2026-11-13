@@ -193,7 +193,7 @@ describe('sendComments, ticked: the session’s own conversation', () => {
   function laneB(turn = false, given: Parameters<typeof fakeClient>[0] = {}) {
     const engine = status(MAIN, { process: 'ready', ...(turn && { turn: { id: 'e1', origin: 'human', startedAt: 'x', acceptedAt: 'x', userMessageUuids: [] } }) } as never);
     useSessions.setState({ records: new Map([[MAIN, record(MAIN)]]), engine: new Map([[MAIN, engine]]) });
-    return fakeClient({ 'side.comment.content': { content: [IMAGE, TEXT] }, 'session.queue.list': { entries: [], paused: false }, 'session.send': { messageUuid: null, disposition: 'sent', queueId: 'q0' }, 'session.steer': { messageUuid: null }, ...given });
+    return fakeClient({ 'side.comment.content': { content: [IMAGE, TEXT] }, 'session.queue.list': { entries: [], paused: false }, 'session.send': { messageUuid: null, disposition: 'sent', queueId: 'q0' }, 'session.steer': { messageUuid: '11111111-1111-4111-8111-111111111111' }, ...given });
   }
   const terminal = (given: Parameters<typeof fakeClient>[0] = {}) => {
     useSessions.setState({ records: new Map([[MAIN, record(MAIN, { holder: { kind: 'terminal', pid: 42 } })]]) });

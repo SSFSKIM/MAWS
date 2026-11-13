@@ -52,8 +52,10 @@ afterAll(() => {
 beforeEach(() => {
   resetShellStores();
   useNotices.setState({ notices: [] });
-  // UX wave U5a: a ticked comment's content is main's, sent through the session's port as a typed message is
-  fake = fakeClient({ 'side.comment.content': { content: [{ type: 'text', text: 'the built message' }] }, 'session.queue.list': { entries: [], paused: false }, 'session.send': { messageUuid: null, disposition: 'sent', queueId: 'q0' }, 'session.intent.get': null });
+  // UX wave U5a: a ticked comment's content is main's, sent through the session's port (here the mocked seam) as a typed
+  // message is
+  fake = fakeClient({ 'side.comment.content': { content: [{ type: 'text', text: 'the built message' }] }, 'session.intent.get': null });
+  seam.mockClear();
   window.maws = fake.client as unknown as PreloadBridge;
   offComposer = registerCommentComposer(openComment);
   const s = useSessions.getState();
@@ -91,8 +93,10 @@ describe('the artifact-comment anchor', () => {
 
   it('goes to the agent by both routes unchanged, its tag round-tripping', async () => {
     const anchor = artifactCommentAnchor({ artifactId: ARTIFACT, title: 'Q3 plan', ...passage });
+    seam.mockResolvedValueOnce({ disposition: 'sent', started: false }); // UX wave U5a: the human send seam, as a typed message
     await expect(sendComments(PARENT, [{ anchor, text: 'Should this be monthly?', screenshot: null }], true)).resolves.toEqual({ ok: true, to: 'main', disposition: 'sent' });
     expect(fake.invoked('side.comment.content')).toEqual([{ comments: [{ anchor, text: 'Should this be monthly?', screenshot: null }] }]);
+    expect(seam.mock.calls.map(([id, content, options]) => [id, content, options])).toEqual([[PARENT, [{ type: 'text', text: 'the built message' }], { origin: 'comment' }]]);
     const sent = sendComments(PARENT, [{ anchor, text: 'Should this be monthly?', screenshot: null }], false, { reveal: () => false });
     await act(() => fake.reply('side.thread.open', { status: 'starting', appSessionId: 'c3333333-3333-4333-8333-333333333333' }));
     await sent;
@@ -167,6 +171,7 @@ describe('the card on a document', () => {
     const { reach, comment } = mount();
     comment();
     await act(async () => {});
+    seam.mockResolvedValueOnce({ disposition: 'sent', started: false }); // UX wave U5a: the human send seam
     await userEvent.click(screen.getByRole('checkbox', { name: 'Send to main' }));
     await userEvent.type(field(), 'Should this be monthly?{Enter}');
     expect(reach.record).toHaveBeenCalledWith(passage.threadId, 'Should this be monthly?');
@@ -409,6 +414,7 @@ describe('the compose card in the margin and the draft rule', () => {
   it('⌘Enter posts beside Enter (C3)', async () => {
     const m = mountMargin();
     await opened(m);
+    seam.mockResolvedValueOnce({ disposition: 'sent', started: false }); // UX wave U5a: the human send seam
     await userEvent.click(screen.getByRole('checkbox', { name: 'Send to main' }));
     await userEvent.type(field(), 'Should this be monthly?');
     await userEvent.keyboard('{Meta>}{Shift>}{Enter}{/Shift}{/Meta}');

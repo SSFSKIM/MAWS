@@ -494,7 +494,7 @@ describe('the checkbox and the one send path', () => {
 
     const s = useSessions.getState();
     useSessions.setState({ engine: new Map(s.engine).set(PARENT, status(PARENT, { process: 'ready', turn: { id: 'e1', origin: 'human', startedAt: 'x', acceptedAt: 'x', userMessageUuids: [] } } as never)) });
-    fake = fakeClient({ ...MAIN_SENDS, 'session.steer': { messageUuid: null } });
+    fake = fakeClient({ ...MAIN_SENDS, 'session.steer': { messageUuid: '11111111-1111-4111-8111-111111111111' } });
     window.maws = fake.client as unknown as PreloadBridge;
     pick();
     expect(titleOf(box())).toBe('Sends at the next step');
