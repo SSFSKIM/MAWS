@@ -1038,12 +1038,11 @@ test.describe('sessions', () => {
       const chip = (name: string) => main.locator(`[data-chip="path"][title="${file(name)}"]`);
       await expect(chip('notes.txt')).toBeVisible({ timeout: 20_000 });
       await expect(chip('unnamed.txt'), 'a path in prose is no chip').toHaveCount(0);
-      const sessionTab = activeMainTab(page);
-      const sessionTabId = await sessionTab.getAttribute('data-tab-id');
+      const sessionTabId = await activeMainTab(page).getAttribute('data-tab-id');
 
       await chip('notes.txt').click();
       const machine = await localRef(page);
-      await expect(activeMainTab(page), 'a file tab of the strip').toHaveAttribute('data-tab-id', `file:${machine}:${file('notes.txt')}`);
+      await expect(mainTabById(page, `file:${machine}:${file('notes.txt')}`), 'a file tab of the strip, in front').toHaveAttribute('aria-selected', 'true');
       const notes = main.locator(`[data-file-viewer][data-path="${file('notes.txt')}"]`);
       const content = notes.locator('.cm-content');
       await expect(content).toHaveText(NOTES, { timeout: 20_000 });
