@@ -523,13 +523,16 @@ describe('the checkbox and the one send path', () => {
     expect(titleOf(box())).toBe('A side thread is not available on Studio yet');
   });
 
-  it('an archived session: the checkbox and Send are off, and the reason is a line under the field', async () => {
-    withParent('exited');
+  // the composer's answer for an archived session (decision 6), even with its process ready, which the port allows
+  it.each(['thread', 'main'] as const)('an archived session with a ready process, opened to %s: both states are off, Send is off, and the reason is a line under the field', async (destination) => {
+    withParent('ready');
     act(() => useSessions.setState({ digests: new Map([[PARENT, digest(PARENT, { availability: 'archived' })]]) }));
     mount();
-    pick();
+    act(() => openCommentComposer(ANCHOR, { appSessionId: PARENT, placement: cardPlacement(), destination }));
     await userEvent.type(field(), 'Look here');
+    expect(box().checked).toBe(destination === 'main');
     expect(box().disabled).toBe(true);
+    expect(titleOf(box())).toBe('Archived · unarchive it to continue');
     expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true);
     expect(card()!.querySelector('[data-comment-unsendable]')!.textContent).toBe('Archived · unarchive it to continue');
   });

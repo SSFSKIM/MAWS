@@ -17,10 +17,12 @@ import { useSessions } from '../stores/sessions';
 import { fileLineAnchor } from '../tools/code/anchor/anchor';
 import { resetShellStores } from '../test-support/shell-stores';
 import { CommentComposerHost, openComposer, useCommentComposer } from './CommentComposer';
-import { applyLaneAState, resetLaneAStore } from '../stores/lane-a'; // UX wave U5a
+import { applyLaneAState, dismissPendingSend, resetLaneAStore } from '../stores/lane-a'; // UX wave U5a
+import { TOAST_DURATION_MS, ToastHost } from '../app/ToastHost';
 import { laneAState } from '../lane-a/test-support/lane-a-state';
 import { shownSession } from '../panel/host';
 import { useMachines } from '../stores/machines';
+import { resetPlaceNotes } from './card/store';
 import { T0 } from '../../../../test/support/builders';
 
 // P5 O6 M2: main is asked and answers with the bare id; the page holds its address
@@ -44,6 +46,7 @@ const titleOf = (input: HTMLInputElement) => input.closest('label')!.getAttribut
 beforeEach(() => {
   resetShellStores();
   resetLaneAStore();
+  resetPlaceNotes(); // UX wave U5a: and the hand-off toasts it follows
   useNotices.setState({ notices: [] });
   fake = fakeClient(MAIN_SENDS);
   window.maws = fake.client as unknown as PreloadBridge;
@@ -246,29 +249,65 @@ describe('the comment composer', () => {
     expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['Queued for Q3 plan; it sends when the queue resumes']);
   });
 
-  it('a terminal session’s unconfirmed hand-off says so in a toast whose Show brings the session’s tab; a plain delivery says nothing', async () => {
-    useSessions.setState({ records: new Map([[PARENT, record(PARENT, { title: { text: 'Q3 plan', source: 'user' }, holder: { kind: 'terminal', pid: 42 } })]]), engine: new Map() });
-    applyLaneAState(PARENT, laneAState(PARENT));
-    fake = fakeClient({ 'side.comment.content': { content: BUILT }, 'laneA.send': { key: { writer: 'maws/m', seq: 2 }, state: 'submitted' } });
-    window.maws = fake.client as unknown as PreloadBridge;
-    show();
-    await userEvent.click(box());
-    await userEvent.type(screen.getByRole('textbox', { name: 'Comment' }), 'Look here{Enter}');
-    await vi.waitFor(() => expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['Not confirmed yet in Q3 plan']));
-    expect(screen.queryByRole('dialog')).toBeNull();
-    const [notice] = useNotices.getState().notices;
-    expect(notice!.actions.map((a) => a.label)).toEqual(['Show']);
-    act(() => notice!.actions[0]!.run());
-    expect(shownSession()).toBe(PARENT);
+  // Decision Log 27 (the architect's ruling): the hand-off's toast is keyed and follows its pending send as a place's
+  // pending line does: it stays past the toast's time while the send is pending or refused, its words following the
+  // send; it reads "Sent to <title>" once the delivery entered and then leaves on the ordinary time; it leaves when the
+  // strip's entry is dismissed (or resent, which dismisses it); each send has its own; a plain delivery says nothing
+  describe('a terminal session’s unconfirmed hand-off', () => {
+    const SECOND = { writer: 'maws/m', seq: 2 };
+    const THIRD = { writer: 'maws/m', seq: 3 };
+    const toasts = () => useNotices.getState().notices.filter((n) => n.kind === 'toast').map((n) => n.text);
+    const delivery = (key: { writer: string; seq: number }, state: 'entered' | 'refused', reason?: string) => ({ key, at: '2026-11-12T09:00:00.000Z', state, ...(reason !== undefined && { reason }) });
+    const sendThrough = async (key: { writer: string; seq: number }, state: 'submitted' | 'entered' = 'submitted') => {
+      fake = fakeClient({ 'side.comment.content': { content: BUILT }, 'laneA.send': { key, state } });
+      window.maws = fake.client as unknown as PreloadBridge;
+      act(() => openComposer(ANCHOR, { appSessionId: PARENT }));
+      await userEvent.click(box());
+      await userEvent.type(screen.getByRole('textbox', { name: 'Comment' }), 'Look here{Enter}');
+      await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    };
+    beforeEach(() => {
+      vi.useFakeTimers({ shouldAdvanceTime: true }); // before any toast mounts, so the host's timeout is a fake one
+      useSessions.setState({ records: new Map([[PARENT, record(PARENT, { title: { text: 'Q3 plan', source: 'user' }, holder: { kind: 'terminal', pid: 42 } })]]), engine: new Map() });
+      applyLaneAState(PARENT, laneAState(PARENT));
+      render(<CommentComposerHost />);
+      render(<ToastHost />);
+    });
+    afterEach(() => vi.useRealTimers());
 
-    useNotices.setState({ notices: [] });
-    fake = fakeClient({ 'side.comment.content': { content: BUILT }, 'laneA.send': { key: { writer: 'maws/m', seq: 3 }, state: 'entered' } });
-    window.maws = fake.client as unknown as PreloadBridge;
-    act(() => openComposer(ANCHOR, { appSessionId: PARENT }));
-    await userEvent.click(box());
-    await userEvent.type(screen.getByRole('textbox', { name: 'Comment' }), 'Look here{Enter}');
-    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect(useNotices.getState().notices).toEqual([]);
+    it('stays past the toast’s time while pending, follows a late refusal, and leaves when the strip’s entry is dismissed', async () => {
+      await sendThrough(SECOND);
+      await vi.waitFor(() => expect(screen.getByText('Not confirmed yet in Q3 plan')).toBeTruthy());
+      await act(async () => vi.advanceTimersByTime(TOAST_DURATION_MS + 500));
+      expect(screen.getByText('Not confirmed yet in Q3 plan')).toBeTruthy();
+      act(() => applyLaneAState(PARENT, laneAState(PARENT, { deliveries: [delivery(SECOND, 'refused', 'the terminal was busy')] })));
+      expect(screen.getByText('Not entered in Q3 plan: the terminal was busy')).toBeTruthy();
+      await act(async () => vi.advanceTimersByTime(TOAST_DURATION_MS + 500));
+      expect(toasts()).toEqual(['Not entered in Q3 plan: the terminal was busy']);
+      act(() => dismissPendingSend(PARENT, SECOND)); // the strip's Dismiss (a resend dismisses its entry the same way)
+      expect(toasts()).toEqual([]);
+    });
+
+    it('reads Sent to <title> once entered and leaves on the ordinary time; each send has its own; Show brings the session’s tab; a plain delivery says nothing', async () => {
+      await sendThrough(SECOND);
+      await sendThrough(THIRD);
+      await vi.waitFor(() => expect(toasts()).toEqual(['Not confirmed yet in Q3 plan', 'Not confirmed yet in Q3 plan']));
+      act(() => applyLaneAState(PARENT, laneAState(PARENT, { deliveries: [delivery(SECOND, 'entered')] })));
+      expect(toasts()).toEqual(['Sent to Q3 plan', 'Not confirmed yet in Q3 plan']);
+      await act(async () => vi.advanceTimersByTime(TOAST_DURATION_MS + 500));
+      expect(toasts()).toEqual(['Not confirmed yet in Q3 plan']);
+      const [notice] = useNotices.getState().notices;
+      expect(notice!.actions.map((a) => a.label)).toEqual(['Show']);
+      act(() => screen.getByRole('button', { name: 'Show' }).click());
+      expect(shownSession()).toBe(PARENT);
+      expect(toasts(), 'acting on a toast dismisses it; the strip it showed says the rest').toEqual([]);
+      act(() => applyLaneAState(PARENT, laneAState(PARENT, { deliveries: [delivery(THIRD, 'entered')] })));
+      expect(toasts()).toEqual([]);
+
+      await sendThrough({ writer: 'maws/m', seq: 4 }, 'entered');
+      await act(async () => {});
+      expect(toasts()).toEqual([]);
+    });
   });
 
   it('Retry is disabled once its destination can no longer send (Send to main, the parent archived meanwhile); an exited parent can still be started', async () => {
