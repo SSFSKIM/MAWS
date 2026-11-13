@@ -23,7 +23,7 @@ function fakeView() {
   return { webContents } as unknown as WebContentsView & { webContents: typeof webContents };
 }
 
-function harness(options: { restored?: ConstructorParameters<typeof TabStore>[0]['restored']; fileBroken?: boolean; createView?: (tab: BrowserTab) => WebContentsView; driven?: (tabId: string) => boolean } = {}) {
+function harness(options: { restored?: ConstructorParameters<typeof TabStore>[0]['restored']; fileBroken?: boolean; createView?: (tab: BrowserTab) => WebContentsView; driven?: (tabId: string) => boolean; reloadForAgent?: (tabId: string) => boolean } = {}) {
   const emitted: { name: EventName; payload: unknown }[] = [];
   const queue: (() => void)[] = [];
   const views: ReturnType<typeof fakeView>[] = [];
@@ -47,6 +47,7 @@ function harness(options: { restored?: ConstructorParameters<typeof TabStore>[0]
     newTabId: () => `b_${(++ids).toString(16).padStart(12, '0')}`,
     schedule: (fn) => void queue.push(fn),
     driven: options.driven,
+    reloadForAgent: options.reloadForAgent,
   });
   const flush = () => {
     while (queue.length > 0) queue.shift()!();
@@ -60,6 +61,10 @@ function harness(options: { restored?: ConstructorParameters<typeof TabStore>[0]
 
 const open = (h: ReturnType<typeof harness>, url: string | null, more: { appSessionId?: AppSessionId; select?: boolean; reuse?: 'url'; requestId?: string } = {}) =>
   h.store.open({ appSessionId: more.appSessionId ?? A, url, select: more.select ?? true, reuse: more.reuse, requestId: more.requestId });
+
+// U12a: show_pane's open (the window's `browser.tabs.open` with `reload`)
+const show = (h: ReturnType<typeof harness>, url: string, more: { appSessionId?: AppSessionId; requestId?: string } = {}) =>
+  h.store.open({ appSessionId: more.appSessionId ?? A, url, select: true, reuse: 'url', reload: true, ...(more.requestId !== undefined && { requestId: more.requestId }) });
 
 describe('TabStore: opening (E4a Design §2)', () => {
   it('opens an empty tab with no view, selected, and a schema-valid record', () => {
@@ -142,6 +147,110 @@ describe('TabStore: opening (E4a Design §2)', () => {
     const { tab } = open(h, 'https://a.test/');
     expect(tab).toMatchObject({ failed: { message: 'no renderer' }, loading: false, suspended: false });
     expect(h.entry(tab.tabId).view).toBeNull();
+  });
+});
+
+// U12a (M1; Interfaces §B's table): `show_pane` on an address already open reloads the tab unless the person is using it
+// (`personUses`), and says which happened. The reload itself is the navigator's (`reloadForAgent`; navigation.test.ts).
+describe('TabStore: show_pane’s open, with reload (U12a)', () => {
+  const reloading = () => {
+    const reloads: string[] = [];
+    const h = harness({ reloadForAgent: (tabId) => (reloads.push(tabId), true) });
+    return { h, reloads };
+  };
+  const loaded = (h: ReturnType<typeof harness>, url = 'https://a.test/page') => open(h, url).tab.tabId;
+  const human = (h: ReturnType<typeof harness>, tabId: string, agoMs: number) => h.entry(tabId).input.emit({ kind: 'key', source: 'human', at: Date.parse('2026-10-06T12:00:00.000Z') - agoMs });
+
+  it('none at the address: a new tab, selected, opened', () => {
+    const { h, reloads } = reloading();
+    const other = loaded(h, 'https://other.test/');
+    const answer = show(h, 'https://a.test/page');
+    expect(answer).toMatchObject({ reused: false, page: 'opened' });
+    expect(answer.tab.tabId).not.toBe(other);
+    expect(h.store.list(A).selected[A]).toBe(answer.tab.tabId);
+    expect(reloads).toEqual([]);
+  });
+
+  it('suspended: selected and loaded, as today, reloaded', () => {
+    const { h, reloads } = reloading();
+    const tabId = loaded(h);
+    h.store.suspend(tabId);
+    loaded(h, 'https://other.test/');
+    const answer = show(h, 'https://A.test/page');
+    expect(answer).toMatchObject({ reused: true, page: 'reloaded', tab: { tabId, suspended: false, loading: true } });
+    expect(h.store.list(A).selected[A]).toBe(tabId);
+    expect(reloads).toEqual([]); // loaded by the store, as any resume
+  });
+
+  it('loaded, and the person not using it: selected, the navigator’s reload commanded, reloaded', () => {
+    const { h, reloads } = reloading();
+    const tabId = loaded(h);
+    loaded(h, 'https://other.test/');
+    expect(show(h, 'https://a.test/page')).toMatchObject({ reused: true, page: 'reloaded', tab: { tabId } });
+    expect(h.store.list(A).selected[A]).toBe(tabId);
+    expect(reloads).toEqual([tabId]);
+  });
+
+  it('loaded, and the person’s input within three seconds: selected, nothing reloaded, kept', () => {
+    const { h, reloads } = reloading();
+    const tabId = loaded(h);
+    loaded(h, 'https://other.test/');
+    human(h, tabId, BROWSER_HANDBACK_IDLE_MS - 1);
+    expect(show(h, 'https://a.test/page')).toMatchObject({ reused: true, page: 'kept', tab: { tabId } });
+    expect(h.store.list(A).selected[A]).toBe(tabId);
+    expect(reloads).toEqual([]);
+  });
+
+  it('a tab that reads "You have the page" with its last input ten seconds old is kept (personUses, not personHolds)', () => {
+    const { h, reloads } = reloading();
+    const tabId = loaded(h);
+    human(h, tabId, 10_000);
+    h.store.setControl(tabId, 'human');
+    expect(show(h, 'https://a.test/page').page).toBe('kept');
+    expect(reloads).toEqual([]);
+  });
+
+  it('the limit: a page the person typed in a minute ago and has left is reloaded like any other', () => {
+    const { h, reloads } = reloading();
+    const tabId = loaded(h);
+    human(h, tabId, 60_000);
+    expect(show(h, 'https://a.test/page').page).toBe('reloaded');
+    expect(reloads).toEqual([tabId]);
+  });
+
+  it('without reload a loaded tab is selected, not reloaded, and the answer has no page (as today)', () => {
+    const { h, reloads } = reloading();
+    const tabId = loaded(h);
+    loaded(h, 'https://other.test/');
+    h.views[0]!.webContents.loadURL.mockClear();
+    const answer = open(h, 'https://a.test/page', { reuse: 'url', requestId: 'link-1' });
+    expect(answer).toEqual({ tab: expect.objectContaining({ tabId }), reused: true });
+    expect('page' in answer).toBe(false);
+    expect(h.store.list(A).selected[A]).toBe(tabId);
+    expect(h.views[0]!.webContents.loadURL).not.toHaveBeenCalled();
+    expect(reloads).toEqual([]);
+  });
+
+  it('a repeated request id answers the first call’s tab and page and commands no second reload; a new id reloads again', () => {
+    const { h, reloads } = reloading();
+    const tabId = loaded(h);
+    const first = show(h, 'https://a.test/page', { requestId: 'r1' });
+    const second = show(h, 'https://a.test/page', { requestId: 'r1' });
+    expect(first).toMatchObject({ page: 'reloaded', tab: { tabId } });
+    expect(second).toEqual({ tab: expect.objectContaining({ tabId }), reused: true, page: 'reloaded' });
+    expect(reloads).toEqual([tabId]);
+    const opened = show(h, 'https://b.test/', { requestId: 'r2' });
+    expect(show(h, 'https://b.test/', { requestId: 'r2' })).toEqual({ tab: expect.objectContaining({ tabId: opened.tab.tabId }), reused: true, page: 'opened' });
+    expect(show(h, 'https://a.test/page', { requestId: 'r3' }).page).toBe('reloaded');
+    expect(reloads).toEqual([tabId, tabId]);
+  });
+
+  it('another session’s tab at the address is never reused nor reloaded', () => {
+    const { h, reloads } = reloading();
+    loaded(h);
+    const answer = show(h, 'https://a.test/page', { appSessionId: B });
+    expect(answer).toMatchObject({ reused: false, page: 'opened', tab: { appSessionId: B } });
+    expect(reloads).toEqual([]);
   });
 });
 

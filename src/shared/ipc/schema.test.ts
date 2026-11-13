@@ -1054,6 +1054,10 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('maws.pane.answer', { appSessionId: 'a', requestId: 'r1', result: { ok: true, opened: { kind: 'panel-tool', toolId: 'terminal', tabId: 't', title: 'Terminal' } } }).ok).toBe(true);
       expect(validateCommandInput('maws.pane.answer', { appSessionId: 'a', requestId: 'r1', result: { ok: false, error: 'show_pane: the artifact pane is not available in this build of MAWS' } }).ok).toBe(true);
       expect(validateCommandInput('maws.pane.answer', { appSessionId: 'a', requestId: 'r1', result: { ok: false } }).ok).toBe(false);
+      // U12a (M1): a browser answer's page; a refusal carries none
+      expect(validateCommandInput('maws.pane.answer', { appSessionId: 'a', requestId: 'r1', result: { ok: true, opened: { kind: 'panel-tool', toolId: 'browser', tabId: 't', title: 'Browser' }, page: 'kept' } }).ok).toBe(true);
+      expect(validateCommandInput('maws.pane.answer', { appSessionId: 'a', requestId: 'r1', result: { ok: true, opened: { kind: 'panel-tool', toolId: 'browser', tabId: 't', title: 'Browser' }, page: 'stale' } }).ok).toBe(false);
+      expect(validateCommandInput('maws.pane.answer', { appSessionId: 'a', requestId: 'r1', result: { ok: false, error: 'x', page: 'kept' } }).ok).toBe(false);
       expect(validateCommandOutput('maws.pane.answer', { outcome: 'write_failed' }).ok).toBe(false);
     });
   });
@@ -1361,6 +1365,11 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('browser.tabs.open', { ...open, reuse: 'title' }).ok).toBe(false);
       expect(validateCommandOutput('browser.tabs.open', { tab, reused: false }).ok).toBe(true);
       expect(validateCommandOutput('browser.tabs.open', { tab: { ...tab, extra: 1 }, reused: false }).ok).toBe(false);
+      // U12a (M1; Interfaces §B): show_pane's open asks for the reload, and the answer says which outcome
+      expect(validateCommandInput('browser.tabs.open', { ...open, reuse: 'url', reload: true, requestId: 'r1' }).ok).toBe(true);
+      expect(validateCommandInput('browser.tabs.open', { ...open, reload: false }).ok).toBe(false);
+      for (const page of ['opened', 'reloaded', 'kept']) expect(validateCommandOutput('browser.tabs.open', { tab, reused: true, page }).ok, page).toBe(true);
+      expect(validateCommandOutput('browser.tabs.open', { tab, reused: true, page: 'stale' }).ok).toBe(false);
       for (const tabId of ['b_0123', 'B_0123456789ab', 'b_0123456789AB', 'tab-1', ''])
         expect(validateCommandInput('browser.tabs.close', { tabId }).ok, tabId).toBe(false);
       expect(validateCommandInput('browser.tabs.close', { tabId: TAB_ID }).ok).toBe(true);

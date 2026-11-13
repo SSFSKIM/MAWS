@@ -15,7 +15,7 @@ function harness(subagentUses: readonly string[] = []) {
   const sent: unknown[] = [];
   const server = new MawsToolServer({
     tools: [askTool({ asks, cancelled: (ask: PendingAsk, reason) => cancelled.push([ask.askId, reason]) })],
-    appSessionId: 'app-1' as AppSessionId, version: '0', cwd: () => '/r', log: () => {},
+    instructions: '', appSessionId: 'app-1' as AppSessionId, version: '0', cwd: () => '/r', log: () => {},
     respond: async (_requestId, response) => void sent.push(response),
     fromSubagent: (toolUseId) => toolUseId !== null && subagentUses.includes(toolUseId), // P2-C3
   });

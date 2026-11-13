@@ -5,7 +5,7 @@ import { BROWSER_AGENT_IDLE_MS, BROWSER_HANDBACK_IDLE_MS, BROWSER_LOADED_TABS_MA
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { TabInputSeam } from '../input';
 import { TabStore, type TabEntry } from '../tabs';
-import { personHolds, TabControls } from './control';
+import { personHolds, personUses, TabControls } from './control';
 
 // Design §8's table, row by row, over E4a's real TabStore and input seam with vitest's fake clock: who drives the page,
 // the two timers, a held command's wait (`whenReleased`), background throttling while the agent acts, and what a closed
@@ -302,6 +302,25 @@ describe('personHolds (Design §6 step 3, §8): the one statement of the rule', 
     h.store.setControl(entry.tab.tabId, 'human');
     expect(personHolds(entry, Date.now() + 60_000)).toBe(false);
     expect(h.controls.personHolds(entry)).toBe(true);
+  });
+});
+
+// U12a (M1; Interfaces §C, ruling R1): what `show_pane`'s reload and the agent's tab read; `personHolds` is unchanged
+describe('personUses: the tab reads "You have the page", or personHolds', () => {
+  it('is the grace while the tab is not the person’s, and lasts while it reads "You have the page"', () => {
+    const h = harness();
+    const entry = h.open();
+    expect(personUses(entry, Date.now())).toBe(false);
+    h.human(entry);
+    expect(personUses(entry, Date.now() + BROWSER_HANDBACK_IDLE_MS - 1)).toBe(true);
+    expect(personUses(entry, Date.now() + BROWSER_HANDBACK_IDLE_MS)).toBe(false); // a page typed in and left
+    h.store.setControl(entry.tab.tabId, 'human');
+    expect(personUses(entry, Date.now() + 10_000)).toBe(true); // the case that tells it from personHolds
+    expect(personHolds(entry, Date.now() + 10_000)).toBe(false);
+    h.store.setControl(entry.tab.tabId, 'agent');
+    expect(personUses(entry, Date.now() + 10_000)).toBe(false);
+    h.store.setControl(entry.tab.tabId, 'idle');
+    expect(personUses(entry, Date.now() + 10_000)).toBe(false);
   });
 });
 
