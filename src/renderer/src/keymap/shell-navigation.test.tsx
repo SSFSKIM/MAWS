@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ACTIONS, ACTION_IDS, effectiveChord, type KeymapOverrides } from '@shared/keymap/actions';
@@ -11,6 +11,8 @@ import { resetShellStores } from '../test-support/shell-stores';
 import { at } from '../../../../test/support/machine';
 import { TabStrip } from '../main/TabStrip';
 import { connectKeys } from './dispatcher';
+import { A, probeTool, resetPanelStores, TestHost } from '../test-support/panel';
+import { panelHost, registerPanelTool } from '../panel/host';
 
 let off: () => void;
 beforeEach(() => {
@@ -263,3 +265,57 @@ it('visits Session cards, each group’s strip and its content, without stopping
   expect(document.activeElement).toBe(screen.getByLabelText('Review input'));
 });
 
+
+// UX wave U8b (M2, fix round 1): a strip's controls past its tabs ("+", Float, Expand, Hide) are part of the strip's
+// stop, so F6 from one of them goes on to the group's content and Shift+F6 back to what precedes the strip.
+describe('F6 from a control at the end of a side group\'s strip', () => {
+  let offTools: (() => void)[] = [];
+  beforeEach(() => {
+    resetPanelStores();
+    offTools = ['terminal', 'review'].map((id) => registerPanelTool(probeTool(id, { title: id === 'terminal' ? 'Terminal' : 'Review' }).tool));
+  });
+  afterEach(() => offTools.splice(0).forEach((off) => off()));
+
+  const mount = (groups: 1 | 2) => {
+    render(<>
+      <section id="region-sidebar"><button>Sidebar destination</button></section>
+      <section id="region-panel"><TestHost /></section>
+    </>);
+    act(() => void panelHost.addTool('terminal', { appSessionId: A }));
+    if (groups === 2) {
+      let review = '';
+      act(() => void (review = panelHost.addTool('review', { appSessionId: A })));
+      act(() => useLayout.getState().moveSurfaceTab(A, review, 'lower'));
+    }
+    const sections = [...document.querySelectorAll<HTMLElement>('section[data-side-group]')];
+    expect(sections).toHaveLength(groups);
+    return sections;
+  };
+  const named = (element: Element | null) => element?.closest('[role="tab"]')?.textContent ?? element?.closest('[role="tabpanel"]')?.id ?? element?.textContent;
+  const control = (section: HTMLElement, name: string) => within(section).getByRole('button', { name });
+
+  it.each(['Float conversation over surface', 'Expand surface', 'Hide side column', 'Add a tool'])('the upper group: F6 from %s goes to its content, Shift+F6 to the sidebar', (name) => {
+    const [upper] = mount(1);
+    control(upper, name).focus();
+    pressMenu({ key: 'F6', code: 'F6' });
+    expect(named(document.activeElement)).toBe('panel-host-body-upper');
+    control(upper, name).focus();
+    pressMenu({ key: 'F6', code: 'F6', shiftKey: true });
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Sidebar destination' }));
+  });
+
+  it('two groups: from the upper strip\'s Hide and the lower strip\'s "+", F6 goes on to that group\'s content and Shift+F6 back past its strip', () => {
+    const [upper, lower] = mount(2);
+    control(upper, 'Hide side column').focus();
+    pressMenu({ key: 'F6', code: 'F6' });
+    expect(named(document.activeElement)).toBe('panel-host-body-upper');
+    pressMenu({ key: 'F6', code: 'F6' });
+    expect(named(document.activeElement)).toBe('Review'); // the lower strip's stop is its selected tab
+    control(lower, 'Add a tool').focus();
+    pressMenu({ key: 'F6', code: 'F6' });
+    expect(named(document.activeElement)).toBe('panel-host-body-lower');
+    control(lower, 'Add a tool').focus();
+    pressMenu({ key: 'F6', code: 'F6', shiftKey: true });
+    expect(named(document.activeElement)).toBe('panel-host-body-upper');
+  });
+});

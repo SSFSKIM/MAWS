@@ -82,6 +82,59 @@ describe('choosing and adding', () => {
   });
 });
 
+// The WAI-ARIA tabs pattern with manual activation (U6's strip, as M2 rewrote it; fix round 1): the arrows move focus
+// along the tabs and wrap without choosing one, only the tab in view is a Tab stop and names the body it controls, and
+// Enter or Space chooses the focused tab through the host.
+describe('the keyboard', () => {
+  const seed = () => {
+    register(probeTool('review', { multiInstance: false }).tool, probeTool('files').tool, probeTool('terminal').tool);
+    const tabs = [ref('review:aaaa0001'), ref('files:aaaa0002'), ref('terminal:aaaa0003')];
+    useLayout.setState({
+      panelBySession: new Map([[A, { tabs, activeTabId: tabs[1].id }]]),
+      panelSurfaces: { version: 2, stacks: { [A]: [tabs[1].id] }, pinnedTools: [], contexts: {} },
+    });
+    render(<Strip />);
+    return tabs;
+  };
+  const inView = () => surfaceTabs(useLayout.getState(), A).map((tab) => tab.id);
+
+  it('ArrowRight and ArrowLeft move focus along the tabs, wrapping at both ends, and choose none', async () => {
+    const user = userEvent.setup();
+    const [, files] = seed();
+    const tabs = screen.getAllByRole('tab');
+    act(() => tabs[1].focus());
+    const walk = async (key: string) => { await user.keyboard(key); return tabs.indexOf(document.activeElement as HTMLElement); };
+    expect([await walk('{ArrowRight}'), await walk('{ArrowRight}'), await walk('{ArrowRight}')]).toEqual([2, 0, 1]);
+    expect([await walk('{ArrowLeft}'), await walk('{ArrowLeft}'), await walk('{ArrowLeft}')]).toEqual([0, 2, 1]);
+    await walk('{ArrowLeft}');
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'review' }));
+    expect(inView()).toEqual([files.id]);
+    expect(screen.getByRole('tab', { selected: true }).textContent).toBe('files');
+  });
+
+  it('only the tab in view is a Tab stop and has aria-controls', () => {
+    seed();
+    expect(screen.getAllByRole('tab').map((tab) => [tab.textContent, tab.tabIndex, tab.getAttribute('aria-controls')])).toEqual([
+      ['review', -1, null],
+      ['files', 0, 'body-upper'],
+      ['terminal', -1, null],
+    ]);
+  });
+
+  it.each(['{Enter}', ' '])('%s on a focused tab chooses it through panelHost.selectTab', async (key) => {
+    const user = userEvent.setup();
+    const [, , terminal] = seed();
+    const select = vi.spyOn(panelHost, 'selectTab');
+    act(() => screen.getByRole('tab', { name: 'files' }).focus());
+    await user.keyboard('{ArrowRight}');
+    expect(select).not.toHaveBeenCalled();
+    await user.keyboard(key);
+    expect(select).toHaveBeenCalledExactlyOnceWith(terminal.id);
+    expect(inView()).toEqual([terminal.id]);
+    expect(screen.getByRole('tab', { name: 'terminal' }).getAttribute('aria-selected')).toBe('true');
+  });
+});
+
 describe('a strip too narrow for its tabs (decision 5)', () => {
   // Six whole tabs of 100 px and five gaps of 2 px take 610 px.
   const six = ['a', 'b', 'c', 'd', 'e', 'f'].map((id) => ({ id, whole: 100 }));
