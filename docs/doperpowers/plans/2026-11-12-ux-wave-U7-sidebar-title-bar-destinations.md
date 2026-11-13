@@ -22,8 +22,8 @@ Build F (commit `f1852de3a`) is the build on the owner's machines, and the owner
 - [x] (2026-11-13) Adversarial review of this document (one P1, six P2, three short points) and the architect's rulings on it and on the thirteen points reported at authoring: folded in, one revision (Decision Log). The cut stands as written. Read again for the revision: master `d7ca414ae`, and `origin/ux-wave/U9` `c13d710b0`, which now holds code.
 - [x] (2026-11-13) The drawn example came back with nineteen points, and the architect ruled on each; the nine points handed back with revision 2 were accepted as written. Folded in, one pass (Decision Log).
 - [x] (2026-11-13) M1 — Three small fixes: six words, "reconnecting", the chip's box. Commits `83f56a79c..d3578520b`; reviewed clean.
-- [ ] M2 — A listed session opens like a local one.
-- [ ] M3 — Hide a session, and get it back. Its last step, the row's own button, is built on the owner's answer to question 1 (M3, decision 9).
+- [x] (2026-11-13) M2 — A listed session opens like a local one. Commits `82c7fdebd..3f6a6ae59`, review fix `273101fd1..9303d53c4` (an anchored Needs you item of a listed session now goes through the opener too); reviewed clean.
+- [ ] M3 — Hide a session, and get it back. Its last step, the row's own button, is built on the owner's answer to question 1 (M3, decision 9). The owner answered "Button on the row" (2026-11-12): it is built.
 - [ ] M4 — U7a's e2e scenes, the record, and the acceptance run.
 - [ ] U7a: the proof an executor does not run; the pull request on the architect's word.
 - [ ] The re-check pass of "Statements to check again", once U13a is on master (the author of this document, on the architect's word). U7b does not start before it.
@@ -955,6 +955,10 @@ U7a's pull request carries the dated amendment of the ruling S-11 reverses; U7b'
 - Decision (M2, the executor's, folded by the controller). Built the first way of decision 1: U9's `remoteSessionActions` was not on the master merged at `6c92b03ff`; `app/session-actions.ts` is not touched. The listed row's own click, ⌘-click and middle-click call `openListed`; with no opener registered the row is selected and its card shows, as a plain click does. `ListedOpenItems` takes its two labels from `SESSION_ACTIONS` and reads whether they are enabled from `remoteOpenerFor` when the menu draws. The listing branch of `SessionItems` is taken only for an address with no record; one with neither record nor listing keeps today's answer. The listed rows' menus are pinned in `sidebar/reach.test.tsx`, not `HoverCard.test.tsx`, whose three assertions changed. One line of `e2e/share.spec.ts` (283), which M2 made false, is changed: a file this document did not name, edited only where M2's behaviour falsified it (typechecked, not run).
   Correction (the executor's): M4's remote step said "⌘-click adds a tab and keeps the tab in front"; both lanes' openers bring the new tab to the front, as a local ⌘-click does (M2 does not touch the openers). The step now says so.
   Date/Author: 2026-11-13, M2's executor; folded by the controller.
+
+- Decision (the controller, 2026-11-13): M3 does not end with the whole `pnpm test`, as Concrete Steps 3 says it does. The owner's rule for the shared build VM (`build-common.md`, which Constraint 1 makes binding as written) has the whole unit suite run once per landing, by the builder of the last milestone; M4's acceptance run is that run. M3 ends instead with vitest over every folder its shapes reach (the sidebar, the stores, `src/shared/ipc`, `src/main/layout`, `app`, and the folders that import the changed modules), and `Sidebar.test.tsx` alone.
+  Rationale: two whole-suite runs on one shared VM make every other builder's checks time out; M4 runs it a milestone later on the whole landing.
+  Date/Author: 2026-11-13, the controller.
 
 ## Outcomes & Retrospective
 
