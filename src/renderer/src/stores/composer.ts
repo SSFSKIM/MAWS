@@ -108,6 +108,7 @@ export interface ComposerState {
   models: ReadonlyMap<AppSessionId, readonly ListedModel[]>; // the engine's latest `session.listModels` answer per session
   chipWidgets: ReadonlyMap<AppSessionId, ChipWidgetRequest>; // W3: the model chip's open menu (`/model`, `/effort`, `/fast`, or the chip itself)
   modeMenus: ReadonlySet<AppSessionId>; // UX wave U4a M5: the mode chip's open menu (the chip itself, or ⇧⌘M)
+  chipViews: ReadonlyMap<AppSessionId, ChipView>; // UX wave U4a M5: the view the model chip's open menu shows now
   attachmentQueue: ReadonlyMap<AppSessionId, readonly QueuedAttachment[]>; // P3-G: what waits for a composer to take it
   // UX wave U4a M3 (decision 15): the stack's window-life state per session: whether a folded stack is open, the one
   // notice line, and the next-step messages a Send now was answered for (each reads "Sending…" until the engine starts it)
@@ -133,6 +134,10 @@ export interface QueuedAttachment {
 
 // W3: the widget the model chip's menu shows (opened by the chip, the palette, a typed command or `openComposerWidget`),
 // until it closes; `nonce` tells two opens of the same name apart.
+// UX wave U4a M5 (decision 21): which of the model selector's two views is on screen; the selector moves between them
+// itself (a pick returns to effort, its row opens the model list), so the menu chords read this, not the request's name.
+export type ChipView = 'model' | 'effort';
+
 export interface ChipWidgetRequest {
   name: string;
   args: string;
@@ -154,6 +159,7 @@ const initial = (): ComposerState => ({
   models: new Map(),
   chipWidgets: new Map(),
   modeMenus: new Set(),
+  chipViews: new Map(),
   attachmentQueue: new Map(),
   stackOpen: new Set(),
   stackNotices: new Map(),
@@ -397,7 +403,24 @@ let chipNonce = 0;
 export function requestChipWidget(appSessionId: AppSessionId, name: string, args: string, focus?: ChipWidgetRequest['focus']): void {
   chipNonce += 1;
   const request: ChipWidgetRequest = { name, args, nonce: chipNonce, ...(focus && { focus }) };
-  useComposerStore.setState((s) => ({ chipWidgets: new Map(s.chipWidgets).set(appSessionId, request) }));
+  useComposerStore.setState((s) => {
+    const chipViews = new Map(s.chipViews);
+    chipViews.delete(appSessionId); // the new request's widget says its own
+    return { chipWidgets: new Map(s.chipWidgets).set(appSessionId, request), chipViews };
+  });
+}
+
+/** The model selector's report of the view it shows, while the chip's menu is open. */
+export function setChipView(appSessionId: AppSessionId, view: ChipView): void {
+  if (!useComposerStore.getState().chipWidgets.has(appSessionId) || useComposerStore.getState().chipViews.get(appSessionId) === view) return;
+  useComposerStore.setState((s) => ({ chipViews: new Map(s.chipViews).set(appSessionId, view) }));
+}
+
+/** The view the chip's open menu shows: the selector's report, else the view its request opens on; null while closed. */
+export function chipViewOf(state: ComposerState, appSessionId: AppSessionId): ChipView | null {
+  const open = state.chipWidgets.get(appSessionId);
+  if (open === undefined) return null;
+  return state.chipViews.get(appSessionId) ?? (open.name === 'model' ? 'model' : 'effort');
 }
 
 export function closeChipWidget(appSessionId: AppSessionId): void {
@@ -405,7 +428,9 @@ export function closeChipWidget(appSessionId: AppSessionId): void {
   useComposerStore.setState((s) => {
     const chipWidgets = new Map(s.chipWidgets);
     chipWidgets.delete(appSessionId);
-    return { chipWidgets };
+    const chipViews = new Map(s.chipViews);
+    chipViews.delete(appSessionId);
+    return { chipWidgets, chipViews };
   });
 }
 

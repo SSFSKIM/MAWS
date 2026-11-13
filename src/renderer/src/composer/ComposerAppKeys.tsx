@@ -7,13 +7,13 @@
 // queue first, so nothing runs after it; Focus puts focus in that session's composer (its docked frame when a card
 // holds the composer's place). UX wave U4a M5 (decision 21): ⇧⌘I, ⇧⌘E and ⇧⌘M ask that session's composer for the model
 // chip's model list, its effort view with the keyboard on the slider, and the mode chip's menu, through the composer's
-// store; a chord pressed while its menu is open closes it, and none asks for anything while the pane shows no session's
-// composer or a card holds its place.
+// store; a chord pressed while its menu is on screen closes it, and none asks for anything while the pane shows no
+// session's composer or a card holds its place.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
 import { useKeyChord } from '../keymap/useKeyChord';
-import { closeChipWidget, closeModeMenu, requestChipWidget, requestModeMenu, useComposerStore } from '../stores/composer';
+import { chipViewOf, closeChipWidget, closeModeMenu, requestChipWidget, requestModeMenu, useComposerStore } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
 import { useQueueStore } from '../stores/queue';
@@ -63,7 +63,8 @@ export function toggleFocusedMenu(menu: ComposerMenu): void {
     else requestModeMenu(appSessionId);
     return;
   }
-  if (state.chipWidgets.get(appSessionId)?.name === menu) closeChipWidget(appSessionId);
+  // the view on screen decides, not the request that opened the menu: the selector moves between its views itself
+  if (chipViewOf(state, appSessionId) === menu) closeChipWidget(appSessionId);
   else requestChipWidget(appSessionId, menu, '', menu === 'effort' ? 'slider' : undefined);
 }
 

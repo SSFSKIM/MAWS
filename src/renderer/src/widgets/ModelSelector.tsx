@@ -36,7 +36,7 @@ import { availabilityRefusal, useAvailability } from '../sessions/availability';
 import { FRESHNESS, useObservedFacts } from '../sessions/observed'; // P2-A
 import { NOT_YET } from '../composer/submit/submit-state'; // P2-A
 import { routeOf, useModelCatalogue } from '../composer/list-models'; // P2-A
-import { isStarting, listedModelsOf, rememberListedModels, useComposerStore } from '../stores/composer';
+import { isStarting, listedModelsOf, rememberListedModels, setChipView, useComposerStore } from '../stores/composer';
 import { digitOf } from '../statusline/ModeMenu'; // UX wave U4a M5: the menus' one digit rule
 import { useSessions } from '../stores/sessions';
 import { useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
@@ -433,6 +433,7 @@ function Track({ view, effort, model }: { view: View; effort: ReactNode; model: 
 function SelectorBody({ name, args, binding, state, error, appSessionId, focusSlider }: { name: Name; args: string; binding: Binding; state: string; error: string | null; appSessionId: AppSessionId; focusSlider: boolean }) {
   const account = useRoutingAccount(appSessionId);
   const [view, setView] = useState<View>(name === 'model' ? 'model' : 'effort');
+  useEffect(() => setChipView(appSessionId, view), [appSessionId, view]); // UX wave U4a M5: the menu chords read the view on screen
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<{ error: string; caption: string | null } | null>(null);
   const [fastAsk, setFastAsk] = useState<'on' | null>(null);
