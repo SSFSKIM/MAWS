@@ -56,8 +56,10 @@
 // `electron-vite build` (the same spec, Decision Log "out/ is built on the pool"). The pool's e2e-build job builds the
 // variants those jobs need at the tested sha, and each restores its own under MAWS_E2E_BUILD_REQUIRE=1
 // (scripts/e2e-build.sh). So only a group whose script starts with `scripts/e2e-build.sh <harness|plain> &&` takes those
-// labels; any other MAC_VM_E2E group (`default`, built by the e2e job's `pnpm build`; a group that builds nothing, or
-// elsewhere) stays off them, as a measured one does. The outputs: `e2e`, every e2e job of the run (what ci-gate-alerts.mjs
+// labels, and `default`, whose out/ is the plain variant: on the host its job runs the whole `pnpm build`, whose
+// electron-vite build is that variant, and in the guest it restores e2e-build's plain out/ in a step of its own (gate.yml)
+// and builds nothing. Any other MAC_VM_E2E group (a group that builds nothing, or elsewhere) stays off them, as a measured
+// one does. The outputs: `e2e`, every e2e job of the run (what ci-gate-alerts.mjs
 // and e2e-default-specs.mjs read), each guest-eligible entry carrying its `variant`; `e2e_host` and `e2e_vm`, the e2e job's
 // and the e2e-vm job's matrices, without and with a variant; `e2e_build`, the variants e2e-build builds (`[]` for none, so
 // the job does not run), on `e2e_build_runner`, a pool box, for which the pool flag is set too.
@@ -312,8 +314,9 @@ export function planOf(env, scripts, now, { docsOnly = false } = {}) {
   const keptAlone = listedShared.filter((name) => name !== 'unit:darwin' && (measured.has(name) || foreground(name)));
   const macShared = new Set(listedShared.filter((name) => !keptAlone.includes(name)));
   // The out/ variant a group's job restores in the guest: its script's leading `scripts/e2e-build.sh <variant> &&`, read as
-  // e2e-default-specs.mjs reads it; undefined for a group that builds another way or not at all.
-  const variantOf = (group) => /^scripts\/e2e-build\.sh (harness|plain) && /.exec((scripts[scriptOf(group)] ?? '').trim())?.[1];
+  // e2e-default-specs.mjs reads it, and `plain` for `default`, whose `pnpm build` builds out/ with MAWS_HARNESS unset;
+  // undefined for a group that builds another way or not at all.
+  const variantOf = (group) => (group === 'default' ? 'plain' : /^scripts\/e2e-build\.sh (harness|plain) && /.exec((scripts[scriptOf(group)] ?? '').trim())?.[1]);
   // MAC_VM_E2E less the measured groups, which keep the host's exclusive instance their bounds were calibrated on, and the
   // groups whose out/ e2e-build cannot make (unit:darwin builds none).
   const listedVm = words(env.MAC_VM_E2E);
@@ -428,7 +431,7 @@ export function planOf(env, scripts, now, { docsOnly = false } = {}) {
       // The build took 39% of the direct Macs' job time (23 jobs, 2026-10-28: 140 s of 368 s at the median), and a set larger
       // than the account's 5 Macs runs in rounds, whose later jobs can restore what the first ones built.
       const cached = hosted && direct ? variantOf(group) : undefined;
-      return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default', libreoffice: libreoffice.has(group), poppler: poppler.has(group), measured: measured.has(group), ...(launchd.has(group) && { launchd: true }), ...(prebuild && { prebuild }), ...(hosted && { hosted }), ...(overflow && { overflow }), ...(eligible && direct && notHosted(group).length === 0 && { retry: true }), ...(cached && { cached }), runner, timeout, ...(onGuest && { test_timeout: testTimeout }), ...guest, ...(peerGroups.has(group) && peer && { peer }) };
+      return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default' && !onGuest, libreoffice: libreoffice.has(group), poppler: poppler.has(group), measured: measured.has(group), ...(launchd.has(group) && { launchd: true }), ...(prebuild && { prebuild }), ...(hosted && { hosted }), ...(overflow && { overflow }), ...(eligible && direct && notHosted(group).length === 0 && { retry: true }), ...(cached && { cached }), runner, timeout, ...(onGuest && { test_timeout: testTimeout }), ...guest, ...(peerGroups.has(group) && peer && { peer }) };
     });
   const e2eHosted = e2e.filter((entry) => entry.hosted && !direct);
   const e2eHost = e2e.filter((entry) => entry.variant === undefined && (!entry.hosted || direct));
