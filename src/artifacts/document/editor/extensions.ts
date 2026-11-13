@@ -7,6 +7,7 @@
 // the document kind builds from here.
 import { Extension, type AnyExtension, type Extensions } from '@tiptap/core';
 import { gapCursor } from '@tiptap/pm/gapcursor';
+import { Plugin } from '@tiptap/pm/state';
 import { Collaboration, type CollaborationOptions } from '../collab';
 import { AssetPaste } from './asset-paste';
 import { Presence, cursorBuilders } from './awareness';
@@ -27,7 +28,30 @@ import { Provisional, type ProvisionalOptions } from './provisional';
 // block, in a transaction that only sets the selection. What is typed or composed at it makes a paragraph there. The
 // trailing paragraph no longer stands in for it, since no repair answers a mere look (`guard` in ../schema.ts). The
 // plugin alone: Tiptap's `Gapcursor` wrapper also adds a field to every node's spec, which nothing here reads.
-const GapCaret = Extension.create({ name: 'gapCaret', addProseMirrorPlugins: () => [gapCursor()] });
+// One amendment: a click on the caret's own place leaves the selection as it was, so the view does not draw it again,
+// while the click's press has put the browser's caret in the nearest text; Chromium reports that after the release, and
+// the view would take it as the person's selection. After such a click the selection is drawn again (`focus` draws it).
+const GapCaret = Extension.create({
+  name: 'gapCaret',
+  addProseMirrorPlugins: () => {
+    const library = gapCursor();
+    const click = library.props.handleClick!;
+    return [
+      new Plugin({
+        ...library.spec,
+        props: {
+          ...library.spec.props,
+          handleClick(view, pos, event) {
+            const before = view.state.selection;
+            if (!click.call(library, view, pos, event)) return false;
+            if (view.state.selection.eq(before)) view.focus();
+            return true;
+          },
+        },
+      }),
+    ];
+  },
+});
 
 export type EditorEnvironment = Omit<ViewEnvironment, 'renderDiagram'> & Partial<Pick<ViewEnvironment, 'renderDiagram'>>;
 

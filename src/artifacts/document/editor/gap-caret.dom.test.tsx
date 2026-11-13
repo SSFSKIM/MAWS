@@ -2,8 +2,8 @@
 // decisions 9 to 11, sequence S4; happy-dom over the in-memory host): ProseMirror's gap cursor in the document editor.
 // Where it is a place and where it is not, block kind by block kind; the arrows that set it from a selected final
 // chart; drawn while it is the selection; kept through another replica's write; a key typed or a composition begun at
-// it makes a paragraph after the block, which stays, in one update of the person's. Setting it writes nothing. Where
-// a click lands needs a layout: e2e/dashboard.spec.ts holds that.
+// it makes a paragraph after the block, which stays, in one update of the person's; a click on its own place keeps it.
+// Setting it writes nothing. Where a click lands needs a layout: e2e/dashboard.spec.ts holds that.
 import type { Editor, JSONContent } from '@tiptap/core';
 import type { ResolvedPos } from '@tiptap/pm/model';
 import { GapCursor } from '@tiptap/pm/gapcursor';
@@ -114,6 +114,32 @@ describe('the gap caret', () => {
       expect(isGapAtEnd(editor()), key).toBe(true);
     }
     await ticks();
+    expect([sent.length, landed.length]).toEqual([0, 0]);
+  });
+
+  // The press of a click puts the browser's caret in the nearest text before the click is handled; a click on the gap
+  // caret's own place leaves the selection as it was, so the view would not draw it again, and the browser's caret
+  // would be read back as the person's selection (decision 16's second click). Where the click lands needs a layout:
+  // here it is given.
+  it('stays when a click lands on its own place, whatever caret the press left in the text, and nothing is written', async () => {
+    const { landed, sent, editor } = await opened(doc(para('p1', 'Quarterly sales.'), chart('c1')));
+    const view = editor().view;
+    view.focus();
+    atEnd(editor());
+    await ticks();
+    const end = editor().state.doc.content.size;
+    view.posAtCoords = () => ({ pos: end, inside: -1 });
+    const text = Array.from(view.dom.querySelectorAll('p')).find((p) => p.textContent === 'Quarterly sales.')!.firstChild!;
+    // the press: the browser's caret in the text, whose selectionchange Chromium delivers after the release
+    const held = (event: Event) => event.stopImmediatePropagation();
+    window.addEventListener('selectionchange', held, true);
+    document.getSelection()!.collapse(text, 'Quarterly sales.'.length);
+    window.removeEventListener('selectionchange', held, true);
+    expect(editor().state.selection, 'the press is not yet read').toBeInstanceOf(GapCursor);
+    expect(view.someProp('handleClick', (click) => click(view, end, new MouseEvent('mouseup', { bubbles: true }))), 'the library takes the click').toBe(true);
+    document.dispatchEvent(new Event('selectionchange'));
+    await ticks();
+    expect(isGapAtEnd(editor()), JSON.stringify(editor().state.selection.toJSON())).toBe(true);
     expect([sent.length, landed.length]).toEqual([0, 0]);
   });
 
