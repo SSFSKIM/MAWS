@@ -122,12 +122,20 @@ const isSpaceOrTab = (code: number) => code === 32 || code === 9;
 const isLineEnding = (code: number) => code === 10 || code === 13;
 const isControl = (code: number) => code < 32 || code === 127;
 const escapes = (text: string, at: number, limit: number) => text.charCodeAt(at) === 92 && at + 1 < limit && ASCII_PUNCTUATION.test(text[at + 1]!);
+// What may stand before a reference definition's `[` on its line: indentation and the markers of a quote or a list item.
+const isLinePrefix = (code: number) => isSpaceOrTab(code) || code === 13 || code === 62 || code === 45 || code === 43 || code === 42 || code === 46 || code === 41 || (code >= 48 && code <= 57);
 
 // Whether the line that starts at `at` is blank (spaces or tabs, then a line ending or the end).
 function blankLineAt(text: string, at: number): boolean {
   let i = at;
   while (i < text.length && isSpaceOrTab(text.charCodeAt(i))) i += 1;
   return i >= text.length || isLineEnding(text.charCodeAt(i));
+}
+
+// The first newline at or after `at` that a blank line follows, or the text's end: no link's resource runs past it.
+function blankLineAfter(text: string, at: number): number {
+  for (let i = text.indexOf('\n', at); i !== -1; i = text.indexOf('\n', i + 1)) if (blankLineAt(text, i + 1)) return i;
+  return text.length;
 }
 
 // From `at`, spaces or tabs and at most one line ending (a blank line ends the paragraph): the index after them, or -1.
@@ -142,88 +150,148 @@ function skipWhitespace(text: string, at: number): number {
   return i;
 }
 
-// After the `(` of `](` at `open`: the destination of an inline link that its `)` closes, or null.
-function destinationAt(text: string, open: number): string | null {
-  const limit = Math.min(text.length, open + LINK_TAIL_MAX);
-  let i = skipWhitespace(text, open);
-  if (i < 0 || i >= limit) return null;
-  let destination: string;
+// A scan that reached `LINK_TAIL_MAX` before it could tell: whether a resource stands there, and where it ends, is not
+// known, so nothing up to the next blank line is read as a link.
+const UNKNOWN = Symbol('past the bound');
+type Scan<T> = T | null | typeof UNKNOWN;
+const pastBound = (text: string, limit: number): null | typeof UNKNOWN => (limit < text.length ? UNKNOWN : null);
+
+// A destination at `at`: `<…>` with no line ending and no unescaped `<` or `>` inside, or a run with no space and no
+// control character whose unescaped parentheses balance. `next` is the index after it.
+function destinationAt(text: string, at: number, limit: number): Scan<{ destination: string; next: number }> {
+  let i = at;
   if (text.charCodeAt(i) === 60) {
-    // `<…>`: no line ending and no unescaped `<` or `>` inside; then whitespace or `)`
-    const start = i + 1;
-    for (i = start; i < limit; i += 1) {
+    for (i += 1; i < limit; i += 1) {
       const code = text.charCodeAt(i);
       if (escapes(text, i, limit)) i += 1;
       else if (code === 62) break;
       else if (code === 60 || isLineEnding(code)) return null;
     }
-    if (i >= limit) return null;
-    destination = text.slice(start, i);
-    i += 1;
-    const after = text.charCodeAt(i);
-    if (i < limit && !isSpaceOrTab(after) && !isLineEnding(after) && after !== 41) return null;
-  } else {
-    // a run with no space and no control character, whose unescaped parentheses balance
-    const start = i;
-    let depth = 0;
-    for (; i < limit; i += 1) {
-      const code = text.charCodeAt(i);
-      if (escapes(text, i, limit)) i += 1;
-      else if (code === 40) {
-        if (++depth > PAREN_DEPTH_MAX) return null;
-      } else if (code === 41) {
-        if (depth === 0) break;
-        depth -= 1;
-      } else if (code === 32 || isControl(code)) break;
-    }
-    if (i >= limit || depth !== 0) return null;
-    destination = text.slice(start, i);
+    return i >= limit ? pastBound(text, limit) : { destination: text.slice(at + 1, i), next: i + 1 };
   }
-  // an optional title, after whitespace: `"…"`, `'…'` or `(…)`, with no blank line inside; then whitespace and `)`
+  let depth = 0;
+  for (; i < limit; i += 1) {
+    const code = text.charCodeAt(i);
+    if (escapes(text, i, limit)) i += 1;
+    else if (code === 40) {
+      if (++depth > PAREN_DEPTH_MAX) return null;
+    } else if (code === 41) {
+      if (depth === 0) break;
+      depth -= 1;
+    } else if (code === 32 || isControl(code)) break;
+  }
+  if (i >= limit) return pastBound(text, limit);
+  return depth === 0 ? { destination: text.slice(at, i), next: i } : null;
+}
+
+// A title at `at` (its opening marker): `"…"`, `'…'` or `(…)`, with no blank line inside. The index after it.
+function titleAt(text: string, at: number, limit: number): Scan<number> {
+  const marker = text.charCodeAt(at);
+  const close = marker === 40 ? 41 : marker;
+  let i = at + 1;
+  for (; i < limit; i += 1) {
+    const code = text.charCodeAt(i);
+    if (escapes(text, i, limit)) i += 1;
+    else if (code === close) break;
+    else if (marker === 40 && code === 40) return null;
+    else if (isLineEnding(code) && blankLineAt(text, code === 13 && text.charCodeAt(i + 1) === 10 ? i + 2 : i + 1)) return null;
+  }
+  return i >= limit ? pastBound(text, limit) : i + 1;
+}
+const isTitleMarker = (code: number) => code === 34 || code === 39 || code === 40;
+
+// After the `(` of `](` at `open`: the inline resource its `)` closes, that is its destination and the index of the `)`.
+function resourceAt(text: string, open: number): Scan<{ destination: string; end: number }> {
+  const limit = Math.min(text.length, open + LINK_TAIL_MAX);
+  let i = skipWhitespace(text, open);
+  if (i < 0) return null;
+  if (i >= limit) return pastBound(text, limit);
+  const angle = text.charCodeAt(i) === 60;
+  const found = destinationAt(text, i, limit);
+  if (found === null || found === UNKNOWN) return found;
+  i = found.next;
+  const after = text.charCodeAt(i);
+  if (angle && i < limit && !isSpaceOrTab(after) && !isLineEnding(after) && after !== 41) return null;
+  // an optional title, after whitespace; then whitespace and `)`
   const beforeTitle = i;
   i = skipWhitespace(text, i);
-  if (i < 0 || i >= limit) return null;
-  const marker = text.charCodeAt(i);
-  if (i > beforeTitle && (marker === 34 || marker === 39 || marker === 40)) {
-    const close = marker === 40 ? 41 : marker;
-    for (i += 1; i < limit; i += 1) {
-      const code = text.charCodeAt(i);
-      if (escapes(text, i, limit)) i += 1;
-      else if (code === close) break;
-      else if (marker === 40 && code === 40) return null;
-      else if (isLineEnding(code) && blankLineAt(text, code === 13 && text.charCodeAt(i + 1) === 10 ? i + 2 : i + 1)) return null;
-    }
-    if (i >= limit) return null;
-    i = skipWhitespace(text, i + 1);
-    if (i < 0 || i >= limit) return null;
+  if (i < 0) return null;
+  if (i >= limit) return pastBound(text, limit);
+  if (i > beforeTitle && isTitleMarker(text.charCodeAt(i))) {
+    const title = titleAt(text, i, limit);
+    if (title === null || title === UNKNOWN) return title;
+    i = skipWhitespace(text, title);
+    if (i < 0) return null;
+    if (i >= limit) return pastBound(text, limit);
   }
-  return text.charCodeAt(i) === 41 ? destination : null;
+  return text.charCodeAt(i) === 41 ? { destination: found.destination, end: i } : null;
+}
+
+// After the `:` of a reference definition's label at `colon`: the index of the last character of its destination, and
+// of its title when one follows; -1 when no destination does. Neither is a link, and the window draws neither. The
+// definition's validity is not judged (what may follow it on the line): passing over too much fails towards the refusal.
+function definitionEnd(text: string, colon: number): number | typeof UNKNOWN {
+  const limit = Math.min(text.length, colon + 1 + LINK_TAIL_MAX);
+  const i = skipWhitespace(text, colon + 1);
+  if (i < 0) return -1;
+  if (i >= limit) return pastBound(text, limit) ?? -1;
+  const found = destinationAt(text, i, limit);
+  if (found === UNKNOWN) return UNKNOWN;
+  if (found === null) return -1;
+  const t = skipWhitespace(text, found.next);
+  if (t > found.next && t < limit && isTitleMarker(text.charCodeAt(t))) {
+    const title = titleAt(text, t, limit);
+    if (title === UNKNOWN) return UNKNOWN;
+    if (title !== null) return title - 1;
+  }
+  return found.next - 1;
 }
 
 // The click path of every inline link the local check finds in `text`, in order. At each unescaped `]` followed by `(`:
 // the `[` it closes (square brackets balance, escaped ones do not count, no blank line between) must not be escaped nor
-// follow an unescaped `!` (an image); then the destination, an optional title, and `)`. No knowledge of the blocks
-// around, so a link in a code fence or in inline code is found too (ruled).
+// follow an unescaped `!` (an image); then the destination, an optional title, and `)`. A link's or an image's resource
+// is read once and the scan goes on after it, and a reference definition's destination and title (a `[` that only
+// indentation or a quote's or a list's marker precede on its line, closed by `]:`; not a footnote's `[^`) are passed
+// over: text shaped like a link inside any of them is no link (the branch review's finding 1). No knowledge of the
+// blocks around, so a link in a code fence or in inline code is found too (ruled).
 export function linkPaths(text: string): string[] {
   const out: string[] = [];
-  const opens: number[] = []; // each unescaped `[` not yet closed
+  const opens: { at: number; leads: boolean }[] = []; // each unescaped `[` not yet closed, and whether it leads its line
   let lineHasContent = false;
+  let prefixOnly = true; // nothing but a line prefix so far on this line
   for (let i = 0; i < text.length; i += 1) {
     const code = text.charCodeAt(i);
     if (code === 10) {
       if (!lineHasContent) opens.length = 0; // a blank line: nothing before it closes after it
       lineHasContent = false;
+      prefixOnly = true;
       continue;
     }
     if (!isSpaceOrTab(code) && code !== 13) lineHasContent = true;
-    if (code === 91 && !isEscaped(text, i)) opens.push(i);
+    const leads = prefixOnly;
+    if (!isLinePrefix(code)) prefixOnly = false;
+    if (code === 91 && !isEscaped(text, i)) opens.push({ at: i, leads });
     else if (code === 93 && !isEscaped(text, i)) {
       const opener = opens.pop();
-      if (opener === undefined || text.charCodeAt(i + 1) !== 40) continue;
-      if (opener > 0 && text.charCodeAt(opener - 1) === 33 && !isEscaped(text, opener - 1)) continue; // an image
-      const destination = destinationAt(text, i + 2);
-      const path = destination === null ? null : clickPath(destination);
-      if (path !== null) out.push(path);
+      if (opener === undefined) continue;
+      const after = text.charCodeAt(i + 1);
+      let end: number;
+      if (after === 40) {
+        const resource = resourceAt(text, i + 2);
+        if (resource === null) continue; // no resource: what follows the `(` is text
+        if (resource === UNKNOWN) end = blankLineAfter(text, i + 2) - 1;
+        else {
+          end = resource.end;
+          const image = opener.at > 0 && text.charCodeAt(opener.at - 1) === 33 && !isEscaped(text, opener.at - 1);
+          const path = image ? null : clickPath(resource.destination);
+          if (path !== null) out.push(path);
+        }
+      } else if (after === 58 && opener.leads && text.charCodeAt(opener.at + 1) !== 94) {
+        const definition = definitionEnd(text, i + 1);
+        if (definition !== UNKNOWN && definition < 0) continue;
+        end = definition === UNKNOWN ? blankLineAfter(text, i + 2) - 1 : definition;
+      } else continue;
+      i = end; // what the resource or the definition holds is not read again
     }
   }
   return out;
