@@ -4,7 +4,7 @@
 // log doesn't hold yet says where it stands: "sending", a refusal under it, or "Not sent".
 import { CHANNEL } from './copy';
 import { ExchangeRow } from './Exchange';
-import { faintOf, LabelLine, Party, Recipients, Time } from './parts';
+import { faintOf, GIVES_WAY, LabelLine, NAMES_ROW, Party, Recipients, Time } from './parts';
 import type { ChannelEntry, HostEntry, SayEntry, WordsEntry } from './project';
 import { ownersLabel } from '../sidebar/owners';
 
@@ -61,10 +61,14 @@ function SayRow({ entry, me }: { entry: SayEntry; me: string | null }) {
   );
   return (
     <article data-channel-entry="say" data-offset={entry.offset} data-channel-label={entry.label} className={`flex min-w-0 flex-col gap-1 ${faintOf(entry)}`}>
-      <header className="flex min-w-0 items-baseline gap-1.5 text-ui-sm">
+      <header className={`${NAMES_ROW} text-ui-sm`}>
         <Party party={entry.from} />
         {entry.to === '*' ? <span className="shrink-0 text-fg-muted">{CHANNEL.toEveryone}</span> : <Recipients to={entry.to} />}
-        {owners !== null && <span className="min-w-0 truncate text-fg-faint">{owners}</span>}
+        {owners !== null && (
+          <span data-name-part="label" className={`${GIVES_WAY.label} text-fg-faint`}>
+            {owners}
+          </span>
+        )}
         <Time at={entry.at} />
       </header>
       <p className={`${BODY} text-ui text-fg`}>{entry.text}</p>
@@ -76,7 +80,7 @@ function SayRow({ entry, me }: { entry: SayEntry; me: string | null }) {
 function HostRow({ entry }: { entry: HostEntry }) {
   return (
     <article data-channel-entry="host" data-host={entry.host} data-offset={entry.offset} data-channel-label={entry.label} className={`flex min-w-0 flex-col gap-1 ${faintOf(entry)}`}>
-      <header className="flex min-w-0 items-baseline gap-1.5 text-ui-sm">
+      <header className={`${NAMES_ROW} text-ui-sm`}>
         <Party party={entry.party} />
         <span className="shrink-0 text-fg-muted">{CHANNEL.host[entry.host]}</span>
         <Time at={entry.at} />

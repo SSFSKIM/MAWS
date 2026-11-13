@@ -10,6 +10,9 @@
 // line that says so. The window, the stream's head and foot, its to-human entries and the opened exchange's head and foot
 // are attached as PNGs for the architect's look; the case asserts structure only: nothing in the tab is wider than its
 // box, and every action is drawn whole inside its entry. The open answer's weight in bytes of JSON is annotated.
+// UX wave U11a M3 (#505): under classic scrollbars the footer and a stream row share both edges; in a 420 px column nothing
+// overflows and every row's names give way in one order (the title, the labels, the chip, then the alias, never under
+// twelve characters); and a live channel's composer lines up the same under classic and overlay scrollbars.
 //
 // The channel is seeded where no real log can hold it at once: under MAWS_E2E=1 a harness build's main answers
 // `org.status` and the project's `org.channel.open` from a file the `org.*` schemas admit (src/main/org/channel-fixture.ts),
@@ -21,7 +24,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { ChannelAnswer, ChannelEvent, ChannelHost, ChannelMachine, ChannelSession, OrgMember, OrgStatus } from '../src/shared/ipc/schema/org';
 import { readOrMintMachineRef } from '../src/shared/machine/identity-file';
 import type { MachineRef } from '../src/shared/machine/ref';
@@ -217,6 +220,48 @@ function overflowing(root: Element): string[] {
     .map((el) => `${el.tagName.toLowerCase()}${el.hasAttribute('data-channel-entry') ? `[${el.getAttribute('data-channel-entry')}]` : ''} "${(el.textContent ?? '').slice(0, 60)}" ${el.scrollWidth} > ${el.clientWidth}`);
 }
 
+// #505 (UX wave U11a M3; the execution document's Interfaces §E): where a row's names give way out of §E's one order.
+// In each row that holds names, a part that has given way (cut, or narrower than its whole) means every part that gives
+// way before it is at its minimum: the title and the chip at nothing, the recipients at their twelve characters; and an
+// alias is never narrower than twelve characters, or than its whole where that is less. Each fault as `<row> <part>: …`.
+function namesOutOfOrder(root: Element): string[] {
+  const RANK: Record<string, number> = { title: 0, label: 1, chip: 2, alias: 3 };
+  const faults: string[] = [];
+  const rows = new Set([...root.querySelectorAll('[data-name-part]')].map((part) => part.closest('header, button, li > div')).filter((row): row is Element => row !== null));
+  for (const row of rows) {
+    const parts = [...row.querySelectorAll<HTMLElement>('[data-name-part]')].filter((part) => part.closest('header, button, li > div') === row);
+    const text = (el: HTMLElement) => (el.querySelector<HTMLElement>('[data-machine-chip]') ?? el);
+    const width = (el: HTMLElement) => el.getBoundingClientRect().width;
+    const whole = (el: HTMLElement) => text(el).scrollWidth <= text(el).clientWidth + 1 && width(el) > 0;
+    const least = (el: HTMLElement) => {
+      const style = getComputedStyle(el);
+      return Math.max(Number.parseFloat(style.minWidth) || 0, Math.min(Number.parseFloat(style.flexBasis) || 0, text(el).scrollWidth));
+    };
+    const name = `${row.tagName.toLowerCase()} "${(row.textContent ?? '').slice(0, 40)}"`;
+    for (const part of parts) {
+      const kind = part.getAttribute('data-name-part')!;
+      if (kind === 'alias' && width(part) + 1 < least(part)) faults.push(`${name} alias: ${width(part)} px, under its ${least(part)}`);
+      if (whole(part) || (width(part) === 0 && text(part).scrollWidth === 0)) continue;
+      for (const before of parts) {
+        if (RANK[before.getAttribute('data-name-part')!]! < RANK[kind]! && width(before) > least(before) + 1) faults.push(`${name} ${kind} gave way while its ${before.getAttribute('data-name-part')} holds ${width(before)} px`);
+      }
+    }
+  }
+  return faults;
+}
+
+/** A box's left and right edges, in CSS pixels. */
+const edgesOf = (locator: Locator) =>
+  locator.evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    return { left: box.left, right: box.right };
+  });
+/** Two boxes share both edges, to within half a pixel. */
+async function expectSameEdges(a: Locator, b: Locator, message: string): Promise<void> {
+  const [x, y] = [await edgesOf(a), await edgesOf(b)];
+  expect(Math.max(Math.abs(x.left - y.left), Math.abs(x.right - y.right)), `${message}: ${JSON.stringify(x)} against ${JSON.stringify(y)}`).toBeLessThan(0.5);
+}
+
 /** An action lies inside its entry, or its card. */
 const ENTRY: ActionEntry = { selector: '[data-channel-entry], [data-channel-card]', name: 'its entry', probe: 'data-channel-entry="probe"' };
 
@@ -293,6 +338,9 @@ test('channel: a seeded project channel offline, its exchange of 40 opened, its 
       await expect(toHuman.and(page.locator(`[data-machine="${local}"]`))).toHaveCount(2);
 
       await expect.poll(() => log.evaluate((el) => (el as HTMLElement).offsetWidth - el.clientWidth), { message: "the stream's scrollbar takes width (classic scrollbars)" }).toBeGreaterThan(0);
+      // #505: the footer reserves the stream's gutter too, so its column is the rows'.
+      await expectSameEdges(channel.locator('[data-channel-offline]'), channel.locator('[data-channel-entry="say"]').first(), "the offline footer and a stream row share both edges under classic scrollbars");
+      await test.info().attach('channel-footer-offline-classic', { body: await channel.locator('[data-channel-offline]').screenshot(), contentType: 'image/png' });
       await test.info().attach('channel-window', { body: await page.screenshot(), contentType: 'image/png' });
       await scrollLog(page, 'foot');
       await test.info().attach('channel-foot', { body: await channel.screenshot(), contentType: 'image/png' });
@@ -316,6 +364,7 @@ test('channel: a seeded project channel offline, its exchange of 40 opened, its 
       await test.info().attach('channel-exchange-foot', { body: await page.screenshot(), contentType: 'image/png' });
 
       expect(await channel.evaluate(overflowing), 'nothing in the Channel tab is wider than its box').toEqual([]);
+      expect(await channel.evaluate(namesOutOfOrder), "every row's names give way in §E's order").toEqual([]);
       expect(await channel.getByRole('button').count(), 'the seeded channel offers its actions').toBeGreaterThan(0);
       expect(await channel.evaluate(actionsNotWhole, ENTRY), 'every action is drawn whole inside its entry').toEqual([]);
       // ...and the check sees a clipped action when there is one
@@ -323,6 +372,20 @@ test('channel: a seeded project channel offline, its exchange of 40 opened, its 
       const probed = await channel.evaluate(actionsNotWhole, ENTRY);
       await channel.evaluate((root) => root.querySelectorAll('[data-probe]').forEach((probe) => probe.remove()));
       expect(probeFaults(probed), `the check names every clipped probe and not the mirror: ${probed.join('; ')}`).toEqual([]);
+
+      // #505: in a column about 420 px wide (a split pane's) no row overflows and the names give way in the one order:
+      // the long alias, title and machine of the seed's second session meet there, the exchange opened.
+      await channel.evaluate((el) => void ((el as HTMLElement).style.width = '420px'));
+      await expect.poll(() => channel.evaluate((el) => Math.round(el.getBoundingClientRect().width))).toBe(420);
+      await scrollLog(page, 'top');
+      await test.info().attach('channel-420-head', { body: await channel.screenshot(), contentType: 'image/png' });
+      await exchange.evaluate((el) => el.scrollIntoView({ block: 'start', behavior: 'instant' }));
+      await test.info().attach('channel-420-exchange', { body: await channel.screenshot(), contentType: 'image/png' });
+      await toHuman.first().evaluate((el) => el.scrollIntoView({ block: 'start', behavior: 'instant' }));
+      await test.info().attach('channel-420-to-human', { body: await channel.screenshot(), contentType: 'image/png' });
+      expect(await channel.evaluate(overflowing), 'nothing in a 420 px Channel is wider than its box').toEqual([]);
+      expect(await channel.evaluate(namesOutOfOrder), "in a 420 px Channel every row's names give way in §E's order").toEqual([]);
+      await expectSameEdges(channel.locator('[data-channel-offline]'), channel.locator('[data-channel-entry="say"]').first(), 'the footer and a stream row share both edges in a 420 px Channel');
     } finally {
       await maws.cleanup();
     }
@@ -330,3 +393,45 @@ test('channel: a seeded project channel offline, its exchange of 40 opened, its 
     rmSync(userData, { recursive: true, force: true });
   }
 });
+
+// #505 (UX wave U11a M3): a live channel's footer, its composer, lines up with the stream under classic scrollbars and
+// under overlay ones (where nothing moves); each footer photographed for the frame's shadow, which the clipping footer
+// must keep (Interfaces §E).
+for (const scrollbars of ['Always', 'WhenScrolling'] as const) {
+  test(`channel: a live channel's composer and a stream row share both edges (AppleShowScrollBars ${scrollbars}); the footer photographed`, async () => {
+    test.setTimeout(90_000);
+    const userData = realpathSync(mkdtempSync(join(tmpdir(), 'maws-channel-')));
+    try {
+      const local = readOrMintMachineRef(userData);
+      const { status, answer } = seededChannel(Date.now(), local);
+      const fixture = join(userData, 'channel.json');
+      writeFileSync(fixture, JSON.stringify({ status, project: PROJECT, answer: { ...answer, live: true } }));
+      const stub = join(userData, 'channel-scenario.json');
+      writeFileSync(stub, JSON.stringify(scenario()));
+      const maws = await launchMaws({ userData, env: { [FIXTURE_ENV]: fixture, MAWS_SESSION_SOURCE: `stub:${stub}` }, appKitDefaults: { AppleShowScrollBars: scrollbars } });
+      try {
+        const { page } = maws;
+        const row = page.locator(`[data-menu="project:${await addressed(page, PROJECT_ID)}"]`).first();
+        await expect(row).toBeVisible({ timeout: 15_000 });
+        await row.click({ button: 'right' });
+        await page.getByRole('menuitem', { name: CHANNEL.menuItem, exact: true }).click();
+        const channel = page.locator(`[data-channel="${PROJECT}"]`);
+        const composer = channel.locator('[data-channel-composer]');
+        await expect(composer).toBeVisible();
+        const gutter = () => channel.getByRole('log').evaluate((el) => (el as HTMLElement).offsetWidth - el.clientWidth);
+        if (scrollbars === 'Always') await expect.poll(gutter, { message: "the stream's scrollbar takes width (classic scrollbars)" }).toBeGreaterThan(0);
+        else expect(await gutter(), 'overlay scrollbars take no width').toBe(0);
+        await scrollLog(page, 'foot');
+        await expectSameEdges(composer, channel.locator('[data-channel-entry="say"]').last(), `the composer and a stream row share both edges (${scrollbars})`);
+        const footer = composer.locator('xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " scroll-gutter-under ")][1]');
+        await expect(footer).toHaveCount(1);
+        await test.info().attach(`channel-footer-live-${scrollbars}`, { body: await footer.screenshot(), contentType: 'image/png' });
+        await test.info().attach(`channel-foot-live-${scrollbars}`, { body: await channel.screenshot(), contentType: 'image/png' });
+      } finally {
+        await maws.cleanup();
+      }
+    } finally {
+      rmSync(userData, { recursive: true, force: true });
+    }
+  });
+}

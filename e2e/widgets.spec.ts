@@ -237,6 +237,21 @@ async function detailUninstall(detail: Locator): Promise<void> {
   await detail.page().getByRole('menuitem', { name: 'Uninstall…', exact: true }).click();
 }
 const sheetOf = (page: Page, action: string) => page.locator(`[data-plugins-sheet="${action}"]`);
+// #523: the window's colour at a point, from a one-pixel screenshot decoded in the page.
+async function pixelAt(page: Page, point: { x: number; y: number }): Promise<number[]> {
+  const shot = await page.screenshot({ clip: { ...point, width: 1, height: 1 } });
+  return page.evaluate(async (base64) => {
+    const image = new Image();
+    image.src = `data:image/png;base64,${base64}`;
+    await image.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const context = canvas.getContext('2d')!;
+    context.drawImage(image, 0, 0);
+    return [...context.getImageData(0, 0, 1, 1).data.slice(0, 3)];
+  }, shot.toString('base64'));
+}
 // The commands and the files they write sit behind a sheet's Details, closed at every opening (the owner's ruling,
 // 2026-10-25); the second sheet, for a marketplace-declared command, has none: its command is in view.
 const detailsOf = (sheet: Locator) => sheet.getByRole('button', { name: 'Details', exact: true });
@@ -1054,6 +1069,44 @@ test.describe('plugin management (E8)', () => {
     await expect(page.locator('[data-catalog-metric]')).toHaveCount(0); // a folder marketplace carries no count
     expect(mutations(backend)).toEqual([]);
     expect(backend.consoleErrors()).toEqual([]);
+  });
+
+  // #523 (UX wave U11a M3; the execution document's Interfaces §E): where layers stack only the top one's backdrop
+  // paints, so the window is dimmed once; Esc and the focus are the dialog library's, the top layer's first.
+  test('#523: the Plugins dialog, then a plugin’s Uninstall… confirmation over it: one backdrop paints, the confirmation’s, and the window reads as under one layer; Esc closes the confirmation, the dialog keeps the keyboard; Esc again closes the dialog', async ({ appBackend: backend }) => {
+    const { page } = backend;
+    const w = await openSessionPlugins(backend);
+    const backdrops = page.locator('[data-scrim]');
+    await expect(backdrops).toHaveCount(1);
+    await expect(backdrops).toHaveClass(/\bbg-bg-active\b/);
+    // A point of the window outside both layers: left of the dialog, at its middle.
+    const box = (await page.locator('[data-widget-dialog="plugins"]').boundingBox())!;
+    const point = { x: Math.floor(box.x / 2), y: Math.floor(box.y + box.height / 2) };
+    const alone = await pixelAt(page, point);
+
+    await rowAction(installedRow(w, 'e8-tools@e8-scratch'), 'Uninstall…');
+    const sheet = sheetOf(page, 'uninstall');
+    await expect(sheet).toBeVisible();
+    await expect(backdrops).toHaveCount(2);
+    await expect(page.locator('[data-scrim].bg-bg-active')).toHaveCount(1);
+    await expect(page.locator('[data-sheet-scrim]')).toHaveClass(/\bbg-bg-active\b/); // the confirmation's
+    await expect(page.locator('[data-scrim]:not([data-sheet-scrim])')).toHaveClass(/\bbg-transparent\b/); // the dialog's, covered
+    const apart = (a: number[], b: number[]) => Math.max(...a.map((channel, i) => Math.abs(channel - b[i]!)));
+    const stacked = await pixelAt(page, point);
+    expect(apart(stacked, alone), `the window reads ${stacked} under both layers, ${alone} under the dialog alone`).toBeLessThanOrEqual(2);
+    await test.info().attach('stacked-plugins-uninstall', { body: await page.screenshot(), contentType: 'image/png' });
+
+    await page.keyboard.press('Escape');
+    await expect(sheet).toBeHidden();
+    await expect(w).toBeVisible();
+    await expect.poll(() => page.evaluate(() => document.querySelector('[data-widget-dialog]')?.contains(document.activeElement) ?? false), { message: 'the dialog under it holds the keyboard' }).toBe(true);
+    await expect(backdrops).toHaveCount(1);
+    await expect(backdrops).toHaveClass(/\bbg-bg-active\b/); // the dialog's paints again
+    expect(apart(await pixelAt(page, point), alone), 'the dialog alone dims the window as before').toBeLessThanOrEqual(2);
+    await page.keyboard.press('Escape');
+    await expect(w).toBeHidden();
+    await expect(backdrops).toHaveCount(0);
+    expect(mutations(backend)).toEqual([]); // nothing ran
   });
 
   test('install at user scope from a Discover card: the sheet names the command and the writes; the card shows the CLI’s progress, then its result; the CLI ran the sheet’s argv', async ({ appBackend: backend }) => {

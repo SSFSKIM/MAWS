@@ -65,8 +65,11 @@ export function ChannelView({ project }: { project: string }) {
   const live = held.phase === 'open' && held.live;
   return (
     <div data-channel={project} className="flex h-full min-h-0 flex-col bg-bg text-ui text-fg">
-      <div ref={scroller} onScroll={onScroll} role="log" aria-label={CHANNEL.title(null)} className="min-h-0 flex-1 overflow-y-auto">
-        <div className="thread-column flex min-h-full flex-col gap-5 pt-6 pb-4">
+      {/* #505: the stream reserves its scrollbar's gutter and the footer the same (styles/app.css), so under classic
+          scrollbars the footer's column is the rows'. The footer clips, so 8 px of the stream's foot is the footer's own
+          head, where the composer frame's shadow draws. */}
+      <div ref={scroller} onScroll={onScroll} role="log" aria-label={CHANNEL.title(null)} className="scroll-gutter min-h-0 flex-1 overflow-y-auto">
+        <div className="thread-column flex min-h-full flex-col gap-5 pt-6 pb-2">
           {held.phase === 'opening' && channel.failed === null && <p className="m-0 text-fg-muted">{CHANNEL.opening}</p>}
           {channel.failed !== null && (
             <div role="alert" className="flex flex-wrap items-center gap-2 text-danger">
@@ -100,7 +103,7 @@ export function ChannelView({ project }: { project: string }) {
           </div>
         </div>
       </div>
-      <div className="shrink-0 pb-4">
+      <div className="scroll-gutter-under shrink-0 pt-2 pb-4">
         <div className="thread-column">{live ? <Composer send={channel.send} /> : <Offline asOf={held.phase === 'open' ? held.asOf : null} access={access} signedIn={me !== null} />}</div>
       </div>
     </div>

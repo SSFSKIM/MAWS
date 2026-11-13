@@ -19,19 +19,44 @@ function useMachineOfName(name: string | null): MachineRef | null {
 }
 
 /**
+ * #505 (UX wave U11a; the execution document's Interfaces §E, "Names, one order"): how a Channel row's names give way as
+ * it narrows, the same in say rows, exchange rows and to-human headers. Each part enters the row at its minimum (its flex
+ * basis: twelve characters for an alias, nothing for the others) and stops at its whole width (`max-w-max`); the row's
+ * room goes to them by grow weights a thousand apart: the alias first, then the machine chip (up to 24 characters), then
+ * the recipients' and owners' labels, then the session's title. Read the other way, as a row narrows the title gives way
+ * first, to nothing, then the labels, then the chip, then the alias, never under its twelve. The weights make the order
+ * exact in practice (what leaks to the next part is a thousandth) and approximate in principle. The fixed parts (the
+ * chevron, the count's words, "and", "to everyone", the time) never shrink. Because every name enters a line at its
+ * minimum, a row (`NAMES_ROW`) wraps only once even the minimums do not fit, its fixed parts moving under the names:
+ * `flex-wrap` breaks lines by the items' base sizes, before any of them would shrink.
+ */
+export const GIVES_WAY = {
+  alias: 'min-w-0 basis-[12ch] grow-[1000000000] max-w-max truncate',
+  chip: 'min-w-0 basis-0 grow-[1000000] max-w-max',
+  label: 'min-w-0 basis-0 grow-[1000] max-w-max truncate',
+  title: 'min-w-0 basis-0 grow max-w-max truncate',
+} as const;
+/** A row that holds names (`GIVES_WAY`). */
+export const NAMES_ROW = 'flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5';
+/** The chip inside its part: a block, so its 24 characters bound the part's whole width and it truncates in a narrower part. */
+const CHIP = 'block max-w-[24ch]';
+
+/** A party's tooltip: its alias, title and machine in full, joined with " · ", a missing one left out. */
+export const partyTooltip = (alias: string, title: string | null, machine: string | null): string => [alias, title, machine].filter((part) => part !== null && part !== '').join(' · ');
+
+/**
  * T1 and T2 for a log's machine name: the roster's chip (`@<name>`, "offline", nothing for this Mac) when the roster
- * names that machine, else the name the log carries, as another machine's. In a line too narrow for it the chip gives
- * way and truncates, before the alias beside it (`Party`) gives any.
+ * names that machine, else the name the log carries, as another machine's. A name part of its row (`GIVES_WAY.chip`).
  */
 export function MachineName({ name }: { name: string | null }) {
   const ref = useMachineOfName(name);
   if (ref === null && (name === null || name === '')) return null;
   return (
-    <span className="inline-flex min-w-0 shrink-[2]">
+    <span data-name-part="chip" className={GIVES_WAY.chip}>
       {ref !== null ? (
-        <MachineChip address={addressOf(ref, 'channel')} className="max-w-full" />
+        <MachineChip address={addressOf(ref, 'channel')} className={CHIP} />
       ) : (
-        <span data-machine-chip className="max-w-full truncate text-ui-sm text-fg-muted">
+        <span data-machine-chip className={`${CHIP} truncate text-ui-sm text-fg-muted`}>
           @{name}
         </span>
       )}
@@ -39,15 +64,30 @@ export function MachineName({ name }: { name: string | null }) {
   );
 }
 
+/** The chip of a machine the roster or the channel names, as a name part of its row (the to-human header's). */
+export function MachineChipPart({ address, name }: { address: string; name?: string }) {
+  return (
+    <span data-name-part="chip" className={GIVES_WAY.chip}>
+      <MachineChip address={address} name={name} className={CHIP} />
+    </span>
+  );
+}
+
 /**
- * A session as the stream names it: its alias, its title faint beside it, its machine's chip. The alias is drawn whole
- * up to 24 characters and never gives way; the title, then the chip, truncate first.
+ * A session as the stream names it: its alias, its title faint beside it, its machine's chip, each a name part of the
+ * row it sits in (`display: contents`), so they give way in the row's one order among the row's other parts.
  */
 export function Party({ party, title = true }: { party: ChannelParty; title?: boolean }) {
   return (
-    <span data-channel-party={party.session} className="inline-flex min-w-0 items-baseline gap-1.5" title={party.title ?? undefined}>
-      <span className="max-w-[24ch] shrink-0 truncate font-medium text-fg">{party.alias}</span>
-      {title && party.title !== null && <span className="min-w-0 shrink-[4] truncate text-fg-muted">{party.title}</span>}
+    <span data-channel-party={party.session} className="contents" title={partyTooltip(party.alias, party.title, party.machine)}>
+      <span data-name-part="alias" className={`${GIVES_WAY.alias} font-medium text-fg`}>
+        {party.alias}
+      </span>
+      {title && party.title !== null && (
+        <span data-name-part="title" className={`${GIVES_WAY.title} text-fg-muted`}>
+          {party.title}
+        </span>
+      )}
       <MachineName name={party.machine} />
     </span>
   );
@@ -77,10 +117,15 @@ export function LabelLine({ entry }: { entry: Pick<ChannelEntry, 'label' | 'by'>
 }
 
 /**
- * Whom a message went to, beside its sender: "to @a, @b", nothing for everyone. It gives way, but never below 12
- * characters (one short alias whole); the room it keeps past a shorter one is the line's own, before the time.
+ * Whom a message went to, beside its sender: "to @a, @b", nothing for everyone. A label of its row (`GIVES_WAY`): it
+ * gives way after the title and before the chip, but never below 12 characters (one short alias whole); the room it
+ * keeps past a shorter one is the line's own, before the time.
  */
 export function Recipients({ to }: { to: '*' | readonly { alias: string }[] }) {
   if (to === '*' || to.length === 0) return null;
-  return <span className="min-w-[12ch] truncate text-ui-sm text-fg-muted">{`${CHANNEL.to} ${to.map((r) => `@${r.alias}`).join(', ')}`}</span>;
+  return (
+    <span data-name-part="label" className="min-w-[12ch] basis-[12ch] grow-[1000] max-w-max truncate text-ui-sm text-fg-muted">
+      {`${CHANNEL.to} ${to.map((r) => `@${r.alias}`).join(', ')}`}
+    </span>
+  );
 }
