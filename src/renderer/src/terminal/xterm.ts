@@ -113,6 +113,7 @@ export function createXtermRenderer(opts: RendererOptions): TerminalRenderer {
       return terminal.buffer.active.cursorY;
     },
     line: (row) => terminal.buffer.active.getLine(row)?.translateToString(true) ?? '',
+    wrapped: (row) => terminal.buffer.active.getLine(row)?.isWrapped ?? false,
     lineCount: () => terminal.buffer.active.length,
     modes: () => ({
       alternateScreen: terminal.buffer.active.type === 'alternate',

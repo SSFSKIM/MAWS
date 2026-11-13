@@ -178,7 +178,9 @@ function Tab({ tab, group, selected, shape, maxWidth, canPin, bodyId, onSelect, 
   useLayoutEffect(() => {
     if (takesKeyboard(tab.id, group)) button.current?.focus();
   });
-  // A move remounts the tab in the other strip, which takes the keyboard; its menu closing gives none back here.
+  // A move remounts the tab in the other strip, which takes the keyboard, or leaves it in this strip, focused already: the
+  // menu's close after the move gives none back. Once: a tab that stayed is the same instance, and a later menu of its
+  // dismissed gives the keyboard back to it as usual.
   const moved = useRef(false);
 
   const element = (
@@ -235,7 +237,10 @@ function Tab({ tab, group, selected, shape, maxWidth, canPin, bodyId, onSelect, 
     <ContextMenu.Root modal={false}>
       <ContextMenu.Trigger asChild disabled={!toMain && moveTo === null} onKeyDown={openMenuOnShiftF10}>{element}</ContextMenu.Trigger>
       <ContextMenu.Portal>
-        <ContextMenu.Content onCloseAutoFocus={(event) => moved.current && event.preventDefault()} className="z-50 min-w-44 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
+        <ContextMenu.Content onCloseAutoFocus={(event) => {
+            if (moved.current) event.preventDefault();
+            moved.current = false;
+          }} className="z-50 min-w-44 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
           {toMain && <MoveToMainItem tabId={tab.id} />}
           {moveTo !== null && (
             <ContextMenu.Item

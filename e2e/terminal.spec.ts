@@ -69,7 +69,18 @@ interface Snap {
   cols: number;
   first: string;
   screen: string[];
+  wrapped: boolean[]; // per screen row: it continues the row above it (the buffer's soft wrap)
   modes: Modes;
+}
+// The screen as the lines that were written: each soft-wrapped row joined to the row it continues. The row it continues
+// filled every column, so its trimmed text is padded back to the width (a space at the wrap stays).
+function logicalLines(snap: Snap): string[] {
+  const joined: string[] = [];
+  snap.screen.forEach((line, row) => {
+    if (snap.wrapped[row] && joined.length > 0) joined[joined.length - 1] = joined.at(-1)!.padEnd(snap.cols) + line;
+    else joined.push(line);
+  });
+  return joined;
 }
 interface Counters {
   bytes: number;
@@ -139,6 +150,7 @@ class Harness {
         rows: number;
         cols: number;
         line(row: number): string;
+        wrapped(row: number): boolean;
         lineCount(): number;
         modes(): Modes;
       };
@@ -150,6 +162,7 @@ class Harness {
         cols: probe.cols,
         first: probe.line(0),
         screen: Array.from({ length: probe.rows }, (_, i) => probe.line(base + i)),
+        wrapped: Array.from({ length: probe.rows }, (_, i) => probe.wrapped(base + i)),
         modes: probe.modes(),
       };
     }, id);
@@ -746,7 +759,8 @@ test('copies a selection and opens links externally', async ({ maws }) => {
     await app.evaluate(({ clipboard }) => clipboard.writeText('echo PASTED-$((6*7))'));
     await page.locator(`[data-terminal-id="${id}"] .xterm-screen`).click();
     await page.keyboard.press('Meta+KeyV');
-    await expect.poll(async () => (await h.snap(id)).screen.some((line) => line.includes('echo PASTED-$((6*7))'))).toBe(true);
+    // read as written: a long prompt wraps the command across rows (UX wave U8b, Addendum 5)
+    await expect.poll(async () => logicalLines(await h.snap(id)).some((line) => line.includes('echo PASTED-$((6*7))'))).toBe(true);
     await h.type(id, '\r');
     await h.expectLine(id, 'PASTED-42');
   });
@@ -817,13 +831,17 @@ test('recolours on theme change without literals', async ({ maws }) => {
     await h.run(id, `clear; printf 'RB\\e[41m    \\e[44m    \\e[0m\\n'`);
     await h.idle(id);
   });
-  const row = (await h.snap(id)).screen.findIndex((line) => line.trimEnd() === 'RB');
+  const drawn = await h.snap(id);
+  const row = drawn.screen.findIndex((line) => line.trimEnd() === 'RB');
   expect(row).toBeGreaterThanOrEqual(0);
+  // An empty cell: on the last row under RB whose text is empty, whatever rows the prompt took (UX wave U8b, Addendum 5)
+  const empty = drawn.screen.findLastIndex((line, at) => at > row && line === '');
+  expect(empty, 'an empty row under RB').toBeGreaterThan(row);
 
   // The pixels the terminal drew in a red-background cell, a blue-background cell and an empty cell, against the
   // current theme's `--term-*` tokens.
   const sample = async () => {
-    const points = { red: await h.cellPoint(id, 3, row), blue: await h.cellPoint(id, 7, row), background: await h.cellPoint(id, 20, row + 2) };
+    const points = { red: await h.cellPoint(id, 3, row), blue: await h.cellPoint(id, 7, row), background: await h.cellPoint(id, 20, empty) };
     const drawn: Record<string, number[]> = {};
     for (const [name, point] of Object.entries(points)) {
       drawn[name] = await app.evaluate(async ({ BrowserWindow }, { x, y }) => {

@@ -441,5 +441,13 @@ describe('the keyboard after a tab moves between groups', () => {
     await moveByKeyboard(user, 'upper', 'Terminal', 'Move below');
     expect(group('lower')).toBeNull();
     expect(document.activeElement).toBe(tabIn('upper', 'Terminal'));
+
+    // the tab is the same instance, so its menu opened again and dismissed gives the keyboard back to it as usual
+    await user.keyboard('{Shift>}{F10}{/Shift}');
+    act(() => screen.getByRole('menuitem', { name: 'Move below' }).focus());
+    await user.keyboard('{Escape}');
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(document.activeElement).toBe(tabIn('upper', 'Terminal'));
   });
 });
