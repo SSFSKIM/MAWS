@@ -1207,6 +1207,10 @@ Found while checking the sections against the code at `48619c824`, then by the a
   Rationale: one declaration per row, so the page, the search (M10) and "every drawn row is declared" read the same table.
   Date/Author: 2026-11-13, M9's executor; folded by the controller.
 
+- Decision (P7's second run, 43386195217 at `8feaa7a7f`, accepted by the architect): Customize's row of MAWS's own list counts the attached session as listing a name when its `session.mcpStatus` answer lists it, unioned with the store's list; other ready sessions keep the store's list (`customize/connectors/ConnectorsSection.tsx`; `d1a728e44`, `055ce03bf`, `3b4ff61b7`, reviewed clean). §A's sentence stands: its check is "the session's mcp_status lists…".
+  Rationale: the store's `EngineSessionStatus.mcpServers` is filled only from `system/init`, so a ready session before its first turn listed nothing and the row read "Open a session, then sign in" beside a live list that showed the server needing sign-in. A ready session that is not the attached one and has had no first turn is still not found; it is ticket 619, with U8's Connectors card that reads "Not reported" before the first turn for the same reason. Rejected: an `mcp_status` read per ready session.
+  Date/Author: 2026-11-13, M8's executor on P7; the wave's architect (accepted).
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
