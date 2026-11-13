@@ -63,12 +63,14 @@ const LIST: BackgroundView = { kind: 'list' };
 
 // The snapshot. `appSessionId`: the session the view state belongs to. `reveal` grows with each `open({ taskId })`, so
 // the body scrolls the selected card into view again. `pendingRun` (E7): the ids an `open({ view: 'run' })` named
-// before any read brought the run; the widget opens once one resolves.
+// before any read brought the run; the widget opens once one resolves. `placing` (M7): the task an `open({ taskId })`
+// selected whose section is not unfolded yet: the list on screen unfolds the one it lists the task in, once it does.
 export interface BackgroundState {
   appSessionId: AppSessionId | null;
   view: BackgroundView;
   pendingRun: string[] | null;
   selected: string | null;
+  placing: string | null;
   expanded: Set<BackgroundSection>;
   showEarlierTasks: boolean;
   scrollTop: number;
@@ -78,9 +80,6 @@ export interface BackgroundState {
   doubtedJobs: ReadonlySet<string>; // P5 O9: a lane A job's stop whose outcome is unknown: it may not have stopped
 }
 
-// A task not known yet (an open that came before the graph has it) is taken for running.
-const sectionOfNode = (node: TaskNode | undefined): BackgroundSection => (node === undefined || node.status === 'running' ? 'running' : 'done');
-
 export class BackgroundHandle {
   private state: BackgroundState;
   private readonly listeners = new Set<() => void>();
@@ -89,7 +88,7 @@ export class BackgroundHandle {
 
   constructor(appSessionId: AppSessionId | null, params: BackgroundParams | undefined) {
     this.state = {
-      appSessionId, view: LIST, pendingRun: null, selected: null, expanded: new Set(OPEN_AT_FIRST), showEarlierTasks: false, scrollTop: 0, stopErrors: new Map(), reveal: 0, stoppingJobs: new Set(), doubtedJobs: new Set(),
+      appSessionId, view: LIST, pendingRun: null, selected: null, placing: null, expanded: new Set(OPEN_AT_FIRST), showEarlierTasks: false, scrollTop: 0, stopErrors: new Map(), reveal: 0, stoppingJobs: new Set(), doubtedJobs: new Set(),
     };
     this.watch(appSessionId);
     this.open(params);
@@ -128,10 +127,15 @@ export class BackgroundHandle {
       const ids = params.runId === undefined ? [params.taskId] : [params.taskId, params.runId];
       const taskId = graph === undefined ? null : resolveRun(graph, ids);
       if (taskId !== null) return this.openRun(taskId);
-      return this.update({ view: LIST, pendingRun: ids, selected: params.taskId, expanded: new Set([...this.state.expanded, 'running']), reveal: this.state.reveal + 1 });
+      return this.update({ view: LIST, pendingRun: ids, selected: params.taskId, placing: null, expanded: new Set([...this.state.expanded, 'running']), reveal: this.state.reveal + 1 });
     }
-    const node = graph?.tasks.get(params.taskId as TaskId);
-    this.update({ view: LIST, pendingRun: null, selected: params.taskId, expanded: new Set([...this.state.expanded, sectionOfNode(node)]), reveal: this.state.reveal + 1 });
+    this.update({ view: LIST, pendingRun: null, selected: params.taskId, placing: params.taskId, reveal: this.state.reveal + 1 });
+  };
+
+  // M7: the list on screen lists the task an open is placing: its section unfolds, once; a later fold is the person's.
+  place = (taskId: string, section: BackgroundSection) => {
+    if (this.state.placing !== taskId) return;
+    this.update({ placing: null, expanded: new Set([...this.state.expanded, section]) });
   };
 
   // E7 start: the widget's view. Opening a run selects its card too, so Back finds it marked.
@@ -214,7 +218,7 @@ export class BackgroundHandle {
     if (appSessionId === null || appSessionId === this.state.appSessionId) return;
     this.watch(appSessionId);
     this.clearDoubt();
-    this.update({ appSessionId, view: LIST, pendingRun: null, selected: null, expanded: new Set(OPEN_AT_FIRST), showEarlierTasks: false, scrollTop: 0, stopErrors: new Map(), stoppingJobs: new Set(), doubtedJobs: new Set() });
+    this.update({ appSessionId, view: LIST, pendingRun: null, selected: null, placing: null, expanded: new Set(OPEN_AT_FIRST), showEarlierTasks: false, scrollTop: 0, stopErrors: new Map(), stoppingJobs: new Set(), doubtedJobs: new Set() });
   };
 
   dispose = () => {
@@ -258,6 +262,7 @@ interface ViewProps {
 function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
   const graph = useTaskGraph((s) => s.entries.get(appSessionId)?.graph ?? EMPTY_GRAPH);
   const runsError = useTaskGraph((s) => s.entries.get(appSessionId)?.disk.runsError ?? null);
+  const runsRead = useTaskGraph((s) => (s.entries.get(appSessionId)?.disk.runs ?? null) !== null);
   // P5 O9 M5: a terminal session driven through its bridge lists the jobs derived from its transcript; the engine status
   // MAWS kept from an earlier run of it is not live meanwhile
   const controls = useSessionControls(appSessionId);
@@ -265,6 +270,9 @@ function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
   const live = !driven && ctx.status !== null;
   const jobs = useDrivenJobs(appSessionId, driven && !live);
   const listed = live || jobs !== null;
+  // Whether what this session's list reads here has been read, so an empty Running can say `Nothing running`: the live
+  // graph; else the terminal's jobs, or for a session read only from disk, its runs.
+  const read = live || (driven ? jobs !== null : runsRead);
   const stopping = own ? snapshot.stoppingJobs : NO_JOBS;
   // What the sections read: the graph of a session live here; else its workflows (a run read from disk) with the jobs
   // its terminal's transcript gives, the graph's shells and monitors being known only while it runs here.
@@ -299,6 +307,12 @@ function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
     if (!present || reveal === 0) return;
     scroller.current?.querySelector<HTMLElement>(`[data-task-id="${CSS.escape(selected!)}"]`)?.scrollIntoView?.({ block: 'nearest' });
   }, [selected, reveal, present]);
+  // M7: an `open({ taskId })` unfolds the section this list holds the task in, now or once a read brings it.
+  const placing = own ? snapshot.placing : null;
+  const placeIn: BackgroundSection | null = placing === null ? null : running.some((n) => n.taskId === placing) ? 'running' : done.some((n) => n.taskId === placing) ? 'done' : null;
+  useEffect(() => {
+    if (placing !== null && placeIn !== null) handle.place(placing, placeIn);
+  }, [placing, placeIn, handle]);
   // E7: an `open({ view: 'run' })` that came before its run opens the widget once a read brings the run.
   const pendingRun = own ? snapshot.pendingRun : null;
   const arrived = pendingRun === null ? null : resolveRun(graph, pendingRun);
@@ -327,7 +341,7 @@ function ListView({ appSessionId, handle, snapshot, own, ctx }: ViewProps) {
           {running.map(row)}
         </Group>
       ) : (
-        listed && <p className="shrink-0 px-3.5 py-3 text-ui text-fg-muted">{BACKGROUND_COPY.nothingRunning}</p>
+        read && <p className="shrink-0 px-3.5 py-3 text-ui text-fg-muted">{BACKGROUND_COPY.nothingRunning}</p>
       )}
       {/* E7: the session's scheduled jobs (Decision Log 10) */}
       <ScheduledSection appSessionId={appSessionId} session={ctx.session} live={live} visible={ctx.visible} expanded={expanded.has('scheduled')} onToggle={handle.toggle} />
