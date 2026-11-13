@@ -19,6 +19,7 @@ import { OrgKeySchema } from '../../machine/org-key'; // P5 O6 M5
 // `REGISTRY`'s declaration (src/shared/ipc/registry.ts), which sits near what the compiler serializes; the wave's growing
 // action table pushed it past (TS7056). An interface is printed by its name (a union or a type alias over one is not), so
 // the table's size no longer reaches that declaration. The schema itself is the same.
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type -- the interface is the point: it is printed by name
 export interface ActionIdSchemaType extends z.ZodType<ActionId, ActionId> {}
 const ActionIdSchema: ActionIdSchemaType = z.enum(ACTION_IDS);
 
