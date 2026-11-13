@@ -5,12 +5,13 @@
 // `readRestoredCost` reads one; a line is parsed only when its bytes hold every needle of the path (or the id of a call
 // a result waits for), and never when it is one of the engine's request records. One job runs at a time for the whole
 // daemon, and it gives the event loop back after every read, every parsed line and every few steps of the rule on a
-// line, so a search of the whole bound does not hold the daemon's other work. It never throws, puts no path in a message, and writes nothing.
+// line, so a search of the whole bound does not hold the daemon's other work. It never throws, puts no path in a
+// message, and writes nothing.
 import { createHash } from 'node:crypto';
+import { constants } from 'node:fs';
 import { open as openFile, type FileHandle } from 'node:fs/promises';
 import { setImmediate as nextTurn } from 'node:timers/promises';
 import { callClass, needlesOf, rowClaimSteps, type PendingCall, type RowClaim } from '@shared/files/named';
-import type { OpenFile } from '@shared/fs/read-tail';
 import type { AppSessionId } from '@shared/graph/ids';
 
 export const NAMED_SCAN_BYTES = 1024 ** 3; // read back from the transcript's end, at most: completeness, not cost
@@ -23,9 +24,15 @@ export const NAMED_FINGERPRINT_BYTES = 4096; // as the engine host's search (`fi
 export const NAMED_PENDING_MAX = 256; // results waiting for their calls in one search; an older one past it is not waited for
 export const NAMED_CLAIM_STEPS = 64; // steps of the rule on one row between two turns of the event loop (the branch review's finding 2)
 
+// How a transcript is opened: read-only and without blocking (`O_RDONLY | O_NONBLOCK`), so a FIFO with no writer, or any
+// other special file, opens at once and is refused on its descriptor's type before anything is read (the branch
+// review's finding 6). Numeric flags, which `@shared/fs/read-tail`'s `OpenFile` does not take.
+export type OpenTranscript = (path: string, flags: number) => Promise<FileHandle>;
+const TRANSCRIPT_FLAGS = constants.O_RDONLY | constants.O_NONBLOCK;
+
 export interface NamedPathsOptions {
   transcript: (appSessionId: AppSessionId) => Promise<string | null>; // decision 13; null: the session has no transcript
-  open?: OpenFile; // tests (`@shared/fs/read-tail`'s type, as `readRestoredCost` takes): the suite counts the bytes read
+  open?: OpenTranscript; // tests: the suite counts the bytes read
   bounds?: { scan?: number; chunk?: number; row?: number; entries?: number; waiting?: number; waitMs?: number; pending?: number }; // tests
   hooks?: { at?(point: 'opened' | 'searched', appSessionId: AppSessionId): Promise<void> }; // tests: after a job has opened the file and read its size; after a search, before its answer is proven and remembered
 }
@@ -249,7 +256,7 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
 
   async function decide(job: Job, handle: FileHandle): Promise<boolean> {
     const stat = await handle.stat({ bigint: true });
-    if (!stat.isFile()) return false;
+    if (!stat.isFile()) return false; // judged on the descriptor, before any read
     await hooks?.at?.('opened', job.appSessionId);
     const identity = { dev: stat.dev, ino: stat.ino };
     const size = Number(stat.size);
@@ -310,11 +317,13 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
   }
 
   // A job never throws: every failure (an unreadable transcript, a read error, a waiter that left) is "not named", and
-  // nothing of it is remembered.
+  // nothing of it is remembered. A file system call that never returns (a mount that stopped answering) keeps the one
+  // job slot until the daemon restarts: ruled, since freeing it would let each later search hold one more of the
+  // daemon's few file system threads.
   async function run(job: Job): Promise<boolean> {
     let handle: FileHandle | null = null;
     try {
-      handle = await open(job.transcript, 'r');
+      handle = await open(job.transcript, TRANSCRIPT_FLAGS);
       return await decide(job, handle);
     } catch {
       return false;

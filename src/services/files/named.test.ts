@@ -7,7 +7,6 @@ import { open as fsOpen, rename, writeFile, mkdir, stat } from 'node:fs/promises
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { OpenFile } from '@shared/fs/read-tail';
 import { callClass, rowClaim } from '@shared/files/named';
 import { StoreFixture } from '../../../test/support/store-fixture';
 import { createNamedPaths, NAMED_CHUNK_BYTES, NAMED_FINGERPRINT_BYTES, NAMED_ROW_BYTES, NAMED_SCAN_BYTES, NAMED_WAIT_MS, NAMED_WAITING_MAX, NAMED_CACHE_ENTRIES, NAMED_PENDING_MAX, NAMED_CLAIM_STEPS, type NamedPathsOptions } from './named';
@@ -35,7 +34,7 @@ let failRead: ((n: number) => boolean) | null;
 const stats = { opens: 0, reads: 0, bytes: 0 };
 
 // fs.open with every read counted, and a read that fails on request
-const counting: OpenFile = async (path, flags) => {
+const counting: NonNullable<NamedPathsOptions['open']> = async (path, flags) => {
   const handle = await fsOpen(path, flags);
   stats.opens += 1;
   const read = handle.read.bind(handle) as (buffer: Buffer, offset: number, length: number, position: number) => Promise<{ bytesRead: number; buffer: Buffer }>;
