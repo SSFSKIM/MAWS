@@ -90,6 +90,7 @@
 // sminos's hello doesn't advertise it, and `unavailable` while none is connected; its `record` target rule places a lane B
 // session through RL10's members join (`AuthorizeContext.members`, targets.ts).
 import { isMachineFeedSub, type Action, type Certificates, type DeviceClass, type OrgState, type RefusalReason, type Right, type SessionRef, type SubMessage } from 'org-protocol';
+import { DRAIN_REPLIES } from '@shared/host/host-supervisor'; // UX wave U9: a completion's act, placed by its record
 import type { ClientRef, Reader } from '@shared/ipc/client';
 import { gradeOf as declaredGrade, type Grade, type GradeSpec, type MachineGrade, type SessionRank } from '@shared/ipc/grades';
 import { REGISTRY, type WireRegistry } from '@shared/ipc/registry';
@@ -239,10 +240,10 @@ class Reads implements EffectReads {
   ) {}
 
   /** How this decision places a lane B session (`live`: targets.ts' `Placing`), or an artifact (through the cache). */
-  placing(live: boolean): Placing {
+  placing(live: boolean, byRecord = false): Placing {
     const held = this.held();
     const { members } = this.ctx;
-    return { dispatch: this.dispatch, log: (line) => this.ctx.log(line), live, artifact: (artifactId) => this.artifact(artifactId), ...(held === undefined ? {} : { held }), ...(members === undefined ? {} : { members }) };
+    return { dispatch: this.dispatch, log: (line) => this.ctx.log(line), live, ...(byRecord && { byRecord }), artifact: (artifactId) => this.artifact(artifactId), ...(held === undefined ? {} : { held }), ...(members === undefined ? {} : { members }) };
   }
 
   /** P5 O7 M5c: the leases and runs the asking channel holds (none for the endpoint's own re-checks, which name the artifact). */
@@ -453,7 +454,8 @@ export class Authorizer {
 
     // 4. The caller's standing at the floor, before anything of the session is read.
     // An engine host act's engine session is checked against the live row where it runs (actions.ts's context check).
-    const placing = reads.placing(!(kind === 'act' && row.executor === 'engine-host'));
+    // UX wave U9 (M1): a completion's act (a pane's answer) is placed by its record, with no status read (targets.ts)
+    const placing = reads.placing(!(kind === 'act' && row.executor === 'engine-host'), kind === 'act' && DRAIN_REPLIES.has(name));
     // P5 O7 M5a: a machine owner stands on every artifact, read before any link is placed; a listing by a session is
     // the session's, which they view as anyone does (the short cut admits artifacts, never a session).
     const shortCut = row.target === 'artifact' && (await reads.owners()).includes(who.member) ? artifactShortCut(name, input, action, reads.held()) : null;
