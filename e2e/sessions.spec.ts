@@ -24,6 +24,7 @@ import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { slashPaletteMovesNothing } from './support/palette-geometry';
 import { clickRevealed } from './support/hover';
 import { activeMainTab, mainTabById, mainTabs } from './support/shell';
+import { processesNaming } from './support/processes'; // the UX wave, U9: A6's scene signals only its own engine host
 import { backgroundAgentRecords, backgroundAgentSidecars, turnEndRecords, userRecord } from './support/lane-a';
 import { newChatIn, openProject, projectLine, projectRow, showProjectList, sidebarRow } from './support/sidebar';
 
@@ -1176,6 +1177,8 @@ test.describe('sessions', () => {
           .toMatch(/^(ready|crashed)$/);
         if (now.state === 'crashed') return;
         killed = now.pid!;
+        // only the scene's own engine host: a process whose command line names this launch's profile
+        expect(processesNaming(launched.maws.userData).map((p) => p.pid), `pid ${killed} is this launch's engine host`).toContain(killed);
         process.kill(killed, 'SIGKILL');
       }
       throw new Error('the engine host was not left crashed by its exits');
@@ -1203,7 +1206,7 @@ test.describe('sessions', () => {
       await crashForGood();
       await (await sidebarRow(page, { appSessionId: appOf('late') })).click();
       await expect(loading, 'Loading… while it waits').toBeVisible({ timeout: 10_000 });
-      await expect(failed, 'the wait ran out').toBeVisible({ timeout: 30_000 });
+      await expect(failed, 'the wait ran out (15 s, and margin for a loaded Mac)').toBeVisible({ timeout: 45_000 });
       await expect(failed.getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
       await restart();
       await expect(main.getByText(words.late, { exact: true }), 'a later ready loads it').toBeVisible({ timeout: 30_000 });
