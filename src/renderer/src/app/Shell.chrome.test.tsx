@@ -95,10 +95,10 @@ describe('the chrome yields to the tab strip', () => {
 
   it('keeps a folded saved surface’s context actions reachable from the keyboard', async () => {
     const user = userEvent.setup();
-    offs.push(registerPanelTool(probeTool('artifacts', { multiInstance: false }).tool));
+    // UX wave U8b (M2): its tab is drawn in the strip, which reads what an Artifacts instance shows (here, its list)
+    offs.push(registerPanelTool(probeTool('artifacts', { multiInstance: false, createState: (init) => ({ id: init.instanceId, init, snapshot: () => ({ view: { kind: 'list' } }) }) }).tool));
     setWidth(700);
-    // held but out of view (UX wave U8b: a tab of the strip would read the Artifacts tool's record, which a probe has none of)
-    useLayout.setState({ panelBySession: new Map([[A, { tabs: [ref('artifacts:aaaaaaaa')], activeTabId: null }]]) });
+    useLayout.setState({ panelBySession: new Map([[A, { tabs: [ref('artifacts:aaaaaaaa')], activeTabId: 'artifacts:aaaaaaaa' }]]) });
     renderShell();
     expect(within(chrome()).queryByRole('button', { name: 'artifacts' })).toBeNull();
     const more = within(chrome()).getByRole('button', { name: 'More surfaces' });
