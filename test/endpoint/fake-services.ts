@@ -14,7 +14,7 @@ import { endpointLibrary, type ContentLookup } from '../../src/services/artifact
 import type { EndpointServices } from '../../src/endpoint/services';
 
 /** `recorded`: each entry handed to the project channel's journal (P5 O8 M7b), in order. */
-export type FakeServices = EndpointServices & { lines: string[]; holds: Set<string>; recorded: NewHostEntry[]; cleanup(): void };
+export type FakeServices = EndpointServices & { lines: string[]; holds: Set<string>; recorded: NewHostEntry[]; activities: { count: number }; cleanup(): void };
 
 /** A fresh ref as `mawsd` mints one: 22 base64url characters, or `<prefix>_` and 22 under a delegation. */
 export const mintRef = (prefix?: string) => `${prefix === undefined ? '' : `${prefix}_`}${randomBytes(16).toString('base64url')}` as MachineRef;
@@ -27,6 +27,7 @@ export function fakeServices(options: { ref?: MachineRef; kind?: 'unit' | 'priva
   fs.chmodSync(stateDir, 0o700);
   const lines: string[] = [];
   const holds = new Set<string>();
+  const activities = { count: 0 };
   const recorded: NewHostEntry[] = [];
   const none = () => () => {};
   return {
@@ -60,6 +61,8 @@ export function fakeServices(options: { ref?: MachineRef; kind?: 'unit' | 'priva
     lines,
     holds,
     recorded,
+    activities,
+    activity: () => void (activities.count += 1), // P5 Decision Log 273
     cleanup: () => fs.rmSync(profileDir, { recursive: true, force: true }),
   };
 }

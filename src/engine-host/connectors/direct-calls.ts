@@ -88,6 +88,9 @@ export interface DirectCallsOptions {
   maxOperations?: number;
   maxResultBytes?: number;
   clock?: DirectClock; // tests: the deadlines' and retention's time
+  // P5 Decision Log 273: an operation's run past its answer (its call, resolution, discovery, a dataset's publication) as
+  // the host's work, from its start until it settles or the operation is dropped
+  work?(): () => void;
 }
 
 // The time the table's deadlines and retention keep (the end's announcement is always the next macrotask's).
@@ -124,6 +127,7 @@ interface Operation {
   deadline?: unknown;
   expiry?: unknown;
   release?: () => void; // lets go of its fence (Decision Log 91: with the operation, not the call)
+  working?: () => void; // P5 Decision Log 273: the end of the run under way
 }
 
 type DatasetEnd = Exclude<ConnectorDatasetTake, { status: 'publishing' }>;
@@ -185,7 +189,7 @@ export class DirectCalls {
   start(input: DirectStartInput): { operationId: string } {
     const operation = this.admit(input.operationId, 'call', this.callDeadlineMs, unavailable('timeout'), input.credential);
     if (input.dataset) operation.sink = true;
-    void this.call(operation, input).then(
+    void this.running(operation, this.call(operation, input)).then(
       (answer) => {
         if ('ok' in answer) this.finish(operation, answer);
         else this.keep(operation, answer);
@@ -237,7 +241,7 @@ export class DirectCalls {
     if (!phase.publishing) {
       phase.publishing = true;
       this.clock.clearTimeout(operation.expiry);
-      void phase.publish!().then((end) => {
+      void this.running(operation, phase.publish!()).then((end) => {
         if ('ok' in end) return this.finish(operation, end);
         if (this.operations.get(operation.id) !== operation || operation.cancelled) return;
         phase.take = end;
@@ -333,7 +337,7 @@ export class DirectCalls {
   }
 
   private run(operation: Operation, body: () => Promise<unknown>, crashed: unknown): void {
-    void body().then(
+    void this.running(operation, body()).then(
       (answer) => this.finish(operation, answer),
       () => this.finish(operation, crashed), // never a message: the host's own fault, said as a closed reason
     );
@@ -390,6 +394,22 @@ export class DirectCalls {
     if (this.operations.get(operation.id) === operation) this.operations.delete(operation.id);
     operation.release?.();
     operation.release = undefined;
+    operation.working?.();
+  }
+
+  // P5 Decision Log 273: `promise` is the operation's work until it settles (or the operation is dropped first)
+  private running<T>(operation: Operation, promise: Promise<T>): Promise<T> {
+    const work = this.options.work?.();
+    if (!work) return promise;
+    let ended = false;
+    const end = () => {
+      if (ended) return;
+      ended = true;
+      if (operation.working === end) delete operation.working;
+      work();
+    };
+    operation.working = end;
+    return promise.finally(end);
   }
 
   private registered(operation: Operation): boolean {

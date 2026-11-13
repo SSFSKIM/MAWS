@@ -292,6 +292,20 @@ describe('the stage’s keys and clipboard', () => {
     expect(readFlat(doc, 's', false).some((e) => e.id === copy)).toBe(true);
   });
 
+  // U6a (the UX wave's U6, collisions: ⇧⌘D is View ▸ Review): with Shift down the stage leaves the key to the menu
+  it('⇧⌘D is not the stage’s: nothing duplicated, the key neither prevented nor stopped', () => {
+    const { doc, session, stage } = mount();
+    act(() => session.select(['a']));
+    const before = readFlat(doc, 's', false).length;
+    const reached = vi.fn();
+    document.addEventListener('keydown', reached);
+    for (const key of ['d', 'D']) expect(fireEvent.keyDown(stage, { key, metaKey: true, shiftKey: true }), key).toBe(true);
+    document.removeEventListener('keydown', reached);
+    expect(reached).toHaveBeenCalledTimes(2);
+    expect(readFlat(doc, 's', false)).toHaveLength(before);
+    expect(session.snapshot().selection).toEqual(['a']);
+  });
+
   it('⌘] and ⌥⌘[ restack a pinned element; Arrange uses the same commands and follows the selected element', async () => {
     const { doc, session, stage } = mount();
     act(() => session.select(['a']));

@@ -78,8 +78,11 @@ describe('the endpoint’s org read', () => {
     await endpoint.start(services);
     await vi.advanceTimersByTimeAsync(0);
     expect(seen).toHaveLength(1);
+    const syncHolds = () => [...services!.holds].filter((hold) => hold.startsWith('the hub sync#'));
+    expect(syncHolds()).toHaveLength(1); // P5 Decision Log 273: the daemon is held while the read is out, so no collection lands on it
     await vi.advanceTimersByTimeAsync(REQUEST_MS);
     expect(services.lines.join('\n')).toMatch(/could not be read: .*timeout/);
+    expect(syncHolds()).toEqual([]);
     void endpoint.syncNow();
     await vi.advanceTimersByTimeAsync(0);
     expect(seen).toHaveLength(2);

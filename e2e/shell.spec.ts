@@ -9,7 +9,7 @@
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Locator, type Page, type TestInfo } from '@playwright/test';
-import { ACTIONS, type ActionId } from '../src/shared/keymap/actions';
+import { ACTIONS, type ActionId, type ActionTable } from '../src/shared/keymap/actions';
 import type { EventPayload } from '../src/shared/ipc/schema';
 import { formatChord } from '../src/shared/keymap/chord';
 import { addressed, localName, localRef } from './support/address';
@@ -852,7 +852,8 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     await openPalette(app, page);
     await expect(palette).toBeVisible();
     const actions = palette.getByRole('group', { name: 'Actions' }).getByRole('option');
-    const ids = Object.keys(ACTIONS) as ActionId[];
+    // U6a: the palette lists every row but the fixed ones (a key its own editor handles is not an act to run)
+    const ids = (Object.keys(ACTIONS) as ActionId[]).filter((id) => !(ACTIONS as ActionTable)[id].fixed);
     await expect(actions).toHaveCount(ids.length);
     const actionTexts = await actions.allTextContents();
     for (const [i, id] of ids.entries()) {

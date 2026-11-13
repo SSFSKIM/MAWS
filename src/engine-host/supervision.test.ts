@@ -689,6 +689,27 @@ describe('the engine host’s collection, asked again as it runs', () => {
     expect(h.collect).toHaveBeenCalledOnce();
   });
 
+  // P5 Decision Log 273: the quiet entry's predicate over the same sources. What holds the host's quiet but runs nothing
+  // here (a client's interest, a row's hold or prompt) leaves it unoccupied; anything that runs or is about to does not.
+  const holdsNothingRunning = new Set(['interest in a session', 'a row’s pending request', 'a row’s pending plan', 'a row’s queued message', 'a row’s background task', 'a row’s cron', 'a row’s work the host cannot read', 'a row’s held peer message']);
+  it.each(pending)('%s: the quiet entry’s predicate', (name, pend) => {
+    const h = collecting();
+    h.rows.push(row(resting()));
+    h.told();
+    expect(h.supervision.unoccupied()).toBe(true);
+    pend(h);
+    expect(h.supervision.quiet()).toBe(false);
+    expect(h.supervision.unoccupied()).toBe(holdsNothingRunning.has(name));
+  });
+
+  it('a row’s headless tab holds the quiet and leaves the host unoccupied', () => {
+    const h = collecting();
+    h.rows.push(row(resting({ work: { unknown: null, crons: [], holds: { browser: 'held' } } } as never)));
+    h.told();
+    expect(h.supervision.quiet()).toBe(false);
+    expect(h.supervision.unoccupied()).toBe(true);
+  });
+
   it('collects at the next reading that finds it quiet once the source has settled, told late or not at all', () => {
     const h = collecting();
     h.rows.push(row(resting()));
