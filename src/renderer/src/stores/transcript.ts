@@ -163,6 +163,7 @@ function copyUi(ui: TranscriptUi, turns: Iterable<TurnId> | 'all'): TranscriptUi
     expandedCells: new Set(ui.expandedCells), revealedBoundaries: new Set(ui.revealedBoundaries), receipts: new Map(ui.receipts), spills: new Map(ui.spills),
     global: turns === 'all' ? ui.global + 1 : ui.global, stamps, version: ui.version + 1,
     ...(ui.ownerLane !== undefined && { ownerLane: ui.ownerLane }), ...(ui.view !== undefined && { view: ui.view }), reportOpenTurns: new Set(ui.reportOpenTurns), // P2-C
+    ...(ui.revealed !== undefined && { revealed: ui.revealed }), // UX wave U3
   };
 }
 
@@ -323,15 +324,23 @@ export function createTranscriptStore() {
       const attached = attachments.get(key);
       if (attached?.restartUi) attached.stagedJump = { focus: id, align: options.align ?? 'center' }; // staging: resolved again at install
       const visible = locate(current.rows, id);
+      // UX wave U3 (the U3a document, Interfaces F): the jump's target is the tab's revealed row, replacing the last; what
+      // a turn's rows depend on bumps for the turns of the old target and the new (the old one's as it is shown)
+      const before = current.state.ui.revealed;
+      const left = before === undefined || before === id ? [] : [turnOfShown(current.rows, before)].filter((turn): turn is TurnId => turn !== null);
+      const touched = (turn: TurnId | null): TurnId[] => [...new Set([...(turn === null ? [] : [turn]), ...left])];
       // P2-C: in the report a row of a marked turn's closed working record is out of sight: the jump opens the record
       const folded = (row: Row) => reportViewOf(current.state.ui) && row.turnId !== null && !current.state.ui.reportOpenTurns?.has(row.turnId) && foldedInReport(row);
       if (visible && (!visible.group || (visible.group.kind === 'group' && visible.group.expanded)) && !folded(visible.row)) {
-        put(key, { jump: request(visible.row.id) });
+        const ui = copyUi(current.state.ui, touched(visible.row.turnId));
+        ui.revealed = id;
+        put(key, { state: withUi(current.state, ui), jump: request(visible.row.id) });
         return;
       }
       const found = visible ?? (options.turnId ? locate(expandedTurnRows(current.state, options.turnId), id) : null) ?? locate(allExpandedRows(current.state), id);
       if (!found) return;
-      const ui = copyUi(current.state.ui, found.row.turnId === null ? 'all' : [found.row.turnId]);
+      const ui = copyUi(current.state.ui, found.row.turnId === null ? 'all' : touched(found.row.turnId));
+      ui.revealed = id; // UX wave U3
       if (folded(found.row)) ui.reportOpenTurns!.add(found.row.turnId!); // P2-C
       if (found.row.turnId !== null && !isExpanded(current.state, found.row.turnId)) expandTurn(ui, found.row.turnId);
       if (found.group) ui.expandedGroups.add(found.group.id);

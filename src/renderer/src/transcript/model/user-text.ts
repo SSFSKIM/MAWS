@@ -5,6 +5,7 @@
 // (X10's framing, `@shared/anchor/message`) is recognised here, so the live prompt, the engine's queued steer on disk and
 // a held entry draw its anchor chip from the text alone, and the row's text is the comment as typed.
 import { slashCommandLine } from '@shared/wire/local-command';
+import { LOCAL_COMMAND_TAG } from '@shared/engine/engine-markers';
 export { slashCommandLine } from '@shared/wire/local-command';
 import { PASTED_BLOCK, PASTED_PLACEHOLDER, pastedPlaceholder } from '@shared/composer/pasted-content';
 import type { Anchor } from '@shared/anchor/anchor';
@@ -131,13 +132,13 @@ export function anchoredTextOf(framed: { anchor: Anchor } & AnchorFrame, text: s
 
 // The engine's local-command echo (`/model`, `/status` and the like arrive as replayed user frames wrapped in these
 // tags; C3 tags the event `origin: 'local-command'`): a `local_command` row, never a bubble and never a turn. The
-// wrapper is recognised too, so an untagged replay (disk backfill) reads the same way.
-const LOCAL_COMMAND = /<local-command-(stdout|stderr|caveat)>([\s\S]*?)<\/local-command-\1>/g;
+// wrapper is recognised too, so an untagged replay (disk backfill) reads the same way. The tags' pattern is shared with
+// the arrivals reader (`@shared/engine/engine-markers`).
 
 export function localCommandOutput(content: string | ContentBlock[]): string | null {
   if (typeof content !== 'string') return null;
-  const matches = [...content.matchAll(LOCAL_COMMAND)];
-  if (matches.length === 0 || content.replace(LOCAL_COMMAND, '').trim() !== '') return null;
+  const matches = [...content.matchAll(LOCAL_COMMAND_TAG)];
+  if (matches.length === 0 || content.replace(LOCAL_COMMAND_TAG, '').trim() !== '') return null;
   return matches.filter((match) => match[1] !== 'caveat').map((match) => match[2].trim()).filter(Boolean).join('\n');
 }
 

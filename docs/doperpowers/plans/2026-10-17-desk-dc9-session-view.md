@@ -1024,6 +1024,11 @@ in their own worktrees.
   escaped (math in the label), and a landing that arrives late can pull
   a reader once from a place chosen while it paged.
   Date/Author: 2026-10-17, M6 executor, folded by the controller.
+  Reversed 2026-11-12 (UX wave, U3, O-41) for a peer's delivery: on every
+  route it is drawn as a peer's message line, not as the owner's bubble
+  opening with 'From <name>'. The owner's own send keeps its bubble with
+  the frame line cut. The owner: 'the cross-session messaging is displayed
+  like user message, not a peer session.'
 
 - Decision: **The phone draws the session view** (the owner, 2026-10-18,
   reversing §4's two phone bindings after a day worked from the desk: the

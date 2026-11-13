@@ -14,7 +14,7 @@
 // has that shape.
 // In each, the attaching app's hello crosses the minor (host.log names the app's wire, the app's main the supervisor's),
 // the app is served as another build (`matches: 'build'`, the update banner, exit-when-idle armed), the kept session's
-// tail reaches its main (the background failure journaled while no app ran raises the Needs-you item only main's live
+// tail reaches its main (the auto-mode denial journaled while no app ran raises the Needs-you item only main's live
 // derivation raises; the request raised while away is pending, its answer is played on and its rows arrive live), a
 // launch on the kept supervisor plays a turn, and once every session there is idle the kept supervisor exits by itself
 // and the app moves to a supervisor of its own build, which serves a launch too.
@@ -150,7 +150,7 @@ import { sidebarOf, sidebarRow } from './support/sidebar'; // U13a; UX wave U7a:
 import { answerOf, fitTo, refusedSample, sampleOf, samplesFor, type ProbeAnswer } from './support/cross-build-samples';
 import { endProfileProcesses, isAlive } from './support/processes';
 import { spineFiles, spineFilesOpen } from '../test/support/spine-files';
-import { adoptedOf, attentionOf, eventsOf, isRequestRow, isTaskFailureRow, pendingPermissions, PERMISSION, PROMPT, statusOf, suffix, tailFixture, TASK_FAILED, withScratch, type Run, type Scratch } from './support/supervisor-scratch';
+import { adoptedOf, attentionOf, eventsOf, isRequestRow, isTailItemRow, pendingPermissions, PERMISSION, PROMPT, statusOf, suffix, TAIL_ITEM, tailFixture, withScratch, type Run, type Scratch } from './support/supervisor-scratch';
 import { stubSpec } from './support/stub-engine'; // P5 O16 M3c
 
 const PEER = process.env.MAWS_E2E_PEER_ROOT || null;
@@ -320,7 +320,7 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   const shapeOf = (shape: Shape) => (shape === 'daemon' ? ' on the daemon shape' : '');
   const said: string[] = [`${keeper.label} (wire ${wireOf(keeper)})${shapeOf(shapes.keeper)} keeps a session; ${attacher.label} (wire ${wireOf(attacher)})${shapeOf(shapes.attacher)} attaches`];
 
-  // the keeper: a paced replay kept across a quit, its background failure and its request still ahead
+  // the keeper: a paced replay kept across a quit, its auto-mode denial and its request still ahead
   const first = await s.launch({ MAWS_HOST_MODE: shapes.keeper, MAWS_E2E_QUIT_ANSWER: 'keep', MAWS_E2E_REPLAY_ROW_MS: ROW_MS, ...steps.env }, keeper.root);
   const own = await s.ready(first.page, onShape(shapes.keeper));
   expect(own, `${keeper.label} on its own supervisor`).toMatchObject({ matches: 'same', supervisor: { buildId: own.appBuildId } });
@@ -340,7 +340,7 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   if (keeperDaemon !== null) expect(isAlive(keeperDaemon), 'the keeper’s mawsd serves its kept session').toBe(true);
   const atQuit = s.journal(id);
   const seqAtQuit = Math.max(...atQuit.map((r) => r.seq));
-  expect(atQuit.filter((r) => isTaskFailureRow(r) || isRequestRow(r)), 'the failure and the request come after the app has exited').toEqual([]);
+  expect(atQuit.filter((r) => isTailItemRow(r) || isRequestRow(r)), 'the denial and the request come after the app has exited').toEqual([]);
   await expect.poll(() => s.journal(id).some(isRequestRow), { timeout: 30_000, message: 'the request reaches the journal while no app runs' }).toBe(true);
 
   // the other build's app attaches, and is served as another build until the kept sessions are idle
@@ -402,23 +402,23 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   const atAttach = await eventsOf(second.page, id);
   const seqOf = (e: SessionEvent) => Number(suffix(e.id).split(':')[0]);
   expect(atAttach.filter((e) => seqOf(e) > seqAtQuit).length, 'events from rows journaled after the keeper had exited').toBeGreaterThan(0);
-  const failure = atAttach.find((e) => e.kind === 'task.notification');
-  expect(failure && seqOf(failure), 'the failure was journaled after the keeper had exited').toBeGreaterThan(seqAtQuit);
+  const denial = atAttach.find((e) => e.kind === 'tool.result' && e.denial === 'automode-unavailable');
+  expect(denial && seqOf(denial), 'the denial was journaled after the keeper had exited').toBeGreaterThan(seqAtQuit);
   // P5 O3-D M6 (the architect's ruling; O3 Decision Log 5(1)): on a pre-A attacher after this build's mawsd held the
-  // stream, the failure's item is the one gap of the downgrade. mawsd, the engine host's permanent client while no app
+  // stream, the denial's item is the one gap of the downgrade. mawsd, the engine host's permanent client while no app
   // ran, took the tail (the host's connect burst sends only what no client has received, src/engine-host/session-stream.ts
   // `republish`) and its spine derived the item into the index at 14, which a pre-A app cannot read (its 13): so neither
   // the item nor the events reach the old app. Every other check of the scene runs. Without the daemon no client takes
   // the tail while away, and the burst brings it to the old app, which derives the item live.
   const derivedUnreadable = shapes.keeper === 'daemon' && !takesSpineLock(attacher);
   if (derivedUnreadable) {
-    test.info().annotations.push({ type: 'skipped check', description: `the failure's Needs-you item, derived from the tail: ${attacher.label} (wire ${wireOf(attacher)}) is from before O3-A; this build's mawsd took the tail while away and derived the item into the index at 14, which it cannot read (O3 DL 5(1))` });
-    said.push(`  tail: the failure's Needs-you item not checked: ${attacher.label} is from before O3-A and cannot read the index at 14 where mawsd derived it (O3 DL 5(1))`);
+    test.info().annotations.push({ type: 'skipped check', description: `the denial's Needs-you item, derived from the tail: ${attacher.label} (wire ${wireOf(attacher)}) is from before O3-A; this build's mawsd took the tail while away and derived the item into the index at 14, which it cannot read (O3 DL 5(1))` });
+    said.push(`  tail: the denial's Needs-you item not checked: ${attacher.label} is from before O3-A and cannot read the index at 14 where mawsd derived it (O3 DL 5(1))`);
   } else {
-    await expect.poll(async () => (await attentionOf(second.page, id, 'error')).map((i) => i.summary), { message: 'the failure’s Needs-you item, derived from the tail' }).toEqual([`Background task failed: ${TASK_FAILED}`]);
+    await expect.poll(async () => (await attentionOf(second.page, id, 'auto_mode_unavailable')).map((i) => i.summary), { message: 'the denial’s Needs-you item, derived from the tail' }).toEqual([TAIL_ITEM]);
   }
   await expect.poll(async () => (await pendingPermissions(second.page, id)).length, { message: 'the request raised while away' }).toBe(1);
-  said.push(`  tail: ${atAttach.filter((e) => seqOf(e) > seqAtQuit).length} events journaled after the keeper's quit; ${derivedUnreadable ? "the request's item" : "the failure's item and the request's"} reached main`);
+  said.push(`  tail: ${atAttach.filter((e) => seqOf(e) > seqAtQuit).length} events journaled after the keeper's quit; ${derivedUnreadable ? "the request's item" : "the denial's item and the request's"} reached main`);
 
   // P5 O5 M2: an artifact page of the kept engine host, loaded by this build's app on the daemon shape
   if (attacherDaemon !== null) said.push(await artifactPage(s, second, attacher.label, servesArtifacts(attacher)));
@@ -514,7 +514,7 @@ async function handedOverCrossing(s: Scratch, keeper: Build, attacher: Build, sh
   const said: string[] = [`${keeper.label} (wire ${wireOf(keeper)})${shapeOf(shapes.keeper)} keeps a session; ${attacher.label} (wire ${wireOf(attacher)})${shapeOf(shapes.attacher)} attaches; both list ${HOLDER_CAPABILITY}: the handover`];
   const stub = s.useStub({ rowMs: Number(ROW_MS) });
 
-  // the keeper: a paced stub launch kept across a quit, its background failure and its request still ahead
+  // the keeper: a paced stub launch kept across a quit, its auto-mode denial and its request still ahead
   const first = await s.launch({ MAWS_HOST_MODE: shapes.keeper, MAWS_E2E_QUIT_ANSWER: 'keep', MAWS_E2E_REPLAY_ROW_MS: ROW_MS, ...steps.env }, keeper.root);
   const own = await s.ready(first.page, onShape(shapes.keeper));
   expect(own, `${keeper.label} on its own supervisor`).toMatchObject({ matches: 'same', supervisor: { buildId: own.appBuildId } });
@@ -563,7 +563,7 @@ async function handedOverCrossing(s: Scratch, keeper: Build, attacher: Build, sh
   const atAttach = await eventsOf(second.page, id);
   const seqOf = (e: SessionEvent) => Number(suffix(e.id).split(':')[0]);
   expect(atAttach.filter((e) => seqOf(e) > seqAtQuit).length, 'events from rows journaled after the keeper had exited').toBeGreaterThan(0);
-  await expect.poll(async () => (await attentionOf(second.page, id, 'error')).map((i) => i.summary), { message: 'the failure’s Needs-you item, derived from the tail' }).toEqual([`Background task failed: ${TASK_FAILED}`]);
+  await expect.poll(async () => (await attentionOf(second.page, id, 'auto_mode_unavailable')).map((i) => i.summary), { message: 'the denial’s Needs-you item, derived from the tail' }).toEqual([TAIL_ITEM]);
   await expect.poll(async () => (await pendingPermissions(second.page, id)).length, { message: 'the request raised while away, once' }).toBe(1);
   if (attacherDaemon !== null) said.push(await artifactPage(s, second, attacher.label, servesArtifacts(attacher)));
   said.push('  gap: not probed: the older supervisor never served this app (its session was handed over at the attach)');
@@ -603,7 +603,7 @@ async function handedOverCrossing(s: Scratch, keeper: Build, attacher: Build, sh
 // (it knows no such command and would answer `unknown_command`, which `mawsd` logs as `failed`). To a host that lists
 // it, neither: one permanent connection. Either way the turn plays on while no app runs, and its end reaches the
 // reattached app's status and the spine's digest (O2's burst on a recycled link, or the front's follow from the app's
-// cursor), and the session's background failure is still one Needs-you item.
+// cursor), and the session's auto-mode denial is still one Needs-you item.
 // Fix round 1 (the architect's ruling): M3's unit tests prove the outstanding-at-quit items (a bridge request, a hold, a
 // remote subscription) against a fake older host; this scene ties that fake to the real one, each end in its own words.
 // `mawsd`'s log: the kept host's welcome it chose its path from (no host.attachment listed), its recycles at the
@@ -655,7 +655,7 @@ async function quitAndReattach(s: Scratch, run: Run, attach: () => Promise<Run>,
   // seq <= atReattach, the turn's end among them) are the session's events, and the turn's end, its `turn.ended` at the
   // end row's seq, reaches main's view (the engine status, through the front's follow from the app's cursor) and the
   // spine's (the digest's lastTurnEndedAt is that event's own time, folded from the recycled link's burst on an older
-  // host: the spine heard no event while no app ran there); the refold adds no second item for the failure folded before
+  // host: the spine heard no event while no app ran there); the refold adds no second item for the denial folded before
   // the quit
   const ended = endRow()!;
   expect(ended.seq, 'the turn’s end was journaled before the reattach').toBeLessThanOrEqual(atReattach);
@@ -671,7 +671,7 @@ async function quitAndReattach(s: Scratch, run: Run, attach: () => Promise<Run>,
     }, { message: 'the spine’s digest has the turn’s end recovered at the reattach' })
     .toEqual({ lastTurnEndedAt: endEvent!.at, working: false });
   const away = s.journal(o.id).filter((r) => r.seq > awayFrom && r.seq <= atReattach).length;
-  expect((await attentionOf(next.page, o.id, 'error')).map((i) => i.summary), 'the background failure is still one Needs-you item').toEqual([`Background task failed: ${TASK_FAILED}`]);
+  expect((await attentionOf(next.page, o.id, 'auto_mode_unavailable')).map((i) => i.summary), 'the auto-mode denial is still one Needs-you item').toEqual([TAIL_ITEM]);
   expect(await pendingPermissions(next.page, o.id), 'the request answered before the quit stays answered').toEqual([]);
   o.said.push(
     `  reattach (acceptance 9, ${o.capable ? 'a host that serves host.attachment: one permanent connection' : 'an older host: O2’s link per attachment'}): connections from mawsd pid ${o.daemon} ${before} → ${departed} at the departure → ${connectsFrom(s.log(), o.daemon)} at the reattach; ${away} rows journaled while no app ran, the turn’s end (seq ${ended.seq}) among them; ${awayEvents.length} events of theirs, the end’s recovered by the digest`,

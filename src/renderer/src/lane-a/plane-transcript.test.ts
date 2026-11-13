@@ -5,6 +5,7 @@
 import type { JsonObject, SessionBodies, SubagentMeta } from 'desk-hub/protocol';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTranscriptStore } from '../stores/transcript';
+import { rowsOf as drawnRows, withAllExpanded } from '../transcript/model/derive';
 import type { Row } from '../transcript/model/rows';
 import { FakePlane, mount, settle } from './test-support/fake-plane';
 import { readRecording, rowsBefore, scriptOf, snapshotAt, STRAY, type LiveItem } from './test-support/session-stream';
@@ -604,6 +605,32 @@ describe('the main transcript through the session plane', () => {
     expect(deliveries()).toEqual([id(5)]);
     await step(script.slice(rowAt(5) + 1));
     expect(store.getState().entries[controller.key].rows).toEqual(await freshRows(rows));
+  });
+
+  it('a background session’s prompt with a peer’s frame is the peer’s line, in the snapshot and live; without the session’s kind, the person’s bubble (UX wave U3, decision 19)', async () => {
+    // The engine's ordinary prompt row, which another machine's producer sends with the session's kind (`sessionKind`);
+    // a row is any JSON on the plane, so the field reaches the reader as written (invented words).
+    const last = recording.session.at(-1)!;
+    const id = (n: number) => `b9b9b9b9-0000-4000-8000-${String(n).padStart(12, '0')}`;
+    const at = (second: number) => `2027-01-01T00:01:${String(second).padStart(2, '0')}.000Z`;
+    const base = (n: number, parent: string, second: number) => ({ uuid: id(n), parentUuid: parent, timestamp: at(second), sessionId: TARGET.session, isSidechain: false });
+    const framed = '[sminos chat demo 7f3a2b1c:12 from river → @you]\nThe migration is merged.';
+    const prompt = (n: number, parent: string, second: number, keys: JsonObject) => ({ ...base(n, parent, second), type: 'user', origin: { kind: 'human' }, promptSource: 'typed', turnOrigin: 'human', message: { role: 'user', content: framed }, ...keys });
+    const reply = (n: number, parent: number, second: number) => ({ ...base(n, id(parent), second), type: 'assistant', message: { id: `msg_bg_${n}`, role: 'assistant', model: 'claude-opus-5-5', type: 'message', content: [{ type: 'text', text: 'Picking it up.' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } } });
+    const ended = (n: number, parent: number, second: number) => ({ ...base(n, id(parent), second), type: 'system', subtype: 'turn_duration', durationMs: 900, isMeta: false });
+    const rows: JsonObject[] = [...recording.session, prompt(1, String(last.uuid), 10, { sessionKind: 'bg' }), reply(2, 1, 11), ended(3, 2, 12), prompt(4, id(3), 13, { sessionKind: 'bg' }), reply(5, 4, 14), ended(6, 5, 15), prompt(7, id(6), 16, {}), reply(8, 7, 17), ended(9, 8, 18)];
+    const script = scriptOf(rows, null);
+    const rowAt = (n: number) => script.findIndex((item) => item.kind === 'row' && item.body.row.uuid === id(n));
+    plane.snapshot(script, rowAt(4)); // the first prompt in the snapshot, the second and the plain one live
+    await settle();
+    await step(script.slice(rowAt(4)));
+    const entry = store.getState().entries[controller.key];
+    // a closed turn folds its work, the message line among it, which its divider then names: read it unfolded
+    const unfolded = drawnRows(withAllExpanded(entry.state));
+    const lines = unfolded.flatMap((row) => (row.kind === 'agent_message' ? [row.text] : []));
+    expect(lines.filter((text) => text === 'Message from @river: The migration is merged.')).toHaveLength(2);
+    expect(unfolded.filter((row) => row.kind === 'user' && row.text === framed)).toHaveLength(1); // the one without the kind
+    expect(entry.rows).toEqual(await freshRows(rows));
   });
 
   it('closes its subscription when closed', () => {

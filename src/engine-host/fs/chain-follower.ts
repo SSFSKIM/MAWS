@@ -14,7 +14,7 @@ import type { AgentId, EventId, MessageUuid, ParentToolUseId, SessionId } from '
 import { branchName } from '@shared/sessions/branch';
 import type { TranscriptSummary } from '@shared/wire/store';
 import { TranscriptRecordSchema, type TranscriptRecord } from '@shared/wire/transcript';
-import { createBackfillContext, eventBase, recordToEvents, isTaskNotification, isHumanPrompt, isNoResponseMarker, localCommandKind, opensTurn, singleText, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
+import { createBackfillContext, endedByExit, eventBase, recordToEvents, isTaskNotification, isHumanPrompt, isNoResponseMarker, localCommandKind, opensTurn, singleText, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
 
 export interface Skeleton {
   uuid: MessageUuid;
@@ -203,8 +203,10 @@ class FollowerCore {
       noResponse: isNoResponseMarker(record),
       localTurnUuid: null,
       localCaveat: localCommandKind(record) === 'caveat',
+      // UX wave U3: a command a terminal wrote as a `system` row is its echo now (backfill's `localCommandKind`), and as
+      // engine-written local history as when it read as an output, under no caveat
       localCommand: localCommandKind(record) === 'caveat' || localCommandKind(record) === 'output'
-        || (localCommandKind(record) === 'echo' && typeof record.parentUuid === 'string' && this.skeletons.get(record.parentUuid as MessageUuid)?.localCaveat === true)
+        || (localCommandKind(record) === 'echo' && (record.type === 'system' || (typeof record.parentUuid === 'string' && this.skeletons.get(record.parentUuid as MessageUuid)?.localCaveat === true)))
         || (record.type === 'user' && singleText(record) === '/compact'),
       isProgress: record.type === 'progress',
       startsTurn: startsTurn(record),
@@ -699,7 +701,11 @@ export class ChainFollower {
     this.backfillEnded = true;
     if (this.agent !== null || (this.options.holders?.() ?? 0) > 0) return;
     const exit = this.core.unendedTurnExit();
-    if (exit !== null) this.deliver([{ source: null, group: 0, event: exit }]);
+    if (exit === null) return;
+    this.deliver([{ source: null, group: 0, event: exit }]);
+    // UX wave U3 (the U3a document, M3): the mapping reads what is written after as past that turn's end, so a fire's
+    // meta row written later opens the engine's turn rather than continuing the one the exit closed
+    endedByExit(this.core.ctx);
   }
 
   snapshot(): FollowerState {

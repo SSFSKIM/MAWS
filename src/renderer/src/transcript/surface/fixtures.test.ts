@@ -58,6 +58,6 @@ describe('adapters against installed-engine transcript asks', () => {
     b.toolUse('q', 'AskUserQuestion', { questions: props.questions });
     const { turn } = setup(b);
     const row: Extract<Row, { kind: 'question' }> = { id: 'question:q' as never, turnId: turn.id, at: turn.startedAt, kind: 'question', toolUseId: tool('q'), questions: nativeQuestionsOf(props.questions)!, answers: { 'Which path?': 'One' }, error: null };
-    expect(questionInput(row, turn).props).toEqual(props);
+    expect(questionInput(row, turn)?.props).toEqual(props);
   });
 });

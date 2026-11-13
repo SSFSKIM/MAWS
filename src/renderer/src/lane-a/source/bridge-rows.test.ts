@@ -151,12 +151,12 @@ describe("the plugin's appended rows", () => {
     }
   });
 
-  it('draws a marked steer without its line, but keeps the line on words MAWS would read as an interrupt marker', () => {
-    const steer = appended(`${STEER_LINE}\nuse the split store\nand the tests`);
-    expect((steerAsDrawn(steer).attachment as JsonObject).prompt).toEqual([{ type: 'text', text: 'use the split store\nand the tests' }]);
-    for (const words of ['[Request interrupted by user]', ' [Request interrupted by user for tool use]', '[Request interrupted by user from the desk]']) {
+  it('leaves a marked steer as it is: the arrivals reader reads it as the owner’s, through MAWS’s backfill (below)', () => {
+    // UX wave U3 (UC-2, class `own`): the backfill draws a marked steer from the reader, its line cut and kept on words
+    // MAWS would read as an interrupt marker; only an older, unmarked steer is still drawn by this module
+    for (const words of ['use the split store\nand the tests', '[Request interrupted by user]', ' [Request interrupted by user for tool use]', '[Request interrupted by user from the desk]']) {
       const row = appended(`${STEER_LINE}\n${words}`);
-      expect((steerAsDrawn(row).attachment as JsonObject).prompt, words).toEqual([{ type: 'text', text: `${STEER_LINE}\n${words}` }]);
+      expect(steerAsDrawn(row), words).toBe(row);
     }
   });
 });
