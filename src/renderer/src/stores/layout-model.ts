@@ -144,17 +144,18 @@ const paneOf = (view: TabSet, target: PaneTarget): Pane => {
 };
 
 // Places a tab (not open anywhere) into a pane, creating pane 1 when asked for and absent. An empty only pane is never
-// split: the tab goes into it (pane 0 is never left empty beside pane 1).
+// split: the tab goes into it (pane 0 is never left empty beside pane 1). Activated, the tab's pane takes the focus; in
+// the background (U13a, §B) the focus stays where it was.
 function place(view: View, tab: TabRef, pane: Pane, index: number | 'afterActive', activate: boolean): View {
   const panes = [...view.panes] as PaneState[];
   if (pane === 1 && panes.length === 1 && panes[0].tabs.length === 0) return place(view, tab, 0, index, activate);
   if (pane === 1 && panes.length === 1) {
-    return { ...view, panes: [panes[0], { tabs: [tab], activeTabId: tab.id }], focusedPane: 1, splitRatio: 0.5 };
+    return { ...view, panes: [panes[0], { tabs: [tab], activeTabId: tab.id }], focusedPane: activate ? 1 : view.focusedPane, splitRatio: 0.5 };
   }
   const target = panes[pane];
   const at = index === 'afterActive' ? target.tabs.findIndex((t) => t.id === target.activeTabId) + 1 : index;
   panes[pane] = insertAt(target, tab, at, activate);
-  return { ...view, panes: panes as TabSet['panes'], focusedPane: pane };
+  return { ...view, panes: panes as TabSet['panes'], focusedPane: activate ? pane : view.focusedPane };
 }
 
 function replaceTab(view: View, pane: Pane, index: number, tab: TabRef): View {
@@ -185,7 +186,7 @@ function openIn(view: View, target: TabTarget, pane: PaneTarget, activate: boole
         : target.kind === 'file' && open.kind === 'file'
           ? replaceTab(view, found.pane, found.index, { ...open, line: target.line, appSessionId: target.appSessionId })
           : view;
-    return activate ? activateIn(updated, tabId(target)) : { ...updated, focusedPane: found.pane };
+    return activate ? activateIn(updated, tabId(target)) : updated;
   }
   return place(view, toRef(target), paneOf(view, pane), 'afterActive', activate);
 }
@@ -223,8 +224,9 @@ function moveIn(view: View, id: string, toPane: Pane, index: number): View {
 
 // ---- transitions -------------------------------------------------------------------------------------------------------
 
-// Brings an open tab to the front (or, with `activate: false`, only focuses its pane), or adds it after the tab in front
-// of the pane asked for.
+// Brings an open tab to the front, or adds it after the tab in front of the pane asked for. With `activate: false`
+// (U13a, §B) no pane's focus and no pane's active tab changes: an open tab takes only its kind's update, and a new one
+// is active only in a pane that was empty.
 export function openTab(main: Strip, target: TabTarget, opts: { pane?: PaneTarget; activate?: boolean } = {}): Strip {
   return onStrip(main, (v) => openIn(v, target, opts.pane ?? 'focused', opts.activate ?? true));
 }
