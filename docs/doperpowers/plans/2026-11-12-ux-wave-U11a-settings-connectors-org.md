@@ -36,7 +36,7 @@ How to see it working: the unit tests named under each milestone fail before its
 - [x] (2026-11-12 05:25Z) M6 — the Connectors dialog (`627d912aa`, `2f3202ebe`; the review's fix, the switch waits for the head's sentence, `539b2ab30`, `e45d064ec`), reviewed clean.
 - [x] (2026-11-12 06:20Z) M7 — Plugins, Connectors and Skills before the first message (`33ee139fa`, `21a97619f`, `289b52763` the wire at minor 37, `8f860a0e4`; the review's fix, a plugin change marks the inventory stale while no reader fetches, `4185f38e2`, `9cbe9cdf7`), reviewed clean.
 - [x] (2026-11-12) P1's verdict: both kinds promote as designed (runs 43357272365, 43358963647); M8 is released, after M7 in the order.
-- [ ] M8 — Sign in for a dynamic connector.
+- [x] (2026-11-12 07:29Z) M8 — Sign in for a dynamic connector (`aa433b9d6`, `9ffe81c35`, `9a1a2be29` the wire at minor 37, `f82dc582b`, `e6946c799`, `d5179df51`), reviewed clean. P7's first run (43384468214 at `e0813cb92`) failed the scene at the sidebar (the session's row is not drawn while its project is collapsed); the scene expands the project first (`8feaa7a7f`); the rerun is the architect's. The run did show the plugin's server and both own-list servers reading needs-auth in a session MAWS started.
 - [ ] M9 — Settings regrouped, a note on one line (starts after the owner's look).
 - [ ] M10 — Search settings.
 - [ ] M11 — the record, master merged again and the wire's files made again, the whole checks, the hand-back.
