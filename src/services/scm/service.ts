@@ -1,11 +1,11 @@
 // Main's source control service (E6 execution document, Design §1, §3, §10; parent §3 F, P-12). Every command names a
-// session; the checkout is resolved here from main's read model (`worktree.path ?? directory`), so the renderer cannot
-// aim git at a directory the session does not work in. Everything but `status` runs only in a checkout the engine
-// trusts, read on demand with the captured login-shell environment (the file the engine itself reads). A local mutation
-// validates the renderer's paths against a fresh status, runs through the mutating runner (hooks on, transport off),
-// answers the status read after, and asks C4's watcher to re-read the root so `git.changed` stays the one ordered path
-// to every surface. Mutations of one repository run one at a time, keyed by its common git dir (keysOf). Nothing is
-// retried or forced.
+// session; the checkout is resolved here from main's read model (the session's working folder,
+// `workingFolder(record).path`), so the renderer cannot aim git at a directory the session does not work in. Everything
+// but `status` runs only in a checkout the engine trusts, read on demand with the captured login-shell environment (the
+// file the engine itself reads). A local mutation validates the renderer's paths against a fresh status, runs through
+// the mutating runner (hooks on, transport off), answers the status read after, and asks C4's watcher to re-read the
+// root so `git.changed` stays the one ordered path to every surface. Mutations of one repository run one at a time,
+// keyed by its common git dir (keysOf). Nothing is retried or forced.
 //
 // The remote half (Design §4, §6): a push or a pull request runs only through a plan (plans.ts) the sheet showed, by its
 // one-shot token; the run is refused `busy` before the token is spent, then revalidated against fresh reads, and spawned
@@ -41,6 +41,7 @@ import type {
 } from '@shared/ipc/schema/scm';
 import { coversHome } from '@shared/machine/machine-home';
 import type { SpineView } from '@shared/spine/view';
+import { workingFolder } from '@shared/sessions/working-folder';
 import type { MutateRun } from '../git/mutate';
 import { GitCommandError, NotARepositoryError, type GitRun } from '../git/runner';
 import { withoutUserInfo } from '../git/service';
@@ -316,7 +317,7 @@ export class ScmService {
   private checkout(appSessionId: AppSessionId): string {
     const record = this.deps.view.record(appSessionId);
     if (record === null) throw new Error(`unknown app session: ${appSessionId}`);
-    return record.worktree?.path ?? record.directory;
+    return workingFolder(record).path;
   }
 
   // E11: the key and the store only; the files trust would load are the session's trust card's to read

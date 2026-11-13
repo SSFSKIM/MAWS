@@ -8,13 +8,18 @@ import {fileURLToPath} from 'node:url';
 export const root=fileURLToPath(new URL('.',import.meta.url));
 export const delay=ms=>new Promise(r=>setTimeout(r,ms));
 export function scratch(prefix='/tmp/maws-probe-'){const p=mkdtempSync(prefix);writeFileSync(p+'/one.txt','ONE\n');execFileSync('git',['init','-q'],{cwd:p});execFileSync('git',['add','one.txt'],{cwd:p});execFileSync('git',['-c','user.name=Probe','-c','user.email=probe@localhost','commit','-qm','seed'],{cwd:p});return p;}
-const secrets=(()=>{const vals=new Set();const add=(k,v)=>{if(typeof v==='string'&&v.length>=8&&/TOKEN|KEY|SECRET|PASSWORD/i.test(k))vals.add(v);};for(const [k,v] of Object.entries(process.env))add(k,v);try{for(const [k,v] of Object.entries(JSON.parse(readFileSync(homedir()+'/.claude/settings.json','utf8')).env||{}))add(k,v);}catch{}return [...vals].sort((a,b)=>b.length-a.length);})();
+const secrets=(()=>{const vals=new Set();const add=(k,v)=>{if(typeof v==='string'&&v.length>=8&&/TOKEN|KEY|SECRET|PASSWORD/i.test(k))vals.add(v);};for(const [k,v] of Object.entries(process.env))add(k,v);try{for(const [k,v] of Object.entries(JSON.parse(readFileSync(homedir()+'/.claude/settings.json','utf8')).env||{}))add(k,v);}catch{}try{const env=JSON.parse(readFileSync('/etc/claude-code/managed-settings.json','utf8')).env||{};for(const [k,v] of Object.entries(env))add(k,v);if(env.ANTHROPIC_BASE_URL){const u=new URL(env.ANTHROPIC_BASE_URL);vals.add(u.host);vals.add(u.hostname);}}catch{}return [...vals].sort((a,b)=>b.length-a.length);})();
 export function redact(text){for(const v of secrets)text=text.split(v).join('[REDACTED]');return text.replace(/sk-ant-[A-Za-z0-9_-]+/g,'sk-ant-[REDACTED]').replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.[A-Za-z.]{2,}/g,m=>/@(localhost|redacted\.invalid)$/.test(m)?m:'owner@redacted.invalid');}
+// VM.md: vm-run.sh names the owner's feature-gate cache and may move the fixtures; both are read at load, since a
+// scenario may scrub the environment before it spawns.
+const FEATURE_CACHE=process.env.PROBE_FEATURE_CACHE,FIXTURE_ROOT=process.env.PROBE_FIXTURE_ROOT?process.env.PROBE_FIXTURE_ROOT.replace(/\/?$/,'/'):root;
+// Seeds the cache into the config home this engine will resolve, unless that home already holds one.
+function seedFeatures(env){const file=(env.CLAUDE_CONFIG_DIR||env.HOME||homedir())+'/.claude.json';let d={};try{d=JSON.parse(readFileSync(file,'utf8'));}catch{}if(d.cachedGrowthBookFeatures)return 'present';writeFileSync(file,JSON.stringify({...d,...JSON.parse(readFileSync(FEATURE_CACHE,'utf8'))}));return 'seeded';}
 export const GATEWAY_ENV=/^(ANTHROPIC_BASE_URL|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_DEFAULT_[A-Z_]*_MODEL)$/;
 export function processTree(root){const rows=execFileSync('ps',['-axo','pid=,ppid=,rss=,command='],{encoding:'utf8'}).trim().split('\n').map(l=>{const m=l.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/);return m&&{pid:+m[1],ppid:+m[2],rssKiB:+m[3],command:m[4]};}).filter(Boolean);const out=[];const walk=pid=>{for(const r of rows)if(r.ppid===pid){out.push(r);walk(r.pid);}};const self=rows.find(r=>r.pid===root);if(self)out.push(self);walk(root);return out.map(r=>({...r,command:redact(r.command).slice(0,140)}));}
 export class Probe {
  constructor(name,{cwd=scratch(),flags=[],model=process.env.PROBE_MODEL||'haiku',dir='fixtures/',bin='claude',unrouted=false,settingSources='',strictMcp=true,mode='default',env:extra={},noModel=false,dropInheritedClaude=false,detached=false}={}){
- mkdirSync(root+dir,{recursive:true});this.cwd=cwd;this.file=root+dir+name+'.jsonl';this.peakTreeRSSKiB=0;this.frames=[];this.handlers=new Map();this.pending=new Map();this.waiters=new Set();this.seq=0;this.peakRSSKiB=0;
+ mkdirSync(FIXTURE_ROOT+dir,{recursive:true});this.cwd=cwd;this.file=FIXTURE_ROOT+dir+name+'.jsonl';this.peakTreeRSSKiB=0;this.frames=[];this.handlers=new Map();this.pending=new Map();this.waiters=new Set();this.seq=0;this.peakRSSKiB=0;
  writeFileSync(this.file,'');
  const env={...process.env};for(const k of ['CLAUDECODE','CLAUDE_CODE_ENTRYPOINT','CLAUDE_CODE_SSE_PORT'])delete env[k];
  // Pass 2 only (P2-F W-T): a probe launched from inside a Claude session would inherit its plugins and model switches; every inherited CLAUDE* variable goes but an explicit CLAUDE_CONFIG_DIR, and the probe's own `env` is applied after.
@@ -22,7 +27,8 @@ export class Probe {
  env.CLAUDE_CODE_ENTRYPOINT='sdk-ts';if(unrouted)for(const k of Object.keys(env))if(GATEWAY_ENV.test(k))delete env[k];Object.assign(env,extra);
  const args=['-p','--input-format','stream-json','--output-format','stream-json','--verbose','--permission-prompt-tool','stdio','--include-partial-messages',...(noModel?[]:['--model',model]),'--setting-sources',settingSources,...(strictMcp?['--strict-mcp-config']:[]),'--permission-mode',mode,...flags];
   // P5-O16: `detached` spawns the engine as its own process group's leader, as MAWS's transport does
- this.child=spawn(bin,args,{cwd,env,stdio:['pipe','pipe','pipe'],detached});this.note({event:'spawn',pid:this.child.pid,cwd,bin,args,routed:!unrouted&&!!env.ANTHROPIC_BASE_URL,extraEnv:Object.keys(extra),...(dropInheritedClaude?{droppedEnv}:{}),node:process.version});
+ const featureCache=FEATURE_CACHE?seedFeatures(env):undefined;
+ this.child=spawn(bin,args,{cwd,env,stdio:['pipe','pipe','pipe'],detached});this.note({event:'spawn',pid:this.child.pid,cwd,bin,args,routed:!unrouted&&!!env.ANTHROPIC_BASE_URL,extraEnv:Object.keys(extra),...(featureCache?{featureCache}:{}),...(dropInheritedClaude?{droppedEnv}:{}),node:process.version});
  let buffer='';this.child.stdout.setEncoding('utf8');this.child.stdout.on('data',s=>{buffer+=s;let i;while((i=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,i);buffer=buffer.slice(i+1);if(!line.trim())continue;try{this.receive(JSON.parse(line));}catch(e){this.note({event:'parse_error',line,error:e.message});}}});
  this.child.stderr.setEncoding('utf8');this.child.stderr.on('data',text=>this.log('stderr',{text}));
  this.child.stdin.on('error',e=>this.note({event:'stdin_error',error:e.message}));

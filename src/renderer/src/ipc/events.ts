@@ -41,6 +41,7 @@ import { askUntilAnswered } from './until-answered';
 import { useGit } from '../stores/git';
 import { queryClient } from './query';
 import type { ScmStatus } from '@shared/ipc/schema/scm';
+import { workingFolder } from '@shared/sessions/working-folder';
 import { invalidateScmQueries, refreshPublishedPrState /* P5 E312 */, SCM_STATUS_QUERIES, scmStatusKey } from '../tools/scm/queries';
 // C8a end
 // C8c start
@@ -489,7 +490,7 @@ export function connectPanelEvents(client: MawsBridge = ipc): () => void {
 // the checkout): the checkout from the session's record, else from its `scm.status` answer.
 function repoRootOf(appSessionId: AppSessionId): string | null {
   const record = useSessions.getState().records.get(appSessionId);
-  const checkout = record ? (record.worktree?.path ?? record.directory) : queryClient.getQueryData<ScmStatus>(scmStatusKey(appSessionId))?.directory;
+  const checkout = record ? workingFolder(record).path : queryClient.getQueryData<ScmStatus>(scmStatusKey(appSessionId))?.directory;
   return checkout === undefined ? null : (useGit.getState().entries.get(checkoutKey(machineOf(appSessionId), checkout))?.status?.repoRoot ?? null);
 }
 // C8a end
