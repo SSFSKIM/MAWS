@@ -92,14 +92,12 @@ export function PanelHost({ appSessionId, tabs, activeTabId, onChange, onToggleP
   );
 }
 
-// The column's height, followed through its resizes (0 until it is laid out).
+// The column's height, followed through its resizes (0 until the observer first reports it, which it does on observing).
 function useHeight(element: RefObject<HTMLDivElement | null>): number {
   const [height, setHeight] = useState(0);
   useLayoutEffect(() => {
     const node = element.current;
-    if (!node) return;
-    setHeight(node.clientHeight);
-    if (typeof ResizeObserver === 'undefined') return;
+    if (!node || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(([entry]) => setHeight(Math.round(entry.contentRect.height)));
     observer.observe(node);
     return () => observer.disconnect();
