@@ -19,7 +19,8 @@ import { currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { machineOf } from '@shared/machine/address';
 import { ipc } from '../ipc/client';
-import { selectOffline, useMachines } from '../stores/machines';
+import { useMachines } from '../stores/machines';
+import { selectShownOffline, usePhaseClock } from '../app/machine-mark'; // the UX wave, U9
 import { sessionSetKey } from '../stores/org-projects';
 import { displayTitle } from '../sessions/title';
 // E5 start
@@ -131,7 +132,8 @@ function useHolderMark(tab: TabRef): { text: string; title: string } | null {
 
 function useSessionOffline(tab: TabRef): boolean {
   const appSessionId = tab.kind === 'session' || tab.kind === 'agent' ? tab.appSessionId : null;
-  return useMachines((s) => appSessionId !== null && selectOffline(s, machineOf(appSessionId)));
+  const now = usePhaseClock(); // the UX wave, U9 (O-39): greyed only in the offline and removed phases
+  return useMachines((s) => appSessionId !== null && selectShownOffline(s, machineOf(appSessionId), now));
 }
 
 // E11 F2b (plan 2.5; owner decision 2): opening a session replaces the shown tab unless it is pinned.
