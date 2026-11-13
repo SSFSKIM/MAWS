@@ -2,24 +2,15 @@
 // that gave no description. A port of Claude Desktop's rule with its refusals, not a rule of MAWS's own: app 5.1231.2,
 // `web/app/v1/c52b02f3f-C1Vcib4H.js`, its function `Ti` at :1675-1714 as its Bash and PowerShell label calls it (`fu`,
 // :12354-12361; the label at :9084-9124). Each helper below names the one it ports, by file and line; the file's own
-// helpers are at :1278-1674, and the six it imports from shared chunks are ported here too (`f`, `c` and `p`, `u`, `Ge`,
-// `w`, and the path helpers of `hi`). One reduction, named where it is: the secret scanner Desktop shares with its other
-// views is ported as its list of service tokens, without the pass that finds a token hidden by invisible characters,
-// because a line holding one of those is refused whole before any word is shown.
+// helpers are at :1278-1674, and the six it imports from shared chunks are ported too: `p`, `u`, `Ge`, `w` and the path
+// helpers of `hi` here, and `f` and `c`, the secret scanner Desktop shares with its other views, in secret-scan.ts.
 //
 // What it does: the first line of the command, a leading `cd … &&` dropped, at most four words, cut at the first word it
 // will not show, `…` when cut or when more follows, and for a read-only file command the file's name kept after the `…`.
 // It gives nothing (null) when it refuses the line or its first word: a command it does not know, a substitution, a
 // credential, a path into the engine's projects or an agent's memory, a control or invisible character.
 
-const once = <T>(make: () => T): (() => T) => { // shared-0-Do3lTMSe.js:4797 (`F`, imported as `o`)
-  let value: T;
-  let made = false;
-  return () => {
-    if (!made) { value = make(); made = true; }
-    return value;
-  };
-};
+import { once, secretSpans, withSecretsHidden } from './secret-scan';
 
 // ---------------------------------------------------------------------------------------------------------------------
 // The file's constants (c52b02f3f-C1Vcib4H.js)
@@ -109,41 +100,6 @@ const POWERSHELL_CONTINUATION = /(?:^|[^`])(?:``)*`$/; // :12354 `du`
 // ---------------------------------------------------------------------------------------------------------------------
 // What the file imports, ported
 
-// The secret scanner's list of service tokens (shared-192-w2LFB3Va.js:4565-4741, `Bv` to `Qv`). Desktop's scanner `Uy`
-// (:4983) also reads a token hidden by invisible characters and one glued into a word behind an escape; this port does
-// not, because a line with such a character is refused whole (`refusedCharacter` and its neighbours, below) and a word
-// glued to anything is no word it shows.
-const NOT_AFTER = '(?<![A-Za-z0-9_-])'; // :4565 `Bv`
-const SPACES = '\\u00A0\\u1680\\u2000-\\u200A\\u202F\\u205F\\u3000'; // :4573 `Hv`
-const BLANKS = `\\t\\v\\f\\r\\n\\u2028\\u2029 ${SPACES}`; // :4574 `Uv`
-const DASHES = '-{4,5}'; // :4576 `Gv`
-const KEY_TAIL = RegExp(`PRIVATE[${BLANKS}]*KEY(?:[${BLANKS}]*BLOCK)?[ \\t${SPACES}]*${DASHES}`); // :4578 `qv`
-const KEY_BEGIN = RegExp(`${DASHES}[ \\t${SPACES}]*BEGIN[A-Z0-9${BLANKS}]*${KEY_TAIL.source}`); // :4579 `Jv`
-const KEY_END = RegExp(`${DASHES}[ \\t${SPACES}]*END[A-Z0-9${BLANKS}]*${KEY_TAIL.source}`); // :4580 `Yv`
-const NO_BEGIN = '(?![A-Za-z0-9_-]*----BEGIN)'; // :4581 `Xv`
-const JWT = `eyJ[A-Za-z0-9_-]{10,}\\.(?:${NO_BEGIN}[A-Za-z0-9_-]*\\.(?!-?eyJ)${NO_BEGIN}[A-Za-z0-9_-]{10,}\\.(?!-?eyJ)${NO_BEGIN}[A-Za-z0-9_-]{10,}\\.(?!-?eyJ)(?:[A-Za-z0-9_]|-(?!---)){10,64}(?:(?![A-Za-z0-9_-]*----)[A-Za-z0-9_-]*)?|eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,})`; // :4582 `Zv`
-const SERVICE_TOKENS = [ // :4583 `Qv`, its regexes in its order
-  `${NOT_AFTER}sk-ant-[A-Za-z0-9_-]{20,}`,
-  `${NOT_AFTER}sk-(?:proj|svcacct|admin|None)-[A-Za-z0-9_-]{20,}`,
-  `${NOT_AFTER}sk-[A-Za-z0-9]{20,}`,
-  `${NOT_AFTER}(?:(?:gh[opsu]_|github_pat_)[A-Za-z0-9_]{20,}|ghr_[A-Za-z0-9]{20,})`,
-  `${NOT_AFTER}AKIA[A-Z0-9]{16}`,
-  `${NOT_AFTER}(?:xox[abceprs]-[A-Za-z0-9-]{10,}|xapp-[0-9]-[A-Z0-9]{1,20}-[0-9]{1,20}-[A-Za-z0-9]{10,})`,
-  `${NOT_AFTER}AIza[A-Za-z0-9_-]{35}`,
-  `${NOT_AFTER}(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{20,}`,
-  `${NOT_AFTER}whsec_[A-Za-z0-9]{20,}`,
-  `${NOT_AFTER}AGE-SECRET-KEY-1[02-9AC-HJ-NP-Z]{58}`,
-  `${NOT_AFTER}gl(?:pat|dt)-[A-Za-z0-9_-]{20,}`,
-  `${NOT_AFTER}${JWT}`,
-  `${KEY_BEGIN.source}[A-Za-z0-9+/=$\\\\\\r\\n\\u2028\\u2029${SPACES}]{0,5000}?${KEY_END.source}`,
-];
-const serviceToken = once(() => new RegExp(SERVICE_TOKENS.map((source) => `(?:${source})`).join('|'), 'g')); // :4730 `$v`, `cy`
-// Every token the list finds (`Vy`, :4942; imported as `c`)
-const tokensIn = (text: string): string[] => [...text.matchAll(serviceToken())].map((match) => match[0]);
-// Each token's characters as bullets, line breaks kept (`rb`, :5261, imported as `f`; its bullets are `Yy`, :5093)
-const withTokensHidden = (text: string): string =>
-  text.replace(serviceToken(), (token) => token.split('\n').map((line) => '•'.repeat(line.length)).join('\n'));
-
 // Characters a line may not hold at all: controls, bidirectional and right-to-left scripts, invisible and format
 // characters (shared-192-w2LFB3Va.js:22521 `aH`, imported as `p`)
 // eslint-disable-next-line no-control-regex -- the control characters are what is refused
@@ -190,10 +146,10 @@ function asDrawn(text: string): string {
 }
 
 // The shown form, whitespace folded and at most 500 characters (shared-39-DHE4OJ5E.js:9996 `ZT` with `$T` :10007,
-// imported as `w`; its own two sanitisers are `rb` and `wj`, above)
+// imported as `w`; its own two sanitisers are `rb`, in secret-scan.ts, and `wj`, above)
 const MAX_SHOWN = 500;
 function shown(text: string): string {
-  const folded = withoutControls(withTokensHidden(text.replace(/[\u2028\u2029]/g, '\n')).replace(/\s+/g, ' ')).trim();
+  const folded = withoutControls(withSecretsHidden(text.replace(/[\u2028\u2029]/g, '\n')).replace(/\s+/g, ' ')).trim();
   if (folded.length <= MAX_SHOWN) return folded;
   const cut = (folded.charCodeAt(MAX_SHOWN - 1) & 0xfc00) === 0xd800 ? MAX_SHOWN - 1 : MAX_SHOWN;
   return `${folded.slice(0, cut)}…`;
@@ -262,7 +218,7 @@ function holdsCredential(text: string): boolean { // :1458 `mi`
   const { anywhere, namedValue, credentialName } = credentialRules();
   const all = readings(text);
   const second = all[1];
-  if (second !== undefined && tokensIn(second).length > 0) return true;
+  if (second !== undefined && secretSpans(second).length > 0) return true;
   for (const reading of all) {
     if (anywhere.some((rule) => rule.test(reading))) return true;
     for (const [, name, separator] of reading.matchAll(namedValue)) {
@@ -398,7 +354,7 @@ export function shortCommand(command: string, tool: 'Bash' | 'PowerShell' = 'Bas
   const continuation = tool === 'PowerShell' ? POWERSHELL_CONTINUATION : BASH_CONTINUATION;
   const limit = (command.charCodeAt(MAX_CHARS - 1) & 0xfc00) === 0xd800 ? MAX_CHARS - 1 : MAX_CHARS;
   const cutShort = command.length > limit;
-  const text = withTokensHidden(command.slice(0, limit));
+  const text = withSecretsHidden(command.slice(0, limit));
   const start = text.search(/[^ \t\r\n]/);
   if (start === -1 || touchesHiddenPath(text) || holdsCredential(text)) return null;
   const lineEnd = text.indexOf('\n', start);
