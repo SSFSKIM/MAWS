@@ -47,9 +47,10 @@ import { TranscriptRecordSchema } from '@shared/wire/transcript'; // P5 O16 M3
 import { createBackfillContext, recordToEvents } from './fs/backfill'; // P5 O16 M3: a gap's reseed
 import { isHookMadeMessageId, isMadeUpFinalAnswer, isMessageTool, messageCallText } from '@shared/owner/message-call'; // P4-R7z
 import { carriedOf, readArrivals, type Arrival } from '@shared/engine/arrival'; // UX wave U3 (UC-2)
+import { localCommandText } from '@shared/engine/engine-markers';
 import { notificationText, taskNotificationBlocks } from '@shared/engine/task-notification';
 import {
-  atEngineHead, carried, engineTurnOpened, headed, idle, keep, launchEnded, noLiveArrivals, output, personsTurnOpened, readFrame, resultReached, scheduleFire, userFrame,
+  arrivalTurnOpened, atEngineHead, carried, engineTurnOpened, headed, idle, keep, launchEnded, noLiveArrivals, output, personsTurnOpened, readFrame, resultReached, scheduleFire, userFrame,
   type LiveArrivals,
 } from './normalizer-arrivals'; // UX wave U3 (the U3a document, M4 and Interfaces E)
 
@@ -445,7 +446,7 @@ export class Normalizer {
       this.state.pendingHumanUuids.delete(uuid); // the engine's --replay-user-messages echo of our own frame
       return;
     }
-    if (main && this.arrivalIn(frame, uuid, arrivals, out, attribution)) return; // UX wave U3 (UC-2)
+    if (main && this.arrivalIn(frame, row.seq, uuid, arrivals, out, attribution)) return; // UX wave U3 (UC-2)
     const marker = frame.origin?.kind === 'human' ? null : engineUserMarkerOf(content);
     if (marker) {
       // engine-authored, never a human prompt: opens nothing and dedupes against no outgoing frame
@@ -472,7 +473,7 @@ export class Normalizer {
   // becomes the events every caller makes of its class; false when it carries none of them (MAWS's own answer envelope
   // and consent message are the person's, and map as today). An arrival at the head of a turn the engine opened opens
   // the turn of its class when that turn is not the engine's: a peer's, or the person's for their own words.
-  private arrivalIn(frame: UserFrame, uuid: MessageUuid | null, arrivals: Arrival[], out: Emitter, attribution: Attribution): boolean {
+  private arrivalIn(frame: UserFrame, seq: number, uuid: MessageUuid | null, arrivals: Arrival[], out: Emitter, attribution: Attribution): boolean {
     const claimed = arrivals.filter((arrival) => arrival.class !== 'consent' && !(arrival.class === 'answer' && arrival.tool === 'maws'));
     const [first] = claimed;
     const live = this.state.arrivals;
@@ -486,7 +487,7 @@ export class Normalizer {
           // idle: a peer's turn, in the place of the engine's that held nothing (decision 6); the normaliser's own record
           // keeps the engine's word, the status's (`EngineSessionStatus.turn.origin` is the person's or the engine's)
           if (this.state.currentTurn === null) this.state.currentTurn = { origin: 'engine', userMessageUuids: [], startedAt: out.at, acceptedAt: out.at };
-          if (live.head === null) live.head = { engine: true, arrival: null, output: false };
+          arrivalTurnOpened(live, seq);
           out.emit({ kind: 'turn.started', userMessageUuid: null, origin: 'peer' }, attribution);
         }
         headed(live, first);
@@ -499,7 +500,7 @@ export class Normalizer {
       case 'own': {
         if (this.state.currentTurn === null || atEngineHead(live)) {
           // idle: the person's turn, in the place of the engine's that held nothing (decision 6)
-          if (live.head === null) live.head = { engine: true, arrival: null, output: false };
+          arrivalTurnOpened(live, seq);
           headed(live, first);
           this.state.currentTurn = { origin: 'human', userMessageUuids: uuid === null ? [] : [uuid], startedAt: out.at, acceptedAt: out.at };
           out.emit({ kind: 'turn.started', userMessageUuid: uuid, origin: 'human' }, attribution);
@@ -539,12 +540,8 @@ export class Normalizer {
     const outputs = this.state.arrivals.commandOutputs;
     if (uuid !== null && outputs.has(uuid)) return;
     if (uuid !== null) outputs.add(uuid);
-    const tagged = arrivals.flatMap((arrival) => {
-      if (arrival.class !== 'command') return [];
-      const stdout = arrival.stdout !== '' || arrival.stderr === '' ? [`<local-command-stdout>${arrival.stdout}</local-command-stdout>`] : [];
-      return arrival.stderr !== '' ? [...stdout, `<local-command-stderr>${arrival.stderr}</local-command-stderr>`] : stdout;
-    });
-    out.emit({ kind: 'user.message', messageUuid: uuid, content: tagged.join('\n'), isReplay, isSynthetic: false, origin: 'local-command', bash: null }, attribution);
+    const content = localCommandText(arrivals.flatMap((arrival) => (arrival.class === 'command' ? [arrival] : [])));
+    out.emit({ kind: 'user.message', messageUuid: uuid, content, isReplay, isSynthetic: false, origin: 'local-command', bash: null }, attribution);
   }
   // UX wave U3 end
 

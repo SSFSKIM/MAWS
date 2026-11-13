@@ -11,6 +11,7 @@ import { INTERRUPT_MARKER } from '../normalizer-support';
 import { apiRetryOfApiError } from '../normalizer-system';
 import { messageText, parsePeerMessage, peerEventsOf } from '@shared/engine/peer-envelope'; // E7
 import { nothingOpen, readNext, type Arrival, type OpenArrivals } from '@shared/engine/arrival'; // UX wave U3 (UC-2)
+import { localCommandText } from '@shared/engine/engine-markers';
 import { isBridgeRow, isMirrorLine } from '@shared/engine/sminos-delivery';
 import { notificationText, taskNotificationBlocks, type TaskNotificationBlock } from '@shared/engine/task-notification';
 import { isMadeUpFinalAnswer } from '@shared/owner/message-call';
@@ -571,12 +572,8 @@ function steered(messageUuid: MessageUuid, words: string, base: Base, events: Se
 // A slash command's output (class `command`): the engine's own tag around it, its terminal escapes removed, in the turn
 // that runs, which is its command's.
 function commandOutput(messageUuid: MessageUuid, arrivals: Arrival[], base: Base): SessionEvent {
-  const tagged = arrivals.flatMap((arrival) => {
-    if (arrival.class !== 'command') return [];
-    const out = arrival.stdout !== '' || arrival.stderr === '' ? [`<local-command-stdout>${arrival.stdout}</local-command-stdout>`] : [];
-    return arrival.stderr !== '' ? [...out, `<local-command-stderr>${arrival.stderr}</local-command-stderr>`] : out;
-  });
-  return { ...base(), kind: 'user.message', messageUuid, content: tagged.join('\n'), isReplay: false, isSynthetic: false, origin: 'local-command', bash: null };
+  const content = localCommandText(arrivals.flatMap((arrival) => (arrival.class === 'command' ? [arrival] : [])));
+  return { ...base(), kind: 'user.message', messageUuid, content, isReplay: false, isSynthetic: false, origin: 'local-command', bash: null };
 }
 
 // A notification already mapped (the same delivery in a queued command and in a row): nothing again. Old records lack a

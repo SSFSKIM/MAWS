@@ -81,6 +81,16 @@ export function engineTurnOpened(state: LiveArrivals, seq: number, out: EventSin
   if (oldest !== undefined) place(state, oldest, out);
 }
 
+/**
+ * A peer's or the person's message opened a turn when none was open (no `system/init` before it; no recorded session
+ * shows one, so this is a guard): the turn's head, and the `seq` the next idle bounds by. Nothing is placed on it.
+ */
+export function arrivalTurnOpened(state: LiveArrivals, seq: number): void {
+  if (state.head !== null) return;
+  state.turnOpenedAt = seq;
+  state.head = { engine: true, arrival: null, output: false };
+}
+
 /** The person's prompt opened a turn: nothing is placed on it. */
 export function personsTurnOpened(state: LiveArrivals, seq: number): void {
   state.turnOpenedAt = seq;
@@ -134,10 +144,13 @@ export function resultReached(state: LiveArrivals, runId: string | null, out: Ev
   return word;
 }
 
-/** The engine went idle (its queue is empty): an end kept before the last turn opened was not told by it, and never will be. */
+/**
+ * The engine went idle (its queue is empty): an end kept before the last turn opened was not told by it, and never will
+ * be. The end whose line stands is not given up: its turn's result settles or withdraws that line.
+ */
 export function idle(state: LiveArrivals): void {
   const opened = state.turnOpenedAt;
-  if (opened !== null) state.kept = state.kept.filter((notice) => notice.seq >= opened);
+  if (opened !== null) state.kept = state.kept.filter((notice) => notice.seq >= opened || notice.runId === state.placed);
 }
 
 /** The launch's exit row, before its `process.exited`: a line placed and not settled is withdrawn, and the state ends with the launch (decision 21). */
