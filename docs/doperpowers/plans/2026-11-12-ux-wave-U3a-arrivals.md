@@ -28,7 +28,7 @@ How to see it working: the table test of the reader over the probes' recorded ca
 - [x] (2026-11-13) M2 — the arrival rows: the model and the lines (`e49e50118`..`d2d0117f4`, two fix rounds; reviewed clean).
 - [x] (2026-11-13) M3 — the transcript file and another machine's rows ask the reader (`6f9573b2d`..`28e0caa1e`, two fix rounds; review converged, one bounded finding left as debt, Decision Log).
 - [x] (2026-11-13) M4 — the live wire asks the reader (`022a4ae89`..`6db129829`, one fix round; reviewed clean).
-- [ ] M5 — the rows ask the mods, and a jump's target is revealed.
+- [x] (2026-11-13) M5 — the rows ask the mods, and a jump's target is revealed (`cd226e249`..`76dcb3302`, an addition and two fix rounds; reviewed clean).
 - [ ] M6 — no alarm for a failed background task; the e2e edits; the record; the acceptance run on the VM; hand-back. Class 1a, the review panel and the pull request are the architect's, after the hand-back.
 
 ## The landing's edge
@@ -648,6 +648,10 @@ Found while checking the section against the code at `85e934368` and the probes'
 - Decision: `revealed` is honoured by every ask in `src/renderer/src/transcript/surface/` in this landing (the user row, the assistant text, the cells, the command output, the question rows, and M5's own), not only by M5's new asks. Interfaces F states it of every row or cell, and this landing's cell jump writes a `CellId` there; an ask that ignored it would leave the jump's target drawn by a mod. U2 honours it in the asks it builds.
   Rationale: Interfaces F as written; the condition is one line per adapter in a file M5 owns.
   Date/Author: 2026-11-13, the U3a controller.
+
+- Decision: a carrier of several notices has one drawing owner (M5's review fixes, `ebde35ce4`..`76dcb3302`). The carrier's first notice that is not revealed asks, with its own line's open state as the instance's `isExpanded`, and draws the mod's answer (when a jump reveals it, the next notice asks for the carrier). The carrier's other notices ask nothing (`noticeFollows`) and follow the drawing the owner applied, not the raw answer: `transcript/surface/carrier-drawing.ts`, a store keyed by session and instance id, is filled from `SurfaceRow`'s `onInk` report and cleared when the owner unmounts; a follower hides only while it says the owner's drawing hides MAWS's line, so a refused rewrite or a drawing that fails brings every notice back, and a carrier not yet answered draws its lines. `engine-surface/` is unchanged.
+  Rationale: the engine mounts one site per carrier (`cli.pretty.js` of `2.1.322`, the task renderer); the M5 review found the answer drawn once per notice, then the followers hiding on a drawing the owner had refused.
+  Date/Author: 2026-11-13, the U3a controller, from M5's executor.
 
 ## Outcomes & Retrospective
 
