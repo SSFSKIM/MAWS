@@ -1000,6 +1000,49 @@ describe('the channel’s reach and refusal', () => {
     await until(() => (h.sockets.length === 2 ? h.last() : null), 'a socket again');
   });
 
+  // M4's review: a refusal stands until the session changes; another tab's open of the channel while it is held keeps it,
+  // and only a released channel opened again starts it over
+  const refusals = [
+    ['credentials', (socket: FakeSocket) => socket.emit('refused', 401, {})],
+    ['removed', (socket: FakeSocket) => socket.emit('close', 4403, '')],
+  ] as const;
+  const refusedHarness = async (refuse: (socket: FakeSocket) => void, refused: 'credentials' | 'removed') => {
+    const h = await harness({ seed: cached, attestations: async () => null, backoff: [20] });
+    opened(await h.channels.open(PROJECT));
+    await until(() => standing(h).reach === 'unreachable', 'unreachable');
+    refuse(await until(() => h.last(), 'a socket'));
+    await until(() => standing(h).refused === refused, 'the refusal');
+    return h;
+  };
+
+  it.each(refusals)('keeps a %s refusal and its reach through another open while the channel is held, opening no socket', async (refused, refuse) => {
+    const h = await refusedHarness(refuse, refused);
+    const before = h.changes.length;
+    expect(opened(await h.channels.open(PROJECT))).toMatchObject({ live: false, reach: 'unreachable', refused });
+    await sleep(100);
+    expect(h.sockets).toHaveLength(1);
+    expect(standing(h)).toEqual({ live: false, reach: 'unreachable', refused });
+    expect(h.changes.length).toBe(before); // the tabs already open are told nothing: the refusal stands for them
+    expect(await h.channels.send(PROJECT, 'hello')).toMatchObject({ ok: false, reason: 'unreadable' });
+  });
+
+  it.each(refusals)('clears a %s refusal at the session’s next change, reading connecting and opening a socket', async (refused, refuse) => {
+    const h = await refusedHarness(refuse, refused);
+    h.session.changed();
+    await until(() => standing(h).refused === undefined, 'the refusal cleared');
+    expect(standing(h).reach).toBe('connecting');
+    await until(() => (h.sockets.length === 2 ? h.last() : null), 'a socket again');
+  });
+
+  it.each(refusals)('clears a %s refusal when the channel, released, is opened again', async (refused, refuse) => {
+    const h = await refusedHarness(refuse, refused);
+    h.channels.release(PROJECT); // inside CHANNEL_RELEASE_MS: the channel is kept, with no tab
+    const again = opened(await h.channels.open(PROJECT));
+    expect(again).toMatchObject({ live: false, reach: 'connecting' });
+    expect(again).not.toHaveProperty('refused');
+    await until(() => (h.sockets.length === 2 ? h.last() : null), 'a socket again');
+  });
+
   it('(j) the same with the code of a member the hub no longer admits: refused removed', async () => {
     const h = await harness({ seed: cached, attestations: async () => null, backoff: [20] });
     opened(await h.channels.open(PROJECT));
