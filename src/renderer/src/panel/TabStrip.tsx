@@ -194,11 +194,12 @@ function Tab({ tab, selected, shape, maxWidth, canPin, bodyId, onSelect, moveTo,
       )}
     </div>
   );
+  // Every tab is a trigger, disabled while its menu would be empty, so a tab is not mounted again when its menu gains or
+  // loses its items (a second tab opened, a group closed) and the keyboard stays on it.
   const toMain = panelTabMoves(tab);
-  if (!toMain && moveTo === null) return element;
   return (
     <ContextMenu.Root modal={false}>
-      <ContextMenu.Trigger asChild onKeyDown={openMenuOnShiftF10}>{element}</ContextMenu.Trigger>
+      <ContextMenu.Trigger asChild disabled={!toMain && moveTo === null} onKeyDown={openMenuOnShiftF10}>{element}</ContextMenu.Trigger>
       <ContextMenu.Portal>
         <ContextMenu.Content className="z-50 min-w-44 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
           {toMain && <MoveToMainItem tabId={tab.id} />}

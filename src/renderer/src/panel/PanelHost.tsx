@@ -98,7 +98,7 @@ function useHeight(element: RefObject<HTMLDivElement | null>): number {
   useLayoutEffect(() => {
     const node = element.current;
     if (!node || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(([entry]) => setHeight(Math.round(entry.contentRect.height)));
+    const observer = new ResizeObserver((entries) => setHeight(Math.round(entries?.[0]?.contentRect.height ?? node.clientHeight)));
     observer.observe(node);
     return () => observer.disconnect();
   }, [element]);
