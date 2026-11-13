@@ -153,7 +153,7 @@ describe('the panel header', () => {
     act(() => void registerEditorHost({ surface: 'panel', tabId: id }, { title: 'Registered', saved: 'saved' }));
     const group = document.querySelector('section[data-side-group="upper"]')!;
     expect([...group.querySelectorAll('[role="tablist"], [data-editor-header]')].map((node) => node.getAttribute('role') ?? 'header')).toEqual(['tablist', 'header']);
-    expect(buttons()).toEqual([]);
+    expect(within(header()).queryAllByRole('button')).toEqual([]);
     expect(stripEnd()).toEqual(CONTROLS);
   });
 
