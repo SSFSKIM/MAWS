@@ -34,7 +34,7 @@ U8c-2:
 - [x] (2026-11-13 09:05Z) Revised a third time, on `ux-wave/U8c-2`, U8c-2's sections only: one admission predicate for the files reader and the endpoint, with one table of cases; `git.lsFiles` admitted at each load; one capture of the record per Source control request, the home rule on it; the upload's wording and its held-open test; what build F's window is given by this build's host, service by service; every consumer of the roots and of the selector sorted by one test (Decision Log 8).
 - [x] (2026-11-13) The architect's rulings on the third revision's ten points and on "Open for the architect" 9: all accepted, with one measurement added to M3's report (Decision Log 9).
 - [x] (2026-11-13 19:09Z) Master `0436cb51c` merged at `d9f2296e2` (U8c-1, U8b, U13a, U6a, U1a, U7a, U11a and U12a are on it); the one conflict was this document's Decision Log, and both sets are kept. The author's pass over "To check again", by reading code on that tree and on the branches of the landings ahead of this one (U6c, U3a, U9) and beside it (U5a, U4a, U2a, U7b): fifteen items, each marked where it stands; what changed is Decision Log 10. Revised a fourth time on it. Nothing of M2 to M6 is built.
-- [ ] M2 — The record says where the agent is.
+- [x] (2026-11-13) M2 — The record says where the agent is. Built at `dc73e0929`..`dfe65a74a` (red run first: the routes test failed at `s1-enter-worktree` on `launch` in both fixtures, with `directory`, `worktree` and `branch` passing); wire minor 41 in two commits (`161f8f98b` the number, `f9c22eabc` the generated files, made on the VM at the number's pushed commit). The task review found one Important point, the false move inside one checkout (Decision Log 12), and one Minor; both fixed at `8e481e3fd` and re-reviewed clean. At `8e481e3fd` on the VM, M2 step 3's set: 100 files, 1719 passed, 1 skipped (the macOS bound); `tsc-node` and `tsc-web` clean (`tsc-web` at `dfe65a74a`), eslint clean on the changed files. The 4,000-upsert bound is the architect's Mac run.
 - [ ] M3 — What may be read there.
 - [ ] M4 — The window follows.
 - [ ] M5 — A shell row keeps its folder.
@@ -1033,6 +1033,22 @@ Found while writing this document and in its adversarial review, against master 
      Date/Author: 2026-11-13, the architect.
    - Decision (the owner's look, for M4): the drawing showed that the folder row, cut at the path's end as built, does not visibly name the worktree after a move, so the owner is asked three questions ("The owner's look"). Rulings that do not wait for the owner: should the cut at the start be chosen, it is the plain CSS one (the row keeps the path's tail, the browser's ellipsis at the front, the whole path in the tooltip as today), with no measuring code; a cut at a folder boundary only if it costs nothing. Should the muted "in …" line be chosen, its own cut keeps the deepest folder, with "in" outside the cut. Frame 4 stands as built: while git has not answered for the new folder, the card's one muted pending row takes the place of the branch row and the change line, and the push and pull-request rows are absent. Frame 7 after the return stands as built: the mark and "worktree <name>" go, and the hover card keeps its branch line. Files lists the working folder first on both kinds of move (the tool's and a `cd`) if that is confined to the order in which the roots are listed; if it needs more, the order is left and named as residue. The hovered sidebar row's short title is the sidebar landing's existing behaviour and is not this landing's to change.
      Date/Author: 2026-11-13, the architect.
+
+13. **2026-11-13 (the executor of M2, folded by the controller): M2's means.**
+   - Decision: §B's rule and its stamp live in a module of their own, `src/services/index/folder-facts.ts` (`folderColumns`, `factsOf`), which `sessions.ts` calls at two places; the repository reads (`repositoryAt`, `checkoutIn`, `headBranch`) stay in `projects.ts`, as §B names them.
+     Rationale: one responsibility, tested alone; `sessions.ts` is already long. Date/Author: 2026-11-13, the executor.
+   - Decision: the summary's fragment scanner keeps a depth-1 `"isSidechain": true`, so a torn last line of an agent's row gives no folder.
+     Rationale: "skips a sidechain row" and "a last line still being written counts by its start" otherwise meet in a torn agent row, whose flag the string-only scanner dropped. Date/Author: 2026-11-13, the executor.
+   - Decision: the routes test also replays `uxwave-folder-headless-resume.jsonl`'s `s9-after-resume` as the headless session's next step, against the `s9` the probe's index recorded.
+     Date/Author: 2026-11-13, the executor.
+   - Decision: the second rule's table of exceptions (§F) is empty at M2; no product file outside the selector reads either key. M3's narrowing in `src/endpoint/targets.ts` adds its row, with its count, if it uses a member access.
+     Date/Author: 2026-11-13, the executor.
+   - Decision: U8a-era fixture records whose `directory` lay outside their `worktree` (a shape the index never writes) take the index's shape, with no assertion changed: the hook's case and the shared selector suite's "worktree" case, `composer/Composer.test.tsx`'s `idleInWorktree` and `transcript/view/TranscriptSlot.test.tsx`'s shell-folder case; `index.test.ts`'s pinned column list gains the two columns.
+     Rationale: decision 9's knowing change (`cwd` is `record.directory`) made them fail at M2. The architect accepted the two other children's suites (Decision Log 12). Date/Author: 2026-11-13, the executor.
+   - Decision: `repositoryAt` treats a `.git` that is neither a file nor a directory as no repository; a pointer file's first line is read; git's relative pointer paths (git 2.48 and later) are resolved against the folder or the git directory, as git writes them.
+     Rationale: the safe side, since it decides a fact. Date/Author: 2026-11-13, the executor.
+   - Decision: the 4,000-upsert case prints, before it asserts, the CPU time of each of the three shares on a fresh index, so a run over the bound carries what decision 11 asks to be reported.
+     Date/Author: 2026-11-13, the executor.
 
 ## Outcomes & Retrospective
 
