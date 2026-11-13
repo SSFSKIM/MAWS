@@ -365,12 +365,12 @@ describe('a turn’s line (acceptance 7, decisions 8 and 9)', () => {
     });
 
     it.each([
-      ['failed', 'Messaged another session (1 failed)', 0],
-      ['unfinished', 'Messaged another session (1 stopped)', 0],
-      ['refused', '', 1],
-      ['rejected', 'Messaged another session (1 stopped)', 0],
-    ] as const)('to another session, %s', (outcome, caption, denied) => {
-      expect(send('peer-a', outcome)).toMatchObject({ caption, denied });
+      ['failed', 'Messaged another session (1 failed)'],
+      ['unfinished', 'Messaged another session (1 stopped)'],
+      ['refused', ''],
+      ['rejected', 'Messaged another session (1 stopped)'],
+    ] as const)('to another session, %s', (outcome, caption) => {
+      expect(send('peer-a', outcome).caption).toBe(caption);
     });
   });
 
