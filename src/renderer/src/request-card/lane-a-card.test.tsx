@@ -25,6 +25,25 @@ import { resetShellStores } from '../test-support/shell-stores';
 import { RequestCard } from './RequestCard';
 import { itemFor, permission } from './test-requests';
 
+// The hover card asks the session's port of each of its buttons on its own answer (U1a §H). The lane A port carries both
+// answers or neither, so the cases where it carries one and not the other refuse that one answer over the real port.
+const refusing = vi.hoisted(() => ({ decision: null as 'allow' | 'deny' | null }));
+vi.mock('../session/controls/controls-for', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../session/controls/controls-for')>();
+  return {
+    ...actual,
+    useSessionControls: (...args: Parameters<typeof actual.useSessionControls>) => {
+      const port = actual.useSessionControls(...args);
+      if (port === null || refusing.decision === null) return port;
+      return {
+        ...port,
+        answerCapability: (item: AttentionItem, answer: Parameters<typeof port.answerCapability>[1]) =>
+          answer.kind === 'permission' && answer.decision === refusing.decision ? { available: false as const, reason: 'Not carried here' } : port.answerCapability(item, answer),
+      };
+    },
+  };
+});
+
 const APP = at('app-lane-a' as AppSessionId);
 const REQ = 'toolu_req' as RequestId;
 let fake: FakeClient;
@@ -39,6 +58,7 @@ beforeEach(() => {
   disconnect = connectKeys();
 });
 afterEach(() => {
+  refusing.decision = null;
   disconnect();
   cleanup();
   delete (window as { maws?: PreloadBridge }).maws;
@@ -163,6 +183,18 @@ describe('a terminal session’s request in the sidebar’s hover card', () => {
     live({ bridge: 'none', pending: [raised({ tool: 'Read', input: { file_path: '/w/notes.txt' } })] });
     hover(permission({ requestId: REQ, toolName: 'Read', displayName: 'Read', input: { file_path: '/w/notes.txt' } }));
     expect(buttons()).toEqual(['Open session']);
+  });
+
+  it.each([
+    ['refuses Allow once and carries Deny', 'allow', ['Open session', 'Deny'], 'Deny', { kind: 'permission', decision: 'deny' }],
+    ['carries Allow once and refuses Deny', 'deny', ['Open session', 'Allow once'], 'Allow once', { kind: 'permission', decision: 'allow', scope: 'once' }],
+  ] as const)('where the port %s, offers only the answer it carries, and sends it', async (_, refused, shown, press, sent) => {
+    refusing.decision = refused;
+    live({ pending: [raised({ tool: 'Read', input: { file_path: '/w/notes.txt' } })] });
+    hover(permission({ requestId: REQ, toolName: 'Read', displayName: 'Read', input: { file_path: '/w/notes.txt' } }));
+    expect(buttons()).toEqual(shown);
+    await userEvent.setup().click(screen.getByRole('button', { name: press }));
+    await waitFor(() => expect(answers()).toEqual([sent]));
   });
 });
 
