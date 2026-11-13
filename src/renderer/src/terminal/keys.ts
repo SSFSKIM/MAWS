@@ -2,7 +2,7 @@
 // to the shell, even without ⌘ (F6's region navigation, or a function-key override). The effective tab-cycle bindings
 // (⌃Tab / ⌃⇧Tab by default) are forwarded explicitly, because the pane dispatcher leaves terminal-owned keys alone.
 // The registry installs it on every renderer and forwards the two tab verdicts through C5's `runAction`.
-import { ACTIONS, ACTION_IDS, effectiveChord, type KeymapOverrides } from '@shared/keymap/actions';
+import { ACTIONS, ACTION_IDS, effectiveChord, heldChords, type KeymapOverrides } from '@shared/keymap/actions';
 import { matchesChord, parseChord } from '@shared/keymap/chord';
 
 const MENU_ACTIONS = ACTION_IDS.filter((id) => ACTIONS[id].sink === 'menu');
@@ -28,9 +28,7 @@ export function terminalKeyFilter(ev: KeyboardEvent, keymap: KeymapOverrides = {
   const bound = MENU_ACTIONS.some((id) => {
     const chord = effectiveChord(id, keymap);
     if (chord === null) return false;
-    const chords = id === 'tab.select' && chord.endsWith('1')
-      ? Array.from({ length: 9 }, (_, i) => `${chord.slice(0, -1)}${i + 1}`) : [chord];
-    return chords.some((accelerator) => matchesChord(ev, parseChord(accelerator)));
+    return heldChords(id, chord).some((accelerator) => matchesChord(ev, parseChord(accelerator))); // U6a: the one rule for the nine
   });
   return bound ? 'app' : 'pty';
 }

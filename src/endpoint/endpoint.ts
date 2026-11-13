@@ -384,7 +384,7 @@ export class Endpoint implements EndpointModule {
       org: () => (this.#identity() === null ? null : this.#org),
       adopt: (states, transitions) => this.#org?.adopt(states, transitions) ?? Promise.resolve(),
       rights: (member) => this.#rights(member),
-      hold: (reason) => this.#services?.hold(reason) ?? (() => {}),
+      hold: (reason, standing?: boolean) => this.#services?.hold(reason, standing) ?? (() => {}),
       counts: (counts) => (this.links.channels = counts),
       log,
       now: this.deps.now,
@@ -490,7 +490,7 @@ export class Endpoint implements EndpointModule {
       own: this.own,
       rl10: this.rl10,
       dispatch,
-      hold: (reason) => this.#services?.hold(reason) ?? (() => {}),
+      hold: (reason, standing?: boolean) => this.#services?.hold(reason, standing) ?? (() => {}),
       engineHostLedger: (closed) => (this.#engineHostLedger = closed),
       offers: authorization.offers,
       leases: this.leases, // P5 O7 M5c
@@ -516,6 +516,7 @@ export class Endpoint implements EndpointModule {
     const seams = options.subscriptions ?? {};
     this.forwards = new Forwards({ log, resumeMs: seams.resumeMs });
     this.streams = new Streams({
+      activity: () => this.#services?.activity?.(), // P5 Decision Log 273
       authorize: (request, who, now) => this.authorizer.authorize(request, who, now),
       dispatch,
       // P5 O7 M5b: an `http` read open's request, to the machine's artifact endpoint (read when asked: a suite may replace it).
@@ -910,7 +911,10 @@ export class Endpoint implements EndpointModule {
   syncNow(): Promise<unknown> {
     const parts = this.parts;
     if (parts === null || !parts.state.enrolled || this.#stopped) return Promise.resolve();
-    this.#syncing ??= syncAndPromote(this.enrollContext()).finally(() => {
+    if (this.#syncing !== null) return this.#syncing;
+    const release = parts.services.hold('the hub sync'); // P5 Decision Log 273: work to the daemon, which collects over none
+    this.#syncing = syncAndPromote(this.enrollContext()).finally(() => {
+      release();
       this.#syncing = null;
       // Judged again after every read: a delegation that expired since the last change is noticed here.
       void this.#judge();

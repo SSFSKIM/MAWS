@@ -1,0 +1,322 @@
+{
+ "provenance": {
+  "probe": "U11 l8-settings-11 (spec draft U11-answered.md, Probes and checks)",
+  "engineVersion": "2.1.322",
+  "engine": "/opt/maws-probe/engines/2.1.322",
+  "route": "gateway (vm-run.sh loopback forward)",
+  "configHome": "$HOME/.claude (scratch)"
+ },
+ "cases": [
+  {
+   "case": "maws-mode-unknown-with-model",
+   "route": "maws",
+   "flags": {
+    "model": null,
+    "mode": null
+   },
+   "user": {
+    "exists": true,
+    "bytes": 74,
+    "sha256": "50589a0d9a5a61d106950102c9b8e126c46281550382292ad33e148ff508e585",
+    "text": "{\n  \"model\": \"haiku\",\n  \"permissions\": {\n    \"defaultMode\": \"bogus\"\n  }\n}\n",
+    "parsed": {
+     "model": "haiku",
+     "permissions": {
+      "defaultMode": "bogus"
+     }
+    },
+    "twoSpaceFinalNewline": true
+   },
+   "project": null,
+   "migrationVersionBefore": null,
+   "init": {
+    "seq": 26,
+    "model": "claude-opus-5-5",
+    "permissionMode": "default"
+   },
+   "assistantModels": [
+    "claude-opus-5-5"
+   ],
+   "result": {
+    "subtype": "success",
+    "is_error": false,
+    "text": "OK",
+    "errors": null
+   },
+   "fixture": "fixtures/uxwave/u11-user-defaults-b-maws-mode-unknown-with-model.jsonl",
+   "getSettings": {
+    "model": null,
+    "defaultMode": null,
+    "keys": [
+     "effective",
+     "sources",
+     "applied",
+     "errors"
+    ],
+    "errors": [
+     {
+      "file": "/tmp/p2b-pec86J/home/.claude/settings.json",
+      "path": "permissions.defaultMode",
+      "message": "Invalid value. Expected one of: \"acceptEdits\", \"auto\", \"bypassPermissions\", \"default\", \"dontAsk\", \"plan\""
+     }
+    ]
+   },
+   "userAfter": {
+    "exists": true,
+    "bytes": 74,
+    "sha256": "50589a0d9a5a61d106950102c9b8e126c46281550382292ad33e148ff508e585",
+    "parsed": {
+     "model": "haiku",
+     "permissions": {
+      "defaultMode": "bogus"
+     }
+    },
+    "twoSpaceFinalNewline": true
+   },
+   "userChanged": false,
+   "migrationVersionAfter": 15
+  },
+  {
+   "case": "term-model-unknown",
+   "route": "terminal",
+   "flags": [],
+   "user": {
+    "exists": true,
+    "bytes": 35,
+    "sha256": "e2a049284e09e4f11575c9db7c270a72a568fd2b567d1c2f5635460cfa4bca6d",
+    "text": "{\n  \"model\": \"no-such-model-p2b\"\n}\n",
+    "parsed": {
+     "model": "no-such-model-p2b"
+    },
+    "twoSpaceFinalNewline": true
+   },
+   "project": null,
+   "migrationVersionBefore": 15,
+   "paneAtStart": [
+    " ▐▛███▛█   Claude Code v2.1.322",
+    "▝▜██████▀  no-such-model-p2b · API Usage Billing",
+    " ▝▝   ▝▝   /tmp/p2b-pec86J/work",
+    "⚠ Model \"no-such-model-p2b\" isn't recognized · context assumed to be 200k tokens · update Claude Code, or see the docs",
+    "                                                                                                                                              ● high · /effort",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "❯ Try \"edit <filepath> to...\"",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents"
+   ],
+   "userAtStart": {
+    "exists": true,
+    "bytes": 35,
+    "sha256": "e2a049284e09e4f11575c9db7c270a72a568fd2b567d1c2f5635460cfa4bca6d",
+    "parsed": {
+     "model": "no-such-model-p2b"
+    },
+    "twoSpaceFinalNewline": true
+   },
+   "userChangedAtStart": false,
+   "paneAfterTurn": [
+    "❯ Without using any tool, reply with only the word OK.",
+    "● API Error: 400 ClaudeUsage routes Claude models only; got no-such-model-p2b.",
+    "✻ Worked for 14s · done 4:58 PM",
+    "                                                          tmux focus-events off · add 'set -g focus-events on' to ~/.tmux.conf and reattach for focus tracking",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "❯",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "  ⏵⏵ auto mode on (shift+tab to cycle)"
+   ],
+   "assistantModels": [
+    "<synthetic>"
+   ],
+   "userRowModes": [
+    "auto"
+   ],
+   "assistantText": [
+    "API Error: 400 ClaudeUsage routes Claude models only; got no-such-model-p2b."
+   ],
+   "userAfter": {
+    "exists": true,
+    "bytes": 35,
+    "sha256": "e2a049284e09e4f11575c9db7c270a72a568fd2b567d1c2f5635460cfa4bca6d",
+    "parsed": {
+     "model": "no-such-model-p2b"
+    },
+    "twoSpaceFinalNewline": true
+   },
+   "userChanged": false,
+   "migrationVersionAfter": 15
+  },
+  {
+   "case": "write-order-model-command",
+   "route": "terminal",
+   "flags": [],
+   "user": {
+    "exists": true,
+    "bytes": 149,
+    "sha256": "745a245e0a9a6b084bfcd4d0b1ae92c41b65f83234559ea69ceb8c1818f17cd4",
+    "text": "{\"zz\": 1, \"model\": \"claude-haiku-5-5\", \"env\": {\"P2B_PROBE\": \"1\"}, \"alpha\": true, \"permissions\": {\"defaultMode\": \"acceptEdits\"}, \"effortLevel\": \"low\"}",
+    "parsed": {
+     "zz": 1,
+     "model": "claude-haiku-5-5",
+     "env": {
+      "P2B_PROBE": "1"
+     },
+     "alpha": true,
+     "permissions": {
+      "defaultMode": "acceptEdits"
+     },
+     "effortLevel": "low"
+    },
+    "twoSpaceFinalNewline": false
+   },
+   "project": null,
+   "migrationVersionBefore": 15,
+   "paneAtStart": [
+    " ▐▛███▛█   Claude Code v2.1.322",
+    "▝▜██████▀  Haiku 5.5 · API Usage Billing",
+    " ▝▝   ▝▝   /tmp/p2b-pec86J/work",
+    "                                                                                                                                            ◐ medium · /effort",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "❯ Try \"refactor <filepath>\"",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "  ⏵⏵ accept edits on (shift+tab to cycle) · ← for agents"
+   ],
+   "userAtStart": {
+    "exists": true,
+    "bytes": 149,
+    "sha256": "745a245e0a9a6b084bfcd4d0b1ae92c41b65f83234559ea69ceb8c1818f17cd4",
+    "parsed": {
+     "zz": 1,
+     "model": "claude-haiku-5-5",
+     "env": {
+      "P2B_PROBE": "1"
+     },
+     "alpha": true,
+     "permissions": {
+      "defaultMode": "acceptEdits"
+     },
+     "effortLevel": "low"
+    },
+    "twoSpaceFinalNewline": false
+   },
+   "userChangedAtStart": false,
+   "paneAfterTurn": [
+    "❯ Without using any tool, reply with only the word OK.",
+    "● OK",
+    "✻ Brewed for 3s · done 4:59 PM",
+    "                                                             tmux detected · scroll with PgUp/PgDn · or add 'set -g mouse on' to ~/.tmux.conf for wheel scroll",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "❯",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "  ⏵⏵ accept edits on (shift+tab to cycle)"
+   ],
+   "panes": [
+    {
+     "command": "/model haiku",
+     "pane": [
+      "❯ Without using any tool, reply with only the word OK.",
+      "● OK",
+      "✻ Brewed for 3s · done 4:59 PM",
+      "❯ /model haiku",
+      "  ⎿  Set model to Haiku 5.5 and saved as your default for new sessions",
+      "                                                                                                                                            ◐ medium · /effort",
+      "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+      "❯",
+      "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+      "  ⏵⏵ accept edits on (shift+tab to cycle)"
+     ]
+    }
+   ],
+   "assistantModels": [
+    "claude-haiku-5-5"
+   ],
+   "userRowModes": [
+    "acceptEdits"
+   ],
+   "assistantText": [
+    "OK"
+   ],
+   "userAfter": {
+    "exists": true,
+    "bytes": 169,
+    "sha256": "70181a0136d5158dc08999cd960b7ed56bddc897c794db6da30f448f01be088a",
+    "text": "{\n  \"env\": {\n    \"P2B_PROBE\": \"1\"\n  },\n  \"permissions\": {\n    \"defaultMode\": \"acceptEdits\"\n  },\n  \"model\": \"haiku\",\n  \"effortLevel\": \"low\",\n  \"zz\": 1,\n  \"alpha\": true\n}\n",
+    "parsed": {
+     "env": {
+      "P2B_PROBE": "1"
+     },
+     "permissions": {
+      "defaultMode": "acceptEdits"
+     },
+     "model": "haiku",
+     "effortLevel": "low",
+     "zz": 1,
+     "alpha": true
+    },
+    "twoSpaceFinalNewline": true
+   },
+   "userChanged": true,
+   "migrationVersionAfter": 15
+  },
+  {
+   "case": "maws-set-model",
+   "route": "maws",
+   "flags": {
+    "model": null,
+    "mode": null
+   },
+   "user": {
+    "exists": true,
+    "bytes": 34,
+    "sha256": "5b0db61731ac8bc3b2f82ab1801e78af97c8e8d8a185dadd760351a210288e6d",
+    "text": "{\n  \"model\": \"claude-haiku-5-5\"\n}\n",
+    "parsed": {
+     "model": "claude-haiku-5-5"
+    },
+    "twoSpaceFinalNewline": true
+   },
+   "project": null,
+   "migrationVersionBefore": 15,
+   "init": {
+    "seq": 26,
+    "model": "claude-haiku-5-5",
+    "permissionMode": "default"
+   },
+   "assistantModels": [
+    "claude-haiku-5-5"
+   ],
+   "result": {
+    "subtype": "success",
+    "is_error": false,
+    "text": "OK",
+    "errors": null
+   },
+   "fixture": "fixtures/uxwave/u11-user-defaults-b-maws-set-model.jsonl",
+   "getSettings": {
+    "model": "claude-haiku-5-5",
+    "defaultMode": null,
+    "keys": [
+     "effective",
+     "sources",
+     "applied"
+    ]
+   },
+   "after": {
+    "setModel": {
+     "subtype": "success",
+     "error": null
+    },
+    "userAfterSetModel": "{\n  \"model\": \"claude-haiku-5-5\"\n}\n"
+   },
+   "userAfter": {
+    "exists": true,
+    "bytes": 34,
+    "sha256": "5b0db61731ac8bc3b2f82ab1801e78af97c8e8d8a185dadd760351a210288e6d",
+    "parsed": {
+     "model": "claude-haiku-5-5"
+    },
+    "twoSpaceFinalNewline": true
+   },
+   "userChanged": false,
+   "migrationVersionAfter": 15
+  }
+ ]
+}

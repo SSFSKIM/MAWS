@@ -1,0 +1,120 @@
+UX wave U10, l6-artifacts-07 (a): the two checks "Does the inferred cause of l6-artifacts-07 (a) hold?" and "Does
+holding the clean-up flag off around an apply cover every apply?" (docs/doperpowers/specs/2026-11-12-ux-wave/
+U10-artifacts.md, Probes and checks; the item l6-artifacts-07 (a) and Design inheritance's advice in the same file;
+2026-11-12)
+
+No engine. The repository's own code, through the real document service: the `maws` server's tool definitions over A's
+real store (SQLite storage, DocumentService, ArtifactStore, the document kind registered), as
+src/engine-host/tool-server/documents-wired.test.ts builds them. @y/y 14.0.0-rc.28 (the pin), vitest 5.0.2, Node 26.13.1,
+on devcloud VM dc-uxprobe-dc94 (Linux), single test files only. Branch ux-wave/probe-code-checks from
+ux-wave/probe-setup 8bd124247. Each case below is deterministic (no timing, no model); each was run at least three times
+with the same result.
+
+Evidence committed: src/engine-host/tool-server/documents-format-cleanup.test.ts. Its `it.fails` cases are the
+behaviour the design asks for; they fail today, and vitest counts an `it.fails` whose body throws as passed, so the gate
+stays green ("4 passed | 4 expected fail" today). When the fix lands they report "expected to fail" and are turned into
+plain `it`; the cases named "today" pin the cause and are deleted with the fix. The experiment of check 2 is
+uxwave-u10-cleanup-hold.experiment.patch beside this file (applied to the worktree for the runs, then reverted; product
+files unchanged on the branch).
+
+----------------------------------------------------------------------------------------------------------------------
+Check 1. Does the inferred cause hold?
+
+Verdict: yes, the cause holds, so the design stands: the refusal is the live doc's own post-apply formatting clean-up,
+a transaction with origin null that Yjs starts in cleanupYTextAfterTransaction, which `integrated` rejects. No other
+writer was found. But the probe's own markdown does not reproduce it, and the trigger is not "bold at the start of a list
+item".
+
+Observed.
+  a. The probe's markdown as written: a document `- **A** text` + a paragraph; agent replace_text `**A** text` -> `B text`,
+     then replace_block on the untouched paragraph from the returned revision. Both land (one row each, credited to the
+     session). Yjs does run its clean-up in the live doc after the agent's apply, and it deletes nothing. (Test:
+     "control: the probe's own markdown ... lands today".) Also landing: `**AB** text` -> `B text`, a bold word replaced
+     by other words that end with it unbolded (`**C** text` -> `D C text`), un-bolding a whole run (`**A** text` ->
+     `A text`, `Some **bold** words` -> `Some bold words`), and the spec case with a person's editor connected.
+  b. The case first reported as refused, replayed outside the repository (nothing of it is committed or kept): of the
+     refused batch's ops, the one alone that refuses replaces a bold run by text that keeps part of the run unbolded,
+     the shape (c) reduces; the next replace_block on an untouched block is then refused as stale at the same revision.
+     Batches that replace the whole list by replace_block refuse the same way.
+  c. Reduced: `- **A B** text` with `**A B** text` -> `B text` refuses, in a list item and in a plain paragraph alike. The
+     trigger is a bold run cut so that part of its text survives unbolded (the patch keeps "B" and re-cuts the bold around
+     it), not a list item and not the run's position. replace_block to the same text refuses too.
+  d. The transactions the live doc runs for (c), in order (test "today, in a list item / in a paragraph"):
+       origin session:app-format (the agent's host replica), local false, 3 items deleted   -> row appended
+       origin null, local true, started inside cleanupYTextAfterTransaction, 2 items deleted (two formatting markers)
+     The second's update is the one `integrated` throws on ("the live doc of ... was edited outside a replica"); inFrame
+     takes the frame's rows back and evicts the doc; no row past the read is in the store; the follow-up edit is refused
+     as stale. The replica's own transaction was local, so no clean-up ran there: the redundant markers are left by the
+     writer's own edit, and only the receiving side removes them.
+  e. Accepting a suggestion: the probe's own markdown in a paragraph, `**A** text` -> `B text` in suggest mode, then the
+     person accepts the range. The accept is refused the same way. Transactions in the live doc: the copy (origin human,
+     writeCopy's one-off replica), the live doc's clean-up (origin null, 1 item deleted), and, queued while that
+     clean-up waited, the agent's host replica's own clean-up of the relayed copy, applied to the live doc as the
+     agent's write (origin session:app-format). The null one throws first. This is the spec's "a host replica forwards
+     it as its agent's", seen. (Test "today: the accept is refused ...".)
+
+Inference. (a)-(e) confirm the mechanism of "Today" in l6-artifacts-07 (a) with one correction to its reading: the edit
+that leaves markers is one that un-bolds part of a bold run, wherever it is; removing the bold run with its text, or
+removing the bold from a whole run, leaves nothing for the clean-up. The spec's probe markdown should be replaced by the
+reduced case (c), which is what the committed test uses. The replica echo of (e) is a second path to rows nobody made:
+it is the l6-artifacts-09 mechanism's first finding, and here it reached the live doc only because the copy was relayed
+to the agent's host replica.
+
+----------------------------------------------------------------------------------------------------------------------
+Check 2. Does holding the clean-up flag off around an apply cover every apply?
+
+Verdict: no. The spec's fallback branch applies ("the fallback in Design inheritance is taken and the tracker gains a row
+for the markers it leaves"), or the refined hold below. The reason is in Yjs, not in the service: an apply made inside a
+transaction already open on the same doc joins it and forces it non-local (`readUpdateV2` in @y/y src/utils/encoding.js
+sets `transaction.local = false` on the transaction it runs in), so Yjs runs its post-transaction clean-up when the
+enclosing transaction ends, after a hold scoped to the apply has been released.
+
+Method. The experiment patch: applyV1 and applyV2 in src/artifacts/yjs/doc.ts hold `doc.cleanupFormatting` false for the
+length of the apply (the spec's advice, variant 1); an audit records every apply that runs nested (inside an open
+transaction on its doc) or re-entrant (while the doc is still working through its transaction queue), and every clean-up
+transaction that deletes something, with its stack. Variant 2: the same, but a nested apply keeps the flag off until the
+doc's `afterAllTransactions`, and the two direct `Y.applyUpdate` calls of src/artifacts/yjs/suggest.ts (the accept's and
+the reject's plan edits) go through applyV1. Variant 3: the fallback, `cleanupFormatting` false on every doc newDoc and
+suggest.ts's scratch docs build. Runs: the committed test (and a copy with `it.fails` turned to `it`), and with variant 1
+the audit over service.test.ts, documents.test.ts, documents-wired.test.ts, holds.test.ts, restore.test.ts,
+provider/port.test.ts, document/adapter.test.ts, patch-writer.test.ts, history.test.ts (variants 2 and 3 also
+yjs/suggest.test.ts).
+
+Observed.
+  a. Variant 1 (hold around the apply): the agent edits of check 1 (c) land as one row. But accepting the probe's own
+     markdown writes two rows of the person's for one accept, and a restore of a version across the un-bolded run
+     writes two rows of the restorer's after the agent's (committed tests "... lands as one row of the person's" and
+     "... each lands as one row", flipped: `[ 'human', 'human' ]`, `[ 'session:app-format', 'human', 'human' ]`).
+     The audit's clean-ups with effect under variant 1 were all on this path: in writeCopy's copy doc at the end of its
+     own transaction (forwarded to the live doc as the copy's second update), and in Yjs's DiffRenderer.acceptChanges on
+     suggest.ts's scratch docs (planning only).
+  b. The applies that run nested in product code (audit, and a read of every applyV1/applyV2/Y.applyUpdate call):
+       src/engine-host/documents/restore.ts:49     the revert, inside the restorer's writeAs              (a main doc)
+       src/artifacts/yjs/suggest.ts:93           the accept's deletions, inside writeCopy's transaction  (a main doc's copy)
+       src/artifacts/yjs/suggest.ts:147          the reject's copy, inside writeThrough                  (a main doc)
+       src/engine-host/documents/service.ts:885  the proposal's removal in settle                        (a suggestion doc: flag already off, harmless)
+       src/artifacts/document/editor/history/memory-history.ts:128  the editor memory host's restore (not run here)
+     The two in suggest.ts call Y.applyUpdate directly, so a hold in doc.ts never sees them: doc.ts is not the one module
+     every apply goes through (the binding module is the directory src/artifacts/yjs/; suggest.ts, versions.ts and
+     revert.ts call @y/y directly, and @y/y's own DiffRenderer.acceptChanges applies internally).
+  c. No re-entrant apply occurred in any run under variant 1. Today (no hold) one does: the agent's host replica's echo
+     in check 1 (e) is applied to the live doc while the live doc's queue holds its own clean-up; it disappears once
+     replicas no longer clean up on receipt.
+  d. Variants 2 and 3: every case of the committed test lands as the design asks (one row per write: the two agent
+     edits, the accept, the agent edit and the restore), and every suite listed above but restore.test.ts (a label test) passes unchanged under each.
+
+Inference. The flag held for the apply alone covers the agent's and the person's ordinary writes, but not a write that
+applies an update inside its own transaction (restore, accept, reject), where it moves the clean-up to the end of that
+write and the replica's onUpdate forwards it as a second row: the very outcome Design inheritance forbids ("the fix must
+not introduce a second row per write"). Two shapes hold the rule in these runs: the fallback (variant 3, flag off for
+good, as suggestion docs run; cost as the spec states it: a person's repeated formatting leaves redundant markers), and
+variant 2 (hold until the doc's queue drains when an apply is nested, with suggest.ts's applies moved behind doc.ts),
+which keeps the writer's own in-transaction clean-up for every write that applies nothing. Variant 2 is the smaller
+behaviour change but adds state to the binding module; neither was tested beyond these suites (no DOM editor suite, no
+e2e).
+
+Seen in passing.
+  - "[yjs] Changed the client-id because another client seems to be using it." is printed on every accept in these runs:
+    the copy doc's transaction, forced non-local by the nested apply, holds inserts under its own adopted clientID, so
+    Yjs regenerates it. The copy is destroyed right after, so nothing observable followed here.
+  - A replace_block refused the same way as replace_text (check 1 (c)): the refusal is not specific to replace_text.

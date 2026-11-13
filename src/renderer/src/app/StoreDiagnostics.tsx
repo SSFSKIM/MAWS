@@ -7,6 +7,7 @@
 // directory's branch, ahead/behind and changed files. C5 replaces it as the user-facing surface.
 import { useEffect, useMemo } from 'react';
 import type { FsState } from '@shared/ipc/schema/fs';
+import { workingFolder } from '@shared/sessions/working-folder';
 import { GitDiagnostics } from './GitDiagnostics';
 import { ReplayDiagnostics } from './ReplayDiagnostics';
 import { machineFor } from '../ipc/machine';
@@ -51,7 +52,7 @@ export function StoreDiagnostics() {
         {rows.map((record) => {
           const badge = describeHolder(record.holder);
           const isFollowed = followed?.appSessionId === record.appId;
-          const directory = record.worktree?.path ?? record.directory;
+          const directory = workingFolder(record).path;
           const machine = machineFor(record.appId);
           const isGitShown = directory !== '' && gitSelected?.directory === directory && gitSelected.machine === machine;
           return (

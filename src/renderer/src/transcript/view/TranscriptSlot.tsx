@@ -22,12 +22,12 @@
 // `lane-a/view/RemoteAgentTranscript.tsx`, where its machine's endpoint carries it; elsewhere its port's gap is said in
 // its place.
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
+import { useWorkingFolder } from '../../sessions/working-folder';
 import { lazy, Suspense, useEffect, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useShownEffort } from '../../composer/effective-effort';
 import { useOwnerChannel } from '../../stores/owner-channel'; // P2-C
 import { attachQueue, EMPTY_QUEUE, useQueueStore } from '../../stores/queue';
-import { useSessions } from '../../stores/sessions';
 import { usePromptAuthor } from '../../sessions/share/reader'; // board 525
 import { useTranscriptStore } from '../../stores/transcript'; // L276
 import { askAnsweredHere, askSteerOf, heldRow } from '../model/derive';
@@ -101,10 +101,8 @@ function LocalTranscriptSlot({ appSessionId, agentId, className, startAt, presen
   // Where the session runs, from its record (its worktree's checkout when it has one): the engine's Bash input names no
   // cwd, so a shell call shows this, labelled as the session's directory. Not for a child agent's transcript: a
   // worktree-isolated subagent's shell ran elsewhere.
-  const sessionDirectory = useSessions((state) => {
-    const record = agentId === undefined ? state.records.get(appSessionId) : undefined;
-    return record ? (record.worktree?.path ?? record.directory) : null;
-  });
+  const folder = useWorkingFolder(appSessionId);
+  const sessionDirectory = agentId === undefined ? (folder?.cwd ?? null) : null;
   useEffect(() => (agentId === undefined ? attachQueue(appSessionId) : undefined), [appSessionId, agentId]);
   const queue = useQueueStore((state) => (agentId === undefined ? (state.bySession.get(appSessionId) ?? EMPTY_QUEUE) : EMPTY_QUEUE));
   const held = useMemo(() => queue.entries.filter((entry) => entry.state === 'queued' && !entry.uncertain), [queue.entries]);

@@ -69,8 +69,8 @@ const load = async (): Promise<EndpointChunk> => {
   return import('../services/artifacts/scheme/endpoint-library');
 };
 
-async function serve(): Promise<ArtifactsEndpoint> {
-  endpoint = createArtifactsEndpoint({ content, load, log: (line) => void lines.push(line) });
+async function serve(work?: () => () => void): Promise<ArtifactsEndpoint> {
+  endpoint = createArtifactsEndpoint({ content, load, log: (line) => void lines.push(line), work });
   server = endpoint.server;
   await new Promise<void>((resolve) => server!.listen(socketPath, resolve));
   return endpoint;
@@ -168,5 +168,44 @@ describe('the artifact endpoint (artifacts.sock)', () => {
     const absent = await get('index.html');
     expect(absent.status).toBe(503);
     expect(await absent.text()).toBe(ENDPOINT_UNAVAILABLE);
+  });
+});
+
+// P5 Decision Log 273: a request is work to the daemon until its response has closed, a body still streaming after its
+// lookup settled included
+describe('the artifact endpoint’s requests as work', () => {
+  const counter = () => {
+    const state = { open: 0, begun: 0 };
+    const work = () => {
+      state.open += 1;
+      state.begun += 1;
+      return () => void (state.open -= 1);
+    };
+    return { state, work };
+  };
+
+  it('over HTTP: open from the request until its response has closed', async () => {
+    const { state, work } = counter();
+    await serve(work);
+    const page = await get('index.html');
+    expect(page.status).toBe(200);
+    await page.text();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(state).toEqual({ open: 0, begun: 1 });
+  });
+
+  it('through fetch: open after the answer, while its body is unread, until read to its end or cancelled', async () => {
+    const { state, work } = counter();
+    const at = await serve(work);
+    const whole = await at.fetch({ url: artifactUrl(PAGE, 'live', 'assets/a'), method: 'GET' });
+    expect(state.open).toBe(1); // the lookup settled, the bytes not yet sent
+    expect(Buffer.from(await new Response(whole.body).arrayBuffer()).equals(ASSET)).toBe(true);
+    expect(state.open).toBe(0);
+    const cancelled = await at.fetch({ url: artifactUrl(PAGE, 'live', 'assets/a'), method: 'GET' });
+    expect(state.open).toBe(1);
+    await cancelled.body!.cancel();
+    expect(state.open).toBe(0);
+    await at.fetch({ url: artifactUrl(PAGE, 'live', 'index.html'), method: 'HEAD' }); // no body: ended at once
+    expect(state).toEqual({ open: 0, begun: 3 });
   });
 });

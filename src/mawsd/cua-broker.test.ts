@@ -253,6 +253,28 @@ describe('promotion', () => {
     await until(client.closed);
   });
 
+  it('tells activity at each chunk, served cold and once spliced, either way (P5 Decision Log 273)', async () => {
+    let activity = 0;
+    const { root, starts, socketOf } = stand({ activity: () => void (activity += 1) });
+    const host = await renderHost(root, A);
+    const client = await cua(await socketOf(A));
+    client.socket.write(request(1, 'tabs.query'));
+    await until(() => client.answer(1) !== undefined);
+    expect(activity).toBeGreaterThan(0); // served cold
+    client.socket.write(request(7, 'windows.create', { url: 'about:blank' }));
+    await until(() => starts.length === 1);
+    starts[0]!.resolve({ epoch: 'e1', socketPath: host.path });
+    await until(() => host.connections.length === 1 && host.heard(0).length > 0);
+    const spliced = activity;
+    host.connections[0]!.socket.write(encodeFrame({ jsonrpc: '2.0', id: 7, result: { id: 1 } }));
+    await until(() => client.answer(7) !== undefined);
+    expect(activity).toBeGreaterThan(spliced); // the render host's answer, piped
+    const before = activity;
+    client.socket.write(request(8, 'tabs.query'));
+    await until(() => host.heard(0).length > request(7, 'windows.create', { url: 'about:blank' }).length);
+    expect(activity).toBeGreaterThan(before); // cua's request, piped
+  });
+
   it('several connections of one session share one start, each spliced with its own trigger', async () => {
     const { root, starts, socketOf } = stand();
     const host = await renderHost(root, A);

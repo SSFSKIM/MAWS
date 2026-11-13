@@ -127,3 +127,31 @@ describe('a relay’s own refusal and its app’s capabilities (P5 O3-D M5)', ()
     expect(answers).toEqual([{ t: 'res', id: 'r1', ok: true, value: 'mine' }]);
   });
 });
+
+// P5 Decision Log 273: a request taken is work from its receipt until its answer settles, whether or not its app is still
+// there to hear it (the idle collection's quiet entry must not land on it)
+describe('a relay’s request as work', () => {
+  it('stays open after its app has gone, until the upstream’s answer settles; a request after the app left is not taken', async () => {
+    let answer!: (response: { t: 'res'; id: string; ok: true; value: unknown }) => void;
+    let open = 0;
+    const r = relay({
+      intercept: () => new Promise((resolve) => (answer = resolve)),
+      work: () => {
+        open += 1;
+        return () => void (open -= 1);
+      },
+    });
+    let listener: ((event: { data: unknown }) => void) | null = null;
+    r.relay.serve({ start: () => {}, postMessage: () => true, on: (_e: string, l: (event: { data: unknown }) => void) => void (listener = l) } as never);
+    listener!({ data: { t: 'req', id: 'r1', name: 'session.rewind', input: {} } });
+    expect(open).toBe(1);
+    r.relay.detach(); // the app's socket closed mid-request
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(open).toBe(1);
+    answer({ t: 'res', id: 'r1', ok: true, value: null });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(open).toBe(0);
+    listener!({ data: { t: 'req', id: 'r2', name: 'session.rewind', input: {} } }); // from the gone app: never taken
+    expect(open).toBe(0);
+  });
+});

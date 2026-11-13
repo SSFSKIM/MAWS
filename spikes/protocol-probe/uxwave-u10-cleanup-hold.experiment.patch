@@ -1,0 +1,107 @@
+diff --git a/src/artifacts/yjs/doc.ts b/src/artifacts/yjs/doc.ts
+index ff1f9d847..d0833d86f 100644
+--- a/src/artifacts/yjs/doc.ts
++++ b/src/artifacts/yjs/doc.ts
+@@ -4,6 +4,40 @@
+ // the wire and log encoding (V1), the version encoding (V2), the binding version every stored document records, and
+ // the predicate B's editor needs to tell the binding's own ProseMirror transactions apart.
+ import * as Y from '@y/y';
++// --- EXPERIMENT (probe W, not for commit): hold cleanupFormatting off around each apply; audit what escapes ---
++import { appendFileSync } from 'node:fs';
++const AUDIT = process.env.PW_AUDIT;
++const HOLD = process.env.PW_HOLD !== '0';
++const auditRec = (rec: Record<string, unknown>) => { if (AUDIT) appendFileSync(AUDIT, JSON.stringify({ test: process.env.PW_FILE, ...rec }) + '\n'); };
++Error.stackTraceLimit = 60;
++const where = () => (new Error().stack ?? '').split('\n').slice(3, 60).map((l) => l.trim().replace(/\(.*\/(src|node_modules)\//, '($1/')).filter((l) => !l.includes('node:internal'));
++const protoEmit = (Y.Doc.prototype as any).emit;
++const cleanupOpen = new WeakSet<object>();
++(Y.Doc.prototype as any).emit = function (this: any, name: string, args: any[]) {
++  if (AUDIT && name === 'beforeTransaction' && (new Error().stack ?? '').includes('cleanupYTextAfterTransaction')) cleanupOpen.add(args[0]);
++  if (AUDIT && name === 'afterTransaction' && cleanupOpen.has(args[0])) {
++    let deleted = 0;
++    args[0].deleteSet.clients.forEach((r: any) => r.getIds().forEach((x: any) => (deleted += x.len)));
++    if (deleted > 0) auditRec({ kind: 'cleanup-with-effect', deleted, suggestionDoc: this.isSuggestionDoc, gc: this.gc, stack: where() });
++  }
++  return protoEmit.call(this, name, args);
++};
++function held(doc: any, run: () => void): void {
++  const nested = doc._transaction !== null;
++  const reentrant = !nested && doc._transactionCleanups.length > 0;
++  if (AUDIT && (nested || reentrant)) auditRec({ kind: nested ? 'apply-nested' : 'apply-reentrant', suggestionDoc: doc.isSuggestionDoc, flag: doc.cleanupFormatting, stack: where() });
++  if (!HOLD) return run();
++  if (process.env.PW_HOLD === '3') return run();
++  if (process.env.PW_HOLD === '2' && nested) {
++    // the enclosing transaction turns non-local (readUpdateV2 forces it): hold until the doc's queue drains
++    if (!doc.__pwHeld) { doc.__pwHeld = doc.cleanupFormatting; doc.cleanupFormatting = false; doc.once('afterAllTransactions', () => { doc.cleanupFormatting = doc.__pwHeld; doc.__pwHeld = undefined; }); }
++    return run();
++  }
++  const was = doc.cleanupFormatting;
++  doc.cleanupFormatting = false;
++  try { run(); } finally { doc.cleanupFormatting = was; }
++}
++// --- end EXPERIMENT ---
+ 
+ export type Doc = Y.Doc;
+ // A shared type of v14's unified model: `doc.get(name)` is one, with attributes (`setAttr`), text and child nodes.
+@@ -14,7 +48,7 @@ export type Node = Y.Node;
+ export const bindingVersion = 'y14-rc28/ypm2-15';
+ 
+ // gc on: deleted content is collected, versions are full states (no state-pair snapshots).
+-export const newDoc = (): Doc => new Y.Doc({ gc: true });
++export const newDoc = (): Doc => { const d = new Y.Doc({ gc: true }); if (process.env.PW_HOLD === '3') d.cleanupFormatting = false; return d; };
+ 
+ // An artifact's suggestion doc (P3-A M8, S1's topology), and every replica that writes or shows it: gc off, so content a
+ // suggestion deletes stays readable for the diff against the main doc, and flagged as v14's suggestion doc, so the
+@@ -31,12 +65,12 @@ export function adoptClientId(doc: Doc, clientId: number): void {
+ // The wire (y-protocols sync) and the update log carry V1; version states are V2, which is smaller.
+ export const stateVector = (doc: Doc): Uint8Array => Y.encodeStateVector(doc);
+ export const diffV1 = (doc: Doc, sv?: Uint8Array): Uint8Array => Y.encodeStateAsUpdate(doc, sv);
+-export const applyV1 = (doc: Doc, update: Uint8Array, origin?: unknown): void => Y.applyUpdate(doc, update, origin);
++export const applyV1 = (doc: Doc, update: Uint8Array, origin?: unknown): void => held(doc, () => Y.applyUpdate(doc, update, origin));
+ // Several V1 updates as one, applied in one transaction (the provider's release of a composition hold).
+ // (The rc types it for `ArrayBuffer`-backed arrays only; a frame's payload is a structured-clone copy, never shared.)
+ export const mergeUpdates = (updates: Uint8Array[]): Uint8Array => Y.mergeUpdates(updates as Uint8Array<ArrayBuffer>[]);
+ export const stateV2 = (doc: Doc): Uint8Array => Y.encodeStateAsUpdateV2(doc);
+-export const applyV2 = (doc: Doc, state: Uint8Array, origin?: unknown): void => Y.applyUpdateV2(doc, state, origin);
++export const applyV2 = (doc: Doc, state: Uint8Array, origin?: unknown): void => held(doc, () => Y.applyUpdateV2(doc, state, origin));
+ 
+ // Runs `edit` as one transaction (one update, one log row) with `origin` as the transaction's origin.
+ export const transact = (doc: Doc, edit: () => void, origin?: unknown): void => doc.transact(edit, origin);
+diff --git a/src/artifacts/yjs/suggest.ts b/src/artifacts/yjs/suggest.ts
+index e4f150dfa..70a93ca92 100644
+--- a/src/artifacts/yjs/suggest.ts
++++ b/src/artifacts/yjs/suggest.ts
+@@ -14,6 +14,7 @@
+ import * as delta from 'lib0/delta';
+ import * as encoding from 'lib0/encoding';
+ import * as Y from '@y/y';
++import { applyV1 } from './doc';
+ import { insertedBy, type ContentIds, type ContentMap, type ItemId } from './attribution';
+ import type { Doc } from './doc';
+ 
+@@ -58,6 +59,7 @@ export class SuggestionError extends Error {
+ 
+ const scratch = (state: Uint8Array, suggestion = false): Y.Doc => {
+   const doc = new Y.Doc({ gc: false, isSuggestionDoc: suggestion });
++  if (process.env.PW_HOLD === '3') doc.cleanupFormatting = false;
+   Y.applyUpdateV2(doc, state);
+   return doc;
+ };
+@@ -90,7 +92,7 @@ export function planAccept(main: Doc, suggestion: Doc, attributions: ContentMap,
+       roots.length === 0 && !deletions
+         ? null
+         : (doc: Doc) => {
+-            if (deletions) Y.applyUpdate(doc, deletions);
++            if (deletions) applyV1(doc, deletions);
+             for (const [name, change] of roots) doc.get(name).applyDelta(change);
+           };
+     return {
+@@ -144,7 +146,7 @@ export function planReject(main: Doc, suggestion: Doc, attributions: ContentMap,
+   }
+   const update = copy as Uint8Array | null;
+   return {
+-    edit: update ? (doc) => Y.applyUpdate(doc, update) : null,
++    edit: update ? (doc) => applyV1(doc, update) : null,
+     remove: proposed.isEmpty() ? null : deletionsOf(proposed),
+     suggesters: [],
+     // The main doc before (the deleted content still there) against the copy.
