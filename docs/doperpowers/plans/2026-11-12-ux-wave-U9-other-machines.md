@@ -20,7 +20,7 @@ Sibling children code against what this landing exposes: U7 mounts on the listed
 - [x] (2026-11-13) Before M1 (the executor): the branch takes master in by a merge and checks the base, as Concrete Steps opens. Merge `f00c74e9b` of master `e71334239`; `ef0e009e4` is an ancestor; `ActionSpec.fixed` and `src/shared/sessions/working-folder.ts` are present (U6a, U8a). U1a and U3a are not on master: section 11's fallbacks apply (`selectPendingOf`; `Transcript.tsx` as on master).
 - [x] (2026-11-13) M1 — The offers at both ends: `48c0d06e2`..`5f2186319`, reviewed clean after three fix rounds (the bridge until M4; a pane answer's route through a drain)
   - [x] (2026-11-13) M1's first step: the listing test, run on the merged base before any change of this landing. For each of its two halves, a pass means the listing rule is not built and the case stays as the pin; a failure makes it the rule's failing-first test (M1, "The listing rule opens with its test").
-- [ ] M2 — Fork over the link, and the sheet's words
+- [x] (2026-11-13) M2 — Fork over the link, and the sheet's words: `38ac6a398`..`740df5e4b`, reviewed clean
 - [ ] M3 — The link's phases and the pane that stays
 - [ ] M4 — The session acts in the window
 - [ ] M5 — A link's return, the live row, the chooser and the measurement
