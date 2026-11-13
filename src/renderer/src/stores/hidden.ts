@@ -3,9 +3,9 @@
 // to any machine, so it works alike for this Mac's sessions and for another machine's, open here or only listed.
 //
 // Reading and writing, after `stores/people.ts` with one difference: a read that failed is not an empty set. The key
-// `sidebar.hidden` is read once at first use; until a read has answered, an act is drawn at once and remembered, nothing
-// is written, and a refused read is asked again at the next act, so one refused read and one Hide never replace the
-// stored set with one entry. Once read, the whole value is written 250 ms after the last change (an act, an arming, a
+// `sidebar.hidden` is read once at first use; until a read has answered, an act is drawn at once and remembered (and so is
+// what a look at it changes), nothing is written, and a refused read is asked again at the next act, so one refused read
+// and one Hide never replace the stored set with one entry. Once read, the whole value is written 250 ms after the last change (an act, an arming, a
 // return, a drop) and at once when the page unloads; a refused write is logged, and the next change writes it again.
 //
 // When a hidden session returns is one pure function of an entry and a look (`afterLook`; the architect's ruling of
@@ -40,6 +40,8 @@ export type Look =
 
 const iso = (ms: number) => new Date(ms).toISOString();
 const later = (time: string | null, than: string): boolean => time !== null && Date.parse(time) > Date.parse(than);
+// When a transcript look found working is found at rest, if no record comes before.
+const quietAfter = (newestAt: string) => Date.parse(newestAt) + QUIET_MS + 1;
 
 /** Whether the look finds the session working; null when it cannot say. */
 export function working(look: Look, now: number): boolean | null {
@@ -174,16 +176,13 @@ export function createHiddenStore(client: MawsBridge, options: { writeDelayMs?: 
         leads.delete(id);
       }
       set({ hidden: loaded ? bounded(hidden, client.localMachine) : hidden, leading: new Set(leads.keys()), acts: get().acts + 1 }); // one write, so the sidebar settles its order on the new ranks
-      if (loaded) {
-        schedule();
-        get().review();
-        return;
-      }
-      early.set(id, entry);
-      void get().load();
+      if (loaded) schedule();
+      else early.set(id, entry);
+      get().review();
+      if (!loaded) void get().load();
     };
-    // A `foreign` record found working is found at rest only once QUIET_MS has passed with nothing written, which changes
-    // no store: the store looks again then.
+    // A `foreign` record found working (a hidden entry not armed, a lead) is found at rest only once QUIET_MS has passed
+    // with nothing written, which changes no store: the store looks again then.
     const wakeAt = (times: number[]) => {
       if (wake !== null) clearTimeout(wake);
       wake = null;
@@ -220,6 +219,7 @@ export function createHiddenStore(client: MawsBridge, options: { writeDelayMs?: 
 
       review() {
         const t = now();
+        const wakes: number[] = []; // each quiet deadline, a hidden entry's or a lead's: nothing else looks again then
         let leadsChanged = false;
         for (const [id, lead] of leads) {
           const look = sources.lookOf(id);
@@ -231,6 +231,7 @@ export function createHiddenStore(client: MawsBridge, options: { writeDelayMs?: 
             const seen = working(look, t);
             ended = seen === false && lead.sawWorking;
             if (seen === true) lead.sawWorking = true;
+            if (seen === true && look.route === 'transcript' && look.newestAt !== null) wakes.push(quietAfter(look.newestAt));
           }
           if (ended) {
             leads.delete(id);
@@ -238,26 +239,26 @@ export function createHiddenStore(client: MawsBridge, options: { writeDelayMs?: 
           }
         }
         const patch: Partial<HiddenStore> = leadsChanged ? { leading: new Set(leads.keys()) } : {};
-        if (loaded) {
-          const current = get().hidden;
-          let next: Map<AppSessionId, HiddenEntry> | null = null;
-          const wakes: number[] = [];
-          for (const [id, entry] of current) {
-            const look = sources.lookOf(id);
-            const answer = sources.gone(id) ? 'returns' : afterLook(entry, look, t);
-            if (answer === entry) {
-              if (look.route === 'transcript' && entry.armedAt === null && look.newestAt !== null) wakes.push(Date.parse(look.newestAt) + QUIET_MS + 1);
-              continue;
-            }
-            next ??= new Map(current);
-            if (answer === 'returns') next.delete(id);
-            else next.set(id, answer);
+        // Until a read has answered, the map holds only this run's acts: they are looked at alike, and what a look changes
+        // is remembered with them, so the read's answer cannot bring back what this run saw return.
+        const current = get().hidden;
+        let next: Map<AppSessionId, HiddenEntry> | null = null;
+        for (const [id, entry] of current) {
+          const look = sources.lookOf(id);
+          const answer = sources.gone(id) ? 'returns' : afterLook(entry, look, t);
+          if (answer === entry) {
+            if (look.route === 'transcript' && entry.armedAt === null && look.newestAt !== null) wakes.push(quietAfter(look.newestAt));
+            continue;
           }
-          wakeAt(wakes);
-          if (next !== null) {
-            patch.hidden = bounded(next, client.localMachine);
-            schedule();
-          }
+          next ??= new Map(current);
+          if (answer === 'returns') next.delete(id);
+          else next.set(id, answer);
+          if (!loaded) early.set(id, answer === 'returns' ? null : answer);
+        }
+        wakeAt(wakes);
+        if (next !== null) {
+          patch.hidden = loaded ? bounded(next, client.localMachine) : next;
+          if (loaded) schedule();
         }
         if (Object.keys(patch).length > 0) set(patch);
       },
