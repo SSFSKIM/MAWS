@@ -596,7 +596,9 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     // Unhide brings the row back for the steps below.
     await test.step('UX wave U7: the listed row’s menu, ⌘-click to a tab of its own, Hide and Unhide', async () => {
       await expect(row, 'only listed: A holds no record of it yet').toHaveAttribute('data-kind', 'listed');
-      const projectKey = (await sidebarOf(page).locator('[data-kind="project"]', { has: row }).getAttribute('data-tree-id'))!.slice('p:'.length);
+      // its project's key, from the project row that holds it (`has` is matched inside each project row, so it names the
+      // row by its tree id alone)
+      const projectKey = (await sidebarOf(page).locator('[data-kind="project"]', { has: page.locator(`[data-tree-id="s:${address}"]`) }).getAttribute('data-tree-id'))!.slice('p:'.length);
       const hidden = sidebarOf(page).locator(`[data-tree-id="hidden:${projectKey}"]`);
       await row.click({ button: 'right' });
       await expect(page.getByRole('menu')).toBeVisible();
