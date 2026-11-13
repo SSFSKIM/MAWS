@@ -17,8 +17,8 @@ How to see it working, on the wave's build: open a session with nothing running 
 - [x] (2026-11-12) Adversarial review: the stored envelope and the optional wire key stand; seven gaps found, all accepted.
 - [x] (2026-11-12) The drawn example sent to the owner, with four choices (Proof that an executor does not run).
 - [x] (2026-11-12) Revised once on the review, the architect's eight rulings and the drawn example (Decision Log 2).
-- [ ] Step 0 (U6a, U8a) is on master and the branch has merged it (Constraints 9).
-- [ ] M1 — what is stored, its readers, the side column's acts, and the two widths
+- [ ] Step 0 (U6a, U8a) is on master and the branch has merged it (Constraints 9). (2026-11-12) U8a is: master `7e5f2016c` merged at `25ce07b97`. U6a is not yet. M1 was built ahead of it on the architect's word (Decision Log 3).
+- [ ] M1 — what is stored, its readers, the side column's acts, and the two widths. (2026-11-12) Built; its proof is green on the VM (the checks are in the report file). Waiting for the boundary review.
 - [ ] M2 — one strip, one tab in view
 - [ ] M3 — the second group
 - [ ] M4 — the card column
@@ -583,6 +583,11 @@ Found while writing this document, against master `48619c824`, and reported to t
   Evidence: `TABLE`, `fold` and `notification` in `src/services/lane-a/jobs.ts`; the note from U3a's author that its reader gives an unlisted word no outcome.
 - Observation (from the adversarial review of 2026-11-12, each read in the code and accepted): a strip drawn over one group's tabs would have deleted the other group's refs, because it submits its own tabs as the scope's list (`TabStrip.tsx`, `select`; `setPanelTabs`); the rule "a ref that is new comes into view" would have turned a plugin roster's passive addition (`activate: false`, `engine-surface/panes.ts`) into a selection, and an unchanged `activeTabId` into a request that shows a hidden column; a pin moved or closed from another session bypasses `setPanelTabs` and would have left a stack that reads as hidden; the lower group's "+" loses its group once its menu's portal holds the focus; a hidden column's remembered tab was not consulted after a relaunch; the exit of X-168 made "once per session" would have missed a session resumed in a terminal, and a remote status overlay would have undone it.
   Evidence: the citations of the review, held by the architect; M1's decisions 4 and 5, M2's 1 to 3, M3's 3, M6's 3 to 5.
+
+- Observation (M1): a case of `app/Shell.panel.test.tsx` ("an addTool before hydration writes nothing…") failed once under M1's suites on the VM and passed when run alone, as its whole file and on the next full run of M1's suites. It asserts that no `panel.` key has been written yet, which holds only while the layout store's 250 ms write-back has not elapsed. Under the load of the shared VM it can elapse. The two writes it saw are that write-back's (`panel.<A>`, `panel.pinned`).
+  Evidence: the run at `949340775`; the load average at the next run was 16 to 20.
+- Observation (M1): a change to the three new slices before hydration is not replayed over the stored value, as an early change of the regions or the tabs is. Nothing can make one: the card column, the bar and the groups are drawn only once a session tab and its panel list exist, and both come from hydration.
+  Evidence: `hydrate` in `stores/layout.ts` sets the three slices from what it read.
 
 ## Decision Log
 
