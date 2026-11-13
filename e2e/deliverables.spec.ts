@@ -1109,12 +1109,20 @@ test('a pass on an HTML page: Escape keeps the text in the card, a second pick l
     const comment = s.panel.locator('[data-editor-header]').getByRole('button', { name: 'Comment', exact: true });
     const card = viewer.locator('[data-comment-card]');
     const field = card.getByRole('textbox', { name: 'Comment' });
+    // A pick at a point of the element that no open card covers: a card Escape kept stands below the first element, over
+    // the left of the next, so the person points at the part of that element to the card's right
     const pick = async (selector: string) => {
       await comment.click();
       await expect(viewer.locator('[data-picking]')).toBeVisible();
       const box = (await frame.locator(selector).boundingBox())!;
-      await pointInFrame(s.page, frame, box.x + 20, box.y + box.height / 2);
-      await s.page.mouse.click(box.x + 20, box.y + box.height / 2);
+      const over = (await card.count()) > 0 ? await card.boundingBox() : null;
+      const x = over === null ? box.x + 20 : over.x + over.width + 16;
+      const at = { x, y: box.y + box.height / 2 };
+      expect(at.x, `${selector}: the point inside the element: ${JSON.stringify({ at, box })}`).toBeLessThan(box.x + box.width - 4);
+      const underCard = over !== null && at.x >= over.x && at.x <= over.x + over.width && at.y >= over.y && at.y <= over.y + over.height;
+      expect(underCard, `${selector}: the point clear of the kept card: ${JSON.stringify({ at, over })}`).toBe(false);
+      await pointInFrame(s.page, frame, at.x, at.y);
+      await s.page.mouse.click(at.x, at.y);
     };
 
     // the first pick, typed, then Escape: the card stays with its text, the keyboard back on Comment
