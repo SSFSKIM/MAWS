@@ -325,3 +325,109 @@ esac
   assert.ok(override, run.stderr);
   assert.match(override, new RegExp(` --peer ${base}$`));
 });
+
+// --peer-exact: the build to check against is one commit and no other. A build the machines run can be a master
+// ancestor that is off master's first-parent chain (it came in as a merge's second parent); --peer would replace it
+// with the merge that contains it, a different tree.
+test('--peer-exact takes a master ancestor off the first-parent chain as given, and says so with its sha and wire', (t) => {
+  const { git, peerAt, draft, landed, tested } = middleOfMergedBranch(t);
+  git('tag', 'draft-peer', draft);
+  for (const ref of [draft, 'draft-peer']) {
+    const result = peerAt(tested, ['--peer-exact', ref]);
+    assert.deepEqual(result, {
+      status: 0,
+      trailers: [`Peer: ${draft}`, 'Peer-Wire: 3.1', 'Wire: 3.3'],
+      notes: [`ci-gate: peer ${draft} taken exactly (--peer-exact ${ref}), not mapped to a first-parent master state: wire 3.1; this tree's 3.3, a minor apart`],
+    });
+  }
+  // the same commit through --peer is still mapped, to another tree
+  assert.deepEqual(peerAt(tested, ['--peer', draft]).trailers, [`Peer: ${landed}`, 'Peer-Wire: 3.2', 'Wire: 3.3']);
+  // a named peer group takes it too, the two minors differing
+  const grouped = peerAt(tested, ['--gates', 'e2e:cross-build', '--peer-exact', draft]);
+  assert.equal(grouped.status, 0, grouped.notes.join('\n'));
+  assert.deepEqual(grouped.trailers, [`Peer: ${draft}`, 'Peer-Wire: 3.1', 'Wire: 3.3']);
+  // a first-parent master state is taken as given as well, and said to be
+  const onChain = peerAt(tested, ['--peer-exact', landed]);
+  assert.deepEqual(onChain.trailers, [`Peer: ${landed}`, 'Peer-Wire: 3.2', 'Wire: 3.3']);
+  assert.match(onChain.notes.join('\n'), new RegExp(`peer ${landed} taken exactly \\(--peer-exact ${landed}\\)`));
+});
+
+test('--peer-exact requires a commit with a manifest that is an ancestor of origin/master, naming the flag', (t) => {
+  const { git, peerAt, base, tested, clone } = middleOfMergedBranch(t);
+  for (const ref of [tested, 'child']) {
+    const result = peerAt(tested, ['--peer-exact', ref]);
+    assert.equal(result.status, 2);
+    assert.deepEqual(result.trailers, []);
+    assert.deepEqual(result.notes, [`ci-gate: --peer-exact ${ref}: ${tested.slice(0, 8)} is not an ancestor of origin/master (or its ancestry is unavailable)`]);
+  }
+  git('checkout', '--quiet', '-b', 'unmerged', base);
+  git('commit', '--quiet', '--allow-empty', '-m', 'not landed');
+  assert.match(peerAt(tested, ['--peer-exact', 'unmerged']).notes.join('\n'), /^ci-gate: --peer-exact unmerged: [0-9a-f]{8} is not an ancestor of origin\/master/);
+  assert.deepEqual(peerAt(tested, ['--peer-exact', 'no-such-ref']), { status: 2, trailers: [], notes: ['ci-gate: --peer-exact no-such-ref: no such commit'] });
+  // a shallow checkout cannot establish the ancestry
+  git('push', '--quiet', 'origin', `${tested}:refs/heads/child`);
+  const shallow = clone('--depth=1', '--branch', 'child');
+  const refused = peerAt(tested, ['--peer-exact', base], shallow);
+  assert.equal(refused.status, 2);
+  assert.deepEqual(refused.trailers, []);
+  assert.match(refused.notes.join('\n'), /^ci-gate: --peer-exact [0-9a-f]{40}: this checkout is shallow, .*fetch complete history/);
+  const missing = middleOfMergedBranch(t, { missingDraft: true });
+  assert.deepEqual(missing.peerAt(missing.tested, ['--peer-exact', missing.draft]), {
+    status: 2, trailers: [], notes: [`ci-gate: the peer ${missing.draft.slice(0, 8)} (--peer-exact ${missing.draft}) has no ${MANIFEST}`],
+  });
+});
+
+test('--peer and --peer-exact are mutually exclusive, whatever --peer names', (t) => {
+  const { peerAt, base, draft, tested } = middleOfMergedBranch(t);
+  const said = ['ci-gate: --peer and --peer-exact cannot both be given: --peer maps a commit to the first master state that contains it, --peer-exact takes it as given'];
+  for (const peer of [base, draft, 'none']) {
+    assert.deepEqual(peerAt(tested, ['--peer', peer, '--peer-exact', draft]), { status: 2, trailers: [], notes: said });
+  }
+  assert.deepEqual(peerAt(tested, ['--gates', 'e2e:cross-build', '--peer', base, '--peer-exact', draft]), { status: 2, trailers: [], notes: said });
+});
+
+test('the launcher passes --peer-exact through, refuses it beside --peer, and pins an override or relaunch to the exact peer', (t) => {
+  const { tree, env, git, draft, tested } = middleOfMergedBranch(t);
+  const bin = join(tree, 'bin');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'gh'), `#!/bin/sh
+case "$*" in
+  "variable get GATE_RUNNER "*) echo pool ;;
+  "variable get GATE_E2E_RUNNER "*) echo macos ;;
+  "variable list "*) ;;
+  *actions/variables*) printf '%s\\n' '["GATE_RUNNER","pool"]' '["GATE_E2E_RUNNER","macos"]' ;;
+  *issues?*) echo '{"number":1,"title":"ci-kit alert: mini: SecurityAgent since 2026-10-31T00:00Z"}' ;;
+  *actions/runners*) echo '{"name":"ci-kit-mac-mini","status":"online","labels":["self-hosted","macOS","ARM64"]}' ;;
+  *) echo UNEXPECTED_GITHUB_CALL >&2; exit 1 ;;
+esac
+`);
+  chmodSync(join(bin, 'gh'), 0o755);
+  const before = git('ls-remote', 'origin');
+  const launch = (...args) => spawnSync('bash', [join(dirname(script), 'ci-gate.sh'), tree, ...args], {
+    encoding: 'utf8', timeout: 10000, env: { ...env, PATH: `${bin}:${env.PATH}`, MAWS_GATE_IGNORE_ALERTS: '', MAWS_GATE_RUNNER: '' },
+  });
+  // refused by the resolver, in its words, before any push: the flag reached it
+  const outside = launch('--gates', 'e2e:cross-build', '--peer-exact', tested, '--label', 'exact-test');
+  assert.equal(outside.status, 2, outside.stdout + outside.stderr);
+  assert.equal(outside.stderr, `ci-gate: --peer-exact ${tested}: ${tested.slice(0, 8)} is not an ancestor of origin/master (or its ancestry is unavailable)\n`);
+  const both = launch('--gates', 'e2e:cross-build', '--peer', 'none', '--peer-exact', draft, '--label', 'exact-test');
+  assert.equal(both.status, 2, both.stdout + both.stderr);
+  assert.match(both.stderr, /^ci-gate: --peer and --peer-exact cannot both be given/);
+  // an alert refusal's override command keeps the exact peer: --peer <sha> would map it again
+  const alerted = launch('--gates', 'e2e:cross-build', '--peer-exact', draft, '--label', 'exact-test');
+  assert.equal(alerted.status, 2, alerted.stdout + alerted.stderr);
+  assert.doesNotMatch(alerted.stdout + alerted.stderr, /UNEXPECTED_GITHUB_CALL/);
+  const override = alerted.stderr.split('\n').find((line) => line.includes('to push anyway'));
+  assert.ok(override, alerted.stderr);
+  assert.match(override, new RegExp(` --peer-exact ${draft}$`));
+  assert.doesNotMatch(override, new RegExp(` --peer ${draft}`));
+  assert.equal(git('ls-remote', 'origin'), before);
+  // and so does the relaunch line of a run the mini refused
+  const summary = execFileSync('bash', ['-c', 'source "$0"; refusals "$1" "$2"', join(dirname(script), 'ci-gate-refusals.sh'),
+    'failure\te2e:cross-build\nsuccess\tplan',
+    'e2e:cross-build\tSet up runner\t2026-10-31T00:00:00Z ci-kit: dialog — rerun'], {
+    encoding: 'utf8', env: { ...process.env, sha: tested, gates: 'unit', runner: 'macos', class1a: 'pool', lane: '', live: '', default_beside: '', label: 'test', relaunch_peer: draft, relaunch_peer_flag: '--peer-exact' },
+  });
+  assert.match(summary, new RegExp(` --peer-exact ${draft} --gates e2e:cross-build `));
+  assert.doesNotMatch(summary, / --peer [0-9a-f]/);
+});
