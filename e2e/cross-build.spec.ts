@@ -1820,12 +1820,14 @@ test('(layout, to the peer) a split strip this build stored, with a pin, a side 
     for (let i = 0; i < 5; i++) await run.page.keyboard.press('ArrowRight');
     await expect(resizer).toHaveAttribute('aria-valuenow', '280');
     let ours: StoredSets | null = null;
+    let contextNone: string | undefined; // the side column's session this build remembers under `none`
     await expect
       .poll(async () => {
         ours = await layoutOf<StoredSets>(run.page, 'main.tabs');
         const surfaces = await layoutOf<StoredSurfaces>(run.page, 'panelTools.surfaces');
         const regions = await layoutOf<StoredRegions>(run.page, 'regions');
-        return [Object.keys(ours?.sets ?? {}), ours?.sets.none?.panes.length, pinnedIn(ours), surfaces?.pinnedTools.includes(PINNED_TOOL_ID), surfaces?.contexts.none !== undefined, regions?.sidebar.width];
+        contextNone = surfaces?.contexts.none;
+        return [Object.keys(ours?.sets ?? {}), ours?.sets.none?.panes.length, pinnedIn(ours), surfaces?.pinnedTools.includes(PINNED_TOOL_ID), contextNone !== undefined, regions?.sidebar.width];
       }, { timeout: 20_000, message: `${here.label} wrote the strip, the surfaces and the width` })
       .toEqual([['none'], 2, [artifact], true, true, 280]);
     const tabs = tabIdsOf(ours);
@@ -1835,40 +1837,62 @@ test('(layout, to the peer) a split strip this build stored, with a pin, a side 
     await endProfileProcesses(s.userData);
     said.push(`  ${here.label} wrote ${tabs.join(', ')}: ${artifact} pinned, a split, Files open, ${PINNED_TOOL} pinned, the sidebar at 280`);
 
-    // the peer: what it draws, and no word of an invalid value
+    // the peer: what it draws, and no word of an invalid value. Each wait on the peer, failing, names what the peer
+    // drew and stored: its strip's tab ids, and its `main.tabs` sets by key with their tab ids
     const old = await s.launch({}, peer.root);
     await s.ready(old.page);
-    await expect(mainTabById(old.page, 'artifacts'), `${peer.label} draws the tab that was in front, selected`).toHaveAttribute('aria-selected', 'true', { timeout: 20_000 });
-    await expect(mainTabById(old.page, artifact).getByRole('img', { name: 'Pinned' }), `${peer.label} draws the pin`).toBeVisible();
-    await expect(old.page.locator('[data-region="sidebar"]').getByRole('separator', { name: 'Resize sidebar' }), `${peer.label} draws the sidebar at the width written`).toHaveAttribute('aria-valuenow', '280');
+    const onPeer = async (what: string, act: () => Promise<unknown>) => {
+      try {
+        await act();
+      } catch (error) {
+        const strip = await stripIds(old.page).catch(() => ['(unread)']);
+        const stored = await layoutOf<StoredSets>(old.page, 'main.tabs').catch(() => null);
+        const sets = Object.fromEntries(Object.entries(stored?.sets ?? {}).map(([key, set]) => [key, set.panes.map((pane) => pane.tabs.map((tab) => tab.id))]));
+        throw new Error(`${peer.label}: ${what}; its strip ${JSON.stringify(strip)}; its main.tabs sets ${JSON.stringify(sets)}`, { cause: error });
+      }
+    };
+    await onPeer('draws the tab that was in front, selected', () => expect(mainTabById(old.page, 'artifacts')).toHaveAttribute('aria-selected', 'true', { timeout: 20_000 }));
+    await onPeer('draws the pin', () => expect(mainTabById(old.page, artifact).getByRole('img', { name: 'Pinned' })).toBeVisible());
+    await onPeer('draws the sidebar at the width written', () => expect(old.page.locator('[data-region="sidebar"]').getByRole('separator', { name: 'Resize sidebar' })).toHaveAttribute('aria-valuenow', '280'));
     expect((await consoleSaid(old.page)).filter((line) => INVALID_LAYOUT.test(line)), `${peer.label} took every layout value as valid`).toEqual([]);
     // a tool's menu opens only while a session is in view (the icon row disables a session tool's icon and its folded
     // item otherwise), so the pin is read, and undone, with the session's tab in front: the peer filed it in its row's
-    // set, so it is reached from its sidebar row
-    await (await sidebarRow(old.page, { appSessionId: id })).click();
-    await expect(activeMainTab(old.page), `${peer.label} shows the session’s tab`).toHaveAttribute('data-tab-id', session, { timeout: 20_000 });
-    await expectToolPinned(old.page, PINNED_TOOL, true, `${peer.label} reads the pinned tool`);
-    await pinToToolbar(old.page, PINNED_TOOL, false);
-    // then the page's tab selected (from the library, which the peer keeps in the set of no project), whose write as
-    // the shown set's tab in front only the peer makes, and the sidebar folded
-    await old.page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click({ timeout: 15_000 });
-    await mainTabById(old.page, artifact).click({ timeout: 15_000 });
-    await expect(activeMainTab(old.page)).toHaveAttribute('data-tab-id', artifact);
-    await old.page.getByRole('banner').getByRole('button', { name: 'Toggle sidebar' }).click();
+    // set, so it is reached from its sidebar row, and the strip shows that set from here
+    await onPeer('shows the session’s tab from its sidebar row', async () => {
+      await (await sidebarRow(old.page, { appSessionId: id })).click();
+      await expect(activeMainTab(old.page)).toHaveAttribute('data-tab-id', session, { timeout: 20_000 });
+    });
+    await onPeer('reads the pinned tool', () => expectToolPinned(old.page, PINNED_TOOL, true, `${peer.label} reads the pinned tool`));
+    await onPeer('unpins the tool', () => pinToToolbar(old.page, PINNED_TOOL, false));
+    // then the page's tab brought to the front of that set, as the peer does it: a tab of no session belongs to the set
+    // shown, so the sidebar's Artifacts moves the library's tab into the project's set, and the page's row in the
+    // library moves the page's tab there too (with its pin) and selects it (its stores/layout-model.ts, `openTab`; its
+    // library/Row.tsx, the row's click). That selection, saved as the shown set's tab in front, is a write only the
+    // peer makes. Then the sidebar folded
+    await onPeer('opens its library', () => old.page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click({ timeout: 15_000 }));
+    await onPeer('opens the page from its library row', () => old.page.locator(`[data-library] [data-artifact-row="${artifactId}"]`).click({ timeout: 15_000 }));
+    await onPeer('shows the page’s tab in front, with its pin', async () => {
+      await expect(activeMainTab(old.page)).toHaveAttribute('data-tab-id', artifact, { timeout: 15_000 });
+      await expect(mainTabById(old.page, artifact).getByRole('img', { name: 'Pinned' })).toBeVisible();
+    });
+    await onPeer('folds the sidebar', () => old.page.getByRole('banner').getByRole('button', { name: 'Toggle sidebar' }).click());
     let theirs: StoredSets | null = null;
     let surfaces: StoredSurfaces | null = null;
     let regions: StoredRegions | null = null;
-    await expect
-      .poll(async () => {
-        theirs = await layoutOf<StoredSets>(old.page, 'main.tabs');
-        surfaces = await layoutOf<StoredSurfaces>(old.page, 'panelTools.surfaces');
-        regions = await layoutOf<StoredRegions>(old.page, 'regions');
-        // F's own write first: the page's tab, which it selected, as the saved tab in front of the set it shows (this
-        // build left the library's tab there), so what follows is read from a value F wrote, not from this build's
-        const shown = theirs?.sets[theirs.current];
-        return [shown?.panes[shown.focusedPane]?.activeTabId, theirs?.version, tabIdsOf(theirs), pinnedIn(theirs), surfaces?.pinnedTools.includes(PINNED_TOOL_ID), surfaces?.contexts.none !== undefined, regions?.version, regions?.sidebar.collapsed];
-      }, { timeout: 20_000, message: `${peer.label} wrote its tab in front, every tab, the pin, the unpinned tool with none kept, and the folded sidebar` })
-      .toEqual([artifact, 3, tabs, [artifact], false, true, 5, true]);
+    await onPeer('writes its tab in front, every tab, the pin, the unpinned tool with none kept, and the folded sidebar', () =>
+      expect
+        .poll(async () => {
+          theirs = await layoutOf<StoredSets>(old.page, 'main.tabs');
+          surfaces = await layoutOf<StoredSurfaces>(old.page, 'panelTools.surfaces');
+          regions = await layoutOf<StoredRegions>(old.page, 'regions');
+          // the peer's own write first: the project's set shown, the page's tab its saved tab in front (this build left
+          // the library's tab in front of `none`), so what follows is read from a value the peer wrote; every tab is
+          // collected over every set, and `contexts.none` stays as this build wrote it
+          const shown = theirs?.sets[theirs.current];
+          return [theirs?.current !== 'none', shown?.panes[shown.focusedPane]?.activeTabId, theirs?.version, tabIdsOf(theirs), pinnedIn(theirs), surfaces?.pinnedTools.includes(PINNED_TOOL_ID), surfaces?.contexts.none, regions?.version, regions?.sidebar.collapsed];
+        }, { timeout: 20_000 })
+        .toEqual([true, artifact, 3, tabs, [artifact], false, contextNone, 5, true]),
+    );
     expect(old.maws.consoleErrors()).toEqual([]);
     said.push(`  ${peer.label}: drew the tab in front, the pin, the tool and the width; wrote ${Object.keys(theirs!.sets).length} sets, contexts ${JSON.stringify(Object.keys(surfaces!.contexts))}`);
     await s.quit(old);
