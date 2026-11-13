@@ -23,7 +23,7 @@ import { closeInterim, dictationStart, inlineFragment, interimOf, needsLeadingSp
 import { createDraftWriter, docOfDraft, isEmptyDoc, registerLiveDraft, type DraftWriter } from './drafts';
 import type { EditorEnv } from './env';
 import { closeSuggestions, suggesting } from './extensions';
-import { historyNavigation, recallDoc, recallEntries, type HistoryNav, type Recall } from './history';
+import { findMatch, historyNavigation, matchPlace, recallDoc, recallEntries, recallLine, recallText, searchKeyOf, searchLine, type HistoryNav, type Recall } from './history';
 import { classifyFile, classifyText, mentionPath, type FileAction } from './paste';
 import { classifyRemoteFile, PICKED_BY_PATH } from './remote-uploads'; // P5 O7 M4
 import { mentionLabel, prefillToDoc } from './recall';
@@ -130,6 +130,7 @@ export interface ControllerView {
   setMode(mode: Serialized['mode']): void;
   setCommandEmpty(empty: boolean): void;
   setBusy(busy: boolean): void;
+  setHistory(line: string | null): void; // UX wave U4a M6: the line under the text while recalling or searching, else null
 }
 
 const HISTORY_LIMIT = 200;
@@ -195,6 +196,10 @@ export class EditorController {
   private nav: HistoryNav = { index: null, draft: null };
   private recalls: Recall[] = [];
   private listed: HistoryEntry[] = [];
+  // UX wave U4a M6 (decision 22): Ctrl+R's search, beside the recall and excluding it: what is typed, the match shown
+  // (an index into `texts`, the recalls newest first, read when it began; null while the draft shows) and the draft it
+  // puts back
+  private search: { query: string; at: number | null; texts: string[]; draft: ComposerDoc } | null = null;
   private dictation: Dictation | null = null; // E9: the open sink, if any
   // P2-B M6: whether the selection is a caret the human left: the editor lost focus since its document was last set
   // while unfocused. A dialog widget's insertion (C11's insertComposerText, "Use in chat") runs while the dialog holds
@@ -304,16 +309,30 @@ export class EditorController {
     this.view.setMode(mode);
     this.view.setCommandEmpty(mode === 'send' || serializeDraft(doc, { sessionId: null, cwd: '' }).empty);
     this.inputs.onDocChange?.(doc);
+    if (!this.silent && transaction.docChanged) {
+      if (this.nav.index !== null) this.nav = historyNavigation(this.nav, 'edit', 0, doc).nav;
+      this.search = null; // UX wave U4a M6: an edit ends a search as it ends a recall, the box keeping what it shows
+    }
+    this.publishHistory(); // UX wave U4a M6: the line follows every document set (a send's clear, a load, a prefill)
     if (this.silent || !transaction.docChanged) return;
     this.revision += 1;
-    if (this.nav.index !== null) this.nav = historyNavigation(this.nav, 'edit', 0, doc).nav;
     this.writer.change(doc);
   }
 
   keyDown(view: EditorView, event: KeyboardEvent): boolean {
     const editor = this.editor;
     if (!editor) return false;
-    if (event.defaultPrevented) return true; // C5's dispatcher ran a composer chord for this key (⌘Enter)
+    if (event.defaultPrevented) return true; // C5's dispatcher ran a composer chord for this key (⌘Enter, Ctrl+R)
+    // UX wave U4a M6 (decision 22): while searching, the keys are the search's; a fresh Esc it took answers its repeats
+    if (this.search !== null) {
+      if (view.composing) {
+        this.endSearch(); // a composition goes on in the box, the match kept (as `yield`)
+        return false;
+      }
+      const taken = this.searchKey(event);
+      if (event.key === 'Escape' && !event.repeat) this.escapeTaken = taken;
+      return taken;
+    }
     if (event.isComposing || view.composing) return false;
     if (suggesting(editor) && popupTakesKeys(editor)) return false; // an open list takes Enter and the arrows
     const plain = !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey;
@@ -387,6 +406,7 @@ export class EditorController {
     const taken = takePrefill(this.inputs.appSessionId);
     if (!taken) return;
     this.nav = { index: null, draft: null };
+    this.search = null;
     this.setDoc(prefillToDoc(taken), { silently: false, caret: 'end' });
     this.inputs.onPrefill?.(taken);
   }
@@ -414,6 +434,7 @@ export class EditorController {
     const editor = this.editor;
     const { appSessionId, sessionId, cwd, disabled } = this.inputs;
     if (!editor || disabled !== null || this.busy || submissions.has(appSessionId)) return;
+    this.endSearch(); // UX wave U4a M6: a send from a search (⌘Enter, the button) sends the match it shows
     // E9: what is on screen is what is sent (and what a refused send keeps): the interim words settle first
     this.endDictation('keep');
     const s = serializeDraft(editor.getJSON(), { sessionId, cwd });
@@ -580,7 +601,102 @@ export class EditorController {
     // The caret sits at the end of what is shown, where a recalled `/compact` would open the palette and take the next
     // arrow and Enter from the walk: a recall opens no popup.
     if (next.show) closeSuggestions(editor);
+    this.publishHistory();
     return next.show !== null || navigating;
+  }
+
+  // ---- UX wave U4a M6 (l3-input-12; decision 22): the history line and Ctrl+R's search --------------------------------
+
+  private publishHistory(): void {
+    const s = this.search;
+    if (s !== null) this.view.setHistory(searchLine(s.query, matchPlace(s.texts, s.query, s.at)));
+    else this.view.setHistory(this.nav.index !== null ? recallLine(this.nav.index, this.recalls.length) : null);
+  }
+
+  /** Ctrl+R (`composer.historySearch`): starts a search of the list ↑ walks, or, while searching, goes to an older match. */
+  searchHistory(): void {
+    const editor = this.editor;
+    if (!editor || this.inputs.disabled !== null || this.busy || submissions.has(this.inputs.appSessionId) || !editor.isEditable) return;
+    if (this.search !== null) return this.searchMove(1);
+    // A search begun while recalling starts from the recalled entry's place and puts back the draft the recall began from
+    const recalling = this.nav.index;
+    if (recalling === null) {
+      const transcript = useTranscriptStore.getState();
+      this.recalls = recallEntries(transcript.rows(this.inputs.appSessionId), transcript.activity(this.inputs.appSessionId), this.listed);
+    }
+    const draft = recalling === null ? editor.getJSON() : (this.nav.draft ?? emptyDoc());
+    this.nav = { index: null, draft: null };
+    this.search = { query: '', at: recalling === null ? null : this.recalls.length - 1 - recalling, texts: this.recalls.map(recallText).reverse(), draft };
+    closeSuggestions(editor);
+    this.publishHistory();
+  }
+
+  // One key while searching; whether the search took it (a `yield`ed key ends the search and goes to the editor).
+  private searchKey(event: KeyboardEvent): boolean {
+    const key = searchKeyOf(event);
+    const s = this.search!;
+    switch (key.kind) {
+      case 'older':
+      case 'newer':
+        this.searchMove(key.kind === 'older' ? 1 : -1);
+        return true;
+      case 'restore':
+        this.endSearch(s.draft);
+        return true;
+      case 'erase':
+        if (s.query === '') this.endSearch(s.draft);
+        else this.searchFor(s.query.slice(0, -1));
+        return true;
+      case 'take':
+        this.endSearch();
+        return true;
+      case 'yield':
+        this.endSearch();
+        return false;
+      case 'type':
+        this.searchFor(s.query + key.char);
+        return true;
+      case 'ignore':
+        return true;
+    }
+  }
+
+  // The next match older (+1) or newer (-1) than the one shown; with none, what is shown stays.
+  private searchMove(step: 1 | -1): void {
+    const s = this.search!;
+    const at = findMatch(s.texts, s.query, (s.at ?? -1) + step, step);
+    if (at !== null) this.showMatch(at);
+  }
+
+  // The typed text changed: the match is the first from the one shown, older, that holds it, else the newest that does;
+  // nothing typed shows the draft; with no match, what is shown stays and the line says so.
+  private searchFor(query: string): void {
+    const s = this.search!;
+    s.query = query;
+    if (query === '') {
+      s.at = null;
+      this.setDoc(s.draft, { silently: true, caret: 'end' });
+    } else {
+      const at = findMatch(s.texts, query, s.at ?? 0, 1) ?? findMatch(s.texts, query, 0, 1);
+      if (at !== null) return this.showMatch(at);
+    }
+    this.publishHistory();
+  }
+
+  private showMatch(at: number): void {
+    const s = this.search!;
+    s.at = at;
+    this.setDoc(recallDoc(this.recalls[this.recalls.length - 1 - at]), { silently: true, caret: 'end' });
+    if (this.editor) closeSuggestions(this.editor);
+    this.publishHistory();
+  }
+
+  // The search ends: the box keeps what it shows, or takes `restore` (the draft put back).
+  private endSearch(restore?: ComposerDoc): void {
+    if (this.search === null) return;
+    this.search = null;
+    if (restore) this.setDoc(restore, { silently: true, caret: 'end' });
+    this.publishHistory();
   }
 
   private pasteText(text: string): boolean {
@@ -873,6 +989,7 @@ export class EditorController {
         if (!current || this.busy || submissions.has(this.inputs.appSessionId) || !isEmptyDoc(current.getJSON())) return false;
         this.revision += 1; // supersedes a pending draft restore
         this.nav = { index: null, draft: null };
+        this.search = null;
         this.setDoc(doc, { silently: true, caret: 'end' });
         return true;
       },

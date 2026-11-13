@@ -95,7 +95,7 @@ describe('the project row', () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Choose a project' }));
     await user.type(within(menu()).getByPlaceholderText('Search projects'), 'elsewhere');
-    expect(rows()).toEqual(['Alphaalpha-two', 'New project', "Don't work in a project"]);
+    expect(rows()).toEqual(['Alphaelsewhere', 'New project', "Don't work in a project"]);
     await user.clear(within(menu()).getByPlaceholderText('Search projects'));
     await user.type(within(menu()).getByPlaceholderText('Search projects'), 'zzz');
     expect(within(menu()).getByText('No projects found')).toBeTruthy();
@@ -329,7 +329,7 @@ describe('the project row on another machine', () => {
     expect(screen.getByRole('button', { name: 'Project Alpha' })).toBeTruthy();
     expect(screen.getByLabelText('Branch main')).toBeTruthy();
     await userEvent.setup().click(screen.getByRole('button', { name: 'Project Alpha' }));
-    expect(rows()).toEqual(['beta', 'Alphaalpha✓', 'Alphaalpha-two', 'New project', "Don't work in a project"]);
+    expect(rows()).toEqual(['beta', 'Alphawork✓', 'Alphaelsewhere', 'New project', "Don't work in a project"]);
   });
 });
 

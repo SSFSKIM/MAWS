@@ -1,11 +1,12 @@
 // Paste and drop classification (C7 execution document, "Sizes and caps"): what a pasted text or a pasted, dropped or
-// picked file becomes. Text past 1,024 characters or 10 lines becomes a pasted atom (the terminal keeps inline paste
-// content up to 1,024 characters). A file is attached as bytes only when the API reads it: PNG, JPEG, GIF and WebP
+// picked file becomes. UX wave U4a (l3-input-09; decision 23): a pasted text stays text whatever its line count, and
+// only one past 20,000 characters becomes a pasted atom (the chip), which can be opened and turned into text. A file is attached as bytes only when the API reads it: PNG, JPEG, GIF and WebP
 // images and PDFs, within their caps; any other file with a path becomes a mention of that path (HEIC, BMP and TIFF
 // included: never bytes), and a file with no path (dragged from a browser) is read as text or refused. Pure.
 
-export const PASTE_INLINE_MAX_CHARS = 1024;
-export const PASTE_INLINE_MAX_LINES = 10;
+// The one number C1 (a 20,000-character paste on the owner's machines) may lower, if typing in the box does not stay
+// responsive with that much text in it; nothing else changes with it.
+export const PASTE_INLINE_MAX_CHARS = 20_000;
 export const IMAGE_BYTE_TYPES: ReadonlySet<string> = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 const MiB = 1024 * 1024;
 export const MAX_SOURCE_IMAGE_BYTES = 20 * MiB; // what `layout.pickFiles` reads as bytes; a larger source is not decoded
@@ -13,7 +14,7 @@ export const MAX_PDF_BYTES = 32 * MiB;
 export const MAX_TEXT_FILE_BYTES = MiB;
 
 export function classifyText(text: string): 'inline' | 'atom' {
-  return text.length > PASTE_INLINE_MAX_CHARS || text.split('\n').length > PASTE_INLINE_MAX_LINES ? 'atom' : 'inline';
+  return text.length > PASTE_INLINE_MAX_CHARS ? 'atom' : 'inline';
 }
 
 export type FileAction = { kind: 'image' } | { kind: 'pdf' } | { kind: 'mention'; path: string } | { kind: 'text' } | { kind: 'refused'; reason: string };

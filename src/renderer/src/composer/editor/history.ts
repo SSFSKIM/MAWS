@@ -3,7 +3,8 @@
 // back the draft the navigation started from; any edit ends navigation, the edited text becoming the draft. The
 // sources, newest first: this session's own human prompts from the transcript (a `peer` turn's opening message is not
 // the owner's), consecutive duplicates collapsed, then `session.history.list` entries not already among them (the same
-// display and the same bodies). Pure.
+// display and the same bodies). UX wave U4a M6 (l3-input-12): the line under the text while recalling or searching, and
+// the search's matching and keys. Pure.
 import type { HistoryEntry } from '@shared/composer/history-entry';
 import type { Prefill } from '../../stores/composer';
 import type { Row, TurnActivity } from '../../transcript';
@@ -82,3 +83,55 @@ export function recallEntries(rows: readonly Row[], activity: readonly TurnActiv
 }
 
 export const recallDoc = (recall: Recall): ComposerDoc => (recall.source === 'session' ? prefillToDoc(recall.prefill) : historyEntryToDoc(recall.entry));
+
+// ---- UX wave U4a M6 (l3-input-12; decision 22): the line under the text, and the search ----------------------------
+
+// While recalling, the entry's place in the list ↑ walks (`index` into it oldest first), 1 the most recent.
+export const recallLine = (index: number, count: number): string => `History ${count - index}/${count} · ↓ to restore your draft`;
+
+// The text a search reads in a recall: what the box shows for it, its placeholders included.
+export const recallText = (recall: Recall): string => (recall.source === 'session' ? recall.prefill.text : recall.entry.display);
+
+const holds = (text: string, query: string) => text.toLowerCase().includes(query.toLowerCase());
+
+// The first prompt from `from` in the direction `step` (+1 older, -1 newer, over `texts` newest first) that holds `query`
+// anywhere, case ignored; an empty query is held by every prompt.
+export function findMatch(texts: readonly string[], query: string, from: number, step: 1 | -1): number | null {
+  for (let i = from; i >= 0 && i < texts.length; i += step) if (holds(texts[i], query)) return i;
+  return null;
+}
+
+// How many prompts hold `query` and the place among them of the one shown (`at`), newest first; null when the one shown
+// does not hold it, or none is shown.
+export function matchPlace(texts: readonly string[], query: string, at: number | null): { place: number; total: number } | null {
+  if (at === null || !holds(texts[at] ?? '', query)) return null;
+  let place = 0;
+  let total = 0;
+  texts.forEach((text, i) => {
+    if (!holds(text, query)) return;
+    total += 1;
+    if (i <= at) place += 1;
+  });
+  return { place, total };
+}
+
+export const searchLine = (query: string, match: { place: number; total: number } | null): string =>
+  query === '' ? 'Search history:' : `Search history: ${query} — ${match ? `match ${match.place} of ${match.total}` : 'no match'}`;
+
+// What a key does while searching, as Claude Desktop's handler reads it (web/app/v1/c82492f2c-B1kvcJEb.js:16080-16210):
+// ↑ (and Ctrl+R, the dispatched chord) older, ↓ newer; Esc puts the draft back, as Backspace does on an empty search;
+// Enter, Tab, ←, →, Home and End take the match; a key of an input-method composition, a dead key, a paste and a cut
+// end the search with the match in the box and are the box's (`yield`); a printable key narrows; any other is held.
+export type SearchKey = { kind: 'older' | 'newer' | 'restore' | 'erase' | 'take' | 'yield' | 'ignore' } | { kind: 'type'; char: string };
+const TAKES = new Set(['Enter', 'Tab', 'ArrowLeft', 'ArrowRight', 'Home', 'End']);
+export function searchKeyOf(event: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'isComposing'>): SearchKey {
+  const { key } = event;
+  if (event.isComposing || key === 'Dead' || key === 'Process' || ((event.ctrlKey || event.metaKey) && !event.altKey && /^[vx]$/i.test(key))) return { kind: 'yield' };
+  if (key === 'ArrowUp') return { kind: 'older' };
+  if (key === 'ArrowDown') return { kind: 'newer' };
+  if (key === 'Escape') return { kind: 'restore' };
+  if (key === 'Backspace') return { kind: 'erase' };
+  if (TAKES.has(key)) return { kind: 'take' };
+  if (key.length === 1 && !event.metaKey && (!event.ctrlKey || event.altKey)) return { kind: 'type', char: key };
+  return { kind: 'ignore' };
+}

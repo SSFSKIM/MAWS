@@ -5,7 +5,8 @@
 // sends whatever the line count, Shift+Enter and ⌥Enter break the line (the action table's fixed rows), ⌘Enter
 // (`composer.queue`) sends with `when: 'after'`, which keeps the message for after a running turn; a composing IME key
 // never sends; ArrowUp on an empty editor (or while recalling) walks
-// history. Mount one Editor per session (key it by the session): its draft and history are that session's. What a
+// history. UX wave U4a M6 (l3-input-12): while recalling or searching, one muted line under the text says where
+// (`setHistory`), and Ctrl+R (`composer.historySearch`) searches the history ↑ walks. Mount one Editor per session (key it by the session): its draft and history are that session's. What a
 // submission does is the caller's (`onSubmit`); the default dispatches by mode (`submit.ts`). The frame around it, the
 // attachment strip and the submit control are the Composer's (M4), which drives the editor through its handle.
 import type { EditorView } from '@tiptap/pm/view';
@@ -91,6 +92,7 @@ export function Editor(props: EditorProps) {
   const [mode, setMode] = useState<Serialized['mode']>('send');
   const [commandEmpty, setCommandEmpty] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [historyLine, setHistory] = useState<string | null>(null); // UX wave U4a M6
   const [dragging, setDragging] = useState(0);
 
   const inputs: ControllerInputs = {
@@ -115,7 +117,7 @@ export function Editor(props: EditorProps) {
     uploadsTo: props.uploadsTo ?? null, // P5 O7 M4
     searchesFiles: props.searchesFiles ?? true, // P5 O7 M4 (fix wave 1)
   };
-  const [controller] = useState(() => new EditorController(client, props.drafts ?? ipcDrafts(client, appSessionId), { setMode, setCommandEmpty, setBusy }, inputs));
+  const [controller] = useState(() => new EditorController(client, props.drafts ?? ipcDrafts(client, appSessionId), { setMode, setCommandEmpty, setBusy, setHistory }, inputs));
   useLayoutEffect(() => controller.update(inputs));
 
   // Options that never change, so Tiptap's per-render comparison leaves the instance alone (a fresh extension list or
@@ -140,6 +142,7 @@ export function Editor(props: EditorProps) {
   }, [controller, editor, prefill]);
 
   useKeyChord('composer.queue', () => void controller.submit('after'), { within: rootRef }); // UX wave U4a: ⌘Enter
+  useKeyChord('composer.historySearch', () => controller.searchHistory(), { within: rootRef }); // UX wave U4a M6: Ctrl+R
   useImperativeHandle(props.handle, () => controller.handle(), [controller]);
 
   // W3 (C6): a widget the palette opens is the app's floating dialog (`WidgetDialog.tsx`), never in the box
@@ -168,6 +171,11 @@ export function Editor(props: EditorProps) {
         <ModeChrome appSessionId={appSessionId} mode={mode} empty={commandEmpty} />
         {/* W2 (C1, Codex's): the prose's size on a 20px line, growing to a quarter of the window before it scrolls */}
         <EditorContent editor={editor} className={`max-h-[25vh] overflow-y-auto text-prose leading-5 text-fg ${mode === 'bash' ? 'font-mono' : ''} ${PLACEHOLDER}`} />
+        {historyLine !== null && (
+          <p role="status" aria-label="Prompt history" className="m-0 truncate px-1 text-ui-sm text-fg-muted">
+            {historyLine}
+          </p>
+        )}
       </div>
     </>
   );

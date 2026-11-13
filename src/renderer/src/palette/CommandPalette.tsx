@@ -78,6 +78,7 @@ const UNAVAILABLE: Partial<Record<ActionId, string>> = {
   'composer.queue': 'Keyboard only, in the composer', // UX wave U4a
   'composer.send': 'Keyboard only, in the composer',
   'composer.cycleMode': 'Keyboard only, in the composer',
+  'composer.historySearch': 'Keyboard only, in the composer', // UX wave U4a M6
 };
 
 // Bound item registration and subscriptions; filtering still searches the complete index.

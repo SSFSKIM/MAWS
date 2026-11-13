@@ -1,8 +1,9 @@
 // The interactive extension set (C7 execution document, "Document model and serialisation"): the schema of
 // `schema.ts` with React node views for the two atoms, the placeholder, undo, the `@` and `/` suggestion triggers with
 // the terminal's own rules (`@` after a space, a newline or CJK punctuation; `/` at the start of a line only, so a `/`
-// mid-sentence is a character), the file handler for pasted and dropped files, and the text paste rule (past 1,024
-// characters or 10 lines a paste becomes an atom; below, the text goes in line for line). Keys are the editor's own view props (`keys.ts`), not an extension,
+// mid-sentence is a character), the file handler for pasted and dropped files, and the text paste rule (past 20,000
+// characters a paste becomes an atom, UX wave U4a's l3-input-09; below, the text goes in line for line whatever its line
+// count). Keys are the editor's own view props (`keys.ts`), not an extension,
 // so they run before any plugin's. The editor's live context reaches every callback through one getter.
 import { Extension, type AnyExtension, type Editor, type Range } from '@tiptap/core';
 import FileHandler from '@tiptap/extension-file-handler';
@@ -40,7 +41,7 @@ export function closeSuggestions(editor: Editor): void {
 
 const run = ({ editor, range, props }: { editor: Editor; range: Range; props: PopupItem }) => props.apply(editor, range);
 
-// The text paste rule: a long plain-text paste becomes a pasted atom; a short one goes in line for line, blank lines kept.
+// The text paste rule: a very long plain-text paste becomes a pasted atom; any other goes in line for line, blank lines kept.
 // The editor's own copied slice is ProseMirror's to paste (its chips come back with their attributes).
 const TextPaste = (env: () => EditorEnv) =>
   Extension.create({
