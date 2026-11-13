@@ -390,6 +390,22 @@ describe('tab strip reorders, closes, reopens', () => {
     await waitFor(() => expect(tabNames()).toEqual(['Charter + research']));
   });
 
+  it('"Close tabs to the right" on the first pinned tab keeps the pinned tab after it and closes the unpinned ones', async () => {
+    render(<Shell />);
+    openThree();
+    act(() => {
+      useLayout.getState().togglePinned(`session:${idOf('Charter + research')}`);
+      useLayout.getState().togglePinned(`session:${idOf('Fix sidebar drag')}`);
+      useLayout.getState().openSession(idOf('Settings idle probe'), { how: 'tab' });
+    });
+    expect(tabNames()).toEqual(['Charter + research', 'Fix sidebar drag', 'Quota reset recovery', 'Settings idle probe']);
+    fireEvent.contextMenu(tab('Charter + research'));
+    const menu = await screen.findByRole('menu');
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Close tabs to the right' }));
+    await waitFor(() => expect(tabNames()).toEqual(['Charter + research', 'Fix sidebar drag']));
+    expect(within(chrome()).getAllByRole('img', { name: 'Pinned' })).toHaveLength(2);
+  });
+
   // A10: forty tabs, nothing closed on the owner's behalf; ⌘9 is the ninth, the cycle walks all forty and wraps, the All
   // tabs menu lists every one, and "Close tabs to the right" on the third leaves three, the pinned ones among them.
   it('forty tabs: ⌘1…9 select the first nine, ⌃Tab walks all forty and wraps, Close tabs to the right on the third leaves three', async () => {
