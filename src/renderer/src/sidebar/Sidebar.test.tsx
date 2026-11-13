@@ -1529,6 +1529,20 @@ describe('listed rows from another machine', () => {
       expect(fork.getAttribute('title')).toBe('Only Studio’s owners can fork a session there.');
     });
 
+    // The architect's ruling (Decision Log, SessionRow's overflow takes mine): the hover overflow is drawn from the facts
+    // its menu reads, so a record row of another machine has it whether its acts are Rename… and Archive or Fork alone
+    it('draws the hover overflow on another machine’s record rows, yours and one whose only act is Fork', () => {
+      studioIs({ capabilities: [SESSION_ACTS_CAPABILITY], owner: true });
+      const yours = record(studio('b1'), { projectId: null, title: { text: 'Yours (record)', source: 'user' } });
+      const theirs = record(studio('b2'), { projectId: null, title: { text: 'Theirs (record)', source: 'user' } });
+      fill([listedOn('b1', { title: 'Yours' }), listedOn('b2', { title: 'Theirs', mine: false })], [here, yours, theirs]);
+      useSessions.setState({ listedMachines: new Set([OTHER_MACHINE]) });
+      expandAll();
+      render(<Sidebar />);
+      expect(within(row('Yours (record)')).getByRole('button', { name: 'Actions for Yours (record)' })).toBeTruthy();
+      expect(within(row('Theirs (record)')).getByRole('button', { name: 'Actions for Theirs (record)' })).toBeTruthy();
+    });
+
     it('leaves the row at once when this window archives it, and it stays gone', async () => {
       studioIs({ capabilities: [SESSION_ACTS_CAPABILITY], owner: true });
       fill([listedOn('b1', { title: 'Studio build' }), listedOn('b2', { title: 'Studio chores' })]);

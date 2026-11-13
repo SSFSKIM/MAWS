@@ -115,21 +115,23 @@ const DECLARED = new Set(Object.keys(REMOTE_UNAVAILABLE));
 const readsHelper = (path: string, source: string) =>
   /from '[^']*lane-b\/remote-unavailable'/.test(source) || (path.startsWith('lane-b/') && /from '\.\/remote-unavailable'/.test(source));
 
-const modules = sources(RENDERER).map((file) => {
-  const path = relative(RENDERER, file);
-  const source = readFileSync(file, 'utf8');
-  return { path, source, named: [...new Set(literalsOf(source).filter((text) => DECLARED.has(text)))].sort() };
-});
+type Module = { path: string; source: string; named: string[] };
+const moduleOf = (path: string, source: string): Module => ({ path, source, named: [...new Set(literalsOf(source).filter((text) => DECLARED.has(text)))].sort() });
+const modules = sources(RENDERER).map((file) => moduleOf(relative(RENDERER, file), readFileSync(file, 'utf8')));
+
+/** Each module that names a declared command without reading the helper or an entry that covers it, as a sentence. */
+function unguardedIn(list: readonly Module[], declared: Readonly<Record<string, Entry>>): string[] {
+  return list.flatMap(({ path, source, named }) => {
+    if (named.length === 0 || path === HELPER || readsHelper(path, source)) return [];
+    const entry = declared[path];
+    const missing = named.filter((command) => !entry?.commands.includes(command));
+    return missing.length === 0 ? [] : [`${path}: issues ${missing.join(', ')} without the helper (lane-b/remote-unavailable.ts) or an entry in GUARDED_ELSEWHERE`];
+  });
+}
 
 describe('every renderer module that issues a declared command', () => {
   it('reads the window’s helper, or is declared with the guard it relies on', () => {
-    const unguarded = modules.flatMap(({ path, source, named }) => {
-      if (named.length === 0 || path === HELPER || readsHelper(path, source)) return [];
-      const entry = GUARDED_ELSEWHERE[path];
-      const missing = named.filter((command) => !entry?.commands.includes(command));
-      return missing.length === 0 ? [] : [`${path}: issues ${missing.join(', ')} without the helper (lane-b/remote-unavailable.ts) or an entry in GUARDED_ELSEWHERE`];
-    });
-    expect(unguarded).toEqual([]);
+    expect(unguardedIn(modules, GUARDED_ELSEWHERE)).toEqual([]);
   });
 
   it('declares nothing the code no longer needs', () => {
@@ -152,5 +154,41 @@ describe('the window’s helper', () => {
     const helper = modules.find((m) => m.path === HELPER)!;
     expect(helper.source).not.toMatch(/ACTS_UNTIL_M4/);
     expect(helper.source).toMatch(/disabledWords\(/);
+  });
+});
+
+// Review (M4): the rule holds a module to the helper in every form a command or an import is written, so a fixture in each
+// form the rule once missed is rejected, and only a real import of the helper exempts a module
+describe('the rule itself', () => {
+  const FIXTURE = 'sessions/fixture.ts';
+  const rejects = (source: string, path = FIXTURE) => expect(unguardedIn([moduleOf(path, source)], {})).toEqual([`${path}: issues session.stop without the helper (lane-b/remote-unavailable.ts) or an entry in GUARDED_ELSEWHERE`]);
+  const accepts = (source: string, path = FIXTURE) => expect(unguardedIn([moduleOf(path, source)], {})).toEqual([]);
+
+  it('rejects a command named in a quoted string or a template literal', () => {
+    rejects("void ipc.invoke('session.stop', { appSessionId });");
+    rejects('void ipc.invoke("session.stop", { appSessionId });');
+    rejects('void ipc.invoke(`session.stop`, { appSessionId });');
+    rejects('void ipc.invoke(`session.stop`, { appSessionId, note: `${why}` });');
+  });
+
+  it('takes no command named only in a comment', () => {
+    accepts("// void ipc.invoke('session.stop')\n/* ipc.invoke(`session.stop`) */\nexport const x = 1;");
+  });
+
+  it('rejects a module whose helper import is commented out or brings types alone', () => {
+    rejects("// import { useRemoteUnavailable } from '../lane-b/remote-unavailable';\nvoid ipc.invoke('session.stop', {});");
+    rejects("/* import { useRemoteUnavailable } from '../lane-b/remote-unavailable'; */\nvoid ipc.invoke('session.stop', {});");
+    rejects("const note = \"import { useRemoteUnavailable } from '../lane-b/remote-unavailable'\";\nvoid ipc.invoke('session.stop', {});");
+    rejects("import type { RemoteStanding } from '../lane-b/remote-unavailable';\nvoid ipc.invoke('session.stop', {});");
+  });
+
+  it('rejects an import of another module of the same name', () => {
+    rejects("import { useRemoteUnavailable } from './remote-unavailable';\nvoid ipc.invoke('session.stop', {});");
+  });
+
+  it('accepts a module that imports the helper', () => {
+    accepts("import { useRemoteUnavailable } from '../lane-b/remote-unavailable';\nvoid ipc.invoke('session.stop', {});");
+    accepts("import { useRemoteUnavailable } from './remote-unavailable';\nvoid ipc.invoke('session.stop', {});", 'lane-b/fixture.ts');
+    accepts("import {\n  useRemoteUnavailable,\n} from '../../lane-b/remote-unavailable';\nvoid ipc.invoke('session.stop', {});", 'tools/maws/fixture.ts');
   });
 });

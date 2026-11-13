@@ -9,6 +9,7 @@ import { fakeClient, type FakeClient } from '../../../../test/support/fake-clien
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { addressOf } from '@shared/machine/address';
 import { REMOTE_UNAVAILABLE, SESSION_ACTS_CAPABILITY } from '@shared/ipc/remote-unavailable';
+import { REMOTE_ACT_PENDING_MS } from '@shared/machine/remote-pending';
 import type { MachineState } from '@shared/ipc/schema/machines';
 import type { OrgKey } from '@shared/machine/org-key';
 import { useLayout } from '../stores/layout';
@@ -499,6 +500,62 @@ describe('dialogs', () => {
       await act(() => fake.fail('session.archive', 'Not archived: only the session’s owners can', 'internal', { refusal: 'grade' }));
       expect(await within(dialog).findByText('Not archived: only the session’s owners can')).toBeTruthy();
       expect(useSessions.getState().listed.has(THERE)).toBe(true);
+    });
+
+    it('words a typed refusal the machine answered as the act not done', async () => {
+      withMain({ 'session.archive': () => ({ status: 'held', holder: { kind: 'terminal', pid: 4 } }) });
+      render(<SessionDialogs />);
+      act(() => openDialog({ kind: 'archive', appSessionId: THERE }));
+      const dialog = await screen.findByRole('dialog', { name: 'Archive “Listed over there”?' });
+      await userEvent.keyboard('{Enter}');
+      expect(await within(dialog).findByText('Not archived: held by terminal · 4; archive it where it runs')).toBeTruthy();
+      expect(useSessions.getState().listed.has(THERE)).toBe(true);
+    });
+
+    // Review (M4): a sheet opened while the machine is up reads the helper, so a link that goes reconnecting or offline
+    // while it is open greys its submit with the helper's sentence, and Enter sends nothing
+    const studioDown = (since: number) =>
+      useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'Studio', local: false, state: 'down', since: new Date(since).toISOString(), generation: 1, carrier: 'relay', capabilities: [SESSION_ACTS_CAPABILITY], owner: true }]);
+    const studioUp = () =>
+      useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'Studio', local: false, state: 'up', since: new Date().toISOString(), generation: 2, carrier: 'relay', capabilities: [SESSION_ACTS_CAPABILITY], owner: true }]);
+
+    it('greys Rename once the link goes reconnecting, then offline, after the sheet opened, and sends nothing', async () => {
+      withMain({ 'session.rename': () => ({ record: record(BARE_IDLE1, { title: { text: 'Renamed from here', source: 'user' } }), via: 'override' }) });
+      render(<SessionDialogs />);
+      act(() => openDialog({ kind: 'rename', appSessionId: THERE }));
+      const dialog = await screen.findByRole('dialog', { name: 'Rename' });
+      const field = within(dialog).getByRole('textbox', { name: 'Title' });
+      await userEvent.clear(field);
+      await userEvent.type(field, 'Renamed from here');
+      const submit = within(dialog).getByRole('button', { name: 'Rename' });
+      expect(submit).toHaveProperty('disabled', false);
+      act(() => studioDown(Date.now()));
+      expect(await within(dialog).findByText('Reconnecting to Studio…')).toBeTruthy();
+      expect(submit).toHaveProperty('disabled', true);
+      act(() => studioDown(Date.now() - REMOTE_ACT_PENDING_MS - 1_000));
+      expect(await within(dialog).findByText('Rename is unavailable while Studio is offline.')).toBeTruthy();
+      await userEvent.type(field, '{Enter}');
+      expect(fake.invoked('session.rename')).toEqual([]);
+      act(() => studioUp());
+      await waitFor(() => expect(submit).toHaveProperty('disabled', false));
+      expect(within(dialog).queryByText('Rename is unavailable while Studio is offline.')).toBeNull();
+    });
+
+    it('greys Archive once the link goes offline after the sheet opened, and sends nothing', async () => {
+      withMain({ 'session.archive': () => ({ archived: true }) });
+      render(<SessionDialogs />);
+      act(() => openDialog({ kind: 'archive', appSessionId: THERE }));
+      const dialog = await screen.findByRole('dialog', { name: 'Archive “Listed over there”?' });
+      const submit = within(dialog).getByRole('button', { name: 'Archive' });
+      expect(submit).toHaveProperty('disabled', false);
+      act(() => studioDown(Date.now() - REMOTE_ACT_PENDING_MS - 1_000));
+      expect(await within(dialog).findByText('Archive is unavailable while Studio is offline.')).toBeTruthy();
+      expect(submit).toHaveProperty('disabled', true);
+      await userEvent.keyboard('{Enter}');
+      expect(fake.invoked('session.archive')).toEqual([]);
+      act(() => studioDown(Date.now()));
+      expect(await within(dialog).findByText('Reconnecting to Studio…')).toBeTruthy();
+      expect(submit).toHaveProperty('disabled', true);
     });
   });
 
