@@ -373,6 +373,25 @@ describe('hidden store: the connection', () => {
     }
   });
 
+  // The architect's ruling of 2026-11-13 on the review's finding 3: before a bridge's first snapshot main leaves the
+  // digest's `foreign` seed, so the transcript decides and an entry is never armed from the bridge's empty fold
+  it('a working terminal session hidden before its bridge’s first snapshot is not armed, stays hidden through that turn, and returns at the next', async () => {
+    setRecords(record(A, { holder: { kind: 'terminal', pid: 7 } }));
+    setDigests(digest(A, { phase: 'foreign', lastTurnEndedAt: iso(T0 - 30_000) })); // the seed: its newest record, half a minute old
+    const { store } = await connected();
+    store.getState().hide(A);
+    expect(store.getState().hidden.get(A)).toEqual({ at: iso(T0), armedAt: null });
+    clock = T0 + MIN;
+    setDigests(digest(A, { phase: 'working', lastTurnEndedAt: iso(T0 - 30_000) })); // the first snapshot: the same turn
+    expect(store.getState().hidden.get(A)).toEqual({ at: iso(T0), armedAt: null });
+    clock = T0 + 2 * MIN;
+    setDigests(digest(A, { phase: 'idle', lastTurnEndedAt: iso(T0 - 30_000) }));
+    expect(store.getState().hidden.get(A)).toEqual({ at: iso(T0), armedAt: iso(T0 + 2 * MIN) });
+    clock = T0 + 3 * MIN;
+    setDigests(digest(A, { phase: 'working', lastTurnEndedAt: iso(T0 - 30_000) }));
+    expect(store.getState().hidden.has(A)).toBe(false);
+  });
+
   it('a listing: hidden at rest, it returns when its listing says busy', async () => {
     setListed(listing('b1', 'idle'));
     const { store } = await connected();

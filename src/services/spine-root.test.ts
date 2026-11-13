@@ -22,6 +22,7 @@ import { item } from '../../test/support/builders';
 import { summary, tempDir } from '../../test/support/index-fixture';
 import { GitService } from './git/service';
 import { Index } from './index/index';
+import { IndexSessionSource } from './index/source';
 import { ScmService } from './scm/service';
 import { openSpineData, startSpine, type SpineData, type SpineRoot } from './spine-root';
 import { takeSpineLock } from './settings/spine-lock';
@@ -292,6 +293,60 @@ describe('the spine and the checkouts composed under plain Node', () => {
     const digests = await bus.invoke('session.digests', undefined);
     if (!digests.ok) throw new Error(digests.error.message);
     expect(digests.value.digests.find((d) => d.appSessionId === appSessionId)).toMatchObject({ phase: 'waiting', pendingRequests: 1 });
+  });
+
+  // UX wave U7 (the architect's ruling of 2026-11-13 on the M3 review's finding 3): a bridge's phase reaches the digest only
+  // from a current snapshot. A live bridge's view before its first snapshot is an empty fold, which would read idle.
+  describe('a bridged digest from current snapshots only', () => {
+    const terminalSession = async (engineSessionId: string) => {
+      const seeded = new Index(join(profile, 'index.sqlite'));
+      const appSessionId = seeded.sessions.upsertFromSummary(summary({ sessionId: engineSessionId as SessionId })).record.appId;
+      seeded.sessions.setHolder(engineSessionId as SessionId, { kind: 'terminal', pid: 4242 });
+      seeded.close();
+      return appSessionId;
+    };
+    const digestOf = async (bus: FakeBus, appSessionId: AppSessionId) => {
+      const digests = await bus.invoke('session.digests', undefined);
+      if (!digests.ok) throw new Error(digests.error.message);
+      return digests.value.digests.find((d) => d.appSessionId === appSessionId);
+    };
+
+    it('before its first snapshot a live bridge leaves the digest as it was; the first snapshot sets the phase', async () => {
+      const engineSessionId = '0e5b1c0d-0000-4000-8000-0000000000a2';
+      const appSessionId = await terminalSession(engineSessionId);
+      const bridge = await startFakeBridge({ home: sminos, session: engineSessionId });
+      bridges.push(bridge);
+      bridge.emit({ type: 'turn', phase: 'start', turnId: 'turn-1', agentId: null }); // mid-turn when MAWS finds it
+      const bridged = vi.spyOn(IndexSessionSource.prototype, 'setBridged');
+      const bus = fakeBus();
+      compose(await openSpineData(profile, { build: BUILD }), new FakeSpineHost(), bus);
+
+      await expect.poll(async () => (await digestOf(bus, appSessionId))?.phase, { timeout: 5000 }).toBe('working');
+      const told = bridged.mock.calls.filter(([id]) => id === appSessionId).map(([, phase]) => phase?.running ?? null);
+      expect(told[0]).toBe(true); // never the empty fold's idle first
+      expect(told).not.toContain(false);
+    });
+
+    it('inside a reconnect the digest keeps the last snapshot’s phase and pending count; a bridge that leaves `live` clears it', async () => {
+      const engineSessionId = '0e5b1c0d-0000-4000-8000-0000000000a3';
+      const appSessionId = await terminalSession(engineSessionId);
+      const bridge = await startFakeBridge({ home: sminos, session: engineSessionId });
+      bridges.push(bridge);
+      const bus = fakeBus();
+      compose(await openSpineData(profile, { build: BUILD }), new FakeSpineHost(), bus);
+      await expect.poll(() => bridge.subscribers(), { timeout: 5000 }).toBe(1);
+      bridge.raise({ request: 'req-1', tool: 'Bash', input: { command: 'ls' } });
+      await expect.poll(async () => digestOf(bus, appSessionId), { timeout: 5000 }).toMatchObject({ phase: 'waiting', pendingRequests: 1 });
+
+      bridge.reset(); // the stream ends; the driver resubscribes after its backoff (0.5 s at first)
+      await expect.poll(() => bridge.subscribers(), { timeout: 5000 }).toBe(0);
+      expect(await digestOf(bus, appSessionId)).toMatchObject({ phase: 'waiting', pendingRequests: 1 });
+
+      await bridge.close(); // the socket goes: the next probe finds no bridge
+      bridges.splice(bridges.indexOf(bridge), 1);
+      await expect.poll(async () => (await digestOf(bus, appSessionId))?.phase, { timeout: 5000 }).toBe('foreign');
+      expect(await digestOf(bus, appSessionId)).toMatchObject({ pendingRequests: 0 });
+    });
   });
 
   // P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, acceptance 1 and 7): the checkouts answer from
