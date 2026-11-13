@@ -2,7 +2,7 @@
 
 > **Parent:** `docs/doperpowers/specs/2026-11-12-ux-wave-design.md` (the UX wave's composite spec, its root), child **U11**, first landing (**U11a**), parent pin `e0df32e3f` (branch `ux-wave-spec`).
 > **The design** is the child's file, `docs/doperpowers/specs/2026-11-12-ux-wave/U11-settings-connectors-org.md`: its ten items that have a design section (l8-settings-01, l8-settings-04, l8-settings-03, l8-settings-06, #540, #523, #505, #456, S-09, S-10), acceptance A1 to A15, "Probes and checks" and "Rulings reversed". In the root: Purpose, the wave's laws, UC-1, UC-6, UC-7, UC-8, UC-10, UC-11, UC-12, UC-14 and "Ordering and dependency map". Where the child's file and the root differ, the root binds.
-> This document holds what the design does not: the landing's edge, what the code says today, the decisions the section left open, and the execution. Twelve points where the code contradicts the section, or where a decision would change what the owner sees beyond the section's words, are reported to the wave's architect ("Reported to the architect"); each has a default this document builds, written so that a ruling changes one named place. **Branch:** `ux-wave/U11a`, from master `48619c824`; master is merged in before anything is built (Concrete Steps, 1). **Board:** #583 (the wave's epic is #573).
+> This document holds what the design does not: the landing's edge, what the code says today, the decisions the section left open, and the execution. Twelve points where the code contradicts the section, or where a decision would change what the owner sees beyond the section's words, were reported to the wave's architect and are ruled ("Reported to the architect, and ruled"). The document was revised once on those rulings, on the adversarial review's findings and on what the drawn Settings page showed (Decision Log). Where the child's file at the pin and a ruling differ, the ruling is the later word; the architect writes it into the spec's files. **Branch:** `ux-wave/U11a`, from master `48619c824`; master is merged in before anything is built (Concrete Steps, 1). **Board:** #583 (the wave's epic is #573).
 
 ## Purpose
 
@@ -10,7 +10,7 @@ After this landing four smaller surfaces stop getting in the way.
 
 A connector that says "Sign in needed" can be signed in from the chat that uses it, whichever kind it is: one a configuration file names (as today), one a plugin brings, or one added under Settings › Sessions › MCP servers. The dialog that lists a chat's connectors is called Connectors, shows one line per connector, and says once what its switch reaches. A new chat shows its plugins, connectors and skills before the first message.
 
-Settings opens on everyday preferences; its Engine section is split into Sessions, Engine and Background; every row reads in one line with the rest behind "More"; and "Search settings" finds a row by its words.
+Settings opens on everyday preferences; its Engine section is split into Sessions, Engine and Supervisor; a row's note is one line, with the rest behind "More"; and "Search settings" finds a row by its words.
 
 On the Org pages every refusal says what to do next or who can act, every sheet dims the window by the same amount, and the project Channel says "Offline · retrying" when it is, lines up under classic scrollbars, cuts names in one order, and opens from the command palette and the View menu.
 
@@ -18,31 +18,33 @@ How to see it working: the unit tests named under each milestone fail before its
 
 ## Progress
 
-- [x] (2026-11-12) Execution document written; the ten sections checked against the code at `48619c824` and against build F (`f1852de3a`); twelve points reported to the wave's architect.
-- [ ] The architect's rulings on the twelve points folded in (Decision Log).
-- [ ] Adversarial review of this document; its findings folded in.
+- [x] (2026-11-12) Execution document written; the ten sections checked against the code at `48619c824` and against build F (`f1852de3a`); twelve points reported to the wave's architect (`6bf2b00ce`).
+- [x] (2026-11-12) The drawn example of the regrouped Settings built and measured by the architect; its findings decided.
+- [x] (2026-11-12) Adversarial review of the document: needs-attention, three findings, all accepted.
+- [x] (2026-11-12) One revision: the architect's rulings on the twelve points, the review's three findings and its note on rows made at run time, and the decisions on the drawing's findings, folded in (Decision Log).
+- [ ] The owner's look at the drawn page: three answers (the order, Org's heading, the section's name). It blocks M9 and M10 and nothing else.
 - [ ] Master merged into the branch; U6a on master confirmed (Concrete Steps, 1).
 - [ ] M1 — the sign-in probe's two questions written; handed to the architect for the gate job on the mini.
 - [ ] M2 — Org sheets: refusals that name a next step; the grant sheet's read; the paused live query.
-- [ ] M3 — one scrim; the Channel's gutter and names.
-- [ ] M4 — the Channel says it is offline.
+- [ ] M3 — one scrim, also where dialogs stack; the Channel's gutter and names.
+- [ ] M4 — the Channel says it is offline, or refused.
 - [ ] M5 — the Channel from the palette and the View menu.
 - [ ] M6 — the Connectors dialog.
 - [ ] M7 — Plugins, Connectors and Skills before the first message.
 - [ ] M8 — Sign in for a dynamic connector (starts after M1's verdict).
-- [ ] M9 — Settings regrouped, its notes on one line (starts after the owner's look).
+- [ ] M9 — Settings regrouped, a note on one line (starts after the owner's look).
 - [ ] M10 — Search settings.
-- [ ] M11 — the record, the whole checks, the hand-back.
+- [ ] M11 — the record, master merged again and the wire's files made again, the whole checks, the hand-back.
 - [ ] The architect's: the e2e runs, class 1a, the xhigh panel, the pull request.
 
 ## The landing's edge
 
-One pull request holds the ten items. They are independent of each other, each is small, and together they are about 105 files and 6,400 changed lines, inside what the wave's panels already hold (U8b: 115 files, 9,000 lines). Splitting by surface was weighed and lost. Only two things can hold part of the landing back, the owner's look (M9, M10) and the mini's probe (M8), and the order of the milestones answers both: what waits on nobody is built first, and the cut below is there if a wait is long. A second pull request would cost its own gate, panel and board ticket for nothing else.
+One pull request holds the ten items. They are independent of each other, each is small, and together they are about 112 files and 7,000 changed lines, inside what the wave's panels already hold (U8b: 115 files, 9,000 lines). Splitting by surface was weighed and lost. Only two things can hold part of the landing back, the owner's look (M9, M10) and the mini's probe (M8), and the order of the milestones answers both: what waits on nobody is built first, and the cut below is there if a wait is long. A second pull request would cost its own gate, panel and board ticket for nothing else.
 
 | part of U11 | in this landing | left, and to what |
 |---|---|---|
 | l8-settings-01, a session MAWS runs on this Mac; Customize's row for MAWS's own list | in full (A1 for this Mac, A2) | — |
-| l8-settings-01, a session MAWS runs on another machine | Sign in on a dynamic connector is drawn disabled with one sentence (Interfaces §A, "The route to another machine") | **U11b**, after U9 has landed: the offer row, the name in the adapter's machine acts and consent commands, the capability with its `REMOTE_NEEDS` entry and RL2 minor, the act's words, the entry removed from `REMOTE_UNAVAILABLE`, and the tests U9's document lists (its Interfaces 2). U9 reviews it. A1's clause "and for a session MAWS runs on another machine" is proved there. |
+| l8-settings-01, a session MAWS runs on another machine | Sign in on a dynamic connector is drawn disabled with one sentence (Interfaces §A, "The route to another machine") | **U11f**, after U9 has landed (the names U11b to U11e are taken by the landings of the owner's answered items): the offer row, the name in the adapter's machine acts and consent commands, the capability with its `REMOTE_NEEDS` entry and RL2 minor, the act's words, the entry removed from `REMOTE_UNAVAILABLE`, and the tests U9's document lists (its Interfaces 2). U9 reviews it. A1's clause "and for a session MAWS runs on another machine" is proved there. |
 | l8-settings-04, "After, now" | in full (A3) | "After, once the #476 probe has answered": its own design |
 | l8-settings-03, "After, now" | in full (A4) | "After, once #476 is designed" |
 | l8-settings-06 | in full (A5, A6, A7), as a tab until U7's dialog lands | U7's Usage section and its dialog |
@@ -51,13 +53,13 @@ One pull request holds the ten items. They are independent of each other, each i
 | "Rulings reversed": the five entries | amended in the documents that hold them (M11) | — |
 | "Waiting": O-14, X-184, l8-settings-05, l8-settings-07, l8-settings-11, #455, #476, l8-settings-12, #342 | nothing | later landings of U11, the visual renewal |
 
-**A cut the architect may take.** The milestones that wait on nobody come first, and each leaves the tree green. If the mini's probe (P1) or the owner's look (P5) is late, M2 to M7 with the amendments of #505, S-09 and l8-settings-04 are a pull request by themselves, and M8 to M10 follow as a second from the same branch. Nothing in this document changes for that but M11's list.
+**A cut the architect may take.** The milestones that wait on nobody come first, and each leaves the tree green. If the mini's probe (P1) or the owner's look (P5) is late, M2 to M7 with the amendments of #505, S-09 and l8-settings-04 are a pull request by themselves, and M8 to M10 follow as a second from the same branch. The results of P2, P3 and P4 travel with the first, which holds the milestones they decide. Nothing in this document changes for that but M11's list.
 
 **Where the owner's four answers of 2026-11-12 find their place.** They are built by a later landing; this landing leaves the place.
 
 - *Customize's outer level becomes My items / Discover.* Settings names no kind of Customize item: its index ends in one link, "Customize ›", and the search has one result for it with the kinds as other words. The link opens Customize where Customize opens by default, so the later landing changes no word in Settings.
 - *A switch for fetching connector icons, starting on.* It is an App preference about how items are drawn: a row "Connector icons" at the end of **Appearance**, with what the fetch tells Google behind its More. The row table (Interfaces §G) takes a row whose value is not in a settings file, which this one needs: by UC-14 it is stored under a layout key of its own.
-- *"Make this the default" writes the Claude Code user settings.* If that landing adds rows for the default model and mode, their place is **Engine**, after Config home, not Sessions: the line under Sessions' heading says "your Claude Code settings files are not changed", and it stays true only if those rows sit elsewhere. The child's file says a waiting item's rows "join Sessions"; that sentence is the later design's to settle (reported, point 12). The index's footer stays as it is here.
+- *"Make this the default" writes the Claude Code user settings.* If that landing adds rows for the default model and mode, they sit under **Engine**, after Config home (ruled, point 12): the line under Sessions' heading says "your Claude Code settings files are not changed", and it stays true only if those rows sit elsewhere. Nothing is built for it here, and the index's footer stays as it is.
 - *An administrator reads another machine's connector list without Touch ID.* No row of Settings is involved. The `machine-admin` line this landing writes (#540) names no Touch ID and stays true.
 
 ## Words used here
@@ -68,7 +70,9 @@ One pull request holds the ten items. They are independent of each other, each i
 - **The services:** `src/services/`, the part of the machine's daemon (`mawsd`) that runs a sign-in. **The endpoint** (`src/endpoint/`) is the door of that daemon to other machines; its **offer table** (`OFFERS` in `src/endpoint/offers.ts`) lists the acts it accepts over the machine link.
 - **The wire:** the commands and events between the app and the machine's daemon and engine host. `src/shared/ipc/wire-manifest.json` records it; a change within a major must be additive and moves `WIRE_MINOR` (`src/shared/ipc/wire.ts`).
 - **A note** is the muted sentence under a Settings row's control. **A state line** is a line that reports a condition the person must act on (a supervisor waiting on an older version, a helper not found, a permission off); it is not a note and is never cut.
-- **Reach** (S-09): whether the channel's own connection to the hub is being tried or has failed, said while the channel is not live.
+- **Reach** (S-09): whether the channel's own connection to the hub is being tried or has failed, said while the channel is not live. **A refusal** is the hub ending the channel's socket for good; the channel then waits and retries nothing.
+- **A configuration's revision:** an opaque string the engine host makes for one configuration of a server (its name, transport and address), so that two can be told apart without the address being shown (§A).
+- **A modal layer:** a sheet or a dialog that takes the window while it is open. Its **backdrop** is the full-window element under it that dims what is behind (the scrim). Layers *stack* when one opens over another.
 
 ## What the code says today, beyond the section
 
@@ -80,6 +84,7 @@ Checked at `48619c824`; build F is an ancestor and none of the files named here 
 - Every reader of an event drops one that does not validate and logs a line, at head and at F alike: `src/shared/host/host-supervisor.ts` ("dropped … invalid"), `src/main/machines/socket-link.ts`, `src/main/lane-b/remote-artifact-feed.ts` ("doesn't read; left out").
 - The renderer never holds a configured server's address: `CustomizationServerSchema` carries name, scope, path and transport, and the address stays in main and the engine host because it may carry a token (`src/shared/ipc/schema/customization.ts`). The renderer binds a sign-in's events by the operation id of its receipt, never by name (`customize/connectors/sign-in.ts`).
 - `signInSessionOf` (`customize/connectors/present.ts`) answers null for scope `app`, and a ready session's status in the sessions store lists its servers by name and status only.
+- The fingerprint a Customize row holds for its configuration is main's own (`configurationFingerprint` in `src/main/catalog/postures.ts`, an HMAC under a key that lives as long as main). It decides which row shows a finished result (`resultFor`) and never reaches the operation, which runs in another process and could not check it.
 - The spike that proved the engine's sign-in (`spikes/p4-aggregator/m4-signin-spike.mjs`, run from `e2e/discover-connectors.spec.ts` under `MAWS_SIGNIN_SPIKE=1`) asked its questions of servers added with `claude mcp add --scope user`; none completed a return for a `--mcp-config` server or a plugin's.
 
 **l8-settings-04.**
@@ -102,7 +107,11 @@ Checked at `48619c824`; build F is an ancestor and none of the files named here 
 - The stored tab's `section` is a closed list of ten names in `src/shared/ipc/schema/layout.ts`, the same at F. `SettingsSection` is derived from it today.
 - Nothing opens Settings at the supervisor's rows. The callers that name a section are `settings.open` with a number (`SETTINGS_SECTIONS` in `gateway/actions.ts`: engine, gateway, keyboard, appearance, notifications; one caller, the engine notice, asks for engine) and two callers in the browser's chrome that ask for `browser`.
 - The supervisor's rows are a `role="group"` named by an `h4`, "Background supervisor", which also takes the keyboard when a pressed control leaves (`SupervisorSettings.tsx`); `e2e/supervisor.spec.ts` finds the rows by that group's name.
-- The body is at most 760 px wide and a row's note sits in its second column, 580 px wide at that width, in 12 px type: about 90 characters with a More button at its end. The default window (1280 px, sidebar 240 px, no side surface) and U7's dialog (960 px) both give the body its 760 px.
+- The body is at most 760 px wide and a row's note sits in its second column, 580 px wide at that width, in 12 px type. The default window with no side surface gives the body its 760 px. Measured on the drawn page: a More button and its gap take 48 px and make the note 22 px high where a plain line is 18.
+- One container, the whole view, decides at 32rem both that the index becomes a row of links and that every row stacks (`@container/settings` in `SettingsView.tsx`, `SETTING_ROW` in `parts.tsx`). A view about 520 px wide, a 50/50 split with no side surface, is above it: the index stays a column and a note is left about 150 px beside its label.
+- The index has no scroll of its own; its grid row grows with it. Today's index needs 523 px.
+- `BrowserImport.tsx` draws a `Setting` per imported Chrome profile and one per extension of each: rows that exist only at run time.
+- Direct login's note carries, beside its sentence, the instruction to run `claude /login` and a Copy button (`GatewaySection.tsx`).
 - The Voice shortcut is unbound by default, and a test pins that the row then points at the microphone.
 - `delivery/copy.ts` (U12's) is the one piece of copy outside Settings that names a moved row.
 - The cross-build scene of both settings files (U13a's M5) changes the theme and the supervisor's idle time through this build's Settings.
@@ -119,6 +128,7 @@ Checked at `48619c824`; build F is an ancestor and none of the files named here 
 **#523.**
 - Ten overlays dim a window today. The item's seven: `Sheet`, `sidebar/AddProject.tsx` (already `bg-bg-active`), and the five. Three of the five (`WidgetDialog.tsx`, `InlineEdit.tsx`, `resume/host.tsx`) put `opacity-60` on the element, so the class cannot be swapped alone. Not named: the document editor's delete-tab confirm (`.doc-confirm-overlay` in `src/artifacts/document/editor/chrome.css`, U10's, plain CSS), and two dismiss backdrops that are not dialogs (`app/Shell.tsx`, `panel/PanelRegion.tsx`). The command palette is a modal with no overlay.
 - `keymap/KeyboardShortcuts.tsx` is U6's by UC-8 and the child's list of insertions does not name it.
+- Layers stack today: the Plugins dialog keeps its backdrop while a confirmation opens over it as a `Sheet` with a backdrop of its own (`composer/WidgetDialog.tsx`, `widgets/plugins/ConfirmSheet.tsx`; `e2e/widgets.spec.ts` drives that pair).
 - `REFUSALS['not-supported']` is also the words of main's refusal of a save, so the new sentence shows there too.
 
 **#456.** `LiveQuery.tsx` and `live.ts` are under `src/artifacts/`, which the root's UC-8 gives to U10 (the child's file says no child owns the folder). Hiding Allow needs to tell the not-offered pause from `failed` and `watchLimit`, where Allow stays, so `live.ts` exports two names, not one.
@@ -134,7 +144,7 @@ Checked at `48619c824`; build F is an ancestor and none of the files named here 
 - The open awaits the cache and nothing of the hub; the unit case that pins it resolves the attestations at once, so it does not pin an answer while they hang.
 - `asOf` is null until the channel first catches up and is kept in the cache: "never read on this Mac" is an open channel with no entries and `asOf` null.
 - The retry waits 1, 2, 4, 8, 16 then 30 s (±20 %), the handshake and the attestation read time out at 10 s, and nothing listens for the network's return.
-- A close code that ends the channel (4401, 4403, 4404) arrives before the welcome.
+- A close that ends the channel's socket for good comes in three codes: the sign-in has ended, the member is no longer admitted, and no such project. For the first two the channel is parked: it opens no socket again until the session next changes (`onClosed` and `reconcile` in `channel.ts`), and the org's own hub status is kept by another component and can still read healthy.
 
 **S-10.**
 - An action is enabled in the menu and the palette exactly while a handler is registered for it; the menu has no way to say a sentence beside a greyed item, and the palette has one (`UNAVAILABLE` in `palette/CommandPalette.tsx`).
@@ -142,24 +152,24 @@ Checked at `48619c824`; build F is an ancestor and none of the files named here 
 - The rule for "has a channel" is written inline twice in `sidebar/menus.tsx`.
 - `waitsOnAnswer` exists in `src/shared/attention/kinds.ts` and the Channel's waiting list already reads it, so U1a's change reaches the count with no edit.
 
-## Reported to the architect
+## Reported to the architect, and ruled
 
-Each point is built at its default until ruled; a ruling changes the one place named.
+Twelve points were reported with the first writing; the architect ruled on 2026-11-12 that every default stands, with the additions in the last column. The one place a later change of a ruling would touch is named as before.
 
-| # | item | the point | the default this document builds | the one place |
-|---|---|---|---|---|
-| 1 | l8-settings-01 | The section gives the new command's `name` 1 to 256 characters. The event that carries its progress bounds a name at 128, and changing that bound is a major of the wire. | `name` is 1 to 128 characters. The event keeps its bound and loses the configured-name rule, which the manifest does not show; a reader on an older build drops such an event, as it drops any it cannot read. | Interfaces §A, the two schemas |
-| 2 | l8-settings-01 | "For a press from a Customize row of MAWS's own list the listed server's address must also be the entry's": the press cannot carry the address (the renderer never holds one) and the command as written cannot tell that press from the dialog's. | One optional field, `entry: 'app'`. The services read the entry's address themselves and compare it with the session's. | Interfaces §A, the command's input |
-| 3 | l8-settings-01 | Until U9 lands the new command must be declared in `REMOTE_UNAVAILABLE` or the coverage test fails: one entry in U9's file, with words the section does not give. | The entry reads "Not on another machine yet: signing in to a connector from a plugin or from MAWS's own list". | Interfaces §A, "The route to another machine" |
-| 4 | l8-settings-04 | "The palette's description of `/mcp` reads …" takes two insertions in U4's `composer/mentions/` that the section does not name, because the engine's description wins in a started chat. | Both insertions, for the one name `mcp`. | Interfaces §C, "Names" |
-| 5 | l8-settings-04 | "Off here is off for every session in <place>" names the project for a session in a linked worktree; where the engine records the switch for such a session was never seen (law 6). | The section's rule, and a wire probe before M6's sentence ships (Proof, P2). If the engine keys a worktree by itself, the place of a worktree session is its folder. | Interfaces §C, "<place>" |
-| 6 | l8-settings-03 | "Choosing a skill inserts `/<name> `" rests on a skill's name on disk being the engine's name for it, which no fixture shows and which the code today treats as unverified. | Insert `/<name> ` for a project's and a person's skill and `/<plugin>:<name> ` for a plugin's, after a wire probe confirms both (Proof, P3). Where it does not, that group is listed without "Use in chat". | Interfaces §D, "Skills" |
-| 7 | #540 | The `machine-admin` line, "Change its settings, connectors and plugins, and restart it", names what the right is graded for. Over the link a holder of the right can act on connectors only. | "Connect, sign in and disconnect its connectors, and choose the connector tools its dashboards may use." | Interfaces §B, the copy table |
-| 8 | #540 | (a) A8's "no line says the same thing twice" fails for reasons the item does not name. (b) `storage`'s new line says "so nothing was sent", which is false when the outcome could not be recorded after the machine answered. (c) Two enroll lines say "Start over" where they are also drawn on a row that has no such button. | (a) The rule is applied to every reason of both sheets (Interfaces §B, the details table). (b) The line drops that clause and main's detail, which says which of the two happened, stays. (c) As the table gives them; the row's Show… opens the sheet that has Start over. A re-enrollment's `machine-names`, where no other name can be chosen, is residue. | Interfaces §B |
-| 9 | #523, #456 | (a) "Every sheet and dialog" does not reach the document editor's confirm, in U10's plain CSS. (b) The scrim in `keymap/KeyboardShortcuts.tsx` is an insertion in U6's file the section does not list. (c) `src/artifacts/dashboard/editor/` is U10's by the root's UC-8, and #456 needs two exports from `live.ts`. | (a) One declaration in U10's `chrome.css`, the same value by its token. (b) and (c) are named as insertions (Constraints). The palette and the two dismiss backdrops stay as they are. | Constraints, "Insertions" |
-| 10 | #505 | (a) "The element under it reserves the same gutter" needs that element to clip (`overflow: hidden`), or the property does nothing. (b) A class on the transcript's scroller reaches every transcript, not only the session pane's. | (a) The footer clips; what the composer draws past its box is fixed or a portal, and an e2e screenshot checks the frame's shadow. (b) The rule is scoped from the session pane, so U3's `Transcript.tsx` is not edited and U1's `SessionPane.tsx` takes two tokens. | Interfaces §E |
-| 11 | S-10 | (a) "Greyed, with 'This project has no channel'": the menu cannot say a sentence. (b) "Bound to a chord in Settings › Keyboard" does not hold while build F stands (ruled with U6a). (c) The row's place in View is not given, and a row of its own id prefix stands between separators. | (a) The menu item is greyed and the palette's row says the sentence. (b) Nothing; the row is not rebindable yet. (c) After the Tabs rows and before "Split / move to other pane": Overview, Artifacts, Tabs ▸ │ Project channel │ Split … | Interfaces §F |
-| 12 | l8-settings-06 | (a) "The supervisor's own deep link lands on Background": there is none. (b) "The open's real target is held in memory": no caller can ask for Background, so there is nothing to hold. (c) The table gives one line and one More for Binary, Update and Voice › Shortcut, which each have a second state the words do not fit. (d) Some lines, three of them not in the table, may not fit one line at 760 px. (e) Sessions' heading line and where a later landing's default model and mode rows go. | (a), (b) The stored list is untouched and nothing is held in memory; `background` is a section the index, the search and U7's `openSettings` reach. (c) The words of Interfaces §G, "States the table does not give". (d) The drawn example measures every note; the fallbacks are in §G. (e) Reported for the later design; nothing built. | Interfaces §G |
+| # | item | the point | what is built | the one place | ruling |
+|---|---|---|---|---|---|
+| 1 | l8-settings-01 | The section gives the new command's `name` 1 to 256 characters. The event that carries its progress bounds a name at 128, and changing that bound is a major of the wire. | `name` is 1 to 128 characters. The event keeps its bound and loses the configured-name rule, which the manifest does not show; a reader on an older build drops such an event. | §A, the two schemas | stands |
+| 2 | l8-settings-01 | "For a press from a Customize row of MAWS's own list the listed server's address must also be the entry's": the press cannot carry the address, and the command as first written could not tell that press from the dialog's. | The press names the entry by an opaque revision of its configuration; the services read the entry, refuse a changed one, and compare its address with the session's. | §A, "The configuration's revision" | stands, and was not enough alone: the review's finding 1 added the revision |
+| 3 | l8-settings-01 | Until U9 lands the new command must be declared in `REMOTE_UNAVAILABLE` or the coverage test fails. | One entry in U9's file: "Not on another machine yet: signing in to a connector from a plugin or from MAWS's own list". | §A, "The route to another machine" | stands; the later landing is U11f |
+| 4 | l8-settings-04 | The palette's description of `/mcp` takes two insertions in U4's `composer/mentions/`, because the engine's description wins in a started chat. | Both insertions, for the one name `mcp`. | §C, "Names" | stands; §I names U4a's overlaps |
+| 5 | l8-settings-04 | "Off here is off for every session in <place>" names the project for a session in a linked worktree; where the engine records the switch there was never seen. | The section's rule, and a wire probe (P2). | §C, "<place>" | stands |
+| 6 | l8-settings-03 | "Choosing a skill inserts `/<name> `" rests on a skill's name on disk being the engine's name for it. | `/<name> ` and `/<plugin>:<name> ` after a wire probe (P3); a group it does not confirm is listed without "Use in chat". | §D, "Skills" | stands |
+| 7 | #540 | The `machine-admin` line names what the right is graded for; over the link a holder can act on connectors only. | "Connect, sign in and disconnect its connectors, and choose the connector tools its dashboards may use." | §B, the copy table | stands |
+| 8 | #540 | (a) "No line twice" fails for reasons the item does not name. (b) `storage`'s "so nothing was sent" is false after a delivery. (c) Two enroll lines say "Start over" where a row has no such button. | (a) §B's details table for every reason of both sheets. (b) The line without that clause; main's detail stays. (c) As the table gives them; a re-enrollment's `machine-names` is residue. | §B | stands |
+| 9 | #523, #456 | (a) The document editor's confirm is in U10's plain CSS. (b) `keymap/KeyboardShortcuts.tsx` is U6's. (c) `src/artifacts/dashboard/editor/` is U10's, and #456 needs two exports. | (a) One declaration in U10's `chrome.css`. (b), (c) Named insertions. | Constraints, "Insertions" | stands |
+| 10 | #505 | (a) The element under a scroller must clip, or the property does nothing. (b) A class on the transcript's scroller reaches every transcript. | (a) The footer clips. (b) The rule is scoped from the session pane: two tokens in U1's `SessionPane.tsx`, `Transcript.tsx` untouched. | §E | stands; §I names U4a's edit of the same wrapper |
+| 11 | S-10 | (a) The menu cannot say why an item is greyed. (b) The row takes no rebinding while build F stands. (c) The row's place in View is not given. | (a) The menu item is greyed and the palette's row says the sentence. (b) Nothing. (c) After the Tabs rows, before "Split / move to other pane". | §F | stands |
+| 12 | l8-settings-06 | (a), (b) There is no deep link to the supervisor's rows, so no new section value can be stored and nothing is held in memory. (c) Binary, Update and Voice › Shortcut have a second state the table's words do not fit. (d) Which lines run over one line. (e) Where a later landing's default model and mode rows go. | (a), (b) The stored list is untouched. (c) §G, "States the table does not give". (d) The drawing's measurements: two lines run over and are cut; `NOTE_LINE_MAX` is gone. (e) Under Engine; nothing built. | §G | (a) to (c) stand; (d) replaced by the measurements; (e) ruled |
 
 ## Acceptance
 
@@ -167,19 +177,19 @@ The child's A1 to A15, as this landing proves them. A unit test is named by the 
 
 | | what is seen | proved by |
 |---|---|---|
-| A1 | In a session MAWS runs on this Mac whose plugin brings a connector that needs a sign-in, the Connectors dialog shows the row as "Sign in needed" with Sign in; after consent it reads Connected with its tool count. In a terminal session the dialog lists connected servers only and points at the terminal's `/mcp`. For a session on another machine the same row's Sign in is disabled with §A's sentence. | M8's unit tests; M8's scene in `e2e/discover-connectors.spec.ts`, in a gate job on the mini (P1). The clause for another machine is U11b's. |
+| A1 | In a session MAWS runs on this Mac whose plugin brings a connector that needs a sign-in, the Connectors dialog shows the row as "Sign in needed" with Sign in; after consent it reads Connected with its tool count. In a terminal session the dialog lists connected servers only and points at the terminal's `/mcp`. For a session on another machine the same row's Sign in is disabled with §A's sentence. | M8's unit tests; M8's scene in `e2e/discover-connectors.spec.ts`, in a gate job on the mini (P1). The clause for another machine is U11f's. |
 | A2 | The same for a server of MAWS's own list; Customize › Connectors › My items offers Sign in on that server's row while a session MAWS runs on this Mac holds it, and "Open a session, then sign in" while none does. | M8's unit tests; the same scene. |
 | A3 | With five connectors the dialog shows five one-line rows (switch, name, status in words, tool count); transport, source, scope and tool names only when a row is opened; the switch's reach once, in the head; "Connectors" in the menu entry, the title and Customize. A terminal session's dialog has the title and the status words. | M6's unit tests; the edited scenes of `e2e/widgets.spec.ts` and `e2e/c11-live.spec.ts`. |
 | A4 | In New chat with a project chosen and nothing sent, the Plugins dialog lists the installed plugins, "+" › Connectors lists the configured connectors, `/skills` lists the skills on disk and choosing one puts its slash name in the composer. None reads "Available once the session starts" or stays blank. A new chat set to another machine says the lists show once the chat starts there. | M7's unit tests; M7's scene in `e2e/widgets.spec.ts`. |
-| A5 | The index shows three groups and the sections of §G's table; Engine holds three rows; no row is a paragraph with no control. | M9's unit tests; the edited `e2e/settings.spec.ts`; the owner's look (P5). |
-| A6 | At the default window no note of Settings outside the Org page takes more than one line; a row with more ends in "More", which opens the rest in place and closes again; every sentence a note had is on the line, behind More, under its section's heading, or listed as dropped. | M9's unit tests (the table's bound; More); M9's scene in `e2e/settings.spec.ts`, which measures each note's height; §G's table of where each note went, read by the milestone's reviewer. |
-| A7 | "mcp", "hook", "theme" and "shortcut" each list their rows as "row in section"; choosing one scrolls to the row and marks it; a word behind a More finds the row and opens its More; no match reads "No matching settings"; Esc clears the field. | M10's unit tests; M10's scene in `e2e/settings.spec.ts`. |
+| A5 | The index shows the two group headings, Org after them and the sections of §G's table; Engine holds three rows; no row is a paragraph with no control. | M9's unit tests; the edited `e2e/settings.spec.ts`; the owner's look (P5). |
+| A6 | Where the body has its full 760 px (the default window with no side surface open; U7's dialog), no note of Settings outside the Org page takes more than one line; a row with more ends in "More", which opens the rest in place and closes again. Where the body is narrower than 32rem the rows stack, and no note stands beside its label in a column under 332 px. Every sentence a note had is on the line, behind More, under its section's heading, or listed as dropped. | M9's unit tests (More; the rows' stacking by the body's container); M9's scene in `e2e/settings.spec.ts`, which measures each note at three widths (§G, "The measure"); §G's table of where each note went, read by the milestone's reviewer. |
+| A7 | "mcp", "hook", "theme" and "shortcut" each list their rows, each result the row's name with its section under it; choosing one brings the row into view under its section's heading, marks it and gives the row the keyboard; a word that only appears behind the More a row shows now finds the row and opens that More; no match reads "No matching settings"; Esc clears the field. | M10's unit tests; M10's scene in `e2e/settings.spec.ts`. |
 | A8 | Each of the fifteen keys reads as §B gives it in the grant sheet, the enroll sheet and the machine row, and no refusal of either sheet says a thing twice. | M2's unit tests. |
 | A9 | On a machine every member owns, a grants read that is out reads "Reading <machine>'s grants…", one that failed shows its line and Retry, and "Everyone in the org owns this machine…" shows only once the grants are known. | M2's unit test, which holds the read open. |
-| A10 | In the light theme the window behind any sheet or dialog is dimmed by the same amount; the Share sheet names the remedy and the machine; hovering the Share or Add owner subtitle shows the whole title and machine name. | M3's unit tests; `e2e/share.spec.ts` (its pin holds) and the screenshots it attaches. |
+| A10 | In the light theme the window behind any sheet or dialog is dimmed by the same amount, also when one opens over another; the Share sheet names the remedy and the machine; hovering the Share or Add owner subtitle shows the whole title and machine name. | M3's unit tests; M3's scene in `e2e/widgets.spec.ts` (the Plugins dialog, then its confirmation); `e2e/share.spec.ts` (its pin holds) and the screenshots it attaches. |
 | A11 | With classic scrollbars the Channel's footer and a stream row have the same left and right edges, and so do the session pane's composer and a transcript row. At the default window and in a column about 420 px wide no Channel row overflows, and names give way in §E's order. | M3's scenes in `e2e/channel.spec.ts` and `e2e/composer.spec.ts`; M3's unit tests for the tooltip and the removed cap. |
 | A12 | A live query paused because its machine does not offer connectors shows "Connectors on <machine> need its app", offers no Allow and has Refresh disabled. | M2's DOM test. |
-| A13 | With the network off a Channel tab shows what this Mac holds; its footer reads "Offline · retrying" with "As of <time>" once the channel's first attempt fails; the composer returns when the channel is live; a Channel never read on this Mac says so. | M4's unit tests, which hold each sequence of §F open; the edited `e2e/channel.spec.ts`; the reproduction (P4). |
+| A13 | With the network off a Channel tab shows what this Mac holds; its footer reads "Offline · retrying" with "As of <time>" once the channel's first attempt fails; the composer returns when the channel is live; a Channel the hub has refused says the refusal and never "retrying"; a Channel never read on this Mac says so. | M4's unit tests, which hold each sequence of §F open; the edited `e2e/channel.spec.ts`; the reproduction (P4). |
 | A14 | ⌘K, then "channel" or a project's name, lists "<project> · channel" for each project that has one, with "N waiting"; Enter opens the tab. View › Project channel opens the Channel of the focused tab's project. Nothing is added to the sidebar. | M5's unit tests; M5's scene in `e2e/channel.spec.ts`. |
 | A15 | The Gateway section, the launch profile's switches and what they write, and the plugin library inside a session behave as before. | No assertion on a `settings.set` payload, a command's input or the plugin library's rows changes in the tests M9 and M7 edit (Constraints, law 8). |
 
@@ -188,29 +198,30 @@ The child's A1 to A15, as this landing proves them. A unit test is named by the 
 - **The design binds.** The child's file and the root, at the places the header names. Stop and hand the point back to the architect with the evidence where the code contradicts a statement the work rests on beyond the twelve points above, where the work needs an edit in another child's file beyond the insertions listed here, where a contract or another child would have to change, or where the owner would see something neither the section nor this document says. Everything else is decided in the spirit of the section and recorded in the Decision Log.
 - **Laws.** Law 3: no setting is added and one row is removed. Law 5: each connector item behaves as its section says on each route; "not on this route" is the section's, not the executor's. Law 6: nothing depends on an engine behaviour not seen. M8 starts after P1's verdict. M6's head sentence and M7's "Use in chat" are built at their defaults and stand only once P2 and P3 have answered, before M11; each outcome changes the one place its row of Proof names. Law 7: today's tokens only; no new token for the scrim or the gutter. Law 8: l8-settings-08, -09 and -10 are `keep`. Moving the launch profile's rows and shortening notes changes no behaviour; in `LaunchProfileSettings.test.tsx`, `McpServersSettings.test.tsx`, the Gateway cases of `SettingsView.test.tsx` and the plugin library's tests, an assertion on what is written or sent is not edited. An executor who finds it must be stops and reports.
 - **The child's binds 6 to 11.** No reset for a damaged grants record. Nothing changes in what the Share sheet sends or how it authorises. One sign-in per connector at a time. Customize reads and changes this Mac only, and nothing shows this Mac's configuration as another machine's. The slash name stays `/mcp`. **Every engine sign-in and every Keychain write a test makes runs only in a gate job on the Mac mini runner.** An executor never runs `pnpm e2e:discover`, the spike script, or anything that starts an engine with an OAuth server, on the MacBook, on the VM or anywhere.
-- **UC-8, insertions in files other children own.** Each is the smallest that does it. "Named" means the child's file or the root names it; "reported" means it is a point above and waits for its ruling.
+- **UC-8, insertions in files other children own.** Each is the smallest that does it. "Named" means the child's file or the root names it; "ruled" means the architect ruled it in on 2026-11-12 (the point's number).
 
   | owner | file (under `src/renderer/src/` unless it starts with `src/`) | the insertion | milestone | |
   |---|---|---|---|---|
   | U4 | `composer/plus-menu/PlusMenu.tsx` | the two entry labels; the Connectors submenu's rows and its empty line come from one hook of `widgets/`; the Plugins submenu's "unavailable" sentence goes | M6, M7 | named |
   | U4 | `composer/WidgetDialog.tsx`, `composer/InlineEdit.tsx` | the overlay's class from the exported name | M3 | named |
-  | U4 | `composer/mentions/widgets.ts`, `composer/mentions/items.ts` | the description of `mcp`, and that one name's declared description winning over the engine's | M6 | reported, 4 |
+  | U4 | `composer/mentions/widgets.ts`, `composer/mentions/items.ts` | the description of `mcp`, and that one name's declared description winning over the engine's | M6 | ruled, 4 |
   | U3 | `transcript/view/rows/Divider.tsx` | the overlay's class | M3 | named |
   | U3 | `transcript/view/Transcript.tsx` | none: the gutter is scoped from the session pane | — | named, not needed |
   | U1 | `session/SessionPane.tsx` | two tokens: the scope on the transcript's wrapper, the gutter on the composer's wrapper | M3 | named (one line each) |
   | U6 | `src/shared/keymap/actions.ts`, `actions.test.ts` | the row `channel.open`; its id in the test's `LANDED` list, as U6a's document asks of a landed child | M5 | named |
   | U6 | `palette/CommandPalette.tsx` and its test | the channel entries; one entry of `UNAVAILABLE` | M5 | named |
-  | U6 | `keymap/KeyboardShortcuts.tsx` | the overlay's class | M3 | reported, 9 |
-  | U9 | `src/shared/ipc/remote-unavailable.ts` | one entry | M8 | reported, 3 |
-  | U10 | `src/artifacts/dashboard/editor/LiveQuery.tsx`, `live.ts`, `live-views.dom.test.tsx` | #456: two exports, the sheet's test of a pause, one case | M2 | reported, 9 |
-  | U10 | `src/artifacts/document/editor/chrome.css` | one declaration of `.doc-confirm-overlay` | M3 | reported, 9 |
+  | U6 | `keymap/KeyboardShortcuts.tsx` | the overlay's class | M3 | ruled, 9 |
+  | U7 | `sidebar/AddProject.tsx` | its overlay reads the shared backdrop, so that it yields when a sheet opens over it | M3 | the review's finding 3 |
+  | U9 | `src/shared/ipc/remote-unavailable.ts` | one entry | M8 | ruled, 3 |
+  | U10 | `src/artifacts/dashboard/editor/LiveQuery.tsx`, `live.ts`, `live-views.dom.test.tsx` | #456: two exports, the sheet's test of a pause, one case | M2 | ruled, 9 |
+  | U10 | `src/artifacts/document/editor/chrome.css` | one declaration of `.doc-confirm-overlay` | M3 | ruled, 9 |
   | U12 | `delivery/copy.ts` | "Settings › Engine › MCP servers" becomes "Settings › Sessions › MCP servers" | M9 | named |
   | U13 | `e2e/cross-build.spec.ts` | only if its settings scene finds this build's rows through the Engine region; then the locator by the row's own label, which both builds draw | M9 | this document |
 
-  In files UC-8 gives nobody: `resume/host.tsx` (the overlay's class), `App.tsx` (one mount, M5), `gateway/actions.ts` (one comment, M9), the connectors' names, schema and grades under `src/shared/ipc/`, and the wire's files. Not edited, and left as residue for their owners: the Connectors card (`panel/summary/Connectors.tsx`, U8), `sidebar/AddProject.tsx` and `sidebar/menus.tsx` (U7).
-- **UC-14.** Neither settings file changes its schema or its version; no setting moves between the files; every row writes the field it writes today. The stored tab's list of sections is not changed (§G). This landing adds no layout key. §H says, per thing stored or sent, what build F does with it.
+  In files UC-8 gives nobody: `resume/host.tsx` (the overlay's class), `App.tsx` (one mount, M5), `gateway/actions.ts` (one comment, M9), the connectors' names, schema and grades under `src/shared/ipc/`, and the wire's files. In the engine host and in main, which UC-8 gives nobody: `src/engine-host/customization/inventory.ts`, `src/shared/ipc/schema/customization.ts`, `src/main/catalog/postures.ts` and `src/shared/ipc/schema/catalog.ts` (the configuration's revision, M8). Not edited, and left as residue for their owners: the Connectors card (`panel/summary/Connectors.tsx`, U8) and `sidebar/menus.tsx` (U7).
+- **UC-14.** Neither settings file changes its schema or its version; no setting moves between the files; every row writes the field it writes today. The stored tab's list of sections is not changed (§G). This landing adds no layout key and stores no revision: the configuration's revision lives in memory, for one run of the engine host. §H says, per thing stored or sent, what build F does with it.
 - **UC-7.** At this landing the new command is declared unavailable for a session on another machine: its control is drawn disabled with one sentence, and nothing is sent.
-- **The wire.** Additive only: one new command. `WIRE_MINOR` takes the next number after the merge of Concrete Steps 1, with its comment; the four generated files are rewritten on the VM and brought back as a patch (Concrete Steps 4). The architect tells the session that keeps master of the wire files.
+- **The wire.** Additive only: one new command, and one optional property on a row of `customization.serverEndpoints`' answer. Other landings raise the minor too (U3a has taken 37; U1a, U4a, U8b and U12a each take one). So `WIRE_MINOR` takes the next number on the master the branch last merged, with its comment, and the generated files are made again after every later merge of master: at M8 (Concrete Steps 4), at M11, and by whoever merges last before the pull request. The architect tells the session that keeps master of the wire files.
 - **Copy.** The words of the child's tables and of Interfaces are exact, apostrophes as each file writes them. A sentence not given by either is not added.
 - **UC-11, the repository is public.** Nothing of the owner's enters code, tests, fixtures, comments, commit messages, documents or pull-request text. Fixtures use invented names, paths and text.
 - **Where checks run (UC-10).** The worktree on the MacBook carries no `node_modules`; nothing is installed, typechecked, linted, tested, built or launched there. Every check runs on the wave's build VM in a checkout of the pushed head. Class 1a on GitHub Actions, every Electron e2e run and every engine probe are the architect's.
@@ -218,11 +229,11 @@ The child's A1 to A15, as this landing proves them. A unit test is named by the 
 
 ## Plan of Work
 
-Eleven milestones. Each is one executor's from this document, the child's file and the code, is reviewed at its boundary, and leaves typecheck, lint and the unit suite green. A milestone carries the e2e edits its change forces and the scenes it adds; they are written and typechecked there and run by the architect. The order puts first what waits on nobody: M1 hands the architect a probe to run while M2 to M7 are built; M8 waits for that probe's verdict; M9 and M10 wait for the owner's look at the drawn example. M5 needs U6a on master (Concrete Steps 1).
+Eleven milestones. Each is one executor's from this document, the child's file and the code, is reviewed at its boundary, and leaves typecheck, lint and the unit suite green. A milestone carries the e2e edits its change forces and the scenes it adds; they are written and typechecked there and run by the architect. The order puts first what waits on nobody: M1 hands the architect a probe to run while M2 to M7 are built; M8 waits for that probe's verdict; M9 and M10 wait for the owner's three answers on the drawn page (P5), and nothing else does. M5 needs U6a on master (Concrete Steps 1).
 
 What consumes what: M7 and M8 consume M6's row and status words; M10 consumes M9's row table; nothing else crosses milestones.
 
-Expected size, lines added plus removed: M1 250, M2 450, M3 450, M4 450, M5 350, M6 650, M7 750, M8 900, M9 1,500, M10 700, M11 100. About 6,400 lines over about 105 files.
+Expected size, lines added plus removed: M1 250, M2 450, M3 600, M4 520, M5 350, M6 650, M7 750, M8 1,050, M9 1,550, M10 750, M11 100. About 7,000 lines over about 112 files.
 
 ### M1 — The probe: a dynamic connector's sign-in through MAWS's redirect (prototyping)
 
@@ -257,43 +268,45 @@ Expected size, lines added plus removed: M1 250, M2 450, M3 450, M4 450, M5 350,
 
 **What it proves.** A8, A9, A12. Tests assert: each of the fifteen keys' text; for every reason of each sheet, given the detail as main words it after this milestone, the exact text drawn (§B's details table); main's tests, the details as cut; the `ineligible` list drawn once; the nobody state through this sequence, the read held open: reading, a refused read's line with Retry, Retry pressed and held (the line stays), the answer (the nobody sentence, and in a second case the picker); the not-offered pause's line with no Allow and Refresh disabled, and Allow kept for `failed`.
 
-### M3 — One scrim for every sheet; the Channel's gutter and names
+### M3 — One scrim for every sheet, also where they stack; the Channel's gutter and names
 
-**What exists at its end.** Every sheet and dialog dims the window with one class from one name. The Share sheet's line names the remedy and the machine, and the Share and Add owner subtitles show the whole title and machine name on hover. Under classic scrollbars the Channel's footer lines up with its rows and the session pane's composer with its transcript. Every Channel row lets names give way in one order and never overflows.
+**What exists at its end.** Every sheet and dialog dims the window with one value from one place, and where one opens over another only the top one's backdrop paints, so the window behind is dimmed once. The Share sheet's line names the remedy and the machine, and the Share and Add owner subtitles show the whole title and machine name on hover. Under classic scrollbars the Channel's footer lines up with its rows and the session pane's composer with its transcript. Every Channel row lets names give way in one order and never overflows.
 
-**What it touches.** `sessions/Sheet.tsx`, `sessions/share/ShareSheet.tsx`, `AddOwnerSheet.tsx`, `sessions/share/copy.ts` and their tests; the overlays of the Constraints table and `resume/host.tsx`; `styles/app.css`; `channel/ChannelView.tsx`, `parts.tsx`, `Exchange.tsx`, `Entries.tsx`, `ToHumanEntry.tsx` and their tests; U1's `session/SessionPane.tsx`; `e2e/channel.spec.ts`, `e2e/composer.spec.ts`. `e2e/share.spec.ts` is not edited: its pin of the scrim's class holds and its sentence follows the copy.
+**What it touches.** A new `sessions/scrim.ts` and its test; `sessions/ui.ts`; `sessions/Sheet.tsx`, `sessions/share/ShareSheet.tsx`, `AddOwnerSheet.tsx`, `sessions/share/copy.ts` and their tests; the overlays of the Constraints table, `resume/host.tsx` and U7's `sidebar/AddProject.tsx`; `styles/app.css`; `channel/ChannelView.tsx`, `parts.tsx`, `Exchange.tsx`, `Entries.tsx`, `ToHumanEntry.tsx` and their tests; U1's `session/SessionPane.tsx`; `e2e/widgets.spec.ts` (the stacked scene), `e2e/channel.spec.ts`, `e2e/composer.spec.ts`. `e2e/share.spec.ts` is not edited: its pin of the scrim's class holds and its sentence follows the copy.
 
-**Interfaces.** §E. Exposes `SCRIM` and the gutter classes.
+**Interfaces.** §E. Exposes `SCRIM`, `useScrim` and the gutter classes.
 
 **Decisions.**
+- *Which backdrop paints where layers stack* is §E's: the top layer's, and every one under it is clear while covered. Two washes of the value would dim the window by about 15% where one sheet dims it by 8%, which is the defect #523 names, moved one layer up. Rejected: the bottom layer alone painting, because the dialog under a sheet would then not read as behind it.
 - `Sheet`'s `scrim` prop goes and its overlay keeps `data-sheet-scrim`, which `e2e/share.spec.ts` reads. The three overlays that carry `opacity-60` lose it with the swap, or the dim would be 0.6 of 0.08.
-- `sidebar/AddProject.tsx` already draws the value and is not edited. The command palette keeps no overlay, and the two dismiss backdrops (`app/Shell.tsx`, `panel/PanelRegion.tsx`) are not dialogs.
+- The command palette keeps no overlay, and the two dismiss backdrops (`app/Shell.tsx`, `panel/PanelRegion.tsx`) are not dialogs. U10's document confirm keeps its plain CSS at the same value and stays out of the stack: nothing opens over it, and a modal layer already blocks the editor it belongs to.
+- Focus and dismissal where layers stack are the dialog library's and are not rebuilt: Esc and a press outside close the top layer only, and the keyboard returns to the layer under it. The scene asserts both. If a pair of layers fails either, stop and report it with the pair; do not patch one dialog's own handling.
 - The remedy sentence replaces `REFUSALS['not-supported']`, so main's refusal of a save in the same words reads it too. `REFUSALS.unsupported` is another sentence and stays.
 - The gutter and the order of names are §E's. The order is by shrink weights far apart, so it is exact in practice and approximate in principle; the e2e scene at 420 px is its proof, since jsdom measures nothing.
 - The say row's recipients and owners labels stand after the title and before the chip in the order.
 
-**What it does not touch.** What the Channel shows or folds. The transcript's rows or its scroller's file. A new token. What the Share sheet sends. `sidebar/`.
+**What it does not touch.** What the Channel shows or folds. The transcript's rows or its scroller's file. A new token. What the Share sheet sends. `sidebar/` beyond the one overlay.
 
-**What it proves.** A10, A11. Unit tests assert: `Sheet`'s overlay class is `SCRIM` and no caller passes a scrim; the Share sentence with a machine's name; both subtitles' tooltip "<title> · <machine>"; an alias with no 24-character cap; a party's tooltip holding alias, title and machine; the to-human header's chip able to shrink. The e2e scenes measure: the footer's and a stream row's left and right edges equal under classic scrollbars; the session pane's composer and a transcript row the same (a scene of `e2e/composer.spec.ts` launched with classic scrollbars); no row overflowing in a 420 px column with a long alias, title and machine; a screenshot of each footer under classic and overlay scrollbars, for the frame's shadow.
+**What it proves.** A10, A11. Unit tests assert: one mounted layer paints `SCRIM`; a second mounted over it paints and the first is clear; the second leaves and the first paints again; three layers, the same; `Sheet`'s overlay takes its class from `useScrim` and no caller passes a scrim; the Share sentence with a machine's name; both subtitles' tooltip "<title> · <machine>"; an alias with no 24-character cap; a party's tooltip holding alias, title and machine; the to-human header's chip able to shrink. The stacked scene, in `e2e/widgets.spec.ts`: the Plugins dialog, then a plugin's "Uninstall…" confirmation over it: exactly one backdrop paints and it is the confirmation's; a point of the window outside both reads the colour it reads under one sheet alone; Esc closes the confirmation, the dialog stays and holds the keyboard; Esc again closes the dialog. The other e2e scenes measure: the footer's and a stream row's left and right edges equal under classic scrollbars; the session pane's composer and a transcript row the same (a scene of `e2e/composer.spec.ts` launched with classic scrollbars); no row overflowing in a 420 px column with a long alias, title and machine; a screenshot of each footer under classic and overlay scrollbars, for the frame's shadow.
 
-### M4 — The Channel says it is offline
+### M4 — The Channel says it is offline, or refused
 
-**What exists at its end.** The channel's answer and its changes carry the channel's own reach while it is not live. The footer reads signed out, a sign-in that ended or is not admitted, "Offline · retrying", or "Connecting…", in that order, after "As of <time>". A channel never read on this Mac says so.
+**What exists at its end.** The channel's answer and its changes carry the channel's own reach while it is not live, and the hub's own refusal of the channel while that stands. The footer reads signed out, a sign-in that ended or is not admitted, "Offline · retrying", or "Connecting…", in that order, after "As of <time>". A channel never read on this Mac says so.
 
 **What it touches.** `src/shared/ipc/schema/org.ts` (the two open shapes), `src/main/org/channel/channel.ts` and `channel.test.ts`, `channel/state.ts`, `ChannelView.tsx`, `channel/copy.ts` and their tests, `e2e/channel.spec.ts`.
 
-**Interfaces.** §F, "The channel's reach": the field, the events, the table of transitions and the footer's order, fixed before the code.
+**Interfaces.** §F, "The channel's reach and refusal": the two fields, the events, the table of transitions and the footer's order, fixed before the code.
 
 **Decisions.**
 - Reach is told as a change whenever it moves while the channel is not live, also when nothing else changed. `ChannelsDeps.reach` already names the network-path object in `channel.ts`; the new state takes another name inside.
-- A close that ends the channel (its code is one of the terminal ones) is not a failure of reach; the footer's earlier lines speak for it.
-- Sign-out, a new hub and a released channel start again at `connecting`, so a stale "Offline" never shows after signing back in.
+- *A close that ends the channel is the channel's own word, kept apart from reach.* The hub ends a channel's socket for good when the sign-in has ended or the member is no longer admitted; the channel then waits for the session's next change and retries nothing, and the org's own hub status can still read healthy. So the channel tells that refusal itself, and the footer reads it before reach. Rejected: leaving it to the org status's lines, which would let "Offline · retrying" stand over a channel that is not retrying.
+- Sign-out, a new hub and a released channel start again at `connecting` with no refusal, so a stale word never shows after signing back in.
 - The composer's return follows the channel's own retry, up to about 36 s after the network is back; no listener for the network is added (the section's "Not included" rules out a Retry; this is the same choice).
 - If P4 shows the open's answer itself was late, its cause is fixed in main here, under a dated Decision Log entry that names what the open waited on. Without P4's result the milestone is complete as written, and A13's first clause waits for P4.
 
 **What it does not touch.** The hub notice in the sidebar and `org-session.ts`. The channel's retry timing. The cache file. X-194.
 
-**What it proves.** A13. Main's tests hold these sequences open with a held attestations promise and the fake socket: (a) attestations held: the open answers at once from the cache with `reach: 'connecting'`; (b) attestations fail: a change to `unreachable`; a socket error before the welcome leaves it; welcome then caught-up: live, no reach; (c) live, then a close after the welcome: `connecting`; the next socket fails before its welcome: `unreachable`; (d) a second open during (b) answers `unreachable` and opens no second socket; (e) sign-out and back in: `connecting`; (f) released during the backoff: no socket afterwards; (g) a terminal close code: not `unreachable`; (h) a wake that drops a live socket: `connecting`. The renderer's tests assert the footer for each pair of org status and reach, the composer back on live, and the "no copy" sentence for an open channel with no entries and no `asOf`.
+**What it proves.** A13. Main's tests hold these sequences open with a held attestations promise and the fake socket: (a) attestations held: the open answers at once from the cache with `reach: 'connecting'`; (b) attestations fail: a change to `unreachable`; a socket error before the welcome leaves it; welcome then caught-up: live, no reach; (c) live, then a close after the welcome: `connecting`; the next socket fails before its welcome: `unreachable`; (d) a second open during (b) answers `unreachable` and opens no second socket; (e) sign-out and back in: `connecting`; (f) released during the backoff: no socket afterwards; (g) from `connecting`, a close with the sign-in's code: `refused: 'credentials'`, and no socket afterwards; (h) a wake that drops a live socket: `connecting`; (i) the review's case: attestations fail (`unreachable`), then the next attempt closes with the sign-in's code while the org's hub status still reads connected: the change carries `refused: 'credentials'` beside the unchanged reach, no further socket is opened, and a session change then clears the refusal, reads `connecting` and opens one; (j) the same with the code for a member no longer admitted: `refused: 'removed'`. The renderer's tests assert the footer for each combination of org status, refusal and reach, among them refusal with reach `unreachable` and a healthy hub status reading the refusal's line and not "Offline · retrying"; the composer back on live; and the "no copy" sentence for an open channel with no entries and no `asOf`.
 
 ### M5 — The Channel opens from the command palette and the View menu
 
@@ -304,7 +317,7 @@ Expected size, lines added plus removed: M1 250, M2 450, M3 450, M4 450, M5 350,
 **Interfaces.** §F, "The Channel's entries". Consumes U6a's table (§I).
 
 **Decisions.**
-- The row's place and the greyed item's words are §F's (reported, 11).
+- The row's place and the greyed item's words are §F's (ruled, 11).
 - "Has a channel" becomes one function in `channel/project.ts` that answers what the sidebar's two menus answer today; a test holds it equal to both on the same fixtures. `sidebar/menus.tsx` is not edited.
 - The count on an entry is the length of the Channel's own waiting list for that project (`waitingFor`), so it reads UC-1's predicate and nothing else.
 - With a Channel tab in front the action's project is that tab's, so the action stays enabled there.
@@ -360,72 +373,77 @@ Expected size, lines added plus removed: M1 250, M2 450, M3 450, M4 450, M5 350,
 
 Starts after M1's verdict is recorded.
 
-**What exists at its end.** A dynamic connector that needs a sign-in offers Sign in in the Connectors dialog of a session MAWS runs on this Mac, and a row of MAWS's own list offers it in Customize while a ready session holds that server. The steps, Cancel and the ways it ends are today's. For a session on another machine the control is disabled with §A's sentence.
+**What exists at its end.** A dynamic connector that needs a sign-in offers Sign in in the Connectors dialog of a session MAWS runs on this Mac, and a row of MAWS's own list offers it in Customize while a ready session holds that server. A press from Customize signs in the configuration the row showed, or nothing. The steps, Cancel and the ways it ends are today's. For a session on another machine the control is disabled with §A's sentence.
 
-**What it touches.** `src/shared/ipc/names/connectors.ts`, `schema/connectors.ts`, `grades/connectors.ts`, `wire.ts`, the four generated files, and the two lists of the machine's commands that tests hold (`test/support/spine-lists.ts`, `src/services/machine-ops.test.ts`); U9's `src/shared/ipc/remote-unavailable.ts`; `src/services/connectors/sign-in.ts`, `sign-in-entry.ts` and their tests; `customize/connectors/sign-in.ts`, `present.ts`, `ConnectorsSection.tsx` and their tests; `widgets/McpWidget.tsx` and its test; `e2e/discover-connectors.spec.ts`.
+**What it touches.** `src/shared/ipc/names/connectors.ts`, `schema/connectors.ts`, `grades/connectors.ts`, `wire.ts`, the generated files, and the two lists of the machine's commands that tests hold (`test/support/spine-lists.ts`, `src/services/machine-ops.test.ts`); for the configuration's revision, `src/shared/ipc/schema/customization.ts`, `src/engine-host/customization/inventory.ts`, `src/shared/ipc/schema/catalog.ts`, `src/main/catalog/postures.ts` and their tests; U9's `src/shared/ipc/remote-unavailable.ts`; `src/services/connectors/sign-in.ts`, `sign-in-entry.ts` and their tests; `customize/connectors/sign-in.ts`, `present.ts`, `ConnectorsSection.tsx` and their tests; `widgets/McpWidget.tsx` and its test; `e2e/discover-connectors.spec.ts`.
 
-**Interfaces.** §A. Exposes `connectors.signInDynamicServer` to U11b and to X-184.
+**Interfaces.** §A. Exposes `connectors.signInDynamicServer` and the configuration's revision to U11f and to X-184.
 
 **Decisions.**
-- The command, its check, its identity and its route to another machine are §A's.
+- The command, its check, its identity, the configuration's revision and its route to another machine are §A's.
 - The check runs inside the operation, in the services, on the status of the session the act then uses; nothing at the door decides it. No remote caller reaches the command at this landing: it has no offer row.
+- *A press from Customize is bound to the configuration its row showed.* The renderer's fingerprint only chose which row shows a finished result; it never reached the operation, so a row read before its entry was replaced under the same name could start a sign-in for the replacement. The press now carries the revision of the configuration the row was drawn from, and the operation refuses when the entry it reads has another. One read of the entry serves both comparisons (the revision pressed, and the session's server), so nothing can change between them. Rejected: main checking its own fingerprint before it forwards the press, which checks at the door and not where the act runs; and an unkeyed hash of the address, which would let a known address be confirmed from the renderer.
 - A dynamic server is never read from a file later, so the wait the operation gives a just-added server ("Server not found", up to ten seconds) does not apply to it: that answer fails the operation at once in the engine's words.
-- An older daemon on this Mac answers `unknown_command`; the row reads it as a sign-in that did not finish, in the transport's words. No capability is added for this Mac's own daemon: that state lasts until the daemon is replaced when idle.
+- An older daemon on this Mac answers `unknown_command`; the row reads it as a sign-in that did not finish, in the transport's words. An older engine host answers no revision, and Customize's row then offers no Sign in; the dialog's does. No capability is added for this Mac's own daemon or host: each state lasts until the process is replaced when idle.
 - M1's verdict sets the redirect per kind (§A).
 
-**What it does not touch.** `src/endpoint/`, `src/main/lane-b/`, `apps/org-protocol/` (U11b). `connectors.signIn` and `connectors.signInServer`. Settings › MCP servers' rows. MAWS's own credential store. Plugin connectors in Customize (X-184).
+**What it does not touch.** `src/endpoint/`, `src/main/lane-b/`, `apps/org-protocol/` (U11f). `connectors.signIn` and `connectors.signInServer`. The fingerprint `catalog.postures` answers and what a row does with it. Settings › MCP servers' rows. MAWS's own credential store. Plugin connectors in Customize (X-184).
 
-**What it proves.** A1 and A2 on this Mac. Services tests assert: each refusal of `dynamicRefusal` with its words; the `entry: 'app'` comparison on transport and address; a dynamic sign-in through every state to connected; one at a time across two sessions. Held open: a second press from another session while the first waits for its callback (the first ends cancelled, the second goes on); a cancel while the check's read is out (no `mcp_authenticate` is sent); the session leaving while the entry's address is being read (it ends `session_exited`, nothing sent). Renderer tests assert: Sign in on a dynamic row and the command it sends; no Sign in for `claudeai` and managed scopes; the disabled control and its sentence for a session on another machine, with a file-scope row beside it still enabled; Customize's own-list row choosing the attached session, then any ready one that lists the name, then "Open a session, then sign in"; a dialog's finished result not shown on Customize's row. `wire.test.ts` holds the manifest: one command added, the event's entry unchanged. The mini's scene signs in a plugin's connector and one of MAWS's own list from the dialog, and the second from Customize.
+**What it proves.** A1 and A2 on this Mac. Services tests assert: each refusal of `dynamicRefusal` with its words; a dynamic sign-in through every state to connected; one at a time across two sessions; a press whose revision is the entry's passes and authenticates; a press whose revision is not the entry's, the entry and the session both holding the replacement, ends `other_entry` with §A's words and sends no `mcp_authenticate`. Held open: the entry is replaced under the same name while the operation's read of it is out, and the read then answers the replacement: refused, nothing authenticated; a second press from another session while the first waits for its callback (the first ends cancelled, the second goes on); a cancel while the check's read is out (no `mcp_authenticate` is sent); the session leaving while the entry is being read (it ends `session_exited`, nothing sent). The engine host's tests assert: the same transport and address give the same revision within one run, another address or transport another, an entry with no address none, and nothing of the address can be read from it. Renderer tests assert: Sign in on a dynamic row and the command it sends; no Sign in for `claudeai` and managed scopes; the disabled control and its sentence for a session on another machine, with a file-scope row beside it still enabled; Customize's own-list row sending the revision it was drawn with, offering no Sign in while it has none, and choosing the attached session, then any ready one that lists the name, then "Open a session, then sign in"; a dialog's finished result not shown on Customize's row. `wire.test.ts` holds the manifest: one command and one optional property added, the event's entry unchanged. The mini's scene signs in a plugin's connector and one of MAWS's own list from the dialog, and the second from Customize.
 
-### M9 — Settings regrouped, its notes on one line
+### M9 — Settings regrouped, a note on one line
 
-Starts after the owner's look (P5) and the architect's word on it.
+Starts after the owner's three answers (P5) and the architect's word on them.
 
-**What exists at its end.** The index shows three groups; the body is in the index's order and opens at Appearance; Engine holds Binary, Update and Config home; Sessions and Background hold what §G's table gives them; the Plugins paragraph row is gone. Every row is drawn from one declaration; a note is one line and the rest is behind "More".
+**What exists at its end.** The index shows two group headings and Org after them; it scrolls by itself, with its footer in place. The body is in the index's order and opens at Appearance; Engine holds Binary, Update and Config home; Sessions and Supervisor hold what §G's table gives them; the Plugins paragraph row is gone. Every row is drawn from one declaration; where the body has its 760 px a note is one line and the rest is behind "More"; where the body is narrow the rows stack.
 
-**What it touches.** `settings-tab/SettingsView.tsx`, `copy.ts`, `parts.tsx`, `EngineSection.tsx`, `SessionsSection.tsx`, a new `BackgroundSection.tsx` and `rows.ts`, `SupervisorSettings.tsx`, `BudgetSettings.tsx`, `LaunchProfileSettings.tsx`, `McpServersSettings.tsx`, the other sections' files where a note changes, and their tests; `settings-tab/index.ts`; `gateway/actions.ts` (a comment); U12's `delivery/copy.ts`; `e2e/settings.spec.ts`, `e2e/supervisor.spec.ts` and `e2e/cross-build.spec.ts` only if a locator breaks.
+**What it touches.** `settings-tab/SettingsView.tsx`, `copy.ts`, `parts.tsx`, `EngineSection.tsx`, `SessionsSection.tsx`, a new `SupervisorSection.tsx` and `rows.ts`, `SupervisorSettings.tsx`, `BudgetSettings.tsx`, `LaunchProfileSettings.tsx`, `McpServersSettings.tsx`, `BrowserImport.tsx`, `KeymapSection.tsx` (its rows' stacking), the other sections' files where a note changes, and their tests; `settings-tab/index.ts`; `gateway/actions.ts` (a comment); U12's `delivery/copy.ts`; `e2e/settings.spec.ts`, `e2e/supervisor.spec.ts` and `e2e/cross-build.spec.ts` only if a locator breaks.
 
 **Interfaces.** §G. Exposes `SettingsSection`, the section table and the row table to M10 and U7.
 
 **Decisions.**
-- The words are the child's table with §G's additions. Any change the look brings is written into §G before the milestone starts.
+- The words are the child's table with §G's additions. A note that fits its line keeps its words; only the two lines the drawing measured over the line are cut. An answer of the owner's is written into §G, at the places §G names, before the milestone starts.
+- *Rows stack by the body's own width.* Today one container, the whole view, turns the index into a row of links and stacks every row, at 32rem. A view between 32rem and about 700 px (a 50/50 split with no side surface is about 520 px) then keeps the index as a column and leaves a note about 150 px beside its label. The body becomes a container of its own and its rows stack under 32rem of body; the index keeps its own break on the view. Rejected: moving the index's break up as well, which changes a second thing nobody asked for.
 - The supervisor's rows keep their group, named by `aria-label` "Background supervisor", and lose the visible `h4`; the keyboard's fallback moves to the section's heading. So `e2e/supervisor.spec.ts` and the supervisor's tests keep their locator.
 - A state line is marked as one and is never cut or put behind More.
-- A More that is closed is not exposed to a screen reader; its button carries `aria-expanded` and reads "Less" while open.
-- Below 32rem the index's row of links drops the group headings and keeps the order.
+- A More that is closed is not in the page; its button carries `aria-expanded` and reads "Less" while open.
+- Below the index's break its row of links drops the group headings and keeps the order.
+- A row made at run time (an imported Chrome profile, one of its extensions) is drawn from a declared repeating row (§G), so nothing in the body is outside the table.
 - Law 8 holds as Constraints say.
 
-**What it does not touch.** Either settings schema, a setting's default, or what a row writes. The Org page's rows. `KeymapSection.tsx` and `keymap.ts` beyond a row's declaration. The stored tab's schema.
+**What it does not touch.** Either settings schema, a setting's default, or what a row writes. The Org page's rows. `keymap.ts`. The stored tab's schema.
 
-**What it proves.** A5, A6. Tests assert: the index's groups and order; each section's rows in §G's order; Engine's three; no Plugins paragraph; every declared row drawn in its section or revealed by another, and every drawn row declared; every declared line at most the bound of §G; a More opening in place and closing; a state line whole; the stored list of sections equal to build F's ten; `delivery/copy.ts`'s sentence. The e2e scene measures every note's height at the default window. A6's last sentence is not a test: the milestone's reviewer reads §G's table of where each old note went against the diff, since a test could only restate that table.
+**What it proves.** A5, A6. Tests assert: the index's two headings, Org after them, and the order; each section's rows in §G's order; Engine's three; no Plugins paragraph; every declared row drawn in its section or revealed by another, and every drawn row declared, with the page populated (imported Chrome profiles with extensions, Spaces with their own design system, a chosen binary, the memory budget on, the supervisor waiting on an older version) and again empty; a More opening in place and closing; a state line whole; Direct login's instruction and its Copy on the row's line; a row's fixed columns giving way under the body's container and the index's under the view's; the stored list of sections equal to build F's ten; `delivery/copy.ts`'s sentence. The e2e scene measures at three widths (§G, "The measure"). A6's last sentence is not a test: the milestone's reviewer reads §G's table of where each old note went against the diff, since a test could only restate that table.
 
 ### M10 — Search settings
 
-**What exists at its end.** "Search settings" at the top of the index lists matching rows as "row in section" in place of the sections, with Up, Down and Enter; choosing one scrolls to the row, marks it, opens its More when the match was there, and gives the row's control the keyboard. ⌘F inside Settings focuses the field; Esc clears it.
+**What exists at its end.** "Search settings" at the top of the index lists matching rows in place of the sections, each the row's name with its section under it, the first preselected, with Up, Down and Enter. Choosing one brings the row into view under its section's heading, marks it, opens the More it shows when the match was there, and gives the row itself the keyboard. ⌘F inside Settings focuses the field; Esc clears it.
 
-**What it touches.** A new `settings-tab/search.ts` and its test; `SettingsView.tsx`, `rows.ts`, `copy.ts` and their tests; `e2e/settings.spec.ts`.
+**What it touches.** A new `settings-tab/search.ts` and its test; `SettingsView.tsx`, `parts.tsx`, `rows.ts`, `copy.ts` and their tests; `e2e/settings.spec.ts`.
 
 **Interfaces.** §G, "Search".
 
 **Decisions.**
-- Matching is a pure function over the row table, the keyboard's rows and the Org page's group headings, so the same words are drawn and found.
+- Matching is a pure function over the row table, the state each drawn row shows now, the keyboard's rows and the Org page's group headings. A row is found only by words the page will show for it in its present state.
+- *The row takes the keyboard, not a control in it.* The first control of several rows acts on Enter (a server's Remove, a chip's ×), so Enter to choose and Enter again would remove something. The row is focused; Tab then enters its controls. Rejected: naming a safe control per row, a list that every new row would have to keep right.
+- The query stays in the field after a choice and the field does not keep the keyboard, so the child's clause "another result is one keystroke away" is dropped: both cannot hold.
 - ⌘F is taken by the Settings view while it holds the keyboard and by nothing else, so it needs no row in U6's table and keeps working when U3's Find lands.
 - The field carries `data-escape-clears`; while Settings is a tab, Esc in an empty field does nothing.
 - The field is drawn once the settings are read, with the rows. Choosing a second result while the first is still marked takes the first mark away at once.
 
 **What it does not touch.** `src/shared/keymap/`. A fuzzy match or a ranking. The Org page's rows.
 
-**What it proves.** A7. Tests assert: the four queries of A7 and their results; every word required and case ignored; a section's name and an Org group as results; a keyboard binding found by its action's title; a word that is only behind a More; a row not drawn leading to the row that reveals it; "No matching settings"; the keyboard in the list; the mark going after its moment, and at once when another result is chosen; Esc clearing; ⌘F focusing the field and reaching nothing outside Settings.
+**What it proves.** A7. Tests assert: the four queries of A7 and their results; "mcp" finding the Customize link; every word required and case ignored; a section's name and an Org group as results, and no row found by its group's name; a keyboard binding found by its action's title; a word behind the More a row shows now, and no result for a word that is only in another state's More; a row not drawn found as the row that reveals it; with the page populated, a repeating row found by its declared label and landing on its first item, and on the row that reveals it when it has none; a result's two lines, the name cut and never wrapped; the first result preselected and Enter choosing it; the chosen row focused and no control of it, so that a second Enter does nothing; the query still in the field; "No matching settings"; the keyboard in the list; the mark going after its moment, and at once when another result is chosen; Esc clearing; ⌘F focusing the field and reaching nothing outside Settings. The e2e scene: a row chosen far down a short section lands with its heading in view; the list scrolls with the index; the narrow form's field and results.
 
 ### M11 — The record, the whole checks, the hand-back
 
-**What exists at its end.** The five reversed rulings are amended where they stand. The branch has passed typecheck, lint on what changed and the whole unit suite on the VM. The hand-back is written.
+**What exists at its end.** The five reversed rulings are amended where they stand. Master is merged once more, the wire's minor is the next one on that master and the generated files are made again. The branch has passed typecheck, lint on what changed and the whole unit suite on the VM. The hand-back is written.
 
-**What it touches.** The documents of "The record"; this document's Progress, Surprises & Discoveries and Decision Log.
+**What it touches.** The documents of "The record"; `src/shared/ipc/wire.ts` and the generated files, if the merge moved the minor; this document's Progress, Surprises & Discoveries and Decision Log.
 
 **What it does not touch.** Product code, unless a check shows a defect; then the fix goes to that milestone's owner through the controller. The register, the board, the tracker.
 
-**What it proves.** Parent-level acceptance 4 for U11's five entries; that the tree is green before the architect's gate.
+**What it proves.** Parent-level acceptance 4 for U11's five entries; that the tree is green, on the master of that hour, before the architect's gate.
 
 ### The record (in the same pull request, UC-10)
 
@@ -460,42 +478,56 @@ From the worktree of branch `ux-wave/U11a`. `vmcheck` below stands for `~/.local
 
 3. **M1** adds no test. `vmcheck 'node --check spikes/p4-aggregator/m4-signin-spike.mjs'` prints nothing, and the e2e project typechecks. Then stop on M1 and hand the architect P1.
 
-4. **M8, the wire.** After the schema, names and grades are edited, take the next `WIRE_MINOR` after the merged master's, then regenerate on the VM and bring the result back:
+4. **M8, the wire.** After the schemas, names and grades are edited, take the next `WIRE_MINOR` on the master last merged (merge again first if master has moved: `git fetch origin master && git merge origin/master`), then make the generated files again on the VM and bring the result back:
 
        G='src/shared/ipc/wire-manifest.json src/shared/ipc/wire-fingerprint.json src/shared/ipc/routes.json src/shared/machine/address-paths.json'
        vmcheck "pnpm wire:manifest >/dev/null; MAWS_ROUTES_WRITE=1 pnpm exec vitest run src/shared/ipc/routes.test.ts >/dev/null; MAWS_ADDRESS_PATHS_WRITE=1 pnpm exec vitest run src/shared/machine/coverage.test.ts >/dev/null; git diff -- $G; git checkout -- $G" > /tmp/u11a-wire.patch
        sed -n '/^diff --git/,$p' /tmp/u11a-wire.patch | git apply
 
-   The last `git checkout` leaves the VM's checkout clean for the next call.
+   The last `git checkout` leaves the VM's checkout clean for the next call. Expect the patch to add `commands.connectors.signInDynamicServer`, the property `revision` under `commands.customization.serverEndpoints.output` and the minor to the manifest, one name to each of `routes.json` and `address-paths.json`, a new value in `wire-fingerprint.json` (the engine host's answer gained a property), and nothing under `events.connectors.signInChanged`. A line under the event means the event's bound moved: undo it. Then `vmcheck 'pnpm exec vitest run src/shared/ipc src/shared/machine test/lane-b/offer-coverage.test.ts'` passes.
 
-   Expect the patch to add `commands.connectors.signInDynamicServer` and the minor to the manifest, one name to each of the other two files, and nothing under `events.connectors.signInChanged`; `wire-fingerprint.json` does not change (the command is the machine's, not the engine host's). A line under the event means the event's bound moved: undo it. Then `vmcheck 'pnpm exec vitest run src/shared/ipc src/shared/machine test/lane-b/offer-coverage.test.ts'` passes.
+5. **M11, master again, then the whole checks.** Other landings move the wire's minor while this one is built.
 
-5. **M11, the whole checks.**
+       git fetch origin master && git merge origin/master
+       grep -n "export const WIRE_MINOR" src/shared/ipc/wire.ts | cut -c1-60
+
+   If the merge conflicted in `wire.ts` or in a generated file, or master's minor is now this branch's or higher: keep master's comment, give this landing's two additions the next number after master's, take master's side of the four generated files, and run step 4's regeneration again. Then:
 
        vmcheck 'pnpm typecheck'
-       vmcheck 'pnpm exec eslint src/renderer/src/settings-tab src/renderer/src/customize src/renderer/src/channel src/renderer/src/widgets src/renderer/src/sessions src/renderer/src/palette src/renderer/src/composer src/services/connectors src/main/org src/shared/ipc src/artifacts/dashboard/editor e2e'
+       vmcheck 'pnpm exec eslint src/renderer/src/settings-tab src/renderer/src/customize src/renderer/src/channel src/renderer/src/widgets src/renderer/src/sessions src/renderer/src/palette src/renderer/src/composer src/services/connectors src/main/org src/main/catalog src/engine-host/customization src/shared/ipc src/artifacts/dashboard/editor e2e'
        vmcheck 'pnpm test'
        vmcheck 'node --test .github/scripts/maws-app-scan.test.mjs'
 
    `pnpm typecheck` takes about five minutes and prints no error. In `pnpm test` the files the build brief lists fail on master too and are not this landing's; any other failure is. The scan passes: this landing adds no recorded file, and the scan is run because M1 and M8 touch fixtures' neighbours.
 
-6. **Stop and hand back.** The executor runs no `scripts/ci-gate.sh`, opens no pull request and starts no Electron e2e or engine. The hand-back says: what exists, with the command and result that showed it; what is not verified (every e2e scene, P1 to P5); the decisions made; anything that contradicts the spec; the residue. Residue known at authoring: the Connectors card still shows the engine's raw status and says "MCP servers" (U8's file); a re-enrollment's `machine-names` line names a remedy that does not apply; a `storage` refusal after the machine answered still opens with "Not signed"; a file-scope server and a dynamic one of the same name and address are two connectors to the one-at-a-time rule though the engine keeps one credential; the composer's return after an outage waits for the channel's own retry; the document editor's confirm if ruling 9 leaves it out.
+6. **Stop and hand back.** The executor runs no `scripts/ci-gate.sh`, opens no pull request and starts no Electron e2e or engine. The hand-back says: what exists, with the command and result that showed it; the master and the wire minor the branch stands on; what is not verified (every e2e scene, P1 to P5); the decisions made; anything that contradicts the spec; the residue. Residue known at authoring, each a row for the debt tracker at landing:
+   - the Connectors card of the card column still shows the engine's raw status and says "MCP servers" (U8's file);
+   - a re-enrollment's `machine-names` line names a remedy that does not apply there;
+   - a `storage` refusal after the machine answered still opens with "Not signed";
+   - a file-scope server and a dynamic one of the same name and address are two connectors to the one-at-a-time rule though the engine keeps one credential;
+   - the Channel's composer returns only at the channel's own next retry, up to about 36 s after the network is back;
+   - a Customize page read before the engine host restarted has revisions the new host does not answer, so its Sign in is refused until the page is refreshed;
+   - "This project has no channel" is also what the palette says when no project is in front;
+   - in a narrow Settings pane "More" often falls alone on a line of its own;
+   - `e2e/c11-live.spec.ts` has no gate group, so its edits run only at a live sitting;
+   - the gate cannot switch the sign-in spike on (`MAWS_SIGNIN_SPIKE`);
+   - the document editor's confirm stays outside the shared backdrop (it never stacks).
 
-7. **The architect's, after the hand-back.** The e2e runs of "Proof that an executor does not run"; class 1a on the head handed back, in the background (`scripts/ci-gate.sh "$PWD" --gates static,unit,probes --label u11a`); the xhigh panel; class 1a again on the final head if the panel changed the branch; the pull request.
+7. **The architect's, after the hand-back.** The e2e runs of "Proof that an executor does not run"; class 1a on the head handed back, in the background (`scripts/ci-gate.sh "$PWD" --gates static,unit,probes --label u11a`); the xhigh panel; class 1a again on the final head if the panel changed the branch; the pull request. Whoever merges master into the branch after this point makes the wire's files again as step 5 does.
 
 ## Interfaces and Dependencies
 
 Paths under `src/renderer/src/` unless they start with `src/` or `e2e/`. A name here is what later milestones and siblings code against; an executor who must change one stops and reports. Everything not named here is the executor's.
 
-### §A. The sign-in of a dynamic connector (M8; consumed by U11b and X-184)
+### §A. The sign-in of a dynamic connector (M8; consumed by U11f and X-184)
 
-**The command and the event** (`src/shared/ipc/schema/connectors.ts`; reported, points 1 and 2):
+**The command and the event** (`src/shared/ipc/schema/connectors.ts`; ruled, points 1 and 2):
 
     'connectors.signInDynamicServer': machine(z.strictObject({
       name: z.string().min(1).max(128),      // as the session's mcp_status reports it
       appSessionId: AppSessionIdSchema,
-      entry: z.literal('app').optional(),    // the press came from a row of MAWS's own list
-      ...Callback,                           // a remote asker's port: no caller sends it until U11b
+      entry: z.strictObject({ revision: z.string().min(1).max(64) }).optional(),   // the press came from a row of MAWS's own list: the revision that row was drawn with
+      ...Callback,                           // a remote asker's port: no caller sends it until U11f
     }), OperationReceiptSchema),
 
     // ConnectorSignInChangedSchema: every field as it is, but
@@ -503,7 +535,20 @@ Paths under `src/renderer/src/` unless they start with `src/` or `e2e/`. A name 
 
 Graded `machine-admin`, as the two sign-ins beside it. A dynamic connector whose name is longer than 128 characters is offered no Sign in. `connectors.signIn` and `connectors.signInServer` keep `McpServerNameSchema` for their input.
 
-Lost: a second event for a dynamic sign-in. It is additive by the letter of the wire's rule, where loosening a refinement is a change the manifest cannot see; it lost because one operation would then speak on two events, every reader and both feed lists would carry both, and the only reader that refuses the loosened value is an older build that could never have started the operation it belongs to (§H). If the architect or the session that keeps master rules for the letter, the event becomes `connectors.dynamicSignInChanged` with the same shape and this paragraph is the place.
+Lost: a second event for a dynamic sign-in. It is additive by the letter of the wire's rule, where loosening a refinement is a change the manifest cannot see; it lost because one operation would then speak on two events, every reader and both feed lists would carry both, and the only reader that refuses the loosened value is an older build that could never have started the operation it belongs to (§H).
+
+**The configuration's revision** (the review's finding 1). An opaque string that stands for one configuration of a server, so that a press can say which configuration its row showed without the renderer ever holding an address.
+
+    // src/shared/ipc/schema/customization.ts: a row of customization.serverEndpoints' answer gains
+    revision: z.string().max(64).nullable().optional(),   // null: the entry has no address
+
+    // src/shared/ipc/schema/catalog.ts: a server of catalog.postures' answer gains
+    revision: z.string().max(64).nullable(),              // null: the engine host answered none
+
+- *Who makes it.* The engine host, in `src/engine-host/customization/inventory.ts`, for every endpoint it answers: an HMAC-SHA-256 of the entry's name, transport and address, under 32 random bytes the host makes at its start, keeps in memory and never writes or sends; in hex, cut to 32 characters. It is the form main's `configurationFingerprint` has; main's fingerprint and what a row does with it are not changed.
+- *How it reaches the row.* Main's `catalog.postures` already reads those endpoints; it hands each one's revision to the renderer beside the posture. Customize's row for an entry of MAWS's own list keeps the revision it was drawn with, sends it with its press, and offers no Sign in while it has none.
+- *How it is checked.* The operation reads the endpoints once, in the services, after the session is known ready and before `mcp_authenticate` is sent. That one read gives the entry's revision now and its address, and both comparisons below use it.
+- *Its life.* One run of the engine host. Nothing stores it. A page read before the host restarted is refused until it is refreshed, which is the safe direction.
 
 **The connector's identity.** A dynamic connector is its machine and its name:
 
@@ -514,23 +559,26 @@ Lost: a second event for a dynamic sign-in. It is additive by the letter of the 
     // customize/connectors/sign-in.ts
     export type SignInScope = PluginsScope | 'dynamic';
     export type SignInServer = { name: string; scope: SignInScope; cwd: string | null; machine?: MachineRef | null };   // signInKeyOf: 'dynamic' as 'user', no folder
-    export function startSignInDynamic(server: { name: string; entry?: 'app' }, fingerprint: string | null, appSessionId: AppSessionId, bridge?: MawsBridge): Promise<void>;
+    export function startSignInDynamic(server: { name: string; revision?: string }, fingerprint: string | null, appSessionId: AppSessionId, bridge?: MawsBridge): Promise<void>;
 
-`startSignInDynamic` binds its receipt as `startSignInByName` does. The dialog passes no fingerprint; Customize passes the row's (`catalog.postures` answers one for an entry of MAWS's own list), so a finished result shows on Customize's row only for the configuration it was started for, and a running one shows on both.
+`startSignInDynamic` binds its receipt as `startSignInByName` does. The dialog passes neither a revision nor a fingerprint. Customize passes both: the revision goes to the services, and the fingerprint stays in the renderer and decides, as today, that a finished result shows only on the row of the configuration it was started for; a running one shows on both.
 
-**The check** (`src/services/connectors/sign-in-entry.ts`), run by the operation before anything else, in the services, on the status of the session the operation then drives:
+**The check** (`src/services/connectors/sign-in-entry.ts`), run by the operation before `mcp_authenticate` is sent, in the services, on the status of the session the operation then drives:
 
-    /** Why the session cannot sign this dynamic server in, in words, or null. `own`: MAWS's own entry of the name when the press named one (null: the list has none now). */
-    export function dynamicRefusal(requested: { name: string; own?: { transport: string; url: string | null } | null }, live: readonly LiveServer[]): string | null;
+    /** Why the session cannot sign this dynamic server in, in words, or null. `own`: MAWS's own entries as the engine host answers them now, read only for a press that names an entry. */
+    export function dynamicRefusal(requested: { name: string; entry?: { revision: string } }, live: readonly LiveServer[], own: readonly EndpointEntry[]): string | null;
 
-| the session's `mcp_status` | answer (the operation then fails `other_entry` with these words) |
+The first row that holds answers; the operation then fails `other_entry` with the words.
+
+| what the operation finds | words |
 |---|---|
-| lists no server of the name | `that session has no <name> server` |
-| lists it with a scope that is not `dynamic` | `this session uses a different <name>; start a new session to sign in` |
-| `entry: 'app'`, and MAWS's list has no entry of the name now, or the listed server's transport or address is not the entry's (compared as `entryRefusal` compares a file entry's: `streamable-http` is `http`; an address written with `${…}` is not compared) | the same sentence |
+| the session's `mcp_status` lists no server of the name | `that session has no <name> server` |
+| it lists the name with a scope that is not `dynamic` | `this session uses a different <name>; start a new session to sign in` |
+| the press names an entry, and MAWS's list has no entry of the name now, or that entry's revision is not the press's, or the host answered no revision | `MAWS’s <name> server changed since this page read it; refresh the page, then sign in` |
+| the press names an entry, and the session's server's transport or address is not that entry's (compared as `entryRefusal` compares a file entry's: `streamable-http` is `http`; an address written with `${…}` is not compared) | `this session uses a different <name>; start a new session to sign in` |
 | otherwise | null |
 
-For `entry: 'app'` the services read the entry themselves (`customization.serverEndpoints`, the entries of scope `app`); the renderer never holds an address. The engine is the last check: `mcp_authenticate` looks the name up among the session's loaded servers, so a server that left between the check and the call (a plugin reloaded) ends the operation in the engine's words.
+So what is authenticated is the session's server; the session's server is the entry; and the entry is the configuration the row showed. The engine is the last check: `mcp_authenticate` looks the name up among the session's loaded servers, so a server that left between the check and the call (a plugin reloaded) ends the operation in the engine's words. A press from the dialog names no entry: its row shows the session's own server, which is what the check verifies and the engine then signs in.
 
 **The redirect** is one constant in `sign-in.ts`, set from M1's verdict:
 
@@ -540,14 +588,14 @@ For `entry: 'app'` the services read the entry themselves (`customization.server
 
 **Who offers Sign in.**
 - *The Connectors dialog* (a session MAWS runs): a row whose status is `needs-auth` and whose scope is `user`, `project`, `local` (through `connectors.signInServer`, unchanged) or `dynamic` (through the new command). Not for `claudeai` or a managed scope.
-- *Customize › Connectors › My items*, a row of MAWS's own list (`scope === 'app'`), when `signInViewOf` offers a sign-in for it: Sign in while a session is chosen, else `CONNECTORS.openSession(null)`, "Open a session, then sign in". The session chosen: the page's attached session when it is ready and its status lists the name; else the first ready session MAWS runs on this Mac whose status lists the name, one in the page's folder first, then by id. The services' check decides; this choice only picks whom to ask.
+- *Customize › Connectors › My items*, a row of MAWS's own list (`scope === 'app'`), when `signInViewOf` offers a sign-in for it and the row has a revision: Sign in while a session is chosen, else `CONNECTORS.openSession(null)`, "Open a session, then sign in". The session chosen: the page's attached session when it is ready and its status lists the name; else the first ready session MAWS runs on this Mac whose status lists the name, one in the page's folder first, then by id. The services' check decides; this choice only picks whom to ask.
 - Settings › MCP servers offers none.
 
-**The route to another machine, until U11b** (reported, point 3). One entry in U9's `REMOTE_UNAVAILABLE`:
+**The route to another machine, until U11f** (ruled, point 3). One entry in U9's `REMOTE_UNAVAILABLE`:
 
     'connectors.signInDynamicServer': notYet('signing in to a connector from a plugin or from MAWS’s own list'),
 
-so the control reads "Not on another machine yet: signing in to a connector from a plugin or from MAWS’s own list", disabled, through `useRemoteUnavailable(appSessionId, 'connectors.signInDynamicServer')`; nothing is sent, and `test/lane-b/offer-coverage.test.ts` passes. A file-scope row beside it keeps its Sign in, and the words a machine's own listener gives ("sign in on <machine>") are today's. A machine reached over a socket link (development and `e2e/machines.spec.ts`) is not greyed by that helper and takes the command or answers `unknown_command`. U11b removes the entry and makes the insertions U9's document lists (its Interfaces 2), with UC-7.5's update sentence for a machine that does not list the capability.
+so the control reads "Not on another machine yet: signing in to a connector from a plugin or from MAWS’s own list", disabled, through `useRemoteUnavailable(appSessionId, 'connectors.signInDynamicServer')`; nothing is sent, and `test/lane-b/offer-coverage.test.ts` passes. A file-scope row beside it keeps its Sign in, and the words a machine's own listener gives ("sign in on <machine>") are today's. A machine reached over a socket link (development and `e2e/machines.spec.ts`) is not greyed by that helper and takes the command or answers `unknown_command`. U11f removes the entry and makes the insertions U9's document lists (its Interfaces 2), with UC-7.5's update sentence for a machine that does not list the capability.
 
 ### §B. Org copy (M2)
 
@@ -558,7 +606,7 @@ so the control reads "Not on another machine yet: signing in to a connector from
 | `grantRefusals['signed-out']` | This Mac isn’t signed in to the org. Sign in under Org, then try again. |
 | `grantRefusals.damaged` | This Mac’s record of the grants it issued is damaged and can’t be repaired here, so it signs no grant. Sign from another device of the machine’s owner (an admin’s, for a machine the org owns). |
 | `grantsDamaged` | Grants can’t be signed on this Mac: its record of the grants it issued is damaged. Sign them from another device of the machine’s owner. |
-| `grantRefusals.storage` | The grant couldn’t be saved on this Mac. Try again; if it keeps failing, check the disk’s free space. *(reported, 8b; the child's line adds ", so nothing was sent")* |
+| `grantRefusals.storage` | The grant couldn’t be saved on this Mac. Try again; if it keeps failing, check the disk’s free space. *(ruled, 8b; the child's line adds ", so nothing was sent")* |
 | `grantRefusals.invalid` | The rights were sent wrongly (one was named twice). Close this sheet and choose them again. |
 | `grantRefusals.ineligible` | This Mac can’t sign this grant. Sign it from another device of the machine’s owner, or resolve: |
 | `grantRefusals['ledger-unread']` | The machine’s grants for this person couldn’t be read, so nothing was signed. Try again in a moment. |
@@ -569,7 +617,7 @@ so the control reads "Not on another machine yet: signing in to a connector from
 | `enrollRefusals['prefix-names-machine']` | That name starts with a delegation’s prefix, which is kept for the machines that delegation certifies. Choose a name outside it. |
 | `enrollRefusals['no-machine']` | The org no longer lists this machine. Close this sheet and enroll it as a new machine. |
 | `enrollRefusals.refused` | The hub refused the enrollment. Try again; if it is refused again, sign in to the hub again under Org. |
-| `rightLines['machine-admin']` | Connect, sign in and disconnect its connectors, and choose the connector tools its dashboards may use. *(reported, 7; the child's line: "Change its settings, connectors and plugins, and restart it.")* |
+| `rightLines['machine-admin']` | Connect, sign in and disconnect its connectors, and choose the connector tools its dashboards may use. *(ruled, 7; the child's line: "Change its settings, connectors and plugins, and restart it.")* |
 
 **What follows a refusal's line.** The line, then main's detail unless the table says otherwise; `ineligible`'s list is drawn once, after its line. Main's string changes only where the last column says.
 
@@ -626,7 +674,7 @@ The first, second and fourth are `CONNECTORS.connected`, `.needed` and `.connect
 
 **The row.** One line: the switch, the name as the engine reports it, the status words, `MCP.tools(n)` when it has tools. Opened: the transport (the full command as its tooltip), `MCP.from(source)`, `MCP.scope(scope)`, an error, the tool names. `WidgetFrame` gains two optional props for the head, a muted subtitle and one line of note; both are this dialog's alone at this landing.
 
-**`<place>`** (reported, point 5): the project's name when the session's record names a project, else the session's folder with the home abbreviated (`homeAbbreviated`), the folder being what the dialog reads today (`engine.cwd`, else the record's directory). P2 decides whether a session in a worktree reads its worktree's folder in place of the project's name; this sentence is the one place.
+**`<place>`** (ruled, point 5): the project's name when the session's record names a project, else the session's folder with the home abbreviated (`homeAbbreviated`), the folder being what the dialog reads today (`engine.cwd`, else the record's directory). P2 decides whether a session in a worktree reads its worktree's folder in place of the project's name; this sentence is the one place.
 
 ### §D. Before the first message (M7)
 
@@ -655,23 +703,29 @@ The first, second and fourth are `CONNECTORS.connected`, `.needed` and `.connect
 
 **Connectors.** One row per name: the entry the engine will use (`shadowedBy`), its scope in Customize's words (`CONNECTORS.scopeOf`) where a started chat's row has its status words. No switch, no Reconnect, no Sign in.
 
-**Skills** (reported, point 6). Customize's three groups under their headings there. "Use in chat" inserts `/<name> ` for a project's and a person's skill and `/<plugin>:<name> ` for a plugin's, `<plugin>` being the installed plugin's key up to its `@`. P3 confirms each form against the engine's own list; a group whose form it does not confirm is listed without "Use in chat", and this paragraph is the one place. No Reload.
+**Skills** (ruled, point 6). Customize's three groups under their headings there. "Use in chat" inserts `/<name> ` for a project's and a person's skill and `/<plugin>:<name> ` for a plugin's, `<plugin>` being the installed plugin's key up to its `@`. P3 confirms each form against the engine's own list; a group whose form it does not confirm is listed without "Use in chat", and this paragraph is the one place. No Reload.
 
 **Plugins.** The dialog reads `folder` (the config home when null), so My items and its management work as in Customize. Its loaded line reads `FRESHNESS.notObserved` alone for an unstarted tab. The "+" › Plugins submenu keeps its two entries and lists no rows before the start.
 
-### §E. One scrim; the gutter; names (M3)
+### §E. One scrim; layers that stack; the gutter; names (M3)
 
     // sessions/ui.ts
-    export const SCRIM = 'bg-bg-active';   // what every sheet and dialog dims the window with (#523); the renewal owns a scrim token
+    export const SCRIM = 'bg-bg-active';   // what a sheet or a dialog dims the window with (#523); the renewal owns a scrim token
 
-Read by `Sheet` and by the overlays of `composer/WidgetDialog.tsx`, `composer/InlineEdit.tsx`, `resume/host.tsx`, `transcript/view/rows/Divider.tsx` and `keymap/KeyboardShortcuts.tsx`. U10's `.doc-confirm-overlay` takes `background: var(--bg-active)` with no opacity (reported, 9). U7's Settings dialog reads `SCRIM`.
+    // sessions/scrim.ts
+    /** The class of one modal layer's backdrop: SCRIM while it is the top layer, 'bg-transparent' while another has opened over it. Each backdrop calls it once and counts as a layer for as long as it is mounted. */
+    export function useScrim(): string;
+
+**Layers that stack** (the review's finding 3). The top layer's backdrop paints and every backdrop under it is clear while it is covered. So the window is dimmed once, by the one value, however many layers are open, and the top layer's backdrop also dims the dialog under it, which then reads as behind. The top layer is the one mounted last. Read by `Sheet` and by the overlays of `composer/WidgetDialog.tsx`, `composer/InlineEdit.tsx`, `resume/host.tsx`, `transcript/view/rows/Divider.tsx`, `keymap/KeyboardShortcuts.tsx` and `sidebar/AddProject.tsx`; each such backdrop carries `data-scrim`, and `Sheet`'s keeps `data-sheet-scrim` beside it. U7's Settings dialog reads it too: the Org sheets and the import sheet open over it. Pitfall: mount order stands for stacking order. Three of these overlays sit at `z-40` and `Sheet` at `z-50`, and today nothing opens a `z-40` dialog over a sheet; a later layer that would must raise its own z-index, the stack is not the place.
+
+U10's `.doc-confirm-overlay` takes `background: var(--bg-active)` with no opacity and is not a layer of the stack (ruled, 9).
 
 | where | reads |
 |---|---|
 | `REFUSALS['not-supported']` (`sessions/share/copy.ts`) | <machine>'s sminos can't keep a session's reach yet. Update sminos on <machine>, then open this again. |
 | the Share and Add owner subtitle's tooltip | <title> · <machine> |
 
-**The gutter** (reported, point 10), in `styles/app.css`, `@layer components`:
+**The gutter** (ruled, point 10), in `styles/app.css`, `@layer components`:
 
     .scroll-gutter { scrollbar-gutter: stable; }                                    /* a scroller with a footer aligned under it */
     .scroll-gutter-under { overflow: hidden; scrollbar-gutter: stable; }            /* that footer: it clips, so the property applies */
@@ -681,33 +735,37 @@ The Channel's stream takes the first and its footer the second. In `session/Sess
 
 **Names, one order** for say rows, exchange rows and to-human headers. As a row narrows: the session's title gives way first, to nothing; then the recipients' and owners' labels; then the machine chip, which keeps up to 24 characters while there is room; then the alias, drawn whole where there is room and never under 12 characters. The chevron, the count's words, "and", "to everyone" and the time never shrink. A row that cannot hold the minimums wraps to a second line. Pitfall: `flex-wrap` on the row breaks lines before any item shrinks, so the wrap must be the fixed parts moving under the names, not the names wrapping among themselves. A party's tooltip is its alias, title and machine in full, joined with " · ", a missing one left out.
 
-### §F. The Channel's reach, entries and action (M4, M5)
+### §F. The Channel's reach and refusal, entries and action (M4, M5)
 
-**The field** (`src/shared/ipc/schema/org.ts`, on the channel's open answer and on its change, after `live`):
+**The two fields** (`src/shared/ipc/schema/org.ts`, on the channel's open answer and on its change, after `live`):
 
-    reach: z.enum(['connecting', 'unreachable']).optional(),   // present exactly while the answer is open and `live` is false
+    reach: z.enum(['connecting', 'unreachable']).optional(),     // present exactly while the answer is open and `live` is false
+    refused: z.enum(['credentials', 'removed']).optional(),      // present while the hub has ended this channel's socket for good and the channel waits for the session's next change
 
-**Events and transitions**, per channel in main. Reach is told with every open answer and as a change whenever it moves while the channel is not live.
+`refused` is the channel's own word and does not depend on reach (the review's finding 2): `credentials` when the hub sign-in has ended, `removed` when the hub no longer admits the member, as the socket's two close codes say (`CLOSE_CREDENTIALS`, `CLOSE_REMOVED` in `project-socket.ts`). The third code that ends a socket, no such project, closes the answer `unknown-project` as today.
 
-| event | reach after |
-|---|---|
-| the channel is made; the sign-in or the hub changes; a released channel is opened again | `connecting` |
-| the attestation read fails | `unreachable` |
-| the socket errors, or closes before its welcome, with a code that does not end the channel | `unreachable` |
-| the socket's headers do not resolve, or a close code ends the channel | unchanged |
-| the socket is welcomed but has not caught up | unchanged |
-| the channel becomes live | absent |
-| a live channel loses its socket (a close, a missed pong, a wake) | `connecting` |
+**Events and transitions**, per channel in main. Both are told with every open answer and as a change whenever either moves while the channel is not live.
 
-So `unreachable` stays through every retry until the channel is live, and the footer does not flicker.
+| event | reach after | refused after |
+|---|---|---|
+| the channel is made; the sign-in or the hub changes; a released channel is opened again | `connecting` | absent |
+| the attestation read fails | `unreachable` | unchanged |
+| the socket errors, or closes before its welcome, with a code that does not end the channel | `unreachable` | unchanged |
+| the socket closes with the code of an ended sign-in, or of a member no longer admitted | unchanged | `credentials`, or `removed`; nothing is retried |
+| the socket's headers do not resolve | unchanged | unchanged |
+| the socket is welcomed but has not caught up | unchanged | unchanged |
+| the channel becomes live | absent | absent |
+| a live channel loses its socket (a close, a missed pong, a wake) | `connecting` | unchanged |
+
+So `unreachable` stays through every retry until the channel is live, and the footer does not flicker; and a refusal stands, whatever reach reads, until the session changes.
 
 **The footer**, while not live, after "As of <time>" when there is one, the first that holds:
 
 | condition | words |
 |---|---|
 | not signed in | Signed out |
-| the org's hub status is `expired` | The hub sign-in has ended. (with its button) |
-| it is `denied` | The hub no longer admits you. |
+| `refused` is `credentials`, or the org's hub status is `expired` | The hub sign-in has ended. (with its button) |
+| `refused` is `removed`, or the hub status is `denied` | The hub no longer admits you. |
 | reach is `unreachable`, or the hub status is `unreachable` | Offline · retrying |
 | otherwise | Connecting… |
 
@@ -720,7 +778,7 @@ So `unreachable` stays through every retry until the channel is live, and the fo
 
 The palette's `PaletteEntries` gains `channels: { project: string; name: string; waiting: number }[]`, drawn as a group "Channels" after Projects and listed with an empty query as Projects are. An entry reads "<name> · channel", with "N waiting" as its muted detail when N is not zero, and matches a query that is part of that text, case ignored. Enter runs `openTab({ kind: 'channel', project })`.
 
-**The action** (reported, point 11):
+**The action** (ruled, point 11):
 
     // src/shared/keymap/actions.ts, after the rows of the Tabs submenu and before pane.split
     'channel.open': { title: 'Project channel', chord: null, sink: 'menu', menu: 'view', scope: 'app' },
@@ -730,32 +788,55 @@ View then reads: Overview, Artifacts, Tabs ▸ │ Project channel │ Split / m
 ### §G. Settings (M9, M10; consumed by U7)
 
     // settings-tab/SettingsView.tsx
-    export const SETTINGS_SECTIONS = ['appearance', 'notifications', 'keyboard', 'voice', 'browser', 'artifacts', 'sessions', 'gateway', 'engine', 'background', 'org'] as const;
+    export const SETTINGS_SECTIONS = ['appearance', 'notifications', 'keyboard', 'voice', 'browser', 'artifacts', 'sessions', 'gateway', 'engine', 'supervisor', 'org'] as const;
     export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
-    export const SECTION_TABLE: readonly { group: 'app' | 'sessions' | 'org'; section: SettingsSection }[];   // the index's and the body's order
-    export function SettingsView(props: { section: SettingsSection | null }): JSX.Element;                    // fills its host; null opens at Appearance
+    export const SECTION_TABLE: readonly { group: 'app' | 'sessions' | null; section: SettingsSection }[];   // the index's and the body's order
+    export function SettingsView(props: { section: SettingsSection | null }): JSX.Element;                   // fills its host; null opens at the table's first section
 
     // settings-tab/rows.ts
     export interface SettingsRow {
       id: string;                    // '<section>.<row>': the search's result and the row's mark in the page (data-settings-row)
       section: SettingsSection;
       label: string;
-      line?: string;                 // the note: one line
-      more?: string;                 // behind More
+      states: Readonly<Record<string, { line?: string; more?: string; state?: true }>>;   // most rows have one, 'default'; `state`: the line reports a condition the person must act on
       keywords?: readonly string[];  // other words people use
       revealedBy?: string;           // the row whose control makes this one drawn
+      repeats?: true;                // drawn once per thing made at run time
     }
     export const SETTINGS_ROWS: readonly SettingsRow[];
 
-A row whose words depend on its state declares one entry per state under the same id, so the bound and the search see every state.
+A drawn row names its declaration and the state it shows (`<Setting row="engine.binary" state="chosen">`), and tells the view both, so the search knows what the page shows now. A value inside a line (a size, a number of minutes, a name) is declared as a marked place; the search reads the words around it.
 
-**Groups and sections.** `INDEX.groups`: App; Sessions and engine; Org. `SECTIONS.background`: Background. The rows of each section, in order, are the child's table. The link reads "Customize" with the chevron beside it, and the footer is unchanged. U7 adds `{ group: 'sessions', section: 'usage' }` after Gateway and its rows to `SETTINGS_ROWS`.
+*Rows made at run time* (the review). `BrowserImport.tsx` draws a row per imported Chrome profile and a row per extension of each. Both are declared once with `repeats`: `browser.importedProfile` (declared label "Imported Chrome profile"; the drawn label is the profile's own name, and its note, the import's summary, is a state) and `browser.extension` (declared label "Extensions"; the drawn label is the extension's name), each `revealedBy` the Chrome profile row. Nothing else in the body repeats: a Space's design system is a control inside the By Space row.
 
-**The stored section** (reported, point 12). The list in `src/shared/ipc/schema/layout.ts` is not edited and stays build F's ten. `SettingsSection` is no longer derived from it; the stored ten are all members of it, so every caller and the tab's host compile unchanged. No caller opens the tab at `background`: it is reached by the index and the search, which move the view without writing the tab, and by U7's `openSettings`, which is held for the run only. So no value F does not know can be stored, and nothing is held in memory.
+**The index.** A column 148 px wide, as today, in three parts: the title and the search field at its top; the list, which scrolls by itself; the footer, which stays at the bottom. The list holds the two groups with their sections, then, under the rule that separates the Customize link today, Org and "Customize ›". With U7's Usage the list needs 705 px and the dialog gives 695 at the default window, so the scroll is not optional.
 
-**A note.** `NOTE_LINE_MAX = 86`: a declared line is at most that many characters, a state's sample values included. It stands for one line at the 580 px a note has when the body is 760 px wide; the e2e scene is the measurement, and the owner's look may move the constant. A state line is declared as one and is exempt.
+- A group heading is drawn as the app's other group headings, 12 px semibold in `fg-muted`, on one line that never wraps. (`fg-faint` is 2.6 to 1 on the index in the light theme.)
+- `INDEX.groups`: `{ app: 'App', sessions: 'Sessions & engine' }`. "Sessions and engine" is 116 px in an entry's 115 and would wrap.
+- `SECTIONS.supervisor`: "Supervisor". The link reads "Customize" with the chevron beside it. The footer is unchanged.
+- The rows of each section, in order, are the child's table, its Background row read as Supervisor.
 
-**Lines and Mores** are the child's table, with these additions.
+Three things are with the owner on the drawn page. Each is built at the first answer and changes at the places named, and nowhere else:
+
+| question | built | the other answer changes |
+|---|---|---|
+| the order | everyday preferences first: App, then Sessions & engine, then Org | `SECTION_TABLE`'s order: Sessions & engine first with Engine at its head (Engine, Sessions, Gateway, Supervisor), then App, then Org. The view opens at the table's first section, so nothing else moves. |
+| Org's heading | Org stands without a group heading | `INDEX.groups` gains `org: 'Org'`, and Org's entry in `SECTION_TABLE` takes `group: 'org'`, the type's third member. Nothing else reads a group: the search does not match by a group's name, and nothing stores one. |
+| the section's name | "Supervisor" | the one string `SECTIONS.supervisor`, to "Background". The id `supervisor` is not shown and not stored. "Background" is also the first word of a session's "Background work" surface and of its key binding, so a search for it would then list both. |
+
+**The stored section** (ruled, point 12). The list in `src/shared/ipc/schema/layout.ts` is not edited and stays build F's ten. `SettingsSection` is no longer derived from it; the stored ten are all members of it, so every caller and the tab's host compile unchanged. No caller opens the tab at `supervisor`: it is reached by the index and the search, which move the view without writing the tab, and by U7's `openSettings`, which is held for the run only. So no value F does not know can be stored, and nothing is held in memory.
+
+**The measure.** "One line" is claimed where the body has its full 760 px: the default window with no side surface open, and U7's dialog when it gives `SettingsView` 948 px (148 for the index, 20 on each side of the body, 760). There a note has 580 px in 12 px type. A note that ends in More, or carries a button, has 532 px for its words and is 22 px high, the button's box; one that does not is 18 px high. No character count stands in for this: these sentences run 5.5 to 5.9 px a character, so a count misjudges both ways. The proof is the e2e scene, at three widths:
+
+1. *The body at 760 px.* Every note is one line: 18 px, or 22 px where it ends in More or carries a button. Rows whose line is a state are not measured.
+2. *A view about 520 px wide* (a 50/50 split with no side surface). The index is still a column; every row is stacked, label over control over note; no note stands beside its label.
+3. *A view about 330 px wide* (a split beside a side surface). The index is a row of links without headings; rows stacked.
+
+*Rows stack by the body's own width.* The body's column is a container of its own, and a row is two columns only where that container is at least 32rem. So a note beside its label is never narrower than 332 px (512 less the label's 168 and the gap's 12). The index keeps today's break, on the whole view, at 32rem.
+
+Known and accepted: the supervisor waiting on an older version takes five lines at 760 px (114 px against 48 when it runs), a state that stays whole; in a narrow pane "More" often falls alone on a line of its own; in a dialog narrower than 948 px (912 at the window's smallest) some notes take two lines.
+
+**Lines and Mores** are the child's table, with these additions. A note that fits its line keeps its words: no More is added for the sake of one clause.
 
 *States the table does not give:*
 
@@ -763,32 +844,58 @@ A row whose words depend on its state declares one entry per state under the sam
 |---|---|---|
 | Binary, a chosen binary | New sessions start on the binary you chose. | Running sessions keep the binary they started on. MAWS was verified against Claude Code <version>. |
 | Update, installed | Runs claude update in a terminal tab. | New sessions start on the new version; running sessions keep theirs. |
-| Update, a chosen binary | Runs claude update in a terminal tab. | New sessions stay on your chosen binary until Use installed. Running sessions keep theirs. |
 | Voice › Shortcut, unbound (the default) | Click the microphone in the composer's toolbar to start dictating, and again to stop. | A shortcut, once bound, dictates into the focused composer while you hold it. |
 | Limit, a limit set | Default: 25% of physical memory. | Past it the least recently used idle session is released. Send resumes a released session. |
-| Exit when idle, never | Never · the supervisor keeps running after its last session ends. | Even with MAWS closed. |
 
-*Lines that may not fit.* A line over the bound moves its last sentence or clause behind More, words unchanged but for the capital and the full stop the cut needs. Applied at authoring, to be confirmed by the look:
+*The two lines that run over at 760 px*, each with its last clause moved behind More and its words otherwise unchanged:
 
-| row | the line | joins More, first |
-|---|---|---|
-| Limit, default | Default: 25% of physical memory (<size>). | Past it the least recently used idle session is released. |
-| Messages to you | Agents message you and ask questions you answer in place. | A session reads as their report. |
-| Per-session Direct (not in the child's table) | The relay card's Run direct stays either way. | Direct is the fallback when the relay is unreachable. |
-| Browser › Profile (not in the child's table) | Applies to tabs opened from now on. | The address bar shows which profile a tab browses with. |
+| row | measured, as the table words it | the line | behind More |
+|---|---|---|---|
+| Limit, default with its size | 550 px of words, then More | Default: 25% of physical memory (<size>). | Past it the least recently used idle session is released. Send resumes a released session. |
+| Update, a chosen binary | 552 px of words, then More | Runs claude update in a terminal tab. | New sessions stay on your chosen binary until Use installed. Running sessions keep theirs. |
 
-*Where each old note went*, for the reviewer of M9: every note of today's `copy.ts` is in the child's table or the two tables above, or keeps its words on one line. Said once under Sessions' heading, "For sessions MAWS runs. Terminal sessions and your Claude Code settings files are not changed.", and so gone from each note: that a setting never reaches a terminal session, and that the person's own settings files are never changed. Dropped: Config home's "MAWS reads them and keeps its own index elsewhere" (the chip says it), and the Plugins paragraph row with its sentence.
+Every other line fits and keeps its words: among them Messages to you as the child's table words it (519 px, then More), Hooks in sessions (490 px, then More), and three notes the table does not list, which stay whole with no More: Per-session Direct (544 px), Browser › Profile (531 px) and Exit when idle set to never (501 px).
 
-**More.** A text button at the line's end, "More", "Less" while open, with `aria-expanded`. Closed, its text is not in the page. The search reads the table, not the page.
+*Direct login.* The child's row gives the line "Only Direct sessions use it." and its More. Today's note also carries the instruction `GATEWAY.signIn`, "Sign in: run claude /login in a terminal", and a Copy button. Both stay on the row's line, after the sentence and before More (401 px together).
+
+*The line under Sessions' heading* sits under the heading, 12 px in `fg-muted`, not beside it as Keyboard's hint does: "For sessions MAWS runs. Terminal sessions and your Claude Code settings files are not changed." It is one line at 760 px and two in a narrow pane.
+
+*Where each old note went*, for the reviewer of M9: every note of today's `copy.ts` is in the child's table or the tables above, or keeps its words on one line. Said once under Sessions' heading, and so gone from each note: that a setting never reaches a terminal session, and that the person's own settings files are never changed. Dropped: Config home's "MAWS reads them and keeps its own index elsewhere" (the chip says it), and the Plugins paragraph row with its sentence.
+
+**More.** A text button at the line's end, drawn in `fg` so that it reads as a button after a muted sentence; "More", "Less" while open, with `aria-expanded`. Closed, its text is not in the page.
 
 **Search** (`settings-tab/search.ts`):
 
-    export interface SettingsResult { id: string; label: string; section: SettingsSection; target: string; openMore: boolean }
-    export function searchSettings(query: string, input: { rows: readonly SettingsRow[]; bindings: readonly { id: string; title: string }[]; orgGroups: readonly string[] }): SettingsResult[];
+    export interface SettingsResult { id: string; name: string; under: string; target: string; openMore: boolean }
+    export function searchSettings(query: string, input: { rows: readonly SettingsRow[]; shown: ReadonlyMap<string, string>; bindings: readonly { id: string; title: string }[]; orgGroups: readonly string[] }): SettingsResult[];
 
-Every word of the query must be found, case ignored. A row matches by its label, line, More, keywords, its section's name and its group's name. A section's name is a result of its own and stands before its rows. A key binding is a result by its action's title alone, so the word "keyboard" lists the section and its two rows, not sixty bindings. An Org group's heading is a result by its own words. The Customize link is a result, with plugins, skills, connectors and marketplace as its other words. Results stand in the page's order and read "<label> in <section>", "in <section>" muted. `target` is the row to scroll to: the row itself, or the row that reveals it. `openMore` is true when the query's words are found only with the More's text. No match reads `INDEX.noMatch`, "No matching settings". The field's label and placeholder are `INDEX.search`, "Search settings".
+`shown` is each drawn row's id and the state it shows. Four rules decide the rest, and each choice under them is stated.
 
-Keywords at least: connectors, integrations and tools for MCP servers; shortcut and hotkey for the key bindings; dark and light for Theme; relay, account and direct for the Gateway rows; RAM for the memory budget.
+*(i) Choosing a result never puts the keyboard on a control that acts on Enter.* The chosen row itself takes the keyboard, with the accent outline; Tab then enters its controls. A second Enter does nothing.
+
+*(ii) A result never names text the page will not show in its present state.* A drawn row is matched by its label, its keywords, its section's name, and the line and More of the state it shows now; another state's words are not searched, so a chosen binary's Binary row is not found by "PATH". A row that is not drawn (Limit and Stateful MCP servers while the memory budget is off) is found as the row that reveals it: its label and keywords count for that row, and the result is that row's name. A repeating row is one result by its declared label, and lands on its first drawn item, or on the row that reveals it when it has none. `openMore` is true when the query's words are found only with the More the row shows now.
+
+*(iii) A result is the row's name with its section under it, never "<row> in <section>", and takes two lines at most.* The name is one line, cut with an ellipsis and whole in its tooltip; under it, in `fg-muted`, one line:
+
+| the result | its name | under it |
+|---|---|---|
+| a row | its label | its section's name |
+| a section | its name | Section |
+| a key binding | its action's title | Keyboard |
+| a group of the Org page | its heading | Org |
+| the Customize link | Customize | Plugins, skills and connectors |
+
+The Org page's own group headed "Org" is not a result of its own; the section's result stands for it. While the field holds text the results take the place of the groups and sections in the index's list and scroll as that list scrolls; the footer stays. No match reads `INDEX.noMatch`, "No matching settings", on two lines at most. The field's label and placeholder are `INDEX.search`, "Search settings"; it is drawn as the dialogs' search field, at the index's width.
+
+*(iv) A row is not matched by its group's name.* "Engine" or "sessions" would otherwise list every row of the group. A key binding is matched by its action's title alone, so "keyboard" lists the section and its two rows, not sixty bindings.
+
+Under those rules: every word of the query must be found, case ignored. Results stand in the page's order, a section's own result before its rows, and the first is preselected, so Enter chooses it; Up and Down move. Choosing a result scrolls the body so that the row's section heading is at the body's top where the row is then in view; a row farther down its section than the body is tall is brought to the middle instead, since both cannot be in view. The row is marked with `bg-bg-active` over its box and 8 px around it, for 1,600 ms, then cleared over 150 ms (at once under reduced motion, and at once when another result is chosen). The query stays in the field; the field does not keep the keyboard.
+
+Keywords at least: connectors, integrations and tools for MCP servers; shortcut and hotkey for the key bindings; dark and light for Theme; relay, account and direct for the Gateway rows; RAM for the memory budget; plugins, skills, connectors, marketplace and mcp for the Customize link.
+
+*The narrow form.* The field is a full-width first row above the row of section links. While it holds text the results take the links' place as a list under the field, at most 12rem high and scrolling; a choice scrolls the body beneath it.
+
+**For U7.** `SettingsView` fills its host and needs 948 px of it for the one-line measure; the dialog's box is 960, so a padding of more than 6 px a side costs it. The index scrolls by itself and its footer stays, which Usage makes necessary. Usage is `{ group: 'sessions', section: 'usage' }` after Gateway in `SECTION_TABLE`, with its rows in `SETTINGS_ROWS`. The dialog's Esc lets a search field that holds text clear first (`data-escape-clears`). A sheet opened from Settings stacks over the dialog, whose backdrop reads `useScrim` (§E).
 
 ### §H. What is stored or sent, and what build F does with it
 
@@ -798,13 +905,15 @@ This landing stores no new key, so it adds no row to the cross-build coverage ta
 |---|---|---|---|---|
 | `settings.json`, `machine-settings.json` | no key, value, default or version changes; a moved row writes the field it wrote | reads and writes them as master's | the same | unchanged at every step |
 | `layout.json`, the Settings tab's `section` | writes only the ten values F knows, by the unchanged callers | parses it | every one of F's ten is a section here | unchanged |
-| the command `connectors.signInDynamicServer`; the wire's minor, one higher | sent by this build's app to this Mac's daemon | a daemon on F answers `unknown_command`: the row reads a sign-in that did not finish, in the transport's words. An app on F never sends it. F reads no minor. | — | a daemon outlives the app that started it until it is idle, so each pairing can occur; both are covered by this row |
+| the command `connectors.signInDynamicServer`; the wire's minor, higher | sent by this build's app to this Mac's daemon | a daemon on F answers `unknown_command`: the row reads a sign-in that did not finish, in the transport's words. An app on F never sends it. F reads no minor. | — | a daemon outlives the app that started it until it is idle, so each pairing can occur; both are covered by this row |
 | the event `connectors.signInChanged`, its `name` now any string up to 128 | emitted by this build's daemon with a dynamic connector's name | every reader on F drops an event whose name fails F's rule and logs one line (`host-supervisor.ts`, `socket-link.ts`, `remote-artifact-feed.ts`). F cannot have started that operation, so it has nothing to bind the event to. It can occur when F's app starts within the five minutes a sign-in this build began is still waiting. | F emits only configured names, which read here | no state is left by a dropped event |
+| `revision`, on a row of `customization.serverEndpoints`' answer (the engine host's); the wire's fingerprint, changed by it | made by this build's engine host, read by this build's services and main | F's main and services read the answer through the wire's tolerant reader, which drops a property a build does not know. F speaks the wire by its major and minor and does not read the fingerprint. | an engine host on F answers no revision: Customize's row of MAWS's own list offers no Sign in until the host is replaced; the dialog's Sign in is not affected | nothing is stored: a revision lives for one run of one engine host |
+| `revision`, on a server of `catalog.postures`' answer (main's) | from main to this app's own windows, one build at both ends | never sees it | — | — |
 | the engine's credential for a signed-in connector | the engine writes it to the Keychain, keyed by the server's name, type, address and headers; MAWS stores nothing | F's sessions run the same engine and read it connected | the same | unchanged |
 | `~/.claude.json`, a disabled connector | the engine's `mcp_toggle`, as today | as today | as today | unchanged |
-| the channel's `reach` | from main to this app's own windows, one build at both ends; not stored, not on the wire | never sees it | — | the channel's cache file is not touched |
+| the channel's `reach` and `refused` | from main to this app's own windows, one build at both ends; not stored, not on the wire | never sees them | — | the channel's cache file is not touched |
 | `channel.open`, a rebinding | not storable: U6a's guard keeps an id F does not know out of `settings.json` | — | — | — |
-| the machine link (RL2) | nothing new crosses it | — | — | U11b's |
+| the machine link (RL2) | nothing new crosses it | — | — | U11f's |
 
 A member who holds `machine-admin` on this machine and is connected from another device hears the sign-in event as today. It can now carry a plugin connector's name, which that member can already list (`connectors.servers`).
 
@@ -813,12 +922,14 @@ A member who holds `machine-admin` on this machine and is connected from another
 Consumed, by the name each is exposed under:
 
 - **U6a** (must be on master before M5): the row's shape and "table order is menu order" (its Interfaces A, B, G); `paletteEntries(query, input, table)`; `WAVE_DEFAULTS`, which already holds `'channel.open': null`, and `LANDED`; `isRebindable`, by which the new row takes no rebinding and this landing does nothing for that; its insertions in this child's files, which M9 keeps as they are (`KeymapRow.rebindable` and the one condition in `KeymapSection.tsx`; `KEYBOARD.hint` without its first clause); and UC-6's focus-first rule as that document builds it, by which a region that handles a menu row's chord itself keeps it (M10's ⌘F).
-- **U13a** (either order): `activeTab(state.main)`, and `openTab(target)` bringing an open tab forward (its §F); `sessionRow` when it is on master (§F above); its insertion in `customize/CustomizeView.tsx`, the file M7 takes the inventory's query out of (whoever lands second merges); its cross-build settings scene, which must find the idle-time row by the row's own label, since this landing moves it from Engine to Background (whoever lands second sees to it).
-- **U9** (either order; before U11b): `REMOTE_UNAVAILABLE` and `useRemoteUnavailable`, whose signature its document keeps. If U9 has landed, its `disabledWords` answers a declared command's words first, so §A's sentence reads the same.
+- **U13a** (either order): `activeTab(state.main)`, and `openTab(target)` bringing an open tab forward (its §F); `sessionRow` when it is on master (§F above); its insertion in `customize/CustomizeView.tsx`, the file M7 takes the inventory's query out of (whoever lands second merges); its cross-build settings scene, which must find the idle-time row by the row's own label, since this landing moves it from Engine to Supervisor (whoever lands second sees to it).
+- **U9** (either order; before U11f): `REMOTE_UNAVAILABLE` and `useRemoteUnavailable`, whose signature its document keeps. If U9 has landed, its `disabledWords` answers a declared command's words first, so §A's sentence reads the same.
+- **U4a** (either order; nothing consumed, three files shared): its slash-list changes are in `composer/mentions/items.ts` and `widgets.ts`, where M6 changes the one name `mcp`; its `/btw` mount changes the transcript's wrapper in `session/SessionPane.tsx`, the element that takes M3's gutter scope. Whoever merges second keeps both edits.
 - **U8a**: nothing consumed. Its tree test fails on a new spelling of a session's folder: M6 and M7 read the folder as the dialogs do today (`engine.cwd`, else the record's directory, a spelling the test counts as zero) or through `useWorkingFolder`, and add no other.
 - **U3a, U8b**: nothing consumed. `transcript/view/Transcript.tsx` is not edited; U8's Connectors card is not edited.
+- **The wire's minor**: U3a, U1a, U4a, U8b and U12a each raise it, as M8 does. The number is whoever merges last's to take (Constraints; Concrete Steps 4 and 5).
 
-Exposed to siblings: `SCRIM`; `SETTINGS_SECTIONS`, `SettingsSection`, `SECTION_TABLE`, `SETTINGS_ROWS` and `SettingsView` (U7); the search field's `data-escape-clears` mark (U7's dialog lets a field that holds text clear first); `connectors.signInDynamicServer`, `startSignInDynamic` and `SignInScope` (U11b, X-184); `connectorStatusWords` (U8's card may adopt it); `useTabPlace` and `useCustomizationInventory` (#476's lists); the three gutter classes; `channel.open`.
+Exposed to siblings: `SCRIM` and `useScrim`; `SETTINGS_SECTIONS`, `SettingsSection`, `SECTION_TABLE`, `SETTINGS_ROWS` and `SettingsView`, with what §G's "For U7" asks of the dialog; the search field's `data-escape-clears` mark; `connectors.signInDynamicServer`, `startSignInDynamic`, `SignInScope` and the configuration's revision (U11f; X-184, whose rows for a plugin's connector will need a revision of their own); `connectorStatusWords` (U8's card may adopt it); `useTabPlace` and `useCustomizationInventory` (#476's lists); the three gutter classes; `channel.open`.
 
 When U3's Find lands, ⌘F is a menu row's chord; its scene "while the Settings dialog is open ⌘F focuses its own search" is where the pair is proved together.
 
@@ -832,46 +943,31 @@ Each line has an owner other than an executor. The controller writes into Progre
 | P2 | **Where the engine records a switched-off connector for a session in a linked worktree** (law 6; point 5) | any time before M11 | A wire probe on the wave's probe VM, engine 2.1.322, scratch config home: a scratch repository with one linked worktree, a session in each, `mcp_toggle` off, then the key of `projects` in the scratch `.claude.json` that holds `disabledMcpServers`. No Keychain is involved. | The key for each case. The repository's root for both: §C's `<place>` stands. The worktree's own folder: a session in a worktree reads its folder as `<place>`. Anything else: back to the architect. |
 | P3 | **A skill's name on disk against the engine's name for it** (law 6; point 6) | any time before M11 | A wire probe on the same VM: a person's skill and a project's skill, each once with a front-matter name equal to its folder's and once different, and a plugin's skill; the engine's own skills list read beside the inventory's rows. | Per group, whether §D's inserted form is the engine's name. A group it does not confirm loses "Use in chat" before the first message. |
 | P4 | **The 45 seconds of "Reading the channel…"** (S-09; the child's Probes) | after M4 is pushed | A Mac other than the MacBook on this branch's build, signed in to an org, the network turned off: one Channel tab that has a cache and one that has none; the time `org.channel.open` takes to answer, and what the body and the footer read. An agent on the mini, or U14's sitting. | The answer comes at once: A13 as built. It is late: what it waited on, which M4 then fixes in main (its last decision). |
-| P5 | **The owner's look at the regrouped Settings** (root, "Looks the owner is asked for") | now; M9 waits for it | The drawn example of the next section, built by the architect. | The owner's answers to its seven questions. A change of order, of a group's name, of a line or of the bound is written into §G before M9 starts. |
-| P6 | **The e2e scenes** on a Mac under the load rule | after M11's hand-back; a milestone's own scenes as soon as it is pushed | The new and reworked scenes alone first: in `e2e/channel.spec.ts` the edges, the 420 px column, the footer's words and the palette and menu scene; in `e2e/composer.spec.ts` the session pane's edges under classic scrollbars; in `e2e/share.spec.ts` the scrim and the sentence; in `e2e/widgets.spec.ts` the three edited Connectors scenes and the unstarted-tab scene; in `e2e/settings.spec.ts` the regrouped page, each note's height, More and the search. Then the groups that hold what this change reaches: `settings` (which also runs the org page, the Channel, Share and the registry), `widgets`, `composer`, `layout`, `supervisor-daemon`, `machines`, `default`. `e2e/c11-live.spec.ts` has no gate group: its edits are typechecked and run at the next live sitting. | Verdicts by group, and the screenshots the scenes attach (the footers under both scrollbar settings; the grant sheet; the Share sheet). A red scene goes back to the controller as a fix. |
+| P5 | **The owner's look at the regrouped Settings** (root, "Looks the owner is asked for") | the page is drawn and measured (2026-11-12); the owner's answers are awaited | Three answers on the drawn page: the order; whether Org takes a group heading; the name of the section for the supervisor and the memory budget. | Each answer changes the places §G's table names and nothing else. M9 and M10 wait for them; no other milestone does. |
+| P6 | **The e2e scenes** on a Mac under the load rule | after M11's hand-back; a milestone's own scenes as soon as it is pushed | The new and reworked scenes alone first: in `e2e/channel.spec.ts` the edges, the 420 px column, the footer's words and the palette and menu scene; in `e2e/composer.spec.ts` the session pane's edges under classic scrollbars; in `e2e/share.spec.ts` the scrim and the sentence; in `e2e/widgets.spec.ts` the stacked scene (the Plugins dialog, then its confirmation), the three edited Connectors scenes and the unstarted-tab scene; in `e2e/settings.spec.ts` the regrouped page, the notes at §G's three widths, More and the search. Then the groups that hold what this change reaches: `settings` (which also runs the org page, the Channel, Share and the registry), `widgets`, `composer`, `layout`, `supervisor-daemon`, `machines`, `default`. `e2e/c11-live.spec.ts` has no gate group: its edits are typechecked and run at the next live sitting. | Verdicts by group, and the screenshots the scenes attach (the footers under both scrollbar settings; the grant sheet; the Share sheet; the stacked dialogs). A red scene goes back to the controller as a fix. |
 | P7 | **M8's sign-in scene, and the cross-build settings scene** | after M8 and M9 are pushed | M8's scene: the `discover` group in a gate job on the mini, with its Keychain custody as the existing sign-in case has it. The cross-build scene: one `e2e:cross-build` run with build `f1852de3a` as the peer, because M9 moves the idle-time row that scene changes through this build's Settings. | The run ids; the scene named as run and green. A skipped scene is not evidence. |
 | P8 | **The branch review** | after M11 | `doperpowers:review-code`, the xhigh panel, over `origin/master...ux-wave/U11a` (Decision Log). | A verdict and findings; the fixes are one wave through the controller. |
 | P9 | **Class 1a** | on the head handed back; again on the final head if the panel changed the branch | Concrete Steps 7. | The run's id, which the pull request names. |
 
-## The drawn example for the owner's look (P5)
+## The owner's look (P5)
 
-Built by the architect before M9, as a page the owner opens, with the app's own tokens (`src/renderer/src/styles/tokens.css`) and Settings' real measures, so that whether a note fits one line is seen and not guessed: the index 148 px wide, a row's label column 168 px, the body at most 760 px, 12 px for notes. Every label, path and name in it is invented (UC-11). The words are the child's table and §G's.
+The architect drew the regrouped Settings as a page, with the app's tokens and Settings' real measures, and measured it; the page and its measurements are kept outside the repository. What it showed is folded into §G: which lines run over, the measure a note has, the index's headings and its scroll, the search's results and what choosing one does, Direct login's line, More's colour, and the place of the line under Sessions' heading. The drawing's frames stand for eleven sections; with U7's Usage there are twelve, which is why the index scrolls.
 
-**Widths.** (1) The 960 px box U7's dialog gives Settings, which is where the owner will meet it. (2) The Settings tab at the default window, 1280 px wide with the sidebar open, which is what this landing ships until U7 lands. (3) A pane about 300 px wide, a 50/50 split, where the index becomes a row of links.
-
-**Frames.**
-
-1. *The index and the top of the body* at widths 1 and 2, light theme: the three group headings, small and muted; the eleven sections; "Customize ›"; the footer; the body opened at Appearance. Once more in the dark theme, for the headings' contrast.
-2. *Sessions*: the line under its heading; its six rows with every note closed; then the same with MCP servers' More open, which is the longest.
-3. *Engine*, three rows, with the installed binary and once with a chosen binary.
-4. *Background*: the supervisor running; the supervisor waiting on an older version, whose line and "Restart now" are a state and stay whole; the memory budget off; the memory budget on, with Limit and Stateful MCP servers shown.
-5. *The longest lines, side by side at 760 px*: Hooks in sessions; Messages to you; Limit with its size; Update with a chosen binary; Per-session Direct; Browser › Profile; Exit when idle set to never. Each as the child's table words it, and beside it as §G's fallback cuts it, so the owner sees what one line costs.
-6. *The search*: the field empty above the index; "mcp" typed, with its results in place of the sections ("MCP servers in Sessions", "Stateful MCP servers in Background"); a result chosen, its row marked; "PATH" typed and chosen, which opens Binary's More; a query with no match.
-7. *Width 3*: the index as a row of links without group headings, and two rows stacked.
-8. *Where later rows would sit*, drawn and marked "not in this landing": "Connector icons" as the last row of Appearance; a default model and mode under Engine.
-
-**What the look should answer.**
+Three questions are with the owner on that page, and M9 is built at the first answer of each until the owner says otherwise:
 
 1. Everyday preferences first and the engine last, or the engine first as today?
-2. The three groups and their names; Org is a group of one section with the same name: keep it as a group, or let Org stand without a heading?
-3. What Sessions holds, and the one line under its heading.
-4. "Background" as the name for the supervisor and the memory budget.
-5. One line and "More" in place: for the lines of frame 5, the cut, or shorter words?
-6. A result reading "row in section", and what choosing one does.
-7. The two places of frame 8.
+2. Org without a group heading, or as a group of one?
+3. "Supervisor" or "Background" for the section that holds the supervisor and the memory budget?
+
+Decided without asking, and shown on the page: what Sessions holds and the line under its heading; that only the two lines that run over are cut; the search's results; "Connector icons" as the last row of Appearance when its landing comes.
 
 ## The pull request
 
-Opened by the architect after the gate. Its body opens with the root's path, "U11, first landing (U11a)" and the parent pin; names its class 1a run, its review verdict and its residue (Concrete Steps 6, with what the milestones add); says that U11b holds the sign-in of a dynamic connector on another machine and waits for U9; and lists the five dated amendments it carries ("The record"). It ends with the `Sminos-Session:` line.
+Opened by the architect after the gate. Its body opens with the root's path, "U11, first landing (U11a)" and the parent pin; names its class 1a run, its review verdict and its residue (Concrete Steps 6, with what the milestones add); says that U11f holds the sign-in of a dynamic connector on another machine and waits for U9; and lists the five dated amendments it carries ("The record"). It ends with the `Sminos-Session:` line.
 
 ## Surprises & Discoveries
 
-Found while checking the sections against the code at `48619c824`. Each is carried by a point of "Reported to the architect" or by a decision above.
+Found while checking the sections against the code at `48619c824`, then by the adversarial review and by the drawn page. Each is carried by a ruled point, a decision in a milestone, or an entry of the Decision Log.
 
 - Observation: the sign-in's progress event bounds a server's name at 128 characters and holds it to a configured name's rule, which a plugin connector's name fails; the bound is on the wire's manifest and the rule is not.
   Evidence: `ConnectorSignInChangedSchema` in `src/shared/ipc/schema/connectors.ts`; `events.connectors.signInChanged` in `wire-manifest.json` reads `"name": {"type": "string", "maxLength": 128}`; `classifyWireChange` calls a changed length bound breaking.
@@ -897,14 +993,112 @@ Found while checking the sections against the code at `48619c824`. Each is carri
   Evidence: the callers of `openTab({ kind: 'settings', … })` and `SETTINGS_SECTIONS` in `gateway/actions.ts`; clicking the index sets the view's own state and writes no tab.
 - Observation: the application menu cannot say why an item is greyed, and a row added after build F takes no rebinding.
   Evidence: `connectActions` reports the registered handlers and nothing else; U6a's document, decision 11.
-- Observation: several lines of the child's table, and three notes it does not list, are longer than one line at 760 px.
-  Evidence: at 12 px a note's 580 px holds about 90 characters less the More button; Update with a chosen binary is 98 characters, Limit with its size about 100, Per-session Direct 99, Messages to you 91, Browser › Profile 91.
+- Observation: a press from Customize was not bound to the configuration its row showed (the review, finding 1).
+  Evidence: `bindReceipt` and `SignInRecord` keep the fingerprint in the renderer; `resultFor` reads it only to choose which row shows a result; the operation's `run` checks the entry as it is when it runs.
+- Observation: a channel the hub has refused retries nothing, while the org's hub status can still read healthy (the review, finding 2).
+  Evidence: `onClosed` in `src/main/org/channel/channel.ts` sets `ended = 'parked'` and drops the socket; `reconcile` clears it only at a session change; the hub status is `org-session.ts`'s.
+- Observation: modal layers stack today, so one value on every backdrop still dims the window twice there (the review, finding 3).
+  Evidence: `WidgetDialogHost` keeps its overlay mounted while `ConfirmSheet`, a `Sheet`, opens from the Plugins dialog; two washes of 8% are about 15%.
+- Observation: Settings draws rows that exist only at run time (the review).
+  Evidence: `BrowserImport.tsx`, a `Setting` per imported profile and per extension.
+- Observation: of the lines thought too long, two run over at 760 px; a character count misjudges both ways (the drawing, findings 1 to 3).
+  Evidence: measured on the drawn page at 580 px in 12 px type: Limit with its size 550 px and Update with a chosen binary 552 px, each then More (48 px); Messages to you 519 px then More fits by 13; Per-session Direct 544 px, Browser › Profile 531 px and Exit when idle set to never 501 px fit with no More; these sentences run 5.5 to 5.9 px a character; a note ending in More is 22 px high.
+- Observation: a note is one line only where the body has its 760 px, and a view about 520 px wide keeps a note column of about 150 px (the drawing, finding 4).
+  Evidence: the rows stack by the whole view's width at 32rem; a 50/50 split with no side surface is above it.
+- Observation: "Sessions and engine" does not fit the index; the index does not fit the dialog once Usage is there (the drawing, findings 5 and 7).
+  Evidence: the heading is 116.0 px in an entry's 115; the index needs 675 px with eleven sections and 705 with Usage, against 695 in the dialog at the default window.
+- Observation: results worded "<row> in <section>" wrap to two and three lines in 148 px, some read badly ("For in Notifications"), a group's name floods the list, and the first control of several rows acts on Enter (the drawing, findings 10 to 17).
+  Evidence: "Stateful MCP servers in Background" is 204 px; "engine" matched 21 rows and 4 sections through the group's name; MCP servers' first control is a server's Remove.
 
 ## Decision Log
 
-- Decision: verification for this landing. This document gets an adversarial review before an executor starts; the wave's architect dispatches it. Each milestone is reviewed at its boundary by the controller's reviewer before a milestone that consumes it starts. The branch gets `doperpowers:review-code` at the xhigh panel: it is expected to change about 105 files and 6,400 lines (about 55 product files, 38 unit-test files, 8 e2e files, 5 documents), well past the mark of twenty files or two thousand lines. The root calls nothing in U11 delicate; three parts still want a lens of their own: the sign-in's check and the wire (M8, §A and §H), the channel's reach (M4, §F's table), and the regrouped Settings against the three `keep` items (M9). Class 1a on GitHub Actions (`static,unit,probes`) is the gate of record, run by the architect on the head handed back and again on the final head if the panel changed the branch. The pull request's body names its class 1a run, its review verdict and its residue, and carries the dated amendments of the five rulings this landing reverses.
-  Rationale: the root's UC-10 and the common brief of the wave's execution documents.
-  Date/Author: 2026-11-12, the author of this document.
+- Decision: verification for this landing. This document gets an adversarial review before an executor starts (done on 2026-11-12: needs-attention, three findings, all accepted and folded in below). Each milestone is reviewed at its boundary by the controller's reviewer before a milestone that consumes it starts. The branch gets `doperpowers:review-code` at the xhigh panel: it is expected to change about 112 files and 7,000 lines (about 60 product files, 40 unit-test files, 8 e2e files, 5 documents), well past the mark of twenty files or two thousand lines. The root calls nothing in U11 delicate; four parts still want a lens of their own: the sign-in's check, the configuration's revision and the wire (M8, §A and §H); the channel's reach and refusal (M4, §F's table); the backdrop where layers stack (M3, §E); and the regrouped Settings against the three `keep` items (M9). Class 1a on GitHub Actions (`static,unit,probes`) is the gate of record, run by the architect on the head handed back and again on the final head if the panel changed the branch. The pull request's body names its class 1a run, its review verdict and its residue, and carries the dated amendments of the five rulings this landing reverses.
+  Rationale: the root's UC-10 and the common brief of the wave's execution documents. Rejected: a single reviewer, at this size.
+  Date/Author: 2026-11-12, the author of this document; the sizes and the fourth lens revised the same day with the entries below.
+- Decision: point 1 stands. The new command's `name` is 1 to 128 characters; the progress event keeps its bound of 128 and loses the configured-name rule.
+  Rationale: the bound is on the wire's manifest and moving it is a major. Rejected: 256 characters as the section wrote it; a second event for dynamic sign-ins (two events for one operation, to spare a reader that could never have started it).
+  Date/Author: 2026-11-12, the wave's architect (the ruling); the author of this document (the fold).
+- Decision: point 2 stands and is not enough alone. A press from Customize names its entry; what it names it by is settled by the review's first finding, below.
+  Rationale: the renderer never holds an address, so the services must do the comparing. Rejected: sending the address with the press.
+  Date/Author: 2026-11-12, the wave's architect (the ruling); the author of this document (the fold).
+- Decision: point 3 stands. Until U9 has landed the new command is declared in `REMOTE_UNAVAILABLE`, with the words of §A.
+  Rationale: the coverage test admits no undeclared command, and the update sentence of UC-7.5 would be untrue while no machine offers it. Rejected: an offer row in U9's files before U9.
+  Date/Author: 2026-11-12, the wave's architect (the ruling); the author of this document (the fold).
+- Decision: point 4 stands. The description of `/mcp` changes at two places of U4's `composer/mentions/`, for that one name; §I names U4a's edits of the same two files.
+  Rationale: the engine's description wins once its catalogue arrives. Rejected: changing the declared description alone, which shows only before the chat starts.
+  Date/Author: 2026-11-12, the wave's architect (the ruling); the author of this document (the fold).
+- Decision: point 5 stands. `<place>` is the section's rule, and P2 says whether a worktree session reads its own folder.
+  Rationale: law 6: the engine's key for a linked worktree was read, never seen. Rejected: always the folder's path, which drops the project's name where it is right.
+  Date/Author: 2026-11-12, the wave's architect (the ruling); the author of this document (the fold).
+- Decision: point 6 stands. "Use in chat" before the first message inserts the two forms of §D once P3 confirms them.
+  Rationale: the code today treats a skill's name on disk as unverified. Rejected: inserting unverified names; offering no "Use in chat" at all, against A4.
+  Date/Author: 2026-11-12, the wave's architect (the ruling); the author of this document (the fold).
+- Decision: point 7 stands. The `machine-admin` line names what a holder can do over the link.
+  Rationale: the offer table gives the right nine acts, all on connectors. Rejected: the child's line, which names settings, plugins and restarts that are graded and not offered.
+  Date/Author: 2026-11-12, the wave's architect (the ruling); the author of this document (the fold).
+- Decision: point 8 stands. (a) §B's details table covers every reason of both sheets. (b) `storage`'s line does not say that nothing was sent. (c) The two enroll lines are as the child words them.
+  Rationale: (a) A8 fails otherwise. (b) The reason is also given after a delivery. (c) The row's Show… opens the sheet that has Start over. Rejected: (a) hiding only the four details the item names; (b) the child's clause; (c) a second wording for the rows, for one edge.
+  Date/Author: 2026-11-12, the wave's architect (the ruling); the author of this document (the fold).
+- Decision: point 9 stands. U10's document confirm takes the value in its own CSS; `keymap/KeyboardShortcuts.tsx` and the two files of #456 are named insertions.
+  Rationale: "every sheet and dialog" includes them. Rejected: leaving the confirm at its old wash; one export from `live.ts`, which cannot tell the not-offered pause from the two where Allow stays.
+  Date/Author: 2026-11-12, the wave's architect (the ruling); the author of this document (the fold).
+- Decision: point 10 stands. The footer under a scroller clips, and the transcript's gutter is scoped from the session pane.
+  Rationale: `scrollbar-gutter` acts only on a scroll container; a class on the shared scroller would reach every transcript. Rejected: a token in U3's `Transcript.tsx`; a measured padding by script.
+  Date/Author: 2026-11-12, the wave's architect (the ruling); the author of this document (the fold).
+- Decision: point 11 stands. The greyed menu item says nothing and the palette's row says the sentence; the row takes no rebinding yet; it stands after the Tabs rows.
+  Rationale: the menu has no place for a sentence, and U6a's guard is the wave's rule. Rejected: a toast on a press of a greyed item; an alias in U6's `menu.ts` to seat the row beside Artifacts.
+  Date/Author: 2026-11-12, the wave's architect (the ruling); the author of this document (the fold).
+- Decision: point 12: (a) to (c) stand; (d) is replaced by the drawing's measurements (below); (e) if a later landing adds rows for a default model and mode, they sit under Engine, and nothing is built here.
+  Rationale: (e) Sessions' heading line says the person's Claude Code settings files are not changed. Rejected: (a), (b) storing the new section as `engine`, for which there is no caller; (e) the child's "they join Sessions".
+  Date/Author: 2026-11-12, the wave's architect (the ruling); the author of this document (the fold).
+- Decision: the later landing for a session on another machine is U11f.
+  Rationale: the design of the owner's answered items already uses U11b to U11e. Rejected: U11b, as this document first had it.
+  Date/Author: 2026-11-12, the wave's architect (the ruling); the author of this document (the fold).
+- Decision: the wire's minor is taken, and the generated files are made again, against the final merged master: at M8, at M11, and by whoever merges last.
+  Rationale: U3a has raised the minor to 37, and U1a, U4a, U8b and U12a raise it too. Rejected: taking the number once, after the merge of Concrete Steps 1.
+  Date/Author: 2026-11-12, the wave's architect (the ruling); the author of this document (the fold).
+- Decision: a press from Customize carries the revision of the configuration its row showed, and the operation refuses a changed entry before it asks anything of the engine (§A, "The configuration's revision"; M8).
+  Rationale: the review's first finding: the fingerprint never left the renderer, so a row read before its entry was replaced under the same name could sign in the replacement. The engine host makes the revision because the services and main both already read its endpoints, and one read then serves both comparisons. Rejected: main checking its own fingerprint before it forwards the press (a check at the door, and a gap before the operation's own); an unkeyed hash of the address (a known address could be confirmed from the renderer); a key shared between main and the services (a stored secret for one comparison); replacing main's fingerprint with the revision (it would change when a file-scope row shows a finished result).
+  Date/Author: 2026-11-12, the adversarial reviewer (the finding); the wave's architect (accepted); the author of this document (the fold).
+- Decision: the channel tells the hub's refusal of it as its own field, `refused`, and the footer reads it before reach (§F; M4).
+  Rationale: the review's second finding: after `unreachable`, a close that ends the channel leaves it parked with nothing retried, while the org's hub status can still read healthy, so "Offline · retrying" would stand for good. Rejected: clearing reach at such a close and falling to "Connecting…" (as untrue); reading the org's hub status alone, which another component keeps.
+  Date/Author: 2026-11-12, the adversarial reviewer (the finding); the wave's architect (accepted); the author of this document (the fold).
+- Decision: where modal layers stack, the top layer's backdrop paints and the ones under it are clear (§E, `useScrim`; M3, with its scene).
+  Rationale: the review's third finding: the Plugins dialog and its confirmation each paint the value, about 15% together. Rejected: the bottom layer alone painting (the dialog under a sheet would not read as behind it); a darker single value chosen to look right when doubled.
+  Date/Author: 2026-11-12, the adversarial reviewer (the finding); the wave's architect (accepted); the author of this document (the fold).
+- Decision: a row made at run time is drawn from a declared repeating row, and "every drawn row is declared" is tested with the page populated (§G; M9).
+  Rationale: the review's note: `BrowserImport.tsx` makes profile and extension rows, and a test over an empty installation would not see them. Rejected: leaving such rows outside the table, which the search and the test would then both miss.
+  Date/Author: 2026-11-12, the adversarial reviewer (the finding); the wave's architect (accepted); the author of this document (the fold).
+- Decision: a note that fits its line keeps its words; only Limit with its size and Update with a chosen binary move their last clause behind More. `NOTE_LINE_MAX` is gone; the bound is the measured width, proved by the e2e scene (18 px, or 22 px for a note that ends in More or carries a button).
+  Rationale: the drawing, findings 1 to 3: of seven lines thought too long two run over, and a count of characters misjudges both ways. Rejected: the four cuts this document first made (a More holding one clause); shorter words in place of a cut.
+  Date/Author: 2026-11-12, the wave's architect, on the drawn page's findings; the author of this document (the fold).
+- Decision: "one line" is claimed where the body has its 760 px; the rows stack by the body's own width, under 32rem of it; U7's dialog is asked for 948 px (§G, "The measure" and "For U7").
+  Rationale: the drawing, finding 4: a view about 520 px wide is above today's break and leaves a note column of about 150 px. Rejected: claiming one line "at the default window" without the condition; moving the index's break as well.
+  Date/Author: 2026-11-12, the wave's architect, on the drawn page's findings; the author of this document (the fold).
+- Decision: a group heading is 12 px semibold `fg-muted` on one line, and the middle group reads "Sessions & engine".
+  Rationale: the drawing, findings 5 and 6: "Sessions and engine" is 116 px in 115, and `fg-faint` is 2.6 to 1 on the index in light. Rejected: a heading that wraps; `fg-faint`.
+  Date/Author: 2026-11-12, the wave's architect, on the drawn page's findings; the author of this document (the fold).
+- Decision: Org stands without a group heading until the owner answers; the other answer, a group of one, changes `INDEX.groups` and Org's entry in `SECTION_TABLE`.
+  Rationale: the drawing, finding 8: "Org" under "Org" reads as a stutter. Rejected as the default: the group of one, which this document first built.
+  Date/Author: 2026-11-12, the wave's architect, on the drawn page's findings; the author of this document (the fold).
+- Decision: the section for the supervisor and the memory budget is named "Supervisor" until the owner answers; the other answer changes the one string `SECTIONS.supervisor`.
+  Rationale: the drawing, finding 9: "Background" is also the first word of a session's "Background work" surface and its key binding. Rejected as the default: "Background", the child's name.
+  Date/Author: 2026-11-12, the wave's architect, on the drawn page's findings; the author of this document (the fold).
+- Decision: the index's list scrolls by itself and its footer stays.
+  Rationale: the drawing, finding 7: with U7's Usage the index needs 705 px of the dialog's 695. Rejected: letting the footer yield.
+  Date/Author: 2026-11-12, the wave's architect, on the drawn page's findings; the author of this document (the fold).
+- Decision: the search is settled under four rules (§G): the chosen row takes the keyboard and no control of it does; a result never names text the page will not show now; a result is the row's name with its section under it, on two lines at most, in a list that scrolls with the index; a row is not matched by its group's name. Also: "mcp" finds the Customize link; the query stays and the child's "one keystroke away" is dropped; the row lands under its section's heading; the first result is preselected; the mark is `bg-bg-active`, 8 px around the row, for 1,600 ms; the narrow form has the field as a first row with its results under it.
+  Rationale: the drawing, findings 10 to 17. Rejected: "<row> in <section>" (two and three lines in 148 px; "For in Notifications"); focus on the row's first control (Enter twice would remove a server); matching a row by its group (21 rows for "engine"); searching every state's More (a result that opens a More without the word).
+  Date/Author: 2026-11-12, the wave's architect, on the drawn page's findings; the author of this document (the fold).
+- Decision: Direct login's sign-in instruction and its Copy button keep their place on the row's line.
+  Rationale: the drawing, finding 18: the child's row did not place them; together with the sentence they are 401 px. Rejected: moving the instruction behind More, where the one thing the row lets a person do would be hidden.
+  Date/Author: 2026-11-12, the wave's architect, on the drawn page's findings; the author of this document (the fold).
+- Decision: "More" is drawn in `fg`, and the line under Sessions' heading sits under it, 12 px in `fg-muted`.
+  Rationale: the drawing, findings 19 and 20: a muted "More" after a muted sentence does not read as a button; the only earlier hint sits beside its heading, where this line would not fit. Rejected: `TEXT_ACTION`'s muted colour; the line beside the heading.
+  Date/Author: 2026-11-12, the wave's architect, on the drawn page's findings; the author of this document (the fold).
+- Decision: the drawing's findings 21 to 24 are noted where they change a stated height or width (§G, "The measure"; "The owner's look"); nothing is built for them.
+  Rationale: the waiting supervisor's five lines are a state that stays whole; "More" alone on a line in a narrow pane is accepted; the dialog has twelve sections once Usage is there; the narrow width is 330 px and holds only beside a side surface. Rejected: cutting the state's lines.
+  Date/Author: 2026-11-12, the wave's architect, on the drawn page's findings; the author of this document (the fold).
 
 ## Outcomes & Retrospective
 
