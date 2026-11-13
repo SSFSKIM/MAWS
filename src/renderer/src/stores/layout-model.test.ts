@@ -7,6 +7,7 @@ import {
   activateTab, activeTab, closeTab, currentSet, cycleTab, dockSplit, dropSession, floatingPane, floatSplit, focusPane, moveTab, openSession, openTab,
   rekeyExpanded, reopenClosed, repairMain, replaceActive, retargetTab, selectTab, sessionOfTab, setSplitRatio, splitWithActive, togglePinned, type RekeyOf,
 } from './layout-model';
+import { frontOf } from './layout';
 
 const S = (id: string) => ({ kind: 'session' as const, appSessionId: id as AppSessionId });
 const ids = (main: Strip) => currentSet(main).panes.map((p) => p.tabs.map((t) => t.id));
@@ -208,6 +209,52 @@ describe('layout store transitions', () => {
 // I2 (§5.2 as amended 2026-10-01): a session opened from the sidebar, the Overview or the palette replaces the focused
 // pane's session.
 // cua #90: an options tab main replaced with a page (`browser.extensions.reveal`'s replacement)
+// UX wave U13a (§B, revised 2026-11-13): a background open (`activate: false`, which §C routes outside `commitShown`)
+// changes no pane's focus and no pane's active tab, so the tab in front stays in front.
+describe('a background open', () => {
+  const bg = { activate: false } as const;
+  // c in front on the left (pane 0 focused), d active on the right
+  const twoPanes = () => focusPane(split(), 0);
+  const unchangedFront = (m: Strip, actives: string[]) => {
+    expect(frontOf({ main: m })).toBe('session:c');
+    expect(cur(m).focusedPane).toBe(0);
+    expect(active(m)).toEqual(actives);
+  };
+
+  it('adds a new tab to the other pane after its active tab, leaving the front where it was', () => {
+    const m = openTab(twoPanes(), S('x'), { pane: 1, ...bg });
+    expect(ids(m)).toEqual([['session:a', 'session:b', 'session:c'], ['session:d', 'session:x']]);
+    unchangedFront(m, ['session:c', 'session:d']);
+  });
+
+  it('of a tab already open in the other pane changes nothing in front, and takes only its kind’s update', () => {
+    const m = twoPanes();
+    expect(openTab(m, S('d'), bg)).toEqual(m);
+    unchangedFront(openTab(m, S('d'), bg), ['session:c', 'session:d']);
+    const withSettings = focusPane(openTab(openTab(split(), { kind: 'settings', section: 'engine' }, { pane: 1 }), S('d')), 0);
+    const updated = openTab(withSettings, { kind: 'settings', section: 'keyboard' }, bg);
+    unchangedFront(updated, ['session:c', 'session:d']);
+    expect(cur(updated).panes[1].tabs.find((t) => t.id === 'settings')).toEqual({ id: 'settings', kind: 'settings', section: 'keyboard', pinned: false });
+  });
+
+  it('that creates pane 1 does not focus it', () => {
+    const m = openTab(abc(), S('x'), { pane: 1, ...bg });
+    expect(ids(m)).toEqual([['session:a', 'session:b', 'session:c'], ['session:x']]);
+    expect(frontOf({ main: m })).toBe('session:c');
+    expect(cur(m).focusedPane).toBe(0);
+    expect(active(m)).toEqual(['session:c', 'session:x']); // the new pane's one tab is its active one
+  });
+
+  it('into an empty strip makes the tab the active one of the empty pane', () => {
+    const m = openTab(base, S('x'), bg);
+    expect(ids(m)).toEqual([['session:x']]);
+    expect(frontOf({ main: m })).toBe('session:x');
+    expect(cur(m).focusedPane).toBe(0);
+    expect(active(m)).toEqual(['session:x']);
+    expect(ids(openTab(base, S('x'), { pane: 1, ...bg }))).toEqual([['session:x']]); // an empty only pane is never split
+  });
+});
+
 describe('retargeting a tab', () => {
   const W = (browserTabId: string) => ({ kind: 'browser' as const, appSessionId: A_ID, browserTabId });
 
