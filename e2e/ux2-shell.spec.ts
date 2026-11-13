@@ -645,10 +645,15 @@ test('Acceptance: compact inactive file tabs contain their extension, pin, dirty
       expect((await box(tab)).width, 'decorated tabs stay compact instead of retaining their full title width').toBeLessThanOrEqual(160);
       await expect.poll(() => tab.evaluate((node) => {
         const bounds = node.getBoundingClientRect();
-        const children = Array.from(node.children).map((child) => child.getBoundingClientRect());
+        // U13a: the title shares a box with the tab's place (drawn in a strip that mixes places), so the walk measures
+        // that box's own children, the title and the place, beside the marks and the close button
+        const titleNode = node.querySelector<HTMLElement>(':scope > span > span.truncate')!;
+        const children = Array.from(node.children)
+          .flatMap((child) => (child.contains(titleNode) ? Array.from(child.children) : [child]))
+          .map((child) => child.getBoundingClientRect());
         const close = node.querySelector<HTMLButtonElement>('button')!;
         const target = close.getBoundingClientRect();
-        const title = node.querySelector<HTMLElement>(':scope > span.truncate:last-of-type')!.getBoundingClientRect();
+        const title = titleNode.getBoundingClientRect();
         return {
           inside: children.every((child) => child.left >= bounds.left && child.right <= bounds.right),
           noOverlap: children.every((child, index) => index === 0 || child.left >= children[index - 1]!.right),

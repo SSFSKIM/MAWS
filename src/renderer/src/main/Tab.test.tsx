@@ -1,13 +1,13 @@
 // P3-F wave S (F16, obs 7a): an artifact main tab's context menu moves the artifact into the panel ("Show in panel"),
 // the mirror of the panel record's "Move to tab": the tab closes, then the Artifacts tool shows the artifact in the panel
-// beside the most recently active chat in the loaded artifact's project (an unprojected artifact uses its tab set).
+// beside the most recently active chat in the loaded artifact's project (an unprojected artifact, the strip's; U13a).
 // Without an open project chat, the item is disabled and says why, even with a pinned Artifacts tab. P4-B3: through
 // the transfer's move (shell/transfer.ts),
 // which carries the editor's state, so the tab's own guard is not asked.
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TEST_MACHINE } from '../../../../test/support/machine';
-import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, tabId, type LayoutMain, type TabRef } from '@shared/ipc/schema/layout';
+import { LAYOUT_DEFAULTS, tabId, type Strip, type TabRef } from '@shared/ipc/schema/layout';
 import { resetSlots } from '../app/slots';
 import type { LibraryRow } from '@shared/ipc/schema/library';
 import { library, libraryRow, resetLibrary } from '../library/store';
@@ -35,7 +35,7 @@ const ARTIFACT: TabRef = { id: tabId({ kind: 'artifact', artifactId: DECK, machi
 const offs: (() => void)[] = [];
 const metadata: LibraryRow = { id: DECK, kind: 'presentation', title: 'Launch deck', createdBy: { kind: 'human' }, createdAt: 0, updatedAt: 0, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 1, lastEditor: { kind: 'human' }, lastEditedAt: 0, sessions: [] };
 
-const showing = (...tabs: TabRef[]): LayoutMain => ({ ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs, activeTabId: ARTIFACT.id }] } } });
+const showing = (...tabs: TabRef[]): Strip => ({ ...LAYOUT_DEFAULTS.main, panes: [{ tabs, activeTabId: ARTIFACT.id }] });
 const artifactTabOpen = () => allTabs(useLayout.getState().main).some((t) => t.id === ARTIFACT.id);
 const viewOf = (id: string | undefined) => (id ? (instanceOf(id)?.state as ArtifactsHandle | undefined)?.snapshot().view : undefined);
 

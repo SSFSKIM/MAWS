@@ -9,11 +9,12 @@
 // temp directory (`MAWS_E2E_TRASH_DIR`, main's e2e seam), never the owner's `~/.Trash`. No native panel opens:
 // under MAWS_E2E `layout.pickFiles` answers from `MAWS_E2E_PICK_PATHS` or as cancelled (main's pick seam).
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
+import { slugOf } from '../src/engine-host/fs/paths';
 import { fixtureIdentity } from '../test/support/fixture-session-id';
 import { runGit } from '../test/support/git-fixture';
 import { ScratchRepo } from '../test/support/scratch-repo';
@@ -21,7 +22,8 @@ import { StoreFixture } from '../test/support/store-fixture';
 import { addressed } from './support/address';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { slashPaletteMovesNothing } from './support/palette-geometry';
-import { mainTabs } from './support/shell';
+import { clickRevealed } from './support/hover';
+import { activeMainTab, mainTabById, mainTabs } from './support/shell';
 import { newChatIn, openProject, projectLine, projectRow, showProjectList, sidebarRow } from './support/sidebar';
 
 const FIXTURES = 'spikes/protocol-probe/fixtures';
@@ -187,6 +189,36 @@ function assertPickSeamBuilt(maws: MawsLaunch): void {
 async function menu(page: Page, id: string, item: string): Promise<void> {
   await (await sidebarRow(page, { appSessionId: id })).click({ button: 'right' });
   await page.getByRole('menuitem', { name: item, exact: true }).click();
+}
+
+// An application-menu item clicked in main by its id (Playwright's keyboard never reaches a macOS menu accelerator:
+// shell.spec.ts); answers its accelerator.
+async function appMenu(maws: MawsLaunch, id: string): Promise<string | null> {
+  const accelerator = await maws.app.evaluate(({ Menu }, id) => {
+    const item = Menu.getApplicationMenu()?.getMenuItemById(id);
+    if (!item?.enabled) return false;
+    item.click();
+    return item.accelerator ?? null;
+  }, id);
+  expect(accelerator, `menu item ${id} exists and is enabled`).not.toBe(false);
+  return accelerator as string | null;
+}
+
+// The tab ids of the strip in order (both panes, left first), or of one pane's row by its tablist's name.
+const tabIdsOf = (page: Page, strip?: 'Left pane tabs' | 'Right pane tabs') =>
+  (strip ? page.getByRole('tablist', { name: strip }) : mainTabs(page)).getByRole('tab').evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('data-tab-id') ?? ''));
+
+// Started sessions of `repo` for C4 to index, one transcript each (`first` its first prompt, and so its title).
+async function seedSessions(store: StoreFixture, repo: ScratchRepo, sessions: { sid: string; first: string }[]): Promise<void> {
+  for (const [n, { sid, first }] of sessions.entries()) {
+    await store.addTranscript(repo.root, sid, [{ type: 'user', uuid: `u-${sid}`, parentUuid: null, cwd: repo.root, sessionId: sid, timestamp: `2026-09-29T10:0${n}:00.000Z`, message: { role: 'user', content: first } }]);
+  }
+}
+// Their records once indexed, in the order given.
+async function indexed(page: Page, sids: string[]): Promise<string[]> {
+  await expect.poll(async () => value(await invoke(page, 'session.list', {})).sessions.filter((r) => sids.includes(r.engineSessionId ?? '')).length, { timeout: 20_000, message: 'the seeded sessions are indexed' }).toBe(sids.length);
+  const records = value(await invoke(page, 'session.list', {})).sessions;
+  return sids.map((sid) => records.find((r) => r.engineSessionId === sid)!.appId);
 }
 
 // The fork's app id: its intent while it sets up (or waits on a card), else its record once bound.
@@ -662,36 +694,106 @@ test.describe('sessions', () => {
     expect(maws.consoleErrors()).toEqual([]);
   });
 
-  for (const entry of ['title bar', 'tab strip', 'project plus', 'sidebar New chat', 'File menu (⌘N)'] as const) {
-    test(`new chat takes typing from ${entry}, without Space opening more tabs`, async () => {
+  // U13a (O-01, A3): with an empty New chat in the strip, New chat from any control brings that same chat to the front
+  // with the keyboard in its composer and makes nothing; once the chat holds a draft, the same control opens one more
+  // chat right after it and the first keeps its draft. Spaces typed into either open no tab. The title bar's chip starts
+  // no chat any more (O-31: it reveals its row), so it is not one of the controls. A project row's "+" that reuses the
+  // chat is pressed directly: `newChatIn` waits for a tab the strip did not hold.
+  for (const entry of ['tab strip', 'project plus', 'sidebar New chat', 'File menu (⌘N)'] as const) {
+    test(`new chat from ${entry} reuses an empty chat and adds one beside a draft, without Space opening more tabs`, async () => {
       const { page, maws, trustedRepos } = await begin({ fixtures: [] });
       const project = await addProject(page, trustedRepos[0].root);
-      await plus(page, project.name);
+      const first = await plus(page, project.name);
+      const firstTab = `session:${await addressed(page, first)}`;
       await expect(editor(page)).toBeFocused();
-      const tabs = mainTabs(page).getByRole('tab');
-      const before = await tabs.count();
-      if (entry === 'title bar') await page.getByRole('banner').getByRole('button', { name: `New chat in ${project.name}` }).click();
-      else if (entry === 'tab strip') await mainTabs(page).getByRole('button', { name: 'New chat', exact: true }).click();
-      else if (entry === 'project plus') await newChatIn(page, project.name);
-      else if (entry === 'sidebar New chat') await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'New chat', exact: true }).click();
-      else {
-        // Menu-sink chords belong to AppKit, not Playwright's renderer keyboard injection (shell.spec.ts).
-        const accelerator = await maws.app.evaluate(({ Menu }) => {
-          const item = Menu.getApplicationMenu()?.getMenuItemById('session.new');
-          if (!item?.enabled) throw new Error('File › New chat is not enabled');
-          item.click();
-          return item.accelerator;
-        });
-        expect(accelerator).toBe('Cmd+N');
-      }
-      await expect(tabs).toHaveCount(before + 1);
-      await expect(editor(page)).toBeFocused();
+      const intents = async () => value(await invoke(page, 'session.intent.list', undefined)).intents.map((i) => i.appSessionId);
+      const press = async (draft: boolean) => {
+        if (entry === 'tab strip') await mainTabs(page).getByRole('button', { name: 'New chat', exact: true }).click();
+        else if (entry === 'project plus' && draft) await newChatIn(page, project.name);
+        else if (entry === 'project plus') {
+          await showProjectList(page);
+          const row = projectRow(page, project.name);
+          await clickRevealed(projectLine(row), row.getByRole('button', { name: `New chat in ${project.name}`, exact: true }));
+        } else if (entry === 'sidebar New chat') await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'New chat', exact: true }).click();
+        else expect(await appMenu(maws, 'session.new')).toBe('Cmd+N');
+      };
+
+      // the empty chat: the same one comes to the front with the keyboard, and nothing is made
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      await expect(editor(page)).not.toBeFocused();
+      await press(false);
+      await expect(editor(page), 'the same chat takes the keyboard').toBeFocused();
+      await expect(activeMainTab(page)).toHaveAttribute('data-tab-id', firstTab);
+      await page.waitForTimeout(500); // past where a chat made by the press would have arrived
+      expect(await tabIdsOf(page), 'one empty chat, the same one').toEqual([firstTab]);
+      expect(await intents(), 'nothing was made').toEqual([first]);
       await page.keyboard.type('A prompt with several spaces');
       await expect(editor(page)).toHaveText('A prompt with several spaces');
-      await expect(tabs).toHaveCount(before + 1);
+      expect(await tabIdsOf(page)).toEqual([firstTab]);
+      await expect.poll(async () => JSON.stringify(value(await invoke(page, 'session.intent.get', { appSessionId: first }))!.draft), { message: 'the draft is kept in its intent' }).toContain('A prompt with several spaces');
+
+      // a draft keeps its chat: one more chat, right after it, with the keyboard, and the first keeps its draft
+      await press(true);
+      await expect.poll(async () => (await tabIdsOf(page)).length, { message: 'one more tab' }).toBe(2);
+      const [kept, added] = await tabIdsOf(page);
+      expect(kept, 'the new chat comes right after the one with the draft').toBe(firstTab);
+      await expect(activeMainTab(page)).toHaveAttribute('data-tab-id', added!);
+      await expect(editor(page)).toBeFocused();
+      await expect(editor(page)).toHaveText('');
+      await page.keyboard.type('another thought');
+      expect(await tabIdsOf(page)).toHaveLength(2);
+      await mainTabById(page, firstTab).click();
+      await expect(editor(page), 'the first chat keeps its draft').toHaveText('A prompt with several spaces');
       expect(maws.consoleErrors()).toEqual([]);
     });
   }
+
+  // U13a (O-01, A2): with three sessions open, New chat from each control adds exactly one tab, right after the tab in
+  // front, and the three stay. Each new chat is closed again (an empty chat closes without a question) before the next
+  // control, so every press meets the same three tabs and no empty chat to reuse (A3). The empty main area's New chat
+  // has no three tabs beside it, and the Overview's shows on an empty board only; the unit tests hold those two.
+  test('New chat from each control, with three sessions open, adds one tab right after the tab in front and the three stay', async () => {
+    const repo = await ScratchRepo.create();
+    const store = await StoreFixture.create();
+    const seeded = [1, 2, 3].map((n) => ({ sid: `5e551011-0000-4000-8000-0000000000b${n}`, first: `open session ${n}` }));
+    await seedSessions(store, repo, seeded);
+    const launched = await launchCase({ fixtures: [], trusted: [repo.root], store });
+    current = { ...launched, repos: [repo] };
+    const { page, maws } = launched;
+    const ids = await indexed(page, seeded.map((s) => s.sid));
+    await (await sidebarRow(page, { appSessionId: ids[0]! })).click();
+    for (const id of ids.slice(1)) await (await sidebarRow(page, { appSessionId: id })).click({ modifiers: ['Meta'] });
+    const three = await Promise.all(ids.map(async (id) => `session:${await addressed(page, id)}`));
+    await expect.poll(() => tabIdsOf(page), { message: 'three session tabs' }).toEqual(three);
+    const project = value(await invoke(page, 'session.projects.list', undefined)).projects.find((p) => p.directory === repo.root)!;
+    const palette = page.getByRole('dialog', { name: 'Command palette' });
+    const controls: [string, () => Promise<unknown>][] = [
+      ['the strip’s "+"', () => mainTabs(page).getByRole('button', { name: 'New chat', exact: true }).click()],
+      ['the sidebar’s New chat', () => page.locator('[data-region="sidebar"]').getByRole('button', { name: 'New chat', exact: true }).click()],
+      ['the project row’s "+"', () => newChatIn(page, project.name)],
+      ['File › New chat (⌘N)', () => appMenu(maws, 'session.new')],
+      ['the palette', async () => {
+        await appMenu(maws, 'palette.open');
+        await expect(palette.getByRole('combobox')).toBeFocused();
+        await page.keyboard.type('new chat');
+        await palette.getByRole('group', { name: 'Actions' }).getByRole('option', { name: /^New chat/ }).first().click();
+      }],
+    ];
+    for (const [control, press] of controls) {
+      await mainTabById(page, three[1]!).click(); // the middle tab in front
+      await expect(activeMainTab(page)).toHaveAttribute('data-tab-id', three[1]!);
+      await press();
+      await expect.poll(async () => (await tabIdsOf(page)).length, { message: `${control}: one tab more` }).toBe(4);
+      const now = await tabIdsOf(page);
+      const added = now.find((id) => !three.includes(id))!;
+      expect(now, `${control}: right after the tab in front, the three kept`).toEqual([three[0], three[1], added, three[2]]);
+      await expect(activeMainTab(page), `${control}: the new chat in front`).toHaveAttribute('data-tab-id', added);
+      await expect(page.getByRole('heading', { name: `New chat in ${project.name}` }), `${control}: in the project of the session in front`).toBeVisible();
+      await appMenu(maws, 'tab.close');
+      await expect.poll(() => tabIdsOf(page), { message: `${control}: the empty chat closed again` }).toEqual(three);
+    }
+    expect(maws.consoleErrors()).toEqual([]);
+  });
 
   test('Overview New chat on an empty board closes the panel and hands typing to the new composer', async () => {
     const { page, maws } = await begin({ fixtures: [] });
@@ -772,24 +874,79 @@ test.describe('sessions', () => {
     expect(maws.consoleErrors()).toEqual([]);
   });
 
-  test('an unstarted tab with a draft survives a relaunch', async () => {
+  // A5 (O-01; l7-shell-12, kept but for one case the owner narrowed on 2026-11-12): a relaunch brings the strip back with
+  // its tabs in their order, the pin, the split and its ratio, and the same tab in front; a New chat with a draft comes
+  // back with it; a New chat with nothing in it does not (Q1, "No, only chats with content").
+  test('a relaunch brings the strip back: the order, a pin, the split and its ratio, the tab in front and a chat with its draft; an empty New chat does not come back', async () => {
     const repo = await ScratchRepo.create();
     const store = await StoreFixture.create();
+    const seeded = [1, 2].map((n) => ({ sid: `5e551011-0000-4000-8000-0000000000c${n}`, first: `kept session ${n}` }));
+    await seedSessions(store, repo, seeded);
     const first = await launchCase({ fixtures: [], trusted: [repo.root], store });
     current = { ...first, repos: [repo] };
-    const project = await addProject(first.page, repo.root);
-    const id = await plus(first.page, project.name);
-    await expect(editor(first.page), 'W9 (H3): the project row\'s "+" hands the keyboard to the new tab').toBeFocused();
-    await first.page.keyboard.type('half a thought');
+    const { page } = first;
+    const [s1, s2] = await indexed(page, seeded.map((s) => s.sid));
+    // two sessions, the first pinned
+    await (await sidebarRow(page, { appSessionId: s1! })).click();
+    await (await sidebarRow(page, { appSessionId: s2! })).click({ modifiers: ['Meta'] });
+    const [t1, t2] = [`session:${await addressed(page, s1!)}`, `session:${await addressed(page, s2!)}`];
+    await expect.poll(() => tabIdsOf(page)).toEqual([t1, t2]);
+    await mainTabById(page, t1).click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Pin tab', exact: true }).click();
+    await expect(mainTabById(page, t1).getByRole('img', { name: 'Pinned' })).toBeVisible();
+    // a New chat holding a draft, after the second session
+    const project = value(await invoke(page, 'session.projects.list', undefined)).projects.find((p) => p.directory === repo.root)!;
+    const id = await plus(page, project.name);
+    const chat = `session:${await addressed(page, id)}`;
+    await expect(editor(page), 'W9 (H3): the project row\'s "+" hands the keyboard to the new tab').toBeFocused();
+    await page.keyboard.type('half a thought');
     // C7 keeps an unstarted session's draft through C10's hook (the intent), written a moment after the typing
-    await expect.poll(async () => JSON.stringify(value(await invoke(first.page, 'session.intent.get', { appSessionId: id }))!.draft)).toContain('half a thought');
-    await expect.poll(async () => JSON.stringify(value(await invoke(first.page, 'layout.get', { key: 'main.tabs' })).value)).toContain(id);
+    await expect.poll(async () => JSON.stringify(value(await invoke(page, 'session.intent.get', { appSessionId: id }))!.draft)).toContain('half a thought');
+    // the second session moved to the other pane (⌘\), and the split's ratio moved off its default
+    await mainTabById(page, t2).click();
+    await appMenu(first.maws, 'pane.split');
+    await expect.poll(() => tabIdsOf(page, 'Right pane tabs'), { message: 'the split' }).toEqual([t2]);
+    const resizer = page.locator('[data-region="main"]').getByRole('separator', { name: 'Resize panes' });
+    const box = (await resizer.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2, { steps: 10 });
+    await page.mouse.up();
+    // back in the left pane: an empty New chat (the draft keeps its chat, so a new one is made), then the draft's chat in front
+    await mainTabById(page, chat).click();
+    await appMenu(first.maws, 'session.new');
+    await expect.poll(async () => (await tabIdsOf(page, 'Left pane tabs')).length, { message: 'an empty New chat beside the one with a draft' }).toBe(3);
+    const left = await tabIdsOf(page, 'Left pane tabs');
+    const empty = left.find((tab) => ![t1, chat].includes(tab))!;
+    expect(left).toEqual([t1, chat, empty]);
+    await mainTabById(page, chat).click();
+    await expect(activeMainTab(page)).toHaveAttribute('data-tab-id', chat);
+    expect(value(await invoke(page, 'session.intent.list', undefined)).intents, 'two New chats at the quit, one of them empty').toHaveLength(2);
+    type Stored = { sets: Record<string, { panes: { tabs: { id: string; pinned: boolean }[]; activeTabId: string }[]; focusedPane: number; splitRatio: number }> };
+    const stored = async (p: Page) => (value(await invoke(p, 'layout.get', { key: 'main.tabs' })).value as Stored).sets.none!;
+    await expect
+      .poll(async () => {
+        const set = await stored(page);
+        return [set.panes.map((pane) => pane.tabs.map((tab) => tab.id)), set.panes[0]!.activeTabId, set.focusedPane, set.splitRatio !== 0.5];
+      }, { message: 'the strip is written, the empty chat in it' })
+      .toEqual([[[t1, chat, empty], [t2]], chat, 0, true]);
+    const divider = await resizer.getAttribute('aria-valuenow');
     await first.maws.app.close();
 
     const second = await launchCase({ fixtures: [], trusted: [repo.root], store, userData: first.maws.userData });
     current = { ...second, repos: [repo], dispose: async () => (await second.maws.cleanup(), await first.maws.cleanup()) };
-    await expect(second.page.getByRole('heading', { name: `New chat in ${project.name}` }), 'hydration kept the unstarted tab').toBeVisible();
-    await expect(editor(second.page), 'the draft is back in the editor').toHaveText('half a thought');
+    const again = second.page;
+    await expect(again.getByRole('heading', { name: `New chat in ${project.name}` }), 'hydration kept the chat with a draft').toBeVisible();
+    await expect.poll(() => tabIdsOf(again, 'Left pane tabs'), { message: 'the order and the split back, the empty chat gone' }).toEqual([t1, chat]);
+    expect(await tabIdsOf(again, 'Right pane tabs')).toEqual([t2]);
+    await expect(mainTabById(again, t1).getByRole('img', { name: 'Pinned' }), 'the pin is back').toBeVisible();
+    await expect(activeMainTab(again), 'the same tab in front').toHaveAttribute('data-tab-id', chat);
+    // two panes, two composers: the chat's is the one holding the draft
+    await expect(editor(again).filter({ hasText: 'half a thought' }), 'the draft is back in the chat’s editor').toBeVisible();
+    await expect(mainTabById(again, chat).getByRole('img', { name: 'Pinned' }), 'the chat unpinned').toHaveCount(0);
+    await expect(again.locator('[data-region="main"]').getByRole('separator', { name: 'Resize panes' }), 'the split’s ratio, as the divider draws it').toHaveAttribute('aria-valuenow', divider!);
+    const intents = value(await invoke(again, 'session.intent.list', undefined)).intents.map((i) => i.appSessionId);
+    expect(intents, 'the chat with a draft keeps its intent; the empty chat’s was discarded at the start').toEqual([id]);
     expect(second.maws.consoleErrors()).toEqual([]);
   });
 
@@ -818,5 +975,47 @@ test.describe('sessions', () => {
     await expect(entry.getByRole('img', { name: 'Needs approval' })).toHaveCount(0);
     await expect(entry, 'the project tree row survives attention retirement').toBeVisible();
     await turnEnded(page, id);
+  });
+  // U8c-1 (M1 decision 9): on EnterWorktree the engine renames the session's transcript, and its folder beside it, into
+  // the worktree's project folder, then appends a `relocated` row and the next turn's rows there (engine 2.1.322,
+  // cli.pretty.js:381469-381548). An open transcript reads on, and the session is listed throughout, never archived.
+  test('a session whose transcript the engine moves stays listed and goes on reading', async () => {
+    const repo = await ScratchRepo.create();
+    const store = await StoreFixture.create();
+    const sid = '5e551011-0000-4000-8000-0000000000c8';
+    const user = (uuid: string, parentUuid: string | null, cwd: string, text: string) => ({ type: 'user', uuid, parentUuid, cwd, sessionId: sid, timestamp: '2026-11-13T10:00:00.000Z', message: { role: 'user', content: text } });
+    const from = await store.addTranscript(repo.root, sid, [user(`u-${sid}`, null, repo.root, 'Written before the move')]);
+    await store.addSidecar(sid, 'subagents/agent-a1.jsonl', '');
+    const worktree = await repo.addManagedWorktree('w1');
+    const launched = await launchCase({ fixtures: [], trusted: [repo.root], store });
+    current = { ...launched, repos: [repo] };
+    const { page } = launched;
+    await expect.poll(async () => value(await invoke(page, 'session.list', {})).sessions.some((r) => r.engineSessionId === sid), { timeout: 20_000 }).toBe(true);
+    const record = value(await invoke(page, 'session.list', {})).sessions.find((r) => r.engineSessionId === sid)!;
+    // Every record the window is sent for the session from here on, and any removal.
+    await page.evaluate((id) => {
+      const seen: unknown[] = [];
+      (window as unknown as { __u8c: unknown[] }).__u8c = seen;
+      window.maws.on('session.changed', ({ record: changed }) => changed.appId === id && seen.push(changed.archived ? 'archived' : 'listed'));
+      window.maws.on('session.removed', ({ appSessionId }) => appSessionId === id && seen.push('removed'));
+    }, record.appId);
+    await (await sidebarRow(page, { appSessionId: record.appId })).click();
+    const main = page.locator('[data-region="main"]');
+    await expect(main.getByText('Written before the move', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+    const project = join(store.paths.projects, slugOf(worktree));
+    const target = join(project, `${sid}.jsonl`);
+    mkdirSync(project, { recursive: true });
+    renameSync(from, target);
+    renameSync(join(dirname(from), sid), join(project, sid));
+    appendFileSync(target, [{ type: 'relocated', relocatedCwd: worktree, sessionId: sid }, user('u-after-move', `u-${sid}`, worktree, 'Written after the move')].map((r) => `${JSON.stringify(r)}\n`).join(''));
+
+    await expect(main.getByText('Written after the move', { exact: true }), 'the open transcript reads on at the new path').toBeVisible({ timeout: 20_000 });
+    await expect(await sidebarRow(page, { appSessionId: record.appId })).toBeVisible();
+    expect(value(await invoke(page, 'session.list', {})).sessions.some((r) => r.appId === record.appId), 'listed, not among the archived').toBe(true);
+    expect(value(await invoke(page, 'session.get', { appSessionId: record.appId }))!.archived).toBe(false);
+    const seen = await page.evaluate(() => (window as unknown as { __u8c: unknown[] }).__u8c);
+    expect(seen, 'never told archived or removed across the move').not.toContain('archived');
+    expect(seen).not.toContain('removed');
   });
 });

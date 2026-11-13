@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
+import { LAYOUT_DEFAULTS, storedMain } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { TEST_MACHINE } from '../../../../test/support/machine';
 import { createLayoutStore, useLayout } from '../stores/layout';
@@ -97,7 +97,7 @@ describe('visible surface lifecycle', () => {
     const regions = { ...LAYOUT_DEFAULTS.regions, panel: { ...LAYOUT_DEFAULTS.regions.panel, width: 444, floating: true }, floatingCard: { [terminal.id]: { w: 420, h: 300 } } };
     const values: Record<string, unknown> = {
       regions,
-      'main.tabs': mainShowing(A),
+      'main.tabs': storedMain(mainShowing(A)),
       [`panel.${A}`]: { tabs: [terminal], activeTabId: null },
       'panelTools.params': { version: 1, params: { [terminal.id]: { attach: 'pty-1' } } },
     };

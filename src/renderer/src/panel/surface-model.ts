@@ -1,6 +1,6 @@
 // UX2-L: visible surfaces are a selection over the existing panel refs, never a second owner of tool instances.
 import type { AppSessionId } from '@shared/graph/ids';
-import { NO_SESSION_SCOPE, type LayoutMain, type PanelSurfaces, type PanelTabRef } from '@shared/ipc/schema/layout';
+import { NO_PROJECT, NO_SESSION_SCOPE, type PanelSurfaces, type PanelTabRef, type Strip } from '@shared/ipc/schema/layout';
 import type { LayoutState } from '../stores/layout';
 import { activeTab, currentSet, sessionOfTab } from '../stores/layout-model';
 
@@ -16,14 +16,14 @@ export function surfaceSession(state: ContextState): AppSessionId | null {
     const session = sessionOfTab(tab);
     return session !== null && state.knownSession(session) ? [session] : [];
   }));
-  const remembered = state.panelSurfaces.contexts[state.main.current];
+  const remembered = state.panelSurfaces.contexts[NO_PROJECT]; // U13a: the strip's one entry
   return sessions.find((session) => session === remembered) ?? sessions[0] ?? null;
 }
 
-export function rememberSurfaceContext(state: Pick<ContextState, 'panelSurfaces' | 'knownSession'>, main: LayoutMain): PanelSurfaces {
+export function rememberSurfaceContext(state: Pick<ContextState, 'panelSurfaces' | 'knownSession'>, main: Strip): PanelSurfaces {
   const session = sessionOfTab(activeTab(main));
-  if (session === null || !state.knownSession(session) || state.panelSurfaces.contexts[main.current] === session) return state.panelSurfaces;
-  return { ...state.panelSurfaces, contexts: { ...state.panelSurfaces.contexts, [main.current]: session } };
+  if (session === null || !state.knownSession(session) || state.panelSurfaces.contexts[NO_PROJECT] === session) return state.panelSurfaces;
+  return { ...state.panelSurfaces, contexts: { ...state.panelSurfaces.contexts, [NO_PROJECT]: session } };
 }
 
 export function surfaceRefs(state: Pick<SurfaceState, 'panelPinned' | 'panelBySession'>, session: AppSessionId | null): PanelTabRef[] {

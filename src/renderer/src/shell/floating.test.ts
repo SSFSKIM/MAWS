@@ -2,7 +2,7 @@
 // handlers as the menu and the header run them; the card's transient closed state; the size key.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, tabId, type LayoutMain, type LayoutRegions, type TabRef } from '@shared/ipc/schema/layout';
+import { LAYOUT_DEFAULTS, tabId, type Strip, type LayoutRegions, type TabRef, storedMain } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { registerShellActions } from '../app/shell-actions';
@@ -13,7 +13,6 @@ import { useNotices } from '../stores/notices'; // P3-F wave S (F6)
 import { mainShowing } from '../test-support/panel';
 import { resetShellStores } from '../test-support/shell-stores';
 import { cardHost, cardSession, cardSizeKey, closeCard, dockPanel, dockSplit, EXPAND_COPY, FLOAT_COPY, floatPanel, floatSplit, openCard, placeCard, splitFloat, useFloatingCard } from './floating';
-import type { ProjectId } from '@shared/graph/ids'; // P4-B3 M2
 import { item, T0 } from '../../../../test/support/builders'; // P4-B3 M2
 import { useAttention } from '../stores/attention'; // P4-B3 M2
 import { activeTab } from '../stores/layout-model'; // P4-B3 M2
@@ -101,7 +100,7 @@ describe('the transition table', () => {
 // tab strip gone until Dock. Float is refused there, and a float that meets no session docks.
 describe('a float with no session to draw', () => {
   const ARTIFACT: TabRef = { id: tabId({ kind: 'artifact', artifactId: 'deck-1', machine: TEST_MACHINE }), kind: 'artifact', artifactId: 'deck-1', machine: TEST_MACHINE, pinned: false };
-  const showing = (...tabs: TabRef[]): LayoutMain => ({ ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs, activeTabId: tabs.at(-1)!.id }] } } });
+  const showing = (...tabs: TabRef[]): Strip => ({ ...LAYOUT_DEFAULTS.main, panes: [{ tabs, activeTabId: tabs.at(-1)!.id }] });
   const notices = () => useNotices.getState().notices.map((n) => n.text);
   const microtasks = () => new Promise<void>((resolve) => queueMicrotask(resolve));
   beforeEach(() => useNotices.setState({ notices: [] }));
@@ -144,7 +143,7 @@ describe('a float with no session to draw', () => {
 
   it('a float stored with an artifact tab in front comes back docked once the layout is read', async () => {
     const stored = { ...LAYOUT_DEFAULTS.regions, panel: { ...LAYOUT_DEFAULTS.regions.panel, width: 444, floating: true } };
-    const values: Record<string, unknown> = { regions: stored, 'main.tabs': showing(ARTIFACT), 'panel.pinned': null };
+    const values: Record<string, unknown> = { regions: stored, 'main.tabs': storedMain(showing(ARTIFACT)), 'panel.pinned': null };
     const { client } = fakeClient({ 'layout.list': { keys: ['regions', 'main.tabs'] }, 'layout.get': (input: unknown) => ({ value: values[(input as { key: string }).key] ?? null }) });
     useLayout.setState({ hydrated: false, main: LAYOUT_DEFAULTS.main, regions: LAYOUT_DEFAULTS.regions });
     await useLayout.getState().hydrate(client, () => true);
@@ -157,7 +156,7 @@ describe('a float with no session to draw', () => {
   // would take the docked state for its baseline and never write it, and the float would come back at a later launch.
   it('the dock of a float stored with an artifact tab in front is written to layout.json', async () => {
     const stored = { ...LAYOUT_DEFAULTS.regions, panel: { ...LAYOUT_DEFAULTS.regions.panel, width: 444, floating: true } };
-    const values: Record<string, unknown> = { regions: stored, 'main.tabs': showing(ARTIFACT), 'panel.pinned': null };
+    const values: Record<string, unknown> = { regions: stored, 'main.tabs': storedMain(showing(ARTIFACT)), 'panel.pinned': null };
     const fake = fakeClient({ 'layout.list': { keys: ['regions', 'main.tabs'] }, 'layout.get': (input: unknown) => ({ value: values[(input as { key: string }).key] ?? null }), 'layout.set': undefined });
     useLayout.setState({ hydrated: false, main: LAYOUT_DEFAULTS.main, regions: LAYOUT_DEFAULTS.regions });
     const stop = persistLayout(fake.client); // subscribed before hydration, as App.tsx does
@@ -170,7 +169,7 @@ describe('a float with no session to draw', () => {
 
   it('a float stored with a session tab in front comes back floating', async () => {
     const stored = { ...LAYOUT_DEFAULTS.regions, panel: { ...LAYOUT_DEFAULTS.regions.panel, floating: true } };
-    const values: Record<string, unknown> = { regions: stored, 'main.tabs': mainShowing(A), 'panel.pinned': null, [`panel.${A}`]: { tabs: [{ id: 'terminal-1', toolId: 'terminal', pinned: false }], activeTabId: 'terminal-1' } };
+    const values: Record<string, unknown> = { regions: stored, 'main.tabs': storedMain(mainShowing(A)), 'panel.pinned': null, [`panel.${A}`]: { tabs: [{ id: 'terminal-1', toolId: 'terminal', pinned: false }], activeTabId: 'terminal-1' } };
     const { client } = fakeClient({ 'layout.list': { keys: Object.keys(values) }, 'layout.get': (input: unknown) => ({ value: values[(input as { key: string }).key] ?? null }) });
     useLayout.setState({ hydrated: false, main: LAYOUT_DEFAULTS.main, regions: LAYOUT_DEFAULTS.regions });
     await useLayout.getState().hydrate(client, () => true);
@@ -198,7 +197,7 @@ describe('the floating card’s closed state and focus', () => {
     runAction('panel.float');
     expect(useComposerStore.getState().focusOnMount.has(A)).toBe(true);
     useComposerStore.setState({ focusOnMount: new Set() });
-    useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, sets: { none: { panes: [{ tabs: [{ id: `file:${TEST_MACHINE}:/x`, kind: 'file', machine: TEST_MACHINE, path: '/x', line: null, appSessionId: A, pinned: false }], activeTabId: `file:${TEST_MACHINE}:/x` }], focusedPane: 0, splitRatio: 0.5 } } } });
+    useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [{ id: `file:${TEST_MACHINE}:/x`, kind: 'file', machine: TEST_MACHINE, path: '/x', line: null, appSessionId: A, pinned: false }], activeTabId: `file:${TEST_MACHINE}:/x` }], focusedPane: 0, splitRatio: 0.5 } });
     floatPanel();
     useComposerStore.setState({ focusOnMount: new Set() });
     dockPanel();
@@ -292,11 +291,11 @@ describe('the split’s card', () => {
   const DIAGNOSTICS: TabRef = { id: 'diagnostics', kind: 'diagnostics', pinned: false };
   const SETTINGS: TabRef = { id: 'settings', kind: 'settings', section: null, pinned: false };
   const S = sessionTab(A);
-  const splitOf = (left: TabRef = S, right: TabRef = DIAGNOSTICS): LayoutMain => ({
+  const splitOf = (left: TabRef = S, right: TabRef = DIAGNOSTICS): Strip => ({
     ...LAYOUT_DEFAULTS.main,
-    sets: { [NO_PROJECT]: { panes: [{ tabs: [left], activeTabId: left.id }, { tabs: [right], activeTabId: right.id }], focusedPane: 1, splitRatio: 0.4 } },
+    panes: [{ tabs: [left], activeTabId: left.id }, { tabs: [right], activeTabId: right.id }], focusedPane: 1, splitRatio: 0.4,
   });
-  const set = () => useLayout.getState().main.sets[NO_PROJECT]!;
+  const set = () => useLayout.getState().main;
   const layout = () => useLayout.getState();
   const closed = () => useFloatingCard.getState().closed;
   const marked = () => [...useComposerStore.getState().focusOnMount];
@@ -316,8 +315,6 @@ describe('the split’s card', () => {
     useLayout.getState().setPanel({ maximized: true });
     expect([cardHost(layout()), cardSession(layout())], 'the main area is at 0 px under a maximized panel').toEqual([null, null]);
     useLayout.getState().setPanel({ maximized: false });
-    useLayout.getState().setCurrentProject(at('elsewhere' as ProjectId));
-    expect([cardHost(layout()), cardSession(layout())], 'another tab set: the float stays with its own').toEqual([null, null]);
   });
 
   it('a float (the divider’s release, Expand) floats S with the ratio untouched, focuses S’s pane and marks its composer', () => {
@@ -393,17 +390,11 @@ describe('the split’s card', () => {
     expect(set().focusedPane).toBe(0);
   });
 
-  it('the pill state resets whenever the split floats or docks, and on a tab set’s return', () => {
+  it('the pill state resets whenever the split floats or docks', () => {
     floatSplit(S.id);
     closeCard();
     dockSplit();
     expect(closed()).toBe(false);
-    floatSplit(S.id);
-    closeCard();
-    useLayout.getState().setCurrentProject(at('elsewhere' as ProjectId));
-    useLayout.getState().setCurrentProject(null);
-    expect(closed()).toBe(false);
-    expect(cardHost(layout())).toBe('split');
   });
 
   // Decision Log 13 (LC-3: Codex keys its exception by the pending input's id)
@@ -561,14 +552,11 @@ describe('the split’s card', () => {
       expect(panel()).toEqual(OPEN);
     });
 
-    it('the fold rides its float through A’s own changes and a tab set’s switch, and ends with the float', () => {
+    it('the fold rides its float through A’s own changes, and ends with the float', () => {
       expand();
       useLayout.getState().openTab({ kind: 'settings', section: null }, { pane: 1 });
       expect(set().floating, 'a tab opened beside the card').toEqual({ sessionTabId: S.id, foldedPanel: true });
-      useLayout.getState().setCurrentProject(at('elsewhere' as ProjectId));
-      expect(panel(), 'another set: the panel stays folded').toEqual({ ...OPEN, collapsed: true });
-      useLayout.getState().setCurrentProject(null);
-      expect(set().floating).toEqual({ sessionTabId: S.id, foldedPanel: true });
+      expect(panel()).toEqual({ ...OPEN, collapsed: true });
       expand();
       expect(panel()).toEqual(OPEN);
     });
@@ -620,7 +608,7 @@ describe('the split’s card', () => {
     const file: TabRef = { id: `file:${TEST_MACHINE}:/x`, kind: 'file', machine: TEST_MACHINE, path: '/x', line: null, appSessionId: A, pinned: false };
     takeTranscriptCarry(A);
     recordTranscriptScroll(A, { following: false, offset: 900, signature: '3:r3', anchor: 'r2' });
-    useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { panes: [{ tabs: [file], activeTabId: file.id }], focusedPane: 0, splitRatio: 0.5 } } } });
+    useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [file], activeTabId: file.id }], focusedPane: 0, splitRatio: 0.5 } });
     floatPanel();
     expect(layout().regions.panel.floating).toBe(true);
     expect(takeTranscriptCarry(A)).toBeNull();
