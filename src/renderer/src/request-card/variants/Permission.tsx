@@ -17,6 +17,7 @@ import { CardButton, CardTextarea, Controls, Muted } from '../controls';
 import { ToolPreview } from '../preview/ToolPreview';
 import { quickApproval } from '../quick-approval';
 import { scopeOptions, type Scope } from '../scope';
+import { toolClass } from '../tools';
 import { carried, gated, type VariantProps } from './types';
 
 const ALLOWED: Record<Scope, string> = { once: 'Allowed once', session: 'Allowed for this session', local_settings: 'Always allowed in this project' };
@@ -74,6 +75,9 @@ export function PermissionBody({ item, request, busy, submit, bindKeys, capabili
   return (
     <div className="flex flex-col gap-3">
       <ToolPreview request={request} />
+      {/* §D: the call's own "Why" follows the preview; a command's preview draws it itself (desk web's too), so only the
+          other classes draw it here, outside the preview region M4's diff fills */}
+      {toolClass(request.toolName) !== 'command' && request.description && <Muted>Why: {request.description}</Muted>}
       {request.decisionReason && <Muted>{request.decisionReason}</Muted>}
       {policy === 'none' && (
         <p className="m-0 text-ui-sm text-warning">{tool} needs its own approval surface, which MAWS does not have · open the session in a terminal to answer it, or deny</p>

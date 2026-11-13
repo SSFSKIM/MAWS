@@ -684,6 +684,21 @@ describe('the permission card', () => {
       expect(card.contains(heading)).toBe(true);
     });
 
+    // §D's order, for a tool whose preview does not carry the description itself (the review of M3): the preview, the
+    // call's "Why", the engine's reason, then the buttons; a command's "Why" stays its preview's own, drawn once
+    it.each(['docked', 'card', 'inline'] as const)('reads the preview, the call’s Why, the engine’s reason, then the buttons, for a tool that is not a command (%s)', (placement) => {
+      mount(permission({ toolName: 'Read', displayName: 'Read', input: { file_path: '/w/notes.txt' }, description: 'Check the release notes', decisionReason: 'An ask rule in the project matched' }), placement);
+      const order = [screen.getByTestId('request-input'), screen.getByText('Why: Check the release notes'), screen.getByText('An ask rule in the project matched'), screen.getByRole('button', { name: 'Deny' })];
+      for (const [before, after] of order.slice(0, -1).map((node, i) => [node, order[i + 1]!] as const)) {
+        expect(before.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING, after.textContent ?? '').toBeTruthy();
+      }
+    });
+
+    it('draws a command’s Why once, from its preview', () => {
+      mount(permission({ input: { command: 'make build', description: 'Build the site' }, description: 'Build the site' }), 'inline');
+      expect(screen.getAllByText('Why: Build the site')).toHaveLength(1);
+    });
+
     it('says who asks only when it is not the main agent', () => {
       const first = mount(permission({ agentId: 'agent-1' as never }), 'inline');
       expect(screen.getByRole('heading', { name: 'Run a command · from A subagent' })).toBeTruthy();
