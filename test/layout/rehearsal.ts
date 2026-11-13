@@ -22,7 +22,7 @@
 // (Settings, the library, Projects and Customize) are already out of what the reader parsed, so they are counted from the
 // raw value: open and in the closed history, by kind. Which kind was in front, and the page that front calls for, are
 // read by this file's own reader of the raw value, which shares no code with `retiredFront` or `pageAtStart`; the page
-// `pageAtStart` answers is compared with it. A retired tab that survives the read, a pane with tabs and none active, and
+// `pageAtStart` answers is compared with it whole (kind, view and show), and only then put into words. A retired tab that survives the read, a pane with tabs and none active, and
 // a page other than the one expected each fail the file.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -146,20 +146,20 @@ function frontOf(tab: unknown): Front {
   return isRetired(kind) ? kind : 'other';
 }
 const wordOf = (page: Destination | null): PageWord => (page === null ? 'none' : page.kind === 'customize' ? `customize ${page.show}` : page.kind);
-// The page a front calls for: a Customize tab's at its section, Projects' and the library's; none for Settings; for any
-// other front, the file's own page when `current` and its only set are `none`, else none.
-function expectedOf(raw: Record<string, unknown>, layout: Record<string, unknown>, tab: unknown): PageWord {
+// The page a front calls for: a Customize tab's, at Mine and its section; Projects' and the library's; none for Settings;
+// for any other front, the file's own page when `current` and its only set are `none`, else none.
+function expectedOf(raw: Record<string, unknown>, layout: Record<string, unknown>, tab: unknown): Destination | null {
   const front = frontOf(tab);
-  if (front === 'settings') return 'none';
-  if (front === 'projects') return 'projects';
-  if (front === 'artifacts') return 'library';
+  if (front === 'settings') return null;
+  if (front === 'projects') return { kind: 'projects' };
+  if (front === 'artifacts') return { kind: 'library' };
   if (front === 'customize') {
     const section = isRecord(tab) ? tab.section : undefined;
-    return `customize ${section === 'skills' ? 'skills' : section === 'mcp' ? 'connectors' : 'plugins'}`;
+    return { kind: 'customize', view: 'mine', show: section === 'skills' ? 'skills' : section === 'mcp' ? 'connectors' : 'plugins' };
   }
   const own = isRecord(raw.sets) && raw.current === NO_PROJECT && Object.keys(raw.sets).length === 1 && Object.hasOwn(raw.sets, NO_PROJECT);
   const stored = StoredDestinationSchema.safeParse(layout.destination);
-  return own && stored.success ? wordOf(stored.data.destination) : 'none';
+  return own && stored.success ? stored.data.destination : null;
 }
 
 function rehearseFile(path: string, converters: Converters, printed: () => number): FileFacts {
@@ -172,7 +172,7 @@ function rehearseFile(path: string, converters: Converters, printed: () => numbe
   const retiredOpen = new Map<Retired, number>();
   let retiredClosed = 0;
   let front: Front = 'none';
-  let expected: PageWord = 'none';
+  let expected: Destination | null = null;
   if (isRecord(raw)) {
     for (const tab of rawLayouts(raw).flatMap(rawPanes).flatMap(rawTabs)) {
       const kind = kindOf(tab);
@@ -234,8 +234,8 @@ function rehearseFile(path: string, converters: Converters, printed: () => numbe
 
   // UX wave U7b: the page hydration opens, against the page this file's own reader expects
   const storedPage = StoredDestinationSchema.safeParse(layout.destination);
-  const page = wordOf(converters.pageAtStart({ rawMain: raw, canonical, stored: storedPage.success ? storedPage.data.destination : null }));
-  if (page !== expected) throw new Refused('destination-mismatch');
+  const page = converters.pageAtStart({ rawMain: raw, canonical, stored: storedPage.success ? storedPage.data.destination : null });
+  if (!isDeepStrictEqual(page, expected)) throw new Refused('destination-mismatch');
 
   const showing = stored.version === 1 ? NO_PROJECT : stored.current;
   return {
@@ -254,8 +254,8 @@ function rehearseFile(path: string, converters: Converters, printed: () => numbe
     contexts: contexts === null ? null : { before: Object.keys(contexts).length, after: Object.hasOwn(contexts, showing) ? 1 : 0 },
     retired: { open: RETIRED.flatMap((kind): [Retired, number][] => (retiredOpen.has(kind) ? [[kind, retiredOpen.get(kind)!]] : [])), closed: retiredClosed },
     front,
-    expected,
-    page,
+    expected: wordOf(expected),
+    page: wordOf(page),
   };
 }
 

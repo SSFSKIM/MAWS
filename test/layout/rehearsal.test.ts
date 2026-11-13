@@ -237,5 +237,23 @@ describe('the rehearsal', () => {
       expect(rehearsalLines(passed).join('\n')).toContain('front customize, expected customize plugins');
       expect(rehearsalLines(passed).join('\n')).not.toContain(SENTINEL);
     });
+
+    it('compares the whole page, so a converter that changes only its view fails the file', () => {
+      const discover = { version: 1, destination: { kind: 'customize', view: 'discover', show: 'connectors' } };
+      const dir = directoryOf({
+        'a.json': JSON.stringify({ 'main.tabs': fWrote(customize('skills')) }),
+        'b.json': JSON.stringify({ 'main.tabs': fWrote(session(`${L}/s2`)), destination: discover }),
+      });
+      const real = rehearse(dir);
+      expect(real.files.map((f) => f.outcome)).toEqual(['pass', 'pass']);
+      expect(rehearsalLines(real).filter((line) => line.includes('expected customize'))).toHaveLength(2);
+      // a retired Customize tab answered at Discover, and a stored Discover page answered at Mine; the show is right in both
+      const atView = (view: 'mine' | 'discover'): typeof pageAtStart => (input) => {
+        const page = pageAtStart(input);
+        return page?.kind === 'customize' ? { ...page, view } : page;
+      };
+      expect(rehearse(dir, { stripOf, storedMain, pageAtStart: atView('discover') }).files.map((f) => f.outcome)).toEqual(['destination-mismatch', 'pass']);
+      expect(rehearse(dir, { stripOf, storedMain, pageAtStart: atView('mine') }).files.map((f) => f.outcome)).toEqual(['pass', 'destination-mismatch']);
+    });
   });
 });
