@@ -1665,6 +1665,20 @@ describe('listed rows from another machine', () => {
       expect(needsYou().map((b) => b.dataset.greyed ?? null)).toEqual([null, null]);
       expect(screen.getByRole('button', { name: 'Overview, 2 waiting' })).toBeTruthy();
     });
+
+    // The UX wave, U9 (the architect's ruling of 2026-11-13): main greys an item by its machine's phase, so a machine
+    // reconnecting within the minute keeps its item live and counted; the row says the machine reconnects
+    it('an item of a reconnecting machine is counted in its place and says “reconnecting”', () => {
+      fill([listedOn('b1', { title: 'Studio build' })]);
+      useAttention.getState().applyRemote({ machine: OTHER_MACHINE, items: [waitOn('b1')], greyed: false });
+      useMachines.getState().applyRoster([
+        { ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-10-28T10:00:00Z', generation: 0 },
+        { ref: OTHER_MACHINE, name: 'Studio', local: false, state: 'down', since: new Date().toISOString(), generation: 1 },
+      ]);
+      render(<><Toolbar /><Sidebar /></>);
+      expect(screen.getByRole('heading', { name: 'Needs you · 1' })).toBeTruthy();
+      expect(needsYou().map((b) => [b.getAttribute('aria-label'), b.dataset.greyed ?? null])).toEqual([['Studio · Studio build · Approval needed, reconnecting', null]]);
+    });
   });
 
   it('caps an expanded project at five over both kinds, then eight after Show more', async () => {

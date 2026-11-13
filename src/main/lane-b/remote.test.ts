@@ -16,6 +16,7 @@ import { BUILTIN_MODELS } from '@shared/sessions/models';
 import { project, record, status } from '../../../test/support/builders';
 import { FakeLink, MINI, type FakeAct } from '../../../test/lane-b/fake-link';
 import type { MainContext } from '../ipc/router';
+import type { CallResult } from '../machines/remote/link';
 import { AGENT_TOO_LARGE, createRemoteLaneB, routeLaneB, standInForMachines, type RemoteLaneB } from './remote';
 import { UNRESOLVED_MAX } from './remote-spawn';
 import { startNotifier } from '../attention/notifier';
@@ -36,7 +37,7 @@ const tabsOf = (...apps: string[]) => {
 };
 const permission: SessionEvent = { id: `${APP}:L1:3:0`, sessionId: `eng-${APP}`, at: '2026-10-31T00:00:00.000Z', seq: 3, agentId: null, parentToolUseId: null, kind: 'permission.requested', requestId: 'req-1', toolUseId: 'tu-1', toolName: 'Bash', displayName: null, input: { command: 'ls' }, description: null, decisionReasonType: null, suggestions: [], blockedPath: null } as unknown as SessionEvent;
 
-function lab(options: { tabs?: string[]; timing?: Parameters<typeof createRemoteLaneB>[0]['timing']; laneA?: string[]; others?: string[] } = {}) {
+function lab(options: { tabs?: string[]; timing?: Parameters<typeof createRemoteLaneB>[0]['timing']; laneA?: string[]; others?: string[]; record?: (input: Record<string, unknown>) => CallResult } = {}) {
   const link = new FakeLink();
   let links: Map<MachineRef, FakeLink> = new Map([[MINI, link]]);
   const remoteListeners = new Set<(machines: readonly MachineRef[]) => void>();
@@ -44,7 +45,7 @@ function lab(options: { tabs?: string[]; timing?: Parameters<typeof createRemote
   let tabs: unknown = tabsOf(...(options.tabs ?? [APP]));
   const emitted: Array<{ machine: MachineRef; name: EventName; payload: Record<string, unknown> }> = [];
   const logs: string[] = [];
-  link.answers.set('session.get', (input) => ({ ok: true, output: record(String(input.appSessionId)) }));
+  link.answers.set('session.get', options.record ?? ((input) => ({ ok: true, output: record(String(input.appSessionId)) })));
   const adapter: RemoteLaneB = createRemoteLaneB({
     local: LOCAL,
     layout: { get: (key) => (key === 'main.tabs' ? tabs : null), onChange: (listener) => (layoutListeners.add(listener), () => void layoutListeners.delete(listener)) },
@@ -1526,5 +1527,113 @@ describe('the stream’s answer across records', () => {
     sub.sink.subbed('snapshot', { epoch: 'L2', seq: 0 });
     expect(said()).toEqual({ n: 2, mode: 'snapshot' });
     l.adapter.stop();
+  });
+});
+
+// The UX wave, U9 (M5, "The settled word"; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, Interfaces §9):
+// one round per machine and generation of its link. The word is said once, on the session's queue of events, when no
+// lane is placing and none awaiting, after the `remote.session` that carried the round's last answer. Each case is in
+// main's order of words.
+describe('the settled word', () => {
+  /** Each word main said, in order: its name, a `remote.session`'s answer, a word's generation. */
+  const words = (l: ReturnType<typeof lab>) =>
+    l.emitted.map(({ name, payload }) => (name === 'remote.settled' ? `settled ${String(payload.generation)}` : name === 'remote.session' ? `session ${JSON.stringify(payload.answer)}` : name));
+  const settledAt = (l: ReturnType<typeof lab>) => words(l).findIndex((w) => w.startsWith('settled'));
+
+  it('holds the word through a transient refusal of the record and its retry, the record, its subscription, and says it after that subscription’s answer', async () => {
+    const answers: CallResult[] = [{ ok: false, error: { code: 'offline' } }];
+    const l = lab({ record: (input) => answers.shift() ?? { ok: true, output: record(String(input.appSessionId)) } });
+    await vi.advanceTimersByTimeAsync(0); // the refusal: a back-off, placing
+    expect(l.of('remote.settled')).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1_000); // the retry: the record, and its subscription in the same step
+    expect(l.of('session.changed')).toHaveLength(1);
+    const sub = l.link.open().find((s) => s.request.session?.id === APP)!;
+    expect(sub).toBeDefined();
+    expect(l.of('remote.settled'), 'nothing between the record and its subscription’s answer').toEqual([]);
+    sub.sink.subbed('snapshot', { epoch: 'L1', seq: 0 });
+    expect(l.of('remote.settled')).toEqual([{ machine: MINI, generation: 1 }]);
+    const said = words(l);
+    expect(said.slice(settledAt(l) - 1, settledAt(l) + 1)).toEqual(['session {"n":1,"mode":"snapshot"}', 'settled 1']);
+  });
+
+  it('says nothing between a record read that succeeds and its subscription, and the word after the answer', async () => {
+    const l = lab();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.of('session.changed')).toHaveLength(1);
+    expect(l.link.open()).toHaveLength(1);
+    expect(l.of('remote.settled')).toEqual([]);
+    l.link.open()[0].sink.subbed('replay', { epoch: 'L1', seq: 0 });
+    expect(l.of('remote.settled')).toEqual([{ machine: MINI, generation: 1 }]);
+    expect(words(l)[settledAt(l) - 1]).toBe('session {"n":1,"mode":"replay"}');
+  });
+
+  it('holds the next generation’s word for a subscription kept across a loss until its `subbed`, and says it once', async () => {
+    const l = lab();
+    const sub = await live(l);
+    expect(l.of('remote.settled')).toEqual([{ machine: MINI, generation: 1 }]);
+    l.link.set('down', null);
+    l.link.set('up');
+    expect(l.of('remote.settled'), 'the kept subscription has not answered').toHaveLength(1);
+    sub.sink.subbed('replay', { epoch: 'L1', seq: 0 });
+    expect(l.of('remote.settled')).toEqual([{ machine: MINI, generation: 1 }, { machine: MINI, generation: 2 }]);
+    const said = words(l);
+    expect(said.indexOf('session {"n":2,"mode":"replay"}'), 'after the answer that carried the round').toBeLessThan(said.indexOf('settled 2'));
+    // said once per generation, whatever opens later
+    l.setTabs(APP, 'app-2');
+    await vi.advanceTimersByTimeAsync(0);
+    l.link.open().find((s) => s.request.session?.id === 'app-2')!.sink.subbed('snapshot', { epoch: 'L9', seq: 0 });
+    expect(l.of('remote.settled')).toHaveLength(2);
+  });
+
+  it('says it at `up` when the machine has no lane at all, and a round that had not settled says nothing at `down`', async () => {
+    const l = lab({ tabs: [] });
+    l.setLinks(new Map([[MINI, l.link]]));
+    expect(l.of('remote.settled')).toEqual([{ machine: MINI, generation: 1 }]);
+    l.link.set('down', null);
+    l.link.set('up');
+    expect(l.of('remote.settled')).toEqual([{ machine: MINI, generation: 1 }, { machine: MINI, generation: 2 }]);
+    l.setTabs(APP); // a lane placing: generation 3's round waits for it, and the loss ends that round unsaid
+    l.link.set('down', null);
+    l.link.set('up');
+    l.link.set('down', null);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.of('remote.settled')).toHaveLength(2);
+  });
+
+  it('is said again to a page that has just subscribed, for the generation settled', async () => {
+    const l = lab();
+    await live(l);
+    await l.cmd('session.get', { appSessionId: APP });
+    expect(l.of('remote.settled')).toEqual([{ machine: MINI, generation: 1 }, { machine: MINI, generation: 1 }]);
+  });
+});
+
+// The UX wave, U9 (M5, "The three lines share one prefix"; A15): a remote tab's open, counted from the moment the tab's
+// interest opens the session; the New chat chooser's two reads of one machine, as one line once both answered
+describe('the timing lines', () => {
+  const timing = (l: ReturnType<typeof lab>) => l.logs.filter((line) => line.startsWith('lane B: timing '));
+
+  it('logs a remote tab’s open once: the link up, its record, its history asked and its first rows, each from the open', async () => {
+    const l = lab();
+    l.link.answers.set('session.events', () => ({ ok: true, output: { events: [], lastSeq: 0, complete: true } }));
+    await vi.advanceTimersByTimeAsync(5);
+    await vi.advanceTimersByTimeAsync(20);
+    await l.cmd('session.events', { appSessionId: APP, afterSeq: null, limit: null });
+    await l.cmd('session.events', { appSessionId: APP, afterSeq: null, limit: null });
+    expect(timing(l).filter((line) => line.startsWith('lane B: timing open'))).toEqual([`lane B: timing open mini/${APP}: link up +0, record +0, history asked +25, first rows +25`]);
+  });
+
+  it('logs the chooser’s two reads of a machine, started together, as one line once both answered, and a lone read not at all', async () => {
+    const l = lab({ tabs: [] });
+    l.link.answers.set('machine.folders.list', () => new Promise((resolve) => setTimeout(() => resolve({ ok: true, output: { entries: [], cursor: null } }), 30)));
+    const both = Promise.all([l.cmd('session.projects.list', undefined), l.cmd('machine.folders.list', {})]);
+    await vi.advanceTimersByTimeAsync(30);
+    await both;
+    expect(timing(l)).toEqual(['lane B: timing chooser mini: session.projects.list 0 ms, machine.folders.list 30 ms']);
+    const alone = l.cmd('machine.folders.list', {});
+    await vi.advanceTimersByTimeAsync(1_000);
+    await alone;
+    await l.cmd('machine.folders.list', { path: '/srv/a' }); // a folder of the sheet, not the chooser's first page
+    expect(timing(l)).toHaveLength(1);
   });
 });
