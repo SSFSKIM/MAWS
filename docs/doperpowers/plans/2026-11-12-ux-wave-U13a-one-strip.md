@@ -499,6 +499,8 @@ The pull request carries the dated amendments of the two rulings this landing re
   Evidence: `panel/surface-model.ts` reads `contexts[main.current]`; a hydration that rewrites `contexts` under `none` while `main.tabs` keeps `current: <project key>` leaves the next launch to look under the project key. Found by the adversarial review, 2026-11-12.
 - Observation: `focusPane` is called both when the store follows the keyboard and when the person chooses a pane; six of its callers are the second kind.
   Evidence: `app/shell-actions.ts` (`pane.focusOther`); `shell/floating.ts` (`floatSplit`, `dockSplit`, `openCard`, `closeCard`, `focusSplitCard`), against `main/Pane.tsx`, `shell/FloatingCard.tsx` and `focusCompactCard`. Found by the adversarial review, 2026-11-12.
+- Observation: on the wave's build VM under load (load average 20 to 27, another child's whole suite beside it), `pnpm test` fails about twenty files outside the known set with `Test timed out in 5000ms` (and a few load-bound assertions); the same files time out on the commit before M1 at the same load. A long `vmcheck.sh` call can also lose its ssh session (exit 255, no output) while the remote run goes on.
+  Evidence: the M1 executor's runs at `d07608d6c` and `7fbf15772` (task report); a whole run detached on the VM (`nohup setsid`, log read after) is the workaround.
 
 ## Decision Log
 
@@ -527,6 +529,17 @@ The pull request carries the dated amendments of the two rulings this landing re
     Date/Author: 2026-11-12, the controller, on the architect's dispatch.
   - Decision: no executor or controller runs `scripts/ci-gate.sh`, opens a pull request or starts an Electron e2e on this branch; class 1a, the review panel, the cross-build run and the pull request are the architect's (as "Proof that an executor does not run" already says for most of them). Checks run on the VM through `vmcheck.sh` only.
     Date/Author: 2026-11-12, the controller, on the architect's dispatch.
+- **2026-11-13 · M1: the means the document left open** (the M1 executor's decisions, folded by the controller).
+  - Decision: the rehearsal parses with a placeholder local machine ref, `rehearsal-local-machine` (valid under `MachineRefSchema`, no machine's). Its session comparison runs once per *machine view*: each ref named by a session or agent tab's address in the parsed value, taken as the local machine; for a version-1 or version-2 value that is the placeholder. Each view compares `sessionsInTabs` and `remoteSessionsInTabs` over the raw stored value with the same readers over `storedMain` of the strip.
+    Rationale: version 3 holds addresses, so the local ref changes nothing of its read; versions 1 and 2 are lifted by every reader with the ref it is given, so one placeholder used everywhere is as faithful as the owner's real ref and the rehearsal needs nothing from the owner's machine.
+  - Decision: every view must be equal on its own (else `sessions-differ`); the printed "held here" and "held elsewhere" are sums over the views, and the line names the number of views (`2 machine views: held here 6 = 6, held elsewhere 6 = 6`).
+  - Decision: `contexts n -> m` is information, not a pass condition: n is the number of keys stored, m is 1 when there is an entry for the set that was showing (`none` for version 1), else 0; `contexts absent` when the key is absent. M2's hydration should give the same m.
+  - Decision: the first line adds `, N distinct` when a tab id repeats across sets (so the strip's smaller count does not read as a loss), and plurals follow the count. The checks run in the order `tab-missing`, `tab-twice`, `sessions-differ`, `not-stored-form`, so each word is reachable; `not-stored-form` is `storedMain`'s output not parsing identically under `LayoutMainSchema`, or `stripOf` of it not being canonical, unmerged and the same strip.
+  - Decision: a run that reads nothing fails: an unreadable directory (`directory unreadable`) or one with no `*.json` (`no layout files`) counts as one not passed, so a mistyped `MAWS_LAYOUT_REHEARSAL` cannot report green.
+  - Decision: the runner's one assertion lives in `runRehearsal` (`test/layout/rehearsal.ts`) with a fixed message, so the sentinel tests exercise the exact assertion the runner makes; `owner-files.test.ts` is that one call under `describe.skipIf`.
+  - Decision: when `focusedPane` names a pane the value does not have (the schema admits `focusedPane: 1` with one pane), `stripOf` appends to pane 0 and leaves `focusedPane` to `repairMain`, which keeps it total and repairing nothing (§A's last point).
+  - Decision: the A7 test is `src/main/layout/one-strip.test.ts`.
+    Date/Author: 2026-11-13, the M1 executor; folded by the controller.
 
 ## Outcomes & Retrospective
 
