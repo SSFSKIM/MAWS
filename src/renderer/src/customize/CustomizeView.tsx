@@ -228,6 +228,6 @@ function LiveConnectorStatus({ appSessionId }: { appSessionId: AppSessionId }) {
   const read = useEngineRead('session.mcpStatus', { appSessionId });
   return <>
     <InventoryState error={read.error ? new Error(read.error) : null} pending={read.state === 'loading'} refresh={read.refetch} />
-    {read.data && <McpBody compact view={{ servers: present(read.data).servers.map((server) => ({ ...server, transport: null, command: null })) }} />}
+    {read.data && <McpBody view={{ servers: present(read.data).servers.map((server) => ({ ...server, transport: null, command: null })) }} />}
   </>;
 }

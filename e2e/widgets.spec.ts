@@ -404,11 +404,26 @@ test.describe('interactive', () => {
     await expect(widget(page, 'diff')).toContainText('0 files · +0 −0 · working tree');
 
     await pick(page, 'mcp'); // pass2/real-settings.jsonl seq 63
-    const servers = widget(page, 'mcp').getByRole('list', { name: 'MCP servers' }).getByRole('listitem');
+    // UX wave U11a (§C, A3): Connectors, "MCP servers" muted beside it, the switch's reach once in the head; one line
+    // per connector (name, status in words, tool count), the transport only once a row is opened
+    const mcp = widget(page, 'mcp');
+    await expect(mcp.locator('header h3')).toHaveText('Connectors');
+    await expect(mcp.locator('[data-widget-subtitle]')).toHaveText('MCP servers');
+    const reach = mcp.locator('[data-widget-note]');
+    await expect(reach).toHaveText(/^Off here is off for every session in .+\.$/);
+    await expect(reach).toHaveAttribute('title', 'The engine records it in ~/.claude.json.');
+    const list = mcp.getByRole('list', { name: 'Connectors' });
+    const servers = list.getByRole('listitem');
     await expect(servers).toHaveCount(3);
+    await expect(servers.nth(0).locator('[data-connector-state]')).toHaveText('Connected · 6 tools');
+    for (let i = 0; i < 3; i++) await expect(servers.nth(i).locator('[data-connector-state]')).toContainText('Connected');
+    await expect(list).not.toContainText('stdio ·');
+    await expect(list).not.toContainText('~/.claude.json');
+    await servers.nth(0).locator('button[aria-expanded]').click();
     await expect(servers.nth(0)).toContainText('stdio · …/ptc-launch');
+    await servers.nth(2).locator('button[aria-expanded]').click();
     await expect(servers.nth(2)).toContainText('http · https://developers.openai.com/mcp');
-    for (let i = 0; i < 3; i++) await expect(servers.nth(i)).toContainText('connected');
+    await expect(servers.nth(2).getByRole('button', { name: 'Reconnect' })).toBeVisible(); // a connected row's, in its opened part
 
     await inProject(backend); // E8: the frame follows `plugins.list`, the CLI stub's, run in the session's directory
     await pick(page, 'plugins'); // pass2/real-settings.jsonl seq 15, from the status
@@ -669,6 +684,7 @@ test.describe('interactive', () => {
 
     await pick(page, 'mcp');
     const docs = widget(page, 'mcp').getByRole('listitem').filter({ hasText: 'openaiDeveloperDocs' });
+    await docs.locator('button[aria-expanded]').click(); // U11a: a connected row's Reconnect is in its opened part
     await docs.getByRole('button', { name: 'Reconnect' }).click();
     await expect(docs.getByRole('status')).toHaveText('Working…');
     const before = (await calls(backend)).filter((c) => c.subtype === 'mcp_status').length;
@@ -678,7 +694,7 @@ test.describe('interactive', () => {
     expect((await calls(backend)).find((c) => c.subtype === 'mcp_reconnect')?.input).toEqual({ appSessionId: READY, serverName: 'openaiDeveloperDocs' });
   });
 
-  test('mcp toggle discloses ~/.claude.json and reads its state back after either outcome', async ({ backend }) => {
+  test('mcp toggle: its reach said once in the head; it reads its state back after either outcome', async ({ backend }) => {
     const { page, app } = backend;
     await openPage(page, { appSessionId: READY, mode: 'interactive' });
     await pick(page, 'mcp');
@@ -686,8 +702,9 @@ test.describe('interactive', () => {
     const docs = row('openaiDeveloperDocs');
     const mcpReads = async () => (await calls(backend)).filter((c) => c.subtype === 'mcp_status').length;
 
-    // Toggle off: the persistence beside the switch, one read after the outcome, the switch from that read
-    await expect(docs).toContainText('Recorded by the engine for this project in ~/.claude.json');
+    // Toggle off: what the switch reaches said once, in the head (U11a), one read after the outcome, the switch from that read
+    await expect(widget(page, 'mcp').locator('[data-widget-note]')).toHaveText(/^Off here is off for every session in /);
+    await expect(docs).not.toContainText('~/.claude.json');
     await holdOperations(backend, true);
     await docs.getByRole('switch').click();
     await expect(docs.getByRole('status')).toHaveText('Working…');

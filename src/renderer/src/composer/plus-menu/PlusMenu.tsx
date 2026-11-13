@@ -48,7 +48,7 @@ export function PlusMenu({ appSessionId, cwd, editor, directories }: PlusMenuPro
         {rows.map((row, index) => <DropdownMenu.Item key={`${row.name}:${index}`} onSelect={() => editor.current?.openWidget(name)} disabled={!widgets.has(name)} className={`${ITEM} flex-row items-center justify-between gap-3`}><span className="min-w-0 truncate">{row.name}</span><span className="shrink-0 text-ui-sm text-fg-muted">{row.detail}</span></DropdownMenu.Item>)}
         {rows.length === 0 && <DropdownMenu.Label className="max-w-64 px-2 py-2 text-ui-sm text-fg-muted">{ready ? name === 'mcp' ? 'No connectors reported by this session' : 'No plugins reported by this session' : 'Live details are unavailable until this session is running'}</DropdownMenu.Label>}
         <DropdownMenu.Item disabled={!widgets.has(name)} onSelect={() => editor.current?.openWidget(name)} className={ITEM}>
-          <span>{name === 'mcp' ? 'Session connector controls…' : 'Session plugin details…'}</span>
+          <span>{name === 'mcp' ? 'Connectors in this chat…' : 'Plugins in this chat…'}</span>
           {widgets.has(name) ? null : <span className="text-ui-sm">{UNAVAILABLE_HINT}</span>}
         </DropdownMenu.Item>
         <DropdownMenu.Separator className="my-1 h-px bg-border" />

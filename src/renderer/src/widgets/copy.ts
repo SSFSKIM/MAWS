@@ -20,7 +20,7 @@ export const WIDGET_TITLE: Record<WidgetCommandName, string> = {
   usage: 'Usage',
   config: 'Config',
   plugins: 'Plugins',
-  mcp: 'MCP servers',
+  mcp: 'Connectors', // UX wave U11a (§C): the dialog's name, with `MCP.subtitle` beside it
   sandbox: 'Sandbox',
   hooks: 'Hooks',
   memory: 'Memory',
@@ -149,8 +149,20 @@ export const CONFIG = {
 // Plugins.
 export const PLUGINS = { none: 'The engine loaded no plugins', problems: 'Problems', problemList: 'Plugin problems', loaded: 'Loaded in this session', loadedList: 'Loaded plugins' };
 
-// MCP.
-export const MCP = { none: 'No MCP servers', list: 'MCP servers', scope: (scope: string) => `scope ${scope}`, from: (source: string) => `from ${source}`, tools: (n: number) => `${n} tool${n === 1 ? '' : 's'}` };
+// MCP. UX wave U11a (§C): the Connectors dialog's head, its muted subtitle and the one sentence of what the switch
+// reaches; `failed` and `off` are the status words Customize's copy does not hold (connector-status.ts).
+export const MCP = {
+  none: 'No connectors',
+  list: 'Connectors',
+  subtitle: 'MCP servers',
+  reach: (place: string) => `Off here is off for every session in ${place}.`,
+  reachTip: 'The engine records it in ~/.claude.json.',
+  failed: 'Failed',
+  off: 'Off',
+  scope: (scope: string) => `scope ${scope}`,
+  from: (source: string) => `from ${source}`,
+  tools: (n: number) => `${n} tool${n === 1 ? '' : 's'}`,
+};
 
 // Sandbox (E11 §2.2): on or off first, with why it is off or what happens to a command it cannot run; the engine's
 // fields under Details.
@@ -426,12 +438,11 @@ export const PLUGIN_MANAGEMENT = {
   reloadAgain: 'Reload again',
 };
 
-// MCP's Reconnect and the persistent enable switch.
+// MCP's Reconnect and the persistent enable switch (what it reaches is said once, in the head: `MCP.reach`).
 export const MCP_ACTIONS = {
   reconnect: 'Reconnect',
   reconnected: 'Reconnected',
   enabled: (name: string) => `Enabled: ${name}`,
-  persisted: 'Recorded by the engine for this project in ~/.claude.json',
   done: 'Done',
   notConnected: (error: string) => `On · not connected · ${error}`,
   unconfirmed: (words: string) => `Unconfirmed · ${words}`,
