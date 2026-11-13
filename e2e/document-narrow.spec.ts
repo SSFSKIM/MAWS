@@ -387,8 +387,16 @@ test('UX wave U5a: in a body under 720 px, a comment’s card that became its si
     const child = await sideThreadOf(page, parent);
     await expect(text.locator('[data-thread]'), 'the comment’s mark').toHaveCount(1);
 
-    // the keyboard back in the page (the thread's card took it), then the tint counted from here on
-    await text.click();
+    // the keyboard back in the page (the thread's card took it), then the tint counted from here on. The card floats
+    // below the passage's line, over the editor's empty lower part (where the editor's own centre falls), so the person
+    // clicks the line itself, at its start, clear of the card and of the passage's mark
+    const line = text.locator('p').first();
+    const lineBox = await box(line);
+    const cardBox = await box(card);
+    const at = { x: lineBox.x + 2, y: lineBox.y + lineBox.height / 2 };
+    const underCard = at.x >= cardBox.x && at.x <= cardBox.x + cardBox.width && at.y >= cardBox.y && at.y <= cardBox.y + cardBox.height;
+    expect(underCard, `the line's start clear of the card: ${JSON.stringify({ at, cardBox })}`).toBe(false);
+    await line.click({ position: { x: 2, y: lineBox.height / 2 } });
     await expect.poll(() => card.evaluate((el) => el.contains(document.activeElement)), { message: 'the keyboard is out of the card' }).toBe(false);
     await expect(card, 'the card stays as its thread meanwhile').toHaveAttribute('data-card-phase', 'thread');
     await text.evaluate((root) => {
