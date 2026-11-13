@@ -10,15 +10,17 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, RequestId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import type { LaneARaised, LaneAState } from '@shared/ipc/schema/lane-a';
-import { record } from '../../../../test/support/builders';
+import { record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { at } from '../../../../test/support/machine';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { laneAState } from '../lane-a/test-support/lane-a-state';
 import { SETTLED_MS, useSettling } from '../lane-a/race';
 import { connectKeys } from '../keymap/dispatcher';
 import { bindingsOf } from '../keymap/useKeyChord';
 import { applyLaneAState, resetLaneAStore } from '../stores/lane-a';
+import { useHosts } from '../stores/hosts';
 import { useSessions } from '../stores/sessions';
+import { hostStatus } from '../test-support/host-status';
 import { resetShellStores } from '../test-support/shell-stores';
 import { RequestCard } from './RequestCard';
 import { itemFor, permission } from './test-requests';
@@ -160,6 +162,22 @@ describe('a terminal session’s plan and question cards', () => {
     expect(clear.getAttribute('title')).toBe('/clear runs in the terminal');
     await userEvent.setup().click(screen.getByRole('button', { name: 'Implement' }));
     await waitFor(() => expect(answers()).toEqual([{ kind: 'plan', outcome: 'implement', feedback: null }]));
+  });
+
+  // UX wave U1a §F: the bridge carries allow and deny, never a mode, so a terminal session's plan has no menu and its
+  // button names no mode, even under this build's engine host and with a status of an earlier run naming one
+  it('offers no mode menu and names no mode', async () => {
+    useHosts.setState({ supervisor: hostStatus() });
+    try {
+      useSessions.getState().applyStatus({ appSessionId: APP, status: { ...status(APP, { process: 'exited' }), prePlanMode: 'acceptEdits' } }, TEST_MACHINE);
+      live({ pending: [raised({ tool: 'ExitPlanMode', input: { plan: '1. do it' } })] });
+      mount({ id: 'e' as never, sessionId: 's' as never, at: '2026-10-28T10:00:00.000Z', seq: null, agentId: null, parentToolUseId: null, kind: 'plan.requested', requestId: REQ, toolUseId: REQ as never, plan: '1. do it', input: { plan: '1. do it' } });
+      expect(screen.queryByRole('button', { name: 'More implement options' })).toBeNull();
+      await userEvent.setup().click(screen.getByRole('button', { name: 'Implement' }));
+      await waitFor(() => expect(answers()).toEqual([{ kind: 'plan', outcome: 'implement', feedback: null }]));
+    } finally {
+      useHosts.setState({ supervisor: null });
+    }
   });
 
   // U1a (A5, A18; §G): an asynchronous question is never declined by Esc, and its Dismiss sends the bridge's dismissal

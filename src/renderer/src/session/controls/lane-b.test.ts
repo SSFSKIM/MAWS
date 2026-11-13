@@ -17,9 +17,11 @@ import { liveBindings } from '../../composer/frame/bindings';
 import { ARCHIVED, ENDED } from '../../composer/submit/submit-state';
 import { resetComposerStore } from '../../stores/composer';
 import { resetQueueStore } from '../../stores/queue';
+import { useHosts } from '../../stores/hosts';
 import { useSessions } from '../../stores/sessions';
+import { hostStatus, supervisorStatus } from '../../test-support/host-status';
 import { useSetup } from '../../sessions/store';
-import { laneBControls } from './lane-b';
+import { laneBControls, PLAN_MODE_WORDS } from './lane-b';
 import type { ControlKey } from './types';
 
 const APP = 'app-b' as AppSessionId;
@@ -370,5 +372,67 @@ describe('lane B on another machine', () => {
     await fake.fail('session.send', 'Not sent: mini is offline', 'host_unavailable');
     expect(await failed).toMatchObject({ message: 'Not sent: mini is offline' }); // main's words, which the composer shows with Send again
     expect(useRemoteLaneB.getState().sending.has(REMOTE)).toBe(false);
+  });
+});
+
+// UX wave U1a §F, the gate: a plan answer that names a mode leaves the window only for a session MAWS runs on this Mac
+// whose engine host has this build's wire (`host.status`: `supervisor.wire` equal to `appWire`). Under another build's
+// host, or none, the port closes it and refuses to send it: that host would drop the key and implement in the earlier
+// mode, under a button that named another. A session on another machine is never sent one (its endpoint refuses it).
+describe('lane B’s gate on a plan’s named mode', () => {
+  const named: RequestAnswer = { kind: 'plan', outcome: 'implement', feedback: null, mode: 'acceptEdits' };
+  const plain: RequestAnswer = { kind: 'plan', outcome: 'implement', feedback: null };
+  const otherWire = hostStatus({ supervisor: supervisorStatus({ wire: 'w-older' }), matches: 'wire' });
+  const noHost = hostStatus({ state: 'starting', supervisor: null, matches: null });
+  beforeEach(() => useHosts.setState({ supervisor: null }));
+
+  it('carries a named mode under an engine host of this build’s wire', async () => {
+    useHosts.setState({ supervisor: hostStatus() });
+    const fake = fakeClient({ 'session.answer': { outcome: 'delivered' } });
+    const port = laneBControls(null, { appSessionId: APP, client: fake.client });
+    const asked = item(APP, 'plan', T0);
+    expect(port.answerCapability(asked, named)).toEqual({ available: true });
+    expect(await port.answer(asked, named)).toEqual({ ok: true, value: { outcome: 'delivered' } });
+    expect(fake.invoked('session.answer')).toEqual([{ appSessionId: APP, requestId: `req-${APP}`, answer: named }]);
+  });
+
+  it.each([
+    ['an engine host of another wire', otherWire],
+    ['no engine host connected', noHost],
+    ['no host status yet', null],
+  ])('under %s closes a named mode, refuses it without calling session.answer, and carries the plain implement', async (_name, supervisor) => {
+    useHosts.setState({ supervisor });
+    const fake = fakeClient({ 'session.answer': { outcome: 'delivered' } });
+    const port = laneBControls(null, { appSessionId: APP, client: fake.client });
+    const asked = item(APP, 'plan', T0);
+    expect(port.answerCapability(asked, named)).toEqual({ available: false, reason: PLAN_MODE_WORDS.otherHost });
+    expect(await port.answer(asked, named)).toMatchObject({ ok: false, error: { message: PLAN_MODE_WORDS.otherHost } });
+    expect(fake.invoked('session.answer')).toEqual([]);
+    expect(port.answerCapability(asked, plain)).toEqual({ available: true });
+    await port.answer(asked, plain);
+    expect(fake.invoked('session.answer')).toEqual([{ appSessionId: APP, requestId: `req-${APP}`, answer: plain }]);
+  });
+
+  it('reads the status when asked, so a port made under this build’s host closes the mode once another serves', () => {
+    useHosts.setState({ supervisor: hostStatus() });
+    const port = laneBControls(null, { appSessionId: APP, client: fakeClient().client });
+    const asked = item(APP, 'plan', T0);
+    expect(port.answerCapability(asked, named)).toEqual({ available: true });
+    useHosts.setState({ supervisor: otherWire });
+    expect(port.answerCapability(asked, named)).toEqual({ available: false, reason: PLAN_MODE_WORDS.otherHost });
+  });
+
+  it('never carries a named mode to a session on another machine, whatever this Mac’s host, before main’s first word too', async () => {
+    useHosts.setState({ supervisor: hostStatus() });
+    const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+    for (const state of [remoteSessionState(REMOTE), null]) {
+      const fake = fakeClient({ 'session.answer': { outcome: 'delivered' } });
+      const port = laneBControls(record(REMOTE), { appSessionId: REMOTE, client: fake.client, remote: { state } });
+      const asked = item(REMOTE, 'plan', T0);
+      expect(port.answerCapability(asked, named)).toEqual({ available: false, reason: PLAN_MODE_WORDS.elsewhere });
+      expect(await port.answer(asked, named)).toMatchObject({ ok: false, error: { message: PLAN_MODE_WORDS.elsewhere } });
+      expect(fake.invoked('session.answer')).toEqual([]);
+      expect(port.answerCapability(asked, plain)).toEqual({ available: true });
+    }
   });
 });

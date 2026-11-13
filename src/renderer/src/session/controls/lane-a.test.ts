@@ -302,6 +302,8 @@ describe('answers', () => {
     const plan = raised({ tool: 'ExitPlanMode' });
     expect(can(plan, { kind: 'plan', outcome: 'implement', feedback: null })).toEqual({ available: true });
     expect(can(plan, { kind: 'plan', outcome: 'clear_and_implement', feedback: null })).toEqual({ available: false, reason: '/clear runs in the terminal' });
+    // UX wave U1a §F: a terminal session's plan names no mode, so the card offers no menu there
+    expect(can(plan, { kind: 'plan', outcome: 'implement', feedback: null, mode: 'acceptEdits' })).toEqual({ available: false, reason: LANE_A_WORDS.planMode });
     expect(can(raised(), { kind: 'elicitation', action: 'accept' })).toEqual({ available: false, reason: LANE_A_WORDS.elicitation });
   });
 

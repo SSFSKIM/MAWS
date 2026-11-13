@@ -15,7 +15,7 @@ const B = 'app-b' as AppSessionId;
 // A card another child docks (C10's trust card, here a stub): its own content and outcome, the frame's rules.
 function ForeignCard({ appSessionId, onAccept, onDecline }: { appSessionId: AppSessionId; onAccept: () => void; onDecline: (() => void) | null }) {
   return (
-    <DockedCardFrame appSessionId={appSessionId} title="Trust this folder" onAccept={onAccept} onDecline={onDecline}>
+    <DockedCardFrame appSessionId={appSessionId} title="Trust this folder" titleAlone onAccept={onAccept} onDecline={onDecline}>
       <p>Do you trust the files in this folder?</p>
       <textarea aria-label={`note ${appSessionId}`} />
       <button type="button">Trust</button>
@@ -54,7 +54,9 @@ describe('docked frame hosts a foreign card', () => {
       </Pane>,
     );
     const frame = screen.getByRole('group', { name: 'Trust this folder' });
-    expect(frame.textContent).toContain('Trust this folder · Composer paused · draft preserved');
+    // UX wave U1a §J: a card another child docks reads its title alone; a request's frame keeps the composer's words
+    expect(frame.querySelector(':scope > p')?.textContent).toBe('Trust this folder');
+    expect(frame.textContent).not.toContain('Composer paused');
     const user = userEvent.setup();
 
     act(() => screen.getByLabelText(`note ${A}`).focus());
@@ -252,5 +254,22 @@ describe('dockCard', () => {
     act(() => undockTrust()); // twice is harmless
     act(() => undockRelay());
     expect(screen.getByRole('list', { name: `docked ${A}` }).textContent).toBe('');
+  });
+});
+
+describe('the frame’s title line (UX wave U1a §J)', () => {
+  it('says the composer is paused for a request, and nothing more for a card that passes its title alone', () => {
+    render(
+      <Pane index={0}>
+        <DockedCardFrame appSessionId={A} title="Approval needed" onAccept={null} onDecline={null}>
+          <p>a request</p>
+        </DockedCardFrame>
+        <DockedCardFrame appSessionId={B} title="Trust this folder?" titleAlone onAccept={null} onDecline={null}>
+          <p>a setup card</p>
+        </DockedCardFrame>
+      </Pane>,
+    );
+    expect(screen.getByRole('group', { name: 'Approval needed' }).querySelector(':scope > p')?.textContent).toBe('Approval needed · Composer paused · draft preserved');
+    expect(screen.getByRole('group', { name: 'Trust this folder?' }).querySelector(':scope > p')?.textContent).toBe('Trust this folder?');
   });
 });

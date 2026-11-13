@@ -39,6 +39,8 @@ describe('lane A answer intents', () => {
     expect(intent(permission, { kind: 'permission', decision: 'deny_and_stop' })).toEqual({ ok: false, code: 'unsupported', message: 'deny-and-interrupt is answered in the terminal' });
     expect(intent(asyncQ, { kind: 'question', answers: {} })).toMatchObject({ ok: false, code: 'unsupported', message: 'an async question needs an answer' });
     expect(intent(plan, { kind: 'plan', outcome: 'clear_and_implement' } as RequestAnswer)).toMatchObject({ ok: false, message: '/clear runs in the terminal' });
+    // UX wave U1a §F: the bridge carries allow and deny, never a mode
+    expect(intent(plan, { kind: 'plan', outcome: 'implement', feedback: null, mode: 'acceptEdits' })).toEqual({ ok: false, code: 'unsupported', message: 'the mode after a plan is chosen in the terminal' });
     expect(intent({ ...permission, suggestions: [rule, rule] }, { kind: 'permission', decision: 'allow', scope: 'session' })).toMatchObject({ ok: false, code: 'unsupported' });
     expect(intent(permission, { kind: 'permission', decision: 'allow', scope: 'session' }, { ...controls, 'decide.scope': { available: false, reason: 'no scope here' } })).toEqual({ ok: false, code: 'unsupported', message: 'no scope here' });
     expect(intent(native, { kind: 'permission', decision: 'allow', scope: 'once' })).toMatchObject({ ok: false, code: 'bad-args' });

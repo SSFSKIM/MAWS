@@ -6,17 +6,21 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
-import { bareOf } from '@shared/machine/address';
+import { addressOf, bareOf } from '@shared/machine/address';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { project, record } from '../../../../test/support/builders';
-import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { project, record, status } from '../../../../test/support/builders';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { BUTTON_LIKE_INPUTS, connectKeys } from '../keymap/dispatcher';
 import { bindingsOf } from '../keymap/useKeyChord';
 import { selectPendingOf, useAttention } from '../stores/attention';
 import { resetComposerStore, useComposerStore } from '../stores/composer';
 import { useNotices } from '../stores/notices';
 import { useSettings } from '../stores/settings';
+import { useHosts } from '../stores/hosts';
+import { applyRemoteSession, resetRemoteLaneBStore } from '../lane-b/remote-session';
+import { remoteSessionState } from '../lane-b/test-support/remote-session';
+import { hostStatus, supervisorStatus } from '../test-support/host-status';
 import { resetShellStores } from '../test-support/shell-stores';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
@@ -1116,5 +1120,111 @@ describe('the dev-mods consent (R2, pass3/mods-consent)', () => {
     expect(screen.getByText('Mods')).toBeTruthy();
     expect(screen.getByText(/Enable hot reloading for this session\?/)).toBeTruthy();
     for (const choice of ['How does this work?', 'Enable for this session', 'Not now']) expect(screen.getByRole('radio', { name: choice })).toBeTruthy();
+  });
+});
+
+// UX wave U1a §F (A12): a plan's primary button names the mode the session will be in after the allow, and, where the
+// session is MAWS's own on this Mac and its engine host has this build's wire, a menu of the other modes an allow may
+// name. Under a host of another build, or none, the card is today's: "Implement" with no menu, and no answer naming a
+// mode ever leaves the window.
+describe("a plan's next mode", () => {
+  const otherWire = hostStatus({ supervisor: supervisorStatus({ wire: 'w-older' }), matches: 'wire' });
+  const noHost = hostStatus({ state: 'starting', supervisor: null, matches: null });
+  const inPlan = (appSessionId: typeof APP, prePlanMode: 'default' | 'acceptEdits' | 'auto' | null, machine = TEST_MACHINE) =>
+    useSessions.getState().applyStatus({ appSessionId, status: { ...status(appSessionId), permissionMode: { requested: 'plan', effective: 'plan', refusal: null }, prePlanMode } }, machine);
+  const caret = () => screen.queryByRole('button', { name: 'More implement options' });
+  const entries = async () => (await screen.findAllByRole('menuitem')).map((entry) => entry.textContent);
+  beforeEach(() => {
+    useHosts.setState({ supervisor: hostStatus() });
+    resetRemoteLaneBStore();
+  });
+  afterEach(() => useHosts.setState({ supervisor: null }));
+
+  it('names the mode before Plan, and its press sends today’s answer', async () => {
+    inPlan(APP, 'default');
+    mount(plan, 'docked');
+    expect(screen.queryByRole('button', { name: 'Implement' })).toBeNull();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Implement · Manual' }));
+    await waitFor(() => expect(answers()).toEqual([{ kind: 'plan', outcome: 'implement', feedback: null }]));
+  });
+
+  it('a menu entry sends the mode it names; the menu never lists Plan or the button’s mode', async () => {
+    inPlan(APP, 'default');
+    mount(plan, 'docked');
+    const user = userEvent.setup();
+    await user.click(caret()!);
+    expect(await entries()).toEqual(['Implement · Accept edits']);
+    await user.click(screen.getByRole('menuitem', { name: 'Implement · Accept edits' }));
+    await waitFor(() => expect(answers()).toEqual([{ kind: 'plan', outcome: 'implement', feedback: null, mode: 'acceptEdits' }]));
+  });
+
+  it('lists the modes in the mode menu’s order without the one on the button, and Enter sends the button’s answer', async () => {
+    inPlan(APP, 'auto');
+    mount(plan, 'docked');
+    const user = userEvent.setup();
+    expect(screen.getByRole('button', { name: 'Implement · Auto' })).toBeTruthy();
+    await user.click(caret()!);
+    expect(await entries()).toEqual(['Implement · Manual', 'Implement · Accept edits']);
+    await user.keyboard('{Escape}');
+    focusOn(frame());
+    await press('{Enter}');
+    await waitFor(() => expect(answers()).toEqual([{ kind: 'plan', outcome: 'implement', feedback: null }]));
+  });
+
+  it('with the mode before Plan unknown reads "Implement", sends no mode, and still lists every mode', async () => {
+    inPlan(APP, null);
+    mount(plan, 'card');
+    const user = userEvent.setup();
+    await user.click(caret()!);
+    expect(await entries()).toEqual(['Implement · Manual', 'Implement · Accept edits']);
+    await user.keyboard('{Escape}');
+    await user.click(screen.getByRole('button', { name: 'Implement' }));
+    await waitFor(() => expect(answers()).toEqual([{ kind: 'plan', outcome: 'implement', feedback: null }]));
+  });
+
+  it.each([
+    ['an engine host of another wire', otherWire],
+    ['no engine host connected', noHost],
+    ['no host status yet', null],
+  ])('under %s is today’s card: "Implement", no menu, today’s answer', async (_name, supervisor) => {
+    useHosts.setState({ supervisor });
+    inPlan(APP, 'acceptEdits');
+    mount(plan, 'docked');
+    expect(caret()).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Implement · / })).toBeNull();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Implement' }));
+    await waitFor(() => expect(answers()).toEqual([{ kind: 'plan', outcome: 'implement', feedback: null }]));
+  });
+
+  it('an entry pressed after the host stopped applying a mode sends nothing, and the card is drawn again without the menu', async () => {
+    inPlan(APP, 'default');
+    mount(plan, 'docked');
+    const user = userEvent.setup();
+    await user.click(caret()!);
+    const entry = await screen.findByRole('menuitem', { name: 'Implement · Accept edits' });
+    // the status changes and the entry is pressed before the card is drawn again: its handler is the one drawn under the gate
+    act(() => {
+      useHosts.setState({ supervisor: otherWire });
+      fireEvent.click(entry);
+    });
+    await flush();
+    expect(answers()).toEqual([]);
+    expect(screen.queryByRole('menuitem')).toBeNull();
+    expect(caret()).toBeNull();
+    expect(screen.getByRole('button', { name: 'Implement' })).toBeTruthy();
+  });
+
+  it('on a session another machine runs names the mode its status gives, offers no menu and sends no mode', async () => {
+    const REMOTE = addressOf(OTHER_MACHINE, 'app-remote' as AppSessionId);
+    applyRemoteSession(remoteSessionState(REMOTE));
+    inPlan(REMOTE, 'acceptEdits', OTHER_MACHINE);
+    render(
+      <Pane>
+        <Card event={plan} placement="card" item={itemFor(plan, REMOTE)} />
+      </Pane>,
+    );
+    expect(caret()).toBeNull();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Implement · Accept edits' }));
+    await waitFor(() => expect(answers()).toEqual([{ kind: 'plan', outcome: 'implement', feedback: null }]));
   });
 });
