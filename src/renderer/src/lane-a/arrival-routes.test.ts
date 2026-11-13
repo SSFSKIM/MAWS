@@ -257,7 +257,8 @@ describe('a scheduled prompt’s firing, from the file (Acceptance 7)', () => {
   // M3's fix round (review finding 1): a file, or the rows another machine sent, that end at a terminal's fire row
   // (its meta row not written yet, or never) still draw the fire where it stands, on the engine's turn it opens
   it('u3-terminal-cron-r1 cut at its first fire row: the line is drawn on both routes, once', async () => {
-    const text = recorded('u3-terminal-cron-r1').split('\n').slice(0, 50).join('\n'); // line 50: the fire, 51 its meta row
+    // line 50: the fire, 51 its meta row; the cut ends with the line's newline, as a whole line written does
+    const text = `${recorded('u3-terminal-cron-r1').split('\n').slice(0, 50).join('\n')}\n`;
     expect(rowsIn(text).at(-1)).toMatchObject({ type: 'system', subtype: 'scheduled_task_fire' });
     const { file, remote } = await bothRoutes(text);
     for (const [route, state] of [['file', file], ['remote', remote]] as const) {
