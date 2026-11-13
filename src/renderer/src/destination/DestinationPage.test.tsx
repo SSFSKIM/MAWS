@@ -1,14 +1,25 @@
 // UX wave U7b (O-40; docs/doperpowers/plans/2026-11-12-ux-wave-U7-sidebar-title-bar-destinations.md, M5 decision 8 and
 // Interfaces §H): the page's region, who takes Esc on it, and where the keyboard goes when it opens and closes.
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { useState } from 'react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { useEffect, useState } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { registerSlot, resetSlots } from '../app/slots';
 import { pageOpen, useLayout } from '../stores/layout';
 import { resetShellStores } from '../test-support/shell-stores';
 import { at } from '../../../../test/support/machine';
+import { takeDiscoverRequest, useCustomizeProject, useDiscoverRequest } from '../customize/open';
 import { DestinationPage } from './DestinationPage';
+
+// Customize's view, as far as a page's `view` reaches it: its section, and the plugins library's tab, which takes a
+// Discover request for the directory it shows at its mount and while mounted, as `PluginsLibrary` does.
+vi.mock('../customize/CustomizeView', () => ({ CustomizeView: ({ section }: { section: string }) => <CustomizeStandIn section={section} /> }));
+const SHOWN = '/work/site';
+function CustomizeStandIn({ section }: { section: string }) {
+  const [tab, setTab] = useState(() => (section === 'plugins' && takeDiscoverRequest(SHOWN) ? 'discover' : 'mine'));
+  useEffect(() => (section === 'plugins' ? useDiscoverRequest.subscribe(() => { if (takeDiscoverRequest(SHOWN)) setTab('discover'); }) : undefined), [section]);
+  return <p>customize {section} {tab}</p>;
+}
 
 const A = at('app-a' as AppSessionId);
 const page = () => document.getElementById('region-page');
@@ -43,6 +54,8 @@ function renderShell() {
 
 beforeEach(() => {
   resetShellStores();
+  useCustomizeProject.setState({ projectId: null, directory: SHOWN }, true); // a directory page, as Open Discover makes one
+  useDiscoverRequest.setState({}, true);
   registerSlot('artifactsLibrary', Library);
 });
 afterEach(() => {
@@ -93,6 +106,17 @@ describe('the page', () => {
     renderShell();
     screen.getByRole('textbox', { name: 'Composer' }).focus();
     openPage();
+    act(() => useLayout.getState().openTab({ kind: 'session', appSessionId: A }));
+    expect(useLayout.getState().destination).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'In the pane' }));
+  });
+
+  it('opened from the sidebar and left for a tab, the keyboard goes from the row to that tab’s pane', () => {
+    renderShell();
+    const row = screen.getByRole('button', { name: 'Projects row' });
+    row.focus();
+    openPage();
+    expect(document.activeElement).toBe(row);
     act(() => useLayout.getState().openTab({ kind: 'session', appSessionId: A }));
     expect(useLayout.getState().destination).toBeNull();
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'In the pane' }));
@@ -153,5 +177,44 @@ describe('the page', () => {
     event.preventDefault();
     page()!.dispatchEvent(event);
     expect(page()).not.toBeNull();
+  });
+});
+
+describe('a Customize page’s view', () => {
+  const customize = (view: 'mine' | 'discover', show: 'all' | 'plugins' | 'skills' | 'connectors' = 'plugins') => ({ kind: 'customize', view, show }) as const;
+  const shown = () => page()!.textContent;
+
+  it('opened on Discover, the plugins library shows Discover, and the request is taken', () => {
+    renderShell();
+    act(() => useLayout.getState().openDestination(customize('discover')));
+    expect(shown()).toBe('customize plugins discover');
+    expect(useDiscoverRequest.getState()).toEqual({});
+  });
+
+  it('opened on My items, then changed to Discover on the same kind, the library turns to Discover without a remount', () => {
+    renderShell();
+    act(() => useLayout.getState().openDestination(customize('mine')));
+    const body = page()!.firstElementChild;
+    expect(shown()).toBe('customize plugins mine');
+    act(() => useLayout.getState().openDestination(customize('discover')));
+    expect(shown()).toBe('customize plugins discover');
+    expect(page()!.firstElementChild).toBe(body);
+  });
+
+  it('a restored page on Discover shows Discover', () => {
+    useLayout.setState({ destination: customize('discover', 'all') });
+    renderShell();
+    expect(shown()).toBe('customize plugins discover');
+  });
+
+  it('Discover on Skills asks nothing of the plugins library, and the user configuration’s page is addressed when no directory is', () => {
+    renderShell();
+    act(() => useLayout.getState().openDestination(customize('discover', 'skills')));
+    expect(shown()).toBe('customize skills mine');
+    expect(useDiscoverRequest.getState()).toEqual({});
+    act(() => useLayout.getState().closeDestination());
+    useCustomizeProject.setState({ projectId: null }, true);
+    act(() => useLayout.getState().openDestination(customize('discover')));
+    expect(useDiscoverRequest.getState(), 'addressed to the user configuration, which this library does not show').toEqual({ cwd: null });
   });
 });

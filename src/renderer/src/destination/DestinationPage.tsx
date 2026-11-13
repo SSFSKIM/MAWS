@@ -6,18 +6,19 @@
 // The keyboard: a page that opens while the keyboard is inside what it hides, or nowhere, takes it on its own region
 // (focusable, no tab stop), so Tab goes on into the page; opened from the sidebar, the keyboard stays on the row. Closed by
 // Back, Esc or ⌘W, the page hands the keyboard back to the element that had it at the open, while that is still connected
-// and not inert, else to the focused pane; left for a tab, to that tab's pane. A closing act that moved the keyboard
-// itself is left alone. Esc is the page's from a window listener, as the Overview's is, after every taker above it in
-// §H's table.
+// and not inert, else to the focused pane; left for a tab, to that tab's pane, from wherever the keyboard was. A closing
+// act that moved the keyboard itself (into that pane, or anywhere when no tab was shown) is left alone. Esc is the
+// page's from a window listener, as the Overview's is, after every taker above it in §H's table.
 import { useEffect, useRef, useState } from 'react';
 import type { Destination } from '@shared/ipc/schema/layout';
 import { useSlot } from '../app/slots';
 import { CustomizeView } from '../customize/CustomizeView';
 import type { CustomizeSection } from '../customize/open';
-import { focusPaneElement } from '../main/pane-dom';
+import { focusPaneElement, paneDomId } from '../main/pane-dom';
 import { ProjectsView } from '../projects/ProjectsView';
 import { useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
+import { requestDiscover } from './discover';
 import { escapeTaker, leaveField } from './escape';
 
 export const PAGE_REGION_ID = 'region-page';
@@ -50,9 +51,16 @@ function Page({ destination }: { destination: Destination }) {
     });
     return () => {
       off();
-      if (available(document.activeElement)) return;
       const pane = currentSet(useLayout.getState().main).focusedPane;
-      if (!leftForTab && available(opener)) opener.focus({ preventScroll: true });
+      const active = document.activeElement;
+      // Left for a tab: the keyboard goes to that tab's pane, wherever it was (the sidebar row included), unless the act
+      // already put it there.
+      if (leftForTab) {
+        if (!(active instanceof Element && (document.getElementById(paneDomId(pane))?.contains(active) || active.closest(`[data-chrome-pane="${pane}"]`)))) focusPaneElement(pane);
+        return;
+      }
+      if (available(active)) return;
+      if (available(opener)) opener.focus({ preventScroll: true });
       else focusPaneElement(pane);
     };
   }, [opener]);
@@ -92,11 +100,23 @@ function Page({ destination }: { destination: Destination }) {
   );
 }
 
+// Customize at its `show`; its `discover` view reaches the plugins library, which is the only one that takes the request,
+// at the open, at a change of the page's fields and at a restored page (a `mine` view asks nothing: until U11c the library
+// keeps the tab the person left it on).
+function CustomizePage({ destination }: { destination: Extract<Destination, { kind: 'customize' }> }) {
+  const section = CUSTOMIZE_SECTION[destination.show];
+  const discover = destination.view === 'discover' && section === 'plugins';
+  useEffect(() => {
+    if (discover) requestDiscover();
+  }, [discover, destination]);
+  return <CustomizeView section={section} />;
+}
+
 function PageBody({ destination }: { destination: Destination }) {
   const Library = useSlot('artifactsLibrary');
   switch (destination.kind) {
     case 'customize':
-      return <CustomizeView section={CUSTOMIZE_SECTION[destination.show]} />;
+      return <CustomizePage destination={destination} />;
     case 'projects':
       return <ProjectsView />;
     case 'library':

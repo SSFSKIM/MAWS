@@ -705,6 +705,53 @@ describe('the page and the Settings dialog', () => {
     expect([s().overviewOpen, s().destination, s().settings]).toEqual([true, PAGE, null]);
   });
 
+  // The architect's ruling on M5: while the Overview is over the main region the side column is docked; over a page it
+  // docks nothing until the page closes under it.
+  describe('the Overview over a page, with the side column maximized', () => {
+    function maximized() {
+      const store = createLayoutStore();
+      const s = () => store.getState();
+      s().setPanel({ maximized: true, collapsed: false });
+      s().openDestination(PAGE);
+      return s;
+    }
+
+    it('opened, closed, then Back: the column is maximized as it was, its regions the same object', () => {
+      const s = maximized();
+      const regions = s().regions;
+      s().setOverviewOpen(true);
+      expect(s().regions).toBe(regions);
+      s().setOverviewOpen(false);
+      s().closeDestination();
+      expect(s().regions).toBe(regions);
+      expect(s().regions.panel.maximized).toBe(true);
+    });
+
+    it('the page left with the Overview still open: the column is docked in the write that closes the page', () => {
+      const s = maximized();
+      const strip = s().main;
+      s().setOverviewOpen(true);
+      s().closeDestination();
+      expect([s().destination, s().overviewOpen]).toEqual([null, true]);
+      expect(s().regions.panel).toMatchObject({ maximized: false, floating: false, collapsed: false });
+      expect(s().main).toEqual(strip);
+    });
+
+    it('a tab shown with the Overview open over the page docks the column too', () => {
+      const s = maximized();
+      s().setOverviewOpen(true);
+      s().openSession(B);
+      expect([s().destination, s().overviewOpen, s().regions.panel.maximized]).toEqual([null, true, false]);
+    });
+
+    it('with no page, opening the Overview docks the column at once, as before', () => {
+      const store = createLayoutStore();
+      store.getState().setPanel({ maximized: true, collapsed: false });
+      store.getState().setOverviewOpen(true);
+      expect(store.getState().regions.panel.maximized).toBe(false);
+    });
+  });
+
   it('inside quietly an activating openTab closes neither; outside it, the same call does', () => {
     const { s } = opened();
     expect(quietly(() => { s().openTab({ kind: 'diagnostics' }); return frontOf(s()); })).toBe('diagnostics');

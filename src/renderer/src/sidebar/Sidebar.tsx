@@ -33,7 +33,7 @@ import { issuedAt, lastActivity, seenActivity, type SidebarSort } from '../overv
 import { useNowEvery } from '../app/use-now';
 import { selectGreyedNeedsYou, selectNeedsYou, useAttention } from '../stores/attention';
 import { useSpawnedHere } from '../sessions/spawned-here'; // P5 O7 M8
-import { tabOnScreen, useLayout, type LayoutState } from '../stores/layout';
+import { pageOpen, tabOnScreen, useLayout, type LayoutState } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
 import { openArtifacts } from '../main/artifacts'; // P3-G
 import { selectHiddenProjects, selectProjectOrder, useSessions } from '../stores/sessions';
@@ -130,7 +130,8 @@ function SidebarBody() {
   // bring it back (React's state adjusted while rendering: this render is discarded for the one without it).
   const [picked, setPicked] = useState<{ id: AppSessionId; over: AppSessionId | null } | null>(null);
   if (picked !== null && picked.over !== selectedTab) setPicked(null);
-  const selected = picked !== null && picked.over === selectedTab ? picked.id : selectedTab;
+  const page = useLayout(pageOpen); // UX wave U7b: nor a listed row picked over no tab, while a page is open
+  const selected = page ? null : picked !== null && picked.over === selectedTab ? picked.id : selectedTab;
 
   const [query, setQuery] = useState('');
   const [allProjects, setAllProjects] = useState(false); // the list's own "Show more" (transient)

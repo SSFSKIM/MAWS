@@ -79,6 +79,20 @@ describe('⌘⇧J (attention.next)', () => {
     expect(active()).toBe(`session:${fix.appSessionId}`);
   });
 
+  // The architect's ruling (§N, the second table): behind a page no session is current, so with two waiting rows the
+  // first, the session behind the page, is opened, not passed over.
+  it('with two waiting rows, the first the session behind a page, opens that session and the page closes', () => {
+    const [first, second] = [idOf('Fix sidebar drag'), idOf('Sidebar interaction pass')];
+    runAction('attention.next');
+    expect(active(), 'the first waiting row is the oldest').toBe(`session:${first}`);
+    useLayout.getState().openDestination({ kind: 'library' });
+    runAction('attention.next');
+    expect(useLayout.getState().destination).toBeNull();
+    expect(active()).toBe(`session:${first}`);
+    runAction('attention.next');
+    expect(active(), 'with the page gone, the session in front is passed over again').toBe(`session:${second}`);
+  });
+
   it('opens into the focused pane of a split', () => {
     useLayout.getState().openSession(idOf('Settings idle probe')); // the left pane's tab (an empty pane takes a split's tab itself)
     useLayout.getState().openSession(idOf('Charter + research'), { split: true });

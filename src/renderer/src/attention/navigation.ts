@@ -19,7 +19,7 @@ import { registerAction } from '../keymap/actions-runtime';
 import { surfaceSession, surfaceTabs } from '../panel/surface-model';
 import { SIDE_TOOL_ID } from '../side/actions';
 import { selectNeedsYou, useAttention } from '../stores/attention';
-import { pageOpen, useLayout } from '../stores/layout';
+import { pageOpen, tabOnScreen, useLayout } from '../stores/layout';
 import { activeTab, currentSet, floatingPane } from '../stores/layout-model';
 import { useNotices } from '../stores/notices';
 import { queueComposerAttachment } from '../stores/composer';
@@ -43,7 +43,9 @@ const openInFocusedPane = (appSessionId: AppSessionId) => {
 
 function openNextNeedsYou(): void {
   const rows = selectNeedsYou(useAttention.getState(), useSessions.getState());
-  const tab = activeTab(useLayout.getState().main);
+  // UX wave U7b (§N, the second table; the architect's ruling): behind a page no session is current, so the session
+  // behind it, when it waits, is opened first, which leaves the page.
+  const tab = tabOnScreen(useLayout.getState());
   const current = tab?.kind === 'session' ? tab.appSessionId : null;
   const next = nextNeedsYou(rows, current);
   if (next) openItem(next.appSessionId, next.oldest);

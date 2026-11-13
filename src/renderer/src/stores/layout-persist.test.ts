@@ -983,6 +983,22 @@ describe('the page’s key', () => {
     expect(pages()).toEqual([null]);
   });
 
+  // Rule 4 asks the shape of the stored `main.tabs`, not of the default read in its place.
+  it('rule 5: a stored page over a main.tabs that does not parse does not open, and the key is deleted', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { store, pages } = await launch({ destination: stored(PAGE), 'main.tabs': { version: 9 } });
+    expect(warn.mock.calls.filter(([line]) => String(line).includes('main.tabs'))).toHaveLength(1);
+    expect(store.getState().destination).toBeNull();
+    expect(pages()).toEqual([null]);
+    warn.mockRestore();
+  });
+
+  it('rule 5: a stored page with no main.tabs in the file does not open, and the key is deleted', async () => {
+    const { store, pages } = await launch({ destination: stored(PAGE), 'main.tabs': null });
+    expect(store.getState().destination).toBeNull();
+    expect(pages()).toEqual([null]);
+  });
+
   it('rule 5: a stored value that does not parse opens nothing, is warned once, and is left in the file', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { store, pages } = await launch({ destination: stored({ kind: 'settings' }) });

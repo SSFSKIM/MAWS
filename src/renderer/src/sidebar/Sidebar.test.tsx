@@ -2192,6 +2192,20 @@ describe('listed rows from another machine', () => {
     expect(open).not.toHaveBeenCalled();
   });
 
+  // UX wave U7b (M5): with no session tab in front, a listed row picked as the selection is not selected under a page,
+  // whose tab behind is not on screen; Back shows it selected again, the tab being the same.
+  it('a listed row picked with no session tab in front is not selected under a page, and is again at Back', async () => {
+    fill([listedOn('b1', { title: 'Studio build', lane: 'A' })]);
+    act(() => useLayout.getState().setSidebar({ expandedProjects: [ORG] as ProjectKey[] }));
+    render(<Sidebar />);
+    await userEvent.click(row('Studio build'));
+    expect(row('Studio build').getAttribute('aria-selected')).toBe('true');
+    act(() => useLayout.getState().openDestination({ kind: 'projects' }));
+    expect(row('Studio build').getAttribute('aria-selected')).not.toBe('true');
+    act(() => useLayout.getState().closeDestination());
+    expect(row('Studio build').getAttribute('aria-selected')).toBe('true');
+  });
+
   it('a selected listed row stays unselected once the shown tab changes, even when the tab it was picked over returns', async () => {
     const other = record(at('other'), { projectId: maws.id, title: { text: 'Other pass', source: 'user' }, updatedAt: '2026-10-28T08:00:00Z' });
     fill([listedOn('b1', { title: 'Studio build', lane: 'A' })], [here, other]);

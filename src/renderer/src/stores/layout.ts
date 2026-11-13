@@ -269,6 +269,9 @@ export function placeOf(state: Pick<LayoutState, 'main' | 'destination' | 'setti
 /** The tab an act of the person's applies to when the act shows nothing: the tab in front, or null while a page covers it (§N, the second table). */
 export const tabOnScreen = (state: Pick<LayoutState, 'main' | 'destination'>): TabRef | null => (pageOpen(state) ? null : (model.activeTab(state.main) ?? null));
 
+// The side column docked: neither maximized nor floating, its width and collapsed as they were.
+const docked = (r: LayoutRegions): LayoutRegions => (r.panel.maximized || r.panel.floating ? { ...r, panel: { ...r.panel, maximized: false, floating: false } } : r);
+
 let quiet = 0;
 /** Runs `run` as something that is not the person's act: a tab it brings to the front closes neither the page nor the dialog. It holds only for what runs synchronously inside it. */
 export function quietly<T>(run: () => T): T {
@@ -476,9 +479,16 @@ export function createLayoutStore() {
     // P4-B3x: every change of the tabs or the regions lands through `commit`, so the fold rule holds at every state.
     // P5 O6 M2: every change lands with its session tabs titled, so a tab is titled when it opens
     let titleOf: TitleOf = () => undefined;
-    // `also`: what lands in the same write (U7b: the page and the dialog an act that shows a tab closes).
-    const commit = (nextMain: Strip, nextRegions: LayoutRegions, also?: Pick<LayoutState, 'destination' | 'settings'>) => {
-      const next = reconcileFold(get().main, { main: model.titleTabs(nextMain, titleOf), regions: nextRegions });
+    // The regions' changes made before the persisted value arrives, replayed over it (W5, below).
+    const earlyRegions: ((r: LayoutRegions) => LayoutRegions)[] = [];
+    // `also`: what lands in the same write (U7b: the page and the dialog an act that shows a tab closes). UX wave U7b (the
+    // architect's ruling on M5): while the Overview is over the main region, the side column is docked. The Overview
+    // opened over a page docks nothing (the page writes nothing of the side column), so a write that closes the page
+    // under the Overview docks the column then.
+    const commit = (nextMain: Strip, nextRegions: LayoutRegions, also?: Partial<Pick<LayoutState, 'destination' | 'settings'>>) => {
+      const docks = also?.destination === null && get().destination !== null && get().overviewOpen;
+      if (docks && !get().hydrated) earlyRegions.push(docked);
+      const next = reconcileFold(get().main, { main: model.titleTabs(nextMain, titleOf), regions: docks ? docked(nextRegions) : nextRegions });
       set({ ...next, panelSurfaces: rememberSurfaceContext(get(), next.main), ...also });
     };
     const earlySurfaces: ((state: PanelSurfaces) => PanelSurfaces)[] = [];
@@ -501,7 +511,7 @@ export function createLayoutStore() {
     // UX wave U8b: a card opened or folded before the stored folds are read is replayed over them likewise.
     const earlyCards: ((open: CardId[]) => CardId[])[] = [];
     const early: ((m: Strip) => Strip)[] = [];
-    const main = (next: (m: Strip) => Strip, also?: Pick<LayoutState, 'destination' | 'settings'>) => {
+    const main = (next: (m: Strip) => Strip, also?: Partial<Pick<LayoutState, 'destination' | 'settings'>>) => {
       if (!get().hydrated) early.push(next);
       commit(next(get().main), get().regions, also);
     };
@@ -520,7 +530,6 @@ export function createLayoutStore() {
     };
     // The regions likewise (W5: a project opened in the sidebar, or a region toggled, before the persisted value arrives
     // is kept over it).
-    const earlyRegions: ((r: LayoutRegions) => LayoutRegions)[] = [];
     const regions = (next: (r: LayoutRegions) => LayoutRegions) => {
       if (!get().hydrated) earlyRegions.push(next);
       commit(get().main, next(get().regions));
@@ -708,7 +717,10 @@ export function createLayoutStore() {
         // closed before the read; 2: none after an act of theirs that showed a tab; 4: the stored page, when the stored
         // tabs have the stored form's shape (`canonical`, a test of shape and not of who wrote them); 5: otherwise none.
         // (Rule 3, a retired tab in front, comes with the retirement of the four tab kinds.)
-        const destination = pageEarly ? get().destination : shownEarly ? null : canonical ? (storedPage?.destination ?? null) : null;
+        // Rule 4 asks it of the stored value: a `main.tabs` that is absent or does not parse is not of that shape, though
+        // the default put in its place is.
+        const shaped = canonical && readAs.has('main.tabs');
+        const destination = pageEarly ? get().destination : shownEarly ? null : shaped ? (storedPage?.destination ?? null) : null;
         set({ regions, main: hydratedMain, ...hydratedPanels, panelParams, panelWidths, cardsOpen, firstReadPending, destination, hydrated: true });
         // A first launch writes the defaults of the keys it lacks, so layout.json always holds the renderer's three
         // fixed keys (acceptance item 6 lists them). Tabs replayed over the saved ones differ from what layout.json holds,
@@ -880,7 +892,7 @@ export function createLayoutStore() {
 
       setSidebar: (patch) => regions((r) => ({ ...r, sidebar: { ...r.sidebar, ...(typeof patch === 'function' ? patch(r.sidebar) : patch) } })),
       setPanel: (patch) => regions((r) => ({ ...r, panel: panelAfter(r.panel, patch) })),
-      revealMain: () => regions((r) => (r.panel.maximized || r.panel.floating ? { ...r, panel: { ...r.panel, maximized: false, floating: false } } : r)),
+      revealMain: () => regions(docked),
       setFloatingCardSize(key, size) {
         regions((r) => {
           const state = get();
@@ -891,8 +903,9 @@ export function createLayoutStore() {
       },
       setOverviewOpen(overviewOpen) {
         // Overview lives over main, so opening it restores main, including when regions are still hydrating. UX wave
-        // U7b: it opens over a page, which stays, and closes the Settings dialog.
-        if (overviewOpen) get().revealMain();
+        // U7b: it opens over a page, which stays, and closes the Settings dialog; over a page it docks nothing until the
+        // page closes under it (`commit`).
+        if (overviewOpen && get().destination === null) get().revealMain();
         set({ overviewOpen, ...(overviewOpen && get().settings !== null ? { settings: null } : {}) });
       },
       setOverviewRect: (overview) => regions((r) => ({ ...r, overview })),
@@ -966,7 +979,8 @@ export function createLayoutStore() {
       closeDestination() {
         if (get().destination === null) return;
         if (!get().hydrated) pageEarly = true;
-        set({ destination: null });
+        if (get().overviewOpen) commit(get().main, get().regions, { destination: null }); // the column docks under the Overview
+        else set({ destination: null });
       },
       openSettings(section) {
         const now = get().settings;
