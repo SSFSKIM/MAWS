@@ -52,10 +52,13 @@ export interface BackfillContext {
   // P5 O9: the rows a sminos bridge appended lately, by their words on one line, waiting for the transcript line that
   // says which of them were the owner's words delivered into a running turn (sminosDelivery, below)
   readonly bridgeRows: Map<string, { uuid: MessageUuid; content: string }>;
-  // P5 O9 (the fix wave): whether a turn runs, from its `turn.started` to its `turn.ended` or an interrupt marker, and
-  // what the bridge delivered while none did, waiting for the turn that answers it (withWaitingWords): the owner's
-  // words, and (UX wave U3) a peer's delivery the bridge appended, as the events it maps to
+  // P5 O9 (the fix wave): whether a turn runs, from its `turn.started` (or, UX wave U3, the model's output) to its
+  // `turn.ended` or an interrupt marker, and what the bridge delivered while none did, waiting for the turn that answers
+  // it (withWaitingWords): the owner's words, and (UX wave U3) a peer's delivery the bridge appended, as the events it
+  // maps to. UX wave U3 (UC-2): whether the running turn has had no model output yet, so that what the engine queued
+  // reached the model with the prompt that opened it (a task the host stopped while the session was idle)
   running: boolean;
+  unanswered: boolean;
   readonly waitingWords: Waiting[];
   // P5 O9 (the M10 sitting): the latest `<local-command-caveat>` record, whose child is a command the terminal ran
   // (localCommandTurn, below)
@@ -95,6 +98,7 @@ export function createBackfillContext(init: {
     lastAssistantWasApiError: false,
     bridgeRows: new Map(),
     running: false,
+    unanswered: false,
     waitingWords: [],
     localCaveat: null,
     arrivals: nothingOpen,
@@ -330,7 +334,9 @@ function taskNotificationAttachment(record: TranscriptRecord, uuid: MessageUuid,
   if (attachment?.type !== 'queued_command' || attachment.commandMode !== 'task-notification') return false;
   if (attachment.isMeta === true || typeof attachment.prompt !== 'string') return true;
   const source = typeof attachment.source_uuid === 'string' && attachment.source_uuid ? attachment.source_uuid as MessageUuid : null;
-  userEvents({ ...record, type: 'user', isMeta: record.isMeta === true || ctx.inToolLoop, origin: { kind: 'task-notification' }, message: { role: 'user', content: attachment.prompt } }, source ?? uuid, arrivals, ctx, base, events, source);
+  // in the tool loop, or with the prompt that opened the running turn, before the model answered (UX wave U3, UC-2: a
+  // task the host stopped while idle sits directly above that prompt), the engine takes it into that turn: no turn of its own
+  userEvents({ ...record, type: 'user', isMeta: record.isMeta === true || ctx.inToolLoop || ctx.unanswered, origin: { kind: 'task-notification' }, message: { role: 'user', content: attachment.prompt } }, source ?? uuid, arrivals, ctx, base, events, source);
   return true;
 }
 
@@ -870,12 +876,29 @@ function withWaitingWords(wake: boolean, events: SessionEvent[], ctx: BackfillCo
       const opened = { ...events[start], userMessageUuid: first.uuid, origin: null } as SessionEvent;
       out = [...events.slice(0, start), opened, ...taken(waiting.filter((row) => row !== first)), ...events.slice(start + 1)];
     } else out = [...events, ...taken(waiting)];
+  } else if (ctx.waitingWords.length > 0 && events.some((event) => MODEL_RUNS.has(event.kind))) {
+    // the model's output with no turn started (a history whose start was not held): the reducer places it with the
+    // waiting prompt, as it would; a waiting peer's message stands before it
+    const peers = ctx.waitingWords.splice(0).flatMap((row) => (row.kind === 'peer' ? row.events : []));
+    out = [...peers, ...events];
   }
   for (const event of out) {
-    if (event.kind === 'turn.started') ctx.running = true;
-    else if (event.kind === 'turn.ended' || (event.kind === 'user.message' && event.origin === 'interrupt-marker')) ctx.running = false;
+    if (event.kind === 'turn.started' || MODEL_RUNS.has(event.kind)) {
+      ctx.running = true;
+      ctx.unanswered = event.kind === 'turn.started';
+    } else if (event.kind === 'turn.ended' || (event.kind === 'user.message' && event.origin === 'interrupt-marker')) ctx.running = ctx.unanswered = false;
   }
   return out;
+}
+const MODEL_RUNS = new Set<SessionEvent['kind']>(['assistant.block.complete', 'tool.use']);
+
+/**
+ * A prompt the person sent that no turn ran to take, already drawn where it went in: the next turn that starts takes it
+ * (withWaitingWords). For desk-web's drawing of the bridge's older, unmarked steer (`appended-turn.ts`), which this
+ * mapping reads as a prompt queued into the turn.
+ */
+export function waitForTurn(ctx: BackfillContext, messageUuid: MessageUuid): void {
+  if (!ctx.running) ctx.waitingWords.push({ kind: 'own', uuid: messageUuid });
 }
 
 // P5 O9 (the M10 sitting): the sminos bridge's mirror of an interrupt's rows for the terminal (`<plugin>: interrupt: …`)

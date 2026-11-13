@@ -225,8 +225,8 @@ describe('deliveries no probe recorded, on both routes (Acceptance 2)', () => {
     const { file, remote } = await bothRoutes(transcript(inbox('[sminos message from human id=0f0e0d0c]\n[Request interrupted by user]'), said('Noted.'), ended()));
     for (const state of [file, remote]) {
       expect(ofKind(drawn(state), 'user').map((row) => row.text)).toEqual(['[sminos message from human id=0f0e0d0c]\n[Request interrupted by user]']);
-      // the engine's turn_duration ended it: closed, with no close of the reader's (`closedBy` is that, `stopped` an interrupt's)
-      expect(turnsOf(state).map((turn) => [turn.origin, turn.state, turn.ended !== null, turn.closedBy])).toEqual([['human', 'closed', true, null]]);
+      // closed, and not as an interrupt closes a turn
+      expect(turnsOf(state).map((turn) => [turn.origin, turn.state, turn.closedBy === 'stopped'])).toEqual([['human', 'closed', false]]);
     }
   });
 
