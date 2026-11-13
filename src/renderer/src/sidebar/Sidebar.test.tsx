@@ -12,7 +12,7 @@ import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machin
 import { machineKey, type OrgKey } from '@shared/machine/org-key';
 import { useMachines } from '../stores/machines';
 import { registerSessionAction } from '../app/session-actions';
-import { registerSessionCreator } from '../keymap/actions-runtime';
+import { registerEmptyChats, registerSessionCreator } from '../keymap/actions-runtime';
 import { closeDialog, useDialogs } from '../sessions/dialogs';
 import { resetRemoteSpawn, spawnTargetOf } from '../sessions/remote-spawn'; // the project registry's M11
 import { SessionDialogs } from '../sessions/SessionDialogs';
@@ -1072,6 +1072,36 @@ describe('new sessions from the sidebar', () => {
     expect(useSessions.getState().unstarted.get(at('app-new-1' as AppSessionId))?.projectId).toBe(at('proj-maws'));
     expand('proj-maws');
     expect(sessionRows(row('MAWS'))).toHaveLength(4);
+  });
+});
+
+// U13a (A3): a project row's "+" and its menu's New chat are New chat for their row, so an empty chat of the project in the
+// strip comes to the front instead of a second, from behind a tab of another project.
+describe('New chat from a project row', () => {
+  const EMPTY = at('app-empty-1' as AppSessionId);
+  beforeEach(() => {
+    fillStores(nine);
+    offs.push(registerEmptyChats({ isEmpty: (id) => id === EMPTY, discard: async () => true }));
+    useSessions.getState().addUnstarted(EMPTY, { projectId: at('proj-maws' as ProjectId), createdAt: '2026-11-12T09:00:00.000Z' });
+    useLayout.getState().openTab({ kind: 'session', appSessionId: EMPTY });
+    useLayout.getState().openSession(idOf('Quota reset recovery'), { how: 'tab' });
+  });
+
+  it.each([
+    ['its "+"', () => userEvent.click(within(row('MAWS')).getByRole('button', { name: 'New chat in MAWS' }))],
+    ['its menu’s New chat', async () => {
+      fireEvent.contextMenu(row('MAWS'));
+      fireEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'New chat' }));
+    }],
+  ])('%s brings the project’s empty chat to the front and makes none', async (_control, press) => {
+    const creator = vi.fn(async () => at('app-new-1' as AppSessionId));
+    offs.push(registerSessionCreator(creator));
+    render(<Sidebar />);
+    await press();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(creator).not.toHaveBeenCalled();
+    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: EMPTY });
+    expect(currentSet(useLayout.getState().main).panes[0].tabs.map((t) => t.id)).toEqual([`session:${EMPTY}`, `session:${idOf('Quota reset recovery')}`]);
   });
 });
 

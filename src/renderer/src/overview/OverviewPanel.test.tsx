@@ -175,6 +175,7 @@ describe('the floating Overview', () => {
     expect(useLayout.getState().overviewOpen).toBe(false);
   });
 
+  // #497 (UX wave U13a, A4): a delayed New chat opens selected only when nothing else came to the front meanwhile.
   it('a delayed New chat closes the panel without restoring its opener, leaving the new composer with the keyboard', async () => {
     const user = userEvent.setup();
     fillStores(scenarioFile('empty'));
@@ -197,16 +198,41 @@ describe('the floating Overview', () => {
     await act(nextTask); // IPC outlives the panel's task-scoped capture flag
     expect(useLayout.getState().overviewOpen).toBe(true);
     expect(focusFrame).not.toHaveBeenCalled();
-    // Even while the creator is pending, a layout change from elsewhere must not close the panel.
-    act(() => useLayout.getState().openSession(idOf('Charter + research')));
-    expect(useLayout.getState().overviewOpen).toBe(true);
     await act(async () => resolve(NEW));
     expect(useLayout.getState().overviewOpen).toBe(false);
     expect(screen.queryByRole('dialog', { name: 'Overview' })).toBeNull();
+    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: NEW });
     await act(nextFrame);
     expect(restoreOpener).not.toHaveBeenCalled();
     expect(focusFrame).toHaveBeenCalledTimes(1);
     expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Message' }));
+  });
+
+  it('a delayed New chat that arrives after another tab came to the front is added unselected, and its composer takes no keyboard', async () => {
+    const user = userEvent.setup();
+    fillStores(scenarioFile('empty'));
+    let resolve!: (id: AppSessionId | null) => void;
+    disposers.push(registerSessionCreator(() => new Promise((done) => {
+      resolve = done;
+    })));
+    const focusFrame = vi.fn();
+    render(
+      <>
+        <World />
+        <NewComposer focusFrame={focusFrame} />
+      </>,
+    );
+    act(() => useLayout.getState().setOverviewOpen(true));
+    await user.click(within(panel()).getByRole('button', { name: 'New chat' }));
+    await act(nextTask);
+    // Even while the creator is pending, a layout change from elsewhere must not close the panel.
+    act(() => useLayout.getState().openSession(idOf('Charter + research')));
+    expect(useLayout.getState().overviewOpen).toBe(true);
+    await act(async () => resolve(NEW));
+    await act(nextFrame);
+    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'session', appSessionId: idOf('Charter + research') });
+    expect(currentSet(useLayout.getState().main).panes[0].tabs.map((t) => t.id)).toEqual([`session:${idOf('Charter + research')}`, `session:${NEW}`]);
+    expect(focusFrame).not.toHaveBeenCalled();
   });
 
   it('a New chat completed after its panel was dismissed does not close a reopened Overview or restore its opener', async () => {

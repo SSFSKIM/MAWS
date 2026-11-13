@@ -10,7 +10,7 @@ import { record } from '../../../../test/support/builders';
 import { registerShellActions } from '../app/shell-actions';
 import { Shell } from '../app/Shell';
 import { registerSlot, resetSlots } from '../app/slots';
-import { createSession, registerCloseGuard, registerSessionCreator, registerUnstartedTitle, runAction } from '../keymap/actions-runtime';
+import { createSession, registerCloseGuard, registerEmptyChats, registerSessionCreator, registerUnstartedTitle, runAction } from '../keymap/actions-runtime';
 import { connectKeys } from '../keymap/dispatcher';
 import { useLayout } from '../stores/layout';
 import { useMachines } from '../stores/machines';
@@ -747,6 +747,25 @@ describe('unstarted sessions', () => {
     await user.click(within(strips()[0].parentElement!).getByRole('button', { name: 'New chat' }));
     expect(asked).toEqual([null, at('proj-codex-somersault')]);
     expect(selected()).toBe('New chat');
+  });
+
+  // U13a (A3): the strip's "+" is New chat with its pane, so an empty chat in the other pane comes over instead of a second
+  it('the strip’s "+" brings an empty chat of the other pane over to its own, and makes none', async () => {
+    const asked: (ProjectId | null)[] = [];
+    offs.push(registerSessionCreator(async (projectId) => (asked.push(projectId), NEW)));
+    const EMPTY = at('app-empty-1' as AppSessionId);
+    offs.push(registerEmptyChats({ isEmpty: (id) => id === EMPTY, discard: async () => true }));
+    const user = userEvent.setup();
+    render(<Shell />);
+    act(() => {
+      useSessions.getState().addUnstarted(EMPTY, { projectId: null, createdAt: '2026-11-12T09:00:00.000Z' });
+      useLayout.getState().openTab({ kind: 'session', appSessionId: EMPTY });
+      useLayout.getState().openSession(idOf('Quota reset recovery'), { split: true });
+    });
+    await user.click(within(strips()[1].parentElement!).getByRole('button', { name: 'New chat' }));
+    expect(asked).toEqual([]);
+    expect(currentSet(useLayout.getState().main).panes.map((p) => p.tabs.map((t) => t.id))).toEqual([[`session:${idOf('Quota reset recovery')}`, `session:${EMPTY}`]]);
+    expect(activeTab(useLayout.getState().main)).toMatchObject({ appSessionId: EMPTY });
   });
 
   it('a record arriving for the id turns the tab into the session’s ordinary tab', async () => {
