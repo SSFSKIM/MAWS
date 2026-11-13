@@ -11,7 +11,9 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { carriedOf } from '@shared/engine/arrival-schema';
 import type { SessionEvent } from '@shared/graph/events';
-import { FIXTURE_DIR, loadUxwaveJournal } from '../../../../../test/support/fixtures';
+import { createBackfillContext, recordToEvents } from '../../../../engine-host/fs/backfill';
+import { event } from '../../../../../test/support/agents-events';
+import { FIXTURE_DIR, loadUxwaveJournal, loadUxwaveTranscript } from '../../../../../test/support/fixtures';
 import { journalToEvents } from '../dev/journal';
 import { rowsOf, withAllExpanded } from './derive';
 import { rowId } from './keys';
@@ -183,6 +185,75 @@ describe('a background task’s end told by an older engine host', () => {
     for (const name of journals) {
       const events = journalToEvents(loadUxwaveJournal(name));
       expect(legacyLines(events, rowsOf(withAllExpanded(reduce(events)))), name).toEqual([]);
+    }
+  });
+});
+
+// The delta review's finding (the architect's ruling of 2026-11-13, "the fallback in a history read through an older
+// host"): the fallback is drawn unless the turn knows the task as a foreground one. An older host's transcript backfill
+// tells a background end as a `task.notification` alone, with no start; a task the turn has no start for counts as one
+// in the background.
+describe('which tasks’ ends an older host’s line is drawn for', () => {
+  const BASH = 'toolu_bg';
+  const opened = [
+    event('turn.started', { userMessageUuid: 'u1', origin: 'human' }, { seq: 1 }),
+    event('user.message', { messageUuid: 'u1', content: 'Run it in the background.' }, { seq: 1, n: 1 }),
+    event('tool.use', { toolUseId: BASH, toolName: 'Bash', input: { command: 'sleep 1; exit 1', run_in_background: true }, messageUuid: 'a1', apiMessageId: 'msg_1' }, { seq: 2 }),
+    event('tool.result', { toolUseId: BASH, content: 'Command running in background with ID: b1', messageUuid: 'r1' }, { seq: 3 }),
+  ];
+  const start = (isBackground: boolean) => event('task.started', { taskId: 'b1', toolUseId: BASH, taskType: 'local_bash', description: 'sleep', isBackground }, { seq: 4 });
+  const toBackground = event('task.updated', { taskId: 'b1', patch: { isBackground: true } }, { seq: 5 });
+  const end = (fields: Record<string, unknown> = {}) => event('task.notification', { taskId: 'b1', toolUseId: BASH, status: 'failed', summary: 'Background command "sleep" failed with exit code 1', ...fields }, { seq: 6 });
+  const endArrival = event('user.message', {
+    messageUuid: 'n1', content: '', isSynthetic: true, origin: 'task-notification',
+    arrival: [{ class: 'task', taskId: 'b1', toolUseId: BASH, runId: 'r-1', outcome: 'failed', summary: 'Background command "sleep" failed with exit code 1', durationMs: null, outputFile: null, detail: null }],
+  }, { seq: 7 });
+  const rowsFor = (events: SessionEvent[]) => rowsOf(withAllExpanded(reduce(events)));
+  const fallbacks = (rows: Row[]) => rows.filter((row) => row.id === rowId.notice(null, end().id, 0)).length;
+  const endLines = (rows: Row[]) => rows.filter((row) => row.kind === 'notice' && row.taskId === 'b1' && row.outcome !== null).length;
+
+  it('no start in the turn (the end routed by its tool use): one line', () => expect(fallbacks(rowsFor([...opened, end()]))).toBe(1));
+  it('a foreground start: none', () => expect(endLines(rowsFor([...opened, start(false), end()]))).toBe(0));
+  it('a background start: one', () => expect(fallbacks(rowsFor([...opened, start(true), end()]))).toBe(1));
+  it('started in the foreground, then updated to the background: one', () => expect(fallbacks(rowsFor([...opened, start(false), toBackground, end()]))).toBe(1));
+  it('a marked event: none', () => expect(endLines(rowsFor([...opened, end({ arrivals: true })]))).toBe(0));
+  it('the same task’s end arrival in the window, whichever came first: the arrival’s line alone', () => {
+    const together = rowsFor([...opened, end(), endArrival]);
+    expect([fallbacks(together), endLines(together)]).toEqual([0, 1]);
+    const drawn = reduce([...opened, end()]);
+    expect(fallbacks(rowsOf(withAllExpanded(drawn)))).toBe(1);
+    const streamed = rowsOf(withAllExpanded(applyEvents(drawn, [endArrival])));
+    expect([fallbacks(streamed), endLines(streamed)]).toEqual([0, 1]);
+  });
+});
+
+describe('a history read through an older host’s transcript backfill', () => {
+  // The tasks probe's transcript as build F's backfill (`f1852de3a`, backfill.ts:320-323) mapped it, recorded:
+  // `fixtures/uxwave/u3-tasks-r1.base-backfill.json` (no task.started; each end a task.notification alone)
+  const baseBackfill = JSON.parse(readFileSync(join(FIXTURE_DIR, 'uxwave', 'u3-tasks-r1.base-backfill.json'), 'utf8')) as SessionEvent[];
+  // the background commands' and monitors' tasks, in the order they end; the agents' ends are their groups'
+  const TASKS = ['bky1j6v31', 'bobq8duq2', 'bmo4g9r2h', 'bzhlugr58', 'bfa5697eq', 'b42ylgnxq', 'b7yxry0k8', 'b6qw9e9zq'];
+  const STALL = 'b6qw9e9zq';
+  const noticesOf = (rows: Row[], taskId: string) => rows.filter((row) => row.kind === 'notice' && row.taskId === taskId);
+
+  it('build F’s backfill, replayed: every background end is exactly one line, the older host’s', () => {
+    expect(baseBackfill.some((e) => e.kind === 'task.started' || (e.kind === 'task.notification' && e.arrivals !== undefined))).toBe(false);
+    const rows = rowsOf(withAllExpanded(reduce(baseBackfill)));
+    expect(legacyRows(baseBackfill, rows).map((row) => (row.kind === 'notice' ? row.taskId : row.id))).toEqual(TASKS);
+    for (const taskId of TASKS) expect(noticesOf(rows, taskId), taskId).toHaveLength(1);
+  });
+
+  it('the same transcript through this branch’s backfill: the same tasks, one line each, and no second line', () => {
+    const records = loadUxwaveTranscript('u3-tasks-r1');
+    const ctx = createBackfillContext({ sessionId: baseBackfill[0]!.sessionId, agent: null });
+    const events = records.flatMap((record) => recordToEvents(record, ctx));
+    const rows = rowsOf(withAllExpanded(reduce(events)));
+    expect(legacyRows(events, rows)).toEqual([]);
+    for (const taskId of TASKS) {
+      const ended = noticesOf(rows, taskId).filter((row) => row.kind === 'notice' && row.outcome !== null);
+      // the stall is no end to this branch's reader (an event, its own line with no outcome); the older host told it as one
+      expect(ended, taskId).toHaveLength(taskId === STALL ? 0 : 1);
+      expect(noticesOf(rows, taskId).length, taskId).toBeGreaterThan(0);
     }
   });
 });
