@@ -2,7 +2,7 @@
 
 Every item the wave considered, one row each: where it came from, its state, and the line it was given when the cut was put to the owner (so "you" in a line is the owner). Kept beside `docs/doperpowers/specs/2026-11-12-ux-wave-design.md`, which cites the items by these ids. Generated from the wave's cut on 2026-11-12; the architect regenerates it when a state changes.
 
-240 items: 148 to build (140 of them in children now), 3 that still wait for the owner to answer (five of the questions to the owner are still open: "Questions still open" below), 2 for a design round, 7 hands-on checks, 25 already built, 23 keep, 13 the same ask as another item, 4 not MAWS's to fix, 3 handed to the visual renewal, 12 later.
+240 items: 148 to build (140 of them in children now), 3 that still wait for the owner to answer (four of the questions to the owner are still open: "Questions still open" below), 2 for a design round, 7 hands-on checks, 25 already built, 23 keep, 13 the same ask as another item, 4 not MAWS's to fix, 3 handed to the visual renewal, 12 later.
 
 Ids: `l<n>-…` a mark on the comparison of 2026-10-23, `O-nn` an observation, `#nnn` a board ticket, `S-nn` a finding from P5's sittings, `X-nnn` a tracker row that rides with an item.
 
@@ -71,17 +71,19 @@ Verbatim, as chosen on the question cards; a note is the owner's own text.
 | Drawn example of the sidebar, the title bar and the pages, frame B: the usage ring: alone, or with the limit's name and percent beside it? | Ring alone (Recommended) |  |
 | Drawn example of the sidebar, the title bar and the pages, frame C: after a relaunch, is Settings open again? | No (Recommended) |  |
 | Drawn example of the sidebar, the title bar and the pages, frame D: ⌘J, ⇧⌘D or ⇧⌘F pressed while a page is open: what happens? | Leave the page (Recommended) |  |
+| One landing of the UX wave (the comment card) changed two scenes of a test group that runs a real Claude engine on your account; the group's script caps its spend at 1.70 USD and a run takes about 45 minutes. I have not run it, because the wave has no word from you for paid test runs. May I run paid live test groups for the wave? | Once per landing (Recommended) |  |
+| Today a click on a link to a file outside a session's folders is refused (your screenshot: a PDF in Downloads). On this Mac, which files outside a session's folders should open, read-only, when you click their link in that session's transcript? | Files the transcript names (Recommended) | typed before the card, over a screenshot of the file viewer's notice "Refused: path outside the session's directories" for a PDF in the Downloads folder: "another small change idea:  can we just [Image #2] allow it" |
+| Opening a linked file outside a session's folders is now planned inside the second artifacts landing, which waits for four other landings. When should it be built? | Own small landing, now (Recommended) |  |
 
 ## Questions still open
 
-A question is put to the owner when its child starts, unless the last column says otherwise. The last two were raised when the spec was assembled or after it.
+A question is put to the owner when its child starts, unless the last column says otherwise. The last one was raised when the spec was assembled or after it.
 
 | items | question | recommended answer | when |
 |---|---|---|---|
 | l6-artifacts-01 | Do you want files the agent writes to open inside MAWS? | PDF only, now. | when its child starts |
 | O-44 | What did "opens the artifact on the new path" mean, and where should a click on an artifact link open it? | Keep opening it in the session's side panel. | when its child starts |
 | l6-artifacts-14 | Have you ever lost a first letter or a jamo while typing Korean yourself in a deck or document? | If not, the tracker row closes as not reproduced. | when its child starts |
-| O-37 | On this Mac, should a file the agent linked in a session's transcript open read-only on click when it lies outside that session's folders? | Yes, limited to files that session's transcript links to, checked by the main process against the transcript. | when its child starts |
 | #476, l8-settings-05 | Where should a per-chat connector switch sit, and does the Settings connector list go once "Add custom connector" moves to Customize? | Put to you with the result of the hands-on check of #476, which shows which switches can act on a running session. | after the hands-on check of #476 |
 
 ## Decisions the sections made that the owner may see differently
@@ -269,7 +271,7 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 | l5-code-09 | mark | build | Files gets a Changed group on top, status colours and dimmed ignored files, then ⌘P quick open. |
 | l5-code-10 | mark | build | "Open in" for VS Code, Cursor, Zed, Xcode, Terminal and Finder, where installed. |
 | l9-browser-delivery-08 | mark | build | The same "Open in" on a session's menu and its sidebar row. |
-| O-37 | observation | build | The choice does not exist: the engine's SendUserFile is already retired and MAWS's own send-file tool delivers. Fixed: the refusal reads as a permissions problem when it is not; a link to a PDF, HTML or media file opens outside the app; file:// links and relative paths are not clickable. One correction to what I told you: a link to a file outside the session's own folders is refused on this Mac too, not only on another machine. Whether such a link should open read-only is a question for you when this part starts; until then the notice says plainly why it did not open. |
+| O-37 | observation | build | The choice does not exist: the engine's SendUserFile is already retired and MAWS's own send-file tool delivers. Fixed: the refusal reads as a permissions problem when it is not; a link to a PDF, HTML or media file opens outside the app; file:// links and relative paths are not clickable. One correction to what I told you: a link to a file outside the session's own folders is refused on this Mac too, not only on another machine. Your answers of 11-13: on this Mac a file outside the session's folders opens read-only when that session's transcript names its path ('Files the transcript names'); the main process checks the path against the transcript before it reads; a session on another machine keeps the refusal. It is built now as a small landing of its own, U6c, after the tab strip landing ('Own small landing, now'); the rest of this item follows in U6's second landing, on top of it. |
 | l9-browser-delivery-03 | mark | build | A local session's localhost links open in the in-app browser, as a remote session's already do; ⌘-click sends one to the system browser. |
 | l5-code-08 | mark | build | Chords for the surfaces (⌘J Terminal, ⌘⇧D Review, ⌘⇧F Files, as in Claude Desktop) and "Attach selection to chat". No bottom drawer. Letting the agent read your terminal is left out. |
 | l7-shell-06 | mark | build | ⌘K opens on your recent sessions and artifacts and can find artifacts. |
