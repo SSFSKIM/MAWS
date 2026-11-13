@@ -364,6 +364,7 @@ test('--peer-exact requires a commit with a manifest that is an ancestor of orig
   git('commit', '--quiet', '--allow-empty', '-m', 'not landed');
   assert.match(peerAt(tested, ['--peer-exact', 'unmerged']).notes.join('\n'), /^ci-gate: --peer-exact unmerged: [0-9a-f]{8} is not an ancestor of origin\/master/);
   assert.deepEqual(peerAt(tested, ['--peer-exact', 'no-such-ref']), { status: 2, trailers: [], notes: ['ci-gate: --peer-exact no-such-ref: no such commit'] });
+  assert.deepEqual(peerAt(tested, ['--peer-exact', 'none']), { status: 2, trailers: [], notes: ['ci-gate: --peer-exact none: no such commit'] }, '`none` is --peer\'s word');
   // a shallow checkout cannot establish the ancestry
   git('push', '--quiet', 'origin', `${tested}:refs/heads/child`);
   const shallow = clone('--depth=1', '--branch', 'child');
