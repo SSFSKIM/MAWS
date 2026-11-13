@@ -333,6 +333,47 @@ describe('a turn’s line (acceptance 7, decisions 8 and 9)', () => {
     expect(lineOf(b).caption).toBe('Ran an agent, messaged a subagent, messaged 2 other sessions');
   });
 
+  // The M2 review: a sent message's step reads its call's own result, as a call's does: a failed send is marked failed,
+  // one with no result in a closed turn stopped, a refusal that stands alone is no step, a stopped refusal a stopped one
+  describe('a sent message’s step, by its call’s own result', () => {
+    type Outcome = 'failed' | 'unfinished' | 'refused' | 'rejected';
+    const agent = (t: Builder) => {
+      t.toolUse('a1', 'Agent', { description: 'Survey', prompt: 'p' });
+      t.emit('subagent.started', { taskId: task('k1'), toolUseId: tool('a1'), description: 'Survey', subagentType: null, isBackground: false, spawnDepth: 1, prompt: null });
+      t.emit('subagent.finished', { taskId: task('k1'), status: 'completed', summary: null, outputFile: null, reason: null });
+      t.result('a1', 'done');
+    };
+    const send = (to: string, outcome: Outcome) => {
+      const b = builder();
+      b.turn('u1');
+      if (to === 'k1') agent(b);
+      b.toolUse('m1', 'SendMessage', { to, message: 'one more thing' });
+      if (outcome === 'failed') b.result('m1', to === 'k1' ? 'No agent is listening.' : JSON.stringify({ success: false, message: 'No session at that address.' }), { isError: to === 'k1' });
+      if (outcome === 'refused') b.result('m1', 'Permission to use SendMessage has been denied.', { isError: true, denial: 'permission-rule' });
+      if (outcome === 'rejected') b.result('m1', 'The user doesn’t want to proceed with this tool use.', { isError: true, denial: 'user-rejected' });
+      b.end(['u1'], outcome === 'rejected' ? { isError: true, result: 'error_during_execution', terminalReason: 'aborted_tools' } : {});
+      return lineOf(b);
+    };
+
+    it.each([
+      ['failed', 'Ran an agent, messaged a subagent (1 failed)'],
+      ['unfinished', 'Ran an agent, messaged a subagent (1 stopped)'],
+      ['refused', 'Ran an agent'],
+      ['rejected', 'Ran an agent, messaged a subagent (1 stopped)'],
+    ] as const)('to a subagent, %s', (outcome, caption) => {
+      expect(send('k1', outcome).caption).toBe(caption);
+    });
+
+    it.each([
+      ['failed', 'Messaged another session (1 failed)', 0],
+      ['unfinished', 'Messaged another session (1 stopped)', 0],
+      ['refused', '', 1],
+      ['rejected', 'Messaged another session (1 stopped)', 0],
+    ] as const)('to another session, %s', (outcome, caption, denied) => {
+      expect(send('peer-a', outcome)).toMatchObject({ caption, denied });
+    });
+  });
+
   it('a running turn’s line carries no caption and its counts so far: an edit in flight adds nothing', () => {
     const b = turnOf((t) => {
       edit(t, 't1', '/w/a.ts', 'done', 'one\ntwo\nthree');

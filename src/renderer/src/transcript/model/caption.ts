@@ -130,15 +130,21 @@ export function stepsOfCells(cells: readonly Cell[]): CaptionStep[] {
 }
 
 const AGENT_OUTCOME: Record<SubagentStatus, StepOutcome> = { started: 'running', working: 'running', finished: 'succeeded', finished_with_errors: 'failed', stopped: 'stopped' };
-const MESSAGE_OUTCOME = { pending: 'running', sent: 'succeeded', failed: 'failed', unanswered: 'stopped' } as const;
+
+// What a message the turn sent did, read from the sending call's own result by the turn's derivation (its drawn row
+// keeps no such fact): its outcome, or `null` for a call refused and standing alone, which is no step.
+export type SentOutcome = (row: Extract<Row, { kind: 'agent_message' }>) => StepOutcome | null;
 
 // A turn's steps (decision 8), from the rows of its work in order: every call of its runs and of its rows that are
 // cells, but the refused ones that stand alone; each agent of its subagent rows, by its own status; and each message it
-// sent to a subagent or to another session, by recipient. Arrivals, questions and thoughts are no steps.
-export function stepsOfTurn(rows: readonly Row[], agentStatus: (ref: SubagentRef) => SubagentStatus): CaptionStep[] {
+// sent to a subagent or to another session, by recipient, by its call's own outcome, but the refused ones that stand
+// alone. Arrivals, questions and thoughts are no steps.
+export function stepsOfTurn(rows: readonly Row[], agentStatus: (ref: SubagentRef) => SubagentStatus, sent: SentOutcome): CaptionStep[] {
   const writes = writesOf(rows.flatMap((row) => (row.kind === 'group' ? row.cells : row.kind === 'cell' ? [row] : [])));
   const steps: CaptionStep[] = [];
-  const step = (kind: CaptionKind, key: string, outcome: StepOutcome) => steps.push({ kind, key, words: '', outcome, path: null });
+  const step = (kind: CaptionKind, key: string, outcome: StepOutcome | null) => {
+    if (outcome !== null) steps.push({ kind, key, words: '', outcome, path: null });
+  };
   for (const row of rows) {
     if (row.kind === 'group' || row.kind === 'cell') {
       for (const cell of row.kind === 'group' ? row.cells : [row]) if (cell.toolName !== 'thinking' && !standsAlone(cell)) steps.push(stepOf(cell, writes));
@@ -146,9 +152,9 @@ export function stepsOfTurn(rows: readonly Row[], agentStatus: (ref: SubagentRef
       for (const ref of row.agents) step('agent', ref.taskId, AGENT_OUTCOME[agentStatus(ref)]);
     } else if (row.kind === 'agent_message' && row.direction === 'to_child') {
       // a recipient this transcript does not know is counted by its message, its own recipient
-      step('agent_message', row.to?.agentId ?? row.to?.taskId ?? row.id, 'succeeded');
+      step('agent_message', row.to?.agentId ?? row.to?.taskId ?? row.id, sent(row));
     } else if (row.kind === 'agent_message' && row.direction === 'between' && row.peer?.recipient) {
-      step('peer_message', row.peer.recipient.address, row.peer.result === null ? 'succeeded' : MESSAGE_OUTCOME[row.peer.result]);
+      step('peer_message', row.peer.recipient.address, sent(row));
     }
   }
   return steps;

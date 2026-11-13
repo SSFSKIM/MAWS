@@ -21,7 +21,7 @@ import { agentMessageCopy, baseName, boundaryCopy, BRANCH_HISTORY_DETAIL, PLUGIN
 import { HANDOVER_REINIT_COPY /* P5 O16 M3b */, RESUMED_COPY, RESUMING_COPY } from './copy'; // C12
 import { glyphFor } from './glyphs';
 import { collectCells, groupItems, type WorkItem } from './groups';
-import { captionParts, captionText, finishedLines, stepsOfTurn, turnOrder } from './caption'; // UX wave U2
+import { captionParts, captionText, finishedLines, stepsOfTurn, turnOrder, type SentOutcome } from './caption'; // UX wave U2
 import { cellId, rowId, turnId as turnIdOf } from './keys';
 import type { LiveBlock, TranscriptState, TranscriptUi, TurnState, TurnWork } from './reduce';
 import { isEngineOrigin, originOf, runningTurn, taskEndArrived, type ReceiptUndo } from './reduce';
@@ -41,7 +41,7 @@ import { peerMessageCopy } from './copy'; // E7
 // E4c start
 import { BROWSER_TOOL_NAMES, browserCallOf, browserToolResultSchemaOf, type BrowserCallSummary, type BrowserToolName } from '@shared/maws/browser';
 import type { ContentBlock } from '@shared/graph/events';
-import { denialDisposition } from './classify';
+import { denialDisposition, stoppedMember } from './classify';
 import { marksOfText } from './owner-marks'; // P2-C (2026-10-09)
 import { messageOfCall } from '@shared/owner/to-human-items'; // P4-R7; P5 O8 M7b: the one extraction, the channel's too
 import { isHistoryGap } from './gap'; // P5 O7 M2
@@ -379,6 +379,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const deliveries = new Map<ToolUseId, DeliveryRecord>(); // E1
   const sideThreads = new Map<AppSessionId, RowOf<'side_thread'>>(); // E3
   const results = new Map<ToolUseId, Event<'tool.result'>>(); // E7: a SendMessage's or ListAgents' result, for its row
+  const sentCalls = new Map<RowId, Event<'tool.use'>>(); // UX wave U2: a SendMessage's call, by the row it draws
   const peerOwners = new Map<MessageUuid, string[]>(); // P5 O15 M2b: the owners a peer envelope's sminos frame named, for its peer.message's row
   const artifacts = new Map<ToolUseId, ArtifactRecord>(); // E2
   const browserActions = new Map<ToolUseId, BrowserActionRecord>(); // E4c
@@ -580,6 +581,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
             kind: event.toolName === 'Workflow' ? 'workflow' : 'agent', subagentType: typeof input.subagent_type === 'string' ? input.subagent_type : null,
           });
         } else if (presentation === 'agent_message') {
+          sentCalls.set(rowId.agentMessage(event.id), event); // UX wave U2: the call its caption step reads
           items.push({ kind: 'later', row: () => sendMessageRow(event, results.get(event.toolUseId), turn.id, known(), agentOf, context) }); // E7: `to` classified against what the transcript knows; the result refines it
         } else if (presentation === 'ask') { // E1
           const input = AskInputSchema.safeParse(event.input);
@@ -970,7 +972,17 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     const firstDenied = denials.find((d) => d.disposition !== 'stopped')?.cellId ?? null;
     // UX wave U2 (O-15; decision 9): what the turn did, once, here: the caption of every step of the turn for a turn
     // that is not running, and the lines its finished edits changed for every turn
-    const parts = dividerState === 'working' ? [] : turnOrder(captionParts(stepsOfTurn(workRows, (ref) => byTask.get(ref.taskId)?.statuses.get(ref.taskId) ?? 'started')));
+    // a sent message's step reads its call's own result: none yet is running, or stopped once the turn closed; a refusal
+    // that stands alone is no step, a stopped one a stopped step; a failed send failed
+    const sent: SentOutcome = (row) => {
+      const use = sentCalls.get(row.id);
+      if (use === undefined) return 'succeeded';
+      const result = results.get(use.toolUseId);
+      if (result === undefined) return context.closed ? 'stopped' : 'running';
+      if (result.denial !== null) return stoppedMember({ kind: result.denial, ...denialDisposition(result.denial, context, context.continued.has(use.toolUseId)) }) ? 'stopped' : null;
+      return sendMessageOutcome(result).ok ? 'succeeded' : 'failed';
+    };
+    const parts = dividerState === 'working' ? [] : turnOrder(captionParts(stepsOfTurn(workRows, (ref) => byTask.get(ref.taskId)?.statuses.get(ref.taskId) ?? 'started', sent)));
     rows.push({
       id: rowId.divider(turn.id), turnId: turn.id, at: user?.at ?? turn.startedAt, kind: 'divider', state: dividerState, ...(dividerState === 'stopped' && turn.closedCause !== null && { cause: turn.closedCause }), origin: turn.origin, startedAt: turn.startedAt, endedAt: turn.endedAt,
       toolCalls: summary.toolCalls, denied: denied.length, autoDenied: summary.autoDenied, firstDeniedCell: firstDenied, expanded, summary, files: changedFiles(cells, turn),
