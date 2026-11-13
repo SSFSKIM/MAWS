@@ -384,9 +384,10 @@ describe('artifact_edit', () => {
 
       const b = await readSeed();
       const plain = await edit({ artifact: b.id, baseRevision: b.revision, answering: 't3', ops: [op] });
+      // the same text but for what differs between two documents of one store: the id, the revision, the message's id
       const bare = (result: McpToolResult, id: string) => {
         const { messageId } = json<{ answered: { messageId: string } }>(result).answered;
-        return textOfResult(result).replaceAll(id, '<artifact>').replaceAll(messageId, '<message>');
+        return textOfResult(result).replaceAll(id, '<artifact>').replaceAll(messageId, '<message>').replace(/"revision": \d+/, '"revision": <n>');
       };
       expect(bare(replied, a.id)).toBe(bare(plain, b.id));
       expect(textOfResult(plain)).toContain('replaced 1 occurrence(s) in ^p2');
