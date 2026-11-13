@@ -28,7 +28,7 @@ How to see it working: the unit suite (each reader of "what waits" handed one an
 - [x] (2026-11-13) U6a is on master (`be663d261`, pull request #604) and U8a since `6e8c72738`; master merged into the branch at `64c13746a`; step 0's two files are present.
 - [x] (2026-11-13) M1 — One predicate, the publisher and every reader. Reviewed clean (one fix wave `5efc03b94..10d61e2b8`: a draft kept through a feed snapshot; the held-back settlement proved through the composed spine; the `unknown` outcome exercised). Built `4753fb642..faf75c3ca`. A17's red run (2026-11-13): the tests commit `4753fb642`, alone on the VM, `pnpm exec vitest run` over the 23 touched test files: 56 failing, each by assertion or a missing export (the tree test `test/one-predicate.test.ts`, every row of §A's reader table, the holder, the tellers, the endpoint, the mirror, main's `accepted`); four new tests passed there by design, each a rule today's code already keeps.
 - [ ] M2 — Questions: the terminal's asynchronous question, Dismiss, double-click. Built `2cc43cc8a..6f6045a23` (red at the tests commit: 56 failing over 14 files).
-- [ ] M3 — The permission card: three buttons, the hints and the keys.
+- [ ] M3 — The permission card: three buttons, the hints and the keys. Built `e4790393c..4c55c614d` (red at the tests commit: 67 failing over 9 files).
 - [ ] M4 — A file change as a diff.
 - [ ] M5 — The plan's next mode; the trust card.
 - [ ] M6 — From outside: one rule for the notification and the hover card.
@@ -857,6 +857,9 @@ No act of this landing needs a new offer: `laneA.accepted` is the session machin
 | `src/endpoint/offers.ts` | U9 | the row `session.answer` gains `accepts`: a plan answer that names a mode is refused for a caller on another machine; its row test |
 | `src/renderer/src/sidebar/RequestPreview.tsx` | U7 | `isOpen` becomes `waits`; nothing else (its approval rule, never drawn in the app, stays) |
 | `src/renderer/src/shell/floating.test.ts` | U10 | one case's expectation: a delivered item is no longer "still pending" |
+| `src/renderer/src/composer/Composer.test.tsx` | U4 | two cases' gesture: a docked permission is allowed with ⌘↩ after its 400 ms, where they pressed Enter (M3; added at execution, Decision Log 2026-11-13) |
+| `src/renderer/src/tools/agents/subagents/subagents.test.tsx` | U8 | one case finds the inline card by its first line ("Run a command · from …"), where it found the heading "Bash" (M3; added at execution) |
+| `src/renderer/src/palette/CommandPalette.tsx` and its test | U6 | two entries of `UNAVAILABLE`, `request.allowOnce` and `request.allowLasting`, with the sentence `request.accept` and `request.decline` carry ("Keyboard only, in a focused request"), where the palette would read "Unavailable" (M3; added at execution) |
 | `src/renderer/src/tools/agents/subagents/AgentList.tsx` and U8b's Subagents card | U8 | only if U8b is on master when M7 merges it: the two readers call `selectWaitingAgents` (M7, "The predicate by agent") |
 | `e2e/` specs of other children's surfaces | each surface's child | the gestures and the listed expectations of M7, nothing else in the scene |
 | `e2e/cross-build.spec.ts` | P5's; U13a adds scenes beside | one assertion in the update scene (M7) |
@@ -959,6 +962,9 @@ Row 6's sentence is not the child's: the child's says "a skip of every question 
 - Observation: every question card now carries a Dismiss button (Overview and inline included), so an unscoped e2e locator for "Dismiss" can meet two.
   Evidence: `QuestionBody`'s foot; today's e2e hits (`lane-a.spec.ts`, `c7-shots.spec.ts`) are scoped to their regions.
 
+- Observation: in the reason box, ⇧⌘↩ also sends the deny with its reason.
+  Evidence: `CardTextarea` submits on any `metaKey` with Enter; today's behaviour, left as it is.
+
 ## Decision Log
 
 - Decision: verification for this landing. This document gets an adversarial review before an executor starts, dispatched by the architect. The branch gets `doperpowers:review-code` at the xhigh panel. Class 1a on GitHub Actions is the gate of record, run once on the head the pull request carries.
@@ -994,6 +1000,9 @@ Row 6's sentence is not the child's: the child's says "a skip of every question 
 - Decision (M2): the settlement's words need who settled, so `Race.settled` carries `by` and `settledWords` takes the item's kind; this app's own dismissal gives null and the card draws nothing. The stepper's double-click on the last step submits only where the port carries that reply, else it picks. MAWS's ask: completeness is a pure `complete` in `draft.ts`, the pick-then-submit `chooseOption` in `store.ts`, Dismiss an option of `submitAsk` (`{dismiss: true}`); one `submitting` mark covers Submit and Dismiss. The fake bridge takes a dismissal while its current status declares `decide.dismiss` and answers 400 otherwise (the stale-status case).
 
 - Decision (2026-11-13, UTC, accepted by the architect): two effects of the asynchronous question's kind that the section did not name stand, with neither file edited. U10's `shell/floating.ts` does not raise the floating window's pill for it: it does not block the session, and it is counted where the other waiting items are. U7's `sidebar/HoverCard.tsx` offers Quick Reply beside it: the session can take a message while that question waits, which is the difference from a blocking one. Both are in "The owner's look", with the Dismiss button now on every question card.
+
+- Decision (M3, 2026-11-13): three edits outside §N, in other children's files, taken as defaults, recorded in §N and reported to the architect: two gestures in U4's `Composer.test.tsx`, one heading in U8's `subagents.test.tsx`, two entries of the palette's `UNAVAILABLE` map. Each follows from §D and changes nothing else in its file.
+- Decision (M3): the Esc hint is drawn "⎋": UC-6 makes a hint the row's chord in the keymap's own formatting (`formatChord`, U6's), and §D's drawing "Esc" yields to that rule (reported to the architect). "Deny… with a reason" keeps today's label, because l4-approvals-03 is a keep and A16 lets only the Allow control's selector change. The 400 ms lives in the permission body, armed from its mount (the body remounts per item, so an Overview card's next prompt starts its own); a key in that time is taken by its binding and answers nothing. A hint is printed only where its key is bound (none on a default-to-no prompt's allow buttons, on a button the port closes, or on a row with no chord). The first line is `askedLine` in `tools.ts`, an `h3` naming the file's base name ("a file" when the call names none); M3 says "Write" or "Edit", M4 makes "Create". `ScopeOption.detail` becomes `rule` and `LOCAL_SETTINGS_DETAIL` goes. `CardKeys`' two new keys and the frame's two new props are optional, so the other variants and `SetupCard` are untouched. A taken repeat returns at once, so no later row on the same chord is tried. The settings tests' Change-control loops iterate the rebindable rows.
 
 ## Outcomes & Retrospective
 
