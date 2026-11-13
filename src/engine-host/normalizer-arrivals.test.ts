@@ -114,6 +114,53 @@ describe('a background task’s end is kept until the model is told (Interfaces 
     expect(notices(drawn(stateOf(events)))).toEqual([]);
   });
 
+  // The recorded session with an idle written in (invented) while the monitor's line stands: the stream's message_stop
+  // before the result is replaced by it. Idle never gives up the end whose line stands; the result settles or
+  // withdraws that line as it would with no idle
+  const idleAt = (seq: number) => r1.map((row) => (row.seq === seq ? { ...row, frame: { ...idleFrame, uuid: `st-${seq}` } } : row));
+
+  it('u3-tasks-r1 with an idle at 761, while the monitor’s line placed at 753 stands: the result at 762, which does not name it, still withdraws it, and the turn at 763 places it again', () => {
+    expect(frameAt(r1, 761).type).toBe('stream_event');
+    const events = live(idleAt(761));
+    expect(trail(events, frameAt(r1, 743).uuid)).toEqual(['753 placed', '762 withdrawn', '763 placed']);
+    expect(drawn(stateOf(events)).filter((row) => row.id === 'notice:0mwdo8jdn-29730c86')).toHaveLength(1);
+    const [closed] = turnsOf(stateOf(events)).filter((turn) => turn.events.some((event) => event.seq === 762));
+    expect(closed!.events.some((event) => event.kind === 'user.message' && event.messageUuid === frameAt(r1, 743).uuid && carriedOf(event.arrival).length > 0)).toBe(false);
+  });
+
+  it('u3-tasks-r1 with an idle at 779, while the line placed at 763 stands: the result at 780, which names its run, settles it, and nothing of it is kept after', () => {
+    expect(frameAt(r1, 779).type).toBe('stream_event');
+    const n = normalizer();
+    const events = idleAt(779).flatMap((row) => n.push(row));
+    expect(trail(events, frameAt(r1, 743).uuid)).toEqual(['753 placed', '762 withdrawn', '763 placed']);
+    expect(drawn(stateOf(events)).filter((row) => row.id === 'notice:0mwdo8jdn-29730c86')).toHaveLength(1);
+    expect(n.state.arrivals).toMatchObject({ kept: [], placed: null });
+  });
+
+  // Written by hand (invented): no recorded session has a peer's or the owner's message arrive with no turn open and no
+  // init before it (all 575 journals under spikes/protocol-probe/fixtures/ read through the normaliser), so this row of
+  // Interfaces E is a guard. An end kept during the person's turn is outstanding when the message opens its own turn;
+  // the next idle bounds by that turn, so the end is given up there and no later engine turn places it
+  it.each([
+    ['a peer’s', 'session:0demo0a1'],
+    ['the owner’s', 'human'],
+  ] as const)('%s message with no turn open opens its turn, and the idle after it gives up the end kept before it', (_, name) => {
+    const body = `[sminos message from ${name} id=0d0e0f01]\nCheck the demo job.`;
+    const delivered = {
+      type: 'user', message: { role: 'user', content: `Another Claude session sent a message:\n<cross-session-message from-name="${name}">\n${body}\n</cross-session-message>\n\nThis came from another Claude session.` },
+      parent_tool_use_id: null, uuid: 'p-demo', isReplay: true, isSynthetic: true, origin: { kind: 'peer', from: 'unknown', name, body },
+    };
+    const rows = handWritten([
+      out(prompt('u-1')), inn(started('u-1')), inn(init), inn(bgStarted), inn(bgEnded), inn(result({ origin: { kind: 'human' }, user_message_uuids: ['u-1'] })), inn(idleFrame),
+      inn(delivered), inn(said('m-2', 'Checked.')), inn(result({ origin: delivered.origin })), inn(idleFrame),
+      inn(init), inn(result({ origin: { kind: 'task-notification' }, user_message_uuids: [] })),
+    ]);
+    const events = live(rows);
+    expect(events.filter((event) => event.seq === 8).map((event) => event.kind)[0]).toBe('turn.started');
+    expect(trail(events, 'f-ended')).toEqual([]);
+    expect(notices(drawn(stateOf(events)))).toEqual([]);
+  });
+
   // Interfaces E's invariant (decision 8 as revised): under one uuid the first carrier stands, so a line is withdrawn
   // before it is placed again
   it('in every recorded session: a line is withdrawn before it is placed again, at most one host-made line stands on a turn, and only on a turn the engine opened', () => {
