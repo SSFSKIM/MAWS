@@ -31,7 +31,7 @@ How to see it working: the tests named under Acceptance fail at the commit that 
 - [x] (2026-11-12) The five Shift conditions with their tests; the two filter pins of A7.
 - [x] (2026-11-12) The e2e edits written (`e2e/shell.spec.ts`'s palette step; one scene in `e2e/ux2-shell.spec.ts`) and typechecked (not run by the executor).
 - [x] (2026-11-12) The record: the charter's two sentences, three insertions.
-- [ ] On the VM: typecheck, lint on the changed paths, the whole unit suite. Hand-back: the executor stops here.
+- [x] (2026-11-12) On the VM: the two test commands of Concrete Steps 2 green at `9038349ff` (`Test Files  24 passed (24)`, `Tests  487 passed (487)`; `Test Files  21 passed (21)`, `Tests  421 passed (421)`); `pnpm typecheck` with no error (all six projects, `tsconfig.e2e.json` included); eslint on the changed paths silent at `8bc3f5176`; `pnpm test` at `8bc3f5176`: `Test Files  11 failed | 2474 passed | 26 skipped (2511)`, every failing file in the known set (desk-hub's three deploy suites, `setup.test.ts`, `git-reads.test.ts`, `portability.test.ts`, `Sidebar.test.tsx`) or a timeout under the VM's load (about 20 to 27) that passes alone or fails on master too: `keymap/session-navigation.test.ts` and `code/viewer/viewer.test.tsx` pass alone; `terminal/ime-trace.test.ts` (an xterm addon's "Data error" at import) passes alone; `main/org/rows.test.ts` times out alone and on master `6e8c72738` the same way. Hand-back: the executor stops here.
 - [ ] The architect's: class 1a green on the head the executor hands back; the xhigh panel, run by the session that keeps master; its findings settled; class 1a again on the final head if the panel changed the branch; the pull request.
 
 ## The landing's edge
