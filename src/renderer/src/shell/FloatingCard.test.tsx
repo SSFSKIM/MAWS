@@ -25,14 +25,19 @@ import { ChromePill } from './FloatingPill'; // P3-F (F-shell)
 import { MARKUP_COPY, resetMarkup, useMarkup } from '../markup/session'; // P3-G (M4)
 import { resetMarkupSurfaces, useRegionMarkupSurface } from '../markup/surface'; // P3-G (M4)
 import { EditorHostScopeContext } from '../panel/editor-host'; // P3-G (M4)
-import { RegionControls } from '../panel/PanelHeader';
+import { RegionControls, StripControls } from '../panel/PanelHeader';
 import { CommentCardHost } from '../side/card/CardHost'; // P3-G (M4)
 import { fail, installFakeMain, ok } from '../test-support/code'; // P3-G (M4)
 
 vi.mock('../app/Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
 
-// The region's controls as the side column's first strip draws them (UX wave U8b, M2), in a header row as before.
-const PanelControls = () => <div data-editor-header><RegionControls hide={() => {}} /></div>;
+// The region's controls as the side column's first strip draws them (UX wave U8b, M2), in a header row as before; over a
+// tab, its Mark up first.
+const PanelControls = ({ tabId }: { tabId?: string }) => (
+  <div data-editor-header>
+    {tabId === undefined ? <RegionControls hide={() => {}} /> : <StripControls tab={{ id: tabId, toolId: tabId.split(':')[0], pinned: false }} hide={() => {}} />}
+  </div>
+);
 
 const A = at('app-a' as AppSessionId); // P5 O6 M2: the page's ids are addresses
 const B = at('app-b' as AppSessionId);
@@ -496,7 +501,7 @@ describe('a mark-up still taken under the open card', () => {
   it('hides the card’s layer and the comment card’s host while main takes the still, keeps both mounted, and shows them after', async () => {
     registerSlot('panelHost', () => (
       <>
-        <PanelControls />
+        <PanelControls tabId={TAB} />
         <EditorHostScopeContext.Provider value={{ surface: 'panel', tabId: TAB }}>
           <ViewerProbe />
         </EditorHostScopeContext.Provider>
@@ -536,7 +541,7 @@ describe('a mark-up still taken under the open card', () => {
   it('shows them again when the capture fails', async () => {
     registerSlot('panelHost', () => (
       <>
-        <PanelControls />
+        <PanelControls tabId={TAB} />
         <EditorHostScopeContext.Provider value={{ surface: 'panel', tabId: TAB }}>
           <ViewerProbe />
         </EditorHostScopeContext.Provider>
@@ -570,7 +575,7 @@ describe('a mark-up still taken under the open card', () => {
   it('hides a showing toast while main takes the still: the retry’s still holds no “Couldn’t capture” toast', async () => {
     registerSlot('panelHost', () => (
       <>
-        <PanelControls />
+        <PanelControls tabId={TAB} />
         <EditorHostScopeContext.Provider value={{ surface: 'panel', tabId: TAB }}>
           <ViewerProbe />
         </EditorHostScopeContext.Provider>

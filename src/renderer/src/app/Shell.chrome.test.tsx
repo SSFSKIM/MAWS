@@ -97,7 +97,8 @@ describe('the chrome yields to the tab strip', () => {
     const user = userEvent.setup();
     offs.push(registerPanelTool(probeTool('artifacts', { multiInstance: false }).tool));
     setWidth(700);
-    useLayout.setState({ panelBySession: new Map([[A, { tabs: [ref('artifacts:aaaaaaaa')], activeTabId: 'artifacts:aaaaaaaa' }]]) });
+    // held but out of view (UX wave U8b: a tab of the strip would read the Artifacts tool's record, which a probe has none of)
+    useLayout.setState({ panelBySession: new Map([[A, { tabs: [ref('artifacts:aaaaaaaa')], activeTabId: null }]]) });
     renderShell();
     expect(within(chrome()).queryByRole('button', { name: 'artifacts' })).toBeNull();
     const more = within(chrome()).getByRole('button', { name: 'More surfaces' });

@@ -175,7 +175,7 @@ describe('shell renders the panel host in the region', () => {
     expect(terminal.probe.created).toEqual([expect.objectContaining({ appSessionId: A, instanceId: id })]);
     expect(panelOf(B)).toBeUndefined();
     expect(screen.getByTestId(`body:${id}`).textContent).toContain(`${A} · unpinned · visible`);
-    expect(within(panel()).getByRole('tablist', { name: 'terminal tabs' })).toBeTruthy();
+    expect(within(panel()).getByRole('tablist', { name: 'Panel tools' })).toBeTruthy();
   });
 
   describe('over a held hydration and a recorded layout.json', () => {
@@ -301,7 +301,7 @@ describe('shell renders the panel host in the region', () => {
       expect(effectiveIds()).toEqual([id, 't:pin00000']);
       expect(within(panel()).getByRole('tabpanel', { name: 'session-info' })).toBeTruthy();
       const singleton = within(panel()).getByRole('region', { name: 'session-info' });
-      expect(within(singleton).queryByRole('tablist')).toBeNull(); // other stacked tools may have their own strips
+      expect(within(singleton).getAllByRole('tab').map((tab) => tab.getAttribute('aria-selected'))).toEqual(['true', 'false']); // one strip, the pins
       expect(info.probe.created).toEqual([expect.objectContaining({ instanceId: id, params: 'p' })]);
     });
   });

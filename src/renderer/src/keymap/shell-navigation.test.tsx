@@ -235,19 +235,31 @@ describe('visible region focus', () => {
 });
 
 
-it('visits Session cards and surface content without stopping on resize controls', () => {
+// UX wave U8b (M2, decision 7): each group of the side column is its strip (its selected tab) and then its content.
+it('visits Session cards, each group’s strip and its content, without stopping on resize controls', () => {
+  const group = (name: string, tool: string, field: string) => (
+    <section data-side-group={name}>
+      <div><div role="tablist"><button role="tab" aria-selected="false" tabIndex={-1}>Other</button><button role="tab" aria-selected="true">{tool}</button></div><button>Hide side column</button></div>
+      <div data-surface={tool}><div role="tabpanel"><input aria-label={field} /></div></div>
+    </section>
+  );
   render(<>
     <section id="region-sidebar"><button>Sidebar destination</button></section>
     <section id="region-main"><div data-pane="0"><div role="tabpanel"><textarea aria-label="Conversation" /></div></div>
       <aside data-region="cards"><button>Environment card</button></aside>
     </section>
-    <section id="region-panel"><button role="separator">Resize surface</button><div data-panel-content><section data-surface="terminal"><button>Close surface</button><div role="tabpanel"><input aria-label="Terminal input" /></div></section></div></section>
+    <section id="region-panel"><button role="separator">Resize surface</button><div data-panel-content><div data-surface-stack>
+      {group('upper', 'terminal', 'Terminal input')}
+      {group('lower', 'review', 'Review input')}
+    </div></div></section>
   </>);
   screen.getByLabelText('Conversation').focus();
-  pressMenu({ key: 'F6', code: 'F6' });
-  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Environment card' }));
-  pressMenu({ key: 'F6', code: 'F6' });
-  expect(document.activeElement).toBe(screen.getByLabelText('Terminal input'));
+  const visits = [...Array(6)].map(() => {
+    pressMenu({ key: 'F6', code: 'F6' });
+    return document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.textContent;
+  });
+  expect(visits).toEqual(['Environment card', 'terminal', 'Terminal input', 'review', 'Review input', 'Sidebar destination']);
   pressMenu({ key: 'F6', code: 'F6', shiftKey: true });
-  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Environment card' }));
+  expect(document.activeElement).toBe(screen.getByLabelText('Review input'));
 });
+

@@ -458,7 +458,7 @@ describe('right panel', () => {
     act(() => openSurface());
     expect(region('panel').inert).toBe(false);
     expect(within(region('panel')).getByRole('button', { name: 'Expand surface' })).toBeTruthy();
-    expect(within(region('panel')).getByRole('button', { name: 'Close surface' })).toBeTruthy();
+    expect(within(region('panel')).getByRole('button', { name: 'Hide side column' })).toBeTruthy();
   });
 
   it('hands a registered host the session’s effective tabs and splits its changes back by pin', async () => {
@@ -487,6 +487,7 @@ describe('right panel', () => {
     expect(useLayout.getState().regions.panel.maximized).toBe(true);
   });
 
+  // UX wave U8b (M2): the host's writes maintain the pins; what is in view with no session is chosen by showSurfaceTab
   it('with no tab open, round-trips the selection between two pins and falls back when the selected pin goes', () => {
     let props: PanelHostProps | null = null;
     registerSlot('panelHost', (p) => {
@@ -499,10 +500,12 @@ describe('right panel', () => {
     renderShell();
     expect(props!).toMatchObject({ appSessionId: null, activeTabId: null });
     act(() => props!.onChange({ tabs: [p1, p2], activeTabId: 'p2' }));
+    expect(props!.activeTabId).toBeNull(); // a write of the list chooses nothing
+    act(() => useLayout.getState().showSurfaceTab(null, 'p2'));
     expect(props!.activeTabId).toBe('p2');
-    act(() => props!.onChange({ tabs: [p1, p2], activeTabId: 'p1' }));
+    act(() => useLayout.getState().showSurfaceTab(null, 'p1'));
     expect(props!.activeTabId).toBe('p1');
-    act(() => props!.onChange({ tabs: [p1, p2], activeTabId: 'p2' }));
+    act(() => useLayout.getState().showSurfaceTab(null, 'p2'));
     // The host removes the selected pin without choosing another: the neighbour that took its place is selected.
     act(() => props!.onChange({ tabs: [p1], activeTabId: 'p2' }));
     expect(props!.tabs.map((t) => t.id)).toEqual(['p1']);
