@@ -377,6 +377,43 @@ describe('the place the head names (U11a §C, "<place>")', () => {
   });
 });
 
+// U11a M6 review: the switch reaches every session in the place the head names, so it waits for that sentence; a read of
+// the main root that is out holds both back, while Reconnect, which reaches this session only, stays available.
+describe('the switch waits for the sentence of what it reaches (U11a §C)', () => {
+  const MAIN = '/Users/example/code/atlas';
+  const WORKTREE = `${MAIN}/.claude/worktrees/feature`;
+  const note = () => document.querySelector<HTMLElement>('[data-widget="mcp"] [data-widget-note]');
+  let settle: { resolve(value: unknown): void; reject(error: unknown): void };
+  beforeEach(() => {
+    useSessions.setState({ engine: new Map([[ID, { ...lifted(backend.status(BARE)), cwd: WORKTREE }]]) });
+    backend.script('git.worktree.list', () => new Promise((resolve, reject) => (settle = { resolve, reject })));
+  });
+  const heldOpen = async () => {
+    mount();
+    const docs = await row(DOCS);
+    await waitFor(() => expect(backend.calls.some((c) => c.command === 'git.worktree.list')).toBe(true));
+    expect(note()).toBeNull();
+    expect(within(docs).getByRole('switch')).toHaveProperty('disabled', true);
+    fireEvent.click(disclosure(docs));
+    expect(within(docs).getByRole('button', { name: 'Reconnect' })).toHaveProperty('disabled', false);
+    return docs;
+  };
+
+  it('holds the switch disabled while the main root is read, and enables it with the sentence once read', async () => {
+    const docs = await heldOpen();
+    await act(async () => settle.resolve({ repoRoot: MAIN, commonDir: `${MAIN}/.git`, worktrees: [], toplevel: WORKTREE }));
+    await waitFor(() => expect(note()?.textContent).toBe('Off here is off for every session in ~/code/atlas.'));
+    expect(within(docs).getByRole('switch')).toHaveProperty('disabled', false);
+  });
+
+  it('enables the switch with the folder’s sentence when the read fails', async () => {
+    const docs = await heldOpen();
+    await act(async () => settle.reject(new WidgetBackendError({ code: 'internal', message: 'not a git repository' })));
+    await waitFor(() => expect(note()?.textContent).toBe('Off here is off for every session in ~/code/atlas/.claude/worktrees/feature.'));
+    expect(within(docs).getByRole('switch')).toHaveProperty('disabled', false);
+  });
+});
+
 describe('the "+" menu’s entries to the dialogs (U11a §C)', () => {
   it('reads Connectors in this chat… and Plugins in this chat…', async () => {
     for (const [submenu, entry] of [['Connectors', /^Connectors in this chat…/], ['Plugins', /^Plugins in this chat…/]] as const) {
