@@ -815,9 +815,11 @@ it.each([true, false])('context-menu Close restores pane focus when the closing 
 // of the side column is written; Back shows it all again without a remount.
 describe('a page beside the sidebar', () => {
   const PAGE = { kind: 'projects' } as const;
-  const mainArea = () => document.querySelector<HTMLElement>('[data-main-area]')!;
+  // The shell's wrapper around the main area's content; the title bar by its mark (a page may hold a banner of its own).
+  const mainArea = () => document.querySelector<HTMLElement>('[data-behind-page]')!;
   const hiddenNow = (element: HTMLElement) => [element.classList.contains('invisible'), element.hasAttribute('inert')];
-  const header = () => screen.getByRole('banner');
+  const header = () => document.querySelector<HTMLElement>('[data-toolbar]')!;
+  const strips = () => header().querySelector<HTMLElement>('[data-chrome-tabs]')!;
 
   it('with the card column drawn: the main area and the column keep their nodes, the grid and the padding, hidden; Back shows them', () => {
     useSessions.setState({ records: new Map([[A, record(A)]]) });
@@ -866,17 +868,18 @@ describe('a page beside the sidebar', () => {
     useLayout.setState({ main: withActive(sessionTab(A)) });
     renderShell();
     act(() => useLayout.getState().openDestination(PAGE));
-    const page = screen.getByRole('region', { name: 'Projects' });
+    const page = document.getElementById('region-page')!;
+    expect(page.getAttribute('aria-labelledby')).toBe(within(header()).getByRole('heading', { level: 1 }).id);
     expect(page.className).toContain('col-[2/-1]');
     expect(page.className).toContain('row-start-3');
     expect(within(header()).getByRole('heading', { level: 1, name: 'Projects' })).toBeTruthy();
     expect(within(header()).queryByRole('button', { name: 'Session cards' }), 'the surface icons are not drawn').toBeNull();
     expect(within(header()).queryByRole('button', { name: /in sidebar$/ }), 'nor the project chip').toBeNull();
-    expect(hiddenNow(chromeTabs()), 'the strips stay mounted, hidden').toEqual([true, true]);
+    expect(hiddenNow(strips()), 'the strips stay mounted, hidden').toEqual([true, true]);
     expect(within(header()).getByRole('button', { name: 'Back' }).getAttribute('title')).toBe('Back · Esc');
     await user.click(within(header()).getByRole('button', { name: 'Back' }));
     expect(useLayout.getState().destination).toBeNull();
-    expect(hiddenNow(chromeTabs())).toEqual([false, false]);
+    expect(hiddenNow(strips())).toEqual([false, false]);
   });
 
   it('the Overview opened over a page is inside no inert element, and the page stays', () => {

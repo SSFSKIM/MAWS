@@ -31,7 +31,7 @@ function Library() {
 function Behind() {
   const hidden = useLayout(pageOpen);
   return (
-    <div data-main-area inert={hidden}>
+    <div data-behind-page inert={hidden}>
       <div id="pane-0"><div role="tabpanel"><button type="button">In the pane</button><textarea aria-label="Composer" /></div></div>
     </div>
   );

@@ -246,7 +246,7 @@ describe('F6 with a page open', () => {
     return <>
       <section id="region-sidebar"><button>Sidebar destination</button></section>
       <section id="region-main">
-        <div data-main-area inert={page} className={page ? 'invisible' : ''}>
+        <div data-behind-page inert={page} className={page ? 'invisible' : ''}>
           {set.panes.map((pane, index) => <section id={`pane-${index}`} data-pane={index} key={index}>
             <div data-pane-strip><div role="tablist" aria-label={`Tabs ${index}`}>
               {pane.tabs.map((tab) => <button role="tab" aria-selected={tab.id === pane.activeTabId} tabIndex={tab.id === pane.activeTabId ? 0 : -1} key={tab.id}>{tab.id}</button>)}

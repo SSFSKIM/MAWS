@@ -211,7 +211,7 @@ it('with a page open and the keyboard in the sidebar drawn over the window, Esc 
   act(() => useLayout.getState().openDestination({ kind: 'projects' }));
   act(() => useShellView.setState({ sidebarOverlay: true }));
   const sidebar = document.getElementById('region-sidebar')!;
-  const control = sidebar.querySelector<HTMLElement>('button, input')!;
+  const control = within(sidebar).getByRole('button', { name: 'Projects' });
   act(() => control.focus());
   await userEvent.keyboard('{Escape}');
   expect(useShellView.getState().sidebarOverlay).toBe(false);

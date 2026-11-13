@@ -927,7 +927,7 @@ describe('the page’s key', () => {
   const PAGE = { kind: 'customize', view: 'mine', show: 'skills' } as const;
   const stored = (destination: unknown) => ({ version: 1, destination });
   // A version-1 `main.tabs`: not the stored form's shape (`canonical` false), as a build before U13a left it.
-  const v1 = { version: 1, panes: [{ tabs: [], activeTabId: null }], focusedPane: 0, splitRatio: 0.5, closedTabs: [] };
+  const v1 = { version: 1, panes: [{ tabs: [], activeTabId: '' }], focusedPane: 0, splitRatio: 0.5, closedTabs: [] };
 
   // A launch over layout.json holding the fixed keys, the side column's and `given`; `failing` keys fail their read;
   // `during` acts while the reads are pending. `pages()` is what was written to `destination`.

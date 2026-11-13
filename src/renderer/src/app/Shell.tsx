@@ -55,7 +55,7 @@ export function Shell() {
       <SidebarRegion />
       <section id={MAIN_REGION_ID} data-region="main" aria-label="Main" inert={!page && (geometry.mainHidden || geometry.sheet)} className="relative col-start-2 row-start-3 flex min-h-0 min-w-0 flex-col overflow-hidden">
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col" style={placed && !yieldCards && room >= CARD_COLUMN_ROOM ? { paddingRight: 304 } : undefined}>
-          <div data-main-area inert={page} className={`relative flex min-h-0 min-w-0 flex-1 flex-col ${page ? 'invisible' : ''}`}>
+          <div data-behind-page inert={page} className={`relative flex min-h-0 min-w-0 flex-1 flex-col ${page ? 'invisible' : ''}`}>
             <MainArea />
           </div>
           <OverviewLayer />
