@@ -698,6 +698,49 @@ describe('a file the transcript names (U6c)', () => {
     await waitFor(() => expect(shown(OTHER)).toMatchObject({ status: 'ready', named: true, text: 'other\n' }));
   });
 
+  // The branch review's finding 4, with the two real stores: a file opened before its folder exists fails its watch
+  // and its read; read again once it exists, it takes its watch again too (the Files store installs a refused watch
+  // again only for a new holder), so a later change shows Updated. Main's events follow only an installed watch.
+  it.each(['its link is clicked again', 'its tab is shown again'])('a failed tab read again when %s is watched again, and shows a later change', async (how) => {
+    const PATH = '/r/gen/file.ts';
+    const files: Record<string, string> = {};
+    const installed = new Set<string>();
+    const main = installFakeMain(async (name, input) => {
+      const path = input.path as string;
+      if (name === 'files.watch') {
+        if (!Object.keys(files).some((file) => file.startsWith(`${path}/`))) return fail(`not found: ${path}`);
+        installed.add(path);
+        return ok();
+      }
+      if (name === 'files.unwatch') {
+        installed.delete(path);
+        return ok();
+      }
+      if (name !== 'files.read') return fail(`unexpected ${name}`);
+      const content = files[path];
+      if (content === undefined) return fail(`not found: ${path}`);
+      const hashed = input.hash === true;
+      return ok({ encoding: 'utf8', content, bytes: content.length, offset: 0, length: content.length, truncated: false, mime: 'text/plain', hash: hashed ? fakeHash(content) : null, utf8: hashed ? true : null });
+    });
+    const offs = [connectCodeEvents()];
+    const first = show(PATH);
+    expect((await screen.findByRole('alert')).textContent).toContain(`not found: ${PATH}`);
+    files[PATH] = 'one\n'; // the folder and the file are made
+    if (how === 'its link is clicked again') act(() => openFile(A, PATH));
+    else {
+      first.unmount();
+      render(<FileViewer tab={fileTab(PATH)} />);
+    }
+    await waitFor(() => expect(codeText()).toBe('one'));
+    files[PATH] = 'two\n';
+    act(() => {
+      if (installed.has('/r/gen')) main.emit('files.changed', { appSessionId: MAIN_A, path: PATH, kind: 'changed' });
+    });
+    await waitFor(() => expect(codeText()).toBe('two'));
+    expect(document.querySelector('[data-updated]')?.textContent).toBe('Updated');
+    offs.forEach((off) => off());
+  });
+
   it('W4: reads a named file again each time its tab is shown, Updated only when its bytes changed', async () => {
     const main = disk({ [OUT]: 'one\n' }, [OUT]);
     const first = show();
