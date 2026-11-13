@@ -87,7 +87,7 @@ import { startRemoteScene, B_NAME, type RemoteScene } from './support/remote-sce
 import type { PlaneRow } from './support/fake-sminos'; // 2026-11-06
 import { answered, BUTTON, FIELD, startPages } from './support/headless-browser'; // P5 O17 M10
 import { connectorControl, writeCuaEngine, type ConnectorControl } from '../test/support/cua-engine'; // P5 O17 M10
-import { closeSurface, mainTabById, openSurface, surface } from './support/shell';
+import { activeMainTab, closeSurface, mainTabById, mainTabs, openSurface, surface } from './support/shell';
 import { seedTranscript, SIDE_QUESTION, SideJournal, slugOf, transcript } from './support/side-replay';
 import { newChatIn, openProject, projectLine, projectRow, showProjectList, sidebarOf } from './support/sidebar';
 import { clickRevealed } from './support/hover'; // P5 O7 M8
@@ -589,6 +589,49 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     const row = sessionRow(page, address);
     await expect(row, `B's row in A's sidebar\n${mainSaid(page)}`).toBeVisible({ timeout: 30_000 });
     await hoverMachineLine(page, row, `${B_NAME} · via the hub`);
+    // UX wave U7a (O-38 with #559, O-16; docs/doperpowers/plans/2026-11-12-ux-wave-U7-sidebar-title-bar-destinations.md,
+    // M4; A2, A3): the row, only listed here, opens as a local row does. Its menu begins Open, Open in new tab, Hide (then
+    // Share and Add owner where the row has them); ⌘-click opens it through lane B's opener in a tab of its own, which
+    // comes to the front as a local row's ⌘-click does; Hide puts it under its project's "Hidden · 1" and the tab stays.
+    // Unhide brings the row back for the steps below.
+    await test.step('UX wave U7: the listed row’s menu, ⌘-click to a tab of its own, Hide and Unhide', async () => {
+      await expect(row, 'only listed: A holds no record of it yet').toHaveAttribute('data-kind', 'listed');
+      const projectKey = (await sidebarOf(page).locator('[data-kind="project"]', { has: row }).getAttribute('data-tree-id'))!.slice('p:'.length);
+      const hidden = sidebarOf(page).locator(`[data-tree-id="hidden:${projectKey}"]`);
+      await row.click({ button: 'right' });
+      await expect(page.getByRole('menu')).toBeVisible();
+      const items = await page.getByRole('menuitem').allTextContents();
+      expect(items.slice(0, 3), 'a listed row’s menu: its two opens, then Hide').toEqual(['Open', 'Open in new tab', 'Hide']);
+      expect(items.slice(3).filter((item) => item !== 'Share…' && item !== 'Add owner…'), 'nothing after Hide but Share and Add owner').toEqual([]);
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('menu')).toHaveCount(0);
+
+      const tabIds = () => mainTabs(page).locator('[role="tab"]').evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('data-tab-id')));
+      const before = await tabIds();
+      await row.click({ modifiers: ['Meta'] });
+      const added = async () => (await tabIds()).filter((id) => !before.includes(id));
+      await expect.poll(added, { timeout: 60_000, message: `⌘-click adds a tab of its own\n${mainSaid(page)}` }).toEqual([`session:${address}`]);
+      expect(await tabIds(), 'and keeps every tab it found').toEqual(expect.arrayContaining(before));
+      const opened = await tabIds();
+      await expect(activeMainTab(page), 'the new tab is in front').toHaveAttribute('data-tab-id', `session:${address}`);
+      await expect(main(page).getByText(FIRST_REPLY).first(), `B's history in the new tab\n${mainSaid(page)}`).toBeVisible({ timeout: 60_000 });
+
+      await row.click({ button: 'right' });
+      await page.getByRole('menuitem', { name: 'Hide', exact: true }).click();
+      await expect(row, 'hidden: out of its project’s list').toHaveCount(0);
+      await expect(hidden).toHaveText('Hidden · 1');
+      await expect(hidden).toHaveAttribute('aria-expanded', 'false');
+      await expect(mainTabById(page, `session:${address}`), 'its tab stays, in front').toHaveAttribute('aria-selected', 'true');
+      expect(await tabIds(), 'no tab closed or opened').toEqual(opened);
+
+      await hidden.click();
+      await expect(row, 'under the Hidden row, indented').toHaveAttribute('data-indented', 'true');
+      await row.click({ button: 'right' });
+      await page.getByRole('menuitem', { name: 'Unhide', exact: true }).click();
+      await expect(hidden).toHaveCount(0);
+      await expect(row).toBeVisible();
+      await expect(row).not.toHaveAttribute('data-indented', 'true');
+    });
     await row.click();
     await expect(main(page).getByText(FIRST_REPLY).first(), `B's history in A's pane\n${mainSaid(page)}`).toBeVisible({ timeout: 60_000 });
 
