@@ -231,8 +231,10 @@ describe('a history read through an older host’s transcript backfill', () => {
   // The tasks probe's transcript as build F's backfill (`f1852de3a`, backfill.ts:320-323) mapped it, recorded:
   // `fixtures/uxwave/u3-tasks-r1.base-backfill.json` (no task.started; each end a task.notification alone)
   const baseBackfill = JSON.parse(readFileSync(join(FIXTURE_DIR, 'uxwave', 'u3-tasks-r1.base-backfill.json'), 'utf8')) as SessionEvent[];
-  // the background commands' and monitors' tasks, in the order they end; the agents' ends are their groups'
-  const TASKS = ['bky1j6v31', 'bobq8duq2', 'bmo4g9r2h', 'bzhlugr58', 'bfa5697eq', 'b42ylgnxq', 'b7yxry0k8', 'b6qw9e9zq'];
+  // the background tasks whose ends draw a line, in the order they end: the commands and monitors, and the background
+  // agent's second end, told under another tool use than its call's (no group claims it; this branch's reader draws
+  // "Agent \"uxw agent\" finished" for it); the agents' ends told under their calls are their groups'
+  const TASKS = ['bky1j6v31', 'bobq8duq2', 'bmo4g9r2h', 'a91c8f61a920a8733', 'bzhlugr58', 'bfa5697eq', 'b42ylgnxq', 'b7yxry0k8', 'b6qw9e9zq'];
   const STALL = 'b6qw9e9zq';
   const noticesOf = (rows: Row[], taskId: string) => rows.filter((row) => row.kind === 'notice' && row.taskId === taskId);
 
