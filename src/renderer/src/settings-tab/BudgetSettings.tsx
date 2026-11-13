@@ -1,5 +1,5 @@
-// Settings › Engine's memory budget rows (C12 execution document, Interfaces "Settings, version 4" and "Surfaces of the
-// budget"; charter §4.4 as amended by D1): the budget in GB with one decimal (stored in MiB; empty is the default, 25%
+// Settings › Supervisor's memory budget rows (Engine's until U11a M9; C12 execution document, Interfaces "Settings,
+// version 4" and "Surfaces of the budget"; charter §4.4 as amended by D1): the budget in GB with one decimal (stored in MiB; empty is the default, 25%
 // of physical memory), and the MCP servers whose state dies with their process, by name as system/init reports them.
 // Each writes its one field through `settings.set`; main pushes the policy to the engine host. W7: a switch above them
 // (settings version 7, on by default); off, the two rows hide and no session is released for memory.
@@ -27,7 +27,7 @@ export const gbOfMib = (mib: number): string => (mib / 1024).toFixed(1);
 export function BudgetSwitch({ settings }: { settings: Settings }) {
   const { enabled } = settings.engine.memoryBudget;
   return (
-    <Setting label={BUDGET_SETTINGS.enabled} note={enabled ? undefined : BUDGET_SETTINGS.offNote}>
+    <Setting row="supervisor.memoryBudget" state={enabled ? 'on' : 'off'}>
       <Switch checked={enabled} label={BUDGET_SETTINGS.enabledLabel} onChange={(next) => void writeSettings({ engine: { memoryBudget: { enabled: next } } })} />
       <span>{BUDGET_SETTINGS.enabledLabel}</span>
     </Setting>
@@ -49,7 +49,7 @@ export function MemoryBudget({ settings }: { settings: Settings }) {
   // While the setting is the default, the host's limit is that default (main pushes it); once set, it is the setting.
   const fallback = saved === null && limitKiB !== null ? gb(limitKiB) : null;
   return (
-    <Setting label={BUDGET_SETTINGS.limit} note={saved === null ? BUDGET_SETTINGS.defaultNote(fallback) : BUDGET_SETTINGS.setNote}>
+    <Setting row="supervisor.limit" state={fallback === null ? 'unsized' : 'sized'} values={{ size: fallback }}>
       <input aria-label={BUDGET_SETTINGS.budget} inputMode="decimal" placeholder={fallback === null ? BUDGET_SETTINGS.placeholder : fallback.replace(' GB', '')} {...field} className={`${INPUT} max-w-[90px] tabular-nums`} />
       <span className="text-ui-sm text-fg-muted">GB</span>
       {saved !== null && (
@@ -83,7 +83,7 @@ export function StatefulServers({ settings }: { settings: Settings }) {
     void write([...names, name]).then((ok) => ok && setDraft(''));
   };
   return (
-    <Setting label={BUDGET_SETTINGS.stateful} note={BUDGET_SETTINGS.statefulNote}>
+    <Setting row="supervisor.stateful">
       {names.map((name) => (
         <Chip key={name}>
           <span className="font-mono">{name}</span>

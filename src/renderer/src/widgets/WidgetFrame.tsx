@@ -33,6 +33,10 @@ interface WidgetFrameBase {
   heading?: ReactNode;
   toolbar?: ReactNode;
   // P2-B end
+  // UX wave U11a (§C): a muted subtitle after the title, and one line of note under it with its tooltip (the Connectors
+  // dialog's "MCP servers" and the switch's reach). The dialog keeps the title alone as its name.
+  subtitle?: string;
+  note?: { text: string; tooltip: string };
 }
 
 // Embedded libraries belong to their page: no modal dismissal, session acquisition, or composer focus.
@@ -76,7 +80,7 @@ function dormantBody(appSessionId: AppSessionId, state: 'dormant' | 'starting' |
 // P2-A end
 
 export function WidgetFrame(props: WidgetFrameProps) {
-  const { title, command, state, error, readAt, children, size = 'utility', heading, toolbar } = props;
+  const { title, command, state, error, readAt, children, size = 'utility', heading, toolbar, subtitle, note } = props;
   const embedded = props.variant === 'embedded';
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -126,8 +130,19 @@ export function WidgetFrame(props: WidgetFrameProps) {
       }}
     >
       {/* P2-B start (2026-10-09): the library's head: title and heading at the left, the toolbar at the right */}
-      <header className={size === 'library' ? `flex min-h-9 items-center gap-3 border-b border-border px-2 pb-2 ${embedded ? 'flex-wrap' : ''}` : 'flex items-baseline justify-between gap-3 border-b border-border px-2 pb-2'}>
-        {!(embedded && size === 'library') && <h3 className="m-0 shrink-0 text-ui font-semibold">{title}</h3>}
+      <header className={size === 'library' ? `flex min-h-9 items-center gap-3 border-b border-border px-2 pb-2 ${embedded ? 'flex-wrap' : ''}` : `flex items-baseline justify-between gap-3 border-b border-border px-2 pb-2 ${note ? 'flex-wrap gap-y-1' : ''}`}>
+        {!(embedded && size === 'library') &&
+          (subtitle ? (
+            // U11a: the subtitle muted beside the title; the dialog's name stays the title (WidgetDialog's)
+            <div className="flex min-w-0 items-baseline gap-2">
+              <h3 className="m-0 shrink-0 text-ui font-semibold">{title}</h3>
+              <span data-widget-subtitle className="min-w-0 truncate text-ui-sm text-fg-muted">
+                {subtitle}
+              </span>
+            </div>
+          ) : (
+            <h3 className="m-0 shrink-0 text-ui font-semibold">{title}</h3>
+          ))}
         {size === 'library' && heading}
         <span className={size === 'library' ? `flex min-w-0 items-center gap-2 ${embedded ? 'max-w-full' : 'ml-auto'}` : 'flex items-baseline gap-2'}>
           {size === 'library' && toolbar}
@@ -141,6 +156,11 @@ export function WidgetFrame(props: WidgetFrameProps) {
             </>
           )}
         </span>
+        {note && (
+          <p data-widget-note title={note.tooltip} className="m-0 w-full text-ui-sm text-fg-muted [overflow-wrap:anywhere]">
+            {note.text}
+          </p>
+        )}
         {props.variant === 'embedded' && props.scope && <div className="ml-auto max-w-full shrink-0 @max-sm/customize:ml-0 @max-sm/customize:w-full">{props.scope}</div>}
       </header>
       {/* P2-B (2026-10-09): the library's body takes the remaining height; its panes scroll, and A's dormant line, drawn

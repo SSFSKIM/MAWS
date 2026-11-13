@@ -8,7 +8,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { ClientRef } from '@shared/ipc/client';
 import { endableClientRef } from '@shared/ipc/client';
 import type { LaneAState, PlaneMessage } from '@shared/ipc/schema/lane-a';
-import { FULL_CAPABILITIES, startFakeBridge, type FakeBridge } from '../../../test/support/fake-bridge';
+import { FULL_CAPABILITIES, startFakeBridge, type FakeBridge, type FakeReply } from '../../../test/support/fake-bridge';
 import { GitFixture } from '../../../test/support/git-fixture';
 import { createLaneADriver, registerLaneA, type LaneADriver, type LaneAView } from './driver';
 
@@ -548,8 +548,8 @@ describe('sends', () => {
 });
 
 describe('decisions', () => {
-  async function raised(raise: Parameters<FakeBridge['raise']>[0]) {
-    const b = await bridge();
+  async function raised(raise: Parameters<FakeBridge['raise']>[0], options: Partial<Parameters<typeof startFakeBridge>[0]> = {}) {
+    const b = await bridge(options);
     const h = harness();
     h.driver.observe({ appId: APP, engineSessionId: ENGINE, holder: terminal });
     await h.live();
@@ -600,10 +600,118 @@ describe('decisions', () => {
     expect(b.decisions[0]?.body).toEqual({ behavior: 'allow', updatedInput: { answers: { 'Which?': 'A' } }, by: 'maws', launch: 'launch-1' });
   });
 
+  // U1a §G: the bridge's dismissal of an asynchronous question (sminos 1.47.0), and what the driver makes of each answer
+  const asyncQ = { request: 'toolu_plugin_1', tool: 'mcp__sminos__AskUserQuestion', input: { questions: [{ question: 'Which?' }] }, async: true as const };
+  const DISMISSING = { ...FULL_CAPABILITIES, controls: { ...FULL_CAPABILITIES.controls, 'decide.dismiss': { available: true } } };
+  const dismiss = { kind: 'permission', decision: 'deny' } as const;
+
+  it('posts an asynchronous question’s dismissal by maws with the launch and no other key, where the bridge declares it', async () => {
+    const { b, h } = await raised(asyncQ, { capabilities: DISMISSING });
+    expect(await h.driver.answer(APP, 'toolu_plugin_1', dismiss)).toEqual({ outcome: 'delivered' });
+    expect(b.decisions).toEqual([{ request: 'toolu_plugin_1', body: { behavior: 'dismiss', by: 'maws', launch: 'launch-1' } }]);
+  });
+
+  it('refuses a dismissal the bridge does not declare before anything is posted', async () => {
+    const { b, h } = await raised(asyncQ);
+    expect(await h.driver.answer(APP, 'toolu_plugin_1', dismiss)).toEqual({ outcome: 'refused', code: 'unsupported', message: 'dismiss it in the terminal' });
+    expect(b.decisions).toEqual([]);
+  });
+
+  it('reads a dismissal an older bridge answers 400 as refused with its sentence: the question still waits, nothing is told', async () => {
+    const { b, h } = await raised(asyncQ, { capabilities: DISMISSING });
+    b.setStatus({ capabilities: FULL_CAPABILITIES }); // replaced by a bridge before 1.47.0; the driver still holds the newer status
+    const told: string[] = [];
+    h.driver.onAccepted((_appId, request) => void told.push(request));
+    expect(await h.driver.answer(APP, 'toolu_plugin_1', dismiss)).toEqual({ outcome: 'refused', code: 'bad-args', message: 'behavior is allow or deny' });
+    expect(h.state()?.pending.map((p) => p.request)).toEqual(['toolu_plugin_1']);
+    expect(told).toEqual([]);
+  });
+
+  it('reads a decision answered 404 as no longer pending, and 503 as unknown', async () => {
+    const { b, h } = await raised({ request: 'toolu_1', tool: 'Bash', input: {} });
+    b.answer('decision', () => ({ status: 404, body: { error: 'no request toolu_1 is pending in this session' } }));
+    expect(await h.driver.answer(APP, 'toolu_1', { kind: 'permission', decision: 'deny' })).toEqual({ outcome: 'not_pending', settled: null, message: 'no request toolu_1 is pending in this session' });
+    b.answer('decision', () => ({ status: 503, body: { error: 'the session is gone' } }));
+    expect(await h.driver.answer(APP, 'toolu_1', { kind: 'permission', decision: 'deny' })).toEqual({ outcome: 'unknown', why: 'gone' });
+  });
+
+  // Decision 8: a 409 that names no winner (the mod refused a relayed answer or dismissal) leaves the request pending at
+  // the bridge, so the driver reads the request again before it says anything; each course with the re-read held open
+  const reread = [
+    ['still pending: refused with the bridge’s sentence', { status: 200, body: { ...asyncQ, session: ENGINE } }, { outcome: 'refused', code: 'refused', message: 'the session refused the dismissal' }],
+    ['settled meanwhile: no longer pending, with its settlement', { status: 410, body: { error: 'settled', settled: { request: 'toolu_plugin_1', winner: 'terminal', outcome: 'withdrawn', by: 'terminal' } } },
+      { outcome: 'not_pending', settled: { request: 'toolu_plugin_1', winner: 'terminal', outcome: 'withdrawn', by: 'terminal' }, message: 'already answered: withdrawn by terminal' }],
+    ['unanswered: unknown', { drop: true }, { outcome: 'unknown', why: 'gone' }],
+  ] as const;
+  it.each(reread)('reads the request again after a bare 409 and says what it finds: %s', async (_course, reply, outcome) => {
+    const { b, h } = await raised(asyncQ, { capabilities: DISMISSING });
+    let release: (reply: FakeReply) => void = () => {};
+    const held = new Promise<FakeReply>((resolve) => (release = resolve));
+    b.answer('decision', () => {
+      b.answer('request', () => held); // the re-read, not the read before the decision
+      return { status: 409, body: { error: 'the session refused the dismissal' } };
+    });
+    let said = false;
+    const answered = h.driver.answer(APP, 'toolu_plugin_1', dismiss).finally(() => (said = true));
+    await expect.poll(() => b.requestReads).toEqual(['toolu_plugin_1', 'toolu_plugin_1']);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(said).toBe(false); // nothing is said while the re-read is out
+    release(reply as FakeReply);
+    expect(await answered).toEqual(outcome);
+    expect(b.decisions).toEqual([]);
+  });
+
+  it('reads a bare 409 again for every decision, a permission’s allow too', async () => {
+    const { b, h } = await raised({ request: 'toolu_1', tool: 'Bash', input: {} });
+    b.answer('decision', () => ({ status: 409, body: { error: 'the session could not take it' } }));
+    expect(await h.driver.answer(APP, 'toolu_1', { kind: 'permission', decision: 'allow', scope: 'once' })).toEqual({ outcome: 'refused', code: 'refused', message: 'the session could not take it' });
+    expect(b.requestReads).toEqual(['toolu_1', 'toolu_1']);
+  });
+
   it('reads a decision answered 504 as unknown: an async question’s answer may have gone to the mod', async () => {
     const { b, h } = await raised({ request: 'toolu_plugin_1', tool: 'mcp__sminos__AskUserQuestion', input: { questions: [{ question: 'Which?' }] }, async: true });
     b.answer('decision', () => ({ status: 504, body: { id: 'cmd-9', error: 'the session did not answer within 5000 ms' } }));
     expect(await h.driver.answer(APP, 'toolu_plugin_1', { kind: 'question', answers: { 'Which?': 'A' } })).toEqual({ outcome: 'unknown', why: 'timeout' });
+  });
+});
+
+// UC-1 (U1a's Interfaces §B, "One holder"): the bridge publishes nothing when it takes an answer, so the driver tells its
+// listeners (the lane A list) who heard the 200: its own answer, or this machine's endpoint through `laneA.accepted`.
+describe('an answer the bridge took', () => {
+  async function driving() {
+    const b = await bridge();
+    const h = harness();
+    h.driver.observe({ appId: APP, engineSessionId: ENGINE, holder: terminal });
+    await h.live();
+    await expect.poll(() => b.subscribers()).toBe(1);
+    b.raise({ request: 'toolu_1', tool: 'Bash', input: { command: 'echo made-up' } });
+    await expect.poll(() => h.state()?.pending.map((p) => p.request)).toEqual(['toolu_1']);
+    const told: Array<[AppSessionId, string]> = [];
+    h.driver.onAccepted((appId, request) => void told.push([appId, request]));
+    return { b, h, told };
+  }
+
+  it('is told once by the driver’s own delivered answer, and never by a refused, settled or unknown one', async () => {
+    const { b, h, told } = await driving();
+    b.answer('decision', () => ({ status: 409, body: { error: 'the terminal answered it; its settlement follows', winner: 'terminal', by: 'terminal' } }));
+    await h.driver.answer(APP, 'toolu_1', { kind: 'permission', decision: 'allow', scope: 'once' });
+    b.answer('decision', () => ({ status: 504, body: { error: 'the session did not answer within 5000 ms' } }));
+    await h.driver.answer(APP, 'toolu_1', { kind: 'permission', decision: 'allow', scope: 'once' });
+    await h.driver.answer(APP, 'toolu_1', { kind: 'permission', decision: 'deny_and_stop' });
+    expect(told).toEqual([]);
+    b.answer('decision', () => ({ status: 200, body: { accepted: true } }));
+    expect(await h.driver.answer(APP, 'toolu_1', { kind: 'permission', decision: 'allow', scope: 'once' })).toEqual({ outcome: 'delivered' });
+    expect(told).toEqual([[APP, 'toolu_1']]);
+  });
+
+  it('is told by laneA.accepted naming the engine session it drives, and by none naming another', async () => {
+    const { h, told } = await driving();
+    const handlers = new Map<string, (input: unknown, ctx: unknown) => unknown>();
+    registerLaneA(h.driver, ((name: string, handler: (input: unknown, ctx: unknown) => unknown) => void handlers.set(name, handler)) as never);
+    handlers.get('laneA.accepted')!({ session: 'e5b1c0de-0000-4000-8000-00000000ffff', request: 'toolu_1' }, {});
+    expect(told).toEqual([]);
+    handlers.get('laneA.accepted')!({ session: ENGINE, request: 'toolu_1' }, {});
+    expect(told).toEqual([[APP, 'toolu_1']]);
   });
 });
 

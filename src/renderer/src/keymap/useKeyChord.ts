@@ -13,6 +13,7 @@ export interface ChordBinding {
   run(arg: number | null): void;
   release?(reason: HoldRelease): void; // E9: a hold action's end (the dispatcher's "Hold semantics")
   within: RefObject<HTMLElement | null> | null; // required for scope 'pane' and 'composer'; ignored for scope 'app'
+  fresh?: boolean; // UX wave U1a (§D): run on a first press only; a key repeat is taken and runs nothing
   order: number; // registration order: of two bindings on the same element the later one wins
 }
 
@@ -38,15 +39,15 @@ export const bindingsOf = (id: ActionId): ChordBinding[] => [...bindings].filter
 export function useKeyChord(
   id: ActionId,
   handler: (arg: number | null) => void,
-  opts: { within?: RefObject<HTMLElement | null>; enabled?: boolean; onRelease?(reason: HoldRelease): void } = {},
+  opts: { within?: RefObject<HTMLElement | null>; enabled?: boolean; onRelease?(reason: HoldRelease): void; fresh?: boolean } = {},
 ): void {
-  const { within = null, enabled = true, onRelease } = opts;
+  const { within = null, enabled = true, onRelease, fresh = false } = opts;
   const onKey = useEffectEvent(handler);
   const onHoldEnd = useEffectEvent((reason: HoldRelease) => onRelease?.(reason));
   // Bound in the commit that mounts the element (debt wave 5): a passive effect runs after paint, and under load late
   // enough that a key pressed at a card that is already on screen found no binding.
   useLayoutEffect(() => {
     if (!enabled) return;
-    return bindChord({ id, within, run: (arg) => onKey(arg), release: (reason) => onHoldEnd(reason) });
-  }, [id, within, enabled]);
+    return bindChord({ id, within, fresh, run: (arg) => onKey(arg), release: (reason) => onHoldEnd(reason) });
+  }, [id, within, enabled, fresh]);
 }

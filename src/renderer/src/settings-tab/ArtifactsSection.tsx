@@ -24,10 +24,10 @@ export function ArtifactsSection({ artifacts }: { artifacts: ArtifactsSettings }
   const systems = useLibraryList({ kind: 'design_system' });
   const spaces = useLibrarySpaces();
   const rows = [...(systems.value?.rows ?? [])].sort((a, b) => a.title.localeCompare(b.title, 'en') || a.id.localeCompare(b.id));
-  const note = systems.status === 'error' && systems.value === undefined ? ARTIFACTS.readFailed(systems.error ?? '') : ARTIFACTS.defaultSystemNote;
+  const readFailed = systems.status === 'error' && systems.value === undefined;
   return (
     <>
-      <Setting label={ARTIFACTS.exportAuthorName} note={ARTIFACTS.exportAuthorNote(resolveExportHumanName(null, accountName))}>
+      <Setting row="artifacts.exportAuthor" values={{ name: resolveExportHumanName(null, accountName) }}>
         <input {...authorField} aria-label={ARTIFACTS.exportAuthorName} placeholder={resolveExportHumanName(null, accountName)} maxLength={200} className={`${INPUT} max-w-[260px]`} />
         {savedName === null && accountName && (
           <button type="button" className={TEXT_ACTION} onClick={() => void writeSettings({ artifacts: { exportAuthorName: accountName } })}>
@@ -35,7 +35,7 @@ export function ArtifactsSection({ artifacts }: { artifacts: ArtifactsSettings }
           </button>
         )}
       </Setting>
-      <Setting label={ARTIFACTS.defaultSystem} note={note}>
+      <Setting row="artifacts.defaultSystem" state={readFailed ? 'readFailed' : 'default'} values={{ why: systems.error ?? '' }}>
         <SystemSelect
           label={ARTIFACTS.defaultSystem}
           value={artifacts.defaultDesignSystem}
@@ -46,7 +46,7 @@ export function ArtifactsSection({ artifacts }: { artifacts: ArtifactsSettings }
           onChange={(id) => void writeSettings({ artifacts: { defaultDesignSystem: id } })}
         />
       </Setting>
-      <Setting label={ARTIFACTS.bySpace} note={(spaces.value?.length ?? 0) > 0 ? ARTIFACTS.bySpaceNote : ARTIFACTS.noSpaces}>
+      <Setting row="artifacts.bySpace" state={(spaces.value?.length ?? 0) > 0 ? 'spaces' : 'none'}>
         {(spaces.value ?? []).length > 0 && (
           <div className="flex w-full flex-col gap-1.5">
             {[...spaces.value!].sort((a, b) => a.name.localeCompare(b.name, 'en')).map((space) => (

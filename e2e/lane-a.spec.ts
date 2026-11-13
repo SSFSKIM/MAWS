@@ -14,9 +14,9 @@ import { FULL_CAPABILITIES, startFakeBridge, type FakeBridge, type FakeBridgeOpt
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
 import { launchMaws, test, type MawsLaunch } from './support/launch';
-import { assistantRecord, backgroundAgentRecords, backgroundAgentSidecars, backgroundBashRecords, CATALOG, editTurnRecords, taskNotificationRecord, terminalSession, turnEndRecords, userRecord, type TerminalSession } from './support/lane-a';
+import { assistantRecord, backgroundAgentRecords, backgroundAgentSidecars, backgroundBashRecords, CATALOG, editTurnRecords, taskNotificationRecord, terminalSession, turnEndRecords, userRecord, type BackgroundAgent, type TerminalSession } from './support/lane-a';
 import { addressed } from './support/address';
-import { openSurface } from './support/shell';
+import { openSurface, sessionCard, showSessionCards, surface } from './support/shell';
 import { sidebarOf, sidebarRow } from './support/sidebar';
 
 function invoke<N extends CommandName>(page: Page, name: N, input: CommandInput<N>): Promise<CommandResult<N>> {
@@ -256,8 +256,9 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     const c = await begin((sid, cwd, after) => backgroundBashRecords(sid, cwd, after, shellJob));
     const { page } = c;
     const { bridge } = await drive(c);
-    await openSurface(page, 'Background work');
-    const shell = page.locator('[data-shell="bsleep01"]');
+    await openSurface(page, 'Background tasks');
+    const tool = surface(page, 'background');
+    const shell = tool.locator('[data-shell="bsleep01"]');
     await expect(shell, 'derived by main from the transcript, carried by the watch').toContainText('Wait ten minutes · running', { timeout: 15_000 });
     await expect(shell.getByRole('button', { name: 'Output' }), 'a local job has no output tail').toHaveCount(0);
     await shell.getByRole('button', { name: 'Stop' }).click();
@@ -265,7 +266,13 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect(shell.getByRole('button', { name: 'stopping…' })).toBeVisible();
     // the engine's notification that it ended, as the transcript records it
     await c.store.appendLines(c.transcript, [JSON.stringify(taskNotificationRecord(c.sid, c.repo.root, randomUUID(), { taskId: 'bsleep01', status: 'killed', summary: 'Background command "Wait ten minutes" was stopped', at: '2026-10-28T10:00:09.000Z' }))]);
-    await expect(shell).toContainText('Wait ten minutes · stopped', { timeout: 10_000 });
+    // UX wave U8b (M7): an ended task leaves Running for Done, which is folded at first and counts it by its kind
+    await expect(tool.locator('section[data-section="running"]'), 'nothing runs').toHaveCount(0, { timeout: 10_000 });
+    await expect(tool.getByText('Nothing running', { exact: true })).toBeVisible();
+    const done = tool.locator('section[data-section="done"]');
+    await expect(done).toHaveAttribute('aria-label', 'Done 1 · 1 shell');
+    await done.getByRole('heading').getByRole('button').click();
+    await expect(shell).toContainText('Wait ten minutes · stopped');
     await expect(shell.getByRole('button')).toHaveCount(0);
     expect(c.maws.consoleErrors()).toEqual([]);
   });
@@ -471,9 +478,14 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect(page.getByText('Because you asked for a short one.')).toBeVisible({ timeout: 10_000 });
 
     // the agents tool: the subagent the transcript started (its sidecars on disk), told through the drill-in's box, then
-    // stopped through its Stop (the jobs list's stop has its own scene)
+    // stopped through its Stop (the jobs list's stop has its own scene). UX wave U8b (M5 decision 5): nothing tells this
+    // Mac's graph which of a terminal session's agents run, so the panel lists it under On disk, folded at first.
     await openSurface(page, 'Subagents');
-    await page.locator('[data-agent-row]').filter({ hasText: agent.description }).click();
+    const agents = surface(page, 'subagents');
+    const onDisk = agents.locator('section[data-section="disk"]');
+    const unfold = onDisk.getByRole('heading').getByRole('button');
+    if ((await unfold.getAttribute('aria-expanded')) !== 'true') await unfold.click();
+    await agents.locator(`[data-agent-row="${agent.agentId}"]`).click();
     const relay = page.locator('[data-region="panel"] [data-key-sink="composer"]'); // the drill-in's box, not the pane's composer
     await relay.getByRole('textbox', { name: /^Message / }).fill('wrap up');
     await relay.getByRole('button', { name: 'Send', exact: true }).click();
@@ -551,6 +563,99 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     expect(c.maws.consoleErrors()).toEqual([]);
   });
 
+  // UX wave U8b (A2; M5 decision 5, M8): the card column of a terminal session this Mac drives. Its shells are known from
+  // its transcript (main derives its jobs, its watch carries them), so a running one gives the Background tasks card; its
+  // agents' states have no source here yet, so there is no Subagents card while the transcript's own row says one works.
+  // The card for running work is the column's last, so its going moves no card above it.
+  test('the card column of a terminal session this Mac drives: the Background tasks card while its shell runs and no Subagents card while its transcript says an agent works; the shell ending takes the card away and moves no card above it', async () => {
+    const agent = { agentId: 'a1e2e000000000003', description: 'Index the notes', prompt: 'Index notes.md.', at: '2026-10-28T10:00:04.000Z' };
+    const job = { taskId: 'bwatch03', command: 'sleep 600', description: 'Watch the build', at: '2026-10-28T10:00:03.000Z' };
+    let last = '';
+    const c = await begin((sid, cwd, after) => {
+      const ask = randomUUID();
+      const shell = backgroundBashRecords(sid, cwd, ask, job);
+      const turn = backgroundAgentRecords(sid, cwd, shell.at(-1)!.uuid as string, agent);
+      last = turn.at(-1)!.uuid as string;
+      return [userRecord(sid, cwd, ask, after, 'Watch the build and index the notes.', '2026-10-28T10:00:03.000Z'), ...shell, ...turn, ...turnEndRecords(sid, cwd, last, '2026-10-28T10:00:05.000Z')];
+    });
+    await backgroundAgentSidecars(c.store, c.sid, c.repo.root, agent);
+    const { page } = c;
+    await drive(c);
+    const row = main(page).locator('.transcript-subagent', { hasText: agent.description });
+    await expect(row, 'the transcript: the agent works under the ended turn').toBeVisible({ timeout: 15_000 });
+
+    await showSessionCards(page);
+    const background = sessionCard(page, 'Background tasks');
+    await expect(background.locator(`[data-task-id="${job.taskId}"]`), 'the shell, as the session’s watch carries it').toContainText(job.description, { timeout: 15_000 });
+    await expect(background.getByRole('button', { name: 'Background tasks 1 running', exact: true })).toBeVisible();
+    await expect(sessionCard(page, 'Subagents'), 'no Subagents card on this route').toHaveCount(0);
+    const above = sessionCard(page, 'Connectors');
+    // Read once two reads a moment apart agree: the Environment card's own reads (git's, the pull request's) may still
+    // land and grow it (as e2e/agent-tools.spec.ts's `settledBoxes` waits for), which is no move the card's leaving made.
+    let lastBox = '';
+    await expect
+      .poll(async () => {
+        const now = JSON.stringify(await above.boundingBox());
+        const same = now === lastBox;
+        lastBox = now;
+        return same;
+      }, { intervals: [250], message: 'the cards above settle' })
+      .toBe(true);
+    const before = await above.boundingBox();
+    expect(before, 'the card above it is drawn').not.toBeNull();
+
+    await c.store.appendLines(c.transcript, [JSON.stringify(taskNotificationRecord(c.sid, c.repo.root, last, { taskId: job.taskId, status: 'completed', summary: 'Background command "Watch the build" completed (exit code 0)', at: '2026-10-28T10:00:09.000Z' }))]);
+    await expect(background, 'its last running task ended: the card leaves').toHaveCount(0, { timeout: 10_000 });
+    expect(await above.boundingBox(), 'and the card above it has not moved').toEqual(before);
+    await expect(sessionCard(page, 'Subagents')).toHaveCount(0);
+    await expect(row, 'the agent still works in the transcript').toBeVisible();
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
+
+  // UX wave U8b (A7, M6; X-168): a terminal session's engine runs an agent in the background, so its turn ends while the
+  // agent works, and the transcript never says the agent ended when the terminal closes. The terminal going (its registry
+  // record and its bridge gone) ends the agents it left running, so their row folds with the turn. A resume in a terminal
+  // (its registry record again: what tells this Mac a process holds the session; no bridge is needed for that) that
+  // starts another agent and then goes too ends that one as well.
+  test('X-168: an agent started in the background whose terminal goes: its row folds with the ended turn; resumed in a terminal, the next agent’s row stays in view, then folds once that terminal goes too', async () => {
+    const first: BackgroundAgent = { agentId: 'a1e2e000000000004', description: 'Sort the notes', prompt: 'Sort notes.md.', at: '2026-10-28T10:00:03.000Z' };
+    const second: BackgroundAgent = { agentId: 'a1e2e000000000005', description: 'Tidy the notes', prompt: 'Tidy notes.md.', at: '2026-10-28T10:01:03.000Z' };
+    let last = '';
+    const c = await begin((sid, cwd, after) => {
+      const ask = randomUUID();
+      const turn = backgroundAgentRecords(sid, cwd, ask, first);
+      const end = turnEndRecords(sid, cwd, turn.at(-1)!.uuid as string, '2026-10-28T10:00:04.000Z');
+      last = end.at(-1)!.uuid as string;
+      return [userRecord(sid, cwd, ask, after, 'Sort them in the background.', '2026-10-28T10:00:03.000Z'), ...turn, ...end];
+    });
+    await backgroundAgentSidecars(c.store, c.sid, c.repo.root, first);
+    const { page } = c;
+    const holder = async () => value(await invoke(page, 'session.get', { appSessionId: c.appId }))?.holder.kind;
+    const rowOf = (agent: BackgroundAgent) => main(page).locator('.transcript-subagent', { hasText: agent.description });
+    const terminal = await drive(c);
+    await expect(rowOf(first), 'the turn ended while its agent works: the call stays in view').toContainText(`${first.description} started working`, { timeout: 15_000 });
+
+    await terminal.close();
+    c.terminal = null;
+    await expect.poll(holder, { timeout: 10_000 }).toBe('none');
+    await expect(rowOf(first), 'its terminal went: the agent ended with it, and its row folds with the turn').toHaveCount(0, { timeout: 15_000 });
+
+    // resumed in a terminal, which starts another agent in the background and ends its turn
+    await drive(c, { bridged: false, open: false });
+    const ask = randomUUID();
+    const turn = backgroundAgentRecords(c.sid, c.repo.root, ask, second);
+    await backgroundAgentSidecars(c.store, c.sid, c.repo.root, second);
+    await c.store.appendLines(c.transcript, [userRecord(c.sid, c.repo.root, ask, last, 'Now tidy them in the background.', '2026-10-28T10:01:03.000Z'), ...turn, ...turnEndRecords(c.sid, c.repo.root, turn.at(-1)!.uuid as string, '2026-10-28T10:01:04.000Z')].map((r) => JSON.stringify(r)));
+    await expect(rowOf(second), 'the resumed session’s agent works: its call stays in view').toContainText(`${second.description} started working`, { timeout: 15_000 });
+    await expect(rowOf(first), 'the first stays ended').toHaveCount(0);
+
+    await c.terminal!.close();
+    c.terminal = null;
+    await expect.poll(holder, { timeout: 10_000 }).toBe('none');
+    await expect(rowOf(second), 'that terminal went too: the second agent ended with it').toHaveCount(0, { timeout: 15_000 });
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
+
   test('a permission the bridge raised: Needs you and the pane within 1 s, the hover preview, the Overview card and the badge; allowed here, then answered in the terminal, then a late answer reading who won', async () => {
     test.setTimeout(120_000);
     const c = await begin();
@@ -559,7 +664,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     const sidebar = sidebarOf(page);
 
     bridge.raise({ request: 'toolu_allow', tool: 'Bash', input: { command: 'ls -la' } });
-    await expect(card(page).getByRole('button', { name: 'Allow', exact: true }), 'docked in the pane within 1 s').toBeVisible({ timeout: 1_000 });
+    await expect(card(page).getByRole('button', { name: 'Allow once', exact: true }), 'docked in the pane within 1 s').toBeVisible({ timeout: 1_000 });
     await expect(sidebar.getByRole('heading', { name: 'Needs you · 1' }), 'in Needs you within 1 s').toBeVisible({ timeout: 1_000 });
     await expect(sidebar.getByRole('list', { name: 'Needs you' }).getByRole('button')).toHaveAccessibleName(/ · Approval needed$/);
     await expect(card(page), 'the terminal asks it too (Q3)').toContainText('Also asked in the terminal: the first answer wins');
@@ -578,30 +683,35 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await page.mouse.move(700, 20);
     await maws.app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('tab.overview')?.click());
     const overview = main(page).getByRole('dialog', { name: 'Overview' });
-    await expect(overview.locator(`[data-card="${await addressed(page, c.appId)}"]`).getByRole('radio', { name: 'Allow once' }), 'the card answers it through the port').toBeVisible({ timeout: 10_000 });
+    await expect(overview.locator(`[data-card="${await addressed(page, c.appId)}"]`).getByRole('button', { name: 'Allow once', exact: true }), 'the card answers it through the port').toBeVisible({ timeout: 10_000 });
     await overview.getByRole('button', { name: 'Close Overview' }).click();
     await expect(overview).toHaveCount(0);
 
-    // allowed in MAWS: the fake takes Interfaces §D's body; its settle takes the item away within 1 s
-    await card(page).getByRole('button', { name: 'Allow', exact: true }).click();
+    // allowed in MAWS: the fake takes Interfaces §D's body. U1a §B: the request stops waiting when the bridge takes the
+    // answer (its 200), before its `settled`: the card, Needs you and the badge go then, and the settle changes nothing
+    await card(page).getByRole('button', { name: 'Allow once', exact: true }).click();
     await expect.poll(() => decided(bridge)).toEqual([{ request: 'toolu_allow', behavior: 'allow', ...AS_MAWS }]);
-    bridge.settle('toolu_allow', 'web', 'allow');
-    await expect(card(page)).toHaveCount(0, { timeout: 1_000 });
+    await expect(card(page), 'gone at the 200, before the settle').toHaveCount(0, { timeout: 1_000 });
     await expect(sidebar.getByRole('heading', { name: /^Needs you/ })).toHaveCount(0, { timeout: 1_000 });
     await expect.poll(() => badge(maws)).toBe('');
+    bridge.settle('toolu_allow', 'web', 'allow');
+    await page.waitForTimeout(300);
+    await expect(card(page), 'the settle changes nothing').toHaveCount(0);
+    await expect(sidebar.getByRole('heading', { name: /^Needs you/ })).toHaveCount(0);
+    expect(await badge(maws)).toBe('');
 
     // answered in the terminal first: the card settles in place as such, stays a moment, then leaves
     bridge.raise({ request: 'toolu_term', tool: 'Bash', input: { command: 'git status' } });
-    await expect(card(page).getByRole('button', { name: 'Allow', exact: true })).toBeVisible({ timeout: 1_000 });
+    await expect(card(page).getByRole('button', { name: 'Allow once', exact: true })).toBeVisible({ timeout: 1_000 });
     bridge.settle('toolu_term', 'terminal', 'allow');
     await expect(card(page).getByRole('status')).toHaveText('Answered in the terminal: Allowed', { timeout: 2_000 });
-    await expect(card(page).getByRole('button', { name: 'Allow', exact: true })).toHaveCount(0);
+    await expect(card(page).getByRole('button', { name: 'Allow once', exact: true })).toHaveCount(0);
     await expect(card(page)).toHaveCount(0, { timeout: 5_000 });
 
     // an answer the bridge refuses because another won reads as that settlement, never an error
     bridge.raise({ request: 'toolu_late', tool: 'Bash', input: { command: 'rm notes.md' } });
     bridge.answer('decision:toolu_late', () => ({ status: 409, body: { error: 'already settled', settled: { request: 'toolu_late', winner: 'terminal', outcome: 'deny', by: 'terminal' } } }));
-    await card(page).getByRole('button', { name: 'Allow', exact: true }).click();
+    await card(page).getByRole('button', { name: 'Allow once', exact: true }).click();
     await expect(card(page).getByRole('status')).toHaveText('Answered in the terminal: Denied', { timeout: 5_000 });
     await expect(card(page).getByRole('alert')).toHaveCount(0);
     expect(decided(bridge).map((d) => d.request), 'the refused one taken by no one').toEqual(['toolu_allow']);
@@ -617,17 +727,25 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     const { bridge } = await drive(c);
     const one = { type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm test' }], behavior: 'allow', destination: 'localSettings' };
 
+    // U1a §D: a localSettings suggestion puts "Always allow in <project>" third, and the session scope in the menu on Allow once
     bridge.raise({ request: 'toolu_scoped', tool: 'Bash', input: { command: 'npm test' }, suggestions: [one] });
-    await card(page).getByRole('radio', { name: 'Allow for this session' }).click();
-    await card(page).getByRole('button', { name: 'Allow', exact: true }).click();
+    await expect(card(page).getByRole('button', { name: /^Always allow in / })).toBeVisible({ timeout: 5_000 });
+    await card(page).getByRole('button', { name: 'More allow options' }).click();
+    await page.getByRole('menuitem', { name: 'Allow for this session' }).click();
     await expect.poll(() => decided(bridge)).toEqual([{ request: 'toolu_scoped', behavior: 'allow', updatedPermissions: [{ ...one, destination: 'session' }], ...AS_MAWS }]);
     await settledHere(page, bridge, 'toolu_scoped');
 
     // two suggestions: no scope; deny-and-interrupt closed with its reason; an edited input refused before the bridge
     bridge.raise({ request: 'toolu_two', tool: 'Bash', input: { command: 'npm test' }, suggestions: [one, { ...one, destination: 'session' }] });
-    const session = card(page).getByRole('radio', { name: 'Allow for this session' });
-    await expect(session).toBeDisabled({ timeout: 5_000 });
-    await expect(session).toHaveAttribute('title', "A scoped allow takes the request's one suggestion; this request offers 2");
+    const offers2 = "A scoped allow takes the request's one suggestion; this request offers 2";
+    const always = card(page).getByRole('button', { name: /^Always allow in / });
+    await expect(always).toBeDisabled({ timeout: 5_000 });
+    await expect(always).toHaveAttribute('title', offers2);
+    await card(page).getByRole('button', { name: 'More allow options' }).click();
+    const session = page.getByRole('menuitem', { name: 'Allow for this session' });
+    await expect(session).toHaveAttribute('aria-disabled', 'true');
+    await expect(session).toHaveAttribute('title', offers2);
+    await page.keyboard.press('Escape');
     await card(page).getByRole('button', { name: 'More deny options' }).click();
     const stop = page.getByRole('menuitem', { name: 'Deny and stop the turn' });
     await expect(stop).toHaveAttribute('aria-disabled', 'true');
@@ -641,10 +759,10 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
 
     // a background subagent's request: answerable in its window, the terminal's once it closes
     bridge.raise({ request: 'toolu_bg', tool: 'Bash', input: { command: 'make' }, agentId: 'a1e2e000000000002', deadline: Date.now() + 4_000 });
-    const allow = card(page).getByRole('button', { name: 'Allow', exact: true });
+    const allow = card(page).getByRole('button', { name: 'Allow once', exact: true });
     await expect(allow).toBeEnabled({ timeout: 1_000 });
     await expect(card(page).getByText('Answer this in the terminal')).toBeVisible({ timeout: 8_000 });
-    for (const name of ['Allow', 'Deny']) {
+    for (const name of ['Deny', 'Allow for this session', 'Allow once']) {
       const button = card(page).getByRole('button', { name, exact: true });
       await expect(button).toBeDisabled();
       await expect(button).toHaveAttribute('title', 'Answer this in the terminal');
@@ -711,4 +829,41 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     }
     expect(c.maws.consoleErrors()).toEqual([]);
   });
+
+  // U1a (A5, A18; §G): a terminal session's asynchronous question does not stop the agent, so its row reads "Question
+  // waiting" in the calm tone, and Esc ends nothing. Its form's Dismiss sends the bridge's dismissal where the bridge
+  // declares `decide.dismiss` (sminos 1.47.0), and is closed with its reason where it does not (the plugin as installed).
+  for (const declared of [false, true]) {
+    test(`an asynchronous question reads "Question waiting"; its Dismiss ${declared ? 'sends the bridge’s dismissal and the card leaves at the 200' : 'is closed: dismiss it in the terminal'}`, async () => {
+      test.setTimeout(120_000);
+      const c = await begin();
+      const { page } = c;
+      const controls = { ...FULL_CAPABILITIES.controls, ...(declared && { 'decide.dismiss': { available: true } }) };
+      const { bridge } = await drive(c, { bridge: { capabilities: { ...FULL_CAPABILITIES, controls } } });
+      bridge.raise({ request: 'toolu_async', tool: 'mcp__plugin_sminos_ask__ask', async: true, input: { questions: [{ question: 'Ship it today?', header: 'Ship it', options: [{ label: 'Yes' }, { label: 'Not yet' }], multiSelect: false }] } });
+      const dismiss = card(page).getByRole('button', { name: 'Dismiss', exact: true }); // the docked card's own: every question card has one
+      await expect(dismiss).toBeVisible({ timeout: 5_000 });
+      const row = await sidebarRow(page, { appSessionId: c.appId });
+      await expect(row.getByRole('img', { name: 'Question waiting' }), 'the calm tone on its row').toBeVisible();
+      await expect(sidebarOf(page).getByRole('list', { name: 'Needs you' }).getByRole('button')).toHaveAccessibleName(/ · Question waiting$/);
+
+      // Esc on the docked form sends nothing (O-22)
+      await main(page).locator('[data-docked-frame]').focus();
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
+      expect(decided(bridge), 'Esc sends nothing').toEqual([]);
+
+      if (!declared) {
+        await expect(dismiss).toBeDisabled();
+        await expect(dismiss).toHaveAttribute('title', 'Dismiss it in the terminal');
+      } else {
+        await expect(dismiss).toBeEnabled();
+        await dismiss.click();
+        await expect.poll(() => decided(bridge)).toEqual([{ request: 'toolu_async', behavior: 'dismiss', ...AS_MAWS }]);
+        await expect(card(page), 'the card leaves at the 200, before any settle').toHaveCount(0, { timeout: 2_000 });
+        await expect(row.getByRole('img', { name: 'Question waiting' }), 'the row no longer counts the question').toHaveCount(0);
+      }
+      expect(c.maws.consoleErrors()).toEqual([]);
+    });
+  }
 });

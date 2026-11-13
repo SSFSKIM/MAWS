@@ -44,7 +44,7 @@ export function BrowserImport() {
   };
   return (
     <>
-      <Setting label={BROWSER.chromeProfile} note={running ? undefined : BROWSER.importNote}>
+      <Setting row="browser.chromeProfile" state={running ? 'running' : 'default'}>
         {running ? (
           <>
             <span className="text-fg-muted">{BROWSER.importing(running.progress ? IMPORT_COPY.phase(running.progress.phase) : IMPORT_COPY.starting)}</span>
@@ -70,7 +70,8 @@ export function BrowserImport() {
       </Setting>
       {records.map((record) => (
         <section key={record.profileDir} aria-label={record.name} data-imported-profile={record.profileDir} className="border-t border-border pt-1">
-          <Setting label={record.name} note={summaryWords(record.report)}>
+          {/* U11a M9: a row made at run time, drawn under the profile's own name from its declaration */}
+          <Setting row="browser.importedProfile" label={record.name} values={{ summary: summaryWords(record.report) }}>
             <span className="text-fg-muted">{BROWSER.importedOn(importDate(record.importedAt))}</span>
             <button type="button" className={TEXT_ACTION} disabled={running !== null} onClick={() => open(() => showReport(record.report))}>
               {BROWSER.showReport}
@@ -122,7 +123,7 @@ function ExtensionToggle({ profileDir, extension }: { profileDir: string; extens
     setPending(null);
   };
   return (
-    <Setting label={extension.name} note={extension.wallet ? BROWSER.walletOff : undefined}>
+    <Setting row="browser.extension" state={extension.wallet ? 'wallet' : 'default'} label={extension.name}>
       <span className="text-fg-muted">{extension.version}</span>
       {pending === null ? (
         <StatusChip extension={extension} />

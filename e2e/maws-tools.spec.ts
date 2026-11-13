@@ -19,7 +19,7 @@
 // Runs under `pnpm e2e:tools` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list). MAWS_E1_SHOTS=1 also
 // writes the replay's screenshots in both themes under docs/doperpowers/evidence/p1-e1/ (`e1-replay-<surface>-<theme>`).
 import { addressed, localRef } from './support/address';
-import { surface, mainTabById } from './support/shell';
+import { sideColumn, surface, mainTabById } from './support/shell';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator } from '@playwright/test';
@@ -356,9 +356,8 @@ test('an ask from a session not shown never switches the main view; its sheet op
     await expect.poll(async () => ofKind(await s.events(asking), 'permission.requested').length, { timeout: 30_000 }).toBe(1);
     await s.maws.app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('tab.overview')?.click());
     const overview = s.page.locator('[data-region="main"]').getByRole('dialog', { name: 'Overview' });
-    const approval = overview.getByRole('article').filter({ has: s.page.getByRole('radio', { name: 'Allow once' }) });
-    await approval.getByRole('radio', { name: 'Allow once' }).click();
-    await approval.getByRole('button', { name: 'Allow', exact: true }).click();
+    const approval = overview.getByRole('article').filter({ has: s.page.getByRole('button', { name: 'Allow once', exact: true }) });
+    await approval.getByRole('button', { name: 'Allow once', exact: true }).click();
     await expect.poll(async () => ofKind(await s.events(asking), 'maws.ask.opened').length, { timeout: 30_000 }).toBe(1);
     await expect(overview.getByRole('article').filter({ hasText: 'Questions from the agent' })).toHaveCount(1);
     await s.page.keyboard.press('Escape');
@@ -384,6 +383,44 @@ test('an ask from a session not shown never switches the main view; its sheet op
     await expect(capsuleOf(s)).toHaveAttribute('data-ask-state', 'answered');
     await expect(questionRow).toHaveCount(0);
     await idle(s, asking);
+  });
+});
+
+// ---- UX wave U1a: the ask form's Dismiss, and a double-click that completes it (§E) ---------------------------------
+
+// One single-choice question in place of the blocking recording's five (invented words). The replay matches the ask's
+// result by its id alone, so whatever the form answers is written; the result read back is the form's answer.
+const ONE_QUESTION_ASK = { questions: [{ id: 'q1', header: 'Release', question: 'Ship the release notes today?', modality: 'choice', options: [{ label: 'Yes' }, { label: 'Not yet' }] }] };
+
+test('the Question sheet’s Dismiss sends one answer with every question skipped', async () => {
+  await scene({ titles: ['U1a: ask dismissed'] }, async (s) => {
+    const [id] = s.ids;
+    await show(s, id);
+    await replay(s, id, askFixture(s.scratch.root, ASK_BLOCKING, ONE_QUESTION_ASK));
+    await allowNext(s, id); // mcp__maws__ask
+    const [opened] = ofKind(await s.events(id), 'maws.ask.opened');
+    const sheet = sheetOf(s);
+    await expect(sheet).toHaveAttribute('data-ask-id', opened!.askId);
+    await clearToasts(s.page);
+    await sheet.getByRole('button', { name: 'Dismiss', exact: true }).click(); // the sheet's own: every question card has one
+    expect(await answersWritten(s, id, opened!.requestId)).toEqual([{ id: 'q1', question: 'Ship the release notes today?', status: 'skipped' }]);
+    await expect(capsuleOf(s)).toHaveAttribute('data-ask-state', 'answered');
+  });
+});
+
+test('a double-click on a single-choice option that completes the Question sheet submits it', async () => {
+  await scene({ titles: ['U1a: ask by double-click'] }, async (s) => {
+    const [id] = s.ids;
+    await show(s, id);
+    await replay(s, id, askFixture(s.scratch.root, ASK_BLOCKING, ONE_QUESTION_ASK));
+    await allowNext(s, id); // mcp__maws__ask
+    const [opened] = ofKind(await s.events(id), 'maws.ask.opened');
+    const sheet = sheetOf(s);
+    await expect(sheet).toHaveAttribute('data-ask-id', opened!.askId);
+    await clearToasts(s.page);
+    await sectionOf(sheet, 'q1').getByRole('radio', { name: 'Yes' }).dblclick();
+    expect(await answersWritten(s, id, opened!.requestId)).toEqual([{ id: 'q1', question: 'Ship the release notes today?', status: 'answered', value: ['Yes'] }]);
+    await expect(capsuleOf(s)).toHaveAttribute('data-ask-state', 'answered');
   });
 });
 
@@ -469,10 +506,11 @@ test('previews: a single-select question lays its options beside the focused opt
 
     const sheet = sheetOf(s);
     await expect(sheet).toHaveAttribute('data-ask-id', opened!.askId);
-    const askSurface = surface(s.page, 'ask-sheet');
-    // UX2-L caps a docked Questions surface at 420 px; maximize it to exercise the existing wide preview layout.
-    await askSurface.getByRole('button', { name: 'Expand surface', exact: true }).click();
-    await expect(askSurface.getByRole('button', { name: 'Restore surface', exact: true })).toBeVisible();
+    // A narrow tool opens 360 px wide (UX wave U8b); maximize it to exercise the existing wide preview layout, from the
+    // region's controls at the end of the side column's first strip.
+    const column = sideColumn(s.page);
+    await column.getByRole('button', { name: 'Expand surface', exact: true }).click();
+    await expect(column.getByRole('button', { name: 'Restore surface', exact: true })).toBeVisible();
 
     const section = sectionOf(sheet, 'q1');
     const radios = section.getByRole('radiogroup');
@@ -510,7 +548,7 @@ test('previews: a single-select question lays its options beside the focused opt
     await shoot(s, 'ask-previews');
 
     // Restore and take the panel to its narrowest: the pane under the options, as wide as they are.
-    await askSurface.getByRole('button', { name: 'Restore surface', exact: true }).click();
+    await column.getByRole('button', { name: 'Restore surface', exact: true }).click();
     const resizer = s.page.getByRole('separator', { name: 'Resize right panel' });
     await resizer.focus();
     await s.page.keyboard.press('Home');

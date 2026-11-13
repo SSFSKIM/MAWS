@@ -55,7 +55,7 @@ export const SHEET = {
   retry: 'Retry',
   answeredElsewhere: 'Already answered elsewhere',
   readFailed: "Couldn't read this session's questions",
-  dismiss: 'Dismiss',
+  dismiss: 'Dismiss', // a cancelled ask's, and a live ask's: every question skipped (U1a)
   // read-only
   // a cancelled ask, by why (null: no event said, as on the disk path)
   cancelled: (reason: AskCancelReason | null) => (reason === 'withdrawn' ? 'The turn was interrupted before you answered' : 'This session ended before you answered'),

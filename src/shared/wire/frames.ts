@@ -95,6 +95,10 @@ export const SystemTaskStartedFrameSchema = systemFrame('task_started', {
   task_type: z.string().optional(),
   workflow_name: z.string().optional(),
   prompt: z.string().optional(),
+  // The UX wave's U8b (M5): the subagent that started a shell, monitor, workflow or nested agent (absent for the main
+  // loop's); `owned_by_subagent` is set beside it on a subagent's own task (findings-uxwave-U8-subagent-tasks.txt (b))
+  owned_by_subagent: z.boolean().optional(),
+  parent_task_id: z.string().optional(),
 });
 export type SystemTaskStartedFrame = z.infer<typeof SystemTaskStartedFrameSchema>;
 
@@ -134,7 +138,7 @@ export const SystemTaskNotificationFrameSchema = systemFrame('task_notification'
 export type SystemTaskNotificationFrame = z.infer<typeof SystemTaskNotificationFrameSchema>;
 
 export const SystemBackgroundTasksChangedFrameSchema = systemFrame('background_tasks_changed', {
-  tasks: z.array(z.looseObject({ task_id: z.string(), task_type: z.string(), description: z.string(), ambient: z.boolean().optional() })),
+  tasks: z.array(z.looseObject({ task_id: z.string(), task_type: z.string(), description: z.string(), ambient: z.boolean().optional(), parent_task_id: z.string().optional() /* the UX wave's U8b (M5) */ })),
 });
 export type SystemBackgroundTasksChangedFrame = z.infer<typeof SystemBackgroundTasksChangedFrameSchema>;
 

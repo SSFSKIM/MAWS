@@ -1,7 +1,8 @@
 // P3-G (§D2.2, M3): the panel's header over C8a's host in C5's region: the strip's label for a tool that registers
 // nothing (its `setTitle` suffix included), "Session overview" on the summary, and an editor's X32 registration drawn
 // as the breadcrumb, the saved state, the open-comment count, its actions (three, then "More actions"), its Export menu,
-// beside the region's own controls, all of them folded into "More actions" under a 360 px header; an inactive tab's
+// beside the region's own controls, all of them folded into "More actions" under a header narrower than the side
+// column's default width leaves it (UX wave U8b's branch review fix wave); an inactive tab's
 // registration still vetoes its close.
 import { QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, render, screen, within } from '@testing-library/react';
@@ -22,7 +23,8 @@ import { panelHost, registerPanelTool, setTitle } from './host';
 import { PanelHost } from './PanelHost';
 import { PanelRegion } from './PanelRegion';
 import type { PanelToolContext } from './tool';
-import { EditorHeader } from './PanelHeader';
+import { COLUMN_CHROME_PX, EditorHeader, NARROW_HEADER_PX } from './PanelHeader';
+import { NARROW_AUTOMATIC_WIDTH } from '../app/shell-geometry';
 
 const offs: (() => void)[] = [];
 beforeEach(() => {
@@ -46,6 +48,11 @@ const mount = () =>
 const header = () => document.querySelector<HTMLElement>('[data-editor-header]')!;
 const title = () => header().querySelector('[data-header-title]')!;
 const buttons = () => within(header()).getAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent);
+// UX wave U8b (M2, decision 4): what the column's first strip ends with, after its tabs and "+": Mark up over a tab that
+// registers nothing, then the region's controls.
+const strip = () => document.querySelector<HTMLElement>('section[data-side-group="upper"]')!.firstElementChild as HTMLElement;
+const stripEnd = () => within(strip()).getAllByRole('button').filter((b) => b.getAttribute('role') !== 'tab' && !b.closest('[role="tablist"]')).map((b) => b.getAttribute('aria-label') ?? b.textContent).slice(1);
+const CONTROLS = ['Float conversation over surface', 'Expand surface', 'Hide side column'];
 
 // A tool whose body registers `host` through X32 from its context, as P3-L, B and C will.
 function editorTool(id: string, host: () => EditorHostRegistration) {
@@ -117,26 +124,39 @@ describe('the panel header', () => {
     offs.push(registerPanelTool(probeTool('files', { multiInstance: false }).tool));
     panelHost.addTool('files', { appSessionId: null, pin: true });
     mount();
-    expect(buttons()).toEqual([FLOAT_COPY.noSession, 'Expand surface', 'Close surface']);
-    expect((within(header()).getByRole('button', { name: FLOAT_COPY.noSession }) as HTMLButtonElement).disabled).toBe(true);
-    expect((within(header()).getByRole('button', { name: 'Expand surface' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(stripEnd()).toEqual([FLOAT_COPY.noSession, 'Expand surface', 'Hide side column']);
+    expect((within(strip()).getByRole('button', { name: FLOAT_COPY.noSession }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(strip()).getByRole('button', { name: 'Expand surface' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('puts an unregistered multi-instance tool’s tabs and surface controls in one header, naming the terminal only once', async () => {
+  // UX wave U8b (M2, decision 4): a tool that registers nothing has no row under the strip; its title is the tab's
+  it('draws no header row for a plain tool: its tabs are the strip’s, naming the terminal once, the region’s controls at its end', async () => {
     const user = userEvent.setup();
     offs.push(registerPanelTool(probeTool('terminal', { title: 'Terminal' }).tool));
     mount();
     const first = add('terminal');
     act(() => setTitle(first, 'zsh'));
-    const tab = within(header()).getByRole('tab', { name: 'Terminal · zsh' });
-    expect(header().textContent?.match(/Terminal/g)).toHaveLength(1);
-    expect(within(header()).getByRole('button', { name: 'Close surface' })).toBeTruthy();
-    await user.click(within(header()).getByRole('button', { name: 'New terminal tab' }));
-    expect(within(header()).getAllByRole('tab')).toHaveLength(2);
+    expect(header()).toBeNull();
+    const tab = within(strip()).getByRole('tab', { name: 'Terminal · zsh' });
+    expect(document.querySelector('[data-region="panel"]')!.textContent?.match(/Terminal/g)).toHaveLength(1);
+    expect(stripEnd()).toEqual(CONTROLS);
+    add('terminal');
+    expect(within(strip()).getAllByRole('tab')).toHaveLength(2);
     await user.click(tab);
     expect(tab.getAttribute('aria-selected')).toBe('true');
     await user.click(within(tab.parentElement!).getByRole('button', { name: 'Close Terminal' }));
-    expect(within(header()).getAllByRole('tab')).toHaveLength(1);
+    expect(within(strip()).getAllByRole('tab')).toHaveLength(1);
+  });
+
+  it('draws the header row under the strip for a tab that registers, without the region’s controls, which stay at the strip’s end', () => {
+    offs.push(registerPanelTool(probeTool('t', { title: 'Plain' }).tool));
+    mount();
+    const id = add('t');
+    act(() => void registerEditorHost({ surface: 'panel', tabId: id }, { title: 'Registered', saved: 'saved' }));
+    const group = document.querySelector('section[data-side-group="upper"]')!;
+    expect([...group.querySelectorAll('[role="tablist"], [data-editor-header]')].map((node) => node.getAttribute('role') ?? 'header')).toEqual(['tablist', 'header']);
+    expect(within(header()).queryAllByRole('button')).toEqual([]);
+    expect(stripEnd()).toEqual(CONTROLS);
   });
 
   it('hands a tool its scope as ctx.editorHost', () => {
@@ -182,7 +202,7 @@ describe('the panel header', () => {
     expect(header().textContent).toContain('Docs/Planning/Q3 brief');
     expect(header().textContent).toContain('Saving…');
     // The count stands for the `comments` action, which is not repeated among the actions.
-    expect(buttons()).toEqual(['3 open comments', 'Version history', 'Export', 'Float conversation over surface', 'Expand surface', 'Close surface']);
+    expect(buttons()).toEqual(['3 open comments', 'Version history', 'Export']);
     await user.click(within(header()).getByRole('button', { name: '3 open comments' }));
     await user.click(within(header()).getByRole('button', { name: 'Version history' }));
     await user.click(within(header()).getByRole('button', { name: 'Export' }));
@@ -232,8 +252,8 @@ describe('the panel header', () => {
     expect(title().textContent).toBe('Registered');
     expect(header().textContent).toContain('Unsaved changes');
     act(() => handle.dispose());
-    expect(within(header()).getByRole('tab', { name: 'Plain' })).toBeTruthy();
-    expect(header().textContent).not.toContain('Unsaved changes');
+    expect(header()).toBeNull(); // the strip's tab names it
+    expect(within(strip()).getByRole('tab', { name: 'Plain' })).toBeTruthy();
   });
 
   it('copies each saved state, and shows none for null', () => {
@@ -279,12 +299,12 @@ describe('the panel header', () => {
     mount();
     const id = add('t');
     act(() => void registerEditorHost({ surface: 'panel', tabId: id }, { title: 'Doc', actions: [action(1, { pressed: true }), action(2), action(3)] }));
-    expect(buttons()).toEqual(['Action 1', 'Action 2', 'Action 3', 'Float conversation over surface', 'Expand surface', 'Close surface']);
+    expect(buttons()).toEqual(['Action 1', 'Action 2', 'Action 3']);
     expect(within(header()).getByRole('button', { name: 'Action 1' }).getAttribute('aria-pressed')).toBe('true');
 
     resetEditorHosts();
     act(() => void registerEditorHost({ surface: 'panel', tabId: id }, { title: 'Doc', actions: [1, 2, 3, 4, 5].map((n) => action(n, n === 5 ? { disabled: true } : {})) }));
-    expect(buttons()).toEqual(['Action 1', 'Action 2', 'Action 3', 'More actions', 'Float conversation over surface', 'Expand surface', 'Close surface']);
+    expect(buttons()).toEqual(['Action 1', 'Action 2', 'Action 3', 'More actions']);
     await user.click(within(header()).getByRole('button', { name: 'More actions' }));
     const items = within(await screen.findByRole('menu')).getAllByRole('menuitem');
     expect(items.map((i) => [i.textContent, i.getAttribute('aria-disabled')])).toEqual([
@@ -310,15 +330,14 @@ describe('the panel header', () => {
     mount();
     const id = add('t');
     act(() => void registerEditorHost({ surface: 'panel', tabId: id }, { title: 'Doc', actions: [action(1), action(2), action(3), action(4), action(5, { pinned: true, label: 'Send to…' })] }));
-    const controls = ['Float conversation over surface', 'Expand surface', 'Close surface'];
-    expect(buttons()).toEqual(['Action 1', 'Action 2', 'Action 3', 'Send to…', 'More actions', ...controls]);
+    expect(buttons()).toEqual(['Action 1', 'Action 2', 'Action 3', 'Send to…', 'More actions']);
     await user.click(within(header()).getByRole('button', { name: 'More actions' }));
     expect(within(await screen.findByRole('menu')).getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Action 4']);
     await user.keyboard('{Escape}');
 
     width = 280;
     resize(header(), { width: 264, height: 40 });
-    expect(buttons()).toEqual(['More actions', ...controls]);
+    expect(buttons()).toEqual(['More actions']);
   });
 
   // P3-L (M6b fix wave 1, X32 additive): an editor gives focus back to an action's control in the header over its scope
@@ -354,7 +373,7 @@ describe('the panel header', () => {
     expect(off.querySelector('[data-menu-check]'), 'but keeps the check’s room, so the labels align').not.toBeNull();
   });
 
-  it('under a 360 px header, folds every editor action and export into "More actions" so the title keeps the room', async () => {
+  it('under a narrow header, folds every editor action and export into "More actions" so the title keeps the room', async () => {
     const user = userEvent.setup();
     const { resize } = installResizeObserver();
     let width = 0;
@@ -372,11 +391,9 @@ describe('the panel header', () => {
         { title: 'Q3 brief', saved: 'saved', actions: [action(1), action(2), action(3)], exports: [{ id: 'pdf', label: 'PDF', onSelect: () => calls.push('export:pdf') }] },
       ),
     );
-    const controls = ['Float conversation over surface', 'Expand surface', 'Close surface'];
-
     width = 280; // the panel's narrowest
     resize(header(), { width: 264, height: 40 });
-    expect(buttons()).toEqual(['More actions', ...controls]);
+    expect(buttons()).toEqual(['More actions']);
     expect(title().textContent).toBe('Q3 brief');
     await user.click(within(header()).getByRole('button', { name: 'More actions' }));
     const menu = await screen.findByRole('menu');
@@ -385,9 +402,38 @@ describe('the panel header', () => {
     await user.click(within(menu).getByRole('menuitem', { name: 'PDF' }));
     expect(calls).toEqual(['export:pdf']);
 
-    width = 360; // at 360 px and wider, the actions and Export are inline again
-    resize(header(), { width: 344, height: 40 });
-    expect(buttons()).toEqual(['Action 1', 'Action 2', 'Action 3', 'Export', ...controls]);
+    width = NARROW_HEADER_PX; // at the threshold and wider, the actions and Export are inline again
+    resize(header(), { width: NARROW_HEADER_PX - 16, height: 40 });
+    expect(buttons()).toEqual(['Action 1', 'Action 2', 'Action 3', 'Export']);
+  });
+
+  // UX wave U8b (the branch review's fix wave): "narrow" is narrower than the side column's default width, so a viewer
+  // in a column at that width keeps Comment in its header's row (the deliverables scenes press it there)
+  it('keeps Comment in the row of a header in a column at its default width, and folds the actions one pixel under it', () => {
+    const { resize } = installResizeObserver();
+    let width = 0;
+    const spy = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.hasAttribute('data-editor-header') ? width : 0;
+    });
+    offs.push(() => spy.mockRestore());
+    const action = (id: string, label: string): EditorHostAction => ({ id, label, icon: () => <svg />, onSelect: () => {} });
+    offs.push(registerPanelTool(probeTool('t').tool));
+    mount();
+    const id = add('t');
+    act(() =>
+      void registerEditorHost(
+        { surface: 'panel', tabId: id },
+        { title: 'Q3 brief', actions: [action('comment', 'Comment'), action('reload', 'Reload'), action('reveal', 'Reveal in Finder'), action('file', 'Open as file')], exports: [{ id: 'pdf', label: 'PDF', onSelect: () => {} }] },
+      ),
+    );
+
+    width = NARROW_AUTOMATIC_WIDTH - COLUMN_CHROME_PX; // the header of a column at its default width
+    resize(header(), { width: width - 16, height: 40 });
+    expect(buttons()).toEqual(['Comment', 'Reload', 'Reveal in Finder', 'More actions', 'Export']);
+
+    width -= 1;
+    resize(header(), { width: width - 16, height: 40 });
+    expect(buttons()).toEqual(['More actions']);
   });
 
   // P3-G (§D2.2, §D4.4, M4): Mark up shows for a tab whose body registered a mark-up surface, after the actions and
@@ -413,12 +459,13 @@ describe('the panel header', () => {
     offs.push(registerPanelTool(probeTool('plain', { title: 'Plain', multiInstance: false }).tool));
     mount();
     add('page');
-    expect(buttons()).toEqual(['Mark up', 'Float conversation over surface', 'Expand surface', 'Close surface']);
-    await userEvent.click(within(header()).getByRole('button', { name: 'Mark up' }));
+    expect(header()).toBeNull(); // it registers nothing: its Mark up ends the strip, before the region's controls
+    expect(stripEnd()).toEqual(['Mark up', ...CONTROLS]);
+    await userEvent.click(within(strip()).getByRole('button', { name: 'Mark up' }));
     expect(begin).toHaveBeenCalledTimes(1);
     const plain = add('plain');
-    act(() => useLayout.getState().setSurfaceStack(A, [plain]));
-    expect(buttons()).toEqual(['Float conversation over surface', 'Expand surface', 'Close surface']);
+    act(() => useLayout.getState().showSurfaceTab(A, plain));
+    expect(stripEnd()).toEqual(CONTROLS);
   });
 
   it('closing an inactive editor tab asks its guard: switched away, the registration still vetoes', async () => {
@@ -429,7 +476,7 @@ describe('the panel header', () => {
     mount();
     const editor = add('editor');
     const other = add('other');
-    act(() => useLayout.getState().setSurfaceStack(A, [other])); // hiding a surface keeps its editor instance
+    act(() => useLayout.getState().showSurfaceTab(A, other)); // a tab out of view keeps its editor instance
     expect(screen.queryByText('editor body')).toBeNull();
     let closed: boolean | undefined;
     await act(async () => void (closed = await panelHost.closeTab(editor)));

@@ -66,6 +66,15 @@ export function outcomeOf(node: TaskNode, now: number): string {
   return ago ? SUBAGENTS_COPY.finished(ago) : SUBAGENTS_COPY.finishedUndated;
 }
 
+// The outcome word alone, without a time (the UX wave's U8b, M7 decision 5: an agent whose own run has ended while a
+// task it started still runs).
+export function outcomeWord(node: TaskNode): string {
+  if (node.status === 'exited') return SUBAGENTS_COPY.endedWithSession;
+  if (node.status === 'failed') return SUBAGENTS_COPY.finishedWithErrorsUndated;
+  if (node.status === 'stopped') return SUBAGENTS_COPY.stoppedUndated;
+  return SUBAGENTS_COPY.finishedUndated;
+}
+
 // The agent a tool-use id started: the wire's `subagent.started` (the graph's `byToolUse`), else the sidecar that names
 // the tool use (`fs.subagentsChanged` can land first). Null while neither has.
 export function agentOfToolUse(entry: TaskGraphEntry | undefined, toolUseId: ToolUseId): AgentId | null {

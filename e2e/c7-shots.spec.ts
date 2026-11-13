@@ -163,17 +163,22 @@ test('the shell: the frame docked under a live transcript, the docked approvals,
     }
     await setTheme(page, 'light', false);
 
-    // 04 vignette 2: the docked approval with its grant scopes (pass2/grant-reapply-start, no ask rule)
+    // 04 vignette 2, as U1a §D redrew it: the docked approval's three buttons, each with its key (pass2/grant-reapply-start,
+    // no ask rule, the engine's local-rule suggestion: Deny, Always allow in the project, Allow once)
     await open(approval);
     await launchReady(page, approval, GRANT, { cwd: repo });
     value(await invoke(page, 'session.send', { appSessionId: approval as never, content: firstPrompt(GRANT) })); // as recorded (the replay holds at it)
-    await expect(pane.getByRole('group', { name: 'Approval needed' })).toBeVisible({ timeout: 20_000 });
-    await shoot(page, 'approval-scopes');
+    const approvalFrame = pane.getByRole('group', { name: 'Approval needed' });
+    await expect(approvalFrame).toBeVisible({ timeout: 20_000 });
+    await expect(approvalFrame.getByRole('button', { name: 'Allow once', exact: true }).locator('kbd')).toBeVisible();
+    await shoot(page, 'approval-buttons-keys');
 
-    // 04 vignette 3: the edit-approval variant (a synthetic Edit request)
+    // 04 vignette 3, as U1a §I redrew it: the edit-approval variant as a diff against the file (a synthetic Edit request)
     await open(edit);
     await launchReady(page, edit, editJournal(), { cwd: repo });
-    await expect(pane.getByRole('group', { name: 'Approval needed' })).toBeVisible({ timeout: 20_000 });
+    const editFrame = pane.getByRole('group', { name: 'Approval needed' });
+    await expect(editFrame).toBeVisible({ timeout: 20_000 });
+    await expect(editFrame.locator('[data-proposed-diff]'), 'the diff, once the file is read').toBeVisible();
     await shoot(page, 'edit-approval');
     expect(maws.consoleErrors()).toEqual([]);
   } finally {

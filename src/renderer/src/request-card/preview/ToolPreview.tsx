@@ -57,6 +57,18 @@ function edits(ev: PermissionEvent): { before: string | null; after: string | nu
   }
 }
 
+// A file change's input alone, each edit's old and new text as bounded blocks that scroll and hold the whole text: the
+// edit row's own drawing, and UX wave U1a's fallback where no diff against the file can be drawn (§I).
+export function FileEdits({ request }: { request: PermissionEvent }) {
+  return (
+    <>
+      {edits(request).map((change, i) => (
+        <Change key={i} {...change} />
+      ))}
+    </>
+  );
+}
+
 export function ToolPreview({ request, compact = false }: { request: PermissionEvent; compact?: boolean }) {
   const { input } = request;
   switch (toolClass(request.toolName)) {
@@ -73,7 +85,7 @@ export function ToolPreview({ request, compact = false }: { request: PermissionE
               </li>
             ))}
           </ul>
-          {!compact && edits(request).map((change, i) => <Change key={i} {...change} />)}
+          {!compact && <FileEdits request={request} />}
         </div>
       );
     }

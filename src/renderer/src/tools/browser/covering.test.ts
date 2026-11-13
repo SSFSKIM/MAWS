@@ -50,6 +50,7 @@ describe('the window’s cover', () => {
     useLayout.setState({ main: mainShowing(A) }); // a session in front, for the card to draw (P3-F wave S, F6)
     // UX2: floating requires a selected surface, not merely an uncollapsed empty panel.
     useLayout.getState().setPanelTabs(A, { tabs: [ref('browser:aaaaaaaa')], activeTabId: 'browser:aaaaaaaa' });
+    useLayout.getState().showSurfaceTab(A, 'browser:aaaaaaaa'); // UX wave U8b: a write of refs shows nothing
     useLayout.getState().setOverviewOpen(true);
     floatPanel();
     expect(useLayout.getState().regions.panel.floating).toBe(true);

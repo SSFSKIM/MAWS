@@ -1,4 +1,4 @@
-// P4-R8 (settings version 16): Settings › Engine › MCP servers, the HTTP servers MAWS passes to every session it launches
+// P4-R8 (settings version 16): Settings › Sessions › MCP servers (Engine's until U11a M9), the HTTP servers MAWS passes to every session it launches
 // (`--mcp-config`, src/shared/engine/app-mcp-servers.ts) and to no terminal session. An entry is a name and a URL; Add
 // writes the list with the entry appended and × writes it without that entry, each through `settings.set` (a patch
 // replaces the list whole), so a change reaches each session at its next launch. An entry the schema refuses is said
@@ -58,7 +58,7 @@ export function McpServers({ settings }: { settings: Settings }) {
     }
   };
   return (
-    <Setting label={MCP_SERVERS.label} note={MCP_SERVERS.note}>
+    <Setting row="sessions.mcpServers">
       {servers.map((server) => (
         <div key={server.name} className="flex min-w-0 basis-full items-center gap-2">
           <span className="font-mono text-ui-sm text-fg">{server.name}</span>

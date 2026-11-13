@@ -474,3 +474,59 @@ describe('dispatcher holds and releases a hold action', () => {
   });
 });
 // E9 end
+
+// UX wave U1a (§D, decision 17; an insertion in U6's dispatcher, U1a's §N): a binding that asks for a fresh press runs on
+// a first press only. Its key repeat is taken (default prevented, no other binding run) and runs nothing; a binding
+// without the option runs a repeat as today; a hold action's latch is untouched (the hold cases above).
+describe('a fresh press', () => {
+  const fresh = vi.fn();
+  const outer = vi.fn();
+  function Fresh({ asked }: { asked: boolean }) {
+    const pane = useRef<HTMLElement>(null);
+    const card = useRef<HTMLDivElement>(null);
+    useKeyChord('request.accept', outer, { within: pane });
+    useKeyChord('request.accept', fresh, { within: card, fresh: asked });
+    return (
+      <section ref={pane} tabIndex={0} aria-label="outer pane">
+        <div ref={card} tabIndex={0} aria-label="fresh card" />
+      </section>
+    );
+  }
+  const enter = (target: HTMLElement, repeat: boolean) => {
+    const event = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', repeat, bubbles: true, cancelable: true });
+    target.dispatchEvent(event);
+    return event;
+  };
+
+  beforeEach(() => {
+    cleanup();
+    fresh.mockClear();
+    outer.mockClear();
+  });
+
+  it('runs a binding registered with fresh for a first press, never for a repeat, and takes the repeat', () => {
+    render(<Fresh asked />);
+    const card = screen.getByLabelText('fresh card');
+    act(() => card.focus());
+    const seen: boolean[] = [];
+    const after = (event: KeyboardEvent) => void seen.push(event.defaultPrevented);
+    window.addEventListener('keydown', after); // bubble phase: what any later handler would see
+    for (let i = 0; i < 5; i++) expect(enter(card, true).defaultPrevented).toBe(true);
+    expect(fresh).not.toHaveBeenCalled();
+    expect(outer).not.toHaveBeenCalled(); // the innermost owner took it: no other binding of the chord runs
+    expect(enter(card, false).defaultPrevented).toBe(true);
+    expect(fresh).toHaveBeenCalledOnce();
+    window.removeEventListener('keydown', after);
+    expect(seen).toEqual([true, true, true, true, true, true]);
+  });
+
+  it('runs a binding without the option on a repeat as on a first press', () => {
+    render(<Fresh asked={false} />);
+    const card = screen.getByLabelText('fresh card');
+    act(() => card.focus());
+    enter(card, false);
+    enter(card, true);
+    enter(card, true);
+    expect(fresh).toHaveBeenCalledTimes(3);
+  });
+});

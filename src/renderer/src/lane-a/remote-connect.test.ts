@@ -23,7 +23,7 @@ const raised = { request: 'toolu_1', session: 'eng-r', tool: 'Bash', input: { co
 let off: () => void = () => {};
 beforeEach(() => {
   resetLaneAStore();
-  useAttention.setState({ bySession: new Map(), requests: new Map() });
+  useAttention.setState({ bySession: new Map(), requests: new Map(), drafts: new Map() });
   off = connectRemoteLaneA();
 });
 afterEach(() => off());
@@ -51,6 +51,15 @@ describe('connectRemoteLaneA', () => {
     expect(useAttention.getState().bySession.get(REMOTE)).toEqual([]);
   });
 
+  // U1a (A5): another machine's terminal session's asynchronous question is mirrored as it is listed there, `async_input`
+  it('mirrors an asynchronous question as an async_input item with its question view', () => {
+    const question = { ...raised, request: 'toolu_q', tool: 'mcp__plugin_sminos_ask__ask', async: true as const, input: { questions: [{ question: 'Ship it?', header: 'Ship', options: [{ label: 'Yes' }] }] } };
+    applyLaneAState(REMOTE, laneAState(REMOTE, { engineSessionId: 'eng-r', link: LINK, acts: [], pending: [question] }));
+    const [mirrored] = useAttention.getState().bySession.get(REMOTE)!;
+    expect(mirrored).toMatchObject({ kind: 'async_input', summary: 'Ship it?' });
+    expect(useAttention.getState().requests.get(mirrored!.id)).toMatchObject({ kind: 'question.requested', questions: [{ question: 'Ship it?' }] });
+  });
+
   // OX2: an attention id is machine-bound, so the mirror lifts it to the session's machine as main's ids are lifted at
   // the IPC boundary; the request view and a question's draft are keyed by it, and two machines' requests stay apart.
   it('addresses each item to its machine, so one engine session and request id on two machines are two cards', () => {
@@ -68,6 +77,40 @@ describe('connectRemoteLaneA', () => {
     applyLaneAState(REMOTE, laneAState(REMOTE, { engineSessionId: 'eng-r', link: LINK, acts: [], pending: [] }));
     expect(useAttention.getState().bySession.get(there)).toHaveLength(1);
     expect(useAttention.getState().drafts.has(third.id)).toBe(true); // the other machine's settling leaves this one's draft
+  });
+
+  // UC-1 (U1a's Interfaces §B, "A window on another machine"): main says in the session's state which requests the
+  // session's machine said it took (`accepted`); the mirror lists a pending request unless it is named there
+  it('lists no request the session’s machine said it took, until the bridge settles it or the plane is reset', () => {
+    const second = { ...raised, request: 'toolu_2', input: { command: 'echo made-up' } };
+    const ids = () => (useAttention.getState().bySession.get(REMOTE) ?? []).map((i) => i.request.requestId);
+    applyLaneAState(REMOTE, laneAState(REMOTE, { engineSessionId: 'eng-r', link: LINK, acts: [], pending: [raised, second] }));
+    expect(ids()).toEqual(['toolu_1', 'toolu_2']);
+    applyLaneAState(REMOTE, laneAState(REMOTE, { engineSessionId: 'eng-r', link: LINK, acts: [], pending: [raised, second], accepted: ['toolu_1'] }));
+    expect(ids()).toEqual(['toolu_2']);
+    applyLaneAState(REMOTE, laneAState(REMOTE, { engineSessionId: 'eng-r', link: LINK, acts: [], pending: [raised, second], accepted: [] })); // a reset: the request restated waits again
+    expect(ids()).toEqual(['toolu_1', 'toolu_2']);
+  });
+
+  // §B, the default of Reported 9: the machine's feed never carries a terminal session's item, and its snapshot replaces
+  // that machine's partition whole; the mirror writes its sessions again after it
+  it('keeps the mirrored cards across a feed snapshot of the machine: the accepted request stays undrawn, the other waiting one drawn', () => {
+    const second = { ...raised, request: 'toolu_2', input: { command: 'echo made-up' } };
+    applyLaneAState(REMOTE, laneAState(REMOTE, { engineSessionId: 'eng-r', link: LINK, acts: [], pending: [raised, second], accepted: ['toolu_1'] }));
+    useAttention.getState().applyRemote({ machine: OTHER_MACHINE, items: [], greyed: false });
+    expect((useAttention.getState().bySession.get(REMOTE) ?? []).map((i) => i.request.requestId)).toEqual(['toolu_2']);
+  });
+
+  // The review of M1: the snapshot must not prune a mirrored question's draft before the list is back
+  it('keeps a mirrored question’s draft across a feed snapshot of the machine: the item stands and the draft is unchanged', () => {
+    const question = { ...raised, request: 'toolu_q', tool: 'AskUserQuestion', input: { questions: [{ question: 'Which file?', header: 'File', options: [{ label: 'a.ts', description: '' }, { label: 'b.ts', description: '' }], multiSelect: false }] } };
+    applyLaneAState(REMOTE, laneAState(REMOTE, { engineSessionId: 'eng-r', link: LINK, acts: [], pending: [question] }));
+    const [card] = useAttention.getState().bySession.get(REMOTE)!;
+    const draft = { step: 0, reached: 0, selected: { 'Which file?': ['b.ts'] }, other: { 'Which file?': 'made-up other text' } };
+    useAttention.getState().setDraft(card.id, draft);
+    useAttention.getState().applyRemote({ machine: OTHER_MACHINE, items: [], greyed: false });
+    expect(useAttention.getState().bySession.get(REMOTE)).toEqual([card]);
+    expect(useAttention.getState().drafts.get(card.id)).toBe(draft);
   });
 
   it('leaves a local state’s requests to main’s own list', () => {

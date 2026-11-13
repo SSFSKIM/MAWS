@@ -5,7 +5,7 @@ import { fakeClient } from '../../../../test/support/fake-client';
 import { addressOf } from '@shared/machine/address';
 import { at, OTHER_MACHINE, TEST_MACHINE as M } from '../../../../test/support/machine';
 import { createLayoutStore, frontOf, registerReplaceGuard, type ReplaceVerdict } from './layout';
-import { surfaceSession } from '../panel/surface-model';
+import { surfaceSession, surfaceTabs } from '../panel/surface-model';
 import { allTabs, currentSet, type RekeyOf } from './layout-model';
 
 const A = at('app-a' as AppSessionId);
@@ -119,13 +119,18 @@ describe('layout store actions', () => {
     expect(store.getState().panelBySession.get(A)?.tabs).toEqual([{ id: 't1', toolId: 'files', pinned: false }]);
   });
 
-  it('clears the no-session selection when setPanelTabs(null, …) asks for none (the panel home glyph with no session shown)', () => {
+  // UX wave U8b (M2): a write of the pins never chooses what is in view; showing and hiding the column for no session do.
+  it('shows the no-session pin it is asked for and hides it, keeping the selection to show again', () => {
     const store = createLayoutStore();
     const pin = { id: 't1', toolId: 'files', pinned: true };
     store.getState().setPanelTabs(null, { tabs: [pin], activeTabId: 't1' });
-    expect(store.getState().panelActiveNoSession).toBe('t1');
-    store.getState().setPanelTabs(null, { tabs: [pin], activeTabId: null });
     expect(store.getState().panelActiveNoSession).toBeNull();
+    store.getState().showSurfaceTab(null, 't1');
+    expect(store.getState().panelActiveNoSession).toBe('t1');
+    expect(surfaceTabs(store.getState(), null)).toEqual([pin]);
+    store.getState().hideSurfaces(null);
+    expect(store.getState().panelActiveNoSession).toBe('t1');
+    expect(surfaceTabs(store.getState(), null)).toEqual([]);
   });
 
   it('patches the regions', () => {

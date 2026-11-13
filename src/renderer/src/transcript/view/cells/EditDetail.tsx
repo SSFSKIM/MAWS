@@ -47,7 +47,7 @@ function budgeted(hunks: Hunk[]): Budgeted {
   return { head: byHunk(all.slice(0, cut.head)), omitted: all.length - cut.head - cut.tail, tail: byHunk(all.slice(all.length - cut.tail)) };
 }
 
-function DiffHunk({ lines }: { lines: DiffLine[] }) {
+function DiffHunk({ lines, whole }: { lines: DiffLine[]; whole: boolean }) {
   return (
     <div className="transcript-diff-hunk">
       {lines.map((line, i) => (
@@ -58,9 +58,7 @@ function DiffHunk({ lines }: { lines: DiffLine[] }) {
           <span className="transcript-diff-sign" aria-hidden="true">
             {line.sign}
           </span>
-          <span>
-            <Truncated text={line.text} />
-          </span>
+          <span>{whole ? line.text : <Truncated text={line.text} />}</span>
         </div>
       ))}
     </div>
@@ -68,14 +66,16 @@ function DiffHunk({ lines }: { lines: DiffLine[] }) {
 }
 
 // The hunks as bounded diff lines: the edit cell's detail draws them, and so does the receipt's hover diff (W4), which
-// has no cell to open a full log of (a turn's work may be folded), so its omitted marker offers no route.
-export function EditDiff({ hunks, cell }: { hunks: Hunk[]; cell: Cell | null }) {
-  const diff = budgeted(hunks);
+// has no cell to open a full log of (a turn's work may be folded), so its omitted marker offers no route. UX wave U1a
+// (§I): `whole` draws every line, each in full, for a permission prompt's "Show all" (what is approved is read first);
+// absent, today's drawing.
+export function EditDiff({ hunks, cell, whole }: { hunks: Hunk[]; cell: Cell | null; whole?: boolean }) {
+  const diff = whole ? { head: hunks.map(linesOf), omitted: 0, tail: [] } : budgeted(hunks);
   const omitted = DETAIL.linesOmitted(diff.omitted);
   return (
     <div className="transcript-diff">
       {diff.head.map((lines, h) => (
-        <DiffHunk key={h} lines={lines} />
+        <DiffHunk key={h} lines={lines} whole={whole === true} />
       ))}
       {diff.omitted > 0 &&
         (cell ? (
@@ -86,7 +86,7 @@ export function EditDiff({ hunks, cell }: { hunks: Hunk[]; cell: Cell | null }) 
           </div>
         ))}
       {diff.tail.map((lines, h) => (
-        <DiffHunk key={`tail:${h}`} lines={lines} />
+        <DiffHunk key={`tail:${h}`} lines={lines} whole={false} />
       ))}
     </div>
   );

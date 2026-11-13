@@ -79,7 +79,7 @@ afterEach(() => {
 });
 
 describe('shell renders the panel host in the region', () => {
-  it('keeps pins first in the inventory, shows only the selected tool’s tabs, and the pin glyph moves its ref', async () => {
+  it('keeps pins first in the inventory, shows every tab in one strip with the selected one in view, and the pin glyph moves its ref', async () => {
     const user = userEvent.setup();
     register(probeTool('terminal').tool, probeTool('files').tool);
     useLayout.setState({
@@ -89,8 +89,8 @@ describe('shell renders the panel host in the region', () => {
     renderShell();
     expect(effectiveIds()).toEqual(['terminal:pin00000', 'files:aaaaaaaa']);
     expect(selectedId()).toBe('files:aaaaaaaa');
-    expect(within(panel()).getByRole('tablist', { name: 'files tabs' })).toBeTruthy();
-    expect(within(panel()).queryByRole('tablist', { name: 'terminal tabs' })).toBeNull();
+    expect(within(panel()).getAllByRole('tablist')).toHaveLength(1);
+    expect(within(panel()).getAllByRole('tab').map((tab) => [tab.textContent, tab.getAttribute('aria-selected')])).toEqual([['terminal', 'false'], ['files', 'true']]);
     expect(screen.getByTestId('body:files:aaaaaaaa').textContent).toContain(`${A} · unpinned · visible`);
     expect(screen.queryByRole('complementary', { name: 'Session cards' })).toBeNull();
 
@@ -175,7 +175,7 @@ describe('shell renders the panel host in the region', () => {
     expect(terminal.probe.created).toEqual([expect.objectContaining({ appSessionId: A, instanceId: id })]);
     expect(panelOf(B)).toBeUndefined();
     expect(screen.getByTestId(`body:${id}`).textContent).toContain(`${A} · unpinned · visible`);
-    expect(within(panel()).getByRole('tablist', { name: 'terminal tabs' })).toBeTruthy();
+    expect(within(panel()).getByRole('tablist', { name: 'Panel tools' })).toBeTruthy();
   });
 
   describe('over a held hydration and a recorded layout.json', () => {
@@ -301,7 +301,7 @@ describe('shell renders the panel host in the region', () => {
       expect(effectiveIds()).toEqual([id, 't:pin00000']);
       expect(within(panel()).getByRole('tabpanel', { name: 'session-info' })).toBeTruthy();
       const singleton = within(panel()).getByRole('region', { name: 'session-info' });
-      expect(within(singleton).queryByRole('tablist')).toBeNull(); // other stacked tools may have their own strips
+      expect(within(singleton).getAllByRole('tab').map((tab) => tab.getAttribute('aria-selected'))).toEqual(['true', 'false']); // one strip, the pins
       expect(info.probe.created).toEqual([expect.objectContaining({ instanceId: id, params: 'p' })]);
     });
   });

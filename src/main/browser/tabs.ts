@@ -18,10 +18,10 @@ import { randomBytes } from 'node:crypto';
 import type { BrowserWindow, LoadURLOptions, WebContents, WebContentsView } from 'electron';
 import type { AppSessionId } from '@shared/graph/ids';
 import { classifyLoadError } from '@shared/browser/errors';
-import { BROWSER_LOADED_TABS_MAX, UNKNOWN_BROWSER_TAB, type BrowserControl, type BrowserTab } from '@shared/browser/tab';
+import { BROWSER_LOADED_TABS_MAX, UNKNOWN_BROWSER_TAB, type BrowserControl, type BrowserOpenPage, type BrowserTab, type BrowserViewport } from '@shared/browser/tab';
 import { hostOf, validateBrowserUrl } from '@shared/browser/url';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
-import { personHolds } from './agent/control';
+import { personHolds, personUses } from './agent/control';
 import { TabDebugger } from './debugger';
 import { TabInputSeam } from './input';
 import type { PersistedTab, TabsFile } from './persist';
@@ -110,6 +110,9 @@ export interface TabStoreDeps {
   // P5 O7 M3: where a load of the tab goes (forwarded.ts's `route`): the URL, moved to a forwarded port's new listener, or
   // null when the forward is being opened again and the load is made once it answers
   routeLoad?(tab: BrowserTab, url: string): string | null;
+  // U12a: the reload `show_pane` asks for (navigation.ts `reloadForAgent`), which is not the person's input. Absent where
+  // nothing asks for one (the daemon's tab engine): a loaded tab is then shown without reloading.
+  reloadForAgent?(tabId: string): boolean;
 }
 
 // A page's `window.open` child, adopted as a tab of its opener's session in its opener's partition (window-open.ts).
@@ -125,6 +128,7 @@ export interface OpenRequest {
   select: boolean;
   reuse?: 'url';
   requestId?: string;
+  reload?: true; // U12a: show_pane's open; the session's tab already at the URL is loaded again unless the person uses it
   partition?: string; // a tab opened from a page (its context menu) opens in that page's partition, not the setting's
   opener?: TabEntry; // a tab a page opened itself (a modifier-clicked link): that page's, never suspended for it
   load?: LoadURLOptions; // E11: such a tab's first load, with the link's referrer and post body (window-open.ts)
@@ -141,7 +145,7 @@ const normalised = (url: string) => {
 export class TabStore {
   private readonly entries = new Map<string, TabEntry>();
   private readonly selected = new Map<AppSessionId, string | null>();
-  private readonly requests = new Map<string, { tabId: string; at: number }>();
+  private readonly requests = new Map<string, { tabId: string; at: number; page?: BrowserOpenPage }>(); // U12a: page
   private readonly dirtySessions = new Set<AppSessionId>();
   private emitScheduled = false;
   private fileBroken: boolean;
@@ -272,22 +276,31 @@ export class TabStore {
 
   // ---- commands -------------------------------------------------------------------------------------------------------
 
-  // `browser.tabs.open` (Design §2; Decision Log 7).
-  open(request: OpenRequest): { tab: BrowserTab; reused: boolean } {
-    const { appSessionId, select, reuse, requestId } = request;
+  // `browser.tabs.open` (Design §2; Decision Log 7). U12a (Interfaces §B): with `reload`, the session's tab at the address
+  // is loaded again unless the person uses it (`personUses`), decided and commanded here in one call, and `page` says
+  // which; the outcome is remembered with the request id, so a second window's call reloads nothing more.
+  open(request: OpenRequest): { tab: BrowserTab; reused: boolean; page?: BrowserOpenPage } {
+    const { appSessionId, select, reuse, requestId, reload } = request;
     this.announceBrokenFile(appSessionId);
     const at = this.now();
     for (const [id, seen] of this.requests) if (at - seen.at > REQUEST_ID_MS) this.requests.delete(id);
     const earlier = requestId === undefined ? undefined : this.requests.get(requestId);
-    if (earlier && this.entries.has(earlier.tabId)) return { tab: this.require(earlier.tabId).tab, reused: true };
+    if (earlier && this.entries.has(earlier.tabId)) return { tab: this.require(earlier.tabId).tab, reused: true, ...(earlier.page !== undefined && { page: earlier.page }) };
 
     const url = request.url === null ? null : normalised(request.url);
     const same = url !== null && reuse === 'url' ? this.all().find(({ tab }) => tab.appSessionId === appSessionId && tab.url !== '' && normalised(tab.url) === url) : undefined;
     if (same) {
       if (select) this.setSelected(appSessionId, same.tab.tabId);
-      if (!same.view) this.loadInto(same, url!, request.opener, request.load);
-      this.remember(requestId, same.tab.tabId, at);
-      return { tab: same.tab, reused: true };
+      let page: BrowserOpenPage | undefined;
+      if (!same.view) {
+        this.loadInto(same, url!, request.opener, request.load);
+        if (reload) page = 'reloaded'; // a suspended tab is loaded as today
+      } else if (reload) {
+        page = personUses(same, at) || !this.deps.reloadForAgent ? 'kept' : 'reloaded';
+        if (page === 'reloaded') this.deps.reloadForAgent!(same.tab.tabId); // `reloaded`: commanded; the answer does not wait for the load
+      }
+      this.remember(requestId, same.tab.tabId, at, page);
+      return { tab: same.tab, reused: true, ...(page !== undefined && { page }) };
     }
 
     const tabId = this.mintTabId();
@@ -298,8 +311,9 @@ export class TabStore {
     this.changed(entry);
     if (select || !this.selected.get(appSessionId)) this.setSelected(appSessionId, tabId);
     if (url !== null) this.loadInto(entry, url, request.opener, request.load);
-    this.remember(requestId, tabId, at);
-    return { tab: entry.tab, reused: false };
+    const page: BrowserOpenPage | undefined = reload ? 'opened' : undefined; // U12a
+    this.remember(requestId, tabId, at, page);
+    return { tab: entry.tab, reused: false, ...(page !== undefined && { page }) };
   }
 
   // A page's `window.open` child (Design §14; Decision Log 24): a new tab of the opener's session and partition whose
@@ -401,6 +415,16 @@ export class TabStore {
     const controlSince = new Date(this.now()).toISOString();
     this.patch(this.require(tabId), { control, controlSince });
     this.deps.emit('browser.control.changed', { tabId, control, controlSince });
+  }
+
+  // U12a (Interfaces §D): the tab's device size (null: Responsive), the same in every pane that shows it, told in the next
+  // tab list; never persisted (`snapshot` writes its own fields) and kept while the tab is suspended. False, with nothing
+  // set, for an extension's options tab, whose page has no device size.
+  setViewport(tabId: string, viewport: BrowserViewport | null): boolean {
+    const entry = this.require(tabId);
+    if (entry.tab.internal !== null) return false;
+    this.patch(entry, { viewport });
+    return true;
   }
 
   // The one way a tab changes (Design §2).
@@ -587,8 +611,8 @@ export class TabStore {
     this.markSession(appSessionId);
   }
 
-  private remember(requestId: string | undefined, tabId: string, at: number): void {
-    if (requestId !== undefined) this.requests.set(requestId, { tabId, at });
+  private remember(requestId: string | undefined, tabId: string, at: number, page?: BrowserOpenPage): void {
+    if (requestId !== undefined) this.requests.set(requestId, { tabId, at, ...(page !== undefined && { page }) });
   }
 
   private announceBrokenFile(appSessionId: AppSessionId): void {
@@ -675,6 +699,7 @@ export class TabStore {
       lastShownAt: at,
       agentBadge: null, // E13: an agent's badge is live, never restored
       internal: null, // cua #90: an extension's page is opened by MAWS only, never restored
+      viewport: null, // U12a: Responsive; a device size is never restored
     };
   }
 

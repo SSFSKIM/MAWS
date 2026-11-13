@@ -14,6 +14,7 @@ import { resetLaneAStore } from '../stores/lane-a';
 import { registerCloseGuard, registerAction, runAction } from '../keymap/actions-runtime';
 import type { PanelHostProps } from '../panel/host-slot';
 import { useLayout } from '../stores/layout';
+import { cardColumnNow, useCardColumnShown, useShellView } from './shell-view';
 import { useSessions } from '../stores/sessions';
 import { useSettings } from '../stores/settings';
 import { registerShellActions } from './shell-actions';
@@ -52,7 +53,8 @@ const offs: (() => void)[] = [];
 const chromeTabs = () => screen.getByRole('banner').querySelector<HTMLElement>('[data-chrome-tabs]')!;
 const renderShell = () => render(<QueryClientProvider client={queryClient}><Shell /></QueryClientProvider>);
 // Geometry and maximize checks need a selected surface; an empty panel reserves no space.
-function openSurface(toolId = 'terminal') {
+// A narrow tool by default (UX wave U8b, Addendum 6: a terminal opens wide, so Background tasks stands for "any other tool").
+function openSurface(toolId = 'background') {
   offs.push(registerPanelTool(probeTool(toolId).tool));
   registerSlot('panelHost', PanelHost);
   useSessions.setState({ records: new Map([[A, record(A)]]) });
@@ -126,7 +128,7 @@ describe('shell frame', () => {
     const user = userEvent.setup();
     offs.push(registerShellActions(fakeBridge()));
     openSurface('review');
-    useLayout.getState().setPanel({ width: 444 });
+    useLayout.getState().setPanelWidth(444); // UX wave U8b: the wide width, Review being in view
     renderShell();
     await user.click(screen.getByRole('button', { name: 'Expand surface' }));
     expect(region('main').inert).toBe(true);
@@ -161,7 +163,7 @@ describe('shell frame', () => {
     renderShell();
     expect(grid().style.gridTemplateColumns).toBe('240px minmax(0, 1fr) 0px');
     act(() => useLayout.getState().setSidebar({ width: 280 }));
-    act(() => useLayout.getState().setPanel({ width: 320 }));
+    act(() => useLayout.getState().setPanelWidth(320)); // UX wave U8b: the narrow width, nothing in view
     expect(grid().style.gridTemplateColumns).toBe('280px minmax(0, 1fr) 0px');
     act(() => openSurface());
     expect(grid().style.gridTemplateColumns).toBe('280px minmax(0, 1fr) 320px');
@@ -171,7 +173,7 @@ describe('shell frame', () => {
     openSurface();
     renderShell();
     act(() => useLayout.getState().setSidebar({ collapsed: true }));
-    expect(grid().style.gridTemplateColumns).toBe('0px minmax(0, 1fr) 420px');
+    expect(grid().style.gridTemplateColumns).toBe('0px minmax(0, 1fr) 360px');
     expect(region('sidebar').inert).toBe(true);
     act(() => useLayout.getState().setPanel({ collapsed: true }));
     expect(grid().style.gridTemplateColumns).toBe('0px minmax(0, 1fr) 0px');
@@ -196,7 +198,12 @@ describe('shell frame', () => {
     renderShell();
     screen.getAllByRole('separator')[1].focus();
     await user.keyboard('{ArrowLeft}');
-    expect(useLayout.getState().regions.panel.width).toBe(428);
+    // UX wave U8b: from the narrow automatic 360, written as the narrow width and as build F's one width
+    expect(useLayout.getState().panelWidths).toMatchObject({ wide: null, narrow: 368 });
+    expect(useLayout.getState().regions.panel.width).toBe(368);
+    await user.keyboard('{Enter}'); // a reset is automatic again, which F reads as 380
+    expect(useLayout.getState().panelWidths).toMatchObject({ wide: null, narrow: null });
+    expect(useLayout.getState().regions.panel.width).toBe(380);
     screen.getAllByRole('separator')[0].focus();
     await user.keyboard('{Home}');
     expect(useLayout.getState().regions.sidebar.width).toBe(200);
@@ -211,7 +218,7 @@ describe('shell frame', () => {
   it('temporarily sets the sidebar aside below 1100 while a surface is open and uses a sheet below 700', () => {
     openSurface('review');
     const regions = LAYOUT_DEFAULTS.regions;
-    useLayout.setState({ regions: { ...regions, sidebar: { ...regions.sidebar, width: 480 }, panel: { ...regions.panel, width: 640 } } });
+    useLayout.setState({ regions: { ...regions, sidebar: { ...regions.sidebar, width: 480 }, panel: { ...regions.panel, width: 640 } }, panelWidths: { version: 1, wide: 640, narrow: null } });
     renderShell();
     expect(grid().style.gridTemplateColumns).toBe('480px minmax(0, 1fr) 600px');
     act(() => setWindowWidth(960));
@@ -234,7 +241,7 @@ describe('shell frame', () => {
   it('a drag-collapse of a clamped region keeps its remembered width for reopening', () => {
     openSurface('review');
     const regions = LAYOUT_DEFAULTS.regions;
-    useLayout.setState({ regions: { ...regions, sidebar: { ...regions.sidebar, width: 900 }, panel: { ...regions.panel, width: 1000 } } });
+    useLayout.setState({ regions: { ...regions, sidebar: { ...regions.sidebar, width: 900 }, panel: { ...regions.panel, width: 1000 } }, panelWidths: { version: 1, wide: 1000, narrow: null } });
     renderShell();
     const dragBy = (handle: HTMLElement, dx: number) => {
       act(() => void fireEvent.pointerDown(handle, { pointerId: 1, button: 0, clientX: 500 }));
@@ -290,7 +297,8 @@ describe('toolbar', () => {
     const floatingCards = screen.getByRole('complementary', { name: 'Session cards' });
     expect(region('main').contains(floatingCards)).toBe(true);
     expect(region('panel').contains(floatingCards)).toBe(false);
-    expect(['Environment', 'Context', 'Connectors', 'Artifacts'].map((name) => within(within(floatingCards).getByRole('region', { name })).getByRole('button').getAttribute('aria-expanded'))).toEqual(['false', 'false', 'false', 'false']);
+    expect(['Environment', 'Context', 'Connectors'].map((name) => within(within(floatingCards).getByRole('region', { name })).getAllByRole('button')[0].getAttribute('aria-expanded'))).toEqual(['true', 'false', 'false']);
+    expect(within(floatingCards).queryByRole('region', { name: 'Artifacts' })).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Toggle sidebar' }));
     expect(sidebar).toHaveBeenCalledOnce();
     await user.click(cards);
@@ -300,6 +308,26 @@ describe('toolbar', () => {
     await user.click(cards);
     expect(screen.getByRole('complementary', { name: 'Session cards' })).toBeTruthy();
     expect(grid().style.gridTemplateColumns).toBe('240px minmax(0, 1fr) 0px');
+  });
+
+  // UX wave U8b (UC-9, §C.2): the column, the icon and useCardColumnShown read one source, so a page that hides the
+  // column turns all three off in one render. The column's absence is not pinned: U7 decides how it hides under a page.
+  it('a page open in the one source turns the cards off for the icon and useCardColumnShown in one render', () => {
+    useSessions.setState({ records: new Map([[A, record(A)]]) });
+    useLayout.setState({ main: withActive(sessionTab(A)) });
+    const seen: boolean[] = [];
+    function Reader() {
+      const shown = useCardColumnShown();
+      seen.push(shown);
+      return null;
+    }
+    render(<QueryClientProvider client={queryClient}><Shell /><Reader /></QueryClientProvider>);
+    const cards = within(screen.getByRole('banner')).getByRole('button', { name: 'Session cards' });
+    expect([cards.getAttribute('aria-pressed'), seen.at(-1), cardColumnNow(useLayout.getState(), window.innerWidth).shown]).toEqual(['true', true, true]);
+    act(() => useShellView.setState({ pageOpen: true }));
+    expect([cards.getAttribute('aria-pressed'), seen.at(-1), cardColumnNow(useLayout.getState(), window.innerWidth).shown]).toEqual(['false', false, false]);
+    act(() => useShellView.setState({ pageOpen: false }));
+    expect([cards.getAttribute('aria-pressed'), seen.at(-1)]).toEqual(['true', true]);
   });
 
   it('shows a rebound chord in the tooltip', () => {
@@ -376,6 +404,20 @@ describe('another machine’s terminal session in the toolbar', () => {
     expect(takeOver.getAttribute('title')).toBe(LANE_A_WORDS.remoteTakeOver);
   });
 
+  // UX wave U8b (UC-9): only listed, it has no record here, so the column holds no record card.
+  it('has the card column with no record card, and Session cards toggles it', async () => {
+    const user = userEvent.setup();
+    renderShell();
+    act(() => useLayout.setState({ main: withActive(sessionTab(REMOTE)) }));
+    const icon = within(screen.getByRole('banner')).getByRole('button', { name: 'Session cards' });
+    expect([icon.getAttribute('aria-pressed'), (icon as HTMLButtonElement).disabled]).toEqual(['true', false]);
+    const cards = screen.getByRole('complementary', { name: 'Session cards' });
+    expect(within(cards).queryAllByRole('region')).toEqual([]);
+    await user.click(icon);
+    expect(screen.queryByRole('complementary', { name: 'Session cards' })).toBeNull();
+    expect(icon.getAttribute('aria-pressed')).toBe('false');
+  });
+
   it('is titled by its listed row', () => {
     expect(toolbarTitle(sessionTab(REMOTE), new Map(), null, null, useSessions.getState().listed)).toEqual({ title: 'Ship the relay', branch: null });
     expect(toolbarTitle(sessionTab(A), new Map(), null, null, useSessions.getState().listed).title).toBe('New chat'); // no record, no row
@@ -384,7 +426,7 @@ describe('another machine’s terminal session in the toolbar', () => {
 
 describe('shell actions', () => {
   it('toggle the sidebar and panel, maximize and restore the panel', () => {
-    openSurface();
+    openSurface('terminal'); // `surface.terminal` below selects it again
     offs.push(registerShellActions(fakeBridge()));
     runAction('sidebar.toggle');
     expect(useLayout.getState().regions.sidebar.collapsed).toBe(true);
@@ -415,7 +457,7 @@ describe('shell actions', () => {
     expect(region('main').inert).toBe(true);
     act(() => runAction('tab.overview'));
     expect(region('main').inert).toBe(false);
-    expect(grid().style.gridTemplateColumns).toBe('240px minmax(0, 1fr) 420px');
+    expect(grid().style.gridTemplateColumns).toBe('240px minmax(0, 1fr) 360px'); // UX wave U8b: a narrow tool's automatic width
     const dialog = within(region('main')).getByRole('dialog', { name: 'Overview' });
     if (alreadyOpen) expect(dialog).toBe(previousDialog);
     await vi.waitFor(() => expect(document.activeElement).toBe(dialog));
@@ -453,7 +495,7 @@ describe('right panel', () => {
     act(() => openSurface());
     expect(region('panel').inert).toBe(false);
     expect(within(region('panel')).getByRole('button', { name: 'Expand surface' })).toBeTruthy();
-    expect(within(region('panel')).getByRole('button', { name: 'Close surface' })).toBeTruthy();
+    expect(within(region('panel')).getByRole('button', { name: 'Hide side column' })).toBeTruthy();
   });
 
   it('hands a registered host the session’s effective tabs and splits its changes back by pin', async () => {
@@ -482,6 +524,7 @@ describe('right panel', () => {
     expect(useLayout.getState().regions.panel.maximized).toBe(true);
   });
 
+  // UX wave U8b (M2): the host's writes maintain the pins; what is in view with no session is chosen by showSurfaceTab
   it('with no tab open, round-trips the selection between two pins and falls back when the selected pin goes', () => {
     let props: PanelHostProps | null = null;
     registerSlot('panelHost', (p) => {
@@ -494,10 +537,12 @@ describe('right panel', () => {
     renderShell();
     expect(props!).toMatchObject({ appSessionId: null, activeTabId: null });
     act(() => props!.onChange({ tabs: [p1, p2], activeTabId: 'p2' }));
+    expect(props!.activeTabId).toBeNull(); // a write of the list chooses nothing
+    act(() => useLayout.getState().showSurfaceTab(null, 'p2'));
     expect(props!.activeTabId).toBe('p2');
-    act(() => props!.onChange({ tabs: [p1, p2], activeTabId: 'p1' }));
+    act(() => useLayout.getState().showSurfaceTab(null, 'p1'));
     expect(props!.activeTabId).toBe('p1');
-    act(() => props!.onChange({ tabs: [p1, p2], activeTabId: 'p2' }));
+    act(() => useLayout.getState().showSurfaceTab(null, 'p2'));
     // The host removes the selected pin without choosing another: the neighbour that took its place is selected.
     act(() => props!.onChange({ tabs: [p1], activeTabId: 'p2' }));
     expect(props!.tabs.map((t) => t.id)).toEqual(['p1']);
@@ -576,7 +621,7 @@ describe('the Artifacts entry', () => {
     const expectShown = () => {
       expect(useLayout.getState().regions.panel).toMatchObject({ floating: false, maximized: false, collapsed: false });
       expect(region('main').inert).toBe(false);
-      expect(grid().style.gridTemplateColumns).toBe('240px minmax(0, 1fr) 420px');
+      expect(grid().style.gridTemplateColumns).toBe('240px minmax(0, 1fr) 360px'); // UX wave U8b: a narrow tool's automatic width
       expect(screen.queryByRole('region', { name: 'Session card' })).toBeNull();
       expect(within(within(region('main')).getByRole('tabpanel')).getByText(placeholder)).toBeTruthy();
     };

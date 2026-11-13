@@ -17,6 +17,11 @@
 //   words for a callback port this Mac already waits on there), shown as they are. A server's result is its machine's too
 //   (the task review's finding 4): the same server signing in on this Mac and on another machine are two servers here,
 //   each with its own newest operation, and a row shows the one of the machine its Sign in runs on (`signInMachineOf`).
+// - UX wave U11a M8 (docs/doperpowers/plans/2026-11-12-ux-wave-U11a-settings-connectors-org.md, §A): a dynamic connector,
+//   a plugin's or one of MAWS's own list, is its machine and its name (`dynamic`, keyed as `user` is, with no folder, and
+//   apart from a file-scope server of the name). The dialog signs it in by name; Customize's row of MAWS's own list also
+//   sends the revision of the configuration it was drawn with, and keeps its fingerprint here, which decides as for any
+//   row that a finished result shows only on the row of the configuration it was started for; a running one shows on both.
 import { create } from 'zustand';
 import type { ConnectorSignInChanged } from '@shared/ipc/schema/connectors';
 import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
@@ -29,7 +34,7 @@ import { transportWords } from '../../widgets/read';
 
 export interface SignInTarget {
   name: string;
-  scope: PluginsScope; // MAWS's own (`app`) servers are not signed in through the engine
+  scope: PluginsScope; // a configuration file's; MAWS's own (`app`) servers sign in as dynamic connectors (`startSignInDynamic`)
   cwd: string | null; // the page's directory: part of a project or local server's identity
   path: string; // the file the entry is in: main signs in only from a session whose engine uses this entry (scalpel-2#1)
 }
@@ -44,10 +49,17 @@ export interface SignInRecord {
 // P5 O7 M5c: a machine as the bookkeeping keys it: this Mac's, or a bare id's (sent to this Mac), as ''
 const machineKey = (machine: MachineRef | null): string => (machine === null || machine === ipc.localMachine ? '' : machine);
 
-/** A configured server on a machine (absent or null: this Mac's). */
-export type SignInServer = Omit<SignInTarget, 'path'> & { machine?: MachineRef | null };
+/** The scope a sign-in is kept under: a configured file's, or a dynamic connector's (U11a M8). */
+export type SignInScope = PluginsScope | 'dynamic';
+/** A server on a machine (absent or null: this Mac's). */
+export type SignInServer = { name: string; scope: SignInScope; cwd: string | null; machine?: MachineRef | null };
 
-export const signInKeyOf = ({ name, scope, cwd, machine = null }: SignInServer): string => [machineKey(machine), scope, scope === 'user' ? '' : (cwd ?? ''), name].join('\u0000');
+// `dynamic` is keyed as `user` is, with no folder
+export const signInKeyOf = ({ name, scope, cwd, machine = null }: SignInServer): string => [machineKey(machine), scope, scope === 'user' || scope === 'dynamic' ? '' : (cwd ?? ''), name].join('\u0000');
+
+/** The longest name `connectors.signInDynamicServer` takes: a dynamic connector of a longer name is offered no Sign in. */
+const DYNAMIC_NAME_MAX = 128;
+export const signsInDynamic = (name: string): boolean => name.length > 0 && name.length <= DYNAMIC_NAME_MAX;
 
 interface SignIns {
   byServer: ReadonlyMap<string, SignInRecord>;
@@ -116,8 +128,18 @@ export async function startSignInByName(server: Omit<SignInTarget, 'path'>, appS
   bindReceipt(server, null, appSessionId, answer);
 }
 
+/**
+ * UX wave U11a M8 (§A): a dynamic connector, by the name the session's mcp_status reports, through
+ * `connectors.signInDynamicServer`. `revision`: the configuration a row of MAWS's own list was drawn with, which the
+ * services check the entry against; the dialog passes none, and no fingerprint. Bound as `startSignInByName` binds.
+ */
+export async function startSignInDynamic(server: { name: string; revision?: string }, fingerprint: string | null, appSessionId: AppSessionId, bridge: MawsBridge = ipc): Promise<void> {
+  const answer = await bridge.invoke('connectors.signInDynamicServer', { name: server.name, appSessionId, ...(server.revision !== undefined && { entry: { revision: server.revision } }) });
+  bindReceipt({ name: server.name, scope: 'dynamic', cwd: null }, fingerprint, appSessionId, answer);
+}
+
 // A sign-in's receipt bound to its server, the events heard before it applied; a refused invoke is a failed sign-in.
-function bindReceipt(target: Omit<SignInTarget, 'path'>, fingerprint: string | null, appSessionId: string, answer: CommandResult<'connectors.signIn' | 'connectors.signInServer'>): void {
+function bindReceipt(target: Omit<SignInServer, 'machine'>, fingerprint: string | null, appSessionId: string, answer: CommandResult<'connectors.signIn' | 'connectors.signInServer' | 'connectors.signInDynamicServer'>): void {
   const machine = machineOfSession(appSessionId); // the session's address names where it went
   const key = signInKeyOf({ ...target, machine });
   if (!answer.ok) {

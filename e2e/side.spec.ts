@@ -28,7 +28,7 @@ import { seedTranscript, SIDE_FOLLOW_UP, SIDE_FOLLOW_UP_ROWS, SIDE_QUESTION, SID
 import type { AppSessionId } from '@shared/graph/ids'; // P2-E1
 import { frameAt, headerAction, importSeeded, mcpCalls, mcpResultOf, metaEvents, ofKind, pageUrlOf, resultText, seedArtifact } from './support/maws-tools'; // P2-E1; P3-L M6b; P3-F (case 12's evidence)
 import { newChatIn, openProject, sidebarOf, sidebarRow } from './support/sidebar';
-import { closeSurface, hideSurfaces, mainTabById, openArtifactInPanel, openSurface, surface } from './support/shell';
+import { hideSurfaces, mainTabById, openArtifactInPanel, openSurface, surface } from './support/shell';
 
 // E3's evidence screenshots, written only under MAWS_E3_SHOTS=1 (E11 W-E: a gate run leaves them alone); the cases'
 // both-themes token scans run either way.
@@ -43,6 +43,8 @@ const CARD_CHILD = 'e3e30000-0000-4000-8000-000000000004'; // P2-E1 (M5): case 8
 const APP = 'src/app.ts';
 const APP_TEXT = Array.from({ length: 12 }, (_, i) => (i === 2 ? 'export const total = items.reduce((sum, item) => sum + item.price, 0);' : `export const v${i + 1} = ${i + 1};`)).join('\n') + '\n';
 const FIRST_PROMPT = 'Remember the word ZEBRA, then tell me what src/app.ts does.';
+// UX wave U7 (S-11): a session with no title is named by its first prompt's first six words, so a fork's caption names its original so
+const FIRST_PROMPT_TITLE = 'Remember the word ZEBRA, then tell';
 const FIRST_REPLY = 'Noted: ZEBRA. src/app.ts exports a running total and a few constants.';
 const COMMENT = 'Why is the total recomputed here instead of cached?';
 const CHILD_REPLY = 'The total is recomputed because items can change between calls. Caching it would need an invalidation hook.';
@@ -243,7 +245,8 @@ async function openThreadFromGutter(c: Case & { parent: string }): Promise<{ chi
   const child = await sideThreadOf(page, c.parent, 'comment');
   const pane = panelRegion(page).locator(`[data-side-thread-view="${await addressed(page, child)}"]`);
   await expect(pane, 'the Side pane opens on the new thread').toBeVisible();
-  await closeSurface(page, 'Files');
+  // UX wave U8b: the Side pane's tab comes into view in Files' place (one tab in view per group); Files stays a tab
+  await expect(surface(page, 'files'), 'Files is out of view').toHaveCount(0);
   await expect(pane.getByText(CHILD_REPLY)).toBeVisible({ timeout: 20_000 });
   return { child, pane, viewer };
 }
@@ -622,7 +625,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
       await forkRow.hover();
       await expect(page.getByTestId('hover-lineage')).toBeVisible({ timeout: 2_000 });
     }).toPass({ timeout: 10_000 });
-    await expect(page.getByTestId('hover-lineage')).toHaveText(`Fork of ${FIRST_PROMPT}`);
+    await expect(page.getByTestId('hover-lineage')).toHaveText(`Fork of ${FIRST_PROMPT_TITLE}`);
     await page.mouse.move(700, 450);
 
     // A, opened from the sidebar: the steered comment drawn from disk with its chip and image
@@ -841,18 +844,17 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     // Reply naming it
     const request = card.locator('[data-request-card]');
     await expect(request).toBeVisible({ timeout: 20_000 });
-    await expect(request).toContainText('Approval needed');
+    await expect(request.getByRole('heading', { name: 'Run a command' }), 'the loaded card says what is asked (U1a §D)').toBeVisible({ timeout: 20_000 });
     await expect(request).toContainText('echo first-step');
     const strip = card.locator('[data-needs-you]');
     await expect(strip).toContainText('Waiting for your permission');
     await expect(strip.getByRole('button', { name: 'Open in Side pane' })).toBeVisible();
     await expect(strip.getByRole('button', { name: 'Open as tab' })).toBeVisible();
-    const allow = request.getByRole('button', { name: 'Allow', exact: true });
+    const allow = request.getByRole('button', { name: 'Allow once', exact: true });
     const [cardBox, allowBox] = [(await card.boundingBox())!, (await allow.boundingBox())!];
     expect(allowBox.x).toBeGreaterThanOrEqual(cardBox.x);
     expect(allowBox.x + allowBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width + 1);
     expect(allowBox.y + allowBox.height).toBeLessThanOrEqual(cardBox.y + cardBox.height + 1);
-    await request.getByRole('radio', { name: 'Allow once' }).click();
     await allow.click();
     await expect.poll(allowed).toBe(1);
 
@@ -865,8 +867,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     const pane = panelRegion(page).locator(`[data-side-thread-view="${await addressed(page, child)}"]`);
     const docked = pane.getByRole('group', { name: 'Approval needed' });
     await expect(docked).toContainText('echo second-step');
-    await docked.getByRole('radio', { name: 'Allow once' }).click();
-    await docked.getByRole('button', { name: 'Allow', exact: true }).click();
+    await docked.getByRole('button', { name: 'Allow once', exact: true }).click();
     await expect.poll(allowed).toBe(2);
     await expect(pane.getByText(CARD_REPLY)).toBeVisible({ timeout: 20_000 });
     expect(writtenUsers(maws, parent)).toHaveLength(1);
@@ -900,14 +901,13 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     const pane = panelRegion(page).locator(`[data-side-thread-view="${await addressed(page, child)}"]`);
     const docked = pane.getByRole('group', { name: 'Approval needed' });
     await expect(docked).toContainText('echo the-step');
-    await docked.getByRole('radio', { name: 'Allow once' }).click();
-    await docked.getByRole('button', { name: 'Allow', exact: true }).click();
+    await docked.getByRole('button', { name: 'Allow once', exact: true }).click();
     await expect(pane.getByText(CARD_REPLY)).toBeVisible({ timeout: 20_000 });
 
     // Show in artifact: the parent's Artifacts tool on the artifact, the card back on the same thread under the heading
     await pane.getByRole('button', { name: 'Show in artifact' }).click();
     await expect(surface(page, 'artifacts')).toBeVisible();
-    await closeSurface(page, 'Side');
+    await expect(surface(page, 'side'), 'the Artifacts tool came into view in the Side pane’s place').toHaveCount(0);
     const viewer = panelRegion(page).locator('[data-artifact-viewer]');
     const redocked = viewer.locator('[data-comment-card]');
     await expect(redocked).toHaveAttribute('data-card-phase', 'thread');
@@ -958,7 +958,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     // the thread reads the page (allowed by a rule) and asks to publish over it: C7's request card inside the card and the
     // strip, then Allow there
     const request = card.locator('[data-request-card]');
-    await expect(request).toContainText('Approval needed', { timeout: 20_000 });
+    await expect(request.getByRole('button', { name: 'Allow once', exact: true }), 'the loaded permission card').toBeVisible({ timeout: 20_000 });
     await expect(card.locator('[data-needs-you]')).toContainText('Waiting for your permission');
     // P3-F (a diagnostic, not a fix): the request's identity and the public pending state are read before the two clicks
     // (so they follow each other as before), and again, collected alongside the poll and never awaited before it, from the
@@ -966,8 +966,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     // attention item, journal) can be told from where it stopped
     const evidenceFrom = Date.now();
     const pending = await allowEvidence(c, child, request, evidenceFrom);
-    await request.getByRole('radio', { name: 'Allow once' }).click();
-    await request.getByRole('button', { name: 'Allow', exact: true }).click();
+    await request.getByRole('button', { name: 'Allow once', exact: true }).click();
     // started at the click, not awaited here: the 20 s poll below runs from the click, so these reads (each may take
     // seconds) cannot lengthen it, and a handler keeps a rejection from going unhandled while the poll runs
     const afterAllow = allowEvidence(c, child, request, evidenceFrom).catch((error: unknown) => ({ unreadable: String(error).slice(0, 200) }));
@@ -1027,7 +1026,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
 });
 
 // P3-F, case 12's diagnostic: one reading of the thread's permission round, as bounded identities and statuses: the request
-// card's own DOM (its request id, busy, the scope chosen, the Allow button's state and place, any alert or status text),
+// card's own DOM (its request id, busy, the Allow once button's state and place, any alert or status text),
 // the thread's status, its permission events, its permission attention items and the host's journal (the engine's asks,
 // the host's answers, the `maws` calls and whether each was answered, the troubles the host noted). Never an input or a
 // payload. Reads only: nothing here clicks, answers, focuses or waits, and a source that cannot be read says so in its
@@ -1060,12 +1059,18 @@ async function allowEvidence(c: Case, child: string, request: Locator, from: num
     card: await read(() =>
       request.evaluateAll((roots) =>
         roots.map((root) => {
-          const allow = Array.from(root.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Allow');
+          // U1a §D: the button by its name, its key hint (hidden from the accessibility tree) left out
+          const named = (button: HTMLButtonElement) =>
+            Array.from(button.childNodes)
+              .filter((node) => !(node instanceof HTMLElement && node.getAttribute('aria-hidden') === 'true'))
+              .map((node) => node.textContent ?? '')
+              .join('')
+              .trim();
+          const allow = Array.from(root.querySelectorAll('button')).find((button) => named(button) === 'Allow once');
           const box = allow?.getBoundingClientRect();
           return {
             requestCard: root.getAttribute('data-request-card'),
             busy: root.getAttribute('aria-busy'),
-            scope: Array.from(root.querySelectorAll('[role="radio"][aria-checked="true"]')).map((node) => node.getAttribute('aria-label')),
             allow: allow && box ? { disabled: allow.disabled, focused: allow === document.activeElement, x: Math.round(box.x), y: Math.round(box.y), w: Math.round(box.width), h: Math.round(box.height) } : null,
             alert: Array.from(root.querySelectorAll('[role="alert"]')).map((node) => `${node.textContent ?? ''} | ${node.querySelector('[title]')?.getAttribute('title') ?? ''}`.slice(0, 200)),
             status: Array.from(root.querySelectorAll('[role="status"]')).map((node) => (node.textContent ?? '').slice(0, 80)),

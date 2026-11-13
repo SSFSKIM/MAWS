@@ -7,6 +7,8 @@ import type { CommandName, EventName, HostState } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
 import { interruptedSummary, PERSIST_RETRY_MS, startAttentionService, type AttentionServiceDeps } from './service';
 import type { AttentionStore } from './store';
+import { laneAAttention } from '../lane-a/attention';
+import type { LaneAView } from '../lane-a/driver';
 
 const APP = 'app-a' as AppSessionId;
 const SID = '33333333-3333-4333-8333-333333333333';
@@ -78,17 +80,30 @@ function setup(opts: { store?: FakeStore; dispatch?: AttentionServiceDeps['dispa
 }
 
 describe('attention service merges broker items with the derived kinds', () => {
-  it('keeps the broker\'s pending and delivered items, persists the merged list, and emits it whole', async () => {
+  it('keeps the broker\'s waiting items, persists the merged list, and emits it whole', async () => {
     const { service, store, fire, last } = setup();
     await service.ready;
     const permission = item({ kind: 'permission', state: 'pending' });
     const question = item({ kind: 'question', state: 'delivered', request: { requestId: 'req-2' as never, toolUseId: 'toolu_2' as never, taskId: null, agentId: null } });
     const plan = item({ kind: 'plan', state: 'confirmed', request: { requestId: 'req-3' as never, toolUseId: 'toolu_3' as never, taskId: null, agentId: null } });
     fire('session.brokerItems', { appSessionId: APP, items: [permission, question, plan] });
-    expect(last()).toEqual([permission, question]); // the engine moved past a confirmed item
+    expect(last()).toEqual([permission]); // UC-1: an answered (delivered) item waits nowhere; the engine moved past a confirmed one
     await service.settled();
-    expect(store.sessions.get(APP)).toEqual([permission, question]);
-    expect(await service.list()).toEqual([permission, question]);
+    expect(store.sessions.get(APP)).toEqual([permission]);
+    expect(await service.list()).toEqual([permission]);
+  });
+
+  // UC-1 (A17, §B): the publisher keeps only what waits, so no answered request reaches any window, machine or the store
+  it('sends, persists and lists a broker list of a pending and a delivered item as the pending one alone', async () => {
+    const { service, store, fire, last, handlers } = setup();
+    await service.ready;
+    const permission = item({ kind: 'permission', state: 'pending' });
+    const answered = item({ kind: 'permission', state: 'delivered', request: { requestId: 'req-2' as never, toolUseId: 'toolu_2' as never, taskId: null, agentId: null } });
+    fire('session.brokerItems', { appSessionId: APP, items: [permission, answered] });
+    expect(last()).toEqual([permission]);
+    await service.settled();
+    expect(store.sessions.get(APP)).toEqual([permission]);
+    expect(await handlers.get('attention.list')!(undefined)).toEqual([permission]);
   });
 
   it('a process exit with lost approvals raises one interrupted item with the contract summary; the broker items are gone', async () => {
@@ -501,6 +516,32 @@ describe('attention service merges broker items with the derived kinds', () => {
 
   // C12: a release under the memory budget is not an attention event (D-18, §5.7): nothing is raised, whatever the
   // session held before (a released session held no request, so it lost none)
+  // UX wave U8b M6 (X-168): a session read from disk now ends with the follower's exit (reason unknown, `seq` null)
+  // whether or not its last turn ended, so the case below runs for sessions that ended long ago. It raises nothing: the
+  // same history with and without the supplied exit gives the same list, and nothing new is emitted for the exit.
+  it('the exit a follower supplies to a session read from disk raises nothing', () => {
+    const disk = (kind: string, payload: Record<string, unknown>, at: string) => ({ ...event(kind, payload), seq: null, at }) as SessionEvent;
+    const history = [
+      disk('turn.started', { userMessageUuid: 'u-1', origin: null }, '2026-09-01T09:00:00.000Z'),
+      disk('turn.ended', { isError: false, terminalReason: null, result: 'success', resultText: null, isEchoReceipt: false, origin: null, errors: [] }, '2026-09-01T09:00:05.000Z'),
+      disk('turn.started', { userMessageUuid: 'u-2', origin: null }, '2026-09-01T09:00:10.000Z'),
+      disk('turn.ended', { isError: true, terminalReason: null, result: 'error_during_execution', resultText: null, isEchoReceipt: false, origin: null, errors: ['overloaded'] }, '2026-09-01T09:00:15.000Z'),
+      disk('task.notification', { taskId: 'task-old', toolUseId: null, status: 'completed', summary: 'done', outputFile: null, reason: null }, '2026-09-01T09:01:00.000Z'),
+    ];
+    const exit = disk('process.exited', { code: null, signal: null, reason: 'unknown', lostAttentionCount: 0, budget: null }, '2026-09-01T09:01:00.000Z');
+    const without = setup();
+    without.batch(...history);
+    const withExit = setup();
+    withExit.batch(...history);
+    const emitted = withExit.changed.length;
+    withExit.batch(exit);
+    expect(withExit.last().map((i) => i.kind)).toEqual(['error']); // the history's own failed turn, as before: not the exit's
+    expect(withExit.last()).toEqual(without.last());
+    expect(withExit.changed.length).toBe(emitted); // the list did not change, so nothing was emitted or persisted
+    withExit.batch(...history, exit); // a second read of the same history
+    expect(withExit.last()).toEqual(without.last());
+  });
+
   it('a budget exit raises nothing and keeps what the session already had', () => {
     const { batch, last, changed } = setup();
     batch(event('turn.ended', { isError: true, terminalReason: 'model_error', result: 'x', resultText: null, isEchoReceipt: false, origin: 'human', errors: [] }));
@@ -584,7 +625,7 @@ describe('attention service persistence failures', () => {
     await expect(service.settled()).rejects.toThrow('EIO: attention.json not written');
     expect(await handlers.get('attention.list')!(undefined)).toEqual([first]);
     expect(last()).toEqual([first]);
-    const second = item({ kind: 'permission', state: 'delivered', request: { requestId: 'req-2' as never, toolUseId: 'toolu_2' as never, taskId: null, agentId: null } });
+    const second = item({ kind: 'permission', state: 'pending', request: { requestId: 'req-2' as never, toolUseId: 'toolu_2' as never, taskId: null, agentId: null } });
     fire('session.brokerItems', { appSessionId: APP, items: [first, second] });
     await expect(service.settled()).resolves.toBeUndefined();
     expect(store.sessions.get(APP)).toEqual([first, second]);
@@ -800,6 +841,24 @@ describe('lane A items', () => {
     service.setLaneAItems(APP, []);
     expect(last()).toEqual([]);
     expect(await handlers.get('attention.request')!({ appSessionId: APP, requestId: 'toolu_a' })).toEqual({ event: null });
+    service.stop();
+  });
+
+  // UC-1 (U1a's §B): with the bridge's settlement held back, the session's machine stops listing a request at the moment
+  // the answer was taken (the holder told by its endpoint's `laneA.accepted`), though the bridge still lists it
+  it('carries no request the holder was told was taken, in attention.changed or attention.list, while the bridge still lists it', async () => {
+    const { service, last, handlers } = setup();
+    await service.ready;
+    const holder = laneAAttention({ set: (appId, entries) => service.setLaneAItems(appId, entries) });
+    const raised = { request: 'toolu_a', session: SID, tool: 'Bash', input: { command: 'echo made-up' }, t: Date.parse(AT) };
+    const view = { state: { appSessionId: APP, engineSessionId: SID, bridge: 'live', reason: null, launch: 'l1', sminos: '1.47.0', ops: [], reads: [], controls: {}, turn: { running: true, unknown: false }, model: null, effort: null, override: null, mode: null, catalog: null, pending: [raised], settled: [], deliveries: [] }, fresh: true, tool: null } as LaneAView;
+    holder.update(APP, view);
+    expect(last().map((i) => i.request.requestId)).toEqual(['toolu_a']);
+    holder.accepted(APP, 'toolu_a');
+    holder.update(APP, view); // the bridge has not settled it
+    expect(last()).toEqual([]);
+    expect(await handlers.get('attention.list')!(undefined)).toEqual([]);
+    holder.stop();
     service.stop();
   });
 
