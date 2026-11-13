@@ -8,6 +8,7 @@ import { project, record, remoteRow, status } from '../../../../test/support/bui
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { addressOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
 import { REMOTE_UNAVAILABLE, SESSION_ACTS_CAPABILITY } from '@shared/ipc/remote-unavailable';
 import { REMOTE_ACT_PENDING_MS } from '@shared/machine/remote-pending';
 import type { MachineState } from '@shared/ipc/schema/machines';
@@ -433,6 +434,47 @@ describe('dialogs', () => {
       expect(await within(dialog).findByText('Can’t list archived sessions on Studio yet. Update MAWS on Studio and try again.')).toBeTruthy();
       expect(within(dialog).queryByText('Loading…')).toBeNull();
       expect(fake.invoked('session.list')).toEqual([]);
+    });
+
+    // The UX wave, U9 (the architect's ruling (A), 2026-11-13): the footer's "Archived sessions…" reaches every machine's
+    // own row, since a machine's row leaves the sidebar with its last listed session and its menu with it
+    it('the footer’s sheet lists another machine’s archived session under its name, after this Mac’s, and Unarchive acts there', async () => {
+      studio({ capabilities: [SESSION_ACTS_CAPABILITY], owner: true });
+      const mine = record(BARE_IDLE2, { projectId: null, archived: true, title: { text: 'Archived here', source: 'user' } });
+      const theirs = record(BARE_IDLE1, { projectId: null, archived: true, title: { text: 'Archived on Studio', source: 'user' } });
+      withMain({ 'session.list': (_: unknown, machine: string | undefined) => ({ sessions: machine === OTHER_MACHINE ? [theirs] : [mine], revision: 1 }), 'session.update': () => ({ ...theirs, archived: false }) });
+      render(<SessionDialogs />);
+      act(() => openDialog({ kind: 'archived', projectId: null }));
+      const dialog = await screen.findByRole('dialog', { name: 'Archived sessions' });
+      const there = await within(dialog).findByRole('region', { name: 'Studio' });
+      const row = await within(there).findByRole('listitem', { name: 'Archived on Studio' });
+      const here = within(dialog).getByRole('region', { name: 'This Mac' });
+      await within(here).findByRole('listitem', { name: 'Archived here' });
+      expect(within(dialog).getAllByRole('region').map((r) => r.getAttribute('aria-label'))).toEqual(['This Mac', 'Studio']);
+      await userEvent.click(within(row).getByRole('button', { name: 'Unarchive' }));
+      await waitFor(() => expect(fake.machines('session.update')).toEqual([OTHER_MACHINE]));
+    });
+
+    it('the footer’s sheet holds no machine for another: each section its rows, its line or its loading, none for a machine with nothing archived', async () => {
+      const LOFT = 'LoftMachineRef00000000' as MachineRef;
+      useMachines.getState().applyRoster([
+        { ref: OTHER_MACHINE, name: 'Studio', local: false, state: 'up', since: new Date().toISOString(), generation: 1, carrier: 'relay', capabilities: [SESSION_ACTS_CAPABILITY], owner: true },
+        { ref: LOFT, name: 'Loft', local: false, state: 'up', since: new Date().toISOString(), generation: 1, carrier: 'relay', capabilities: ['rl2.project-acts'], owner: true },
+      ]);
+      useSessions.setState({ listedMachines: new Set([OTHER_MACHINE, LOFT]) });
+      withMain({});
+      render(<SessionDialogs />);
+      act(() => openDialog({ kind: 'archived', projectId: null }));
+      const dialog = await screen.findByRole('dialog', { name: 'Archived sessions' });
+      await waitFor(() => expect(fake.pending('session.list')).toBe(2)); // this Mac and Studio; Loft is not asked
+      const order = fake.machines('session.list');
+      await act(() => fake.reply('session.list', { sessions: [], revision: 1 }, order.findIndex((machine) => machine !== OTHER_MACHINE))); // this Mac's
+      const here = within(dialog).getByRole('region', { name: 'This Mac' });
+      expect(await within(here).findByText('No archived sessions.')).toBeTruthy();
+      expect(within(within(dialog).getByRole('region', { name: 'Studio' })).getByText('Loading…')).toBeTruthy();
+      expect(within(within(dialog).getByRole('region', { name: 'Loft' })).getByText('Can’t list archived sessions on Loft yet. Update MAWS on Loft and try again.')).toBeTruthy();
+      await act(() => fake.reply('session.list', { sessions: [], revision: 1 }));
+      await waitFor(() => expect(within(dialog).queryByRole('region', { name: 'Studio' })).toBeNull());
     });
 
     it('asks nothing of a machine that is offline or connecting, and says which as its line', async () => {

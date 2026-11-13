@@ -1,7 +1,9 @@
 // The tab's hold on a remote lane B session's transcript (P5 O15 M2b, Decision Log 39; ./transcript-hold.ts): over the
 // real stores and a session source on a fake X2 client, the pane's own attach and detach played as its mount and its
 // unmount while its tab stays (the floating card taking the session; before the UX wave's U9 M3, the offline placeholder,
-// which no longer replaces a pane that has something to keep).
+// which no longer replaces a pane that has something to keep). The UX wave, U9 (M5, #565): a history read of the
+// machine's session waits, from the roster's `up`, for main's settled word of that generation or SETTLE_BACKSTOP_MS,
+// whichever is first; a held key not whole at the return is decided there.
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, EventId } from '@shared/graph/ids';
 import type { CommandName, CommandResult, EventName, EventPayload, EventSource, MawsBridge } from '@shared/ipc/schema';
@@ -16,7 +18,7 @@ import { useSessions } from '../stores/sessions';
 import { useTranscriptStore } from '../stores/transcript';
 import { builder } from '../transcript/model/test-events';
 import { ipcSourceOver } from '../transcript/source/ipc';
-import { applyRemoteSession, resetRemoteLaneBStore } from './remote-session';
+import { applyRemoteSession, applyRemoteSettled, resetRemoteLaneBStore, SETTLE_BACKSTOP_MS } from './remote-session';
 import { remoteSessionState } from './test-support/remote-session';
 import type { RemoteAnswer, RemoteSession } from '@shared/ipc/schema/remote';
 import { useRemoteTranscriptHold } from './transcript-hold';
@@ -53,7 +55,8 @@ vi.mock('../transcript/source/ipc', async (original) => {
 const REMOTE = addressOf(OTHER_MACHINE, 'app-t' as AppSessionId);
 const LOCAL = at('app-l' as AppSessionId);
 const SINCE = '2026-11-10T08:00:00.000Z';
-const machineState = (state: MachineState['state'], generation: number): MachineState => ({ ref: OTHER_MACHINE, name: 'mini', local: false, state, since: SINCE, generation, ...(state === 'up' && { carrier: 'relay' as const }) });
+// the roster restamps `since` at each change of state, as main's does: an `up` is now
+const machineState = (state: MachineState['state'], generation: number): MachineState => ({ ref: OTHER_MACHINE, name: 'mini', local: false, state, since: new Date().toISOString(), generation, ...(state === 'up' && { carrier: 'relay' as const }) });
 const here: MachineState = { ref: TEST_MACHINE, name: 'this Mac', local: true, state: 'up', since: SINCE, generation: 0 };
 
 let f: ReturnType<typeof fakeClient>;
@@ -82,6 +85,8 @@ const lose = (state: RemoteSession['stream'] = 'paused') => {
   stream(state);
   roster('down');
 };
+// main's settled word for the roster's current generation (the UX wave, U9, M5), as `connectShell` applies it
+const settledWord = () => applyRemoteSettled({ machine: OTHER_MACHINE, generation });
 const reads = () => f.calls.filter((call) => call.name === 'session.events');
 const entry = (key: AppSessionId = REMOTE) => useTranscriptStore.getState().entries[key];
 const attached = (key: AppSessionId = REMOTE) => useTranscriptStore.getState().attached(key);
@@ -122,6 +127,7 @@ afterEach(() => {
 // Hydrated with the link up, the tab mounted; then the machine goes offline and the pane unmounts while the tab stays.
 async function heldThroughALoss() {
   roster('up');
+  settledWord();
   const first = pane();
   const hold = tab();
   answered(0);
@@ -134,8 +140,9 @@ async function heldThroughALoss() {
 describe('the hold', () => {
   // the panel's finding 1: the store publishes `hydrating` before it counts the attachment, so a hold mounted with its
   // pane first acquires at the next notification, here main's word of the loss (said before the roster's)
-  it('acquiring at main’s word of the loss arms it: a hydration that fails in the outage is read again at the replay', async () => {
+  it('acquiring at main’s word of the loss arms it: a hydration that fails in the outage is read again at the return’s settled word', async () => {
     roster('up');
+    settledWord();
     const hold = tab();
     const first = pane();
     expect(attached()).toBe(true);
@@ -147,6 +154,9 @@ describe('the hold', () => {
     roster('up');
     const again = pane();
     stream('live', 'replay');
+    await settle();
+    expect(reads(), 'decided at the settled word').toHaveLength(1);
+    settledWord();
     await vi.waitFor(() => expect(reads()).toHaveLength(2));
     answered(1);
     await vi.waitFor(() => expect(entry().phase).toBe('live'));
@@ -172,6 +182,7 @@ describe('the hold', () => {
   // The UX wave, U9 (M3; #563): a pane that has something to keep stays mounted through the outage, its attachment its own
   it('reads nothing again at up for a pane kept mounted through the loss', async () => {
     roster('up');
+    settledWord();
     const shown = pane();
     const hold = tab();
     answered(0);
@@ -192,9 +203,10 @@ describe('the hold', () => {
     offline.unmount();
     expect(attached()).toBe(false);
     roster('up');
+    settledWord();
     const shown = pane();
     const hold = tab();
-    expect(reads()).toHaveLength(2); // the next mount hydrates as today
+    expect(reads()).toHaveLength(2); // the next mount hydrates, the machine settled
     shown.unmount();
     hold.unmount();
     expect(attached()).toBe(false);
@@ -206,6 +218,7 @@ describe('the hold', () => {
     expect(attached()).toBe(false);
     roster('up');
     expect(attached(), 'the link up is not a mount').toBe(false);
+    settledWord();
     const shown = pane();
     expect(reads()).toHaveLength(1);
     answered(0);
@@ -226,8 +239,9 @@ describe('the hold', () => {
     refused(0);
     await shown.hydrated;
     roster('up');
+    settledWord();
     const again = pane();
-    expect(reads(), 'at up the pane hydrates as today').toHaveLength(2);
+    expect(reads(), 'settled, the pane hydrates').toHaveLength(2);
     again.unmount();
     hold.unmount();
   });
@@ -259,8 +273,9 @@ describe('the hold', () => {
 // The coordinator's B: today's remount gives a pane that is not whole at the return a free retry; the hold keeps it, at
 // the stream's return (`remote.session` past `paused`), never before that stream's `subbed`.
 describe('a held key not whole at the return', () => {
-  it('whose hydration failed is read again once the stream is back, not at the link’s up', async () => {
+  it('whose hydration failed is read again at the return’s settled word, not at the link’s up nor at the stream’s answer', async () => {
     roster('up');
+    settledWord();
     const first = pane();
     const hold = tab();
     refused(0);
@@ -271,11 +286,14 @@ describe('a held key not whole at the return', () => {
     roster('up');
     const again = pane(); // joins the failed attachment
     await settle();
-    expect(reads(), 'the stream has not answered yet').toHaveLength(1);
-    stream('live'); // the link's change said again: no answer
+    expect(reads(), 'up is not settled').toHaveLength(1);
+    stream('live', 'replay');
+    await settle();
+    expect(reads(), 'an answer is not settled').toHaveLength(1);
+    applyRemoteSettled({ machine: OTHER_MACHINE, generation: generation - 1 }); // an earlier generation's word
     await settle();
     expect(reads()).toHaveLength(1);
-    stream('live', 'replay');
+    settledWord();
     await settle();
     expect(reads()).toHaveLength(2);
     answered(1);
@@ -286,18 +304,38 @@ describe('a held key not whole at the return', () => {
     hold.unmount();
   });
 
+  it('whose hydration failed is read again when nothing resubscribes: at the backstop after up, with no word', async () => {
+    roster('up');
+    settledWord();
+    const first = pane();
+    const hold = tab();
+    refused(0);
+    await first.hydrated;
+    lose();
+    roster('up');
+    await settle();
+    expect(reads()).toHaveLength(1);
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_BACKSTOP_MS + 100));
+    expect(reads()).toHaveLength(2);
+    answered(1);
+    await vi.waitFor(() => expect(entry().phase).toBe('live'));
+    first.unmount();
+    hold.unmount();
+  });
+
   it('whose hydration was still out at the loss waits for it, and reads again only if it failed', async () => {
     for (const outcome of ['failed', 'answered'] as const) {
       f = fakeClient();
       fake.current = f;
       useTranscriptStore.getState().drop(REMOTE);
       roster('up');
+      settledWord();
       const first = pane();
       const hold = tab();
       lose();
       first.unmount();
       roster('up');
-      stream('live', 'replay');
+      settledWord();
       await settle();
       expect(reads(), outcome).toHaveLength(1);
       if (outcome === 'failed') refused(0);
@@ -313,6 +351,9 @@ describe('a held key not whole at the return', () => {
     roster('up');
     f.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L2' }, OTHER_MACHINE);
     stream('gap', 'snapshot');
+    await settle();
+    expect(reads(), 'the snapshot’s re-read waits for the word').toHaveLength(1);
+    settledWord();
     await vi.waitFor(() => expect(reads()).toHaveLength(2));
     lose();
     refused(1);
@@ -322,6 +363,9 @@ describe('a held key not whole at the return', () => {
     await settle();
     expect(reads()).toHaveLength(2);
     stream('live', 'replay');
+    await settle();
+    expect(reads()).toHaveLength(2);
+    settledWord();
     await settle();
     expect(reads()).toHaveLength(3);
     answered(2);
@@ -338,6 +382,9 @@ describe('a held key not whole at the return', () => {
     roster('up');
     const again = pane();
     stream('idle', 'unavailable');
+    await settle();
+    expect(reads(), 'an idle session’s re-read waits for the word').toHaveLength(1);
+    settledWord();
     await vi.waitFor(() => expect(reads()).toHaveLength(2));
     expect(entry().state.seen.size, 'the old rows kept').toBe(history.length);
     answered(1);
@@ -352,8 +399,50 @@ describe('a held key not whole at the return', () => {
     const hold = await heldThroughALoss();
     roster('up');
     stream('live', 'replay');
+    settledWord();
     await settle();
     expect(reads()).toHaveLength(1);
     hold.unmount();
+  });
+});
+
+// The UX wave, U9 (M5, #565's first case): a pane's first read with nothing held, of a tab restored at launch or opened
+// while the machine was away, is made once the machine settled, not beside the live sessions' resumes
+describe('a first read with nothing held', () => {
+  it('waits from the roster’s up for the settled word of its generation, and a pane mounted after it reads at once', async () => {
+    roster('up');
+    const first = pane();
+    await settle();
+    expect(reads(), 'up is not settled').toHaveLength(0);
+    settledWord();
+    await settle();
+    expect(reads()).toHaveLength(1);
+    answered(0);
+    await first.hydrated;
+    first.unmount();
+    useTranscriptStore.getState().drop(REMOTE);
+    const later = pane();
+    expect(reads(), 'mounted after the word: at once').toHaveLength(2);
+    later.unmount();
+  });
+
+  it('reads at the backstop when no word comes', async () => {
+    roster('up');
+    const first = pane();
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_BACKSTOP_MS - 300));
+    expect(reads()).toHaveLength(0);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(reads()).toHaveLength(1);
+    first.unmount();
+  });
+
+  it('reads at once for a machine the roster does not say is up, and for a session of this Mac', async () => {
+    const away = pane(); // the roster unread
+    expect(reads()).toHaveLength(1);
+    away.unmount();
+    roster('up');
+    const local = pane(LOCAL);
+    expect(reads()).toHaveLength(2);
+    local.unmount();
   });
 });
