@@ -464,11 +464,13 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     items.push(item);
   };
   const questionsOf: CallQuestions = (call) => callQuestions(turn, state, call as ToolUseId);
-  // The whole-branch review's finding 3: the tasks of this turn that ran in the background, whose ends an older engine
-  // host tells only as `task.notification` (one without the `arrivals` mark, while the window holds no end arrival of
-  // the task: reduce.ts, taskEndArrived), and the lines drawn of them, which are no
-  // work of the turn's: the wire said the task ended, mostly after the turn's answer, which stays its answer
-  const backgroundTasks = new Set<TaskId>();
+  // The whole-branch review's finding 3: what this turn knows of each task's ground (its start's `isBackground`, as a
+  // later update sets it), for the ends an older engine host tells only as `task.notification` (one without the
+  // `arrivals` mark, while the window holds no end arrival of the task: reduce.ts, taskEndArrived). A task not known as a
+  // foreground one gets its line: an older host's transcript backfill tells a background end with no start (the delta
+  // review's finding). The lines drawn are no work of the turn's: the wire said the task ended, mostly after the turn's
+  // answer, which stays its answer
+  const inBackground = new Map<TaskId, boolean>();
   const olderHostEnds = new Set<RowId>();
 
   const blockRow = (block: LiveBlock, at: string): Item | null => {
@@ -659,7 +661,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         if (kind !== 'local_agent' && kind !== 'local_workflow') {
           const rec = event.toolUseId ? tools.get(event.toolUseId) : undefined;
           if (rec) rec.backgroundTaskId = event.taskId;
-          if (event.kind === 'task.started' && event.isBackground) backgroundTasks.add(event.taskId);
+          if (event.kind === 'task.started') inBackground.set(event.taskId, event.isBackground);
           break;
         }
         const existing = event.toolUseId ? byToolUse.get(event.toolUseId) : undefined;
@@ -703,7 +705,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         }
         for (const rec of tools.values()) if (rec.backgroundTaskId === event.taskId) rec.backgroundDone = true;
         // an older host's end yields to the same task's end arrival in the window (the handover round)
-        if (event.kind === 'task.notification' && event.arrivals !== true && backgroundTasks.has(event.taskId) && !(state !== null && taskEndArrived(state, event.taskId))) {
+        if (event.kind === 'task.notification' && event.arrivals !== true && inBackground.get(event.taskId) !== false && !(state !== null && taskEndArrived(state, event.taskId))) {
           const row = olderHostNotice(event, turn.id);
           olderHostEnds.add(row.id);
           items.push({ kind: 'row', row });
@@ -711,7 +713,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         break;
       }
       case 'task.updated':
-        if (event.patch.isBackground === true) backgroundTasks.add(event.taskId);
+        if (event.patch.isBackground !== undefined) inBackground.set(event.taskId, event.patch.isBackground);
         break;
       case 'subagent.message': {
         if (event.direction === 'from_child') { // E7: the agent by its title, a hand-back as its report
