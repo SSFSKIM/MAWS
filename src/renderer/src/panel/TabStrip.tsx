@@ -42,7 +42,7 @@ export function TabStrip({ appSessionId, tabs, activeTabId, bodyId, trailing }: 
   };
 
   return (
-    <div className="flex h-9 min-w-0 shrink-0 items-center gap-1 border-b border-border px-1">
+    <div data-side-strip className="flex h-9 min-w-0 shrink-0 items-center gap-1 border-b border-border px-1">
       <div ref={list} role="tablist" aria-label="Panel tools" onKeyDown={onKeyDown} className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none]">
         {tabs.map((tab) => {
           const selected = tab.id === activeTabId;
