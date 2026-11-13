@@ -19,7 +19,7 @@ Sibling children code against what this landing exposes: U7 mounts on the listed
 - [x] (2026-11-13) `p5-idle-margin` is on master: merge `4109f5e25`. Master `be663d261` also holds U6a (pull request #604) and U8a, and `ef0e009e4` is an ancestor of it.
 - [x] (2026-11-13) Before M1 (the executor): the branch takes master in by a merge and checks the base, as Concrete Steps opens. Merge `f00c74e9b` of master `e71334239`; `ef0e009e4` is an ancestor; `ActionSpec.fixed` and `src/shared/sessions/working-folder.ts` are present (U6a, U8a). U1a and U3a are not on master: section 11's fallbacks apply (`selectPendingOf`; `Transcript.tsx` as on master).
 - [ ] M1 — The offers at both ends
-  - [ ] M1's first step: the listing test, run on the merged base before any change of this landing. For each of its two halves, a pass means the listing rule is not built and the case stays as the pin; a failure makes it the rule's failing-first test (M1, "The listing rule opens with its test").
+  - [x] (2026-11-13) M1's first step: the listing test, run on the merged base before any change of this landing. For each of its two halves, a pass means the listing rule is not built and the case stays as the pin; a failure makes it the rule's failing-first test (M1, "The listing rule opens with its test").
 - [ ] M2 — Fork over the link, and the sheet's words
 - [ ] M3 — The link's phases and the pane that stays
 - [ ] M4 — The session acts in the window
@@ -572,6 +572,9 @@ At landing the architect updates the register's rows and closes the tickets and 
   Evidence: `ledger.finish(opId, result)` in `src/services/machine-ops.ts` keeps the handler's answer, and a duplicate or a query returns it. Stated under R9, with M1's three-answer test.
 - Observation: a link is `connecting` once and `down` through every retry, and the roster's `generation` tells a machine that was up from one that never was.
   Evidence: `REPORTED` and the state assignments in `src/main/machines/remote/link.ts`; the restamp of `since` in `src/main/machines/manager.ts`.
+
+- Observation (M1's listing test, 2026-11-13): on the merged base neither half holds. After an archive and after a rename made through the services' own handlers, the listing a remote reader with no tab open holds, and the one kept for the hub, still carry the reported title and state; so the listing rule is built for both halves.
+  Evidence: `test/endpoint/listing-follows-record.test.ts` at `48c0d06e2`, run alone on the VM: `Test Files  1 failed (1)`, `Tests  2 failed (2)`, duration 11.92 s. The endpoint builds a listing in two places, both from sminos's member frame: `#report` in `src/endpoint/rl10/members.ts` (the hub's) and `#listings` in `src/endpoint/calls.ts` (`endpoint.listings`, which does not pass through `#report`); the rule covers both.
 
 ## Decision Log
 
