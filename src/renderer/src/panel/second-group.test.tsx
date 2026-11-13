@@ -111,7 +111,9 @@ describe('where a tab that is opened goes with two groups (decision 3)', () => {
     const ids = threeTabs();
     await moveFromMenu('upper', 'Files', 'Move below');
     let second = '';
+    console.log('DBG before', JSON.stringify(sideGroups(useLayout.getState(), A)));
     act(() => void (second = panelHost.addTool('files', { appSessionId: A })));
+    console.log('DBG after', JSON.stringify(sideGroups(useLayout.getState(), A)), JSON.stringify(useLayout.getState().panelGroups));
     expect(stripOf('lower')).toEqual([['Files', false], ['Files', true]]);
     expect(inView()).toEqual([ids.terminal, second]);
     act(() => void panelHost.addTool('review', { appSessionId: A })); // a single-instance tool's tab is shown where it is
