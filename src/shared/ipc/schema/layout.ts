@@ -477,7 +477,9 @@ export function stripOf(stored: LayoutMain | LayoutMainV1): { strip: Strip; merg
   }
   const keys = Object.keys(stored.sets) as TabSetKey[];
   const canonical = stored.current === NO_PROJECT && keys.length === 1 && keys[0] === NO_PROJECT;
-  const { floating, ...base } = stored.sets[stored.current] ?? EMPTY_TAB_SET;
+  // An own key only: `current` may name an `Object.prototype` member (the key schemas admit `constructor`), and a
+  // `current` that names no own set starts an empty strip.
+  const { floating, ...base } = (Object.hasOwn(stored.sets, stored.current) ? stored.sets[stored.current] : undefined) ?? EMPTY_TAB_SET;
   const held = new Set(base.panes.flatMap((pane) => pane.tabs.map((tab) => tab.id)));
   const taken: TabRef[] = [];
   for (const key of keys) {

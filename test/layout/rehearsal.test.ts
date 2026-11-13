@@ -78,9 +78,9 @@ describe('the rehearsal', () => {
     expect(result.files.map((f) => [f.label, f.outcome])).toEqual([['file 1 of 2', 'pass'], ['file 2 of 2', 'pass']]);
     expect(rehearsalLines(result)).toEqual([
       'file 1 of 2  main.tabs v3: 3 sets, 7 tabs, 6 distinct (session 4, agent 1, file 1, artifacts 1), 2 pinned, 1 closed, 0 reader warnings',
-      '             -> strip: 6 tabs, 2 panes, merged yes, canonical no; missing 0, twice 0; 2 machine views: held here 3 = 3, held elsewhere 3 = 3; contexts 3 -> 1   pass',
+      '             -> strip: 6 tabs, 2 panes, merged yes, canonical no; missing 0, added 0, twice 0; 2 machine views: held here 3 = 3, held elsewhere 3 = 3; contexts 3 -> 1   pass',
       'file 2 of 2  main.tabs v2: 1 set, 1 tab (session 1), 0 pinned, 0 closed, 0 reader warnings',
-      '             -> strip: 1 tab, 1 pane, merged no, canonical no; missing 0, twice 0; 1 machine view: held here 1 = 1, held elsewhere 0 = 0; contexts absent   pass',
+      '             -> strip: 1 tab, 1 pane, merged no, canonical no; missing 0, added 0, twice 0; 1 machine view: held here 1 = 1, held elsewhere 0 = 0; contexts absent   pass',
     ]);
     const { output, failure } = heard(() => runRehearsal(dir));
     expect(failure).toBe('');
@@ -112,11 +112,16 @@ describe('the rehearsal', () => {
     }
   });
 
-  it('fails a conversion that loses a tab, changes an open session, or stores another form, and says only which', () => {
+  it('fails a conversion that loses a tab, adds one, changes an open session, or stores another form, and says only which', () => {
     const dir = directoryOf({ 'one.json': JSON.stringify({ 'main.tabs': v3({ none: set([session(`${L}/s1`), file(`/invented/${SENTINEL}.md`)]), 'smns:x': set([session(`${OTHER}/s2`)]) }, 'none') }) });
     const dropping: typeof stripOf = (stored) => {
       const read = stripOf(stored);
       return { ...read, strip: { ...read.strip, panes: read.strip.panes.map((p) => ({ ...p, tabs: p.tabs.filter((t) => !t.id.includes(SENTINEL)) })) as Strip['panes'] } };
+    };
+    const adding: typeof stripOf = (stored) => {
+      const read = stripOf(stored);
+      const [first, ...rest] = read.strip.panes;
+      return { ...read, strip: { ...read.strip, panes: [{ ...first, tabs: [...first.tabs, { id: 'diagnostics', kind: 'diagnostics', pinned: false }] }, ...rest] as Strip['panes'] } };
     };
     const moving: typeof storedMain = (strip) => {
       const stored = storedMain(strip);
@@ -129,6 +134,7 @@ describe('the rehearsal', () => {
     };
     const cases = [
       [{ stripOf: dropping, storedMain }, 'tab-missing'],
+      [{ stripOf: adding, storedMain }, 'tab-added'],
       [{ stripOf, storedMain: moving }, 'sessions-differ'],
       [{ stripOf, storedMain: keyed }, 'not-stored-form'],
       [{ stripOf: throwing, storedMain }, 'internal'],

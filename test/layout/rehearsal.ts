@@ -31,7 +31,7 @@ import { remoteSessionsInTabs } from '../../src/main/lane-b/remote-interest';
 import { sessionsInTabs } from '../../src/main/layout/open-session-tabs';
 
 export const OUTCOMES = [
-  'pass', 'unreadable', 'not-json', 'not-a-layout', 'main-tabs-absent', 'main-tabs-rejected', 'surfaces-rejected', 'tab-missing', 'tab-twice',
+  'pass', 'unreadable', 'not-json', 'not-a-layout', 'main-tabs-absent', 'main-tabs-rejected', 'surfaces-rejected', 'tab-missing', 'tab-added', 'tab-twice',
   'sessions-differ', 'not-stored-form', 'internal',
 ] as const;
 export type Outcome = (typeof OUTCOMES)[number];
@@ -54,7 +54,7 @@ export interface FileFacts {
   pinned: number;
   closed: number;
   warnings: number; // what the reader printed while it read
-  strip: { tabs: number; panes: number; merged: boolean; canonical: boolean; missing: number; twice: number };
+  strip: { tabs: number; panes: number; merged: boolean; canonical: boolean; missing: number; added: number; twice: number };
   views: number;
   here: { before: number; after: number };
   elsewhere: { before: number; after: number };
@@ -113,7 +113,7 @@ function rehearseFile(path: string, converters: Converters, printed: () => numbe
   const text = step('unreadable', () => readFileSync(path, 'utf8'));
   const layout: unknown = step('not-json', () => JSON.parse(text));
   if (!isRecord(layout)) throw new Refused('not-a-layout');
-  if (!('main.tabs' in layout)) throw new Refused('main-tabs-absent');
+  if (!Object.hasOwn(layout, 'main.tabs')) throw new Refused('main-tabs-absent');
   const raw = layout['main.tabs'];
   const before = printed();
   const read = storedMainSchema(REHEARSAL_LOCAL).safeParse(raw);
@@ -121,7 +121,7 @@ function rehearseFile(path: string, converters: Converters, printed: () => numbe
   if (!read.success) throw new Refused('main-tabs-rejected');
   const stored = read.data;
   let contexts: Record<string, unknown> | null = null;
-  if ('panelTools.surfaces' in layout) {
+  if (Object.hasOwn(layout, 'panelTools.surfaces')) {
     const surfaces = storedPanelSurfacesSchema(REHEARSAL_LOCAL).safeParse(layout['panelTools.surfaces']);
     if (!surfaces.success) throw new Refused('surfaces-rejected');
     contexts = surfaces.data.contexts;
@@ -131,9 +131,12 @@ function rehearseFile(path: string, converters: Converters, printed: () => numbe
   const idsIn = new Set(tabsIn.map((tab) => tab.id));
   const { strip, merged, canonical } = converters.stripOf(stored);
   const idsOut = strip.panes.flatMap((pane) => pane.tabs.map((tab) => tab.id));
-  const missing = [...idsIn].filter((id) => !idsOut.includes(id)).length;
-  const twice = idsOut.length - new Set(idsOut).size;
+  const distinctOut = new Set(idsOut);
+  const missing = [...idsIn].filter((id) => !distinctOut.has(id)).length;
+  const added = [...distinctOut].filter((id) => !idsIn.has(id)).length;
+  const twice = idsOut.length - distinctOut.size;
   if (missing > 0) throw new Refused('tab-missing');
+  if (added > 0) throw new Refused('tab-added');
   if (twice > 0) throw new Refused('tab-twice');
 
   const written = converters.storedMain(strip);
@@ -168,11 +171,11 @@ function rehearseFile(path: string, converters: Converters, printed: () => numbe
     pinned: tabsIn.filter((tab) => tab.pinned).length,
     closed: stored.closedTabs.length,
     warnings,
-    strip: { tabs: idsOut.length, panes: strip.panes.length, merged, canonical, missing, twice },
+    strip: { tabs: idsOut.length, panes: strip.panes.length, merged, canonical, missing, added, twice },
     views: views.size,
     here,
     elsewhere,
-    contexts: contexts === null ? null : { before: Object.keys(contexts).length, after: showing in contexts ? 1 : 0 },
+    contexts: contexts === null ? null : { before: Object.keys(contexts).length, after: Object.hasOwn(contexts, showing) ? 1 : 0 },
   };
 }
 
@@ -212,7 +215,7 @@ export function rehearsalLines(rehearsal: Rehearsal): string[] {
     const stored = `main.tabs v${facts.version}: ${counted(facts.sets, 'set')}, ${counted(facts.tabs, 'tab')}${distinct}${kinds === '' ? '' : ` (${kinds})`}, ${facts.pinned} pinned, ${facts.closed} closed, ${counted(facts.warnings, 'reader warning')}`;
     const read = [
       `-> strip: ${counted(strip.tabs, 'tab')}, ${counted(strip.panes, 'pane')}, merged ${yesNo(strip.merged)}, canonical ${yesNo(strip.canonical)}`,
-      `missing ${strip.missing}, twice ${strip.twice}`,
+      `missing ${strip.missing}, added ${strip.added}, twice ${strip.twice}`,
       `${counted(facts.views, 'machine view')}: held here ${here.before} = ${here.after}, held elsewhere ${elsewhere.before} = ${elsewhere.after}`,
       contexts === null ? 'contexts absent' : `contexts ${contexts.before} -> ${contexts.after}`,
     ].join('; ');

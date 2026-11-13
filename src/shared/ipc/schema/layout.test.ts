@@ -594,6 +594,9 @@ describe('the one strip, read from and stored as main.tabs', () => {
     expect(stripOf(emptyBeside)).toEqual({ strip: { ...set, closedTabs: [] }, merged: false, canonical: false });
     const repeated = { ...emptyBeside, sets: { none: set, [BETA]: { panes: [pane([on(2)])], focusedPane: 0, splitRatio: 0.5 } } } as unknown as LayoutMain;
     expect(stripOf(repeated)).toEqual({ strip: { ...set, closedTabs: [] }, merged: false, canonical: false });
+    // `current` naming an `Object.prototype` member reads no set through the prototype: the strip starts empty
+    const inherited = StoredMainSchema.parse({ version: 3, current: 'constructor', sets: { none: set }, closedTabs: [] }) as LayoutMain;
+    expect(stripOf(inherited)).toEqual({ strip: { panes: [pane([on(1), on(2)])], focusedPane: 0, splitRatio: 0.5, closedTabs: [] }, merged: true, canonical: false });
     const noneElsewhere = { version: 3, current: BETA, sets: { none: set }, closedTabs: [] } as unknown as LayoutMain;
     expect(stripOf(noneElsewhere).canonical).toBe(false);
     expect(stripOf({ version: 3, current: 'none', sets: {}, closedTabs: [] }).canonical).toBe(false);
