@@ -14,7 +14,7 @@ The execution document is `docs/doperpowers/plans/2026-11-12-ux-wave-U8b-column-
 - **Three slices in the layout store**: `panelGroups`, `panelWidths` and `cardsOpen`.
   - They are read at hydration and written through `persistedKeys` / `storedValue`.
   - `storedLayout(state)` exports every key as `persistLayout` writes it.
-  - **The first read** happens when the listing and every read of hydration answered and the listing holds no `panelTools.groups` (revised at the boundary review: a launch with a failed read defers it whole, nothing pruned and nothing marked, and hydration writes no key whose read failed):
+  - **The first read** happens when the listing and every read of hydration answered and the listing holds no `panelTools.groups` (revised at the boundary review: a launch with a failed listing or read defers it whole, nothing pruned and nothing marked, and hydration writes no key it could not read; after such a launch, persistence's first write of a list, the stacks or the groups writes the marker, and the profile is never pruned):
     - In each session's list, a tab of a single-instance tool that is not in view (or to be shown) by §A's reading is dropped. The pins, and the tabs of multi-instance or unregistered tools, are kept.
     - Each scope whose list changed is repaired.
     - `panelTools.widths` becomes `{ wide: regions.panel.width, or null when that is 380; narrow: null }`.
@@ -132,7 +132,7 @@ What the first whole run's other failures are:
    - `updatePanelTabs` keeps its `{ activeTabId }` options and `setSurfaceStack` stays.
    - A repaired scope's `activeTabId` takes §A's meaning at once. This differs from the stacking rule's only in a scope with two surfaces whose refs another session's write changed.
 6. The first read keeps a hidden column's "to be shown" tab as well as one in view.
-7. A launch at which `layout.list` or any `layout.get` failed is no first read (revised at the boundary review; first written as "a failed `layout.list`" alone).
+7. A launch at which `layout.list` or any `layout.get` failed is no first read (revised at the boundary review; first written as "a failed `layout.list`" alone). After such a launch, this build's first write of the side column's state writes `panelTools.groups`, so the prune never runs on lists this build has written.
 8. The bar's restore value for an automatic width is 0, so a drag past either end hands back "automatic". `floatPanel` is called without a width.
 9. F's frozen reader is in test support. The acts are tested in `panel/side-groups.test.ts`, because the node project cannot import the renderer store (composite, TS6307). That file also avoids U13a's `surface-model.test.ts`.
 10. `WIDE_SURFACES` moves to `shell-geometry.ts`.
