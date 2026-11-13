@@ -515,7 +515,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       round.settling = generation;
       round.settled = null;
       for (const app of machines.get(machine)?.lanes.keys() ?? []) opens.get(`${machine}/${app}`)?.up();
-      if (evaluateNow) settle(round);
+      if (evaluateNow) settleRound(round);
       return;
     }
     if (was !== 'up') return;
@@ -527,7 +527,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   }
 
   /** The round settles once no lane of its machine is placing or awaiting: said once for its generation. */
-  function settle(round: Round): void {
+  function settleRound(round: Round): void {
     if (round.settling === null || rounds.get(round.link.machine) !== round) return;
     const held = machines.get(round.link.machine);
     if (held?.link === round.link) {
@@ -545,7 +545,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   function standingChanged(machine: MachineRef, app: string): void {
     if (sessionOf(machine, app)?.state.record != null) opens.get(`${machine}/${app}`)?.record();
     const round = rounds.get(machine);
-    if (round !== undefined) settle(round);
+    if (round !== undefined) settleRound(round);
   }
 
   /** The UX wave, U9 (M5): each remote tab's open, from the moment its interest opened the session, for its timing line. */
@@ -604,7 +604,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     lanes.delete(app);
     opens.delete(`${machine}/${app}`);
     const round = rounds.get(machine);
-    if (round !== undefined) settle(round); // a lane let go waits for nothing
+    if (round !== undefined) settleRound(round); // a lane let go waits for nothing
     if (lane.session.attentionItems().length > 0) attention.streamsChanged(machine, app); // fix wave 4: its items leave the streams'
   }
 
