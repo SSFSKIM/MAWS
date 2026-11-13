@@ -614,3 +614,26 @@ describe('browser work through the front', () => {
     expect(tapped).toEqual([{ appSessionId: 's1' }]);
   });
 });
+
+// P5 Decision Log 273: a client's request is work from its receipt until its answer settles, the connection gone or not
+describe('the front’s requests as work', () => {
+  it('stays open after its client has gone, until the answer settles', async () => {
+    let answer!: (value: unknown) => void;
+    let open = 0;
+    const { client } = front({
+      daemon: () => new Promise((resolve) => (answer = resolve)),
+      work: () => {
+        open += 1;
+        return () => void (open -= 1);
+      },
+    });
+    const c = client();
+    c.send({ t: 'req', id: 'r1', name: 'daemon.restart', input: undefined });
+    expect(open).toBe(1);
+    c.close(); // the connection ended mid-request
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(open).toBe(1);
+    answer(undefined);
+    await vi.waitFor(() => expect(open).toBe(0));
+  });
+});

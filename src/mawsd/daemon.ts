@@ -99,7 +99,7 @@ import { appIdentity } from '@shared/host/identity';
 import { cuaSocketDir, renderCuaSocketDir } from '@shared/daemon/files'; // P5 O5 M5; P5 O17 M5: the render host's sockets
 import { daemonCuaSocketPath } from '@shared/browser/cua-socket';
 import { BrowserRefused, type BrowserFeed } from '@shared/browser/screencast'; // P5 O17 M6
-import { idleCollector, type Collect } from '@shared/host/idle-collect';
+import { eventNews, idleCollector, type Collect, type HeapSize } from '@shared/host/idle-collect';
 import { makePrivateDirectory, clearSocketPath } from '@shared/host/private-listen';
 import { PrivatePathError } from '@shared/host/private-path';
 import { captureShellEnvironment } from '@shared/host/shell-env';
@@ -201,6 +201,7 @@ export interface DaemonOptions {
   helloHoldMs?: number;
   restartBackoffMs?: readonly number[];
   collect?: Collect; // the idle collection (@shared/host/idle-collect.ts's lastResortCollect)
+  idleQuiet?: { quietMs: number; heap(): HeapSize }; // P5 Decision Log 273: a test's quiet period and heap reading
   // P5 O3-D M2: the spine seam's (spine-seam.ts): the chunk's load, whether a batch while cold loads the spine (on in the
   // product since M5b, when main stopped composing its own spine; off, an app quitting would leave its last batches to
   // mawsd's link, and a spine loaded by them would hold spine.lock against an embedded app's next launch), the timings
@@ -531,7 +532,33 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   };
 
   // --- the clocks -----------------------------------------------------------------------------------------------------
-  const idle = idleCollector({ log, collect: options.collect, quiet: () => clocks.quiet() }); // P5 Decision Log 124's lever: a collection at each quiet entry, asked again as it collects
+  // P5 Decision Log 124's lever: a collection at each quiet entry, asked again as it collects. Decision Log 273: and once
+  // per quiet period with clients connected. Activity is a line a client sends on any of the three sockets, an event from
+  // either host that is news (the engine host's periodic memory samples are not: eventNews), a hold or a client's engine
+  // request beginning or ending, an endpoint document frame and each chunk a cua pipe carries.
+  // Work, held open until it settles, is each request a relay or the front took (its client gone or not), each endpoint
+  // dispatch, each artifacts.sock request until its response closes and each artifact fetch until its body ends; the
+  // endpoint holds the daemon through a hub sync. The I/O any of it starts is the collector's own last check.
+  const engineNews = eventNews(); // P5 Decision Log 273
+  // P5 Decision Log 273: a loaded spine with work in flight (a command, a session's setup or recovery, a sweep, an
+  // attention pass: SpineRoot.busy) is not settled; its settling is activity, so the next quiet period is armed
+  let spineWaited: ReturnType<typeof spine.root> = null;
+  const spineSettled = (): boolean => {
+    const root = spine.root();
+    if (root === null || !root.busy()) return true;
+    if (spineWaited !== root) {
+      spineWaited = root;
+      void root.settled().then(() => {
+        spineWaited = null;
+        idle.activity();
+      });
+    }
+    return false;
+  };
+  const idle = idleCollector({
+    log, collect: options.collect, quiet: () => clocks.quiet(), ...(options.idleQuiet && { heap: options.idleQuiet.heap }),
+    activity: { settled: () => clocks.settled() && spineSettled(), quietMs: options.idleQuiet?.quietMs },
+  });
   const clocks = new DaemonClocks(kind, {
     armEnginePark: (why) => {
       log(why === 'discovery' ? '[spine] discovery: the wake is over: asking the engine host to exit when idle' : 'no app and no interest for the idle time: asking the engine host to exit when idle');
@@ -554,6 +581,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       idle.set(quiet);
       spine.quiet(quiet); // the spine's release runs on the daemon's quiet, with no working session (spine-seam.ts)
     },
+    activity: () => idle.activity(),
   });
 
   // P5 O5 (landing 1; engine-requests.ts): a client's request to the engine host (the front's, the endpoint's, the artifact
@@ -675,6 +703,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   const engineRelay = new Relay({
     owner: 'engine-host',
     hosts,
+    work: () => idle.work(), // P5 Decision Log 273
     log: (line) => log(`engine-host.sock: ${line}`),
     startedAt: (pid) => lockStartedAt(join(profileDir, 'supervisor'), pid),
     // P5 O3-D M5a (D44(3)): a post-D app's request the spine intercepts goes through it, the spine loaded for it if cold
@@ -823,6 +852,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   const ptyRelay = new Relay({
     owner: 'pty-host',
     hosts,
+    work: () => idle.work(), // P5 Decision Log 273
     log: (line) => log(`pty-host.sock: ${line}`),
     startedAt: (pid) => lockStartedAt(paths.ptyHost, pid),
     refuseHello: (peer, appPid) => refuseConnectorless('pty-host.sock', peer, appPid), // P5 O4 M4 (D45): no socket for a refused app
@@ -860,6 +890,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   let upstreamConnected = false;
   hosts.onState('engine-host', (state) => {
     const ready = state.state === 'ready';
+    if (!ready) engineNews.reset(); // P5 Decision Log 273: the link's events break here; the next host's are news afresh
     clocks.engineHost(ready ? state.pid : null);
     if (ready) permanentLink = permanentClient && (hosts.peer('engine-host')?.capabilities.includes(ATTACHMENT_CAPABILITY) ?? false); // P5 O3-D M3: at each welcome
     if (ready && !upstreamConnected) {
@@ -896,6 +927,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     }
   });
   hosts.onRaw('engine-host', (message) => {
+    if (engineNews.news(message.name, message.payload)) idle.activity(); // P5 Decision Log 273: a change of state, not a periodic sample
     if (render.event(message.name, message.payload)) return; // P5 O5 M4: the render seam answers it, no client hears it
     if (message.name === 'host.browserIdle') return browserIdle(message.payload); // P5 O17 M3, M5: mawsd's own, no app hears it
     if (message.name === 'session.status') engineSeen(message.payload); // P5 O5 M5: the cua socket's peer check
@@ -909,6 +941,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     ptyRelay.dropApp(`the pty host is ${state.state}`);
   });
   hosts.onRaw('pty-host', (message) => {
+    idle.activity(); // P5 Decision Log 273
     ptyRelay.deliver(message);
     each(eventListeners, 'pty-host', message);
     const payload = message.payload as { ptyId?: unknown; offset?: unknown; data?: unknown } | null;
@@ -1331,6 +1364,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   let engineAppPid: number | null = null; // the app welcomed on engine-host.sock: the port's requests with no client go to its machine.sock connection
   const front = createServicesFront({
     spine,
+    work: () => idle.work(), // P5 Decision Log 273
     hosts: { forward: clientEngine.forward, onRaw: hosts.onRaw, onStreaming: hosts.onStreaming, parked: hosts.parked }, // P5 O5: forward through the park's guard
     intercept: (request) => interceptEngine(request),
     daemon: daemonCommand,
@@ -1381,10 +1415,13 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       return refused === null ? loadEndpointChunk() : Promise.reject(new Error(refused));
     },
     log: (line) => log(`[artifacts] ${line}`),
+    work: () => idle.work(), // P5 Decision Log 273
   });
 
   // --- the endpoint seam -----------------------------------------------------------------------------------------------
-  const holds = new Map<number, string>();
+  const holds = new Map<number, { reason: string; standing: boolean }>();
+  // P5 Decision Log 273: the clocks told every hold (the exit's guard) and the operations among them (the collection's)
+  const tellHolds = () => clocks.holds(holds.size, [...holds.values()].filter((hold) => !hold.standing).length);
   let nextHold = 0;
   const endpointChannels = new Map<number, EndpointChannel>();
   const endpointNeeds = new Map<number, () => void>(); // P5 O7 M5b: each open channel's park need, released at its end
@@ -1470,13 +1507,14 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       if (upstreamConnected) listener({ connected: true, generation });
       return () => void upstreamListeners.delete(listener);
     },
-    hold(reason) {
+    activity: () => idle.activity(), // P5 Decision Log 273
+    hold(reason, standing = false) {
       const id = ++nextHold;
-      holds.set(id, reason);
-      clocks.holds(holds.size);
+      holds.set(id, { reason, standing });
+      tellHolds();
       return () => {
         if (!holds.delete(id)) return;
-        clocks.holds(holds.size);
+        tellHolds();
       };
     },
     interest: {
@@ -1496,6 +1534,15 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     channel: spineChannel(spine, log), // P5 O8 M7b: lane A's to-human entries, to the spine's journal (loaded for one if cold)
     log: (line) => log(`[endpoint] ${line}`),
   };
+
+  // P5 Decision Log 273: the endpoint's dispatches are work until they settle, and its document frames activity
+  const untrackedDispatch = services.dispatch.bind(services);
+  services.dispatch = (...args) => {
+    const end = idle.work();
+    return untrackedDispatch(...args).finally(end);
+  };
+  const untrackedFrame = services.documents.frame.bind(services.documents);
+  services.documents.frame = (channel, bytes) => (idle.activity(), untrackedFrame(channel, bytes));
 
   // --- (6) the sockets --------------------------------------------------------------------------------------------------
   const servers: Server[] = [];
@@ -1520,6 +1567,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     const appPath = join(dirname(options.modules.self), '..', '..');
     const loadAddon = options.cua?.loadAddon ?? (() => loadPeerAddon(peerAddonPath({ packaged, resourcesPath: dirname(appPath), appRoot: appPath })));
     cua = createCuaSockets({
+      activity: () => idle.activity(), // P5 Decision Log 273
       dir: cuaDir,
       loadAddon: () => {
         const addon = loadAddon();
@@ -1556,6 +1604,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       token: () => token,
       onExit: (when, from) => engineRelay.exit(when, from),
       log: (line) => log(`engine-host.sock: ${line}`),
+      onActivity: () => idle.activity(), // P5 Decision Log 273
     });
     engineRelay.bind(engineClients);
     const ptyServer = createServer();
@@ -1569,6 +1618,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       onExit: (when, from) => ptyRelay.exit(when, from),
       onClient: announced,
       log: (line) => log(`pty-host.sock: ${line}`),
+      onActivity: () => idle.activity(), // P5 Decision Log 273
     });
     ptyRelay.bind(ptyClients);
     const machineServer = createServer();
@@ -1594,6 +1644,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         return own ? { kind: 'refuse', line: own, own: true } : { kind: 'welcome', identity, counts: { liveSessions: 0, rows: 0 } };
       },
       log: (line) => log(`machine.sock: ${line}`),
+      onActivity: () => idle.activity(), // P5 Decision Log 273
     });
     for (const [server, path] of [
       [engineServer, paths.sockets['engine-host']],

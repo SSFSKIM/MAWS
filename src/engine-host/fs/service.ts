@@ -89,6 +89,7 @@ export interface FsServiceOptions {
   releaseMs?: number; // FOLLOW_RELEASE_MS
   agentRetryMs?: number; // AGENT_RETRY_MS
   log?: (line: string) => void; // P5 O7 M8: the follows' holds and drops (stderr, the host's log, by default)
+  activity?: () => void; // P5 Decision Log 273: each change the watcher hears, the reads it starts being the host's work
 }
 
 /**
@@ -204,11 +205,13 @@ export class FsService {
   private replays: ReplaySnapshots | null = null;
   private readonly contests = new Map<SessionId, Contest>(); // W7
   private readonly foreignLeftAt = new Map<SessionId, number>(); // W7: when each session's last foreign holder went
+  private readonly activity: () => void; // P5 Decision Log 273
 
   constructor(options: FsServiceOptions) {
     this.paths = options.paths;
     this.emit = options.emit;
     this.log = options.log ?? ((line) => console.error(line));
+    this.activity = options.activity ?? (() => {});
     this.openReader = options.openReader ?? ((locate) => new FsFileReader(locate));
     this.reconcileMs = options.reconcileMs ?? RECONCILE_MS;
     this.window = options.window;
@@ -824,6 +827,7 @@ export class FsService {
   }
 
   private onChange(change: StoreChange): void {
+    this.activity();
     switch (change.kind) {
       case 'transcript':
         // Poke at once (an append to the file being followed is the common case), then take the location from the

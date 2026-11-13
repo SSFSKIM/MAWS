@@ -73,7 +73,7 @@ Opened 2026-10-05 as the extension phase, the owner's design approved the same d
 - File editor tab (CodeMirror 6) and editable merge view.
 - Source control panel (stage, discard, commit, push, PR from a session's worktree); the summary's pull-request status and checks arrive here (owner, 2026-09-28).
 - MAWS-integrated SendUserFile: MAWS's own path for an agent to deliver a file into the right panel, in place of the engine tool that is disabled under the SDK entrypoint; the sandboxed PDF and HTML frame in the file viewer (owner, 2026-09-28).
-- Bottom dock for the auxiliary panel host (terminal drawer).
+- Bottom dock for the auxiliary panel host (terminal drawer). Amended 2026-11-12 (UX wave, l5-code-08): ⌘J shows and hides the Terminal side surface, as in Claude Desktop; the bottom dock stays deferred and holds no chord.
 - Browser panel as a separate WebContentsView with target-restricted automation and human takeover.
 - Side chat (`/btw`), Tasks panel (TaskCreate lists), cross-session messaging and teams, scheduled loops.
 - All-accounts usage view from ClaudeUsage's ledger (P0 shows the active account only).
@@ -240,7 +240,7 @@ With auto mode as the default (D-18), most items are questions, plan reviews, th
 
 ### 5.8 Keyboard
 
-⌘N new session, ⌘K command palette, ⌘B sidebar, ⌘⇧B right panel, ⌘J bottom dock (P1), ⌘1..9 tabs, ⌃Tab cycle, ⌘W close tab, ⌘\ split, ⌘⇧J next Needs-you, Enter/Esc on a docked request, ⌘Enter send when the editor is multi-line, ⇧Tab cycles permission mode as in the terminal. All bindings editable.
+⌘N new session, ⌘K command palette, ⌘B sidebar, ⌘⇧B right panel, ⌘J bottom dock (P1), ⌘1..9 tabs, ⌃Tab cycle, ⌘W close tab, ⌘\ split, ⌘⇧J next Needs-you, Enter/Esc on a docked request, ⌘Enter send when the editor is multi-line, ⇧Tab cycles permission mode as in the terminal. All bindings editable. Amended 2026-11-12 (UX wave, l5-code-08): ⌘J shows and hides the Terminal side surface, as in Claude Desktop; the bottom dock stays deferred and holds no chord. Amended 2026-11-12 (UX wave, UC-14): an action added after build `f1852de3a` takes no rebinding while that build can still be gone back to, because its reader of the settings refuses an action it does not know; the limit goes when that build is retired.
 
 ## 6. Visual identity
 
