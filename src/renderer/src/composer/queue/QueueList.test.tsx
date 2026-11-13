@@ -301,6 +301,7 @@ describe('the stack’s text, fold and pause', () => {
 describe('the stack’s refused controls', () => {
   const R = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
   afterEach(() => {
+    cleanup(); // before the bridge goes: a mounted row reads it
     useSessions.setState({ listed: new Map(), listedMachines: new Set() });
     delete (window as { maws?: unknown }).maws;
   });
