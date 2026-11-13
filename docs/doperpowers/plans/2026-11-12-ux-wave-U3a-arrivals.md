@@ -678,6 +678,9 @@ Found while checking the section against the code at `85e934368` and the probes'
   Rationale: the wave's boundary review; the architect's ruling on finding 3.
   Date/Author: 2026-11-13, the U3a controller, from the fixer's report.
 
+- Decision: the recorded events fixtures, sorted (the architect's ruling of 2026-11-13; Fix C, `a795fd463`). Of the fixtures that hold X1 `task.notification` events: `test/fixtures/transcript/events/agents-stop-shell.events.jsonl` and `agents-stop-workflow.events.jsonl` are generated from raw journals by `test/support/agents-fixtures.ts` through the normaliser (pinned byte for byte by its test); both are regenerated with the modern normaliser, carry the mark, and draw no fallback line, so `agents-stop-shell`'s snapshot is back to what it was and nothing changes on screen. The finding 3 tests' `u3-tasks-r1.base-events.json` stays an older host's on purpose (the base normaliser's output). `spikes/supervisor-probe/results/q6-reconnect.json` is recorded events only and is read by no test, snapshot or scene. So no fixture stays an older host's and gains a line. The scenes that replay these events are all in `e2e/agent-tools.spec.ts` (`e2e:agents`), all of the generated case; no desk web or desk hub scene replays them.
+  Date/Author: 2026-11-13, the U3a controller, from the fixer's report.
+
 ## Outcomes & Retrospective
 
 (2026-11-13, at the hand-back; the architect's review panel and its fix waves refresh this.)
