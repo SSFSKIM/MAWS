@@ -68,9 +68,12 @@ const whole = derive(plan());
 const relaunch = derive(plan(`${relaunchGates}\nDefaultBeside: ${class1}`));
 const widened = deriveStep(plan(relaunchGates));
 // default on the guest's labels, as gate.yml's MAC_VM_E2E puts it: on either desktop, and on the guest alone.
+// The host's placement sets MAC_VM_E2E without default: in CI this process inherits gate.yml's own list.
+const hostPlan = plan('', { MAC_VM_E2E: vmList.split(' ').filter((group) => group !== 'default').join(' ') });
 const guestPlans = [plan('', { MAC_VM_E2E: vmList }), plan('Lane: vm', { MAC_VM_E2E: vmList })];
+const onHost = derive(hostPlan);
 const onGuest = guestPlans.map(derive);
-for (const derivation of [whole, relaunch, widened, ...onGuest]) derivation.catch(() => {}); // a failure is the awaiting test's
+for (const derivation of [whole, relaunch, widened, onHost, ...onGuest]) derivation.catch(() => {}); // a failure is the awaiting test's
 
 test("this tree: beside the macOS lane's other groups, default runs its own specs", async () => {
   const { specs, total } = await whole;
@@ -133,10 +136,10 @@ test("this tree: beside the macOS lane's other groups, default runs its own spec
 // guest's restored plain out/) leaves its own specs as they are.
 test("this tree: default's own specs are the same whether it runs on the host or the guest", async () => {
   const entry = (outputs) => JSON.parse(outputs.e2e).find((job) => job.group === 'default');
-  assert.equal(entry(plan()).variant, undefined);
+  assert.equal(entry(hostPlan).variant, undefined);
   for (const outputs of guestPlans) assert.equal(entry(outputs).variant, 'plain');
   const all = await whole;
-  for (const derivation of onGuest) {
+  for (const derivation of [onHost, ...onGuest]) {
     const guest = await derivation;
     assert.deepEqual([guest.specs, guest.total], [all.specs, all.total]);
   }
