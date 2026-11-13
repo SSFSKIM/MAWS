@@ -48,7 +48,7 @@ const cases: [string, Kind, string, () => ReturnType<typeof builder>, (container
     b.toolUse('q-alpha', 'AskUserQuestion', { questions: question('alpha') }); b.result('q-alpha', 'answered');
     b.toolUse('q-beta', 'AskUserQuestion', { questions: question('beta') }); b.result('q-beta', 'answered');
     return b;
-  }, (c) => c.textContent!.includes('Which alpha?')],
+  }, (c) => c.querySelector('.transcript-question-line')?.getAttribute('title') === 'Which alpha?'],
 ];
 
 describe('a jump’s revealed target with a mods surface attached', () => {
