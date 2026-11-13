@@ -57,7 +57,7 @@ function source(f: Fixture, h: SessionHarness, owners: string[] = ['@machine']):
   const engine = sessionIdFor(sid++);
   h.trustDirectory(h.work);
   const record = h.index.sessions.upsertFromSummary(summary({ sessionId: engine, directory: h.work, customTitle: 'Studio plan' })).record;
-  h.index.sessions.update(record.appId, { permissionMode: DEFAULT_MODE });
+  h.index.sessions.applyEngineStatus(record.appId, { permissionMode: DEFAULT_MODE });
   h.writeTranscript(h.work, engine);
   f.records.set({ lane: 'B', session: engine, owners, shares: [] }, record.appId);
   return { app: record.appId, engine };
@@ -102,6 +102,7 @@ describe('a fork from another machine', () => {
     const a = await openRemote(f, org.a1, org.A);
     const message = { content: 'Reply OK', display: 'Reply OK' };
     const ran = await run(a, await stepped(f, a, forkArgs(app, { message })));
+    console.log('DEBUG-FORK', JSON.stringify(ran));
     expect(ran).toMatchObject({ ack: 'ok', outcome: { state: 'done', result: { status: 'starting' } } });
     const forkId = (ran.outcome as { result: { appSessionId: AppSessionId } }).result.appSessionId;
     expect(forkId).not.toBe(app);
@@ -184,7 +185,7 @@ describe('the ceiling, judged where the fork is allocated', () => {
     const { f, h } = await machine();
     const { app } = source(f, h);
     f.endpoint.policy.set({ ceiling: 'acceptEdits' }); // the source's `default` is within it when the endpoint decides
-    between(f, () => h.index.sessions.update(app, { permissionMode: BYPASS_MODE }));
+    between(f, () => h.index.sessions.applyEngineStatus(app, { permissionMode: BYPASS_MODE }));
     const a = await openRemote(f, org.a1, org.A);
     expect(await run(a, await stepped(f, a, forkArgs(app)))).toEqual({
       ack: 'ok',
@@ -206,7 +207,7 @@ describe('the ceiling, judged where the fork is allocated', () => {
     h.host.onCall = () => {
       if (raised || !allocated()) return;
       raised = true;
-      h.index.sessions.update(app, { permissionMode: BYPASS_MODE });
+      h.index.sessions.applyEngineStatus(app, { permissionMode: BYPASS_MODE });
     };
     const a = await openRemote(f, org.a1, org.A);
     const ran = await run(a, await stepped(f, a, forkArgs(app)));
@@ -221,7 +222,7 @@ describe('the ceiling, judged where the fork is allocated', () => {
   it('fails a fork whose source is above the ceiling as the endpoint’s policy stands, and lets one within it run', async () => {
     const { f, h } = await machine();
     const { app } = source(f, h);
-    h.index.sessions.update(app, { permissionMode: BYPASS_MODE });
+    h.index.sessions.applyEngineStatus(app, { permissionMode: BYPASS_MODE });
     const a = await openRemote(f, org.a1, org.A);
     expect(await run(a, await stepped(f, a, forkArgs(app)))).toMatchObject({ ack: 'ok', outcome: { state: 'failed', error: { issues: { refusal: 'ceiling', mode: 'bypassPermissions' } } } });
     f.endpoint.policy.set({ ceiling: 'bypassPermissions' });

@@ -762,7 +762,7 @@ describe('session service', () => {
 
     it('is refused `ceiling` with the mode above the machine’s ceiling, before anything is allocated', async () => {
       const src = source();
-      h.index.sessions.update(src.appId, { permissionMode: { requested: 'bypassPermissions', effective: 'bypassPermissions', refusal: null } });
+      h.index.sessions.applyEngineStatus(src.appId, { permissionMode: { requested: 'bypassPermissions', effective: 'bypassPermissions', refusal: null } });
       refused.add('bypassPermissions');
       const forking = h.service.forkFromAnotherMachine(src.appId, { kind: 'inPlace' }, { message: null, rewindTo: null });
       await expect(forking).rejects.toBeInstanceOf(CeilingRefused);
