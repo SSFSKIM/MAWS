@@ -18,6 +18,7 @@ export const once = <T>(make: () => T): (() => T) => { // shared-0-Do3lTMSe.js:4
 };
 
 // The characters Desktop treats as invisible or unsafe (shared-0-Do3lTMSe.js:25521 `z8`, imported as `Jn`)
+// eslint-disable-next-line no-misleading-character-class -- Desktop's class as written: with the `u` flag each mark is a code point of its own
 const UNSAFE = /[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}\u2800\uFFFC\u{1D159}\u{13441}\u{13442}\u{16910}\u{16FE4}\uFDD0-\uFDEF\uFFFE\uFFFF\u{1FFFE}\u{1FFFF}\u{2FFFE}\u{2FFFF}\u{3FFFE}\u{3FFFF}\u{4FFFE}\u{4FFFF}\u{5FFFE}\u{5FFFF}\u{6FFFE}\u{6FFFF}\u{7FFFE}\u{7FFFF}\u{8FFFE}\u{8FFFF}\u{9FFFE}\u{9FFFF}\u{AFFFE}\u{AFFFF}\u{BFFFE}\u{BFFFF}\u{CFFFE}\u{CFFFF}\u{DFFFE}\u{DFFFF}\u{EFFFE}\u{EFFFF}\u{FFFFE}\u{FFFFF}\u{10FFFE}\u{10FFFF}]/u;
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -65,6 +66,7 @@ const TRIGGER = new RegExp(PATTERNS.map((pattern) => `(?:${pattern.trigger})`).j
 const ESCAPED_JWT = once(() => RegExp(`(?:${ESCAPES.join('|')})eyJ[A-Za-z0-9_-]{10,}\\.`)); // :4675 `oy`
 const mayHoldToken = (text: string) => TRIGGER.test(text) || (text.includes('eyJ') && ESCAPED_JWT().test(text)); // :4676 `sy`
 const MAX_SCAN = 262144; // :4744 `dy`
+// eslint-disable-next-line no-misleading-character-class -- Desktop's class as written: with the `u` flag each mark is a code point of its own
 const INVISIBLE = once(() => new RegExp(String.raw`(?![\t\n\r])${UNSAFE.source}|[\p{M}\p{Co}\p{Cn}]`, 'u')); // :4745 `fy`
 const invisible = (char: string) => INVISIBLE().test(char); // :4746 `py`
 const INVISIBLE_RUN = once(() => RegExp(`(?:${INVISIBLE().source}){1,65536}`, 'gu')); // :4749 `my`
