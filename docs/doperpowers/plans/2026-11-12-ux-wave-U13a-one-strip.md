@@ -630,6 +630,14 @@ The pull request carries the dated amendments of the two rulings this landing re
   - Decision (the architect's ruling, after the one-strip scene's screenshots of run 43385216852 showed places squeezed to one letter and an ellipsis): a place is drawn only while a readable part of it fits, its whole text or at least its first four characters before the ellipsis; below that it is not drawn at all (no box, no gap) and the title takes the room. The tooltip, the accessible name and the All tabs line keep title and place; the title still truncates only after the place is gone. Done in CSS in `main/Tab.tsx` (no measuring in script, tokens only); held by the one-strip scene at each width it visits, a unit test pinning what is computable. This sharpens M4's "Shrinking" decision without changing its intent.
   - Observation: `e2e/ux2-shell.spec.ts:612` (compact inactive file tabs), a scene this branch had not edited, read the title as the tab's direct child (`:scope > span.truncate`); M4's wrapper broke it. The scene reads the title through the wrapper, its four assertions unchanged.
     Date/Author: 2026-11-13, the architect's ruling and the layout run; the controller.
+- **2026-11-13 · The branch review (xhigh panel over `c0e7b2ae8..a45780aad`): five findings, each confirmed by its verifier, fixed as one wave** (the architect's rulings; commits `8b3d4a147` red, `84745874b`).
+  - Decision (P1, `isEmptyChat`): a chat with a write of its draft in flight is not empty. `patchIntent` counts unanswered intent writes per session, raised before the request leaves and lowered when it is answered; `isEmptyChat` is false while the count is above zero. No wire or IPC change. Test: from empty chat A a slow New chat for another project, typing into A and a tab switch before the creation returns, the patch's reply held: A is not discarded and then holds the draft.
+  - Decision (P2, the same function): one definition of empty, `isEmptyChat`, read by every caller (the reuse, the close of the other empty chats, the relaunch sweep): no stored draft, no live draft, no draft write in flight, no queued prefill (the Library's "Ask Claude"), no queued attachment, and the conditions §E lists. At a relaunch nothing of an earlier run's chat lives outside its intent, so the sweep in effect reads the intent, and anything queued during startup keeps the chat. Tests: a prefill, an attachment, a relaunch with a prefill queued.
+  - Decision (P2, `closeEmptyChat`): the tab leaves the strip in the same synchronous run (`closeTab(id, { remember: false })`), and what the session holds beside it (side tools and their instances, agent tabs, closed-history entries: `dropSession`) is dropped only after main has answered yes; a refusal or an error restores the tab and its pin, and nothing else was touched. Test with a real panel host and a probe tool: refused, throws, agrees.
+  - Decision (P2, `rowOf`): a listed session with no record, of either lane, sits under its listing's row (`rowOfListed ?? orgKey ?? machineKey`, as lane B already did), changed in `rowOf` rather than in `stores/org-projects.ts`. Test: a lane A listing in front gives its project's row, the chip, and New chat in that project's folder here.
+  - Decision (P2, `subscribeTransfer`): it also subscribes to what `sessionRow` reads, through a new `subscribeSessionRows` in `keymap/actions-runtime.ts` (sessions, machine loads, unstarted titles). Test: the cover goes from refused to accepted when the machine's load arrives during a drag.
+  - Observation: none of the five touches what build F reads (`main.tabs`, `panelTools.surfaces`, `regions`, the settings files) or `e2e/cross-build.spec.ts`; during a pending discard the chat's `panel.<id>` key is kept rather than deleted early, a value F already reads.
+    Date/Author: 2026-11-13, the branch review, the architect's rulings; the M3 executor's fixes; recorded by the controller.
 
 ## Outcomes & Retrospective
 
@@ -650,7 +658,7 @@ The pull request carries the dated amendments of the two rulings this landing re
 - **Size.** About 6,460 lines changed over 80 files, against the estimate of about 4,900 over about 98 files. Of those, about 5,700 are in `src/`, `test/` and `e2e/`, over 75 files. Fewer files changed than estimated, but more lines per file: the store's rewrite, M3's relaunch sweep and M5's cross-build scenes all came out longer.
 - **Order.** The milestones held their order. Step 0 was not waited for: master was merged at each boundary, never rebased. The whole unit suite ran twice, at the end of M2 and at the end of M5; the wave's build rule of 2026-11-13 then limited it to once per landing.
 
-**What the reviews found that the document had not.** Each task review was independent and reproduced its bug on the VM before reporting it. Rounds per milestone: M1 two, M2 two, M3 three, M4 one, M5 three.
+**What the reviews found that the document had not.** Each task review was independent and reproduced its bug on the VM before reporting it. Rounds per milestone: M1 two, M2 two, M3 three, M4 one, M5 four. The branch review then found five more, listed after M5.
 - **M1.** A stored `current` naming an `Object.prototype` member crashed `stripOf`. The rehearsal passed a conversion that added a tab.
 - **M2.** `openTab(…, { activate: false })` moved the focus, so the background path that §C, §E and U7 rely on could change the tab in front.
 - **M3.** The relaunch sweep could discard a chat of this run that held typing, twice over:
@@ -664,9 +672,16 @@ The pull request carries the dated amendments of the two rulings this landing re
   - a pin read through a disabled icon.
 
   In addition, `#` followed by digits in a comment tripped the token guard.
+- **The branch review** (xhigh panel), five findings:
+  - `isEmptyChat` missed a draft write in flight, a queued prefill and a queued attachment;
+  - a refused empty-chat close lost the chat's side tools;
+  - a lane A listing had no row;
+  - a drag did not hear the rows it reads.
+- **The architect's look at the screenshots**: a place squeezed to one letter became "readable or not drawn". `ux2-shell.spec.ts:612`, a scene the branch never edited, broke on M4's markup.
 
 **Lessons.**
 - A startup step that changes stored state in the same window as a person's first act needs a stated order of the two, not only a predicate. The document stated what to discard, and not that creation must wait for it.
+- "Empty" must be decided by one function that reads every place content can wait, in-flight writes included. The same class of fault was found three times, twice in M3's reviews and once in the branch review: a draft write still in flight, and a queued prefill or attachment, each looked empty.
 - A scene that proves a read must look for something only the reading build could have produced. Equal values that both builds would write prove nothing.
 - Running the cross-build group early, before M5 was reviewed, surfaced two scene faults (a folded icon, a disabled icon) that reading the code had not.
 
