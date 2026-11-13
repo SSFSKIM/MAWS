@@ -21,7 +21,7 @@ The build on the owner's machines today, build F (commit `f1852de3a`), reads the
 - [x] (2026-11-12 22:46Z) Document written against master `85e934368`; the section checked against the code at that head ("What the code holds today").
 - [x] (2026-11-12 23:09Z) Adversarial review of this document: its five findings and two remarks, and the architect's rulings on the six points reported at authoring, are folded in (Decision Log).
 - [ ] Step 0 on master (U6a and U8a landed); this branch merges it (not a rebase: Decision Log, 2026-11-12 23:40Z). M1 runs before it, on the architect's word, over a merge of master at `eeba4e916`.
-- [ ] M1 — The stored form and its reader.
+- [x] (2026-11-13 02:05Z) M1 — The stored form and its reader. Commits `4a4f915d1..d07608d6c`, review fix `0c147f02f`; task review clean on its second round. Next: the architect's rehearsal on real layout files (Concrete Steps 4), then step 0 merged, then M2.
 - [ ] M2 — One strip in the store, and the current project.
 - [ ] M3 — New chat.
 - [ ] M4 — What the tabs and the title bar show.
