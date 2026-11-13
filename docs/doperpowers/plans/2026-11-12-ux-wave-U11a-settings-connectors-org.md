@@ -1019,6 +1019,11 @@ Found while checking the sections against the code at `48619c824`, then by the a
 - Observation: the engine's own lists disagree on a skill's name when its front-matter name differs from its folder's: the initialize answer's `commands` give the front-matter name, `system/init` gives the folder's, and the transcript's command line names the folder; so such a skill shows in the transcript under the folder's name, not the name Customize lists. Both names run it (P3).
   Evidence: `spikes/protocol-probe/findings-uxwave-u11-skill-names.txt` and its lists journal `u11-skill-names-lists.jsonl` on `ux-wave/probe3-u11`.
 
+- Observation: a Channel tab opened again inside the 30 s release delay while the network is still off reads "Connecting…" until its socket next fails, up to 30 s later (§F's first row as written; for P4 to judge); and a wake that drops a socket not yet welcomed is told as `onClosed(1006)`, so it reads `unreachable` (M4).
+  Evidence: `src/main/org/channel/channel.ts` (`open` calls `reconcile(true)` before `retain`; the release delay); `project-socket.ts`'s close on a wake.
+- Observation: `test/support/tokens-guard.test.ts` reads an item id written `#` and three digits (`#505`, `#523`, `#540`) as a hex colour, so M2's and M3's comments and strings fail it (29 hits at `45a02d0d1`); M3's fix writes them another way.
+  Evidence: M4's full-suite run at `0adbfd07c`, the only failure that is not on the brief's list or a load timeout.
+
 ## Decision Log
 
 - Decision: verification for this landing. This document gets an adversarial review before an executor starts (done on 2026-11-12: needs-attention, three findings, all accepted and folded in below). Each milestone is reviewed at its boundary by the controller's reviewer before a milestone that consumes it starts. The branch gets `doperpowers:review-code` at the xhigh panel: it is expected to change about 112 files and 7,000 lines (about 60 product files, 40 unit-test files, 8 e2e files, 5 documents), well past the mark of twenty files or two thousand lines. The root calls nothing in U11 delicate; four parts still want a lens of their own: the sign-in's check, the configuration's revision and the wire (M8, §A and §H); the channel's reach and refusal (M4, §F's table); the backdrop where layers stack (M3, §E); and the regrouped Settings against the three `keep` items (M9). Class 1a on GitHub Actions (`static,unit,probes`) is the gate of record, run by the architect on the head handed back and again on the final head if the panel changed the branch. The pull request's body names its class 1a run, its review verdict and its residue, and carries the dated amendments of the five rulings this landing reverses.
@@ -1128,6 +1133,10 @@ Found while checking the sections against the code at `48619c824`, then by the a
 - Decision: in the Channel, 8 px of the stream's foot padding moves to the clipping footer so the composer frame's ring and near shadow are not cut; a compact session pane (no transcript above its composer) takes no composer gutter.
   Rationale: `.scroll-gutter-under` clips (§E), which would cut the frame's ring at its edge.
   Date/Author: 2026-11-12, M3's executor; folded by the controller.
+
+- Decision: M4's readings of §F's table where it leaves a case open: a session change is the session value object changing (`org-session.ts` rebuilds it exactly when the org, member, device or credential changes), not every adopted head; clearing a refusal starts reach again at `connecting`; "a released channel opened again" is an open while no tab holds it (inside the release delay); a close after the welcome but before caught up leaves reach unchanged; a failed attestation read moves reach only while its hub is still the session's; at caught up the internal reach resets, so a stale `unreachable` cannot leak into a later not-live state; the Sign in button goes with the footer's ended-sign-in row and no longer shows beside "Signed out". In main the per-channel state is `standing` (the name `reach` stays the network path's) and `ended` names the refusal (`'credentials' | 'removed'`) in place of `'parked'`. `src/main/org/org-session.test.ts` (UC-8: nobody's) takes one expected answer.
+  Rationale: each is the row of §F's table that holds most nearly, chosen so a word never stands that the channel no longer means. The e2e scenes (three, one launch each, with the org's hub status `connected`) cover the case S-09 is about.
+  Date/Author: 2026-11-12, M4's executor; folded by the controller.
 
 ## Outcomes & Retrospective
 
