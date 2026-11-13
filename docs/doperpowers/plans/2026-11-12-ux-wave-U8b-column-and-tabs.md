@@ -19,7 +19,7 @@ How to see it working, on the wave's build: open a session with nothing running 
 - [x] (2026-11-12) Revised once on the review, the architect's eight rulings and the drawn example (Decision Log 2).
 - [x] (2026-11-12) The owner answered the four choices (23:45Z): three as recommended, and the Subagents card's tree with "(+N)" as the Claude Code CLI writes it; the architect ruled on what follows from them (Decision Log 4). M2, M3, M5, M7 and M8 are written to the answers and the rulings.
 - [ ] Step 0 (U6a, U8a) is on master and the branch has merged it (Constraints 9). (2026-11-12) U8a is: master `7e5f2016c` merged at `25ce07b97`. U6a is not yet. M1 was built ahead of it on the architect's word (Decision Log 3).
-- [ ] M1 — what is stored, its readers, the side column's acts, and the two widths. (2026-11-12) Built at `d316535b0`. Its proof is green on the VM: M1's suites, the whole typecheck, and the whole unit suite at `29f5417bc` with only the VM's known failures (the report file has the runs). Waiting for the boundary review.
+- [x] M1 — what is stored, its readers, the side column's acts, and the two widths. (2026-11-12) Built at `d316535b0`; its boundary review found the first read unsafe after a failed read and after work in a deferred launch, fixed in `e9f91cd18..cd1fafe75` (Decision Log 3) and reviewed clean at `cd1fafe75`.
 - [ ] M2 — one strip, one tab in view
 - [ ] M3 — the second group
 - [ ] M4 — the card column
@@ -673,6 +673,8 @@ Found while writing this document, against master `48619c824`, and reported to t
      Date/Author: 2026-11-12, the architect's ruling; written by the author.
    - Decision: U5 builds no next-step button, so the push row stays as M4 leaves it and §C.4 keeps `PushState`'s signature as the stable name (The landing's edge; §C.4). The owner's answer of 2026-11-12 on Source control: "We don't need a button that asks agent to commit, push, or open pull request … Source control is enough for read only". The two sentences here that expected the button were written before it, and U5a's document builds none.
      Date/Author: 2026-11-12, the owner's answer and the architect's ruling; written by the author.
+
+5. **2026-11-12 (the controller): the whole unit suite runs once per landing.** On the architect's word, for the wave's shared build VMs: only the builder of M9 runs `pnpm test` (Concrete Steps 4 says each milestone's end). An earlier milestone's proof is the typecheck of each project it changed, eslint on the files it changed, and vitest over the directories it touched plus the test folders that import what it changed, named in its report; after a merge of master, the same set again. `~/.local/share/maws-ux-wave/briefs/build-common.md` holds the rule.
 
 ## Outcomes & Retrospective
 
