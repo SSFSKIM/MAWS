@@ -5,7 +5,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { anchoredMessage, parseAnchoredText } from '@shared/anchor/message';
-import { anchorPath, callClass, chipPath, clickPath, EDIT_TOOLS, hrefOf, isMcpTool, linkPaths, needlesOf, normalizeLexically, READ_TOOLS, rowClaim } from './named';
+import { anchorPath, callClass, chipPath, clickPath, EDIT_TOOLS, hrefOf, isMcpTool, linkPaths, linkWork, needlesOf, normalizeLexically, READ_TOOLS, rowClaim, STRETCH_MAX, WORK_FLOOR, WORK_PER_CHAR } from './named';
 
 const P = '/work/out/report.md';
 
@@ -169,11 +169,166 @@ describe('the link form: linkPaths', () => {
     expect(linkPaths(deep(33))).toEqual([]);
   });
 
-  it('answers in time over a hostile text', () => {
-    const text = '[a]('.repeat(200_000) + ']('.repeat(200_000);
-    const started = performance.now();
-    linkPaths(text);
-    expect(performance.now() - started).toBeLessThan(2_000);
+});
+
+// Decision Log 24: the scan's work is bounded by construction. One meter per text counts what every loop of the block
+// pass and the inline pass visits, helpers included; the scan pauses (gives the event loop back) each time the meter has
+// advanced 64 KiB, and a text whose work would pass WORK_PER_CHAR times its length names nothing more. Every bound here
+// is a count, never a time.
+describe('the scan’s work, bounded by construction (Decision Log 24)', () => {
+  // An independent count, outside the meter: every `charCodeAt` call and every character an `indexOf` passes, and the
+  // longest unread input any regular expression is run on (`exec` is what `test`, `replace` and `matchAll` call once it
+  // is patched). A count past its bound stops the scan at once, so a quadratic scan fails here instead of running on.
+  const VISITS_PER_CHAR = 4 * WORK_PER_CHAR;
+  const REGEX_INPUT_MAX = 64 * 1024; // a link's tail is at most 16 KiB, and percent-encoding at most triples an ASCII one
+  function probed(text: string): { visits: number; regexInput: number } {
+    const bound = VISITS_PER_CHAR * text.length + 1_000_000;
+    const { charCodeAt, indexOf } = String.prototype;
+    const { exec } = RegExp.prototype;
+    let visits = 0;
+    let regexInput = 0;
+    const visit = (n: number) => {
+      visits += n;
+      if (visits > bound) throw new Error(`past ${bound} visits`);
+    };
+    String.prototype.charCodeAt = function (this: string, index: number) {
+      visit(1);
+      return charCodeAt.call(this, index);
+    };
+    String.prototype.indexOf = function (this: string, search: string, from?: number) {
+      const found = indexOf.call(this, search, from);
+      visit(Math.max(1, (found === -1 ? this.length : found) - (from ?? 0)));
+      return found;
+    };
+    RegExp.prototype.exec = function (this: RegExp, input: string) {
+      const unread = String(input).length - (this.global || this.sticky ? this.lastIndex : 0);
+      regexInput = Math.max(regexInput, unread);
+      if (unread > REGEX_INPUT_MAX) throw new Error(`a regular expression ran on ${unread} characters`);
+      return exec.call(this, input);
+    };
+    try {
+      linkPaths(text);
+    } finally {
+      Object.assign(String.prototype, { charCodeAt, indexOf });
+      RegExp.prototype.exec = exec;
+    }
+    return { visits, regexInput };
+  }
+  function bounded(text: string): { work: number; longest: number } {
+    const probe = probed(text);
+    expect(probe.visits).toBeLessThanOrEqual(VISITS_PER_CHAR * text.length + 1_000_000);
+    expect(probe.regexInput).toBeLessThanOrEqual(REGEX_INPUT_MAX);
+    const { work, longest } = linkWork(text);
+    expect(work).toBeLessThanOrEqual(WORK_PER_CHAR * text.length + WORK_FLOOR);
+    expect(longest).toBeLessThanOrEqual(STRETCH_MAX);
+    return { work, longest };
+  }
+
+  // the delta review's four inputs
+  it('a tower of a hundred thousand list markers, then a link: the thematic-break test runs once per line', () => {
+    const text = `${'- '.repeat(100_000)}[r](${P})`;
+    bounded(text);
+    expect(linkPaths(text)).toEqual([]); // nested past the cap: refused
+  });
+
+  it('a delimiter row of a hundred thousand spaces that fails at its end: read in one pass', () => {
+    const text = `a | b\n|-${' '.repeat(100_000)}|x\n\n[r](${P})`;
+    bounded(text);
+  });
+
+  it('backtick runs of every length from 1 to 2,000: each closing run is looked up, not searched for', () => {
+    const text = `${Array.from({ length: 2000 }, (_, k) => '`'.repeat(k + 1)).join(' ')} [r](${P})`;
+    bounded(text);
+    expect(linkPaths(text)).toEqual([P]); // no run closes, so the link stands, on a line of two million characters
+  });
+
+  it('a million open brackets, then a thousand links: the opener stack is never walked', () => {
+    const text = `${'['.repeat(1_000_000)}${`[r](${P}) `.repeat(1000)}`;
+    bounded(text);
+  });
+
+  it.each([
+    ['link openers and resource tails', '[a]('.repeat(200_000) + ']('.repeat(200_000)],
+    ['a dense line of links', `[r](${P}.bak) `.repeat(50_000)],
+    ['a quote tower', `${'> '.repeat(100_000)}[r](${P})`],
+    ['an autolink with no end', `<a:${'b'.repeat(200_000)}`],
+    ['autolink starts', '<a:b'.repeat(100_000)],
+    ['a fence of a hundred thousand backticks', '`'.repeat(100_000)],
+    ['a hundred thousand definitions', `[a]: /x\n`.repeat(100_000)],
+    ['a thousand nested images, then links', `${'!['.repeat(1000)}${`[r](${P})`.repeat(1000)}`],
+  ])('%s', (_, text) => {
+    bounded(text);
+  });
+
+  // One seeded generator of hostile shapes, each part sized from ten to twenty thousand: marker towers, bracket towers,
+  // delimiter-run ladders, long whitespace runs, and their mixes across lines.
+  function mulberry32(seed: number): () => number {
+    let state = seed;
+    return () => {
+      state = (state + 0x6d2b79f5) | 0;
+      let t = Math.imul(state ^ (state >>> 15), 1 | state);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  const ladder = (marker: string, n: number, between: string) => Array.from({ length: Math.min(n, 300) }, (_, k) => marker.repeat(k + 1)).join(between);
+  const SHAPES: ((n: number) => string)[] = [
+    (n) => '> '.repeat(n),
+    (n) => '- '.repeat(n),
+    (n) => '* '.repeat(n),
+    (n) => '1. '.repeat(n),
+    (n) => '[^a]: '.repeat(n),
+    (n) => '['.repeat(n),
+    (n) => '!['.repeat(n),
+    (n) => '[a]('.repeat(n),
+    (n) => ']('.repeat(n),
+    (n) => '('.repeat(n),
+    (n) => '[a]['.repeat(n),
+    (n) => ']'.repeat(n),
+    (n) => ladder('`', n, ' '),
+    (n) => ladder('$', n, 'x'),
+    (n) => ladder('`', n, '\n'),
+    (n) => '`'.repeat(n),
+    (n) => '$$'.repeat(n),
+    (n) => ' '.repeat(n),
+    (n) => '\t'.repeat(n),
+    (n) => '\r'.repeat(n),
+    (n) => ' \t'.repeat(n),
+    (n) => `|-${' '.repeat(n)}|x`,
+    (n) => `| ${'-'.repeat(n)} |`,
+    (n) => '|'.repeat(n),
+    (n) => '-'.repeat(n),
+    (n) => '_ '.repeat(n),
+    (n) => `<a:${'b'.repeat(n)}`,
+    (n) => `http://${'x'.repeat(n)}`,
+    (n) => '[a]: /x\n'.repeat(Math.min(n, 2000)),
+    (n) => '|a|b|\n|-|-|\n' + '|x|y|\n'.repeat(Math.min(n, 2000)),
+    (n) => '```\n'.repeat(Math.min(n, 2000)),
+    () => `[r](${P})`,
+    () => `[r](${P}.bak)`,
+    () => '\n',
+    () => '\n\n',
+  ];
+  const SIZES = [10, 100, 1000, 5000, 20_000];
+  const JOINS = ['', ' ', '\n', '\n\n', '\n> ', '\n- ', '|', '\n    '];
+
+  it('over seeded hostile shapes, every bound holds', () => {
+    const seed = 0x6d657472;
+    const count = 300;
+    const random = mulberry32(seed);
+    const pick = <T>(items: readonly T[]) => items[Math.floor(random() * items.length)]!;
+    let chars = 0;
+    let worstRatio = 0;
+    let worstStretch = 0;
+    for (let k = 0; k < count; k += 1) {
+      const parts = Array.from({ length: 1 + Math.floor(random() * 4) }, () => pick(SHAPES)(pick(SIZES)));
+      const text = parts.join(pick(JOINS));
+      const { work, longest } = bounded(text);
+      chars += text.length;
+      worstRatio = Math.max(worstRatio, work / Math.max(1, text.length));
+      worstStretch = Math.max(worstStretch, longest);
+    }
+    console.log(`named scan work: seed ${seed}, ${count} hostile texts, ${chars} characters, most work per character ${worstRatio.toFixed(1)} (bound ${WORK_PER_CHAR}), longest stretch ${worstStretch} (bound ${STRETCH_MAX})`);
   });
 });
 

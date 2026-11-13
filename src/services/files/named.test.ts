@@ -604,6 +604,21 @@ describe('the queue (S14, S15)', () => {
     expect(loop.ticks()).toBeGreaterThanOrEqual(empties / 256); // at least one turn of the loop per 256 values
   });
 
+  // Decision Log 24: the rule's meter pauses each time its scan has done 64 KiB of work, and each pause is a turn of the
+  // loop at once, not one step among NAMED_CLAIM_STEPS. A row of one long text and one link that does not name the path:
+  // its two passes over three million characters pause at least once per 64 KiB of the text.
+  it('gives the event loop back at every pause of the scan of one long text', async () => {
+    const text = `${'x'.repeat(3_000_000)} [r](${P}.bak)`;
+    await writeTranscript([assistant({ type: 'text', text })]);
+    const loop = ticker();
+    try {
+      expect(await paths({ open: instant(), bounds: { chunk: 8 * 1024 * 1024 } }).names(S, P)).toBe(false);
+    } finally {
+      loop.stop();
+    }
+    expect(loop.ticks()).toBeGreaterThanOrEqual(text.length / (64 * 1024));
+  });
+
   // fix round 1, item 3: a request's patience and its signal run from the moment it is made, the locator's wait
   // included; the queue has only what is left; a locator that answers after the request ended queues nothing
   it('a held locator: the request answers not named on time, or at once when its signal ends, and queues nothing', async () => {
