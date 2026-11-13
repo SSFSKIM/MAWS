@@ -444,6 +444,37 @@ describe('scm service', () => {
       expect(commits()).toBe(3);
     });
 
+    // UX wave U8c-2, M3 fix wave 1: the deadline runs from the call through the request's capture of its folder (the
+    // admission's reads, the caller's guard) and the queue; a capture that ends past it starts nothing.
+    it('answers busy at the deadline for an act whose capture is held past it, and starts nothing once the capture ends', async () => {
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => (release = resolve));
+      let fail!: (error: Error) => void;
+      const failing = new Promise<void>((_resolve, reject) => (fail = reject));
+      const scm = service({ admitMs: ADMIT_MS });
+      const holding: FolderGuard = () => held;
+      const answers = [
+        scm.stage({ appSessionId: ID, paths: ['a.txt'] }, holding),
+        scm.commit({ appSessionId: ID, message: 'x', noVerify: false }, holding),
+        scm.run({ appSessionId: ID, token: 'c4444444-4444-4444-8444-444444444444' }, 'push', holding),
+        scm.unstage({ appSessionId: ID, paths: ['s.ts'] }, () => failing),
+      ];
+      expect(await Promise.all(answers)).toMatchObject([{ refused: 'busy' }, { refused: 'busy' }, { refused: 'busy' }, { refused: 'busy' }]);
+      release();
+      fail(new Error('the guard refused after the deadline'));
+      await wait(20);
+      expect(read).not.toHaveBeenCalled();
+      expect(readStatus).not.toHaveBeenCalled();
+      expect(mutate).not.toHaveBeenCalled();
+      expect(await scm.stage({ appSessionId: ID, paths: ['a.txt'] })).toMatchObject({ ok: true }); // nothing is left holding the queue
+    });
+
+    it('admits an act whose capture ends within the deadline, the deadline counted from the call', async () => {
+      const scm = service({ admitMs: ADMIT_MS });
+      const late: FolderGuard = () => wait(ADMIT_MS / 3);
+      expect(await scm.stage({ appSessionId: ID, paths: ['a.txt'] }, late)).toMatchObject({ ok: true });
+    });
+
     it('lets a key resolution that fails within the deadline fail the call, as before', async () => {
       read.mockImplementation(async (_directory, args) => {
         if (args[0] === 'rev-parse' && args.includes('--git-common-dir')) throw new GitTimeoutError('git rev-parse timed out');

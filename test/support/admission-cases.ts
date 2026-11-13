@@ -4,7 +4,7 @@
 // directory is in. The predicate has two readers, git's own files (the files service, uploads, `git.lsFiles`, Source
 // control: `admittedFolder`) and the machine's `git.worktree.list` (the endpoint: `CheckoutBounds.of`), and both suites
 // run every row here over the same repositories on disk, which `admissionRepos` makes in a scratch folder.
-import { copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { accessSync, chmodSync, constants, copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SessionRecord } from '../../src/shared/graph/session';
@@ -28,6 +28,8 @@ export interface AdmissionPaths {
   linkToWorktree: string; // a link to `beside`
   linkToPlain: string; // a link to `plain`
   other: string; // a folder of another repository
+  locked: string; // the main work tree of a repository whose config cannot be read (mode 000)
+  lockedWt: string; // a registered linked worktree of that repository, beside it
   plain: string; // a folder in no repository
   missing: string; // a folder that does not exist
 }
@@ -75,7 +77,22 @@ export const ADMISSION_CASES: readonly [string, (p: AdmissionPaths) => Admission
   ['a folder of another repository', (p) => agentAt(p, p.other, null)],
   ['a folder of no repository', (p) => agentAt(p, p.plain, null)],
   ['a folder that does not resolve', (p) => agentAt(p, p.missing, null)],
+  ['a registered linked worktree of a repository whose config cannot be read: a read that fails refuses', (p) => ({
+    record: { directory: p.locked, additionalDirectories: [], worktree: null, agentFolder: { checkout: p.lockedWt, cwd: p.lockedWt, branch: null, linked: true } },
+    which: 'path',
+    folder: p.lockedWt,
+    admitted: null,
+  })],
 ];
+
+const readable = (path: string) => {
+  try {
+    accessSync(path, constants.R_OK);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 const git = (cwd: string, ...args: string[]) => runGit(cwd, args);
 
@@ -109,6 +126,8 @@ export async function admissionRepos(): Promise<{ paths: AdmissionPaths; dispose
     linkToWorktree: at('link-wt'),
     linkToPlain: at('link-plain'),
     other: at('other'),
+    locked: at('locked'),
+    lockedWt: at('locked-wt'),
     plain: at('plain'),
     missing: at('missing'),
   };
@@ -133,6 +152,11 @@ export async function admissionRepos(): Promise<{ paths: AdmissionPaths; dispose
     mkdirSync(folder);
     copyFileSync(join(p.beside, '.git'), join(folder, '.git'));
   }
+  await repository(p.locked, 'main', ['README.md']);
+  await git(p.locked, 'worktree', 'add', '-q', '-b', 'locked-wt', p.lockedWt);
+  const config = join(p.locked, '.git', 'config');
+  chmodSync(config, 0o000); // git itself then exits 128 ("unable to access '.git/config': Permission denied")
+  if (readable(config)) throw new Error('the admission cases need a user whom mode 000 denies (not root): the locked row would not be locked');
   mkdirSync(p.plain);
   symlinkSync(p.beside, p.linkToWorktree);
   symlinkSync(p.plain, p.linkToPlain);

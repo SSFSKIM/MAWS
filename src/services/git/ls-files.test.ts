@@ -185,9 +185,11 @@ describe('git lsFiles and the folders the records’ facts name', () => {
     expect((await l.list({ directory: p.beside, query: 'index', limit: 30 })).paths[0]).toBe('packages/app/index.ts');
   });
 
-  it('lists no folder that holds a copied .git pointer, nor one an archived session’s fact names', async () => {
+  it('lists no folder that holds a copied .git pointer, nor one whose repository’s config cannot be read, nor one an archived session’s fact names', async () => {
     const copied = listerOver(fakeSpineView({ records: [movedTo(p.copy)] }));
     await expect(copied.list({ directory: p.copy, query: '', limit: 30 })).rejects.toThrow(/not a directory of any session or project/);
+    const locked = listerOver(fakeSpineView({ records: [movedTo(p.lockedWt, { directory: p.locked })] })); // its repository's config cannot be read
+    await expect(locked.list({ directory: p.lockedWt, query: '', limit: 30 })).rejects.toThrow(/not a directory of any session or project/);
     const archived = listerOver(fakeSpineView({ records: [movedTo(p.beside, { archived: true })] }));
     await expect(archived.list({ directory: p.beside, query: '', limit: 30 })).rejects.toThrow(/not a directory of any session or project/);
   });

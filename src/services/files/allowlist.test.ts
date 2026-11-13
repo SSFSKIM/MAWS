@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync } from 'node:fs';
 import { realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,6 +8,7 @@ import type { SetupIntent } from '@shared/sessions/intent';
 import { ADMISSION_CASES, admissionRepos, type AdmissionPaths } from '../../../test/support/admission-cases';
 import { record as sessionRecord } from '../../../test/support/builders';
 import { fakeSpineView } from '../../../test/support/fake-spine-view';
+import { runGit } from '../../../test/support/git-fixture';
 import { admittedFolder, allowlistOf, rootsOf, under } from './allowlist';
 
 describe('files allowlist', () => {
@@ -126,6 +127,28 @@ describe('the admission of a fact’s folder (§G), read from git’s own files'
     const record = { directory: p.main, additionalDirectories: [], worktree: null, agentFolder: { checkout: p.beside, cwd: p.beside, branch: 'beside', linked: true } };
     expect(await rootsOf(record, [p.beside])).toEqual([p.main]);
     expect(await rootsOf(record, [join(p.base, 'elsewhere')])).toEqual([p.main, p.beside]);
+  });
+
+  // Not in the shared table: git itself, finding a nested `.git` it cannot read, takes the outer repository (on the VM, git
+  // 2.43 answers the main checkout as the top level from inside it), so the endpoint's reader, which asks git, admits the
+  // folder as a sub-folder of the main work tree. The files reader reads git's files itself, and a read that fails refuses.
+  it('refuses a folder whose repository’s metadata cannot be read, rather than taking the repository around it', async () => {
+    const nested = join(p.main, 'locked-nested');
+    mkdirSync(nested);
+    await runGit(nested, ['init', '-q', '-b', 'nested']);
+    const record = { directory: p.main, additionalDirectories: [], worktree: null, agentFolder: { checkout: nested, cwd: nested, branch: null, linked: false } };
+    try {
+      for (const [locked, mode] of [[join(nested, '.git'), 0o755], [join(nested, '.git', 'HEAD'), 0o644]] as const) {
+        chmodSync(locked, 0o000);
+        try {
+          expect(await admittedFolder(record, 'path'), locked).toBeNull();
+        } finally {
+          chmodSync(locked, mode);
+        }
+      }
+    } finally {
+      rmSync(nested, { recursive: true, force: true });
+    }
   });
 
   it('reads the predicate again at each call: a registration removed since is no root', async () => {
