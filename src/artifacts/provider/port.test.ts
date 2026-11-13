@@ -794,6 +794,65 @@ describe('PortProvider', () => {
 const MSG_GARBAGE = 99;
 
 // P4-A2 (X35; the execution document's R2 and R3): the provisional frames and the `integrated` seq a layer's withdrawal waits on.
+// l6-artifacts-07 (a): what a replica receives is never a write of its own. One writer bolds a word of the host's text and
+// another, not having seen the bold, deletes it; a replica that receives both, in that order, as two update frames is left
+// with the bold's two markers around nothing, which Yjs's post-apply clean-up would have deleted and the provider sent.
+describe('PortProvider: a replica that only receives formatting edits (l6-artifacts-07 (a))', () => {
+  // The two writers' updates over the host's text, each applied to the host's doc as the host would.
+  function boldThenDeletion(host: TestHost): Uint8Array[] {
+    const bolder = newDoc();
+    const deleter = newDoc();
+    applyV1(bolder, diffV1(host.doc));
+    applyV1(deleter, diffV1(host.doc));
+    const sv = stateVector(host.doc);
+    bolder.get('t').format(4, 4, { bold: true });
+    deleter.get('t').delete(4, 4);
+    const updates = [diffV1(bolder, sv), diffV1(deleter, sv)];
+    for (const update of updates) applyV1(host.doc, update, 'writer');
+    return updates;
+  }
+  function received(host: TestHost) {
+    type(host.doc, 0, 'one word two');
+    const [replicaEnd, hostEnd] = MemoryPort.pair();
+    host.attach(hostEnd);
+    const doc = newDoc();
+    const provider = new PortProvider(doc, { log: quiet });
+    provider.connect(replicaEnd);
+    pump(replicaEnd, hostEnd);
+    for (const update of boldThenDeletion(host)) hostEnd.postMessage(encodeFrame({ type: 'update', update }));
+    pump(replicaEnd, hostEnd);
+    expect(text(doc)).toBe('one  two');
+    return { doc, provider, hostEnd };
+  }
+
+  it('sends no frame and has nothing unsaved', () => {
+    const host = new TestHost();
+    const { provider } = received(host);
+    expect(host.contentFrames).toEqual(['step2']); // its answer to the host's step 1, and nothing after it
+    expect(provider.state.unsaved).toBe(0);
+  });
+
+  // S3 c: a disconnect carries only the replica's own unacknowledged edits into the next connection.
+  it('carries nothing into the next connection when it wrote nothing itself', () => {
+    const host = new TestHost();
+    host.holdAcks = true; // anything it sent would still be unacked at the disconnect
+    const { doc, provider, hostEnd } = received(host);
+    hostEnd.close();
+    expect(provider.state).toMatchObject({ phase: 'off', unsaved: 0 });
+    const restarted = new TestHost();
+    applyV1(restarted.doc, diffV1(host.doc));
+    const sv = stateVector(restarted.doc);
+    const [replicaEnd2, hostEnd2] = MemoryPort.pair();
+    restarted.attach(hostEnd2);
+    provider.connect(replicaEnd2);
+    pump(replicaEnd2, hostEnd2);
+    expect(restarted.contentFrames).toEqual(['step2']);
+    expect(stateVector(restarted.doc)).toEqual(sv); // the step 2 brought nothing the host lacked
+    expect(text(restarted.doc)).toBe(text(doc));
+    expect(provider.state).toMatchObject({ phase: 'live', synced: true, unsaved: 0 });
+  });
+});
+
 describe('the provisional layer’s frames (P4-A2)', () => {
   const provisional = (over: Partial<ArtifactProvisional> = {}): ArtifactProvisional => ({
     toolUseId: 'toolu_1' as ArtifactProvisional['toolUseId'], appSessionId: 'app-1' as ArtifactProvisional['appSessionId'], artifactId: 'a1', kind: 'document',

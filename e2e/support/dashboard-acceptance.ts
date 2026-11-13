@@ -5,7 +5,7 @@
 // or by the config, fails the reserved final run by name). test/support/final-invocation.test.ts keeps the counts equal
 // to the specs' own `test(` declarations. The live and scale specs are separate explicit scripts, never listed here.
 export const DASHBOARD_ACCEPTANCE: readonly { file: string; tests: number }[] = [
-  { file: 'dashboard.spec.ts', tests: 4 },
+  { file: 'dashboard.spec.ts', tests: 7 }, // U10a decision 16: the gap caret's three cases
   { file: 'dashboard-comments.spec.ts', tests: 1 },
   { file: 'dashboard-history.spec.ts', tests: 2 },
   { file: 'dashboard-export.spec.ts', tests: 4 },

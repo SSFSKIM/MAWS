@@ -13,15 +13,16 @@
 //    `undoContentIds`, the re-pin may return to it and keeps this module's overwrite-twice tests.
 // 2. When nothing changed, the answer is a decodable empty update, not S3's 13 zero bytes.
 import * as Y from '@y/y';
+import { newDoc, newDocGcOff } from './doc';
 
 const idsOf = (doc: Y.Doc) => Y.createContentIdsFromDoc(doc, true);
-const EMPTY = Y.encodeStateAsUpdateV2(new Y.Doc());
+const EMPTY = Y.encodeStateAsUpdateV2(newDoc());
 
 // The V2 update that takes a doc at `liveState` back to the content of `oldState` (both V2 states of the same doc,
 // `oldState` an ancestor). `keep` names changes made since the version that the restore leaves in place (a kind's
 // `revertScope`, e.g. the messages posted to a thread); everything else since is undone.
 export function revertUpdate(oldState: Uint8Array, liveState: Uint8Array, keep?: Y.ContentIds | null): Uint8Array {
-  const scratch = new Y.Doc({ gc: false });
+  const scratch = newDocGcOff(); // a doc that tidied itself between the two applies would plan on a state nobody stored
   try {
     Y.applyUpdateV2(scratch, oldState);
     const oldIds = idsOf(scratch);
