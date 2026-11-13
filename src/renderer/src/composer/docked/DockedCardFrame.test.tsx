@@ -279,7 +279,11 @@ describe('the hand-over to a frame that mounts a commit later', () => {
   });
 
   it('(b) gives it, in the other order, to a frame mounting after the editor took the focus, by its pane holding it', async () => {
-    const view = await answered(() => requestAnimationFrame(() => screen.getByLabelText('editor').focus()));
+    // the editor as Tiptap focuses it, a frame later; held by reference, so a later test's editor is never this one
+    const view = await answered(() => {
+      const editor = document.querySelector<HTMLElement>('[aria-label="editor"]');
+      requestAnimationFrame(() => void (editor?.isConnected && editor.focus()));
+    });
     await nextFrame();
     await nextFrame();
     expect(document.activeElement).toBe(screen.getByLabelText('editor'));

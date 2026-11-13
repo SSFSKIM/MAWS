@@ -295,9 +295,9 @@ test('the three keys on their buttons; ⌘Enter inside the first 400 ms answers 
 
 // U1a §D (A3, decision 17): a chord held down answers the prompt it was pressed at and not the one that takes its place,
 // however long it is held: its key repeats reach no request handler. Released and pressed again, it answers the second.
-// The prompts dock in the real composer, which reads every waiting request ahead (`swapOf`'s `unread`), so the next
-// prompt's frame mounts in the commit the answered one leaves and takes the focus from it (`handingOver`); the bare
-// docked placement reads each request only once its card mounts, a commit too late for that hand-over.
+// The prompts dock in the composer, as they do in the product. The second arrives only once the first is answered, a
+// commit after its frame left; that frame's hand-over (`handingOver`) waits for the editor's deferred focus, so the
+// second frame takes the focus in either order.
 test('a held ⌘Enter answers the first of two queued prompts and never the second; pressed again, it answers the second', async ({ cards }) => {
   const { page } = cards;
   await openCards(page);
