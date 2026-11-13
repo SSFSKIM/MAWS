@@ -360,10 +360,11 @@ test('U8b: three cards, Artifacts in More surfaces; tools are tabs with one in v
       await expect.poll(() => stack(page), { message: 'the terminal in place of Review, which stays a tab' }).toEqual(['terminal']);
       await expect(surface(page, 'terminal').locator('[data-terminal-id]')).toBeVisible({ timeout: 15_000 });
       const terminalId = await surface(page, 'terminal').locator('[data-terminal-id]').getAttribute('data-terminal-id');
-      expect((await box(panel(page))).width, 'Review earns the wide column, a terminal the narrow one').toBeLessThan(wide);
+      expect((await box(panel(page))).width, 'a terminal earns the wide column, as Review does (UX wave U8b, Addendum 6)').toBe(wide);
       await expect(surface(page, 'terminal').getByRole('tablist'), 'a terminal draws no strip of its own').toHaveCount(0);
       await openSurface(page, 'Session info');
       await expect.poll(() => stack(page), { message: 'one tool in view' }).toEqual(['session-info']);
+      expect((await box(panel(page))).width, 'Session info the narrow one').toBeLessThan(wide);
       await expect(sideColumn(page).locator('section[data-side-group]'), 'one group').toHaveCount(1);
       await expect.poll(() => tabTitles(page, 'upper'), { message: 'three tabs in the order they were opened' }).toEqual(['Review', 'Terminal', 'Session info']);
       await expect(sideColumn(page).getByRole('tab', { selected: true })).toHaveAccessibleName('Session info');
@@ -450,9 +451,10 @@ test('U8b: three cards, Artifacts in More surfaces; tools are tabs with one in v
 
 // UX wave U8b (M2, decision 5: the owner's "Shrink to icons" of 2026-11-12; `fitTabs` in panel/TabStrip.tsx): while a
 // strip's tabs do not fit, the tabs not in view stand as their icons alone (28 px, the title as tooltip and name), the
-// rightmost first; only once every one of them is an icon is the tab in view cut, down to 72 px. Five narrow tools (two
-// terminals among them: a second terminal is a second tab of the strip) at the automatic 360 px, then at the column's
-// minimum and at its maximum.
+// rightmost first; only once every one of them is an icon is the tab in view cut, down to 72 px. Five tools (two
+// terminals among them: a second terminal is a second tab of the strip) with Session info in view, so at the narrow
+// automatic 360 px (a terminal in view would make the column wide, Addendum 6), then at the column's minimum and at its
+// maximum.
 test('U8b: a narrow strip shrinks the tabs not in view to icons, the rightmost first, then cuts the tab in view; two terminals are two tabs', async ({ maws }, info) => {
   test.setTimeout(120_000);
   const { page } = maws;
@@ -502,8 +504,8 @@ test('U8b: a narrow strip shrinks the tabs not in view to icons, the rightmost f
   expect(maws.consoleErrors()).toEqual([]);
 });
 
-// UX wave U8b (A5; M1, decision 3; X-165): two remembered widths. Review, Files and the browser open at 60 % of the room
-// right of the sidebar, any other tool at 360 px; a drag moves only the width in use, and a reset (Enter) makes it
+// UX wave U8b (A5; M1, decision 3; X-165): two remembered widths. Review, Files, the browser and a terminal (Addendum 6)
+// open at 60 % of the room right of the sidebar, any other tool at 360 px; a drag moves only the width in use, and a reset (Enter) makes it
 // automatic again, writing F's 380 to `regions.panel.width`.
 test('U8b (A5): the side column remembers a reading tool’s width and any other tool’s apart', async ({ maws }) => {
   const { page } = maws;

@@ -53,7 +53,8 @@ const offs: (() => void)[] = [];
 const chromeTabs = () => screen.getByRole('banner').querySelector<HTMLElement>('[data-chrome-tabs]')!;
 const renderShell = () => render(<QueryClientProvider client={queryClient}><Shell /></QueryClientProvider>);
 // Geometry and maximize checks need a selected surface; an empty panel reserves no space.
-function openSurface(toolId = 'terminal') {
+// A narrow tool by default (UX wave U8b, Addendum 6: a terminal opens wide, so Background tasks stands for "any other tool").
+function openSurface(toolId = 'background') {
   offs.push(registerPanelTool(probeTool(toolId).tool));
   registerSlot('panelHost', PanelHost);
   useSessions.setState({ records: new Map([[A, record(A)]]) });
@@ -425,7 +426,7 @@ describe('another machine’s terminal session in the toolbar', () => {
 
 describe('shell actions', () => {
   it('toggle the sidebar and panel, maximize and restore the panel', () => {
-    openSurface();
+    openSurface('terminal'); // `surface.terminal` below selects it again
     offs.push(registerShellActions(fakeBridge()));
     runAction('sidebar.toggle');
     expect(useLayout.getState().regions.sidebar.collapsed).toBe(true);

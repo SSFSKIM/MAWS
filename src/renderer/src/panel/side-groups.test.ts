@@ -5,7 +5,8 @@ import { describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { NO_SESSION_SCOPE, type LowerGroup, type PanelTabRef } from '@shared/ipc/schema/layout';
 import { buildFSchemaOf } from '../../../../test/support/layout-build-f';
-import { createLayoutStore, storedLayout, type LayoutState } from '../stores/layout';
+import { createLayoutStore, panelWidthClass, storedLayout, type LayoutState } from '../stores/layout';
+import { shellGeometryOf } from '../app/shell-view';
 import { A, B, mainShowing, ref } from '../test-support/panel';
 import { groupForOpen, readGroups, sideGroups, type ScopeValues, type SideGroups } from './surface-model';
 
@@ -14,6 +15,7 @@ const files = ref('files:aaaa0002');
 const t1 = ref('terminal:aaaa0003');
 const t2 = ref('terminal:aaaa0004');
 const info = ref('session-info:aaaa0005');
+const bg = ref('background:aaaa0008');
 const P = ref('terminal:aaaa0006', true);
 const Q = ref('browser:aaaa0007', true);
 
@@ -280,7 +282,7 @@ describe('the acts that change what is in view (Interfaces §B)', () => {
 
 describe('the two widths (A5, X-165)', () => {
   it('a drag writes the width in use and regions.panel.width; a reset makes it automatic and writes F’s 380', () => {
-    const store = storeWith({ panelBySession: lists([[A, [review, t1], review.id]]), panelSurfaces: stacked({ [A]: [review.id] }) });
+    const store = storeWith({ panelBySession: lists([[A, [review, info], review.id]]), panelSurfaces: stacked({ [A]: [review.id] }) });
     store.getState().setPanelWidth(512.4);
     expect(store.getState().panelWidths).toEqual({ version: 1, wide: 512, narrow: null });
     expect(store.getState().regions.panel.width).toBe(512);
@@ -289,10 +291,46 @@ describe('the two widths (A5, X-165)', () => {
     expect(store.getState().panelWidths).toEqual({ version: 1, wide: null, narrow: null });
     expect(store.getState().regions.panel.width).toBe(380);
     expectFReads(store.getState());
-    store.getState().showSurfaceTab(A, t1.id);
+    store.getState().showSurfaceTab(A, info.id);
     store.getState().setPanelWidth(380);
     expect(store.getState().panelWidths).toEqual({ version: 1, wide: null, narrow: 380 });
     expect(store.getState().regions.panel.width).toBe(380);
     expectFReads(store.getState());
+  });
+
+  // UX wave U8b, Addendum 6 (the owner's answer, Decision Log 23): a terminal opens wide, like Review
+  it('a column whose tab in view is a terminal is wide: 60 % of the room, its width remembered as the wide one', () => {
+    const store = storeWith({ panelBySession: lists([[A, [t1, bg], t1.id]]), panelSurfaces: stacked({ [A]: [t1.id] }) });
+    expect(panelWidthClass(store.getState())).toBe('wide');
+    expect(shellGeometryOf(store.getState(), 1440).panel).toBe(720); // 60 % of the 1200 px right of the sidebar
+    store.getState().setPanelWidth(600);
+    expect(store.getState().panelWidths).toEqual({ version: 1, wide: 600, narrow: null });
+  });
+
+  it('a terminal dragged to a width leaves the width Background tasks opens at, and the reverse', () => {
+    const store = storeWith({ panelBySession: lists([[A, [t1, bg], t1.id]]), panelSurfaces: stacked({ [A]: [t1.id] }) });
+    store.getState().setPanelWidth(600);
+    store.getState().showSurfaceTab(A, bg.id);
+    expect(panelWidthClass(store.getState())).toBe('narrow');
+    expect(shellGeometryOf(store.getState(), 1440).panel).toBe(360);
+    store.getState().setPanelWidth(400);
+    store.getState().showSurfaceTab(A, t1.id);
+    expect(shellGeometryOf(store.getState(), 1440).panel).toBe(600);
+    store.getState().showSurfaceTab(A, bg.id);
+    expect(shellGeometryOf(store.getState(), 1440).panel).toBe(400);
+    expect(store.getState().panelWidths).toEqual({ version: 1, wide: 600, narrow: 400 });
+  });
+
+  it('a terminal in one group and Background tasks in the other make a wide column (any tab in view)', () => {
+    for (const [upper, lower] of [[t1, bg], [bg, t1]]) {
+      const store = storeWith({
+        panelBySession: lists([[A, [t1, bg], upper.id]]),
+        panelSurfaces: stacked({ [A]: [upper.id, lower.id] }),
+        panelGroups: lowered({ [A]: { tabs: [lower.id], share: 0.5 } }),
+      });
+      expect(view(sideGroups(store.getState(), A))).toMatchObject({ upperShown: upper.id, lowerShown: lower.id });
+      expect(panelWidthClass(store.getState())).toBe('wide');
+      expect(shellGeometryOf(store.getState(), 1440).panel).toBe(720);
+    }
   });
 });

@@ -1,9 +1,10 @@
 import type { LayoutRegions, PanelTabRef, PanelWidths } from '@shared/ipc/schema/layout';
 
-// UX wave U8b (O-09, X-165): the side column remembers two widths, one while it shows a reading tool and one otherwise.
-export const WIDE_SURFACES = new Set(['review', 'files', 'browser']);
+// UX wave U8b (O-09, X-165): the side column remembers two widths, one while it shows a reading tool or a terminal and
+// one otherwise. A terminal opens wide, like Review (the owner's answer, the execution document's Decision Log 23).
+export const WIDE_SURFACES = new Set(['review', 'files', 'browser', 'terminal']);
 export const isWideColumn = (inView: readonly PanelTabRef[]): boolean => inView.some((tab) => WIDE_SURFACES.has(tab.toolId));
-// The automatic width of a column for any other tool (a reading tool's is 60 % of the room).
+// The automatic width of a column for any other tool (a wide one's, `WIDE_SURFACES`, is 60 % of the room).
 export const NARROW_AUTOMATIC_WIDTH = 360;
 
 // UX2: the approved mockup's 240px sidebar, content-sized surfaces, and temporary narrow-window yielding.

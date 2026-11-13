@@ -10,7 +10,7 @@ import { useWindowWidth } from './regions';
 // `pageOpen` (UX wave U8b, §C.2): a page is open that hides the card column. False until U7 sets it from its destination.
 export const useShellView = create<{ sidebarOverlay: boolean; cardsOverlay: boolean; pageOpen: boolean }>(() => ({ sidebarOverlay: false, cardsOverlay: false, pageOpen: false }));
 export { WIDE_SURFACES } from './shell-geometry';
-// A column is wide while a reading tool is among the tabs in view; its width is the one remembered for that class.
+// A column is wide while a tool of `WIDE_SURFACES` is among the tabs in view; its width is the one remembered for that class.
 export function shellGeometryOf(state: LayoutState, width: number) {
   const tabs = surfaceTabs(state, surfaceSession(state));
   return shellGeometry(state.regions, width, tabs.length > 0, isWideColumn(tabs), state.panelWidths);

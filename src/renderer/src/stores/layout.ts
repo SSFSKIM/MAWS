@@ -299,7 +299,7 @@ function surfaceRegions(state: LayoutState): LayoutRegions {
 // Build F's automatic width, which `regions.panel.width` holds while this build's width in use is automatic (Interfaces §G).
 export const F_AUTOMATIC_WIDTH = LAYOUT_DEFAULTS.regions.panel.width;
 export const PANEL_WIDTHS_DEFAULT: PanelWidths = { version: 1, wide: null, narrow: null };
-// The class of the side column's width now: wide while a reading tool is among the tabs in view (`shellGeometryOf`).
+// The class of the side column's width now: wide while a tool of `WIDE_SURFACES` is among the tabs in view (`shellGeometryOf`).
 export const panelWidthClass = (state: Pick<LayoutState, 'main' | 'knownSession' | 'panelPinned' | 'panelBySession' | 'panelActiveNoSession' | 'panelSurfaces'>): 'wide' | 'narrow' =>
   isWideColumn(surfaceTabs(state, surfaceSession(state))) ? 'wide' : 'narrow';
 

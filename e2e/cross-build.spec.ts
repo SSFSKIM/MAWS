@@ -2338,8 +2338,8 @@ test('(side column, to the peer) two groups, a hidden column, a folded card and 
     expect(sideOf(s, address).added, `the three keys as ${here.label} left them, through ${peer.label}’s write`).toEqual(left);
     said.push(`  ${peer.label}: its cards, then Review at ${wide} and the artifact on its record; wrote its two surfaces; with no session shown, the two pins with the second selected; the three keys kept`);
 
-    // this build: the peer's two surfaces as two groups, the wide width automatic, the narrow one 380 (the terminal
-    // brought into view above, beside the artifact below)
+    // this build: the peer's two surfaces as two groups, the wide width automatic, the narrow one 380 as stored (the
+    // terminal brought into view above, beside the artifact below, keeps the column wide: Addendum 6)
     const back = await s.launch();
     await s.ready(back.page);
     await showSession(back.page, id, session);
@@ -2351,10 +2351,11 @@ test('(side column, to the peer) two groups, a hidden column, a folded card and 
     await expect(panelResizer(back.page), 'the wide width automatic').toHaveAttribute('aria-valuenow', String(wide));
     await sideTab(sideGroup(back.page, 'upper'), /^Terminal/).first().click();
     await expect(sideGroup(back.page, 'upper'), 'the terminal above').toHaveAttribute('aria-label', 'Terminal');
-    await expect(panelResizer(back.page), 'the narrow width still 380').toHaveAttribute('aria-valuenow', String(F_AUTOMATIC_WIDTH));
+    await expect(panelResizer(back.page), 'a terminal in view keeps the column wide (UX wave U8b, Addendum 6)').toHaveAttribute('aria-valuenow', String(wide));
+    expect(sideOf(s, address).added['panelTools.widths'], 'the narrow width still 380').toEqual({ version: 1, wide: null, narrow: F_AUTOMATIC_WIDTH });
     expect(back.maws.consoleErrors()).toEqual([]);
     await s.quit(back);
-    said.push(`  ${here.label} again: Review above, the artifact below, wide automatic (${wide}), narrow 380`);
+    said.push(`  ${here.label} again: Review above, the artifact below, wide automatic (${wide}), the terminal wide too, narrow 380 stored`);
     record(said);
   });
 });

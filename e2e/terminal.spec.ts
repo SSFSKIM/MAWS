@@ -9,6 +9,7 @@
 // copied since; support/clipboard.ts). The shells start over the launch's scratch shell home (support/launch.ts), so
 // none writes the owner's history.
 import { expect, type ElectronApplication, type Page } from '@playwright/test';
+import { logicalLines } from '../test/support/terminal-lines'; // UX wave U8b, Addendum 5
 import { PROFILE_VARIABLE } from '../test/support/shell-home';
 import { withNativeClipboard } from './support/clipboard';
 import { test } from './support/launch';
@@ -71,16 +72,6 @@ interface Snap {
   screen: string[];
   wrapped: boolean[]; // per screen row: it continues the row above it (the buffer's soft wrap)
   modes: Modes;
-}
-// The screen as the lines that were written: each soft-wrapped row joined to the row it continues. The row it continues
-// filled every column, so its trimmed text is padded back to the width (a space at the wrap stays).
-function logicalLines(snap: Snap): string[] {
-  const joined: string[] = [];
-  snap.screen.forEach((line, row) => {
-    if (snap.wrapped[row] && joined.length > 0) joined[joined.length - 1] = joined.at(-1)!.padEnd(snap.cols) + line;
-    else joined.push(line);
-  });
-  return joined;
 }
 interface Counters {
   bytes: number;

@@ -33,7 +33,7 @@ describe('the optional surface geometry', () => {
     useLayout.setState({ main: mainShowing(A), panelBySession: new Map([[A, { tabs: [ref('artifacts:aaaaaaaa')], activeTabId: 'artifacts:aaaaaaaa' }]]) });
     const state = useLayout.getState();
     expect(shellGeometryOf(state, 1440).panel).toBe(360);
-    for (const tool of ['review', 'files', 'browser']) {
+    for (const tool of ['review', 'files', 'browser', 'terminal']) { // UX wave U8b, Addendum 6: a terminal opens wide
       const id = `${tool}:aaaaaaaa`;
       expect(shellGeometryOf({ ...state, panelBySession: new Map([[A, { tabs: [ref(id)], activeTabId: id }]]) }, 1440).panel).toBe(720);
     }
@@ -45,7 +45,7 @@ describe('the optional surface geometry', () => {
       useLayout.setState({ main });
       const state = useLayout.getState();
       expect(shellGeometryOf(state, 1280)).toMatchObject({ sidebar: 240, panel: 0 });
-      for (const [tool, width] of [['terminal', 360], ['browser', 624]] as const) {
+      for (const [tool, width] of [['background', 360], ['browser', 624]] as const) {
         const id = `${tool}:aaaaaaaa`;
         const withSurface = { ...state, panelBySession: new Map([[A, { tabs: [ref(id)], activeTabId: id }]]) };
         expect(shellGeometryOf(withSurface, 1280).panel).toBe(width);

@@ -946,11 +946,13 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
     // As in R7: with the page's sidebar collapsed, C5's clamp cannot narrow the panel in a small window, so the default
     // width and the 640 px refit below render as set.
     await panel.call('collapseSidebar', true);
-    // UX2: no tool means no column. UX wave U8b (M1, A5): a narrow tool opens at the narrow automatic width, 360 px.
+    // UX2: no tool means no column. UX wave U8b (Addendum 6, the owner's answer): a terminal opens wide, like Review, at
+    // 60 % of the room right of the sidebar (collapsed here, so the window's width).
     expect((await panel.region.boundingBox())!.width).toBe(0);
     await openSurface(page, 'Terminal');
     const defaultWidth = (await panel.region.boundingBox())!.width;
-    expect(defaultWidth).toBe(360);
+    const room = await page.evaluate(() => innerWidth);
+    expect(defaultWidth).toBe(Math.round(room * 0.6));
     await expect.poll(async () => (await panel.tabs()).find((t) => t.toolId === 'terminal')?.terminalId ?? null).not.toBeNull();
     const id = (await panel.tabs()).find((t) => t.toolId === 'terminal')!.terminalId!;
 
@@ -969,8 +971,9 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
 
     const side = await cols();
     const screen = page.locator(`[data-terminal-id="${id}"] .xterm-screen`);
-    expect((await screen.boundingBox())!.width, 'the terminal fits the content-sized side column').toBeLessThanOrEqual(defaultWidth);
-    expect(side, 'fitted to the side column, not the window').toBeLessThan(80);
+    const drawn = (await screen.boundingBox())!.width;
+    expect(drawn, 'the terminal fits the content-sized side column').toBeLessThanOrEqual(defaultWidth);
+    expect(side, 'fitted to the side column, not the window').toBeLessThan(Math.floor(room / (drawn / side)));
     expect(side).toBeGreaterThan(20);
     test.info().annotations.push({ type: `columns at ${defaultWidth} px`, description: String(side) });
 
@@ -1004,11 +1007,12 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
     await type('\r');
     await expect.poll(() => hasLine('PASTED-42')).toBe(true);
 
-    // Narrower, then wider than the default: the terminal refits at each width. UX wave U8b (M1): the harness sets widths
-    // of 280, 380 and 640 and none of them is the automatic 360, so the refit back goes to 380, past where it began.
+    // Narrower, then wider than the default: the terminal refits at each width. UX wave U8b (Addendum 6): the default is
+    // the wide automatic width, past every width the harness sets, so the column's own bar takes it to its maximum (End).
     await panel.call('setWidth', 280);
     await expect.poll(cols, 'refits narrower').toBeLessThan(side);
-    await panel.call('setWidth', 380);
+    await panel.region.getByRole('separator', { name: 'Resize right panel', exact: true }).focus();
+    await page.keyboard.press('End');
     await expect.poll(cols, 'and wider, past its default').toBeGreaterThan(side);
     const sideways = await panel.region.evaluate((region) =>
       Array.from(region.querySelectorAll<HTMLElement>('*'))
