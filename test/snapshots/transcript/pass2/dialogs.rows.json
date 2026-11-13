@@ -23,6 +23,11 @@
   {
     "at": "2026-09-28T10:01:16.981Z",
     "autoDenied": 0,
+    "caption": "Loaded 1 tool, used maws-elicit · ask_color",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-28T10:01:25.290Z",
     "expanded": true,
@@ -31,6 +36,10 @@
     "id": "divider:turn:515ffadf-0558-4de5-81bf-e2cba9fe5605",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "loaded 1 tool",
+      "used maws-elicit · ask_color"
+    ],
     "startedAt": "2026-09-28T10:01:17.024Z",
     "state": "completed",
     "summary": {
@@ -68,17 +77,16 @@
     "turnId": "turn:515ffadf-0558-4de5-81bf-e2cba9fe5605"
   },
   {
-    "activeLabel": null,
     "at": "2026-09-28T10:01:20.060Z",
     "cells": [
       {
         "agent": null,
+        "background": false,
         "category": "skills",
         "classification": {
           "category": "skills",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": true,
@@ -119,12 +127,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "mcp",
         "classification": {
           "category": "mcp",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_flagged",
           "startsGroup": false,
@@ -160,12 +168,16 @@
         "toolUseId": "toolu_017qf2Wt8JjN7eavDRS6hWXm"
       }
     ],
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "expanded": true,
     "icon": "mcp",
     "id": "group:cell:toolu_016h47VUh2tj8pGf7PQMovaM",
     "kind": "group",
     "state": "completed",
-    "summary": "Used maws-elicit, loaded 1 tool",
+    "summary": "Loaded 1 tool, used maws-elicit · ask_color",
     "turnId": "turn:515ffadf-0558-4de5-81bf-e2cba9fe5605"
   },
   {

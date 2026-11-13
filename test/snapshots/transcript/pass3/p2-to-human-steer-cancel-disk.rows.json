@@ -49,6 +49,11 @@
   {
     "at": "2026-10-09T12:20:02.738Z",
     "autoDenied": 0,
+    "caption": "Ran 3 commands",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-09T12:20:21.638Z",
     "expanded": true,
@@ -57,6 +62,9 @@
     "id": "divider:turn:e975eb41-95da-4384-a36e-ccec8893f267",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran 3 commands"
+    ],
     "startedAt": "2026-10-09T12:20:02.740Z",
     "state": "completed",
     "summary": {
@@ -96,12 +104,12 @@
   {
     "agent": null,
     "at": "2026-10-09T12:20:03.592Z",
+    "background": false,
     "category": "commands",
     "classification": {
       "category": "commands",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,
@@ -147,17 +155,16 @@
     "turnId": "turn:e975eb41-95da-4384-a36e-ccec8893f267"
   },
   {
-    "activeLabel": null,
     "at": "2026-10-09T12:20:10.186Z",
     "cells": [
       {
         "agent": null,
+        "background": false,
         "category": "commands",
         "classification": {
           "category": "commands",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": true,
@@ -188,12 +195,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "commands",
         "classification": {
           "category": "commands",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -223,6 +230,10 @@
         "toolUseId": "toolu_01G1faTsnoyczBeLxei6MwpK"
       }
     ],
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "expanded": true,
     "icon": "commands",
     "id": "group:cell:toolu_01EbX63xB5YaqCZaUqBKvjXj",

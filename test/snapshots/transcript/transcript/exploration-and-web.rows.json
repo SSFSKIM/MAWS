@@ -23,6 +23,11 @@
   {
     "at": "2026-09-28T10:30:00.045Z",
     "autoDenied": 0,
+    "caption": "Searched code, searched for files, read 6 files and 5 more actions",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-28T10:30:03.169Z",
     "expanded": true,
@@ -31,6 +36,16 @@
     "id": "divider:turn:u-exploration-and-web-002",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "searched code",
+      "searched for files",
+      "read 6 files",
+      "searched the web",
+      "fetched a page",
+      "ran /test-driven-development",
+      "loaded 2 tools",
+      "used docs · search"
+    ],
     "startedAt": "2026-09-28T10:30:00.100Z",
     "state": "completed",
     "summary": {
@@ -68,17 +83,16 @@
     "turnId": "turn:u-exploration-and-web-002"
   },
   {
-    "activeLabel": null,
     "at": "2026-09-28T10:30:00.153Z",
     "cells": [
       {
         "agent": null,
+        "background": false,
         "category": "other",
         "classification": {
           "category": "other",
           "denial": null,
           "groupable": true,
-          "hidden": true,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -102,12 +116,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "exploration",
         "classification": {
           "category": "exploration",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": true,
@@ -133,12 +147,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "exploration",
         "classification": {
           "category": "exploration",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -164,12 +178,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "exploration",
         "classification": {
           "category": "exploration",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -200,12 +214,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "exploration",
         "classification": {
           "category": "exploration",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -239,12 +253,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "exploration",
         "classification": {
           "category": "exploration",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -275,12 +289,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "exploration",
         "classification": {
           "category": "exploration",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -311,12 +325,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "exploration",
         "classification": {
           "category": "exploration",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -347,12 +361,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "exploration",
         "classification": {
           "category": "exploration",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -382,12 +396,16 @@
         "toolUseId": "toolu_synth_x_read6"
       }
     ],
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "expanded": true,
     "icon": "exploration",
     "id": "group:cell:think:msg_explorationandweb_007:0",
     "kind": "group",
     "state": "completed",
-    "summary": "Read 6 files, searched for `rowsOf`, searched for `src/model/**/*.ts`",
+    "summary": "Searched code, searched for files, read 6 files",
     "turnId": "turn:u-exploration-and-web-002"
   },
   {
@@ -403,17 +421,16 @@
     "turnId": "turn:u-exploration-and-web-002"
   },
   {
-    "activeLabel": null,
     "at": "2026-09-28T10:30:01.629Z",
     "cells": [
       {
         "agent": null,
+        "background": false,
         "category": "web",
         "classification": {
           "category": "web",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": true,
@@ -438,12 +455,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "web",
         "classification": {
           "category": "web",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -468,12 +485,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "skills",
         "classification": {
           "category": "skills",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -496,7 +513,7 @@
         "endedAt": "2026-09-28T10:30:02.255Z",
         "expanded": true,
         "id": "cell:toolu_synth_x_skill",
-        "label": "Loaded test-driven-development skill",
+        "label": "Ran /test-driven-development",
         "paths": [],
         "startedAt": "2026-09-28T10:30:02.201Z",
         "status": "done",
@@ -505,12 +522,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "skills",
         "classification": {
           "category": "skills",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -547,12 +564,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "mcp",
         "classification": {
           "category": "mcp",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -590,12 +607,16 @@
         "toolUseId": "toolu_synth_x_mcp"
       }
     ],
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "expanded": true,
     "icon": "mcp",
     "id": "group:cell:toolu_synth_x_websearch",
     "kind": "group",
     "state": "completed",
-    "summary": "Used docs, loaded test-driven-development skill, loaded 2 tools, searched the web for tanstack virtual followOnAppend, fetched tanstack.com",
+    "summary": "Searched the web, fetched a page, ran /test-driven-development and 2 more actions",
     "turnId": "turn:u-exploration-and-web-002"
   },
   {

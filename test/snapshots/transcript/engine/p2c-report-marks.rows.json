@@ -23,6 +23,11 @@
   {
     "at": "2026-10-09T07:13:26.000Z",
     "autoDenied": 0,
+    "caption": "Ran a command",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-09T07:13:26.450Z",
     "expanded": true,
@@ -31,6 +36,9 @@
     "id": "divider:turn:baba53c5-64b3-427a-bcac-a1f723ccb331",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran a command"
+    ],
     "startedAt": "2026-10-09T07:13:26.030Z",
     "state": "completed",
     "summary": {
@@ -70,12 +78,12 @@
   {
     "agent": null,
     "at": "2026-10-09T07:13:26.150Z",
+    "background": false,
     "category": "commands",
     "classification": {
       "category": "commands",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,

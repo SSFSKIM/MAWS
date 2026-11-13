@@ -23,6 +23,11 @@
   {
     "at": "2026-10-06T06:35:20.207Z",
     "autoDenied": 0,
+    "caption": "Loaded 1 tool",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-06T06:35:28.033Z",
     "expanded": true,
@@ -31,6 +36,9 @@
     "id": "divider:turn:6ba4fc44-c08d-4db3-97ae-16e0152d9ba9",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "loaded 1 tool"
+    ],
     "startedAt": "2026-10-06T06:35:20.232Z",
     "state": "completed",
     "summary": {
@@ -82,12 +90,12 @@
   {
     "agent": null,
     "at": "2026-10-06T06:35:22.990Z",
+    "background": false,
     "category": "skills",
     "classification": {
       "category": "skills",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,

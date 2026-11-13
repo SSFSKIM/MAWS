@@ -23,6 +23,11 @@
   {
     "at": "2026-09-28T10:02:20.696Z",
     "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": null,
     "expanded": true,
@@ -31,6 +36,7 @@
     "id": "divider:turn:77244027-54d4-46df-9794-2c1b36b8b601",
     "kind": "divider",
     "origin": "human",
+    "parts": [],
     "startedAt": "2026-09-28T10:02:20.758Z",
     "state": "working",
     "summary": {
@@ -62,17 +68,16 @@
     "turnId": "turn:77244027-54d4-46df-9794-2c1b36b8b601"
   },
   {
-    "activeLabel": "Thinking",
     "at": "2026-09-28T10:02:23.408Z",
     "cells": [
       {
         "agent": null,
+        "background": false,
         "category": "commands",
         "classification": {
           "category": "commands",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_flagged",
           "startsGroup": true,
@@ -102,12 +107,16 @@
         "toolUseId": "toolu_018tRuD61WcQz8FakAbzkFcE"
       }
     ],
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "expanded": true,
     "icon": "commands",
     "id": "group:cell:toolu_018tRuD61WcQz8FakAbzkFcE",
     "kind": "group",
     "state": "active",
-    "summary": "Ran 1 command",
+    "summary": "Ran a command",
     "turnId": "turn:77244027-54d4-46df-9794-2c1b36b8b601"
   }
 ]

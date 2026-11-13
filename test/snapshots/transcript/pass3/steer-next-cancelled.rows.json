@@ -23,6 +23,11 @@
   {
     "at": "2026-10-01T09:36:01.680Z",
     "autoDenied": 0,
+    "caption": "Ran 8 commands",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-01T09:37:07.888Z",
     "expanded": true,
@@ -31,6 +36,9 @@
     "id": "divider:turn:c4d464bf-50e4-4a07-8f8f-ef85370a994f",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran 8 commands"
+    ],
     "startedAt": "2026-10-01T09:36:01.736Z",
     "state": "completed",
     "summary": {
@@ -68,17 +76,16 @@
     "turnId": "turn:c4d464bf-50e4-4a07-8f8f-ef85370a994f"
   },
   {
-    "activeLabel": null,
     "at": "2026-10-01T09:36:03.646Z",
     "cells": [
       {
         "agent": null,
+        "background": false,
         "category": "commands",
         "classification": {
           "category": "commands",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_flagged",
           "startsGroup": true,
@@ -109,12 +116,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "commands",
         "classification": {
           "category": "commands",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_flagged",
           "startsGroup": false,
@@ -145,12 +152,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "commands",
         "classification": {
           "category": "commands",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_flagged",
           "startsGroup": false,
@@ -181,12 +188,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "commands",
         "classification": {
           "category": "commands",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_flagged",
           "startsGroup": false,
@@ -217,12 +224,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "commands",
         "classification": {
           "category": "commands",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_flagged",
           "startsGroup": false,
@@ -253,12 +260,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "commands",
         "classification": {
           "category": "commands",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_flagged",
           "startsGroup": false,
@@ -289,12 +296,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "commands",
         "classification": {
           "category": "commands",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_flagged",
           "startsGroup": false,
@@ -325,12 +332,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "commands",
         "classification": {
           "category": "commands",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_flagged",
           "startsGroup": false,
@@ -360,6 +367,10 @@
         "toolUseId": "toolu_01XVtHiCqXxMT7zSA54U83N5"
       }
     ],
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "expanded": true,
     "icon": "commands",
     "id": "group:cell:toolu_01SMXBfGFku1Ft1xFKQZ5ENE",

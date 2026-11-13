@@ -23,6 +23,11 @@
   {
     "at": "2026-10-06T11:56:42.160Z",
     "autoDenied": 0,
+    "caption": "Loaded 1 tool, used maws · red_square",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-06T11:56:46.449Z",
     "expanded": true,
@@ -31,6 +36,10 @@
     "id": "divider:turn:2ee07738-6363-49fe-a568-a7bf009a883a",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "loaded 1 tool",
+      "used maws · red_square"
+    ],
     "startedAt": "2026-10-06T11:56:42.167Z",
     "state": "completed",
     "summary": {
@@ -70,12 +79,12 @@
   {
     "agent": null,
     "at": "2026-10-06T11:56:44.208Z",
+    "background": false,
     "category": "skills",
     "classification": {
       "category": "skills",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,
@@ -119,12 +128,12 @@
   {
     "agent": null,
     "at": "2026-10-06T11:56:45.417Z",
+    "background": false,
     "category": "mcp",
     "classification": {
       "category": "mcp",
       "denial": null,
       "groupable": false,
-      "hidden": false,
       "humanDecision": true,
       "safeguard": "not_evaluated",
       "startsGroup": false,

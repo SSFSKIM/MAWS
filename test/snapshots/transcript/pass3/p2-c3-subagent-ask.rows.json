@@ -23,6 +23,11 @@
   {
     "at": "2026-10-14T08:53:55.467Z",
     "autoDenied": 0,
+    "caption": "Ran an agent",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-14T08:54:06.606Z",
     "expanded": true,
@@ -31,6 +36,9 @@
     "id": "divider:turn:d42da5b4-ee9a-41fc-847e-e4a84522832e",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran an agent"
+    ],
     "startedAt": "2026-10-14T08:53:55.491Z",
     "state": "completed",
     "summary": {
@@ -100,53 +108,6 @@
     "turnId": "turn:d42da5b4-ee9a-41fc-847e-e4a84522832e"
   },
   {
-    "at": "2026-10-14T08:54:20.075Z",
-    "autoDenied": 0,
-    "denied": 0,
-    "endedAt": "2026-10-14T08:54:31.513Z",
-    "expanded": true,
-    "files": [],
-    "firstDeniedCell": null,
-    "id": "divider:turn:ereplay:journal:111:1",
-    "kind": "divider",
-    "origin": "engine",
-    "startedAt": "2026-10-14T08:54:20.075Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 0,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 0,
-        "skills": 0,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": 0.004579415,
-      "denials": [],
-      "durationMs": 11443,
-      "model": "claude-haiku-5-5",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 0,
-        "reviewed": 0
-      },
-      "terminalReason": "completed",
-      "toolCalls": 0,
-      "usage": {
-        "cacheCreationInputTokens": 689,
-        "cacheReadInputTokens": 17337,
-        "inputTokens": 2,
-        "outputTokens": 4,
-        "thinkingTokens": 0
-      }
-    },
-    "toolCalls": 0,
-    "turnId": "turn:ereplay:journal:111:1"
-  },
-  {
     "at": "2026-10-14T08:54:31.502Z",
     "blockIndex": 0,
     "id": "text:msg_011Cg1r9KzHMjhcAfWkM1CJX:0",
@@ -175,6 +136,11 @@
   {
     "at": "2026-10-14T08:54:20.623Z",
     "autoDenied": 0,
+    "caption": "Ran an agent",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-14T08:54:34.457Z",
     "expanded": true,
@@ -183,6 +149,9 @@
     "id": "divider:turn:64cdb020-07d8-400e-b936-da6ed2cf4c4a",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran an agent"
+    ],
     "startedAt": "2026-10-14T08:54:31.513Z",
     "state": "completed",
     "summary": {
@@ -254,6 +223,11 @@
   {
     "at": "2026-10-14T08:54:38.025Z",
     "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-14T08:54:40.528Z",
     "expanded": true,
@@ -262,6 +236,7 @@
     "id": "divider:turn:ereplay:journal:205:1",
     "kind": "divider",
     "origin": "engine",
+    "parts": [],
     "startedAt": "2026-10-14T08:54:38.025Z",
     "state": "stopped",
     "summary": {

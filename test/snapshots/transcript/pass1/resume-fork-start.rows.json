@@ -23,6 +23,11 @@
   {
     "at": "2026-09-28T09:22:25.274Z",
     "autoDenied": 0,
+    "caption": "Created 2 files",
+    "counts": {
+      "added": 12,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-28T09:22:31.747Z",
     "expanded": true,
@@ -46,6 +51,9 @@
     "id": "divider:turn:49f5aef7-fe2c-4ee3-aad7-8a75d08ed50b",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "created 2 files"
+    ],
     "startedAt": "2026-09-28T09:22:25.320Z",
     "state": "completed",
     "summary": {
@@ -106,17 +114,16 @@
     "turnId": "turn:49f5aef7-fe2c-4ee3-aad7-8a75d08ed50b"
   },
   {
-    "activeLabel": null,
     "at": "2026-09-28T09:22:30.415Z",
     "cells": [
       {
         "agent": null,
+        "background": false,
         "category": "files",
         "classification": {
           "category": "files",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": true,
@@ -164,12 +171,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "files",
         "classification": {
           "category": "files",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -206,6 +213,10 @@
         "toolUseId": "toolu_01MQzbZUziwWJr2CsS1peg9u"
       }
     ],
+    "counts": {
+      "added": 12,
+      "removed": 0
+    },
     "expanded": true,
     "icon": "files",
     "id": "group:cell:toolu_011PWfSNncXejckNmSaQWjkW",

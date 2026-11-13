@@ -23,6 +23,11 @@
   {
     "at": "2026-09-28T09:22:05.261Z",
     "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": null,
     "expanded": true,
@@ -31,6 +36,7 @@
     "id": "divider:turn:78bf314c-d854-4662-b810-fede10ae5be3",
     "kind": "divider",
     "origin": "human",
+    "parts": [],
     "startedAt": "2026-09-28T09:22:05.308Z",
     "state": "working",
     "summary": {

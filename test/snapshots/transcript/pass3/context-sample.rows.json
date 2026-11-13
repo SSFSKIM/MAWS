@@ -23,6 +23,11 @@
   {
     "at": "2026-09-29T19:00:51.480Z",
     "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-29T19:00:52.474Z",
     "expanded": true,
@@ -31,6 +36,7 @@
     "id": "divider:turn:fa4d0234-8ffe-440f-b32b-3ec27cea7416",
     "kind": "divider",
     "origin": "human",
+    "parts": [],
     "startedAt": "2026-09-29T19:00:51.487Z",
     "state": "completed",
     "summary": {
@@ -107,6 +113,11 @@
   {
     "at": "2026-09-29T19:00:52.483Z",
     "autoDenied": 0,
+    "caption": "Read one.txt",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-29T19:00:55.082Z",
     "expanded": true,
@@ -115,6 +126,9 @@
     "id": "divider:turn:66cfb780-b906-4f92-af32-02b7c17fec7b",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "read one.txt"
+    ],
     "startedAt": "2026-09-29T19:00:52.486Z",
     "state": "completed",
     "summary": {
@@ -165,12 +179,12 @@
   {
     "agent": null,
     "at": "2026-09-29T19:00:54.084Z",
+    "background": false,
     "category": "exploration",
     "classification": {
       "category": "exploration",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,

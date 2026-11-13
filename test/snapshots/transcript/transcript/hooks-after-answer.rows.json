@@ -49,6 +49,11 @@
   {
     "at": "2026-09-28T11:40:00.405Z",
     "autoDenied": 0,
+    "caption": "Ran a command",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-28T11:40:00.780Z",
     "expanded": true,
@@ -57,6 +62,9 @@
     "id": "divider:turn:u-hooks-answer-027",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran a command"
+    ],
     "startedAt": "2026-09-28T11:40:00.435Z",
     "state": "completed",
     "summary": {
@@ -96,12 +104,12 @@
   {
     "agent": null,
     "at": "2026-09-28T11:40:00.510Z",
+    "background": false,
     "category": "commands",
     "classification": {
       "category": "commands",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,

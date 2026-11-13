@@ -23,6 +23,11 @@
   {
     "at": "2026-09-28T11:00:00.045Z",
     "autoDenied": 0,
+    "caption": "Ran 2 commands",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-28T11:00:00.827Z",
     "expanded": true,
@@ -31,6 +36,9 @@
     "id": "divider:turn:u-long-output-002",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran 2 commands"
+    ],
     "startedAt": "2026-09-28T11:00:00.100Z",
     "state": "completed",
     "summary": {
@@ -68,17 +76,16 @@
     "turnId": "turn:u-long-output-002"
   },
   {
-    "activeLabel": null,
     "at": "2026-09-28T11:00:00.177Z",
     "cells": [
       {
         "agent": null,
+        "background": false,
         "category": "commands",
         "classification": {
           "category": "commands",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": true,
@@ -113,12 +120,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "commands",
         "classification": {
           "category": "commands",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -153,6 +160,10 @@
         "toolUseId": "toolu_synth_long_2"
       }
     ],
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "expanded": true,
     "icon": "commands",
     "id": "group:cell:toolu_synth_long_1",

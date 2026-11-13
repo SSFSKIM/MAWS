@@ -23,6 +23,11 @@
   {
     "at": "2026-10-06T10:59:45.543Z",
     "autoDenied": 0,
+    "caption": "Ran an agent, loaded 1 tool",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-06T10:59:55.284Z",
     "expanded": true,
@@ -31,6 +36,10 @@
     "id": "divider:turn:22be2241-f79e-4248-a05b-7553331810d5",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran an agent",
+      "loaded 1 tool"
+    ],
     "startedAt": "2026-10-06T10:59:45.551Z",
     "state": "completed",
     "summary": {
@@ -90,12 +99,12 @@
   {
     "agent": null,
     "at": "2026-10-06T10:59:51.601Z",
+    "background": false,
     "category": "skills",
     "classification": {
       "category": "skills",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,
@@ -177,53 +186,6 @@
     "turnId": "turn:22be2241-f79e-4248-a05b-7553331810d5"
   },
   {
-    "at": "2026-10-06T10:59:55.288Z",
-    "autoDenied": 0,
-    "denied": 0,
-    "endedAt": "2026-10-06T10:59:56.729Z",
-    "expanded": true,
-    "files": [],
-    "firstDeniedCell": null,
-    "id": "divider:turn:ereplay:journal:157:1",
-    "kind": "divider",
-    "origin": "engine",
-    "startedAt": "2026-10-06T10:59:55.288Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 0,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 0,
-        "skills": 0,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": 0.06013975,
-      "denials": [],
-      "durationMs": 1444,
-      "model": "claude-haiku-4-5-20251001",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 0,
-        "reviewed": 0
-      },
-      "terminalReason": "completed",
-      "toolCalls": 0,
-      "usage": {
-        "cacheCreationInputTokens": 693,
-        "cacheReadInputTokens": 23666,
-        "inputTokens": 10,
-        "outputTokens": 100,
-        "thinkingTokens": 45
-      }
-    },
-    "toolCalls": 0,
-    "turnId": "turn:ereplay:journal:157:1"
-  },
-  {
     "at": "2026-10-06T10:59:56.253Z",
     "blockIndex": 1,
     "id": "text:msg_011CfksFTREyiUmuxiGA1ysF:1",
@@ -252,6 +214,11 @@
   {
     "at": "2026-10-06T10:59:59.286Z",
     "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-06T11:00:02.141Z",
     "expanded": true,
@@ -260,6 +227,7 @@
     "id": "divider:turn:d1b2523a-e8f7-4406-b01a-c350f5375391",
     "kind": "divider",
     "origin": "human",
+    "parts": [],
     "startedAt": "2026-10-06T10:59:59.288Z",
     "state": "completed",
     "summary": {

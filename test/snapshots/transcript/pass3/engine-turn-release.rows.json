@@ -23,6 +23,11 @@
   {
     "at": "2026-09-29T01:50:34.335Z",
     "autoDenied": 0,
+    "caption": "Ran 2 commands",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-29T01:50:39.332Z",
     "expanded": true,
@@ -31,6 +36,9 @@
     "id": "divider:turn:458685fe-08d6-4f66-82c0-0ad0a63245ae",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran 2 commands"
+    ],
     "startedAt": "2026-09-29T01:50:34.367Z",
     "state": "completed",
     "summary": {
@@ -68,17 +76,16 @@
     "turnId": "turn:458685fe-08d6-4f66-82c0-0ad0a63245ae"
   },
   {
-    "activeLabel": null,
     "at": "2026-09-29T01:50:36.463Z",
     "cells": [
       {
         "agent": null,
+        "background": false,
         "category": "commands",
         "classification": {
           "category": "commands",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_flagged",
           "startsGroup": true,
@@ -109,12 +116,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "commands",
         "classification": {
           "category": "commands",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_flagged",
           "startsGroup": false,
@@ -144,6 +151,10 @@
         "toolUseId": "toolu_01NHunYiw7HDaWk97x8PQdy3"
       }
     ],
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "expanded": true,
     "icon": "commands",
     "id": "group:cell:toolu_01MTEP3qCAeYHkiHydokPpni",
@@ -191,53 +202,6 @@
     "turnId": "turn:562abf01-f74a-4656-b617-4166196def6e"
   },
   {
-    "at": "2026-09-29T01:50:52.569Z",
-    "autoDenied": 0,
-    "denied": 0,
-    "endedAt": "2026-09-29T01:50:54.095Z",
-    "expanded": true,
-    "files": [],
-    "firstDeniedCell": null,
-    "id": "divider:turn:ereplay:journal:124:1",
-    "kind": "divider",
-    "origin": "engine",
-    "startedAt": "2026-09-29T01:50:52.569Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 0,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 0,
-        "skills": 0,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": 0.1563076,
-      "denials": [],
-      "durationMs": 1528,
-      "model": "claude-sonnet-5-5",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 0,
-        "reviewed": 0
-      },
-      "terminalReason": "completed",
-      "toolCalls": 0,
-      "usage": {
-        "cacheCreationInputTokens": 563,
-        "cacheReadInputTokens": 33063,
-        "inputTokens": 2,
-        "outputTokens": 44,
-        "thinkingTokens": 0
-      }
-    },
-    "toolCalls": 0,
-    "turnId": "turn:ereplay:journal:124:1"
-  },
-  {
     "at": "2026-09-29T01:50:53.473Z",
     "blockIndex": 0,
     "id": "text:msg_011CfWtihiHRFxjvHSwWQwpR:0",
@@ -248,53 +212,6 @@
     "model": "claude-sonnet-5-5",
     "phase": "answer",
     "turnId": "turn:ereplay:journal:124:1"
-  },
-  {
-    "at": "2026-09-29T01:50:54.110Z",
-    "autoDenied": 0,
-    "denied": 0,
-    "endedAt": "2026-09-29T01:50:56.580Z",
-    "expanded": true,
-    "files": [],
-    "firstDeniedCell": null,
-    "id": "divider:turn:ereplay:journal:154:1",
-    "kind": "divider",
-    "origin": "engine",
-    "startedAt": "2026-09-29T01:50:54.110Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 0,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 0,
-        "skills": 0,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": 0.1717754,
-      "denials": [],
-      "durationMs": 2482,
-      "model": "claude-sonnet-5-5",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 0,
-        "reviewed": 0
-      },
-      "terminalReason": "completed",
-      "toolCalls": 0,
-      "usage": {
-        "cacheCreationInputTokens": 976,
-        "cacheReadInputTokens": 33159,
-        "inputTokens": 2,
-        "outputTokens": 51,
-        "thinkingTokens": 0
-      }
-    },
-    "toolCalls": 0,
-    "turnId": "turn:ereplay:journal:154:1"
   },
   {
     "at": "2026-09-29T01:50:56.323Z",

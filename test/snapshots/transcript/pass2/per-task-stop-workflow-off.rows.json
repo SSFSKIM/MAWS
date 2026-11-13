@@ -23,6 +23,11 @@
   {
     "at": "2026-09-28T10:03:22.463Z",
     "autoDenied": 0,
+    "caption": "Ran an agent (1 stopped), ran a command (1 stopped)",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-28T10:03:30.352Z",
     "expanded": true,
@@ -31,6 +36,10 @@
     "id": "divider:turn:504399e2-3e09-4d3f-b266-6e7d8bfddc35",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran an agent (1 stopped)",
+      "ran a command (1 stopped)"
+    ],
     "startedAt": "2026-09-28T10:03:22.477Z",
     "state": "stopped",
     "summary": {
@@ -98,6 +107,7 @@
   {
     "agent": null,
     "at": "2026-09-28T10:03:28.342Z",
+    "background": false,
     "category": "commands",
     "classification": {
       "category": "commands",
@@ -107,8 +117,7 @@
         "kind": "user-rejected",
         "reason": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed."
       },
-      "groupable": false,
-      "hidden": false,
+      "groupable": true,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,
@@ -127,6 +136,7 @@
       "stdout": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.",
       "truncated": null
     },
+    "doneLabel": "Ran `sleep 20` in 2s",
     "endedAt": "2026-09-28T10:03:30.350Z",
     "expanded": true,
     "id": "cell:toolu_01TXA17ye1W5MKoWoPbVY8ic",

@@ -23,6 +23,11 @@
   {
     "at": "2026-09-28T11:20:00.045Z",
     "autoDenied": 0,
+    "caption": "Edited 3 files, read 2 files, searched code and 5 more actions",
+    "counts": {
+      "added": 4,
+      "removed": 2
+    },
     "denied": 1,
     "endedAt": "2026-09-28T11:20:04.105Z",
     "expanded": true,
@@ -53,6 +58,13 @@
     "id": "divider:turn:u-mockup-turn-002",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "edited 3 files",
+      "read 2 files",
+      "searched code",
+      "searched for files",
+      "ran 4 commands"
+    ],
     "startedAt": "2026-09-28T11:20:00.100Z",
     "state": "completed",
     "summary": {
@@ -97,17 +109,16 @@
     "turnId": "turn:u-mockup-turn-002"
   },
   {
-    "activeLabel": null,
     "at": "2026-09-28T11:20:00.153Z",
     "cells": [
       {
         "agent": null,
+        "background": false,
         "category": "other",
         "classification": {
           "category": "other",
           "denial": null,
           "groupable": true,
-          "hidden": true,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -131,12 +142,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "exploration",
         "classification": {
           "category": "exploration",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": true,
@@ -167,12 +178,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "exploration",
         "classification": {
           "category": "exploration",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -203,12 +214,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "exploration",
         "classification": {
           "category": "exploration",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -234,12 +245,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "exploration",
         "classification": {
           "category": "exploration",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -264,12 +275,16 @@
         "toolUseId": "toolu_synth_mock_4"
       }
     ],
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "expanded": true,
     "icon": "exploration",
     "id": "group:cell:think:msg_mockupturn_007:0",
     "kind": "group",
     "state": "completed",
-    "summary": "Read 2 files, searched for `setWidth`, searched for `src/layout/*.css`",
+    "summary": "Read 2 files, searched code, searched for files",
     "turnId": "turn:u-mockup-turn-002"
   },
   {
@@ -285,17 +300,16 @@
     "turnId": "turn:u-mockup-turn-002"
   },
   {
-    "activeLabel": null,
     "at": "2026-09-28T11:20:01.525Z",
     "cells": [
       {
         "agent": null,
+        "background": false,
         "category": "files",
         "classification": {
           "category": "files",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": true,
@@ -338,12 +352,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "files",
         "classification": {
           "category": "files",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -381,6 +395,10 @@
         "toolUseId": "toolu_synth_mock_6"
       }
     ],
+    "counts": {
+      "added": 3,
+      "removed": 2
+    },
     "expanded": true,
     "icon": "files",
     "id": "group:cell:toolu_synth_mock_5",
@@ -392,6 +410,7 @@
   {
     "agent": null,
     "at": "2026-09-28T11:20:02.113Z",
+    "background": false,
     "category": "commands",
     "classification": {
       "category": "commands",
@@ -402,7 +421,6 @@
         "reason": "Permission denied by rule: Bash(rm -rf:*) is denied in this project."
       },
       "groupable": false,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,
@@ -436,12 +454,12 @@
   {
     "agent": null,
     "at": "2026-09-28T11:20:02.415Z",
+    "background": false,
     "category": "files",
     "classification": {
       "category": "files",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,
@@ -495,17 +513,16 @@
     "turnId": "turn:u-mockup-turn-002"
   },
   {
-    "activeLabel": null,
     "at": "2026-09-28T11:20:02.755Z",
     "cells": [
       {
         "agent": null,
+        "background": false,
         "category": "commands",
         "classification": {
           "category": "commands",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": true,
@@ -536,12 +553,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "commands",
         "classification": {
           "category": "commands",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -572,12 +589,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "commands",
         "classification": {
           "category": "commands",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -608,12 +625,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "commands",
         "classification": {
           "category": "commands",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -643,6 +660,10 @@
         "toolUseId": "toolu_synth_mock_12"
       }
     ],
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "expanded": true,
     "icon": "commands",
     "id": "group:cell:toolu_synth_mock_9",

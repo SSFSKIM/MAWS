@@ -23,6 +23,11 @@
   {
     "at": "2026-09-29T01:44:40.377Z",
     "autoDenied": 0,
+    "caption": "Created 2 files, loaded 1 tool",
+    "counts": {
+      "added": 13,
+      "removed": 1
+    },
     "denied": 0,
     "endedAt": "2026-09-29T01:44:53.001Z",
     "expanded": true,
@@ -46,6 +51,10 @@
     "id": "divider:turn:7c16db57-3810-4c67-84e8-ac43853377ca",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "created 2 files",
+      "loaded 1 tool"
+    ],
     "startedAt": "2026-09-29T01:44:40.387Z",
     "state": "completed",
     "summary": {
@@ -83,17 +92,16 @@
     "turnId": "turn:7c16db57-3810-4c67-84e8-ac43853377ca"
   },
   {
-    "activeLabel": null,
     "at": "2026-09-29T01:44:43.576Z",
     "cells": [
       {
         "agent": null,
+        "background": false,
         "category": "files",
         "classification": {
           "category": "files",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "skipped",
           "startsGroup": true,
@@ -140,12 +148,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "skills",
         "classification": {
           "category": "skills",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -185,12 +193,16 @@
         "toolUseId": "toolu_01Mv4Wz4scY3GU5c2KHme9Ms"
       }
     ],
+    "counts": {
+      "added": 10,
+      "removed": 0
+    },
     "expanded": true,
     "icon": "skills",
     "id": "group:cell:toolu_01MmVYiQCVuXfxjFDLabEtVL",
     "kind": "group",
     "state": "completed",
-    "summary": "Loaded 1 tool, created 1 file",
+    "summary": "Created plan-how-to-create-twinkling-ember.md, loaded 1 tool",
     "turnId": "turn:7c16db57-3810-4c67-84e8-ac43853377ca"
   },
   {
@@ -206,12 +218,12 @@
   {
     "agent": null,
     "at": "2026-09-29T01:44:48.225Z",
+    "background": false,
     "category": "files",
     "classification": {
       "category": "files",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "skipped",
       "startsGroup": false,
@@ -269,12 +281,12 @@
   {
     "agent": null,
     "at": "2026-09-29T01:44:51.472Z",
+    "background": false,
     "category": "files",
     "classification": {
       "category": "files",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "skipped",
       "startsGroup": false,
@@ -367,6 +379,11 @@
   {
     "at": "2026-09-29T01:44:54.128Z",
     "autoDenied": 0,
+    "caption": "Read and edited plan-how-to-create-twinkling-ember.md",
+    "counts": {
+      "added": 5,
+      "removed": 5
+    },
     "denied": 0,
     "endedAt": "2026-09-29T01:45:02.283Z",
     "expanded": true,
@@ -383,6 +400,9 @@
     "id": "divider:turn:1b740363-a57a-473a-97a1-72a75a272cc8",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "read and edited plan-how-to-create-twinkling-ember.md"
+    ],
     "startedAt": "2026-09-29T01:44:54.130Z",
     "state": "stopped",
     "summary": {
@@ -432,17 +452,16 @@
     "turnId": "turn:1b740363-a57a-473a-97a1-72a75a272cc8"
   },
   {
-    "activeLabel": null,
     "at": "2026-09-29T01:44:57.392Z",
     "cells": [
       {
         "agent": null,
+        "background": false,
         "category": "exploration",
         "classification": {
           "category": "exploration",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": true,
@@ -473,12 +492,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "files",
         "classification": {
           "category": "files",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "skipped",
           "startsGroup": false,
@@ -530,12 +549,16 @@
         "toolUseId": "toolu_01GtF81Cu7fY5Z3eW7FokwjS"
       }
     ],
+    "counts": {
+      "added": 5,
+      "removed": 5
+    },
     "expanded": true,
     "icon": "files",
     "id": "group:cell:toolu_01GGt1AzhpVQcjAsCmAVyz1x",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited 1 file, read 1 file",
+    "summary": "Read and edited plan-how-to-create-twinkling-ember.md",
     "turnId": "turn:1b740363-a57a-473a-97a1-72a75a272cc8"
   },
   {
@@ -590,6 +613,11 @@
   {
     "at": "2026-09-29T01:45:02.301Z",
     "autoDenied": 0,
+    "caption": "Created second.txt",
+    "counts": {
+      "added": 1,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-29T01:45:05.277Z",
     "expanded": true,
@@ -606,6 +634,9 @@
     "id": "divider:turn:8e7fbc83-df00-48bf-a05a-6b1592924ec4",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "created second.txt"
+    ],
     "startedAt": "2026-09-29T01:45:02.302Z",
     "state": "completed",
     "summary": {
@@ -645,12 +676,12 @@
   {
     "agent": null,
     "at": "2026-09-29T01:45:04.355Z",
+    "background": false,
     "category": "files",
     "classification": {
       "category": "files",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "skipped",
       "startsGroup": false,

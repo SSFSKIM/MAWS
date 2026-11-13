@@ -23,6 +23,11 @@
   {
     "at": "2026-09-30T09:14:02.476Z",
     "autoDenied": 0,
+    "caption": "Ran an agent",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-30T09:14:08.060Z",
     "expanded": true,
@@ -31,6 +36,9 @@
     "id": "divider:turn:99c0ffdd-c6a6-4e5f-9056-2ed2d88ae05a",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran an agent"
+    ],
     "startedAt": "2026-09-30T09:14:02.483Z",
     "state": "completed",
     "summary": {
@@ -98,53 +106,6 @@
     "model": "claude-opus-5-5",
     "phase": "answer",
     "turnId": "turn:99c0ffdd-c6a6-4e5f-9056-2ed2d88ae05a"
-  },
-  {
-    "at": "2026-09-30T09:14:10.600Z",
-    "autoDenied": 0,
-    "denied": 0,
-    "endedAt": "2026-09-30T09:14:12.786Z",
-    "expanded": true,
-    "files": [],
-    "firstDeniedCell": null,
-    "id": "divider:turn:ereplay:journal:110:1",
-    "kind": "divider",
-    "origin": "engine",
-    "startedAt": "2026-09-30T09:14:10.600Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 0,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 0,
-        "skills": 0,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": 0.152352,
-      "denials": [],
-      "durationMs": 2189,
-      "model": "claude-opus-5-5",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 0,
-        "reviewed": 0
-      },
-      "terminalReason": "completed",
-      "toolCalls": 0,
-      "usage": {
-        "cacheCreationInputTokens": 716,
-        "cacheReadInputTokens": 17306,
-        "inputTokens": 2,
-        "outputTokens": 100,
-        "thinkingTokens": 0
-      }
-    },
-    "toolCalls": 0,
-    "turnId": "turn:ereplay:journal:110:1"
   },
   {
     "at": "2026-09-30T09:14:11.375Z",

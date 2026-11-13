@@ -23,6 +23,11 @@
   {
     "at": "2026-09-30T00:07:33.395Z",
     "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-30T00:07:34.702Z",
     "expanded": true,
@@ -31,6 +36,7 @@
     "id": "divider:turn:642951f0-2f1d-41ed-b0a8-83c1ee66e4c2",
     "kind": "divider",
     "origin": "human",
+    "parts": [],
     "startedAt": "2026-09-30T00:07:33.406Z",
     "state": "completed",
     "summary": {
@@ -107,6 +113,11 @@
   {
     "at": "2026-09-30T00:07:44.001Z",
     "autoDenied": 0,
+    "caption": "Read big1.txt",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-30T00:07:48.854Z",
     "expanded": true,
@@ -115,6 +126,9 @@
     "id": "divider:turn:11a82fa5-5f4e-4513-a655-b0e4bc59ec56",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "read big1.txt"
+    ],
     "startedAt": "2026-09-30T00:07:44.002Z",
     "state": "completed",
     "summary": {
@@ -165,12 +179,12 @@
   {
     "agent": null,
     "at": "2026-09-30T00:07:45.681Z",
+    "background": false,
     "category": "exploration",
     "classification": {
       "category": "exploration",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,
@@ -241,6 +255,11 @@
   {
     "at": "2026-09-30T00:07:48.861Z",
     "autoDenied": 0,
+    "caption": "Read big2.txt",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-30T00:07:52.406Z",
     "expanded": true,
@@ -249,6 +268,9 @@
     "id": "divider:turn:55932f34-c1cc-44a6-8a9d-504562ac7ba8",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "read big2.txt"
+    ],
     "startedAt": "2026-09-30T00:07:48.862Z",
     "state": "completed",
     "summary": {
@@ -299,12 +321,12 @@
   {
     "agent": null,
     "at": "2026-09-30T00:07:50.510Z",
+    "background": false,
     "category": "exploration",
     "classification": {
       "category": "exploration",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,
@@ -375,6 +397,11 @@
   {
     "at": "2026-09-30T00:07:52.413Z",
     "autoDenied": 0,
+    "caption": "Read big3.txt",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-30T00:07:56.759Z",
     "expanded": true,
@@ -383,6 +410,9 @@
     "id": "divider:turn:e0a4fb9c-adc3-4155-80be-fd960a3ed19a",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "read big3.txt"
+    ],
     "startedAt": "2026-09-30T00:07:52.413Z",
     "state": "completed",
     "summary": {
@@ -433,12 +463,12 @@
   {
     "agent": null,
     "at": "2026-09-30T00:07:54.095Z",
+    "background": false,
     "category": "exploration",
     "classification": {
       "category": "exploration",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,
@@ -509,6 +539,11 @@
   {
     "at": "2026-09-30T00:07:56.766Z",
     "autoDenied": 0,
+    "caption": "Read big4.txt",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-30T00:08:00.790Z",
     "expanded": true,
@@ -517,6 +552,9 @@
     "id": "divider:turn:563ef4c6-c80b-41c2-b6fb-473424304fd7",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "read big4.txt"
+    ],
     "startedAt": "2026-09-30T00:07:56.767Z",
     "state": "completed",
     "summary": {
@@ -567,12 +605,12 @@
   {
     "agent": null,
     "at": "2026-09-30T00:07:58.790Z",
+    "background": false,
     "category": "exploration",
     "classification": {
       "category": "exploration",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,

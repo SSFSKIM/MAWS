@@ -23,6 +23,11 @@
   {
     "at": "2026-09-28T09:57:16.408Z",
     "autoDenied": 0,
+    "caption": "Ran a command",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-28T09:57:31.378Z",
     "expanded": true,
@@ -31,6 +36,9 @@
     "id": "divider:turn:812c652e-1da3-4ef6-86b6-a4782f2b00a8",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran a command"
+    ],
     "startedAt": "2026-09-28T09:57:16.464Z",
     "state": "completed",
     "summary": {
@@ -70,12 +78,12 @@
   {
     "agent": null,
     "at": "2026-09-28T09:57:26.177Z",
+    "background": false,
     "category": "commands",
     "classification": {
       "category": "commands",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_flagged",
       "startsGroup": false,
@@ -135,6 +143,11 @@
   {
     "at": "2026-09-28T09:57:31.379Z",
     "autoDenied": 0,
+    "caption": "Ran a command",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-28T09:57:37.611Z",
     "expanded": true,
@@ -143,6 +156,9 @@
     "id": "divider:turn:bb9b64e7-437c-4fe0-ba0b-544ffcf202f2",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran a command"
+    ],
     "startedAt": "2026-09-28T09:57:31.381Z",
     "state": "completed",
     "summary": {
@@ -182,12 +198,12 @@
   {
     "agent": null,
     "at": "2026-09-28T09:57:33.961Z",
+    "background": false,
     "category": "commands",
     "classification": {
       "category": "commands",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_flagged",
       "startsGroup": false,

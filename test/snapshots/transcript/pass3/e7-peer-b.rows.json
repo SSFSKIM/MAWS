@@ -49,6 +49,11 @@
   {
     "at": "2026-10-06T10:54:21.282Z",
     "autoDenied": 0,
+    "caption": "Messaged another session, loaded 1 tool",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-06T10:54:26.197Z",
     "expanded": true,
@@ -57,6 +62,10 @@
     "id": "divider:turn:3c95b09d-2759-4093-96c8-2b28c1a981eb",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "messaged another session",
+      "loaded 1 tool"
+    ],
     "startedAt": "2026-10-06T10:54:21.283Z",
     "state": "completed",
     "summary": {
@@ -96,12 +105,12 @@
   {
     "agent": null,
     "at": "2026-10-06T10:54:22.889Z",
+    "background": false,
     "category": "skills",
     "classification": {
       "category": "skills",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,
@@ -181,6 +190,11 @@
   {
     "at": "2026-10-06T10:54:30.258Z",
     "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-06T10:54:32.302Z",
     "expanded": true,
@@ -193,6 +207,7 @@
       "line": "Message from @repo-h6xooi-51: Hello from A — received your probe message."
     },
     "origin": "peer",
+    "parts": [],
     "startedAt": "2026-10-06T10:54:30.258Z",
     "state": "completed",
     "summary": {
@@ -271,6 +286,11 @@
   {
     "at": "2026-10-06T10:54:49.710Z",
     "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-06T10:54:51.876Z",
     "expanded": true,
@@ -283,6 +303,7 @@
       "line": "Message from @repo-h6xooi-51: E7 probe: reply from A"
     },
     "origin": "peer",
+    "parts": [],
     "startedAt": "2026-10-06T10:54:49.710Z",
     "state": "completed",
     "summary": {
@@ -375,6 +396,11 @@
   {
     "at": "2026-10-06T10:55:08.877Z",
     "autoDenied": 0,
+    "caption": "Messaged another session",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-06T10:55:11.840Z",
     "expanded": true,
@@ -383,6 +409,9 @@
     "id": "divider:turn:2e2cd9bd-01ae-4320-aff1-460bd117a833",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "messaged another session"
+    ],
     "startedAt": "2026-10-06T10:55:08.878Z",
     "state": "completed",
     "summary": {

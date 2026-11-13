@@ -85,6 +85,12 @@
       "childAgents": 0,
       "terminalReason": null
     },
-    "files": []
+    "files": [],
+    "caption": "",
+    "parts": [],
+    "counts": {
+      "added": 0,
+      "removed": 0
+    }
   }
 ]

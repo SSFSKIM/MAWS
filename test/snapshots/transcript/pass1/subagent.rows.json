@@ -23,6 +23,11 @@
   {
     "at": "2026-09-28T09:22:05.261Z",
     "autoDenied": 0,
+    "caption": "Ran 2 agents",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-28T09:22:12.440Z",
     "expanded": true,
@@ -31,6 +36,9 @@
     "id": "divider:turn:78bf314c-d854-4662-b810-fede10ae5be3",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran 2 agents"
+    ],
     "startedAt": "2026-09-28T09:22:05.308Z",
     "state": "completed",
     "summary": {
@@ -133,6 +141,11 @@
   {
     "at": "2026-09-28T09:22:12.445Z",
     "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-28T09:22:13.826Z",
     "expanded": true,
@@ -141,6 +154,7 @@
     "id": "divider:turn:ereplay:journal:355:1",
     "kind": "divider",
     "origin": "engine",
+    "parts": [],
     "startedAt": "2026-09-28T09:22:12.445Z",
     "state": "completed",
     "summary": {
@@ -203,6 +217,11 @@
   {
     "at": "2026-09-28T09:22:13.829Z",
     "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-28T09:22:15.234Z",
     "expanded": true,
@@ -211,6 +230,7 @@
     "id": "divider:turn:ereplay:journal:425:1",
     "kind": "divider",
     "origin": "engine",
+    "parts": [],
     "startedAt": "2026-09-28T09:22:13.829Z",
     "state": "completed",
     "summary": {
