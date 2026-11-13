@@ -1,7 +1,8 @@
 // X2 `scm.*` (E6 execution document, Interfaces "X2 `scm.*`"; parent §3 F, P-12): the Source control panel's commands.
-// Main owns every one: it resolves the session's checkout from its read model (`worktree.path ?? directory`), so no
-// command takes a directory; it gates everything but `scm.status` on the engine's trust; local mutations run through
-// the mutating git runner, remote commands only through a plan main recorded, the sheet showed and the run revalidated.
+// Main owns every one: it resolves the session's checkout from its read model (the session's working folder,
+// `workingFolder(record).path`), so no command takes a directory; it gates everything but `scm.status` on the engine's
+// trust; local mutations run through the mutating git runner, remote commands only through a plan main recorded, the
+// sheet showed and the run revalidated.
 // What the owner can act on is a refusal value (`ScmRefusal`), never an error envelope. P5 O3-E M2
 // (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §C): every command is `machine`-owned, served by
 // `mawsd` on the daemon shape with the spine (main's embedded binding answers them on the embedded one).

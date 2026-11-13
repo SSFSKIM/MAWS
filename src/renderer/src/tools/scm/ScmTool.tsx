@@ -11,6 +11,7 @@ import type { PanelTool, PanelToolContext, PanelToolInit } from '../../panel/too
 import { SCM_COPY } from './copy';
 import { ScmShell } from './ScmShell';
 import { createScmUi, forSession, type ScmParams, type ScmUi } from './view-state';
+import { workingFolder } from '@shared/sessions/working-folder';
 
 export const SCM_TOOL_ID = 'source-control';
 
@@ -55,7 +56,7 @@ function ScmBody({ state, ctx }: { state: ScmState; ctx: PanelToolContext }) {
     return <p className="flex h-full items-center justify-center p-4 text-center text-ui text-fg-muted">{SCM_COPY.noSession}</p>;
   }
   if (!synced) return null;
-  const directory = ctx.session.worktree?.path ?? ctx.session.directory;
+  const directory = workingFolder(ctx.session).path;
   return <ScmShell key={`${shown}\0${directory}`} appSessionId={shown} directory={directory} ui={ui} />;
 }
 

@@ -102,6 +102,20 @@ regexTarget = "match"
 regexes = ['''SHA256 = '[0-9a-f]{64}''']
 
 [[allowlists]]
+description = "The UX wave's probe fixtures (spikes/protocol-probe/fixtures/uxwave and pass3/uxwave, 2026-11-12): an engine transcript row's `turnAttributionKey` is a uuid the engine draws for a turn, not a credential"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^spikes/protocol-probe/fixtures/(?:pass3/)?uxwave/[^/]+\.jsonl$''']
+regexes = ['''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$''']
+
+[[allowlists]]
+description = "The same fixtures: message ids the probe VM's model gateway answered with for models that are not Anthropic's (msg_ and 19 to 23 base62 characters, shorter than Anthropic's 24): identifiers of messages, not credentials"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^spikes/protocol-probe/fixtures/(?:pass3/)?uxwave/[^/]+\.jsonl$''']
+regexes = ['''^msg_[0-9A-Za-z]{19,23}$''']
+
+[[allowlists]]
 description = "gitleaks' default global allowlist of values (placeholders, booleans, repeated letters, template expressions, home and system paths) and its two stopwords; its list of exempt paths is removed"
 regexes = [
     '''(?i)^true|false|null$''',

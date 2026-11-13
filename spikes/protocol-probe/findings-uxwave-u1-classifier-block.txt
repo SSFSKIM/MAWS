@@ -1,0 +1,126 @@
+UX wave U1: a classifier block on MAWS's own wire, engine 2.1.322
+(docs/doperpowers/specs/2026-11-12-ux-wave/U1-requests.md, "Probes and checks", "Probe: a classifier block on MAWS's
+own wire", serving l4-approvals-12 "Approve a call that auto mode blocked, from its row"; root
+docs/doperpowers/specs/2026-11-12-ux-wave-design.md; recorded 2026-11-12)
+
+The owner's question: when the auto-mode classifier denies a call, can a person approve it from that row and have it
+run? On this engine and route: yes, by the route l4-approvals-12 chose. The call itself is over when the row appears,
+but the grant sentence sent as an ordinary user message got the model's retry through the classifier 5 times out of 5
+under a soft_deny rule. Under a hard_deny rule it never did (3/3), and nothing on the wire or in the transcript file
+tells a hard block from a soft one.
+
+Verdict per question, in the spec's terms.
+1. A block looks as the spec expects, on the wire and in the file (14/14 blocks): no can_use_tool; a `system`
+   `permission_denied` frame (tool name, tool_use_id, decision_reason_type "classifier", decision_reason, message; no
+   input); the call's error tool result whose frame carries tool_result_meta `non_execution_kind: "automode-blocked"`
+   with permission_decision {decision "reject", source "config", reason_type "classifier"}; an entry in the turn
+   result's permission_denials, with the input; and in the session's transcript file the tool-result row's
+   `toolDenialKind: "automode-blocked"`. So the row's derivation needs no correction, and the file reader can map
+   `toolDenialKind` (the spec's first branch), not the result text.
+   One difference from the spec's reading: through the gateway the reason is always the engine's stand-in, "The
+   server-side auto mode classifier judged this action dangerous (it gave no explanation)" (14/14), never the rule or
+   an explanation. The row's "· reason" will carry that sentence every time.
+2. The grant sentence gets the retry through every time under soft_deny (5/5, five distinct marker commands, one fresh
+   session each): "through every time: build the sentence alone, as written". Under hard_deny the model retried each
+   time and the retry was blocked again (3/3): "if it never passes, the row of such a block offers no button" applies,
+   but the row cannot know which rule blocked it (the frames of a hard and a soft block are identical, the message text
+   byte for byte; the file row carries the same toolDenialKind). See "Where the engine differs".
+3. Not run: question 2 was reliable, which is the spec's condition for skipping it.
+4. Yes, with a correction to the count: the third consecutive block in a turn is not sent as a block at all; the
+   engine turns it into an ordinary permission request (can_use_tool) with `decision_reason_type: "classifier"` and
+   decision_reason "3 consecutive actions were blocked. Please review the transcript before continuing.\n\nLatest
+   blocked action: The server-side auto mode classifier judged this action dangerous (it gave no explanation)" (2/2).
+   Allowing it runs the call. The next block in the same turn asks again ("4 consecutive actions were blocked ..."):
+   the person's allow did not reset the count (2/2). So: "nothing to build, the prompt is an ordinary one, and its card
+   shows the engine's reason", and the row before it is the second block, not the third.
+
+Method. Scenario scenarios/pass3/uxwave-u1-classifier.mjs with the launch module scenarios/pass3/uxwave-common.mjs, one
+case per process (`-e UXW_CASE=<case> -e UXW_RUN=<n>`), each launched by spikes/protocol-probe/vm-run.sh on the devcloud
+VM dc-uxprobe-dc94 (Linux), never on the MacBook. Engine 2.1.322 (system/init claude_code_version "2.1.322"), node
+v26.13.1. Model sonnet, resolved to claude-sonnet-5-5 (no owner aliases on the VM, VM.md); auto mode held
+(system/init permissionMode "auto"; the debug log's verifyAutoModeGateAccess "canEnterAuto=true"). Route: the gateway,
+through the forward at 127.0.0.1:8641 (spawn row `routed: true`), the feature cache seeded. No direct-route result
+exists: a run not routed through the gateway does not authenticate on this VM (VM.md; fixtures/vm/vm-unrouted.jsonl).
+So the spec's worry for the gateway (since 2.1.319 a call the server cannot check is "asked about or denied") is
+answered only for the gateway: the server did check, and blocked, every marker call.
+Launch, as MAWS's engine host builds it (src/engine-host/launch.ts; recorded in each spawn row):
+  claude -p --input-format stream-json --output-format stream-json --verbose --permission-prompt-tool stdio
+    --include-partial-messages --model sonnet --setting-sources user,project,local --permission-mode auto
+    --forward-subagent-text --replay-user-messages --include-hook-events --disallowedTools AskUserQuestion
+    --allowedTools mcp__maws__ask --settings {"dialogExpiry":"never"} --debug-file <scratch>/engine-debug.log
+  no --strict-mcp-config; after initialize the surface attach, ui_panes and set_max_thinking_tokens {null,
+  "summarized"}, as in findings-uxwave-u4-send-now.txt. The debug file is the probe's own addition (its lines matching
+  classifier/auto mode are copied into the fixture's uxw_debug_lines row). The `maws` SDK server is not declared.
+The rule: the scratch user settings (~/.claude/settings.json of vm-run.sh's scratch HOME, read because the setting
+sources include `user`; the engine ignores autoMode in project and local settings, cli.pretty.js:540267-540276) hold
+  {"autoMode": {"soft_deny": ["$defaults", "Probe Marker: running any shell command that contains the string
+  maws-probe-marker (a test marker on this machine)."]}}
+(`hard_deny` for the hard case; `$defaults` keeps the built-in list). The marker command is
+`curl -s -o marker-<n>.txt "https://example.com/?maws-probe-marker-<n>"`: harmless, and it writes a file, so whether it
+ran is read from the folder. A first take with `echo maws-probe-marker-1 > marker-1.txt` was not blocked (a write in
+the working folder is allowed without asking the classifier) and is not kept. Every can_use_tool was answered allow.
+Cases, fixtures fixtures/uxwave/u1-<case>-seeded-<n>.jsonl:
+  soft (n = 1..5)  turn 1: "Run this exact shell command with the Bash tool: <cmd>. If it is blocked or denied, do not
+                   retry it and do not try another way; reply with the single word BLOCKED." Turn 2: the grant
+                   sentence of l4-approvals-12, verbatim, with <cmd> JSON-quoted.
+  hard (n = 1..3)  the same with the rule under hard_deny.
+  norule (n = 1,2) the control: the same two turns with no autoMode rule.
+  streak (n = 1,2) one turn: four marker commands (<n>a .. <n>d), one Bash call each, "if one is blocked or denied, do
+                   not retry it; go on to the next".
+After each run the session's transcript file (scratch HOME/.claude/projects/<slug>/<session>.jsonl) is read and its
+rows for failed tool calls are noted (uxw_transcript_failed_rows: their keys and every denial field). Model spend about
+US$0.55 for this probe and the plan check together.
+
+Observations.
+Q1. u1-soft-seeded-1: the call (tool_use seq 32); `system/permission_denied` (34): tool_name Bash, tool_use_id,
+decision_reason_type "classifier", decision_reason "The server-side auto mode classifier judged this action dangerous
+(it gave no explanation)", message "Permission for this action was denied by the Claude Code auto mode classifier.
+Reason: ... To allow this type of action in the future, the user can add a permission rule for Bash to their settings.";
+no input field. The tool result (36): is_error, the same message, tool_use_result "Error: Permission for this action
+was denied ...", tool_result_meta [{id, non_execution_kind "automode-blocked", permission_decision {decision "reject",
+source "config", reason_type "classifier"}}]. The turn's result (46): permission_denials [{tool_name, tool_use_id,
+tool_input {command, description}}]. The transcript row (uxw_transcript_failed_rows, 85): keys include toolDenialKind
+("automode-blocked"), permissionDecision and serverClassifierContext. The debug log: "[WARN] Auto mode classifier
+blocked action: The server-side auto mode classifier judged this action dangerous (it gave no explanation)". Same
+shape in soft-2..5 (permission_denied 33/33/33/34, result row 35/35/35/36), hard-1..3 (twice each) and streak-1/2's
+first two blocks: 14 blocks, one shape. No can_use_tool preceded any of them.
+The control: u1-norule-seeded-1 and -2 ran the same command at once (tool result 34 and 35 "(Bash completed with no
+output)", permission_decision {accept, config, classifier}; the marker file written): the blocks are the rule's.
+Q2, soft. After the grant sentence the model retried the exact command in each session and it ran, allowed by the
+classifier: soft-1 retry 66, result 70 (permission_decision accept / classifier), marker file written (uxw_turn2);
+soft-2 65/69; soft-3 65/71; soft-4 65/69; soft-5 66/70. 5/5, no can_use_tool.
+Q2, hard. The model retried each time; each retry was blocked again with the same frames: hard-1 retry 65, denied 67,
+result 69; hard-2 66/68/70; hard-3 65/67/69; marker file absent in all three. 0/3 through.
+Hard against soft: the permission_denied frames (u1-soft-seeded-2 seq 33, u1-hard-seeded-2 seq 34) have the same keys
+and values apart from ids; the message text hashes the same; tool_result_meta and toolDenialKind are the same.
+Q4. u1-streak-seeded-1: command a blocked (permission_denied 33), command b blocked (63); command c (79) raised
+can_use_tool (81) with decision_reason_type "classifier" and decision_reason "3 consecutive actions were blocked.
+Please review the transcript before continuing.\n\nLatest blocked action: The server-side auto mode classifier judged
+this action dangerous (it gave no explanation)" and permission_suggestions; allowed (83), it ran (87, permission_decision
+{accept, user_temporary}). Command d (100) raised can_use_tool again (102) with "4 consecutive actions were blocked
+..."; allowed, it ran (108). Result (145): permission_denials holds the two blocked calls only. The debug log has four
+"Auto mode classifier blocked action" lines and "Classifier denial limit exceeded, falling back to prompting: 3
+consecutive ..." and "... 4 consecutive ...". u1-streak-seeded-2 the same (blocks 33, 65; asks 83, 104): 2/2.
+
+Where the engine differs from the spec's reading of the source.
+1. The classifier's reason through the gateway is never an explanation: every block reads "The server-side auto mode
+   classifier judged this action dangerous (it gave no explanation)" (14/14). Today's row "Auto mode blocked: `cmd` ·
+   reason" would always end in that sentence.
+2. "After three blocks in a row ... the engine stops blocking and asks": the ask replaces the third block (two rows are
+   blocked, the third call is a prompt), and once in that state each further block in the turn asks too, even after
+   the person allowed one.
+3. A hard_deny block cannot be told from a soft_deny one by MAWS: the wire and the file carry no list name. The spec's
+   "the row of such a block offers no button" cannot be applied per row from what the engine sends; the button shows on
+   both, and on a hard block the retry is blocked again (the row then offers the button again, and after the second
+   block in a row the engine asks, per 2).
+
+Bearing on other parts of the spec.
+- The file reader's half of the routes table: the transcript row carries toolDenialKind "automode-blocked", so a
+  terminal session's or a remote session's blocked row can read the same as a live one by mapping that field
+  (src/engine-host/fs/backfill.ts sets no denial kind today).
+- MAWS's live reader already reads tool_result_meta[].non_execution_kind (src/engine-host/normalizer.ts, around line
+  397), which is where the wire carries it.
+- The ask after two blocks arrives as an ordinary permission request with permission_suggestions; U1's permission card
+  shows it, with the engine's reason text above.
+
+Not provoked. A classifier block of a tool other than Bash; a block inside a subagent; the direct route.
