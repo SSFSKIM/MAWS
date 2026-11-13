@@ -227,7 +227,8 @@ export async function readDataset(agent: AgentSeam, session: string, artifactId:
 
 // ---- layout ------------------------------------------------------------------------------------------------------------------
 
-/** The dashboard's Artifacts surface shown or hidden by its icon, retaining the record for the next opening. */
+/** The dashboard's Artifacts surface shown, or the side column hidden while it is in view (its tab and record kept for
+ * the next opening; UX wave U8b). */
 export async function setPanel(page: Page, shown: boolean): Promise<void> {
   if (shown) await openSurface(page, 'Artifacts');
   else await hideSurface(page, 'Artifacts');

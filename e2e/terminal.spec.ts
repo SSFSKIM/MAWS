@@ -13,7 +13,7 @@ import { PROFILE_VARIABLE } from '../test/support/shell-home';
 import { withNativeClipboard } from './support/clipboard';
 import { test } from './support/launch';
 import { latencyBudgets, MEASURED_WAIT_MS } from './support/latency';
-import { openSurface, pinSurfaceForSessions, showSessionCards, surface } from './support/shell';
+import { openSurface, pinSurfaceForSessions, showSessionCards, sideColumn, sideGroup, surface } from './support/shell';
 import { bareOf } from '../src/shared/machine/address'; // P5 O6 M2: the page's pty ids are addresses; the raw bridge's are bare
 
 // The parent-session variables a terminal must never inherit (§4.1), two engine-launch ones (D-19) and an Electron
@@ -128,9 +128,7 @@ class Harness {
     const tabs = await this.tabs();
     const before = new Set(tabs.map((tab) => tab.id));
     await openSurface(this.page, 'Terminal');
-    if (tabs.some((tab) => tab.toolId === 'terminal')) {
-      await surface(this.page, 'terminal').getByRole('button', { name: 'New terminal tab', exact: true }).click();
-    }
+    if (tabs.some((tab) => tab.toolId === 'terminal')) await addTerminalFromStrip(this.page);
     const tab = (await this.tabs()).find((tab) => !before.has(tab.id))!;
     return { tabId: tab.id, id: tab.terminalId! };
   }
@@ -205,13 +203,24 @@ class Harness {
     );
   }
 
-  // Instance tabs belong to the Terminal surface, never the shell's main tab row.
-  tab = (tabId: string) => surface(this.page, 'terminal').locator(`[data-tab-id="${tabId}"]`);
+  // Instance tabs are tabs of the side column's strip (UX wave U8b), never the shell's main tab row.
+  tab = (tabId: string) => sideColumn(this.page).locator(`[data-side-strip] [data-tab-id="${tabId}"]`);
   async selectTerminalTab(tabId: string): Promise<void> {
     await openSurface(this.page, 'Terminal');
     await this.tab(tabId).getByRole('tab').click();
   }
   bar = (name: string) => surface(this.page, 'terminal').getByRole('status', { name });
+}
+
+// Another terminal, from the "+" (`Add a tool`) of the strip of the group it is in view in; answers when the menu's
+// Terminal was chosen, the moment the opening is measured from.
+async function addTerminalFromStrip(page: Page): Promise<number> {
+  await sideGroup(page, 'upper').locator('[data-side-strip]').getByRole('button', { name: 'Add a tool', exact: true }).click();
+  const item = page.getByRole('menuitem', { name: 'Terminal', exact: true });
+  await expect(item).toBeVisible();
+  const chosen = Date.now();
+  await item.click();
+  return chosen;
 }
 
 const harnessOf = async (maws: { page: Page; app: ElectronApplication }) => {
@@ -270,14 +279,15 @@ test('opens a login shell in the session directory with the terminal environment
   const h = await harnessOf(maws);
   const { page } = maws;
   const A = (await h.sessions()).A;
-  // The first shell opens from the surface row; another uses Terminal's own new-tab button. Both measure from
-  // the opening action to the first visible line, under the same cold and warm prompt bounds.
+  // The first shell opens from the surface row; another from the side column's "+" (UX wave U8b: a terminal is a tab of
+  // the strip). Both measure from the opening action to the first visible line, under the same cold and warm prompt
+  // bounds.
   const openFromChrome = async (): Promise<{ id: TerminalId; ms: number }> => {
     const before = new Set((await h.tabs()).map((t) => t.id));
     const terminal = surface(page, 'terminal');
     const shown = await terminal.isVisible();
-    const clicked = Date.now();
-    if (shown) await terminal.getByRole('button', { name: 'New terminal tab', exact: true }).click();
+    let clicked = Date.now();
+    if (shown) clicked = await addTerminalFromStrip(page);
     else await openSurface(page, 'Terminal');
     const tab = (await h.tabs()).find((t) => !before.has(t.id))!;
     expect(tab).toMatchObject({ toolId: 'terminal', selected: true, home: A });
@@ -364,7 +374,7 @@ test('pinned tab keeps its shell across sessions and warns about the worktree', 
 
   await pinSurfaceForSessions(page, 'Terminal');
   await page.getByRole('group', { name: 'session' }).getByRole('button', { name: 'Session B' }).click();
-  // Each session keeps its own surface stack: open the pinned terminal in B before checking its worktree warning.
+  // Each session keeps its own tab in view: show the pinned terminal in B before checking its worktree warning.
   await h.selectTerminalTab(tabId);
   await expect(h.tab(tabId).getByRole('tab')).toHaveAttribute('aria-selected', 'true');
   expect(await h.info(id)).toMatchObject({ pid, status: 'running', visible: true });
@@ -566,10 +576,10 @@ test('floods without loss while the page stays responsive', async ({ maws }) => 
   // UX2 docks an empty surface stack, so load's pre-creation maximize cannot calibrate this workload. Expand only
   // after Terminal exists, and again after the cards hide it. The partial FOX line plus the longest marker needs 62 cols.
   const calibrateWidth = async () => {
-    const terminal = surface(h.page, 'terminal');
-    const maximize = terminal.getByRole('button', { name: 'Expand surface', exact: true });
+    // the region's controls end the side column's first strip (UX wave U8b), outside the terminal's body
+    const maximize = sideColumn(h.page).getByRole('button', { name: 'Expand surface', exact: true });
     if (await maximize.count()) await maximize.click();
-    await expect(terminal.getByRole('button', { name: 'Restore surface', exact: true })).toBeVisible();
+    await expect(sideColumn(h.page).getByRole('button', { name: 'Restore surface', exact: true })).toBeVisible();
     await expect.poll(async () => (await h.snap(id)).cols, { message: 'the full W1 marker fits its final output row' }).toBeGreaterThanOrEqual(62);
   };
   await h.prompt(id);

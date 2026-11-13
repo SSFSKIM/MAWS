@@ -224,8 +224,8 @@ test.describe('the editor in stub mode over a scratch repository', () => {
       // E11 W-D: at a viewer about 600 px wide the merge bar's controls take the directory's width, never the file's name
       const [width, height] = await p.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getSize());
       const resize = (next: number) => p.maws.app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows()[0].setSize(w, h), [next, height] as const);
-      // Files otherwise consumes a responsive share of the window (and becomes a sheet below 700 px).
-      // Close it through its chrome; at 600 px the sidebar yields and the real viewer fills main.
+      // Files otherwise takes 60 % of the room (and becomes a sheet below 700 px). Hide the side column from its
+      // strip (Files stays a tab); at 600 px the sidebar yields and the real viewer fills main.
       await hideSurface(p.page, 'Files');
       await resize(600);
       await expect.poll(async () => Math.abs((await viewer.boundingBox())!.width - 600), { message: 'the viewer about 600 px wide' }).toBeLessThan(40);

@@ -9,7 +9,7 @@
 // themes (shots under MAWS_E4A_SHOTS=1).
 // Runs under `pnpm e2e:browser` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list); each launch passes
 // MAWS_HARNESS=0, so the window is the product app.
-import { hideSurface, openSurface, surfaceRow, usagePill } from './support/shell';
+import { hideSurface, openSurface, sideGroup, surfaceRow, usagePill } from './support/shell';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -167,7 +167,8 @@ test('show_pane opens one tab for two windows’ worth of one request; links and
       await expectOnPane(s, a, paneIn(panel), 'panel');
       await expect(paneIn(main).locator('[data-browser-page="elsewhere"]')).toBeVisible();
     }
-    // Closing the optional Browser surface unmounts its pane; the main tab takes the view back.
+    // Hiding the side column with Browser in view unmounts its pane (its tab stays in the strip); the main tab takes the
+    // view back.
     await hideSurface(s.page, 'Browser');
     await expectOnPane(s, a, paneIn(main), 'main');
     expect((await viewOf(s, a))?.owner?.surface).toBe('main');
@@ -630,7 +631,8 @@ test('P3-G acceptance 11: Mark up freezes the page to a still under the overlay;
     const dom = () => page.evaluate(() => document.documentElement.outerHTML);
     const before = await dom();
 
-    const markUp = s.panel.locator('[data-editor-header]').getByRole('button', { name: 'Mark up' });
+    // UX wave U8b (M2): the Browser registers no header row, so its Mark up sits at the end of its group's strip
+    const markUp = sideGroup(s.page, 'upper').locator('[data-side-strip]').getByRole('button', { name: 'Mark up', exact: true });
     const layer = s.page.getByRole('region', { name: 'Mark-up' });
     const marks = layer.locator('[data-markup-canvas] > *');
     const strip = s.pane.getByRole('list', { name: 'attachments' });
@@ -899,7 +901,7 @@ test('cua #103: human control in a 380 px panel keeps the icon, Hand back and ev
     const [id] = s.ids as [AppSessionId];
     await show(s, id);
     const panel = await openBrowser(s);
-    // Keep this regression at its original 379 px chrome width despite UX2-L's wider content-sized default.
+    // Keep this regression at its original 379 px chrome width despite the Browser's wide default (60 % of the room).
     const resizer = s.page.getByRole('separator', { name: 'Resize right panel' });
     const chromeBox = (await panel.locator('[data-browser-chrome]').boundingBox())!;
     const handle = (await resizer.boundingBox())!;
