@@ -33,7 +33,8 @@ How to see it working: the unit tests named under each milestone fail before its
 - [ ] M5 — the Channel from the palette and the View menu.
 - [ ] M6 — the Connectors dialog.
 - [ ] M7 — Plugins, Connectors and Skills before the first message.
-- [ ] M8 — Sign in for a dynamic connector (starts after M1's verdict).
+- [x] (2026-11-12) P1's verdict: both kinds promote as designed (runs 43357272365, 43358963647); M8 is released, after M7 in the order.
+- [ ] M8 — Sign in for a dynamic connector.
 - [ ] M9 — Settings regrouped, a note on one line (starts after the owner's look).
 - [ ] M10 — Search settings.
 - [ ] M11 — the record, master merged again and the wire's files made again, the whole checks, the hand-back.
@@ -1023,6 +1024,13 @@ Found while checking the sections against the code at `48619c824`, then by the a
   Evidence: `src/main/org/channel/channel.ts` (`open` calls `reconcile(true)` before `retain`; the release delay); `project-socket.ts`'s close on a wake.
 - Observation: `test/support/tokens-guard.test.ts` reads an item id written `#` and three digits (`#505`, `#523`, `#540`) as a hex colour, so M2's and M3's comments and strings fail it (29 hits at `45a02d0d1`); M3's fix writes them another way.
   Evidence: M4's full-suite run at `0adbfd07c`, the only failure that is not on the brief's list or a load timeout.
+
+- Observation: P1's verdict (2026-11-12, engine 2.1.322, runs 43357272365 and 43358963647 on the mini): both kinds promote as designed. For a server of MAWS's own list and for a plugin's server, `mcp_authenticate` with MAWS's redirect answers `custom`, the callback and the reconnect take the server's name (`plugin:<plugin>:<server>` for a plugin's), the status reads connected, and a later process reads it connected. `DYNAMIC_REDIRECT = { plugin: 'maws', own: 'maws' }`.
+  Evidence: `spikes/p4-aggregator/findings-m4.txt`, the dated part "UX wave U11a, M1".
+- Observation: a plugin's server is listed with scope `dynamic`, the same value as a server of the launch's own list, so a name starting `plugin:` is the only thing that tells them apart; and the engine suppresses a plugin's server whose address a file-configured server already names (or an earlier plugin's does), so such a connector never appears in a session's status. Nothing changes for the second in this landing; it bears on who is offered Sign in and on X-184's plugin rows. M8 checks §A's "Who offers Sign in" and `dynamicRefusal` against the first.
+  Evidence: P1's second run (`before.scope` `dynamic` for `plugin:fx-plugin:fx-oauth`); its first run's debug line "Suppressing plugin MCP server … duplicates manually-configured …"; the function near line 476051 of `~/claude-code-bundle/2.1.322/cli.pretty.js`.
+- Observation: on 2.1.322 a configured server reads `needs-auth` after `mcp_oauth_callback_url` until `mcp_reconnect`, so the spike's older questions `custom`, `cancel` and `pathA` list "the server did not report connected"; the operation already sends the reconnect (findings-m4, point 1).
+  Evidence: P1's runs; `src/services/connectors/sign-in.ts`.
 
 ## Decision Log
 
