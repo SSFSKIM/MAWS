@@ -897,4 +897,43 @@ Found while writing this document, against master `48619c824`, and reported to t
 
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+(2026-11-13, the controller, at the hand-back to the architect. The run of the e2e groups on the Mac, the cross-build gate, class 1a and the branch review are not yet run and are not in this account.)
+
+**What landed.** All nine milestones, each reviewed clean at its boundary, on `ux-wave/U8b` from `78d343799`. Masters merged: `7e5f2016c` (U8a), `5c9cfa0c5` (the probes), `e71334239` (U6a), `d7ca414ae`, `80dcc59af` (spec batches 5 and 6), `c0e7b2ae8` (U10a) and `9df6b4493` (U13a, whose five conflicts were resolved as both and reviewed).
+- **The side column.** One strip with one tab in view per group, two groups at most, two remembered widths, and a first read that prunes at most once per profile.
+- **The card column.** Three cards with their folds remembered, two slots, and one pure predicate (`cardColumnShown`).
+- **The graph's readings.** Who started a task, with wire minor 37, and both vocabularies of a task's type read through `kindOf`.
+- **The exit a gone terminal leaves.** On this Mac, and on another machine through its presence.
+- **The two panels and the two cards for running work.**
+- **M9's scenes**, written but not run.
+
+**Against the purpose.** The acceptance items have unit proof, and the e2e scenes wait for the Mac. What is stored stays readable by build F (UC-14): a frozen copy of F's schemas is tested, and the cross-build scenes cross both directions.
+
+**What the boundary reviews caught.** Every finding below was real, and most were reproduced on the VM before they were fixed. Each would have shipped without a review at its boundary.
+- The first read could delete tabs: after a failed read, after a failed listing, and after work done in a deferred launch.
+- F6 was lost on the controls at a strip's end.
+- A pane chosen from the lower "+" opened above.
+- The exit decision was dropped after a failed final read.
+- Late rows after a gone presence stayed working, and one rebuild ran per late row.
+- A deep link could hide its task.
+- "Nothing running" was missing on the route read from disk.
+- The reverse crossing of `panel.pinned` and `panelTools.activeNoSession` was not proved.
+
+**Where the document was wrong about the code, and was corrected in place.**
+- `setSurfaceStack` had a caller in U1's file (Decision Log 6).
+- The Stop callback names labels, not task types (Decision Log 10).
+- `end {session-ended}` cannot fire for a process that has gone, since DC8 (Decision Log 13).
+- M7 broke desk web's typecheck (Decision Log 18).
+
+**Lessons**
+- A boundary review that may run code finds the faults that reading misses. Four of M6's five findings were shown by a probe on the VM, not by the diff.
+- A test log belongs in a file on the VM. A pipe into `head`, and a full disk on this Mac, each cost a proof run.
+- The guards read text. The tokens guard took "#359" for a colour twice, and a number is now written in words.
+- One reading in one place (`kindOf`, `cardColumnShown`, the panel's merge of jobs read by the card) settled three questions before they could become three mappings.
+
+**Left for later**
+- The tracker row: a folded parent does not say that a nested agent waits.
+- No e2e fixture has a failed agent.
+- No scene shows the ask sheet giving back its place.
+- The stderr of 75 files in the whole suite: 73 are untouched by this branch, and 2 are traced to other tests.
+- The test-timing residue listed in the report.
