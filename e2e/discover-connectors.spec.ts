@@ -28,6 +28,13 @@
 //            delayed by 15 s completes "connected here"; Cancel then a retry; a second press; S2 stopped mid-flow; with
 //            no ready session, the "Open a session" words. The scratch directory's exact Keychain item is claimed before
 //            any engine runs and released after the app and both sessions have exited.
+//   dynamic: the UX wave's U11a M8 (A1, A2; docs/doperpowers/plans/2026-11-12-ux-wave-U11a-settings-connectors-org.md, §A,
+//            Proof P7), on the Mac lane alone, with the sign-in case's custody: a plugin installed from a scratch folder
+//            marketplace brings a server (`plugin:fx-plugin:fx-oauth`) and MAWS's own list holds two (`fx-own`,
+//            `fx-own-2`), each against an engine-mode fixture, no file-configured server beside them. Before a session
+//            runs, Customize's row of MAWS's own list says to open one; then the session's Connectors dialog signs the
+//            plugin's connector and `fx-own` in (Connected with its tool count), and Customize signs `fx-own-2` in
+//            through that session.
 import { execFile, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
@@ -38,6 +45,7 @@ import { invoke, value } from './support/c7-replay';
 import { firstRead } from './support/discover-read';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { openAppDestination } from './support/shell';
+import { addressed } from './support/address';
 import { engineKeychainCustody, readOAuthLog, startOAuthFixture, summarizeOAuthLog, type OAuthFixture } from './support/connector-oauth';
 import { assertEngineProcessKeychainEnv, guardKeychain, killTree } from './support/keychain-guard';
 import { isAlive } from './support/processes';
@@ -436,4 +444,120 @@ test('sign-in: S1 then S2, connected here after a delayed consent, Cancel and a 
   }
   if (closing) throw closing;
   expect(released.some((r) => (r as { found: boolean }).found), 'the sign-in stored the one item its scratch configuration names').toBe(true);
+});
+
+test('dynamic: a plugin’s connector and one of MAWS’s own list signed in from the Connectors dialog, a second of the list from Customize', async () => {
+  test.skip(process.platform !== 'darwin', 'engine sign-in runs on the Mac lane alone (Decision Log 13)');
+  test.setTimeout(900_000);
+  const PLUGIN = 'plugin:fx-plugin:fx-oauth';
+  const openLog = join(root, 'open.log');
+  writeFileSync(openLog, '');
+  maws = await launchMaws({ realEngine: { projects: 1, home: 'runner' }, env: { MAWS_E2E_OPEN_LOG: openLog } });
+  const { page } = maws;
+  const engine = maws.realEngine!;
+  const [directory] = engine.scratch.projects;
+  // the sign-in case's custody: both items the scratch configuration directory names, claimed before any engine runs
+  const scratchRoot = dirname(engine.scratch.configDir);
+  const custodies = [...new Set([engine.scratch.configDir, realpathSync(engine.scratch.configDir)])].map((dir) => engineKeychainCustody(dir, { scratchRoot: dir === engine.scratch.configDir ? scratchRoot : realpathSync(scratchRoot), engineEnv: { CLAUDE_CONFIG_DIR: dir } }));
+  for (const custody of custodies) custody.claim();
+  const pids = new Set<number>();
+  let pluginFixture: OAuthFixture | null = null;
+  let released: unknown[];
+  let closing: unknown = null;
+  try {
+    const ownFixture = await startOAuthFixture({ root, id: 'own', mode: 'engine' });
+    fixture = ownFixture;
+    const pluginServer = await startOAuthFixture({ root, id: 'plugin', mode: 'engine' }); // its own address: nothing names it twice
+    pluginFixture = pluginServer;
+
+    // the plugin, from a scratch folder marketplace, installed at user scope by the engine's own CLI
+    const market = join(root, 'market');
+    const plugin = join(market, 'plugins', 'fx-plugin');
+    mkdirSync(join(market, '.claude-plugin'), { recursive: true });
+    mkdirSync(join(plugin, '.claude-plugin'), { recursive: true });
+    writeFileSync(join(market, '.claude-plugin', 'marketplace.json'), `${JSON.stringify({ name: 'fx-market', owner: { name: 'Fixture' }, description: 'A scratch marketplace for the dynamic sign-in scene', plugins: [{ name: 'fx-plugin', source: './plugins/fx-plugin', description: 'One HTTP server, the OAuth fixture' }] }, null, 2)}\n`);
+    writeFileSync(join(plugin, '.claude-plugin', 'plugin.json'), `${JSON.stringify({ name: 'fx-plugin', version: '0.0.1', description: 'One HTTP server, the OAuth fixture' }, null, 2)}\n`);
+    writeFileSync(join(plugin, '.mcp.json'), `${JSON.stringify({ mcpServers: { 'fx-oauth': { type: 'http', url: pluginServer.resourceUrl } } }, null, 2)}\n`);
+    await engineCli(maws!, ['plugin', 'marketplace', 'add', market]);
+    await engineCli(maws!, ['plugin', 'install', 'fx-plugin@fx-market', '--scope', 'user']);
+    // MAWS's own list, which every session MAWS runs is given at launch (--mcp-config)
+    value(await invoke(page, 'settings.set', { engine: { mcpServers: [{ name: 'fx-own', type: 'http', url: ownFixture.resourceUrl }, { name: 'fx-own-2', type: 'http', url: ownFixture.resourceUrl }] } }));
+
+    const project = value(await invoke(page, 'session.projects.add', { directory }));
+    const statusIn = async (appSessionId: string, name: string) => value(await invoke(page, 'session.mcpStatus', { appSessionId: appSessionId as never })).mcpServers.find((s) => s.name === name)?.status ?? null;
+    const opened = () => readFileSync(openLog, 'utf8').split('\n').filter((line) => line.startsWith('openExternal ')).map((line) => line.slice('openExternal '.length));
+    const consent = async (authUrl: string) => {
+      const authorized = await fetch(authUrl, { redirect: 'manual' });
+      expect(authorized.status).toBe(302);
+      expect((await fetch(authorized.headers.get('location')!)).status).toBe(200);
+    };
+    // a press, then the browser step, or the sign-in's end in its own words (a failure says why)
+    const press = async (scope: Locator, name: string): Promise<string> => {
+      const before = opened().length;
+      await scope.getByRole('button', { name: `Sign in to ${name}` }).click();
+      await expect.poll(async () => opened().length > before || /didn’t finish|Signed in/.test(await scope.innerText()), { timeout: 30_000 }).toBe(true);
+      expect(opened().length, `the browser step for ${name}; the row reads: ${await scope.innerText()}`).toBeGreaterThan(before);
+      await expect(scope.locator('[data-sign-in-state]')).toHaveText('Finish signing in in your browser…');
+      return opened().at(-1)!;
+    };
+
+    await test.step('before a session runs, Customize’s row of MAWS’s own list says to open one', async () => {
+      await openAppDestination(page, 'Customize');
+      const select = page.getByRole('combobox', { name: 'Project', exact: true });
+      await select.selectOption((await select.locator('option', { hasText: 'project-a' }).getAttribute('value'))!);
+      await openConnectors(page, 'My items');
+      await expect(row(page, 'fx-own-2').locator('[data-sign-in-needs-session]')).toHaveText('Open a session, then sign in');
+      await expect(row(page, 'fx-own-2').getByRole('button', { name: 'Sign in to fx-own-2' })).toHaveCount(0);
+    });
+
+    const created = value(await invoke(page, 'session.create', { projectId: project.id, location: { kind: 'directory', path: directory } }));
+    const session = created.appSessionId;
+    let start = value(await invoke(page, 'session.start', { appSessionId: session, message: null, options: { requireEmptyMessage: true } }));
+    if (start.status === 'needs_trust') start = value(await invoke(page, 'session.start', { appSessionId: session, message: null, options: { requireEmptyMessage: true, trust: 'accepted' } }));
+    expect(start, 'the session starts with no message').toMatchObject({ status: 'starting' });
+    await expect.poll(async () => value(await invoke(page, 'engine.sessions', undefined)).find((s) => s.appSessionId === session)?.process, { timeout: 90_000 }).toBe('ready');
+    const pid = value(await invoke(page, 'engine.sessions', undefined)).find((s) => s.appSessionId === session)?.pid;
+    if (pid) {
+      pids.add(pid);
+      assertEngineProcessKeychainEnv(pid, engine.scratch.configDir);
+    }
+    for (const name of [PLUGIN, 'fx-own', 'fx-own-2']) await expect.poll(() => statusIn(session, name), { timeout: 60_000, message: `${name} in the session’s status` }).toBe('needs-auth');
+
+    await test.step('the Connectors dialog signs the plugin’s connector and one of MAWS’s own list in: Connected, with its tool count', async () => {
+      await page.locator(`[role="treeitem"][data-menu="session:${await addressed(page, session)}"]`).click();
+      const main = page.locator('[data-region="main"]');
+      await main.getByRole('button', { name: 'Add files, photos or commands' }).click();
+      await page.getByRole('menuitem', { name: 'Connectors', exact: true }).hover();
+      await page.getByRole('menuitem', { name: /^Connectors in this chat…/ }).click();
+      const dialog = page.locator('[data-widget="mcp"]');
+      for (const name of [PLUGIN, 'fx-own']) {
+        const server = dialog.locator(`[data-mcp-server="${name}"]`);
+        await expect(server.locator('[data-connector-state]')).toHaveText('Sign in needed');
+        await consent(await press(server, name));
+        await expect(server.locator('[data-sign-in-state]')).toHaveText('Signed in · connected here', { timeout: 60_000 });
+        await expect(server.locator('[data-connector-state]')).toHaveText('Connected · 1 tool', { timeout: 30_000 });
+        expect(await statusIn(session, name)).toBe('connected');
+      }
+      await test.info().attach('dynamic-dialog.png', { body: await page.screenshot(), contentType: 'image/png' });
+      await page.keyboard.press('Escape');
+    });
+
+    await test.step('Customize’s row of MAWS’s own list signs the second in through that session', async () => {
+      await openAppDestination(page, 'Customize');
+      await openConnectors(page, 'My items');
+      const own = row(page, 'fx-own-2');
+      await consent(await press(own, 'fx-own-2'));
+      await expect(own.locator('[data-sign-in-state]')).toHaveText('Signed in · connected here', { timeout: 60_000 });
+      expect(await statusIn(session, 'fx-own-2')).toBe('connected');
+    });
+  } finally {
+    await maws?.cleanup().catch((error: unknown) => (closing = error));
+    maws = null;
+    await fixture?.close();
+    fixture = null;
+    await pluginFixture?.close();
+    released = custodies.map((custody) => custody.release({ enginePids: [...pids] }));
+  }
+  if (closing) throw closing;
+  expect(released.some((r) => (r as { found: boolean }).found), 'the sign-ins stored the one item its scratch configuration names').toBe(true);
 });

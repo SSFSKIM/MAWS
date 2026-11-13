@@ -12,6 +12,9 @@
 // is one line (`ConnectorRow`): the switch, the name, the status in words (connector-status.ts) and the tool count;
 // opening the row shows the rest. Sign in and Reconnect sit on the line of a row that needs a sign-in or failed, and
 // Reconnect is in the opened part of any other. What the switch reaches is said once, in the head, never on a row.
+// U11a M8 (§A): a dynamic connector that needs a sign-in, a plugin's or one of MAWS's own list, offers Sign in too, by its
+// name (`connectors.signInDynamicServer`); for a session on another machine it is drawn disabled with U9's sentence until
+// U11f, a file-scope row beside it keeping its own.
 // U11a (§D, l8-settings-03): before the first message on this Mac the dialog lists the folder's configured connectors,
 // one row per name (the entry the engine will use) with its scope in place of a status, and no switch, Reconnect or Sign
 // in; for a tab set to another machine it says the list shows once the chat starts there.
@@ -26,7 +29,7 @@ import { serverKey, signInViewOf, usedEntries } from '../customize/connectors/pr
 import { useCustomizationInventory } from '../customize/inventory';
 import { InventoryState } from '../customize/InventoryState';
 import type { CustomizationServer } from '@shared/ipc/schema/customization';
-import { signInKeyOf, signInMachineOf, startSignInByName, useSignIns } from '../customize/connectors/sign-in';
+import { signInKeyOf, signInMachineOf, signsInDynamic, startSignInByName, startSignInDynamic, useSignIns, type SignInServer } from '../customize/connectors/sign-in';
 import { useSessionControls } from '../session/controls/controls-for'; // P5 O9 M5
 import { useSessions } from '../stores/sessions';
 import { useCommand } from '../ipc/query';
@@ -159,23 +162,29 @@ export function ConnectorRow({ server, words, control, actions, opened, under }:
   );
 }
 
-// P5 O7 M8: a scope the engine signs a server in from (its configuration files'); `dynamic`, `claudeai` and the managed
-// scopes are signed in nowhere a session reaches
+// P5 O7 M8: a scope the engine signs a server in from (its configuration files'); U11a M8: and `dynamic`, a plugin's or
+// one of MAWS's own list, of a name the command takes. `claudeai` and the managed scopes are signed in nowhere a session
+// reaches.
 const signInScope = (scope: string | null): PluginsScope | null => (PLUGINS_SCOPES as readonly (string | null)[]).includes(scope) ? (scope as PluginsScope) : null;
+function signInTargetOf(server: McpServerView, cwd: string | null): Omit<SignInServer, 'machine'> | null {
+  if (server.scope === 'dynamic') return signsInDynamic(server.name) ? { name: server.name, scope: 'dynamic', cwd: null } : null;
+  const scope = signInScope(server.scope);
+  return scope === null || (scope !== 'user' && cwd === null) ? null : { name: server.name, scope, cwd };
+}
 
 // P5 O7 M8: Sign in on a server that needs auth, and the line its sign-in says (Customize's words); none before one ran.
 // U11a: the button sits on the row's line, the line under the row.
 function useSignIn({ server, appSessionId, cwd, readAt }: { server: McpServerView; appSessionId: AppSessionId; cwd: string | null; readAt: number | null }): { button: ReactNode; line: string | null } {
-  const scope = signInScope(server.scope);
-  const target = scope === null || (scope !== 'user' && cwd === null) ? null : { name: server.name, scope, cwd };
+  const target = signInTargetOf(server, cwd);
   const record = useSignIns((s) => (target === null ? null : (s.byServer.get(signInKeyOf({ ...target, machine: signInMachineOf(appSessionId) })) ?? null)));
-  const unavailable = useRemoteUnavailable(appSessionId, 'connectors.signInServer'); // an older machine's refusal
+  // a command the machine does not take: declared (U9's `REMOTE_UNAVAILABLE`), or an older machine's refusal
+  const unavailable = useRemoteUnavailable(appSessionId, target?.scope === 'dynamic' ? 'connectors.signInDynamicServer' : 'connectors.signInServer');
   if (target === null) return { button: null, line: null };
   const live = { status: server.status, error: server.error };
   const line = record === null ? null : (signInViewOf({ live, liveRead: readAt === null ? null : { appSessionId, at: readAt }, posture: null, last: record, transport: null })?.text ?? null);
   const button =
     server.status === 'needs-auth' ? (
-      <button type="button" aria-label={CONNECTORS.signInName(server.name)} disabled={unavailable !== null} title={unavailable ?? undefined} onClick={() => void startSignInByName(target, appSessionId)} className={SIGN_IN}>
+      <button type="button" aria-label={CONNECTORS.signInName(server.name)} disabled={unavailable !== null} title={unavailable ?? undefined} onClick={() => void (target.scope === 'dynamic' ? startSignInDynamic({ name: target.name }, null, appSessionId) : startSignInByName({ ...target, scope: target.scope }, appSessionId))} className={SIGN_IN}>
         {CONNECTORS.signIn}
       </button>
     ) : null;

@@ -19,7 +19,10 @@ export const CustomizationServerSchema = z.strictObject({
 });
 // P4-AGG M4: a configured server's endpoint, main's alone (a configured URL may carry a token, so it never reaches the
 // renderer): the catalog matches it against the directory's connectors for Connectors' sign-in posture.
-export const CustomizationEndpointSchema = z.strictObject({ name: z.string(), scope: z.enum(['app', 'user', 'project', 'local']), path: AbsolutePath, transport: CustomizationServerSchema.shape.transport, url: z.string().max(4096).nullable() });
+// UX wave U11a M8 (§A): `revision`, an opaque stand-in for the configuration (its name, transport and address) that the
+// engine host keys per run, so a press from Customize can name the configuration its row showed; null: no address;
+// absent from an engine host of an earlier build.
+export const CustomizationEndpointSchema = z.strictObject({ name: z.string(), scope: z.enum(['app', 'user', 'project', 'local']), path: AbsolutePath, transport: CustomizationServerSchema.shape.transport, url: z.string().max(4096).nullable(), revision: z.string().max(64).nullable().optional() });
 export const CustomizationInventorySchema = z.strictObject({
   skills: z.array(CustomizationSkillSchema), servers: z.array(CustomizationServerSchema), warnings: z.array(z.string()),
   // P4-AGG M4: every MCP configuration file that applies (app, user, local, each project `.mcp.json`) read without a

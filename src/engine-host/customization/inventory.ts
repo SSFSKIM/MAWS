@@ -5,6 +5,7 @@
 // SKILL.md lives one folder below each skills directory (765453-765544), project .mcp.json files are read up the entire
 // ancestor chain (737077-737101), and installed_plugins.json v2 holds arrays of scoped installation records (775499,
 // 775585). Local keys use the already-probed conservative derivation in connectors/local-key.ts.
+import { createHmac, randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, open, opendir, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -23,6 +24,17 @@ export const INVENTORY_BOUNDS = {
   entries: 2048, rows: 1024, ancestors: 128, timeoutMs: 7000,
 } as const;
 interface InventoryDeps { userData: string; captureEnv: () => Promise<Record<string, string>>; timeoutMs?: number }
+
+type Revision = (configuration: Pick<CustomizationEndpoint, 'name' | 'transport' | 'url'>) => string | null;
+/** UX wave U11a M8 (docs/doperpowers/plans/2026-11-12-ux-wave-U11a-settings-connectors-org.md, §A): a configuration's
+ * revision, an HMAC of its name, transport and address under `key`, in hex cut to 32 characters (the form of main's
+ * `configurationFingerprint`). It tells two configurations of one name apart for a press from Customize, which never holds
+ * an address; keyed, so a known address cannot be confirmed from it. Null for one without an address. */
+export function configurationRevision(key: Buffer): Revision {
+  return ({ name, transport, url }) => (url === null ? null : createHmac('sha256', key).update(`${name}\u0000${transport}\u0000${url}`).digest('hex').slice(0, 32));
+}
+// The host's key: made at its start, kept in memory, never written or sent; a revision lives for one run of the host.
+const revisionOf = configurationRevision(randomBytes(32));
 const record = (value: unknown): Record<string, unknown> | null => typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
 const absent = (error: unknown) => ['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '');
 const LIMIT = 'Customization inventory reached its read limit; some configured items are not inventoried.';
@@ -51,7 +63,8 @@ class Reading {
   }
   addServer(row: CustomizationServer, url: string | null): void {
     this.check(); if (this.servers.length >= INVENTORY_BOUNDS.rows) throw new Stop(); this.servers.push(row);
-    this.endpoints.push({ name: row.name, scope: row.scope, path: row.path, transport: row.transport, url: url === null ? null : url.slice(0, 4096) });
+    const address = url === null ? null : url.slice(0, 4096);
+    this.endpoints.push({ name: row.name, scope: row.scope, path: row.path, transport: row.transport, url: address, revision: revisionOf({ name: row.name, transport: row.transport, url: address }) });
   }
 
   async exists(path: string): Promise<boolean> {

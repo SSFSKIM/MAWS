@@ -8,7 +8,8 @@
 // - Remove asks `claude mcp remove <name> --scope <scope>` at the server's own scope; MAWS's own (`app`) servers are not
 //   the engine's to remove.
 // - Sign in runs in the attached session, else any ready session whose scope includes the server (Decision Log 14): any
-//   session for a user-scope server, a session in the page's directory for a project or local one.
+//   session for a user-scope server, a session in the page's directory for a project or local one. UX wave U11a M8: a
+//   server of MAWS's own list runs in a ready session whose status lists it (`ownSignInSessionOf`).
 // - A server's sign-in state: a sign-in under way or its end first, then the attached session's mcp_status, then the
 //   directory's auth posture for the record the server's endpoint matches (main's `catalog.postures`); no words when MAWS
 //   observed nothing, though a remote server still offers Sign in. A success yields to a read taken after it that says
@@ -131,6 +132,20 @@ export function signInSessionOf(scope: CustomizationServer['scope'], ready: read
   const here = (session: ReadySession) => (cwd !== null && session.cwd === cwd ? 0 : 1);
   const inScope = ready.filter((session) => scope === 'user' || here(session) === 0).sort((a, b) => here(a) - here(b) || a.appSessionId.localeCompare(b.appSessionId));
   return inScope[0]?.appSessionId ?? null;
+}
+
+/** A ready session with the names of the servers its status lists. */
+export type HoldingSession = ReadySession & { servers: readonly string[] };
+
+/** UX wave U11a M8 (§A, "Who offers Sign in"): the session a server of MAWS's own list signs in from: the attached one
+ * when it is ready and its status lists the name; else the first ready session whose status lists it, one in the page's
+ * directory first, then by id; null when none does (Sign in then says to open one). The services' check decides; this
+ * only picks whom to ask. */
+export function ownSignInSessionOf(name: string, ready: readonly HoldingSession[], attached: string | null, cwd: string | null): string | null {
+  const holding = ready.filter((session) => session.servers.includes(name));
+  if (attached !== null && holding.some((session) => session.appSessionId === attached)) return attached;
+  const here = (session: ReadySession) => (cwd !== null && session.cwd === cwd ? 0 : 1);
+  return [...holding].sort((a, b) => here(a) - here(b) || a.appSessionId.localeCompare(b.appSessionId))[0]?.appSessionId ?? null;
 }
 
 export interface SignInFacts {
