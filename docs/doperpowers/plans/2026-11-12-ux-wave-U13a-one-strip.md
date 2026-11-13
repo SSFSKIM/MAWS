@@ -617,6 +617,12 @@ The pull request carries the dated amendments of the two rulings this landing re
   - Observation: `test/support/tokens-guard.test.ts` reads `#` and three to eight hex digits as a colour, so M3's ticket reference written as a hash and the number failed it in four places; they are reworded to "ticket 497" (the architect's ruling; the guard is not loosened).
   - Observation: the merge commit `3958e7df4` carries git's default message without the session line; it stays (a force-push would be needed), and the pull request names it.
     Date/Author: 2026-11-13, the M5 executor and the architect; folded by the controller.
+- **2026-11-13 · M5's review: what each cross-build assertion proves.**
+  - Decision: `(layout, to the peer)` counts F's `main.tabs` only once it holds what F alone writes: the page's tab as the saved active tab of the set F shows (this build had left the library's tab there). The tool's pin is read and undone through its menu only while the seeded session's tab is in front, on both builds, because with no session in view the icon row disables every session tool's icon and folded item (the architect's rerun of 2026-11-13); a lost pin still fails, since the menu then offers "Pin to toolbar".
+  - Decision: `(layout, from the peer)`'s "a relaunch shows no notice" asserts that the relaunch wrote nothing to `main.tabs` (the stored value deep-equal before and after it), then watches a reload of that same value with an observer installed from the page's start. The notice follows `merged` alone, which `stripOf` computes from the stored value, so the observed reload stands for the relaunch's own read.
+    Rationale: the launch helper hands over the page only after the host is ready, so an observer installed after it misses the relaunch's first hydration; the reviewer found the reload alone proved only "no notice on a later reload".
+  - Decision: the one-strip scene's narrow step goes down from 900 px to 600 px (the window's minimum) until a place is cut or at zero width, and fails if none gives way; the give-way invariant is asserted there.
+    Date/Author: 2026-11-13, the controller, on M5's task reviews and the architect's runs.
 
 ## Outcomes & Retrospective
 
