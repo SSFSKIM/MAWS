@@ -115,7 +115,7 @@ describe('the whole declared invocation', () => {
   it('holds a group that declares its case counts to exactly those, in place of forbidding test.only', () => {
     const problems = (over: Partial<InvocationSummary>) => invocationProblems(dashboardRun(over), { script: dashboard, files: DASHBOARD_ACCEPTANCE }, ROOT);
     const [, ...rest] = dashboardRun().tests;
-    expect(problems({ tests: rest })).toEqual(['dashboard.spec.ts: 3 cases of the declared 4']);
+    expect(problems({ tests: rest })).toEqual(['dashboard.spec.ts: 6 cases of the declared 7']);
     expect(problems({ tests: dashboardRun().tests.filter((t) => t.file !== 'dashboard-history.spec.ts') })).toEqual(['dashboard-history.spec.ts: 0 cases of the declared 2']);
     expect(problems({ tests: [...dashboardRun().tests, { file: 'dashboard-scale.spec.ts', title: 'scale', outcome: 'expected' }] })).toEqual(['a file outside the declared list ran: dashboard-scale.spec.ts']);
     expect(problems({ argv: [...argvOf(dashboard), 'e2e/dashboard.spec.ts'] })).toEqual(['the invocation was narrowed: the command line adds e2e/dashboard.spec.ts']);

@@ -17,6 +17,9 @@ Object.assign(alias, {
   'lowlight-engine': resolve(createRequire(__filename).resolve('lowlight'), '../lib/index.js'),
 });
 // C8c end
+// U10a (M2's store suite, src/main/artifacts/document-repairs-store.dom.test.tsx): the happy-dom projects take
+// `node:sqlite` through a shim, since under Node 22 vitest does not externalize it there (test/support/node-sqlite.ts).
+const domAlias = { ...alias, 'node:sqlite': resolve(__dirname, 'test/support/node-sqlite.ts') };
 // Renderer suites that drive a real emulator without a DOM (C9: `@xterm/headless` round trips) run under Node.
 const RENDERER_NODE_TESTS = 'src/renderer/src/terminal/**/*.node.test.ts';
 
@@ -98,7 +101,7 @@ const DISPLAY_NODE_TESTS = ['src/shared/app/*.test.ts', 'src/engine-host/documen
 // A project under the React Compiler as electron-vite builds the app, over happy-dom (C8a; the `renderer-compiled`
 // projects), each with its own plugin instance.
 const compiled = (test: { name: string; include: string[]; exclude?: string[]; testTimeout?: number; hookTimeout?: number; css?: typeof ARTIFACTS_DOM_CSS }) => ({
-  resolve: { alias },
+  resolve: { alias: domAlias }, // U10a
   plugins: [react({ babel: { plugins: ['babel-plugin-react-compiler'] } })],
   test: { environment: 'happy-dom' as const, env: { MAWS_REACT_COMPILER: '1', ...OWNER_LOCALE }, setupFiles: HAPPY_DOM_SETUP, ...test },
 });
@@ -157,7 +160,7 @@ export default defineConfig({
       { resolve: { alias }, test: { name: 'node-timing', environment: 'node', include: TIMING_NODE_TESTS, ...TIMING_TIMEOUTS } },
       { resolve: { alias }, test: { name: 'node-display', environment: 'node', include: DISPLAY_NODE_TESTS, env: OWNER_LOCALE } }, // P4-W2L
       {
-        resolve: { alias },
+        resolve: { alias: domAlias }, // U10a
         test: {
           name: 'renderer',
           environment: 'happy-dom',

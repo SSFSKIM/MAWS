@@ -7,7 +7,7 @@
 - **Edges:** blocked-by: external, a sitting of about forty-five minutes with the owner for the checks marked *owner*, and the mini's operator session for those marked *agent*; a check marked *wave build* needs a build that holds the named child's change. blocks: U7 (S-03), U13 (l6-artifacts-13), U3 and U9 (O-33, O-35, O-39), U5 (O-46), U10 (l6-artifacts-09), U11 (#476, S-09), U6 (l5-code-07, O-37), U12 (Stop during a computer-use call).
 - **Contracts:** UC-11.
 - **Design inheritance:** advisory: run a check on build F unless it says otherwise, so that the verdict is about what the owner uses; where a check needs a log line that F does not write, the owning child adds the line first and the check runs on the wave's build.
-- **Required:** required for the items each check gates; the wave can close with a check recorded as "did not reproduce", which moves its item to the tracker with the method kept. **Status:** not dispatched: waiting for a sitting.
+- **Required:** required for the items each check gates; the wave can close with a check recorded as "did not reproduce", which moves its item to the tracker with the method kept. **Status** (as of 2026-11-13 05:47Z; the root's Tracking map is the current record): not dispatched (#597): waiting for a sitting.
 
 | check | the question | how | who | what each outcome changes |
 |---|---|---|---|---|
