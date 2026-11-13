@@ -67,6 +67,7 @@ export function PanelHost({ appSessionId, tabs, activeTabId, onChange, onToggleP
               grow={-1}
               percentOf={room}
               onChange={(px) => useLayout.getState().setGroupShare(appSessionId, px / room)}
+              onReset={() => useLayout.getState().setGroupShare(appSessionId, 0.5)}
               className="shrink-0"
             />,
           ] : []),

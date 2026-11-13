@@ -205,19 +205,25 @@ function writeRefs(appSessionId: AppSessionId | null, fn: (refs: PanelTabRef[]) 
   else l.updatePanelTabs(appSessionId, fn, below);
 }
 
-// UX wave U8b (M3, decision 3): the group of the side column that holds the keyboard: a group's section, or a menu drawn
-// in a portal from a group's strip (marked `data-side-group-menu`), whose items open with focus inside it.
-function focusedGroup(): SideGroupName | null {
-  const at = typeof document === 'undefined' ? null : document.activeElement?.closest<HTMLElement>('section[data-side-group], [data-side-group-menu]');
-  const name = at?.dataset.sideGroup ?? at?.dataset.sideGroupMenu;
-  return name === 'upper' || name === 'lower' ? name : null;
+// UX wave U8b (M3, decision 3): where the keyboard is in the side column. `menu`: inside a menu drawn in a portal from a
+// group's strip (marked `data-side-group-menu`), whose item is an open from that group, so it counts as the opener's
+// origin even when the item's opener names none (a plugin pane's, `openPaneTab`). `section`: inside a group's section,
+// the weaker fallback after a group that holds the tool.
+function keyboardGroup(): { menu: SideGroupName | null; section: SideGroupName | null } {
+  const at = typeof document === 'undefined' ? null : document.activeElement;
+  const name = (value: string | undefined) => (value === 'upper' || value === 'lower' ? value : null);
+  return {
+    menu: name(at?.closest<HTMLElement>('[data-side-group-menu]')?.dataset.sideGroupMenu),
+    section: name(at?.closest<HTMLElement>('section[data-side-group]')?.dataset.sideGroup),
+  };
 }
 
-// Where a new tab of `toolId` goes in its target's column: the opener's group, else `groupForOpen`'s answer, the keyboard
-// read only when the target's column is the one on screen.
+// Where a new tab of `toolId` goes in its target's column: the opener's group (said, or the strip menu it was chosen
+// from), else `groupForOpen`'s answer; the keyboard is read only when the target's column is the one on screen.
 function groupFor(target: AppSessionId | null, toolId: string, origin: SideGroupName | undefined): SideGroupName {
   const state = layout();
-  return groupForOpen(sideGroups(state, target), toolId, origin ?? null, surfaceSession(state) === target ? focusedGroup() : null);
+  const keyboard = surfaceSession(state) === target ? keyboardGroup() : { menu: null, section: null };
+  return groupForOpen(sideGroups(state, target), toolId, origin ?? keyboard.menu, keyboard.section);
 }
 
 // The writer for a change to the pins alone: the shown session's list when it has one, else the pins by themselves; no
