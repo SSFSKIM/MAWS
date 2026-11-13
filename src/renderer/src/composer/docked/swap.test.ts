@@ -46,10 +46,10 @@ describe('the docked swap takes the oldest answerable request, once it is read',
     }
   });
 
-  it('keeps an answered request docked (collapsed) until it retires', () => {
+  it('docks no answered or retired request (UC-1: the composer is back at the answer)', () => {
     const event = permission();
     const delivered = itemFor(event, A, { state: 'delivered' });
-    expect(swapOf([delivered], new Map([[delivered.id, event as SessionEvent]])).item?.id).toBe(delivered.id);
+    expect(swapOf([delivered], new Map([[delivered.id, event as SessionEvent]])).item).toBeNull();
     expect(swapOf([itemFor(event, A, { state: 'retired' })], new Map()).item).toBeNull();
   });
 

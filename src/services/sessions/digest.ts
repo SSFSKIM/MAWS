@@ -285,7 +285,8 @@ export function applyStatusToDigest(d: SessionDigest, status: EngineSessionStatu
 // any. Its availability stays `foreign_held`: MAWS never starts a second writer on it.
 export interface BridgedPhase {
   running: boolean; // the main loop's turn
-  pending: number; // its pending requests
+  pending: number; // its requests that stop it and that MAWS has not answered (UX wave U1a, UC-1: the lane A list's waiting
+  // requests but asynchronous questions, src/services/lane-a/attention.ts `stopping`), not the bridge's whole `pending`
   tool: { tool: string; input: unknown; running: boolean } | null; // the main loop's latest tool call of the turn
 }
 export function bridgedDigest({ running, pending, tool }: BridgedPhase): Pick<SessionDigest, 'phase' | 'activity' | 'pendingRequests'> {

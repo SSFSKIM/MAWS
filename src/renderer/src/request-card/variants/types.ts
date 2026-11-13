@@ -19,7 +19,8 @@ export interface VariantProps<K extends SessionEvent['kind']> {
   request: Extract<SessionEvent, { kind: K }>;
   placement: Placement;
   busy: boolean;
-  // `what` is the collapsed line's text once delivered (`Answered · <what>`); `delivered` runs after a delivered answer.
+  // `what` names the answer, for a body hosted outside the card; the card draws nothing of it (UX wave U1's UC-1: a sent
+  // card stands as it was, disabled, until its item leaves the list). `delivered` runs after a delivered answer.
   submit(answer: RequestAnswer, what: string, delivered?: () => void): void;
   bindKeys(keys: CardKeys): void;
   // P5 O9 M6: whether the session's controls port carries this answer (`answerCapability`), and why not; an option it

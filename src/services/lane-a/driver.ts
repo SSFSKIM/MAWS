@@ -20,6 +20,9 @@
 // - Controls post `POST /command?wait=10000` carrying the launch `/status` named. A 504 or a closed socket is `unknown`:
 //   the op may have run. Nothing is retried on its own but `deliver` (./deliveries.ts). Decisions are built from typed
 //   fields (./decisions.ts) after a fresh `GET /requests/<id>`, with `by: 'maws'`. `from` is never sent.
+// - An answer the bridge took (UX wave U1's UC-1, U1a's Interfaces §B): the bridge says nothing on its stream until its
+//   `settled`, so the driver tells its `onAccepted` listeners (the lane A list) at its own decision's 200, and when this
+//   machine's endpoint says sminos took one over the link (`laneA.accepted`, naming the engine session it drives).
 // - Media (M7): an upload is checked, saved under the session's own directory and handed to the bridge's `media` op
 //   (./media.ts), retried under its upload id; the roots it wrote are swept once no upload went to them for a day.
 // - The uid boundary (RL §5.11): the driver authenticates nothing and is authorized by the uid, as `sminos steer` is, so
@@ -102,6 +105,8 @@ export interface LaneAView {
   tool: MainTool | null;
 }
 export type LaneAListener = (appId: AppSessionId, view: LaneAView | null) => void;
+/** The bridge took an answer to `request` of the session (UC-1): its 200, heard here or by this machine's endpoint. */
+export type LaneAAcceptedListener = (appId: AppSessionId, request: string) => void;
 
 type ReadKind = 'usage' | 'config' | 'settings' | 'mcp' | 'status' | 'rows' | 'diff' | 'output';
 type ReadOutput = { ok: true; result: unknown } | { ok: false; code: 'no-bridge' | 'unsupported' | 'timeout' | 'busy' | 'failed'; message: string };
@@ -185,6 +190,10 @@ export interface LaneADriver {
   stopTask(appId: AppSessionId, taskId: string): Promise<ControlResult>;
   media(appId: AppSessionId, files: readonly { name: string; mediaType: string; data: string }[]): Promise<ControlResult>;
   onChange(listener: LaneAListener): () => void; // M6: each session's view as it changes, from now on
+  /** UC-1: this machine's endpoint heard sminos take an answer to `request` of the engine session `engineSessionId`. A
+   * session the driver does not drive (or whose bridge is not live) changes nothing. */
+  accepted(engineSessionId: string, request: string): void;
+  onAccepted(listener: LaneAAcceptedListener): () => void; // UC-1: each answer the bridge took, from now on
   readonly probes: Settling; // P5 O3-D M2 (Interfaces §A, D27): the probes in flight, which a release waits for
   stop(): void;
 }
@@ -201,6 +210,10 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
   let stopped = false;
   const warned = new Set<string>();
   const listeners = new Set<LaneAListener>();
+  const acceptedListeners = new Set<LaneAAcceptedListener>();
+  const tellAccepted = (appId: AppSessionId, request: string) => {
+    for (const listener of acceptedListeners) listener(appId, request);
+  };
   const probing = new Work(); // P5 O3-D M2
   const uploads = uploadRecords(join(deps.userData, 'lane-a', 'uploads.json'), { log });
   let git: GitRun | null = deps.git ?? null;
@@ -641,7 +654,10 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     }
     const body = posted.body ?? {};
     const message = typeof body.error === 'string' ? body.error : `the bridge answered ${posted.status}`;
-    if (posted.status === 200) return { outcome: 'delivered' };
+    if (posted.status === 200) {
+      tellAccepted(appId, request); // UC-1: the bridge took it; its settlement follows on the stream
+      return { outcome: 'delivered' };
+    }
     if (posted.status === 409 && (body.code === 'launch' || body.code === 'lane-b')) return { outcome: 'refused', code: body.code, message };
     if (posted.status === 409) {
       // another answer won: its settlement, as the child names it (or follows)
@@ -771,6 +787,13 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
       listeners.add(listener);
       return () => void listeners.delete(listener);
     },
+    accepted(engineSessionId, request) {
+      for (const s of sessions.values()) if (s.engine === engineSessionId && !s.gone && s.bridge?.bridge === 'live') tellAccepted(s.appId, request);
+    },
+    onAccepted(listener) {
+      acceptedListeners.add(listener);
+      return () => void acceptedListeners.delete(listener);
+    },
     probes: probing,
     stop() {
       stopped = true;
@@ -811,5 +834,6 @@ export function registerLaneA(driver: LaneADriver, register: Register): void {
   register('laneA.tell', ({ appSessionId, agentId, text }) => driver.tell(id(appSessionId), agentId, text));
   register('laneA.stopTask', ({ appSessionId, taskId }) => driver.stopTask(id(appSessionId), taskId));
   register('laneA.media', ({ appSessionId, files }) => driver.media(id(appSessionId), files));
+  register('laneA.accepted', ({ session, request }) => driver.accepted(session, request)); // UC-1: this machine's endpoint's word
 }
 

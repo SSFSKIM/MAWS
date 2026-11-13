@@ -1,8 +1,9 @@
 // X4, the request card (charter §13 X4, owned by C7; C7 execution document, Request card): one component for the five
 // request kinds and the notices, identical in every placement. It resolves the originating request (the prop, else
 // `attention.request` through the attention store's cache), answers through `session.answer` with payloads `toAnswer`
-// validated, reports the delivery (`answering`, `delivered` as one collapsed line until the item retires,
-// `not_pending` for two seconds, `write_failed` back to pending with Retry), and owns the keyboard: Enter and Esc
+// validated, reports the delivery (`answering`; `delivered` standing as it was, its controls disabled, until its item
+// leaves the session's list, UX wave U1's UC-1 and U1a's §C; `not_pending` for two seconds; `write_failed` back to
+// pending with Retry), and owns the keyboard: Enter and Esc
 // through C5's dispatcher, bound `within` the element that owns focus for the placement. Docked, that is the
 // `DockedCardFrame` around the card; in an Overview card, the nearest ancestor with a `tabindex` (C5's article), since
 // the article, not the card, holds focus there; hover and inline bind no key. Digits pick a permission's scope from
@@ -55,8 +56,8 @@ import { PlanBody } from './variants/Plan';
 import { QuestionBody } from './variants/Question';
 import type { CardKeys, Placement } from './variants/types';
 import { displayTitle } from '../sessions/title';
+import { waits } from '@shared/attention/kinds'; // UC-1
 // P2-C start (2026-10-10)
-import { isOpen } from '@shared/attention/kinds';
 import { bareOf } from '@shared/machine/address';
 import { markIdOf } from '@shared/owner/marks';
 import { openAnchor, ownerAnchorOf, type ItemAnchor } from '../attention/anchor';
@@ -81,19 +82,20 @@ const TONE: Record<AttentionTone, string> = { warning: 'text-warning', info: 'te
 const NOT_PENDING_MS = 2_000;
 const CARRIED: Capability = { available: true }; // no port: today's delivery path refuses it in the holder's words
 
-type Phase = 'pending' | 'answering' | 'delivered' | 'not_pending' | 'closed';
+// `sent`: the answer was delivered, and the card stands as it was, its controls disabled, until the session's list no
+// longer holds its item, which every route's holder says at once (UC-1, U1a's §C); the card never hides on its own word.
+type Phase = 'pending' | 'answering' | 'sent' | 'not_pending' | 'closed';
 type Outcome = 'delivered' | 'not_pending' | 'write_failed';
 
 // The one delivery path: the session's controls port (lane B: `session.answer`), its outcome, and a Retry that sends
 // the same answer again.
 function useDelivery(item: AttentionItem, onAnswered: RequestCardProps['onAnswered']) {
   const [phase, setPhase] = useState<Phase>('pending');
-  const [what, setWhat] = useState<string | null>(null);
   const [failed, setFailed] = useState<{ retry: () => void; detail: string | null } | null>(null);
   const inFlight = useRef(false);
 
   const submit = useCallback(
-    (answer: RequestAnswer, text: string, delivered?: () => void) => {
+    (answer: RequestAnswer, _what: string, delivered?: () => void) => { // the card draws no "Answered · <what>" (§C)
       const { requestId } = item.request;
       if (requestId === null) return;
       const send = async () => {
@@ -106,8 +108,7 @@ function useDelivery(item: AttentionItem, onAnswered: RequestCardProps['onAnswer
         const outcome: Outcome = result.ok ? result.value.outcome : 'write_failed';
         onAnswered?.(outcome);
         if (outcome === 'delivered') {
-          setWhat(text);
-          setPhase('delivered');
+          setPhase('sent');
           delivered?.();
         } else if (outcome === 'not_pending') {
           setPhase(terminalOnlyNow(item) ? 'pending' : 'not_pending'); // P5 O9 M6: the terminal's to answer, still pending
@@ -127,7 +128,7 @@ function useDelivery(item: AttentionItem, onAnswered: RequestCardProps['onAnswer
     return () => clearTimeout(timer);
   }, [phase]);
 
-  return { phase, what, failed, submit };
+  return { phase, failed, submit };
 }
 
 // Text entry, as C5's dispatcher defines it (`keymap/dispatcher.ts`, whose `BUTTON_LIKE_INPUTS` this reads): an input
@@ -183,10 +184,13 @@ const answerable = (request: SessionEvent | null): boolean =>
     request.kind === 'elicitation.requested' ||
     (request.kind === 'dialog.requested' && declaredDialog(request.dialogKind, request.payload).ok));
 
-// Keyed by the item: every piece of per-request state (the delivery phase, the answered line, a failure, the bound
+// Keyed by the item: every piece of per-request state (the delivery phase, its sent state, a failure, the bound
 // keys, a variant's picked scope or selections) belongs to one request, and a placement that renders the card unkeyed
 // (C5's Overview card and hover card pass the session's next request into the same slot) must never carry it over.
+// UC-1: an item that no longer waits (its answer delivered: only a machine on an older build still lists one) is drawn
+// by no placement and binds no key.
 export function RequestCard(props: RequestCardProps) {
+  if (!waits(props.item)) return null;
   return <RequestCardFor key={props.item.id} {...props} />;
 }
 
@@ -211,7 +215,7 @@ function RequestCardFor(props: RequestCardProps) {
       component="AskUserQuestion"
       instanceId={request.toolUseId}
       props={{ tool: 'AskUserQuestion', questions: engineQuestionsOf(request.questions) }}
-      enabled={item.state === 'pending'}
+      enabled={waits(item)}
     >
       {(rewritten, { concealed }) => native({ ...request, questions: nativeQuestionsOf(rewritten.questions)! }, concealed)}
     </SurfaceRow>
@@ -227,7 +231,7 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   const project = useSessions((s) => (record?.projectId ? (s.projects.get(record.projectId)?.name ?? null) : null));
   const rows = useTranscriptStore((s) => s.entries[item.appSessionId]?.rows);
   const now = useNow();
-  const { phase, what, failed, submit } = useDelivery(item, onAnswered);
+  const { phase, failed, submit } = useDelivery(item, onAnswered);
   const pointer = usePointerOnly();
   // P5 O9 M6: what the session's port carries, and how the race with its terminal stands
   const controls = useSessionControls(item.appSessionId);
@@ -249,7 +253,7 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   }, []);
   const accept = useCallback(() => keys.current.accept?.(), []);
   const decline = useCallback(() => keys.current.decline?.(), []);
-  const live = phase === 'pending' && item.state === 'pending' && !concealed && race.settled === null; // M6: a settled race answers nothing
+  const live = phase === 'pending' && !concealed && race.settled === null; // M6: a settled race answers nothing
 
   // Card placement: the focus owner is C5's article (the nearest `tabindex` ancestor), the card root without one.
   const rootRef = useRef<HTMLDivElement>(null);
@@ -283,10 +287,10 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   if (phase === 'closed' && race.settled === null) return null; // M6: a settlement stays said while its placement shows it
 
   const heading = HEADINGS[item.kind];
-  const busy = phase === 'answering';
+  const sent = phase === 'sent';
+  const busy = phase === 'answering' || sent; // sent: disabled until the list lets the item go
   const requester = requesterName(rows ?? [], request?.agentId ?? item.request.agentId);
   const { title, subtitle } = titleOf(request, requester);
-  const collapsed = phase === 'delivered' || (phase === 'pending' && item.state === 'delivered' && failed === null);
   const hover = placement === 'hover';
   // P5 O9 M6: by the session's port, which a session held elsewhere has only while its bridge drives it
   const canAnswerHover = hover && hoverApproval(item, request) && controls !== null
@@ -297,7 +301,7 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   const openSession = () => (anchor !== null ? openAnchor(item.appSessionId, anchor, (id) => useLayout.getState().openSession(id)) : useLayout.getState().openSession(item.appSessionId));
   // P2-C end
   const variant = { item, placement, busy: busy || concealed, submit, bindKeys, capability };
-  const settled = collapsed ? null : race.settled; // M6: our own delivered answer says itself
+  const settled = sent ? null : race.settled; // M6: a settlement after our own delivered answer is ours: nothing to say
 
   let body: ReactNode;
   if (loading) {
@@ -316,12 +320,6 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
     body = (
       <p role="status" className="m-0 text-fg-muted">
         Already answered elsewhere
-      </p>
-    );
-  } else if (collapsed) {
-    body = (
-      <p role="status" className="m-0 text-fg-muted">
-        Answered{what ? ` · ${what}` : ''}
       </p>
     );
   } else if (request?.kind === 'maws.ask.opened') {
@@ -368,7 +366,7 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
         <div className="flex flex-col gap-1">
           <h3 className="m-0 text-ui font-semibold">{title}</h3>
           {subtitle && <Muted>{subtitle}</Muted>}
-          {race.asked && settled === null && !collapsed && <Muted>{race.terminalOnly ? RACE.terminal : RACE.asked}</Muted>}
+          {race.asked && settled === null && <Muted>{race.terminalOnly ? RACE.terminal : RACE.asked}</Muted>}
           {hover && <Muted>{[project, record ? displayTitle(record) : null, itemAge(item, now)].filter(Boolean).join(' · ')}</Muted>}
         </div>
       )}
@@ -389,23 +387,23 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
           <CardButton onClick={() => void useAttention.getState().retryRequest(ipc, item)}>Retry</CardButton>
         </div>
       )}
-      {request?.kind === 'permission.requested' && record && !collapsed && (
+      {request?.kind === 'permission.requested' && record && (
         <p className="m-0 truncate font-mono text-ui-sm text-fg-muted" title={record.directory}>
           {record.directory}
         </p>
       )}
-      {canAnswerHover && !collapsed && <Muted>Approve applies to this request only.</Muted>}
+      {canAnswerHover && <Muted>Approve applies to this request only.</Muted>}
       {(hover || (placement === 'card' && !answerable(request))) && request?.kind !== 'maws.ask.opened' && (
         <Controls>
           <CardButton onClick={openSession} className="mr-auto">
             Open session
           </CardButton>
           {/* P2-C start (2026-10-10) */}
-          {item.kind === 'essential_unread' && anchor !== null && isOpen(item) && (
+          {item.kind === 'essential_unread' && anchor !== null && (
             <MarkRead appSessionId={item.appSessionId} anchor={anchor} />
           )}
           {/* P2-C end */}
-          {canAnswerHover && !collapsed && request?.kind === 'permission.requested' && (
+          {canAnswerHover && request?.kind === 'permission.requested' && (
             <>
               <CardButton
                 disabled={busy}

@@ -10,7 +10,7 @@
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AttentionId } from '@shared/graph/ids';
-import { isActionable, isOpen } from '@shared/attention/kinds';
+import { isActionable, waits } from '@shared/attention/kinds';
 import { declaredDialog } from '../../request-card/variants/dialog-kinds';
 
 export interface Swap {
@@ -26,7 +26,7 @@ const byAge = (a: AttentionItem, b: AttentionItem) => at(a) - at(b);
 
 export function swapOf(items: readonly AttentionItem[], requests: ReadonlyMap<AttentionId, SessionEvent | null>): Swap {
   // the owner's ruling (2026-10-30): an error seen or dismissed is retired, so only an unseen one is a notice here
-  const open = items.filter(isOpen).sort(byAge);
+  const open = items.filter(waits).sort(byAge); // UC-1: an answered request docks nowhere
   const unread: AttentionItem[] = [];
   const answerable: AttentionItem[] = [];
   const notices: AttentionItem[] = [];

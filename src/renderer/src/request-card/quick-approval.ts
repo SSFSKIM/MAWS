@@ -6,6 +6,7 @@
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import { isReadOnlyRequest } from '@shared/attention/read-only-tools';
+import { waits } from '@shared/attention/kinds';
 
 export type QuickApproval = 'full' | 'button_only' | 'none';
 
@@ -15,4 +16,4 @@ export const quickApproval = (ev: Extract<SessionEvent, { kind: 'permission.requ
 // The hover card's Approve and Deny (§5.1): a pending permission for a read-only tool with nothing that withholds a
 // quick approval; every other item shows its preview and Open session.
 export const hoverApproval = (item: AttentionItem, request: SessionEvent | null): boolean =>
-  item.state === 'pending' && request?.kind === 'permission.requested' && isReadOnlyRequest(request) && quickApproval(request) === 'full';
+  waits(item) && request?.kind === 'permission.requested' && isReadOnlyRequest(request) && quickApproval(request) === 'full';

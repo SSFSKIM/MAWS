@@ -79,7 +79,7 @@ describe('lane B’s pending counts with no device subscribed', () => {
     expect(sent.frames.slice(2)).toEqual([notify('app-1', 'settled', 1), notify('app-1', 'settled', 0)]);
   });
 
-  it('counts only the items that wait on an answer: an answered (confirmed or retired) item is not pending', async () => {
+  it('counts only the items that wait on an answer: an answered (delivered, confirmed or retired) item is not pending', async () => {
     const { f, sent } = await lab(['app-1'], ['app-1']);
     const s = f.host.session('app-1');
     f.host.setItems('app-1', [
@@ -89,7 +89,7 @@ describe('lane B’s pending counts with no device subscribed', () => {
       item(s, 'rq-4', 'question'),
     ]);
     await sent.count(1);
-    expect(sent.frames).toEqual([notify('app-1', 'waiting', 2)]);
+    expect(sent.frames).toEqual([notify('app-1', 'waiting', 1)]);
   });
 
   // UC-1 (A17): the endpoint's lane B count leaves out a request whose answer was delivered

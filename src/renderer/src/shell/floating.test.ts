@@ -419,7 +419,7 @@ describe('the split’s card', () => {
     expect(marked(), 'the raise never takes the keyboard').toEqual([]);
     closeCard();
     pending({ ...permission, state: 'delivered' });
-    expect(closed(), 'the same request, still pending').toBe(true);
+    expect(closed(), 'the same request, answered: nothing new waits').toBe(true);
     pending(permission, attention(A, 'question', '2026-09-28T10:01:00.000Z'));
     expect(closed()).toBe(false);
   });

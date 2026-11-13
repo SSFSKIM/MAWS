@@ -65,16 +65,17 @@ describe('needs-you ordering', () => {
     expect(row).toMatchObject({ tier: 1, count: 3, oldest: { kind: 'question' } });
   });
 
-  it('counts delivered items, ignores confirmed and retired ones, and excludes archived sessions', () => {
+  it('ignores delivered (UC-1), confirmed and retired items, and excludes archived sessions', () => {
     const rows = needsYou(
       new Map([
         ['d' as AppSessionId, [item('d', 'permission', '2026-09-28T10:00:00Z', { state: 'delivered' })]],
         ['r' as AppSessionId, [item('r', 'permission', '2026-09-28T10:00:00Z', { state: 'retired' })]],
         ['x' as AppSessionId, [item('x', 'permission', '2026-09-28T10:00:00Z')]],
+        ['p' as AppSessionId, [item('p', 'permission', '2026-09-28T10:00:00Z')]],
       ]),
-      rs(record('d'), record('r'), record('x', { archived: true })),
+      rs(record('d'), record('r'), record('x', { archived: true }), record('p')),
     );
-    expect(rows.map((r) => r.appSessionId)).toEqual(['d']);
+    expect(rows.map((r) => r.appSessionId)).toEqual(['p']);
   });
 
   it('breaks a tie on wait by title', () => {

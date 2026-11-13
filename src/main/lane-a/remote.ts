@@ -27,7 +27,12 @@
 //   at most once per 10 s. The state carries the link (`link`: its state, this device's member, class and machine rights
 //   from `caps`, and the reason no control acts, if so), refreshed at each `caps` and link state change; while that
 //   reason stands every act is refused with it here. It also carries each control's act in flight (`acts`) with the
-//   link's progress, until its outcome.
+//   link's progress, until its outcome. UX wave U1a (UC-1, Interfaces §B, the ruling on Reported 8): it names each request
+//   whose answer the session's machine said it took (`done` to this device's own act) in `accepted`, which every window
+//   of this device reads, so the request is drawn nowhere here before the bridge's settlement; nothing reaches this
+//   device of the session machine's own holder. An entry leaves at the bridge's `settled`, at a reset of the session's
+//   main watch (its snapshot clears `pending` too, and the requests restated after it wait again), and when the bridge
+//   stops being live. No timer: a window on a third device waits for the settlement.
 // - Reads name the watch's subscription (`input.sub`). `rows`, `diff` and `output` answer `{requested: true}` and arrive
 //   as plane messages of their kind; one of each kind is outstanding per watch, a second waiting for the first's answer,
 //   the watch's reset or 10 s. Every other read carries an id minted here and is answered by that id's `read` message
@@ -135,6 +140,7 @@ type Session = {
   sends: Send[];
   sending: boolean;
   acts: Map<string, LaneAAct>; // controls' acts in flight, by opId (a send's is its delivery)
+  accepted: Set<string>; // UC-1: the requests the machine said it took, until a word of the machine's says otherwise
   last: string; // the last state sent
 };
 
@@ -189,7 +195,7 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
     const sessions = machineOf(link);
     let s = sessions.get(id) ?? null;
     if (s === null && create) {
-      s = { machine: link.machine, link, id, watches: new Map(), status: null, hydratedAt: 0, deliveries: new Map(), sends: [], sending: false, acts: new Map(), last: '' };
+      s = { machine: link.machine, link, id, watches: new Map(), status: null, hydratedAt: 0, deliveries: new Map(), sends: [], sending: false, acts: new Map(), accepted: new Set(), last: '' };
       sessions.set(id, s);
     }
     return s;
@@ -202,11 +208,13 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
     const w = primary(s);
     if (w === null) return null;
     const deliveries = [...s.deliveries.values()].map((d): LaneADelivery => ({ key: d.key, at: d.at, state: d.state, ...(d.uuid !== undefined && { uuid: d.uuid }), ...(d.reason !== undefined && { reason: d.reason }) }));
-    return w.fold.state({ appSessionId: s.id, status: s.status, deliveries, link: linkView(s.link), acts: [...s.acts.values()] });
+    return w.fold.state({ appSessionId: s.id, status: s.status, deliveries, link: linkView(s.link), acts: [...s.acts.values()], accepted: [...s.accepted] });
   }
 
   function changed(s: Session): void {
     const state = stateOf(s);
+    // UC-1: an entry the state no longer names (settled, or the bridge no longer live) is gone for good
+    if (state !== null) s.accepted = new Set(state.accepted);
     const text = JSON.stringify(state);
     if (text === s.last) return;
     s.last = text;
@@ -287,6 +295,7 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
           w.backoffMs = timing.backoffMs[0];
           const message = value as PlaneMessage;
           if (w.agentId === null) w.fold.message(message);
+          if (primary(s) === w) s.accepted.clear(); // UC-1: a reset; the requests restated after it wait again
           emitPlane(s, { watch: w.id, messages: [message] });
           if (w.paused !== null) {
             w.paused = null;
@@ -585,7 +594,11 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
       args = { decision: 'allow', scope: { suggestion: 0, sha256, destination: intent.destination }, digest };
     }
     const outcome = await act(live, rpc, args, { target: request, requestDigest: digest });
-    if (outcome.state === 'done') return { outcome: 'delivered' };
+    if (outcome.state === 'done') {
+      live.s.accepted.add(request); // UC-1: the machine took it; its settlement follows on the plane
+      changed(live.s);
+      return { outcome: 'delivered' };
+    }
     if (outcome.state === 'unknown') return { outcome: 'unknown', why: 'gone' };
     const result = controlOf(outcome, live.s.link.name, rpc) as Extract<ControlResult, { state: 'refused' }>;
     if (result.code === 'not-pending') return { outcome: 'not_pending', settled: fold.settledOf(request), message: result.message };

@@ -83,6 +83,11 @@ function mount(event: RequestEvent, placement: Placement, over: Partial<Attentio
 }
 
 const press = async (key: string) => userEvent.setup().keyboard(key);
+// UC-1 (§C): after a delivered answer the card stands as it was, `button` disabled, and draws no "Answered" line
+const sentAsItWas = async (button: string) => {
+  await waitFor(() => expect((screen.getAllByRole('button', { name: button }).at(-1) as HTMLButtonElement).disabled).toBe(true));
+  expect(screen.queryByText(/Answered/)).toBeNull();
+};
 const focusOn = (element: HTMLElement) => act(() => element.focus());
 const frame = () => document.querySelector<HTMLElement>('[data-docked-frame]')!; // a multi-select question is a named group too
 const article = () => screen.getByRole('article');
@@ -283,7 +288,7 @@ describe('request card placements and delivery states', () => {
     expect(answers()).toEqual([]); // nothing leaves before Submit
     await user.click(submit);
     await waitFor(() => expect(answers()).toEqual([{ kind: 'question', answers: { 'Which color do you prefer?': 'Red', 'Which fruits do you like?': 'Apple, Pear' } }]));
-    await waitFor(() => expect(screen.getByText('Answered · Submitted')).toBeTruthy());
+    await sentAsItWas('Submit'); // UC-1: the card stands, sent, until its item leaves the list
   });
 
   it.each(['inline', 'docked', 'card'] as const)('a single-select pick in %s waits for Next and can be changed, with the pager retaining the answer', async (placement) => {
@@ -329,7 +334,7 @@ describe('request card placements and delivery states', () => {
     mount(skippedQuestion, 'inline');
     await user.click(screen.getByRole('button', { name: 'Skip' }));
     await waitFor(() => expect(answers().at(-1)).toEqual({ kind: 'question', answers: {} })); // the engine: "The user did not answer the questions."
-    await waitFor(() => expect(screen.getByText('Answered · Skipped')).toBeTruthy());
+    await sentAsItWas('Skip');
   });
 
   it('the picks live beside the request: a remount, or the same item in another placement, resumes at the same question', async () => {
@@ -401,7 +406,7 @@ describe('request card placements and delivery states', () => {
     await press('{Escape}');
     // the answer C3's broker writes as the recorded deny (broker.test.ts pins the wire over the same fixture)
     await waitFor(() => expect(answers()).toEqual([{ kind: 'permission', decision: 'deny' }]));
-    await waitFor(() => expect(screen.getByText('Answered · Skipped')).toBeTruthy());
+    await sentAsItWas('Skip');
     first.view.unmount();
     mount(question, 'card');
     focusOn(article());
@@ -544,11 +549,10 @@ describe('request card placements and delivery states', () => {
     else await waitFor(() => expect(answers()).toEqual([{ kind: 'permission', decision: 'deny' }]));
   });
 
-  it('delivered collapses to one line, not_pending says so for two seconds and closes, write_failed offers Retry', async () => {
+  it('delivered stands as it was, disabled, with no "Answered" line; not_pending says so for two seconds and closes, write_failed offers Retry', async () => {
     const first = mount(unflaggedRead, 'inline');
     fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
-    expect(await screen.findByText('Answered · Allowed once')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Allow' })).toBeNull();
+    await sentAsItWas('Allow');
     first.view.unmount();
 
     vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -568,17 +572,12 @@ describe('request card placements and delivery states', () => {
     expect((screen.getByRole('button', { name: 'Allow' }) as HTMLButtonElement).disabled).toBe(false); // back to pending
     outcome = 'delivered';
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    expect(await screen.findByText('Answered · Allowed once')).toBeTruthy();
+    await sentAsItWas('Allow');
+    expect(screen.queryByText("Couldn't deliver the answer")).toBeNull();
     expect(answers().slice(-2)).toEqual([
       { kind: 'permission', decision: 'allow', scope: 'once' }, // the failed write
       { kind: 'permission', decision: 'allow', scope: 'once' }, // the same answer again
     ]);
-  });
-
-  it('an item already delivered when the card mounts renders the collapsed line', () => {
-    mount(unflaggedRead, 'card', { state: 'delivered' });
-    expect(screen.getByRole('status').textContent).toBe('Answered');
-    expect(bindingsOf('request.accept')).toEqual([]);
   });
 
   it('fetches the request through the attention store when the placement passes none, showing a skeleton meanwhile', async () => {
@@ -769,10 +768,10 @@ describe('a card whose item changes starts over (C5 renders the slot unkeyed)', 
     view.rerender(inArticle({ ...reapply, requestId: 'req-next' } as RequestEvent));
     expect(screen.getByRole('radio', { name: 'Allow once' }).getAttribute('aria-checked')).toBe('true'); // not a scope nobody picked here
     fireEvent.click(screen.getByRole('button', { name: 'Deny' }));
-    expect(await screen.findByText('Answered · Denied')).toBeTruthy();
+    await sentAsItWas('Deny');
     view.rerender(inArticle({ ...reapply, requestId: 'req-third' } as RequestEvent));
-    expect(screen.queryByText(/Answered/)).toBeNull();
-    expect(screen.getByRole('button', { name: 'Allow' })).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Allow' }) as HTMLButtonElement).disabled).toBe(false); // the next one inherits no sent state
+    expect((screen.getByRole('button', { name: 'Deny' }) as HTMLButtonElement).disabled).toBe(false);
   });
 });
 

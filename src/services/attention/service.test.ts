@@ -80,17 +80,17 @@ function setup(opts: { store?: FakeStore; dispatch?: AttentionServiceDeps['dispa
 }
 
 describe('attention service merges broker items with the derived kinds', () => {
-  it('keeps the broker\'s pending and delivered items, persists the merged list, and emits it whole', async () => {
+  it('keeps the broker\'s waiting items, persists the merged list, and emits it whole', async () => {
     const { service, store, fire, last } = setup();
     await service.ready;
     const permission = item({ kind: 'permission', state: 'pending' });
     const question = item({ kind: 'question', state: 'delivered', request: { requestId: 'req-2' as never, toolUseId: 'toolu_2' as never, taskId: null, agentId: null } });
     const plan = item({ kind: 'plan', state: 'confirmed', request: { requestId: 'req-3' as never, toolUseId: 'toolu_3' as never, taskId: null, agentId: null } });
     fire('session.brokerItems', { appSessionId: APP, items: [permission, question, plan] });
-    expect(last()).toEqual([permission, question]); // the engine moved past a confirmed item
+    expect(last()).toEqual([permission]); // UC-1: an answered (delivered) item waits nowhere; the engine moved past a confirmed one
     await service.settled();
-    expect(store.sessions.get(APP)).toEqual([permission, question]);
-    expect(await service.list()).toEqual([permission, question]);
+    expect(store.sessions.get(APP)).toEqual([permission]);
+    expect(await service.list()).toEqual([permission]);
   });
 
   // UC-1 (A17, §B): the publisher keeps only what waits, so no answered request reaches any window, machine or the store
@@ -599,7 +599,7 @@ describe('attention service persistence failures', () => {
     await expect(service.settled()).rejects.toThrow('EIO: attention.json not written');
     expect(await handlers.get('attention.list')!(undefined)).toEqual([first]);
     expect(last()).toEqual([first]);
-    const second = item({ kind: 'permission', state: 'delivered', request: { requestId: 'req-2' as never, toolUseId: 'toolu_2' as never, taskId: null, agentId: null } });
+    const second = item({ kind: 'permission', state: 'pending', request: { requestId: 'req-2' as never, toolUseId: 'toolu_2' as never, taskId: null, agentId: null } });
     fire('session.brokerItems', { appSessionId: APP, items: [first, second] });
     await expect(service.settled()).resolves.toBeUndefined();
     expect(store.sessions.get(APP)).toEqual([first, second]);

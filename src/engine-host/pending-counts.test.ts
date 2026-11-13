@@ -32,7 +32,7 @@ describe('engine.pendingItems’s answer', () => {
       row('app-2', [item('app-2', 1, 'pending', { kind: 'error', request: { requestId: null, toolUseId: null, taskId: null, agentId: null } })]),
       row('app-3', []),
     ]);
-    expect(answer).toEqual({ sessions: [{ appSessionId: 'app-1', waiting: 2 }] });
+    expect(answer).toEqual({ sessions: [{ appSessionId: 'app-1', waiting: 1 }] }); // UC-1: the delivered one waits on nothing
     expect(commands['engine.pendingItems'].output.parse(answer)).toEqual(answer);
   });
 

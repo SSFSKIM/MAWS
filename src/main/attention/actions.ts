@@ -3,6 +3,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
 import type { SpineView } from '@shared/spine/view';
 import { isReadOnlyRequest } from '@shared/attention/read-only-tools';
+import { waits } from '@shared/attention/kinds';
 import type { HostDispatch } from '../ipc/router';
 
 // P5 O3-C (reader R2): a reply acquires the session, and Allow once reads the request still pending, through the spine's view
@@ -12,7 +13,7 @@ export function notificationActions(deps: {
 }) {
   const canAllow = async (item: AttentionItem): Promise<boolean> => {
     const current = deps.view.attention(item.appSessionId).find((pending) => pending.id === item.id);
-    if (current?.kind !== 'permission' || current.state !== 'pending' || current.request.requestId === null) return false;
+    if (current?.kind !== 'permission' || !waits(current) || current.request.requestId === null) return false;
     const result = await deps.dispatch('engine-host', 'session.pendingRequest', { appSessionId: item.appSessionId, requestId: current.request.requestId });
     return result.ok && isReadOnlyRequest((result.value as { event: SessionEvent | null }).event);
   };

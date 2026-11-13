@@ -22,7 +22,7 @@ import type { SpineView } from '@shared/spine/view';
 import type { EventPayload, NotificationKinds, Settings, SessionDigest } from '@shared/ipc/schema';
 import type { AttentionNavigate } from '@shared/ipc/schema/attention';
 import type { MachineRef } from '@shared/machine/ref';
-import { isActionable, isOpen } from '@shared/attention/kinds';
+import { isActionable, waits } from '@shared/attention/kinds';
 import { previewLine } from '@shared/owner/preview';
 import type { emit as emitEvent, emitFrom as emitEventFrom } from '../ipc/events';
 import type { RemoteAttention, RemoteAttentionChange } from '../lane-b/remote-attention';
@@ -139,7 +139,7 @@ export function startNotifier(view: NotifierView, deps: NotifierDeps): () => voi
   const inNeedsYou = (id: AppSessionId) => { const r = view.record(id); return r !== null && !r.archived; };
   const onAttention = (appSessionId: AppSessionId, items: readonly AttentionItem[], silent: ReadonlySet<AttentionId>) => {
     for (const [handle, notice] of live) {
-      if (notice.remote === undefined && notice.appSessionId === appSessionId && notice.attentionId !== null && !items.some((i) => i.id === notice.attentionId && isOpen(i))) {
+      if (notice.remote === undefined && notice.appSessionId === appSessionId && notice.attentionId !== null && !items.some((i) => i.id === notice.attentionId && waits(i))) {
         live.delete(handle);
         handle.close();
       }
@@ -148,7 +148,7 @@ export function startNotifier(view: NotifierView, deps: NotifierDeps): () => voi
       if (seen.has(item.id)) continue;
       seen.add(item.id);
       if (silent.has(item.id)) continue;
-      if (item.state !== 'pending' || !isActionable(item) || !inNeedsYou(appSessionId)) continue;
+      if (!waits(item) || !isActionable(item) || !inNeedsYou(appSessionId)) continue;
       const settings = deps.settings().notifications;
       if (settings.enabled && settings.kinds[GROUP[item.kind]]) post({ appSessionId, attentionId: item.id, body: item.summary });
     }
@@ -165,7 +165,7 @@ export function startNotifier(view: NotifierView, deps: NotifierDeps): () => voi
     if (!record || record.archived || record.holder.kind !== 'self' || !policy.enabled || !policy.kinds.turnFinished) return;
     post({ appSessionId: digest.appSessionId, attentionId: null, body: digest.lastAssistantLine ?? 'Turn finished' });
   };
-  const counts = (items: readonly AttentionItem[]) => items.some((i) => isOpen(i) && isActionable(i));
+  const counts = (items: readonly AttentionItem[]) => items.some((i) => waits(i) && isActionable(i));
   const updateBadge = () => {
     let count = 0;
     for (const [id, items] of view.allAttention()) if (inNeedsYou(id) && counts(items)) count++;
@@ -183,7 +183,7 @@ export function startNotifier(view: NotifierView, deps: NotifierDeps): () => voi
   const remoteMet = new Set<MachineRef>();
   const remotePending = (machine: MachineRef, app: string, id: AttentionId | null) => {
     const held = deps.remote?.machine(machine);
-    return held !== null && held !== undefined && !held.greyed && (held.sessions.get(app) ?? []).some((i) => i.id === id && i.state === 'pending');
+    return held !== null && held !== undefined && !held.greyed && (held.sessions.get(app) ?? []).some((i) => i.id === id && waits(i));
   };
   const titleOf = (machine: MachineRef, name: string, app: string) => {
     const title = deps.remoteTitle?.(machine, app) ?? null;
@@ -193,7 +193,7 @@ export function startNotifier(view: NotifierView, deps: NotifierDeps): () => voi
     const held = deps.remote?.machine(change.machine) ?? null;
     for (const [handle, notice] of live) {
       if (notice.remote?.machine !== change.machine || (change.kind === 'session' && notice.appSessionId !== change.app)) continue;
-      if ((held?.sessions.get(notice.appSessionId) ?? []).some((i) => i.id === notice.attentionId && isOpen(i))) continue;
+      if ((held?.sessions.get(notice.appSessionId) ?? []).some((i) => i.id === notice.attentionId && waits(i))) continue;
       live.delete(handle);
       handle.close();
     }
@@ -208,7 +208,7 @@ export function startNotifier(view: NotifierView, deps: NotifierDeps): () => voi
           if (remoteSeen.has(key)) continue;
           remoteSeen.add(key);
           if (restoring) continue;
-          if (item.state !== 'pending' || !isActionable(item)) continue;
+          if (!waits(item) || !isActionable(item)) continue;
           const settings = deps.settings().notifications;
           if (settings.enabled && settings.kinds[GROUP[item.kind]]) post({ appSessionId: app as AppSessionId, attentionId: item.id, body: item.summary, remote: { machine: change.machine, title: titleOf(change.machine, held.name, app) } });
         }
