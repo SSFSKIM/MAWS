@@ -1181,6 +1181,10 @@ Found while checking the sections against the code at `48619c824`, then by the a
   Rationale: a terminal session on another machine known only by its listing (lane A) is a session tab of a project with a channel, and `sessionSetKey` resolves a record-less listing only for lane B. Rejected: editing `stores/org-projects.ts`, outside M5's insertions (its other callers' gap is residue).
   Date/Author: 2026-11-12, M5's executor on the task review; the wave's architect (the ruling).
 
+- Decision: M6's means. The row is `ConnectorRow` (exported from `widgets/McpWidget.tsx`: `server`, `words`, `control`, `actions`, `opened`, `under`); it opens through a button with `aria-expanded`, not `<details>`, and its opened part is drawn only while open. `<place>` reads the main root through the existing `git.worktree.list` (home abbreviated); any failed read, and a session on another machine, falls back to the folder, and no sentence is drawn while the read is out. The terminal session's dialog takes the "MCP servers" subtitle and no head sentence (its switch is the terminal's `/mcp`). Sign in sits on the row's line and its progress line under the row, beside the toggle's and the reconnect's answer. The head's note may wrap, so a long path is not cut. In `composer/mentions/items.ts` a one-entry map lets only `mcp`'s declared description win. The "+" › Connectors submenu's rows take `connectorStatusWords` in M7, through its `widgets/` hook.
+  Rationale: §C's row and words, with the controls outside the disclosure (M6's second decision); the submenu's rows are M7's by the Constraints table.
+  Date/Author: 2026-11-12, M6's executor; folded by the controller.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
