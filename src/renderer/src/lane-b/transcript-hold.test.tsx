@@ -192,6 +192,33 @@ describe('the hold', () => {
     }
   });
 
+  // M5's fix round: the re-read's wait for a hydration still out asked the store again until it answered the same
+  // settlement twice; a key left hydrating with no attachment answers a new settled promise each time, so the wait went
+  // round in microtasks and never yielded. Reached here by a second client's source of the key, attached over the
+  // hold's and let go (one client's sources are one per key, so the window's own panes never do this)
+  it('stops waiting on a key that is hydrating with no attachment left, and never spins on it', async () => {
+    const hold = await heldThroughALoss();
+    const other = fakeClient();
+    void useTranscriptStore.getState().attach(REMOTE, ipcSourceOver(other.client, REMOTE));
+    useTranscriptStore.getState().detach(REMOTE);
+    expect(attached(), 'no attachment left').toBe(false);
+    expect(entry().phase).toBe('hydrating');
+    // a bound of its own: past 50 asks the store answers a settlement that never comes, so a spinning wait parks there
+    const retry = useTranscriptStore.getState().retry;
+    let asks = 0;
+    useTranscriptStore.setState({ retry: (key: string) => (++asks > 50 ? new Promise<void>(() => {}) : retry(key)) });
+    try {
+      roster('up');
+      settledWord();
+      await settle();
+      await settle();
+      expect(asks, 'the store asked at most once').toBeLessThanOrEqual(1);
+    } finally {
+      useTranscriptStore.setState({ retry });
+      hold.unmount();
+    }
+  });
+
   it('keeps the key the pane attached across offline: at up the pane joins it, and nothing is read again', async () => {
     const hold = await heldThroughALoss();
     expect(attached(), 'held while the pane is unmounted').toBe(true);
