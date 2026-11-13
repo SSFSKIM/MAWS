@@ -2,21 +2,26 @@
 // a file through `openFile`, a file tab in C5's main area, and the tab's viewer is the only reader of its bytes. The
 // session comes first because the allowlist is per session; `codeTranscriptActions.openFile` is the transcript's
 // two-argument form, filling the session from the focused pane (C5's Pane focuses on pointerdown, so at click time it
-// is the transcript's).
+// is the transcript's). UX wave U6c (decision 15): opening a file whose tab is already open reads it again when its last
+// read failed or no watch keeps it current (`revisit`).
 import type { AppSessionId } from '@shared/graph/ids';
 import { normalizeLexically } from '@shared/files/named';
+import { tabId, type TabTarget } from '@shared/ipc/schema/layout';
 import { machineFor } from '../../ipc/machine';
 import { panelHost, shownSession } from '../../panel/host';
 import { useLayout } from '../../stores/layout';
 import { useSessions } from '../../stores/sessions';
 import { useTranscriptStore, type TranscriptActions, type TurnId } from '../../transcript';
+import { useViewer } from './viewer/viewer-store';
 
 // `normalizeLexically` lives in the rule of a file the transcript names (UX wave U6c, `src/shared/files/named.ts`), so the
 // daemon's check reads a path as the click does; exported here as before.
 export { normalizeLexically };
 
 export function openFile(appSessionId: AppSessionId | null, path: string, line?: number | null): void {
-  useLayout.getState().openTab({ kind: 'file', path: normalizeLexically(path), line: line ?? null, appSessionId, machine: machineFor(appSessionId) });
+  const target: TabTarget = { kind: 'file', path: normalizeLexically(path), line: line ?? null, appSessionId, machine: machineFor(appSessionId) };
+  useLayout.getState().openTab(target);
+  useViewer.getState().revisit(tabId(target), appSessionId);
 }
 
 // The session a turn belongs to, for a call outside a click: the transcript store key whose state holds the turn, the
