@@ -516,14 +516,15 @@ describe('the checkout bounds and the folders a record’s facts name', () => {
     for (const [name, make] of ADMISSION_CASES) {
       const { record, which, folder, admitted } = make(p);
       const bounds = await f.endpoint.checkoutBounds.of(record, dispatch);
+      // soft: every row is judged and reported, as each is a case of its own in the files service's suite
       if (admitted !== null) {
-        expect(bounds.roots, name).toContain(admitted);
-        expect(withinBounds(bounds.within, admitted), name).toBe(true);
+        expect.soft(bounds.roots, name).toContain(admitted);
+        expect.soft(withinBounds(bounds.within, admitted), name).toBe(true);
       } else {
-        expect(bounds.roots, name).not.toContain(real(folder));
-        expect(bounds.roots, name).toEqual([record.directory]); // the record's own root alone
+        expect.soft(bounds.roots, name).not.toContain(real(folder));
+        expect.soft(bounds.roots, name).toEqual([record.directory]); // the record's own root alone
       }
-      if (which === 'path') expect(bounds.checkoutCovers, `${name}: the working folder is Source control’s checkout`).toBe(admitted === null);
+      if (which === 'path') expect.soft(bounds.checkoutCovers, `${name}: the working folder is Source control’s checkout`).toBe(admitted === null);
     }
   });
 
