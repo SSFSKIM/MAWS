@@ -257,25 +257,26 @@ function knownPlaces(machine: MachineRef, registry: OrgProjects): ProjectRecord[
 export function useRemotePlaces(machine: MachineRef, name: string, client: MawsBridge = ipc): RemotePlaces {
   const registry = useSessions((s) => s.registry);
   const known = useMemo(() => knownPlaces(machine, registry), [machine, registry]);
-  const [answer, setAnswer] = useState<{ projects: ProjectRecord[] | null; error: string | null } | null>(null);
-  const [folders, setFolders] = useState<FolderPlaces | null>(null);
+  // each answer keeps the machine it is of, so a menu opened on another machine shows none of the last one's
+  const [listed, setListed] = useState<{ of: MachineRef; projects: ProjectRecord[] | null; error: string | null } | null>(null);
+  const [read, setRead] = useState<{ of: MachineRef; folders: FolderPlaces } | null>(null);
   useEffect(() => {
     let live = true;
-    setAnswer(null);
-    setFolders(null);
     void client
       .invoke('session.projects.list', undefined, { machine })
       .catch(() => null)
-      .then((listed) => {
-        const projects = listed?.ok === true ? listed.value.projects.filter((p) => p.hidden !== true) : null;
+      .then((answered) => {
+        const projects = answered?.ok === true ? answered.value.projects.filter((p) => p.hidden !== true) : null;
         if (projects !== null) lastListing.set(machine, projects);
-        if (live) setAnswer({ projects, error: projects === null ? SETUP_WORDS.projectsUnread(name) : null });
+        if (live) setListed({ of: machine, projects, error: projects === null ? SETUP_WORDS.projectsUnread(name) : null });
       });
-    void readFolderPlaces(machine, name, client).then((read) => live && setFolders(read));
+    void readFolderPlaces(machine, name, client).then((folders) => live && setRead({ of: machine, folders }));
     return () => {
       live = false;
     };
   }, [machine, name, client]);
+  const answer = listed?.of === machine ? listed : null;
+  const folders = read?.of === machine ? read.folders : null;
   const projects = answer?.projects ?? (known.length > 0 ? known : null);
   return { projects, reading: answer === null && known.length === 0 ? SETUP_WORDS.reading(name) : null, error: answer?.error ?? null, folders };
 }
