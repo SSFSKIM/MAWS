@@ -7,15 +7,19 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { bareOf } from '@shared/machine/address';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { project, record } from '../../../../test/support/builders';
 import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { BUTTON_LIKE_INPUTS, connectKeys } from '../keymap/dispatcher';
 import { bindingsOf } from '../keymap/useKeyChord';
 import { selectPendingOf, useAttention } from '../stores/attention';
 import { resetComposerStore, useComposerStore } from '../stores/composer';
 import { useNotices } from '../stores/notices';
+import { useSettings } from '../stores/settings';
 import { resetShellStores } from '../test-support/shell-stores';
 import { useLayout } from '../stores/layout';
+import { useSessions } from '../stores/sessions';
 import { currentSet } from '../stores/layout-model';
 import { ipcSource, useTranscriptStore } from '../transcript';
 import { builder, uuid } from '../transcript/model/test-events';
@@ -91,6 +95,23 @@ const sentAsItWas = async (button: string) => {
 const focusOn = (element: HTMLElement) => act(() => element.focus());
 const frame = () => document.querySelector<HTMLElement>('[data-docked-frame]')!; // a multi-select question is a named group too
 const article = () => screen.getByRole('article');
+// UX wave U1a (§D): a permission prompt's keys, as the dispatcher reads them, and the 400 ms they wait after it appears
+const CMD_ENTER = { key: 'Enter', code: 'Enter', metaKey: true };
+const SHIFT_CMD_ENTER = { key: 'Enter', code: 'Enter', metaKey: true, shiftKey: true };
+const ESCAPE = { key: 'Escape', code: 'Escape' };
+const keyAt = (target: Element, init: KeyboardEventInit) => {
+  const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+  target.dispatchEvent(event);
+  return event;
+};
+const KEY_GRACE_MS = 400;
+const graceOver = () => act(() => void vi.advanceTimersByTime(KEY_GRACE_MS));
+const flush = () => act(async () => {});
+// A button's name as a reader hears it: its text without what is hidden from the accessibility tree (a key hint)
+const nameOf = (b: HTMLElement) =>
+  b.getAttribute('aria-label') ?? [...b.childNodes].filter((n) => !(n instanceof Element && n.getAttribute('aria-hidden') === 'true')).map((n) => n.textContent).join('').trim();
+// The buttons that answer a permission prompt, left to right (the quiet reason button and the two carets aside)
+const answerButtons = () => screen.queryAllByRole('button').map(nameOf).filter((name) => !/^tab \d|^Deny… with a reason$|^More (deny|allow) options$/.test(name));
 
 const refusal = syntheticRequest('refusal-fallback-dialog');
 const autoFallback = syntheticRequest('auto-mode-fallback-dialog');
@@ -473,20 +494,8 @@ describe('request card placements and delivery states', () => {
     await waitFor(() => expect(answers()).toEqual([{ kind: 'plan', outcome: 'keep_planning', feedback: 'split step 2' }]));
   });
 
-  it('docked, the scope group offers the grant scopes; digits pick, Enter allows the picked scope', async () => {
-    mount(reapply, 'docked');
-    expect(screen.getByText('Approval needed')).toBeTruthy(); // the frame's title
-    const scopes = within(screen.getByRole('radiogroup', { name: 'Allow scope' }));
-    expect(scopes.getAllByRole('radio').map((r) => r.getAttribute('aria-label'))).toEqual(['Allow once', 'Allow for this session', 'Always allow touch granted.txt in this project']);
-    expect(scopes.getByRole('radio', { name: 'Allow once' }).getAttribute('aria-checked')).toBe('true');
-    focusOn(frame());
-    await press('2');
-    expect(scopes.getByRole('radio', { name: 'Allow for this session' }).getAttribute('aria-checked')).toBe('true');
-    await press('{Enter}');
-    await waitFor(() => expect(answers()).toEqual([{ kind: 'permission', decision: 'allow', scope: 'session' }]));
-  });
-
-  it('docked with the request still loading, digits reach the frame that mounts once it arrives', async () => {
+  it('docked with the request still loading, the keys reach the frame that mounts once it arrives', async () => {
+    vi.useFakeTimers();
     const item = itemFor(reapply, APP);
     render(
       <Pane>
@@ -496,8 +505,10 @@ describe('request card placements and delivery states', () => {
     expect(screen.queryByRole('group')).toBeNull(); // the skeleton is not framed
     await act(() => fake.reply('attention.request', { event: reapply }));
     focusOn(frame());
-    await press('2');
-    expect(screen.getByRole('radio', { name: 'Allow for this session' }).getAttribute('aria-checked')).toBe('true');
+    graceOver();
+    keyAt(frame(), CMD_ENTER);
+    await flush();
+    expect(answers()).toEqual([{ kind: 'permission', decision: 'allow', scope: 'once' }]);
   });
 
   it("Enter in the Deny… with a reason textarea is a newline; ⌘Enter sends the deny with the reason", async () => {
@@ -520,39 +531,30 @@ describe('request card placements and delivery states', () => {
     await waitFor(() => expect(answers()).toEqual([{ kind: 'permission', decision: 'deny_and_stop' }]));
   });
 
-  it('a default_to_no request never answers on Enter: it says to use the Allow button, which still allows', async () => {
-    mount(permission({ defaultToNo: true, suggestions: [] }), 'docked');
-    expect(screen.getByRole('radio', { name: 'Allow once' }).getAttribute('aria-checked')).toBe('false');
-    focusOn(frame());
-    await press('{Enter}');
-    await press('1');
-    expect(screen.getByRole('status').textContent).toBe('Use the Allow button for this request');
-    expect(screen.getByRole('radio', { name: 'Allow once' }).getAttribute('aria-checked')).toBe('false'); // digits disabled
-    expect(answers()).toEqual([]);
-    const user = userEvent.setup();
-    await user.click(screen.getByRole('radio', { name: 'Allow once' }));
-    await user.click(screen.getByRole('button', { name: 'Allow' }));
-    await waitFor(() => expect(answers()).toEqual([{ kind: 'permission', decision: 'allow', scope: 'once' }]));
-  });
-
-  it.each(['docked', 'card', 'inline'] as const)('a requires_user_interaction Read has no Allow, no scope group and no Enter or digit approval (%s)', async (placement) => {
+  it.each(['docked', 'card', 'inline'] as const)('a requires_user_interaction Read has no allow button and no allow key, only Deny and the sentence (%s)', async (placement) => {
+    vi.useFakeTimers();
     mount(flaggedRead, placement);
-    expect(screen.queryByRole('button', { name: 'Allow' })).toBeNull();
+    expect(screen.queryAllByRole('button').filter((b) => /^Allow|^Always allow/.test(nameOf(b) ?? ''))).toEqual([]);
     expect(screen.queryByRole('radiogroup')).toBeNull();
     expect(screen.getByText(/Read needs its own approval surface, which MAWS does not have/)).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Deny' })).toBeTruthy();
+    expect(answerButtons()).toEqual(['Deny']);
     expect(bindingsOf('request.accept')).toEqual([]);
-    focusOn(placement === 'docked' ? frame() : placement === 'card' ? article() : screen.getByRole('button', { name: 'Deny' }));
-    await press('1');
-    await press('{Escape}'); // Esc still denies where the card holds keys
+    expect(bindingsOf('request.allowOnce')).toEqual([]);
+    expect(bindingsOf('request.allowLasting')).toEqual([]);
+    const owner = placement === 'docked' ? frame() : placement === 'card' ? article() : screen.getByRole('button', { name: 'Deny' });
+    focusOn(owner);
+    graceOver();
+    for (const init of [CMD_ENTER, SHIFT_CMD_ENTER, { key: 'Enter', code: 'Enter' }, { key: '1', code: 'Digit1' }]) keyAt(owner, init);
+    keyAt(owner, ESCAPE); // Esc still denies where the card holds keys
+    await flush();
     if (placement === 'inline') expect(answers()).toEqual([]);
-    else await waitFor(() => expect(answers()).toEqual([{ kind: 'permission', decision: 'deny' }]));
+    else expect(answers()).toEqual([{ kind: 'permission', decision: 'deny' }]);
   });
 
   it('delivered stands as it was, disabled, with no "Answered" line; not_pending says so for two seconds and closes, write_failed offers Retry', async () => {
     const first = mount(unflaggedRead, 'inline');
-    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
-    await sentAsItWas('Allow');
+    fireEvent.click(screen.getByRole('button', { name: 'Allow once' }));
+    await sentAsItWas('Allow once');
     first.view.unmount();
 
     vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -567,12 +569,12 @@ describe('request card placements and delivery states', () => {
 
     outcome = 'write_failed';
     mount(unflaggedRead, 'inline');
-    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow once' }));
     expect(await screen.findByText("Couldn't deliver the answer")).toBeTruthy();
-    expect((screen.getByRole('button', { name: 'Allow' }) as HTMLButtonElement).disabled).toBe(false); // back to pending
+    expect((screen.getByRole('button', { name: 'Allow once' }) as HTMLButtonElement).disabled).toBe(false); // back to pending
     outcome = 'delivered';
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    await sentAsItWas('Allow');
+    await sentAsItWas('Allow once');
     expect(screen.queryByText("Couldn't deliver the answer")).toBeNull();
     expect(answers().slice(-2)).toEqual([
       { kind: 'permission', decision: 'allow', scope: 'once' }, // the failed write
@@ -587,7 +589,7 @@ describe('request card placements and delivery states', () => {
     render(<RequestCard item={item} request={null} placement="inline" paneIndex={null} />);
     expect(screen.getByText('Loading the request…')).toBeTruthy();
     await act(() => fake.reply('attention.request', { event: reapply }));
-    expect(screen.getByRole('heading', { name: 'Bash' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Run a command' })).toBeTruthy();
     expect(fake.invoked('attention.request')).toEqual([{ appSessionId: MAIN_APP, requestId: reapply.requestId }]);
     expect(useAttention.getState().requests.get(item.id)).toEqual(reapply);
   });
@@ -642,6 +644,304 @@ describe('request card placements and delivery states', () => {
   });
 });
 
+// UX wave U1a (M3, §D; l4-approvals-02 and A3 as this landing cuts them): the permission card is one line saying what is
+// asked, the preview, three buttons with their keys on them, and the rule's file line only with a project rule. ⌘↩, ⇧⌘↩ and
+// Esc answer from the docked frame or a focused Overview article, on a fresh press, once the prompt has been drawn for
+// 400 ms; Enter and the digits answer no permission prompt.
+describe('the permission card', () => {
+  const askRule = fixtureRequest('pass2', 'grant-askrule-start', 27);
+  const sessionOnly = permission({ toolName: 'Read', displayName: 'Read', input: { file_path: '/w/notes.txt' } }); // once, session
+  const inProject = (name: string | null) =>
+    act(() =>
+      useSessions.setState((s) => ({
+        records: new Map(s.records).set(APP, record(APP, { projectId: name === null ? null : ('p-1' as never), directory: '/work/the-folder' })),
+        projects: name === null ? s.projects : new Map(s.projects).set('p-1' as never, project('p-1', 0, { name })),
+        recordsVersion: s.recordsVersion + 1,
+        projectsVersion: s.projectsVersion + 1,
+      })),
+    );
+  const ownerOf = (placement: 'docked' | 'card') => (placement === 'docked' ? frame() : article());
+
+  describe('what it reads', () => {
+    it.each(['docked', 'card', 'inline'] as const)('reads what is asked, then the preview, with no tool heading, no "wants to" line and no folder line (%s)', (placement) => {
+      inProject(null);
+      mount(reapply, placement);
+      expect(screen.getByRole('heading', { name: 'Run a command' })).toBeTruthy();
+      expect(screen.queryByRole('heading', { name: 'Bash' })).toBeNull();
+      expect(screen.queryByText(/wants to/)).toBeNull();
+      expect(screen.queryByText('/work/the-folder')).toBeNull();
+      expect(screen.queryByRole('radiogroup')).toBeNull();
+      expect(screen.getByTestId('request-input').textContent).toBe('touch granted.txt');
+      const card = document.querySelector('[data-request-card]')!;
+      const heading = screen.getByRole('heading', { name: 'Run a command' });
+      expect(heading.compareDocumentPosition(screen.getByTestId('request-input')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(card.contains(heading)).toBe(true);
+    });
+
+    it('says who asks only when it is not the main agent', () => {
+      const first = mount(permission({ agentId: 'agent-1' as never }), 'inline');
+      expect(screen.getByRole('heading', { name: 'Run a command · from A subagent' })).toBeTruthy();
+      first.view.unmount();
+      mount(permission(), 'inline');
+      expect(screen.getByRole('heading', { name: 'Run a command' })).toBeTruthy();
+      expect(screen.queryByText(/from/)).toBeNull();
+    });
+
+    it('keeps the docked frame’s title and the glyph of the kind on the first line', () => {
+      mount(reapply, 'docked');
+      expect(frame().getAttribute('aria-label')).toBe('Approval needed');
+      expect(screen.getByRole('heading', { name: 'Run a command' }).textContent).toBe('◐Run a command');
+    });
+
+    it('the hover placement keeps its layout: the tool heading, the "wants to" line and the folder line', () => {
+      inProject(null);
+      mount(unflaggedRead, 'hover');
+      expect(screen.getByRole('heading', { name: 'Read' })).toBeTruthy();
+      expect(screen.getByText('Main session wants to read a file')).toBeTruthy();
+      expect(screen.getByText('/work/the-folder')).toBeTruthy();
+      expect(screen.queryByRole('heading', { name: 'Read a file' })).toBeNull();
+    });
+  });
+
+  describe('its buttons, from the scopes the request offers', () => {
+    it('an ask-rule prompt: Deny and Allow once, no lasting key, no menu on Allow once, no file line', () => {
+      mount(askRule, 'docked');
+      expect(answerButtons()).toEqual(['Deny', 'Allow once']);
+      expect(screen.queryByRole('button', { name: 'More allow options' })).toBeNull();
+      expect(bindingsOf('request.allowLasting')).toEqual([]);
+      expect(bindingsOf('request.allowOnce')).toHaveLength(1);
+      expect(screen.queryByText(/settings\.local\.json/)).toBeNull();
+    });
+
+    it('a session scope only: the third button reads "Allow for this session", with no menu and no file line', () => {
+      mount(sessionOnly, 'docked');
+      expect(answerButtons()).toEqual(['Deny', 'Allow for this session', 'Allow once']);
+      expect(screen.queryByRole('button', { name: 'More allow options' })).toBeNull();
+      expect(screen.queryByText(/settings\.local\.json/)).toBeNull();
+    });
+
+    it('a project rule: "Always allow in <project>", the rule’s file line, and "Allow for this session" as the one entry of the menu on Allow once', async () => {
+      inProject('probe');
+      mount(reapply, 'docked');
+      expect(answerButtons()).toEqual(['Deny', 'Always allow in probe', 'Allow once']);
+      expect(screen.getByText(/^Always allow adds/).textContent).toBe('Always allow adds touch granted.txt to .claude/settings.local.json in the project.');
+      const user = userEvent.setup();
+      await user.click(screen.getByRole('button', { name: 'More allow options' }));
+      expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent)).toEqual(['Allow for this session']);
+      await user.click(screen.getByRole('menuitem', { name: 'Allow for this session' }));
+      await waitFor(() => expect(answers()).toEqual([{ kind: 'permission', decision: 'allow', scope: 'session' }]));
+    });
+
+    it('names the project "this project" when the session has none', () => {
+      inProject(null);
+      mount(reapply, 'inline');
+      expect(answerButtons()).toEqual(['Deny', 'Always allow in this project', 'Allow once']);
+    });
+
+    it.each([
+      ['Allow once', { kind: 'permission', decision: 'allow', scope: 'once' }],
+      ['Always allow in this project', { kind: 'permission', decision: 'allow', scope: 'local_settings' }],
+      ['Deny', { kind: 'permission', decision: 'deny' }],
+    ])('"%s" sends its answer once', async (name, answer) => {
+      mount(reapply, 'inline');
+      const button = screen.getByRole('button', { name });
+      fireEvent.click(button);
+      fireEvent.click(button);
+      await waitFor(() => expect(answers()).toEqual([answer]));
+      await flush();
+      expect(answers()).toHaveLength(1);
+    });
+
+    it('finds each button by its name without its hint, and carries the key in aria-keyshortcuts', () => {
+      mount(reapply, 'docked');
+      const keys = (name: string) => screen.getByRole('button', { name }).getAttribute('aria-keyshortcuts');
+      expect(keys('Allow once')).toBe('Meta+Enter');
+      expect(keys('Always allow in this project')).toBe('Meta+Shift+Enter');
+      expect(keys('Deny')).toBe('Escape');
+      expect(screen.getByRole('button', { name: 'Allow once' }).textContent).toBe('Allow once⌘↩');
+      expect(screen.getByRole('button', { name: 'Always allow in this project' }).textContent).toBe('Always allow in this project⌘⇧↩');
+      expect(screen.getByRole('button', { name: 'Deny' }).textContent).toBe('Deny⎋');
+      expect(screen.queryByRole('button', { name: /⌘/ })).toBeNull();
+    });
+
+    it('prints no hint for a row the keymap leaves unbound, and binds no key for it', () => {
+      // a stored rebinding of another action holds ⌘↩ (U6a's decision 10), so Allow once has no effective chord
+      act(() => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V21, keymap: { 'composer.send': 'Cmd+Enter' } }, resolvedTheme: 'light' } }));
+      try {
+        mount(reapply, 'docked');
+        expect(screen.getByRole('button', { name: 'Allow once' }).textContent).toBe('Allow once');
+        expect(screen.getByRole('button', { name: 'Allow once' }).hasAttribute('aria-keyshortcuts')).toBe(false);
+        expect(bindingsOf('request.allowOnce')).toEqual([]);
+        expect(screen.getByRole('button', { name: 'Deny' }).getAttribute('aria-keyshortcuts')).toBe('Escape');
+      } finally {
+        useSettings.setState({ state: null });
+      }
+    });
+
+    it('a request flagged "default to no" binds no allow key and prints no hint on its allow buttons; the buttons still answer', async () => {
+      vi.useFakeTimers();
+      mount(permission({ defaultToNo: true, suggestions: [] }), 'docked');
+      expect(answerButtons()).toEqual(['Deny', 'Allow for this session', 'Allow once']);
+      for (const name of ['Allow once', 'Allow for this session']) {
+        expect(screen.getByRole('button', { name }).textContent).toBe(name);
+        expect(screen.getByRole('button', { name }).hasAttribute('aria-keyshortcuts')).toBe(false);
+      }
+      expect(screen.getByRole('button', { name: 'Deny' }).getAttribute('aria-keyshortcuts')).toBe('Escape');
+      expect(bindingsOf('request.allowOnce')).toEqual([]);
+      expect(bindingsOf('request.allowLasting')).toEqual([]);
+      focusOn(frame());
+      graceOver();
+      for (const init of [CMD_ENTER, SHIFT_CMD_ENTER, { key: 'Enter', code: 'Enter' }]) keyAt(frame(), init);
+      await flush();
+      expect(answers()).toEqual([]);
+      fireEvent.click(screen.getByRole('button', { name: 'Allow once' }));
+      await flush();
+      expect(answers()).toEqual([{ kind: 'permission', decision: 'allow', scope: 'once' }]);
+    });
+  });
+
+  describe('its keys', () => {
+    beforeEach(() => void vi.useFakeTimers());
+
+    it.each(['docked', 'card'] as const)('⌘↩ allows once, ⇧⌘↩ gives the third button’s scope, Esc denies, from the focused owner (%s)', async (placement) => {
+      for (const [init, answer] of [
+        [CMD_ENTER, { kind: 'permission', decision: 'allow', scope: 'once' }],
+        [SHIFT_CMD_ENTER, { kind: 'permission', decision: 'allow', scope: 'local_settings' }],
+        [ESCAPE, { kind: 'permission', decision: 'deny' }],
+      ] as const) {
+        const { view } = mount(reapply, placement);
+        focusOn(ownerOf(placement));
+        graceOver();
+        expect(keyAt(ownerOf(placement), init).defaultPrevented).toBe(true);
+        await flush();
+        expect(answers().at(-1)).toEqual(answer);
+        view.unmount();
+      }
+      expect(answers()).toHaveLength(3);
+    });
+
+    it.each(['docked', 'card'] as const)('answers nothing at 399 ms and answers at 400 ms (%s)', async (placement) => {
+      mount(reapply, placement);
+      focusOn(ownerOf(placement));
+      act(() => void vi.advanceTimersByTime(KEY_GRACE_MS - 1));
+      for (const init of [CMD_ENTER, SHIFT_CMD_ENTER, ESCAPE]) keyAt(ownerOf(placement), init);
+      await flush();
+      expect(answers()).toEqual([]);
+      act(() => void vi.advanceTimersByTime(1));
+      keyAt(ownerOf(placement), CMD_ENTER);
+      await flush();
+      expect(answers()).toEqual([{ kind: 'permission', decision: 'allow', scope: 'once' }]);
+    });
+
+    it.each(['docked', 'card'] as const)('Enter and the digits answer nothing (%s)', async (placement) => {
+      mount(reapply, placement);
+      focusOn(ownerOf(placement));
+      graceOver();
+      for (const init of [{ key: 'Enter', code: 'Enter' }, { key: '1', code: 'Digit1' }, { key: '2', code: 'Digit2' }, { key: '3', code: 'Digit3' }]) keyAt(ownerOf(placement), init);
+      await flush();
+      expect(answers()).toEqual([]);
+    });
+
+    it('no key answers from a button or from the reason box, whose own ⌘↩ sends the deny with its reason', async () => {
+      mount(reapply, 'docked');
+      graceOver();
+      for (const name of ['Allow once', 'Deny', 'Always allow in this project']) {
+        const button = screen.getByRole('button', { name });
+        focusOn(button);
+        for (const init of [CMD_ENTER, SHIFT_CMD_ENTER, ESCAPE]) keyAt(button, init);
+      }
+      await flush();
+      expect(answers()).toEqual([]);
+      fireEvent.click(screen.getByRole('button', { name: 'Deny… with a reason' }));
+      const box = screen.getByRole('textbox', { name: 'Reason for denying' });
+      fireEvent.change(box, { target: { value: 'not now' } });
+      keyAt(box, ESCAPE);
+      await flush();
+      expect(answers()).toEqual([]);
+      fireEvent.keyDown(box, CMD_ENTER);
+      await flush();
+      expect(answers()).toEqual([{ kind: 'permission', decision: 'deny', message: 'not now' }]);
+    });
+
+    it.each(['docked', 'card'] as const)('a chord pressed while an input method composes answers nothing (%s)', async (placement) => {
+      mount(reapply, placement);
+      focusOn(ownerOf(placement));
+      graceOver();
+      for (const init of [CMD_ENTER, SHIFT_CMD_ENTER, ESCAPE]) keyAt(ownerOf(placement), { ...init, isComposing: true });
+      await flush();
+      expect(answers()).toEqual([]);
+    });
+
+    it('a prompt that offers no allow still waits its 400 ms before Esc denies', async () => {
+      mount(flaggedRead, 'docked');
+      focusOn(frame());
+      keyAt(frame(), ESCAPE);
+      await flush();
+      expect(answers()).toEqual([]);
+      graceOver();
+      keyAt(frame(), ESCAPE);
+      await flush();
+      expect(answers()).toEqual([{ kind: 'permission', decision: 'deny' }]);
+    });
+  });
+
+  // Two prompts queued in one session: a chord held through the first answer must not answer the second, however long it
+  // is held; the second answers to a fresh press once its own 400 ms have passed. One answer per press.
+  describe('a held chord across two prompts', () => {
+    const second = { ...reapply, requestId: 'req-second', toolUseId: 'toolu_second' } as RequestEvent;
+    const events = new Map<string | null, SessionEvent>([[reapply.requestId, reapply], [second.requestId, second]]);
+    function Queue({ placement }: { placement: 'docked' | 'card' }) {
+      const item = useAttention((s) => selectPendingOf(s, APP)[0] ?? null);
+      return item === null ? null : <Card event={events.get(item.request.requestId)!} placement={placement} item={item} />;
+    }
+    const list = (items: AttentionItem[]) => act(() => useAttention.getState().applySnapshot(items, TEST_MACHINE));
+    const sent = () => fake.invoked('session.answer').map((input) => (input as { requestId: string; answer: unknown }));
+
+    beforeEach(() => void vi.useFakeTimers());
+
+    it.each([
+      ['⌘↩', 'docked', CMD_ENTER, { kind: 'permission', decision: 'allow', scope: 'once' }],
+      ['⇧⌘↩', 'docked', SHIFT_CMD_ENTER, { kind: 'permission', decision: 'allow', scope: 'local_settings' }],
+      ['Esc', 'docked', ESCAPE, { kind: 'permission', decision: 'deny' }],
+      ['⌘↩', 'card', CMD_ENTER, { kind: 'permission', decision: 'allow', scope: 'once' }],
+      ['⇧⌘↩', 'card', SHIFT_CMD_ENTER, { kind: 'permission', decision: 'allow', scope: 'local_settings' }],
+      ['Esc', 'card', ESCAPE, { kind: 'permission', decision: 'deny' }],
+    ] as const)('%s held on the %s placement answers the first prompt and not the second', async (_name, placement, chord, answer) => {
+      const [a, b] = [itemFor(reapply, APP), itemFor(second, APP)];
+      list([a, b]);
+      render(<Pane><Queue placement={placement} /></Pane>);
+      focusOn(ownerOf(placement));
+      graceOver();
+      keyAt(ownerOf(placement), chord); // the first, fresh press
+      await flush();
+      expect(sent()).toEqual([{ appSessionId: MAIN_APP, requestId: reapply.requestId, answer }]);
+      list([b]); // the publisher lets the answered item go; the second prompt takes its place
+      const owner = ownerOf(placement);
+      expect(document.activeElement).toBe(owner); // docked: the second prompt's frame took focus from the first
+      expect(document.querySelector(`[data-request-card="${b.id}"]`)).not.toBeNull();
+      const seen: boolean[] = [];
+      const after = (event: KeyboardEvent) => void seen.push(event.defaultPrevented);
+      window.addEventListener('keydown', after);
+      for (let elapsed = 0; elapsed < 3 * KEY_GRACE_MS; elapsed += 50) {
+        act(() => void vi.advanceTimersByTime(50));
+        keyAt(owner, { ...chord, repeat: true });
+      }
+      window.removeEventListener('keydown', after);
+      await flush();
+      expect(sent()).toHaveLength(1);
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen.every(Boolean)).toBe(true); // every repeat was taken: no other handler acts on it
+      owner.dispatchEvent(new KeyboardEvent('keyup', { key: chord.key, code: chord.code, bubbles: true }));
+      keyAt(owner, chord); // let go and pressed again
+      await flush();
+      expect(sent()).toEqual([
+        { appSessionId: MAIN_APP, requestId: reapply.requestId, answer },
+        { appSessionId: MAIN_APP, requestId: second.requestId, answer },
+      ]);
+    });
+  });
+});
+
 describe('card focus owner is the Overview article', () => {
   function Articles() {
     const a = itemFor(reapply, at('app-a'));
@@ -654,24 +954,29 @@ describe('card focus owner is the Overview article', () => {
     );
   }
 
-  it('Enter and Esc on the focused article answer through the dispatcher, and only that article', async () => {
+  it('⌘↩ and Esc on the focused article answer through the dispatcher, and only that article', async () => {
+    vi.useFakeTimers();
     render(<Articles />);
     const [first, second] = screen.getAllByRole('article');
+    graceOver();
     focusOn(second);
-    await press('{Enter}');
-    await waitFor(() => expect(fake.invoked('session.answer')).toEqual([{ appSessionId: 'app-b', requestId: 'req-b', answer: { kind: 'permission', decision: 'allow', scope: 'once' } }]));
+    keyAt(second, CMD_ENTER);
+    await flush();
+    expect(fake.invoked('session.answer')).toEqual([{ appSessionId: 'app-b', requestId: 'req-b', answer: { kind: 'permission', decision: 'allow', scope: 'once' } }]);
     focusOn(first);
-    await press('{Escape}');
-    await waitFor(() => expect(fake.invoked('session.answer').at(-1)).toEqual({ appSessionId: 'app-a', requestId: reapply.requestId, answer: { kind: 'permission', decision: 'deny' } }));
+    keyAt(first, ESCAPE);
+    await flush();
+    expect(fake.invoked('session.answer').at(-1)).toEqual({ appSessionId: 'app-a', requestId: reapply.requestId, answer: { kind: 'permission', decision: 'deny' } });
   });
 
   it('a card without a focusable ancestor binds to its own root', () => {
     render(<RequestCard item={itemFor(reapply, APP)} request={reapply} placement="card" paneIndex={null} />);
-    const [binding] = bindingsOf('request.accept');
+    const [binding] = bindingsOf('request.allowOnce');
     expect(binding.within?.current).toBe(document.querySelector('[data-request-card]'));
   });
 
-  it('two docked cards in two panes: Enter with focus in one answers that one only', async () => {
+  it('two docked cards in two panes: ⌘↩ with focus in one answers that one only', async () => {
+    vi.useFakeTimers();
     render(
       <>
         <Pane index={0}>
@@ -683,9 +988,11 @@ describe('card focus owner is the Overview article', () => {
       </>,
     );
     const frames = screen.getAllByRole('group', { name: 'Approval needed' });
+    graceOver();
     focusOn(frames[1]);
-    await press('{Enter}');
-    await waitFor(() => expect(fake.invoked('session.answer')).toHaveLength(1));
+    keyAt(frames[1], CMD_ENTER);
+    await flush();
+    expect(fake.invoked('session.answer')).toHaveLength(1);
     expect(fake.invoked('session.answer')[0]).toMatchObject({ appSessionId: 'app-b' });
   });
 });
@@ -706,11 +1013,11 @@ describe('the card after an answer', () => {
     const item = itemFor(unflaggedRead, APP);
     list([item]);
     render(<Pane><Listed placement="inline" event={unflaggedRead} /></Pane>);
-    fireEvent.click(button('Allow'));
+    fireEvent.click(button('Allow once'));
     await waitFor(() => expect(answers()).toHaveLength(1));
     await act(async () => {});
     expect(screen.queryByText(/Answered/)).toBeNull();
-    expect(button('Allow').disabled).toBe(true);
+    expect(button('Allow once').disabled).toBe(true);
     expect(button('Deny').disabled).toBe(true);
     list([]);
     expect(card()).toBeNull();
@@ -722,7 +1029,7 @@ describe('the card after an answer', () => {
     const item = itemFor(unflaggedRead, APP);
     list([item]);
     render(<Pane><Listed placement="inline" event={unflaggedRead} /></Pane>);
-    fireEvent.click(button('Allow'));
+    fireEvent.click(button('Allow once'));
     await waitFor(() => expect(fake.invoked('session.answer')).toHaveLength(1));
     list([]); // the broker told its list before session.answer returned
     expect(card()).toBeNull();
@@ -734,12 +1041,12 @@ describe('the card after an answer', () => {
   it('stands, sent and disabled, while a delivered answer’s item is still listed', async () => {
     list([itemFor(unflaggedRead, APP)]);
     render(<Pane><Listed placement="card" event={unflaggedRead} /></Pane>);
-    fireEvent.click(button('Allow'));
+    fireEvent.click(button('Allow once'));
     await waitFor(() => expect(answers()).toHaveLength(1));
     await act(async () => {});
     expect(card()).not.toBeNull();
     expect(screen.queryByText(/Answered/)).toBeNull();
-    expect(button('Allow').disabled).toBe(true);
+    expect(button('Allow once').disabled).toBe(true);
     expect(bindingsOf('request.accept')).toEqual([]);
   });
 
@@ -760,17 +1067,20 @@ describe('a card whose item changes starts over (C5 renders the slot unkeyed)', 
     </Pane>
   );
 
-  it('the next request in the same Overview card inherits neither the delivery nor the picked scope', async () => {
+  it('the next request in the same Overview card inherits neither the delivery nor the keys’ 400 ms', async () => {
+    vi.useFakeTimers();
     const view = render(inArticle(reapply));
     focusOn(article());
-    await press('2');
-    expect(screen.getByRole('radio', { name: 'Allow for this session' }).getAttribute('aria-checked')).toBe('true');
+    graceOver();
     view.rerender(inArticle({ ...reapply, requestId: 'req-next' } as RequestEvent));
-    expect(screen.getByRole('radio', { name: 'Allow once' }).getAttribute('aria-checked')).toBe('true'); // not a scope nobody picked here
+    keyAt(article(), CMD_ENTER); // the next prompt has just appeared: its keys wait their own 400 ms
+    await flush();
+    expect(answers()).toEqual([]);
     fireEvent.click(screen.getByRole('button', { name: 'Deny' }));
-    await sentAsItWas('Deny');
+    await flush();
+    expect((screen.getByRole('button', { name: 'Deny' }) as HTMLButtonElement).disabled).toBe(true);
     view.rerender(inArticle({ ...reapply, requestId: 'req-third' } as RequestEvent));
-    expect((screen.getByRole('button', { name: 'Allow' }) as HTMLButtonElement).disabled).toBe(false); // the next one inherits no sent state
+    expect((screen.getByRole('button', { name: 'Allow once' }) as HTMLButtonElement).disabled).toBe(false); // the next one inherits no sent state
     expect((screen.getByRole('button', { name: 'Deny' }) as HTMLButtonElement).disabled).toBe(false);
   });
 });

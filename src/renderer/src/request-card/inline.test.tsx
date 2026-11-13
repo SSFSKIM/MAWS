@@ -123,8 +123,8 @@ describe("request renderer registers through C6's seam", () => {
     const slotRow = { id: 'slot:r1', turnId: null, at: bash.at, kind: 'request_slot', requestId: 'r1', toolUseId: 'b1', requestKind: 'permission', toolName: 'Bash', requestedAt: bash.at } as never;
     const { renderSessionRequest } = await import('./inline');
     render(<>{renderSessionRequest(slotRow)}</>);
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Bash' })).toBeTruthy());
-    expect(screen.queryByRole('heading', { name: 'Edit' })).toBeNull();
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Run a command' })).toBeTruthy());
+    expect(screen.queryByRole('heading', { name: 'Edit b.ts' })).toBeNull();
   });
 
   // UC-1 (A17): an answered request waits nowhere, so its slot in the transcript draws no card
@@ -164,7 +164,7 @@ describe("request renderer registers through C6's seam", () => {
     const slotRow = { id: 'slot:r1', turnId: null, at: bash.at, kind: 'request_slot', requestId: 'r1', toolUseId: 'b1', requestKind: 'permission', toolName: 'Bash', requestedAt: bash.at } as never;
     const undock = markDocked(APP, 'r1' as RequestId);
     render(<>{render1(slotRow)}</>);
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Bash' })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Run a command' })).toBeTruthy());
     expect(screen.queryByText(/answer below/)).toBeNull();
     undock();
     const other = render(<>{renderInlineRequest(at('app-other' as AppSessionId))(slotRow)}</>); // another session holds no such item

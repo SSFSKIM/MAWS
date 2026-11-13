@@ -160,6 +160,72 @@ describe('docked frame hosts a foreign card', () => {
   });
 });
 
+// UX wave U1a (§D): the frame binds the permission prompt's two allow keys beside Enter and Esc, within itself, and every
+// key it binds acts on a fresh press only, a card another child docks included.
+describe('the frame’s request keys', () => {
+  const key = (target: HTMLElement, init: KeyboardEventInit) => {
+    const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+    target.dispatchEvent(event);
+    return event;
+  };
+  const CMD_ENTER = { key: 'Enter', code: 'Enter', metaKey: true };
+  const SHIFT_CMD_ENTER = { key: 'Enter', code: 'Enter', metaKey: true, shiftKey: true };
+
+  it('runs Allow once on ⌘↩ and the lasting allow on ⇧⌘↩ from the frame itself, and neither from a button inside it', () => {
+    const once = vi.fn();
+    const lasting = vi.fn();
+    render(
+      <Pane index={0}>
+        <DockedCardFrame appSessionId={A} title="Approval needed" onAccept={null} onDecline={null} onAllowOnce={once} onAllowLasting={lasting}>
+          <button type="button">Allow once</button>
+        </DockedCardFrame>
+      </Pane>,
+    );
+    act(() => screen.getByRole('button', { name: 'Allow once' }).focus());
+    key(document.activeElement as HTMLElement, CMD_ENTER);
+    key(document.activeElement as HTMLElement, SHIFT_CMD_ENTER);
+    expect(once).not.toHaveBeenCalled();
+    expect(lasting).not.toHaveBeenCalled();
+    const frame = screen.getByRole('group', { name: 'Approval needed' });
+    act(() => frame.focus());
+    expect(key(frame, CMD_ENTER).defaultPrevented).toBe(true);
+    expect(key(frame, SHIFT_CMD_ENTER).defaultPrevented).toBe(true);
+    expect(once).toHaveBeenCalledTimes(1);
+    expect(lasting).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the allow keys unbound for a card that passes none', () => {
+    render(
+      <Pane index={0}>
+        <ForeignCard appSessionId={A} onAccept={() => {}} onDecline={null} />
+      </Pane>,
+    );
+    const frame = screen.getByRole('group', { name: 'Trust this folder' });
+    act(() => frame.focus());
+    expect(key(frame, CMD_ENTER).defaultPrevented).toBe(false);
+  });
+
+  it('acts on a fresh press only, for a card another child docks too: a repeat is taken and runs nothing', () => {
+    const accept = vi.fn();
+    const decline = vi.fn();
+    render(
+      <Pane index={0}>
+        <ForeignCard appSessionId={A} onAccept={accept} onDecline={decline} />
+      </Pane>,
+    );
+    const frame = screen.getByRole('group', { name: 'Trust this folder' });
+    act(() => frame.focus());
+    expect(key(frame, { key: 'Enter', code: 'Enter', repeat: true }).defaultPrevented).toBe(true);
+    expect(key(frame, { key: 'Escape', code: 'Escape', repeat: true }).defaultPrevented).toBe(true);
+    expect(accept).not.toHaveBeenCalled();
+    expect(decline).not.toHaveBeenCalled();
+    key(frame, { key: 'Enter', code: 'Enter' });
+    key(frame, { key: 'Escape', code: 'Escape' });
+    expect(accept).toHaveBeenCalledTimes(1);
+    expect(decline).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('dockCard', () => {
   function Docked({ appSessionId }: { appSessionId: AppSessionId }) {
     const cards = useDockedCards(appSessionId);

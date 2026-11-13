@@ -16,6 +16,7 @@ import { at } from '../../../../test/support/machine';
 import { laneAState } from '../lane-a/test-support/lane-a-state';
 import { SETTLED_MS, useSettling } from '../lane-a/race';
 import { connectKeys } from '../keymap/dispatcher';
+import { bindingsOf } from '../keymap/useKeyChord';
 import { applyLaneAState, resetLaneAStore } from '../stores/lane-a';
 import { useSessions } from '../stores/sessions';
 import { resetShellStores } from '../test-support/shell-stores';
@@ -57,15 +58,25 @@ describe('a terminal session’s permission card', () => {
     live({ pending: [raised({ suggestions: [{ type: 'addRules' }, { type: 'addRules' }] })] });
     mount(permission({ requestId: REQ, suggestions: [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'ls' }], behavior: 'allow', destination: 'localSettings' }] }));
     expect(screen.getByText('Also asked in the terminal: the first answer wins')).toBeTruthy();
-    const session = screen.getByRole('radio', { name: 'Allow for this session' });
-    expect(session.hasAttribute('disabled')).toBe(true);
-    expect(session.getAttribute('title')).toBe("A scoped allow takes the request's one suggestion; this request offers 2");
+    const offers2 = "A scoped allow takes the request's one suggestion; this request offers 2";
+    // U1a §D: the third button and the menu's one entry, each closed with its reason, bound to no key and showing none
+    const always = screen.getByRole('button', { name: 'Always allow in this project' });
+    expect(always.hasAttribute('disabled')).toBe(true);
+    expect(always.getAttribute('title')).toBe(offers2);
+    expect(always.hasAttribute('aria-keyshortcuts')).toBe(false);
+    expect(bindingsOf('request.allowLasting')).toEqual([]);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'More allow options' }));
+    const session = await screen.findByRole('menuitem', { name: 'Allow for this session' });
+    expect(session.getAttribute('aria-disabled')).toBe('true');
+    expect(session.getAttribute('title')).toBe(offers2);
+    await userEvent.setup().keyboard('{Escape}');
     await userEvent.setup().click(screen.getByRole('button', { name: 'More deny options' }));
     const stop = await screen.findByRole('menuitem', { name: 'Deny and stop the turn' });
     expect(stop.getAttribute('aria-disabled')).toBe('true');
     expect(stop.getAttribute('title')).toBe('Deny-and-interrupt is answered in the terminal');
     await userEvent.setup().keyboard('{Escape}');
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Allow' }));
+    expect(screen.getByRole('button', { name: 'Allow once' }).getAttribute('aria-keyshortcuts')).toBe('Meta+Enter'); // what it carries keeps its key
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Allow once' }));
     await waitFor(() => expect(answers()).toEqual([{ kind: 'permission', decision: 'allow', scope: 'once' }]));
   });
 
@@ -74,7 +85,7 @@ describe('a terminal session’s permission card', () => {
     mount(permission({ requestId: REQ }));
     act(() => live({ pending: [], settled: [{ request: REQ, session: 'eng-1', winner: 'terminal', outcome: 'allow', by: 'terminal' }] }));
     expect(screen.getByRole('status').textContent).toBe('Answered in the terminal: Allowed');
-    expect(screen.queryByRole('button', { name: 'Allow' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Allow once' })).toBeNull();
     expect(screen.queryByText('Also asked in the terminal: the first answer wins')).toBeNull();
   });
 
@@ -83,7 +94,7 @@ describe('a terminal session’s permission card', () => {
     window.maws = fake.client as unknown as PreloadBridge;
     live({ pending: [raised()] });
     mount(permission({ requestId: REQ }));
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Allow' }));
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Allow once' }));
     await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Answered in the terminal: Denied'));
     expect(screen.queryByRole('alert')).toBeNull();
   });
@@ -94,11 +105,11 @@ describe('a terminal session’s permission card', () => {
     live({ pending: [raised({ agentId: 'a1' })] });
     mount(permission({ requestId: REQ, agentId: 'a1' as never }));
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    await userEvent.setup({ advanceTimers: vi.advanceTimersByTime }).click(screen.getByRole('button', { name: 'Allow' }));
+    await userEvent.setup({ advanceTimers: vi.advanceTimersByTime }).click(screen.getByRole('button', { name: 'Allow once' }));
     await waitFor(() => expect(screen.getByText('Answer this in the terminal')).toBeTruthy());
     await act(async () => void vi.advanceTimersByTime(5_000)); // past the not-pending card's close
     expect(screen.queryByText('Already answered elsewhere')).toBeNull();
-    for (const name of ['Allow', 'Deny']) expect(screen.getByRole('button', { name }).hasAttribute('disabled')).toBe(true);
+    for (const name of ['Allow once', 'Allow for this session', 'Deny']) expect(screen.getByRole('button', { name }).hasAttribute('disabled')).toBe(true);
     act(() => live({ pending: [], settled: [{ request: REQ, session: 'eng-1', winner: 'terminal', outcome: 'allow', by: 'terminal' }] }));
     expect(screen.getByRole('status').textContent).toBe('Answered in the terminal: Allowed');
   });
@@ -107,10 +118,10 @@ describe('a terminal session’s permission card', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     live({ pending: [raised({ agentId: 'a1', deadline: new Date(Date.now() + 1200).toISOString() })] });
     mount(permission({ requestId: REQ, agentId: 'a1' as never }));
-    expect(screen.getByRole('button', { name: 'Allow' }).hasAttribute('disabled')).toBe(false);
+    expect(screen.getByRole('button', { name: 'Allow once' }).hasAttribute('disabled')).toBe(false);
     await act(async () => void vi.advanceTimersByTime(1100));
     expect(screen.getByText('Answer this in the terminal')).toBeTruthy();
-    for (const name of ['Allow', 'Deny']) {
+    for (const name of ['Allow once', 'Allow for this session', 'Deny']) { // every answer button the card has
       const button = screen.getByRole('button', { name });
       expect(button.hasAttribute('disabled')).toBe(true);
       expect(button.getAttribute('title')).toBe('Answer this in the terminal');
