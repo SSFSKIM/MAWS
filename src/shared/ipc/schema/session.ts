@@ -860,6 +860,17 @@ const o7m8Commands = {
 } as const;
 export const O7M8_SESSION_COMMANDS = Object.keys(o7m8Commands) as (keyof typeof o7m8Commands)[];
 // P5 O7 M8 end ----------------------------------------------------------------------------------------------------------
+// UX wave U4a start (docs/doperpowers/plans/2026-11-12-ux-wave-U4a-composer.md, Interfaces A) -----------------------------
+// Owner engine-host. `session.steer.sendNow` sends now a message that waits at the next step (a pending `next` steer of the
+// session's own) through the engine's send-now request, which moves a running call to the background rather than
+// killing it; the engine delivers with it every message waiting at the next step (decision 32). `nothing_waiting` when
+// it is not a pending steer, and without asking; refused while a hold, a Stop or a cancel withdraws it. One round trip,
+// bounded as `session.steer.cancel` is.
+const u4aCommands = {
+  'session.steer.sendNow': host(input({ messageUuid: MessageUuidSchema }), z.strictObject({ outcome: z.enum(['delivering', 'stopped', 'nothing_waiting']) })),
+} as const;
+export const U4A_SESSION_COMMANDS = Object.keys(u4aCommands) as (keyof typeof u4aCommands)[];
+// UX wave U4a end -------------------------------------------------------------------------------------------------------
 
 export const commands = {
   ...c3Commands, // C3
@@ -879,6 +890,7 @@ export const commands = {
   ...o5Commands, // P5 O5 M5
   ...o7Commands, // P5 O7 M4
   ...o7m8Commands, // P5 O7 M8
+  ...u4aCommands, // UX wave U4a
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

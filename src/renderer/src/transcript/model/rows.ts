@@ -66,7 +66,7 @@ export type Row = RowBase &
       } // steer: sent while its turn was running (joins that turn at its delivery position, no turn of its own); dropped: the engine never ran it; lines: its hard line breaks (W2: the bubble folds by its rendered height, not by these)
     | { kind: 'assistant_text'; messageUuid: MessageUuid | null; blockIndex: number; markdown: string; live: boolean; phase: 'answer' | 'commentary'; forHuman?: boolean; model: string | null; cut?: true; partway?: true } // cut (P5 O9): a terminal session's reply an interrupt cut before the engine wrote it, which the session kept none of; partway: its text starts partway through
     | {
-        kind: 'divider'; state: 'working' | 'completed' | 'stopped' | 'failed'; cause?: 'crash' /* E11: present when the engine, not the reader, stopped it */; origin: 'human' | 'engine' | 'peer'; startedAt: string; endedAt: string | null;
+        kind: 'divider'; state: 'working' | 'completed' | 'stopped' | 'failed'; cause?: 'crash' | 'message' /* E11: present when the engine, not the reader, stopped it; UX wave U4a: `message`, a message sent now ended it */; origin: 'human' | 'engine' | 'peer'; startedAt: string; endedAt: string | null;
         toolCalls: number; denied: number; autoDenied: number; firstDeniedCell: CellId | null; expanded: boolean; summary: TurnSummary; files?: ChangedFile[];
         // UX wave U3 (UC-2, "The rows"): on a turn the person did not start, what stands at its head and opened it, for U2
         // to name the turn from: that arrival's class and its row's words (no lead mark, no owners)

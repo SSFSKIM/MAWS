@@ -14,7 +14,7 @@ import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
 import { HISTORICAL_BROWSER_TOOL_USE, MAWS_TOOL_USE } from './classify'; // E2, E4c
 import { isAskModTool } from './classify'; // DC9
 import { askModAnswers } from './ask-mod'; // DC9
-import { cellOf, editCounts, engineRefusalOf, filePathOf, resultJson, resultText, toolErrorText, type ToolRecord, type TurnContext } from './cells';
+import { cellOf, editCounts, engineRefusalOf, filePathOf, movedToBackground, resultJson, resultText, toolErrorText, type ToolRecord, type TurnContext } from './cells';
 import { firstJsonBlock, jsonObjectOf } from './cells'; // E2, E4c
 import { hookNotice, type HookRecord } from './hooks';
 import { agentMessageCopy, baseName, boundaryCopy, BRANCH_HISTORY_DETAIL, groupSummary, PLUGIN, processExitCopy, reconnectCopy, retryCopy, subagentSentence } from './copy';
@@ -31,7 +31,7 @@ import { needsSeparator, separatorLabel } from './time';
 import { confirmsSettingChange, isInterruptionMarker, isLocalCommand, localCommandOutput, slashCommandLine, userTextOf, type UserText } from './user-text';
 import { handbackReport, messageText, parsePeerMessage, peerLabel, sendMessageOutcome, sminosFrameOwners } from '@shared/engine/peer-envelope'; // E7; P5 O15 M2b: sminosFrameOwners
 import { carriedOf, type Arrival, type CarriedArrival } from '@shared/engine/arrival-schema'; // UX wave U3
-import { headRole } from './head'; // UX wave U3
+import { headRole, opensTurn } from './head'; // UX wave U3; U4a
 import { NOTICE } from './copy'; // UX wave U3
 import { answeredWords } from './answered'; // UX wave U3
 import { INTERRUPT_CUT, parseInterruptCut } from '@shared/lane-a/interrupt-cut'; // P5 O9
@@ -540,7 +540,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
           // subagent.message) draws it; a peer text no reader claims keeps its bubble below, so nothing is lost
         } else if (answersHeldAsk(event)) {
           // an async ask's answer: its capsule draws it (above)
-        } else if (event.messageUuid !== null && turnIdOf.ofMessage(event.messageUuid) === turn.id && user === null && !dropped(event.messageUuid)) {
+        } else if (event.messageUuid !== null && opensTurn(event, turn.id) && user === null && !dropped(event.messageUuid)) {
           user = userRow(event, rowId.user(event.messageUuid), true);
         } else if (turn.id === turnIdOf.ofEvent(event.id) && user === null && !event.isSynthetic) {
           user = userRow(event, rowId.userOfEvent(event.id), false);
@@ -571,7 +571,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         if (dropped(event.messageUuid)) break;
         const presentation = presentationOf(event.toolName);
         if (presentation === 'cell') {
-          tools.set(event.toolUseId, { use: event, result: null, safeguard: 'not_evaluated', elapsedSeconds: 0, humanDecision: false, backgroundTaskId: null, backgroundDone: false });
+          tools.set(event.toolUseId, { use: event, result: null, safeguard: 'not_evaluated', elapsedSeconds: 0, humanDecision: false, backgroundTaskId: null, backgroundDone: false, exited: turn.agentsEndedAt !== undefined && position < turn.agentsEndedAt /* UX wave U4a */ });
           items.push({ kind: 'tool', toolUseId: event.toolUseId });
         } else if (presentation === 'subagent') {
           const input = record(event.input);
@@ -610,6 +610,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       case 'tool.result': {
         const rec = toolRecord(event.toolUseId);
         if (rec) rec.result = event;
+        if (rec && movedToBackground(rec, event)) rec.moved = true; // UX wave U4a (decision 33)
         const group = byToolUse.get(event.toolUseId);
         const ref = group?.refs.find((ref) => ref.toolUseId === event.toolUseId);
         if (group && ref && event.isError) group.statuses.set(ref.taskId, 'finished_with_errors');
@@ -958,6 +959,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const lastReply = turn.events.findLast((event) => event.kind === 'assistant.block.complete');
   const endedOnApiError = lastReply?.kind === 'assistant.block.complete' && lastReply.isApiErrorMessage === true;
   const dividerState: RowOf<'divider'>['state'] = turn.state === 'open' ? 'working' : turn.closedBy !== null ? turn.closedBy : isAborted(turn.ended?.terminalReason ?? null) ? 'stopped' : turn.ended?.isError && !endedOnApiError ? 'failed' : turn.ended ? 'completed' : 'stopped';
+  // E11: the engine's process ended it; UX wave U4a (Interfaces B): a message sent now ended it
+  const cause = turn.closedCause ?? (turn.ended?.endedForMessage === true ? 'message' : null);
   const rows: Row[] = [...above];
   if (user) rows.push(user);
   // The divider summarises a work area. A turn the owner did not start (engine, peer) always has one, because it is
@@ -968,7 +971,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     const denied = denials.filter((d) => d.disposition === 'denied');
     const firstDenied = denials.find((d) => d.disposition !== 'stopped')?.cellId ?? null;
     rows.push({
-      id: rowId.divider(turn.id), turnId: turn.id, at: user?.at ?? turn.startedAt, kind: 'divider', state: dividerState, ...(dividerState === 'stopped' && turn.closedCause !== null && { cause: turn.closedCause }), origin: turn.origin, startedAt: turn.startedAt, endedAt: turn.endedAt,
+      id: rowId.divider(turn.id), turnId: turn.id, at: user?.at ?? turn.startedAt, kind: 'divider', state: dividerState, ...(dividerState === 'stopped' && cause !== null && { cause }), origin: turn.origin, startedAt: turn.startedAt, endedAt: turn.endedAt,
       toolCalls: summary.toolCalls, denied: denied.length, autoDenied: summary.autoDenied, firstDeniedCell: firstDenied, expanded, summary, files: changedFiles(cells, turn),
       ...(opener !== undefined && { opener }), // UX wave U3
     });

@@ -127,6 +127,7 @@ export const grades = {
   'session.ui.answer': 'converse', // the attached surface's copy and prompt read, fill and suggest answers; nothing executes
   'session.reloadSkills': 'manage',
   'session.steer.cancel': 'converse',
+  'session.steer.sendNow': 'converse', // UX wave U4a (decision 4): carries no content; ends the running turn, as session.interrupt may
   'session.promptHistory': 'view',
   'session.observedFacts': 'view',
   'session.acquire': { floor: 'converse', byEffect: true }, // joins a ready or starting session; a resume relaunches it

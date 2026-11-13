@@ -85,6 +85,7 @@ export class OwnerHostSim {
         await gate();
         return this.cancelAnswer === 'withdrawn';
       },
+      sendNow: async () => undefined, // UX wave U4a: no scenario here sends a message now
       onChange: (queue) => {
         if (this.listening) this.onQueue?.(queue);
       },
