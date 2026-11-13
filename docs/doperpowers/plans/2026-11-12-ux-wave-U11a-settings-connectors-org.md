@@ -517,6 +517,7 @@ From the worktree of branch `ux-wave/U11a`. `vmcheck` below stands for `~/.local
    - `e2e/c11-live.spec.ts` has no gate group, so its edits run only at a live sitting;
    - the gate cannot switch the sign-in spike on (`MAWS_SIGNIN_SPIKE`);
    - the document editor's confirm stays outside the shared backdrop (it never stacks);
+   - a listed-only terminal session on another machine (lane A, no record) is filed into no project's tab set by `sessionSetKey`, so its tab opens in the set in front and can stand in another project's strip (`ipc/events.ts`'s `projectOf`; M5's action resolves it for itself);
    - `EnrollSheet.test.tsx`'s re-enroll case (master's) prints an uncaptured "[org] command failed … no answer for org.enroll.approve" from an unanswered fake call;
    - where the main root of a session's repository cannot be read (git answers nothing, or another machine does not offer the reading), the Connectors dialog's head names the session's folder, a narrower place than the engine's switch reaches (P2).
 
@@ -1033,6 +1034,9 @@ Found while checking the sections against the code at `48619c824`, then by the a
   Evidence: P1's second run (`before.scope` `dynamic` for `plugin:fx-plugin:fx-oauth`); its first run's debug line "Suppressing plugin MCP server … duplicates manually-configured …"; the function near line 476051 of `~/claude-code-bundle/2.1.322/cli.pretty.js`.
 - Observation: on 2.1.322 a configured server reads `needs-auth` after `mcp_oauth_callback_url` until `mcp_reconnect`, so the spike's older questions `custom`, `cancel` and `pathA` list "the server did not report connected"; the operation already sends the reconnect (findings-m4, point 1).
   Evidence: P1's runs; `src/services/connectors/sign-in.ts`.
+
+- Observation: `sessionSetKey` (`stores/org-projects.ts`) answers "not known" for a terminal session on another machine that is only listed (lane A, no record), though its listing names a hub project: it resolves a record-less listing only for lane B. M5's action resolves that case itself from the listing's project (ruled 2026-11-12; Decision Log); `sessionSetKey` is not changed, and for its other two callers today: (1) `ipc/events.ts`'s `projectOf`, the layout's filing of a session's tabs, treats such a tab as not known, so it opens in the tab set in front (`lane-a/remote-connect.ts` → `openSession`) and is never refiled into its project's set: it can stand in another project's strip; (2) `main/Tab.tsx`'s label calls it only for a session with a record, so it is not affected. The first can show the person a tab under the wrong project, so it is a tracker row with the pull request (Concrete Steps 6); nothing of it is fixed in this landing.
+  Evidence: `sessionSetKey` (the `listing?.lane === 'B'` branch); `projectOf` in `ipc/events.ts` near line 381; `useSessionLabel` in `main/Tab.tsx`; M5's task review.
 
 ## Decision Log
 
