@@ -23,16 +23,19 @@ const BADGE = 'shrink-0 truncate rounded-sm bg-bg-active px-1.5 text-ui-sm leadi
 // The head's right side: Search skills, Sort by (Plugin name offered only when a plugin brings a skill, Desktop's rule),
 // and Reload skills (E8's `reload_skills`, on a ready process).
 // P5 O7 M8: `unavailable`, why Reload is greyed for a session on another machine (lane-b/remote-unavailable.ts)
-export function SkillsToolbar({ plugins, canReload, reloading, onReload, unavailable = null }: { plugins: boolean; canReload: boolean; reloading: boolean; onReload(): void; unavailable?: string | null }) {
+// UX wave U11a: no `onReload`, no Reload (an unstarted tab's skills are the disk's; there is no engine to reload)
+export function SkillsToolbar({ plugins, canReload = false, reloading = false, onReload, unavailable = null }: { plugins: boolean; canReload?: boolean; reloading?: boolean; onReload?(): void; unavailable?: string | null }) {
   const { search, sort } = useLibraryStore((s) => s.skills);
   const sorts: readonly SkillsSort[] = plugins ? ['name', 'plugin'] : ['name'];
   return (
     <span className="flex min-w-0 items-center gap-1">
       <SearchField label={S.search} value={search} onChange={(next) => setSkills({ search: next })} />
       <Choice label={L.sortBy} icon={<SortIcon />} value={plugins ? sort : 'name'} values={sorts} words={S.sort} isDefault={!plugins || sort === 'name'} onChange={(next) => setSkills({ sort: next })} />
-      <button type="button" className={SECONDARY} disabled={!canReload || reloading || unavailable !== null} title={unavailable ?? undefined} onClick={onReload}>
-        {PLUGIN_MANAGEMENT.reloadSkills}
-      </button>
+      {onReload && (
+        <button type="button" className={SECONDARY} disabled={!canReload || reloading || unavailable !== null} title={unavailable ?? undefined} onClick={onReload}>
+          {PLUGIN_MANAGEMENT.reloadSkills}
+        </button>
+      )}
     </span>
   );
 }

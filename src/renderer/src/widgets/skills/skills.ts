@@ -13,6 +13,7 @@ import type { SessionCatalog } from '../../stores/catalog';
 import { parseEach } from '../parts';
 import { displayNameOf, GROUP_ORDER, SKILLS_DIR, type PluginIdentity, type SourceGroup } from '../plugins/library';
 import type { ObservedPlugin } from '@shared/engine/observed-facts';
+import type { CustomizationSkill } from '@shared/ipc/schema/customization';
 
 export interface SkillRow {
   name: string; // the engine's qualified name for live rows; display metadata for disk rows
@@ -83,6 +84,25 @@ export function skillGroups(dialog: GetSkillsDialogResponse, catalog: SessionCat
     return { group: GROUPED.get(source) ?? 'added', row: { name: s.name, plugin: null, description, source } };
   });
   return GROUP_ORDER.map((group) => ({ group, rows: placed.filter((p) => p.group === group).map((p) => p.row).sort(byLabel) })).filter((g) => g.rows.length > 0);
+}
+
+// The skills on disk (`customization.inventory`) in Customize's three groups: this project's, yours, from plugins.
+// `invocable` (UX wave U11a, §D "Skills"; P3, spikes/protocol-probe/findings-uxwave-u11-skill-names.txt): an unstarted
+// tab's `/skills`, where "Use in chat" inserts the form the engine runs: `/<name> ` for a project's and a person's skill,
+// `/<manifest name>:<name> ` for a plugin's; a plugin skill whose manifest name is not known (null, or absent from an
+// earlier engine host) has no invocation. Customize's own page lists them with none.
+export function diskSkillGroups(skills: readonly CustomizationSkill[], { invocable }: { invocable: boolean }): SkillGroup[] {
+  const invocationOfDisk = (skill: CustomizationSkill): string | null => {
+    if (!invocable) return null;
+    if (skill.source !== 'plugin') return skill.name;
+    return typeof skill.pluginName === 'string' ? `${skill.pluginName}:${skill.name}` : null;
+  };
+  const result: SkillGroup[] = [];
+  for (const [source, group] of [['project', 'here'], ['user', 'yours'], ['plugin', 'added']] as const) {
+    const rows = skills.filter((skill) => skill.source === source).map((skill) => ({ name: skill.name, invocation: invocationOfDisk(skill), description: skill.description, source, plugin: skill.plugin, path: skill.path }));
+    if (rows.length) result.push({ group, rows });
+  }
+  return result;
 }
 
 export const hasPluginSkills = (groups: readonly SkillGroup[]): boolean => groups.some((g) => g.rows.some((r) => r.plugin !== null));

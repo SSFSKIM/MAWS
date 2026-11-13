@@ -146,12 +146,13 @@ class Reading {
     } finally { await directory.close(); }
   }
 
-  async skillDirectory(path: string, source: CustomizationSkill['source'], plugin: string | null, anchor?: string): Promise<boolean> {
+  // `pluginName`: a plugin skill's plugin as the engine names it (UX wave U11a); the other skills carry none
+  async skillDirectory(path: string, source: CustomizationSkill['source'], plugin: string | null, anchor?: string, pluginName: string | null = null): Promise<boolean> {
     const file = join(path, 'SKILL.md');
     const text = await this.text(file, true, anchor);
     if (text === null) return false;
     const words = frontMatter(text);
-    this.addSkill({ name: (words.name ?? basename(path)).slice(0, 256), description: (words.description ?? '').slice(0, 4096), source, path: file, plugin });
+    this.addSkill({ name: (words.name ?? basename(path)).slice(0, 256), description: (words.description ?? '').slice(0, 4096), source, path: file, plugin, ...(source === 'plugin' && { pluginName }) });
     return true;
   }
   async skillsIn(path: string, source: CustomizationSkill['source'], plugin: string | null = null, anchor?: string): Promise<void> {
@@ -173,6 +174,12 @@ class Reading {
   }
 }
 
+// UX wave U11a (§D "Skills"; P3, spikes/protocol-probe/findings-uxwave-u11-skill-names.txt): the engine names a plugin by
+// its manifest's `name`, not by the installed key up to its `@`, and runs a plugin's skill as `/<that name>:<skill>`. A
+// name the engine's rule refuses (2.1.322 cli.pretty.js:953562: empty, a space, a control or formatting character) loads
+// no plugin under any name, and a longer one than the row holds would be cut wrong: both answer null.
+const pluginNameOf = (name: unknown): string | null => (typeof name === 'string' && name.length > 0 && name.length <= 256 && !/[\s\p{Cc}\p{Cf}]/u.test(name) ? name : null);
+
 async function installedSkills(r: Reading, configHome: string, cwd: string | null): Promise<void> {
   const path = join(configHome, 'plugins', 'installed_plugins.json');
   const raw = await r.json(path);
@@ -193,17 +200,19 @@ async function installedSkills(r: Reading, configHome: string, cwd: string | nul
       const anchor = await r.confined(row.installPath);
       if (anchor === null) { r.warn(`${path}: an installed plugin directory could not be read`); continue; }
       const id = plugin.slice(0, 256);
+      // the manifest first: its name is every skill's of the plugin (U11a), its declarations add folders below
+      const manifestPath = join(row.installPath, '.claude-plugin', 'plugin.json');
+      const manifest = record(await r.json(manifestPath, anchor));
+      const pluginName = pluginNameOf(manifest?.name);
       const seen = new Set<string>();
       const addDirectory = async (directory: string): Promise<boolean> => {
         const real = await r.confined(directory, anchor);
         if (real === null) return false;
         if (seen.has(real)) return true;
         seen.add(real);
-        return r.skillDirectory(directory, 'plugin', id, anchor);
+        return r.skillDirectory(directory, 'plugin', id, anchor, pluginName);
       };
       for (const directory of await r.directories(join(row.installPath, 'skills'), anchor)) await addDirectory(directory);
-      const manifestPath = join(row.installPath, '.claude-plugin', 'plugin.json');
-      const manifest = record(await r.json(manifestPath, anchor));
       for (const declaration of [manifest?.skills, record(manifest?.experimental)?.skills]) {
         if (declaration === undefined) continue;
         const paths = typeof declaration === 'string' ? [declaration] : Array.isArray(declaration) ? declaration : [];

@@ -9,6 +9,10 @@ export const CUSTOMIZATION_INVENTORY_COVERAGE = 'Plugin MCP servers and marketpl
 const AbsolutePath = z.string().min(1).max(4096).refine((path) => path.startsWith('/') && !path.includes('\0'), 'expected an absolute path');
 export const CustomizationSkillSchema = z.strictObject({
   name: z.string(), description: z.string(), source: z.enum(['user', 'project', 'plugin']), path: AbsolutePath, plugin: z.string().nullable(),
+  // UX wave U11a (§D "Skills", P3): a plugin skill's plugin as the engine names it, the `name` of the plugin's
+  // .claude-plugin/plugin.json, which `/<pluginName>:<name> ` runs; null when that name could not be read; absent on a
+  // person's or a project's skill, and from an engine host of an earlier build
+  pluginName: z.string().max(256).nullable().optional(),
 });
 export const CustomizationServerSchema = z.strictObject({
   name: z.string(), scope: z.enum(['app', 'user', 'project', 'local']), path: AbsolutePath, transport: z.enum(['stdio', 'http', 'sse', 'ws', 'unknown']),

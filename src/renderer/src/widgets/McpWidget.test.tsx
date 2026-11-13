@@ -418,7 +418,7 @@ describe('the "+" menu’s entries to the dialogs (U11a §C)', () => {
   it('reads Connectors in this chat… and Plugins in this chat…', async () => {
     for (const [submenu, entry] of [['Connectors', /^Connectors in this chat…/], ['Plugins', /^Plugins in this chat…/]] as const) {
       const user = userEvent.setup();
-      render(<PlusMenu appSessionId={ID} cwd="/work/atlas" editor={{ current: null }} />);
+      render(<QueryClientProvider client={new QueryClient()}><PlusMenu appSessionId={ID} cwd="/work/atlas" editor={{ current: null }} /></QueryClientProvider>);
       await user.click(screen.getByRole('button', { name: 'Add files, photos or commands' }));
       const trigger = screen.getByRole('menuitem', { name: submenu });
       act(() => trigger.focus());

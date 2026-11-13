@@ -164,6 +164,21 @@ export const MCP = {
   tools: (n: number) => `${n} tool${n === 1 ? '' : 's'}`,
 };
 
+// UX wave U11a (§D, l8-settings-03): an unstarted tab's Connectors and Skills dialogs, what the three dialogs and the
+// "+" › Connectors submenu say for a tab set to another machine, and the place named with no folder chosen.
+export const BEFORE_START = {
+  connectors: (place: string) => `Configured for ${place}. Connection state, and connectors from plugins, show once the chat starts.`,
+  skills: (place: string) => `On disk for ${place}. The chat may load more once it starts.`,
+  remote: (machine: string) => `Shown once the chat starts on ${machine}`,
+  userConfiguration: 'your user configuration',
+};
+
+// The "+" › Connectors submenu's line where a started session lists no rows (connector-menu.ts).
+export const CONNECTOR_MENU = {
+  noneReported: 'No connectors reported by this session',
+  notRunning: 'Live details are unavailable until this session is running',
+};
+
 // Sandbox (E11 §2.2): on or off first, with why it is off or what happens to a command it cannot run; the engine's
 // fields under Details.
 export const SANDBOX = {

@@ -253,7 +253,7 @@ it('shows a session directory no project has as its directory as itself, its pat
 
 it('opens the connector Manage footer for the composer project even when no session exists', async () => {
   const user = userEvent.setup();
-  render(<PlusMenu cwd="/two" editor={{ current: null }} />);
+  render(<QueryClientProvider client={new QueryClient()}><PlusMenu cwd="/two" editor={{ current: null }} /></QueryClientProvider>); // U11a: the menu's rows come from a hook over the query client
   await user.click(screen.getByRole('button', { name: 'Add files, photos or commands' }));
   const connectors = screen.getByRole('menuitem', { name: 'Connectors' });
   act(() => connectors.focus());

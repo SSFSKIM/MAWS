@@ -27,9 +27,10 @@ export function openCustomize(section: CustomizeSection = 'plugins', projectId: 
 export const useDiscoverRequest = create<{ cwd: string | null } | { cwd?: undefined }>(() => ({}));
 // P5 O6 M4: `cwd` is this machine's (the session plugin widgets open it only for this machine's sessions), so it names
 // this machine's project of that directory, never another machine's of the same path (Customize is local until O4).
-export function openDiscover(cwd: string): void {
-  const project = [...useSessions.getState().projects.values()].find((p) => p.directory === cwd && machineOf(p.id) === ipc.localMachine);
-  showCustomize('plugins', project ? { projectId: project.id } : { projectId: null, directory: cwd });
+// UX wave U11a: null, from an unstarted tab with no folder chosen, is the user configuration's page.
+export function openDiscover(cwd: string | null): void {
+  const project = cwd === null ? undefined : [...useSessions.getState().projects.values()].find((p) => p.directory === cwd && machineOf(p.id) === ipc.localMachine);
+  showCustomize('plugins', project ? { projectId: project.id } : cwd === null ? { projectId: null } : { projectId: null, directory: cwd });
   useDiscoverRequest.setState({ cwd }, true);
 }
 /** Takes the request when it is for the library showing `cwd`'s page; answers whether it did. */

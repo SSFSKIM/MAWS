@@ -98,6 +98,16 @@ export function shadowedBy(server: CustomizationServer, servers: readonly Custom
   return used === null || (used.scope === server.scope && used.path === server.path) ? null : used.scope;
 }
 
+/** UX wave U11a (§D "Connectors"): one entry per name, the one the engine will use, in the inventory's order. */
+export function usedEntries(servers: readonly CustomizationServer[]): CustomizationServer[] {
+  const named = new Set<string>();
+  return servers.filter((server) => {
+    if (named.has(server.name) || shadowedBy(server, servers) !== null) return false;
+    named.add(server.name);
+    return true;
+  });
+}
+
 export const shadowWords = (scope: CustomizationServer['scope'], name: string): string => (scope === 'app' ? C.shadowedByMaws(name) : C.shadowed(scope));
 
 /** The key a configured server's operations run under (Remove): its scope, name and file, since two project files may

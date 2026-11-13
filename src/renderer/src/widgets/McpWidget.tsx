@@ -12,6 +12,9 @@
 // is one line (`ConnectorRow`): the switch, the name, the status in words (connector-status.ts) and the tool count;
 // opening the row shows the rest. Sign in and Reconnect sit on the line of a row that needs a sign-in or failed, and
 // Reconnect is in the opened part of any other. What the switch reaches is said once, in the head, never on a row.
+// U11a (§D, l8-settings-03): before the first message on this Mac the dialog lists the folder's configured connectors,
+// one row per name (the entry the engine will use) with its scope in place of a status, and no switch, Reconnect or Sign
+// in; for a tab set to another machine it says the list shows once the chat starts there.
 import { useId, useRef, useState, type ReactNode } from 'react';
 import * as z from 'zod';
 import type { OperationEvent } from '@shared/engine/operations';
@@ -19,7 +22,10 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { McpStatusResponse } from '@shared/wire/control';
 import { PLUGINS_SCOPES, type PluginsScope } from '@shared/plugins/cli';
 import { CONNECTORS } from '../customize/connectors/copy';
-import { signInViewOf } from '../customize/connectors/present';
+import { serverKey, signInViewOf, usedEntries } from '../customize/connectors/present';
+import { useCustomizationInventory } from '../customize/inventory';
+import { InventoryState } from '../customize/InventoryState';
+import type { CustomizationServer } from '@shared/ipc/schema/customization';
 import { signInKeyOf, signInMachineOf, startSignInByName, useSignIns } from '../customize/connectors/sign-in';
 import { useSessionControls } from '../session/controls/controls-for'; // P5 O9 M5
 import { useSessions } from '../stores/sessions';
@@ -29,11 +35,12 @@ import { homeAbbreviated } from '../tools/session-info/model';
 import { connectorStatusWords } from './connector-status';
 import { McpDriven } from './McpDriven'; // P5 O9 M5
 import { useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
-import { MCP, MCP_ACTIONS, WIDGET_TITLE } from './copy';
+import { BEFORE_START, MCP, MCP_ACTIONS, WIDGET_TITLE } from './copy';
 import { operationLine, outcomeWords, useOperation } from './operation';
 import { Mono, parseEach, Rows, TextButton } from './parts';
 import { MOVES_READS, useEngineRead, type EngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
+import { useCloseOnLeavingForRemote, useTabPlace, type TabPlace } from './tab-place';
 
 const ConfigSchema = z.looseObject({ type: z.string().optional(), command: z.string().optional(), args: z.array(z.string()).optional(), url: z.string().optional() });
 const ToolSchema = z.looseObject({ name: z.string() });
@@ -317,8 +324,45 @@ function useSwitchPlace(appSessionId: AppSessionId, folder: string | null): stri
 const MOVES_MCP = (s: Parameters<typeof MOVES_READS>[0]) => `${MOVES_READS(s)}|${s.mcpServers.map((m) => `${m.name}=${m.status}`).join(',')}`;
 
 export function McpWidget(props: { appSessionId: AppSessionId; args: string; close(): void }) {
+  const place = useTabPlace(props.appSessionId); // U11a: an unstarted tab's dialog branches before the frame's read
+  useCloseOnLeavingForRemote(place, props.close);
   const controls = useSessionControls(props.appSessionId); // P5 O9 M5: a session driven through its bridge reads the bridge
+  if (place.kind !== 'started') return <McpBeforeStart appSessionId={props.appSessionId} place={place} close={props.close} />;
   return controls && controls.turn() !== null ? <McpDriven appSessionId={props.appSessionId} controls={controls} close={props.close} /> : <McpEngine {...props} />;
+}
+
+// U11a (§D "Connectors"): a configured server as the row draws it before the start: the scope stands on the line in
+// Customize's words, so the opened part holds the transport and the file that configures it.
+const configuredView = (server: CustomizationServer): McpServerView => ({ name: server.name, status: '', transport: server.transport === 'unknown' ? null : server.transport, command: null, scope: null, source: null, error: null, tools: [] });
+
+function McpBeforeStart({ appSessionId, place, close }: { appSessionId: AppSessionId; place: Exclude<TabPlace, { kind: 'started' }>; close(): void }) {
+  const local = place.kind === 'local';
+  const inventory = useCustomizationInventory(local ? place.folder : null, { enabled: local });
+  const servers = inventory.data ? usedEntries(inventory.data.servers) : null;
+  return (
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.mcp} subtitle={MCP.subtitle} command="mcp" state="ready" error={null} close={close}>
+      {place.kind === 'remote' ? (
+        <p className="m-0 text-fg-muted">{BEFORE_START.remote(place.machine)}</p>
+      ) : (
+        <>
+          <p data-before-start className="m-0 mb-1 text-ui-sm text-fg-muted">
+            {BEFORE_START.connectors(place.place)}
+          </p>
+          <InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} refresh={() => void inventory.refetch()} />
+          {servers !== null &&
+            (servers.length === 0 ? (
+              <p className="m-0 text-ui-sm text-fg-muted">{MCP.none}</p>
+            ) : (
+              <Rows label={MCP.list}>
+                {servers.map((server) => (
+                  <ConnectorRow key={serverKey(server)} server={configuredView(server)} words={CONNECTORS.scopeOf(server.scope)} opened={<span title={server.path}>{homeAbbreviated(server.path)}</span>} />
+                ))}
+              </Rows>
+            ))}
+        </>
+      )}
+    </WidgetFrame>
+  );
 }
 
 function McpEngine({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
