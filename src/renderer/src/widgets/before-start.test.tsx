@@ -22,6 +22,8 @@ import { resetRemoteSpawn, useRemoteSpawn } from '../sessions/remote-spawn';
 import { putIntent, intent, resetSetupStore } from '../test-support/setup-intents';
 import { registerFocusTarget, resetComposerStore } from '../stores/composer';
 import { useMachines } from '../stores/machines';
+import { useSettings } from '../stores/settings';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { useSessions } from '../stores/sessions';
 import { McpWidget } from './McpWidget';
 import { useLibraryStore } from './plugins/library-store';
@@ -84,6 +86,7 @@ afterEach(() => {
   useLibraryStore.setState(useLibraryStore.getInitialState());
   useSessions.setState({ projects: new Map(), records: new Map(), engine: new Map() });
   useMachines.setState({ roster: 'unread', machines: new Map() });
+  useSettings.setState({ state: null });
   useCustomizeProject.setState({ projectId: undefined });
   useDiscoverRequest.setState({}, true);
   delete (window as { maws?: unknown }).maws;
@@ -174,6 +177,42 @@ describe('the Skills dialog before the first message', () => {
     }
     expect(close).toHaveBeenCalledTimes(3);
     expect(invoked('session.send')).toEqual([]);
+  });
+});
+
+// The branch panel's finding 1: a skill of a plugin the chat will start without (the launch profile's `plugins.off`, which
+// the launch writes as `enabledPlugins[id] = false`) stays listed, and its Use in chat is greyed with the reason.
+describe('a skill of a plugin the chat starts without', () => {
+  const profileOff = (off: string[]) =>
+    useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V21, engine: { ...SETTINGS_DEFAULTS_V21.engine, launchProfile: { plugins: { off }, hooks: 'user' } } }, resolvedTheme: 'light' } });
+  const useButtons = (name: string) => within(document.querySelector<HTMLElement>(`[data-skill-row="${name}"]`)!).queryAllByRole('button', { name: 'Use in chat' });
+
+  it('is listed with Use in chat disabled and saying why, on its row and in its detail; the other skills stay usable', async () => {
+    profileOff(['fx-entry@fx-market']);
+    const insertText = vi.fn();
+    registerFocusTarget(ID, { focusEditor: () => {}, focusFrame: () => {}, insertText });
+    mount(SkillsWidget);
+    await screen.findByRole('region', { name: 'In this project' });
+    const [onRow] = useButtons('draw');
+    expect(onRow).toBeTruthy();
+    expect(onRow).toHaveProperty('disabled', true);
+    expect(onRow!.getAttribute('title')).toBe('Off in the sessions MAWS runs: Settings › Sessions › Plugins in sessions');
+    fireEvent.click(onRow!);
+    expect(insertText).not.toHaveBeenCalled();
+    expect(useButtons('review')[0]).toHaveProperty('disabled', false);
+    fireEvent.click(screen.getByRole('button', { name: 'View draw' }));
+    const inDetail = within(document.querySelector<HTMLElement>('[data-skill-detail="draw"]')!).getByRole('button', { name: 'Use in chat' });
+    expect(inDetail).toHaveProperty('disabled', true);
+    expect(inDetail.getAttribute('title')).toBe('Off in the sessions MAWS runs: Settings › Sessions › Plugins in sessions');
+  });
+
+  it('is usable again once the profile turns the plugin back on', async () => {
+    profileOff(['fx-entry@fx-market']);
+    mount(SkillsWidget);
+    await screen.findByRole('region', { name: 'In this project' });
+    expect(useButtons('draw')[0]).toHaveProperty('disabled', true);
+    act(() => profileOff([]));
+    await waitFor(() => expect(useButtons('draw')[0]).toHaveProperty('disabled', false));
   });
 });
 
@@ -320,6 +359,24 @@ describe('a plugin change while no reader of the inventory is fetching', () => {
     await openConnectors();
     await waitFor(() => expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toContain('linearproject scope'));
     expect(invoked('customization.inventory')).toEqual([{ cwd: ATLAS }, { cwd: ATLAS }]);
+  });
+
+  // The branch panel's finding 3: a change that lands while the first read is in flight is owed a read after it (the
+  // read joined by the invalidation answers the list from before the change).
+  it('reads again after a first read that was in flight when the change came', async () => {
+    let first!: (value: CustomizationInventory) => void;
+    let reads = 0;
+    backend.script('customization.inventory', () => {
+      reads += 1;
+      return reads === 1 ? new Promise<CustomizationInventory>((resolve) => (first = resolve)) : withSkill('linear');
+    });
+    mount(SkillsWidget);
+    await waitFor(() => expect(reads).toBe(1));
+    act(() => changed());
+    await act(async () => first(ATLAS_INVENTORY)); // the answer read before the change
+    await waitFor(() => expect(document.querySelector('[data-skill-row="linear"]')).toBeTruthy());
+    expect(document.querySelector('[data-skill-row="review"]')).toBeNull();
+    expect(reads).toBe(2);
   });
 
   it('reads again when /skills opens after a change made while no dialog was open', async () => {

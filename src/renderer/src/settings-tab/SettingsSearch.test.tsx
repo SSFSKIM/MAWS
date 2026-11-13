@@ -136,6 +136,29 @@ describe('Search settings: the field and its results', () => {
     type('mcp servers'); // a new query preselects its first result again
     expect(selected()).toBe(0);
   });
+
+  // The branch panel's finding 2: the selected result is always the one in view. The reveal follows every change of the
+  // selection or of the results, and a query that leaves the results the same (a trailing space) keeps the selection.
+  it('keeps the selection and its reveal when a query change leaves the results the same, and reveals the first when they change', () => {
+    renderView();
+    field().focus();
+    type('session');
+    const selected = () => options().findIndex((o) => o.getAttribute('aria-selected') === 'true');
+    expect(options().length).toBeGreaterThan(4);
+    for (let i = 0; i < 4; i += 1) press('ArrowDown');
+    expect(selected()).toBe(4);
+    const revealed = vi.mocked(HTMLElement.prototype.scrollIntoView);
+    const lastRevealed = () => revealed.mock.contexts.at(-1);
+    expect(lastRevealed()).toBe(options()[4]);
+    revealed.mockClear();
+    type('session '); // the search ignores the trailing space: the same results
+    expect(selected()).toBe(4);
+    expect(field().getAttribute('aria-activedescendant')).toBe(options()[4]!.id);
+    expect(revealed.mock.contexts.every((element) => element === options()[4])).toBe(true);
+    type('mcp'); // other results: the first is selected and revealed, wherever the list was scrolled
+    expect(selected()).toBe(0);
+    expect(lastRevealed()).toBe(options()[0]);
+  });
 });
 
 describe('Search settings: choosing a result', () => {

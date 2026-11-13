@@ -582,6 +582,24 @@ test('settings: Search settings finds rows by their words; a choice lands under 
     expect((await paneList.boundingBox())!.height, 'at most 12rem').toBeLessThanOrEqual(192.5);
     expect(await paneList.evaluate((el) => el.scrollHeight > el.clientHeight), 'the narrow list scrolls').toBe(true);
     expect((await paneList.boundingBox())!.y, 'under the field').toBeGreaterThanOrEqual(fieldBox.y + fieldBox.height - 1);
+    // the branch panel's finding 2: Down until the list has scrolled, then a trailing space, which the search ignores:
+    // the same results keep the selection, and the selected result is the one in view
+    const selectedOption = paneListbox.locator('[role="option"][aria-selected="true"]');
+    const inList = async () => {
+      const [box, list] = [(await selectedOption.boundingBox())!, (await paneList.boundingBox())!];
+      return box.y >= list.y - 1 && box.y + box.height <= list.y + list.height + 1;
+    };
+    for (let i = 0; i < 6 && (await paneList.evaluate((el) => el.scrollTop)) === 0; i += 1) await paneField.press('ArrowDown');
+    expect(await paneList.evaluate((el) => el.scrollTop), 'Down scrolled the list').toBeGreaterThan(0);
+    const chosen = await selectedOption.getAttribute('id');
+    await paneField.press('End');
+    await page.keyboard.type(' ');
+    await expect(paneField).toHaveValue('session ');
+    await expect(selectedOption).toHaveAttribute('id', chosen!);
+    expect(await inList(), 'the kept selection in view').toBe(true);
+    await paneField.fill('sessions');
+    await expect.poll(inList, { message: 'the selection in view after the results changed' }).toBe(true);
+    await paneField.fill('session');
     await page.screenshot({ path: test.info().outputPath('settings-search-330.png') });
     await paneField.fill('mcp');
     await expect(paneListbox.getByRole('option').first()).toBeVisible();
