@@ -23,7 +23,7 @@ How to see it working: the unit tests named under each milestone fail before its
 - [x] (2026-11-12) Adversarial review of the document: needs-attention, three findings, all accepted.
 - [x] (2026-11-12) One revision: the architect's rulings on the twelve points, the review's three findings and its note on rows made at run time, and the decisions on the drawing's findings, folded in (Decision Log).
 - [ ] The owner's look at the drawn page: three answers (the order, Org's heading, the section's name). It blocks M9 and M10 and nothing else.
-- [ ] Master merged into the branch; U6a on master confirmed (Concrete Steps, 1).
+- [x] (2026-11-12) Master `6e8c72738` merged into the branch (`eb0290ce8`). U6a is not on master yet (no `BUILD_F_ACTION_IDS`), so M5 waits; U13a's `sessionRow` is not there either; master still holds the `settings` tab kind. Of the files this document names, the merge changed `composer/Composer.tsx` and `ipc/events.ts` (U8a's working folder, `useWorkingFolder`): M5 and M7 read them again before building.
 - [ ] M1 — the sign-in probe's two questions written; handed to the architect for the gate job on the mini.
 - [ ] M2 — Org sheets: refusals that name a next step; the grant sheet's read; the paused live query.
 - [ ] M3 — one scrim, also where dialogs stack; the Channel's gutter and names.
