@@ -209,8 +209,9 @@ describe('what a remote reader may send', () => {
     expect(f.host.calls.filter((c) => c.name === 'session.reader.update')).toEqual([]);
     expect(index.sessions.get(app)).toMatchObject({ ...NONE, archived: false });
     expect(readerFields(index.sessions.get(app, org.B)!)).toEqual(NONE);
-    // `session.update` (the record, `title`, `archived`) is not offered, to an owner or anyone else.
-    for (const r of [a, b]) for (const patch of [{ pinned: true }, { title: null }, { archived: true }]) expect(code(await call(r, 'session.update', { appSessionId: app, patch }))).toBe('not-offered');
+    // `session.update` (the record, `title`, `archived`) is no call, to an owner or anyone else: the UX wave offers it as
+    // an act, an unarchive alone (U9, M1; test/endpoint/session-acts.test.ts).
+    for (const r of [a, b]) for (const patch of [{ pinned: true }, { title: null }, { archived: true }, { archived: false }]) expect(code(await call(r, 'session.update', { appSessionId: app, patch }))).toBe('act-required');
   });
 
   it('grades a reader’s update `list`, a draft’s read `view` and its write `converse`', async () => {

@@ -130,6 +130,16 @@ describe('a machine’s listing follows its record, read by a remote reader with
     await expect.poll(() => surfaces(f, b, app), { timeout: FOLLOWS_WITHIN_MS, interval: 100 }).toEqual({ channel: 'withdrawn', hub: 'withdrawn' });
   });
 
+  it('lists again a session unarchived in the machine’s own window', async () => {
+    const { f, app, b } = await machine();
+    await until(() => said(hubListing(f, app)) !== null, 'the session listed for the hub');
+    expect(await windowAct(f, 'session.archive', { appSessionId: app })).toEqual({ archived: true });
+    await expect.poll(() => surfaces(f, b, app), { timeout: FOLLOWS_WITHIN_MS, interval: 100 }).toEqual({ channel: 'withdrawn', hub: 'withdrawn' });
+
+    await windowAct(f, 'session.update', { appSessionId: app, patch: { archived: false } });
+    await expect.poll(() => surfaces(f, b, app), { timeout: FOLLOWS_WITHIN_MS, interval: 100 }).toEqual({ channel: { title: REPORTED }, hub: { title: REPORTED } });
+  });
+
   it('re-issues the listing of a stopped session renamed in the machine’s own window with the record’s title', async () => {
     const { f, h, app, b } = await machine();
     await until(() => said(hubListing(f, app)) !== null, 'the session listed for the hub');

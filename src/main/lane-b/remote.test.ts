@@ -107,7 +107,7 @@ describe('routeLaneB', () => {
       expect(l.adapter.handles(name), name).toBe(true);
     }
     expect(l.adapter.handles('session.events')).toBe(true); // read in pages the channel carries
-    for (const name of ['session.status', 'session.get', 'session.update', 'session.drafts.get', 'laneA.send'] as CommandName[]) expect(l.adapter.handles(name), name).toBe(false);
+    for (const name of ['session.status', 'session.get', 'session.drafts.get', 'laneA.send'] as CommandName[]) expect(l.adapter.handles(name), name).toBe(false);
   });
 
   // The project registry's M11: a harness build's e2e fixture (src/main/org/registry-fixture.ts) stands in for a machine
@@ -1316,6 +1316,123 @@ describe('the project acts (the project registry)', () => {
     await l.cmd('session.projects.remove', { id: 'p-1' });
     await l.cmd('session.projects.update', { id: 'p-1', patch: { name: 'A' } });
     expect(l.link.acts.map((a) => a.request.action)).toEqual(['session.projects.addFolder', 'session.projects.remove', 'session.projects.update']);
+  });
+});
+
+// The UX wave (U9, M1; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, Interfaces §1 and §3): the session
+// acts go only to a machine whose endpoint lists `rl2.session-acts`. With a current channel that lacks it an act answers
+// at once and nothing is sent; with no channel current it waits under the link's hold, carrying the capability as
+// `requires` for the channel it goes on to judge. The machine acts work with no tab open and resume nothing; the two
+// engine-host acts need the session's tab, and a pane's answer never resumes a session. A refused act says UC-7.5's
+// sentence, its code in `issues.refusal`.
+describe('the session acts (`rl2.session-acts`)', () => {
+  const SESSION_ACTS = ['rl2.executor.machine', 'rl2.session-acts'];
+  const machineActs: Array<[string, Record<string, unknown>]> = [
+    ['session.archive', { appSessionId: APP }],
+    ['session.update', { appSessionId: APP, patch: { archived: false } }],
+    ['session.rename', { appSessionId: APP, title: 'Loft notes' }],
+    ['attention.acknowledge', { appSessionId: APP, attentionId: `${APP}:error:e1`, how: 'dismissed' }],
+  ];
+
+  it('are taken by the adapter, the archived read among them', () => {
+    const l = lab();
+    for (const name of ['session.archive', 'session.update', 'session.rename', 'attention.acknowledge', 'session.steer.cancel', 'maws.pane.answer', 'session.list'] as CommandName[]) expect(l.adapter.handles(name), name).toBe(true);
+  });
+
+  it('build the machine acts with no session and no context, carrying the capability, on a session no tab holds, resuming nothing', async () => {
+    const l = lab({ tabs: [] });
+    l.link.relink(SESSION_ACTS);
+    l.link.onAct = settleWith({ state: 'done', result: null });
+    l.link.answers.set('session.list', () => ({ ok: true, output: { sessions: [], revision: 1 } }));
+    for (const [name, input] of machineActs) await l.cmd(name, input);
+    expect(l.link.acts.map((a) => a.request)).toEqual(machineActs.map(([action, args]) => ({ action, args, executor: 'machine', sendBy: expect.any(Number), requires: 'rl2.session-acts' })));
+    expect(await l.cmd('session.list', { includeArchived: true })).toEqual({ ok: true, value: { sessions: [], revision: 1 } });
+    expect(l.link.calls.filter((c) => c.name === 'session.list')).toEqual([{ name: 'session.list', input: { includeArchived: true } }]);
+    expect(l.base).toEqual([]);
+  });
+
+  it('build taking back a waiting message and a pane’s answer as engine-host acts on the open session, carrying the capability', async () => {
+    const l = lab();
+    l.link.relink(SESSION_ACTS);
+    await live(l);
+    l.link.onAct = (act) => act.settle({ state: 'done', result: act.request.action === 'session.steer.cancel' ? { outcome: 'cancelled' } : { outcome: 'delivered' } });
+    expect(await l.cmd('session.steer.cancel', { appSessionId: APP, messageUuid: 'm2' })).toEqual({ ok: true, value: { outcome: 'cancelled' } });
+    expect(await l.cmd('maws.pane.answer', { appSessionId: APP, requestId: 'req-1', result: { ok: false, error: 'closed' } })).toEqual({ ok: true, value: { outcome: 'delivered' } });
+    expect(l.link.acts.map((a) => a.request)).toEqual([
+      { action: 'session.steer.cancel', session: APP, context: { lane: 'B', launchId: 'L1', engineSessionId: `eng-${APP}` }, args: { appSessionId: APP, messageUuid: 'm2' }, executor: 'engine-host', sendBy: expect.any(Number), requires: 'rl2.session-acts' },
+      { action: 'maws.pane.answer', session: APP, context: { lane: 'B', launchId: 'L1', engineSessionId: `eng-${APP}` }, args: { appSessionId: APP, requestId: 'req-1', result: { ok: false, error: 'closed' } }, executor: 'engine-host', sendBy: expect.any(Number), requires: 'rl2.session-acts' },
+    ]);
+  });
+
+  it('never resume a released session for a pane’s answer: the request it answers died with its launch', async () => {
+    const l = lab();
+    l.link.relink(SESSION_ACTS);
+    await vi.advanceTimersByTimeAsync(0);
+    l.link.open()[0].sink.ended('unavailable'); // released: no live launch
+    expect(await l.cmd('maws.pane.answer', { appSessionId: APP, requestId: 'req-1', result: { ok: false, error: 'closed' } })).toMatchObject({ ok: false, error: { code: 'internal' } });
+    expect(l.link.acts).toEqual([]);
+  });
+
+  it('need the session’s tab for the engine-host acts', async () => {
+    const l = lab({ tabs: [] });
+    l.link.relink(SESSION_ACTS);
+    expect(await l.cmd('session.steer.cancel', { appSessionId: APP, messageUuid: 'm2' })).toMatchObject({ ok: false, error: { issues: { refusal: 'not-open' } } });
+    expect(l.link.acts).toEqual([]);
+  });
+
+  it('are sent nothing of to a peer whose handshake lacks the capability, answered at once in UC-7.5’s words', async () => {
+    const l = lab();
+    await live(l); // the peer lists rl2.executor.machine alone, as build F's
+    l.link.answers.set('session.list', () => ({ ok: true, output: { sessions: [], revision: 1 } }));
+    expect(await l.cmd('session.archive', { appSessionId: APP })).toEqual({ ok: false, error: { code: 'internal', message: 'Not archived: update MAWS on mini and try again', issues: { refusal: 'not-offered' } } });
+    expect(await l.cmd('session.rename', { appSessionId: APP, title: 'Loft notes' })).toMatchObject({ ok: false, error: { message: 'Not renamed: update MAWS on mini and try again', issues: { refusal: 'not-offered' } } });
+    expect(await l.cmd('attention.acknowledge', machineActs[3][1])).toMatchObject({ ok: false, error: { message: 'Not dismissed: update MAWS on mini and try again' } });
+    for (const [name, input] of [['session.update', machineActs[1][1]], ['session.steer.cancel', { appSessionId: APP, messageUuid: 'm2' }], ['maws.pane.answer', { appSessionId: APP, requestId: 'req-1', result: { ok: false, error: 'closed' } }], ['session.list', { includeArchived: true }]] as const) {
+      expect([name, await l.cmd(name, input)]).toMatchObject([name, { ok: false, error: { issues: { refusal: 'not-offered' } } }]);
+    }
+    expect(l.link.acts).toEqual([]);
+    expect(l.link.calls.filter((c) => c.name === 'session.list')).toEqual([]);
+  });
+
+  it('wait under the link’s hold with no channel current, never answered `host_unavailable`, and end in the offline sentence', async () => {
+    const l = lab({ tabs: [] });
+    l.link.lose(); // still `up` for the grace: no channel current, no peer known
+    l.link.onAct = (act) => act.move('waiting');
+    const made = Date.now();
+    const archiving = l.cmd('session.archive', { appSessionId: APP });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.link.acts.map((a) => a.request)).toEqual([{ action: 'session.archive', args: { appSessionId: APP }, executor: 'machine', sendBy: made + 60_000, requires: 'rl2.session-acts' }]);
+    let answered = false;
+    void archiving.then(() => (answered = true));
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(answered).toBe(false);
+    l.link.acts[0].settle({ state: 'refused', reason: 'offline' });
+    expect(await archiving).toEqual({ ok: false, error: { code: 'host_unavailable', message: 'Not archived: mini is offline', issues: { refusal: 'offline' } } });
+  });
+
+  it('word a machine’s refusal and a failure by UC-7.5, the code riding in `issues.refusal`', async () => {
+    const l = lab({ tabs: [] });
+    l.link.relink(SESSION_ACTS);
+    const outcomes: Array<[Parameters<FakeAct['settle']>[0], unknown]> = [
+      [{ state: 'refused', reason: 'grade' }, { code: 'internal', message: 'Not renamed: only the session’s owners can', issues: { refusal: 'grade' } }],
+      [{ state: 'refused', reason: 'read-only' }, { code: 'internal', message: 'Not renamed: mini is in read-only mode', issues: { refusal: 'read-only' } }],
+      [{ state: 'refused', reason: 'unavailable' }, { code: 'host_unavailable', message: 'Not renamed: mini is busy; try again in a moment', issues: { refusal: 'unavailable' } }],
+      [{ state: 'not-sent' }, { code: 'host_unavailable', message: 'Not renamed: mini is offline', issues: { refusal: 'not-sent' } }],
+      [{ state: 'failed', error: { code: 'internal', message: 'unknown app session: app-1' } }, { code: 'internal', message: 'Not renamed: unknown app session: app-1' }],
+    ];
+    for (const [outcome, error] of outcomes) {
+      l.link.onAct = settleWith(outcome);
+      expect(await l.cmd('session.rename', { appSessionId: APP, title: 'Loft notes' }), JSON.stringify(outcome)).toEqual({ ok: false, error });
+    }
+  });
+
+  it('keep the pending sentence for an act the channel carried whose outcome hasn’t come by the bound', async () => {
+    const l = lab({ tabs: [] });
+    l.link.relink(SESSION_ACTS);
+    l.link.onAct = (act) => act.move('sent');
+    const archiving = l.cmd('session.archive', { appSessionId: APP });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(await archiving).toEqual({ ok: false, error: { code: 'timeout', message: 'mini took the request but hasn’t confirmed it' } });
   });
 });
 

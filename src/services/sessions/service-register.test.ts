@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { CommandName } from '@shared/ipc/schema';
+import { endableClientRef, type HandlerContext } from '@shared/ipc/client';
 import { fakeBus } from '../../../test/support/fake-bus';
 import { SessionHarness } from '../../../test/support/session-harness';
 import { sessionIdFor, summary } from '../../../test/support/index-fixture'; // P2-A
@@ -29,6 +30,22 @@ describe('the session service’s commands, answered on the services bus', () =>
     expect(bad).toMatchObject({ ok: false, error: { code: 'invalid_input', message: expect.stringContaining('location: directory not found'), issues: [{ path: ['patch', 'location'] }] } });
     expect(await invoke('session.start', { appSessionId: id, message: null, options: {} })).toMatchObject({ ok: true, value: { status: 'needs_trust' } });
     expect(await invoke('session.trust.check', { directory: h.work })).toMatchObject({ ok: true, value: { trustKey: h.work, trusted: false } });
+  });
+
+  // The UX wave (U9, R9): a rename made under a reader (another machine's member, through the endpoint) answers the record
+  // as `session.get` answers that reader, read after the rename: a member is never answered the owners' reading.
+  it('answers a rename under a reader with the record as that reader reads it', async () => {
+    const B = 'b'.repeat(32);
+    const record = h.index.sessions.upsertFromSummary(summary({ directory: h.work })).record;
+    h.index.sessions.setPinned(record.appId, true);
+    const as = (reader: string): HandlerContext => ({ client: endableClientRef('endpoint:1'), remote: true, reader });
+    for (const [reader, title] of [[B, 'Loft notes'], ['owner', 'Studio notes']] as const) {
+      const renamed = (await bus.invoke('session.rename', { appSessionId: record.appId, title }, as(reader))) as Result;
+      expect(renamed, reader).toEqual({ ok: true, value: { record: h.index.sessions.get(record.appId, reader), via: 'override' } });
+    }
+    const asMember = (await bus.invoke('session.rename', { appSessionId: record.appId, title: 'Loft notes' }, as(B))) as Result;
+    expect((asMember.value as { record: { pinned: boolean } }).record.pinned).toBe(false);
+    expect(h.index.sessions.get(record.appId)!.pinned).toBe(true);
   });
 
   it('refuses a patch while a start is in flight as internal `starting`', async () => {
