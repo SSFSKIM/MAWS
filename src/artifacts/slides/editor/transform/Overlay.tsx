@@ -513,7 +513,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
         const d = { x: key === 'ArrowLeft' ? -step : key === 'ArrowRight' ? step : 0, y: key === 'ArrowUp' ? -step : key === 'ArrowDown' ? step : 0 };
         notice(nudge(c, sel, d));
         done();
-      } else if (mod && key.toLowerCase() === 'd' && cmds.canEdit) {
+      } else if (mod && !e.shiftKey && key.toLowerCase() === 'd' && cmds.canEdit) { // U6a: ⇧⌘D is View ▸ Review's
         notice(cmds.duplicate());
         done();
       } else if (mod && key.toLowerCase() === 'g') {

@@ -713,6 +713,23 @@ describe('find', () => {
     expect(editor().view.dom.querySelectorAll('.find-match')).toHaveLength(0);
   });
 
+  // U6a (the UX wave's U6, collisions: ⇧⌘F is View ▸ Files): with Shift down the document leaves the key to the menu
+  it('⇧⌘F opens no find bar and is neither prevented nor stopped; ⌘F still opens it', async () => {
+    const { editor } = await mount(doc(para('p1', 'alpha beta')));
+    const reached = vi.fn();
+    document.addEventListener('keydown', reached);
+    for (const key of ['f', 'F']) {
+      let kept = false;
+      act(() => void (kept = fireEvent.keyDown(editor().view.dom, { key, metaKey: true, shiftKey: true })));
+      expect(kept, key).toBe(true);
+    }
+    document.removeEventListener('keydown', reached);
+    expect(reached).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('searchbox', { name: 'Find in document' })).toBeNull();
+    act(() => void fireEvent.keyDown(editor().view.dom, { key: 'f', metaKey: true }));
+    expect(screen.getByRole('searchbox', { name: 'Find in document' })).toBeTruthy();
+  });
+
   const findCount = () => within(screen.getByRole('search')).getByRole('status').textContent;
 
   // P3-F panel scalpel-1#2 (X26): the keys of an IME composition are the IME's; its commit Enter does not step and its

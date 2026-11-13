@@ -1,6 +1,6 @@
 UX wave, child U11, l8-settings-11: does engine 2.1.322 take its default model and permission mode from the user
 settings file, under MAWS's launch and in a terminal, and does it rewrite that file by itself?
-(the U11 draft, ~/.local/share/maws-ux-wave/spec/drafts/U11-answered.md, l8-settings-11 and its "Probes and checks";
+(the draft of the spec's U11 section as it stood then, kept outside the repository; the section is `docs/doperpowers/specs/2026-11-12-ux-wave/U11-settings-connectors-org.md`: l8-settings-11 and its "Probes and checks";
 2026-11-12/13, VM dc-uxwave2-e584, branch ux-wave/probe2-text-defaults)
 
 Question. With `model` and `permissions.defaultMode` in `<config home>/settings.json` and no flag: what `system/init`

@@ -32,6 +32,8 @@ export interface EngineRequestsOptions {
 
 export function engineRequests({ hosts, clocks, log, exitSettleMs = EXIT_SETTLE_MS }: EngineRequestsOptions): { forward: Forward; hold(): () => void; inFlight(): number } {
   let inFlight = 0;
+  let standing = 0; // P5 Decision Log 273: the open document channels' needs among them, no operation in flight
+  const tell = () => clocks.engineRequests(inFlight, inFlight - standing);
 
   // The asked host's exit: its link leaving `ready`, or its park; false when the bound passed first
   const exited = () =>
@@ -55,7 +57,7 @@ export function engineRequests({ hosts, clocks, log, exitSettleMs = EXIT_SETTLE_
     if (owner !== 'engine-host') return hosts.forward(owner, request);
     if (hosts.completionGone(owner, request.name, request.input)) return hosts.forward(owner, request); // the exception above: answered at once
     inFlight += 1;
-    clocks.engineRequests(inFlight);
+    tell();
     clocks.engineNeeded();
     try {
       if (clocks.parkAsked()) {
@@ -71,7 +73,7 @@ export function engineRequests({ hosts, clocks, log, exitSettleMs = EXIT_SETTLE_
       // request that outlived the idle time would otherwise have the park asked the moment it ends)
       clocks.engineNeeded();
       inFlight -= 1;
-      clocks.engineRequests(inFlight);
+      tell();
     }
   };
   // P5 O7 M5b: an open endpoint document channel (daemon.ts' `documents.open`) is a need held until it closes, counted
@@ -81,7 +83,8 @@ export function engineRequests({ hosts, clocks, log, exitSettleMs = EXIT_SETTLE_
   const hold = (): (() => void) => {
     let held = true;
     inFlight += 1;
-    clocks.engineRequests(inFlight);
+    standing += 1;
+    tell();
     clocks.engineNeeded();
     return () => {
       if (!held) return;
@@ -89,7 +92,8 @@ export function engineRequests({ hosts, clocks, log, exitSettleMs = EXIT_SETTLE_
       // The need first: the count's evaluation then reads the clock started at the close, never the one from the open
       clocks.engineNeeded();
       inFlight -= 1;
-      clocks.engineRequests(inFlight);
+      standing -= 1;
+      tell();
     };
   };
   return { forward, hold, inFlight: () => inFlight };
