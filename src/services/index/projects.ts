@@ -406,8 +406,13 @@ const optionalPointer = (path: string): string | null => (exists(path) ? pointer
 // Where the agent's folder sits for a session launched in `launch` (a realpath): its checkout (the launch folder itself
 // inside the launch folder's own work tree, else the root of the work tree the folder is in), the folder's realpath, that
 // work tree, and whether it is a linked worktree. Null for a folder that does not resolve, is in another repository, or
-// is in none under a launch folder that is in one. "At or under" is at a segment boundary.
-export function checkoutIn(launch: string, folder: string): { checkout: string; cwd: string; workTree: string | null; linked: boolean } | null {
+// is in none under a launch folder that is in one. "At or under" is at a segment boundary. `repositoryOf` is how a folder's
+// repository is read (a batch's shared reads, `folder-facts.ts`).
+export function checkoutIn(
+  launch: string,
+  folder: string,
+  repositoryOf: (folder: string) => Repository | null = repositoryAt,
+): { checkout: string; cwd: string; workTree: string | null; linked: boolean } | null {
   let c: string;
   try {
     c = canonical(folder);
@@ -415,8 +420,8 @@ export function checkoutIn(launch: string, folder: string): { checkout: string; 
     return null;
   }
   const within = c === launch || c.startsWith(launch.endsWith(sep) ? launch : launch + sep);
-  const rc = repositoryAt(c);
-  const rl = repositoryAt(launch);
+  const rc = repositoryOf(c);
+  const rl = repositoryOf(launch);
   if (rl === null) return rc === null && within ? { checkout: launch, cwd: c, workTree: null, linked: false } : null;
   if (rc === null || rc.commonDir !== rl.commonDir) return null;
   if (rc.workTree === rl.workTree) return { checkout: within ? launch : rl.workTree, cwd: c, workTree: rl.workTree, linked: rl.linked };

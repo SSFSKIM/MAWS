@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId, AttentionId, MessageUuid, RequestId, SessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { SessionRecordSchema } from '@shared/graph/session';
+import type { TranscriptSummary } from '@shared/wire/store';
 import { gitCheckout, gitWorktree, sessionIdFor, summary, tempDir } from '../../../test/support/index-fixture';
 import { budgetVerdict, machineLoad } from '../../../test/support/latency-budget';
 import { Index } from './index';
@@ -293,6 +294,14 @@ describe('session records in the index', () => {
     return { summaries, main, w1, w2 };
   };
 
+  // The summaries an engine host of a build before this landing sends: no newest row's folder.
+  const withoutNewest = (summaries: TranscriptSummary[]) =>
+    summaries.map((s) => {
+      const copy = { ...s };
+      delete copy.newestCwd;
+      return copy;
+    });
+
   // macOS: a CPU-time bound measured on the Apple silicon Mac (a hardware-bound gate,
   // docs/doperpowers/plans/2026-10-14-gate-offload.md §3.1).
   it.skipIf(process.platform !== 'darwin')('upserts 4,000 synthetic summaries inside one transaction in under 500 ms of CPU time', async () => {
@@ -331,17 +340,28 @@ describe('session records in the index', () => {
           fresh.dispose();
         }
       }
-      // The three shares, on one more fresh index, printed and not asserted: what a run over the bound is reported with.
-      const shares = tempDir();
-      const shared = new Index(join(shares.path, 'index.sqlite'));
-      try {
-        const share = (pick: (i: number) => boolean) => Math.round(run(shared, summaries.filter((_, i) => pick(i))).ms * 10) / 10;
-        console.log(`[latency] 4,000 upserts by share, CPU ms: one folder ${share((i) => i % 20 > 2 || i % 20 === 0)}, home in a worktree ${share((i) => i % 20 === 1)}, cd into a worktree ${share((i) => i % 20 === 2)}`);
-      } finally {
-        shared.close();
-        shares.dispose();
-      }
+      // Printed and not asserted: the same 4,000 summaries without the newest row's folder (the older producer's, which
+      // reads nothing new), the comparison every run carries at its own load, the least of three runs on fresh indexes;
+      // and the three shares, what a run over the bound is reported with: diagnostics, one run each (M2 fix wave 2).
+      const leastOf = (batch: TranscriptSummary[], runCount = 3) => {
+        const times: number[] = [];
+        for (let i = 0; i < runCount; i++) {
+          const fresh = tempDir();
+          const other = new Index(join(fresh.path, 'index.sqlite'));
+          try {
+            times.push(run(other, batch).ms);
+          } finally {
+            other.close();
+            fresh.dispose();
+          }
+        }
+        return Math.round(Math.min(...times) * 10) / 10;
+      };
+      const share = (pick: (i: number) => boolean) => leastOf(summaries.filter((_, i) => pick(i)), 1);
       const least = Math.round(Math.min(...runs.map((r) => r.ms)) * 10) / 10;
+      const withoutNewestLeast = leastOf(withoutNewest(summaries));
+      console.log(`[latency] 4,000 upserts, CPU ms: ${least}; the same without the newest row's folder: ${withoutNewestLeast}`);
+      console.log(`[latency] 4,000 upserts by share, CPU ms: one folder ${share((i) => i % 20 > 2 || i % 20 === 0)}, home in a worktree ${share((i) => i % 20 === 1)}, cd into a worktree ${share((i) => i % 20 === 2)}`);
       const { ceiling, reason } = budgetVerdict('4,000 upserts, CPU time', least, 500, machine, at);
       if (reason !== null) console.log(`[latency] ${reason}`);
       expect(least).toBeLessThan(ceiling);
@@ -349,7 +369,7 @@ describe('session records in the index', () => {
     } finally {
       repos.dispose();
     }
-  });
+  }, 60_000); // the case runs the upserts 9 times; this is the test's timeout, not a time bound
 
   // U8c-2 (M2 decision 11): the same count from an engine host that does not say where the newest row is gives exactly
   // today's records, and neither column is written.
@@ -357,11 +377,7 @@ describe('session records in the index', () => {
     const repos = tempDir('maws-bound-');
     try {
       const { summaries, main, w1 } = await boundSummaries(repos.path);
-      const older = summaries.map((s) => {
-        const copy = { ...s };
-        delete copy.newestCwd;
-        return copy;
-      });
+      const older = withoutNewest(summaries);
       index.transaction(() => {
         for (const s of older) index.sessions.upsertFromSummary(s);
       });
