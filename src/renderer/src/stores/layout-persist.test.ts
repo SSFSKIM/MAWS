@@ -6,6 +6,7 @@ import { addressOf } from '@shared/machine/address';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { createLayoutStore, LAYOUT_WRITE_DELAY_MS, persistLayout } from './layout';
 import { sideGroups } from '../panel/surface-model'; // UX wave U8b
+import { buildFSchemaOf } from '../../../../test/support/layout-build-f'; // UX wave U8b
 
 const A = at('app-a' as AppSessionId);
 const B = at('app-b' as AppSessionId);
@@ -706,9 +707,9 @@ describe('the side column’s first read of a profile', () => {
   const multiInstance = (toolId: string) => (toolId === 'plugin-pane' ? undefined : toolId === 'terminal');
   const fixed = { regions: LAYOUT_DEFAULTS.regions, 'main.tabs': storedMain(LAYOUT_DEFAULTS.main), 'panel.pinned': [] };
 
-  // A launch over `file`, each key of `failing` failing its `layout.get` (and `layout.list` its listing); `after()` is
-  // layout.json as its writes left it.
-  async function launch(file: Record<string, unknown>, failing: readonly string[] = []) {
+  // A launch over `file`, each key of `failing` failing its `layout.get` (and `layout.list` its listing); `during` acts on
+  // the store while the reads are pending; `after()` is layout.json as its writes left it.
+  async function launch(file: Record<string, unknown>, failing: readonly string[] = [], during?: (store: ReturnType<typeof createLayoutStore>) => void) {
     const fake = fakeClient({
       'layout.list': { keys: Object.keys(file) },
       'layout.get': ({ key }: { key: string }) => ({ value: file[key] ?? null }),
@@ -720,6 +721,7 @@ describe('the side column’s first read of a profile', () => {
     const stop = persistLayout(client, store);
     running.push(stop);
     const hydrating = store.getState().hydrate(client, () => true, { multiInstance });
+    during?.(store);
     await vi.runAllTimersAsync();
     await hydrating;
     const sets = () => fake.invoked('layout.set') as { key: string; value: unknown }[];
@@ -846,6 +848,42 @@ describe('the side column’s first read of a profile', () => {
     expect(first.after()['panelTools.params']).toEqual({ version: 1, params: { [files.id]: { root: 'invented' } } });
     const again = await launch(first.after());
     expect(again.sets()).toEqual([]);
+  });
+
+  // The branch review's finding 2 (root UC-14: a first read loses nothing): F's two stacked surfaces, and an act that
+  // hides A's column while the reads are pending. The prune judges what was stored; the act is replayed after it.
+  const stacked = {
+    ...fixed,
+    'main.tabs': storedMain({ ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [shown], activeTabId: shown.id }] }),
+    [`panel.${A}`]: { tabs: [files, review], activeTabId: review.id },
+    'panelTools.surfaces': { version: 2, stacks: { [A]: [files.id, review.id] }, pinnedTools: [], contexts: {} },
+  };
+  it.each([
+    ['openSession, then hideSurfaces', (store: ReturnType<typeof createLayoutStore>) => { store.getState().openSession(A); store.getState().hideSurfaces(A); }],
+    ['hideSurfaces, then openSession', (store: ReturnType<typeof createLayoutStore>) => { store.getState().hideSurfaces(A); store.getState().openSession(A); }],
+  ])('UC-14: a first read keeps every tab it would keep without an act, when %s land while the reads are pending', async (_, acts) => {
+    const first = await launch(stacked, [], acts);
+    expect(first.store.getState().panelBySession.get(A)?.tabs).toEqual([files, review]);
+    expect(sideGroups(first.store.getState(), A).hidden).toBe(true); // the act holds
+    window.dispatchEvent(new Event('beforeunload'));
+    const lists = first.sets().filter((write) => write.key === `panel.${A}`);
+    for (const write of lists) expect((write.value as { tabs: unknown[] }).tabs).toContainEqual(files);
+    for (const write of first.sets()) expect(buildFSchemaOf(write.key)?.safeParse(write.value).success ?? true, write.key).toBe(true);
+    const next = await launch(first.after());
+    expect(next.store.getState().panelBySession.get(A)?.tabs).toEqual([files, review]);
+  });
+
+  // The branch review's finding 3: a card opened or folded while the reads are pending is replayed over the stored folds
+  // and written, as an early act on the side column is.
+  it.each([
+    ['Context opened', (store: ReturnType<typeof createLayoutStore>) => store.getState().setCardOpen('context', true), ['environment', 'context']],
+    ['Environment folded', (store: ReturnType<typeof createLayoutStore>) => store.getState().setCardOpen('environment', false), []],
+  ] as const)('a card fold made while the reads are pending holds after hydration and is stored: %s', async (_, act, open) => {
+    const launched = await launch({ ...fixed, ...SIDE_COLUMN_KEYS }, [], act);
+    expect(launched.store.getState().cardsOpen).toEqual(open);
+    await vi.advanceTimersByTimeAsync(LAYOUT_WRITE_DELAY_MS);
+    expect(launched.after()['cards.open']).toEqual({ version: 1, open });
+    expect((await launch(launched.after())).store.getState().cardsOpen).toEqual(open);
   });
 
   it('takes F’s one width as the wide width, 380 as automatic, and keeps 380 once dragged to it', async () => {

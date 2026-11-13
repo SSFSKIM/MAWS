@@ -384,6 +384,17 @@ test.describe('the #panel harness: the agent tools', () => {
     await h.agents('patchStatus', 'A', { backgroundTasks: [ghost] }); // a snapshot-born node
     await h.open('background');
     await expect.poll(async () => (await h.background())?.shells.map((s) => s.taskId)).toEqual([ghost.taskId]);
+    // The UX wave's U8b (the branch review's finding 7): at the column's 280 px minimum the untimed shell's state text stays
+    // inside its row's line, clear of the Output and Stop buttons.
+    await h.panel('setWidth', 280);
+    await expect.poll(async () => Math.round((await h.region.boundingBox())?.width ?? 0), 'the column at 280 px').toBe(280);
+    const row = surface(h.page, 'background').locator(`[data-shell="${ghost.taskId}"]`);
+    await expect(row.locator('[data-part="state"]')).toHaveText(/· running · elapsed unavailable$/);
+    const state = (await row.locator('[data-part="state"]').boundingBox())!;
+    for (const name of ['Output', 'Stop']) {
+      const button = (await row.getByRole('button', { name, exact: true }).boundingBox())!;
+      expect(state.x + state.width <= button.x || button.x + button.width <= state.x, `the state text clear of ${name}`).toBe(true);
+    }
     await h.agents('patchStatus', 'A', { backgroundTasks: [] });
     // A snapshot's silence never removes a node: the ghost stays until the stop resolves.
     await expect.poll(async () => (await h.background())?.shells.map((s) => s.taskId), 'kept after the status drops it').toEqual([ghost.taskId]);

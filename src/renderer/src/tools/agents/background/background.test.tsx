@@ -33,6 +33,8 @@ import { SLOW_TICK_MS, STOP_DOUBT_MS } from '../subagents/shared';
 import { subagentsTool, type SubagentsParams } from '../subagents/SubagentsTool';
 import { BackgroundSummary } from './BackgroundSummary';
 import { backgroundTool, type BackgroundHandle, type BackgroundParams } from './BackgroundTool';
+import { MonitorRow, ShellRow } from './TaskRows'; // the UX wave's U8b
+import type { TaskNode } from '../model/task-graph';
 // E7 start: the Scheduled section
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -860,16 +862,42 @@ describe('background work', () => {
       expect(ids('done')).toEqual([]);
     });
 
-    it('a narrow row cuts a shell’s description, never its state and time', async () => {
+    // The branch review's finding 7: the line clips to its box; its description is cut first (it shrinks to nothing before
+    // the state gives up any width) and the state only once the row is narrower than the state alone, at most the line's
+    // whole width; the buttons keep their size.
+    it('a narrow row cuts a shell’s description first, then its state, and never paints past its own box', async () => {
       await mount({ events: [startedTask('sh1', 'local_bash', 'Build the site and then publish every page of it to the staging host', 1)] });
       const line = document.querySelector<HTMLElement>('[data-shell="sh1"] [data-part="line"]')!;
-      expect(line.querySelector('[data-part="description"]')?.className).toContain('truncate');
+      expect(line.className.split(' ')).toEqual(expect.arrayContaining(['min-w-0', 'overflow-hidden']));
+      expect(line.querySelector('[data-part="description"]')?.className.split(' ')).toEqual(expect.arrayContaining(['min-w-0', 'truncate']));
       const state = line.querySelector<HTMLElement>('[data-part="state"]')!;
-      expect(state.className).toContain('shrink-0');
-      expect(state.className).not.toContain('truncate');
+      expect(state.className.split(' ')).toEqual(expect.arrayContaining(['shrink-0', 'max-w-full', 'overflow-hidden', 'text-ellipsis', 'whitespace-pre']));
       expect(state.textContent).toMatch(/^ · running /);
       expect(line.title).toBe(line.textContent);
+      for (const button of within(document.querySelector<HTMLElement>('[data-shell="sh1"]')!).getAllByRole('button')) expect(button.className).toContain('shrink-0');
     });
+  });
+
+  // The branch review's finding 8: a row draws its kind's mark only when its caller asks (the panel does; desk web's depth
+  // view, which draws the same rows, does not), and without the ask it holds no mark's element at all.
+  it('a shell’s and a monitor’s rows hold their kind’s mark only when asked', () => {
+    const shell: TaskNode = {
+      taskId: 'sh1' as TaskId, kind: 'shell', taskType: 'local_bash', toolUseId: null, description: 'Build the site', status: 'running', stopping: false,
+      startedAt: null, endedAt: null, usage: null, lastToolName: null, activity: null, summary: null, report: null, reason: null, outputFile: null,
+      isBackground: true, parentTaskId: null, agent: null, workflow: null, provenance: { wire: true, disk: false, snapshot: true },
+    };
+    const monitor: TaskNode = { ...shell, taskId: 'm1' as TaskId, kind: 'monitor', taskType: 'monitor_ws' };
+    const rows = (kindMark?: boolean) => (
+      <>
+        <ShellRow node={shell} now={0} selected={false} stopError={null} onStop={() => {}} onOutput={null} kindMark={kindMark} />
+        <MonitorRow node={monitor} now={0} selected={false} stopError={null} onStop={() => {}} kindMark={kindMark} />
+      </>
+    );
+    const marks = () => Array.from(document.querySelectorAll<HTMLElement>('[data-kind-mark]'), (mark) => mark.dataset.kindMark);
+    const { rerender } = render(rows());
+    expect(marks()).toEqual([]);
+    rerender(rows(true));
+    expect(marks()).toEqual(['shell', 'monitor']);
   });
 
   it('reads Nothing running for a live session with no background work, and no line about task lists', async () => {

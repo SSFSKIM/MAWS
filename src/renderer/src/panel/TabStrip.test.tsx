@@ -196,4 +196,30 @@ describe('a strip too narrow for its tabs (decision 5)', () => {
     narrowTo(610);
     expect(shapes()).toEqual([whole, whole, whole, whole, whole, whole]);
   });
+
+  // The branch review's finding 5: a tab folding to its icon takes its Unpin and Close glyphs away; the keyboard on one of
+  // them goes to the tab's own button, and a glyph of a tab that does not fold keeps it.
+  it.each([
+    ['Unpin', 0, 250],
+    ['Close', 5, 600],
+  ] as const)('a tab folding to its icon while its %s glyph holds the keyboard hands it to the tab', (glyph, at, room) => {
+    register(probeTool('t', { title: 'Tee' }).tool);
+    const ids = ['t:aaaa0001', 't:aaaa0002', 't:aaaa0003', 't:aaaa0004', 't:aaaa0005', 't:aaaa0006'];
+    useLayout.setState({
+      panelPinned: [ref(ids[0], true)],
+      panelBySession: new Map([[A, { tabs: ids.slice(1).map((id) => ref(id)), activeTabId: ids[1] }]]),
+      panelSurfaces: { version: 2, stacks: { [A]: [ids[1]] }, pinnedTools: [], contexts: {} },
+    });
+    const narrowTo = laidOut(610);
+    render(<Strip />);
+    const tabOf = (id: string) => document.querySelector<HTMLElement>(`[data-tab-id="${id}"]`)!;
+    const shownClose = within(tabOf(ids[1])).getByRole('button', { name: 'Close Tee' });
+    act(() => within(tabOf(ids[at])).getByRole('button', { name: `${glyph} Tee` }).focus());
+    narrowTo(room);
+    expect(tabOf(ids[at]).dataset.tabShape).toBe('icon');
+    expect(document.activeElement).toBe(within(tabOf(ids[at])).getByRole('tab'));
+    act(() => shownClose.focus()); // the tab in view never folds: its glyph keeps the keyboard
+    narrowTo(150);
+    expect(document.activeElement).toBe(shownClose);
+  });
 });

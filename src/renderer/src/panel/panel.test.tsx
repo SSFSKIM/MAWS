@@ -390,3 +390,40 @@ describe('one strip, one tab in view', () => {
   });
 });
 
+
+// UX wave U8b, the branch review's finding 4: a tab moved by its menu remounts in the other group's strip, and the keyboard
+// goes with it to its button there, the Tab stop of that strip. The probe tools consume no focus request, so where the
+// keyboard lands is the strip's doing, not a tool's.
+describe('the keyboard after a tab moves between groups', () => {
+  const group = (name: 'upper' | 'lower') => document.querySelector<HTMLElement>(`section[data-side-group="${name}"]`);
+  const tabIn = (name: 'upper' | 'lower', title: string) => within(group(name)!).getByRole('tab', { name: title });
+
+  // The tab's menu opened from the keyboard (Shift+F10 on the focused tab) and the item chosen with Enter; then the turn
+  // a closing menu takes to hand focus back has passed.
+  async function moveByKeyboard(user: ReturnType<typeof userEvent.setup>, from: 'upper' | 'lower', title: string, item: 'Move below' | 'Move above') {
+    act(() => tabIn(from, title).focus());
+    await user.keyboard('{Shift>}{F10}{/Shift}');
+    const choice = await screen.findByRole('menuitem', { name: item });
+    act(() => choice.focus());
+    await user.keyboard('{Enter}');
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+  }
+
+  it('Move below, Move above, and a move that empties its group each leave the keyboard on the moved tab in its new strip', async () => {
+    const user = userEvent.setup();
+    register(probeTool('review', { title: 'Review', multiInstance: false }).tool, probeTool('files', { title: 'Files' }).tool, probeTool('terminal', { title: 'Terminal' }).tool);
+    renderHost();
+    act(() => void panelHost.addTool('review', { appSessionId: A }));
+    act(() => void panelHost.addTool('files', { appSessionId: A }));
+    act(() => void panelHost.addTool('terminal', { appSessionId: A }));
+    await moveByKeyboard(user, 'upper', 'Files', 'Move below'); // makes the lower group
+    expect(document.activeElement).toBe(tabIn('lower', 'Files'));
+    await moveByKeyboard(user, 'upper', 'Review', 'Move below'); // joins it
+    expect(document.activeElement).toBe(tabIn('lower', 'Review'));
+    await moveByKeyboard(user, 'lower', 'Files', 'Move above'); // the lower group keeps Review
+    expect(document.activeElement).toBe(tabIn('upper', 'Files'));
+    await moveByKeyboard(user, 'lower', 'Review', 'Move above'); // the lower group's last tab: the group closes
+    expect(group('lower')).toBeNull();
+    expect(document.activeElement).toBe(tabIn('upper', 'Review'));
+  });
+});
