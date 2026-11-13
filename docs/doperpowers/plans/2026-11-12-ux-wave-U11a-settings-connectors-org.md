@@ -27,7 +27,7 @@ How to see it working: the unit tests named under each milestone fail before its
 - [x] (2026-11-12 01:40Z) M1 — the sign-in probe's two questions written (`bf946d2bc`), reviewed clean; handed to the architect for the gate job on the mini.
 - [x] (2026-11-12 02:10Z) M1's follow-up at the architect's request: a refused custom callback or reconnect is followed by a sign-in through the engine's own listener, reported as `fallback` (`2aac33196`), reviewed clean. P1 runs at `2aac33196`.
 - [x] (2026-11-12) P2 and P3 answered by the architect's probes (branch `ux-wave/probe3-u11` at `7f3f6c692`); the rulings are written into §C's `<place>`, §D's Skills, §H and the Decision Log, and M6 and M7 are built to them.
-- [ ] M2 — Org sheets: refusals that name a next step; the grant sheet's read; the paused live query.
+- [x] (2026-11-12 03:05Z) M2 — Org sheets: refusals that name a next step; the grant sheet's read; the paused live query (`18bf9a01b`, `dd6626fd5`), reviewed clean.
 - [ ] M3 — one scrim, also where dialogs stack; the Channel's gutter and names.
 - [ ] M4 — the Channel says it is offline, or refused.
 - [ ] M5 — the Channel from the palette and the View menu.
