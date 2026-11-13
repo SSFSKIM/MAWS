@@ -340,12 +340,12 @@ describe('session records in the index', () => {
           fresh.dispose();
         }
       }
-      // Printed and not asserted, each the least of three runs on fresh indexes: the same 4,000 summaries without the
-      // newest row's folder (the older producer's, which reads nothing new), the comparison every run carries at its own
-      // load; and the three shares, what a run over the bound is reported with (M2 fix wave 2).
-      const leastOf = (batch: TranscriptSummary[]) => {
+      // Printed and not asserted: the same 4,000 summaries without the newest row's folder (the older producer's, which
+      // reads nothing new), the comparison every run carries at its own load, the least of three runs on fresh indexes;
+      // and the three shares, what a run over the bound is reported with: diagnostics, one run each (M2 fix wave 2).
+      const leastOf = (batch: TranscriptSummary[], runCount = 3) => {
         const times: number[] = [];
-        for (let i = 0; i < 3; i++) {
+        for (let i = 0; i < runCount; i++) {
           const fresh = tempDir();
           const other = new Index(join(fresh.path, 'index.sqlite'));
           try {
@@ -357,7 +357,7 @@ describe('session records in the index', () => {
         }
         return Math.round(Math.min(...times) * 10) / 10;
       };
-      const share = (pick: (i: number) => boolean) => leastOf(summaries.filter((_, i) => pick(i)));
+      const share = (pick: (i: number) => boolean) => leastOf(summaries.filter((_, i) => pick(i)), 1);
       const least = Math.round(Math.min(...runs.map((r) => r.ms)) * 10) / 10;
       const withoutNewestLeast = leastOf(withoutNewest(summaries));
       console.log(`[latency] 4,000 upserts, CPU ms: ${least}; the same without the newest row's folder: ${withoutNewestLeast}`);
@@ -369,7 +369,7 @@ describe('session records in the index', () => {
     } finally {
       repos.dispose();
     }
-  });
+  }, 60_000); // the case runs the upserts 9 times; this is the test's timeout, not a time bound
 
   // U8c-2 (M2 decision 11): the same count from an engine host that does not say where the newest row is gives exactly
   // today's records, and neither column is written.
