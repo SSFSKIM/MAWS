@@ -8,7 +8,6 @@
 import { useEffect } from 'react';
 import { BannerHost } from './BannerHost';
 import { MainArea } from '../main/MainArea';
-import { OverviewLayer } from '../overview/OverviewPanel';
 import { MarkupLayer } from '../markup/MarkupLayer';
 import { CommandPalette } from '../palette/CommandPalette';
 import { KeyboardShortcuts } from '../keymap/KeyboardShortcuts';
@@ -18,6 +17,7 @@ import { activeTab, currentSet } from '../stores/layout-model';
 import { Sidebar } from '../sidebar/Sidebar';
 import { pageOpen, useLayout } from '../stores/layout';
 import { DestinationPage } from '../destination/DestinationPage';
+import { OverviewHost } from '../destination/OverviewHost';
 import { SettingsDialog } from '../destination/SettingsDialog';
 import { COLLAPSE_THRESHOLD_PX, SIDEBAR_BOUNDS } from './regions';
 import { CARD_COLUMN_ROOM } from './shell-geometry';
@@ -58,14 +58,11 @@ export function Shell() {
           <div data-behind-page inert={page} className={`relative flex min-h-0 min-w-0 flex-1 flex-col ${page ? 'invisible' : ''}`}>
             <MainArea />
           </div>
-          {!page && <OverviewLayer />}
+          <OverviewHost />
         </div>
         {placed && <aside data-region="cards" aria-label="Session cards" hidden={yieldCards} inert={!cards} className={`absolute top-3 right-3 bottom-3 z-20 w-70 overflow-y-auto ${cards ? '' : 'invisible'}`}><FloatingSummary appSessionId={session} /></aside>}
       </section>
       <DestinationPage />
-      {/* UX wave U7b (the M5 review): over a page the Overview moves in the page's box, not in the main track, which a
-          maximized or floating side column leaves at 0 px; it is drawn over the page and is inside no inert element. */}
-      {page && <div data-overview-host className="pointer-events-none relative z-30 col-[2/-1] row-start-3 min-h-0 min-w-0"><OverviewLayer /></div>}
       <ToastHost />
       <PanelRegion />
       <MarkupLayer />

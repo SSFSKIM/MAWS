@@ -894,29 +894,58 @@ describe('a page beside the sidebar', () => {
     expect(useLayout.getState().destination).toEqual(PAGE);
   });
 
-  // The M5 review: a maximized or floating side column leaves the main track 0 px wide, so over a page the Overview moves
-  // in the page's box (its own host over the page's grid area), and the main area keeps its node, its box and the grid.
-  it.each(['maximized', 'floating'] as const)('with the side surface %s, the Overview over a page is hosted in the page’s area, not the main track', (how) => {
+  // The M5 review: a maximized or floating side column leaves the main track 0 px wide, so over a page the Overview's one
+  // host is placed over the page's box (fixed, at the page region's rect); it stays in the main region and is never
+  // remounted, and the main area keeps its node, its box and the grid.
+  const PAGE_BOX = { left: 240, top: 40, width: 1200, height: 860 };
+  const measured = () => vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    const { left, top, width, height } = this.id === 'region-page' ? PAGE_BOX : { left: 0, top: 0, width: 0, height: 0 };
+    return { left, top, width, height, x: left, y: top, right: left + width, bottom: top + height, toJSON: () => ({}) } as DOMRect;
+  });
+  const host = () => document.querySelector<HTMLElement>('[data-overview-host]')!;
+  const overviewPanel = () => document.querySelector<HTMLElement>('[data-overview-panel]');
+
+  it.each(['maximized', 'floating'] as const)('with the side surface %s, the Overview over a page is placed over the page’s box, not the main track', (how) => {
+    const rect = measured();
     openSurface();
     useLayout.getState().setPanel({ collapsed: false, [how]: true });
     renderShell();
     const [area, columns] = [mainArea(), grid().style.gridTemplateColumns];
     const padding = area.parentElement!.style.paddingRight;
+    expect(host().className.split(' ')).toEqual(expect.arrayContaining(['absolute', 'inset-0']));
     act(() => useLayout.getState().openDestination(PAGE));
     act(() => useLayout.getState().setOverviewOpen(true));
     expect(useLayout.getState().regions.panel[how], 'the Overview over a page docks nothing').toBe(true);
-    const overview = document.querySelector<HTMLElement>('[data-overview-panel]')!;
-    const host = overview.closest<HTMLElement>('[data-overview-host]')!;
-    expect(host.parentElement).toBe(grid());
-    expect(host.className.split(' ')).toEqual(expect.arrayContaining(['col-[2/-1]', 'row-start-3', 'z-30']));
-    expect(host.className.split(' ')).toEqual(expect.arrayContaining(document.getElementById('region-page')!.className.split(' ').filter((c) => c.startsWith('col-') || c.startsWith('row-'))));
-    expect(region('main').contains(overview), 'not in the main track').toBe(false);
+    const overview = overviewPanel()!;
+    expect(overview.closest('[data-overview-host]')).toBe(host());
+    expect(host().className.split(' ')).toEqual(expect.arrayContaining(['fixed', 'z-30']));
+    expect([host().style.left, host().style.top, host().style.width, host().style.height]).toEqual(['240px', '40px', '1200px', '860px']);
+    expect(region('main').contains(overview), 'still in the main region').toBe(true);
     expect(overview.closest('[inert]')).toBeNull();
     expect([mainArea(), grid().style.gridTemplateColumns, area.parentElement!.style.paddingRight]).toEqual([area, columns, padding]);
     act(() => useLayout.getState().setOverviewOpen(false));
     act(() => useLayout.getState().closeDestination());
     expect(useLayout.getState().regions.panel[how], 'Back shows the column as it was').toBe(true);
-    expect(document.querySelector('[data-overview-host]')).toBeNull();
+    expect(host().className.split(' ')).toEqual(expect.arrayContaining(['absolute', 'inset-0']));
+    expect(host().getAttribute('style')).toBeNull();
+    rect.mockRestore();
+  });
+
+  it('a page opened with the Overview open from a focused sidebar row leaves the keyboard on the row and the Overview the same node; Back does not pull the keyboard into it', () => {
+    useSessions.setState({ records: new Map([[A, record(A)]]) });
+    useLayout.setState({ main: withActive(sessionTab(A)) });
+    renderShell();
+    act(() => useLayout.getState().setOverviewOpen(true));
+    const overview = overviewPanel()!;
+    const row = within(region('sidebar')).getByRole('button', { name: 'Projects' });
+    act(() => row.focus());
+    act(() => useLayout.getState().openDestination(PAGE));
+    expect(document.activeElement).toBe(row);
+    expect(overviewPanel()).toBe(overview);
+    act(() => useLayout.getState().closeDestination());
+    expect(document.activeElement).toBe(row);
+    expect(overviewPanel()).toBe(overview);
+    expect(useLayout.getState().overviewOpen).toBe(true);
   });
 
   it('⌘W closes the Settings dialog, then the page, and only then the tab in front', () => {
