@@ -5,15 +5,16 @@
 // the editor, and the resubmit provider (an edited message forks). The setup-intent hook itself is registered at
 // App.tsx's module load, before any composer renders (C7's rule for a hook). In launch mode `scenario` C5's stub
 // creator stands and nothing of C10's is registered but the retention, which keeps nothing there (a stub's new
-// session has no intent).
+// session has no intent). UX wave U13a: New chat's empty-chat port in mode `index`, and the discard of empty New chats
+// before the layout hydrates.
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { CommandOutput, MawsBridge } from '@shared/ipc/schema';
 import type { Location } from '@shared/sessions/intent';
 import { onLaunchMode } from '../app/launch-mode';
 import { registerSlot } from '../app/slots';
 import { registerResubmitProvider } from '../composer/resubmit-seam';
 import { ipc } from '../ipc/client';
-import { NEW_CHAT, registerCloseGuard, registerReplaceVerdict, registerSessionCreator, registerTabRetention, registerUnstartedTitle, unstartedTitlesChanged, type UnstartedTitleAnswer } from '../keymap/actions-runtime';
+import { NEW_CHAT, registerCloseGuard, registerEmptyChats, registerReplaceVerdict, registerSessionCreator, registerTabRetention, registerUnstartedTitle, unstartedTitlesChanged, type UnstartedTitleAnswer } from '../keymap/actions-runtime';
 import { prefillComposer } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
 import { registerSessionActions } from './actions';
@@ -23,7 +24,7 @@ import { registerMessageReturn } from './message-return';
 import { NewSessionEmptyState } from './NewSessionEmptyState';
 import { resubmitProvider } from './record-ops';
 import { connectSetupDock } from './SetupCard';
-import { beforeCloseUnstarted, unstartedReplaceVerdict } from './setup-actions'; // E11 F2b: unstartedReplaceVerdict
+import { beforeCloseUnstarted, discardEmptyChat, isEmptyChat, isEmptyIntent, unstartedReplaceVerdict } from './setup-actions'; // E11 F2b: unstartedReplaceVerdict; U13a: the empty chats
 import { connectSetup, useSetup } from './store';
 import { intentProjectName } from './useSetupIntent';
 import { machineOf } from '@shared/machine/address';
@@ -78,18 +79,44 @@ export async function createUnstartedSession(projectId: ProjectId | null, client
   return result.value.appSessionId as AppSessionId;
 }
 
+// UX wave U13a (its plan's Interfaces §E; the owner, 2026-11-12: "No, only chats with content"): a New chat with nothing
+// in it does not come back after a relaunch. Its intent is discarded once the snapshot holds the intents, before the
+// retention lets the layout hydrate, so hydration finds no intent and drops its tab without a word; one main refuses
+// stays, and its tab comes back as before.
+async function discardEmptyIntents(client: MawsBridge): Promise<void> {
+  const empty = [...useSetup.getState().intents.values()].filter(isEmptyIntent);
+  await Promise.all(
+    empty.map(async ({ appSessionId }) => {
+      const result = await client.invoke('session.intent.discard', { appSessionId }).catch((error: unknown) => ({ ok: false as const, error }));
+      if (result.ok) useSetup.getState().applyIntentChanged({ appSessionId, intent: null });
+      else console.warn('[sessions] an empty New chat could not be discarded; its tab comes back', result.error);
+    }),
+  );
+}
+
+type LaunchMode = CommandOutput<'session.launchMode'>['mode'];
+
 export function connectSessions(client: MawsBridge = ipc): () => void {
   const setup = connectSetup(client, useSetup, heldToast);
-  const offs: (() => void)[] = [registerTabRetention({ ready: setup.ready, known: setup.known, retains: retainsTab })];
+  let live = true;
+  let modeOf!: (mode: LaunchMode) => void;
+  const mode = new Promise<LaunchMode>((resolve) => (modeOf = resolve));
+  // U13a: in launch mode `index` only (mode `scenario`'s stub sessions are not New chats); `known` waits for it too, so a
+  // snapshot held only after a failed first read also lets the local machine settle without the empty chats
+  const emptied = setup.known.then(() => mode).then((m) => (live && m === 'index' ? discardEmptyIntents(client) : undefined));
+  const ready = setup.ready.then((held) => (held ? emptied.then(() => held) : held));
+  const offs: (() => void)[] = [registerTabRetention({ ready, known: emptied, retains: retainsTab })];
   // 2026-10-31: asked until main answers, so an upgrade's mawsd restart no longer leaves New chat disabled (launch-mode.ts)
-  const stopAsking = onLaunchMode((mode) => {
-    if (mode !== 'index') return;
+  const stopAsking = onLaunchMode((m) => {
+    modeOf(m);
+    if (m !== 'index') return;
     registerSlot('newSession', NewSessionEmptyState);
     offs.push(
       registerSessionCreator((projectId, location) => createUnstartedSession(projectId, client, location ?? null)),
       registerCloseGuard('session', (ref) => (ref.kind === 'session' ? beforeCloseUnstarted(ref.appSessionId).then((r) => r === 'closed') : Promise.resolve(true))),
       registerReplaceVerdict('session', (ref) => (ref.kind === 'session' ? unstartedReplaceVerdict(ref.appSessionId) : null)), // E11 F2b
       registerUnstartedTitle(unstartedTitle),
+      registerEmptyChats({ isEmpty: isEmptyChat, discard: discardEmptyChat }), // U13a: New chat's reuse and close
       watchUnstartedTitles(), // New chat: a project chosen in the row renames the tab
       registerSessionActions(),
       connectSetupDock(),
@@ -99,6 +126,7 @@ export function connectSessions(client: MawsBridge = ipc): () => void {
     );
   }, client);
   return () => {
+    live = false;
     stopAsking();
     setup.disconnect();
     offs.forEach((off) => off());

@@ -11,7 +11,7 @@ import type { TabRef } from '@shared/ipc/schema/layout';
 import { Icon, IconButton } from '../app/IconButton';
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
-import { createSession, focusedProject, NEW_CHAT, requestCloseTab, useSessionCreatorRegistered } from '../keymap/actions-runtime';
+import { NEW_CHAT, newChat, requestCloseTab, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { SESSION_DRAG_TYPE } from '../sidebar/SessionRow';
 import { dragAccepted, dropPanelRecord, endDrag, moveMainTab, PANEL_TAB_DRAG_TYPE } from '../shell/transfer'; // P4-B3
 import { useLayout } from '../stores/layout';
@@ -202,8 +202,7 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
   );
 }
 
-// §5.2's "+" at the strip's end: a New chat in this pane (2026-10-01), in the project whose tab set the strips show
-// (W12), else in none. Disabled until a session creator is registered (C10; the stub's in launch mode scenario), like
+// §5.2's "+" at the strip's end: a New chat in this pane (2026-10-01; U13a: `newChat`, in the current project). Disabled until a session creator is registered (C10; the stub's in launch mode scenario), like
 // the sidebar's "+".
 function NewSessionButton({ pane }: { pane: Pane }) {
   const canCreate = useSessionCreatorRegistered();
@@ -213,7 +212,7 @@ function NewSessionButton({ pane }: { pane: Pane }) {
       aria-label={NEW_CHAT}
       title={canCreate ? NEW_CHAT : 'Not available here'}
       disabled={!canCreate}
-      onClick={() => void createSession(focusedProject(), { pane })}
+      onClick={() => void newChat({ pane })}
       className="mx-1 inline-flex size-7 shrink-0 items-center justify-center self-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent"
     >
       <span aria-hidden className="text-ui leading-none">

@@ -4,22 +4,23 @@
 // handler renders disabled everywhere: in the page through `useActionEnabled`, in the application menu through the
 // enabled set the dispatcher reports to main.
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
-import type { Strip, TabRef, TabTarget } from '@shared/ipc/schema/layout';
+import { tabId, type Strip, type TabRef, type TabTarget } from '@shared/ipc/schema/layout';
 import { machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import type { ActionId } from '@shared/keymap/actions';
 import type { Location } from '@shared/sessions/intent';
 import { askEditorHostClose } from '../panel/editor-host'; // P3-G
-import { markFocusOnMount } from '../stores/composer';
-import { useLayout, type ReplaceVerdict } from '../stores/layout';
+import { markFocusOnMount, useComposerStore } from '../stores/composer';
+import { frontOf, useLayout, type ReplaceVerdict } from '../stores/layout';
 import { toast } from '../stores/notices';
 import { NEW_CHAT } from '../sessions/title';
-import { allTabs, currentSet } from '../stores/layout-model';
+import { allTabs, currentSet, locateTab } from '../stores/layout-model';
 import { surfaceSession } from '../panel/surface-model';
 import { focusPaneElement, paneDomId } from '../main/pane-dom';
 import { useMachines } from '../stores/machines';
 import { useSessions, type SessionsState } from '../stores/sessions';
-import { localProjectOfSet, sessionSetKey, type RowKey } from '../stores/org-projects'; // P5 O6 M5
+import { localProjectOfSet, selectOrgIndex, sessionSetKey, type RowKey } from '../stores/org-projects'; // P5 O6 M5
+import { newChatElsewhere, registrySpawnTarget } from '../sidebar/registry-new-chat'; // U13a: New chat's place elsewhere
 import { ipc } from '../ipc/client';
 import { create } from 'zustand';
 import { createHandlerRegistry } from './registry';
@@ -42,13 +43,13 @@ export const useActionEnabled = (id: ActionId): boolean => registry.useEnabled(i
 // so the "+" buttons call `createSession(projectId)` directly. W5: a worktree group's "+" in the sidebar names the
 // checkout as the location, which the creator puts on the intent (a creator without intents ignores it). New chat
 // (2026-10-01): `session.new` (⌘N, File › New chat, the ⌘K palette) is registered with the creator, so it is available
-// wherever a session can be made, and starts in the focused project, if any (`focusedProject`).
+// wherever a session can be made; U13a: it is `newChat`, as every New chat control is.
 export type SessionCreator = (projectId: ProjectId | null, location?: Location | null) => Promise<AppSessionId | null>;
 
 const creators = createHandlerRegistry<'create', [ProjectId | null, (Location | null)?]>('session creator');
 
 export const registerSessionCreator = (fn: SessionCreator): (() => void) => {
-  const offs = [creators.register('create', fn), registerAction('session.new', async () => void (await createSession(focusedProject())))];
+  const offs = [creators.register('create', fn), registerAction('session.new', async () => void (await newChat()))];
   return () => offs.forEach((off) => off());
 };
 export const isSessionCreatorRegistered = (): boolean => creators.has('create');
@@ -56,10 +57,13 @@ export const useSessionCreatorRegistered = (): boolean => creators.useEnabled('c
 
 // C12: answers the new session's id (null when none was made), so the Worktrees… dialog can set its location. The project
 // registry: `registry`, the registry project a New chat with no project here is opened in (sidebar/registry-new-chat.ts),
-// the unstarted session's before its tab opens, so the tab is filed in that project's set (panel sweep#3).
+// the unstarted session's before its tab opens (panel sweep#3), so its tab names that project's row. #497 (UX wave U13a):
+// the tab in front is read at the call and again at the answer; a chat whose answer finds another tab in front is added
+// after that tab, unselected, and its composer takes the keyboard when the person selects it.
 export async function createSession(projectId: ProjectId | null, opts: { pane?: 0 | 1 | 'focused'; location?: Location; registry?: string } = {}): Promise<AppSessionId | null> {
   const creator = creators.get('create') as SessionCreator | undefined;
   if (!creator) return null; // C12
+  const front = frontOf(useLayout.getState());
   let appSessionId: AppSessionId | null;
   try {
     appSessionId = await (opts.location ? creator(projectId, opts.location) : creator(projectId));
@@ -72,8 +76,132 @@ export async function createSession(projectId: ProjectId | null, opts: { pane?: 
   // W9 (H3): the new tab's composer takes the keyboard as it mounts, so typing goes on without a click (Claude Desktop's
   // and T3's new thread); marked as the tab opens, before anything could render its composer
   markFocusOnMount(appSessionId);
-  useLayout.getState().openTab({ kind: 'session', appSessionId }, { pane: opts.pane ?? 'focused' });
+  const tab: TabTarget = { kind: 'session', appSessionId };
+  if (frontOf(useLayout.getState()) === front) useLayout.getState().openTab(tab, { pane: opts.pane ?? 'focused' });
+  else useLayout.getState().openTab(tab, { activate: false });
   return appSessionId; // C12
+}
+
+// ---- New chat (UX wave U13a: its section's rule 6, O-01 "New chat"; the plan's Interfaces §E) ------------------------------
+// The one way an empty chat is asked for: every New chat control calls `newChat`. It brings back an empty chat of the
+// place it would start one in rather than make a second, and closes the strip's other empty chats. `createSession`
+// stays underneath for a creation that carries something (the Worktrees dialog's checkout, the Library's prompt).
+
+// What `sessions/` tells the shell about a chat (registered by its composition in launch mode `index`; with none, as in
+// mode `scenario`, no chat is empty and each press makes one).
+export interface EmptyChats {
+  isEmpty(appSessionId: AppSessionId): boolean;
+  /** Discards the chat's intent and asks nothing. false: main refused, and the person has been told why. */
+  discard(appSessionId: AppSessionId): Promise<boolean>;
+}
+
+let emptyChats: EmptyChats | null = null;
+
+export function registerEmptyChats(port: EmptyChats): () => void {
+  emptyChats = port;
+  return () => {
+    if (emptyChats === port) emptyChats = null;
+  };
+}
+
+export interface NewChatOptions {
+  pane?: 0 | 1;
+  row?: RowKey;
+}
+
+// Where a chat for a row starts: in its folder on this Mac that is not hidden; else, for a registry project, on a
+// machine that has the project, as the row's "+" starts it there; else with no project ("Choose a project").
+type Place = { kind: 'here'; projectId: ProjectId } | { kind: 'elsewhere'; target: Parameters<typeof newChatElsewhere>[0] } | { kind: 'none' };
+
+function placeOf(row: RowKey | null): Place {
+  if (row === null) return { kind: 'none' };
+  const sessions = useSessions.getState();
+  const project = localProjectOfSet(sessions, row, ipc.localMachine);
+  if (project !== undefined && !project.hidden) return { kind: 'here', projectId: project.id };
+  const registered = selectOrgIndex(sessions, ipc.localMachine).orgs.get(row)?.registry;
+  const target = registered === undefined ? null : registrySpawnTarget(registered, useMachines.getState().machines);
+  return target === null ? { kind: 'none' } : { kind: 'elsewhere', target };
+}
+
+// Whether a chat is for the place a press resolves to: made for it, or given it since (a project chosen in it).
+function isFor(appSessionId: AppSessionId, place: Place): boolean {
+  const projectId = unstartedProjectOf(appSessionId);
+  if (place.kind === 'here') return projectId === place.projectId;
+  if (projectId !== null) return false;
+  const registry = useSessions.getState().unstarted.get(appSessionId)?.registry;
+  return place.kind === 'elsewhere' ? registry === place.target.registry : registry === undefined;
+}
+
+const sessionTab = (appSessionId: AppSessionId): TabTarget => ({ kind: 'session', appSessionId });
+
+function emptyChatsOfStrip(): AppSessionId[] {
+  const port = emptyChats;
+  if (port === null) return [];
+  return allTabs(useLayout.getState().main).flatMap((t) => (t.kind === 'session' && port.isEmpty(t.appSessionId) ? [t.appSessionId] : []));
+}
+
+// The chat comes to the front in the pane asked for, moved there from the other, and its composer takes the keyboard: at
+// once when it is mounted there already, else as it mounts.
+function bringForward(appSessionId: AppSessionId, pane: 0 | 1 | undefined): void {
+  const id = tabId(sessionTab(appSessionId));
+  const layout = useLayout.getState();
+  const { panes, focusedPane } = layout.main;
+  const at = locateTab(layout.main, id)!;
+  const to = pane !== undefined && pane < panes.length ? pane : focusedPane;
+  const mounted = at.pane === to && panes[to].activeTabId === id;
+  if (at.pane === to) layout.activateTab(id);
+  else layout.moveTab(id, to, panes[to].tabs.findIndex((t) => t.id === panes[to].activeTabId) + 1);
+  const composer = mounted ? useComposerStore.getState().focusTargets.get(appSessionId) : undefined;
+  if (composer) composer.focusFrame();
+  else markFocusOnMount(appSessionId);
+}
+
+async function pressNewChat({ pane, row }: NewChatOptions): Promise<AppSessionId | null> {
+  const place = placeOf(row ?? currentRow());
+  const found = emptyChatsOfStrip();
+  const same = found.find((id) => isFor(id, place));
+  if (same !== undefined) {
+    bringForward(same, pane);
+    for (const id of found) if (id !== same) closeEmptyChat(id);
+    return same;
+  }
+  const opts = pane === undefined ? {} : { pane };
+  const created = place.kind === 'elsewhere' ? await newChatElsewhere(place.target, opts) : await createSession(place.kind === 'here' ? place.projectId : null, opts);
+  // after the arrival, so a new chat takes the front from an empty one beside it before that one is closed
+  if (created !== null) for (const id of found) closeEmptyChat(id);
+  return created;
+}
+
+let pressing: Promise<AppSessionId | null> | null = null;
+
+/** A New chat, from any control: the chat brought forward or made, null when none could be made. A press while an
+    earlier one waits for its chat is that press. */
+export function newChat(opts: NewChatOptions = {}): Promise<AppSessionId | null> {
+  if (pressing !== null) return pressing;
+  const press = pressNewChat(opts).finally(() => {
+    if (pressing === press) pressing = null;
+  });
+  pressing = press;
+  return press;
+}
+
+/** Closes an empty chat for the person, never through `requestCloseTab` (whose tab stays selectable while its discard
+    is on the way): checked again and taken out of the strip in one run, and only then discarded, put back unselected
+    if main refuses. A chat in front, no longer empty or with no tab is left alone. */
+export function closeEmptyChat(appSessionId: AppSessionId): void {
+  const port = emptyChats;
+  const tab = sessionTab(appSessionId);
+  const layout = useLayout.getState();
+  if (port === null || locateTab(layout.main, tabId(tab)) === null || !port.isEmpty(appSessionId) || frontOf(layout) === tabId(tab)) return;
+  layout.dropSession(appSessionId); // as an unstarted chat's close, it leaves no reopen entry
+  const putBack = () => useLayout.getState().openTab(tab, { activate: false });
+  port.discard(appSessionId).then(
+    (discarded) => (discarded ? useSessions.getState().dropUnstarted(appSessionId) : putBack()),
+    (error: unknown) => {
+      console.error('[actions] discarding an empty chat failed; its tab is back', error);
+      putBack();
+    },
+  );
 }
 
 // ---- closing tabs -------------------------------------------------------------------------------------------------------
@@ -273,12 +401,11 @@ export function useCurrentRow(): RowKey | null {
 }
 
 // New chat's preselection (2026-10-01): the current project's folder on this Mac, unless it is hidden from the sidebar
-// (W11). None for a machine's row, a project with no folder here or no current project: the chat then starts with
-// "Choose a project" (a session starts on another machine from O7's picker).
+// (W11). None for a machine's row, a project with no folder here or no current project (U13a: New chat's place, which
+// may then be another machine's).
 export function focusedProject(): ProjectId | null {
-  const row = currentRow();
-  const project = row === null ? undefined : localProjectOfSet(useSessions.getState(), row, ipc.localMachine);
-  return project && !project.hidden ? project.id : null;
+  const place = placeOf(currentRow());
+  return place.kind === 'here' ? place.projectId : null;
 }
 
 // ---- tab retention ------------------------------------------------------------------------------------------------------
