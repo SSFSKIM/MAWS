@@ -127,14 +127,16 @@ test('a replayed permission renders in the docked frame on the card page, ⌘Ent
   await expect(frame.getByRole('button', { name: 'Allow for this session' })).toHaveCount(0);
   await expect(frame.getByRole('button', { name: /^Always allow/ })).toHaveCount(0);
 
-  // The other pane's keys are that region's: its Enter counts there, and ⌘Enter pressed there answers nothing here.
+  // Past the prompt's first 400 ms, so a key that answers nothing is unbound rather than early: the other pane's keys
+  // are that region's (its Enter counts there, and ⌘Enter pressed there answers nothing here), and Enter on the frame
+  // answers nothing (a permission prompt is allowed with ⌘Enter).
+  await pastGrace(page, frame.locator('[data-request-card]'));
   await page.getByRole('region', { name: 'pane 1' }).getByLabel('counter').focus();
   await page.keyboard.press('Enter');
   expect(await counted(page)).toBe(1);
   await page.keyboard.press(ALLOW_ONCE_KEY);
-  expect(await resolved(page, 'c7-permission', 'permission.resolved')).toEqual([]);
-  // Enter on the frame answers nothing once the prompt's first 400 ms are past (a permission prompt is allowed with ⌘Enter)
-  await pastGrace(page, frame.locator('[data-request-card]'));
+  await page.waitForTimeout(300);
+  expect(await resolved(page, 'c7-permission', 'permission.resolved'), "the other pane's ⌘Enter allows nothing").toEqual([]);
   await frame.focus();
   await page.keyboard.press('Enter');
   await page.waitForTimeout(300);
@@ -610,6 +612,7 @@ test('the real composer gives way to the card and returns with focus in the edit
     await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: countingId })).turn).not.toBeNull();
 
     // the left one sends the fixture's prompt from its composer, and the editor gives way to the permission card
+    await watchPrompts(page);
     await message(left).click();
     await page.keyboard.type(firstPrompt(PERMISSION));
     await page.keyboard.press('Enter');
@@ -626,6 +629,8 @@ test('the real composer gives way to the card and returns with focus in the edit
     await expect(frame).toBeFocused(); // the pane held focus
 
     // Enter, ⌘Enter and ⌘. in the other pane's editor are that pane's: the card is not answered, the counting turn stops
+    // (pressed past the prompt's first 400 ms, so a ⌘Enter that reached the card would answer it)
+    await pastGrace(page, frame.locator('[data-request-card]'));
     await message(right).click();
     await page.keyboard.press('Enter');
     await page.keyboard.press(ALLOW_ONCE_KEY);
