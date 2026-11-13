@@ -751,9 +751,11 @@ describe('the side column’s first read of a profile', () => {
   it.each(['panelTools.surfaces', 'panel.pinned', `panel.${A}`, 'panelTools.params', 'regions'])('waits while the read of %s fails: nothing pruned, nothing marked; the next launch reads it first', async (key) => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const own = { tabs: [files, info, review, t1], activeTabId: review.id };
+    const shown = { id: `session:${A}`, kind: 'session', appSessionId: A, pinned: false }; // so hydration learns a context
     const f = {
       ...fixed,
       regions: { ...LAYOUT_DEFAULTS.regions, panel: { ...LAYOUT_DEFAULTS.regions.panel, width: 512 } },
+      'main.tabs': { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [shown], activeTabId: shown.id }] } } },
       'panel.pinned': [pin],
       [`panel.${A}`]: own,
       'panelTools.surfaces': { version: 2, stacks: { [A]: [files.id, review.id] }, pinnedTools: [], contexts: {} },
@@ -768,6 +770,7 @@ describe('the side column’s first read of a profile', () => {
     expect(failed.sets().map((write) => write.key)).not.toContain(`panel.${A}`);
     expect(failed.sets().map((write) => write.key)).not.toContain('panelTools.params');
     expect(failed.sets().map((write) => write.key)).not.toContain('panelTools.widths');
+    expect(failed.sets().map((write) => write.key)).not.toContain(key); // hydration writes no default over a value it could not read
     expect(failed.after()).toMatchObject({ [`panel.${A}`]: own, 'panelTools.params': f['panelTools.params'] });
     const next = await launch(failed.after());
     expect(next.store.getState().effectivePanelTabs(A)).toEqual([pin, files, review, t1]);
