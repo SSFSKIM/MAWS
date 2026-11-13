@@ -55,10 +55,10 @@ export interface BackfillContext {
   // P5 O9 (the fix wave): whether a turn runs, from its `turn.started` (or, UX wave U3, the model's output) to its
   // `turn.ended` or an interrupt marker, and what the bridge delivered while none did, waiting for the turn that answers
   // it (withWaitingWords): the owner's words, and (UX wave U3) a peer's delivery the bridge appended, as the events it
-  // maps to. UX wave U3 (UC-2): whether this mapping saw the last turn end (`running` false is also a history whose start
-  // it never saw, a page of rows, where a delivery is drawn at its row), and whether the running turn has had no model
-  // output yet, so that what the engine queued reached the model with the prompt that opened it (a task the host stopped
-  // while the session was idle)
+  // maps to. UX wave U3 (UC-2): whether this mapping saw the last turn end (`idle`; `running` is false too for a history
+  // whose start the mapping never saw, a page of rows, where a delivery is drawn at its row), and whether the running
+  // turn has had no model output yet, so that what the engine queued reached the model with the prompt that opened it
+  // (a task the host stopped while the session was idle)
   running: boolean;
   idle: boolean;
   unanswered: boolean;
@@ -76,9 +76,8 @@ export interface BackfillContext {
   commandLast: MessageUuid | null;
 }
 
-// What the bridge delivered while no turn ran (withWaitingWords): the owner's words, drawn already as a prompt waiting
-// for its turn, or a peer's delivery's events, placed when a turn starts.
-// the owner's words (`words` null when they were drawn at their row already), or a peer's delivery as its events
+// What the bridge delivered while no turn ran (withWaitingWords), placed when a turn starts: the owner's words (`words`
+// null when they were drawn at their row already, desk-web's older steer), or a peer's delivery as its events.
 type Waiting = { kind: 'own'; uuid: MessageUuid; words: string | null } | { kind: 'peer'; events: SessionEvent[] };
 
 export function createBackfillContext(init: {
@@ -460,8 +459,8 @@ function arrivalEvents(record: TranscriptRecord, uuid: MessageUuid, arrivals: Ar
     case 'peer':
     case 'subagent': {
       if (isBridgeRow(record)) {
-        // a delivery the bridge appended into the running turn: at its row while a turn runs, else held for the turn
-        // that starts next, as the owner's words are (withWaitingWords)
+        // a delivery the bridge appended into the running turn: at its row, but held for the turn that starts next when
+        // this mapping saw the last turn end, as the owner's words are (withWaitingWords)
         ctx.appendedLast = true;
         const delivered: SessionEvent[] = [];
         peerMessage(record, uuid, first, ctx, base, delivered);
