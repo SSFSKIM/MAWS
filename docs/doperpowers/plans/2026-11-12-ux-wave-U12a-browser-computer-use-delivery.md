@@ -22,7 +22,7 @@ After this landing a session MAWS launches with its browser is told, in MAWS's o
 - [ ] Probe 1 (Stop during a running cell), which can run today on any build ("Proof that an executor does not run"); its count goes onto Ticket 2.
 - [x] (2026-11-13 03:13Z) Step 0 on master (U6a and U8a both landed, master `be663d261`); constraint 11's line prints `step-0-landed`; this branch merged master at `e1c92a4dc`. The merge changed none of the files the milestones touch.
 - [x] (2026-11-13 04:25Z) M1 — What the agent is told, and `show_pane` on a page already open. Commits `850c9e25b`..`e45db9b44`; reviewed clean. On the VM: `tsc` of the node and web projects, eslint of the changed paths, vitest over the touched folders and their importers (1,338 files passed; the one failure, `test/artifacts/portability.test.ts`, is on build-common's list), `pnpm test:probes` (346 passed), the maws-app scan (8 of 8). Probe 6's precondition (a build of this branch with M1) is met.
-- [ ] M2 — The agent's tab comes forward.
+- [x] (2026-11-13 05:05Z) M2 — The agent's tab comes forward. Commits `9132ad824`..`e21655049`; reviewed clean. On the VM: `tsc` of the node and web projects, eslint of the nine changed files, vitest over the touched folders and their importers (208 files passed; the one failure, `src/shared/machine/git-reads.test.ts`, is on build-common's list). The e2e scene of `browser-cua.spec.ts` that M5 reworks asserts the old behaviour until then.
 - [ ] M3 — Device sizes and Copy screenshot.
 - [ ] M4 — Computer use in the session.
 - [ ] M5 — The e2e scenes, the record, and the acceptance run.
