@@ -38,7 +38,8 @@ How to see it working: the unit tests named under each milestone fail before its
 - [x] (2026-11-12) P1's verdict: both kinds promote as designed (runs 43357272365, 43358963647); M8 is released, after M7 in the order.
 - [x] (2026-11-12 07:29Z) M8 — Sign in for a dynamic connector (`aa433b9d6`, `9ffe81c35`, `9a1a2be29` the wire at minor 37, `f82dc582b`, `e6946c799`, `d5179df51`), reviewed clean. P7's first run (43384468214 at `e0813cb92`) failed the scene at the sidebar (the session's row is not drawn while its project is collapsed); the scene expands the project first (`8feaa7a7f`); the rerun is the architect's. The run did show the plugin's server and both own-list servers reading needs-auth in a session MAWS started.
 - [x] (2026-11-13 08:17Z) M9 — Settings regrouped, a note on one line (`17042eac0`, `21e5af652`, `c4b948405`, `3a1fc191d`, `85b190c73`), reviewed clean (law 8, UC-14 and A6's table read against the diff).
-- [ ] M10 — Search settings.
+- [x] (2026-11-13 09:09Z) M10 — Search settings (`ab103d6be`, `94042a370`, `3e5648236`, `fdc9436ed`, `cfd86e288`, `52d1be5d6`), reviewed clean. The architect accepted its two behaviour choices: every Settings row a focus stop outside the Tab order, ⌘F only from the view's own DOM.
+- [x] (2026-11-13 09:09Z) P6 and P7 on the Mac (the architect's): e2e:settings green at `85b190c73` (run 43391255930: M9's three-width measure holds at 18.5 px and 22.5 px); e2e:discover green at `e186cb343` (run 43392298473: M8's scene, a plugin's connector and two of MAWS's own list signed in, with no Keychain prompt).
 - [ ] M11 — the record, master merged again and the wire's files made again, the whole checks, the hand-back.
 - [ ] The architect's: the e2e runs, class 1a, the xhigh panel, the pull request.
 
