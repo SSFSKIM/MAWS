@@ -878,6 +878,8 @@ describe('sending from the box', () => {
       expect(editorOf().editor.getText()).toBe('for later');
       await key(editorOf(), { key: 'Enter' });
       await waitFor(() => expect(fake.invoked('laneA.send')).toEqual([{ appSessionId: A_ID, text: 'for later' }]));
+      await act(() => fake.reply('laneA.send', { key: { writer: 'maws/m', seq: 1 }, state: 'entered', uuid: 'row-1' })); // settled: no submission of A outlives the test
+      await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
     });
 
     it('sends ⌘Enter with no turn running', async () => {
@@ -889,6 +891,8 @@ describe('sending from the box', () => {
       await type('now');
       await cmdEnter();
       await waitFor(() => expect(fake.invoked('laneA.send')).toEqual([{ appSessionId: A_ID, text: 'now' }]));
+      await act(() => fake.reply('laneA.send', { key: { writer: 'maws/m', seq: 2 }, state: 'entered', uuid: 'row-2' }));
+      await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
     });
   });
 });
