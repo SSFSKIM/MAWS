@@ -592,12 +592,12 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     const above = sessionCard(page, 'Connectors');
     // Read once two reads a moment apart agree: the Environment card's own reads (git's, the pull request's) may still
     // land and grow it (as e2e/agent-tools.spec.ts's `settledBoxes` waits for), which is no move the card's leaving made.
-    let last = '';
+    let lastBox = '';
     await expect
       .poll(async () => {
         const now = JSON.stringify(await above.boundingBox());
-        const same = now === last;
-        last = now;
+        const same = now === lastBox;
+        lastBox = now;
         return same;
       }, { intervals: [250], message: 'the cards above settle' })
       .toBe(true);
