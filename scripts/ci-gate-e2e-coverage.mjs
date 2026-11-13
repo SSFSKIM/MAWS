@@ -149,7 +149,7 @@ export function advisoryTrailers(lines) {
 // saying so; a push never waits on it.
 const main = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (main && process.argv.includes('--mini-copy')) {
-  let output = '';
+  let output;
   try {
     const { values } = parseArgs({ options: { 'mini-copy': { type: 'boolean' }, 'git-dir': { type: 'string' }, sha: { type: 'string' }, gates: { type: 'string', default: '' } } });
     if (!values['git-dir'] || !values.sha) throw new Error('--git-dir and --sha are required');

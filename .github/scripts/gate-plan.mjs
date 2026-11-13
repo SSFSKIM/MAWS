@@ -511,7 +511,8 @@ export function planOf(env, scripts, now, { docsOnly = false } = {}) {
     job.groups = job.copies.map((step) => step.group).join(', ');
     for (const step of job.copies) Object.assign(copies.find((copy) => copy.group === step.group), { timeout: job.timeout, test_timeout: step.minutes });
   }
-  const planned = [...e2e, ...copies.map(({ paths, ...entry }) => entry)];
+  // The copies' matrix entries, without the paths the summary names.
+  const planned = [...e2e, ...copies.map((copy) => Object.fromEntries(Object.entries(copy).filter(([key]) => key !== 'paths')))];
   const e2eHosted = e2e.filter((entry) => entry.hosted && !direct);
   const e2eHost = planned.filter((entry) => entry.variant === undefined && (!entry.hosted || direct));
   const e2eVm = e2e.filter((entry) => entry.variant !== undefined);
