@@ -1760,11 +1760,18 @@ test('(layout, from the peer) a layout the peer filed under two tab sets opens w
     await s.quit(run);
 
     // a relaunch of this build reads the one set it wrote: no notice. A notice lasts 6 s and the launch helper hands the
-    // page over only once the host is ready, by when hydration may be over, so the page's read is watched from its
-    // start: an init script on the app's context (it runs before the page's own scripts at each load) records every
-    // appearance of the notice, and the window is reloaded so that hydration reads the profile again under it
+    // page over only once the host is ready, by when the relaunch's own hydration may be over. The notice follows only
+    // `merged`, which the reader computes from the stored value alone, so: the relaunch's read is held to have written
+    // nothing (the stored `main.tabs` the same before it and after it), and the window is then reloaded under an init
+    // script on the app's context (run before the page's own scripts at each load) that records every appearance of the
+    // notice; that reload reads the very value the relaunch read, so it stands for the relaunch
+    const storedTabs = () => (JSON.parse(readFileSync(join(s.userData, 'layout.json'), 'utf8')) as Record<string, unknown>)['main.tabs'];
+    const beforeRelaunch = storedTabs();
     const again = await s.launch();
     await s.ready(again.page);
+    await expect.poll(async () => (await stripIds(again.page)).sort(), { timeout: 20_000, message: 'the relaunch shows the same strip' }).toEqual(tabs);
+    await again.page.waitForTimeout(1_000); // past the layout's write-back delay: whatever the relaunch's read writes is written
+    expect(storedTabs(), 'the relaunch’s own read wrote nothing to main.tabs').toEqual(beforeRelaunch);
     await again.maws.app.context().addInitScript((text) => {
       const seen: number[] = [];
       (window as unknown as { __u13aNotices: number[] }).__u13aNotices = seen;
@@ -1774,7 +1781,7 @@ test('(layout, from the peer) a layout the peer filed under two tab sets opens w
       new MutationObserver(look).observe(document, { subtree: true, childList: true, characterData: true });
     }, ONE_STRIP_NOTICE);
     await again.page.reload();
-    await expect.poll(async () => (await stripIds(again.page)).sort(), { timeout: 20_000, message: 'the strip back' }).toEqual(tabs);
+    await expect.poll(async () => (await stripIds(again.page)).sort(), { timeout: 20_000, message: 'the strip back after the reload' }).toEqual(tabs);
     await again.page.waitForTimeout(2_000); // past hydration, where the notice would show
     expect(await again.page.evaluate(() => (window as unknown as { __u13aNotices?: number[] }).__u13aNotices ?? null), 'no notice from the page’s start: nothing was merged').toEqual([]);
     await s.quit(again);
