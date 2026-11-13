@@ -414,10 +414,12 @@ describe('forwarded ports', () => {
     const forward = outcome.result!.forward as string;
     const { id, answer } = await openTcp(a, action.opId, forward);
     expect(answer).toMatchObject({ t: 'streamOpened', credit: 256 * 1024 });
+    const before = f.services.activities.count;
     await a.channel.send({ t: 'streamData', id, offset: 0, data: GET('/page') });
     await until(() => closeOf(a, id), 'the response and the close');
     expect(output(a, id).text).toMatch(/^HTTP\/1\.1 200 OK[\s\S]*hello from \/page$/);
     expect(closeOf(a, id)).toBe('closed');
+    expect(f.services.activities.count - before).toBeGreaterThanOrEqual(2); // P5 Decision Log 273: the request's chunk in, the response's out
 
     const closed = await http();
     servers.pop()!.close();

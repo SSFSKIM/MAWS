@@ -110,3 +110,23 @@ describe('the open comments on a thumbnail (V10)', () => {
     expect(thumb(4).getAttribute('aria-label')).toBe('Slide 4');
   });
 });
+
+// U6a (the UX wave's U6, collisions: ⇧⌘D is View ▸ Review): a thumbnail's ⌘D duplicates its slide; with Shift down the
+// key is left to the menu.
+describe('a thumbnail’s ⌘D', () => {
+  it('duplicates the slide; ⇧⌘D duplicates nothing and is neither prevented nor stopped', () => {
+    const { doc, thumb } = mount();
+    const reached = vi.fn();
+    document.addEventListener('keydown', reached);
+    for (const key of ['d', 'D']) {
+      let kept = false;
+      act(() => void (kept = fireEvent.keyDown(thumb(2), { key, metaKey: true, shiftKey: true })));
+      expect(kept, key).toBe(true);
+    }
+    document.removeEventListener('keydown', reached);
+    expect(reached).toHaveBeenCalledTimes(2);
+    expect(slideOrder(doc)).toHaveLength(SLIDES.length);
+    act(() => void fireEvent.keyDown(thumb(2), { key: 'd', metaKey: true }));
+    expect(slideOrder(doc)).toHaveLength(SLIDES.length + 1);
+  });
+});

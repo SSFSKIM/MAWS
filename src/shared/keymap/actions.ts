@@ -7,66 +7,91 @@
 // renderer handler would have to prevent every such chord itself; a chord that must know the focused element therefore
 // stays out of the menu. Defaults are §5.8's; overrides live in
 // `settings.keymap`.
+// U6a (the UX wave's UC-6): the table's order is the menus' order. A row placed in a menu sits where it stands among
+// that menu's rows, or in the submenu it names, which the menu folds in where the submenu's first row stands; the shortcut
+// sheet and Settings › Keyboard group the rows the same way. A `fixed` row is a key its own editing surface handles:
+// listed in the sheet and Settings under its scope, never dispatched, never in the palette, never rebound. A child adds
+// a key by adding its row here and nowhere else.
+import { parseChord } from './chord';
+import { BUILD_F_ACTION_IDS } from './build-f';
 
 export type Sink = 'menu' | 'renderer';
 export interface ActionSpec {
   title: string;
   chord: string | null;
   sink: Sink;
-  menu: 'app' | 'file' | 'view' | 'go' | 'help' | null; // 'app' is the application menu (MAWS › Settings… ⌘,), for C11's settings.open
+  // 'app' is the application menu (MAWS › Settings… ⌘,), for C11's settings.open; U6a: 'edit' is placed after the Edit
+  // menu's own items
+  menu: 'app' | 'file' | 'edit' | 'view' | 'go' | 'help' | null;
+  submenu?: string; // U6a: the submenu of its menu the row sits in
   scope: 'app' | 'pane' | 'composer';
   // E9: a hold action: its binding runs on the accepted keydown and is told when the hold ends (the key or a modifier
   // of its chord let go, or the window losing the keyboard); `keymap/dispatcher.ts`, "Hold semantics"
   hold?: true;
+  // U6a: a key its own editing surface handles (Enter in the composer): `renderer`, no menu, with a chord; listed, never
+  // dispatched, not rebindable
+  fixed?: true;
 }
 
 export const ACTIONS = {
   'session.new':          { title: 'New chat',                    chord: 'Cmd+N',        sink: 'menu', menu: 'file', scope: 'app' },   // New chat (2026-10-01): registered with the session creator; disabled until one exists
   'tab.close':            { title: 'Close tab',                   chord: 'Cmd+W',        sink: 'menu', menu: 'file', scope: 'app' },
   'tab.reopen':           { title: 'Reopen closed tab',           chord: 'Cmd+Shift+T',  sink: 'menu', menu: 'file', scope: 'app' },
+  // View, in its order (U6a; l7-shell-07): Overview, Artifacts, Tabs ▸, the panes, the regions, the side surfaces and More
+  // surfaces ▸, the moves between them, then Comments ▸, Appearance ▸ and Usage (accounts.open, in C11's block below)
   'tab.overview':         { title: 'Overview',                    chord: 'Cmd+0',        sink: 'menu', menu: 'view', scope: 'app' },
   'artifacts.open':       { title: 'Artifacts',                   chord: null,           sink: 'menu', menu: 'view', scope: 'app' },   // P3-G (§D5): opens or activates the Artifacts tab, as the sidebar's row does
-  'tab.select':           { title: 'Select tab 1–9',              chord: 'Cmd+1',        sink: 'menu', menu: 'view', scope: 'app' },   // the menu expands this to nine items Cmd+1 … Cmd+9 with arg 1..9
-  'tab.next':             { title: 'Next tab',                    chord: 'Ctrl+Tab',     sink: 'renderer', menu: 'view', scope: 'pane' },
-  'tab.previous':         { title: 'Previous tab',                chord: 'Ctrl+Shift+Tab', sink: 'renderer', menu: 'view', scope: 'pane' },
-  'tab.stripNext':        { title: 'Next tab in strip',           chord: 'Cmd+Alt+]',    sink: 'menu', menu: 'go', scope: 'app' },
-  'tab.stripPrevious':    { title: 'Previous tab in strip',       chord: 'Cmd+Alt+[',    sink: 'menu', menu: 'go', scope: 'app' },
-  'region.focusNext':     { title: 'Focus next region',           chord: 'F6',           sink: 'menu', menu: 'go', scope: 'app' },
-  'region.focusPrevious': { title: 'Focus previous region',       chord: 'Shift+F6',     sink: 'menu', menu: 'go', scope: 'app' },
-  'sidebar.focus':        { title: 'Focus sidebar',               chord: null,           sink: 'menu', menu: 'go', scope: 'app' },
+  'tab.select':           { title: 'Select tab 1–9',              chord: 'Cmd+1',        sink: 'menu', menu: 'view', submenu: 'Tabs', scope: 'app' },   // the menu expands this to nine items Cmd+1 … Cmd+9 with arg 1..9
+  'tab.next':             { title: 'Next tab',                    chord: 'Ctrl+Tab',     sink: 'renderer', menu: 'view', submenu: 'Tabs', scope: 'pane' },
+  'tab.previous':         { title: 'Previous tab',                chord: 'Ctrl+Shift+Tab', sink: 'renderer', menu: 'view', submenu: 'Tabs', scope: 'pane' },
   'pane.split':           { title: 'Split / move to other pane',  chord: 'Cmd+\\',       sink: 'menu', menu: 'view', scope: 'app' },
   'pane.focusOther':      { title: 'Focus other pane',            chord: 'Cmd+Shift+\\', sink: 'menu', menu: 'view', scope: 'app' },
-  'sidebar.toggle':       { title: 'Toggle sidebar',              chord: 'Cmd+B',        sink: 'menu', menu: 'view', scope: 'app' },
-  'panel.toggle':         { title: 'Toggle session cards',          chord: 'Cmd+Shift+B',  sink: 'menu', menu: 'view', scope: 'app' },
-  'surface.terminal': { title: 'Toggle Terminal surface', chord: null, sink: 'menu', menu: 'view', scope: 'app' },
-  'surface.review': { title: 'Toggle Review surface', chord: null, sink: 'menu', menu: 'view', scope: 'app' },
-  'surface.browser': { title: 'Toggle Browser surface', chord: null, sink: 'menu', menu: 'view', scope: 'app' },
-  'surface.files': { title: 'Toggle Files surface', chord: null, sink: 'menu', menu: 'view', scope: 'app' },
-  'surface.source-control': { title: 'Toggle Source control surface', chord: null, sink: 'menu', menu: 'view', scope: 'app' },
-  'surface.subagents': { title: 'Toggle Subagents surface', chord: null, sink: 'menu', menu: 'view', scope: 'app' },
-  'surface.background': { title: 'Toggle Background work surface', chord: null, sink: 'menu', menu: 'view', scope: 'app' },
-  'surface.session-info': { title: 'Toggle Session info surface', chord: null, sink: 'menu', menu: 'view', scope: 'app' },
-  'surface.ask-sheet': { title: 'Toggle Questions surface', chord: null, sink: 'menu', menu: 'view', scope: 'app' },
-  'panel.maximize':       { title: 'Expand surface',        chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
-  // P3-G (§D1.7): the panel's floating state, the third region state of the B family (⌘B the sidebar, ⇧⌘B the panel); a
-  // page in the browser passes every ⌥⌘ chord to the menu, so it works with a page focused
-  'panel.float':          { title: 'Float conversation over surface',    chord: 'Cmd+Alt+B',    sink: 'menu', menu: 'view', scope: 'app' },
   // P4-B3 (X32 amendment; its Decision Log 12): the focused pane takes the main area and the session beside it floats in
   // the split's card, as the editor header's Expand does; on a floating split it restores the split. No default chord.
   // P4-B3x (P4 Decision Log 40): it also folds an open right panel, which restoring the split opens again
   'main.expandArtifactPane': { title: 'Expand pane',              chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
+  'sidebar.toggle':       { title: 'Toggle sidebar',              chord: 'Cmd+B',        sink: 'menu', menu: 'view', scope: 'app' },
+  'panel.toggle':         { title: 'Toggle session cards',          chord: 'Cmd+Shift+B',  sink: 'menu', menu: 'view', scope: 'app' },
+  'panel.maximize':       { title: 'Expand surface',        chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
+  // P3-G (§D1.7): the panel's floating state, the third region state of the B family (⌘B the sidebar, ⇧⌘B the panel); a
+  // page in the browser passes every ⌥⌘ chord to the menu, so it works with a page focused
+  'panel.float':          { title: 'Float conversation over surface',    chord: 'Cmd+Alt+B',    sink: 'menu', menu: 'view', scope: 'app' },
+  // U6a (l5-code-08): ⌘J, ⇧⌘D and ⇧⌘F show and hide Terminal, Review and Files, Claude Desktop's chords for the same acts;
+  // the other surfaces stay unbound, the rarer ones in More surfaces ▸. Each row is titled by its surface's name.
+  'surface.terminal': { title: 'Terminal', chord: 'Cmd+J', sink: 'menu', menu: 'view', scope: 'app' },
+  'surface.review': { title: 'Review', chord: 'Cmd+Shift+D', sink: 'menu', menu: 'view', scope: 'app' },
+  'surface.files': { title: 'Files', chord: 'Cmd+Shift+F', sink: 'menu', menu: 'view', scope: 'app' },
+  'surface.browser': { title: 'Browser', chord: null, sink: 'menu', menu: 'view', scope: 'app' },
+  'surface.source-control': { title: 'Source control', chord: null, sink: 'menu', menu: 'view', submenu: 'More surfaces', scope: 'app' },
+  'surface.subagents': { title: 'Subagents', chord: null, sink: 'menu', menu: 'view', submenu: 'More surfaces', scope: 'app' },
+  'surface.background': { title: 'Background work', chord: null, sink: 'menu', menu: 'view', submenu: 'More surfaces', scope: 'app' },
+  'surface.session-info': { title: 'Session info', chord: null, sink: 'menu', menu: 'view', submenu: 'More surfaces', scope: 'app' },
+  'surface.ask-sheet': { title: 'Questions', chord: null, sink: 'menu', menu: 'view', submenu: 'More surfaces', scope: 'app' },
   // P4-B3 (X38; its Decision Log 21): the focused main artifact tab into the panel ("Show in panel"), and the shown
   // panel's Artifacts record into a main tab ("Move to tab"), as a drag does; refused with the drag's reason. No chords
   'artifact.moveToPanel':    { title: 'Move to side surface',            chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
   'artifact.moveToTab':      { title: 'Move to tab',              chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
-  'theme.light':          { title: 'Appearance: Light',           chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
-  'theme.dark':           { title: 'Appearance: Dark',            chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
-  'theme.system':         { title: 'Appearance: System',          chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
+  // P4-B1 start (2026-10-20; the P4 spec §4.3, Docs' View › Comments): every document's comment view, per user
+  // (settings.artifacts.commentsView): Expand draws the cards in the margin, Minimize the icons at the anchors, Hide an
+  // empty margin. Unbound by default; U6a: in View › Comments
+  'comments.expand':         { title: 'Expand comments',          chord: null,           sink: 'menu', menu: 'view', submenu: 'Comments', scope: 'app' },
+  'comments.minimize':       { title: 'Minimize comments',        chord: null,           sink: 'menu', menu: 'view', submenu: 'Comments', scope: 'app' },
+  'comments.hide':           { title: 'Hide comments',            chord: null,           sink: 'menu', menu: 'view', submenu: 'Comments', scope: 'app' },
+  // P4-B1 end
+  'theme.light':          { title: 'Appearance: Light',           chord: null,           sink: 'menu', menu: 'view', submenu: 'Appearance', scope: 'app' },
+  'theme.dark':           { title: 'Appearance: Dark',            chord: null,           sink: 'menu', menu: 'view', submenu: 'Appearance', scope: 'app' },
+  'theme.system':         { title: 'Appearance: System',          chord: null,           sink: 'menu', menu: 'view', submenu: 'Appearance', scope: 'app' },
+  // Go, in its order (U6a; l7-shell-07): the palette, the session steps, the tab steps, the region steps
   'palette.open':         { title: 'Command palette',             chord: 'Cmd+K',        sink: 'menu', menu: 'go',   scope: 'app' },
   'session.previous':    { title: 'Previous session', chord: 'Cmd+Shift+[', sink: 'menu', menu: 'go', scope: 'app' },
   'session.next':        { title: 'Next session', chord: 'Cmd+Shift+]', sink: 'menu', menu: 'go', scope: 'app' },
   'session.markUnread':  { title: 'Mark session unread', chord: 'Cmd+Alt+U', sink: 'menu', menu: 'go', scope: 'app' },
   'attention.next':       { title: 'Next Needs-you',              chord: 'Cmd+Shift+J',  sink: 'menu', menu: 'go',   scope: 'app' },
+  'tab.stripNext':        { title: 'Next tab in strip',           chord: 'Cmd+Alt+]',    sink: 'menu', menu: 'go', scope: 'app' },
+  'tab.stripPrevious':    { title: 'Previous tab in strip',       chord: 'Cmd+Alt+[',    sink: 'menu', menu: 'go', scope: 'app' },
+  'region.focusNext':     { title: 'Focus next region',           chord: 'F6',           sink: 'menu', menu: 'go', scope: 'app' },
+  'region.focusPrevious': { title: 'Focus previous region',       chord: 'Shift+F6',     sink: 'menu', menu: 'go', scope: 'app' },
+  'sidebar.focus':        { title: 'Focus sidebar',               chord: null,           sink: 'menu', menu: 'go', scope: 'app' },
   'shortcuts.open':       { title: 'Keyboard shortcuts',          chord: 'Cmd+/',        sink: 'menu', menu: 'help', scope: 'app' },
   'diagnostics.open':     { title: 'Diagnostics',                 chord: null,           sink: 'menu', menu: 'help', scope: 'app' },
   'request.accept':       { title: 'Approve / answer the docked request', chord: 'Enter', sink: 'renderer', menu: null, scope: 'pane' },     // C7's card subscribes through useKeyChord
@@ -110,26 +135,69 @@ export const ACTIONS = {
   // P2-C end
   // P3-G (§D4.4): Mark up over the selected panel tab's surface, as the panel header's button does; unbound by default
   'markup.start':            { title: 'Mark up',                  chord: null,           sink: 'renderer', menu: null, scope: 'app' },
-  // P4-B1 start (2026-10-20; the P4 spec §4.3, Docs' View › Comments): every document's comment view, per user
-  // (settings.artifacts.commentsView): Expand draws the cards in the margin, Minimize the icons at the anchors, Hide an
-  // empty margin. Three flat items (the table has no submenu or checked state); unbound by default
-  'comments.expand':         { title: 'Expand comments',          chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
-  'comments.minimize':       { title: 'Minimize comments',        chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
-  'comments.hide':           { title: 'Hide comments',            chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
-  // P4-B1 end
 } as const satisfies Record<string, ActionSpec>;
 
 export type ActionId = keyof typeof ACTIONS;
 export const ACTION_IDS = Object.keys(ACTIONS) as [ActionId, ...ActionId[]];
 
+// A table of rows: `ACTIONS`, or (in a test) `ACTIONS` with rows shaped as a later child will add them.
+export type ActionTable = Readonly<Record<ActionId, ActionSpec>>;
+export const idsOf = (table: ActionTable): ActionId[] => Object.keys(table) as ActionId[];
+
 // Ids an earlier version had, which a settings file may still carry as overrides: the keymap's schema names only the
-// current ids, so a read drops these first rather than refusing the whole file (W10: ⌥Enter's hold).
+// ids it knows (U6a: build F's, `./build-f.ts`), so a read drops these first rather than refusing the whole file (W10:
+// ⌥Enter's hold).
 export const RETIRED_ACTION_IDS: readonly string[] = ['composer.steer'];
 
 // `settings.keymap`: overrides only; null unbinds; absent means the default.
 export type KeymapOverrides = Partial<Record<ActionId, string | null>>;
 
-export function effectiveChord(id: ActionId, overrides: KeymapOverrides): string | null {
-  const override = overrides[id];
-  return override === undefined ? ACTIONS[id].chord : override;
+// The nine chords Select tab 1–9 numbers `chord` into, or null when it does not: only a chord whose key (the token after
+// its last `+`) is the digit 1 numbers through 9, so F11 or F21 is one chord, never F12 … F19 or F22 … F29 (the panel's
+// finding of 2026-11-12, "tab-chord expansion past F24"). The one statement of the rule: the menu's nine items, the
+// chords a row holds and the shown chord all read it.
+export function tabChords(chord: string): string[] | null {
+  const tokens = chord.split('+');
+  if (tokens.at(-1) !== '1') return null;
+  const mods = tokens.slice(0, -1).map((token) => `${token}+`).join('');
+  return Array.from({ length: 9 }, (_, i) => `${mods}${i + 1}`);
+}
+
+// The chords a row holds with `chord`: Select tab 1–9 the nine the menu numbers it into.
+export function heldChords(id: ActionId, chord: string): string[] {
+  return (id === 'tab.select' ? tabChords(chord) : null) ?? [chord];
+}
+
+// U6a (UC-14; the U6a execution document, decision 11): while build F may run on the same profile, a row takes a
+// rebinding only if it is not fixed and F knows its id; the settings' schema stores no other (`./build-f.ts`).
+const BUILD_F_IDS: ReadonlySet<string> = new Set(BUILD_F_ACTION_IDS);
+export function isRebindable(id: ActionId, table: ActionTable = ACTIONS): boolean {
+  const spec = table[id] as ActionSpec | undefined;
+  return spec !== undefined && !spec.fixed && BUILD_F_IDS.has(id);
+}
+
+const sameChord = (a: string, b: string) => {
+  const x = parseChord(a);
+  const y = parseChord(b);
+  return x.meta === y.meta && x.ctrl === y.ctrl && x.alt === y.alt && x.shift === y.shift && x.key === y.key;
+};
+
+// The chord a row answers to (U6a, the U6a execution document's Interfaces A), in this order:
+// 1. a fixed row answers its default, always: it takes no override and yields to none;
+// 2. a rebindable row with an override of its own answers that override (null unbinds); an override of a row that is
+//    not rebindable is never read;
+// 3. every other row answers its default, or null while another rebindable row's own override holds that chord
+//    (decision 10: a rebinding the person stored wins over a default a later build gives another action, and nothing
+//    stored is rewritten; freeing the chord restores the default). Select tab counts its nine chords on either side.
+export function effectiveChord(id: ActionId, overrides: KeymapOverrides, table: ActionTable = ACTIONS): string | null {
+  const spec = table[id];
+  if (spec.fixed) return spec.chord;
+  const own = overrides[id];
+  if (own !== undefined && isRebindable(id, table)) return own;
+  if (spec.chord === null) return null;
+  const mine = heldChords(id, spec.chord);
+  const taken = (Object.entries(overrides) as [ActionId, string | null | undefined][]).some(
+    ([other, chord]) => other !== id && typeof chord === 'string' && isRebindable(other, table) && heldChords(other, chord).some((held) => mine.some((c) => sameChord(c, held))),
+  );
+  return taken ? null : spec.chord;
 }

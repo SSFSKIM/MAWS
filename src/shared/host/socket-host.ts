@@ -70,6 +70,7 @@ export interface SocketHostOptions {
   onClient?(connected: boolean, peer?: WirePeer): void; // a client was welcomed (P5 O3-D M3: with what its hello said of it), or the client left
   listening?(host: SocketHost): void; // serving, synchronously after the listen and before anything can be asked
   log(line: string): void;
+  onActivity?(): void; // P5 Decision Log 273: socket-server's, each line and document frame of its client
 }
 
 export interface SocketHost {
@@ -163,6 +164,7 @@ export async function startSocketHost(opts: SocketHostOptions, proc: HostProcess
       else opts.exitWhenIdle();
     },
     onClient: opts.onClient,
+    onActivity: opts.onActivity, // P5 Decision Log 273
     log,
   });
 

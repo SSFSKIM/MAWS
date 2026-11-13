@@ -18,14 +18,14 @@ function seedFeatures(env){const file=(env.CLAUDE_CONFIG_DIR||env.HOME||homedir(
 export const GATEWAY_ENV=/^(ANTHROPIC_BASE_URL|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_DEFAULT_[A-Z_]*_MODEL)$/;
 export function processTree(root){const rows=execFileSync('ps',['-axo','pid=,ppid=,rss=,command='],{encoding:'utf8'}).trim().split('\n').map(l=>{const m=l.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/);return m&&{pid:+m[1],ppid:+m[2],rssKiB:+m[3],command:m[4]};}).filter(Boolean);const out=[];const walk=pid=>{for(const r of rows)if(r.ppid===pid){out.push(r);walk(r.pid);}};const self=rows.find(r=>r.pid===root);if(self)out.push(self);walk(root);return out.map(r=>({...r,command:redact(r.command).slice(0,140)}));}
 export class Probe {
- constructor(name,{cwd=scratch(),flags=[],model=process.env.PROBE_MODEL||'haiku',dir='fixtures/',bin='claude',unrouted=false,settingSources='',strictMcp=true,mode='default',env:extra={},noModel=false,dropInheritedClaude=false,detached=false}={}){
+ constructor(name,{cwd=scratch(),flags=[],model=process.env.PROBE_MODEL||'haiku',dir='fixtures/',bin='claude',unrouted=false,settingSources='',strictMcp=true,mode='default' /* null: no --permission-mode */,env:extra={},noModel=false,dropInheritedClaude=false,detached=false}={}){
  mkdirSync(FIXTURE_ROOT+dir,{recursive:true});this.cwd=cwd;this.file=FIXTURE_ROOT+dir+name+'.jsonl';this.peakTreeRSSKiB=0;this.frames=[];this.handlers=new Map();this.pending=new Map();this.waiters=new Set();this.seq=0;this.peakRSSKiB=0;
  writeFileSync(this.file,'');
  const env={...process.env};for(const k of ['CLAUDECODE','CLAUDE_CODE_ENTRYPOINT','CLAUDE_CODE_SSE_PORT'])delete env[k];
  // Pass 2 only (P2-F W-T): a probe launched from inside a Claude session would inherit its plugins and model switches; every inherited CLAUDE* variable goes but an explicit CLAUDE_CONFIG_DIR, and the probe's own `env` is applied after.
  const droppedEnv=dropInheritedClaude?Object.keys(env).filter(k=>k.startsWith('CLAUDE')&&k!=='CLAUDE_CONFIG_DIR').sort():[];for(const k of droppedEnv)delete env[k];
  env.CLAUDE_CODE_ENTRYPOINT='sdk-ts';if(unrouted)for(const k of Object.keys(env))if(GATEWAY_ENV.test(k))delete env[k];Object.assign(env,extra);
- const args=['-p','--input-format','stream-json','--output-format','stream-json','--verbose','--permission-prompt-tool','stdio','--include-partial-messages',...(noModel?[]:['--model',model]),'--setting-sources',settingSources,...(strictMcp?['--strict-mcp-config']:[]),'--permission-mode',mode,...flags];
+ const args=['-p','--input-format','stream-json','--output-format','stream-json','--verbose','--permission-prompt-tool','stdio','--include-partial-messages',...(noModel?[]:['--model',model]),'--setting-sources',settingSources,...(strictMcp?['--strict-mcp-config']:[]),...(mode===null?[]:['--permission-mode',mode]),...flags];
   // P5-O16: `detached` spawns the engine as its own process group's leader, as MAWS's transport does
  const featureCache=FEATURE_CACHE?seedFeatures(env):undefined;
  this.child=spawn(bin,args,{cwd,env,stdio:['pipe','pipe','pipe'],detached});this.note({event:'spawn',pid:this.child.pid,cwd,bin,args,routed:!unrouted&&!!env.ANTHROPIC_BASE_URL,extraEnv:Object.keys(extra),...(featureCache?{featureCache}:{}),...(dropInheritedClaude?{droppedEnv}:{}),node:process.version});

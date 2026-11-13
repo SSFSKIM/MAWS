@@ -28,17 +28,14 @@ item".
 Observed.
   a. The probe's markdown as written: a document `- **A** text` + a paragraph; agent replace_text `**A** text` -> `B text`,
      then replace_block on the untouched paragraph from the returned revision. Both land (one row each, credited to the
-     session). Yjs does run its clean-up in the live doc after the agent's apply, and it deletes nothing. The friction
-     entry's markdown (`- **X** fell`, `**X** fell` -> `Its N fell`) also lands. (Test: "control: the probe's own
-     markdown ... lands today".) Also landing: `**AB** text` -> `B text`, `**N** fell` -> `Its N fell`, un-bolding a
-     whole run (`**A** text` -> `A text`, `Some **bold** words` -> `Some bold words`), and the spec case with a person's
-     editor connected.
-  b. The recorded transcript of the refused calls (the 2026-10-23 decision-memo session; four refused batches). Its
-     document at revision 172 rebuilt from the read's markdown, its batches replayed: the batch at 20:27:31Z refuses; of
-     its six ops, the one alone that refuses is `**P Q's N** fell` -> `Its N fell` (the friction entry's op);
-     the next replace_block on an untouched block is then refused as stale at the same revision, exactly as the entry
-     says. The two whole-list replace_block batches of 20:26:29Z and 20:26:40Z refuse the same way. (Replayed on the VM
-     from a copy in /tmp, not committed: the memo is the owner's session.)
+     session). Yjs does run its clean-up in the live doc after the agent's apply, and it deletes nothing. (Test:
+     "control: the probe's own markdown ... lands today".) Also landing: `**AB** text` -> `B text`, a bold word replaced
+     by other words that end with it unbolded (`**C** text` -> `D C text`), un-bolding a whole run (`**A** text` ->
+     `A text`, `Some **bold** words` -> `Some bold words`), and the spec case with a person's editor connected.
+  b. The case first reported as refused, replayed outside the repository (nothing of it is committed or kept): of the
+     refused batch's ops, the one alone that refuses replaces a bold run by text that keeps part of the run unbolded,
+     the shape (c) reduces; the next replace_block on an untouched block is then refused as stale at the same revision.
+     Batches that replace the whole list by replace_block refuse the same way.
   c. Reduced: `- **A B** text` with `**A B** text` -> `B text` refuses, in a list item and in a plain paragraph alike. The
      trigger is a bold run cut so that part of its text survives unbolded (the patch keeps "B" and re-cuts the bold around
      it), not a list item and not the run's position. replace_block to the same text refuses too.
