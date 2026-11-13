@@ -117,6 +117,10 @@
     "firstDeniedCell": null,
     "id": "divider:turn:ereplay:journal:71:1",
     "kind": "divider",
+    "opener": {
+      "class": "peer",
+      "line": "Message from @repo-b-gen1il-79: E7 probe: hello from B"
+    },
     "origin": "peer",
     "startedAt": "2026-10-06T10:54:24.943Z",
     "state": "completed",
@@ -177,7 +181,7 @@
       "summary": null,
       "toolUseId": null
     },
-    "text": "Message from repo-b-gen1il-79: E7 probe: hello from B",
+    "text": "Message from @repo-b-gen1il-79: E7 probe: hello from B",
     "to": null,
     "turnId": "turn:ereplay:journal:71:1"
   },
@@ -250,7 +254,7 @@
       "summary": "Respond to peer session probe",
       "toolUseId": "toolu_01Hjvw4bRrU1xo6YfEsM31Lj"
     },
-    "text": "Sent to repo-b-gen1il-79: Hello from A — received your probe message.",
+    "text": "Sent to @repo-b-gen1il-79: Hello from A — received your probe message.",
     "to": null,
     "turnId": "turn:ereplay:journal:71:1"
   },
@@ -348,7 +352,7 @@
       "summary": null,
       "toolUseId": "toolu_014MYinuDDFrreJtW6nkbeVh"
     },
-    "text": "Sent to repo-b-gen1il-79: E7 probe: reply from A",
+    "text": "Sent to @repo-b-gen1il-79: E7 probe: reply from A",
     "to": null,
     "turnId": "turn:fab15aee-8755-4d22-be95-fe6a693bb43e"
   },
@@ -487,7 +491,7 @@
       "summary": null,
       "toolUseId": null
     },
-    "text": "Message from repo-b-gen1il-79: E7 probe: second message while you work",
+    "text": "Message from @repo-b-gen1il-79: E7 probe: second message while you work",
     "to": null,
     "turnId": "turn:d6dcf359-401e-4c0c-b982-082a8b388515"
   },
@@ -585,7 +589,7 @@
       "summary": null,
       "toolUseId": "toolu_01KC8uNWxWQ5zXJ7EU6Fh8nT"
     },
-    "text": "Sent to nobody-e7: E7 probe: nobody",
+    "text": "Sent to @nobody-e7: E7 probe: nobody",
     "to": null,
     "turnId": "turn:c762441a-e67e-4d7d-bf40-f40a32c465ec"
   },

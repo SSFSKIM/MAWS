@@ -162,7 +162,7 @@
       "summary": null,
       "toolUseId": "toolu_01G9uwubWgCupz4H7294VaDp"
     },
-    "text": "Sent to repo-h6xooi-51: E7 probe: hello from B",
+    "text": "Sent to @repo-h6xooi-51: E7 probe: hello from B",
     "to": null,
     "turnId": "turn:3c95b09d-2759-4093-96c8-2b28c1a981eb"
   },
@@ -188,6 +188,10 @@
     "firstDeniedCell": null,
     "id": "divider:turn:ereplay:journal:104:1",
     "kind": "divider",
+    "opener": {
+      "class": "peer",
+      "line": "Message from @repo-h6xooi-51: Hello from A — received your probe message."
+    },
     "origin": "peer",
     "startedAt": "2026-10-06T10:54:30.261Z",
     "state": "completed",
@@ -248,7 +252,7 @@
       "summary": null,
       "toolUseId": null
     },
-    "text": "Message from repo-h6xooi-51: Hello from A — received your probe message.",
+    "text": "Message from @repo-h6xooi-51: Hello from A — received your probe message.",
     "to": null,
     "turnId": "turn:ereplay:journal:104:1"
   },
@@ -274,6 +278,10 @@
     "firstDeniedCell": null,
     "id": "divider:turn:ereplay:journal:140:1",
     "kind": "divider",
+    "opener": {
+      "class": "peer",
+      "line": "Message from @repo-h6xooi-51: E7 probe: reply from A"
+    },
     "origin": "peer",
     "startedAt": "2026-10-06T10:54:49.714Z",
     "state": "completed",
@@ -334,7 +342,7 @@
       "summary": null,
       "toolUseId": null
     },
-    "text": "Message from repo-h6xooi-51: E7 probe: reply from A",
+    "text": "Message from @repo-h6xooi-51: E7 probe: reply from A",
     "to": null,
     "turnId": "turn:ereplay:journal:140:1"
   },
@@ -432,7 +440,7 @@
       "summary": null,
       "toolUseId": "toolu_017StumvJQFvUYHP9Fr1aPuv"
     },
-    "text": "Sent to repo-h6xooi-51: E7 probe: second message while you work",
+    "text": "Sent to @repo-h6xooi-51: E7 probe: second message while you work",
     "to": null,
     "turnId": "turn:2e2cd9bd-01ae-4320-aff1-460bd117a833"
   },
