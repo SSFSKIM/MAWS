@@ -38,8 +38,8 @@ describe('Search settings', () => {
 
   // UX wave U7b (O-47): the usage panel is one declared row of Usage, so the search finds it and lands on the section
   it('finds Usage and its panel, "Claude accounts", by the section’s name and the row’s words', () => {
-    expect(read('usage')).toEqual(['Usage · Section', 'Claude accounts · Usage']);
-    expect(search('usage')[1]).toEqual({ id: 'usage.accounts', name: 'Claude accounts', under: 'Usage', target: 'usage.accounts', openMore: false });
+    expect(read('usage')).toEqual(['Direct login · Gateway', 'Usage · Section', 'Claude accounts · Usage']); // Direct login's line names usage
+    expect(search('usage').find((r) => r.id === 'usage.accounts')).toEqual({ id: 'usage.accounts', name: 'Claude accounts', under: 'Usage', target: 'usage.accounts', openMore: false });
     expect(ids('codex')).toEqual(['usage.accounts']);
     expect(ids('limit')).toContain('usage.accounts');
   });

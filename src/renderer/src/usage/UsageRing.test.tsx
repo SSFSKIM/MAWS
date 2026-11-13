@@ -154,8 +154,9 @@ describe('the usage popover', () => {
       expect(within(codex).queryAllByRole('meter')).toHaveLength(0);
       expect(codex.textContent).toContain("Limits show in ClaudeUsage's own panel");
     }
-    // no saved sessions, no actions, no add row, no activity
-    expect(popover.textContent).not.toMatch(/saved session|requests? ·/);
+    // no saved sessions, no activity, no actions, no add row
+    expect(popover.textContent).not.toContain('saved session');
+    expect(popover.querySelector('[data-serving]')).toBeNull();
     expect(within(popover).getAllByRole('button').map((b) => b.textContent)).toEqual(['Usage settings']);
   });
 
