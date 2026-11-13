@@ -9,7 +9,7 @@ import { artifactUrl } from '@shared/artifacts/scheme'; // P3-L (M5b)
 import { fileLineAnchor } from '../../tools/code/anchor/anchor';
 import { laneAState } from '../../lane-a/test-support/lane-a-state';
 import { applyLaneAState, dismissPendingSend, holdPendingSend, resetLaneAStore } from '../../stores/lane-a';
-import { CLAIM_DEADLINE_MS, cardGone, claimCard, closeCard, discardComment, dropSession, dropSubject, flightRefused, launchFlight, leaveCard, notePlace, openCard, passKey, registerCardHost, resetPlaceNotes, SENT_NOTE_MS, setCommentText, setPassToMain, targetOf, useCommentCard } from './store';
+import { CLAIM_DEADLINE_MS, cardGone, claimCard, closeCard, discardComment, dropSession, dropSubject, flightRefused, launchFlight, leaveCard, notePlace, openCard, passKey, placeNoteOf, registerCardHost, resetPlaceNotes, SENT_NOTE_MS, setCommentText, setPassToMain, targetOf, useCommentCard } from './store';
 
 const PARENT = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
 const RECORD = '00000000-0000-4000-8000-000000000001';
@@ -185,6 +185,26 @@ describe('the place’s note', () => {
     expect(note('h1')).toEqual(pending);
     dismissPendingSend(PARENT, KEY);
     expect(note('h1')).toBeNull();
+  });
+
+  // M3's review, finding 3: a place's line is the newest set for its subject, a key set again counting as new
+  it('draws the newest line of a subject: A, then B, then A again draws A’s, a durable pending one included', () => {
+    const other = 'b2222222-2222-4222-8222-222222222222' as AppSessionId;
+    const a = passKey('browser', 'tab-1', PARENT);
+    const b = passKey('browser', 'tab-1', other);
+    const key = { writer: 'maws/m', seq: 7 };
+    applyLaneAState(PARENT, laneAState(PARENT));
+    holdPendingSend(PARENT, key, 'the words');
+    const drawn = () => placeNoteOf(useCommentCard.getState().notes, 'browser', 'tab-1');
+    notePlace(a, { kind: 'pending', appSessionId: PARENT, key, title: 'Q3 plan' });
+    notePlace(b, { kind: 'sent', text: 'Sent to B', at: Date.now() });
+    expect(drawn()).toMatchObject({ kind: 'sent', text: 'Sent to B' });
+    notePlace(a, { kind: 'pending', appSessionId: PARENT, key, title: 'Q3 plan' });
+    expect(drawn()).toMatchObject({ kind: 'pending', appSessionId: PARENT });
+    notePlace(b, { kind: 'sent', text: 'Sent to B again', at: Date.now() });
+    expect(drawn()).toMatchObject({ text: 'Sent to B again' });
+    notePlace(a, { kind: 'sent', text: 'Sent to A', at: Date.now() });
+    expect(drawn()).toMatchObject({ text: 'Sent to A' });
   });
 
   it('a pending send whose words entered before its line was set makes the line the sent one at once', () => {

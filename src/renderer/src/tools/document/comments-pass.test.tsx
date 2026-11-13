@@ -22,7 +22,7 @@ import { record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
 import { at } from '../../../../../test/support/machine';
 import { holdArtifactEditorState, releaseArtifactEditorState, type ArtifactEditor } from '../../artifacts/registry';
-import { resetPlaceNotes, useCommentCard } from '../../side/card/store';
+import { cardHostEntry, resetPlaceNotes, useCommentCard } from '../../side/card/store';
 import { openComment } from '../../side/register';
 import { useSessions } from '../../stores/sessions';
 import { resetShellStores } from '../../test-support/shell-stores';
@@ -87,9 +87,22 @@ async function openTab(confirm: () => boolean = () => false) {
   const editor: ArtifactEditor<DocumentTabState> = { Panel: () => null, createState: (target) => new DocumentTabState(target, deps), dispose: (state) => state.dispose() };
   const { state } = holdArtifactEditorState(SCOPE, A, 'document', editor);
   await until(() => state.snapshot().ready, 'the tab to open');
+  // M3's review, finding 4: every hold of the replica is counted, and each release, so a second release shows
+  const holds = { taken: 0, released: 0, twice: 0 };
+  const holdReplica = () => {
+    holds.taken += 1;
+    const release = state.hold();
+    let done = false;
+    return () => {
+      if (done) holds.twice += 1;
+      else holds.released += 1;
+      done = true;
+      release();
+    };
+  };
   let current: Editor | null = null;
   function Surface() {
-    const comments = useDocumentComments({ artifactId: A, appSessionId: PARENT, title: 'Draft', holdReplica: state.hold, hostId: state.commentHostId });
+    const comments = useDocumentComments({ artifactId: A, appSessionId: PARENT, title: 'Draft', holdReplica, hostId: state.commentHostId });
     return <DocumentEditor artifactId={A} handle={tabHandle!} host={owner} comments={comments} onEditor={(e) => (current = e)} />;
   }
   const view = render(<Surface />);
@@ -102,7 +115,20 @@ async function openTab(confirm: () => boolean = () => false) {
     const open = useCommentCard.getState().open!;
     return open.target?.kind === 'artifact' ? open.target.threadId : '';
   };
-  return { state, view, comment, handle: () => tabHandle!, hide: () => view.rerender(<></>), show: () => view.rerender(<Surface />) };
+  // each settlement a send of the card's host is told, counted as it is told (the host's registration, wrapped)
+  const settled: boolean[] = [];
+  const countSettlements = () => {
+    const entry = cardHostEntry(state.commentHostId)!;
+    const sending = entry.sending!;
+    entry.sending = (comment, how) => {
+      const settle = sending(comment, how);
+      return (went) => {
+        settled.push(went);
+        settle(went);
+      };
+    };
+  };
+  return { state, view, comment, handle: () => tabHandle!, hide: () => view.rerender(<></>), show: () => view.rerender(<Surface />), holds, settled, countSettlements };
 }
 const card = () => document.querySelector<HTMLElement>('[data-comment-card]');
 const messages = (d: DocumentHandle['doc'], threadId: string) => getThread(d, threadId)?.messages.map((m) => m.body) ?? null;
@@ -147,6 +173,7 @@ describe('a document tab closed during a flight', () => {
         const tab = await openTab();
         const sent = await tab.comment('ships quarterly', 'Monthly?');
         if (route.ticked) fireEvent.click(screen.getByRole('checkbox', { name: 'Send to main' }));
+        tab.countSettlements();
         fireEvent.click(within(card()!).getByRole('button', { name: 'Send' }));
         if (route.held === 'session.send') await act(() => fake.reply('side.comment.content', { content: [{ type: 'text', text: 'the built message' }] }));
         const draft = await tab.comment('The plan', 'Draft beside it');
@@ -175,6 +202,9 @@ describe('a document tab closed during a flight', () => {
         }
         await until(() => tab.handle().closed === true, 'the replica released and closed');
         expect(useCommentCard.getState().passes.size).toBe(0);
+        expect(tab.settled, 'the comment in flight is settled once').toEqual([outcome === 'went']);
+        expect(tab.holds.twice, 'no hold is released twice').toBe(0);
+        expect(tab.holds.released, 'every hold is released').toBe(tab.holds.taken);
       });
     }
 });

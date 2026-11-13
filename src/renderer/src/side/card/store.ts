@@ -374,11 +374,18 @@ export function unsentOf(passes: ReadonlyMap<string, CommentPass>, host: CardHos
   return newest === null ? null : { count, newest: { pass: newest.pass, comment: newest.comment } };
 }
 
-/** The line a host of `(host, subject)` draws in its place, newest first; null when none. */
+// The notes with `place`'s set as the newest: a Map keeps a key's first position on a re-set, so it is moved to the end.
+function latestLast(notes: ReadonlyMap<string, PlaceNote>, place: string, note: PlaceNote): Map<string, PlaceNote> {
+  const next = new Map(notes);
+  next.delete(place);
+  return next.set(place, note);
+}
+
+/** The line a host of `(host, subject)` draws in its place: the newest set (`latestLast`); null when none. */
 export function placeNoteOf(notes: ReadonlyMap<string, PlaceNote>, host: CardHostKind, subject: string): PlaceNote | null {
   const prefix = subjectPrefix(host, subject);
   let found: PlaceNote | null = null;
-  for (const [key, note] of notes) if (key.startsWith(prefix)) found = note; // a Map keeps the latest set last
+  for (const [key, note] of notes) if (key.startsWith(prefix)) found = note; // the latest set is last (`latestLast`)
   return found;
 }
 
@@ -482,7 +489,7 @@ export function hideCardThread(child: AppSessionId): void {
 // meanwhile; a pending one is followed in the lane A store from now on, and read against it at once, since its words
 // may have entered between the hand-off and this call.
 export function notePlace(place: string, note: PlaceNote): void {
-  useCommentCard.setState((s) => ({ notes: new Map(s.notes).set(place, note) }));
+  useCommentCard.setState((s) => ({ notes: latestLast(s.notes, place, note) }));
   if (note.kind === 'sent') expireSoon(place, note);
   else {
     followPending();
@@ -548,6 +555,7 @@ function settlePending(lane: LaneAStore): void {
     next ??= new Map(notes);
     if (enteredIn(lane, note.appSessionId, note.key)) {
       const sent = sentNote(SIDE_COPY.place.sent(note.title), note.thread);
+      next.delete(place); // the receipt is the place's newest line
       next.set(place, sent);
       entered.push([place, sent]);
     } else next.delete(place);

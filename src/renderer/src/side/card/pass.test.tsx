@@ -4,6 +4,7 @@
 // comment joins the first: the card lists the others, Send reads "Send N comments" and one send carries them all. A pass
 // with comments and no card is a chip. §D's table row by row, each with the awaited promise held open.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Anchor, AnchorScreenshot } from '@shared/anchor/anchor';
 import { artifactUrl } from '@shared/artifacts/scheme';
@@ -232,6 +233,25 @@ describe('a pass’s send (§D), each awaited promise held open', () => {
     expect(pass()?.comments).toHaveLength(2);
   });
 
+  // M3's review, finding 2 (§D: the checkbox may change during a flight, which changes nothing of the flight)
+  it('the checkbox changes during a flight: the flight keeps its destination, the next send takes the new one', async () => {
+    await twoInFlight(); // ticked: to main, the content held
+    pick(3);
+    type('And the footer');
+    expect(box().disabled).toBe(false);
+    fireEvent.click(box());
+    expect(box().checked).toBe(false);
+    await fake.reply('side.comment.content', { content: BUILT });
+    await fake.reply('session.send', { messageUuid: null, disposition: 'sent', queueId: 'q0' });
+    await settle();
+    expect(fake.invoked('session.send')).toHaveLength(1);
+    expect(fake.invoked('side.thread.open')).toHaveLength(0);
+    expect(box().checked).toBe(false);
+    fireEvent.click(sendButton());
+    expect(fake.invoked('side.thread.open')).toHaveLength(1);
+    expect(fake.invoked('side.comment.content')).toHaveLength(1);
+  });
+
   it('a comment added during a flight stays editable and survives its success', async () => {
     await twoInFlight();
     pick(3);
@@ -308,15 +328,44 @@ describe('a pass’s send (§D), each awaited promise held open', () => {
 });
 
 describe('the host’s frame (§C)', () => {
-  it('onClosed hears each card of the host that went, once, whatever took it: another comment, Escape kept, Close', () => {
+  it('onClosed hears each card of the host that went, once, whatever took it: another comment, Close', async () => {
     const closed: string[] = [];
     render(<Host frame={{ ...FRAME, onClosed: (gone) => closed.push(gone.anchor.locator) }} />);
     pick(1);
     type('Make it bolder');
     pick(2); // the card moves to the new comment
+    await settle();
     expect(closed).toEqual(['#e1']);
     fireEvent.click(within(card()!).getByRole('button', { name: 'Close' }));
+    await settle();
     expect(closed).toEqual(['#e1', '#e2']);
+  });
+
+  // M3's review, finding 1: M4 tells the page its card closed from this; a card the host keeps is never reported
+  it('onClosed: StrictMode’s replay and a remount under the same id keep the card and report nothing; its real close is reported once', async () => {
+    const closed: string[] = [];
+    const frame: CardFrame = { ...FRAME, onClosed: (gone) => closed.push(gone.anchor.locator) };
+    pick(1); // open before the host mounts, so the replay's cleanup meets it
+    const view = render(
+      <StrictMode>
+        <Host key="a" frame={frame} />
+      </StrictMode>,
+    );
+    type('Make it bolder');
+    await settle();
+    expect(card()).not.toBeNull();
+    expect(closed).toEqual([]);
+    view.rerender(
+      <StrictMode>
+        <Host key="b" frame={frame} />
+      </StrictMode>,
+    );
+    await settle();
+    expect(card()).not.toBeNull();
+    expect(closed).toEqual([]);
+    fireEvent.click(within(card()!).getByRole('button', { name: 'Close' }));
+    await settle();
+    expect(closed).toEqual(['#e1']);
   });
 });
 

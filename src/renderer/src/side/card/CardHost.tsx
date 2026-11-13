@@ -144,15 +144,22 @@ export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, vi
   }, [hostId, host, subject, holds]);
 
   const card = open?.hostId === hostId ? open : null;
-  // UX wave U5a (§C): told when this host's card went, for whatever reason (closed, sent, replaced, the host gone)
+  // UX wave U5a (§C): told once when this host's card went, for whatever reason (closed, sent, replaced, handed to another
+  // host, the host gone). Asked a microtask after the effect's cleanup, as the unmount's leave is: a StrictMode replay or
+  // a remount under the same id, which keep the card open on this host, report nothing; the mount drawing it then does.
   const shownCard = card?.serial ?? null;
   useEffect(() => {
     if (shownCard === null) return;
     const went = useCommentCard.getState().open;
+    if (went?.serial !== shownCard) return;
     return () => {
-      if (went?.serial === shownCard) latest.current.onClosed?.(went);
+      queueMicrotask(() => {
+        const open = useCommentCard.getState().open;
+        if (open?.serial === shownCard && open.hostId === hostId && hostOf(hostId)) return; // still this host's
+        latest.current.onClosed?.(went);
+      });
     };
-  }, [shownCard]);
+  }, [shownCard, hostId]);
   const rect = useLocated(card, frame, box, layout);
   const pin = rect ? pinOf(rect, frame) : null;
   const style = layout === 'docked' ? stripCard(box) : layout === 'margin' ? marginCard(box) /* P4-B1 */ : placeCard(box, pin);

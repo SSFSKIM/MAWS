@@ -93,7 +93,7 @@ function useRoute(parent: AppSessionId) {
 }
 
 // What the form draws, from the route and the state it is in (one shape for the sheet and the card).
-function formOf(route: ReturnType<typeof useRoute>, state: { wantsMain: boolean; screenshot: AnchorScreenshot | null; screenshots: number; flightTo: CommentDestination | null; withText: number }) {
+function formOf(route: ReturnType<typeof useRoute>, state: { wantsMain: boolean; screenshot: AnchorScreenshot | null; screenshots: number; flightTo: CommentDestination | null; withText: number; boxHeld: boolean }) {
   const { threadRemote, mainRefusal, threadRefusal, refusalOf, starts, running } = route;
   // ticked and locked for another machine's session (no side thread there yet, whatever its port says meanwhile);
   // otherwise the person's choice, which cannot be moved into a state that can't send
@@ -105,8 +105,9 @@ function formOf(route: ReturnType<typeof useRoute>, state: { wantsMain: boolean;
   return {
     destination,
     toMain,
-    // UX wave U5a: the box is off while a send is on its way, and where the state it would move to can't send
-    toMainFixed: busy || otherRefusal !== null,
+    // UX wave U5a: the box is off where the state it would move to can't send, and while the sheet's send is on its way
+    // (`boxHeld`); a card's pass may change it during a flight (§D), which keeps the destination it set out with
+    toMainFixed: state.boxHeld || otherRefusal !== null,
     // its title: why a tick can't send, or why it can't be left, else what a tick does now (the composer's words)
     toMainTitle: (threadRemote !== null ? threadRefusal : null) ?? mainRefusal ?? (toMain ? threadRefusal : null) ?? (starts ? STARTS : running ? COPY.mainBusy : COPY.mainIdle),
     unsendable: refusalOf(destination), // the line under the field when the state it is in can't send
@@ -139,7 +140,7 @@ export function useCommentForm({ anchor, parent, gone, onSent, destination: init
   const [phase, setPhase] = useState<CommentFormPhase>({ kind: 'editing' });
   const route = useRoute(parent);
   const sending = phase.kind === 'sending';
-  const form = formOf(route, { wantsMain, screenshot, screenshots: screenshot === null ? 0 : 1, flightTo: phase.kind === 'sending' ? phase.destination : null, withText: text.trim() === '' ? 0 : 1 });
+  const form = formOf(route, { wantsMain, screenshot, screenshots: screenshot === null ? 0 : 1, flightTo: phase.kind === 'sending' ? phase.destination : null, withText: text.trim() === '' ? 0 : 1, boxHeld: sending });
 
   const send = async (to: CommentDestination) => {
     if (!form.canSend(to)) return;
@@ -193,6 +194,7 @@ export function usePassForm(passKey: string, commentId: string): CommentForm & {
     screenshots: comments.filter((each) => each.screenshot !== null).length,
     flightTo,
     withText: comments.filter((each) => each.text.trim() !== '').length,
+    boxHeld: false, // §D: the next send's destination, never the flight's
   });
   const send = async (to: CommentDestination) => {
     if (!form.canSend(to)) return;
