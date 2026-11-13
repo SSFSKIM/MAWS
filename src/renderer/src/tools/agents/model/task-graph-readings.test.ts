@@ -123,7 +123,7 @@ describe('the graph’s readings', () => {
       expect(firstLevelAgents(graph)).toEqual({ running: ids(['A']), done: [] });
     });
 
-    it('keeps an agent among the running while a task it started runs (#359), and moves it to done when that ends', () => {
+    it('keeps an agent among the running while a task it started runs (item 359), and moves it to done when that ends', () => {
       const graph = graphOf([...agent('A'), shell('s1', 'A'), agentEnds('A', 'completed', 20)]);
       expect(firstLevelAgents(graph)).toEqual({ running: ids(['A']), done: [] });
       expect(firstLevelAgents(graphOf([taskEnds('s1')], graph))).toEqual({ running: [], done: ids(['A']) });
