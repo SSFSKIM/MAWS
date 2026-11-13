@@ -634,6 +634,9 @@ Found while checking the section against the code at `85e934368` and the probes'
   Rationale: the architect's ruling of 2026-11-13 ("if M4 finds the live route never carries that notice, the expectation moves with Acceptance 7").
   Date/Author: 2026-11-13, the U3a controller.
 
+- Decision: M4's three points accepted by the architect (2026-11-13): the file-only notices each drawing in their own turn when a session is read in both forms, as Acceptance 7 states it; the two corrections and Interfaces E's three new rows; and the queue's release. `onTurnEnded` in `src/engine-host/queue.ts` already sends every turn whose origin is not the person's through `releaseAfterEngineTurn` (the head goes as after a person's turn when the process can take it; when it cannot, the queue pauses with its info notice); M4 only makes a fire's, a task's and a hand-back's turn carry the word that selects that rule, where master read `null`. That is the rule's intent, so it stays; a unit test in `queue.test.ts` pins a queued entry submitted at the end of a turn of each new origin word while the process can write (no change to `queue.ts`). `e2e:p1-live`, the queue's live check, is a paid group run only on the owner's word: it is named in the pull request's residue.
+  Date/Author: 2026-11-13, the wave's architect, recorded by the U3a controller.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
