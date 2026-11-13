@@ -292,6 +292,7 @@ From M2 on, `LAYOUT_DEFAULTS.main` is `EMPTY_STRIP`: the store's default, not a 
 - `LayoutState.main: Strip`.
 - `hydrate(client, known, opts?: { settle?: () => void; rekeyOf?: RekeyOf; titleOf?: TitleOf }): Promise<{ merged: boolean }>`; `merged` is `stripOf`'s.
 - Gone from `LayoutState`: `projectOf`, `setCurrentProject`, `refileTabs`. Gone from the module: `ProjectOf`, `NO_PROJECT_OF`.
+- `openTab(ref, { activate: false })` changes no pane's focus and no pane's active tab, so `frontOf` is what it was (revised 2026-11-13; Decision Log): an open tab only takes the update its kind takes (a settings section, a file's line and session), and a new tab is placed after the active tab of the pane asked for, becoming that pane's active tab only when the pane was empty; a pane 1 it creates is not focused. Before, it focused the pane it touched.
 - Every other action keeps its name, its arguments and its meaning: `openTab(ref, opts?: { pane?: PaneTarget; activate?: boolean })`, `openSession(appSessionId, opts?: OpenSessionOptions)`, `closeTab`, `retargetTab`, `reopenClosed`, `moveTab`, `reorderTab`, `selectTab`, `cycleTab`, `activateTab`, `togglePinned`, `splitWithActive`, `focusPane`, `setSplitRatio`, `floatSplit`, `dockSplit`, `dropSession`, `settleMachine`, `refreshTabTitles`, `rekeyProjects`.
 - New: `frontOf(state: Pick<LayoutState, 'main'>): string`, the id of the tab in front, `''` when the focused pane is empty; and `showPane(pane: 0 | 1): void`, for a pane the person chose. `showPane` makes the same change of the strip as `focusPane` and differs only in the commit function it lands through (§C).
 
@@ -569,6 +570,10 @@ The pull request carries the dated amendments of the two rulings this landing re
 - **2026-11-13 · The wave's build rule: one whole suite per landing.** The whole `pnpm test` runs once, by the builder of M5, before the hand-back; M3 and M4 and each merge of master are proved by the typecheck of each project changed, eslint on the files changed, and vitest over the directories touched and the test folders that import what changed (Concrete Steps 2, revised). M2's whole-suite run, started before the rule, stands as M2's.
     Rationale: nine landings share three build VMs, and two whole-suite runs on one VM make every other check there time out.
     Date/Author: 2026-11-13, the architect's rule, recorded by the controller.
+- **2026-11-13 · M2's review: a background open changes no focus.**
+  - Decision: `openTab` with `activate: false` keeps `focusedPane` and every pane's active tab (§B, revised): a new tab goes after the active tab of the pane asked for and is active there only if that pane was empty; a pane 1 it creates is not focused; an open tab takes only its kind's update. Before this, the model focused the pane it touched ("only focuses its pane"), so a background add or reopen into the other pane changed the tab in front.
+    Rationale: §C routes `activate: false` outside `commitShown` and §E's arrival rule and U7's acceptance (§F) rely on a background open not bringing anything to the front; the reviewer reproduced `frontOf` moving from the left pane's tab to the right pane's. No production caller passed `activate: false` before this landing, so nothing relied on the old focus move.
+    Date/Author: 2026-11-13, the controller, on M2's task review.
 
 ## Outcomes & Retrospective
 
