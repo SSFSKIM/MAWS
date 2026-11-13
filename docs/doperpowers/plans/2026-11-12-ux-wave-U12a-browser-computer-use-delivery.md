@@ -858,7 +858,7 @@ The pull request carries the dated lines of the two records this landing amends,
 
 - **2026-11-13 · M4's executor decisions** (folded by the controller; the third to fifth are readings of §E's words).
   - The strip's states are a `StripTracker` behind `useComputerUse`, read through `useSyncExternalStore`, with one timer, cleared at unmount.
-  - The running turn is the session's last turn, and only while it is open and neither the store nor the controls port says it is not running; any other open turn is read as closed, so its unanswered calls read `withdrawn`.
+  - The running turn is the session's last turn the engine accepted, and only while it is open and neither the store nor the controls port says it is not running; any other open turn is read as closed, so its unanswered calls read `withdrawn`. Corrected at M4's review (2026-11-13): it first read the last turn accepted *or closed*, so a queued prompt cancelled, discarded or refused behind a running call became the latest turn and the call read `withdrawn`, taking Stop away while it ran. A prompt dropped before it starts receives no engine events, so leaving it out loses nothing.
   - A turn's own calls and its subagents' calls are merged by their start, which is used only to tell which call came later (the evidence's "started after it").
   - A subagent's error result is `withdrawn` when the interruption marker follows it in its own list or appears anywhere in the turn's own events.
   - When several calls the strip showed are withdrawn, the latest is the unresolved one and the earlier count as resolved; a call withdrawn while the strip is `absent` never makes the line linger. An accepted limit: a withdrawal and a new turn's start in one event batch leave no lingering line.
