@@ -8,6 +8,8 @@
 // instead; a refusal arriving after the sheet closed is a toast. Its own small store, as E5's editor sheets have, so it
 // never collides with C10's one-sheet dialog store or E1's sheets. Since P2-E1 the form's logic and parts are shared
 // with the comment card (`comment-form.ts`, `CommentFormParts.tsx`), which a producer with a host asks for instead.
+// UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, decision 19): the sheet shows the card's
+// checkbox, "Send to main", under the field, its caption as its title alone.
 import { create } from 'zustand';
 import type { Anchor } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -15,7 +17,7 @@ import { Sheet, SheetForm } from '../sessions/Sheet';
 import { FIELD, PRIMARY } from '../sessions/ui';
 import type { CommentContext } from '../tools/code/anchor/anchor';
 import { useCommentForm } from './comment-form';
-import { CommentRefusal, DestinationControl, ScreenshotThumbnail } from './CommentFormParts';
+import { CommentFormLines, CommentRefusal, ScreenshotThumbnail, SendToMainBox } from './CommentFormParts';
 import { SIDE_COPY } from './copy';
 
 const COPY = SIDE_COPY.composer;
@@ -57,7 +59,7 @@ function CommentSheet({ anchor, parent, destination }: { anchor: Anchor; parent:
             {anchor.locator}
           </p>
         )}
-        {form.screenshot !== null && <ScreenshotThumbnail parent={parent} screenshot={form.screenshot} disabled={form.sending} onRemove={form.removeScreenshot} />}
+        {form.screenshot !== null && form.showScreenshot && <ScreenshotThumbnail parent={parent} screenshot={form.screenshot} disabled={form.sending} onRemove={form.removeScreenshot} />}
         <textarea
           aria-label={COPY.field}
           placeholder={COPY.placeholder}
@@ -69,7 +71,8 @@ function CommentSheet({ anchor, parent, destination }: { anchor: Anchor; parent:
           onKeyDown={form.onKeyDown}
           className={`${FIELD} min-h-[88px] resize-y leading-snug disabled:text-fg-muted`}
         />
-        <DestinationControl form={form} />
+        <SendToMainBox form={form} />
+        <CommentFormLines form={form} />
         <CommentRefusal form={form} />
       </SheetForm>
     </Sheet>

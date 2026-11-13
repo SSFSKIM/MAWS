@@ -10,13 +10,17 @@ export const SIDE_COPY = {
     title: (label: string | null) => (label === null ? 'Comment' : `Comment on ${label}`),
     field: 'Comment',
     placeholder: 'What should the agent look at or change here?',
-    destination: 'Send to',
-    thread: 'Side thread',
-    threadCaption: 'A forked session answers here; the main conversation goes on',
+    // UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, §E): one checkbox in place of the two
+    // destinations; its title says what ticking does now, or why it can't change
     main: 'Send to main',
     mainBusy: SENDS_AT_NEXT_STEP, // the composer's own wording for a `next` steer
     mainIdle: 'Sent now',
-    mainNotRunning: 'The main session isn’t running',
+    threadRemote: (machine: string) => `A side thread is not available on ${machine} yet`,
+    noConversation: 'This session has no conversation to fork yet',
+    leftOut: (count: number, reason: string) => `${count === 1 ? '1 screenshot is' : `${count} screenshots are`} left out: ${reason}`,
+    tooLongRemote: 'Too long for a terminal session on another machine: send fewer comments at a time',
+    notConfirmed: 'The session did not confirm the message', // an unconfirmed hand-off that names no pending send
+    notSent: 'The comment was not sent', // a refusal the port gave no words for
     send: 'Send',
     starting: 'Starting…',
     sending: 'Sending…',
@@ -25,8 +29,19 @@ export const SIDE_COPY = {
     screenshot: (width: number, height: number) => `Screenshot · ${width} × ${height}`,
     removeScreenshot: 'Remove screenshot',
     openedElsewhere: (parentTitle: string) => `Side thread opened in the panel of ${parentTitle}`,
-    queued: 'Queued; it sends when the queue resumes',
     refusedAfterClose: (error: string) => `The comment was not sent: ${error}`,
+  },
+  // UX wave U5a (§E; decision 8): the line a card's host draws in its place after a send to the main conversation. "Sent
+  // to" only for a confirmed delivery; a terminal session's hand-off that is not confirmed follows its pending send in
+  // the strip's words (`PENDING_SEND`'s, the session named), with one action, Show
+  place: {
+    sent: (title: string) => `Sent to ${title}`,
+    steered: (title: string) => `Sent to ${title}; read at the next step`,
+    queued: (title: string) => `Queued for ${title}; it sends when the queue resumes`,
+    sending: (title: string) => `Not confirmed yet in ${title}`,
+    unconfirmed: (title: string) => `May not have arrived in ${title}`,
+    refused: (title: string, reason: string | null) => (reason ? `Not entered in ${title}: ${reason}` : `Not entered in ${title}`),
+    show: 'Show',
   },
   // P2-E1: the comment card beside the element (P2-E1 document, D12); its form's words are the composer's above
   card: {
@@ -122,4 +137,10 @@ export const SIDE_COPY = {
 export function sideRowStatus(row: { state: 'opened' | 'finished' | 'failed'; text: string | null; turns: number }): string {
   if (row.state === 'opened') return SIDE_COPY.row.opened;
   return row.state === 'failed' ? SIDE_COPY.row.failed(row.text, row.turns) : SIDE_COPY.row.finished(row.text, row.turns);
+}
+
+// UX wave U5a (§E, decision 8): the pending line's words for its pending send's state, the session named.
+export function pendingWords(send: { state: 'sending' | 'refused' | 'unconfirmed'; reason: string | null }, title: string): string {
+  if (send.state === 'sending') return SIDE_COPY.place.sending(title);
+  return send.state === 'refused' ? SIDE_COPY.place.refused(title, send.reason) : SIDE_COPY.place.unconfirmed(title);
 }

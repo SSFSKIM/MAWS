@@ -11,6 +11,9 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { parseDeliverableUrl } from '@shared/maws/deliverable'; // P3-L (M6b): a legacy anchor's page URL
 import { parseArtifactUrl, type ArtifactUrlRevision } from '@shared/artifacts/scheme'; // P3-L (M5b)
 import type { CardRect, CommentContext, CommentPlacement /* P4-B1 */ } from '../../tools/code/anchor/anchor';
+import type { DeliveryKey } from '@shared/ipc/schema/lane-a';
+import { sameKey, useLaneA, type LaneAStore } from '../../stores/lane-a'; // UX wave U5a: a pending line follows its send
+import { SIDE_COPY } from '../copy';
 
 // What the card is about, as a host recognises it: (P2-E2) a browser page by its URL, or (P3-L M5b, Decision Log 10) an
 // HTML artifact's page on the store's scheme at a revision, whose host is the artifact viewer's. P3-L M6b: E2's
@@ -48,7 +51,16 @@ export interface ShownThread {
   parent: AppSessionId;
   child: AppSessionId;
 }
-export const useCommentCard = create<{ open: OpenCard | null; shownThread: ShownThread | null }>()(() => ({ open: null, shownThread: null }));
+// UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, §C, decision 8): the line a host draws in
+// its card's place after a send to the main conversation. `sent` is said only for a confirmed delivery and leaves after
+// SENT_NOTE_MS; `pending` follows the pending send a terminal session's unconfirmed hand-off made under `key` and never
+// leaves by itself: it becomes the sent line when that send's delivery entered, and leaves with the send when the
+// person dismisses it or sends it again from the strip. Keyed by the place it belongs to: in M2 the host id of the card
+// that sent (each card holds one comment); M3 keys it by the pass.
+export type PlaceNote = { kind: 'sent'; text: string; at: number } | { kind: 'pending'; appSessionId: AppSessionId; key: DeliveryKey; title: string };
+export const SENT_NOTE_MS = 4_000;
+
+export const useCommentCard = create<{ open: OpenCard | null; shownThread: ShownThread | null; notes: ReadonlyMap<string, PlaceNote> }>()(() => ({ open: null, shownThread: null, notes: new Map() }));
 
 let serials = 0;
 
@@ -132,4 +144,71 @@ export function showCardThread(parent: AppSessionId, child: AppSessionId): void 
 }
 export function hideCardThread(child: AppSessionId): void {
   if (useCommentCard.getState().shownThread?.child === child) useCommentCard.setState({ shownThread: null });
+}
+
+// UX wave U5a: the place's line, replacing whatever it showed. A sent line leaves after SENT_NOTE_MS unless replaced
+// meanwhile; a pending one is followed in the lane A store from now on, and read against it at once, since its words
+// may have entered between the hand-off and this call.
+export function notePlace(place: string, note: PlaceNote): void {
+  useCommentCard.setState((s) => ({ notes: new Map(s.notes).set(place, note) }));
+  if (note.kind === 'sent') expireSoon(place, note);
+  else {
+    followPending();
+    settlePending(useLaneA.getState());
+  }
+}
+
+const sentNote = (text: string): PlaceNote => ({ kind: 'sent', text, at: Date.now() });
+
+function expireSoon(place: string, note: PlaceNote): void {
+  setTimeout(() => {
+    const { notes } = useCommentCard.getState();
+    if (notes.get(place) !== note) return;
+    const next = new Map(notes);
+    next.delete(place);
+    useCommentCard.setState({ notes: next });
+  }, SENT_NOTE_MS);
+}
+
+let offPending: (() => void) | null = null;
+function followPending(): void {
+  offPending ??= useLaneA.subscribe(settlePending);
+}
+
+// Each pending line against the strip's entries: one whose send is still held stays (its words follow the send's
+// state where it is drawn); one whose send left becomes the sent line if its delivery entered, and leaves otherwise.
+// The subscription ends with the last pending line.
+function settlePending(lane: LaneAStore): void {
+  const { notes } = useCommentCard.getState();
+  let next: Map<string, PlaceNote> | null = null;
+  const entered: [string, PlaceNote][] = [];
+  let following = false;
+  for (const [place, note] of notes) {
+    if (note.kind !== 'pending') continue;
+    if (lane.pendingSends.get(note.appSessionId)?.some((send) => sameKey(send.key, note.key))) {
+      following = true;
+      continue;
+    }
+    next ??= new Map(notes);
+    const delivery = lane.states.get(note.appSessionId)?.deliveries.find((d) => sameKey(d.key, note.key));
+    if (delivery?.state === 'entered') {
+      const sent = sentNote(SIDE_COPY.place.sent(note.title));
+      next.set(place, sent);
+      entered.push([place, sent]);
+    } else next.delete(place);
+  }
+  if (!following) {
+    offPending?.();
+    offPending = null;
+  }
+  if (next === null) return;
+  useCommentCard.setState({ notes: next });
+  for (const [place, sent] of entered) expireSoon(place, sent);
+}
+
+/** Every place's line gone, and nothing followed (a test's reset). */
+export function resetPlaceNotes(): void {
+  offPending?.();
+  offPending = null;
+  useCommentCard.setState({ notes: new Map() });
 }

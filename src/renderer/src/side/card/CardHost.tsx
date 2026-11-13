@@ -25,14 +25,24 @@
 // in flow in the stack's entry the margin placed (`layout="margin"`), as the docked strip is in its column: the card at
 // the entry's width (`marginCard`), its height capped by the page's scroll box (`.ds-doc`), never pinned, nothing
 // located. The document host also opts into X36's draft rule (`keepDraftOnEscape`, `discardOnBlurEmpty`, `onDraft`).
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+//
+// UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, §C "What the host draws", decision 8): with
+// no card of its own open, the host draws its place's note there: "Sent to <title>" for a confirmed delivery, or the
+// pending line of a terminal session's hand-off with Show. Docked it is one line in the strip, in a margin a line in
+// the entry, over an HTML page the top right corner of the box, over a document where the card was. The host supplies
+// nothing for it; `namesParent` went (the card names the receiving session by one rule).
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { CardRect } from '../../tools/code/anchor/anchor';
 import { hostedInSidePane, useSidePane } from '../store';
 import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
 import type { ArtifactOpenAt } from '../../artifacts/open-at';
 import { CommentCard } from './CommentCard';
-import { caretOf, marginCard /* P4-B1 */, pinOf, placeCard, stripCard, stripMax } from './placement';
-import { claimCard, closeCard, useCommentCard, type CardHostKind, type CardHostMode, type OpenCard } from './store';
+import { caretOf, cardPosition, marginCard /* P4-B1 */, pinOf, placeCard, stripCard, stripMax, type CardPin, type CardStyle } from './placement';
+import { claimCard, closeCard, useCommentCard, type CardHostKind, type CardHostMode, type OpenCard, type PlaceNote } from './store';
+import { QUIET } from '../../sessions/ui'; // UX wave U5a
+import { sameKey, useLaneA } from '../../stores/lane-a';
+import { useLayout } from '../../stores/layout';
+import { pendingWords, SIDE_COPY } from '../copy';
 
 export interface CardFrame {
   scale: number;
@@ -48,9 +58,6 @@ export interface CardFrame {
   actions?(card: OpenCard): ReactNode;
   onSending?(card: OpenCard, sending: { text: string; destination: 'thread' | 'main' }): (went: boolean) => void;
   // P3-B end
-  // P3-F1 (the P3 interface ledger's X23 row of fix 2): the host has no chat beside it, so the composing card names the
-  // session its comment goes to
-  namesParent?: true;
   // P4-B1 start (D8; X36's draft rule, which the document host opts into): the composing field's text as it changes
   // (`draftOf` gives a remounted card its text back), Escape on a non-empty field returning the keyboard to the host's
   // control and keeping the card, and focus leaving the card for elsewhere with an empty field discarding it (C4, C6)
@@ -118,6 +125,12 @@ export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, vi
   const rect = useLocated(card, frame, box, layout);
   const pin = rect ? pinOf(rect, frame) : null;
   const style = layout === 'docked' ? stripCard(box) : layout === 'margin' ? marginCard(box) /* P4-B1 */ : placeCard(box, pin);
+  // UX wave U5a: the place's note, drawn while no card of this host's is open; over a document where its card last was
+  // pinned (kept from the renders that drew it, React's pattern for information from earlier renders)
+  const note = useCommentCard((s) => s.notes.get(hostId) ?? null);
+  const [lastPin, setLastPin] = useState<CardPin | null>(null);
+  if (card !== null && pin !== null && (lastPin === null || pin.x !== lastPin.x || pin.y !== lastPin.y || pin.top !== lastPin.top)) setLastPin(pin);
+  const placeNote = card === null && note !== null ? note : null;
   const dismiss = (serial: number) => {
     closeCard(serial);
     restoreFocus?.();
@@ -128,6 +141,7 @@ export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, vi
     return (
       <div ref={ref} data-card-host={host} data-card-margin="" className="relative">
         {card && <CommentCard key={card.serial} card={card} style={style} pinned={false} {...cardProps(card)} />}
+        {placeNote && <PlaceLine note={placeNote} className="py-1" /> /* UX wave U5a */}
       </div>
     );
   }
@@ -143,6 +157,7 @@ export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, vi
       >
         {caret !== null && <Caret x={caret} />}
         {card && <CommentCard key={card.serial} card={card} style={style} pinned={false} {...cardProps(card) /* P4-B1 */} />}
+        {placeNote && <PlaceLine note={placeNote} className="px-3 py-1" /> /* UX wave U5a: one line in the strip */}
       </div>
     );
   }
@@ -150,6 +165,42 @@ export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, vi
     // P3-G (§D4.1): the anchored card floats over the viewer's body, so a mark-up still of that body is taken without it
     <div ref={ref} data-card-host={host} data-markup-occluder className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
       {card && <CommentCard key={card.serial} card={card} style={style} pinned={pin !== null && style.mode !== 'docked'} {...cardProps(card) /* P4-B1 */} />}
+      {placeNote && <FloatingLine note={placeNote} where={host === 'artifact' && lastPin !== null ? placeCard(box, lastPin) : null} /> /* UX wave U5a */}
+    </div>
+  );
+}
+
+// UX wave U5a: over a frame the line floats as a small raised chip, where the card last was over a document (its
+// corner's offsets, not its size), else in the box's top right corner.
+function FloatingLine({ note, where }: { note: PlaceNote; where: CardStyle | null }) {
+  const chip = 'pointer-events-auto absolute rounded-sm border border-border bg-bg-raised px-2 py-0.5 shadow-float';
+  if (where === null || where.mode === 'strip' || where.mode === 'margin') return <PlaceLine note={note} className={`${chip} top-2 right-2`} />;
+  const { left, top, bottom } = cardPosition(where);
+  return <PlaceLine note={note} className={chip} style={{ left, top, bottom }} />;
+}
+
+// UX wave U5a: the line itself. A sent line is its words; a pending one is its pending send's state in the strip's
+// words, followed by key, with Show, which brings the session's tab (and its composer's strip) to the front.
+function PlaceLine({ note, className, style }: { note: PlaceNote; className: string; style?: CSSProperties }) {
+  if (note.kind === 'sent') {
+    return (
+      <p role="status" data-sent-note="" style={style} className={`m-0 truncate text-ui-sm text-fg-muted ${className}`}>
+        {note.text}
+      </p>
+    );
+  }
+  return <PendingLine note={note} className={className} {...(style && { style })} />;
+}
+
+function PendingLine({ note, className, style }: { note: Extract<PlaceNote, { kind: 'pending' }>; className: string; style?: CSSProperties }) {
+  const send = useLaneA((s) => s.pendingSends.get(note.appSessionId)?.find((held) => sameKey(held.key, note.key)) ?? null);
+  if (send === null) return null; // its send left: the store turns the line into the sent one, or drops it
+  return (
+    <div role="status" data-pending-note={send.state} style={style} className={`flex min-w-0 items-baseline gap-2 text-ui-sm ${send.state === 'refused' ? 'text-danger' : 'text-fg-muted'} ${className}`}>
+      <span className="min-w-0 truncate">{pendingWords(send, note.title)}</span>
+      <button type="button" className={`${QUIET} shrink-0 text-ui-sm`} onClick={() => useLayout.getState().openSession(note.appSessionId)}>
+        {SIDE_COPY.place.show}
+      </button>
     </div>
   );
 }

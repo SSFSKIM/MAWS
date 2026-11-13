@@ -16,16 +16,22 @@
 // (`onDiscard`: the focus is where the person put it). A click on the composing card's body, off its controls, puts the
 // caret at the end of the field. The field's text is told to the frame as it changes (`onDraft`), and a remounted card
 // starts from the frame's (`draftOf`).
+//
+// UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, M2; decisions 8, 9 and 16): the row holds
+// the "Send to main" checkbox and Send, with the lines that say why a send can't go as it stands under it; a screenshot
+// the route can never carry is not drawn. A send to main that went tells the host's place where it went. The card names
+// the receiving session ("Session: <title>") on every host exactly when it is not the session the main area shows.
 import { useEffect, useLayoutEffect, useRef, type FocusEvent, type KeyboardEvent, type MouseEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { GlyphMark } from '../../attention/GlyphMark';
 import { glyphFor } from '../../attention/glyph';
-import { displayTitle } from '../../sessions/title'; // P3-F1
+import { shownSession } from '../../panel/host'; // UX wave U5a
 import { FIELD, PRIMARY, QUIET } from '../../sessions/ui';
+import { useLayout } from '../../stores/layout';
 import { selectPendingOf, useAttention } from '../../stores/attention';
 import { useSessions } from '../../stores/sessions';
-import { useCommentForm } from '../comment-form';
-import { CommentRefusal, DestinationControl, ScreenshotThumbnail } from '../CommentFormParts';
+import { receivingTitle, useCommentForm } from '../comment-form';
+import { CommentFormLines, CommentRefusal, ScreenshotThumbnail, SendToMainBox } from '../CommentFormParts';
 import { SIDE_COPY } from '../copy';
 import type { CardFrame } from './CardHost';
 import { CardThread, openThreadAsTab } from './CardThread';
@@ -68,6 +74,7 @@ export function CommentCard({ card, style, pinned, frame, visible, onDismiss, on
   const draft = useRef(thread ? '' : (frame.draftOf?.(card) ?? ''));
   const composingEmpty = () => thread === null && draft.current.trim() === '';
   const inThread = thread !== null;
+  const shown = useLayout((s) => shownSession(s.main)); // UX wave U5a (decision 16)
   // the composer's field goes with the composing phase: focus stays in the card, so Escape still reaches it
   useEffect(() => {
     if (inThread && !ref.current?.contains(document.activeElement)) ref.current?.focus();
@@ -142,7 +149,7 @@ export function CommentCard({ card, style, pinned, frame, visible, onDismiss, on
           </svg>
         </button>
       </header>
-      {!thread && frame.namesParent && <ParentName parent={card.parent} /> /* P3-F1 */}
+      {!thread && shown !== card.parent && <ParentName parent={card.parent} /> /* P3-F1; UX wave U5a: the one rule */}
       {thread ? <CardThread card={card} child={thread.child} echo={thread.echo} frame={frame} visible={visible} /> : <CardComposer card={card} frame={frame} onDismiss={onDismiss} onText={(text) => (draft.current = text)} /* P4-B1 */ />}
     </div>
   );
@@ -157,9 +164,9 @@ function ThreadGlyph({ child }: { child: AppSessionId }) {
   return record === null ? null : <GlyphMark glyph={glyphFor(record, digest, pending, listing)} className="w-[12px] shrink-0" />;
 }
 
-// P3-F1: the session a composing card's comment goes to, for a host with no chat beside it.
+// P3-F1: the session a composing card's comment goes to, when the main area shows another (UX wave U5a).
 function ParentName({ parent }: { parent: AppSessionId }) {
-  const title = useSessions((s) => displayTitle(s.records.get(parent)));
+  const title = useSessions((s) => receivingTitle(s, parent));
   return (
     <p data-card-parent={parent} className="m-0 shrink-0 truncate text-ui-sm text-fg-muted" title={title}>
       {COPY.parent(title)}
@@ -168,7 +175,8 @@ function ParentName({ parent }: { parent: AppSessionId }) {
 }
 
 // The composer half. Its Side thread is not revealed while the card holds it (the card becomes the thread); a card closed
-// or replaced before the fork answered asks for the reveal, so a thread is never created unseen. Send to main closes it.
+// or replaced before the fork answered asks for the reveal, so a thread is never created unseen. Send to main closes it,
+// and its host's place says where the comment went (UX wave U5a).
 function CardComposer({ card, frame, onDismiss, onText }: { card: OpenCard; frame: CardFrame; onDismiss(): void; onText(text: string): void }) { // P4-B1: onText
   const { anchor, parent, serial } = card;
   const gone = () => cardGone(serial);
@@ -187,7 +195,7 @@ function CardComposer({ card, frame, onDismiss, onText }: { card: OpenCard; fram
       lastUnmount = { serial, focused: element?.closest('[data-comment-card]')?.contains(document.activeElement) ?? false };
     };
   }, [serial]);
-  const form = useCommentForm({ anchor, parent, gone, reveal: gone, onSent: ({ child, text }) => (child ? enterThread(serial, child, text) : onDismiss()), ...(onSending && { onSending: (sending) => onSending(card, sending) }), ...(initial && { destination: initial }) /* P3-F1 */, text /* P4-B1 */, sendKey: `card:${serial}` /* P4-B3: a remount of the card (a moved document) keeps its send */ });
+  const form = useCommentForm({ anchor, parent, gone, reveal: gone, onSent: ({ child, text }) => (child ? enterThread(serial, child, text) : onDismiss()), ...(onSending && { onSending: (sending) => onSending(card, sending) }), ...(initial && { destination: initial }) /* P3-F1 */, text /* P4-B1 */, sendKey: `card:${serial}` /* P4-B3: a remount of the card (a moved document) keeps its send */, ...(card.hostId !== null && { place: card.hostId }) /* UX wave U5a */ });
   // P4-B1: the field's text, told to the card and the frame as the person changes it
   const setText = (value: string) => {
     form.setText(value);
@@ -196,7 +204,7 @@ function CardComposer({ card, frame, onDismiss, onText }: { card: OpenCard; fram
   };
   return (
     <>
-      {form.screenshot !== null && <ScreenshotThumbnail parent={parent} screenshot={form.screenshot} disabled={form.sending} onRemove={form.removeScreenshot} />}
+      {form.screenshot !== null && form.showScreenshot && <ScreenshotThumbnail parent={parent} screenshot={form.screenshot} disabled={form.sending} onRemove={form.removeScreenshot} />}
       <form
         className="flex flex-col gap-2"
         onSubmit={(event) => {
@@ -215,14 +223,15 @@ function CardComposer({ card, frame, onDismiss, onText }: { card: OpenCard; fram
           onKeyDown={form.onKeyDown}
           className={`${FIELD} max-h-[calc(6lh+0.5rem)] resize-none leading-snug field-sizing-content disabled:text-fg-muted`}
         />
-        <div className="flex items-center gap-2">
+        <div data-send-row="" className="flex items-center gap-2">
           <div className="min-w-0 flex-1">
-            <DestinationControl form={form} compact />
+            <SendToMainBox form={form} />
           </div>
           <button type="submit" disabled={!form.canSend(form.destination)} className={PRIMARY}>
             {form.submitLabel}
           </button>
         </div>
+        <CommentFormLines form={form} />
       </form>
       <CommentRefusal form={form} />
     </>
