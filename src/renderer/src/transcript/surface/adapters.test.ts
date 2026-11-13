@@ -81,6 +81,29 @@ describe('transcript surface adapters', () => {
     expect(group.cells.flatMap((cell) => toolInputs(cell, turn).map((call) => call.instanceId))).toEqual(['r1', 'r3']);
   });
 
+  // UX wave U2 (l6-artifacts-12; the U2a document, M3): a rewrite draws the artifact by the title the transcript gave it
+  it('an output-only rewrite of an artifact call keeps the title an earlier turn and this turn gave it', () => {
+    const MEMO_ID = '5b0c6c1e-7d2a-4c8e-9f10-2a3b4c5d6e7f';
+    const json = (value: unknown) => [{ type: 'text', text: JSON.stringify(value) }];
+    const b = builder(); b.turn('u1');
+    b.toolUse('r1', 'mcp__maws__artifact_read', { artifact: 'q3-memo' });
+    b.result('r1', json({ status: 'read', artifactId: MEMO_ID, kind: 'document', title: 'Q3 memo', revision: 4, handle: 'q3-memo', versions: [] }));
+    b.end(['u1']); b.turn('u2');
+    b.toolUse('e1', 'mcp__maws__artifact_edit', { artifact: 'q3-memo', edits: [] }); b.result('e1', json({ status: 'ok' }));
+    b.toolUse('r2', 'mcp__maws__artifact_read', { artifact: 'q4-plan' });
+    b.result('r2', json({ status: 'read', artifactId: '7a1d2e3f-4b5c-4d6e-8f70-1a2b3c4d5e6f', kind: 'document', title: 'Q4 plan', revision: 1, handle: 'q4-plan', versions: [] }));
+    b.toolUse('e2', 'mcp__maws__artifact_edit', { artifact: 'q4-plan', edits: [] }); b.result('e2', json({ status: 'ok' }));
+    b.end(['u2']);
+    const { state, rows } = setup(b);
+    const turn = [...state.turns.values()].at(-1)!;
+    const cells = rows.flatMap((row) => (row.kind === 'group' ? row.cells : row.kind === 'cell' ? [row] : []));
+    const rewritten = (id: string) => {
+      const input = toolInputs(cells.find((cell) => cell.toolUseId === tool(id))!, turn, undefined, state)[0];
+      return withToolProps(input, { ...input.props, output: json({ status: 'ok', note: 'rewritten' }) }).label;
+    };
+    expect([rewritten('e1'), rewritten('e2')]).toEqual(['Edited ‹Q3 memo›', 'Edited ‹Q4 plan›']);
+  });
+
   it('keeps factual call details through rewrites without reviving an engine batch summary', () => {
     const b = builder(); b.turn('u');
     b.toolUse('bash', 'Bash', { command: 'pwd' }); b.result('bash', '/p');
