@@ -314,7 +314,10 @@ env:
   # same counts as its mini baseline, plus hosted settings/document checks after selecting overlay scrollbars.
   # Direct runs two bare-suite shards, each building the unsigned app; shard 1 owns the small packaged checks.
   # Every job sweeps launchd. Mirror keeps one unsharded build and all checks on the mini.
-  HOSTED_MAC_JOBS: packaged
+  # unit:darwin (CI-opt, 2026-11-13): the mini's exclusive desktop was the single lane for every link's unit:darwin, queued
+  # 83-95 minutes behind e2e groups for a job of about a minute. Its 22 guarded files read no keychain, launchd or TCC
+  # state. Admission: 3/3 direct hosted greens on this PR's tree, each with the mini baseline's counts (the PR body).
+  HOSTED_MAC_JOBS: packaged unit:darwin
   # Never overflow these hosted-eligible groups to EC2 (Decision Log 123: an EC2-only red leaves at once).
   # Empty after the 2026-10-29 parity audit: the supplied sessions reds predate #297, shell predates 54aab1ada,
   # and lane-a used the wrong card address (d81b1441b). None proves an EC2-only red on a tree green elsewhere.
@@ -651,8 +654,8 @@ jobs:
     name: unit:darwin
     needs: plan
     if: needs.plan.outputs.unit_darwin == 'true'
-    # The exclusive instance, a shared one when MAC_SHARED_E2E names unit:darwin, solo or the guest when MAC_VM_E2E does;
-    # the timeout as the plan says.
+    # macos-26 when HOSTED_MAC_JOBS admits unit:darwin on the direct route; else the exclusive instance, a shared one when
+    # MAC_SHARED_E2E names unit:darwin, solo or the guest when MAC_VM_E2E does; the timeout as the plan says.
     runs-on: ${{ fromJSON(needs.plan.outputs.unit_darwin_runner) }}
     timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeouts).unit_darwin }}
     steps:
