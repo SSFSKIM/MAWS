@@ -9,7 +9,7 @@ import { BASH_RESULT, builder, api, tool, uuid } from '../model/test-events';
 import type { ArrivalEntry } from '@shared/engine/arrival-schema';
 import { loadUxwaveJournal } from '../../../../../test/support/fixtures';
 import { journalToEvents } from '../dev/journal';
-import { arrivalInput, assistantInput, commandInput, groupInput, questionInput, sentInput, toolInputs, userInput, withToolProps } from './adapters';
+import { arrivalInput, assistantInput, commandInput, groupInput, noticeFollows, questionInput, sentInput, toolInputs, userInput, withToolProps } from './adapters';
 
 afterEach(cleanup);
 
@@ -338,14 +338,18 @@ describe('the rows of what entered the session ask the engine’s sites', () => 
     expect(arrivalInput(find(agent.rows, 'notice'), agent.turn, closed)?.props).toEqual({ text: 'Agent &quot;Survey&quot; <notes> finished', origin: { kind: 'task-notification' }, isExpanded: false, task: { id: 'ag1', status: 'completed', type: 'local_agent', durationMs: 65000 } });
   });
 
-  it('a carrier of two blocks is one site, its first block’s, for each of its lines', () => {
+  it('a carrier of two blocks is one site, its first block’s, asked by its first line and followed by the other, unless a jump revealed the first', () => {
     const second = TASK.replace(/bt1/g, 'bt2').replace('failed with exit code 1', 'completed (exit code 0)').replace('<status>failed', '<status>completed');
     const { rows, turn } = noticeTurn(`${TASK}\n\n${second}`, [taskEntry({ runId: null }), taskEntry({ taskId: 'bt2', toolUseId: 'tu-bt2', runId: null, outcome: 'completed', summary: 'Background command "count files" completed (exit code 0)' })]);
     const notices = rows.filter((r): r is Extract<Row, { kind: 'notice' }> => r.kind === 'notice');
     expect(notices).toHaveLength(2);
     const [first, next] = notices.map((row) => arrivalInput(row, turn, closed));
-    expect(next).toEqual(first);
+    expect(next).toBeNull();
     expect(first?.props.text).toBe('Background command "count files" failed with exit code 1');
+    expect(notices.map((row) => noticeFollows(row, turn, undefined))).toEqual([null, first!.instanceId]);
+    // the revealed first asks nothing and follows nothing; the second then asks for the carrier, with the same props
+    expect(notices.map((row) => noticeFollows(row, turn, notices[0]!.id))).toEqual([null, null]);
+    expect(notices.map((row) => arrivalInput(row, turn, { ...closed, revealed: notices[0]!.id }))).toEqual([null, first]);
   });
 
   it('a line the engine’s transcript draws through no UserMessage asks none: what the host made, a block with no <summary>, a scheduled fire, an answer by a hook’s context, the bridge’s wake as its prompt', () => {

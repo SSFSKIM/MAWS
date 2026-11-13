@@ -225,7 +225,9 @@ export interface ArrivalAsk { revealed: RowId | CellId | undefined; expanded: bo
 /** The UserMessage ask of a message line or a notice; null where it asks none. */
 export function arrivalInput(row: ArrivalRow, turn: TurnState | undefined, { revealed, expanded }: ArrivalAsk): RowInput<'UserMessage'> | null {
   if (!turn || row.id === revealed) return null;
-  const carrier = row.kind === 'notice' ? noticeCarrier(row, turn) : messageCarrier(row, turn);
+  const carried = row.kind === 'notice' ? noticeCarrier(row, turn) : null;
+  if (carried !== null && carried.ids.find((id) => id !== revealed) !== row.id) return null; // another notice asks for the carrier
+  const carrier = row.kind === 'notice' ? carried?.carrier ?? null : messageCarrier(row, turn);
   if (carrier === null) return null;
   const props = engineUserProps(messageText(carrier.content), expanded, row.kind === 'agent_message' ? row : null);
   return props === null ? null : { instanceId: carrier.messageUuid ?? row.id, props };
@@ -237,6 +239,18 @@ export function sentInput(row: RowOf<'agent_message'>, turn: TurnState | undefin
   const toolUseId = row.peer?.toolUseId ?? turn.events.find((e): e is Extract<SessionEvent, { kind: 'tool.use' }> => e.kind === 'tool.use' && rowId.agentMessage(e.id) === row.id)?.toolUseId;
   const rec = toolUseId == null ? undefined : toolRecords(turn).get(toolUseId);
   return rec === undefined ? null : { instanceId: rec.use.toolUseId, props: callProps(rec, cellOf(rec, turnContext(turn), false)) };
+}
+
+/**
+ * The ask a notice follows: the engine mounts one UserMessage site per carrier (its task renderer near line 925119), so of
+ * a carrier's notices the first not revealed asks, with its own line's open state, and draws the answer; each other one
+ * asks nothing and follows that ask's outcome by its instance id. Null for the notice that asks, for the revealed one,
+ * and for a notice whose carrier is its only notice.
+ */
+export function noticeFollows(row: RowOf<'notice'>, turn: TurnState | undefined, revealed: RowId | CellId | undefined): string | null {
+  const carried = turn === undefined || row.id === revealed ? null : noticeCarrier(row, turn);
+  const asking = carried?.ids.find((id) => id !== revealed);
+  return carried === null || asking === undefined || asking === row.id ? null : carried.carrier.messageUuid ?? asking;
 }
 
 // The message a line stands for: a peer's by its companion's uuid, a subagent's the envelope its `subagent.message` was read from.
@@ -254,15 +268,19 @@ function messageCarrier(row: RowOf<'agent_message'>, turn: TurnState): UserMessa
   return null;
 }
 
-// The synthetic message whose arrival the notice draws: the first that gives its id, as the derivation keeps the first.
-function noticeCarrier(row: RowOf<'notice'>, turn: TurnState): UserMessageEvent | null {
+// The synthetic message whose arrival the notice draws, the first that gives its id, as the derivation keeps the first;
+// with the notices it draws, in its order (the ids it gives that no earlier message gave).
+function noticeCarrier(row: RowOf<'notice'>, turn: TurnState): { carrier: UserMessageEvent; ids: RowId[] } | null {
+  const given = new Set<RowId>();
   for (const e of turn.events) {
     if (e.kind !== 'user.message' || !e.isSynthetic || e.arrival === undefined) continue;
-    const ids = e.arrival.map((entry, n) => {
+    const ids: RowId[] = [];
+    e.arrival.forEach((entry, n) => {
       const known = carriedOf([entry])[0];
-      return known === undefined || known.class === 'consent' ? null : rowId.notice(known.class === 'task' ? known.runId : null, e.messageUuid ?? e.id, n);
+      const id = known === undefined || known.class === 'consent' ? null : rowId.notice(known.class === 'task' ? known.runId : null, e.messageUuid ?? e.id, n);
+      if (id !== null && !given.has(id)) { given.add(id); ids.push(id); }
     });
-    if (ids.includes(row.id)) return e;
+    if (ids.includes(row.id)) return { carrier: e, ids };
   }
   return null;
 }

@@ -6,6 +6,7 @@ import { assistantDrawingKey, retainAssistantDrawing, useAssistantDrawings } fro
 import type { AppSessionId } from '@shared/graph/ids';
 import { stripAnsi } from '@shared/wire/ansi';
 import { nativeQuestionsOf, parseTranscriptProps, type TranscriptProps } from '@shared/engine/surface-rows';
+import { siteKey, useSurfaceAnswers } from '../../engine-surface/registry'; // UX wave U3
 import { SurfaceRow } from '../../engine-surface/SurfaceRow';
 import { assistantPresentation } from '../../owner/to-human/Presenter';
 import { useSurfaceAttached, useSurfaceSite } from '../../engine-surface/site';
@@ -21,7 +22,7 @@ import { LocalCommandRow } from '../view/rows/LocalCommand';
 import { NoticeRow } from '../view/rows/Notice'; // UX wave U3
 import { QuestionRow } from '../view/rows/Question';
 import { UserRow } from '../view/rows/User';
-import { arrivalInput, assistantInput, commandInput, groupInput, questionInput, sentInput, userInput } from './adapters';
+import { arrivalInput, assistantInput, commandInput, groupInput, noticeFollows, questionInput, sentInput, userInput } from './adapters';
 import { SurfaceCellLine } from './Tools';
 
 import { useDisclosure, useTranscriptContext } from '../view/context';
@@ -55,9 +56,22 @@ export function SurfaceAgentMessageRow({ row }: { row: Extract<Row, { kind: 'age
 export function SurfaceNoticeRow({ row }: { row: Extract<Row, { kind: 'notice' }> }) {
   const { appSessionId, state, turn } = useTranscriptSurface(row);
   const [expanded] = useDisclosure(`line:${row.id}`);
-  const input = arrivalInput(row, turn, { revealed: state?.ui.revealed, expanded });
+  const revealed = state?.ui.revealed;
+  const follows = noticeFollows(row, turn, revealed);
+  const input = arrivalInput(row, turn, { revealed, expanded });
+  if (follows !== null) return <FollowingNotice row={row} appSessionId={appSessionId} instanceId={follows} />;
   if (!input) return <NoticeRow row={row} />;
   return <SurfaceRow appSessionId={appSessionId} component="UserMessage" {...input} placeholder={<span className="text-fg-faint">…</span>}>{() => <NoticeRow row={row} />}</SurfaceRow>;
+}
+
+// A notice its carrier's other notice asks for: hidden where the mod's answer replaced or hid the carrier (a drawing
+// with no place for the engine's), MAWS's line where the mod kept the engine's drawing, gave no hook, or has not answered.
+function FollowingNotice({ row, appSessionId, instanceId }: { row: Extract<Row, { kind: 'notice' }>; appSessionId: AppSessionId | null; instanceId: string }) {
+  const attached = useSurfaceAttached(appSessionId);
+  const answer = useSurfaceAnswers((s) => appSessionId === null ? undefined : s.answers.get(siteKey({ appSessionId, component: 'UserMessage', instanceId })));
+  const tree = attached && answer?.hooked ? answer.tree : null;
+  if (tree !== null && !drawsEngine(tree) && firstEngineRef(tree) === null) return null;
+  return <NoticeRow row={row} />;
 }
 
 function useAssistantInput(row: Extract<Row, { kind: 'assistant_text' }>) {
