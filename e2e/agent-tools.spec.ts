@@ -43,6 +43,7 @@ const OPEN_TURN: EngineSessionStatus['turn'] = { id: 'harness-turn' as never, or
 // ends what still runs ("ended with the session"); pass3/stop-task's three tasks, each stopped in the recording.
 const startedBy = (starter: string, taskId: string, description: string): BackgroundTask => ({ ...listed(taskId, 'local_bash', description), parentTaskId: starter as BackgroundTask['parentTaskId'] });
 const exitAt = (at: string): Partial<EngineSessionStatus> => ({ process: 'exited', exit: { code: 0, signal: null, reason: 'unknown', at, release: null }, backgroundTasks: [] });
+const SIBLING = listed('e2e-sibling-agent', 'local_agent', 'A sibling the main loop dispatched');
 const STOP_TASK = { shell: 'ba3cr5gnx', agent: 'ac2bd8a00d8e492f4', workflow: 'wkmzd07jp' };
 // The card column: the record's three cards, above the two for running work; the cards by title in order (the column's
 // scrolling list); the three's boxes, read once two reads a moment apart agree (a card's own reads, git's, may still land).
@@ -693,15 +694,20 @@ test.describe('the #panel harness: the agent tools', () => {
     h.expectQuietConsole();
   });
 
-  // A2, the Subagents card: two agents, the outer one running the inner one.
-  test('A2: the Subagents card opens the agent under a row from its (+1), and a press on a row opens that agent in the panel', async ({ maws }) => {
+  // A2, the Subagents card: two first-level agents, the outer one running the inner one, and a sibling the status lists.
+  test('A2: the Subagents card opens the agent under a row from its (+1), its sibling keeping its place, and a press on a row opens that agent in the panel', async ({ maws }) => {
     const h = await Harness.open(maws);
     const { outer, inner } = E7_NESTED_AGENTS;
     await h.load('A', 'pass3/nested-agents', { releaseTo: E7_NESTED_AGENTS.innerStart + 1 });
+    await h.agents('patchStatus', 'A', { backgroundTasks: [SIBLING] }); // a second first-level agent, running
     await showSessionCards(h.page);
     const card = sessionCard(h.page, 'Subagents');
-    await expect(card.locator('h3'), 'every running agent, the nested one too').toHaveText('Subagents 2 running');
-    await expect(card.locator('[data-agent-row]'), 'first-level agents only').toHaveCount(1);
+    const rowsOf = () => card.locator('[data-agent-row]').evaluateAll((rows) => rows.map((row) => `${(row as HTMLElement).dataset.depth}:${(row as HTMLElement).dataset.agentRow}`));
+    await expect(card.locator('h3'), 'every running agent, the nested one too').toHaveText('Subagents 3 running');
+    await expect(card.locator('[data-agent-row]'), 'first-level agents only').toHaveCount(2);
+    const firstLevel = await rowsOf();
+    expect([...firstLevel].sort(), 'the two roots, each at depth 0').toEqual([`0:${outer}`, `0:${SIBLING.taskId}`].sort());
+    await expect(card.locator(`[data-agent-row="${SIBLING.taskId}"] [data-part="under"]`), 'nothing runs under the sibling').toHaveCount(0);
     await expect(sessionCard(h.page, 'Background tasks'), 'no background task runs').toHaveCount(0);
     const outerRow = card.locator(`[data-agent-row="${outer}"]`);
     const title = await outerRow.locator('[data-part="title"]').innerText();
@@ -717,25 +723,29 @@ test.describe('the #panel harness: the agent tools', () => {
     await expect(disclosure).toHaveAttribute('aria-expanded', 'true');
     await expect(disclosure, 'opened: the arrow turned and no count').toHaveText('');
     await expect(disclosure).toHaveAccessibleName(`Agents under ${title}`);
+    expect(await rowsOf(), 'the inner agent comes in under its row; the sibling keeps its place').toEqual(firstLevel.flatMap((row) => (row === `0:${outer}` ? [row, `1:${inner}`] : [row])));
 
     await test.step('a press on the nested row opens that agent; the panel shows the same row opened', async () => {
       await card.locator(`[data-agent-row="${inner}"] > [data-part="open"]`).click();
       await expect.poll(async () => (await h.drillIn())?.agentId).toBe(inner);
       await expect(sessionCards(h.page), 'the column gives way').toBeHidden();
       await h.agents('back');
-      await expect.poll(async () => (await h.agents('tree'))?.map(({ agentId, depth, under }) => ({ agentId, depth, under }))).toEqual([
+      await expect.poll(async () => (await h.agents('tree'))?.filter(({ agentId }) => agentId !== SIBLING.taskId).map(({ agentId, depth, under }) => ({ agentId, depth, under }))).toEqual([
         { agentId: outer, depth: 0, under: { count: '', expanded: true } },
         { agentId: inner, depth: 1, under: null },
       ]);
-      expect((await h.subagents())!.headings, 'the card\'s number').toEqual(['Running 2']);
+      expect((await h.subagents())!.headings, 'the card\'s number').toEqual(['Running 3']);
     });
 
     await showSessionCards(h.page);
     await h.agents('releaseThrough', 'A', E7_NESTED_AGENTS.innerFinish);
-    await expect(card.locator('h3')).toHaveText('Subagents 1 running');
-    await expect(card.locator('[data-agent-row]')).toHaveCount(1);
+    await expect(card.locator('h3')).toHaveText('Subagents 2 running');
+    await expect(card.locator('[data-agent-row]')).toHaveCount(2);
     await expect(outerRow.locator('[data-part="under"]'), 'no agent runs under it: neither count nor arrow').toHaveCount(0);
     await h.agents('releaseThrough', 'A', E7_NESTED_AGENTS.outerFinish);
+    await expect(card.locator('h3')).toHaveText('Subagents 1 running');
+    expect(await rowsOf(), 'the sibling alone').toEqual([`0:${SIBLING.taskId}`]);
+    await h.agents('patchStatus', 'A', exitAt('2026-10-01T10:00:00.000Z')); // the sibling ends with the process
     await expect(card, 'the card leaves with the last running agent').toHaveCount(0);
     h.expectQuietConsole();
   });
