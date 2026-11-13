@@ -2768,3 +2768,291 @@ test('a subagent of B’s terminal session, where B’s endpoint lists no rl2.ag
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// The UX wave, U9 (docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, M3; #563, O-39, S-01): a session tab of
+// B's keeps its pane through the link's drop, one status line above it, and the reader keeps their place (A4), for a
+// session MAWS runs on B (lane B) and for a terminal session of B's (lane A, which has no record by design); a Stop
+// pressed in A reaches B's engine and the turn ends, and one pressed once the link is down reads "Stopping…" and then
+// says it did not stop (A11). A's way to B is the hub alone (the relay), so cutting its pipe takes the link down.
+const PLACE_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000d5';
+const STOP_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000d6';
+const PLACE_TURNS = 10; // enough of B's history for the pane to scroll
+const longReply = (turn: number) => Array.from({ length: 12 }, (_, k) => `B’s reply ${turn}, paragraph ${k + 1}.`).join('\n\n');
+const WHILE_DOWN_REPLY = 'B answered this while A was cut off.';
+const PLACE_DRAFT = 'a draft kept while B reconnects';
+const STOP_FIRST_REPLY = 'B is ready to count.';
+const STOP_DELTAS = ['Counting ', 'on B: 1, 2, '];
+const RECONNECTING = `Reconnecting to ${B_NAME}…`;
+
+// The first row in view of the pane's transcript and its top against the scroller's: the reader's place.
+const placeIn = (page: Page) =>
+  main(page)
+    .locator('[data-transcript-scroller]')
+    .first()
+    .evaluate((scroller) => {
+      const top = scroller.getBoundingClientRect().top;
+      const row = Array.from(scroller.querySelectorAll<HTMLElement>('[data-row-id]')).find((r) => r.getBoundingClientRect().bottom > top + 1);
+      return row === undefined ? null : { id: row.dataset.rowId!, offset: Math.round(row.getBoundingClientRect().top - top), scrollHeight: scroller.scrollHeight };
+    });
+// Scrolls the pane's transcript up, as a reader's wheel does, until its place holds still.
+async function scrollUp(page: Page): Promise<{ id: string; offset: number; scrollHeight: number }> {
+  const scroller = main(page).locator('[data-transcript-scroller]').first();
+  const box = (await scroller.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, -1_200);
+  let last = '';
+  await expect.poll(async () => {
+    const now = JSON.stringify(await placeIn(page));
+    const still = now === last && now !== 'null';
+    last = now;
+    return still;
+  }, { timeout: 10_000, intervals: [250] }).toBe(true);
+  return JSON.parse(last) as { id: string; offset: number; scrollHeight: number };
+}
+// Every alert the main region shows from now on, kept as text: an outage must draw none.
+async function keepAlerts(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const seen: string[] = [];
+    (window as unknown as { __alerts: string[] }).__alerts = seen;
+    const region = document.querySelector('[data-region="main"]')!;
+    const look = () => region.querySelectorAll('[role="alert"]').forEach((el) => seen.push(el.textContent ?? ''));
+    new MutationObserver(look).observe(region, { subtree: true, childList: true, characterData: true });
+    look();
+  });
+}
+const alertsSeen = (page: Page) => page.evaluate(() => (window as unknown as { __alerts: string[] }).__alerts);
+const linkLine = (page: Page) => main(page).locator('[data-link-words="line"]');
+const primaryOf = (page: Page) => main(page).locator('[data-submit-state]');
+const toastsOf = (page: Page) => page.locator('[data-toast-viewport]');
+
+/** B's lane B session on `journal`, its first turn over and listed; A launched over the relay, the session open in A. */
+async function laneBOpened(opts: { root: string; aUserData: string; journal: SideJournal; first: string; firstReply: string; title: string }, held: TerminalHeld) {
+  const checkout = join(opts.root, 'b-checkout');
+  const journals = join(opts.root, 'journals');
+  for (const dir of [checkout, journals]) mkdirSync(dir);
+  const fixture = opts.journal.write(journals, 'b-session');
+  const scene = (held.scene = await startRemoteScene({
+    scratch: join(opts.root, 'scene'),
+    aUserData: opts.aUserData,
+    b: {
+      root: '/tmp', // as M8's: the replay writes the session's transcript only into a config home that is its own real path
+      env: { MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: fixture, DISABLE_AUTOUPDATER: '1' },
+      prepare: ({ claudeConfigDir }) => {
+        writeFileSync(join(claudeConfigDir, '.claude.json'), JSON.stringify({ hasCompletedOnboarding: true, projects: { [checkout]: { hasTrustDialogAccepted: true } } }));
+        writeFileSync(join(claudeConfigDir, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'default' } }));
+      },
+    },
+  }));
+  const { b } = scene;
+  await b.request('machineSettings.set', { patch: { gateway: { defaultRoute: 'direct' } } });
+  const project = await b.request<{ id: string }>('session.projects.add', { directory: checkout });
+  const app = (await b.request<{ appSessionId: string }>('session.create', { projectId: project.id, location: null })).appSessionId;
+  await b.request('session.intent.patch', { appSessionId: app, patch: { gateway: 'direct' } });
+  type Status = { process: string; turn: unknown; engineSessionId: string | null };
+  const status = () => b.request<Status>('session.status', { appSessionId: app }).catch(() => null);
+  const turnOver = async () => {
+    const s = await status();
+    return s !== null && s.process === 'ready' && s.turn === null;
+  };
+  const started = await b.request<{ status: string }>('session.start', { appSessionId: app, message: { content: opts.first, display: opts.first }, options: {} });
+  expect(started.status, `B's session starts: ${JSON.stringify(started)}`).not.toBe('needs_trust');
+  await expect.poll(turnOver, { timeout: 60_000, message: `B's session ends its first turn\n${b.log().slice(-4000)}` }).toBe(true);
+  /** One more turn of B's own, written over its machine.sock as its own app's composer would. */
+  const sendOnB = (content: string) => b.request('session.send', { appSessionId: app, content });
+  const engine = (await status())?.engineSessionId ?? opts.journal.sessionId;
+  const a = (held.a = await launchMaws({ userData: opts.aUserData, env: { MAWS_DEV_ORG: scene.devOrgDir(false), MAWS_MACHINE_NAME: 'A' } }));
+  keepMainLines(a);
+  const { page } = a;
+  await expect.poll(async () => (await machineOf(page, b.ref))?.state ?? null, { timeout: 60_000, message: `A's link to B comes up over the relay\n${mainSaid(page)}` }).toBe('up');
+  await scene.sminos.list({ engine, app, owners: [scene.member], project: PROJECT, title: opts.title, cwd: checkout });
+  await expect.poll(async () => (await rowsOf(page)).some((row) => row.machine === b.ref && row.session === app), { timeout: 60_000, message: `B's session is a row of A's\n${mainSaid(page)}` }).toBe(true);
+  await expandMachine(page, b.ref);
+  const row = sessionRow(page, addressOf(b.ref, app));
+  await expect(row, `B's row in A's sidebar\n${mainSaid(page)}`).toBeVisible({ timeout: 30_000 });
+  await row.click();
+  await quoting(expect(main(page).getByText(opts.firstReply).first(), 'B’s history in A’s pane').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
+  return { scene, b, page, turnOver, sendOnB };
+}
+
+test('U9 A4, a session MAWS runs on B: its tab keeps its pane through the link’s drop under one status line, and the reader keeps their place, their draft and no error', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-place-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-place-'));
+  const held: TerminalHeld = { scene: null, a: null };
+  try {
+    const journal = new SideJournal(PLACE_SESSION, join(root, 'b-checkout'));
+    for (let turn = 1; turn <= PLACE_TURNS; turn += 1) journal.turn(longReply(turn));
+    journal.turn(WHILE_DOWN_REPLY);
+    const { scene, b, page, turnOver, sendOnB } = await laneBOpened({ root, aUserData, journal, first: 'Write the first long reply.', firstReply: 'B’s reply 1, paragraph 1.', title: 'B’s long session' }, held);
+    // B's history, written on B before A reads it again
+    for (let turn = 2; turn <= PLACE_TURNS; turn += 1) {
+      await sendOnB(`Write long reply ${turn}.`);
+      await expect.poll(turnOver, { timeout: 60_000 }).toBe(true);
+    }
+    await quoting(expect(main(page).getByText(`B’s reply ${PLACE_TURNS}, paragraph 12.`).first(), 'B’s last reply in A’s pane').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
+
+    const place = await scrollUp(page);
+    await composerOf(page).click();
+    await page.keyboard.type(PLACE_DRAFT);
+    const pane = await main(page).locator('[data-transcript-scroller]').first().elementHandle();
+    await keepAlerts(page);
+
+    await test.step('the link down: the line says B reconnects, over the same pane, and a reply B writes meanwhile waits', async () => {
+      scene.aHub.cut();
+      await quoting(expect(linkLine(page), 'the status line above the kept pane').toHaveText(RECONNECTING, { timeout: 60_000 }), () => mainSaid(page));
+      await expect(main(page).locator('[data-link-words="middle"]'), 'no words in the pane’s place').toHaveCount(0);
+      expect(await pane!.evaluate((node) => node.isConnected), 'the same pane, still mounted').toBe(true);
+      await sendOnB('Answer while A is cut off.');
+      await expect.poll(turnOver, { timeout: 60_000 }).toBe(true);
+      expect((await machineOf(page, b.ref))?.state, 'A has not seen it').not.toBe('up');
+    });
+
+    await test.step('the link back: the same first row at the same place, the new reply below it, the draft, and no error drawn', async () => {
+      scene.aHub.restore();
+      await expect.poll(async () => (await machineOf(page, b.ref))?.state, { timeout: 120_000, message: `A's link to B comes up again\n${mainSaid(page)}` }).toBe('up');
+      await expect(linkLine(page), 'the line gone with the link up').toHaveCount(0);
+      await expect.poll(async () => ((await placeIn(page))?.scrollHeight ?? 0) > place.scrollHeight, { timeout: 60_000, message: 'the reply written meanwhile joins the transcript' }).toBe(true);
+      const after = (await placeIn(page))!;
+      expect(after.id, 'the same first row in view').toBe(place.id);
+      expect(Math.abs(after.offset - place.offset), `at the same place (${place.offset} px, then ${after.offset} px)`).toBeLessThanOrEqual(2);
+      expect(await pane!.evaluate((node) => node.isConnected), 'the same pane throughout').toBe(true);
+      await expect(composerOf(page), 'the draft kept').toHaveText(PLACE_DRAFT);
+      expect(await alertsSeen(page), 'no error drawn in the pane').toEqual([]);
+      const scroller = main(page).locator('[data-transcript-scroller]').first();
+      await scroller.evaluate((node) => node.scrollTo({ top: node.scrollHeight }));
+      await expect(main(page).getByText(WHILE_DOWN_REPLY).first(), 'the reply below, once scrolled to').toBeVisible({ timeout: 30_000 });
+    });
+  } finally {
+    await held.a?.cleanup();
+    await held.scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('U9 A4, a terminal session of B’s: its recordless pane stays through the link’s drop under one status line, and the reader keeps their place, their draft and no error', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-la-place-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-la-place-'));
+  const held: TerminalHeld = { scene: null, a: null };
+  try {
+    const checkout = join(root, 'b-terminal');
+    mkdirSync(checkout);
+    const scene = (held.scene = await startRemoteScene({ scratch: join(root, 'scene'), aUserData }));
+    const { b } = scene;
+    const engine = 'b0c0d0e0-0000-4000-8000-0000000000d7';
+    // The main transcript, chained: an ask and a long answer per turn (terminalRow's numbering, from 101)
+    const rows: PlaneRow[] = [];
+    const add = (type: 'user' | 'assistant', text: string) => {
+      const n = 101 + rows.length;
+      const row: PlaneRow = { ...terminalRow(n, type, text, null, checkout), sessionId: engine, parentUuid: rows.at(-1)?.uuid ?? null };
+      rows.push(row);
+      return row;
+    };
+    for (let turn = 1; turn <= PLACE_TURNS; turn += 1) {
+      add('user', `Write long reply ${turn}.`);
+      add('assistant', longReply(turn));
+    }
+    const plane = scene.sminos.laneA(PROJECT, { engine, title: 'B’s long terminal session', cwd: checkout, owners: [scene.member], launch: 'L-terminal-place', main: rows, agents: {}, subagents: [] });
+    const a = (held.a = await launchMaws({ userData: aUserData, env: { MAWS_DEV_ORG: scene.devOrgDir(false), MAWS_MACHINE_NAME: 'A' } }));
+    keepMainLines(a);
+    const { page } = a;
+    await expect.poll(async () => (await machineOf(page, b.ref))?.state ?? null, { timeout: 60_000, message: `A's link to B comes up over the relay\n${mainSaid(page)}` }).toBe('up');
+    await expect
+      .poll(async () => (await rowsOf(page)).find((row) => row.machine === b.ref && row.session === engine) ?? null, { timeout: 60_000, message: `B's terminal session is a row of A's\n${mainSaid(page)}` })
+      .toMatchObject({ lane: 'A' });
+    await expandMachine(page, b.ref);
+    const row = sessionRow(page, addressOf(b.ref, engine));
+    await expect(row).toBeVisible({ timeout: 30_000 });
+    await row.click();
+    await quoting(expect(main(page).getByText(`B’s reply ${PLACE_TURNS}, paragraph 12.`).first(), 'the terminal session’s transcript in A’s pane').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
+
+    const place = await scrollUp(page);
+    await composerOf(page).click();
+    await page.keyboard.type(PLACE_DRAFT);
+    const pane = await main(page).locator('[data-transcript-scroller]').first().elementHandle();
+    await keepAlerts(page);
+
+    await test.step('the link down: the line says B reconnects, over the same pane, and rows the session writes meanwhile wait', async () => {
+      scene.aHub.cut();
+      await quoting(expect(linkLine(page), 'the status line above the kept pane').toHaveText(RECONNECTING, { timeout: 60_000 }), () => mainSaid(page));
+      await expect(main(page).locator('[data-link-words="middle"]'), 'no words in the pane’s place').toHaveCount(0);
+      expect(await pane!.evaluate((node) => node.isConnected), 'the same pane, still mounted').toBe(true);
+      plane.append(null, add('user', 'Answer while A is cut off.'));
+      plane.append(null, add('assistant', WHILE_DOWN_REPLY));
+    });
+
+    await test.step('the link back: the same first row at the same place, the new rows below it, the draft, and no error drawn', async () => {
+      scene.aHub.restore();
+      await expect.poll(async () => (await machineOf(page, b.ref))?.state, { timeout: 120_000, message: `A's link to B comes up again\n${mainSaid(page)}` }).toBe('up');
+      await expect(linkLine(page), 'the line gone with the link up').toHaveCount(0);
+      await expect.poll(async () => ((await placeIn(page))?.scrollHeight ?? 0) > place.scrollHeight, { timeout: 60_000, message: 'the rows written meanwhile join the transcript' }).toBe(true);
+      const after = (await placeIn(page))!;
+      expect(after.id, 'the same first row in view').toBe(place.id);
+      expect(Math.abs(after.offset - place.offset), `at the same place (${place.offset} px, then ${after.offset} px)`).toBeLessThanOrEqual(2);
+      expect(await pane!.evaluate((node) => node.isConnected), 'the same pane throughout').toBe(true);
+      await expect(composerOf(page), 'the draft kept').toHaveText(PLACE_DRAFT);
+      expect(await alertsSeen(page), 'no error drawn in the pane').toEqual([]);
+      const scroller = main(page).locator('[data-transcript-scroller]').first();
+      await scroller.evaluate((node) => node.scrollTo({ top: node.scrollHeight }));
+      await expect(main(page).getByText(WHILE_DOWN_REPLY).first(), 'the rows below, once scrolled to').toBeVisible({ timeout: 30_000 });
+    });
+  } finally {
+    await held.a?.cleanup();
+    await held.scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/** B's lane B session open in A with a turn running on B, which only a Stop ends (SideJournal.stoppedTurn). */
+async function stoppableOpened(root: string, aUserData: string, held: TerminalHeld) {
+  const journal = new SideJournal(STOP_SESSION, join(root, 'b-checkout'));
+  journal.turn(STOP_FIRST_REPLY);
+  journal.stoppedTurn(STOP_DELTAS);
+  const opened = await laneBOpened({ root, aUserData, journal, first: 'Get ready to count.', firstReply: STOP_FIRST_REPLY, title: 'B’s counting session' }, held);
+  await opened.sendOnB('Count slowly.');
+  await quoting(expect(main(opened.page).getByText('Counting on B: 1, 2,').first(), 'the running turn’s text in A’s pane').toBeVisible({ timeout: 60_000 }), () => mainSaid(opened.page));
+  await expect(primaryOf(opened.page), 'the composer offers Stop').toHaveText('Stop', { timeout: 30_000 });
+  return opened;
+}
+
+test('U9 A11, a Stop that reaches B: pressed in A on B’s running turn, B’s engine is interrupted and A reads the turn’s end', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-stop-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-stop-'));
+  const held: TerminalHeld = { scene: null, a: null };
+  try {
+    const { page, turnOver } = await stoppableOpened(root, aUserData, held);
+    expect(await turnOver(), 'B’s turn runs').toBe(false);
+    await primaryOf(page).click();
+    await expect.poll(turnOver, { timeout: 60_000, message: `B's turn ends at the Stop\n${mainSaid(page)}` }).toBe(true);
+    await expect(primaryOf(page), 'A reads the turn’s end: the composer offers Stop no more').not.toHaveText(/^Stop/, { timeout: 30_000 });
+    await expect(toastsOf(page), 'and says nothing failed').not.toContainText('Not stopped');
+  } finally {
+    await held.a?.cleanup();
+    await held.scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('U9 A11, a Stop pressed once the line says B reconnects: it reads “Stopping…” under the link’s hold, then says it did not stop because B is offline', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-stop-cut-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-stop-cut-'));
+  const held: TerminalHeld = { scene: null, a: null };
+  try {
+    const { scene, page, turnOver } = await stoppableOpened(root, aUserData, held);
+    scene.aHub.cut();
+    await quoting(expect(linkLine(page), 'the status line').toHaveText(RECONNECTING, { timeout: 60_000 }), () => mainSaid(page));
+    await expect(primaryOf(page), 'Stop is left as it is while B reconnects: main’s hold answers it').toHaveText('Stop');
+    await primaryOf(page).click();
+    await expect(primaryOf(page), 'a Stop on its way').toHaveText('Stopping…', { timeout: 5_000 });
+    await expect(primaryOf(page)).toBeDisabled();
+    await quoting(expect(toastsOf(page), 'the notice once the hold gives up').toContainText(`Not stopped: ${B_NAME} is offline`, { timeout: REMOTE_ACT_PENDING_MS + 30_000 }), () => mainSaid(page));
+    await expect(primaryOf(page), 'Stopping… no more').not.toHaveText('Stopping…');
+    expect(await turnOver(), 'nothing reached B: its turn still runs').toBe(false);
+  } finally {
+    await held.a?.cleanup();
+    await held.scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});

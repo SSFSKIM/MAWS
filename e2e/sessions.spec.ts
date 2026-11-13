@@ -167,7 +167,10 @@ async function watchTranscriptFailures(page: Page): Promise<void> {
     const note = () =>
       document.querySelectorAll('[role="alert"]').forEach((node) => {
         const text = (node.textContent ?? '').trim();
-        if (text.startsWith('Could not load this transcript') && !seen.includes(text)) seen.push(text);
+        // the alert's words (src/renderer/src/transcript/model/copy.ts's HYDRATION.failed) and, since the UX wave's U9, its
+        // reason in its title
+        const said = `${text} (${node.getAttribute('title') ?? ''})`;
+        if (text.startsWith('Couldn’t load this conversation') && !seen.includes(said)) seen.push(said);
       });
     new MutationObserver(note).observe(document.body, { subtree: true, childList: true, characterData: true });
   });
