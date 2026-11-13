@@ -1542,6 +1542,21 @@ describe('listed rows from another machine', () => {
       expect(opened).toEqual([studio('b1')]);
     });
 
+    // UX wave U7, #559: the store's own open skips the opener's retry for a session whose stream ended
+    it('⌘-click and a middle click on its Needs you row open it in a tab of its own through its lane’s opener', () => {
+      const calls: [AppSessionId, { newTab: boolean } | undefined][] = [];
+      offs.push(registerRemoteOpener('B', (listed, how) => calls.push([listed.appId, how])));
+      fill([listedOn('b1', { title: 'Studio build', state: 'idle' })]);
+      useAttention.getState().applyRemote({ machine: OTHER_MACHINE, items: [waitOn('b1')], greyed: false });
+      render(<Sidebar />);
+      const tabsBefore = useLayout.getState().main;
+      fireEvent.click(needsYou()[0], { metaKey: true });
+      fireEvent(needsYou()[0], new MouseEvent('auxclick', { bubbles: true, button: 1 }));
+      expect(calls).toEqual([[studio('b1'), { newTab: true }], [studio('b1'), { newTab: true }]]);
+      expect(useLayout.getState().main).toBe(tabsBefore);
+      expect(needsYou()[0].getAttribute('data-menu')).toBe('none'); // a Needs you row keeps no menu for a listed session
+    });
+
     it('a greyed machine’s item is drawn after the live rows, readable and marked, and leaves every count until its snapshot', () => {
       fill([listedOn('b1', { title: 'Studio build' })]);
       useAttention.setState({ loaded: true, bySession: new Map([[here.appId, [pageItem('here', 'question', '2026-10-28T09:00:00Z')]]]), version: useAttention.getState().version + 1 });
@@ -1585,7 +1600,8 @@ describe('listed rows from another machine', () => {
     expect(drawn(row('MAWS'))).toEqual([['Remote refactor', 'listed']]);
   });
 
-  it('a click calls its lane’s opener; with none the row is selected and its card shows, opening nothing and offering no menu', async () => {
+  // UX wave U7, O-38 and #559: a listed row opens like a local one, every way through its lane's opener
+  it('a click calls its lane’s opener; with none the row is selected and its card shows, opening nothing, and its two opens are disabled', async () => {
     fill([listedOn('b1', { title: 'Studio build', lane: 'A' })]);
     act(() => useLayout.getState().setSidebar({ expandedProjects: [ORG] as ProjectKey[] }));
     render(<Sidebar />);
@@ -1596,14 +1612,64 @@ describe('listed rows from another machine', () => {
     expect(within(card).getByTestId('hover-meta').textContent).toMatch(/^Idle · updated /);
     expect(within(card).getByTestId('hover-machine').textContent).toBe('Studio');
     expect(useLayout.getState().main).toBe(tabsBefore);
+    expect(row('Studio build').getAttribute('data-menu')).toBe(`session:${studio('b1')}`);
     fireEvent.contextMenu(row('Studio build'));
-    expect(screen.queryByRole('menu')).toBeNull();
+    const items = within(await screen.findByRole('menu')).getAllByRole('menuitem');
+    expect(items.map((m) => [m.textContent, m.hasAttribute('data-disabled'), m.getAttribute('title')])).toEqual([
+      ['Open', true, 'Not available here'],
+      ['Open in new tab', true, 'Not available here'],
+    ]);
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+    fireEvent.click(row('Studio build'), { metaKey: true }); // ⌘-click with no opener: as a plain click
+    expect(row('Studio build').getAttribute('aria-selected')).toBe('true');
+    expect(useLayout.getState().main).toBe(tabsBefore);
 
     const open = vi.fn();
     offs.push(registerRemoteOpener('A', open));
     await userEvent.click(row('Studio build'));
-    expect(open).toHaveBeenCalledWith(expect.objectContaining({ appId: studio('b1'), lane: 'A' }));
+    expect(open).toHaveBeenCalledWith(expect.objectContaining({ appId: studio('b1'), lane: 'A' }), undefined);
     expect(useLayout.getState().main).toBe(tabsBefore);
+  });
+
+  it('its menu offers Open and Open in new tab; ⌘-click and a middle click open it in a tab of its own, Enter as a click, each through its lane’s opener', async () => {
+    const calls: [AppSessionId, { newTab: boolean } | undefined][] = [];
+    offs.push(registerRemoteOpener('B', (listed, how) => calls.push([listed.appId, how])));
+    fill([listedOn('b1', { title: 'Studio build' })]);
+    act(() => useLayout.getState().setSidebar({ expandedProjects: [ORG] as ProjectKey[] }));
+    render(<Sidebar />);
+    const tabsBefore = useLayout.getState().main;
+    fireEvent.contextMenu(row('Studio build'));
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getAllByRole('menuitem').map((m) => [m.textContent, m.hasAttribute('data-disabled')])).toEqual([['Open', false], ['Open in new tab', false]]);
+    await userEvent.click(within(menu).getByRole('menuitem', { name: 'Open' }));
+    fireEvent.contextMenu(row('Studio build'));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Open in new tab' }));
+    fireEvent.click(row('Studio build'), { metaKey: true });
+    fireEvent(row('Studio build'), new MouseEvent('auxclick', { bubbles: true, button: 1 }));
+    fireEvent.keyDown(row('Studio build'), { key: 'Enter' });
+    expect(calls).toEqual([
+      [studio('b1'), undefined],
+      [studio('b1'), { newTab: true }],
+      [studio('b1'), { newTab: true }],
+      [studio('b1'), { newTab: true }],
+      [studio('b1'), undefined],
+    ]);
+    expect(useLayout.getState().main).toBe(tabsBefore); // the opener opens; the row never runs the store's own open
+  });
+
+  it('draws the three dots on a listed row and on a record that cannot be renamed', async () => {
+    const user = userEvent.setup();
+    const held = record(at('held'), { projectId: maws.id, holder: { kind: 'terminal', pid: 7 }, title: { text: 'Terminal pass', source: 'user' }, updatedAt: '2026-10-28T08:00:00Z' });
+    fill([listedOn('b1', { title: 'Studio build' })], [here, held]);
+    act(() => useLayout.getState().setSidebar({ expandedProjects: [ORG] as ProjectKey[] }));
+    render(<Sidebar />);
+    await user.click(within(row('Studio build')).getByRole('button', { name: 'Actions for Studio build' }));
+    expect(within(await screen.findByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open', 'Open in new tab']);
+    expect(row('Studio build').getAttribute('aria-selected')).not.toBe('true'); // the dots open the menu, not the session
+    await user.keyboard('{Escape}');
+    await user.click(within(row('Terminal pass')).getByRole('button', { name: 'Actions for Terminal pass' }));
+    expect(within(await screen.findByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open', 'Open in new tab']);
   });
 
   it('a selected listed row stays unselected once the shown tab changes, even when the tab it was picked over returns', async () => {

@@ -2,8 +2,8 @@
 // M6b's "At its end": a row's mark, Share from the row's menu and the session's header, hub projects only; Proves'
 // renderer line: the marks and menus on listed rows). The mark: a lock for Private, a people mark for wider access or
 // shares, read from the machine's policy for your own sessions and from the listing's audience for another's private one
-// shared with you, with its access in the hover card. Share: a listed row you own in a hub project has a menu holding it,
-// any other listed row none; a record of this Mac's in a hub project that its policy read names offers it while you are
+// shared with you, with its access in the hover card. Share: a listed row you own in a hub project has it in its menu
+// (UX wave U7, O-38: after the two opens every listed row's menu holds), any other listed row not; a record of this Mac's in a hub project that its policy read names offers it while you are
 // this Mac's one owner (P5 O8 M5b: its read names every session any of its owners owns, and the door takes the act from
 // the session's owners alone; the Decision Log's "M5b Task 1, the renderer", item 6); one in a local-only project, or
 // while signed out, doesn't; it opens the Share sheet. P5 O8 M5b: Add owner sits beside Share wherever Share is.
@@ -124,7 +124,7 @@ describe('the reach mark', () => {
 });
 
 describe('Share on a row', () => {
-  it('gives a listed row you own in a hub project a menu holding Share, which opens the sheet; any other listed row has no menu', async () => {
+  it('gives a listed row you own in a hub project Share after its opens, which opens the sheet; any other listed row’s menu has no Share', async () => {
     fill([mine('m', { title: 'Mine' }), mine('n', { title: 'No project', project: null, orgKey: null })]);
     render(
       <>
@@ -133,9 +133,11 @@ describe('Share on a row', () => {
       </>,
     );
     expect(row('Mine').getAttribute('data-menu')).toBe(`session:${studio('m')}`);
-    expect(row('No project').getAttribute('data-menu')).toBe('none');
+    expect(row('No project').getAttribute('data-menu')).toBe(`session:${studio('n')}`); // UX wave U7, O-38: every listed row's menu
+    expect(within(await menuOf('No project')).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open', 'Open in new tab']);
+    await userEvent.keyboard('{Escape}');
     const menu = await menuOf('Mine');
-    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual([SHARE.menuItem, OWNER.menuItem]);
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open', 'Open in new tab', SHARE.menuItem, OWNER.menuItem]);
     fireEvent.click(within(menu).getByRole('menuitem', { name: SHARE.menuItem }));
     expect(await screen.findByRole('dialog', { name: SHARE.title })).toBeTruthy();
   });
@@ -211,7 +213,7 @@ describe('Add owner beside Share', () => {
     fill([mine('t', { title: 'Theirs', owners: ['member-ana'], mine: false })]);
     act(() => usePeople.setState({ on: new Set([ORG]) }));
     render(<Sidebar />);
-    expect(row('Theirs').getAttribute('data-menu')).toBe('none');
+    expect(await itemsOf('Theirs')).toEqual([]); // its menu holds the two opens alone (UX wave U7, O-38)
   });
 });
 
