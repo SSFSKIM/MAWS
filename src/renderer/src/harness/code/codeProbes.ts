@@ -2,6 +2,7 @@
 // Review, Files and the viewer draw, from their DOM (the chips, the list, the counter, the tree rows, the notices) and
 // the stores behind it (the hunk texts, the viewer's text), and drives them with the clicks a reader would make.
 import type { AppSessionId } from '@shared/graph/ids';
+import { workingFolder } from '@shared/sessions/working-folder';
 import { checkoutKey, machineFor } from '../../ipc/machine';
 import { instanceOf, shownSession } from '../../panel/host';
 import { useGit } from '../../stores/git';
@@ -78,7 +79,7 @@ function targetOf(root: HTMLElement): ReviewTarget | null {
   }
   const record = appSessionId ? useSessions.getState().records.get(appSessionId) : undefined;
   if (!appSessionId || !record) return null;
-  return { appSessionId, directory: record.worktree?.path ?? record.directory, turnId };
+  return { appSessionId, directory: workingFolder(record).path, turnId };
 }
 
 // The files Review lists for a scope, from the same stores and the same functions its shell reads.

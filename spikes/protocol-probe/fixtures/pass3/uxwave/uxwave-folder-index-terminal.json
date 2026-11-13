@@ -1,0 +1,302 @@
+[
+ {
+  "step": "s0-start",
+  "fixture": "uxwave-folder-terminal.jsonl",
+  "transcriptFolder": "-tmp-pz-LS0mTB-work",
+  "rows": 31,
+  "summary": {
+   "directory": "/tmp/pz-LS0mTB/work",
+   "relocatedCwd": null,
+   "gitBranch": "master"
+  },
+  "record": {
+   "directory": "/tmp/pz-LS0mTB/work",
+   "worktree": null,
+   "branch": "master",
+   "projectId": "8a8ed09f-ab3f-4c77-9f65-2be83199d453"
+  },
+  "newestMainRow": {
+   "cwd": "/tmp/pz-LS0mTB/work",
+   "gitBranch": "master"
+  }
+ },
+ {
+  "step": "s1-enter-worktree",
+  "fixture": "uxwave-folder-terminal.jsonl",
+  "transcriptFolder": "-tmp-pz-LS0mTB-work--claude-worktrees-pz-alpha",
+  "rows": 61,
+  "summary": {
+   "directory": "/tmp/pz-LS0mTB/work",
+   "relocatedCwd": "/tmp/pz-LS0mTB/work/.claude/worktrees/pz-alpha",
+   "gitBranch": "worktree-pz-alpha"
+  },
+  "record": {
+   "directory": "/tmp/pz-LS0mTB/work/.claude/worktrees/pz-alpha",
+   "worktree": {
+    "path": "/tmp/pz-LS0mTB/work/.claude/worktrees/pz-alpha",
+    "branch": "worktree-pz-alpha"
+   },
+   "branch": "worktree-pz-alpha",
+   "projectId": "8a8ed09f-ab3f-4c77-9f65-2be83199d453"
+  },
+  "newestMainRow": {
+   "cwd": "/tmp/pz-LS0mTB/work/.claude/worktrees/pz-alpha",
+   "gitBranch": "worktree-pz-alpha"
+  }
+ },
+ {
+  "step": "s2-run-there",
+  "fixture": "uxwave-folder-terminal.jsonl",
+  "transcriptFolder": "-tmp-pz-LS0mTB-work--claude-worktrees-pz-alpha",
+  "rows": 70,
+  "summary": {
+   "directory": "/tmp/pz-LS0mTB/work",
+   "relocatedCwd": "/tmp/pz-LS0mTB/work/.claude/worktrees/pz-alpha",
+   "gitBranch": "worktree-pz-alpha"
+  },
+  "record": {
+   "directory": "/tmp/pz-LS0mTB/work/.claude/worktrees/pz-alpha",
+   "worktree": {
+    "path": "/tmp/pz-LS0mTB/work/.claude/worktrees/pz-alpha",
+    "branch": "worktree-pz-alpha"
+   },
+   "branch": "worktree-pz-alpha",
+   "projectId": "8a8ed09f-ab3f-4c77-9f65-2be83199d453"
+  },
+  "newestMainRow": {
+   "cwd": "/tmp/pz-LS0mTB/work/.claude/worktrees/pz-alpha",
+   "gitBranch": "worktree-pz-alpha"
+  }
+ },
+ {
+  "step": "s3-exit-keep",
+  "fixture": "uxwave-folder-terminal.jsonl",
+  "transcriptFolder": "-tmp-pz-LS0mTB-work",
+  "rows": 106,
+  "summary": {
+   "directory": "/tmp/pz-LS0mTB/work",
+   "relocatedCwd": "/tmp/pz-LS0mTB/work",
+   "gitBranch": "master"
+  },
+  "record": {
+   "directory": "/tmp/pz-LS0mTB/work",
+   "worktree": null,
+   "branch": "master",
+   "projectId": "8a8ed09f-ab3f-4c77-9f65-2be83199d453"
+  },
+  "newestMainRow": {
+   "cwd": "/tmp/pz-LS0mTB/work",
+   "gitBranch": "master"
+  }
+ },
+ {
+  "step": "s3b-run-after-exit",
+  "fixture": "uxwave-folder-terminal.jsonl",
+  "transcriptFolder": "-tmp-pz-LS0mTB-work",
+  "rows": 114,
+  "summary": {
+   "directory": "/tmp/pz-LS0mTB/work",
+   "relocatedCwd": "/tmp/pz-LS0mTB/work",
+   "gitBranch": "master"
+  },
+  "record": {
+   "directory": "/tmp/pz-LS0mTB/work",
+   "worktree": null,
+   "branch": "master",
+   "projectId": "8a8ed09f-ab3f-4c77-9f65-2be83199d453"
+  },
+  "newestMainRow": {
+   "cwd": "/tmp/pz-LS0mTB/work",
+   "gitBranch": "master"
+  }
+ },
+ {
+  "step": "s4-cd-second-worktree",
+  "fixture": "uxwave-folder-terminal.jsonl",
+  "transcriptFolder": "-tmp-pz-LS0mTB-work",
+  "rows": 124,
+  "summary": {
+   "directory": "/tmp/pz-LS0mTB/work",
+   "relocatedCwd": "/tmp/pz-LS0mTB/work",
+   "gitBranch": "master"
+  },
+  "record": {
+   "directory": "/tmp/pz-LS0mTB/work",
+   "worktree": null,
+   "branch": "master",
+   "projectId": "8a8ed09f-ab3f-4c77-9f65-2be83199d453"
+  },
+  "newestMainRow": {
+   "cwd": "/tmp/pz-LS0mTB/work/.claude/worktrees/pz-beta",
+   "gitBranch": "master"
+  }
+ },
+ {
+  "step": "s4b-run-after-cd",
+  "fixture": "uxwave-folder-terminal.jsonl",
+  "transcriptFolder": "-tmp-pz-LS0mTB-work",
+  "rows": 132,
+  "summary": {
+   "directory": "/tmp/pz-LS0mTB/work",
+   "relocatedCwd": "/tmp/pz-LS0mTB/work",
+   "gitBranch": "master"
+  },
+  "record": {
+   "directory": "/tmp/pz-LS0mTB/work",
+   "worktree": null,
+   "branch": "master",
+   "projectId": "8a8ed09f-ab3f-4c77-9f65-2be83199d453"
+  },
+  "newestMainRow": {
+   "cwd": "/tmp/pz-LS0mTB/work/.claude/worktrees/pz-beta",
+   "gitBranch": "master"
+  }
+ },
+ {
+  "step": "s5-cd-subfolder",
+  "fixture": "uxwave-folder-terminal.jsonl",
+  "transcriptFolder": "-tmp-pz-LS0mTB-work",
+  "rows": 150,
+  "summary": {
+   "directory": "/tmp/pz-LS0mTB/work",
+   "relocatedCwd": "/tmp/pz-LS0mTB/work",
+   "gitBranch": "master"
+  },
+  "record": {
+   "directory": "/tmp/pz-LS0mTB/work",
+   "worktree": null,
+   "branch": "master",
+   "projectId": "8a8ed09f-ab3f-4c77-9f65-2be83199d453"
+  },
+  "newestMainRow": {
+   "cwd": "/tmp/pz-LS0mTB/work/.claude/worktrees/pz-beta/sub",
+   "gitBranch": "master"
+  }
+ },
+ {
+  "step": "s5b-run-after-subfolder",
+  "fixture": "uxwave-folder-terminal.jsonl",
+  "transcriptFolder": "-tmp-pz-LS0mTB-work",
+  "rows": 158,
+  "summary": {
+   "directory": "/tmp/pz-LS0mTB/work",
+   "relocatedCwd": "/tmp/pz-LS0mTB/work",
+   "gitBranch": "master"
+  },
+  "record": {
+   "directory": "/tmp/pz-LS0mTB/work",
+   "worktree": null,
+   "branch": "master",
+   "projectId": "8a8ed09f-ab3f-4c77-9f65-2be83199d453"
+  },
+  "newestMainRow": {
+   "cwd": "/tmp/pz-LS0mTB/work/.claude/worktrees/pz-beta/sub",
+   "gitBranch": "master"
+  }
+ },
+ {
+  "step": "s6-cd-sibling-outside",
+  "fixture": "uxwave-folder-terminal.jsonl",
+  "transcriptFolder": "-tmp-pz-LS0mTB-work",
+  "rows": 168,
+  "summary": {
+   "directory": "/tmp/pz-LS0mTB/work",
+   "relocatedCwd": "/tmp/pz-LS0mTB/work",
+   "gitBranch": "master"
+  },
+  "record": {
+   "directory": "/tmp/pz-LS0mTB/work",
+   "worktree": null,
+   "branch": "master",
+   "projectId": "8a8ed09f-ab3f-4c77-9f65-2be83199d453"
+  },
+  "newestMainRow": {
+   "cwd": "/tmp/pz-LS0mTB/work",
+   "gitBranch": "master"
+  }
+ },
+ {
+  "step": "s6b-run-after-sibling",
+  "fixture": "uxwave-folder-terminal.jsonl",
+  "transcriptFolder": "-tmp-pz-LS0mTB-work",
+  "rows": 183,
+  "summary": {
+   "directory": "/tmp/pz-LS0mTB/work",
+   "relocatedCwd": "/tmp/pz-LS0mTB/work",
+   "gitBranch": "master"
+  },
+  "record": {
+   "directory": "/tmp/pz-LS0mTB/work",
+   "worktree": null,
+   "branch": "master",
+   "projectId": "8a8ed09f-ab3f-4c77-9f65-2be83199d453"
+  },
+  "newestMainRow": {
+   "cwd": "/tmp/pz-LS0mTB/work",
+   "gitBranch": "master"
+  }
+ },
+ {
+  "step": "s7-subagent-enters-worktree",
+  "fixture": "uxwave-folder-terminal.jsonl",
+  "transcriptFolder": "-tmp-pz-LS0mTB-work",
+  "rows": 192,
+  "summary": {
+   "directory": "/tmp/pz-LS0mTB/work",
+   "relocatedCwd": "/tmp/pz-LS0mTB/work",
+   "gitBranch": "master"
+  },
+  "record": {
+   "directory": "/tmp/pz-LS0mTB/work",
+   "worktree": null,
+   "branch": "master",
+   "projectId": "8a8ed09f-ab3f-4c77-9f65-2be83199d453"
+  },
+  "newestMainRow": {
+   "cwd": "/tmp/pz-LS0mTB/work",
+   "gitBranch": "master"
+  }
+ },
+ {
+  "step": "s7b-main-after-subagent",
+  "fixture": "uxwave-folder-terminal.jsonl",
+  "transcriptFolder": "-tmp-pz-LS0mTB-work",
+  "rows": 219,
+  "summary": {
+   "directory": "/tmp/pz-LS0mTB/work",
+   "relocatedCwd": "/tmp/pz-LS0mTB/work",
+   "gitBranch": "master"
+  },
+  "record": {
+   "directory": "/tmp/pz-LS0mTB/work",
+   "worktree": null,
+   "branch": "master",
+   "projectId": "8a8ed09f-ab3f-4c77-9f65-2be83199d453"
+  },
+  "newestMainRow": {
+   "cwd": "/tmp/pz-LS0mTB/work",
+   "gitBranch": "master"
+  }
+ },
+ {
+  "step": "s9-after-resume",
+  "fixture": "uxwave-folder-terminal.jsonl",
+  "transcriptFolder": "-tmp-pz-LS0mTB-work",
+  "rows": 232,
+  "summary": {
+   "directory": "/tmp/pz-LS0mTB/work",
+   "relocatedCwd": "/tmp/pz-LS0mTB/work",
+   "gitBranch": "master"
+  },
+  "record": {
+   "directory": "/tmp/pz-LS0mTB/work",
+   "worktree": null,
+   "branch": "master",
+   "projectId": "8a8ed09f-ab3f-4c77-9f65-2be83199d453"
+  },
+  "newestMainRow": {
+   "cwd": "/tmp/pz-LS0mTB/work",
+   "gitBranch": "master"
+  }
+ }
+]

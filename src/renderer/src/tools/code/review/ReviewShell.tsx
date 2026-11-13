@@ -26,7 +26,7 @@ const toggle = 'rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg-m
 
 export interface ReviewShellProps {
   appSessionId: AppSessionId;
-  directory: string; // session.worktree?.path ?? session.directory
+  directory: string; // the session's working folder: workingFolder(session).path
   ui: StoreApi<ReviewUi>;
   chips: boolean; // the panel tool's scope chips; a diff tab's scope is its ref's
   focusRequest?: number; // the panel tool's: a growth re-reads the scope
