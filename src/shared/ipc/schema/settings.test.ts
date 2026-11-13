@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { SETTINGS_DEFAULTS_V21 } from '../../settings/defaults';
-import { commands, SettingsPatchSchema, SettingsSchema } from './settings'; // C12: commands
+import { clientSettingsDefaults, SETTINGS_DEFAULTS_V21 } from '../../settings/defaults';
+import { commands, ClientSettingsSchema, SettingsPatchSchema, SettingsSchema } from './settings'; // C12: commands
+import { BUILD_F_ACTION_IDS } from '../../keymap/build-f'; // U6a
+import { SAMPLE_IDS } from '../../keymap/sample-rows'; // U6a
 import { LaunchProfileSchema, userScopeProfile } from '../../engine/launch-profile'; // P4-A2
 
 const base = SETTINGS_DEFAULTS_V21;
@@ -57,6 +59,19 @@ describe('settings keymap is a partial record', () => {
     expect(SettingsSchema.safeParse({ version: 1, theme: 'light' }).success).toBe(false);
     expect(SettingsSchema.safeParse({ ...base, version: 2 }).success).toBe(false);
     expect(SettingsSchema.safeParse({ ...base, notifications: { enabled: true, sound: false } }).success).toBe(false);
+  });
+
+  // U6a (UC-14; the U6a execution document, decision 11): while build F may run on the same profile, the stored keymap
+  // holds only the ids F knows, at the one definition the client file, the merged settings and the patch share
+  it('accepts exactly the action ids build F knows, in the client file, the merged settings and the patch', () => {
+    const client = clientSettingsDefaults();
+    const accepts = (keymap: Record<string, string | null>) => [
+      ClientSettingsSchema.safeParse({ ...client, keymap }).success,
+      SettingsSchema.safeParse({ ...base, keymap }).success,
+      SettingsPatchSchema.safeParse({ keymap }).success,
+    ];
+    for (const id of BUILD_F_ACTION_IDS) expect(accepts({ [id]: null }), id).toEqual([true, true, true]);
+    for (const id of [...SAMPLE_IDS, 'zzz']) expect(accepts({ [id]: 'Cmd+Y' }), id).toEqual([false, false, false]);
   });
 
   it('patches keymap and notifications like the theme', () => {

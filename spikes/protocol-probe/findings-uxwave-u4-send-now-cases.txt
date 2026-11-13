@@ -1,0 +1,346 @@
+UX wave U4 P2: the cases of Send now the first pass did not run, on engine 2.1.322, on MAWS's own wire and environment
+(the execution document of U4's first landing, docs/doperpowers/plans/2026-11-12-ux-wave-U4a-composer.md on
+ux-wave/U4a, M1, Interfaces A and B, "Reported to the architect" 5 and 6; the child's file
+docs/doperpowers/specs/2026-11-12-ux-wave/U4-composer.md; the first pass findings-uxwave-u4-send-now.txt, fixtures
+u4p1-*; recorded 2026-11-12)
+
+Question. For the request MAWS's host will write, `interrupt {send_now: true, message_uuid}`, what does the engine
+answer and put on the wire, in what order, what does its transcript file hold afterwards, and is it the same on three
+runs, when (1) the uuid names nothing the engine holds; (2) two messages wait at the next step; (3) a Stop follows the
+request before its answer, or after it and before the cut turn's end; (4) what lies between the cut turn's end and the
+message's turn; (5) the turn is writing text, behind a subagent, holding a permission request, or in a call that cannot
+be moved; (6) the message waits after the turn; (7) the engine does not know the key.
+
+Verdict, per case (the document's expectation in brackets, then whether the engine did that).
+1. Nothing waiting: `{still_queued: [], send_now: "nothing_waiting"}` within 3 ms, for a uuid never sent (3/3), one
+   withdrawn first by cancel_async_message (3/3), and one the engine had already started at a tool boundary of the same
+   turn (3/3). The turn goes on untouched: no frame follows the answer, the running command is not moved and runs to
+   its own end, nothing is delivered. [Reported 6(a): nothing shown, the row leaves at the engine's `started`;
+   Interfaces B: the answer removes the uuid. Holds.]
+2. Two messages waiting: naming either one delivers both. The command is moved and the turn cut exactly as for one
+   message; then both lifecycles read `started` at consecutive seqs, the first-sent first, whichever was named (3/3
+   naming the first, 3/3 naming the second). The engine joins them into one user message: the first's replay frame
+   holds its own text, the second's replay holds both texts, and the transcript file has one user line, under the
+   second's uuid, with both texts; the first's uuid has no line of its own. [Reported 6(b), by reading
+   cli.pretty.js:600167-600182: only the named one goes, the others stay rows until the engine starts them. Differs:
+   the others go too. The rule "a row leaves at its `started`" still draws the right stack, since both start at once.]
+3. A Stop while a send-now is in flight. The engine answers `delivering` at once but moves the command only about 1 s
+   later (804 to 1013 ms after the answer, 27 runs); what the Stop does depends on which side of the move it lands.
+   - MAWS's Stop square (cancel_async_message for the waiting message, then the plain interrupt), written before the
+     answer (3/3) or right after it (3/3), so before the move: the cancel answers `cancelled: true` (the message's
+     lifecycle `cancelled`), the plain interrupt rejects the command and kills it ("The user doesn't want to proceed
+     ...", "[Request interrupted by user for tool use]", result error_during_execution / aborted_tools), STATE idle
+     follows at once; nothing is delivered. [Reported 6(c): the end reads as a stop, the message is whatever the
+     hold's answer says. Holds; the hold answers true, so MAWS holds the row.]
+   - The same written after the move, before the cut turn's end (3/3): the cancel answers `cancelled: true`, the
+     interrupt `{still_queued: []}`; the cut turn ends as the send-now's end (success / aborted_tools, no marker), STATE
+     idle; the moved command survives, and its completion starts a turn of the engine's own about 25 s later. Nothing
+     is delivered. [Holds for the message (held) and the end (unmarked, since the Stop empties the set); the command is
+     not stopped, as the first pass's case (h) found.]
+   - A plain interrupt alone (no hold), before the move (6/6): the command is killed and the turn ends as a Stop
+     (error_during_execution / aborted_tools, the marker), and the waiting message is still delivered as the next turn.
+     After the move (3/3): the Stop does nothing at all: answered `{still_queued: [<message>]}`, no marker, the cut turn
+     ends success / aborted_tools, the message starts and its turn runs to its end, the command survives. [Not in the
+     document. Under Interfaces B this end would be unmarked (the Stop empties the set) and read "You stopped" while the
+     message runs; MAWS's square always holds first, so this is the path of any caller that interrupts without the
+     hold.]
+4. Between the cut turn and the next: no `session_state_changed` falls there, and no frame a reader would take for
+   idle. With CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1 (MAWS sets it; the first pass did not, which is why its fixtures
+   hold no state frame at all), in every run where a send-now cut a turn and the message ran next (shell 3, `later` 3,
+   two messages 6, permission 3, text 3, hook 3, plain Stop after the move 3: 24/24) the frames between the cut turn's
+   `result` and the message's `started` are only the cut prompt's `command_lifecycle cancelled` (plus, with two
+   messages, the first's replay frame). The session's state stays `running` (in the permission case it goes from
+   `requires_action` to `running` as the request is withdrawn, before the cut turn's result); the first `idle` is at
+   the end of the message's own turn. Where nothing follows (MAWS's Stop with its hold), `idle` comes right after the
+   result. [Reported 6(d), decision 6: the digest's rule does not depend on it. Holds: no idle to react to.]
+5. What was running:
+   (a) the model writing text (3/3): `stopped`; the partial reply, "[Request interrupted by user]", error_during_
+       execution / aborted_streaming, the message as the next turn, as in the first pass's (c). [Interfaces B: marked
+       true. Holds.]
+   (b) a subagent: under MAWS's environment there is no turn waiting on one. With CLAUDE_CODE_FORK_SUBAGENT=true (MAWS's
+       launch) the Agent call ran in the background each time though the prompt asked for a foreground one (4/4; the
+       model's input carried run_in_background as the string "false"), the main turn ended by itself, and the message
+       started as a turn of its own before the request was written; the request answered `nothing_waiting`. The first
+       pass's case (b), a foreground Agent call moved and the message read in the same turn, was recorded without that
+       variable.
+   (c) a permission request held (mode default, 3/3): `delivering`; control_cancel_request, "Tool permission request
+       aborted", success / aborted_tools, the message as the next turn, the model asking for the same call again: as in
+       the first pass's (d). [Interfaces B: marked true. Holds.]
+   (d) a call that cannot be moved: a shell call held before it starts by a PreToolUse hook of the user settings (3/3):
+       `delivering`; the hook is cancelled (hook_response outcome "cancelled"), the call is rejected ("The user doesn't
+       want to take this action right now. STOP what you are doing and wait for the user to tell you how to
+       proceed.", is_error, no interrupt marker, no backgroundedToDeliverMessage), success / aborted_tools 0.44 s after
+       the answer, the message as the next turn; the model ran the command again there. [Interfaces B marks it
+       (aborted, set not empty); Interfaces C draws no "Moved" label. Holds.]
+       An MCP tool call, tried as the unmovable case, is movable on 2.1.322 (3/3): `delivering`, moved within 6 ms
+       (task_started with task_type mcp_task, no task_updated frame), its result the text "MCP tool "slow/slow_wait" was
+       moved to the background as task ... so that a message that arrived while it was running can reach you; it was not
+       interrupted and keeps running ...", and the message read in the same turn (no result between). The call's
+       tool_use_result is that content array: no backgroundedToDeliverMessage flag. [Interfaces B: unmarked, since the
+       message starts while the turn is open. Holds. Interfaces C: the row would read as an ended call while it runs.]
+6. After the turn: a MAWS after-the-turn row lives in MAWS's own queue, so the engine holds no such uuid and the request
+   is case 1 (`nothing_waiting`); the document sends such a row by promoting it to `now` instead. The engine's own
+   priority `later` (which MAWS does not write) can be named: without a request it waits until the turn ends (1/1);
+   with one it answers `delivering` and behaves exactly like a `next` message (moved, cut, next turn; 3/3).
+7. An engine that does not know the key (2.1.283, installed in about 10 s; 1/1): the answer is `{still_queued:
+   [<message>]}` with no `send_now`; the engine performs a plain interrupt: the command is rejected and killed, "[Request
+   interrupted by user for tool use]", error_during_execution / aborted_tools, the message starts as the next turn.
+   [Decision 5: an answer without the key reads `stopped`; the command is killed and the message starts next. Holds.]
+
+Method. Scenario scenarios/pass3/uxwave-u4-send-now-2.mjs (launch module uxwave-common-send-permission.mjs, as the first
+pass), one case per process (`-e UXW_CASE=<case> -e UXW_RUN=<n>`), each launched by spikes/protocol-probe/vm-run.sh on a
+devcloud VM (Linux), never on the MacBook; vm-check.mjs's claims held before the first probe (version, routed, built-in
+plugins only, no MCP server, Monitor, only the control CLAUDE.md; it now counts 27 tools). Engine 2.1.322 (every
+system/init reads claude_code_version "2.1.322"); case 7 on 2.1.283 (the spawn row's bin). Model haiku
+(claude-haiku-5-5) through the gateway (spawn row routed: true), seeded feature cache.
+Launch: the first pass's (MAWS's flags, setting sources user,project,local, no --strict-mcp-config, mode auto; the
+permission case mode default; the MCP case adds --mcp-config naming a stdio server the scenario writes, whose one tool
+sleeps), plus the environment keys src/engine-host/launch.ts buildEnvironment sets, which the first pass left out:
+CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES=false, CLAUDE_CODE_FORK_SUBAGENT=true, CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING=1,
+CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1, CLAUDE_CODE_QUESTION_PREVIEW_FORMAT=html (the uxw_case row lists them). The
+hook case sets a PreToolUse hook on Bash in the scratch user settings, a node script that sleeps 30 s.
+Each case: the prompt as a `now` user frame; once the call runs (the waiter's pid file, the MCP tool's start file, the
+hook's start file, the held permission request, or text streaming), 1.5 s later the message "Reply with the single word
+PINEAPPLE, then carry on with what you were doing." at priority `next` (`later` in 6; a second message, "... MANGO
+...", in 2), its `queued` lifecycle awaited, then 0.5 s later the request. The frames MAWS's host writes, as written:
+the send-now `{subtype: "interrupt", send_now: true, message_uuid}` (decision 3); MAWS's Stop square
+`{subtype: "cancel_async_message", message_uuid}` answered, then `{subtype: "interrupt", reason: "user-cancel",
+cancel_queued: false}` (session.ts interrupt() with holdEngineQueued, queue.ts holdAll); the plain interrupt alone; the
+cancel of case 1 is session.steer.cancel's. "In flight" writes the Stop's frames in the same tick as the send-now, before
+its answer; "after the answer" writes them when the answer arrives; "after the move" when task_updated
+{is_backgrounded: true} arrives. The scenario reduces the engine's transcript file at the end into its uxw_transcript
+row (line types, uuids, prompt ids, a head of each block; no system-prompt text).
+Fixtures: fixtures/uxwave/u4p2-<case>-<n>.jsonl, seq numbers below are theirs. Runs: a 3; n-never 3; n-dropped 3;
+n-started 3; two-1 3; two-2 3; stop-inflight 3; stop-inflight-hold 3; stop-after 3; stop-after-hold 3; stop-moved 3;
+stop-moved-hold 3; k-text 3; k-agent 4; k-perm 3; k-hook 3; k-mcp 3; later 3; later0 1; old 1.
+
+Observations (one run cited per case; the others match at the seqs given).
+Main case again, u4p2-a-1: answer `delivering` (41); task_started (43), task_updated is_backgrounded (45, +1013 ms);
+tool result "Command was moved to the background ..." with backgroundedToDeliverMessage true (46); result success /
+aborted_tools (47); the prompt `cancelled` (48); the message `started` (49); STATE idle only at 193, after the
+message's turn (191); the moved command's completion starts an engine-own turn (STATE running 197). a-2, a-3: 41, 45,
+47, 48, 49 the same. The first pass's (a) holds under MAWS's environment.
+1. u4p2-n-never-1: answer nothing_waiting (39); task_started (41, the command registered, not moved), its own result
+   "started nnever1 / finished nnever1" (45) 28 s later, result completed (55), STATE idle (58). n-never-2, -3 the same.
+   u4p2-n-dropped-1: cancel_async_message (40) answered cancelled: true (42), lifecycle cancelled (41); the send-now (44)
+   answered nothing_waiting (45); the command ran to its end (51), result completed (61). n-dropped-2, -3 the same.
+   u4p2-n-started-1: the message `started` at the first command's end (71), read in the turn (PINEAPPLE); the second
+   command running, the send-now (122) answered nothing_waiting (123); nothing moved, its own result (129), result
+   completed (144). n-started-2 (answer 100), -3 (111) the same.
+2. u4p2-two-1-1 (the first named): answer delivering with both uuids in still_queued (45); moved (49); tool result (50);
+   result success / aborted_tools (51); prompt cancelled (52); the first's replay (53, its text), started first (54),
+   started second (55); the second's replay (60) holds both texts; one reply "PINEAPPLE / MANGO"; both completed
+   (169-170). u4p2-two-2-1 (the second named): the same at 72, 76-78, 79, 80, 81, 82, 87. two-1-2, -3 and two-2-2, -3
+   the same (started at 53/54, 54/55). The uxw_transcript row of each holds one user line for the pair, under the
+   second's uuid.
+3. u4p2-stop-inflight-hold-1: send-now (41) and cancel_async_message (42) written together; answers delivering (43),
+   lifecycle cancelled for the message (44), cancelled: true (45); the interrupt (46) answered {still_queued: []} (47);
+   "The user doesn't want to proceed ..." (49), the marker (50), result error_during_execution / aborted_tools (51),
+   prompt cancelled (52), STATE idle (53); the process dead 2 s after. -2, -3 the same (51 / 52-54).
+   u4p2-stop-after-hold-1: the same with the cancel written at the answer (42-53). -2, -3 the same.
+   u4p2-stop-moved-hold-1: delivering (42), moved (45), cancel (47) cancelled: true (49), interrupt (50) {still_queued:
+   []} (51); tool result "moved ..." (53), result success / aborted_tools (54), prompt cancelled (55), STATE idle (56);
+   the command alive, done 25 s later (59-60), then STATE running (62) and an engine-own turn (result 121). -2, -3 the
+   same.
+   u4p2-stop-inflight-1 (plain): send-now (41) and interrupt (42) together; delivering (43), {still_queued:
+   [<message>]} (44); rejected (46), marker (47), result error_during_execution / aborted_tools (48), prompt cancelled
+   (49), the message started (50) and answered; the command dead 2 s after (the model then ran it again). -2, -3 and
+   stop-after-1..3 the same (46-49).
+   u4p2-stop-moved-1 (plain): delivering (43), moved (46), interrupt (48) answered {still_queued: [<message>]} (49);
+   tool result "moved ..." (51), result success / aborted_tools (52), no marker anywhere, prompt cancelled (53), the
+   message started (54) and completed (148), STATE idle (149); the command survived. -2, -3 the same.
+4. The `between` frames are read off each fixture above: a-1 47 to 49 (48 only), two-1-1 51 to 54 (52, 53),
+   k-perm-1 48 to 50 (49), k-text-1 133 to 135 (134), k-hook-1 46 to 48 (47), later-1 47 to 49 (48), stop-moved-1 52 to
+   54 (53). No state frame in any of them; the state frames of each run are listed in its uxw_final row's neighbours
+   (a-1: 193 idle, 197 running, 236 idle).
+5. u4p2-k-text-1: stopped (126), aborted partial reply (128), marker (129), result error_during_execution /
+   aborted_streaming (133), prompt cancelled (134), message started (135). -2 the same, -3 at 126-132.
+   u4p2-k-agent-1: the Agent call's input run_in_background "false" (38), task_started (42), "Async agent launched
+   successfully" (44), the first turn's result (125); the message sent after (128), started at once (131); the request
+   (134) answered nothing_waiting (135). k-agent-2..4 the same (result 166 / 127 / 127, started 172 / 133 / 132).
+   u4p2-k-perm-1: delivering (43), control_cancel_request (45), STATE running (46), "Tool permission request aborted"
+   (47), result success / aborted_tools (48), prompt cancelled (49), message started (50), re-asked (104). -2, -3 the
+   same (47-49 / 48-50).
+   u4p2-k-hook-1: delivering (42), hook_response outcome cancelled (44), the rejection (45), result success /
+   aborted_tools (46), prompt cancelled (47), message started (48); the model ran the command again (137). -2, -3 the
+   same.
+   u4p2-k-mcp-1: delivering (51), background_tasks_changed and task_started mcp_task (53-54), the "moved" result (55),
+   the message's replay (56) and started (57) with no result between, the turn's result completed (132); the server's
+   call ran to its end (done file) and its completion started an engine-own turn (138-147). -2, -3 the same (55-57).
+6. u4p2-later0-1: the `later` message queued (39), the command ran its 30 s (46), result completed (57), then the
+   message started (60) as a turn of its own. u4p2-later-1: delivering (41), moved (45), result success / aborted_tools
+   (47), prompt cancelled (48), message started (49). -2, -3 the same.
+7. u4p2-old-1 (2.1.283): answer {still_queued: [<message>]} (79); rejected (81), marker (82), result
+   error_during_execution / aborted_tools (83), prompt cancelled (84), message started (85); the process dead 2 s after.
+
+The transcript file afterwards (the uxw_transcript rows).
+- A send-now that moved a shell command (a, two, later, stop-moved): the cut turn leaves the "moved" tool result and
+  nothing else: no interrupt marker, no line for the end; the message is a user line with a new promptId. Nothing in
+  the file tells this end from a turn that simply went on.
+- While writing (k-text): the partial reply and "[Request interrupted by user]", the same lines a Stop leaves.
+- Permission (k-perm), hook (k-hook): the error tool result ("Tool permission request aborted", the rejection text),
+  no marker.
+- A Stop before the move (stop-*): the rejection and "[Request interrupted by user for tool use]"; with the hold, the
+  message's enqueue and dequeue queue-operations and no user line for it.
+- Two messages: one user line for both, under the second's uuid; MCP and n-started: the message as a queue `remove`
+  with no user line of its own (read in the turn).
+
+Where the engine differs from the document's reading of the source.
+1. Two waiting messages (Reported 6(b)): naming one delivers all that wait at the next step, joined into one user
+   message under the last one's uuid (two-1-*, two-2-*). Inference: `pressWaiting` (cli.pretty.js:600834-600852)
+   moves for every waiting message and marks them all; the named uuid only selects the answer.
+2. A Stop's effect depends on the move, which comes about 1 s after `delivering`: before it, a plain interrupt kills
+   the command and the message still runs next (stop-inflight-*, stop-after-*); after it and before the cut turn's
+   end, a plain interrupt is a no-op (stop-moved-*). MAWS's square, which withdraws the message first, holds it either
+   way; only the command's fate differs (killed before the move, kept after).
+3. Under MAWS's environment (CLAUDE_CODE_FORK_SUBAGENT=true) a foreground subagent call did not occur (k-agent-1..4),
+   so "Send now behind a running subagent" is not a state MAWS's sessions reach in these runs; the first pass's (b)
+   needs that variable unset.
+4. An MCP tool call is moved like a shell command and the message is read in the same turn (k-mcp-*), with no
+   structured flag on its result.
+
+Bearing on other parts of the spec.
+- Interfaces B, the plain-Stop-after-the-move path: the Stop empties the set, so the cut end reads "You stopped" while
+  the message runs. Only a caller that interrupts without holding the waiting steers meets it (today's Esc path does,
+  `holdEngineQueued` false; after U4 Esc is Send now on the first row).
+- Interfaces C: a moved MCP call reads as ended while it runs; its result text is the only mark.
+- Reported 4 (the transcript file holds no terminal reason) is confirmed and extends to two messages: the first's uuid
+  never appears in the file, so a backfilled transcript cannot find that message by its uuid.
+- The cut prompt's `cancelled` after `started` holds in every cutting case (24/24), as the first pass found.
+- The cost of `later`: none for MAWS, which writes no `later`; noted because Claude Desktop's ⌘Enter does.
+
+Not provoked. A foreground Agent call under MAWS's environment (four tries; see 5(b)). A tool that cannot be moved once
+it has started (the MCP tool, the candidate, is movable; the hook case holds a call before it starts). A Stop written
+between the cut turn's result and the message's start (the gap is 2 to 5 ms). The direct route (it does not
+authenticate on this VM, VM.md). Model spend: about US$0.13 over the 57 runs (haiku; the largest total_cost_usd of each run).
+
+
+UX wave U4 P3, third pass (recorded 2026-11-12): two cases the second pass did not record, on engine 2.1.322, on MAWS's
+own wire and environment (U4a's execution document, decision 32 and "Reported to the architect" 23 and 25)
+
+Question. (1) A turn ends by itself, with no Send now and no Stop, while two (then three) messages wait at the next
+step: how does the engine take them (a `started` each? one replayed user message, under which uuid, holding which
+text? the same joined form as u4p2-two-*?), what does the request to the model carry, and what does the transcript
+file hold for them? (2) One message waits at the next step and one waits after the turn; Send now is asked for the
+after-the-turn one (MAWS writes it as queue.ts promote() does: a `now` user frame of the row's content under a fresh
+uuid; the engine never held that row). What is answered, which messages go in which order, each one's `started`, the
+replayed user message, whether the running call is moved, what stays queued; and the mirror (Send now on the next-step
+message while the after-the-turn row waits in the app's queue).
+
+Verdict, per case (the document's expectation in brackets, then whether the engine did that).
+1. A turn's ordinary end joins every message waiting at the next step, exactly as a Send now does (end2 3/3, end3
+   1/1). The turn ends `success` / `completed` (end_turn) and the prompt reads `completed`; then each member reads
+   `started` at consecutive seqs in the order sent, the request names all of them (`status requesting` with every
+   uuid), and one user message holds all the texts, joined by a newline, under the last one's uuid: the last member's
+   replay carries the joined text, every earlier member's replay its own text only. The transcript file has one user
+   line for the batch, under the last uuid, and none under the others (an `enqueue` and a `dequeue` queue-operation per
+   member). The same form as u4p2-two-*, the cut turn's `aborted_tools` end and the prompt's `cancelled` aside. No
+   state frame falls between the turn's result and the batch's starts; the first `idle` is at the batch's own end.
+   [Reported 23, by the engine's text: the ordinary end takes the same path. Holds; decision 32's rule serves it as
+   written.]
+2. Send now on an after-the-turn row (a `now` frame) while a next-step message waits: the `now` message goes alone,
+   never joined with the waiting one (6/6), and whether the running command is moved depends on when the frame is
+   written.
+   - Written once the shell call has become a task (its `task_started`, 2.7 to 3.0 s into the call; promote-late 3/3):
+     moved 5 to 9 ms after the write, the cut turn ends `success` / `aborted_tools` about 1 s after it, the prompt
+     `cancelled`, the `now` message `started` and replayed alone (its own text, its own uuid). The next-step message
+     stays queued; it was read at the first tool boundary of the new turn (its own replay with its own text, its own
+     `started`, then the request names both uuids), and one result completes both. In the file it is a queue `remove`
+     and a `queued_command` attachment, with no user line under its uuid.
+   - Written earlier, before the call is a task (2.0 s into the call; promote 3/3): not moved. The command runs to its
+     own end (about 28 s more); its own output is the tool result; then the turn is cut at that boundary (`success` /
+     `aborted_tools`, the prompt `cancelled`), the `now` message starts and runs as a turn of its own, and the
+     next-step message starts only when that turn has ended, as a turn of its own. Two user lines in the file, each
+     under its own uuid.
+   No answer frame exists for a `now` frame; its `queued` lifecycle comes 4 to 14 ms after the write.
+   [Reported 25: "by decision 32's path the engine may start them together". Differs: never together. The rule "each
+   row leaves at its own `started`" draws the right stack in both timings, and the Send now names one message, as the
+   document's title has it. M1's claim that a `now` frame does what the request does holds only for the later write.]
+   Mirror (mirror 1/1): Send now on the next-step message (the request) answers `{still_queued: [<it>], send_now:
+   "delivering"}`, and the command is moved 1.03 s later, though the request was written at the same early moment as
+   promote's; the cut turn ends `aborted_tools`, the message starts and runs to its end. The after-the-turn row, written
+   by the probe as MAWS's queue releases it (a plain user frame at the first main-lane result with no prompt unstarted),
+   goes 20 ms after that result and starts as a turn of its own. Nothing is joined. [Interfaces A and the release rule
+   (line 636): the head goes when the sent message's own turn ends. Holds.]
+
+Method. Scenario scenarios/pass3/uxwave-u4-send-now-3.mjs, beside the second pass's and on its launch exactly (launch
+module uxwave-common-send-permission.mjs, MAWS's flags, setting sources user,project,local, mode auto, the five
+environment keys of launch.ts buildEnvironment, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1 among them), one case per
+process (`-e UXW_CASE=<case> -e UXW_RUN=<n>`), each launched by vm-run.sh on devcloud VM dc-uxwave2-e584 (Linux);
+vm-check.mjs's claims held before the first probe (2.1.322, routed, built-in plugins only, no MCP server, Monitor, 27
+tools, only the control CLAUDE.md, no desk member before or after). Every system/init reads claude_code_version
+"2.1.322"; model haiku (claude-haiku-5-5) through the gateway (spawn row routed: true), seeded feature cache.
+- end2, end3: the prompt "write a story of about 900 words, without tools" as a `now` frame; 0.8 s after the first
+  text delta, two (three) messages at `next` ("Reply with the single word PINEAPPLE / MANGO / KIWI, then carry on
+  ..."), each `queued` lifecycle awaited; then nothing until the end. The uxw_messages_written row confirms no result
+  and no `started` before the messages were all queued.
+- promote: the shell prompt of the second pass (node wait.cjs <tag> 30, in the foreground); 1.5 s after the waiter's pid
+  file, PINEAPPLE at `next` (queued awaited), 0.5 s later MANGO as a `now` user frame (origin human, a fresh uuid: what
+  promote() writes). promote-late: the same, timed from the engine's `task_started` for the call instead of the pid
+  file. mirror: PINEAPPLE at `next`, 0.5 s later `interrupt {send_now: true, message_uuid}` for it; MANGO stands for the
+  app queue's after-the-turn row and is written as queue.ts write() writes a release (no priority) at the first
+  main-lane result after which every prompt the probe wrote has a lifecycle past `queued` and no `started` follows the
+  result (session.ts turnOpen); the probe checks every 20 ms.
+- Each run ends when every message has started, the command has ended, and the wire has been quiet 12 s (at most 90 s);
+  the uxw_final row lists the results, lifecycles, `requesting` frames and string replays; the uxw_transcript row
+  reduces the engine's transcript file as the second pass does.
+Fixtures: fixtures/uxwave/u4p3-<case>-<n>.jsonl, seq numbers below are theirs. Runs: end2 3; end3 1; promote 3;
+promote-late 3; mirror 1. promote-late-1's process was stopped by the harness's end while an engine-own turn (the
+moved command's completion) had started a new shell call (exit 143); nothing before seq 276 is affected.
+
+Observations (the seqs of each run).
+1. u4p3-end2-1: PINEAPPLE and MANGO queued (512, 515); result success / completed (677); prompt completed (678);
+   PINEAPPLE's replay with its own text (679), started (680), MANGO started (681); requesting [both] (683); MANGO's
+   replay with both texts (685); one reply "PINEAPPLE / MANGO"; result (741), both completed (742-743), STATE idle
+   (744). end2-2: 168, 171; 664, 665; 666; 667-668; 670; 672; 722, idle 725. end2-3: 64, 67; 614, 615; 616; 617-618;
+   620; 622; 674, idle 677. u4p3-end3-1: queued 119, 122, 125; result (507); prompt completed (508); replays of the
+   first two with their own texts (509, 510); started 511, 512, 513; requesting [all three] (515); the third's replay
+   with all three texts (517); one result (565), all completed (566-568), idle (569).
+   Files (uxw_transcript): end2-*: one user line under MANGO's uuid holding both texts; end3-1: one under KIWI's uuid
+   holding the three. The earlier members' uuids appear nowhere in the file.
+2. u4p3-promote-late-1: task_started (37); PINEAPPLE queued (41); MANGO written `now` (42); task_updated is_backgrounded
+   (46, +5 ms); MANGO queued (47); "Command was moved to the background ..." (48); result success / aborted_tools (49);
+   prompt cancelled (50); MANGO started (51), requesting [MANGO] (53), replay (54); in MANGO's turn the model reads the
+   moved command's output (115-119), then PINEAPPLE's replay (120), started (121), requesting [MANGO, PINEAPPLE] (122);
+   PINEAPPLE completed (222), result (223), MANGO completed (224). -2: 46, 49, 50, 51, 54; 155, 156, 157; 287. -3: 46,
+   49, 50, 51, 54; 123, 124, 125; 207.
+   u4p3-promote-1: PINEAPPLE queued (38); MANGO written (39), queued (42); task_started (43, 0.76 s after the write),
+   never moved; task_notification completed (44, 27.8 s after the write); the command's own output as the tool result (45);
+   result success / aborted_tools (46); prompt cancelled (47); MANGO started (48), requesting [MANGO] (50), replay (51),
+   result (96), completed (97); PINEAPPLE started (98), requesting (100), replay (102), result (110). -2: 40/43, 44, 47,
+   48, 49, 52; 103; 105, 109; 141. -3: 39/42, 43, 46, 47, 48, 51; 90; 92, 96; 146.
+   u4p3-mirror-1: PINEAPPLE queued (39); the request (41) answered delivering (42); moved (45, +1029 ms); result success
+   / aborted_tools (47); prompt cancelled (48); PINEAPPLE started (49), replay (52), result (167), STATE idle (169);
+   MANGO released (170), queued (172), STATE running (174), started (175), replay (179), result (250); the moved
+   command's completion then starts an engine-own turn (253-291).
+   Files: promote-*: two user lines, MANGO's then PINEAPPLE's, each under its own uuid and promptId. promote-late-*:
+   MANGO's user line; PINEAPPLE as a queue `remove` and a `queued_command` attachment (no user line under its uuid).
+   mirror-1: a user line each.
+
+Where the engine differs from the document.
+1. Reported 25: a `now` frame does not join or carry the message waiting at the next step (promote-*, promote-late-*);
+   the request does (u4p2-two-*). Inference, from cli.pretty.js:600799-600812 (takeBeforeEnqueue): a `now` message
+   that arrives while another waits calls `moveHolders()` once and stays a `now`, where a lone `now` becomes a pressed
+   send-now; the press path (pressWaiting, 600834-600852) is the one that marks every waiting message.
+2. Line 577 / M1 ("a `now` frame does what the request does"): not when another message waits and the frame comes
+   before the shell call is a task (promote-* 3/3): nothing is moved, the `now` waits for the call to finish and only
+   then cuts the turn. Inference: that one `moveHolders()` finds no registered task to move and nothing retries, while
+   the request (mirror-1, and the second pass's a-* at the same 2.0 s) waits for the task and moves it about 1 s later.
+   The window is the first 2.7 to 3.0 s of a shell call; the case's frames are those of an ordinary tool boundary with
+   a `now` waiting (the command's own output, no "moved" text, no backgroundedToDeliverMessage).
+
+Bearing on other parts of the spec.
+- Decision 32 holds in both cases: every member leaves at its own `started` (both always come), and the joined
+  replay is the last member's, with the joined text, after all the `started` frames; the earlier members' replays are
+  echoes of their own text and come before their `started`. Its (b) and (c) are exercised by the ordinary end, not only
+  by Send now; nothing is joined in case 2.
+- Interfaces B's cut-turn reading in the early promote: the turn ends `aborted_tools` with no move, about 28 s after
+  Send now, so a row "Sending ..." from the promote's answer lasts the whole call; the call reads as ended normally.
+- A message read at a tool boundary (promote-late's PINEAPPLE) has no user line in the file, only an attachment, so a
+  reload draws it differently from the live replay (an echo the normaliser drops); this is the first pass's tool-boundary
+  path, met here inside a sent-now turn.
+
+Not run. The early promote at a later moment within the window (only the 2.0 s timing and the post-registration
+timing were run), and with a tool other than a shell call. A turn's ordinary end with the members of two kinds (a
+slash command beside prompts). The direct route (it does not authenticate on this VM, VM.md). Model spend: about
+US$0.03 over the 11 runs (haiku; the largest total_cost_usd of each run).

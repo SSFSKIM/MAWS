@@ -76,6 +76,9 @@ export interface ConnectorCallsOptions {
   datasets?: ConnectorDatasetSink; // E3: where a start's `dataset` sink publishes (absent: such a start is refused)
   // P3-HD: route D's observation cache; each mcp_status answer read here is observed before it is discarded
   statusCache?: ConnectorStatusCache;
+  // P5 Decision Log 273: an operation's run past its `start` answer (its call, a dataset's publication) as the host's work,
+  // from its start until it settles or the operation is dropped
+  work?(): () => void;
 }
 
 // main's input, as the IPC validated it
@@ -101,6 +104,7 @@ interface Operation {
   sink?: true; // E3: a dataset operation
   committing?: boolean; // E3 M2 residual: its publication admitted into its savepoint, not yet ended
   cancelled?: true; // E3 M2 residual: main's cancel won before the admission; its end is `failed: timeout`
+  working?: () => void; // P5 Decision Log 273: the end of the run under way (its call's, then its publication's)
 }
 
 // E3: a dataset operation's result in the host: waiting for main's take (`publish`), publishing, or its end (`take`).
@@ -186,7 +190,7 @@ export class ConnectorCalls {
     if (this.operations.has(input.operationId)) throw new Error(`connector operation ${input.operationId} is already known`);
     const operation: Operation = { id: input.operationId, controller: new AbortController(), attachment: this.attachment, ...(input.dataset && { sink: true as const }) /* E3 */ };
     this.operations.set(operation.id, operation);
-    void this.execute(operation, input).then(
+    void this.running(operation, this.execute(operation, input)).then(
       (outcome) => {
         if (operation.revoked) return this.finish(operation, revokedWhile(input, 'it ran'));
         if ('ok' in outcome) return this.finish(operation, outcome);
@@ -258,6 +262,22 @@ export class ConnectorCalls {
     clearTimeout(operation.expiry);
     this.operations.delete(operation.id);
     operation.release?.();
+    operation.working?.();
+  }
+
+  // P5 Decision Log 273: `promise` is the operation's work until it settles (or the operation is dropped first)
+  private running<T>(operation: Operation, promise: Promise<T>): Promise<T> {
+    const work = this.options.work?.();
+    if (!work) return promise;
+    let ended = false;
+    const end = () => {
+      if (ended) return;
+      ended = true;
+      if (operation.working === end) delete operation.working;
+      work();
+    };
+    operation.working = end;
+    return promise.finally(end);
   }
 
   private finish(operation: Operation, outcome: ConnectorOperationOutcome): void {
@@ -292,7 +312,7 @@ export class ConnectorCalls {
   private consume(operation: Operation, phase: DatasetPhase): void {
     phase.publishing = true;
     clearTimeout(operation.expiry);
-    void phase.publish!().then(
+    void this.running(operation, phase.publish!()).then(
       (end) => {
         delete operation.committing;
         if ('ok' in end) return this.finish(operation, end);

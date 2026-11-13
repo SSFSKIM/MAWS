@@ -4,6 +4,7 @@
 // `dockCard` and renders inside C7's `DockedCardFrame`, which owns the frame, the focus, Enter (`onAccept`) and Esc
 // (`onDecline`); `connectSetupDock` keeps one docked card per session in step with the setup store, for an unstarted
 // tab and a record's resume alike (C7's composer shows a session's docked card whether or not it has started).
+// UX wave U1a §J (l4-approvals-13): each reads its title alone, without the frame's "Composer paused" of a request.
 import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { machineOf } from '@shared/machine/address';
@@ -68,7 +69,7 @@ export function SetupCard({ appSessionId }: { appSessionId: AppSessionId }) {
     const accept = () => void continueSetup(appSessionId, { trust: 'accepted' }, card.message);
     const decline = () => void releaseMessage(appSessionId, card.message);
     return (
-      <DockedCardFrame appSessionId={appSessionId} title={TRUST_CARD_TITLE} onAccept={busy ? null : accept} onDecline={busy ? null : decline}>
+      <DockedCardFrame appSessionId={appSessionId} title={TRUST_CARD_TITLE} titleAlone onAccept={busy ? null : accept} onDecline={busy ? null : decline}>
         <TrustCard trust={card.trust} busy={busy} onAccept={accept} onStartWithoutTrusting={() => void continueSetup(appSessionId, { trust: 'declined' }, card.message)} onDecline={decline} />
       </DockedCardFrame>
     );
@@ -95,7 +96,7 @@ function FailureHost({ appSessionId, failure, busy }: { appSessionId: AppSession
   // hand the message back first and returns it only then. Any other failure's message is main's to release.
   const back = () => void (failure === UNSENT ? reclaimMessage(appSessionId, message) : releaseMessage(appSessionId, message));
   return (
-    <DockedCardFrame appSessionId={appSessionId} title={FAILURE_CARD_TITLE} onAccept={busy ? null : retry} onDecline={busy ? null : back}>
+    <DockedCardFrame appSessionId={appSessionId} title={FAILURE_CARD_TITLE} titleAlone onAccept={busy ? null : retry} onDecline={busy ? null : back}>
       <FailureCard failure={shown} busy={busy} retainedWorktree={retainedWorktree} onAccept={retry} onDecline={back} onDiscard={() => void resolve('discard')} onKeep={() => void resolve('keep')} />
     </DockedCardFrame>
   );
@@ -178,7 +179,7 @@ function RelayHost({ appSessionId, card, busy }: { appSessionId: AppSessionId; c
   // C11 end
 
   return (
-    <DockedCardFrame appSessionId={appSessionId} title={RELAY_CARD_TITLE} onAccept={accept} onDecline={busy ? null : decline}>
+    <DockedCardFrame appSessionId={appSessionId} title={RELAY_CARD_TITLE} titleAlone onAccept={accept} onDecline={busy ? null : decline}>
       {/* C11: gatewayModel={false}: with pickDirectModel in place a gateway model no longer blocks Run direct, it asks for a Claude model first */}
       <RelayCard health={health} policy={policy} now={now} gatewayModel={false} openClaudeUsage={openClaudeUsage} onAccept={direct} onDecline={decline} onRecheck={() => void recheck()} onStartAnyway={anyway} />
     </DockedCardFrame>

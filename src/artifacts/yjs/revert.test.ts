@@ -4,10 +4,12 @@
 // A re-pin to a `@y/y` that fixes it keeps these tests.
 import * as Y from '@y/y';
 import { describe, expect, it } from 'vitest';
+import { applyV1, diffV1, newDoc, stateV2, stateVector } from './doc';
+import { liveMarkers } from './format-cleanup.fixture';
 import { revertUpdate } from './revert';
 
 const live = () => {
-  const doc = new Y.Doc({ gc: true });
+  const doc = newDoc();
   doc.clientID = 1;
   return doc;
 };
@@ -129,5 +131,32 @@ describe('revertUpdate: the whole doc, schema-agnostic', () => {
     Y.applyUpdateV2(doc, revertUpdate(version, Y.encodeStateAsUpdateV2(doc), keep));
     expect(doc.get('root').getAttr('title')).toBe('Plan');
     expect(doc.get('threads').getAttr('t1')).toBe('a message posted since');
+  });
+});
+
+// l6-artifacts-07 (a): a restore is planned on a scratch doc that applies the version's state and then the live state. A
+// scratch that tidied formatting between the two would plan against a state no stored document holds, and its undo
+// would put back, as the restorer's, a marker only its own clean-up had removed.
+describe('revertUpdate over a live state that keeps redundant markers (l6-artifacts-07 (a))', () => {
+  it('takes the content back to the version and inserts no marker', () => {
+    const live = newDoc();
+    live.get('t').insert(0, 'one word two three');
+    const deleter = newDoc(); // a replica that has not seen the bold when it deletes the word
+    applyV1(deleter, diffV1(live));
+    const sv = stateVector(deleter);
+    live.get('t').format(4, 4, { bold: true });
+    const version = stateV2(live);
+    deleter.get('t').delete(4, 4);
+    applyV1(live, diffV1(deleter, sv));
+    expect(liveMarkers(live.get('t'))).toBe(2); // the bold's two markers, around nothing
+    const update = revertUpdate(version, stateV2(live));
+    const inserted = Y.decodeUpdateV2(update as Uint8Array<ArrayBuffer>).structs.filter((struct) => struct instanceof Y.Item && struct.content instanceof Y.ContentFormat);
+    expect(inserted).toEqual([]);
+    Y.applyUpdateV2(live, update);
+    const old = newDoc();
+    Y.applyUpdateV2(old, version);
+    expect(live.get('t').toString()).toBe('one word two three');
+    expect(live.get('t').toDelta()).toEqual(old.get('t').toDelta());
+    expect(liveMarkers(live.get('t'))).toBe(2);
   });
 });

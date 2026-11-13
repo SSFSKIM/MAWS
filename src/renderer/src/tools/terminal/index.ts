@@ -6,13 +6,14 @@ import type { SessionRecord } from '@shared/graph/session';
 import type { HostState, PtyInfo } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
 import { REMOTE_ACT_PENDING_MS, REMOTE_ATTACH_PENDING_MS } from '@shared/machine/remote-pending';
+import { workingFolder } from '@shared/sessions/working-folder';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { ipc } from '../../ipc/client';
 import { panelHost } from '../../panel/host';
 import type { PanelTool, PanelToolInit } from '../../panel/tool';
 import { terminalMachine } from '../../terminal/machine';
 import { terminals, type Adopting, type TerminalId } from '../../terminal/registry';
-import { sessionDirectory, TerminalIcon, TerminalView } from './TerminalView';
+import { TerminalIcon, TerminalView } from './TerminalView';
 
 export const TERMINAL_TOOL_ID = 'terminal';
 
@@ -259,7 +260,7 @@ export function ensureTerminal(state: TerminalTabState, shown: { appSessionId: A
   }
   if (state.ui.getState().adopting) state.ui.setState({ adopting: false });
   const adopted = terminals.list().find((info) => info.label === state.instanceId && !abandoned.has(info.id));
-  const cwd = state.params.cwd ?? (shown.session ? sessionDirectory(shown.session) : undefined);
+  const cwd = state.params.cwd ?? (shown.session ? workingFolder(shown.session).path : undefined);
   let terminalId: TerminalId | null = adopted?.id ?? null;
   let lostAtQuit = false;
   if (!terminalId && owner && cwd) {

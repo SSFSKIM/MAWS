@@ -75,8 +75,8 @@ function harness(options: { pingMs?: [number, number]; gate?: { reached(): void;
       await options.gate?.open;
       return rights.get(member) ?? [];
     },
-    hold: (reason) => {
-      const id = `${reason}#${n++}`;
+    hold: (reason, standing) => {
+      const id = `${reason}${standing ? ' (standing)' : ''}#${n++}`;
       holds.add(id);
       return () => void holds.delete(id);
     },
@@ -127,7 +127,7 @@ describe('admission', () => {
     expect(caps).toEqual({ t: 'caps', member: A, device: 'a1', clientClass: 'native-mac', machine: { grades: OWNER_GRADES }, stateVersion: 2 });
     expect(h.counts).toEqual({ relayed: 0, direct: 1 });
     expect(h.holds.size).toBe(1);
-    expect([...h.holds][0]).toMatch(/^channel#/);
+    expect([...h.holds][0]).toMatch(/^channel \(standing\)#/); // P5 Decision Log 273: a connection's hold, no operation
     const other = await device(b1, B).open(dialDirect(h), REF);
     const b = watch(other);
     expect(await until(() => b.messages[0], 'caps')).toMatchObject({ t: 'caps', member: B, device: 'b1', machine: { grades: [] } });

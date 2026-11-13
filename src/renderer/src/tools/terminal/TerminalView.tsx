@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { useStore } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { SessionRecord } from '@shared/graph/session';
+import { workingFolder } from '@shared/sessions/working-folder';
 import { ipc } from '../../ipc/client';
 import type { PanelToolContext } from '../../panel/tool';
 import { useMachines } from '../../stores/machines';
@@ -17,9 +17,6 @@ import { terminalMachine } from '../../terminal/machine';
 import { terminals, type TerminalInfo } from '../../terminal/registry';
 import { TERMINAL } from './copy';
 import { ensureTerminal, hostReadyOf, takeFocusRequest, type TerminalTabState } from './index';
-
-// Where a session runs: its worktree when it has one, else its directory (the worktree warning compares against it).
-export const sessionDirectory = (session: SessionRecord): string => session.worktree?.path ?? session.directory;
 
 const bar = 'flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-bg-raised px-2 py-1 text-ui-sm';
 const barButton = 'rounded-sm border border-border px-2 py-0.5 text-fg hover:bg-bg-hover disabled:text-fg-faint disabled:hover:bg-transparent';
@@ -72,7 +69,7 @@ export function TerminalView({ state, ctx }: { state: TerminalTabState; ctx: Pan
 
   useEffect(() => setTitle(title), [setTitle, title]);
 
-  const shownDirectory = ctx.session ? sessionDirectory(ctx.session) : null;
+  const shownDirectory = ctx.session ? workingFolder(ctx.session).path : null; // where the session works (the worktree warning compares against it)
   const moved = info !== null && shownDirectory !== null && info.cwd !== shownDirectory;
 
   const openContextMenu = (ev: ReactMouseEvent<HTMLDivElement>) => {

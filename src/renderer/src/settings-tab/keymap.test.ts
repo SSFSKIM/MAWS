@@ -1,8 +1,10 @@
 // The Keyboard section's pure half (C11 execution document, Interfaces "Settings tab" Keyboard; M5 decisions): a keydown
 // read into Electron accelerator syntax through C5's chord vocabulary, the conflict and menu rules, and the table's rows.
 import { describe, expect, it } from 'vitest';
+import { ACTIONS, ACTION_IDS, idsOf, isRebindable, type ActionTable, type KeymapOverrides } from '@shared/keymap/actions';
 import type { KeyEventLike } from '@shared/keymap/chord';
-import { acceleratorOf, captureChord, keymapGroups } from './keymap';
+import { EXTENDED_TABLE, SAMPLE_IDS, SAMPLE_ROWS, sample } from '@shared/keymap/sample-rows'; // U6a
+import { acceleratorOf, captureChord, displayChord, keymapGroups } from './keymap';
 
 const key = (code: string, keyValue: string, mods: Partial<Pick<KeyEventLike, 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>> = {}): KeyEventLike => ({
   metaKey: false,
@@ -82,19 +84,84 @@ describe('keymap capture records, refuses conflicts and unbinds', () => {
   });
 });
 
+const PLACEMENT_LABEL = { app: 'MAWS menu', file: 'File', edit: 'Edit', view: 'View', go: 'Go', help: 'Help' } as const;
+const SCOPE_LABEL = { app: 'App-wide', pane: 'In a pane', composer: 'In the composer' } as const;
+const TABLES: [string, ActionTable][] = [['the table', ACTIONS], ['the table with the sample rows', EXTENDED_TABLE]]; // U6a (decision 12)
+const subsequence = (whole: string[], part: string[]) => {
+  let at = 0;
+  for (const token of whole) if (token === part[at]) at++;
+  return at === part.length;
+};
+
 describe('the keymap table', () => {
-  it('lists every action once, tab.select as one row, grouped by menu placement then scope, with effective chords', () => {
+  it('lists every action once, tab.select as one row, grouped by menu placement, submenu, then scope, with effective chords', () => {
     const groups = keymapGroups({ 'attention.next': 'Cmd+Shift+U', 'palette.open': null });
-    expect(groups.map((g) => g.label)).toEqual(['MAWS menu', 'File', 'View', 'Go', 'Help', 'App-wide', 'In a pane', 'In the composer']);
+    const labels = groups.map((g) => g.label);
+    expect(subsequence(labels, ['MAWS menu', 'File', 'View', 'View › Tabs', 'View › More surfaces', 'View › Comments', 'View › Appearance', 'Go', 'Help', 'App-wide', 'In a pane', 'In the composer']), labels.join(' · ')).toBe(true);
     const rows = groups.flatMap((g) => g.rows);
     expect(new Set(rows.map((r) => r.id)).size).toBe(rows.length);
     const row = (id: string) => rows.find((r) => r.id === id)!;
-    expect(row('settings.open')).toMatchObject({ title: 'Settings…', chord: 'Cmd+,', display: '⌘,', overridden: false });
+    expect(row('settings.open')).toMatchObject({ title: 'Settings…', chord: 'Cmd+,', display: '⌘,', overridden: false, rebindable: true });
     expect(row('attention.next')).toMatchObject({ chord: 'Cmd+Shift+U', display: '⌘⇧U', overridden: true });
     expect(row('palette.open')).toMatchObject({ chord: null, display: 'Unbound', overridden: true });
     expect(row('tab.select')).toMatchObject({ display: '⌘1…9' });
-    expect(groups.find((g) => g.label === 'View')!.rows.map((r) => r.id)).toContain('tab.next'); // a renderer action placed in a menu
-    expect(groups.find((g) => g.label === 'In a pane')!.rows.map((r) => r.id)).toEqual(['request.accept', 'request.decline']);
+    expect(row('surface.terminal')).toMatchObject({ title: 'Terminal', chord: 'Cmd+J', display: '⌘J' });
+    expect(groups.find((g) => g.label === 'View › Tabs')!.rows.map((r) => r.id)).toEqual(['tab.select', 'tab.next', 'tab.previous']); // renderer actions placed in a menu's submenu
+    expect(groups.find((g) => g.label === 'In a pane')!.rows.map((r) => r.id)).toEqual(expect.arrayContaining(['request.accept', 'request.decline', 'request.allowOnce', 'request.allowLasting']));
+    // UX wave U1a (§D): the two keys a permission prompt gains, and the titles the four request rows read
+    expect(row('request.allowOnce')).toMatchObject({ title: 'Allow once', chord: 'Cmd+Enter', display: '⌘↩', rebindable: false });
+    expect(row('request.allowLasting')).toMatchObject({ title: 'Allow with the lasting scope the prompt names', chord: 'Cmd+Shift+Enter', display: '⌘⇧↩', rebindable: false });
+    expect(row('request.decline')).toMatchObject({ title: 'Deny a prompt, or decline a question', display: '⎋' });
+    expect(row('request.accept')).toMatchObject({ title: 'Next or Submit on a question; Implement on a plan', display: '↩' });
+  });
+
+  // A9: the sheet and Settings list every row once, under the group the menus draw it in
+  it.each(TABLES)('puts every row in exactly one group, labelled by its placement, its submenu’s path or its scope (%s)', (_name, table) => {
+    const groups = keymapGroups({}, table);
+    expect(groups.flatMap((g) => g.rows.map((r) => r.id)).sort()).toEqual([...idsOf(table)].sort());
+    for (const group of groups) {
+      expect(group.rows.length, group.label).toBeGreaterThan(0);
+      for (const { id } of group.rows) {
+        const spec = table[id];
+        const label = spec.menu === null ? SCOPE_LABEL[spec.scope] : spec.submenu === undefined ? PLACEMENT_LABEL[spec.menu] : `${PLACEMENT_LABEL[spec.menu]} › ${spec.submenu}`;
+        expect(group.label, id).toBe(label);
+      }
+    }
+  });
+
+  it('lists a sibling’s rows with no edit here: an edit row’s submenu, a fixed row under its scope, neither rebindable', () => {
+    const groups = keymapGroups({}, EXTENDED_TABLE);
+    const labels = groups.map((g) => g.label);
+    expect(labels.indexOf('Edit › Sample')).toBe(labels.indexOf('File') + 1); // after File, before View: no Edit row names no submenu
+    const composer = groups.find((g) => g.label === 'In the composer')!.rows;
+    expect(composer.find((r) => r.id === sample('sample.fixed'))).toMatchObject({ chord: 'Shift+Enter', display: '⇧↩', rebindable: false });
+    const rows = groups.flatMap((g) => g.rows);
+    for (const id of SAMPLE_IDS) expect(rows.find((r) => r.id === id)!.rebindable, id).toBe(false);
+    for (const id of ACTION_IDS) expect(rows.find((r) => r.id === id)!.rebindable, id).toBe(isRebindable(id)); // today's rows keep their control; a row build F does not know takes none (U1a's two)
+    expect(ACTION_IDS.filter((id) => !isRebindable(id))).toEqual(['request.allowOnce', 'request.allowLasting']);
+  });
+
+  it('shows a row that yields its default to a stored rebinding as unbound, and an override it cannot take as no override', () => {
+    const chord = SAMPLE_ROWS['sample.menu'].chord;
+    const rows = keymapGroups({ 'palette.open': chord, [sample('sample.shared')]: 'Cmd+Y' } as KeymapOverrides, EXTENDED_TABLE).flatMap((g) => g.rows);
+    expect(rows.find((r) => r.id === sample('sample.menu'))).toMatchObject({ chord: null, display: 'Unbound', overridden: false });
+    expect(rows.find((r) => r.id === 'palette.open')).toMatchObject({ chord, overridden: true });
+    expect(rows.find((r) => r.id === sample('sample.shared'))).toMatchObject({ chord: 'Cmd+Enter', overridden: false });
+  });
+});
+
+// U6a (the U6a execution document, Interfaces D; decisions 7 and 10): what the capture counts as holding a chord
+describe('the capture’s conflicts', () => {
+  it('never counts a fixed row as a holder', () => {
+    expect(captureChord(key('Enter', 'Enter', { shiftKey: true }), 'request.accept', {}, EXTENDED_TABLE)).toEqual({ kind: 'chord', chord: 'Shift+Enter' });
+  });
+
+  it('accepts an action’s own default where another row shares it by default, and refuses that chord for any other action', () => {
+    const cmdEnter = key('Enter', 'Enter', { metaKey: true });
+    expect(captureChord(cmdEnter, 'composer.send', { 'composer.send': null }, EXTENDED_TABLE)).toEqual({ kind: 'chord', chord: 'Cmd+Enter' });
+    expect(captureChord(cmdEnter, 'request.accept', {}, EXTENDED_TABLE)).toEqual({ kind: 'refused', message: 'Already bound to Allow once · unbind it first' }); // U1a: the first row holding ⌘↩
+    // a row holding it by its own override is still a conflict
+    expect(captureChord(cmdEnter, 'composer.send', { 'composer.send': null, 'composer.cycleMode': 'Cmd+Enter' }, EXTENDED_TABLE)).toEqual({ kind: 'refused', message: 'Already bound to Cycle permission mode · unbind it first' });
   });
 });
 
@@ -120,3 +187,11 @@ it('reads Space by its code, and refuses a bare Space for the app-wide hold to d
   expect(captureChord(key('Space', '\u00a0', { altKey: true }), 'composer.dictate', {})).toEqual({ kind: 'chord', chord: 'Alt+Space' });
 });
 // E9 end
+
+// The panel's finding of 2026-11-12 ("tab-chord expansion past F24"): only a chord whose key is the digit 1 reads as nine
+it('shows Select tab numbered through nine only for a chord whose key is the digit 1', () => {
+  expect(displayChord('tab.select', 'Cmd+1')).toBe('⌘1…9');
+  expect(displayChord('tab.select', 'F21')).toBe('F21');
+  expect(displayChord('tab.select', 'F11')).toBe('F11');
+  expect(keymapGroups({ 'tab.select': 'F21' }).flatMap((g) => g.rows).find((r) => r.id === 'tab.select')).toMatchObject({ chord: 'F21', display: 'F21' });
+});

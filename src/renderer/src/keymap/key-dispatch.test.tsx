@@ -3,9 +3,10 @@ import userEvent from '@testing-library/user-event';
 import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ActionId, KeymapOverrides } from '@shared/keymap/actions';
+import { EXTENDED_TABLE, sample } from '@shared/keymap/sample-rows'; // U6a
 import { useLayout } from '../stores/layout';
 import { resetShellStores } from '../test-support/shell-stores';
-import { connectKeys, keymapBinds, releaseHold } from './dispatcher';
+import { connectKeys, dispatchKey, keymapBinds, releaseHold } from './dispatcher';
 import { useKeyChord } from './useKeyChord';
 import { currentSet } from '../stores/layout-model';
 
@@ -252,6 +253,45 @@ describe('keymapBinds', () => {
   });
 });
 
+// U6a (UC-6 "fixed"; the U6a execution document, decision 7): a key its own editing surface handles is listed and never
+// dispatched, so the dispatcher runs no binding of it and keymapBinds does not count it; a row sharing ⌘Enter with
+// composer.send, as U4's composer.queue will, is dispatched as any composer row.
+describe('rows the dispatcher does not count', () => {
+  function Composer({ fixed, shared }: { fixed: () => void; shared: () => void }) {
+    const ref = useRef<HTMLDivElement>(null);
+    useKeyChord(sample('sample.fixed'), fixed, { within: ref });
+    useKeyChord(sample('sample.shared'), shared, { within: ref });
+    return (
+      <div ref={ref} data-key-sink="composer">
+        <textarea aria-label="draft" />
+      </div>
+    );
+  }
+
+  it('never runs a fixed row, and runs a composer row that shares a chord by default', () => {
+    cleanup();
+    disconnect();
+    const handled: boolean[] = [];
+    const listen = (event: KeyboardEvent) => void handled.push(dispatchKey(event, {}, EXTENDED_TABLE));
+    window.addEventListener('keydown', listen, { capture: true });
+    const fixed = vi.fn();
+    const shared = vi.fn();
+    render(<Composer fixed={fixed} shared={shared} />);
+    const draft = screen.getByLabelText('draft');
+    act(() => draft.focus());
+    const kept = fireEvent.keyDown(draft, { key: 'Enter', shiftKey: true });
+    fireEvent.keyDown(draft, { key: 'Enter', metaKey: true });
+    window.removeEventListener('keydown', listen, { capture: true });
+    expect(fixed).not.toHaveBeenCalled();
+    expect(kept).toBe(true); // the editor's own key keeps its default
+    expect(shared).toHaveBeenCalledOnce();
+    expect(handled).toEqual([false, true]);
+    const press = (init: KeyboardEventInit) => new KeyboardEvent('keydown', init);
+    expect(keymapBinds(press({ key: 'Enter', shiftKey: true }), {}, EXTENDED_TABLE)).toBe(false);
+    expect(keymapBinds(press({ key: 'Enter', metaKey: true }), {}, EXTENDED_TABLE)).toBe(true);
+  });
+});
+
 describe('the chord capture', () => {
   function AppChord({ spy }: { spy: () => void }) {
     useKeyChord('composer.stop', spy);
@@ -434,3 +474,59 @@ describe('dispatcher holds and releases a hold action', () => {
   });
 });
 // E9 end
+
+// UX wave U1a (§D, decision 17; an insertion in U6's dispatcher, U1a's §N): a binding that asks for a fresh press runs on
+// a first press only. Its key repeat is taken (default prevented, no other binding run) and runs nothing; a binding
+// without the option runs a repeat as today; a hold action's latch is untouched (the hold cases above).
+describe('a fresh press', () => {
+  const fresh = vi.fn();
+  const outer = vi.fn();
+  function Fresh({ asked }: { asked: boolean }) {
+    const pane = useRef<HTMLElement>(null);
+    const card = useRef<HTMLDivElement>(null);
+    useKeyChord('request.accept', outer, { within: pane });
+    useKeyChord('request.accept', fresh, { within: card, fresh: asked });
+    return (
+      <section ref={pane} tabIndex={0} aria-label="outer pane">
+        <div ref={card} tabIndex={0} aria-label="fresh card" />
+      </section>
+    );
+  }
+  const enter = (target: HTMLElement, repeat: boolean) => {
+    const event = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', repeat, bubbles: true, cancelable: true });
+    target.dispatchEvent(event);
+    return event;
+  };
+
+  beforeEach(() => {
+    cleanup();
+    fresh.mockClear();
+    outer.mockClear();
+  });
+
+  it('runs a binding registered with fresh for a first press, never for a repeat, and takes the repeat', () => {
+    render(<Fresh asked />);
+    const card = screen.getByLabelText('fresh card');
+    act(() => card.focus());
+    const seen: boolean[] = [];
+    const after = (event: KeyboardEvent) => void seen.push(event.defaultPrevented);
+    window.addEventListener('keydown', after); // bubble phase: what any later handler would see
+    for (let i = 0; i < 5; i++) expect(enter(card, true).defaultPrevented).toBe(true);
+    expect(fresh).not.toHaveBeenCalled();
+    expect(outer).not.toHaveBeenCalled(); // the innermost owner took it: no other binding of the chord runs
+    expect(enter(card, false).defaultPrevented).toBe(true);
+    expect(fresh).toHaveBeenCalledOnce();
+    window.removeEventListener('keydown', after);
+    expect(seen).toEqual([true, true, true, true, true, true]);
+  });
+
+  it('runs a binding without the option on a repeat as on a first press', () => {
+    render(<Fresh asked={false} />);
+    const card = screen.getByLabelText('fresh card');
+    act(() => card.focus());
+    enter(card, false);
+    enter(card, true);
+    enter(card, true);
+    expect(fresh).toHaveBeenCalledTimes(3);
+  });
+});

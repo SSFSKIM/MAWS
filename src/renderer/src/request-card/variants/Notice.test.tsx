@@ -135,6 +135,13 @@ describe('an error notice', () => {
       expect(acknowledged()).toEqual(SEEN);
     });
 
+    // UC-1 (A17): only a waiting item is seen; one in any other state waits nowhere and is told nothing
+    it('an item that no longer waits (its state delivered) is not counted as seen', async () => {
+      await act(async () => void render(<NoticeBody item={error({ state: 'delivered' })} seenHere />));
+      await advance(5_000);
+      expect(acknowledged()).toEqual([]);
+    });
+
     it('a notice that unmounts before two seconds is not seen', async () => {
       await act(async () => void render(<NoticeBody item={error()} seenHere />));
       await advance(1_500);

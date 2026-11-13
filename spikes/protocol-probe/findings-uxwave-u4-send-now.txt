@@ -1,0 +1,238 @@
+UX wave U4 P1: Send now and the move to the background on engine 2.1.322, on MAWS's own wire
+(docs/doperpowers/specs/2026-11-12-ux-wave/U4-composer.md, "Probes and checks", P1, serving "Sending: one design for
+l3-input-01 ..." and l3-input-01; root docs/doperpowers/specs/2026-11-12-ux-wave-design.md; recorded 2026-11-12)
+
+Question. What does the engine do, and put on the wire, for (a) `interrupt {send_now: true, message_uuid}` while a
+`next` message waits behind a running foreground shell command; (b) the same behind a running Agent call; (c) the same
+while the model only writes text; (d) the same while a permission request is pending; (e) `background_tasks
+{tool_use_id}` for a running shell command and for a running Agent call, a `next` message waiting; (f) a user frame at
+priority `now` during a running shell command; (g) case (a) on the gateway route, where the two feature flags may never
+be fetched; (h) a plain interrupt after case (a). For each: the control response, the tool result's text, whether the
+command's process survives, the frames that end or continue the turn, the message's lifecycle frames, and what tells a
+send-now ending from a Stop.
+
+Verdict, in the spec's terms.
+- (a) answers `delivering` and the command is moved and survives, but the message is NOT read in the same turn: the
+  engine ends the turn first (`result` subtype success, terminal_reason aborted_tools) and starts the message as the
+  next turn. So "Send now is built as written" holds for what the engine does to the command, and the fallback
+  (`background_tasks` instead) is not needed; but A3's "the agent answers the message in the same turn" and the table's
+  "reads the message in the same turn" are false for a shell command, and the host must recognise this turn end as a
+  send-now end (it reads like no Stop on the wire; see "telling the endings apart").
+- (b) for a foreground Agent call (run_in_background: false): `delivering`, the call is moved, and the message IS read
+  in the same turn (no `result` between). On 2.1.322 Agent calls run in the background by default, so a foreground one
+  exists only when the model passes run_in_background: false; with only a background agent running, (b) is (c).
+- (c) answers `stopped`; the turn ends (aborted_streaming) and the message runs as the next turn: as written. Nothing on
+  the wire tells this ending from a Stop except the control response: the host's own record decides, as the spec's
+  fallback says.
+- (d) answers `delivering` (not `stopped`): the engine withdraws the permission request (control_cancel_request), the
+  call's result is "Tool permission request aborted", the turn ends (success / aborted_tools, the call listed in
+  permission_denials) and the message starts the next turn. The table's last column ("the turn ends at the request,
+  which is withdrawn ..., and the message starts the next turn") is what happens; Send now need not be disabled there.
+  The model then asked for the same call again in the next turn (2/2).
+- (e) shell: `background_tasks` answers `{backgrounded: false}` when it arrives before the engine has registered the
+  running command as a task (the `system/task_started` frame for that tool_use_id), and `{backgrounded: true}` one
+  second later, once registered (3/3 with the retry; 3/3 false without it). Once moved, the tool result reads "Command
+  was manually backgrounded by user with ID: ...", the process survives, and the waiting message is read in the same
+  turn. Agent: `{backgrounded: true}` at the first try (3/3), the message read in the same turn. So the automatic move
+  is built as written, and its retry is load-bearing; it covers shell commands and foreground Agent calls.
+- (f) a `now` frame during a running shell command does what send-now does: the command is moved to the background
+  ("so that a message that arrived while it was running can reach you"), survives, and the turn ends with success /
+  aborted_tools; the message runs as the next turn. Charter §4.2's sentence ("`priority: 'now'` preempts the running
+  turn (ended as aborted_streaming)", measured on 2.1.283) no longer holds during a shell command on 2.1.322. Also run
+  (beyond the spec's list): `now` behind a foreground Agent call moves it and the message is read in the same turn;
+  `now` while the model writes ends the turn with success / aborted_streaming and no interrupt marker.
+- (g) no difference: with an empty feature cache every flag-dependent case (a, b, e) behaved exactly as with the seeded
+  cache, and the engine wrote no feature cache during the run (nothing was fetched through the gateway). The flags
+  (`tengu_velvet_panda`, `tengu_bubbly_meteor`) are true in the owner's cache and default to true in the code, so an
+  unfetched flag reads on. The fallback does not apply to gateway sessions; nothing for Surprises.
+- (h) differs from the spec's reading: a plain interrupt after a Send now does NOT stop the command the engine moved.
+  The Stop ends the message's turn (aborted_streaming, "[Request interrupted by user]", the message's lifecycle
+  `cancelled`), the moved command keeps running to its end, and its completion starts a turn of the engine's own
+  (2/2). The engine's `notePersonsStop` stops moved tasks only where `fw()` holds, which requires
+  `CLAUDE_CODE_SESSION_ORIGIN === "claude_ai_chat"` (cli.pretty.js:526543, 612709-612712, 600851-600870); MAWS's
+  sessions are not that.
+
+Method. Scenario scenarios/pass3/uxwave-u4-send-now.mjs with the launch module scenarios/pass3/uxwave-common.mjs; one
+case per process (`-e UXW_CASE=<case> -e UXW_RUN=<n>`), each launched by spikes/protocol-probe/vm-run.sh on the devcloud
+VM dc-uxprobe-dc94 (Linux), never on the MacBook. Engine 2.1.322 (/opt/maws-probe/engines/2.1.322; every system/init
+reads claude_code_version "2.1.322"), node v26.13.1. Model haiku, resolved by the gateway to claude-haiku-5-5 (the
+owner's env aliases are not applied on the VM, VM.md). Route: the gateway, through the forward at 127.0.0.1:8641
+(spawn row `routed: true`). No direct-route result exists: a run not routed through the gateway does not authenticate
+on this VM (VM.md; fixtures/vm/vm-unrouted.jsonl).
+Launch, as MAWS's engine host builds it (src/engine-host/launch.ts ENGINE_FLAGS, buildLaunch, protectedSettings; the
+spawn row of every fixture records it):
+  claude -p --input-format stream-json --output-format stream-json --verbose --permission-prompt-tool stdio
+    --include-partial-messages --model haiku --setting-sources user,project,local --permission-mode auto
+    --forward-subagent-text --replay-user-messages --include-hook-events --disallowedTools AskUserQuestion
+    --allowedTools mcp__maws__ask --settings {"dialogExpiry":"never"}
+  no --strict-mcp-config (MAWS never passes it). Case d alone used --permission-mode default, so that a permission
+  request is raised. After initialize (probe-initialize.mjs: MAWS's initialize without its `maws` SDK server): ui_attach
+  as MAWS's desktop surface (client_id maws-main, viewport 100x30 fullscreen, the four answers of
+  src/shared/engine/surface.ts) since the engine offers ui_surface_v1, ui_panes, and set_max_thinking_tokens
+  {max_thinking_tokens: null, thinking_display: "summarized"} (src/engine-host/session.ts handshake). Differences from
+  the product: the `maws` server is not declared or served (so mcp__maws__ask is allowed but absent), no session host,
+  no app queue. Every can_use_tool was answered allow (MAWS's person approving), except in case d. Sessions start in
+  auto mode and haiku holds it (system/init permissionMode "auto"; the shell call's tool_result_meta reads
+  permission_decision {accept, config, classifier}).
+Each case: the first prompt is a user frame at priority `now` (as MAWS's queue writes it); the long command is
+`node wait.cjs <tag> 40`, which writes wait-<tag>.pid at its start and wait-<tag>.done 40 s later, so survival is read
+from the process and the file, not from the model; once the call runs (pid file live, or text streaming, or the
+permission request held), the message "Reply with the single word PINEAPPLE, then carry on with what you were doing."
+is written at priority `next` (`now` in f), its `queued` lifecycle awaited, then 0.5 s later the case's request.
+The feature cache: "seeded" is vm-run.sh's scratch HOME (spawn row featureCache "present"; 26 tools with
+PushNotification, 51 slash commands); "empty" (UXW_NOFEAT=1, -e PROBE_FEATURE_CACHE=) points CLAUDE_CONFIG_DIR at a
+config home whose .claude.json lacks cachedGrowthBookFeatures (25 tools, no PushNotification, 48 slash commands,
+u4p1-a-empty-1 seq 17), and the scenario re-reads that file at the end (uxw_final.featureCacheAfter).
+Comparison cases beyond the spec's list: c0 (a plain interrupt while the model writes, a `next` message waiting), s0
+(a plain interrupt during the running shell command, a `next` message waiting), e-bash-retry (background_tasks repeated
+each second while it answers false, at most 15 s), f-text and f-agent. The plain interrupt is MAWS's:
+`interrupt {reason: "user-cancel", cancel_queued: false}` (session.ts interrupt()).
+Fixtures: fixtures/uxwave/u4p1-<case>-<seeded|empty>-<n>.jsonl. Runs: a 3 seeded + 2 empty; b 2 + 2 (and
+u4p1-b-asyncdefault-seeded-1, the first take, whose agent ran in the background by default); c 2; c0 1; d 2;
+e-bash 2 + 1; e-bash-retry 2 + 1; e-agent 2 + 1; f 2; f-text 2; f-agent 1; h 2; s0 1. Model spend: about US$0.07 (the result frames' total_cost_usd).
+
+Observations, per case (seq numbers are the fixture's).
+
+(a) send_now behind a running shell command. u4p1-a-seeded-1: the response at seq 40 is
+`{still_queued: [<the message>], send_now: "delivering"}`. Then system/task_started for the call (42,
+is_backgrounded false), background_tasks_changed (43), task_updated {is_backgrounded: true} (44), and the call's tool
+result (45): "Command was moved to the background (ID: ...) so that a message that arrived while it was running can
+reach you; it was not interrupted. Output is being written to: ... You will be notified when it completes. ...", with
+tool_use_result {interrupted: false, backgroundTaskId, backgroundedToDeliverMessage: true}. Then a `result` (46):
+subtype success, is_error false, stop_reason tool_use, terminal_reason aborted_tools, no interrupt marker. Then the
+first prompt's lifecycle `cancelled` (47) although it had `started`, the message's `started` (48), a new system/init
+(49), the message replayed, and the model answers it (PINEAPPLE). The process was alive 2 s after the request and ran
+to its end (done file written); its completion arrived as task_updated completed + task_notification (203-204) and a
+turn the engine started itself (system/init 210, result 248). The move came within about 1 s of the request (in
+a-seeded-2 the request went 2.6 s after the tool_use frame, before the call's task_started at 3.6 s, and was still
+answered `delivering`: the engine waited for the call to become movable).
+Same in a-seeded-2 (45-48), a-seeded-3 (44-47), a-empty-1 (43-46), a-empty-2 (45-48): 5/5.
+
+(b) send_now behind a running foreground Agent call. u4p1-b-seeded-1: the Agent call (seq 35, run_in_background
+false) runs; its subagent's shell is live. Response (48) `delivering`; task_updated {is_backgrounded: true} for the
+agent's task (51); the Agent call's tool result (52) is the ordinary "Async agent launched successfully. ..." text
+(nothing says it was moved for a message); the message is replayed (53) and `started` (54) with no `result` between:
+the same turn, whose status frame lists both uuids (55). The first prompt's lifecycle is `completed` (114), not
+cancelled. The subagent's shell ran to its end (done file) and the agent's report arrived later. Same in b-seeded-2
+(51-54), b-empty-1 (52-55), b-empty-2 (51-54): 4/4.
+The first take, u4p1-b-asyncdefault-seeded-1, asked for "the Agent tool" without run_in_background: the engine launched
+it in the background at once (task_started is_backgrounded true, seq 40; tool result "Async agent launched
+successfully", 42) and the main loop went on to a model request. send_now then answered `stopped` (53): "[Request
+interrupted by user]" (55), result error_during_execution / aborted_streaming (59), the message as the next turn (61).
+The system prompt on 2.1.322 says "Subagents run in the background by default ... Pass `run_in_background: false` only
+when your very next action depends on the result" (cli.pretty.js:460511).
+
+(c) send_now while the model only writes. u4p1-c-seeded-1: response (127) `{still_queued: [...], send_now:
+"stopped"}`; the partial assistant message with `aborted: true` (129); user "[Request interrupted by user]" (130);
+result error_during_execution, is_error true, terminal_reason aborted_streaming (134); first prompt `cancelled` (135);
+the message `started` (136) as the next turn. c-seeded-2 the same (130, 134, 136): 2/2.
+c0 (MAWS's plain Stop, same situation), u4p1-c0-seeded-1: response (133) `{still_queued: [...]}` (no send_now key);
+aborted assistant message (135), "[Request interrupted by user]" (136), result error_during_execution /
+aborted_streaming (140), prompt `cancelled` (141), and the waiting `next` message `started` (142) as the next turn.
+Every frame from the response on has the same shape as in c (compared field by field, ids and timings aside).
+
+(d) send_now while a permission request is pending. u4p1-d-seeded-1 (permission mode default): can_use_tool for the
+shell call (33), held unanswered; response (41) `delivering`; control_cancel_request for it (43); the call's tool result
+(44) "Tool permission request aborted" (is_error); result (45) subtype success, terminal_reason aborted_tools,
+permission_denials naming the call; prompt `cancelled` (46); the message `started` (47). The model answered PINEAPPLE
+and asked for the same call again (a new can_use_tool, 125). d-seeded-2 the same (44-47; re-ask at 183): 2/2.
+
+(e) background_tasks. Shell, single request, u4p1-e-bash-seeded-1: the request (40) went 3.5 s after the tool_use frame
+and was answered `{backgrounded: false}` (41) before the call's task_started (43, +4.2 s). Nothing was moved: the
+heartbeat tool_progress (45), the command ran its 40 s in the foreground, its result "started ebash1\nfinished ebash1"
+(47), and only then the waiting message was replayed and `started` (48-49), in the same turn. e-bash-seeded-2 and
+e-bash-empty-1 the same (false, each before task_started): 3/3.
+Shell with the retry, u4p1-e-bash-retry-seeded-1: tries false (43, +2.8 s, before task_started at 44, +3.6 s) then true
+1 s later (48); task_updated {is_backgrounded: true} (47); the tool result (51) "Command was manually backgrounded by
+user with ID: ... Output is being written to: ... If it is still running after 30m in the background, it will be
+stopped ..."; the message replayed and `started` (52-53) with no `result` between (the turn's result comes at 319,
+prompt `completed` 321); the process survived to its end. e-bash-retry-seeded-2 (false at +3.7 s, true at +4.7 s;
+tool result 50, message started 52) and e-bash-retry-empty-1 (51, 53) the same: 3/3.
+Agent, u4p1-e-agent-seeded-1: `{backgrounded: true}` at once; task_updated is_backgrounded (87); tool result "Async agent
+launched successfully" (90); message `started` (92), same turn (result 110). e-agent-seeded-2 (131, 134, 136) and
+e-agent-empty-1 (52, 55, 57) the same: 3/3.
+
+(f) priority `now` during the shell command (no interrupt). u4p1-f-seeded-1: the message is `queued` (40); the call is
+moved (task_updated is_backgrounded 44) with the same tool result as (a) (45, "... so that a message that arrived while
+it was running can reach you ..."); result success / aborted_tools (46); prompt `cancelled` (47); message `started`
+(48); the process survived to its end. f-seeded-2 the same (42-45): 2/2.
+f-text (`now` while the model writes), u4p1-f-text-seeded-1: result (103) subtype success, is_error false,
+terminal_reason aborted_streaming, and no "[Request interrupted by user]" frame; prompt `cancelled` (104); message
+`started` (105). f-text-seeded-2 the same (157-159): 2/2.
+f-agent (`now` behind a foreground Agent call), u4p1-f-agent-seeded-1: the agent moved (task_updated 50), the message
+`started` (53) in the same turn (result 101): 1/1.
+
+(h) a plain interrupt after (a). u4p1-h-seeded-2: (a)'s frames (tool result "moved ..." 44, result success /
+aborted_tools 45, message `started` 47); the interrupt 2 s after the message started, during its model request:
+response `{still_queued: []}` (55); "[Request interrupted by user]" (57); result error_during_execution /
+aborted_streaming (61); the message's lifecycle `cancelled` (62). The moved process was alive 3 s after the Stop
+(uxw_alive, 63), ran to its end (task_updated completed 65, task_notification 66), and its completion started a turn of
+the engine's own (system/init 68, result 137) in which the model also answered the earlier message. u4p1-h-seeded-1 the
+same (stop answered `{still_queued: []}`, marker 56, result 57, message cancelled 58, process alive 3 s after, task
+completed 61-62): 2/2.
+
+(s0) MAWS's plain Stop during the shell command, a `next` message waiting. u4p1-s0-seeded-1: response (39)
+`{still_queued: [<the message>]}`; tool result (41) "The user doesn't want to proceed with this tool use. The tool use
+was rejected ..." with tool_result_meta non_execution_kind "user-rejected"; "[Request interrupted by user for tool use]"
+(42); result error_during_execution, is_error true, terminal_reason aborted_tools (43); prompt `cancelled` (44); the
+waiting message `started` (45) as the next turn. The process was dead 2 s after the Stop: 1/1.
+
+Telling the endings apart (observation, then inference).
+- Send now that moved a shell command (a), or a `now` frame that did (f): result subtype success, is_error false,
+  terminal_reason aborted_tools; no interrupt marker; the call's tool_use_result carries backgroundedToDeliverMessage
+  true (the text: "Command was moved to the background ... so that a message that arrived while it was running can
+  reach you"). A Stop during a shell command (s0): result error_during_execution, is_error true, aborted_tools, the
+  marker "[Request interrupted by user for tool use]", the call's non_execution_kind "user-rejected". These differ on
+  the wire.
+- Send now with nothing movable (c) and a Stop while writing (c0): identical from the response on (error_during_
+  execution, aborted_streaming, "[Request interrupted by user]"). Only the control response differs (`send_now:
+  "stopped"`), so the host's own record of having sent the request is the only tell, as the spec's fallback for (c)
+  says.
+- `now` while writing (f-text): success / aborted_streaming and no marker, which differs from a Stop.
+- In every case that ends a turn, the first prompt's command_lifecycle reads `cancelled` after `started`.
+Inference: MAWS today reads aborted_tools and aborted_streaming as the person's stop (src/services/sessions/digest.ts,
+around line 184), so without new code the (a) ending would read "You stopped". The host already knows it sent the
+send_now and got `delivering`, which covers (a), (c) and (d) alike; the wire features above are a second, independent
+check for (a) and (f).
+
+Where the engine differs from the spec's reading of the source.
+1. "Reads the message in the same turn" (the table's Send now cell, "How Send now reaches the engine", A3): true for a
+   foreground Agent call (b) and after background_tasks (e); false for a shell command under send_now (a) and under a
+   `now` frame (f), where a `result` (success / aborted_tools) comes first and the message is the next turn. The command
+   is still moved and still survives, so the design's intent holds; what changes is that MAWS sees a turn end it must
+   name ("Ended for your message" rather than "You stopped") in the `delivering` case too, not only in `stopped`.
+2. (d) answers `delivering`, not `stopped`, while the turn does end and the message runs next.
+3. background_tasks answers `{backgrounded: false}` for a shell command until the engine registers it as a task, about
+   3.6 to 4.5 s after the tool_use frame in these runs (the permission check and the spawn come first); a request after
+   the call's `system/task_started` frame succeeds. The spec's three seconds from the call's start falls before that
+   point, so the first request is usually refused and the retry does the work. A trigger on task_started for the
+   call's tool_use_id would move it at the first try.
+4. A Stop after a Send now does not stop the moved command for a MAWS session (h); the U4 sentence "when the person
+   presses Stop after a Send now, the engine also stops the command it had moved for that delivery (`notePersonsStop`
+   ...)" does not hold on this wire. The command runs on, and its completion starts a turn by itself.
+5. Charter §4.2's `now` sentence (measured on 2.1.283) no longer holds during a shell command or an Agent call: `now`
+   moves the call and keeps it alive (f, f-agent); only while the model writes does it end the turn (f-text), and then
+   as success / aborted_streaming.
+
+Bearing on other parts of the spec.
+- Subagents run in the background by default on 2.1.322 (b's first take; the system prompt's sentence), so "a running
+  subagent call" that a message waits behind is the rarer run_in_background: false case; the common case is the main
+  loop's own model request, where send_now answers `stopped` and cuts the reply (b-asyncdefault).
+- A moved shell command's completion starts a turn the engine runs by itself (a-seeded-1 system/init 210 with no user
+  uuid, result 248; h-seeded-2 68-137): a turn MAWS did not start, relevant to how U3 draws arrivals and to the "N
+  turns" bookkeeping.
+- After MAWS's plain Stop with `cancel_queued: false`, a waiting `next` message runs as the next turn (s0 45, c0 142);
+  MAWS's holdAll before the Stop is what keeps it held (session.ts interrupt()), unchanged.
+- The cut turn's prompt reads `cancelled` after `started` (every turn-ending case); MAWS must not read that as a message
+  that was never sent.
+- Haiku (claude-haiku-5-5) holds auto mode on 2.1.322 through the gateway (system/init permissionMode "auto", the
+  classifier's accept on every shell call); findings-pass2.md's "Haiku cannot hold auto mode" was 2.1.283.
+- Whether `now` can replace the two steps for an after-the-turn row (f's question): on the wire `now` does what send_now
+  does in every case measured (moves a shell or Agent call, ends the turn only when nothing can move), with a more
+  distinguishable ending while writing (f-text), but it returns no `delivering` / `stopped` answer and keeps the
+  ending of (a). Promoting at `now` therefore serves an after-the-turn row as well as promote-then-send_now; the choice
+  is the design's.
+
+Not provoked. A send_now that the engine answers `nothing_waiting` (the message already read) was not attempted.
+Background agents' moves were not timed against a three-second rule. No run on the direct route (it cannot
+authenticate on this VM).

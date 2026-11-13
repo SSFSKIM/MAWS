@@ -58,13 +58,19 @@ describe('lane A decisions', () => {
     expect(await decide({ ...permission, suggestions: [dirs] }, allow)).toEqual({ ok: true, body: { behavior: 'allow', updatedPermissions: [dirs] } });
   });
 
-  it('answers a question, declines a native one skipped or denied, and refuses either for an async one', async () => {
+  it('answers a question, declines a native one skipped or denied, and refuses either for an async one whose bridge declares no dismissal', async () => {
     expect(await decide(native, { kind: 'question', answers: { 'Which?': 'A' } })).toEqual({ ok: true, body: { behavior: 'allow', updatedInput: { answers: { 'Which?': 'A' } } } });
     expect(await decide(asyncQ, { kind: 'question', answers: { 'Which?': 'A' } })).toEqual({ ok: true, body: { behavior: 'allow', updatedInput: { answers: { 'Which?': 'A' } } } });
     expect(await decide(native, { kind: 'question', answers: {} })).toEqual({ ok: true, body: { behavior: 'deny' } });
     expect(await decide(native, { kind: 'permission', decision: 'deny' })).toEqual({ ok: true, body: { behavior: 'deny' } });
     expect(await decide(asyncQ, { kind: 'question', answers: {} })).toEqual({ ok: false, code: 'unsupported', message: 'an async question needs an answer' });
-    expect(await decide(asyncQ, { kind: 'permission', decision: 'deny' })).toEqual({ ok: false, code: 'unsupported', message: 'an async question is answered, never declined' });
+    expect(await decide(asyncQ, { kind: 'permission', decision: 'deny' })).toEqual({ ok: false, code: 'unsupported', message: 'dismiss it in the terminal' });
+  });
+
+  // U1a §G: the bridge's dismissal, built exactly, only where its status declares `decide.dismiss`
+  it('builds an asynchronous question’s dismissal as exactly {behavior: dismiss}', async () => {
+    const declared = { ...controls, 'decide.dismiss': { available: true } };
+    expect(await decisionFor({ current: asyncQ, held: asyncQ, answer: { kind: 'permission', decision: 'deny' }, controls: declared })).toEqual({ ok: true, body: { behavior: 'dismiss' } });
   });
 
   it('approves a plan, keeps planning with or without feedback, and refuses clear-and-implement', async () => {

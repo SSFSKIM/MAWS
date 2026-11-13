@@ -1,7 +1,8 @@
 import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ACTION_IDS, ACTIONS } from '@shared/keymap/actions';
+import { ACTION_IDS, ACTIONS, type ActionTable } from '@shared/keymap/actions';
+import { EXTENDED_TABLE, sample } from '@shared/keymap/sample-rows'; // U6a
 import { formatChord } from '@shared/keymap/chord';
 import { registerShellActions } from '../app/shell-actions';
 import { registerAction, runAction } from '../keymap/actions-runtime';
@@ -65,8 +66,9 @@ describe('command palette', () => {
   it('lists every action of the table with its chord, disabled ones greyed with what they wait for', async () => {
     await openAndType('');
     const actions = within(group('Actions')!).getAllByRole('option');
-    expect(actions).toHaveLength(ACTION_IDS.length);
-    for (const id of ACTION_IDS) {
+    const listed = ACTION_IDS.filter((id) => !(ACTIONS as ActionTable)[id].fixed); // U6a: an editor's own key is not an act to run
+    expect(actions).toHaveLength(listed.length);
+    for (const id of listed) {
       const option = actions.find((o) => o.dataset.value === `action:${id}`)!;
       expect(option, id).toBeTruthy();
       expect(option.textContent).toContain(ACTIONS[id].title);
@@ -76,6 +78,8 @@ describe('command palette', () => {
     expect(newSession.getAttribute('aria-disabled')).toBe('true');
     expect(newSession.textContent).toContain('Not available here');
     expect(actions.find((o) => o.dataset.value === 'action:composer.send')!.textContent).toContain('Keyboard only, in the composer');
+    // UX wave U1a (§D): a permission prompt's two allow keys wait for a focused request, as Enter and Esc do
+    for (const id of ['request.allowOnce', 'request.allowLasting']) expect(actions.find((o) => o.dataset.value === `action:${id}`)!.textContent, id).toContain('Keyboard only, in a focused request');
     expect(actions.find((o) => o.dataset.value === 'action:tab.close')!.getAttribute('aria-disabled')).toBe('false');
   });
 
@@ -257,7 +261,16 @@ describe('palette entries', () => {
     const found = paletteEntries('quota', { records, projects });
     expect(found.sessions).toEqual([]);
     expect(paletteEntries('MAWS', { records, projects }).projects.map((p) => p.name)).toEqual(['MAWS']);
-    expect(paletteEntries('', { records, projects }).actions).toEqual(ACTION_IDS);
+    expect(paletteEntries('', { records, projects }).actions).toEqual(ACTION_IDS.filter((id) => !(ACTIONS as ActionTable)[id].fixed));
+  });
+
+  // U6a (decision 7): a fixed row (a key its editor handles) is not an act the palette can run, so it is not listed
+  it('lists no fixed row, and every other row of a table extended with a sibling’s rows', () => {
+    const empty = { records: new Map(), projects: new Map() };
+    const actions = paletteEntries('', empty, EXTENDED_TABLE).actions;
+    expect(actions).not.toContain(sample('sample.fixed'));
+    expect(actions).toEqual(expect.arrayContaining([sample('sample.menu'), sample('sample.shared')]));
+    expect(paletteEntries('sample', empty, EXTENDED_TABLE).actions).toEqual([sample('sample.menu'), sample('sample.shared')]);
   });
 });
 

@@ -1,0 +1,160 @@
+UX wave U8, Probes and checks 1: what engine 2.1.322 reports when the agent changes folder (l5-code-14, UC-4)
+(docs/doperpowers/specs/2026-11-12-ux-wave/U8-card-column-working-folder.md, "Probes and checks", first entry; the
+contract UC-4 in docs/doperpowers/specs/2026-11-12-ux-wave-design.md; 2026-11-12)
+
+Question. When the agent changes folder, which signal says so, promptly and reliably, on each route: the wire (a
+session MAWS runs), the transcript file (all three routes), a CwdChanged hook callback, MAWS's own index? The six
+outcomes the spec names decide l5-code-14's second landing.
+
+Verdict, in the spec's terms.
+  Outcome 1 occurred: the transcript's rows show the main loop's folder promptly after every kind of move. The first
+  row written after the move (the tool's own result row) carries the new `cwd`, for EnterWorktree, ExitWorktree, a
+  shell `cd` into a second worktree made with `git worktree add`, and a `cd` into a subfolder; the same in the
+  terminal session. The one move the rows do not show is a `cd` outside the launch folder, and that is because the
+  engine undoes it at once ("Shell cwd was reset to <launch folder>"), so the rows are right. l5-code-14 can be built
+  as written, a shell's `cd` included, reading the newest main-loop row's `cwd`.
+  With one correction the item needs: the rows' `gitBranch` is not re-read after a shell `cd`. In the second worktree
+  (git: pz-beta) every row still says `master`, the launch checkout's branch, until the session ends; only EnterWorktree
+  and ExitWorktree update it. The spec already reads the card's branch from git at the working folder, which is right;
+  but its sentence "The record's branch label and the card agree, because both now come from where the agent is" does
+  not hold as long as the record's branch comes from the newest row (`upsertFromSummary`): after a `cd` the record
+  would keep `master`. The branch must come from git at the working folder for the record too, or the two disagree.
+  Outcome 3 did not occur as stated: a CwdChanged callback registered at initialize is never called on its own. It is
+  called (with old_cwd and new_cwd) only when a CwdChanged hook is also configured in settings, because the engine
+  checks the settings' and the main thread's hooks before firing and does not count SDK callbacks; and CwdChanged
+  never fires for EnterWorktree or ExitWorktree, only for a shell `cd`. Recorded, not used, as the spec says.
+  Outcome 4 occurred: the index already moves the record on a `relocated` row. EnterWorktree writes `relocated` and
+  `worktree-state` rows and the index's next summary re-files the record to the worktree (directory, worktree path and
+  branch); ExitWorktree writes them back and the record returns. A shell `cd` writes no `relocated` row, so the record
+  stays on the launch folder. So, as the outcome says, once the working folder exists the launch folder must stop
+  moving on EnterWorktree, and a test pins it.
+  Outcome 5 did not occur: no subagent's move appears in the main transcript. A subagent cannot call EnterWorktree (the
+  tool refuses), and a subagent launched with isolation "worktree" writes its rows, with its worktree as `cwd`, to its
+  own file under `<session>/subagents/`, `isSidechain: true`; the main file has no sidechain row at all.
+  Outcomes 2 and 6: not the case (1 holds).
+  Confidence: high for the sequence run (headless once, terminal once, plus three controls); each move was made once
+  per route, so a move that sometimes fails to write its row would not have been seen.
+
+Things the spec does not say, observed.
+  - The transcript file moves. On EnterWorktree the session file is moved to the worktree's own project folder
+    (`projects/<slug of the worktree path>/<id>.jsonl`, the whole history with it); on ExitWorktree it moves back. The
+    old folder is left empty. A reader that follows the file by path (the engine host's follower, the index's
+    discovery) sees the session's file vanish and reappear under another slug at every EnterWorktree/ExitWorktree; the
+    index handled it (same engine id, same record), but the follower's behaviour was not tested here.
+  - `relocated` rows are also re-stamped with the file's own project folder at other times (headless rows 140, 183,
+    213, terminal rows 137, 173, 207: `relocatedCwd` the launch folder while the main loop was in pz-beta/sub). So
+    `relocated` names where the file lives, not where the agent is; it must not be read as the working folder.
+  - Each turn's `system/init` frame carries the main loop's cwd at the turn's start (it is repeated every turn under
+    MAWS's launch), so a session MAWS runs has a wire signal too, one turn late at worst.
+  - A resumed session goes back to the worktree EnterWorktree left it in (resumed from the launch folder or from the
+    worktree: init cwd the worktree), but not to a folder a shell `cd` left it in (init cwd the launch folder, and the
+    rows with it). The rows are right in both cases.
+  - `vcs_state_changed` was never sent: none of the moves is a push, merge or rebase, the kinds it reports.
+  - EnterWorktree's result (wire `tool_use_result`, file `toolUseResult`): {worktreePath, worktreeBranch, message};
+    ExitWorktree's: {action, originalCwd, worktreePath, worktreeBranch, restoredCwd, originalCwdMissing, message}. The
+    spec cites the first's two fields; confirmed.
+
+Method. Engine 2.1.322 (/opt/maws-probe/engines/2.1.322), gateway route, model haiku (claude-haiku-5-5) for the main
+loop, subagents on the owner's subagent model (opus, claude-opus-5-5). The devcloud VM through vm-run.sh
+(spikes/protocol-probe/VM.md); a scratch HOME and a scratch git repository `work/` (seeded with one.txt, then sub/two.txt
+and `.gitignore: .claude/worktrees/`). Paths below: R is the scratch root (/tmp/pz-…).
+  Headless (scenarios/pass3/uxwave-folder.mjs): MAWS's launch (uxwave-common.mjs: launch.ts's flags and --settings,
+  buildEnvironment's constants, the owner's user settings incl. worktree.baseRef fresh, ui_attach and
+  set_max_thinking_tokens after initialize; full list in findings-uxwave-U2-thinking-text.txt), permission mode default,
+  every permission allowed, and `initialize.hooks = {CwdChanged: [{hookCallbackIds: ["pz_cwd_changed"]}]}`
+  (hooks_applied true). One turn per step; after each, a `step_record` note: the step's seq range, the wire's frames of
+  interest, the transcript rows the step added in every file of the session id (with each row's cwd, gitBranch,
+  isSidechain, agentId, and every relocated and worktree-state row), the project folders and `git worktree list`.
+  Steps: s0 start; s1 EnterWorktree name pz-alpha; s2 pwd there; s3 ExitWorktree keep; s3b pwd; s4 one Bash call
+  `git worktree add -q -b pz-beta .claude/worktrees/pz-beta && cd .claude/worktrees/pz-beta && pwd`; s4b pwd; s5 `cd sub
+  && pwd`; s5b pwd; s6 `git worktree add -q -b pz-gamma R/work-gamma && cd R/work-gamma && pwd` (a worktree outside the
+  launch folder); s6b pwd; s7 a general-purpose subagent asked to EnterWorktree pz-sub and pwd; s7b pwd; s8 a subagent
+  with isolation "worktree" asked to pwd; s8b pwd; then end_session, and a second launch `--resume <id>` from work/ with
+  s9 pwd. Fixtures uxwave-folder-headless.jsonl, uxwave-folder-headless-resume.jsonl.
+  Terminal (scenarios/pass3/uxwave-folder-terminal.mjs, through vm-run.sh `run`): the interactive engine under tmux as
+  `vm-run.sh term` starts it (`<engine> --model haiku`, cwd work/, TERM xterm-256color, the terminal's own setting
+  sources and entrypoint, auto mode as the owner's terminal sessions start), the owner's user settings in the scratch
+  HOME's settings.json; the prompts typed with tmux send-keys; steps s0 to s7b as above (no s8), then `/exit` and a new
+  engine `--resume <id>` for s9. No dialog appeared. Only the transcript is read: each `step_record` holds the rows added
+  and the pane's last lines. Fixture uxwave-folder-terminal.jsonl.
+  Controls (headless, MAWS's launch): uxwave-folder-control.mjs adds a settings command hook for CwdChanged (through the
+  launch's --settings object beside dialogExpiry; it appends its input to a log) to the callback, then c1 `cd` into a
+  worktree made beforehand, c2 `cd` back, c3 EnterWorktree pz-alpha, c4 pwd, ends the session inside the worktree and
+  resumes it twice, from work/ and from the worktree (fixtures uxwave-folder-control*.jsonl); uxwave-folder-resume-cd.mjs
+  ends a session after a `cd` into a second worktree and resumes it from work/ (fixtures uxwave-folder-resume-cd*.jsonl).
+  The index (the fourth reader): spikes/protocol-probe/uxwave-folder-index.test.ts, run on the VM with
+  `node_modules/.bin/vitest run --config spikes/protocol-probe/uxwave-folder-index.vitest.config.ts` (no app build): for
+  each step it cuts the session's final file to the step's row count at the path the step found it, runs MAWS's
+  `summarize` (src/engine-host/fs/summarize.ts, 64 KiB windows) and `Index.sessions.upsertFromSummary`
+  (src/services/index/sessions.ts) on one fresh index in step order, against the scratch repository on disk. Output
+  fixtures/pass3/uxwave/uxwave-folder-index-headless.json and -terminal.json.
+
+Observed, per step (headless; seq is the fixture's, rows are 0-based lines of the session file; terminal in brackets).
+  step  wire                                         hook cb  transcript rows                                index after the step
+  s0    init cwd R/work (seq 20)                     none     row 2 cwd R/work, gitBranch master             directory R/work, worktree null, branch master
+  s1    EnterWorktree result seq 84 {worktreePath    none     file moved to projects/-…-work--claude-        directory and worktree R/work/.claude/
+        R/work/.claude/worktrees/pz-alpha,                    worktrees-pz-alpha/; row 44 relocated          worktrees/pz-alpha, branch
+        worktreeBranch worktree-pz-alpha}                     relocatedCwd the worktree, row 45              worktree-pz-alpha
+                                                              worktree-state {worktreePath, worktreeBranch,
+                                                              originalCwd R/work,…}, row 48 (the result)
+                                                              cwd the worktree, gitBranch worktree-pz-alpha
+                                                              [terminal rows 48, 49, 52]
+  s2    init cwd the worktree (seq 139)              none     row 56 cwd the worktree                        as s1
+  s3    ExitWorktree result seq 207 {action keep,    none     file moved back to projects/-…-work/; row 82   directory R/work, worktree null, branch master
+        restoredCwd R/work,…}                                 relocated R/work, row 83 worktree-state null,
+                                                              row 86 cwd R/work master [87, 88, 91]
+  s3b   init cwd R/work (seq 225)                    none     row 100 cwd R/work                             as s3
+  s4    Bash result seq 289 stdout …/pz-beta         none     row 113 (the result) cwd R/work/.claude/       directory R/work, worktree null, branch master
+                                                              worktrees/pz-beta, gitBranch master [117]
+  s4b   init cwd …/pz-beta (seq 323); git prints     none     row 120 cwd …/pz-beta, gitBranch master [125]  as s4
+        branch pz-beta
+  s5    Bash result seq 399 stdout …/pz-beta/sub     none     row 134 cwd …/pz-beta/sub, master; rows 140,   as s4
+                                                              142 relocated R/work, worktree-state null
+                                                              (re-stamp) [142; 137, 141]
+  s5b   init cwd …/pz-beta/sub (seq 421)             none     row 146 cwd …/pz-beta/sub                      as s4
+  s6    Bash result seq 488 stdout R/work-gamma,     none     row 159 cwd R/work [161]                       as s4
+        stderr "Shell cwd was reset to R/work"
+  s6b   init cwd R/work (seq 522)                    none     row 166 cwd R/work                             as s4
+  s7    task_started seq 579 (backgrounded agent)    none     main rows cwd R/work; the subagent's file      as s4
+                                                              subagents/agent-a5931….jsonl: EnterWorktree
+                                                              refused: "EnterWorktree cannot create a
+                                                              worktree from a subagent with a cwd override
+                                                              (isolation: "worktree" or explicit cwd) — it
+                                                              would mutate the parent session's
+                                                              process-wide working directory. …"; its pwd
+                                                              R/work [same, agent-aa79….jsonl]
+  s8    task_started seq 674                         none     the subagent's file agent-aafc….jsonl row 0    as s4
+                                                              cwd R/work/.claude/worktrees/agent-aafc…,
+                                                              isSidechain true; main rows unchanged
+  s8b   init cwd R/work (seq 759)                    none     row 218 cwd R/work                             as s4
+  s9    resume: init cwd R/work (resume seq 21)      none     row 234 cwd R/work [224]                       as s4
+  Controls.
+    CwdChanged with a settings hook beside the callback (uxwave-folder-control.jsonl): c1 callback seq 61 and the
+    settings hook's log {old_cwd R/work, new_cwd R/work/.claude/worktrees/pz-beta}; c2 callback seq 159 {old …/pz-beta,
+    new R/work}; c3 EnterWorktree (seq 174-239): no callback, no log line; no system/hook_* frame for CwdChanged under
+    --include-hook-events. In the headless run (callback alone): no callback in 810 frames, three shell `cd`s.
+    Resume inside a worktree: from R/work, init cwd R/work/.claude/worktrees/pz-alpha (…-resume-from-launch-folder seq
+    21), the engine finding the file in the worktree's project folder; from the worktree, the same (…-from-worktree
+    seq 21); the rows go on with that cwd.
+    Resume after a `cd` (uxwave-folder-resume-cd*.jsonl): before the end the rows' cwd is …/pz-beta; after the resume
+    from R/work, init cwd R/work and the next pwd prints R/work, master.
+
+Inference, for the second landing.
+  - Signal: the newest main-loop row's `cwd` (isSidechain false; rows without `cwd` skipped) is prompt and correct for
+    every move on both routes recorded; it is what l5-code-14 asks. A session MAWS runs also has each turn's init
+    `cwd`. Neither `relocated` nor CwdChanged can replace it (the first names the file's folder and misses `cd`s; the
+    second misses the worktree tool and needs a settings hook).
+  - Branch: read it with git at the working folder; the row's gitBranch is stale after a `cd`. The record's branch
+    (today from the newest row) needs the same change or it disagrees with the card.
+  - The record moves on EnterWorktree today (outcome 4); after the second landing that move and the working folder
+    would say the same thing for the worktree tool, but for a `cd` only the working folder moves. Pin the launch
+    folder, as the outcome says.
+  - Subagents need no filtering in the main file (none of their rows is there), but a reader of `subagents/` must not
+    take an isolated agent's cwd for the session's.
+  - The worktree a `cd` reaches outside the launch folder is never reached (the engine resets it); UC-4's bound "a
+    registered worktree of the launch repository" is then about worktrees under the launch folder (or added
+    directories, not tried).
+
+Not tried. Added directories (`--add-dir`) and a `cd` into one; a worktree of another repository; a session on another
+machine (its own machine follows the same file); ExitWorktree with action remove; the engine host's follower across the
+file's move; repeated runs of each move.

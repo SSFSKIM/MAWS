@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { useEffect, useRef, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, tabId } from '@shared/ipc/schema/layout';
+import { LAYOUT_DEFAULTS, tabId } from '@shared/ipc/schema/layout';
 import { record } from '../../../../test/support/builders';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { at, TEST_MACHINE } from '../../../../test/support/machine';
@@ -219,7 +219,7 @@ describe('the floating card in the Shell', () => {
   it('with an artifact tab in front, the header’s Float is disabled with its reason and ⌥⌘B leaves main and its tab strip shown', async () => {
     installFakeMain(() => fail('not answered here'));
     const artifact = { id: tabId({ kind: 'artifact', artifactId: 'deck-1', machine: TEST_MACHINE }), kind: 'artifact', artifactId: 'deck-1', machine: TEST_MACHINE, pinned: false } as const;
-    useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [artifact], activeTabId: artifact.id }] } } } });
+    useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [artifact], activeTabId: artifact.id }] } });
     render(<Shell />);
     const header = region('panel').querySelector<HTMLElement>('[data-editor-header]')!;
     const float = within(header).getByRole('button', { name: FLOAT_COPY.noSession }) as HTMLButtonElement;
@@ -254,7 +254,7 @@ describe('the floating card in the Shell', () => {
   it('a drag of the divider past the maximum with an artifact tab in front floats nothing and keeps the drag’s start as its width', async () => {
     installFakeMain(() => fail('not answered here'));
     const artifact = { id: tabId({ kind: 'artifact', artifactId: 'deck-1', machine: TEST_MACHINE }), kind: 'artifact', artifactId: 'deck-1', machine: TEST_MACHINE, pinned: false } as const;
-    useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [artifact], activeTabId: artifact.id }] } } } });
+    useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [artifact], activeTabId: artifact.id }] } });
     render(<Shell />);
     const divider = within(region('panel')).getByRole('separator', { name: 'Resize right panel' });
     const max = Number(divider.getAttribute('aria-valuemax'));

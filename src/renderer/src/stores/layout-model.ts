@@ -1,70 +1,44 @@
 // The tab and pane model (C5 execution document, "Tab and pane transitions"; residue *Tab strip* and *Split*): pure
-// functions over the persisted `main.tabs` value, one per row of the transition table, so the table is testable
-// without a store. At most two panes (D-8). The Overview is not a tab (W5, §5.2 as amended 2026-10-01): it floats over
-// the main area, so the only pane may be empty. W12 (I3): one pane layout per project, a set (`main.sets`), the strip
-// showing the current one (`main.current`); a tab id exists at most once across every set, and the closed-tab history
-// is shared. A transition works on the current set unless it says otherwise; one that finds its tab in another set
-// works there.
-import type { AppSessionId, ProjectId } from '@shared/graph/ids';
-import { isAddress } from '@shared/machine/address';
+// functions over the strip, one per row of the transition table, so the table is testable without a store. At most two
+// panes (D-8). The Overview is not a tab (W5, §5.2 as amended 2026-10-01): it floats over the main area, so the only
+// pane may be empty. UX wave U13a (its section, "The strip"; it replaces W12's set per project): one strip for every tab
+// open in the window, from every project and machine; a tab id exists once in it, since ids are computed from what a
+// tab shows. `main.tabs` stores `storedMain` of it and is read back through `stripOf` (`@shared/ipc/schema/layout`).
+import type { AppSessionId } from '@shared/graph/ids';
 import { machineKey } from '@shared/machine/org-key';
 import type { MachineRef } from '@shared/machine/ref';
 import {
-  EMPTY_TAB_SET, NO_PROJECT, tabId, UNPINNABLE_KINDS, type LayoutMain, type LayoutMainV1, type PaneState, type ProjectKey, type TabRef, type TabSet, type TabSetKey,
-  type TabTarget,
+  EMPTY_TAB_SET, NO_PROJECT, tabId, UNPINNABLE_KINDS, type PaneState, type ProjectKey, type Strip, type TabRef, type TabSet, type TabSetKey, type TabTarget,
 } from '@shared/ipc/schema/layout';
 
 type Pane = 0 | 1;
 export type PaneTarget = Pane | 'focused' | 'other';
-// What a set's own transitions work on: its panes, with the shared closed-tab history.
-type View = TabSet & { closedTabs: TabRef[] };
-// Which set a tab belongs in: its session's project's, null for a tab of no session (it stays where it is opened).
-export type SetOfTab = (tab: TabRef) => TabSetKey | null;
+// What the transitions work on: the strip's panes, with its closed-tab history.
+type View = Strip;
 
 const CLOSED_MAX = 10;
 
 const toRef = (target: TabTarget): TabRef => ({ ...target, id: tabId(target), pinned: false }) as TabRef;
 
-// ---- the sets ----------------------------------------------------------------------------------------------------------
+// ---- the strip -------------------------------------------------------------------------------------------------------
 
-// The set the strip shows.
-export const currentSet = (main: LayoutMain): TabSet => main.sets[main.current] ?? EMPTY_TAB_SET;
+// The strip as a tab set (the name stays for its readers: its panes, focus, ratio and float).
+export const currentSet = (main: Strip): TabSet => main;
 
-const setKeys = (main: LayoutMain): TabSetKey[] => Object.keys(main.sets) as TabSetKey[];
-const isEmpty = (set: TabSet) => set.panes.every((p) => p.tabs.length === 0);
+// Every tab of the strip, both panes (usage, the viewer's pruning, a close guard's lookup).
+export const allTabs = (main: Strip): TabRef[] => main.panes.flatMap((p) => p.tabs);
 
-// Every tab of every set (usage, the viewer's pruning, a close guard's lookup).
-export const allTabs = (main: LayoutMain): TabRef[] => setKeys(main).flatMap((key) => main.sets[key]?.panes.flatMap((p) => p.tabs) ?? []);
+// Where tab `id` is: its pane and index.
+export const locateTab = (main: Strip, id: string): { pane: Pane; index: number } | null => locate(main, id);
 
-// Where tab `id` is: its set (the current one looked at first), pane and index.
-export function locateTab(main: LayoutMain, id: string): { set: TabSetKey; pane: Pane; index: number } | null {
-  for (const set of [main.current, ...setKeys(main).filter((k) => k !== main.current)]) {
-    const view = main.sets[set];
-    const at = view ? locate(view, id) : null;
-    if (at) return { set, ...at };
-  }
-  return null;
-}
+export const isOpen = (main: Strip, id: string): boolean => locateTab(main, id) !== null;
 
-export const isOpen = (main: LayoutMain, id: string): boolean => locateTab(main, id) !== null;
-
-// The current set always has an entry; any other set is kept only while it holds a tab.
-function tidy(main: LayoutMain): LayoutMain {
-  const empty = setKeys(main).filter((key) => key !== main.current && isEmpty(main.sets[key] ?? EMPTY_TAB_SET));
-  if (empty.length === 0 && main.sets[main.current]) return main;
-  const sets = { ...main.sets };
-  for (const key of empty) delete sets[key];
-  sets[main.current] ??= EMPTY_TAB_SET;
-  return { ...main, sets };
-}
-
-// Runs a set's own transition on set `key` (created empty when absent) and writes it back; an unchanged view leaves
-// `main` as it was, so nothing is persisted for a no-op.
-function onSet(main: LayoutMain, key: TabSetKey, fn: (view: View) => View): LayoutMain {
-  const before: View = { ...(main.sets[key] ?? EMPTY_TAB_SET), closedTabs: main.closedTabs };
-  const after = fn(before);
-  if (after === before) return main;
-  return tidy({ ...main, sets: { ...main.sets, [key]: keptFloat(before, asSet(after)) }, closedTabs: after.closedTabs });
+// Runs a transition over the strip and normalises its float; an unchanged view leaves `main` as it was, so nothing is
+// persisted for a no-op.
+function onStrip(main: Strip, fn: (view: View) => View): Strip {
+  const after = fn(main);
+  if (after === main) return main;
+  return { ...keptFloat(main, asSet(after)), closedTabs: after.closedTabs };
 }
 
 // P4-B3 (X37): a float belongs to the pane that collapsed. A transition that leaves its session tab active in the other
@@ -75,42 +49,23 @@ function keptFloat(before: TabSet, after: TabSet): TabSet {
   return was === null || now === null || was === now ? after : asSet({ ...after, floating: undefined });
 }
 
-// P4-B3 (X37; its Decision Log 6): the float is normalised rather than policed. Every set written back keeps `floating`
+// P4-B3 (X37; its Decision Log 6): the float is normalised rather than policed. The strip written back keeps `floating`
 // only while it names the active session tab of one of two panes, so every transition docks a float its change ended:
 // A's last tab closing (one pane, S full width), S's tab closing or changing (docked at the ratio, or A alone), the
-// session removed; `keptFloat` adds S's tab leaving its pane. A float in a set the strip does not show stays stored
-// with it.
+// session removed; `keptFloat` adds S's tab leaving its pane.
 const asSet = ({ panes, focusedPane, splitRatio, floating }: TabSet): TabSet => {
   const set: TabSet = { panes, focusedPane, splitRatio };
   if (!floating || floatingPane({ ...set, floating }) === null) return set;
   return { ...set, floating: floating.foldedPanel ? { sessionTabId: floating.sessionTabId, foldedPanel: true } : { sessionTabId: floating.sessionTabId } };
 };
 
-const onCurrent = (main: LayoutMain, fn: (view: View) => View): LayoutMain => onSet(main, main.current, fn);
-
-// The strip shows set `key` (a project clicked in the sidebar, an open of a tab another set holds or of another
-// project's session): created empty when it has none; the set it leaves goes if it is empty (W12: an emptied set stays
-// current, showing the empty pane, until the strip moves on).
-export function switchSet(main: LayoutMain, key: TabSetKey): LayoutMain {
-  if (key === main.current && main.sets[key]) return main;
-  return tidy({ ...main, current: key });
-}
-
-// Tab `at` leaves its set for set `to`, after the active tab of `to`'s focused pane, keeping its pin; neither the
-// strip nor the active tab of `to` changes (a pane it is the first tab of activates it).
-function moveToSet(main: LayoutMain, at: { set: TabSetKey; pane: Pane; index: number }, to: TabSetKey): LayoutMain {
-  const tab = paneAt(main.sets[at.set] as TabSet, at.pane).tabs[at.index];
-  const left = onSet(main, at.set, (v) => withPanes(v, v.panes.map((p, i) => (i === at.pane ? without(p, tab.id) : p)), v.focusedPane));
-  return onSet(left, to, (v) => place(v, tab, v.focusedPane, 'afterActive', false));
-}
-
-// ---- reading a set -----------------------------------------------------------------------------------------------------
+// ---- reading the strip -------------------------------------------------------------------------------------------------
 
 // The pane at an index the caller knows exists (the focused pane, or one `locate` found).
 const paneAt = (view: TabSet, pane: Pane): PaneState => view.panes[pane] as PaneState;
 
-// P4-B3 (X37): the pane that has yielded into the floating card: the one whose active tab is the set's floating session
-// tab, while the set has two panes; null while docked.
+// P4-B3 (X37): the pane that has yielded into the floating card: the one whose active tab is the strip's floating session
+// tab, while it has two panes; null while docked.
 export function floatingPane(set: TabSet): Pane | null {
   const id = set.floating?.sessionTabId;
   if (id === undefined || set.panes.length !== 2) return null;
@@ -124,10 +79,9 @@ export function paneShowsSession(set: TabSet, pane: Pane): boolean {
   return p?.tabs.some((t) => t.id === p.activeTabId && t.kind === 'session') ?? false;
 }
 
-// The active tab of the current set's focused pane: what the toolbar titles and the right panel follows.
-export function activeTab(main: LayoutMain): TabRef | null {
-  const set = currentSet(main);
-  const pane = set.panes[set.focusedPane] ?? set.panes[0];
+// The active tab of the strip's focused pane: what the toolbar titles and the right panel follows.
+export function activeTab(main: Strip): TabRef | null {
+  const pane = main.panes[main.focusedPane] ?? main.panes[0];
   return pane.tabs.find((t) => t.id === pane.activeTabId) ?? null;
 }
 
@@ -190,17 +144,18 @@ const paneOf = (view: TabSet, target: PaneTarget): Pane => {
 };
 
 // Places a tab (not open anywhere) into a pane, creating pane 1 when asked for and absent. An empty only pane is never
-// split: the tab goes into it (pane 0 is never left empty beside pane 1).
+// split: the tab goes into it (pane 0 is never left empty beside pane 1). Activated, the tab's pane takes the focus; in
+// the background (U13a, §B) the focus stays where it was.
 function place(view: View, tab: TabRef, pane: Pane, index: number | 'afterActive', activate: boolean): View {
   const panes = [...view.panes] as PaneState[];
   if (pane === 1 && panes.length === 1 && panes[0].tabs.length === 0) return place(view, tab, 0, index, activate);
   if (pane === 1 && panes.length === 1) {
-    return { ...view, panes: [panes[0], { tabs: [tab], activeTabId: tab.id }], focusedPane: 1, splitRatio: 0.5 };
+    return { ...view, panes: [panes[0], { tabs: [tab], activeTabId: tab.id }], focusedPane: activate ? 1 : view.focusedPane, splitRatio: 0.5 };
   }
   const target = panes[pane];
   const at = index === 'afterActive' ? target.tabs.findIndex((t) => t.id === target.activeTabId) + 1 : index;
   panes[pane] = insertAt(target, tab, at, activate);
-  return { ...view, panes: panes as TabSet['panes'], focusedPane: pane };
+  return { ...view, panes: panes as TabSet['panes'], focusedPane: activate ? pane : view.focusedPane };
 }
 
 function replaceTab(view: View, pane: Pane, index: number, tab: TabRef): View {
@@ -231,7 +186,7 @@ function openIn(view: View, target: TabTarget, pane: PaneTarget, activate: boole
         : target.kind === 'file' && open.kind === 'file'
           ? replaceTab(view, found.pane, found.index, { ...open, line: target.line, appSessionId: target.appSessionId })
           : view;
-    return activate ? activateIn(updated, tabId(target)) : { ...updated, focusedPane: found.pane };
+    return activate ? activateIn(updated, tabId(target)) : updated;
   }
   return place(view, toRef(target), paneOf(view, pane), 'afterActive', activate);
 }
@@ -269,16 +224,11 @@ function moveIn(view: View, id: string, toPane: Pane, index: number): View {
 
 // ---- transitions -------------------------------------------------------------------------------------------------------
 
-// `set` is where a tab of a session goes (the store passes its session's project's set): a tab not open anywhere opens
-// there, the strip moving to it when the tab is activated; a tab open in another set moves there. A tab of no session
-// (Settings, Diagnostics, a file opened from no session) belongs to the current set: open in another one, it moves to
-// the current set (W12: a singleton follows the strip). Without `set`, a session's tab stays in the set that has it.
-export function openTab(main: LayoutMain, target: TabTarget, opts: { pane?: PaneTarget; activate?: boolean; set?: TabSetKey } = {}): LayoutMain {
-  const activate = opts.activate ?? true;
-  const found = locateTab(main, tabId(target));
-  const to = sessionOfTab(target) === null ? main.current : (opts.set ?? found?.set ?? main.current);
-  const moved = found && found.set !== to ? moveToSet(main, found, to) : main;
-  return onSet(activate ? switchSet(moved, to) : moved, to, (v) => openIn(v, target, opts.pane ?? 'focused', activate));
+// Brings an open tab to the front, or adds it after the tab in front of the pane asked for. With `activate: false`
+// (U13a, §B) no pane's focus and no pane's active tab changes: an open tab takes only its kind's update, and a new one
+// is active only in a pane that was empty.
+export function openTab(main: Strip, target: TabTarget, opts: { pane?: PaneTarget; activate?: boolean } = {}): Strip {
+  return onStrip(main, (v) => openIn(v, target, opts.pane ?? 'focused', opts.activate ?? true));
 }
 
 // How a session opens (I2, §5.2 as amended 2026-10-01): by default it takes the place of the focused pane's session
@@ -289,14 +239,10 @@ export interface OpenSessionOptions {
   how?: 'replace' | 'tab';
 }
 
-// `set`: the session's project's set (I3), which the strip moves to first.
-export function openSession(main: LayoutMain, appSessionId: AppSessionId, opts: OpenSessionOptions & { set?: TabSetKey } = {}): LayoutMain {
+export function openSession(main: Strip, appSessionId: AppSessionId, opts: OpenSessionOptions = {}): Strip {
   const target: TabTarget = { kind: 'session', appSessionId };
-  if (!opts.split) return opts.how === 'tab' ? openTab(main, target, { set: opts.set }) : replaceActive(main, appSessionId, opts.set);
-  const found = locateTab(main, tabId(target));
-  const to = opts.set ?? found?.set ?? main.current;
-  const shown = switchSet(found && found.set !== to ? moveToSet(main, found, to) : main, to);
-  return onSet(shown, to, (v) => {
+  if (!opts.split) return opts.how === 'tab' ? openTab(main, target) : replaceActive(main, appSessionId);
+  return onStrip(main, (v) => {
     const at = locate(v, tabId(target));
     const other = paneOf(v, 'other');
     if (!at) return openIn(v, target, other, true);
@@ -306,20 +252,18 @@ export function openSession(main: LayoutMain, appSessionId: AppSessionId, opts: 
   });
 }
 
-// I2: a session opened from the sidebar, the Overview or the palette replaces what the focused pane shows. Open anywhere,
-// it is activated, the strip moving to its set; otherwise the strip moves to `set` (I3: the session's project's) and an
-// unpinned tab active in its focused pane, of any kind (E11 F2b, plan 2.5; owner decision 2), gives its place to it
-// under the session's own tab id, the old ref joining the closed-tab history for ⌘⇧T; a pinned tab or an empty pane is
-// left alone and the session opens after it. A tab whose work replacing it would lose (an unsaved file, a launch in
-// flight, a blank unstarted chat) is the store's to keep out of this (it asks for a tab of its own).
-export function replaceActive(main: LayoutMain, appSessionId: AppSessionId, set?: TabSetKey): LayoutMain {
+// I2: a session opened from the sidebar, the Overview or the palette replaces what the focused pane shows. Open already,
+// it is activated; otherwise an unpinned tab active in the focused pane, of any kind (E11 F2b, plan 2.5; owner decision
+// 2), whatever project or machine it is of, gives its place to it under the session's own tab id, the old ref joining
+// the closed-tab history for ⌘⇧T; a pinned tab or an empty pane is left alone and the session opens after it. A tab
+// whose work replacing it would lose (an unsaved file, a launch in flight, a blank unstarted chat) is the store's to
+// keep out of this (it asks for a tab of its own).
+export function replaceActive(main: Strip, appSessionId: AppSessionId): Strip {
   const target: TabTarget = { kind: 'session', appSessionId };
-  if (isOpen(main, tabId(target))) return openTab(main, target, { set });
-  const to = set ?? main.current;
-  const shown = switchSet(main, to);
-  const old = activeTab(shown);
-  if (old === null || old.pinned) return openTab(shown, target, { set });
-  return onSet(shown, to, (v) => {
+  if (isOpen(main, tabId(target))) return openTab(main, target);
+  const old = activeTab(main);
+  if (old === null || old.pinned) return openTab(main, target);
+  return onStrip(main, (v) => {
     const at = locate(v, old.id) as { pane: Pane; index: number };
     const tab = toRef(target);
     const panes = [...v.panes] as PaneState[];
@@ -329,12 +273,12 @@ export function replaceActive(main: LayoutMain, appSessionId: AppSessionId, set?
 }
 
 // cua #90: tab `id` shows `target` from now on, in its place, with its pin and its being active (an options tab main
-// replaced with a page: the tab it showed is gone, so nothing joins the closed-tab history); the strip and the focus stay.
-// A tab not open, or a target open already (an id lives once), leaves the layout as it was.
-export function retargetTab(main: LayoutMain, id: string, target: TabTarget): LayoutMain {
+// replaced with a page: the tab it showed is gone, so nothing joins the closed-tab history); the focus stays. A tab not
+// open, or a target open already (an id lives once), leaves the strip as it was.
+export function retargetTab(main: Strip, id: string, target: TabTarget): Strip {
   const found = locateTab(main, id);
   if (!found || isOpen(main, tabId(target))) return main;
-  return onSet(main, found.set, (v) => {
+  return onStrip(main, (v) => {
     const pane = paneAt(v, found.pane);
     const tab = { ...toRef(target), pinned: pane.tabs[found.index].pinned } as TabRef;
     const retargeted = replaceTab(v, found.pane, found.index, tab);
@@ -345,32 +289,22 @@ export function retargetTab(main: LayoutMain, id: string, target: TabTarget): La
   });
 }
 
-// Activates tab `id` wherever it is, the strip moving to its set.
-export function activateTab(main: LayoutMain, id: string): LayoutMain {
-  const found = locateTab(main, id);
-  return found ? onSet(switchSet(main, found.set), found.set, (v) => activateIn(v, id)) : main;
-}
+export const activateTab = (main: Strip, id: string): Strip => onStrip(main, (v) => activateIn(v, id));
 
-export function focusPane(main: LayoutMain, pane: Pane): LayoutMain {
-  return onCurrent(main, (v) => (pane < v.panes.length && pane !== v.focusedPane ? { ...v, focusedPane: pane } : v));
+export function focusPane(main: Strip, pane: Pane): Strip {
+  return onStrip(main, (v) => (pane < v.panes.length && pane !== v.focusedPane ? { ...v, focusedPane: pane } : v));
 }
 
 // `remember: false` (P4-B3, its Decision Log 32): a move is not a close, so the tab leaves no ⌘⇧T entry.
 export interface CloseOptions {
   remember?: boolean;
 }
-export function closeTab(main: LayoutMain, id: string, opts: CloseOptions = {}): LayoutMain {
-  const found = locateTab(main, id);
-  return found ? onSet(main, found.set, (v) => closeIn(v, id, opts.remember ?? true)) : main;
-}
+export const closeTab = (main: Strip, id: string, opts: CloseOptions = {}): Strip => onStrip(main, (v) => closeIn(v, id, opts.remember ?? true));
 
-// Within the current set (the strips show only it).
-export function moveTab(main: LayoutMain, id: string, toPane: Pane, index: number): LayoutMain {
-  return onCurrent(main, (v) => moveIn(v, id, toPane, index));
-}
+export const moveTab = (main: Strip, id: string, toPane: Pane, index: number): Strip => onStrip(main, (v) => moveIn(v, id, toPane, index));
 
-export function splitWithActive(main: LayoutMain): LayoutMain {
-  return onCurrent(main, (v) => {
+export function splitWithActive(main: Strip): Strip {
+  return onStrip(main, (v) => {
     const pane = paneAt(v, v.focusedPane);
     if (v.panes.length === 1 && pane.tabs.length < 2) return v;
     const to: Pane = v.panes.length === 2 ? ((1 - v.focusedPane) as Pane) : 1;
@@ -378,15 +312,15 @@ export function splitWithActive(main: LayoutMain): LayoutMain {
   });
 }
 
-export function selectTab(main: LayoutMain, n: number): LayoutMain {
-  return onCurrent(main, (v) => {
+export function selectTab(main: Strip, n: number): Strip {
+  return onStrip(main, (v) => {
     const tab = paneAt(v, v.focusedPane).tabs[n - 1];
     return tab ? activateIn(v, tab.id) : v;
   });
 }
 
-export function cycleTab(main: LayoutMain, delta: 1 | -1): LayoutMain {
-  return onCurrent(main, (v) => {
+export function cycleTab(main: Strip, delta: 1 | -1): Strip {
+  return onStrip(main, (v) => {
     const { tabs, activeTabId } = paneAt(v, v.focusedPane);
     if (tabs.length === 0) return v;
     const at = tabs.findIndex((t) => t.id === activeTabId);
@@ -394,21 +328,19 @@ export function cycleTab(main: LayoutMain, delta: 1 | -1): LayoutMain {
   });
 }
 
-// `at` is where the tab stood when it was closed, when the store remembers it; otherwise it opens like any tab. `set`
-// is where it goes (its session's project's; the current set for a tab of no session).
-export function reopenClosed(main: LayoutMain, at: number | null, set?: TabSetKey): LayoutMain {
+// `at` is where the tab stood when it was closed, when the store remembers it; otherwise it opens like any tab.
+export function reopenClosed(main: Strip, at: number | null): Strip {
   const tab = main.closedTabs.at(-1);
   if (!tab) return main;
   const rest = { ...main, closedTabs: main.closedTabs.slice(0, -1) };
   if (isOpen(rest, tab.id)) return activateTab(rest, tab.id);
-  const to = set ?? main.current;
-  return onSet(switchSet(rest, to), to, (v) => place(v, tab, v.focusedPane, at ?? 'afterActive', true));
+  return onStrip(rest, (v) => place(v, tab, v.focusedPane, at ?? 'afterActive', true));
 }
 
-export function togglePinned(main: LayoutMain, id: string): LayoutMain {
+export function togglePinned(main: Strip, id: string): Strip {
   const found = locateTab(main, id);
   if (!found) return main;
-  return onSet(main, found.set, (v) => {
+  return onStrip(main, (v) => {
     if (UNPINNABLE_KINDS.has(paneAt(v, found.pane).tabs[found.index].kind)) return v;
     const panes = [...v.panes] as PaneState[];
     const pane = panes[found.pane];
@@ -419,115 +351,79 @@ export function togglePinned(main: LayoutMain, id: string): LayoutMain {
 
 const belongsTo = (tab: TabRef, appSessionId: AppSessionId) => (tab.kind === 'session' || tab.kind === 'agent') && tab.appSessionId === appSessionId;
 
-// `session.removed`: the session's session and agent tabs close, in every set, without a closed-tab entry; it cannot be
-// reopened.
-export function dropSession(main: LayoutMain, appSessionId: AppSessionId): LayoutMain {
-  let next = main;
-  for (const key of setKeys(main)) {
-    next = onSet(next, key, (v) => {
-      const gone = v.panes.flatMap((p) => p.tabs).filter((t) => belongsTo(t, appSessionId));
-      if (gone.length === 0) return v;
-      return withPanes(v, v.panes.map((p) => gone.reduce((pane, t) => without(pane, t.id), p)), v.focusedPane);
-    });
-  }
+// `session.removed`: the session's session and agent tabs close without a closed-tab entry; it cannot be reopened.
+export function dropSession(main: Strip, appSessionId: AppSessionId): Strip {
+  const next = onStrip(main, (v) => {
+    const gone = v.panes.flatMap((p) => p.tabs).filter((t) => belongsTo(t, appSessionId));
+    if (gone.length === 0) return v;
+    return withPanes(v, v.panes.map((p) => gone.reduce((pane, t) => without(pane, t.id), p)), v.focusedPane);
+  });
   const closedTabs = next.closedTabs.filter((t) => !belongsTo(t, appSessionId));
   return closedTabs.length === next.closedTabs.length ? next : { ...next, closedTabs };
 }
 
 // P4-B3 (its Decision Log 3): the pixel floors are the divider's and the render's (`main/split.ts`), so the model only
 // keeps the ratio sane.
-export function setSplitRatio(main: LayoutMain, ratio: number): LayoutMain {
+export function setSplitRatio(main: Strip, ratio: number): Strip {
   const splitRatio = Number.isFinite(ratio) ? Math.min(0.99, Math.max(0.01, ratio)) : 0.5;
-  return onCurrent(main, (v) => ({ ...v, splitRatio }));
+  return onStrip(main, (v) => ({ ...v, splitRatio }));
 }
 
-// P4-B3 (X37; its Decision Log 1, 2, 4): the current set's pane showing session tab `sessionTabId` yields into the
-// floating card; `splitRatio` is left as it was, so Dock returns the ratio at pointer-down. Nothing changes unless the
-// set is a split with that session tab active in a pane. P4-B3x: `foldedPanel` marks the float as Expand's with the
-// right panel folded by it (the layout store folds the panel in the same change).
-export function floatSplit(main: LayoutMain, sessionTabId: string, opts: { foldedPanel?: boolean } = {}): LayoutMain {
-  return onCurrent(main, (v) => {
+// P4-B3 (X37; its Decision Log 1, 2, 4): the strip's pane showing session tab `sessionTabId` yields into the floating
+// card; `splitRatio` is left as it was, so Dock returns the ratio at pointer-down. Nothing changes unless the strip is a
+// split with that session tab active in a pane. P4-B3x: `foldedPanel` marks the float as Expand's with the right panel
+// folded by it (the layout store folds the panel in the same change).
+export function floatSplit(main: Strip, sessionTabId: string, opts: { foldedPanel?: boolean } = {}): Strip {
+  return onStrip(main, (v) => {
     if (v.floating?.sessionTabId === sessionTabId) return v;
     const next: View = { ...v, floating: opts.foldedPanel ? { sessionTabId, foldedPanel: true } : { sessionTabId } };
     return floatingPane(next) === null ? v : next;
   });
 }
 
-// P4-B3x (P4 Decision Log 40): the float whose Expand folded the right panel, and its set; null when no fold stands.
-// The store keeps at most one: a fold is made only over an open panel and dropped whenever the panel opens.
-export function foldOf(main: LayoutMain): { set: TabSetKey; sessionTabId: string } | null {
-  for (const key of setKeys(main)) {
-    const floating = main.sets[key]?.floating;
-    if (floating?.foldedPanel) return { set: key, sessionTabId: floating.sessionTabId };
-  }
-  return null;
+// P4-B3x (P4 Decision Log 40): the float whose Expand folded the right panel; null when no fold stands. A fold is made
+// only over an open panel and dropped whenever the panel opens.
+export function foldOf(main: Strip): { sessionTabId: string } | null {
+  return main.floating?.foldedPanel ? { sessionTabId: main.floating.sessionTabId } : null;
 }
 
 // Whether the fold standing in `before` ended with its float in `after` (a dock, Restore split, or any transition that
 // ended the float), rather than by the mark being dropped while the float stays.
-export function foldEnded(before: LayoutMain, after: LayoutMain): boolean {
+export function foldEnded(before: Strip, after: Strip): boolean {
   const fold = foldOf(before);
-  return fold !== null && after.sets[fold.set]?.floating?.sessionTabId !== fold.sessionTabId;
+  return fold !== null && after.floating?.sessionTabId !== fold.sessionTabId;
 }
 
-// Every fold mark dropped, the floats kept (the owner opened the panel: leaving Expand then leaves it as they set it);
+// The fold mark dropped, the float kept (the owner opened the panel: leaving Expand then leaves it as they set it);
 // `main` itself when none stands.
-export function unfold(main: LayoutMain): LayoutMain {
+export function unfold(main: Strip): Strip {
   const fold = foldOf(main);
-  if (fold === null) return main;
-  const set = main.sets[fold.set] as TabSet;
-  return unfold({ ...main, sets: { ...main.sets, [fold.set]: { ...set, floating: { sessionTabId: fold.sessionTabId } } } });
+  return fold === null ? main : { ...main, floating: { sessionTabId: fold.sessionTabId } };
 }
 
 // The floating pane comes back beside the other at the stored ratio; `floating` goes from the value.
-export function dockSplit(main: LayoutMain): LayoutMain {
-  return onCurrent(main, (v) => (v.floating ? { ...v, floating: undefined } : v));
+export function dockSplit(main: Strip): Strip {
+  return onStrip(main, (v) => (v.floating ? { ...v, floating: undefined } : v));
 }
 
-// W12: a tab whose session's project changed (a New chat given its project, a record refolded into another project)
-// moves to that project's set, after the active tab of its focused pane; when it is what the strip shows, the strip
-// follows it. Nothing moves, nothing changes. P5 O6 M5: nothing leaves a set still keyed from before M5 whose key
-// `rekeyOf` cannot answer yet; that set migrates whole (`rekeySets`), its panes and ratio with it.
 // P5 O6 M2 (M6's scene): each session tab takes its session's title where `titleOf` knows one that differs from the
 // title the tab holds; a session it does not know keeps the title its tab last knew. Nothing differs: `main` itself.
-export function titleTabs(main: LayoutMain, titleOf: (appSessionId: AppSessionId) => string | undefined): LayoutMain {
-  let sets: LayoutMain['sets'] | null = null;
-  for (const key of setKeys(main)) {
-    const set = main.sets[key];
-    if (!set) continue;
-    let changed = false;
-    const panes = set.panes.map((pane) => {
-      let paneChanged = false;
-      const tabs = pane.tabs.map((tab) => {
-        if (tab.kind !== 'session') return tab;
-        const title = titleOf(tab.appSessionId);
-        if (title === undefined || title === tab.title) return tab;
-        paneChanged = true;
-        return { ...tab, title };
-      });
-      if (!paneChanged) return pane;
-      changed = true;
-      return { ...pane, tabs };
-    }) as TabSet['panes'];
-    if (!changed) continue;
-    sets ??= { ...main.sets };
-    sets[key] = { ...set, panes };
-  }
-  return sets === null ? main : { ...main, sets };
-}
-
-export function refile(main: LayoutMain, setOf: SetOfTab, rekeyOf?: RekeyOf): LayoutMain {
-  const waiting = (key: TabSetKey) => rekeyOf !== undefined && isProjectAddress(key) && rekeyOf(key) === 'wait';
-  let next = main;
-  for (const tab of allTabs(main)) {
-    const to = setOf(tab);
-    const at = locateTab(next, tab.id);
-    if (to === null || !at || at.set === to || waiting(at.set)) continue;
-    const shown = at.set === next.current && activeTab(next)?.id === tab.id;
-    next = moveToSet(next, at, to);
-    if (shown) next = activateTab(next, tab.id);
-  }
-  return next;
+export function titleTabs(main: Strip, titleOf: (appSessionId: AppSessionId) => string | undefined): Strip {
+  let changed = false;
+  const panes = main.panes.map((pane) => {
+    let paneChanged = false;
+    const tabs = pane.tabs.map((tab) => {
+      if (tab.kind !== 'session') return tab;
+      const title = titleOf(tab.appSessionId);
+      if (title === undefined || title === tab.title) return tab;
+      paneChanged = true;
+      return { ...tab, title };
+    });
+    if (!paneChanged) return pane;
+    changed = true;
+    return { ...pane, tabs };
+  }) as TabSet['panes'];
+  return changed ? { ...main, panes } : main;
 }
 
 // ---- P5 O6 M5: project keys to org keys --------------------------------------------------------------------------------
@@ -544,84 +440,8 @@ export function refile(main: LayoutMain, setOf: SetOfTab, rekeyOf?: RekeyOf): La
 // stays, as a hidden project's set does.
 export type RekeyOf = (key: TabSetKey) => TabSetKey | 'gone' | 'wait';
 
-const isProjectAddress = (key: string): key is ProjectId => key !== NO_PROJECT && isAddress(key);
 // The keys `RekeyOf` is asked of: a project's address, an org project's key; never a machine's row or the no-project set.
 const isRekeyable = (key: string): key is TabSetKey => key !== NO_PROJECT && !key.startsWith('machine:');
-
-// Whole sets move, not tabs one by one (W12's `refile` moves session tabs only, which would strand a set's file and
-// artifact tabs under a key nothing shows). Sets landing on one key merge: the base is the one that was current, else
-// the first in key order, whose panes, focus, ratio and float stand; every other's tabs, pane by pane, follow in the
-// base's focused pane, with no tab twice. A gone project's session tabs go where `setOf` files them and the rest to the
-// no-project set. `current` follows its set. `bases` names, per key that took sets in, the set it took its panes from
-// (`rekeyContexts`). Nothing to migrate: `main` itself.
-export function rekeySets(main: LayoutMain, rekeyOf: RekeyOf, setOf: SetOfTab): { main: LayoutMain; bases: ReadonlyMap<TabSetKey, TabSetKey> } {
-  const keys = setKeys(main);
-  const target = new Map<TabSetKey, TabSetKey | 'gone'>();
-  for (const key of keys) {
-    if (!isRekeyable(key)) continue;
-    const to = rekeyOf(key);
-    if (to !== 'wait' && to !== key) target.set(key, to);
-  }
-  const bases = new Map<TabSetKey, TabSetKey>();
-  if (target.size === 0) return { main, bases };
-  // each key's sources, in key order (sorted, not as stored): the sets that stay where they are, and those that move onto it
-  const sources = new Map<TabSetKey, TabSetKey[]>();
-  for (const key of keys) {
-    const to = target.get(key) ?? key;
-    if (to !== 'gone') sources.set(to, [...(sources.get(to) ?? []), key].sort());
-  }
-  const sets: LayoutMain['sets'] = {};
-  let current = main.current;
-  for (const [to, from] of sources) {
-    const base = from.includes(main.current) ? main.current : from[0];
-    if (from.length > 1 || base !== to) bases.set(to, base);
-    if (from.includes(main.current)) current = to;
-    const baseSet = main.sets[base] as TabSet;
-    const others = from.filter((key) => key !== base).flatMap((key) => main.sets[key]?.panes.flatMap((p) => p.tabs) ?? []);
-    if (others.length === 0) {
-      sets[to] = baseSet;
-      continue;
-    }
-    const seen = new Set(baseSet.panes.flatMap((p) => p.tabs.map((t) => t.id)));
-    const focused = paneAt(baseSet, baseSet.focusedPane);
-    const appended = others.filter((t) => !seen.has(t.id) && seen.add(t.id));
-    const panes = baseSet.panes.map((p, i) => (i === baseSet.focusedPane ? { tabs: [...focused.tabs, ...appended], activeTabId: focused.activeTabId || (appended[0]?.id ?? '') } : p));
-    sets[to] = asSet({ ...baseSet, panes: panes as TabSet['panes'] });
-  }
-  let next: LayoutMain = { ...main, current, sets };
-  // a gone project's tabs, re-homed in their order (each after the one before it); the strip follows its shown tab
-  for (const key of keys) {
-    if (target.get(key) !== 'gone') continue;
-    const gone = main.sets[key] as TabSet;
-    const shown = paneAt(gone, gone.focusedPane).activeTabId;
-    const after = new Map<TabSetKey, number>(); // per home, where its next re-homed tab goes
-    for (const tab of gone.panes.flatMap((p) => p.tabs)) {
-      const home = setOf(tab) ?? NO_PROJECT;
-      const into = next.sets[home] ?? EMPTY_TAB_SET;
-      const placed = place({ ...into, closedTabs: [] }, tab, into.focusedPane, after.get(home) ?? 'afterActive', false);
-      after.set(home, paneAt(placed, into.focusedPane).tabs.findIndex((t) => t.id === tab.id) + 1);
-      next = { ...next, sets: { ...next.sets, [home]: asSet(placed) } };
-      if (main.current === key && tab.id === shown) current = home;
-    }
-    if (main.current === key && current === key) current = NO_PROJECT;
-  }
-  return { main: tidy({ ...next, current }), bases };
-}
-
-// `panelTools.surfaces.contexts` (keyed by tab set) by the same map: an address entry moves to its key, a merge keeping
-// the base set's entry (`rekeySets`' `bases`), even over one the key already held, else the first; a gone one goes; a
-// waiting one stays.
-export function rekeyContexts<V>(contexts: Readonly<Record<string, V>>, rekeyOf: RekeyOf, bases: ReadonlyMap<TabSetKey, TabSetKey>): Record<string, V> {
-  const out: Record<string, V> = {};
-  for (const [key, value] of Object.entries(contexts)) {
-    const to = isRekeyable(key) ? rekeyOf(key) : key;
-    if (to === 'gone') continue;
-    const at = to === 'wait' ? key : to;
-    if (Object.hasOwn(out, at) && bases.get(at as TabSetKey) !== key) continue; // the base's, or the first, stands
-    out[at] = value;
-  }
-  return out;
-}
 
 // `regions.sidebar.expandedProjects`: an address entry to its org key, each once; one gone is dropped (an expanded
 // state costs nothing to lose); a waiting one stays; `'other'` ("Other sessions") is this machine's own row now.
@@ -635,42 +455,15 @@ export function rekeyExpanded(list: readonly ProjectKey[], rekeyOf: RekeyOf, loc
   return out;
 }
 
-// Hydration: a session or agent tab whose record no longer exists is dropped silently, a tab id exists once across
-// every set (the current set's copy kept), pinned tabs precede the rest, every pane's active tab is one of its tabs, a
-// set left with nothing goes unless it is the current one, which falls back to one empty pane.
-export function repairMain(main: LayoutMain, known: (appSessionId: AppSessionId) => boolean): LayoutMain {
+// Hydration: a session or agent tab whose record no longer exists is dropped silently, a tab id exists once in the
+// strip (its first copy kept), pinned tabs precede the rest, every pane's active tab is one of its tabs, and a strip
+// left with nothing is one empty pane.
+export function repairMain(main: Strip, known: (appSessionId: AppSessionId) => boolean): Strip {
   const keep = (t: TabRef) => (t.kind !== 'session' && t.kind !== 'agent') || known(t.appSessionId);
   const seen = new Set<string>();
-  const sets: LayoutMain['sets'] = {};
-  for (const key of [main.current, ...setKeys(main).filter((k) => k !== main.current)]) {
-    const set = main.sets[key];
-    if (!set) continue;
-    const panes = set.panes.map((p): PaneState => {
-      const tabs = pinnedFirst(p.tabs.filter((t) => keep(t) && !seen.has(t.id) && seen.add(t.id)));
-      return { tabs, activeTabId: tabs.some((t) => t.id === p.activeTabId) ? p.activeTabId : (tabs[0]?.id ?? '') };
-    });
-    sets[key] = asSet(withPanes({ ...set, closedTabs: [] }, panes, set.focusedPane));
-  }
-  return tidy({ ...main, sets, closedTabs: main.closedTabs.filter(keep) });
-}
-
-// W12: version 1's one layout filed into sets by each tab's session's project (`setOf`; a tab of no session goes with
-// the current set). The current set is the active tab's, else that of the first tab with a session in the focused pane,
-// else 'none'. Each set keeps the panes its tabs came from, their order, the active tabs (else the first) and the
-// focused pane where it can.
-export function fromV1(v1: LayoutMainV1, setOf: SetOfTab): LayoutMain {
-  const focused = v1.panes[v1.focusedPane] ?? v1.panes[0];
-  const shown = focused.tabs.find((t) => t.id === focused.activeTabId);
-  const current = (shown ? setOf(shown) : null) ?? focused.tabs.map(setOf).find((key) => key !== null) ?? NO_PROJECT;
-  const home = (tab: TabRef): TabSetKey => setOf(tab) ?? current;
-  const view: View = { panes: v1.panes, focusedPane: v1.focusedPane, splitRatio: v1.splitRatio, closedTabs: [] };
-  const sets: LayoutMain['sets'] = {};
-  for (const key of new Set([current, ...v1.panes.flatMap((p) => p.tabs.map(home))])) {
-    const panes = v1.panes.map((p): PaneState => {
-      const tabs = p.tabs.filter((t) => home(t) === key);
-      return { tabs, activeTabId: tabs.some((t) => t.id === p.activeTabId) ? p.activeTabId : (tabs[0]?.id ?? '') };
-    });
-    sets[key] = asSet(withPanes(view, panes, v1.focusedPane));
-  }
-  return tidy({ version: 3, current, sets, closedTabs: v1.closedTabs });
+  const panes = main.panes.map((p): PaneState => {
+    const tabs = pinnedFirst(p.tabs.filter((t) => keep(t) && !seen.has(t.id) && seen.add(t.id)));
+    return { tabs, activeTabId: tabs.some((t) => t.id === p.activeTabId) ? p.activeTabId : (tabs[0]?.id ?? '') };
+  });
+  return { ...asSet(withPanes(main, panes, main.focusedPane)), closedTabs: main.closedTabs.filter(keep) };
 }

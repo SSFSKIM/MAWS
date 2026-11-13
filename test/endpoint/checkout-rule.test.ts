@@ -237,6 +237,23 @@ describe('the checkout rule', () => {
     }
   });
 
+  // UX wave U8a (decision 7 of its execution document): an answer that is no record, here a worktree with no path, names
+  // no checkout the endpoint can vouch for (a remote reader's feed then withholds its source-control output); its other
+  // bounds are as for no worktree.
+  it('names no checkout for an answer whose worktree has no path, and bounds the rest as for no worktree', async () => {
+    const one = await repo();
+    const plain = realpathSync(mkdtempSync(join(tmpdir(), 'checkout-plain-')));
+    try {
+      const f = await machine(one.serviceEnv());
+      const none = await f.endpoint.checkoutBounds.of({ directory: plain, additionalDirectories: [], worktree: null }, (owner, name, input) => f.services.dispatch(owner, name, input));
+      const pathless = await f.endpoint.checkoutBounds.of({ directory: plain, additionalDirectories: [], worktree: {} }, (owner, name, input) => f.services.dispatch(owner, name, input));
+      expect(none).toEqual({ within: [plain], roots: [plain], dropped: [], checkoutCovers: false });
+      expect(pathless).toEqual({ ...none, checkoutCovers: true });
+    } finally {
+      rmSync(plain, { recursive: true, force: true });
+    }
+  });
+
   // Round 2 (P2): a linked worktree of a home kept in git is the home's repository to git's worktree reads (which resolve
   // to the main checkout) and to scm (its trust key, the main checkout): it bounds nothing of git's either.
   it('bounds nothing of git’s by a linked worktree of a home kept in git', async () => {

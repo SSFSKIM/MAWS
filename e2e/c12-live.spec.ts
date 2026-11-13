@@ -30,6 +30,7 @@ import { ENGINE_BIN } from '../test/support/engine-pin';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { newChatIn, sidebarRow } from './support/sidebar';
 import { CLOCK } from './support/clock'; // L129
+import { allowForTheSession } from './support/request-keys';
 
 const skip = c12LiveSkipReason();
 test.skip(skip !== null, skip ?? '');
@@ -177,8 +178,9 @@ async function open(page: Page, id: string): Promise<void> {
 async function approve(page: Page, scope: 'Allow once' | 'Allow for this session'): Promise<void> {
   const frame = main(page).getByRole('group', { name: 'Approval needed' });
   await expect(frame).toBeVisible({ timeout: 120_000 });
-  await frame.getByRole('radio', { name: scope }).click();
-  await frame.getByRole('button', { name: 'Allow', exact: true }).click();
+  // U1a §D: a button per scope; the session scope sits in the menu on Allow once beside a project rule
+  if (scope === 'Allow once') await frame.getByRole('button', { name: 'Allow once', exact: true }).click();
+  else await allowForTheSession(frame);
   await expect(frame).toBeHidden({ timeout: 15_000 });
 }
 

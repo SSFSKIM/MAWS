@@ -113,11 +113,14 @@
 // with no banner and no wait for idle (handedOverCrossing). Where either does not (the merge-base peer at O16's landing),
 // O3-D's crossing above stands; the first landing after O16 that bumps WIRE_MINOR runs the handover's branch against
 // O16's merge as the peer.
+// UX wave U7a: (sidebar, both ways), a layout key one build stores and the other does not know, read across the two
+// builds in both directions; its block is at the end of this file, and its row is in U13a's UC-14 coverage table.
 // Run by `pnpm e2e:cross-build` (MAWS_CROSS_BUILD_E2E=1), which the gate adds to a run whose tree and peer differ in
 // WIRE_MINOR (.github/scripts/gate-plan.mjs).
 import { randomUUID } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { expect, test, type Page } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -140,6 +143,10 @@ import { placeholderGrantText, sealWithAppSafeStorage, writeLegacySealed } from 
 import { ciRefusal, e2eLabel, runIdOf } from './support/daemon-unit-guard.mjs';
 import { installUnitDaemon, type UnitDaemon } from './support/unit-daemon';
 import { REPO_ROOT } from './support/launch';
+import { addressed } from './support/address'; // U13a
+import { menu } from './support/menu'; // U13a: Settings and the split
+import { activeMainTab, closeSurface, mainTabById, mainTabs, openSurface, surfaceRow } from './support/shell'; // U13a
+import { sidebarOf, sidebarRow } from './support/sidebar'; // U13a; UX wave U7a: sidebarOf
 import { answerOf, fitTo, refusedSample, sampleOf, samplesFor, type ProbeAnswer } from './support/cross-build-samples';
 import { endProfileProcesses, isAlive } from './support/processes';
 import { spineFiles, spineFilesOpen } from '../test/support/spine-files';
@@ -348,6 +355,12 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   const build = served.appBuildId;
   expect(build, 'two builds').not.toBe(kept.buildId);
   await expect(banner(second.page, 'MAWS was updated.')).toContainText('1 session is still running');
+  // UX wave U1a (§F): the signal that keeps a plan's mode away under an engine host of another build, as the window
+  // holds it: attached, the engine host's wire fingerprint is the kept build's and not this app's, wherever the two
+  // builds' registries differ; once the app has moved to a supervisor of its own build, the two are equal (below)
+  const registriesDiffer = !isDeepStrictEqual(keeper.manifest.entries, attacher.manifest.entries);
+  if (registriesDiffer) expect(served.supervisor!.wire, "attached: the kept engine host's wire fingerprint, not the app's").not.toBe(served.appWire);
+  said.push(`  plan-mode gate: supervisor.wire ${served.supervisor!.wire === served.appWire ? 'equals' : 'differs from'} appWire while attached${registriesDiffer ? '' : ' (the registries are equal)'}`);
   // the hello across the minor, as each end logged it; on the daemon shape the engine host's client is `mawsd`, which
   // says this build's engine-host build and wire, and the app's main reads the welcome `mawsd` reflects from upstream
   const attacherDaemon = shapes.attacher === 'daemon' ? served.daemon!.pid : null;
@@ -440,6 +453,7 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   // the move: once both sessions are idle they are released, the kept supervisor exits, and the app starts its own
   const moved = await s.ready(second.page, (st) => st.supervisor!.pid !== kept.pid && onShape(shapes.attacher)(st), idleMs + 45_000);
   expect(moved, `${attacher.label} on a supervisor of its own build`).toMatchObject({ matches: 'same', supervisor: { buildId: build, exitWhenIdle: false } });
+  expect(moved.supervisor!.wire, "moved (U1a §F): the engine host's wire fingerprint is the app's").toBe(moved.appWire);
   if (attacherDaemon !== null) expect(moved.daemon!.pid, 'the same mawsd serves the new engine host').toBe(attacherDaemon);
   await expect.poll(() => isAlive(kept.pid), { timeout: 10_000, message: 'the kept supervisor is gone' }).toBe(false);
   expect(s.lock(), 'the lock names the new supervisor').toMatchObject({ pid: moved.supervisor!.pid, buildId: build });
@@ -1591,4 +1605,473 @@ test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd:
   } finally {
     await pages.close();
   }
+});
+
+// ---- U13a: what the wave stores, build F reads (UC-14) ---------------------------------------------------------------
+// The UX wave's U13a (docs/doperpowers/plans/2026-11-12-ux-wave-U13a-one-strip.md, M5; the section's "The round trip with
+// build F") stores one strip as `main.tabs` version 3 with the one set `none`, which build F (`f1852de3a`) reads with its
+// strict reader and files into its per-project sets again. Three scenes prove it both ways, each by what the reading
+// build draws or by what it writes after an act, never by reading back a key that build has not written (F writes
+// `main.tabs` at its launch only when its reader rewrote the value, learnt a title, dropped a fold or replayed a change,
+// else at its next change of the tabs). Each runs only with a peer that still keeps a tab set per project (its
+// `stores/layout-model.ts` has `switchSet`); a skipped scene is not evidence, and the run of record is the one whose
+// peer is F (`--peer-exact f1852de3a`), counted only with all three run.
+//   (layout, from the peer)  the peer files tabs under two sets, pins a tab and a tool, and quits; this build opens every
+//                            tab of every set in one strip, once each, with the pin, the tab in front and the notice,
+//                            writes the one set, keeps the pinned tool and remembers the side column's session under
+//                            `none` alone; a relaunch shows no notice.
+//   (layout, to the peer)    this build stores a split strip with a pinned tab, a side surface, a pinned tool and a
+//                            sidebar width; the peer draws them, says nothing of an invalid value, acts, and writes every
+//                            tab back with the pin; this build reads what the peer wrote: every tab, the pin, the tool
+//                            unpinned and the sidebar folded.
+//   (settings, both ways)    one field of each settings file changed through Settings, read by the other build, changed
+//                            there and read back here, with no `[settings] invalid` or `cannot read` line on either side.
+// UC-14's coverage for U13a: for each stored thing this landing changes or relies on, the scene that asserts F reads what
+// this build wrote and writes it on, and the scene that asserts this build reads what F wrote. A later landing that
+// stores something new adds its row here and extends a scene (U8's `cards.open` and `panelTools.widths`, U7b's
+// `destination` and the retired tab kinds, U6's open files, any new tab kind, any field a landing adds
+// to a settings file).
+//   | stored                                        | F reads this build's value, and writes on             | this build reads F's value                         |
+//   |-----------------------------------------------|-------------------------------------------------------|----------------------------------------------------|
+//   | `main.tabs`: which tabs                       | (layout, to the peer): the tab in front drawn; every   | (layout, from the peer); the return of (layout, to |
+//   |                                               | id in what F writes after its act                     | the peer)                                          |
+//   | `main.tabs`: pins                             | (layout, to the peer): the pin drawn; `pinned: true`  | both, as above                                     |
+//   |                                               | in what F writes                                      |                                                    |
+//   | `main.tabs`: order, the split, the floating   | not asserted: F rebuilds them by its own rules        | the showing set's order and split, by M1's unit    |
+//   | card                                          | (the plan's Interfaces §H)                            | tests                                              |
+//   | `panelTools.surfaces`, not its default        | (layout, to the peer): the pinned tool drawn; F's      | both layout scenes: the pinned tools kept,         |
+//   |                                               | written value keeps `none` beside its own entries     | `contexts` back to `none` alone                    |
+//   | `regions`                                     | (layout, to the peer): the width drawn; version 5 in  | the return of (layout, to the peer): the sidebar   |
+//   |                                               | what F writes                                         | folded                                             |
+//   | `sidebar.hidden` (U7a)                        | (sidebar, both ways): F draws the session it does not | the return of (sidebar, both ways): the row under  |
+//   |                                               | know to be hidden, and the key is in the file F wrote | Hidden. F never writes the key                     |
+//   |                                               | after its act                                         |                                                    |
+//   | `settings.json`, `machine-settings.json`      | (settings, both ways)                                 | (settings, both ways)                              |
+//   | `machine-route.json`                          | not covered: written only when the machine's default  | not covered                                        |
+//   |                                               | route is set, which neither this landing nor a scene   |                                                    |
+//   |                                               | does                                                  |                                                    |
+const keepsSets = (build: Build) => {
+  const model = join(build.root ?? REPO_ROOT, 'src/renderer/src/stores/layout-model.ts');
+  return existsSync(model) && readFileSync(model, 'utf8').includes('export function switchSet');
+};
+const keepsSetsWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) keeps no tab set per project (its stores/layout-model.ts has no switchSet): UC-14's round trip is with build F, --peer-exact f1852de3a`;
+const ONE_STRIP_NOTICE = 'Tabs from every project are now in one strip'; // src/renderer/src/ipc/events.ts
+const PINNED_TOOL = 'Session info'; // a tool outside the icon row's first four, listed only when pinned or open
+const PINNED_TOOL_ID = 'session-info';
+const LAYOUT_PAGE = 'Cross-build layout page';
+type StoredSets = { version: number; current: string; sets: Record<string, { panes: { tabs: { id: string; pinned: boolean }[]; activeTabId: string }[]; focusedPane: number }> };
+type StoredSurfaces = { pinnedTools: string[]; contexts: Record<string, string>; stacks: Record<string, string[]> };
+type StoredRegions = { version: number; sidebar: { width: number; collapsed: boolean } };
+const layoutOf = async <T>(page: Page, key: 'main.tabs' | 'panelTools.surfaces' | 'regions') => value(await invoke(page, 'layout.get', { key })).value as T | null;
+const stripIds = (page: Page) => mainTabs(page).getByRole('tab').evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('data-tab-id') ?? ''));
+const pinnedIn = (stored: StoredSets | null) => Object.values(stored?.sets ?? {}).flatMap((set) => set.panes.flatMap((pane) => pane.tabs.filter((tab) => tab.pinned).map((tab) => tab.id)));
+const notice = (page: Page) => page.locator('[data-toast-viewport]').getByText(ONE_STRIP_NOTICE);
+// Every console message the page gave, of every type (Playwright keeps them from the first load: e2e/support/launch.ts)
+const consoleSaid = async (page: Page) => (await page.consoleMessages({ filter: 'all' })).map((message) => `${message.type()}: ${message.text()}`);
+const INVALID_LAYOUT = /\[layout\] \S+ is not a valid value/; // stores/layout.ts in both builds, a warning
+const SETTINGS_REFUSED = /\[settings\] (?:invalid|cannot read) /; // src/shared/settings/file-store.ts in both builds
+// A tool's own menu, as a person reaches it at any width: from its icon in the row, or, where a narrow row folds the
+// tool into "More surfaces" (the row's icons past its room, pinned and open ones among them), from its item there by
+// Shift+F10, as e2e/support/shell.ts's pinSurfaceForSessions does; the same in both builds (panel/SurfaceRow.tsx)
+async function openToolMenu(page: Page, name: string): Promise<void> {
+  const icon = surfaceRow(page).getByRole('button', { name, exact: true });
+  if (await icon.count()) await icon.click({ button: 'right' });
+  else {
+    await surfaceRow(page).getByRole('button', { name: 'More surfaces', exact: true }).click();
+    const item = page.getByRole('menuitem', { name, exact: true });
+    await item.focus();
+    await item.press('Shift+F10');
+  }
+}
+async function closeMenus(page: Page): Promise<void> {
+  await expect(async () => {
+    if (await page.getByRole('menu').count()) await page.keyboard.press('Escape');
+    await expect(page.getByRole('menu')).toHaveCount(0, { timeout: 1_000 });
+  }).toPass({ timeout: 10_000 });
+}
+// A tool pinned to, or unpinned from, the icon row through its menu; opened first for the pin (a tool past the first
+// four is listed only when pinned or open)
+async function pinToToolbar(page: Page, name: string, pin: boolean): Promise<void> {
+  if (pin) await openSurface(page, name);
+  await openToolMenu(page, name);
+  await page.getByRole('menuitem', { name: pin ? 'Pin to toolbar' : 'Unpin from toolbar', exact: true }).click();
+  await closeMenus(page);
+}
+// Whether the tool is pinned as a person sees it at any width: its menu offers to unpin it, or to pin it
+async function expectToolPinned(page: Page, name: string, pinned: boolean, message: string): Promise<void> {
+  await openToolMenu(page, name);
+  await expect(page.getByRole('menuitem', { name: pinned ? 'Unpin from toolbar' : 'Pin to toolbar', exact: true }), message).toBeVisible();
+  await closeMenus(page);
+}
+// The library's tab and an artifact's, opened as a person opens them (the sidebar's Artifacts, then the page's row)
+async function openLibraryAndPage(page: Page, artifactId: string): Promise<string> {
+  await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click({ timeout: 15_000 });
+  await page.locator('[data-library]').getByRole('article', { name: LAYOUT_PAGE, exact: true }).click({ timeout: 20_000 });
+  await expect(page.locator(`[data-region="main"] [data-artifact-tab="${artifactId}"]`), 'the artifact’s tab').toBeVisible({ timeout: 20_000 });
+  let tab: string | undefined;
+  await expect.poll(async () => (tab = (await stripIds(page)).find((id) => id.includes(artifactId))), { message: 'the artifact’s tab in the strip' }).toBeDefined();
+  return tab!;
+}
+async function pinTab(page: Page, id: string): Promise<void> {
+  await mainTabById(page, id).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Pin tab', exact: true }).click();
+  await expect(mainTabById(page, id).getByRole('img', { name: 'Pinned' })).toBeVisible();
+}
+
+test('(layout, from the peer) a layout the peer filed under two tab sets opens whole in this build’s one strip, with its pin, its tab in front and the notice once; the pinned tool kept and the side column’s session under none alone', async () => {
+  const { here, peer } = builds();
+  test.skip(!keepsSets(peer), keepsSetsWhy(peer));
+  await withScratch('xb-layout-from', async (s) => {
+    const said: string[] = [`${peer.label} (wire ${wireOf(peer)}) files the tabs under two sets; ${here.label} (wire ${wireOf(here)}) reads them as one strip`];
+    // the peer: the library's tab and an artifact's while no project shows, then the seeded session from its sidebar row,
+    // which the peer files in its row's set and shows; that tab pinned, and a tool pinned to the icon row
+    const old = await s.launch({}, peer.root);
+    await s.ready(old.page);
+    const id = await s.record(old.page);
+    const artifactId = await createHtmlArtifact(old.page, LAYOUT_PAGE, 'XB_LAYOUT_PAGE');
+    await openLibraryAndPage(old.page, artifactId);
+    await (await sidebarRow(old.page, { appSessionId: id })).click({ modifiers: ['Meta'] });
+    let front = '';
+    await expect.poll(async () => (front = (await activeMainTab(old.page).getAttribute('data-tab-id')) ?? ''), { timeout: 20_000, message: `${peer.label} shows the session’s tab` }).toMatch(/^session:/);
+    await pinTab(old.page, front);
+    await pinToToolbar(old.page, PINNED_TOOL, true);
+    await closeSurface(old.page, PINNED_TOOL);
+    let theirs: StoredSets | null = null;
+    await expect
+      .poll(async () => {
+        theirs = await layoutOf<StoredSets>(old.page, 'main.tabs');
+        return [Object.keys(theirs?.sets ?? {}).length >= 2, pinnedIn(theirs), (await layoutOf<StoredSurfaces>(old.page, 'panelTools.surfaces'))?.pinnedTools.includes(PINNED_TOOL_ID)];
+      }, { timeout: 20_000, message: `${peer.label} wrote two sets, the pin and the pinned tool` })
+      .toEqual([true, [front], true]);
+    const tabs = tabIdsOf(theirs);
+    const keys = Object.keys(theirs!.sets);
+    expect(old.maws.consoleErrors()).toEqual([]);
+    await s.quit(old);
+    await endProfileProcesses(s.userData); // this build's own mawsd from here
+    said.push(`  ${peer.label} wrote ${keys.length} sets (${keys.map((key) => (key === 'none' ? 'none' : 'a row')).join(', ')}), ${tabs.length} tabs, in front ${front}, pinned ${front}`);
+
+    // this build: every tab of every set in the strip once, the pin, the tab in front, the notice; written as one set
+    const run = await s.launch();
+    await expect(notice(run.page), 'the notice that the sets became one strip (shown for 6 s, so looked for first)').toBeVisible({ timeout: 30_000 });
+    await s.ready(run.page);
+    await expect.poll(async () => (await stripIds(run.page)).sort(), { timeout: 20_000, message: 'every tab of every set in the strip' }).toEqual(tabs);
+    expect(new Set(await stripIds(run.page)).size, 'each once').toBe(tabs.length);
+    await expect(mainTabById(run.page, front).getByRole('img', { name: 'Pinned' }), 'the pin').toBeVisible();
+    await expect(activeMainTab(run.page), 'the tab that was in front').toHaveAttribute('data-tab-id', front);
+    await expectToolPinned(run.page, PINNED_TOOL, true, 'the pinned tool kept in the icon row');
+    await expect
+      .poll(async () => {
+        const ours = await layoutOf<StoredSets>(run.page, 'main.tabs');
+        return [ours?.version, ours?.current, Object.keys(ours?.sets ?? {}), pinnedIn(ours)];
+      }, { timeout: 20_000, message: 'written back as the one set' })
+      .toEqual([3, 'none', ['none'], [front]]);
+    const surfaces = (await layoutOf<StoredSurfaces>(run.page, 'panelTools.surfaces'))!;
+    expect(surfaces.pinnedTools, 'the pinned tool kept').toContain(PINNED_TOOL_ID);
+    expect(Object.keys(surfaces.contexts).filter((key) => key !== 'none'), 'the side column’s session remembered under none alone').toEqual([]);
+    expect(run.maws.consoleErrors()).toEqual([]);
+    said.push(`  ${here.label}: ${tabs.length} tabs in one strip, the pin and the tab in front kept, the notice shown; contexts ${JSON.stringify(Object.keys(surfaces.contexts))}`);
+    await s.quit(run);
+
+    // a relaunch of this build reads the one set it wrote: no notice. A notice lasts 6 s and the launch helper hands the
+    // page over only once the host is ready, by when the relaunch's own hydration may be over. The notice follows only
+    // `merged`, which the reader computes from the stored value alone, so: the relaunch's read is held to have written
+    // nothing (the stored `main.tabs` the same before it and after it), and the window is then reloaded under an init
+    // script on the app's context (run before the page's own scripts at each load) that records every appearance of the
+    // notice; that reload reads the very value the relaunch read, so it stands for the relaunch
+    const storedTabs = () => (JSON.parse(readFileSync(join(s.userData, 'layout.json'), 'utf8')) as Record<string, unknown>)['main.tabs'];
+    const beforeRelaunch = storedTabs();
+    const again = await s.launch();
+    await s.ready(again.page);
+    await expect.poll(async () => (await stripIds(again.page)).sort(), { timeout: 20_000, message: 'the relaunch shows the same strip' }).toEqual(tabs);
+    await again.page.waitForTimeout(1_000); // past the layout's write-back delay: whatever the relaunch's read writes is written
+    expect(storedTabs(), 'the relaunch’s own read wrote nothing to main.tabs').toEqual(beforeRelaunch);
+    await again.maws.app.context().addInitScript((text) => {
+      const seen: number[] = [];
+      (window as unknown as { __u13aNotices: number[] }).__u13aNotices = seen;
+      const look = () => {
+        if (document.querySelector('[data-toast-viewport]')?.textContent?.includes(text)) seen.push(Math.round(performance.now()));
+      };
+      new MutationObserver(look).observe(document, { subtree: true, childList: true, characterData: true });
+    }, ONE_STRIP_NOTICE);
+    await again.page.reload();
+    await expect.poll(async () => (await stripIds(again.page)).sort(), { timeout: 20_000, message: 'the strip back after the reload' }).toEqual(tabs);
+    await again.page.waitForTimeout(2_000); // past hydration, where the notice would show
+    expect(await again.page.evaluate(() => (window as unknown as { __u13aNotices?: number[] }).__u13aNotices ?? null), 'no notice from the page’s start: nothing was merged').toEqual([]);
+    await s.quit(again);
+    said.push('  a relaunch of this build: the same strip, no notice');
+    record(said);
+  });
+});
+
+test('(layout, to the peer) a split strip this build stored, with a pin, a side surface, a pinned tool and a sidebar width, is drawn by the peer, written on by it after its acts, and read back here whole', async () => {
+  const { here, peer } = builds();
+  test.skip(!keepsSets(peer), keepsSetsWhy(peer));
+  await withScratch('xb-layout-to', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) stores one strip; ${peer.label} (wire ${wireOf(peer)}) reads it, acts and writes it on`];
+    // this build: the seeded session's tab, the library's and an artifact's; the artifact's pinned; the session split
+    // into the other pane, Files open beside it and a tool pinned to the icon row; then the library's tab in front and
+    // the sidebar 40 px wider than its default
+    const run = await s.launch();
+    await s.ready(run.page);
+    const id = await s.record(run.page);
+    await (await sidebarRow(run.page, { appSessionId: id })).click();
+    const session = `session:${await addressed(run.page, id)}`;
+    await expect(activeMainTab(run.page)).toHaveAttribute('data-tab-id', session, { timeout: 20_000 });
+    const artifactId = await createHtmlArtifact(run.page, LAYOUT_PAGE, 'XB_LAYOUT_PAGE');
+    const artifact = await openLibraryAndPage(run.page, artifactId);
+    await pinTab(run.page, artifact);
+    await mainTabById(run.page, session).click();
+    await menu(run.maws.app, 'pane.split');
+    await expect.poll(() => run.page.getByRole('tablist', { name: 'Right pane tabs' }).getByRole('tab').evaluateAll((t) => t.map((e) => e.getAttribute('data-tab-id'))), { message: 'the split' }).toEqual([session]);
+    await openSurface(run.page, 'Files');
+    await pinToToolbar(run.page, PINNED_TOOL, true);
+    await closeSurface(run.page, PINNED_TOOL);
+    await mainTabById(run.page, 'artifacts').click();
+    await expect(activeMainTab(run.page)).toHaveAttribute('data-tab-id', 'artifacts');
+    const resizer = run.page.locator('[data-region="sidebar"]').getByRole('separator', { name: 'Resize sidebar' });
+    await resizer.focus();
+    for (let i = 0; i < 5; i++) await run.page.keyboard.press('ArrowRight');
+    await expect(resizer).toHaveAttribute('aria-valuenow', '280');
+    let ours: StoredSets | null = null;
+    let contextNone: string | undefined; // the side column's session this build remembers under `none`
+    await expect
+      .poll(async () => {
+        ours = await layoutOf<StoredSets>(run.page, 'main.tabs');
+        const surfaces = await layoutOf<StoredSurfaces>(run.page, 'panelTools.surfaces');
+        const regions = await layoutOf<StoredRegions>(run.page, 'regions');
+        contextNone = surfaces?.contexts.none;
+        return [Object.keys(ours?.sets ?? {}), ours?.sets.none?.panes.length, pinnedIn(ours), surfaces?.pinnedTools.includes(PINNED_TOOL_ID), contextNone !== undefined, regions?.sidebar.width];
+      }, { timeout: 20_000, message: `${here.label} wrote the strip, the surfaces and the width` })
+      .toEqual([['none'], 2, [artifact], true, true, 280]);
+    const tabs = tabIdsOf(ours);
+    expect(tabs).toEqual([artifact, 'artifacts', session].sort());
+    expect(run.maws.consoleErrors()).toEqual([]);
+    await s.quit(run);
+    await endProfileProcesses(s.userData);
+    said.push(`  ${here.label} wrote ${tabs.join(', ')}: ${artifact} pinned, a split, Files open, ${PINNED_TOOL} pinned, the sidebar at 280`);
+
+    // the peer: what it draws, and no word of an invalid value. Each wait on the peer, failing, names what the peer
+    // drew and stored: its strip's tab ids, and its `main.tabs` sets by key with their tab ids
+    const old = await s.launch({}, peer.root);
+    await s.ready(old.page);
+    const onPeer = async (what: string, act: () => Promise<unknown>) => {
+      try {
+        await act();
+      } catch (error) {
+        const strip = await stripIds(old.page).catch(() => ['(unread)']);
+        const stored = await layoutOf<StoredSets>(old.page, 'main.tabs').catch(() => null);
+        const sets = Object.fromEntries(Object.entries(stored?.sets ?? {}).map(([key, set]) => [key, set.panes.map((pane) => pane.tabs.map((tab) => tab.id))]));
+        throw new Error(`${peer.label}: ${what}; its strip ${JSON.stringify(strip)}; its main.tabs sets ${JSON.stringify(sets)}`, { cause: error });
+      }
+    };
+    await onPeer('draws the tab that was in front, selected', () => expect(mainTabById(old.page, 'artifacts')).toHaveAttribute('aria-selected', 'true', { timeout: 20_000 }));
+    await onPeer('draws the pin', () => expect(mainTabById(old.page, artifact).getByRole('img', { name: 'Pinned' })).toBeVisible());
+    await onPeer('draws the sidebar at the width written', () => expect(old.page.locator('[data-region="sidebar"]').getByRole('separator', { name: 'Resize sidebar' })).toHaveAttribute('aria-valuenow', '280'));
+    expect((await consoleSaid(old.page)).filter((line) => INVALID_LAYOUT.test(line)), `${peer.label} took every layout value as valid`).toEqual([]);
+    // a tool's menu opens only while a session is in view (the icon row disables a session tool's icon and its folded
+    // item otherwise), so the pin is read, and undone, with the session's tab in front: the peer filed it in its row's
+    // set, so it is reached from its sidebar row, and the strip shows that set from here
+    await onPeer('shows the session’s tab from its sidebar row', async () => {
+      await (await sidebarRow(old.page, { appSessionId: id })).click();
+      await expect(activeMainTab(old.page)).toHaveAttribute('data-tab-id', session, { timeout: 20_000 });
+    });
+    await onPeer('reads the pinned tool', () => expectToolPinned(old.page, PINNED_TOOL, true, `${peer.label} reads the pinned tool`));
+    await onPeer('unpins the tool', () => pinToToolbar(old.page, PINNED_TOOL, false));
+    // then the page's tab brought to the front of that set, as the peer does it: a tab of no session belongs to the set
+    // shown, so the sidebar's Artifacts moves the library's tab into the project's set, and the page's row in the
+    // library moves the page's tab there too (with its pin) and selects it (its stores/layout-model.ts, `openTab`; its
+    // library/Row.tsx, the row's click). That selection, saved as the shown set's tab in front, is a write only the
+    // peer makes. Then the sidebar folded
+    await onPeer('opens its library', () => old.page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click({ timeout: 15_000 }));
+    await onPeer('opens the page from its library row', () => old.page.locator(`[data-library] [data-artifact-row="${artifactId}"]`).click({ timeout: 15_000 }));
+    await onPeer('shows the page’s tab in front, with its pin', async () => {
+      await expect(activeMainTab(old.page)).toHaveAttribute('data-tab-id', artifact, { timeout: 15_000 });
+      await expect(mainTabById(old.page, artifact).getByRole('img', { name: 'Pinned' })).toBeVisible();
+    });
+    await onPeer('folds the sidebar', () => old.page.getByRole('banner').getByRole('button', { name: 'Toggle sidebar' }).click());
+    let theirs: StoredSets | null = null;
+    let surfaces: StoredSurfaces | null = null;
+    let regions: StoredRegions | null = null;
+    await onPeer('writes its tab in front, every tab, the pin, the unpinned tool with none kept, and the folded sidebar', () =>
+      expect
+        .poll(async () => {
+          theirs = await layoutOf<StoredSets>(old.page, 'main.tabs');
+          surfaces = await layoutOf<StoredSurfaces>(old.page, 'panelTools.surfaces');
+          regions = await layoutOf<StoredRegions>(old.page, 'regions');
+          // the peer's own write first: the project's set shown, the page's tab its saved tab in front (this build left
+          // the library's tab in front of `none`), so what follows is read from a value the peer wrote; every tab is
+          // collected over every set, and `contexts.none` stays as this build wrote it
+          const shown = theirs?.sets[theirs.current];
+          return [theirs?.current !== 'none', shown?.panes[shown.focusedPane]?.activeTabId, theirs?.version, tabIdsOf(theirs), pinnedIn(theirs), surfaces?.pinnedTools.includes(PINNED_TOOL_ID), surfaces?.contexts.none, regions?.version, regions?.sidebar.collapsed];
+        }, { timeout: 20_000 })
+        .toEqual([true, artifact, 3, tabs, [artifact], false, contextNone, 5, true]),
+    );
+    expect(old.maws.consoleErrors()).toEqual([]);
+    said.push(`  ${peer.label}: drew the tab in front, the pin, the tool and the width; wrote ${Object.keys(theirs!.sets).length} sets, contexts ${JSON.stringify(Object.keys(surfaces!.contexts))}`);
+    await s.quit(old);
+    await endProfileProcesses(s.userData);
+
+    // this build again: every tab once, the pin, the tool unpinned (read with the session in front), the sidebar folded
+    const back = await s.launch();
+    await s.ready(back.page);
+    await expect.poll(async () => (await stripIds(back.page)).sort(), { timeout: 20_000, message: 'every tab back in the strip' }).toEqual(tabs);
+    expect(new Set(await stripIds(back.page)).size, 'each once').toBe(tabs.length);
+    await expect(mainTabById(back.page, artifact).getByRole('img', { name: 'Pinned' }), 'the pin').toBeVisible();
+    await mainTabById(back.page, session).click(); // a tool's menu opens only while a session is in view
+    await expect(activeMainTab(back.page)).toHaveAttribute('data-tab-id', session);
+    await expectToolPinned(back.page, PINNED_TOOL, false, 'the tool unpinned');
+    expect((await layoutOf<StoredSurfaces>(back.page, 'panelTools.surfaces'))?.pinnedTools ?? []).not.toContain(PINNED_TOOL_ID);
+    await expect(back.page.getByRole('banner').getByRole('button', { name: 'Toggle sidebar' }), 'the sidebar folded').toHaveAttribute('aria-pressed', 'false');
+    expect(back.maws.consoleErrors()).toEqual([]);
+    await s.quit(back);
+    said.push(`  ${here.label} again: ${tabs.length} tabs, the pin, the tool unpinned, the sidebar folded`);
+    record(said);
+  });
+});
+
+// The theme lives in `<profile>/settings.json` (the client's half, main's), the engine host's idle time in
+// `<profile>/machine-settings.json` (the machine's half, `mawsd`'s); one act cannot reach both, so each is changed.
+const THEME = (page: Page, name: 'Light' | 'Dark' | 'System') => settingsPanel(page).getByRole('region', { name: 'Appearance' }).getByRole('radio', { name, exact: true });
+const IDLE = (page: Page) => settingsPanel(page).getByRole('textbox', { name: 'Minutes before the supervisor exits when idle' });
+const settingsPanel = (page: Page) => page.locator('[data-region="main"]').getByRole('tabpanel');
+const settingsFile = (s: Scratch, name: 'settings.json' | 'machine-settings.json') => {
+  const path = join(s.userData, name);
+  return existsSync(path) ? (JSON.parse(readFileSync(path, 'utf8')) as { theme?: string; supervisor?: { idleExitMinutes: number | null } }) : null;
+};
+async function changeSettings(run: Run, theme: 'Dark' | 'System', minutes: string): Promise<void> {
+  await menu(run.maws.app, 'settings.open');
+  await THEME(run.page, theme).check();
+  await IDLE(run.page).fill(minutes);
+  await IDLE(run.page).press('Enter');
+  await expect(IDLE(run.page)).toHaveValue(minutes);
+}
+async function expectSettings(run: Run, theme: 'Dark' | 'System', minutes: string): Promise<void> {
+  await menu(run.maws.app, 'settings.open');
+  await expect(THEME(run.page, theme), `the theme ${theme} read`).toBeChecked({ timeout: 20_000 });
+  await expect(IDLE(run.page), `the idle time ${minutes} read`).toHaveValue(minutes, { timeout: 20_000 });
+}
+const refusals = (run: Run, s: Scratch) => [...run.output().split('\n'), ...s.daemonLog().split('\n')].filter((line) => SETTINGS_REFUSED.test(line));
+
+test('(settings, both ways) a theme and an idle time changed through this build’s Settings are read by the peer, changed there and read back here, and neither build refuses either file', async () => {
+  const { here, peer } = builds();
+  test.skip(!keepsSets(peer), keepsSetsWhy(peer));
+  await withScratch('xb-settings', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) and ${peer.label} (wire ${wireOf(peer)}) take turns on both settings files`];
+    const run = await s.launch();
+    await s.ready(run.page);
+    await changeSettings(run, 'Dark', '25');
+    await expect(run.page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await expect.poll(() => [settingsFile(s, 'settings.json')?.theme, settingsFile(s, 'machine-settings.json')?.supervisor?.idleExitMinutes], { message: `${here.label} wrote both files` }).toEqual(['dark', 25]);
+    expect(refusals(run, s)).toEqual([]);
+    await s.quit(run);
+    await endProfileProcesses(s.userData); // the peer's own mawsd reads the machine's file
+    said.push(`  ${here.label} wrote the theme dark and the idle time 25`);
+
+    const old = await s.launch({}, peer.root);
+    await s.ready(old.page);
+    await expect(old.page.locator('html'), `${peer.label} draws the theme`).toHaveAttribute('data-theme', 'dark', { timeout: 20_000 });
+    await expectSettings(old, 'Dark', '25');
+    await changeSettings(old, 'System', '40');
+    await expect.poll(() => [settingsFile(s, 'settings.json')?.theme, settingsFile(s, 'machine-settings.json')?.supervisor?.idleExitMinutes], { message: `${peer.label} wrote both files` }).toEqual(['system', 40]);
+    expect(refusals(old, s), `${peer.label} and its mawsd refused neither file`).toEqual([]);
+    await s.quit(old);
+    await endProfileProcesses(s.userData);
+    said.push(`  ${peer.label} read both, then wrote the theme system and the idle time 40`);
+
+    const back = await s.launch();
+    await s.ready(back.page);
+    await expectSettings(back, 'System', '40');
+    expect(refusals(back, s), `${here.label} and its mawsd refused neither file`).toEqual([]);
+    await s.quit(back);
+    said.push(`  ${here.label} read both of the peer's values`);
+    record(said);
+  });
+});
+
+// ---- UX wave U7a: the sidebar's hidden sessions, a layout key the peer does not know ----------------------------------
+
+// UX wave U7a (docs/doperpowers/plans/2026-11-12-ux-wave-U7-sidebar-title-bar-destinations.md, M4 and Interfaces §G; the
+// wave's root, UC-14): a hidden session is stored under a layout key of its own, `sidebar.hidden`, which a build from
+// before U7a (build F on the owner's machines) never asks for: it is outside that build's LayoutKeySchema, and that
+// build's main keeps every top-level key of layout.json and writes the whole file back with each write of its own. Its
+// row is in UC-14's coverage table above (U13a's block).
+//   (sidebar, both ways) this build hides the seeded session from its row's menu and quits. The peer opens the profile:
+//                        it draws the session's row in its project, logs no "[layout] … is not a valid value", and folds
+//                        its sidebar, after which layout.json still holds `sidebar.hidden` with the same entry. This
+//                        build opens the profile again: the sidebar is folded as the peer left it, and the row stands
+//                        under its project's "Hidden · 1". Skipped for a peer whose layout schema names the key.
+const layoutSchemaNames = (build: Build, key: string) => readFileSync(join(build.root ?? REPO_ROOT, 'src/shared/ipc/schema/layout.ts'), 'utf8').includes(`'${key}'`);
+const storedLayout = (userData: string) => JSON.parse(readFileSync(join(userData, 'layout.json'), 'utf8')) as Record<string, unknown>;
+const sidebarFolded = (userData: string) => (storedLayout(userData).regions as { sidebar?: { collapsed?: boolean } } | undefined)?.sidebar?.collapsed ?? null;
+const WIDE = { x: 72, y: 48, width: 1360, height: 860 }; // wide enough that the sidebar folds in place, not as an overlay
+
+test('(sidebar, both ways) this build hides a session and quits; the peer, which knows no sidebar.hidden, draws the session, refuses no layout value, folds its sidebar and keeps the key; this build reads the session back hidden, the sidebar folded', async () => {
+  const { here, peer } = builds();
+  test.skip(layoutSchemaNames(peer, 'sidebar.hidden'), `the peer (wire ${wireOf(peer)}) names sidebar.hidden in its layout schema: a build from U7a on, not one that has never heard of the key`);
+  await withScratch('xb-sidebar', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) hides a session; ${peer.label} (wire ${wireOf(peer)}) opens the profile; ${here.label} opens it again`];
+    const wide = (run: Run) => run.maws.app.evaluate(({ BrowserWindow }, bounds) => BrowserWindow.getAllWindows()[0].setBounds(bounds), WIDE);
+
+    // this build: the seeded session hidden from its row's menu, and the key written
+    const ours = await s.launch();
+    await s.ready(ours.page, (st) => st.daemon !== null, 60_000);
+    const id = await s.record(ours.page);
+    const address = await addressed(ours.page, id);
+    await wide(ours);
+    const row = await sidebarRow(ours.page, { appSessionId: id });
+    await row.click({ button: 'right' });
+    await ours.page.getByRole('menuitem', { name: 'Hide', exact: true }).click();
+    await expect(row, 'the row leaves its project’s list').toHaveCount(0);
+    await expect(sidebarOf(ours.page).locator('[data-kind="hidden"]')).toHaveText('Hidden · 1');
+    type Hidden = { version: 1; hidden: Record<string, { at: string; armedAt: string | null }> };
+    let entry: Hidden['hidden'][string] | null = null;
+    await expect
+      .poll(async () => (entry = ((value(await invoke(ours.page, 'layout.get', { key: 'sidebar.hidden' })).value as Hidden | null)?.hidden[address] ?? null)), { message: 'this build stored the hide' })
+      .not.toBeNull();
+    expect(ours.maws.consoleErrors()).toEqual([]);
+    await s.quit(ours);
+    await endProfileProcesses(s.userData); // the peer's app starts a mawsd of its own build
+    const stored = storedLayout(s.userData)['sidebar.hidden'];
+    expect(stored, 'layout.json holds the hide as this build quit').toEqual({ version: 1, hidden: { [address]: entry } });
+    said.push(`  hidden: ${address}, stored ${JSON.stringify(entry)}`);
+
+    // the peer: the session drawn, no layout value refused, its fold written with the key kept
+    const theirs = await s.launch({}, peer.root);
+    const messages: string[] = [];
+    theirs.page.on('console', (message) => messages.push(message.text()));
+    messages.push(...(await theirs.page.consoleMessages({ filter: 'all' })).map((message) => message.text()));
+    await s.ready(theirs.page, () => true, 60_000);
+    await wide(theirs);
+    await expect(await sidebarRow(theirs.page, { appSessionId: id }), `${peer.label} draws the session in its project`).toBeVisible({ timeout: 20_000 });
+    expect(sidebarFolded(s.userData), 'the sidebar not folded before the peer folds it').not.toBe(true);
+    await menu(theirs.maws.app, 'sidebar.toggle');
+    await expect.poll(() => sidebarFolded(s.userData), { timeout: 10_000, message: `${peer.label} wrote its fold to layout.json` }).toBe(true);
+    expect(storedLayout(s.userData)['sidebar.hidden'], `the key is in the file ${peer.label} wrote after its act, its entry the same`).toEqual(stored);
+    expect(messages.filter((text) => INVALID_LAYOUT.test(text)), `${peer.label} refuses no stored layout value`).toEqual([]);
+    expect(theirs.maws.consoleErrors()).toEqual([]);
+    await s.quit(theirs);
+    await endProfileProcesses(s.userData);
+    expect(storedLayout(s.userData)['sidebar.hidden'], `the key as ${peer.label} quit`).toEqual(stored);
+    said.push(`  ${peer.label}: the row drawn, nothing refused, the sidebar folded, sidebar.hidden kept`);
+
+    // this build again: the fold the peer left, and the row under Hidden
+    const again = await s.launch();
+    await s.ready(again.page, (st) => st.daemon !== null, 60_000);
+    const sidebar = sidebarOf(again.page);
+    await expect(sidebar, 'the sidebar folded as the peer left it').toHaveJSProperty('inert', true, { timeout: 20_000 });
+    expect(((value(await invoke(again.page, 'layout.get', { key: 'regions' })).value) as { sidebar: { collapsed: boolean } }).sidebar.collapsed).toBe(true);
+    await wide(again);
+    await menu(again.maws.app, 'sidebar.toggle');
+    await expect(sidebar).toHaveJSProperty('inert', false);
+    const back = await sidebarRow(again.page, { appSessionId: id });
+    const hiddenRow = sidebar.locator('[data-kind="hidden"]');
+    await expect(hiddenRow, 'the session is still hidden: its project ends in Hidden · 1').toHaveText('Hidden · 1', { timeout: 20_000 });
+    await expect(back, 'out of its project’s list').toHaveCount(0);
+    await hiddenRow.click();
+    await expect(back, 'under the Hidden row').toHaveAttribute('data-indented', 'true');
+    expect(again.maws.consoleErrors()).toEqual([]);
+    await s.quit(again);
+    said.push(`  ${here.label} again: the sidebar folded, the row under Hidden · 1`);
+    record(said);
+  });
 });

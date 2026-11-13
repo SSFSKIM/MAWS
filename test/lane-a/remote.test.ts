@@ -318,6 +318,107 @@ describe('remote lane A over a real link', { timeout: 30_000 }, () => {
     expect(l.plane.rpcs).toHaveLength(sent);
   });
 
+  // U1a §G (correction 5): the daemon's `decide` takes allow or deny, so a dismissal of an asynchronous question is not
+  // carried to another machine, whatever that machine's bridge declares; refused before any act is built
+  it.each([
+    ['declares the dismissal', { ...CAPABILITIES, controls: { ...CAPABILITIES.controls, 'decide.dismiss': { available: true } } }],
+    ['declares none', CAPABILITIES],
+  ])('refuses an asynchronous question’s dismissal before any act when the bridge %s', async (_says, capabilities) => {
+    const l = await lab();
+    l.plane.presence.set('la-1', { ...l.plane.presenceOf('la-1'), capabilities });
+    await watched(l);
+    l.plane.raise({ request: 'toolu_aq', tool: 'mcp__plugin_sminos_ask__ask', input: { questions: [{ question: 'Ship it?' }] }, async: true });
+    await until(() => stateNow(l)?.pending.some((x) => x.request === 'toolu_aq'), 'the asynchronous question');
+    const sent = l.plane.rpcs.length;
+    expect(await l.cmd('laneA.answer', { appSessionId: 'la-1', request: 'toolu_aq', answer: { kind: 'permission', decision: 'deny' } })).toEqual({ outcome: 'refused', code: 'unsupported', message: 'dismiss it in the terminal on mini' });
+    expect(l.plane.rpcs).toHaveLength(sent);
+    expect(stateNow(l)?.acts ?? []).toEqual([]);
+  });
+
+  // UC-1 (U1a's Interfaces §B, "A window on another machine", the ruling on Reported 8): the session's machine said `done`
+  // to this device's own answer, so main names the request in the state every window of this device reads, until a word
+  // of the machine's (the bridge's settlement, a reset, a bridge no longer live) says otherwise; no timer
+  describe('an answer the session’s machine said it took', () => {
+    const acceptedNow = (l: Lab) => stateNow(l)?.accepted ?? [];
+    const answer = (l: Lab, decision: 'allow' | 'deny' = 'allow') => l.cmd('laneA.answer', { appSessionId: 'la-1', request: 'toolu_p1', answer: decision === 'allow' ? { kind: 'permission', decision, scope: 'once' } : { kind: 'permission', decision } });
+
+    it('is named in the state at the machine’s done, through a second window opened meanwhile, until the bridge settles it', async () => {
+      const l = await lab();
+      await watched(l);
+      l.plane.raise(permission);
+      await until(() => stateNow(l)?.pending.length === 1, 'the request');
+      expect(acceptedNow(l)).toEqual([]);
+      const told = l.emitted.length;
+      expect(await answer(l)).toEqual({ outcome: 'delivered' });
+      expect(acceptedNow(l)).toEqual(['toolu_p1']);
+      expect(stateNow(l)?.pending.map((r) => r.request)).toEqual(['toolu_p1']); // the bridge still lists it
+      const naming = l.emitted.slice(told).filter((e) => e.name === 'laneA.changed' && ((e.payload.state as LaneAState | null)?.accepted ?? []).includes('toolu_p1'));
+      expect(naming.length).toBeGreaterThan(0);
+      const other = endableClientRef('page-2');
+      const { watch: second } = (await l.cmd('laneA.watch', { appSessionId: 'la-1' }, other)) as { watch: string };
+      await until(() => messagesOf(l, second).some((m) => m.kind === 'snapshot'), 'the second window’s snapshot');
+      expect(acceptedNow(l)).toEqual(['toolu_p1']);
+      l.plane.settle('toolu_p1', 'web', 'allow');
+      await until(() => stateNow(l)?.pending.length === 0, 'the settlement');
+      expect(acceptedNow(l)).toEqual([]);
+    });
+
+    it('is cleared by a reset whose snapshot restates the request, which then waits again', async () => {
+      const l = await lab();
+      const watch = await watched(l);
+      l.plane.raise(permission);
+      await until(() => stateNow(l)?.pending.length === 1, 'the request');
+      await answer(l);
+      expect(acceptedNow(l)).toEqual(['toolu_p1']);
+      const [epoch] = l.plane.upstreams();
+      l.plane.end(epoch, 'discontinuity');
+      await until(() => planeOf(l, watch).some((p) => p.resumed === true), 'the view resumed on a fresh subscription', 10_000);
+      await until(() => stateNow(l)?.pending.length === 1, 'the request restated');
+      expect(acceptedNow(l)).toEqual([]);
+    });
+
+    it('is cleared when the bridge stops being live', async () => {
+      const l = await lab();
+      await watched(l);
+      l.plane.raise(permission);
+      await until(() => stateNow(l)?.pending.length === 1, 'the request');
+      await answer(l);
+      expect(acceptedNow(l)).toEqual(['toolu_p1']);
+      l.plane.wide('presence', { ...l.plane.presenceOf('la-1'), bridge: false });
+      await until(() => stateNow(l)?.bridge === 'none', 'the bridge gone');
+      expect(acceptedNow(l)).toEqual([]);
+    });
+
+    const naming = (l: Lab, from: number) => l.emitted.slice(from).filter((e) => e.name === 'laneA.changed' && ((e.payload.state as LaneAState | null)?.accepted ?? []).includes('toolu_p1'));
+
+    it('names nothing for an answer the machine refused', async () => {
+      const l = await lab();
+      await watched(l);
+      l.plane.raise(permission);
+      await until(() => stateNow(l)?.pending.length === 1, 'the request');
+      const told = l.emitted.length;
+      l.plane.handle('decide', () => ({ state: 'failed', error: { code: 'not-pending', message: 'it is no longer pending' } }));
+      expect(await answer(l, 'deny')).toMatchObject({ outcome: 'not_pending' });
+      expect(naming(l, told)).toEqual([]);
+      expect(acceptedNow(l)).toEqual([]);
+    });
+
+    it('names nothing for an answer whose outcome is unknown: the link ended with the decision outstanding', async () => {
+      const l = await lab();
+      await watched(l);
+      l.plane.raise(permission);
+      await until(() => stateNow(l)?.pending.length === 1, 'the request');
+      const told = l.emitted.length;
+      l.carriers.at(-1)!.tap.mute = true; // the endpoint's ack and done never reach the link
+      const answering = answer(l);
+      await until(() => l.plane.runs.some((r) => r.rpc === 'decide'), 'the decision run at sminos');
+      l.link.close();
+      expect(await answering).toMatchObject({ outcome: 'unknown' });
+      expect(naming(l, told)).toEqual([]);
+      expect(acceptedNow(l)).toEqual([]);
+    });
+  });
+
   it('signs a decision on a session its member doesn’t own once the endpoint asks for step-up, under the same opId', async () => {
     const l = await lab();
     await watched(l, 'la-b');
