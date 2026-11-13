@@ -503,7 +503,11 @@ describe('request card placements and delivery states', () => {
       </Pane>,
     );
     expect(screen.queryByRole('group')).toBeNull(); // the skeleton is not framed
-    await act(() => fake.reply('attention.request', { event: reapply }));
+    await act(async () => {
+      const replied = fake.reply('attention.request', { event: reapply });
+      vi.advanceTimersByTime(0); // the fake client settles its reply on a timer
+      await replied;
+    });
     focusOn(frame());
     graceOver();
     keyAt(frame(), CMD_ENTER);
