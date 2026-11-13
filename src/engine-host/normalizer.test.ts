@@ -1088,3 +1088,37 @@ describe('a gap reseeded from the transcript', () => {
     expect(only(feed(other, [otherStart, block, delta], 2), 'assistant.block.delta')).toHaveLength(1);
   });
 });
+
+// The UX wave's U8b, M5 decision 1: who started a task. The engine names a subagent's shell's and monitor's starter on
+// `task_started` (`owned_by_subagent`, `parent_task_id`) and on each `background_tasks_changed` entry (`parent_task_id`),
+// and neither key for the main loop's (pass3/uxwave/uxwave-subagent-tasks-nodelay: the agent at seq 41, its shell at 75
+// and 76, the main loop's shell at 176 and 177; findings-uxwave-U8-subagent-tasks.txt (b)).
+describe('normaliser: a task’s starter', () => {
+  const AGENT = 'ab2a8ea9925ee4d69';
+  const events = () => {
+    const n = make();
+    return loadJournal('pass3', 'uxwave/uxwave-subagent-tasks-nodelay').flatMap((row) => n.push(row));
+  };
+  const at = (list: SessionEvent[], seq: number) => list.filter((e) => e.seq === seq);
+
+  it('carries a subagent’s shell’s starter on task.started, and none for the main loop’s shell or an agent', () => {
+    const list = events();
+    for (const e of list) SessionEventSchema.parse(e);
+    expect(at(list, 76)).toMatchObject([{ kind: 'task.started', taskId: 'brqab7ydc', parentTaskId: AGENT }]);
+    expect(at(list, 177)).toMatchObject([{ kind: 'task.started', taskId: 'bfg1i3ud3' }]);
+    expect(at(list, 177)[0]).not.toHaveProperty('parentTaskId');
+    expect(at(list, 41)[0]).toMatchObject({ kind: 'subagent.started', taskId: AGENT });
+    expect(at(list, 41)[0]).not.toHaveProperty('parentTaskId');
+  });
+
+  it('carries each listed task’s starter on tasks.snapshot, and none where the entry names none', () => {
+    const list = events();
+    expect(at(list, 75)).toEqual([expect.objectContaining({
+      kind: 'tasks.snapshot',
+      tasks: [
+        { taskId: AGENT, taskType: 'local_agent', description: 'Run background sleep command', ambient: false },
+        { taskId: 'brqab7ydc', taskType: 'local_bash', description: 'Sleep 30 seconds then print marker', ambient: false, parentTaskId: AGENT },
+      ],
+    })]);
+  });
+});
