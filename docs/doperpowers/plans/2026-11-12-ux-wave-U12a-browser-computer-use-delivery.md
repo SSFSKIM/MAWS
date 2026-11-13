@@ -20,14 +20,15 @@ After this landing a session MAWS launches with its browser is told, in MAWS's o
 - [x] (2026-11-13 01:15Z) Revision 2: the adversarial review's five findings and the architect's rulings on R1 to R9 are folded in, with the reload's rule for a page the person has typed in (Decision Log). No milestone was added or removed.
 - [x] (2026-11-13 01:30Z) Revision 3: revision 2 is accepted with one amendment, the architect's ruling of the same day. The protection of a page the person has typed in is withdrawn; `show_pane` reloads unless the person is using the tab (Decision Log).
 - [ ] Probe 1 (Stop during a running cell), which can run today on any build ("Proof that an executor does not run"); its count goes onto Ticket 2.
-- [ ] Step 0 on master (U6a and U8a both landed); this branch merges master. U8a is on master at this writing and U6a is not.
+- [x] (2026-11-13 03:13Z) Step 0 on master (U6a and U8a both landed, master `be663d261`); constraint 11's line prints `step-0-landed`; this branch merged master at `e1c92a4dc`. The merge changed none of the files the milestones touch.
 - [ ] M1 — What the agent is told, and `show_pane` on a page already open.
 - [ ] M2 — The agent's tab comes forward.
 - [ ] M3 — Device sizes and Copy screenshot.
 - [ ] M4 — Computer use in the session.
 - [ ] M5 — The e2e scenes, the record, and the acceptance run.
 - [ ] The proof an executor does not run: `unit:darwin`, the new scenes alone and then the e2e groups, probe 4, probe 6, the hands-on check of the cursor's label, the branch review, class 1a on the final head.
-- [ ] The two tickets filed on the computer-use plugin's board (the architect), and the pull request opened on the architect's word.
+- [x] (2026-11-13 03:13Z) The two tickets filed on the computer-use plugin's board by the architect: Ticket 1 is `SSFSKIM/cua#368`, Ticket 2 is `SSFSKIM/cua#369`.
+- [ ] The pull request, opened on the architect's word.
 
 ## The landing's edge
 
@@ -309,11 +310,11 @@ Five milestones. M1 produces the predicate M2 reads; M3 and M4 are independent o
   - One new entry at the end of the charter's §19 Decision log, naming both: the amendment of X9 with its four parts, and the reversal of the choice of 2026-10-08, each with the path of this document.
   - The tracker's row of 2026-10-27 (P4-R7z) gains one clause: the probe's snapshot now carries `show_pane`'s description of this landing, which the recorded fixtures predate.
 - **The five debt rows** are added to `docs/tech-debt-tracker.md` in its table's form, dated the day of the commit, source "UX wave U12a":
-  1. After a Stop that withdrew a running computer-use call, MAWS cannot tell when the cell has ended; the line "Computer use may still be finishing a step" stays until a later computer-use call settles, the session ends, the server is gone, or the person dismisses it. Where: `src/renderer/src/computer-use/strip-state.ts`. Goes when: the computer-use plugin stops a cancelled cell or tells the host when one has ended (Ticket 2).
-  2. The computer-use strip cannot see an approval that carries no tool-use id: a plugin approval raised as an MCP form mid-call, and an approval waited for in a terminal session with no live bridge. The strip reads "Computer use running" through such a wait. Where: `src/renderer/src/computer-use/reading.ts`. Goes when: the plugin reports its state (Ticket 2).
+  1. After a Stop that withdrew a running computer-use call, MAWS cannot tell when the cell has ended; the line "Computer use may still be finishing a step" stays until a later computer-use call settles, the session ends, the server is gone, or the person dismisses it. Where: `src/renderer/src/computer-use/strip-state.ts`. Goes when: the computer-use plugin stops a cancelled cell or tells the host when one has ended (Ticket 2, `SSFSKIM/cua#369`).
+  2. The computer-use strip cannot see an approval that carries no tool-use id: a plugin approval raised as an MCP form mid-call, and an approval waited for in a terminal session with no live bridge. The strip reads "Computer use running" through such a wait. Where: `src/renderer/src/computer-use/reading.ts`. Goes when: the plugin reports its state (Ticket 2, `SSFSKIM/cua#369`).
   3. A session's selected browser tab is one value for every window, so a second window whose Browser tool is open but not in view follows the agent's tab when another window opens its Browser by itself. Where: `TabStore`'s selection; `agentTabComesForward`. Goes when: a window keeps its own shown tab, if two windows on one session become common.
   4. A device size applies only where a pane holds the tab's view; a tab no pane shows is parked at 1280 × 800, and that is the size the agent sees there. Where: `src/main/browser/view.ts` (parking); `tools/browser/viewport.ts`. Goes when: scaled or emulated sizes are taken up (the section's "Not included").
-  5. The cursor's label is the session's title at launch: it does not follow a rename until the next launch, and it is kept wherever the launch's settings are (the session's state file and the journal's `spawn` row). Where: `extraSettingsOf`. Goes when: the plugin reads a label at a task's start (Ticket 2, point 3).
+  5. The cursor's label is the session's title at launch: it does not follow a rename until the next launch, and it is kept wherever the launch's settings are (the session's state file and the journal's `spawn` row). Where: `extraSettingsOf`. Goes when: the plugin reads a label at a task's start (Ticket 2, `SSFSKIM/cua#369`, point 3).
 - The acceptance run is Concrete Steps 5. Class 1a is not M5's.
 
 **What it does not touch.** Product code, unless a scene shows a defect; then the fix goes to the milestone's owner through the controller. `e2e/remote.spec.ts` (probe 5 is #435's). The register and the board.
@@ -651,13 +652,13 @@ Each line has an owner other than an executor. The controller writes into Progre
 | **The owner's look** | not before the build | No drawn example is asked for: the strip's form and words, the menu's rows and the chip are fixed by the section, follow Claude Desktop's banner and menu, and are each one line or one row. The one thing the owner has not seen in words is the lingering line with its Dismiss, which the rulings added. The owner sees all of it at the sitting (root acceptance 2); the scenes' screenshots, with fixture content, can be shown earlier if the architect wants a word on the lingering line, the strip's place or the sized page's surround. | The owner's word, if asked. |
 | **The branch review** | after M5 | `doperpowers:review-code`, the xhigh panel, from the architect's session over `origin/master...ux-wave/U12a` (Decision Log). | A verdict and findings; the fixes are one wave through the controller. |
 | **Class 1a** | once, on the head the pull request will carry, after the review's fixes | `scripts/ci-gate.sh "$PWD" --gates static,unit,probes --label u12a`, in the background. | The run's id. |
-| **The two tickets** | Ticket 1 now; Ticket 2 now, or after probe 1 so that its text and its comment go together | The texts under "Hand-off", filed on the computer-use plugin's board (the repository `SSFSKIM/cua`) through its tracker scripts. | The two ticket numbers, written into the section's table, the tracker's rows 1, 2 and 5 and the pull request. |
+| **The two tickets** | Ticket 1 now; Ticket 2 now, or after probe 1 so that its text and its comment go together | The texts under "Hand-off", filed on the computer-use plugin's board (the repository `SSFSKIM/cua`) through its tracker scripts. | The two ticket numbers, written into the section's table, the tracker's rows 1, 2 and 5 and the pull request. Filed 2026-11-13: Ticket 1 `SSFSKIM/cua#368`, Ticket 2 `SSFSKIM/cua#369`. |
 
 ## Hand-off: the two tickets for the computer-use plugin's board
 
 The texts below are final and each stands alone. They were checked against the plugin's source at its `main`, `9020bb18` (the repository `SSFSKIM/cua`), by this document's author and by the adversarial review. Ticket 2 was amended in revision 2: a host cannot count a cancelled cell's end from its `timeout_ms`, so the ticket asks for a cell that stops on cancellation or, failing that, a signal that says when a cancelled cell has ended.
 
-### Ticket 1
+### Ticket 1 (filed as `SSFSKIM/cua#368`)
 
 Suggested labels: enhancement, priority P2, ready for an implementer.
 
@@ -692,7 +693,7 @@ Suggested labels: enhancement, priority P2, ready for an implementer.
 >
 > **Context.** #13 (the adapter that shipped `MAWS_RULE`); `docs/doperpowers/specs/2026-10-08-maws-in-app-browser-design.md`.
 
-### Ticket 2
+### Ticket 2 (filed as `SSFSKIM/cua#369`)
 
 Suggested labels: enhancement, priority P2, ready for an architect.
 
@@ -816,6 +817,8 @@ The pull request carries the dated lines of the two records this landing amends,
     Rationale: the item exists so that a person who tested a page and asked for a fix sees the new page without reloading it themselves, and that person has almost always typed in the page. Rejected: keeping a page the person has typed in since it loaded, which revision 2 built on the architect's conditional ruling (main can tell it cheaply): it made A2's first sentence false in the item's own main case, and an agent told the page was kept would reload it through the plugin anyway. A2's second sentence, a tab kept while the person is typing in it, is `personUses` and stands as written.
     Date/Author: 2026-11-13, the architect's ruling; revision 2's entry on the half-filled form is superseded by this one.
   - Without a change of decision: M5's debt rows are five, and the rows the tickets resolve are 1, 2 and 5. The review panel's first lens reads `personUses` beside `personHolds`, the reload that is not the person's input, and the window's sequence for the agent's tab.
+
+- **2026-11-13 · Execution begins (the controller).** The plan runs under subagent-driven execution: a fresh executor per milestone, each milestone reviewed clean before the next is dispatched, as the Plan of Work asks. The reviews run one after another and never beside an executor, because two `vmcheck.sh` calls on one branch collide on the VM checkout's git lock. The branch merged master `be663d261` (step 0) at `e1c92a4dc`; nothing in the files this landing touches moved since `6e8c72738`, so the statements under "What the code holds today" stand and no interface needed re-pinning. The two tickets' numbers are written where this document names them (Progress, the Hand-off headings, M5's debt rows 1, 2 and 5). The whole-branch review and the pull request stay the architect's, as the Decision Log's first entry says.
 
 ## Outcomes & Retrospective
 
