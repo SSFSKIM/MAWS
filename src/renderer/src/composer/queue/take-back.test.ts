@@ -16,13 +16,15 @@ import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { fakeClient } from '../../../../../test/support/fake-client';
 import type { QueueControls } from '../../session/controls/types';
 import { resetComposerStore, useComposerStore } from '../../stores/composer';
+import { useHosts } from '../../stores/hosts';
 import { resetQueueStore, useQueueStore, type SessionQueue } from '../../stores/queue';
+import { daemonStatus, hostStatus } from '../../test-support/host-status';
 import { preloadOf } from '../../test-support/preload-of';
 import { attachmentsOf, type ComposerDoc } from '../editor/doc';
 import { draftOf } from '../editor/drafts';
 import { STACK_WORDS } from './stack';
 import { deleteRefusal, refusalsNow, takeBackRefusal } from './stack-acts';
-import { attachTakeBackBox, carryForward, readRecord, resetTakeBack, retryTakeBackLoad, stageMark, storeRefusesStage, TAKE_BACK_WORDS, takeBack, takingBack, WITHDRAW_WAIT_MS, type TakeBackBox, type TakeBackDeps } from './take-back';
+import { attachTakeBackBox, carryForward, readRecord, resetTakeBack, retryTakeBackLoad, SETTLE_RETRY_MS, stageMark, storeRefusesStage, TAKE_BACK_WORDS, takeBack, takingBack, WITHDRAW_WAIT_MS, type TakeBackBox, type TakeBackDeps } from './take-back';
 
 const APP = 'app-take' as AppSessionId;
 const U1 = '11111111-1111-4111-8111-111111111111' as MessageUuid;
@@ -57,6 +59,8 @@ CREATE TABLE drafts (app_session_id TEXT PRIMARY KEY REFERENCES sessions(app_id)
   const entries = new Set<string>();
   let holdWithdrawals = false; // a withdrawal's answer never comes
   let claimAnswer: string | null = null; // the claim answered with these words instead of by the store
+  let settlesFailing = 0; // the next settling saves fail (the services do not answer)
+  let readsFailing = false; // a read of what is kept fails
 
   const invoke = async (name: string, input: Record<string, unknown>) => {
     if (name === 'session.drafts.set') {
@@ -69,6 +73,10 @@ CREATE TABLE drafts (app_session_id TEXT PRIMARY KEY REFERENCES sessions(app_id)
         await gate.promise;
       }
       if (replaces === DRAFT_CLAIM && claimAnswer !== null) return { ok: false, error: { code: 'internal', message: claimAnswer } };
+      if (replaces?.startsWith(settles('')) && settlesFailing > 0) {
+        settlesFailing -= 1;
+        return { ok: false, error: { code: 'timeout', message: 'the services did not answer' } };
+      }
       try {
         store.set(APP, draft, 'owner', replaces);
         return { ok: true, value: undefined };
@@ -76,7 +84,10 @@ CREATE TABLE drafts (app_session_id TEXT PRIMARY KEY REFERENCES sessions(app_id)
         return { ok: false, error: { code: 'internal', message: (error as Error).message } };
       }
     }
-    if (name === 'session.drafts.get') return { ok: true, value: store.get(APP) };
+    if (name === 'session.drafts.get') {
+      log.push('read');
+      return readsFailing ? { ok: false, error: { code: 'timeout', message: 'the services did not answer' } } : { ok: true, value: store.get(APP) };
+    }
     if (name === 'session.promptHistory') {
       log.push('record');
       return { ok: true, value: over.history?.() ?? { events: [...events], complete: true } };
@@ -132,6 +143,8 @@ CREATE TABLE drafts (app_session_id TEXT PRIMARY KEY REFERENCES sessions(app_id)
     },
     holdWithdrawals: (on: boolean) => void (holdWithdrawals = on),
     answerClaim: (words: string | null) => void (claimAnswer = words),
+    failSettles: (count: number) => void (settlesFailing = count),
+    failReads: (on: boolean) => void (readsFailing = on),
     /** The engine host's queue as the window's store lists it. */
     listed(queue: Partial<SessionQueue> = {}) {
       const steersNow = [...steers].map((messageUuid) => ({ messageUuid, content: TEXT, createdAt: SINCE }));
@@ -148,12 +161,16 @@ const settleAll = () => new Promise((resolve) => setTimeout(resolve, 0));
 // ---- the box ----------------------------------------------------------------------------------------------------------
 
 function box(free = true) {
-  const state = { free, loaded: [] as ComposerDoc[], replaced: [] as (ComposerDoc | null)[], held: [] as boolean[], later: [] as string[] };
+  const state = { free, loaded: [] as ComposerDoc[], replaced: [] as (ComposerDoc | null)[], held: [] as boolean[], later: [] as string[], taken: [] as (() => void)[], settled: 0 };
   const api: TakeBackBox = {
     load: (doc) => (state.free ? (state.loaded.push(doc), true) : false),
     replace: (doc) => void state.replaced.push(doc),
     hold: (on) => void state.held.push(on),
-    settleLater: (replaces) => void state.later.push(replaces),
+    settleLater: (replaces, taken) => {
+      state.later.push(replaces);
+      state.taken.push(taken);
+    },
+    settled: () => void (state.settled += 1),
   };
   return { state, api };
 }
@@ -172,6 +189,7 @@ const sentAndCleared = (w: ReturnType<typeof world>) => {
 };
 
 beforeEach(() => {
+  useHosts.setState({ supervisor: hostStatus() }); // this Mac's services: a daemon of this build
   window.maws = preloadOf(fakeClient());
   resetComposerStore();
   resetQueueStore();
@@ -290,6 +308,104 @@ describe('(c) a claim that is not taken withdraws nothing and the row stays', ()
     expect(takeBackRefusal(refusals, next(U1))).toBe(TAKE_BACK_WORDS.needsServices);
     expect(deleteRefusal(refusals, after('q-1'))).toBeNull();
     expect(deleteRefusal(refusals, next(U1))).toBeNull();
+  });
+
+  it('(h) the refusal ends when this Mac’s services restart: a take-back then works without a reload', async () => {
+    const w = world();
+    w.answerClaim(STALE_DRAFT_WORDS);
+    w.steers.add(U1);
+    const b = box();
+    attachTakeBackBox(APP, b.api);
+    await takeBack(APP, next(U1), w.deps);
+    expect(storeRefusesStage(APP)).toBe(TAKE_BACK_WORDS.needsServices);
+    useHosts.setState({ supervisor: hostStatus({ daemon: daemonStatus({ pid: 4242, startedAt: '2026-11-13T12:00:00.000Z' }) }) }); // a new mawsd
+    expect(storeRefusesStage(APP)).toBeNull();
+    w.answerClaim(null);
+    await takeBack(APP, next(U1), w.deps);
+    expect(w.log).toEqual(['claim', 'claim', 'cancel', 'settle']);
+    expect(b.state.loaded.map(textOf)).toEqual([TEXT]);
+  });
+
+  it('(h) services this Mac runs in the app (no daemon) are this build’s: a stale answer is said and not remembered', async () => {
+    useHosts.setState({ supervisor: hostStatus({ daemon: null }) });
+    const w = world();
+    w.answerClaim(STALE_DRAFT_WORDS);
+    w.steers.add(U1);
+    attachTakeBackBox(APP, box().api);
+    await takeBack(APP, next(U1), w.deps);
+    expect(notice()).toBe(TAKE_BACK_WORDS.needsServices);
+    expect(storeRefusesStage(APP)).toBeNull();
+  });
+});
+
+// decision 13, step 4, to the letter (M3's review, finding 2): the box stays held until a settling save is acknowledged
+// or a read of what is kept settles it; tries spent and a failed read are neither
+describe('the settle', () => {
+  it('a settling save that keeps failing holds the box, hands the form to the writer, and is asked again until taken', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    const w = world();
+    w.steers.add(U1);
+    const b = box();
+    attachTakeBackBox(APP, b.api);
+    w.failSettles(5);
+    const run = takeBack(APP, next(U1), w.deps);
+    await vi.advanceTimersByTimeAsync(SETTLE_RETRY_MS * 8);
+    expect(w.log.filter((step) => step === 'settle').length).toBeGreaterThanOrEqual(3);
+    expect(b.state.later).toEqual([settles(w.store.get(APP)!.updatedAt)]); // the stage's settle form, to the writer
+    expect(b.state.held.at(-1)).toBe(true); // tries spent: still held
+    expect(takingBack(APP)).toBe(true);
+    expect(stageMark(w.store.get(APP))).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(SETTLE_RETRY_MS * 64);
+    await run;
+    expect(b.state.held.at(-1)).toBe(false);
+    expect(stageMark(w.store.get(APP))).toBeNull();
+    expect(textOf(w.store.get(APP)!.doc as ComposerDoc)).toBe(TEXT);
+    expect(b.state.settled).toBe(1); // the writer no longer names the form
+  });
+
+  it('a settle the writer’s own save acknowledged ends the operation', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    const w = world();
+    w.steers.add(U1);
+    const b = box();
+    attachTakeBackBox(APP, b.api);
+    w.failSettles(1000);
+    const run = takeBack(APP, next(U1), w.deps);
+    await vi.advanceTimersByTimeAsync(SETTLE_RETRY_MS * 8);
+    expect(b.state.taken).toHaveLength(1);
+    b.state.taken[0]!(); // the writer's save naming the form was taken
+    await vi.advanceTimersByTimeAsync(SETTLE_RETRY_MS * 64);
+    await run;
+    expect(b.state.held.at(-1)).toBe(false);
+    expect(takingBack(APP)).toBe(false);
+  });
+
+  it('a stale settle whose read of what is kept fails leaves the hold in place; once the read answers, the box takes what is kept', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    const w = world();
+    w.steers.add(U1);
+    const b = box();
+    attachTakeBackBox(APP, b.api);
+    w.holdNextSets(2); // the claim, then the settling save
+    const run = takeBack(APP, next(U1), w.deps);
+    await vi.waitFor(() => expect(w.heldCount()).toBe(1));
+    const stage = (await w.letGo(), w.store.get(APP)!);
+    await vi.waitFor(() => expect(w.heldCount()).toBe(1));
+    // another mount settles the stage first, with its own words
+    const theirs = draftOf({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'their settled words' }] }] }, '2026-09-29T10:09:00.000Z')!;
+    w.store.set(APP, theirs, 'owner', settles(stage.updatedAt));
+    w.failReads(true);
+    await w.letGo(); // this mount's settle lands: stale; its read fails
+    await vi.advanceTimersByTimeAsync(SETTLE_RETRY_MS * 4);
+    expect(w.log.filter((step) => step === 'read').length).toBeGreaterThanOrEqual(1);
+    expect(b.state.held.at(-1)).toBe(true); // a failed read is no answer
+    expect(b.state.replaced).toEqual([]);
+    expect(takingBack(APP)).toBe(true);
+    w.failReads(false);
+    await vi.advanceTimersByTimeAsync(SETTLE_RETRY_MS * 64);
+    await run;
+    expect(b.state.replaced.map(textOf)).toEqual(['their settled words']);
+    expect(b.state.held.at(-1)).toBe(false);
   });
 });
 
