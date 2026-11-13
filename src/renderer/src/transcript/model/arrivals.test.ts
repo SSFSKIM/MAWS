@@ -6,7 +6,7 @@ import type { ArrivalEntry, CarriedArrival } from '@shared/engine/arrival-schema
 import { describe, expect, it } from 'vitest';
 import { consentMessage } from '@shared/engine/arrival';
 import { isPersistentRow, rowsOf, turnRows, withAllExpanded } from './derive';
-import { dividerCopy, NOTICE } from './copy';
+import { NOTICE } from './copy';
 import { rowId, turnId } from './keys';
 import { applyEvents, createState, type TranscriptState } from './reduce';
 import type { Row } from './rows';
@@ -625,35 +625,5 @@ describe('the consent line (decision 10)', () => {
     expect(user).toMatchObject({ messageUuid: 'c1', consent: { kind: 'command', subject: 'git push origin notes' } });
     expect(isPersistentRow(user!)).toBe(true);
     expect(kinds(folded)).toEqual(['user', 'divider']);
-  });
-});
-
-// UX wave U2, M2 (C2, C5; O-15): a turn an answer's notice opened reads `Worked for` where it did work, and has no line
-// where it only answers; the notice stays in view through a fold either way
-describe('the line of a turn an answer opened', () => {
-  const ANSWER: CarriedArrival = { class: 'answer', tool: 'sminos', call: 'tu-q7', summary: 'Your questions have been answered: "Which colour?"="Teal". You can now continue with these answers in mind.', answers: null, dismissed: false };
-  const opened = (work: boolean) => {
-    const b = builder();
-    engineTurn(b);
-    carry(b, 'a1', [ANSWER], 'The human responded to your async AskUserQuestion (call tu-q7): Teal');
-    if (work) {
-      b.toolUse('t1', 'Bash', { command: 'make theme' });
-      b.result('t1', 'ok');
-    }
-    b.text('m1', 0, 'Teal it is.');
-    endEngine(b);
-    return rowsOf(reduce(b.events)); // at rest: folded
-  };
-
-  it('that only answers has no line, and its notice and answer stay', () => {
-    expect(kinds(opened(false))).toEqual(['notice', 'assistant_text']);
-  });
-
-  it('with one call reads `Worked for …` and keeps its notice in view when folded', () => {
-    const list = opened(true);
-    expect(kinds(list)).toEqual(['divider', 'notice', 'assistant_text']);
-    const line = divider(list);
-    expect(line.opener).toMatchObject({ class: 'answer' });
-    expect(dividerCopy({ ...line, durationMs: line.summary.durationMs ?? 0 })).toBe('Worked for 1s · Ran a command');
   });
 });

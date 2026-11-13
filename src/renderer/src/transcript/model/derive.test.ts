@@ -11,6 +11,7 @@ import { cellId, rowId, turnId } from './keys';
 import { applyEvents, createState, withAgents, withUi, type AgentLookup } from './reduce';
 import type { Row, SubagentRef } from './rows';
 import { api, BASH_RESULT, builder, request, task, tool, uuid, type Builder } from './test-events';
+import type { CarriedArrival } from '@shared/engine/arrival-schema';
 import { configureTime } from './time';
 
 const reduce = (events: SessionEvent[]) => applyEvents(createState(null, null), events);
@@ -1389,5 +1390,35 @@ describe('`background` over a recorded MCP call moved to the background (uxwave/
     const atEnd = callsUpTo(132).find((cell) => cell.toolName === 'mcp__slow__slow_wait')!;
     expect(atEnd.status).not.toBe('running');
     expect(atEnd.background).toBe(false);
+  });
+});
+
+// UX wave U2, M2 (C2, C5; O-15): a turn an answer's notice opened reads `Worked for` where it did work, and has no line
+// where it only answers; the notice stays in view through a fold either way
+describe('the line of a turn an answer opened', () => {
+  const ANSWER: CarriedArrival = { class: 'answer', tool: 'sminos', call: 'tu-q7', summary: 'Your questions have been answered: "Which colour?"="Teal". You can now continue with these answers in mind.', answers: null, dismissed: false };
+  const opened = (work: boolean) => {
+    const b = builder();
+    b.emit('turn.started', { userMessageUuid: null, origin: 'engine' });
+    b.emit('user.message', { messageUuid: uuid('a1'), content: 'The human responded to your async AskUserQuestion (call tu-q7): Teal', isReplay: true, isSynthetic: true, origin: 'task-notification', bash: null, arrival: [ANSWER] });
+    if (work) {
+      b.toolUse('t1', 'Bash', { command: 'make theme' });
+      b.result('t1', 'ok');
+    }
+    b.text('m1', 0, 'Teal it is.');
+    b.end([], { origin: 'task-notification' });
+    return rowsOf(reduce(b.events)).filter((row) => row.kind !== 'time'); // at rest: folded
+  };
+
+  it('that only answers has no line, and its notice and answer stay', () => {
+    expect(kinds(opened(false))).toEqual(['notice', 'assistant_text']);
+  });
+
+  it('with one call reads `Worked for …` and keeps its notice in view when folded', () => {
+    const list = opened(true);
+    expect(kinds(list)).toEqual(['divider', 'notice', 'assistant_text']);
+    const line = find(list, 'divider');
+    expect(line.opener).toMatchObject({ class: 'answer' });
+    expect(dividerCopy({ ...line, durationMs: line.summary.durationMs ?? 0 })).toBe('Worked for 1s · Ran a command');
   });
 });
