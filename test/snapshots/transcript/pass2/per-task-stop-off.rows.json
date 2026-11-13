@@ -158,6 +158,20 @@
     "turnId": "turn:cba09f87-9767-4699-879f-f2a7560dc79b"
   },
   {
+    "at": "2026-09-28T10:02:12.746Z",
+    "class": "task",
+    "detail": null,
+    "durationMs": null,
+    "id": "notice:replay:journal:77:0:0",
+    "kind": "notice",
+    "outcome": "completed",
+    "outputFile": "/private/tmp/claude-501/-private-tmp-maws-probe2-XdJXUX/5a5931ce-4e50-44bc-8884-cf96e2eab352/tasks/bjvqmsw5i.output",
+    "taskId": "bjvqmsw5i",
+    "text": "Background command \"Sleep 30s then write BG_DONE to bg.txt in background\" completed (exit code 0)",
+    "toolUseId": "toolu_017Csv2uR4vG2H9hsDabBthf",
+    "turnId": "turn:cba09f87-9767-4699-879f-f2a7560dc79b"
+  },
+  {
     "at": "2026-09-28T10:02:12.749Z",
     "autoDenied": 0,
     "denied": 0,
