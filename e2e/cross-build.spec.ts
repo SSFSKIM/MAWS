@@ -1833,12 +1833,20 @@ test('(layout, to the peer) a split strip this build stored, with a pin, a side 
     await s.ready(old.page);
     await expect(mainTabById(old.page, 'artifacts'), `${peer.label} draws the tab that was in front, selected`).toHaveAttribute('aria-selected', 'true', { timeout: 20_000 });
     await expect(mainTabById(old.page, artifact).getByRole('img', { name: 'Pinned' }), `${peer.label} draws the pin`).toBeVisible();
-    await expectToolPinned(old.page, PINNED_TOOL, true, `${peer.label} draws the pinned tool`);
     await expect(old.page.locator('[data-region="sidebar"]').getByRole('separator', { name: 'Resize sidebar' }), `${peer.label} draws the sidebar at the width written`).toHaveAttribute('aria-valuenow', '280');
     expect((await consoleSaid(old.page)).filter((line) => INVALID_LAYOUT.test(line)), `${peer.label} took every layout value as valid`).toEqual([]);
-    // its acts: another tab selected, the tool unpinned, the sidebar folded; then what it writes holds every tab
-    await mainTabById(old.page, artifact).click();
+    // a tool's menu opens only while a session is in view (the icon row disables a session tool's icon and its folded
+    // item otherwise), so the pin is read, and undone, with the session's tab in front: the peer filed it in its row's
+    // set, so it is reached from its sidebar row
+    await (await sidebarRow(old.page, { appSessionId: id })).click();
+    await expect(activeMainTab(old.page), `${peer.label} shows the session’s tab`).toHaveAttribute('data-tab-id', session, { timeout: 20_000 });
+    await expectToolPinned(old.page, PINNED_TOOL, true, `${peer.label} reads the pinned tool`);
     await pinToToolbar(old.page, PINNED_TOOL, false);
+    // then the page's tab selected (from the library, which the peer keeps in the set of no project), whose write as
+    // the shown set's tab in front only the peer makes, and the sidebar folded
+    await old.page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click({ timeout: 15_000 });
+    await mainTabById(old.page, artifact).click({ timeout: 15_000 });
+    await expect(activeMainTab(old.page)).toHaveAttribute('data-tab-id', artifact);
     await old.page.getByRole('banner').getByRole('button', { name: 'Toggle sidebar' }).click();
     let theirs: StoredSets | null = null;
     let surfaces: StoredSurfaces | null = null;
@@ -1859,12 +1867,14 @@ test('(layout, to the peer) a split strip this build stored, with a pin, a side 
     await s.quit(old);
     await endProfileProcesses(s.userData);
 
-    // this build again: every tab once, the pin, the tool unpinned, the sidebar folded
+    // this build again: every tab once, the pin, the tool unpinned (read with the session in front), the sidebar folded
     const back = await s.launch();
     await s.ready(back.page);
     await expect.poll(async () => (await stripIds(back.page)).sort(), { timeout: 20_000, message: 'every tab back in the strip' }).toEqual(tabs);
     expect(new Set(await stripIds(back.page)).size, 'each once').toBe(tabs.length);
     await expect(mainTabById(back.page, artifact).getByRole('img', { name: 'Pinned' }), 'the pin').toBeVisible();
+    await mainTabById(back.page, session).click(); // a tool's menu opens only while a session is in view
+    await expect(activeMainTab(back.page)).toHaveAttribute('data-tab-id', session);
     await expectToolPinned(back.page, PINNED_TOOL, false, 'the tool unpinned');
     expect((await layoutOf<StoredSurfaces>(back.page, 'panelTools.surfaces'))?.pinnedTools ?? []).not.toContain(PINNED_TOOL_ID);
     await expect(back.page.getByRole('banner').getByRole('button', { name: 'Toggle sidebar' }), 'the sidebar folded').toHaveAttribute('aria-pressed', 'false');
