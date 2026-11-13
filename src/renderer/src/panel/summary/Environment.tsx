@@ -1,6 +1,7 @@
-// Environment (C8 spec *The summary*): the branch, the uncommitted change line (Review's own control, the card's way into
-// Review; UX wave U8b, l5-code-16), and the model row that opens Session info. The git facts are the git store's for the summary's directory (Summary.tsx holds the watch); a failed
-// watch says why in words and draws no branch, a failed diff keeps the branch and says the change is unavailable.
+// Environment (C8 spec *The summary*): the branch, the uncommitted change line (Review's own control, the card's one way
+// into Review; UX wave U8b, l5-code-16), and the model row that opens Session info. The git facts are the git store's for
+// the summary's directory (Summary.tsx holds the watch); a failed watch says why in words and draws no branch, a failed
+// diff keeps the branch and says the change is unavailable.
 import { EffortSchema } from '@shared/engine/launch-spec';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
