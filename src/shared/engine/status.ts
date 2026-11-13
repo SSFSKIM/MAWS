@@ -56,7 +56,7 @@ export const EngineSessionStatusSchema = z.strictObject({
   pluginsObservedAt: z.string().nullable(),
   // P2-A end
   // The UX wave's U8b (M5): `parentTaskId` is the subagent that started the task, as the engine's listing names it; absent
-  // for the main loop's, and from a host before wire minor 37
+  // for the main loop's, and from a host before wire minor 40
   backgroundTasks: z.array(z.strictObject({ taskId: TaskIdSchema, taskType: z.string(), description: z.string(), ambient: z.boolean(), parentTaskId: TaskIdSchema.optional() })),
   grants: z.array(z.string()), // the snapshot's rule strings
   mcpServers: z.array(z.strictObject({ name: z.string(), status: z.string(), source: z.string().nullable() })),

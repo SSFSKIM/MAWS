@@ -237,7 +237,7 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
   event('subagent.finished', { taskId: TaskIdSchema, status: TaskOutcomeSchema, summary: nullableString(), outputFile: nullableString(), reason: nullableString(), usage: TaskUsageSchema.optional() }),
   event('subagent.message', { direction: z.enum(['to_child', 'from_child', 'between']), fromAgentId: AgentIdSchema.nullable(), toAgentId: AgentIdSchema.nullable(), text: z.string() }),
   // The UX wave's U8b (M5): `parentTaskId` on a task's start and on each listed task is the subagent that started it, from
-  // the engine's `parent_task_id`; absent for the main loop's, and from a producer before wire minor 37.
+  // the engine's `parent_task_id`; absent for the main loop's, and from a producer before wire minor 40.
   event('task.started', { taskId: TaskIdSchema, toolUseId: ToolUseIdSchema.nullable(), taskType: z.string(), description: z.string(), isBackground: z.boolean(), workflowName: nullableString(), parentTaskId: TaskIdSchema.optional() }),
   event('task.updated', {
     taskId: TaskIdSchema,
