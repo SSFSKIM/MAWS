@@ -288,9 +288,12 @@ describe('the scan’s work, bounded by construction (Decision Log 24)', () => {
     bounded(text);
   });
 
+  // each text is one line, whose end is found first (a charge of its length and one); the refusal comes after that
   it('a refusal at a cap counts the work spent reaching it', () => {
-    expect(linkWork(`${'> '.repeat(40)}x`).work).toBeGreaterThanOrEqual(2 * 32); // past 32 markers
-    expect(linkWork(`- x${' '.repeat(20_000)}`).work).toBeGreaterThanOrEqual(16 * 1024); // a thematic tail past 16 KiB
+    const markers = `${'> '.repeat(40)}x`; // refused at its 33rd marker
+    expect(linkWork(markers).work).toBeGreaterThanOrEqual(markers.length + 1 + 2 * 32);
+    const tail = `- x${' '.repeat(20_000)}`; // a thematic tail read past 16 KiB
+    expect(linkWork(tail).work).toBeGreaterThanOrEqual(tail.length + 1 + 16 * 1024);
   });
 
   // One seeded generator of hostile shapes, each part sized from ten to twenty thousand: marker towers, bracket towers,
