@@ -885,6 +885,13 @@ Found while writing this document, against master `48619c824`, and reported to t
    - Decision: one row in `docs/tech-debt-tracker.md`, accepted by the architect: a folded parent row in the Subagents panel and card does not say that a nested agent waits, as the spec's "a request of its own" allows. No ticket and no test.
    Date/Author: 2026-11-13, the executor of M9.
 
+18. **2026-11-13 (UTC; the architect, on M9's concern 1): desk web's two files are this landing's one exception to Constraint 3.** `da097279b` edits `apps/desk-web/src/depth/view/JobsPane.tsx` and `SubagentTree.tsx`, which no constraint gives this landing. The edit stays.
+   - Why: a landing repairs the typecheck it breaks. M7 changed the shape of the panels' copy and rows, which desk web's depth view imports, and without the edit `pnpm typecheck` fails.
+   - Bound: desk web keeps its words and drawing as they were. Only the shape M7 changed is adapted, with no visible or behavioural change in desk web. M9's review confirms exactly that.
+   - Proof on the Mac: `e2e:desk-web` joins this landing's Mac set, so the rows' text is proven there.
+   - The pull request flags the edit to the session that keeps master, which owns desk web's fold into MAWS.
+   Date/Author: 2026-11-13, the architect's ruling; written by the controller.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
