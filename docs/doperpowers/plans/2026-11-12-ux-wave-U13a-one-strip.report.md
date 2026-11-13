@@ -1,6 +1,6 @@
 # UX wave U13a (one strip): execution report
 
-Board #578. Execution document: `docs/doperpowers/plans/2026-11-12-ux-wave-U13a-one-strip.md`. This report covers M1, the milestone the architect dispatched. M2 to M5 wait for the rehearsal on real layout files and for step 0 to reach master.
+Board #578. Execution document: `docs/doperpowers/plans/2026-11-12-ux-wave-U13a-one-strip.md`. This report covers M1 to M5. M1 was dispatched alone. M2 to M5 followed once the architect's rehearsal on real layout files had passed (2026-11-13); step 0 was not waited for, and master was merged at each milestone boundary instead.
 
 ## M1: the stored form and its reader
 
@@ -117,11 +117,75 @@ The document deviates from its Concrete Steps 1 and its constraint 9 in one way:
 - The rehearsal over the owner's real layout files. That is the architect's run.
 - Electron e2e. M1 touches no e2e spec and needs no scene.
 
-## For later milestones
+## M2 to M5 (2026-11-13)
 
-- **Q1.** The owner answered Q1 (2026-11-12, per the coordinator): a New chat with nothing typed does not come back after a relaunch. M3 records it in the Decision Log and Progress, settles §E's last paragraph, and builds that branch with its tests, its e2e clause and its dated amendment. M1 does not act on it.
-- **M2's hydration** should give the same `contexts` m as the rehearsal prints for a file.
+Each milestone had one executor and an independent task review. Every Critical and Important finding was fixed and re-reviewed. The execution document's Decision Log and Progress carry each decision and tick; its Outcomes & Retrospective sums the landing up. Every check below ran on the build VM through `vmcheck.sh ux-wave/U13a`.
+
+### Master merges
+
+| at | brings | checks after it |
+|---|---|---|
+| `4141b9cb1` | U8a | none run separately; M2's checks ran over the merged tree |
+| `d76a8d41a` | U6a | `pnpm typecheck` exit 0; vitest over `stores/ shell/ main/ keymap/ panel/ sidebar/ app/ ipc/ shared/ipc/schema/ shared/keymap/`: 152 files, 2268 tests passed |
+| `3958e7df4` | `d3c7edce3`, the gate's `--peer-exact` | the acceptance run below ran on top of it |
+| `438a8d116` | `80dcc59af`, `scripts/ci-gate.sh` only | `bash -n scripts/ci-gate.sh` passes |
+
+No merge conflicted. `3958e7df4` carries git's default merge message, without the session line.
+
+### Milestones
+
+**M2: one strip in the store, and the current project.**
+- Commits: `67c8ba4bf..4cf52c4dc`, review fix `0041b10cc..1d744f9cd`. Two review rounds.
+- The finding: a background `openTab` moved the focus. §B was revised.
+- Checks:
+  - `pnpm typecheck` exit 0;
+  - eslint on 56 paths exit 0;
+  - 32 touched test files passed (1448 tests);
+  - the whole `pnpm test` at `3daeac9be` exited 1 with 19 files failing: the known set, `Sidebar.test.tsx` under load (passes alone), one real failure fixed in `4cf52c4dc`, and ten files that pass alone with `--testTimeout=60000`;
+  - after the review fix: the web tsc, eslint, and vitest over five directories passed (1302 tests).
+- One edit outside UC-8's list, which you confirmed: `panel/host.ts`, type only.
+
+**M3: New chat, with Q1.**
+- Commits: `fd5f60831..275685451`, review fixes `7e00e152b..c9e5b9d25` and `97adaff64..9cecb61bc`. Three review rounds.
+- The findings: the relaunch sweep could discard a chat of this run. The fix is that creation now waits for the sweep. A refused close also lost its pin.
+- Last checks, at `9cecb61bc`:
+  - web tsc exit 0;
+  - eslint exit 0;
+  - vitest over `sessions/ keymap/ main/ overview/ sidebar/ app/`: 119 files, 1769 tests passed.
+
+**M4: the tabs' places, Close tabs to the right, the chip.**
+- Commits: `02ed34550..04e4b080b`. One review round, clean.
+- The review's Minor, a pinned tab to the right of the menu's tab, became a unit case in M5.
+- Checks:
+  - web tsc exit 0;
+  - eslint exit 0;
+  - vitest over eleven directories: 153 of 156 files passed. The three failures were time-outs; the forty-tab case was given its own budget, and the rerun passed 16 files, 397 tests.
+
+**M5: the e2e scenes, the record, the acceptance run.**
+- Commits: `4a31bd4d8..4206f9520`, review fixes `dca21b066`, `5003003a0` and `9dce99e62`. Three review rounds.
+- Your trial cross-build runs found the tool pin hidden behind a folded icon, then behind a disabled one. The review found two assertions that could pass without proving F's write or a relaunch with no notice.
+- The acceptance run at `8be4eb94f`:
+  - `pnpm typecheck` exit 0, which covers `e2e/`;
+  - `pnpm lint` exit 0;
+  - `pnpm test` exited non-zero with 10 files failing:
+    - the known set of six;
+    - `journal`, `org/rows` and `document-perf`, which pass rerun alone;
+    - `test/support/tokens-guard.test.ts`, which read `#497` as a colour. It was reworded on your ruling and the guard passes.
+- Fix checks:
+  - web and e2e tsc exit 0;
+  - eslint exit 0;
+  - the guard and the touched test files: 5 files, 76 tests passed.
+- A12: `git diff origin/master...HEAD -- src/shared/keymap/actions.ts` prints nothing.
+
+### e2e
+
+No executor runs e2e. The scenes to run alone first, the groups, and the cross-build run of record with F are in the execution document's Progress (the hand-over line of 2026-11-13).
+
+### Not verified
+
+- A whole unit suite with no failure outside the known set. The VM's runs were noisy under load, and every other failure passes rerun alone. Class 1a is the record.
+- Every e2e scene on a real build. Your trial runs passed `(layout, from the peer)` and `(settings, both ways)`. `(layout, to the peer)` has been fixed twice since and has not been run since.
 
 ## Residue
 
-None beyond the whole-suite qualification above, which class 1a settles.
+- **A pinned tool cannot be pinned or unpinned while a tab that is not a session's is in front.** In `src/renderer/src/panel/SurfaceRow.tsx`, the session tools' icons are `disabled={!session && !tab}`, and their folded items under "More surfaces" are disabled the same way. With the library, a page or Diagnostics in front, a person has no way to reach the tool's "Unpin from toolbar". Found while the cross-build scene was being fixed, and not for this landing to change. It needs a tracker row.
