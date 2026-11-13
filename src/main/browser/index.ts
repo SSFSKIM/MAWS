@@ -141,6 +141,7 @@ export function startBrowser({ userData, settings, view, data, register, emit: e
     // E4c end
     driven: (tabId) => cua.holds(tabId), // E13: the cap never suspends a tab an agent drives through cua
     routeLoad: (tab, url) => (forwarded ? forwarded.route(tab, url) : url), // P5 O7 M3: a forwarded port's tab past a relaunch
+    reloadForAgent: (tabId) => navigator.reloadForAgent(tabId), // U12a: show_pane's reload, never the person's input
   });
   const forwarded = remote ? forwardedTabs({ store, forwards: remote.forwards, log: (line) => console.warn(line) }) : null;
   if (restored.tabs.length !== file.tabs.length) writer.markDirty();

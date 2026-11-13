@@ -45,6 +45,14 @@ export function personHolds(entry: TabEntry, now: number): boolean {
   return last !== null && now - last < BROWSER_HANDBACK_IDLE_MS;
 }
 
+// U12a (the UX wave's U12 execution document, Interfaces §C; ruling R1): the person is using the tab: it reads "You have
+// the page" (control `human`), or `personHolds` (their last input within BROWSER_HANDBACK_IDLE_MS). The one statement of
+// this rule, which `show_pane`'s reload reads; the takeover gate keeps reading `personHolds`, whose grace ends while the
+// tab may still read "You have the page" (cua #103).
+export function personUses(entry: TabEntry, now: number): boolean {
+  return entry.tab.control === 'human' || personHolds(entry, now);
+}
+
 // Told after every control transition (`from`: the state it left).
 export type ControlListener = (entry: TabEntry, from: BrowserControl) => void;
 

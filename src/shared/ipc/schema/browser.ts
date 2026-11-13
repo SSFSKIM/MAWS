@@ -9,6 +9,7 @@ import {
   BROWSER_PLACEHOLDER_MAX_BYTES,
   BROWSER_SUGGESTIONS_MAX,
   BrowserControlSchema,
+  BrowserOpenPageSchema, // U12a
   BrowserPartitionSchema,
   BrowserTabIdSchema,
   BrowserTabSchema,
@@ -170,7 +171,9 @@ export const commands = {
     owner: 'main',
   },
   // `url: null` opens an empty tab. `reuse: 'url'` selects the session's tab already at the same normalised URL (show_pane);
-  // a `requestId` repeated within 10 s answers the first call's tab (two windows handling one `maws.pane.show`).
+  // a `requestId` repeated within 10 s answers the first call's tab (two windows handling one `maws.pane.show`). U12a:
+  // `reload`, which show_pane's path alone sets, loads that tab again unless the person is using it, and the answer's
+  // `page` says what was done (present exactly when `reload` was asked; a repeated id answers the first call's).
   'browser.tabs.open': {
     input: z.strictObject({
       appSessionId: AppSessionIdSchema,
@@ -178,8 +181,9 @@ export const commands = {
       select: z.boolean(),
       reuse: z.literal('url').optional(),
       requestId: z.string().min(1).optional(),
+      reload: z.literal(true).optional(), // U12a
     }),
-    output: z.strictObject({ tab: BrowserTabSchema, reused: z.boolean() }),
+    output: z.strictObject({ tab: BrowserTabSchema, reused: z.boolean(), page: BrowserOpenPageSchema.optional() /* U12a */ }),
     owner: 'main',
   },
   'browser.tabs.close': { input: TabOnly, output: z.void(), owner: 'main' },

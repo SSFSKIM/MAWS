@@ -94,6 +94,13 @@ export const BrowserTabSchema = z.strictObject({
 });
 export type BrowserTab = z.infer<typeof BrowserTabSchema>;
 
+// U12a (the UX wave's U12, l9-browser-delivery-02; Interfaces §B): what `show_pane`'s open did with the page at its address,
+// as main answers `browser.tabs.open` with `reload` and the window passes it on to the agent: a new tab (`opened`), the
+// tab at that address loaded again (`reloaded`), or shown without reloading because the person is using it (`kept`).
+export const BROWSER_OPEN_PAGES = ['opened', 'reloaded', 'kept'] as const;
+export const BrowserOpenPageSchema = z.enum(BROWSER_OPEN_PAGES);
+export type BrowserOpenPage = z.infer<typeof BrowserOpenPageSchema>;
+
 // cua #90: whether a URL is a page of the extension (`chrome-extension://<id>/…`), the one origin an internal tab of that
 // extension may show.
 export function isExtensionPage(url: string, extensionId: string): boolean {
