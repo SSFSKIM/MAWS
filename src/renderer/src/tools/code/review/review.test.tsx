@@ -1155,11 +1155,12 @@ describe('review tool', () => {
 
 describe('review diff tab', () => {
   const offs: (() => void)[] = [];
+  let main: ReturnType<typeof reviewMain>;
   beforeEach(() => {
     resetPanelStores();
     useReview.getState().reset();
     resetDiffTabs();
-    reviewMain();
+    main = reviewMain();
     useSessions.setState((s) => ({ records: new Map(s.records).set(A, record(A, { directory: '/repo' })) }));
     offs.push(connectPanelEvents());
   });
@@ -1205,6 +1206,25 @@ describe('review diff tab', () => {
     moveTo(WT);
     await waitFor(() => expect(document.querySelector('[data-review]')).not.toBeNull());
     await waitFor(() => expect(selectedPath()).toBe('src/staged.ts'));
+  });
+
+  // Fix wave 1 (the architect's ruling a): the ref's file has no change in the folder the agent moved to. The tab shows
+  // that folder's changes, its first file selected, with nothing of the old folder's file and no error.
+  it('shows the new folder’s changes when its ref’s file has none there, with nothing of the old folder and no error', async () => {
+    const OTHER_PATCH = APP_PATCH.replaceAll('src/app.ts', 'src/other.ts');
+    main.state.diff = (input) => (input.directory === WT && input.path === undefined ? Promise.resolve(ok({ patch: OTHER_PATCH, files: [{ ...APP_FILES[0], path: 'src/other.ts' }] })) : undefined);
+    render(<DiffTab tab={diffTab('uncommitted @ src/staged.ts')} />);
+    await waitFor(() => expect(selectedPath()).toBe('src/staged.ts'));
+    await waitFor(() => expect(bodyText()).toContain('export const staged = 1;'));
+    moveTo(WT);
+    await waitFor(() => expect(rows().map((r) => r[0])).toEqual(['src/other.ts']));
+    await waitFor(() => expect(selectedPath()).toBe('src/other.ts'));
+    expect(header()).toBe('1 file changed · +2 −0 · Uncommitted');
+    expect(document.body.textContent).not.toContain('src/staged.ts');
+    expect(document.body.textContent).not.toContain('export const staged = 1;');
+    expect(document.querySelector('[data-review-refused]')).toBeNull();
+    expect(document.querySelector('[data-review-unavailable]')).toBeNull();
+    expect(document.querySelector('[role="alert"]')).toBeNull();
   });
 
   it('says why a ref does not parse or names a turn not loaded', async () => {

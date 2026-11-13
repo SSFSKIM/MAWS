@@ -1,3 +1,4 @@
+import { QueryObserver } from '@tanstack/react-query';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
@@ -117,24 +118,57 @@ describe('shell event subscription', () => {
   });
 
   // UX wave U8c-2 (M4 decision 2): the card's pull-request row reads `scm.status` and `scm.pr.state` keyed by the session
-  // alone, so a change of the session's working folder asks both again; a change that leaves the folder asks neither.
-  it('asks the pull-request row’s two reads again when a record’s working folder changes, and for no other change', async () => {
+  // alone, so a change of the session's working folder drops both answers (they were the checkout's it left) and asks
+  // again; a change that leaves the folder keeps both.
+  const MOVED = { agentFolder: { checkout: '/work/a/.claude/worktrees/w1', cwd: '/work/a/.claude/worktrees/w1/src', branch: 'w1', linked: true } };
+  it('drops the pull-request row’s two answers when a record’s working folder changes, and for no other change', async () => {
     const { fake } = setup();
     await answerSnapshots(fake);
     try {
       for (const key of [prStateKey(A), scmStatusKey(A)]) queryClient.setQueryData(key, { kept: true });
-      const asked = () => [prStateKey(A), scmStatusKey(A)].map((key) => queryClient.getQueryState(key)?.isInvalidated ?? null);
-      const moved = { agentFolder: { checkout: '/work/a/.claude/worktrees/w1', cwd: '/work/a/.claude/worktrees/w1/src', branch: 'w1', linked: true } };
+      const kept = () => [prStateKey(A), scmStatusKey(A)].map((key) => queryClient.getQueryData(key) !== undefined);
       fake.event('session.changed', { record: record('a', { title: { text: 'renamed', source: 'user' } }), cause: 'update', revision: 2 });
-      expect(asked()).toEqual([false, false]);
-      fake.event('session.changed', { record: record('a', moved), cause: 'facts', revision: 3 });
-      expect(asked()).toEqual([true, true]);
+      expect(kept()).toEqual([true, true]);
+      fake.event('session.changed', { record: record('a', MOVED), cause: 'facts', revision: 3 });
+      expect(kept()).toEqual([false, false]);
       for (const key of [prStateKey(A), scmStatusKey(A)]) queryClient.setQueryData(key, { kept: true });
-      fake.event('session.changed', { record: record('a', { agentFolder: { ...moved.agentFolder, cwd: '/work/a/.claude/worktrees/w1/lib' } }), cause: 'facts', revision: 4 });
-      expect(asked()).toEqual([false, false]); // the agent's folder alone: the checkout is the same
+      fake.event('session.changed', { record: record('a', { agentFolder: { ...MOVED.agentFolder, cwd: '/work/a/.claude/worktrees/w1/lib' } }), cause: 'facts', revision: 4 });
+      expect(kept()).toEqual([true, true]); // the agent's folder alone: the checkout is the same
       fake.event('session.changed', { record: record('a'), cause: 'facts', revision: 5 }); // back at the launch folder
-      expect(asked()).toEqual([true, true]);
+      expect(kept()).toEqual([false, false]);
     } finally {
+      queryClient.clear();
+    }
+  });
+
+  // Held open (fix wave 1): the first `scm.status` read, asked in the launch folder, is still out when the agent moves.
+  // The new folder is asked, and the launch folder's answer, landing late, is never the query's.
+  it('asks the new folder when the first scm.status read is still out at a move, and never keeps the left folder’s answer', async () => {
+    const { fake } = setup();
+    await answerSnapshots(fake);
+    const answers: { folder: string; release(): void; promise: Promise<{ folder: string }> }[] = [];
+    const ask = (folder: string) => {
+      let release!: () => void;
+      const promise = new Promise<{ folder: string }>((resolve) => (release = () => resolve({ folder })));
+      answers.push({ folder, release, promise });
+      return promise;
+    };
+    let folder = 'launch'; // what main answers for: the record it holds at the call
+    const observer = new QueryObserver(queryClient, { queryKey: scmStatusKey(A), queryFn: () => ask(folder) });
+    const off = observer.subscribe(() => {});
+    try {
+      expect(answers.map((a) => a.folder)).toEqual(['launch']);
+      folder = 'worktree';
+      fake.event('session.changed', { record: record('a', MOVED), cause: 'facts', revision: 2 });
+      await vi.waitFor(() => expect(answers.map((a) => a.folder)).toEqual(['launch', 'worktree']));
+      answers[0].release();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(queryClient.getQueryData(scmStatusKey(A))).toBeUndefined();
+      answers[1].release();
+      await vi.waitFor(() => expect(queryClient.getQueryData(scmStatusKey(A))).toEqual({ folder: 'worktree' }));
+      expect(observer.getCurrentResult().data).toEqual({ folder: 'worktree' });
+    } finally {
+      off();
       queryClient.clear();
     }
   });

@@ -20,7 +20,7 @@ import { A, B, DIR, OTHER_TOKEN, planOf, refusal, statusOf, TOKEN } from '../../
 import { REVIEW_SCOPE_BYTES_CAP, splitPatch } from '../code/review/review-model';
 import { prStateKey, scmStatusKey } from './queries';
 import { connectScmRunEnds, createScmStore, diffOf, fileDiffOf, SCM_REFRESH_MS, type ScmDiffTarget } from './store';
-import { createScmUi, forSession } from './view-state';
+import { createScmUi, forFolder, forSession } from './view-state';
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 // The renderer's validating client over the fake, so every answer and event the cases script is held to its schema.
@@ -453,6 +453,45 @@ describe('source control store applies no status of its own and resumes a run fr
     release();
     await done;
     expect(ui.getState().notice).toBeNull();
+  });
+
+  // UX wave U8c-2 (fix wave 1): an answer is for the folder it was asked in as well. A stage asked in the launch folder
+  // and refused after the agent moved writes nothing on the page that now shows the worktree.
+  it('applies an answer only to the working folder it was asked in', async () => {
+    let release!: () => void;
+    const main = scmMain(async (name) => {
+      if (name !== 'scm.stage') return ok();
+      await new Promise<void>((resolve) => (release = resolve));
+      return ok(refusal('git_failed', 'index.lock exists', 'fatal: Unable to create index.lock\n'));
+    });
+    const store = createScmStore(validated(main.bridge));
+    const ui = createScmUi({ session: at(A), directory: DIR });
+    const done = store.getState().stage(ui, at(A), DIR, ['a.ts']);
+    await tick();
+    ui.setState(forFolder(ui.getState(), `${DIR}/.claude/worktrees/w1`));
+    release();
+    await done;
+    expect(ui.getState().notice).toBeNull();
+  });
+
+  // The commit's draft is the session's, wherever the page is: a commit that lands after a move clears the draft it took
+  // and Skip hooks, and records no last commit on the page of the folder the agent is in now.
+  it('clears the committed draft when the commit lands after a move, and records its commit on no other folder’s page', async () => {
+    let release!: () => void;
+    const main = scmMain(async (name) => {
+      if (name !== 'scm.commit') return ok();
+      await new Promise<void>((resolve) => (release = resolve));
+      return ok(committed);
+    });
+    const store = createScmStore(validated(main.bridge));
+    const ui = createScmUi({ session: at(A), directory: DIR });
+    ui.setState({ message: 'Fix', noVerify: true });
+    const done = store.getState().commit(ui, at(A));
+    await tick();
+    ui.setState(forFolder(ui.getState(), `${DIR}/.claude/worktrees/w1`));
+    release();
+    await done;
+    expect(ui.getState()).toMatchObject({ message: '', noVerify: false, lastCommit: null, notice: null });
   });
 
   const out = (seq: number, text: string, token = TOKEN): ScmRemoteOutput => ({ appSessionId: A, token, seq, kind: 'stdout', text });
