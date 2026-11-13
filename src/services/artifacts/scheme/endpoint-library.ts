@@ -25,13 +25,16 @@ export interface EndpointLibrary {
 }
 
 // `onRequest`: told of each request the scheme's handler answers (one over HTTP or a `fetch`), for the endpoint's count.
-export function endpointLibrary(content: ContentLookup, onRequest: () => void = () => {}): EndpointLibrary {
+// `work` (P5 Decision Log 273): each HTTP request's lifetime, from its arrival until its response has closed (written
+// out, or its connection gone), so a body still streaming after its lookup settled is still work to the daemon.
+export function endpointLibrary(content: ContentLookup, onRequest: () => void = () => {}, work?: () => () => void): EndpointLibrary {
   const artifacts = createArtifactHandler(content);
   const handle: SchemeHandler = (request) => {
     onRequest();
     return artifacts(request);
   };
   const server = createServer(serveOverHttp(handle));
+  if (work) server.on('request', (_request, response) => void response.once('close', work()));
   return {
     accept(socket) {
       server.emit('connection', socket);
