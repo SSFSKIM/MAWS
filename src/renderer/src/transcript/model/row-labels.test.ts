@@ -113,6 +113,16 @@ describe('where an artifact’s title comes from', () => {
     expect([cellOf(b, 't1').label, cellOf(b, 't2').label]).toEqual(['Edited ‹Q3 memo›', 'Edited ‹Q3 memo›']);
   });
 
+  it('a screenshot or delivery result names the artifact by the handle in its `id` and the uuid in its `deliverableId`', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('p1', MAWS('artifact_screenshot'), { id: 'q3-memo' });
+    b.result('p1', [IMAGE, ...json({ status: 'captured', id: 'q3-memo', deliverableId: MEMO_ID, title: 'Q3 memo', width: 64, height: 64, bytes: 9, consoleErrors: [] })]);
+    edit(b, 't1', 'q3-memo');
+    edit(b, 't2', MEMO_ID);
+    expect([cellOf(b, 't1').label, cellOf(b, 't2').label]).toEqual(['Edited ‹Q3 memo›', 'Edited ‹Q3 memo›']);
+  });
+
   it('a title learned in an earlier turn names a later turn’s call', () => {
     const b = builder();
     b.turn('u1');
