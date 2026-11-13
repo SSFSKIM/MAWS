@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
-import { shellGeometry } from './shell-geometry';
+import { cardColumnShown, shellGeometry } from './shell-geometry';
 import { shellGeometryOf } from './shell-view';
 import { useLayout } from '../stores/layout';
 import { openTab } from '../stores/layout-model';
@@ -87,5 +87,28 @@ describe('the optional surface geometry', () => {
   });
   it('does not let stale maximize state reserve an empty column', () => {
     expect(shellGeometry({ ...regions, panel: { ...regions.panel, maximized: true } }, 1280, false, false, AUTO).mainHidden).toBe(false);
+  });
+});
+
+// UX wave U8b (UC-9; its execution document, Interfaces §C.2): the card column's one predicate, a pure function of its facts.
+describe('whether the card column is shown', () => {
+  const base = { sessionTab: true, tabsInView: 0, collapsed: false, room: 960, opened: false, pageOpen: false };
+  it('is shown for a session tab with nothing in view, the right side open and room for it', () => {
+    expect(cardColumnShown(base)).toBe(true);
+  });
+  it.each([
+    ['no session tab in front', { sessionTab: false }],
+    ['a tab in view', { tabsInView: 1 }],
+    ['two tabs in view', { tabsInView: 2 }],
+    ['the right side collapsed', { collapsed: true }],
+    ['a page open', { pageOpen: true }],
+    ['too little room, not opened', { room: 959 }],
+  ])('is not shown with %s', (_, facts) => {
+    expect(cardColumnShown({ ...base, ...facts })).toBe(false);
+  });
+  it('opened by the person, it is shown in too little room, but never over a page or a tab in view', () => {
+    expect(cardColumnShown({ ...base, room: 400, opened: true })).toBe(true);
+    expect(cardColumnShown({ ...base, room: 400, opened: true, pageOpen: true })).toBe(false);
+    expect(cardColumnShown({ ...base, room: 400, opened: true, tabsInView: 1 })).toBe(false);
   });
 });

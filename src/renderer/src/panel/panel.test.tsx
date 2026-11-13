@@ -76,6 +76,28 @@ describe('surface icons and same-tool tabs', () => {
     expect(screen.queryByRole('tabpanel')).toBeNull();
   });
 
+  // UX wave U8b (A3, O-05): Artifacts is no card any more; More lists it as any other tool.
+  it('More lists Artifacts: chosen, it is a tab in view; pinned to the toolbar, it is an icon', async () => {
+    const user = userEvent.setup();
+    register(probeTool('artifacts', { title: 'Artifacts', multiInstance: false, createState: (init) => ({ id: init.instanceId, init, snapshot: () => ({ view: { kind: 'list' } }) }) }).tool);
+    renderHost();
+    expect(within(surfaceRow()).queryByRole('button', { name: 'Artifacts' })).toBeNull();
+    await user.click(icon('More surfaces'));
+    expect((await menuItems()).map((i) => i.textContent)).toEqual(['Artifacts']);
+    await user.click(screen.getByRole('menuitem', { name: 'Artifacts' }));
+    expect(panelOf(A)!.tabs.map((tab) => tab.toolId)).toEqual(['artifacts']);
+    expect(surfaces()).toEqual(['artifacts']);
+    await user.click(icon('Artifacts')); // hides the column: the tool keeps its tab and leaves the icon row
+    expect(within(surfaceRow()).queryByRole('button', { name: 'Artifacts' })).toBeNull();
+    await user.click(icon('More surfaces'));
+    const item = await screen.findByRole('menuitem', { name: 'Artifacts' });
+    act(() => item.focus());
+    await user.keyboard('{Shift>}{F10}{/Shift}');
+    await user.click(await screen.findByRole('menuitem', { name: 'Pin to toolbar' }));
+    expect(useLayout.getState().panelSurfaces.pinnedTools).toEqual(['artifacts']);
+    expect(icon('Artifacts').getAttribute('aria-pressed')).toBe('false');
+  });
+
   it('with no session shown new surfaces are disabled, but an existing pin remains selectable and a sessionless pin still lands', async () => {
     const user = userEvent.setup();
     register(probeTool('terminal', { title: 'Terminal' }).tool, probeTool('session-info', { title: 'Session info', multiInstance: false }).tool);

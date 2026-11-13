@@ -14,6 +14,7 @@ import { resetLaneAStore } from '../stores/lane-a';
 import { registerCloseGuard, registerAction, runAction } from '../keymap/actions-runtime';
 import type { PanelHostProps } from '../panel/host-slot';
 import { useLayout } from '../stores/layout';
+import { cardColumnNow, useCardColumnShown, useShellView } from './shell-view';
 import { useSessions } from '../stores/sessions';
 import { useSettings } from '../stores/settings';
 import { registerShellActions } from './shell-actions';
@@ -295,7 +296,8 @@ describe('toolbar', () => {
     const floatingCards = screen.getByRole('complementary', { name: 'Session cards' });
     expect(region('main').contains(floatingCards)).toBe(true);
     expect(region('panel').contains(floatingCards)).toBe(false);
-    expect(['Environment', 'Context', 'Connectors', 'Artifacts'].map((name) => within(within(floatingCards).getByRole('region', { name })).getByRole('button').getAttribute('aria-expanded'))).toEqual(['false', 'false', 'false', 'false']);
+    expect(['Environment', 'Context', 'Connectors'].map((name) => within(within(floatingCards).getByRole('region', { name })).getAllByRole('button')[0].getAttribute('aria-expanded'))).toEqual(['true', 'false', 'false']);
+    expect(within(floatingCards).queryByRole('region', { name: 'Artifacts' })).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Toggle sidebar' }));
     expect(sidebar).toHaveBeenCalledOnce();
     await user.click(cards);
@@ -305,6 +307,26 @@ describe('toolbar', () => {
     await user.click(cards);
     expect(screen.getByRole('complementary', { name: 'Session cards' })).toBeTruthy();
     expect(grid().style.gridTemplateColumns).toBe('240px minmax(0, 1fr) 0px');
+  });
+
+  // UX wave U8b (UC-9, §C.2): the column, the icon and useCardColumnShown read one source, so a page that hides the
+  // column turns all three off in one render. The column's absence is not pinned: U7 decides how it hides under a page.
+  it('a page open in the one source turns the cards off for the icon and useCardColumnShown in one render', () => {
+    useSessions.setState({ records: new Map([[A, record(A)]]) });
+    useLayout.setState({ main: withActive(sessionTab(A)) });
+    const seen: boolean[] = [];
+    function Reader() {
+      const shown = useCardColumnShown();
+      seen.push(shown);
+      return null;
+    }
+    render(<QueryClientProvider client={queryClient}><Shell /><Reader /></QueryClientProvider>);
+    const cards = within(screen.getByRole('banner')).getByRole('button', { name: 'Session cards' });
+    expect([cards.getAttribute('aria-pressed'), seen.at(-1), cardColumnNow(useLayout.getState(), window.innerWidth).shown]).toEqual(['true', true, true]);
+    act(() => useShellView.setState({ pageOpen: true }));
+    expect([cards.getAttribute('aria-pressed'), seen.at(-1), cardColumnNow(useLayout.getState(), window.innerWidth).shown]).toEqual(['false', false, false]);
+    act(() => useShellView.setState({ pageOpen: false }));
+    expect([cards.getAttribute('aria-pressed'), seen.at(-1)]).toEqual(['true', true]);
   });
 
   it('shows a rebound chord in the tooltip', () => {
@@ -379,6 +401,20 @@ describe('another machine’s terminal session in the toolbar', () => {
     const takeOver = await screen.findByRole('menuitem', { name: 'Take over in MAWS' });
     expect(takeOver.getAttribute('aria-disabled')).toBe('true');
     expect(takeOver.getAttribute('title')).toBe(LANE_A_WORDS.remoteTakeOver);
+  });
+
+  // UX wave U8b (UC-9): only listed, it has no record here, so the column holds no record card.
+  it('has the card column with no record card, and Session cards toggles it', async () => {
+    const user = userEvent.setup();
+    renderShell();
+    act(() => useLayout.setState({ main: withActive(sessionTab(REMOTE)) }));
+    const icon = within(screen.getByRole('banner')).getByRole('button', { name: 'Session cards' });
+    expect([icon.getAttribute('aria-pressed'), (icon as HTMLButtonElement).disabled]).toEqual(['true', false]);
+    const cards = screen.getByRole('complementary', { name: 'Session cards' });
+    expect(within(cards).queryAllByRole('region')).toEqual([]);
+    await user.click(icon);
+    expect(screen.queryByRole('complementary', { name: 'Session cards' })).toBeNull();
+    expect(icon.getAttribute('aria-pressed')).toBe('false');
   });
 
   it('is titled by its listed row', () => {
