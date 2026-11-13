@@ -2,7 +2,7 @@
 
 Every item the wave considered, one row each: where it came from, its state, and the line it was given when the cut was put to the owner (so "you" in a line is the owner). Kept beside `docs/doperpowers/specs/2026-11-12-ux-wave-design.md`, which cites the items by these ids. Generated from the wave's cut on 2026-11-12; the architect regenerates it when a state changes.
 
-240 items: 143 to build (135 of them in children now), 11 that were questions to the owner at the cut (five of the questions to the owner are still open: "Questions still open" below), 2 for a design round, 7 hands-on checks, 25 already built, 23 keep, 13 the same ask as another item, 4 not MAWS's to fix, 3 handed to the visual renewal, 9 later.
+240 items: 148 to build (139 of them in children now), 3 that still wait for the owner to answer (five of the questions to the owner are still open: "Questions still open" below), 2 for a design round, 7 hands-on checks, 25 already built, 23 keep, 13 the same ask as another item, 4 not MAWS's to fix, 3 handed to the visual renewal, 12 later.
 
 Ids: `l<n>-…` a mark on the comparison of 2026-10-23, `O-nn` an observation, `#nnn` a board ticket, `S-nn` a finding from P5's sittings, `X-nnn` a tracker row that rides with an item.
 
@@ -129,8 +129,8 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 | l4-approvals-12 | mark | build | Yes, it works, as "Approve and retry": probed on 11-12, the button's message got the blocked command to run 5 times out of 5. It is not what I first told you: nothing MAWS can do grants one exact call in auto mode. The button sends the engine's own consent sentence as a message, and the classifier treats your go-ahead after a block as consent. A command blocked by a rule that always denies is blocked again every time (0 of 3), and the engine does not say which kind of rule blocked a call, so the button stays and a repeated block says so. After two blocks in a row the engine asks you with an ordinary prompt instead. |
 | l4-approvals-09 | mark | build | From a notification you can allow a shell command (shown in full) or a read-only tool, and deny anything. An edit opens the app. |
 | #333 | ticket | build | The same rule on the sidebar hover card. |
-| O-19 | observation | question to the owner | Larger than it reads: the sminos ask cannot serve a session MAWS runs today, for three separate reasons, and MAWS has no path to deliver its async answer. Two repositories. |
-| #420 | ticket | question to the owner | Part of O-19. Its second half is a separate small choice (defer the edit tools again). |
+| #420 | ticket | build | Part of O-19. Its second half is a separate small choice (defer the edit tools again). |
+| O-19 | observation | build, last | Larger than it reads: the sminos ask cannot serve a session MAWS runs today, for three separate reasons, and MAWS has no path to deliver its async answer. Two repositories. |
 | #421 | ticket | later | Follows O-19's answer. |
 | l4-approvals-01 | mark | already built | Fixed: the agent's ask tool is pre-allowed. |
 | l4-approvals-03 | mark | keep | Kept. |
@@ -211,9 +211,9 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 | l3-input-14 | mark | build | The model chip shows the model's display name everywhere. |
 | O-32 | observation | build | The lightning is the fast-mode switch, not decoration; it becomes a "Fast mode" row. Each effort stop gets a full-height hit area and the track snaps to the nearest stop. |
 | O-20 | observation | build | /btw shows an elapsed timer (the engine streams nothing for a side question, so it cannot show real thinking) and moves from the side tab to a small card at the bottom right of the session. |
-| l2-transcript-13 | mark | question to the owner | You dismissed this but marked the same feature "fix" twice (l3-input-11, l6-artifacts-11). One answer for all three. |
-| l3-input-11 | mark | question to the owner | The same feature as l2-transcript-13 (dismissed) and l6-artifacts-11 (fix). One answer for all three. |
-| l6-artifacts-11 | mark | question to the owner | The same feature as l2-transcript-13 and l3-input-11. One answer for all three. |
+| l2-transcript-13 | mark | later | You dismissed this but marked the same feature "fix" twice (l3-input-11, l6-artifacts-11). One answer for all three. |
+| l3-input-11 | mark | later | The same feature as l2-transcript-13 (dismissed) and l6-artifacts-11 (fix). One answer for all three. |
+| l6-artifacts-11 | mark | later | The same feature as l2-transcript-13 and l3-input-11. One answer for all three. |
 | l3-input-13 | mark | keep | Kept. |
 | X-050 | tracker | same ask as another item | Part of l3-input-05: two-line rows with the whole text on hover. |
 
@@ -362,7 +362,10 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 | l8-settings-01 | mark | build | Sign in exists, but not for plugin-provided servers or the servers added in MAWS's own Settings. Both get it. |
 | l8-settings-03 | mark | build | The libraries work before the first message. |
 | l8-settings-04 | mark | build | The MCP widget's rows are compact and called Connectors; its switch means "off in this chat". |
+| #455 | ticket | build | A security call: reading another machine's connectors asks for Touch ID each time the sheet opens. |
 | l8-settings-06 | mark | build | Settings is regrouped and its long notes shortened, then gets a search. |
+| l8-settings-11 | mark | build | Option B rested on a misreading of Claude Desktop: its "make default" stores an app preference and writes no Claude Code settings file. |
+| O-14 | observation | build | MAWS has the kind on the outside (Plugins, Skills, Connectors, each with My items and Discover), and so does Claude Desktop 5. Your sentences ask for both orders. Missing icons are a recorded privacy ruling, not a bug. |
 | #540 | ticket | build | Each refusal on the Org sheets names the next step. |
 | #523 | ticket | build | Share sheet: one scrim for every sheet, a plain remedy line, the full machine name on hover. |
 | #505 | ticket | build | Channel tab: a stable scrollbar gutter and sensible truncation of names. |
@@ -372,9 +375,6 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 | X-184 | tracker | build, after an answer | Plugin-provided connectors appear under My items, with Sign in. |
 | l8-settings-05 | mark | build, after an answer | "Add custom connector…" moves to Customize and writes the Claude Code config with a scope. |
 | l8-settings-07 | mark | build, after an answer | A skill can be switched off (the engine now supports it), revealed in Finder and opened. "New skill…" starts a chat with the skill creator. |
-| #455 | ticket | question to the owner | A security call: reading another machine's connectors asks for Touch ID each time the sheet opens. |
-| l8-settings-11 | mark | question to the owner | Option B rested on a misreading of Claude Desktop: its "make default" stores an app preference and writes no Claude Code settings file. |
-| O-14 | observation | question to the owner | MAWS has the kind on the outside (Plugins, Skills, Connectors, each with My items and Discover), and so does Claude Desktop 5. Your sentences ask for both orders. Missing icons are a recorded privacy ruling, not a bug. |
 | #476 | ticket | hands-on check (U14) | The ticket names switches that do not exist in MAWS, and no engine setting is yet shown to drop a server's tools at launch. A probe first, then its own design. |
 | l8-settings-12 | mark | later | A project settings page: after the registry lands, because a project then has locations on several machines. |
 | l8-settings-02 | mark | already built | Built: Customize is the home for plugins, skills and connectors. |
