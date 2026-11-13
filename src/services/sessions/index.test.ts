@@ -117,7 +117,7 @@ describe('a plan answer that names a mode, at the forwarding boundary', () => {
   const plain = { appSessionId: id, requestId: plan.request.requestId, answer: { kind: 'plan', outcome: 'implement', feedback: null } };
   // The engine host's status answers with `wire`; every other command it answers delivered
   const servedBy = (wire: string | null) => {
-    const dispatch = vi.fn(async (_owner: string, name: string) => {
+    const dispatch = vi.fn(async (_owner: string, name: string, _input?: unknown) => {
       if (name !== 'host.supervisorStatus') return { ok: true as const, value: { outcome: 'delivered' as const } };
       return wire === null ? { ok: false as const, error: { code: 'host_unavailable' as const, message: 'engine-host is not running' } } : { ok: true as const, value: { wire, pid: 7 } };
     });
