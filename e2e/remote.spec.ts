@@ -3168,7 +3168,7 @@ const ACTS_TITLE = 'B’s session to act on';
 const ACTS_REPLY = 'B is ready to be acted on.';
 const RENAMED_ON_A = 'Renamed from A';
 
-// The session tabs of A's strip, by address.
+// The session tabs of A's strip, by address, as main last saved the layout (a renderer change reaches it a moment later).
 async function sessionTabsOf(page: Page): Promise<string[]> {
   type Pane = { tabs: { kind: string; appSessionId?: string }[] };
   const main = await invoke<{ value: { current: string; sets: Record<string, { panes: Pane[] }> } | null }>(page, 'layout.get', { key: 'main.tabs' });
@@ -3236,7 +3236,7 @@ test('U9 A8, A9, A10: from A, Rename… on B’s listed row renames it on B; For
       await sheet.getByRole('button', { name: 'Archive' }).click();
       await expect(sheet).toBeHidden({ timeout: 60_000 });
       await expect(row, 'the row leaves at once').toHaveCount(0, { timeout: 5_000 });
-      expect(await sessionTabsOf(page), 'the session’s tab is closed').not.toContain(address);
+      await expect.poll(() => sessionTabsOf(page), { timeout: 10_000, message: 'the session’s tab is closed (the layout as main last saved it)' }).not.toContain(address);
       await expect.poll(async () => (await onB(app))?.archived ?? null, { timeout: 30_000, message: 'B’s record is archived' }).toBe(true);
       await page.waitForTimeout(5_000); // the hub's listing has had its time: the row stays gone
       await expect(row).toHaveCount(0);
