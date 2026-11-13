@@ -626,6 +626,7 @@ export const LayoutKeySchema = z.union([
   z.literal('sidebar.people'), // P5 O8 M5: SidebarPeopleSchema
   z.literal('sidebar.hidden'), // UX wave U7 (O-16): SidebarHiddenSchema
   z.literal('cards.open'), z.literal('panelTools.widths'), z.literal('panelTools.groups'), // UX wave U8b: the three above
+  z.literal('destination'), // UX wave U7b (O-40): StoredDestinationSchema
 ]);
 // P5 O8 M5 (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, "The People toggle"): the sidebar rows (org projects'
 // and machines' row keys) whose People toggle is on, written by `stores/people.ts`; an absent key means every toggle off.
@@ -641,6 +642,17 @@ export const SidebarHiddenSchema = z.strictObject({
   hidden: z.record(z.string().min(1), z.strictObject({ at: z.string(), armedAt: z.string().nullable() })),
 });   // key `sidebar.hidden`
 export type SidebarHidden = z.infer<typeof SidebarHiddenSchema>;
+// UX wave U7b, O-40 (docs/doperpowers/plans/2026-11-12-ux-wave-U7-sidebar-title-bar-destinations.md, Interfaces §F and
+// §G; the wave's UC-12): the page open beside the sidebar in place of the tabs, a place that is not a tab. Stored while a
+// page is open and deleted when none is; build F never asks for the key and its main keeps it through its own writes.
+// The Settings dialog is never stored.
+export const DestinationSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('customize'), view: z.enum(['mine', 'discover']), show: z.enum(['all', 'plugins', 'skills', 'connectors']) }),
+  z.strictObject({ kind: z.literal('library') }),
+  z.strictObject({ kind: z.literal('projects') }),
+]);
+export type Destination = z.infer<typeof DestinationSchema>;
+export const StoredDestinationSchema = z.strictObject({ version: z.literal(1), destination: DestinationSchema });   // key `destination`; absent: the tabs show
 export type LayoutKey = z.infer<typeof LayoutKeySchema>;
 
 // C7 start: the composer's file picker and the near-limit banners' dismissals (C7 execution document, Interfaces "X2

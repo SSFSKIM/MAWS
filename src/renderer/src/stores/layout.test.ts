@@ -4,7 +4,7 @@ import { EMPTY_STRIP, EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, storedMain, ty
 import { fakeClient } from '../../../../test/support/fake-client';
 import { addressOf } from '@shared/machine/address';
 import { at, OTHER_MACHINE, TEST_MACHINE as M } from '../../../../test/support/machine';
-import { createLayoutStore, frontOf, registerReplaceGuard, type ReplaceVerdict } from './layout';
+import { createLayoutStore, frontOf, pageOpen, placeOf, quietly, registerReplaceGuard, tabOnScreen, type ReplaceVerdict } from './layout';
 import { surfaceSession, surfaceTabs } from '../panel/surface-model';
 import { allTabs, currentSet, type RekeyOf } from './layout-model';
 
@@ -578,6 +578,148 @@ describe('one strip', () => {
     expect(frontOf(store.getState())).toBe(`session:${A}`);
     store.getState().focusPane(1);
     expect(frontOf(store.getState())).toBe(`session:${B}`);
+  });
+});
+
+// UX wave U7b (docs/doperpowers/plans/2026-11-12-ux-wave-U7-sidebar-title-bar-destinations.md, Interfaces §F): the page
+// and the Settings dialog beside the strip, and U13a's table of acts with the effect `commitShown` now has.
+describe('the page and the Settings dialog', () => {
+  const B = at('app-b' as AppSessionId);
+  const C = at('app-c' as AppSessionId);
+  const PAGE = { kind: 'customize', view: 'mine', show: 'skills' } as const;
+  // A store showing A, B and C in one pane (C in front), with a closed tab to reopen, a page and the dialog open, and the
+  // number of writes counted from here.
+  function opened() {
+    const store = createLayoutStore();
+    const s = () => store.getState();
+    s().openSession(A);
+    s().openSession(B, { how: 'tab' });
+    s().openSession(C, { how: 'tab' });
+    s().openSession(at('app-d' as AppSessionId), { how: 'tab' });
+    s().closeTab(`session:${at('app-d' as AppSessionId)}`);
+    s().openDestination(PAGE);
+    s().openSettings('engine');
+    let writes = 0;
+    store.subscribe(() => (writes += 1));
+    return { store, s, writes: () => writes };
+  }
+
+  const shows: [string, (s: ReturnType<typeof createLayoutStore>['getState']) => void][] = [
+    ['openTab', (s) => s().openTab({ kind: 'diagnostics' })],
+    ['openSession', (s) => s().openSession(B)],
+    ['activateTab', (s) => s().activateTab(`session:${A}`)],
+    ['activateTab of the tab in front', (s) => s().activateTab(`session:${C}`)],
+    ['selectTab', (s) => s().selectTab(1)],
+    ['cycleTab', (s) => s().cycleTab(1)],
+    ['reopenClosed', (s) => s().reopenClosed()],
+    ['moveTab', (s) => s().moveTab(`session:${A}`, 0, 2)],
+    ['reorderTab', (s) => s().reorderTab(`session:${A}`, 2)],
+    ['splitWithActive', (s) => s().splitWithActive()],
+    ['showPane', (s) => s().showPane(0)],
+  ];
+  for (const [name, act] of shows) {
+    it(`${name} closes the page and the dialog in the write that lands it`, () => {
+      const { store, writes } = opened();
+      act(store.getState);
+      expect([store.getState().destination, store.getState().settings]).toEqual([null, null]);
+      expect(writes()).toBe(1);
+    });
+  }
+
+  const keeps: [string, (s: ReturnType<typeof createLayoutStore>['getState']) => void][] = [
+    ['focusPane', (s) => s().focusPane(0)],
+    ['openTab with activate: false', (s) => s().openTab({ kind: 'diagnostics' }, { activate: false })],
+    ['closeTab', (s) => s().closeTab(`session:${A}`)],
+    ['togglePinned', (s) => s().togglePinned(`session:${A}`)],
+    ['setSplitRatio', (s) => s().setSplitRatio(0.3)],
+    ['dropSession', (s) => s().dropSession(A)],
+    ['refreshTabTitles', (s) => s().refreshTabTitles()],
+  ];
+  for (const [name, act] of keeps) {
+    it(`${name} closes neither`, () => {
+      const { store } = opened();
+      act(store.getState);
+      expect([store.getState().destination, store.getState().settings]).toEqual([PAGE, { section: 'engine' }]);
+    });
+  }
+
+  it('openDestination closes the dialog and leaves the strip equal by reference; the same kind again changes only its fields', () => {
+    const store = createLayoutStore();
+    const s = () => store.getState();
+    s().openSession(A);
+    const strip = s().main;
+    s().openSettings();
+    s().openDestination(PAGE);
+    expect([s().destination, s().settings, s().main]).toEqual([PAGE, null, strip]);
+    expect(s().main).toBe(strip);
+    s().openDestination({ ...PAGE, view: 'discover', show: 'all' });
+    expect(s().destination).toEqual({ kind: 'customize', view: 'discover', show: 'all' });
+    const held = s().destination;
+    s().openDestination({ kind: 'customize', view: 'discover', show: 'all' });
+    expect(s().destination, 'the same page again writes nothing').toBe(held);
+    s().openDestination({ kind: 'library' });
+    expect(s().destination).toEqual({ kind: 'library' });
+    expect(s().main).toBe(strip);
+  });
+
+  it('closeDestination and closeSettings leave the strip equal by reference', () => {
+    const store = createLayoutStore();
+    const s = () => store.getState();
+    s().openSession(A);
+    const strip = s().main;
+    s().openDestination({ kind: 'projects' });
+    s().openSettings('voice');
+    s().closeSettings();
+    expect([s().settings, s().destination]).toEqual([null, { kind: 'projects' }]);
+    s().closeDestination();
+    expect(s().destination).toBeNull();
+    expect(s().main).toBe(strip);
+  });
+
+  it('openSettings over a page keeps it; open already, only a section that is given changes', () => {
+    const store = createLayoutStore();
+    const s = () => store.getState();
+    s().openDestination({ kind: 'projects' });
+    s().openSettings('voice');
+    expect([s().destination, s().settings]).toEqual([{ kind: 'projects' }, { section: 'voice' }]);
+    s().openSettings();
+    expect(s().settings).toEqual({ section: 'voice' });
+    s().openSettings('engine');
+    expect(s().settings).toEqual({ section: 'engine' });
+  });
+
+  it('closeFront closes the dialog and keeps the page, then closes the page, then answers false', () => {
+    const { s } = opened();
+    expect(s().closeFront()).toBe(true);
+    expect([s().destination, s().settings]).toEqual([PAGE, null]);
+    expect(s().closeFront()).toBe(true);
+    expect(s().destination).toBeNull();
+    const strip = s().main;
+    expect(s().closeFront()).toBe(false);
+    expect(s().main).toBe(strip);
+  });
+
+  it('setOverviewOpen(true) closes the dialog and keeps the page', () => {
+    const { s } = opened();
+    s().setOverviewOpen(true);
+    expect([s().overviewOpen, s().destination, s().settings]).toEqual([true, PAGE, null]);
+  });
+
+  it('inside quietly an activating openTab closes neither; outside it, the same call does', () => {
+    const { s } = opened();
+    expect(quietly(() => { s().openTab({ kind: 'diagnostics' }); return frontOf(s()); })).toBe('diagnostics');
+    expect([s().destination, s().settings]).toEqual([PAGE, { section: 'engine' }]);
+    s().openTab({ kind: 'diagnostics' });
+    expect([s().destination, s().settings]).toEqual([null, null]);
+  });
+
+  it('the selectors: pageOpen, placeOf, tabOnScreen', () => {
+    const { s } = opened();
+    expect([pageOpen(s()), placeOf(s()), tabOnScreen(s())]).toEqual([true, 'settings', null]);
+    s().closeSettings();
+    expect(placeOf(s())).toBe('page:customize');
+    s().closeDestination();
+    expect([pageOpen(s()), placeOf(s()), tabOnScreen(s())?.id]).toEqual([false, `session:${C}`, `session:${C}`]);
   });
 });
 
