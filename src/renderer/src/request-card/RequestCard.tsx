@@ -8,7 +8,8 @@
 // Docked, that is the `DockedCardFrame` around the card; in an Overview card, the nearest ancestor with a `tabindex` (C5's
 // article), since the article, not the card, holds focus there; hover and inline bind no key. Digits pick a question's
 // option from the same owner. U1a §D: a permission prompt opens on one line saying what is asked (`askedLine`), where the
-// other kinds have their title; the hover placement keeps its heading, its "wants to" line and the folder line. U1a §I: a
+// other kinds have their title; the hover placement keeps its heading, its "wants to" line and the folder line, and offers
+// Allow once and Deny as the one rule for answers from outside a pane admits (U1a §H, `outsideAnswers`). U1a §I: a
 // file change says "Create" or "Edit" as its diff against the file read on the session's machine says (`proposed`). E1 M4b: a
 // blocking `maws` ask's item (originating in `maws.ask.opened`) renders compact (`variants/Ask.tsx`), its one action
 // opening the Question sheet; the card never answers it. P5 O8 M7a: a placement
@@ -51,7 +52,6 @@ import { CardButton, Controls, Muted } from './controls';
 import { HoverPreview } from './preview/HoverPreview';
 import { proposedChange, proposedFilePath } from './preview/proposed';
 import { useProposedFile } from './preview/use-proposed-file';
-import { hoverApproval } from './quick-approval';
 import { requesterName } from './requester';
 import { askedLine, mcpParts, toolVerb } from './tools';
 import { DialogBody } from './variants/Dialog';
@@ -64,6 +64,7 @@ import { QuestionBody } from './variants/Question';
 import { gated, type CardKeys, type Placement } from './variants/types';
 import { displayTitle } from '../sessions/title';
 import { waits } from '@shared/attention/kinds'; // UC-1
+import { outsideAnswers } from '@shared/attention/outside-answers'; // U1a §H
 // P2-C start (2026-10-10)
 import { bareOf } from '@shared/machine/address';
 import { markIdOf } from '@shared/owner/marks';
@@ -90,6 +91,9 @@ const NOT_PENDING_MS = 2_000;
 const KEY_NAMES = ['accept', 'decline', 'allowOnce', 'allowLasting'] as const;
 const NO_KEYS: Record<(typeof KEY_NAMES)[number], boolean> = { accept: false, decline: false, allowOnce: false, allowLasting: false };
 const CARRIED: Capability = { available: true }; // no port: today's delivery path refuses it in the holder's words
+// U1a §H: the two answers the hover card may give, the once-only allow and the plain deny
+const ALLOW_ONCE = toAnswer({ kind: 'permission', decision: 'allow', scope: 'once' });
+const DENY = toAnswer({ kind: 'permission', decision: 'deny', message: '' });
 
 // `sent`: the answer was delivered, and the card stands as it was, its controls disabled, until the session's list no
 // longer holds its item, which every route's holder says at once (UC-1, U1a's §C); the card never hides on its own word.
@@ -314,9 +318,11 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   // U1a §D: a permission prompt's first line, outside the hover placement, in place of the kind line and the title
   const asked = request?.kind === 'permission.requested' && !hover ? askedLine(request, proposed) : null;
   const from = request?.agentId && requester !== 'Main session' ? requester : null;
-  // P5 O9 M6: by the session's port, which a session held elsewhere has only while its bridge drives it
-  const canAnswerHover = hover && hoverApproval(item, request) && controls !== null
-    && capability({ kind: 'permission', decision: 'allow', scope: 'once' }).available && capability({ kind: 'permission', decision: 'deny' }).available;
+  // U1a §H: what the one rule for answers from outside a pane admits on the hover card, each button by the session's port
+  // on its own answer (P5 O9 M6: a session held elsewhere has a port only while its bridge drives it)
+  const outside = hover && waits(item) && controls !== null ? outsideAnswers(request, 'hover') : null;
+  const hoverAllow = outside?.allowOnce === true && capability(ALLOW_ONCE).available;
+  const hoverDeny = outside?.deny === true && capability(DENY).available;
   // P2-C start (2026-10-10; M6): a question an agent left or a must-read opens at its mark in the report, and a must-read
   // offers Mark read; neither is answered here (the card in the session answers a question)
   const anchor = ownerAnchorOf(item);
@@ -433,7 +439,7 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
           {record.directory}
         </p>
       )}
-      {canAnswerHover && <Muted>Approve applies to this request only.</Muted>}
+      {hoverAllow && <Muted>Approve applies to this request only.</Muted>}
       {(hover || (placement === 'card' && !answerable(request))) && request?.kind !== 'maws.ask.opened' && (
         <Controls>
           <CardButton onClick={openSession} className="mr-auto">
@@ -444,26 +450,21 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
             <MarkRead appSessionId={item.appSessionId} anchor={anchor} />
           )}
           {/* P2-C end */}
-          {canAnswerHover && request?.kind === 'permission.requested' && (
-            <>
-              <CardButton
-                disabled={busy}
-                title="Click to deny"
-                onPointerDown={pointer.onPointerDown}
-                onClick={(event) => pointer.byPointer(event) && submit(toAnswer({ kind: 'permission', decision: 'deny', message: '' }), 'Denied')}
-              >
-                Deny
-              </CardButton>
-              <CardButton
-                tone="primary"
-                disabled={busy}
-                title="Click to approve"
-                onPointerDown={pointer.onPointerDown}
-                onClick={(event) => pointer.byPointer(event) && submit(toAnswer({ kind: 'permission', decision: 'allow', scope: 'once' }), 'Allowed once')}
-              >
-                Approve
-              </CardButton>
-            </>
+          {hoverDeny && (
+            <CardButton disabled={busy} title="Click to deny" onPointerDown={pointer.onPointerDown} onClick={(event) => pointer.byPointer(event) && submit(DENY, 'Denied')}>
+              Deny
+            </CardButton>
+          )}
+          {hoverAllow && (
+            <CardButton
+              tone="primary"
+              disabled={busy}
+              title="Click to allow once"
+              onPointerDown={pointer.onPointerDown}
+              onClick={(event) => pointer.byPointer(event) && submit(ALLOW_ONCE, 'Allowed once')}
+            >
+              Allow once
+            </CardButton>
           )}
         </Controls>
       )}
