@@ -462,6 +462,24 @@ export function createViewerStore(client: MawsBridge) {
       if (entry && incarnations.get(tabId) === incarnation) patch(tabId, { loads: entry.loads + 1, pending: entry.pending - 1 });
     };
 
+    // U6c (decision 15; the branch review's finding 4): an entry asked for again is read again; one whose last read
+    // failed takes its watch again first, since the watch failed with the read when the file's folder did not exist yet
+    // and the Files store installs a refused watch again only for a new holder. The new hold is taken before the old one
+    // goes, so a watch that stands is not dropped; the read follows once the watch has answered, as at the first mount.
+    const readAgain = (tabId: string, entry: ViewerEntry, cause: LoadCause) => {
+      const reason = reasonOf(entry);
+      if (entry.status !== 'error' || entry.appSessionId === null) {
+        void load(tabId, reason, cause);
+        return;
+      }
+      const hold = useFiles.getState().watch(entry.appSessionId, dirname(entry.path));
+      holds.get(tabId)?.release();
+      holds.set(tabId, hold);
+      void hold.ready.then(() => {
+        if (holds.get(tabId) === hold) void load(tabId, reason, cause);
+      });
+    };
+
     const refresh = (tabId: string) => {
       if (mounted.get(tabId)) void load(tabId, 'change');
       else stale.set(tabId, 'event'); // read when next shown
@@ -572,7 +590,7 @@ export function createViewerStore(client: MawsBridge) {
           // a re-read an event left for the next showing, or (U6c) a failed or named entry shown again
           const left = stale.get(tabId);
           stale.delete(tabId);
-          if (left !== undefined || revisitable(entry)) void load(tabId, reasonOf(entry), left ?? 'revisit');
+          if (left !== undefined || revisitable(entry)) readAgain(tabId, entry, left ?? 'revisit');
         }
         mounted.set(tabId, (mounted.get(tabId) ?? 0) + 1);
         prune();
@@ -711,7 +729,7 @@ export function createViewerStore(client: MawsBridge) {
       revisit(tabId, appSessionId) {
         const entry = get().entries.get(tabId);
         if (!entry || (appSessionId !== undefined && appSessionId !== entry.appSessionId) || !revisitable(entry)) return;
-        if (mounted.get(tabId)) void load(tabId, reasonOf(entry), 'revisit');
+        if (mounted.get(tabId)) readAgain(tabId, entry, 'revisit');
         else if (!stale.has(tabId)) stale.set(tabId, 'revisit'); // read when next shown; an event's re-read already waiting stays one
       },
 
