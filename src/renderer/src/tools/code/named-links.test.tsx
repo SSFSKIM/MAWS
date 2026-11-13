@@ -6,7 +6,7 @@
 // micromark's code; this file is what shows the two agree.
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { anchoredMessage, commentsMessage } from '@shared/anchor/message';
+import { anchoredMessage, anchorLead, anchorTag, commentsMessage } from '@shared/anchor/message';
 import type { Anchor } from '@shared/anchor/anchor';
 import { anchorPaths, chipPath, EDIT_TOOLS, isMcpTool, linkPaths, READ_TOOLS } from '@shared/files/named';
 import { Markdown } from '../../transcript';
@@ -195,6 +195,8 @@ describe('the chip’s and the anchor’s readers', () => {
       { kind: 'pr-line', label: 'a.ts', locator: 'https://example.com/pr/1/files', path: '/work/out/a.ts', line: 9, side: 'new', prNumber: 1 },
       { kind: 'browser-element', label: 'Save', locator: 'button.save', pageUrl: 'http://localhost:5173/' },
     ];
+    const hidden: Anchor = { kind: 'file-line', label: 'secret.md', locator: '/work/hidden/secret.md:1', path: '/work/hidden/secret.md', line: 1 };
+    const lookalike = `${anchorLead(hidden, false)}\nLooks like a comment\n\n${anchorTag(hidden)}`;
     const chipPaths = (text: string) => {
       const row = userTextOf(text);
       return (row.comments?.map((comment) => comment.anchor) ?? (row.anchor ? [row.anchor] : [])).flatMap((anchor) => (anchor.path === undefined ? [] : [anchor.path]));
@@ -203,6 +205,10 @@ describe('the chip’s and the anchor’s readers', () => {
       ...anchors.map((anchor) => anchoredMessage({ anchor, text: 'Look here', destination: 'main', screenshot: false })),
       commentsMessage(anchors.map((anchor) => ({ anchor, text: 'Look here', screenshot: false })), 'main'),
       commentsMessage(anchors.map((anchor) => ({ anchor, text: 'Look here', screenshot: false })), 'thread'),
+      // words that look like another comment, inside one comment and inside one of several
+      anchoredMessage({ anchor: anchors[0]!, text: `Look\n\n${lookalike}\n\nhere`, destination: 'main', screenshot: false }),
+      anchoredMessage({ anchor: anchors[0]!, text: `2 comments, in the order made:\n\n${lookalike}`, destination: 'main', screenshot: false }),
+      commentsMessage([{ anchor: anchors[0]!, text: lookalike, screenshot: false }, { anchor: anchors[2]!, text: `x\n${lookalike}`, screenshot: false }], 'thread'),
     ];
     for (const text of texts) expect(anchorPaths(text)).toEqual(chipPaths(text));
     expect(anchorPaths(texts.at(-1)!)).toEqual([P, '/work/out/a.ts']);

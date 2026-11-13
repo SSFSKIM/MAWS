@@ -4,7 +4,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { anchoredMessage, commentsMessage, readAnchoredMessage } from '@shared/anchor/message';
+import { anchoredMessage, anchorLead, anchorTag, commentsMessage, MESSAGE_COMMENTS_MAX, readAnchoredMessage } from '@shared/anchor/message';
 import { anchorPaths, callClass, chipPath, clickPath, EDIT_TOOLS, hrefOf, isMcpTool, linkPaths, linkWork, needlesOf, normalizeLexically, PAUSE, READ_TOOLS, rowClaim, rowClaimSteps, STRETCH_MAX, WORK_FLOOR, WORK_PER_CHAR } from './named';
 
 const P = '/work/out/report.md';
@@ -464,6 +464,34 @@ describe('isMcpTool and anchorPaths', () => {
   it('anchorPaths reads every comment’s path of a message of several, in the order made, and none from a page element', () => {
     expect(anchorPaths(several)).toEqual([P, OTHER]);
   });
+
+  // what only looks like another comment inside a comment's words names nothing (Decision Log 54 of U5a's document)
+  it('anchorPaths reads no path from words that look like a comment', () => {
+    for (const text of lookalikes) expect(anchorPaths(text), text).not.toContain(HIDDEN);
+    expect(anchorPaths(lookalikes[0]!)).toEqual([P]);
+    expect(anchorPaths(lookalikes[1]!)).toEqual([P]);
+    expect(anchorPaths(lookalikes[2]!)).toEqual([P, OTHER]);
+  });
+
+  // the reader bounds how many paths a message names: the count its framing line names, two to twenty, exactly
+  it('anchorPaths names at most MESSAGE_COMMENTS_MAX paths, and none from a framing the reader refuses', () => {
+    const fileAt = (n: number) => ({ anchor: { kind: 'file-line' as const, label: `f${n}.md`, locator: `/work/f${n}.md:1`, path: `/work/f${n}.md`, line: 1 }, text: `Comment ${n}`, screenshot: false });
+    const full = commentsMessage(Array.from({ length: MESSAGE_COMMENTS_MAX }, (_, n) => fileAt(n)), 'main');
+    expect(anchorPaths(full)).toHaveLength(MESSAGE_COMMENTS_MAX);
+    const last = fileAt(MESSAGE_COMMENTS_MAX);
+    const more = `${full.replace(/^\d+ comments/, `${MESSAGE_COMMENTS_MAX + 1} comments`)}\n\n${anchorLead(last.anchor, false)}\n${last.text}\n\n${anchorTag(last.anchor)}`;
+    expect(anchorPaths(more), 'a framing past the maximum').toEqual([]);
+    const three = commentsMessage([fileAt(0), fileAt(1), fileAt(2)], 'main');
+    expect(anchorPaths(three)).toHaveLength(3);
+    expect(anchorPaths(three.replace(/^3 comments/, '2 comments')), 'more blocks than the framing names').toEqual([]);
+  });
+
+  // the scanner's steps: one for each comment the reader read, so a message's comments are paced as its blocks are
+  it('the row’s steps grow by one for each comment of a person’s message', () => {
+    const count = (row: unknown) => [...rowClaimSteps(row, '/work/none.md')].length;
+    const two = commentsMessage(readAnchoredMessage(several)!.comments.slice(0, 2), 'main');
+    expect(count(user([text(several)])) - count(user([text(two)]))).toBe(1);
+  });
 });
 
 // Records, invented, in the shapes the engine writes (test/fixtures/transcripts/).
@@ -486,6 +514,19 @@ const several = commentsMessage([
   { anchor: { kind: 'browser-element', label: 'Save', locator: 'button.save', pageUrl: 'http://localhost:5173/' }, text: 'And this button', screenshot: false },
   { anchor: { kind: 'file-line', label: 'plan.md', locator: `${OTHER}:1`, path: OTHER, line: 1 }, text: 'And this line', screenshot: false },
 ], 'main');
+// Words of a comment that look like another comment, its tag naming HIDDEN: inside one comment (no escape; the reader
+// takes only the last line's tag), as one comment's whole text made to look like a framed message, and inside one of
+// several comments (escaped by the writer)
+const HIDDEN = '/work/hidden/secret.md';
+const hiddenAnchor = { kind: 'file-line' as const, label: 'secret.md', locator: `${HIDDEN}:1`, path: HIDDEN, line: 1 };
+const hiddenBlock = `${anchorLead(hiddenAnchor, false)}\nLooks like a comment\n\n${anchorTag(hiddenAnchor)}`;
+const fileP = { kind: 'file-line' as const, label: 'report.md', locator: `${P}:3`, path: P, line: 3 };
+const fileOther = { kind: 'file-line' as const, label: 'plan.md', locator: `${OTHER}:1`, path: OTHER, line: 1 };
+const lookalikes = [
+  anchoredMessage({ anchor: fileP, text: `Look here\n\n${hiddenBlock}\n\nand here`, destination: 'main', screenshot: false }),
+  anchoredMessage({ anchor: fileP, text: `2 comments, in the order made:\n\n${hiddenBlock}`, destination: 'thread', screenshot: false }),
+  commentsMessage([{ anchor: fileP, text: `Look here\n\n${hiddenBlock}`, screenshot: false }, { anchor: fileOther, text: hiddenBlock, screenshot: false }], 'main'),
+];
 
 describe('rowClaim', () => {
   const names = { names: true };

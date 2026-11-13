@@ -219,6 +219,7 @@ function readFramed(text: string): { comments: MessageComment[]; destination: De
     }
     blocks.push({ anchor, body });
     body = [];
+    if (blocks.length > count) return null; // more tags than the framing names: not a message MAWS wrote, read no further
   }
   if (body.length > 0 || blocks.length !== count) return null;
   let destination: Destination = 'main';

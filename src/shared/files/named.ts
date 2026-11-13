@@ -1067,7 +1067,28 @@ function* anyStringLinks(value: unknown, path: string): Steps<boolean> {
 // blocks this way before it reads the tag (`userTextOf`, model/user-text.ts).
 function* personNames(content: unknown, path: string): Steps<boolean> {
   const texts = yield* textsOf(content);
-  return (yield* linksTo(texts, path)) || anchorPaths(texts.join('\n\n')).some((named) => isThePath(named, path));
+  return (yield* linksTo(texts, path)) || (yield* anchorNames(texts.join('\n\n'), path));
+}
+
+// The anchor form's read of a person's message (UX wave U5a, docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md,
+// Decision Log 54): the window reads it only when it holds a tag; the meter is charged for the reader's one pass over the
+// text, as the link pass's loops are, and then a step and the path's compare for each comment read, at most
+// MESSAGE_COMMENTS_MAX, since the reader reads no more.
+function* anchorNames(text: string, path: string): Steps<boolean> {
+  if (!text.includes('<maws_anchor')) return false;
+  const m = meterFor(text);
+  try {
+    charge(m, text.length + 1);
+    for (const { anchor } of readAnchoredMessage(text)?.comments ?? []) {
+      yield;
+      charge(m, (anchor.path?.length ?? 0) + 1);
+      if (isThePath(anchor.path, path)) return true;
+    }
+  } catch (error) {
+    if (error instanceof ScanRefused) return false;
+    throw error;
+  }
+  return false;
 }
 
 // Whether a record names `path` (Interfaces §A, the table of `rowClaim`), or which calls a result form of it waits for.
