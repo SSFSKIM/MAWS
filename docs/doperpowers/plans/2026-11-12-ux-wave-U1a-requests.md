@@ -151,12 +151,18 @@ Seven points were reported at authoring. **Ruled on 2026-11-12: all seven defaul
 
 Accepted with them: the three setup cards read their title alone; UC-6's Esc on an asynchronous question sends nothing; the sidebar's fallback preview is no reader in the app; a terminal session's asynchronous question follows the notification setting "asyncInput" for its in-app notice, where it followed "questions".
 
-### Reported at the revision, for a ruling
+### Reported at the revision, and ruled
 
-Found while the review's findings were verified in the code. Each has the default the milestones build and the one place a ruling changes.
+Found while the review's findings were verified in the code. Each has the default the milestones build and the one place a ruling changes. **Ruled 2026-11-13 (UTC) by the architect: both defaults stand** (Decision Log), with one condition on point 8 and one ticket.
 
 8. **Nothing the holder lists reaches another machine for a terminal session.** The ruling on the review's third finding has two halves. The first is built as given: one holder on the session's machine, told by that machine's own endpoint when an answer arrives over the link (§B, "One holder"). The second, "a window on another machine mirrors that and holds no mark of its own", has nothing to mirror. The finding's two pieces of evidence do not hold in the code: the machine's attention feed never carries a terminal session's item ("What the code holds today": `recordedPlacement`, `record` in `rl10/members.ts`), so no feed snapshot can bring an answered item back, and no badge on the other machine counts such a request with or without a mark. What a snapshot does is the opposite (point 9). **Default:** the device takes the machine's word from the one place it arrives, the outcome of its own act, and main says it once for all of that device's windows (`accepted` on the remote session's state; §B, "A window on another machine"). It is no window's mark and has no timer; a window on a third device waits for the bridge's settlement. **Place:** that paragraph of §B. The other answers: nothing on the device, in which case the answered card stands there, sent and disabled, until the bridge's `settled` arrives, and A1's fourth route, the ticket's own, is met only at the settlement; or let the machine's feed carry a terminal session's items to the members who may view it, which makes Needs you and the badge count such requests across machines and changes what a caller on another machine is given: a design of its own, with its own review of that boundary.
 9. **A feed snapshot erases a remote terminal session's cards** (an existing fault, found with point 8; "What the code holds today"). **Default:** repaired here, in the mirror, because the test the review asks for (a feed snapshot between an acceptance and its settlement) cannot say anything true while every mirrored card vanishes at the snapshot: the mirror writes its sessions again after the machine's partition is replaced. **Place:** the last bullet of §B's "A window on another machine". The other answer: leave it and register a ticket; M1's test then covers the accepted request alone.
+
+**The ruling on 8.** The device's `accepted` stands as built. It is not a second holder of the session's state: it records one fact that only this device has, that the machine answered `done` to this device's own act, and it gives way to every word of the machine's (the bridge's `settled`, a plane reset, a bridge that is no longer live, the request leaving the list). The condition: nothing reads it but UC-1's predicate on this device, so the request's card and this device's counts are all it can change, and M1's tests hold each of its ends open (a `done` whose `settled` is late; a plane reset between the two; the bridge ending between the two; a second window of the same device opened in between). Rejected: nothing on the device, because the answered card would then stand as waiting on the device that answered it until the settlement, which is the ticket's own complaint on the route it was filed for; and carrying a terminal session's items in the machine's feed, which changes what a caller on another machine is given and is a design of its own (registered as a ticket, not built in this wave).
+
+**The ruling on 9.** Repaired here, in M1, in the mirror (`src/renderer/src/lane-a/remote-connect.ts`, a file M1 already edits): the mirror writes its sessions again after the machine's partition is replaced. Rejected: a ticket, because M1's test of a snapshot between an acceptance and its settlement would then pass over a list that has lost every mirrored card.
+
+**The two labels of a plan's button where no menu is offered** ("Implement" under an engine host of another build on this Mac; the earlier mode named, with no menu, on a session another machine runs) stand as §F's table gives them: each is true where it is drawn.
 
 ## Acceptance
 
@@ -958,6 +964,11 @@ Row 6's sentence is not the child's: the child's says "a skip of every question 
   - Smaller: a dismissal sent to an older bridge under a stale status is refused with 400, documented and tested; build F's strict endpoint is recorded as verified; the switch of the two agent readers to `selectWaitingAgents` is assigned by landing order.
   Rationale: each finding was read against the code it cites and holds, but for two pieces of the third's evidence (Surprises & Discoveries): no feed carries a terminal session's item to another machine. The ruling's rule for the session's machine is built as given; what a window on another machine can show is reported as point 8, with point 9, a fault found beside it.
   Date/Author: 2026-11-12, the author of this document, at the architect's rulings.
+- Decision: the two points reported at the revision are ruled; both defaults stand ("Reported at the revision, and ruled").
+  - Point 8: main on the answering device records the machine's `done` for its own act as `accepted` on the remote session's state, read by UC-1's predicate on that device and by nothing else, and cleared by every word of the machine's. Rejected: no record on the device (the answered card would stand as waiting where it was answered); a terminal session's items in the machine's feed (its own design and its own ticket).
+  - Point 9: the mirror's loss of its cards at a feed snapshot is repaired in M1. Rejected: a ticket.
+  - The plan button's two labels where no menu is offered stand.
+  Date/Author: 2026-11-13 (UTC), the wave's architect.
 
 ## Outcomes & Retrospective
 
