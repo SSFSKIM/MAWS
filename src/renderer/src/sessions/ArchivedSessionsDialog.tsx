@@ -21,7 +21,7 @@ import type { MachineState } from '@shared/ipc/schema/machines';
 import { phaseOf, phaseWords, usePhaseClock } from '../app/machine-mark';
 import { useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { useIsOverRl2 } from '../lane-b/remote-session';
-import { selectOffline, useMachines } from '../stores/machines';
+import { useMachines } from '../stores/machines';
 import { machineName, machineOfRow, rowName, rowOfSession, rowProjects, selectOrgIndex, type RowKey } from '../stores/org-projects';
 import { useSessions } from '../stores/sessions';
 import { isManagedWorktree } from './ArchiveDialog';
