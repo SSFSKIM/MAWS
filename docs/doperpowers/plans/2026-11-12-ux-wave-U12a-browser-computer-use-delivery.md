@@ -882,6 +882,18 @@ The pull request carries the dated lines of the two records this landing amends,
   - The *(copy screenshot)* scene asserts what `clipboard.read()` gives back (an `image/png` kind, a PNG signature, a decode, the size at device pixels within a pixel); whether macOS reports `public.png` is attached as an annotation, not asserted.
   - The computer-use journals have their own builder, `e2e/support/computer-use-replay.ts`, rather than an extension of `SideJournal`, whose writer is shared by the side, library and remote specs. It records no `get_status` after a result, since a recorded one the host did not send would hold the replay. Each of the three scenes launches once.
 
+- **2026-11-13 · The branch review's seven findings, ruled by the architect; one fix wave.** The xhigh panel over `c0e7b2ae8..03805fc20` confirmed seven findings (all P2) and refuted one (a withdrawal and a new turn's start in one batch: the accepted limit above). The rulings:
+  - The computer-use line's evidence. The rule they share: where two readings are possible, the line stays, because a line kept until Dismiss is the lesser fault and a line cleared while a step may still run is the greater one.
+    1. A later call's result is evidence only when it shows that call's cell ran: a later computer-use call whose result is not an error (or, if the plugin's answers given before a cell is queued are not error results, a reader that tells them apart by the plugin's own sentences, cited at its pin).
+    2. An interruption marker withdraws only the calls the interruption cut: the error results between the marker and the last event before it that is not a tool result; in a child's list, only its trailing error results.
+    3. Nothing is settled for good by a result that can still be read differently: the later-result evidence is derived from the current reading at each look; only the process gone, the server gone and Dismiss are kept.
+    4. The process is gone only when something says it exited: a failed turn with a live process leaves the line.
+  - The agent's tab coming forward. The person's act wins.
+    5. `agentTabComesForward` also answers no while a panel in any window shows any tab of the session. No stamp of the person's input is added to the chrome's selection.
+    6. An opening that waits for `browser.agent.show`'s answer is dropped when, in the meantime, this window adds or removes the session's Browser tool or changes the session it shows.
+    7. The tool opens by the agent only once this window's list of tabs holds the selection main answered with; `browser.agent.show`'s answer names the session's selected tab. When the agent's tab did not come forward, the opening is as before.
+  Date/Author: 2026-11-13, the architect's rulings on the panel's findings.
+
 ## Outcomes & Retrospective
 
 **2026-11-13, at the executors' end (before the architect's runs).** The five milestones are built and each was reviewed clean at its boundary; the branch review, the Mac runs and class 1a are the architect's and are not in this entry.
