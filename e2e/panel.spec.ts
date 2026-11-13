@@ -1714,7 +1714,7 @@ async function addBelow(page: Page, name: string, by: 'pointer' | 'keys'): Promi
   // a press that lands before that entry focus moves one past it and the menu does not wrap.
   const items = page.locator('[data-side-group-menu="lower"]').getByRole('menuitem');
   await expect(items.first(), 'the menu opened by keys focuses its first item').toBeFocused();
-  const at = () => items.evaluateAll((nodes) => nodes.indexOf(document.activeElement as Element));
+  const at = () => items.evaluateAll((nodes) => nodes.indexOf(document.activeElement as HTMLElement));
   const count = await items.count();
   for (let step = 1; step < count && !(await item.evaluate((element) => element === document.activeElement)); step += 1) {
     const from = await at();
