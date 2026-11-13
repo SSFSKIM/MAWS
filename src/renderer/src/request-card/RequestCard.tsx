@@ -8,7 +8,8 @@
 // Docked, that is the `DockedCardFrame` around the card; in an Overview card, the nearest ancestor with a `tabindex` (C5's
 // article), since the article, not the card, holds focus there; hover and inline bind no key. Digits pick a question's
 // option from the same owner. U1a §D: a permission prompt opens on one line saying what is asked (`askedLine`), where the
-// other kinds have their title; the hover placement keeps its heading, its "wants to" line and the folder line. E1 M4b: a
+// other kinds have their title; the hover placement keeps its heading, its "wants to" line and the folder line. U1a §I: a
+// file change says "Create" or "Edit" as its diff against the file read on the session's machine says (`proposed`). E1 M4b: a
 // blocking `maws` ask's item (originating in `maws.ask.opened`) renders compact (`variants/Ask.tsx`), its one action
 // opening the Question sheet; the card never answers it. P5 O8 M7a: a placement
 // that asks for it (`askInPlace`: the project channel's waiting cards) draws the sheet's body inline instead, which
@@ -22,7 +23,7 @@
 // the bridge's dismissal, which no key sends) and a double-click that picks a single choice and goes on.
 //
 // The card imports the docked frame from its own module, never `composer/index.ts`, so no editor code reaches it.
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type MouseEvent, type PointerEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type MouseEvent, type PointerEvent } from 'react';
 import { ATTENTION_HEADINGS, type AttentionTone } from '@shared/attention/headings';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { RequestAnswer } from '@shared/engine/answers';
@@ -48,6 +49,8 @@ import { ASK_CARD } from './copy'; // E1 M4b
 import { AskBody } from './variants/Ask'; // E1 M4b
 import { CardButton, Controls, Muted } from './controls';
 import { HoverPreview } from './preview/HoverPreview';
+import { proposedChange, proposedFilePath } from './preview/proposed';
+import { useProposedFile } from './preview/use-proposed-file';
 import { hoverApproval } from './quick-approval';
 import { requesterName } from './requester';
 import { askedLine, mcpParts, toolVerb } from './tools';
@@ -243,6 +246,11 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   const controls = useSessionControls(item.appSessionId);
   const capability = useCallback((answer: RequestAnswer): Capability => controls?.answerCapability(item, answer) ?? CARRIED, [controls, item]);
   const race = useRace(item);
+  // U1a §I: a file change's diff, against its file as read on the session's machine; the first line and the preview both
+  // follow it. The read's answer lands nowhere once the card has answered, so what was approved stays drawn as it was.
+  const fileRequest = request?.kind === 'permission.requested' && placement !== 'hover' ? request : null;
+  const file = useProposedFile(item.appSessionId, item.id, fileRequest && proposedFilePath(fileRequest.toolName, fileRequest.input), phase !== 'pending');
+  const proposed = useMemo(() => (fileRequest ? proposedChange(fileRequest.toolName, fileRequest.input, file) : null), [fileRequest, file]);
 
   // The requests a docked placement shows: the transcript's slot then renders a pointer to it. A notice with no request
   // read (unreadable, or no longer held) shows nothing to answer, so the transcript keeps its own card.
@@ -304,7 +312,7 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   const { title, subtitle } = titleOf(request, requester);
   const hover = placement === 'hover';
   // U1a §D: a permission prompt's first line, outside the hover placement, in place of the kind line and the title
-  const asked = request?.kind === 'permission.requested' && !hover ? askedLine(request) : null;
+  const asked = request?.kind === 'permission.requested' && !hover ? askedLine(request, proposed) : null;
   const from = request?.agentId && requester !== 'Main session' ? requester : null;
   // P5 O9 M6: by the session's port, which a session held elsewhere has only while its bridge drives it
   const canAnswerHover = hover && hoverApproval(item, request) && controls !== null
@@ -346,7 +354,7 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   } else {
     switch (request?.kind) {
       case 'permission.requested':
-        body = <PermissionBody {...variant} request={request} />;
+        body = <PermissionBody {...variant} request={request} proposed={proposed ?? undefined} />;
         break;
       case 'question.requested': {
         // U1a §E: Dismiss sends the decline the form's Esc sends (an asynchronous question's: the bridge's dismissal),

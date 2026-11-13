@@ -7,6 +7,8 @@
 // policy: `button_only` (`default_to_no`) binds no allow key; `none` (`requires_user_interaction`) draws no allow button.
 // P5 O9 M6: each button, and each menu entry, is drawn disabled in place with its reason where the session's port can't
 // carry it (a terminal session's bridge: deny-and-interrupt, a scope its request doesn't suggest), and no key answers it.
+// UX wave U1a (M4, §I): a file change's preview is its diff against the file as read (`proposed`, which the card reads
+// and hands here, since its first line says "Create" or "Edit" by it), or the input alone until and unless one is drawn.
 import { DropdownMenu } from 'radix-ui';
 import { useEffect, useRef, useState } from 'react';
 import { effectiveChord, type ActionId } from '@shared/keymap/actions';
@@ -14,6 +16,8 @@ import { useSessions } from '../../stores/sessions';
 import { useSettings } from '../../stores/settings';
 import { toAnswer } from '../answers';
 import { CardButton, CardTextarea, Controls, Muted } from '../controls';
+import { INPUT_ALONE, type Proposed } from '../preview/proposed';
+import { ProposedChange } from '../preview/ProposedChange';
 import { ToolPreview } from '../preview/ToolPreview';
 import { quickApproval } from '../quick-approval';
 import { scopeOptions, type Scope } from '../scope';
@@ -27,7 +31,7 @@ const KEY_GRACE_MS = 400;
 const MENU = 'z-50 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg';
 const MENU_ITEM = 'cursor-default rounded-sm px-2.5 py-1 outline-none data-[disabled]:text-fg-faint data-[highlighted]:bg-bg-hover';
 
-export function PermissionBody({ item, request, busy, submit, bindKeys, capability = carried }: VariantProps<'permission.requested'>) {
+export function PermissionBody({ item, request, busy, submit, bindKeys, capability = carried, proposed = INPUT_ALONE }: VariantProps<'permission.requested'> & { proposed?: Proposed }) {
   const project = useSessions((s) => {
     const record = s.records.get(item.appSessionId);
     return record?.projectId ? (s.projects.get(record.projectId) ?? null) : null;
@@ -74,9 +78,9 @@ export function PermissionBody({ item, request, busy, submit, bindKeys, capabili
   const tool = request.displayName ?? request.toolName;
   return (
     <div className="flex flex-col gap-3">
-      <ToolPreview request={request} />
+      {toolClass(request.toolName) === 'edit' ? <ProposedChange request={request} proposed={proposed} appSessionId={item.appSessionId} /> : <ToolPreview request={request} />}
       {/* §D: the call's own "Why" follows the preview; a command's preview draws it itself (desk web's too), so only the
-          other classes draw it here, outside the preview region M4's diff fills */}
+          other classes draw it here */}
       {toolClass(request.toolName) !== 'command' && request.description && <Muted>Why: {request.description}</Muted>}
       {request.decisionReason && <Muted>{request.decisionReason}</Muted>}
       {policy === 'none' && (
