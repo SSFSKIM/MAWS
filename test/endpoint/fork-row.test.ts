@@ -12,7 +12,7 @@
 // reach it.
 //
 // The org (sub-harness.ts): A owns the machine `mini`; B and C are members.
-import { readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { keyId, signRecord, SIGNING_DOMAINS, type Action, type Grant } from 'org-protocol';
@@ -81,7 +81,11 @@ async function grant(f: Fixture, member: string, rights: Grant['rights']): Promi
 }
 
 const claimed = (f: Fixture) => f.spine.claimed.filter((c) => c.name === 'session.fork');
-const intentFiles = (h: SessionHarness) => readdirSync(join(h.userData, 'sessions', 'intents')).filter((name) => name.endsWith('.json'));
+/** The setup intents on disk: none at all where nothing was ever allocated. */
+const intentFiles = (h: SessionHarness) => {
+  const dir = join(h.userData, 'sessions', 'intents');
+  return existsSync(dir) ? readdirSync(dir).filter((name) => name.endsWith('.json')) : [];
+};
 
 describe('the fork row', () => {
   it('is a `machine` act on the session, the machine’s owners’ alone, taking an in-place fork only', () => {
@@ -102,7 +106,6 @@ describe('a fork from another machine', () => {
     const a = await openRemote(f, org.a1, org.A);
     const message = { content: 'Reply OK', display: 'Reply OK' };
     const ran = await run(a, await stepped(f, a, forkArgs(app, { message })));
-    console.log('DEBUG-FORK', JSON.stringify(ran));
     expect(ran).toMatchObject({ ack: 'ok', outcome: { state: 'done', result: { status: 'starting' } } });
     const forkId = (ran.outcome as { result: { appSessionId: AppSessionId } }).result.appSessionId;
     expect(forkId).not.toBe(app);

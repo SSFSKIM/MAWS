@@ -731,7 +731,7 @@ describe('session service', () => {
       h.writeTranscript(h.work, SID);
       return record;
     };
-    const intents = () => readdirSync(join(h.userData, 'sessions', 'intents')).filter((f) => f.endsWith('.json'));
+    const intents = () => (existsSync(join(h.userData, 'sessions', 'intents')) ? readdirSync(join(h.userData, 'sessions', 'intents')).filter((f) => f.endsWith('.json')) : []);
 
     it('answers `starting` once its setup reached `launching`, the record there, without waiting for the engine to be ready', async () => {
       const src = source();
