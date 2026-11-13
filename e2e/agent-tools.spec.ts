@@ -784,13 +784,15 @@ test.describe('E7: the orchestration views', () => {
     const { address, name, text } = E7_PEER_A;
     const peerRows = () => h.agents('peerRows');
     const expandAll = () => h.page.evaluate(() => (window as unknown as HarnessWindow).__maws_harness!.panel!.transcript('A').expandAll());
-    const inbound = (preview: string) => ({ kind: 'message', direction: 'inbound', who: `@ ${name}`, owners: null, address, preview, result: null, resultText: null });
-    const outbound = (to: string, preview: string, result: string) => ({ kind: 'message', direction: 'outbound', who: `To @ ${name}`, address: to, preview, result });
+    // UX wave U3 (O-12): one line, `Message from @<name>: <preview>` or `Sent to @<name>: <preview>`; the sender reads `@name`
+    const inbound = (preview: string) => ({ kind: 'message', direction: 'inbound', who: `@${name}`, owners: null, address, preview, result: null, resultText: null });
+    const outbound = (to: string, preview: string, result: string) => ({ kind: 'message', direction: 'outbound', who: `@${name}`, address: to, preview, result });
     await h.load('A', 'pass3/e7-peer-a', { releaseTo: E7_PEER_A.replyFrom });
     await h.agents('patchStatus', 'A', { turn: null });
 
-    await test.step('closed turns keep the message from another session, with Reply; the listing and the agent’s own send fold', async () => {
-      await expect.poll(peerRows).toEqual([{ ...inbound('E7 probe: hello from B'), reply: true, line: null }]);
+    // UX wave U3 (O-12): the message from another session folds with its turn, as the listing and the agent's own send do
+    await test.step('closed turns fold the message from another session with the listing and the agent’s own send; opened, it has Reply', async () => {
+      await expect.poll(peerRows).toEqual([]);
       await expandAll();
       await expect.poll(async () => (await peerRows()).length, 'the folded rows shown').toBe(3);
       const rows = await peerRows();
@@ -825,11 +827,11 @@ test.describe('E7: the orchestration views', () => {
       await expandAll();
       const rows = (await peerRows()).filter((row) => row.kind === 'message');
       expect(rows.map((row) => row.kind === 'message' && [row.direction, row.who, row.preview, row.result])).toEqual([
-        ['inbound', `@ ${name}`, 'E7 probe: hello from B', null],
-        ['outbound', `To @ ${name}`, 'Hello from A — received your probe message.', 'sent'],
-        ['outbound', `To @ ${name}`, text, 'sent'], // the owner's reply, to the envelope's address
-        ['inbound', `@ ${name}`, 'E7 probe: second message while you work', null],
-        ['outbound', 'To @ nobody-e7', 'E7 probe: nobody', 'failed'],
+        ['inbound', `@${name}`, 'E7 probe: hello from B', null],
+        ['outbound', `@${name}`, 'Hello from A — received your probe message.', 'sent'],
+        ['outbound', `@${name}`, text, 'sent'], // the owner's reply, to the envelope's address
+        ['inbound', `@${name}`, 'E7 probe: second message while you work', null],
+        ['outbound', '@nobody-e7', 'E7 probe: nobody', 'failed'],
       ]);
       expect(rows.at(-1)).toMatchObject({ resultText: "No agent named 'nobody-e7' is reachable.\nUse ListAgents to see everyone you can message." });
     });
@@ -862,8 +864,8 @@ test.describe('E7: the orchestration views', () => {
       await expandAll();
       const inboundOwners = async () => (await peerRows()).flatMap((row) => (row.kind === 'message' && row.direction === 'inbound' ? [[row.who, row.owners, row.preview]] : []));
       await expect.poll(inboundOwners).toEqual([
-        [`@ ${name}`, E7_PEER_OWNERS.label, 'E7 probe: hello from B'],
-        [`@ ${name}`, null, 'E7 probe: second message while you work'],
+        [`@${name}`, E7_PEER_OWNERS.label, 'E7 probe: hello from B'],
+        [`@${name}`, null, 'E7 probe: second message while you work'],
       ]);
       await h.agents('scrollColumnTo', 'E7 probe: hello from B');
       await bothThemes(h, 'g3-owners', h.page.locator('[data-agents-harness-transcript]'));
