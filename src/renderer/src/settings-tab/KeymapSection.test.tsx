@@ -4,7 +4,8 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PreloadBridge } from '@shared/ipc/schema';
-import { ACTION_IDS, ACTIONS, type KeymapOverrides } from '@shared/keymap/actions';
+import { ACTIONS, type KeymapOverrides } from '@shared/keymap/actions';
+import { BUILD_F_ACTION_IDS } from '@shared/keymap/build-f';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { useSettings } from '../stores/settings';
 import { settingsBridge, type SettingsBridge } from '../test-support/settings-bridge';
@@ -119,7 +120,8 @@ describe('keymap capture records, refuses conflicts and unbinds', () => {
     renderSection();
     for (const title of ['Sample fixed key', 'Sample menu row', 'Sample shared chord']) expect(within(row(title)).queryByRole('button'), title).toBeNull();
     expect(chordOf('Sample fixed key')).toBe('⇧↩');
-    for (const id of ACTION_IDS) expect(within(row(ACTIONS[id].title)).getByRole('button', { name: `Change ${ACTIONS[id].title}` }), id).toBeTruthy();
+    for (const id of BUILD_F_ACTION_IDS) expect(within(row(ACTIONS[id].title)).getByRole('button', { name: `Change ${ACTIONS[id].title}` }), id).toBeTruthy();
+    expect(within(row(ACTIONS['channel.open'].title)).queryByRole('button'), 'U11a M5: a landed child’s row build F does not know').toBeNull();
   });
 
   it('every action is a row, the docked request keys included', () => {

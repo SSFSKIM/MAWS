@@ -1,7 +1,8 @@
 // The Keyboard section's pure half (C11 execution document, Interfaces "Settings tab" Keyboard; M5 decisions): a keydown
 // read into Electron accelerator syntax through C5's chord vocabulary, the conflict and menu rules, and the table's rows.
 import { describe, expect, it } from 'vitest';
-import { ACTIONS, ACTION_IDS, idsOf, type ActionTable, type KeymapOverrides } from '@shared/keymap/actions';
+import { ACTIONS, idsOf, type ActionTable, type KeymapOverrides } from '@shared/keymap/actions';
+import { BUILD_F_ACTION_IDS } from '@shared/keymap/build-f';
 import type { KeyEventLike } from '@shared/keymap/chord';
 import { EXTENDED_TABLE, SAMPLE_IDS, SAMPLE_ROWS, sample } from '@shared/keymap/sample-rows'; // U6a
 import { acceleratorOf, captureChord, displayChord, keymapGroups } from './keymap';
@@ -132,7 +133,8 @@ describe('the keymap table', () => {
     expect(composer.find((r) => r.id === sample('sample.fixed'))).toMatchObject({ chord: 'Shift+Enter', display: '⇧↩', rebindable: false });
     const rows = groups.flatMap((g) => g.rows);
     for (const id of SAMPLE_IDS) expect(rows.find((r) => r.id === id)!.rebindable, id).toBe(false);
-    for (const id of ACTION_IDS) expect(rows.find((r) => r.id === id)!.rebindable, id).toBe(true); // today's rows keep their control
+    for (const id of BUILD_F_ACTION_IDS) expect(rows.find((r) => r.id === id)!.rebindable, id).toBe(true); // the rows build F knows keep their control (U11a M5: a landed child's row, channel.open, takes none)
+    expect(rows.find((r) => r.id === 'channel.open')!.rebindable).toBe(false);
   });
 
   it('shows a row that yields its default to a stored rebinding as unbound, and an override it cannot take as no override', () => {
