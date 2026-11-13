@@ -48,6 +48,25 @@ describe('the session service’s commands, answered on the services bus', () =>
     expect(h.index.sessions.get(record.appId)!.pinned).toBe(true);
   });
 
+  // The UX wave (U9, M2): a fork under an operation's claim is another machine's (`machine.op` hands the claim), composed
+  // here and held to the machine's ceiling; a fork above it is refused with the refusal and the mode in `issues`, which
+  // the asking device words. A fork with no claim is this machine's own window's, unheld by the ceiling.
+  it('holds a fork another machine asked for to the ceiling, the refusal and the mode in `issues`, and leaves a local fork as it was', async () => {
+    h.trustDirectory(h.work);
+    h.host.script = () => ({});
+    const engine = sessionIdFor(0x2f01);
+    const record = h.index.sessions.upsertFromSummary(summary({ sessionId: engine, directory: h.work })).record;
+    h.writeTranscript(h.work, engine);
+    const fork = { appSessionId: record.appId, target: { kind: 'inPlace' }, message: null, rewindTo: null };
+    const claimed: HandlerContext = { client: endableClientRef('endpoint:1'), remote: true, reader: 'owner', op: { opId: 'op-fork-1', opCreated: new Date().toISOString(), member: 'a'.repeat(32), device: 'dev-1', fingerprint: 'fp-1' } };
+    // this harness's service was given no ceiling to read: every fork from another machine is above it
+    expect(await bus.invoke('session.fork', fork, claimed)).toEqual({
+      ok: false,
+      error: { code: 'internal', message: expect.stringContaining(record.permissionMode.requested), issues: { refusal: 'ceiling', mode: record.permissionMode.requested } },
+    });
+    expect(await invoke('session.fork', fork)).toMatchObject({ ok: true, value: { status: 'starting' } });
+  });
+
   it('refuses a patch while a start is in flight as internal `starting`', async () => {
     h.trustDirectory(h.work);
     h.host.script = () => ({ ready: false });

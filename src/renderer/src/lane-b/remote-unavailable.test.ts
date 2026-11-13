@@ -34,10 +34,10 @@ afterEach(() => {
 });
 
 // The UX wave (U9, M1) offers `session.rename` now: the declared example is one that stays declared, `session.delete`;
-// the acts M1 offers stay greyed here, in the words they were declared with, until M4 (`ACTS_UNTIL_M4`).
+// the acts M1 and M2 offer stay greyed here, in the words they were declared with, until M4 (`ACTS_UNTIL_M4`).
 describe('remoteUnavailableOf', () => {
-  it('until M4, greys the six acts M1 offers for a session on another machine in the words they were declared with', () => {
-    expect(Object.keys(ACTS_UNTIL_M4).sort()).toEqual(['attention.acknowledge', 'maws.pane.answer', 'session.archive', 'session.rename', 'session.steer.cancel', 'session.update']);
+  it('until M4, greys the acts M1 and M2 offer for a session on another machine in the words they were declared with', () => {
+    expect(Object.keys(ACTS_UNTIL_M4).sort()).toEqual(['attention.acknowledge', 'maws.pane.answer', 'session.archive', 'session.fork', 'session.rename', 'session.steer.cancel', 'session.update']);
     for (const [command, words] of Object.entries(ACTS_UNTIL_M4) as Array<[keyof typeof ACTS_UNTIL_M4, string]>) {
       expect(REMOTE_UNAVAILABLE[command], command).toBeUndefined();
       expect(words, command).toMatch(/^Not on another machine yet: /);

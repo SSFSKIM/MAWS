@@ -9,14 +9,13 @@ const UP: RemoteStanding = { machine: M, phase: 'up', capabilities: [SESSION_ACT
 const at = (fields: Partial<RemoteStanding>): RemoteStanding => ({ ...UP, ...fields });
 
 describe('the acts the wave offers', () => {
-  it('leave the declared set and each needs `rl2.session-acts`; Fork stays declared until its row lands', () => {
-    const built = ['session.archive', 'session.update', 'session.rename', 'session.list', 'attention.acknowledge', 'session.steer.cancel', 'maws.pane.answer'] as const;
+  it('leave the declared set and each needs `rl2.session-acts`, Fork among them (M2)', () => {
+    const built = ['session.archive', 'session.update', 'session.rename', 'session.list', 'attention.acknowledge', 'session.steer.cancel', 'maws.pane.answer', 'session.fork'] as const;
     expect(Object.keys(REMOTE_NEEDS).sort()).toEqual([...built].sort());
     for (const command of built) {
       expect(REMOTE_NEEDS[command], command).toBe('rl2.session-acts');
       expect(REMOTE_UNAVAILABLE[command], command).toBeUndefined();
     }
-    expect(REMOTE_UNAVAILABLE['session.fork']).toBe('Not on another machine yet: forking a session');
     expect(REMOTE_UNAVAILABLE['session.stop']).toBeDefined(); // "End session": answered no
   });
 
@@ -33,7 +32,7 @@ describe('disabledWords: before the act', () => {
   });
 
   it('keeps a declared command’s own words, whatever else holds', () => {
-    expect(disabledWords('session.fork', at({ phase: 'offline', capabilities: [], owner: false }))).toBe(REMOTE_UNAVAILABLE['session.fork']);
+    expect(disabledWords('session.takeOver', at({ phase: 'offline', capabilities: [], owner: false }))).toBe(REMOTE_UNAVAILABLE['session.takeOver']);
     expect(disabledWords('session.delete', UP)).toBe(REMOTE_UNAVAILABLE['session.delete']);
   });
 
@@ -63,6 +62,14 @@ describe('disabledWords: before the act', () => {
     expect(disabledWords('session.rename', at({ phase: 'connecting', capabilities: null }))).toBe('Connecting to Loft…');
     expect(disabledWords('session.update', at({ phase: 'reconnecting', capabilities: null }))).toBe('Reconnecting to Loft…');
     for (const command of ['session.send', 'session.interrupt', 'attention.acknowledge'] as const) expect(disabledWords(command, at({ phase: 'reconnecting', capabilities: null })), command).toBeNull();
+  });
+
+  it('closes Fork for a member known not to own the machine, after the build and the phase', () => {
+    expect(disabledWords('session.fork', at({ owner: false }))).toBe('Only Loft’s owners can fork a session there.');
+    expect(disabledWords('session.fork', at({ owner: null }))).toBeNull(); // not known: the machine decides
+    expect(disabledWords('session.fork', UP)).toBeNull();
+    expect(disabledWords('session.fork', at({ owner: false, capabilities: ['rl2.feeds'] }))).toBe('Can’t fork on Loft yet. Update MAWS on Loft and try again.');
+    expect(disabledWords('session.fork', at({ owner: false, phase: 'reconnecting', capabilities: null }))).toBe('Reconnecting to Loft…');
   });
 
   it('leaves the removed phase to main', () => {

@@ -1436,6 +1436,80 @@ describe('the session acts (`rl2.session-acts`)', () => {
   });
 });
 
+// The UX wave (U9, M2; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, Interfaces §1, M2's Decisions): a
+// fork in place is a `machine` act, signed before its first copy goes, carrying the capability, made from a tab or with
+// none, and not through the spawn table: two forks from one tab are two forks. Its answer is waited for within the fork's
+// command budget on the machine, past the pending bound; a machine's `ceiling` refusal of it names the mode it refused.
+describe('the fork (`rl2.session-acts`)', () => {
+  const SESSION_ACTS = ['rl2.executor.machine', 'rl2.session-acts'];
+  const FORK = { appSessionId: APP, target: { kind: 'inPlace' }, message: { content: 'go on', display: 'go on' }, rewindTo: 'u-1' };
+  const STARTING = { status: 'starting', appSessionId: 'fork-1' };
+
+  it('is a `machine` act on the machine, stepped up before it goes, carrying the capability, on a session no tab holds', async () => {
+    const l = lab({ tabs: [] });
+    l.link.relink(SESSION_ACTS);
+    l.link.onAct = settleWith({ state: 'done', result: STARTING });
+    expect(l.adapter.handles('session.fork')).toBe(true);
+    expect(await l.cmd('session.fork', FORK)).toEqual({ ok: true, value: STARTING });
+    expect(l.link.acts.map((a) => a.request)).toEqual([{ action: 'session.fork', args: FORK, executor: 'machine', sendBy: expect.any(Number), stepUp: 'required', requires: 'rl2.session-acts' }]);
+    expect(l.base).toEqual([]);
+  });
+
+  it('makes two forks of two presses in one tab', async () => {
+    const l = lab();
+    l.link.relink(SESSION_ACTS);
+    let n = 0;
+    l.link.onAct = (act) => act.settle({ state: 'done', result: { status: 'starting', appSessionId: `fork-${++n}` } });
+    expect(await l.cmdFrom('session.fork', FORK, APP)).toEqual({ ok: true, value: { status: 'starting', appSessionId: 'fork-1' } });
+    expect(await l.cmdFrom('session.fork', FORK, APP)).toEqual({ ok: true, value: { status: 'starting', appSessionId: 'fork-2' } });
+    expect(l.link.acts).toHaveLength(2);
+  });
+
+  it('waits for its answer within the fork’s budget past the pending bound, where another act reads pending', async () => {
+    const l = lab({ tabs: [] });
+    l.link.relink(SESSION_ACTS);
+    Object.assign(l.link, { budgets: { 'session.fork': 30_000 } });
+    l.link.onAct = (act) => act.move('accepted');
+    const forking = l.cmd('session.fork', FORK);
+    let answered = false;
+    void forking.then(() => (answered = true));
+    await vi.advanceTimersByTimeAsync(60_000 + 30_000); // the pending bound and the budget, short of the round trip's margin
+    expect(answered).toBe(false);
+    l.link.acts[0].settle({ state: 'done', result: STARTING });
+    expect(await forking).toEqual({ ok: true, value: STARTING });
+
+    const late = l.cmd('session.fork', FORK);
+    await vi.advanceTimersByTimeAsync(60_000 + 31_000);
+    expect(await late).toEqual({ ok: false, error: { code: 'timeout', message: 'mini took the request but hasn’t confirmed it' } });
+  });
+
+  it('is sent nothing of to a peer whose handshake lacks the capability, answered at once in UC-7.5’s words', async () => {
+    const l = lab({ tabs: [] });
+    l.link.relink(['rl2.executor.machine']); // build F's
+    expect(await l.cmd('session.fork', FORK)).toEqual({ ok: false, error: { code: 'internal', message: 'Not forked: update MAWS on mini and try again', issues: { refusal: 'not-offered' } } });
+    expect(l.link.acts).toEqual([]);
+  });
+
+  it('words the machine’s refusals by UC-7.5, a `ceiling` failure naming the mode it refused', async () => {
+    const l = lab({ tabs: [] });
+    l.link.relink(SESSION_ACTS);
+    const outcomes: Array<[Parameters<FakeAct['settle']>[0], unknown]> = [
+      [{ state: 'refused', reason: 'owners-only' }, { code: 'internal', message: 'Not forked: only mini’s owners can', issues: { refusal: 'owners-only' } }],
+      [{ state: 'refused', reason: 'step-up' }, { code: 'internal', message: 'Not forked: the confirmation was cancelled', issues: { refusal: 'step-up' } }],
+      [{ state: 'refused', reason: 'read-only' }, { code: 'internal', message: 'Not forked: mini is in read-only mode', issues: { refusal: 'read-only' } }],
+      [
+        { state: 'failed', error: { code: 'internal', message: 'the source’s permission mode bypassPermissions is above this machine’s ceiling', issues: { refusal: 'ceiling', mode: 'bypassPermissions' } } },
+        { code: 'internal', message: 'Not forked: mini doesn’t start sessions in bypassPermissions from another machine', issues: { refusal: 'ceiling' } },
+      ],
+      [{ state: 'failed', error: { code: 'internal', message: 'engine-unconfigured: the engine is not configured yet' } }, { code: 'internal', message: 'Not forked: engine-unconfigured: the engine is not configured yet' }],
+    ];
+    for (const [outcome, error] of outcomes) {
+      l.link.onAct = settleWith(outcome);
+      expect(await l.cmd('session.fork', FORK), JSON.stringify(outcome)).toEqual({ ok: false, error });
+    }
+  });
+});
+
 // P5 O15 M2b (the panel's finding 2): the adapter keeps each session's count of its stream's answers, so a record made
 // again for a new link object goes on from it, and a page's armed `answer.n` is passed by the new record's first answer
 describe('the stream’s answer across records', () => {

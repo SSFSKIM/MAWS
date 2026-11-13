@@ -37,6 +37,12 @@ describe('the spine’s command budgets', () => {
     expect(COMMAND_BUDGETS_MS['session.acquire']).toBeGreaterThan(EXIT_WAIT_MS + CONFIGURE_WAIT_MS + WATCHDOG_MS);
   });
 
+  // The UX wave (U9, M2): a fork from another machine answers at its setup's `launching`, as a spawn does, with no git call
+  it('a fork covers the configure gate and the launch before its record, as a spawn’s does without the git call', () => {
+    expect(COMMAND_BUDGETS_MS['session.fork']).toBeGreaterThan(CONFIGURE_WAIT_MS + WATCHDOG_MS);
+    expect(COMMAND_BUDGETS_MS['session.fork']).toBe(COMMAND_BUDGETS_MS['session.spawn']! - GIT_TIMEOUT_MS);
+  });
+
   it('the engine settings’ verdict, and lane A’s bridge commands, cover their own waits', () => {
     expect(COMMAND_BUDGETS_MS['settings.engineApplied']).toBeGreaterThan(CONFIGURE_WAIT_MS);
     for (const name of ['laneA.interrupt', 'laneA.command', 'laneA.btw', 'laneA.compact', 'laneA.stopAgent', 'laneA.tell', 'laneA.read', 'laneA.stopTask'] as const) {
